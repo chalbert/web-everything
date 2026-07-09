@@ -45,6 +45,7 @@ import {
   classifySurfacePaths,
   validatePolyglotWideningGate, POLYGLOT_WIDENING_TAG, PILOT_EVIDENCE_NUMS,
   validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
+  validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
 } from '../check-standards-rules.mjs';
 import { execFileSync } from 'node:child_process';
 
@@ -1739,5 +1740,77 @@ describe('strandedHashesOnMain — the #2319 hash-on-main invariant (pure detect
   });
   it('ignores non-backlog paths and non-.md files', () => {
     expect(strandedHashesOnMain(['scripts/xabcdef-thing.mjs', 'backlog/README', 'reports/xabcdef-r.md'])).toEqual([]);
+  });
+});
+
+describe('extractPlaywrightContainerTags — parse container image tags out of workflow YAML (#2234)', () => {
+  it('finds a single tag', () => {
+    expect(extractPlaywrightContainerTags('image: mcr.microsoft.com/playwright:v1.58.1-jammy')).toEqual(['v1.58.1-jammy']);
+  });
+  it('finds multiple tags across a longer document', () => {
+    const text = [
+      'container:\n  image: mcr.microsoft.com/playwright:v1.58.1-jammy',
+      'container:\n  image: mcr.microsoft.com/playwright:v1.58.1-jammy',
+    ].join('\n');
+    expect(extractPlaywrightContainerTags(text)).toEqual(['v1.58.1-jammy', 'v1.58.1-jammy']);
+  });
+  it('empty when no reference present', () => {
+    expect(extractPlaywrightContainerTags('runs-on: ubuntu-latest')).toEqual([]);
+  });
+});
+
+describe('validatePlaywrightContainerPin — container image tag ↔ installed version lockstep (#2234)', () => {
+  it('clean when every reference matches the installed version', () => {
+    const res = validatePlaywrightContainerPin({
+      installedVersion: '1.58.1',
+      filesReferences: [
+        { file: '.github/workflows/ci.yml', tags: ['v1.58.1-jammy'] },
+        { file: '.github/workflows/update-visual-baselines.yml', tags: ['v1.58.1-jammy'] },
+      ],
+    });
+    expect(res.errors).toEqual([]);
+  });
+  it('errors when a file has no container reference at all', () => {
+    const res = validatePlaywrightContainerPin({
+      installedVersion: '1.58.1',
+      filesReferences: [{ file: '.github/workflows/ci.yml', tags: [] }],
+    });
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0].message).toMatch(/no "mcr\.microsoft\.com\/playwright:v1\.58\.1-jammy"/);
+  });
+  it('errors on a drifted tag, naming both the found and expected tag', () => {
+    const res = validatePlaywrightContainerPin({
+      installedVersion: '1.58.1',
+      filesReferences: [{ file: '.github/workflows/ci.yml', tags: ['v1.40.0-jammy'] }],
+    });
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0].message).toMatch(/pins "mcr\.microsoft\.com\/playwright:v1\.40\.0-jammy"/);
+    expect(res.errors[0].message).toMatch(/expects "v1\.58\.1-jammy"/);
+  });
+  it('one error per file when multiple files drift', () => {
+    const res = validatePlaywrightContainerPin({
+      installedVersion: '1.58.1',
+      filesReferences: [
+        { file: 'a.yml', tags: ['v1.40.0-jammy'] },
+        { file: 'b.yml', tags: ['v1.41.0-jammy'] },
+      ],
+    });
+    expect(res.errors).toHaveLength(2);
+  });
+  it('errors loudly when the installed version cannot be resolved', () => {
+    const res = validatePlaywrightContainerPin({ installedVersion: null, filesReferences: [] });
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0].message).toMatch(/could not resolve the installed @playwright\/test version/);
+  });
+  it('real repo files stay in lockstep (standing guard, mirrors the check-standards.mjs wiring)', () => {
+    const lock = JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8'));
+    const installedVersion = lock.packages?.['node_modules/@playwright/test']?.version ?? null;
+    const filesReferences = PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES.map((rel) => {
+      const p = join(ROOT, rel);
+      const text = existsSync(p) ? readFileSync(p, 'utf8') : '';
+      return { file: rel, tags: extractPlaywrightContainerTags(text) };
+    });
+    const res = validatePlaywrightContainerPin({ installedVersion, filesReferences });
+    expect(res.errors).toEqual([]);
   });
 });

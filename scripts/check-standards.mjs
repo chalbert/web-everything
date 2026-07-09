@@ -55,6 +55,7 @@ import {
   validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
   duplicateBacklogNums,
   strandedHashesOnMain,
+  validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -1478,6 +1479,26 @@ try {
     );
 } catch (e) {
   err(`Standard-vs-site surface classifier failed: ${e.message}`);
+}
+
+// ── 13. Playwright container-image pin lockstep (#2234) ────────────────────────
+// The visual-regression CI jobs (ci.yml's `visual` job + update-visual-baselines.yml) render inside a
+// version-locked `mcr.microsoft.com/playwright:vX.Y.Z-jammy` container so rendered pixels stay
+// byte-reproducible across machines/CI. Fail loud if the image tag ever drifts from the installed
+// `@playwright/test` version (package-lock.json) — the pure lockstep rule lives in
+// check-standards-rules.mjs; the fs reads (workflow YAML + lockfile) stay here.
+try {
+  const lock = JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8'));
+  const installedVersion = lock.packages?.['node_modules/@playwright/test']?.version ?? null;
+  const filesReferences = PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES.map((rel) => {
+    const p = join(ROOT, rel);
+    const text = existsSync(p) ? readFileSync(p, 'utf8') : '';
+    return { file: rel, tags: extractPlaywrightContainerTags(text) };
+  });
+  const { errors: pce } = validatePlaywrightContainerPin({ installedVersion, filesReferences });
+  for (const e of pce) err(e.message, e.descriptor);
+} catch (e) {
+  err(`Playwright container pin check failed: ${e.message}`);
 }
 
 // ── Scope attribution (#952, ratified #949 Fork 3-A) ───────────────────────────
