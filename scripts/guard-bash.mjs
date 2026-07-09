@@ -67,7 +67,11 @@ export function isLaneCwd(cwd) {
 // Recover the cwd the command will ACTUALLY run in by honouring a leading `cd <target>` — resolving a
 // `cd "$LANE"` against a literal `LANE=/abs` assignment earlier in the same command (the exact lane idiom).
 // Pure + unit-tested. Fails safe: an unresolvable target (unknown var, command-subst) → the reported cwd,
-// i.e. today's behaviour (an override is still needed, never a wrong ALLOW of a real primary mutation).
+// i.e. today's behaviour. #2339 removed the BACKLOG_MUTATE_OK override, so there is now no escape hatch for
+// that residual case — never a wrong ALLOW of a real primary mutation, but a genuine lane mutation whose `cd`
+// target this resolver can't statically resolve (e.g. a command-substitution path) will be wrongly denied.
+// The fix is to invoke with a directly-resolvable `cd` (a literal absolute path, or `LANE=/abs; cd "$LANE"` —
+// the standard lane idiom every skill already teaches), not to reach for a removed override.
 export function resolveEffectiveCwd(command, reportedCwd, resolvePath = resolve) {
   const cmd = String(command || '');
   if (!cmd) return reportedCwd;
@@ -106,9 +110,13 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0 } = {}) {
   // #2302 — a backlog item-mutation (claim/resolve/scaffold/…) run from the PRIMARY checkout stamps the item on
   // primary and bypasses lane isolation (found working #2095: a primary `claim` flipped open→active, reverted +
   // re-run in the lane). Deny it and steer to a lane — the same invariant guard-lane enforces for Edit/Write.
-  // Only fires when cwd is a primary (a lane clone is allowed). Sanctioned override: prefix BACKLOG_MUTATE_OK=1.
-  if (primaryCwd && isBacklogMutation(s) && !/\bBACKLOG_MUTATE_OK=1\b/.test(s))
-    return 'Backlog item-mutations (claim/resolve/scaffold/settle/retype/yield/prepare-stamp) must run in a LANE clone, not the primary checkout — running backlog.mjs here mutates the item on primary and bypasses lane isolation (#2302/#104). cd into your lane clone (~/workspace/.lanes/<repo>/lane-N) and run it there. Sanctioned override (rare): prefix `BACKLOG_MUTATE_OK=1`.';
+  // Only fires when cwd is a primary (a lane clone is allowed). #2219 ratified that NO item-file frontmatter
+  // transition ever splices to primary (everything rides the lane→PR) — so unlike MAIN_PUSH_OK/STALE_LANE_OK,
+  // there is no legitimate direct-to-primary case left to escape-hatch for. #2339 — the former
+  // `BACKLOG_MUTATE_OK=1` override was itself the hole (used in error 2026-07-09, defeating this very guard);
+  // removed. This denial is now UNCONDITIONAL — primary stays read-only in fact, not just by convention.
+  if (primaryCwd && isBacklogMutation(s))
+    return 'Backlog item-mutations (claim/resolve/scaffold/settle/retype/yield/prepare-stamp) must run in a LANE clone, not the primary checkout — running backlog.mjs here mutates the item on primary and bypasses lane isolation (#2302/#104/#2219). cd into your lane clone (~/workspace/.lanes/<repo>/lane-N) and run it there. There is no override — #2219 ratified that nothing ever splices to primary (#2339).';
 
   // #2323 — a backlog item-mutation run in a lane clone that is BEHIND its upstream runs STALE `scripts/`
   // against a STALE backlog view: a pool lane handed out N commits behind origin/main once ran the pre-#2288
