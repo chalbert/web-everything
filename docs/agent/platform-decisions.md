@@ -934,6 +934,42 @@ after #932/#934 — it removes the *temptation*; the gate catches what slips *no
 **Lineage:** #933 (ratified 2026-06-18) · incidents #870 #931 · precedent #436/#437 (conventions
 fold into compliance), #840/#844/#477 (warn-first rollout).
 
+### Gate-rollout ratchet: promote-on-green, then flip-to-enforce-by-default at the drained milestone {#gate-rollout-ratchet}
+
+How a per-route/per-target quality gate (the axe a11y lane is the reference case) rolls from
+warn-only to build-blocking. Two orthogonal axes, both ratified #867:
+
+1. **Promotion tracks measurement only, not any upstream rework.** A route/target enters the
+   enforced set the moment it *measures green*, decoupled from whether its dogfood/UI conversion has
+   landed. Enforcing early means every later rework of that surface lands **under** the guard — the
+   proof made structural. Holding promotion until the rework lands is the **broken branch**: it
+   removes the guard at the single riskiest edit (the rework itself). This is a forced invariant, not
+   a weigh — it restates #774's green-only criterion; a rework precondition is not one the gate ever
+   asserts (it measures rendered output, never provenance, and re-measures every run).
+2. **Warn-only is a stage you exit, not a resting posture — flip to enforce-by-default once
+   drained.** Keep the warn-only *entry* posture (#774) while a largely-unmeasured site is draining;
+   once the enforced set equals the derived set and the lane is green (a mechanically-decidable
+   predicate over repo state), **invert**: a derived route is build-blocking **unless** listed in an
+   explicit, reviewable `WARN_ROUTES` opt-out (new/experimental surfaces opt *out*, visibly and
+   temporarily). Fail-closed is what "the site is the conformance proof" means once the debt is
+   drained; perpetual warn-entry is fail-open by construction, and measured evidence shows warn
+   output is ignored in practice. Rejected alternatives: flip-everything-now (yields a permanently
+   red lane that trains the repo to ignore it) and a violation-level baseline snapshot
+   (churn-sensitive, and snapshotted debt rots with no drain forcing-function).
+
+Two rollout obligations the flip carries: the drained-milestone trigger must be **self-announcing**
+(a lane meta-check that flags "drain complete — execute the flip" when the enforced set equals the
+derived set, shipped *ahead* of the milestone so it can't rot unnoticed — a red enforced lane once
+went unnoticed for a week), and the flip **supersedes #774's warn-only-entry rider as a plain
+successor-ruling-on-changed-facts** (preserving #774's explicit-set discipline; record the
+supersession lineage beside the #774 entry, never a retro-edit). Applies **per repo** ("mirrored,
+not shared", #774/#849) — each gate drains against its own enforced set.
+
+**Lineage:** #867 (ratified 2026-07-09, parent #777) · #774 (auto-derivation + warn-only-entry
+rider, superseded part (ii)) · #763/#770/#793/#805 (axe lane built + first enforce flip) · #849 (FUI
+mirror) · precedent #840/#844/#477 (warn-first → ERROR), fail-closed `check:standards`
+classifier ([constellation-placement](#constellation-placement) cluster).
+
 ### A composition artifact is owned by its *new* substance; referenced parts stay home {#composition-artifact-ownership}
 
 When a new artifact is a **composition of capabilities that already exist** across the constellation (a
