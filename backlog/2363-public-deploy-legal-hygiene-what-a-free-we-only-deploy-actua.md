@@ -2,8 +2,10 @@
 kind: story
 size: 2
 parent: "1104"
-status: open
+status: resolved
 dateOpened: "2026-07-09"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
 tags: [legal, privacy, gdpr, license, trademark, deployment, solo-founder]
 crossRef: { url: /backlog/186-legal-business-protection-review/, label: "Pre-sale professional review — the paid-sale half (#186)" }
 ---
@@ -41,3 +43,42 @@ Checklist:
 
 Explicitly **out of scope** (all in #186, gated by first paid sale): legal entity,
 trademark registration, commercial-license counsel, product EULA, E&O insurance, DPA.
+
+## Resolution (2026-07-09)
+
+All three checklist lines closed:
+
+- **Privacy notice** — published at `/privacy/` (`we:src/privacy.njk`): names Cloudflare
+  as the request-metadata processor, describes the single `we_gate` strictly-necessary
+  cookie (30d, no identity/tracking payload), states plainly that no analytics/ads/
+  third-party cookies run, and commits to rewriting the notice + adding a consent
+  banner *before* any analytics/Zaraz/cookie ships (matching the item's re-scope
+  trigger). Linked from the site footer (`we:src/_layouts/base.njk`,
+  `we:src/_data/chrome.js` — the FUI mode-C chrome sidecar has its own footer copy).
+  In the process, fixed a **false claim already live in both footers** — "No cookies
+  were used" — which was wrong the moment `we_gate` shipped; both now read "No
+  analytics, no tracking" and link `/privacy/` instead of asserting zero cookies.
+  Also added `/privacy` to `we:vite.config.mts`'s dev-proxy allowlist so the page
+  resolves on the Vite dev server (:3000), not just the 11ty build (:8080).
+- **Repo LICENSE present + honest labeling** — added `we:LICENSE` (Apache-2.0, full
+  text) and `we:LICENSE-DOCS` (CC-BY-4.0, prose) at the repo root, split exactly as
+  ratified in [#098](/backlog/098-licensing-strategy/)'s resolution ("Ships as a
+  LICENSE + LICENSE-DOCS pair"). `we:package.json`'s `license` field was still `MIT`
+  (stale/never matched any ratified decision) — corrected to `Apache-2.0` to match
+  the code license and stop the two files disagreeing.
+- **Name / trademark clearance (non-infringement only)** — cheap knock-out web search,
+  no live USPTO database query (out of tool reach; a full clearance search stays a
+  paid-sale action under #186 if ever needed). Findings:
+  - **"Web Everything"** — no colliding software/web-standards trademark or product
+    found.
+  - **"Frontier UI"** — an abandoned `frontier-ui` npm package exists (tiny React
+    component library, v0.0.1, last published years ago, no adoption signal). A soft
+    naming overlap, not an active registered mark — not a blocker, worth knowing.
+  - **"Plateau"** — the closest collision: "Plateau Studio," a low-code
+    frontend/process-development platform, and "Plateau Systems" (talent-management
+    LMS, holds registered marks in an unrelated class). Same generic-word space as
+    our internal `plateau-app`, no exact-name-plus-adjacent-market registered mark
+    surfaced. Worth a fuller check before any *registration* filing (#186's scope),
+    but nothing here blocks continued free-tier use of the name.
+  No hard collision surfaced for any of the three names at the "don't infringe before
+  spending on branding" bar this line asks for.
