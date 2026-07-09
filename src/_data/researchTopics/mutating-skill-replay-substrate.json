@@ -1,0 +1,22 @@
+{
+  "id": "mutating-skill-replay-substrate",
+  "title": "Execution substrate for replaying a mutating skill/script under test",
+  "status": "open",
+  "summary": "Grounds decision #2274 (child of the #2268 validation-suite epic). The suite must run a MUTATING skill/script and assert on its effect without leaving state behind — via a --dry-run retrofit (Fork A) or replaying the real skill in an ephemeral revertible checkout (Fork B). Survey finding: Fork A-vs-B is ALREADY SETTLED by the parent epic (we:backlog/2268-...md:30-36 prescribes 'worktree-replay rather than a per-skill --dry-run retrofit (see #2274)'), so #2274 is a RATIFY of B plus a SUBSTRATE decision, not an open A-vs-B choice. Two tiers (we:scripts/lib/invariant-catalogue.json:5-6): Tier A = deterministic scripts, pure input->(files/exit code), golden/snapshot tests (child #2273); Tier B = judgment skills batch/drain/finish/next/review-program, no deterministic output, validated by replay + invariant assertion (child #2272). Two corrections drive the prepared default: (1) the epic's word 'worktree' is guard-BLOCKED — the #1153 branch guard denies git worktree add in constellation checkouts (we:docs/agent/platform-decisions.md:2497-2498), and #1996 codified 'isolation = a clone' (we:reports/2026-07-02-solo-session-worktree-lane-prior-art.md:21), so it must be read as a lane CLONE. (2) My first-draft 'dedicated cold clone per replay to avoid lease contention' was REFUTED: contention is already solved by #2275's exclusive lease (we:scripts/lane-pool.mjs:287-353), and a fresh clone pays cold npm ci EVERY replay while a warm leased lane amortizes deps (the real cost is npm ci, not the --reference clone, :13-18) — so cold-clone-per-replay is strictly slower. The genuine reason to isolate is REMOTE BLAST-RADIUS: drain/finish/pr replay the real skill which pushes lane/* refs + merges PRs against the real origin, so they cannot faithfully replay in a production-pool lane whose origin is real GitHub. Finding (post-skeptic SURVIVES-WITH-AMENDMENT; screen CLEAR): substrate = a leased warm validation-lane pool (#2275) pointed at a THROWAWAY LOCAL BARE ORIGIN for the push-y skills (drain/finish/pr); a plain leased pool lane for non-remote skills (next/review-program); Tier-A pure scripts use golden/snapshot tests (no --dry-run; git-mutating Tier-A ops like backlog.mjs scaffold/resolve get a cheap git-init scratch tree). Rejected: --dry-run retrofit (~38-script surface, unfaithful stubbed path for the heaviest-mutating skills, unnecessary for Tier-A which snapshots cover more faithfully), overlayfs/CoW/container (a substrate the constellation doesn't use). Full grounding in reports/2026-07-09-mutating-skill-replay-substrate.md.",
+  "dateOpened": "2026-07-09",
+  "lastReviewed": "2026-07-09",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "validation-suite",
+    "replay",
+    "worktree",
+    "lane-clone",
+    "test-isolation",
+    "skills",
+    "agent-meta",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}
