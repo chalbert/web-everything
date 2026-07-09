@@ -31,6 +31,7 @@ Batch · Commit · Git Hygiene cluster — open a leaf with `node scripts/memory
 - [Single session should use a lane](single-session-should-use-a-lane.md) — RULED #2123: every edit-action session runs in an isolated lane CLONE; no carve-out
 - [Lane refresh wipes unmapped lanes](lane-refresh-wipes-unmapped-lanes.md) — map/own a lane before editing; refresher hard-resets idle clean lanes to origin/main mid-work
 - [Producer opens PR, drain reviews](producer-opens-pr-drain-reviews.md) — DECIDED 2026-07-02: lanes open draft PRs, drain reviews+merges; drop self-approve
+- [Sweep review findings to closure](sweep-review-findings-to-closure.md) — a produced PR w/ an advisory finding isn't done till FIXED (commit+comment) or DISMISSED (comment+label); review:human is human-only via /review; #2365
 - [Batch item can silently reverse a codified rule](batch-item-can-silently-reverse-codified-rule.md) — a story can reverse a rule codified only in code; grep it, reclassify to decision; #2149/#1952
 - [No work EVER in the primary checkout](no-work-ever-in-primary-all-repos.md) — the EDIT itself runs in a lane clone (every repo: WE/plateau-app/FUI), no carve-out; #2203 blocks the push, this blocks the touch
 - [Backlog id-storm buffer + lane→PR](backlog-id-storm-buffer-and-lane-pr.md) — hand-picked max+1 ids collide under concurrent sessions (dup id → CI red); buffer max+~6, verify no dup, land via lane→PR
