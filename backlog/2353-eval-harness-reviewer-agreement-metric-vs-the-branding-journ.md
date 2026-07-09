@@ -3,6 +3,7 @@ kind: story
 size: 3
 parent: "2208"
 status: open
+locus: plateau-app
 dateOpened: "2026-07-09"
 tags: []
 ---

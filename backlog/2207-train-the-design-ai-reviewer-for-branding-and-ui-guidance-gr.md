@@ -13,7 +13,7 @@ tags: [design-review, ai-judge, branding, training, review-design]
 
 # Train the design-AI reviewer for branding & UI guidance — grounded, consistent, better than stock AI
 
-> **Sliced 2026-07-09** (`/split 2207`, report `we:reports/2026-07-09-backlog-split-analysis.md`): the
+> **Sliced 2026-07-09** (`/split 2207`, report `we:reports/2026-07-09-backlog-split-analysis-2207.md`): the
 > foundational **eval harness** (agreement metric vs the journey labels) carved out to sibling **#2353**
 > under #2208 — buildable now. This residual is the **training payload**: ground the reviewer's verdicts
 > in the ratified brand rubric (cite the owning attribute set/rule per #2209 Fork 6), iterated against the
