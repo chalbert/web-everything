@@ -1,9 +1,9 @@
 ---
 kind: decision
 parent: "777"
-status: open
+status: active
 dateOpened: "2026-06-17"
-dateStarted: "2026-07-02"
+dateStarted: "2026-07-09"
 preparedDate: "2026-07-02"
 relatedReport: reports/2026-07-02-a11y-ratchet-promotion-endgame.md
 tags: [dogfood, a11y, ratchet, ci-gate]
@@ -240,6 +240,33 @@ Screen: clear — entry posture is directly observable (a new page post-drain sh
    (#774)" headers in both gate files with the supersession lineage. A small precursor rides with
    spin-off 3: the self-announcing drain meta-check in the lane (flags "drain complete — execute the
    #867 flip" when `ENFORCED_ROUTES` equals the derived set), so the trigger cannot rot unnoticed.
+
+---
+
+## Ruling (2026-07-09)
+
+Ratified after discussion + red-team; both forks landed on their prepared defaults.
+
+- **Fork 1 → (a) decoupled promotion.** A scope-C route enters `ENFORCED_ROUTES` the moment it
+  measures green, regardless of FUI-conversion state; branch (b) is the rejected broken branch (it
+  removes the guard at the riskiest edit — the conversion — as the 5-route regression shows). A
+  forced-invariant ratify of #774's green-only criterion, not a new weigh.
+- **Fork 2 → (b) flip to enforce-by-default at the drained-and-green milestone.** Keep #774's
+  warn-only entry while draining; once `ENFORCED_ROUTES` equals the derived set and the lane is
+  green, invert to build-blocking-unless-in an explicit `WARN_ROUTES` opt-out set. Supersedes #774
+  rider (ii) as a successor-ruling-on-changed-facts (part (i), the explicit-set discipline, is
+  preserved). Alternatives (c) flip-all-now and (d) violation-baseline are rejected on merit.
+  - **Rider accepted at ratify — pull the self-announcing drain trigger *forward*.** The
+    "drain complete — execute the #867 flip" meta-check ships with the **promotion** spin-off (#3),
+    not deferred into the flip spin-off (#5): the whole (b) case rests on the milestone being
+    noticed, and a red enforced lane already went unnoticed for a week — the reminder must exist
+    *before* the milestone, not after.
+  - **Codification note:** when the flip lands (#5), record the #774 rider-(ii) supersession lineage
+    in `we:docs/agent/platform-decisions.md` beside the #774 entry and rewrite the "FORCED INVARIANT
+    (#774)" headers in both gate files.
+
+Route lists in the Digest are from the 2026-07-02 measurement — re-measure at execution time rather
+than trusting them verbatim.
 
 ---
 
