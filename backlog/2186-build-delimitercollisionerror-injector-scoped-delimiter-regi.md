@@ -1,8 +1,10 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
 tags: []
 ---
 
