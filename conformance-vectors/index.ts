@@ -17,6 +17,7 @@ export { navListA11ySuite } from './nav-list-a11y.vectors.js';
 export { textNodeSuite } from './text-node.vectors.js';
 export { treegridArbitrationSuite } from './treegrid-arbitration.vectors.js';
 export { webpolicySuite } from './webpolicy.vectors.js';
+export { webprocessSuite } from './webprocess.vectors.js';
 export { webcomplianceSuite } from './webcompliance.vectors.js';
 export { intlSuite } from './intl.vectors.js';
 export { analyticsSuite } from './analytics.vectors.js';
@@ -46,6 +47,7 @@ import { navListA11ySuite } from './nav-list-a11y.vectors.js';
 import { textNodeSuite } from './text-node.vectors.js';
 import { treegridArbitrationSuite } from './treegrid-arbitration.vectors.js';
 import { webpolicySuite } from './webpolicy.vectors.js';
+import { webprocessSuite } from './webprocess.vectors.js';
 import { webcomplianceSuite } from './webcompliance.vectors.js';
 import { intlSuite } from './intl.vectors.js';
 import { analyticsSuite } from './analytics.vectors.js';
@@ -62,6 +64,7 @@ export const conformanceSuites: ReadonlyArray<ConformanceVectorSuite> = [
   textNodeSuite,
   treegridArbitrationSuite,
   webpolicySuite,
+  webprocessSuite,
   webcomplianceSuite,
   intlSuite,
   analyticsSuite,
