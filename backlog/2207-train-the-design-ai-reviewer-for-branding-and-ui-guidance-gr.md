@@ -4,7 +4,7 @@ size: 5
 status: open
 locus: webeverything
 parent: "2208"
-blockedBy: ["2209", "x5ngusg"]
+blockedBy: ["2209", "2353"]
 relatedTo: ["2209", "1034", "1552", "1167"]
 relatedReport: reports/2026-07-09-backlog-split-analysis-2207.md
 dateOpened: "2026-07-03"
@@ -14,10 +14,10 @@ tags: [design-review, ai-judge, branding, training, review-design]
 # Train the design-AI reviewer for branding & UI guidance — grounded, consistent, better than stock AI
 
 > **Sliced 2026-07-09** (`/split 2207`, report `we:reports/2026-07-09-backlog-split-analysis.md`): the
-> foundational **eval harness** (agreement metric vs the journey labels) carved out to sibling **#x5ngusg**
+> foundational **eval harness** (agreement metric vs the journey labels) carved out to sibling **#2353**
 > under #2208 — buildable now. This residual is the **training payload**: ground the reviewer's verdicts
 > in the ratified brand rubric (cite the owning attribute set/rule per #2209 Fork 6), iterated against the
-> eval baseline. `blockedBy` **#2209** (the rubric — still an open decision) **+ #x5ngusg** (the baseline).
+> eval baseline. `blockedBy` **#2209** (the rubric — still an open decision) **+ #2353** (the baseline).
 > The learning log and explorer/vision-tool hooks below stay here; the sighted-loop-hooks stream was
 > considered for a further carve but left in place (shares the `/review-design` skill file).
 
