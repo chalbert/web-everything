@@ -1,5 +1,6 @@
 node_modules/
 _site/
+_site-visual-fixtures/
 dist/
 coverage/
 playwright-report/
