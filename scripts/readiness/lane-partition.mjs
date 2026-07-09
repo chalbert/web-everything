@@ -124,6 +124,15 @@ export function blockEdge(x, y) {
   return xbb.has(String(y.num)) || ybb.has(String(x.num));
 }
 
+// The ORIENTED half of `blockEdge`: does `blocked` declare a `blockedBy` edge on `blocker` — i.e. must
+// `blocker` land FIRST? `blockEdge` is the symmetric OR of both directions (it answers "same lane?"); a
+// SCHEDULER also needs the direction, to place the blocker in an EARLIER wave than the item it blocks
+// regardless of numeric `num` order (a higher-numbered blocker still goes first). Returns false for the
+// reverse and unrelated pairs; a mutual (cyclic) edge is true both ways — callers break that tie numerically.
+export function blockedByEdge(blocked, blocker) {
+  return new Set((blocked.blockedBy || []).map(String)).has(String(blocker.num));
+}
+
 // Only a genuinely-unknown touch-set is an UNCONDITIONAL serial. A probe that succeeded — even low-confidence
 // or monolith-touching — is partitioned by the pairwise `conflicts` check, which serializes it only against an
 // item it actually contends with (and otherwise lets it run concurrent under the optimistic floor).
