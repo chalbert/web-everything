@@ -1,0 +1,51 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/2158-package-fui-component-render-so-we-builds-single-repo/">#2158</a> asks how WE's
+    docs site gets FUI's <strong>component-render</strong> build tool without the cross-repo sibling checkout —
+    so a fresh clone, GitHub Actions, or <strong>Cloudflare Workers Builds</strong> (single-repo only) can
+    build. Today WE's eleventy build <strong>subprocess-execs</strong> the FUI CLI at
+    <code>we:../frontierui/dist/tools/component-render/cli.mjs</code> — deliberately an exec, never an import,
+    because a build-time <code>import '@frontierui'</code> is the <em>one</em> thing that violates the ratified
+    WE&harr;FUI boundary (<code>we:docs/agent/platform-decisions.md:224-226</code>).
+</p>
+
+<h2>The load-bearing correction</h2>
+<p>
+    The item's premise "WE already consumes <code>@frontierui/*</code> as packages" is <strong>false</strong> —
+    they are vite/tsconfig <em>sibling-source aliases</em>, and FUI publishes nothing to npm (the
+    <code>@frontierui</code> scope is held "restricted until an explicit go"). And the built
+    <code>cli.mjs</code> is <strong>not self-contained</strong>: <code>fui:scripts/build-tools.mjs:56</code>
+    bundles <code>packages:'external'</code>, so <code>happy-dom</code> (+ transitive
+    <code>iconv-lite</code>/<code>safer-buffer</code>) is resolved at runtime from <code>node_modules</code>.
+    Vendoring one file therefore also needs happy-dom in WE's tree — resolved against <strong>WE's lockfile,
+    not FUI's</strong> — which silently retargets the #1867 reproducibility invariant ("invoked from within the
+    FUI checkout against FUI's locked lockfile", <code>:1503-1505</code>) and risks cross-repo SSR render-skew.
+</p>
+
+<h2>Recommendation (to ratify in #2158)</h2>
+<ol>
+    <li><strong>End-state: npm-publish <code>@frontierui/component-render</code>.</strong> The only option that
+        <em>dissolves</em> the happy-dom coupling (a published package declares happy-dom as its own dependency,
+        npm-resolved reproducibly) — but gated behind the held-scope governance "go" + a new publish pipeline,
+        so it cannot be the <em>now</em> answer.</li>
+    <li><strong>Interim (now): vendor the prebuilt CLI, execed as today, correctly pinned.</strong> The pin is
+        the built artifact <em>+ the exact happy-dom / transitive versions + a WE-lockfile constraint matching
+        FUI's</em> (not a bare commit hash), and <code>codifiedIn</code> must <strong>amend the #1867 anchor's
+        "from within the FUI checkout" clause</strong>. This <em>removes the FUI read from the deploy path</em>
+        (a fresh clone builds; the credential survives only in one scheduled sync job that runs the existing
+        <code>EXPECTED_PRODUCER</code> pin-check) — it does not "drop the PAT" outright.</li>
+    <li><strong>Rejected:</strong> sibling checkout (status quo); git submodule / GH-release-fetch (still need a
+        private-repo read credential, don't unlock Workers Builds); committing FUI tool <em>source</em> and
+        building it in WE (a zero-impl / memory-rule-#6 violation). The vendored <em>exec'd</em> artifact is a
+        build cache, not WE-authored impl — boundary-safe.</li>
+</ol>
+
+<h2>Method</h2>
+<p>
+    Skeptic pass <strong>SURVIVES-WITH-AMENDMENT</strong> (refuted the "self-contained artifact" premise;
+    folded in the happy-dom pin + the #1867 amendment); fresh-context screen <strong>CLEAR</strong>. Full
+    grounding, with verified <code>file:line</code> citations, in
+    <code>we:reports/2026-07-09-single-repo-docs-build-fui-tool-distribution.md</code>.
+</p>
+{% endraw %}

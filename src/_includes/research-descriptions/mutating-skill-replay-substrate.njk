@@ -1,0 +1,46 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/2274-execution-substrate-for-skill-memory-replay-dry-run-flags-vs/">#2274</a> (child of the
+    <a href="/backlog/2268-validation-suite-for-skills-and-memory/">#2268</a> validation-suite epic) asks the
+    execution substrate for running a <strong>mutating</strong> skill/script under test without leaving state:
+    a <code>--dry-run</code> retrofit on every script (Fork A), or replaying the real skill in an ephemeral,
+    revertible checkout (Fork B)?
+</p>
+
+<h2>What the survey changed</h2>
+<p>
+    Two corrections. <strong>(1) A-vs-B is already settled by the parent epic</strong> —
+    <code>we:backlog/2268-...md:30-36</code> prescribes worktree-replay "<em>rather than</em> a per-skill
+    <code>--dry-run</code> retrofit (see #2274)" — so #2274 is a <strong>ratify of B + a substrate decision</strong>,
+    not an open A-vs-B choice. <strong>(2) "worktree" is guard-blocked</strong>: the #1153 branch guard denies
+    <code>git worktree add</code> in constellation checkouts (<code>we:docs/agent/platform-decisions.md:2497-2498</code>),
+    and #1996 codified "isolation = a clone" — so it must be read as a <strong>lane clone</strong>.
+</p>
+
+<h2>Recommendation (to ratify in #2274)</h2>
+<ol>
+    <li><strong>Ratify Fork B; reject the <code>--dry-run</code> retrofit.</strong> ~38 of 49 scripts would need
+        it, the heaviest-mutating skills (drain/finish/pr) would test a <em>stubbed</em> path (a weaker proof —
+        the proven path is not the shipped path), and Tier-A pure scripts need no dry-run at all (golden/snapshot
+        tests run the <em>real</em> write path more faithfully).</li>
+    <li><strong>Substrate: a leased warm validation-lane pool, isolated by a throwaway origin for the push-y
+        skills.</strong> The first-draft "dedicated cold clone per replay, to avoid lease contention" was
+        <em>refuted</em> — contention is already solved by #2275's exclusive lease, and a cold <code>npm ci</code>
+        per replay loses to a warm leased lane on cost. The genuine reason to isolate is <strong>remote
+        blast-radius</strong>: drain/finish/pr push <code>lane/*</code> refs + merge PRs against the real origin,
+        so replay them in a <strong>leased warm lane pointed at a throwaway local bare origin</strong>; a plain
+        leased pool lane suffices for non-remote skills (next/review-program).</li>
+    <li><strong>Tier-A:</strong> golden/snapshot tests (no <code>--dry-run</code>); the git-mutating Tier-A ops
+        (e.g. <code>we:scripts/backlog.mjs</code> scaffold/resolve) get a cheap <code>git init</code> scratch
+        tree, not a full lane.</li>
+</ol>
+
+<h2>Method</h2>
+<p>
+    Skeptic pass <strong>SURVIVES-WITH-AMENDMENT</strong> (A-vs-B is a ratify; the "dedicated clone" reason was
+    refuted &rarr; leased warm pool + throwaway origin); fresh-context screen <strong>CLEAR</strong> (faithfulness
+    — real mutation vs simulated path). Full grounding in
+    <code>we:reports/2026-07-09-mutating-skill-replay-substrate.md</code>.
+</p>
+{% endraw %}
