@@ -16,6 +16,14 @@ name: CI
 # built _site statically on :8080, and runs `check:visual` against committed -chromium-linux baselines.
 # Linux baselines live alongside the darwin ones in tests/visual/rendered-site-visual.spec.ts-snapshots/.
 # Refresh them by running the `update-visual-baselines` workflow (.github/workflows/update-visual-baselines.yml).
+# The `visual` job renders inside a version-locked `mcr.microsoft.com/playwright:vX.Y.Z-jammy` container
+# pinned to the `@playwright/test` version installed in package-lock.json (#2234) — rendering on a bare
+# `ubuntu-latest` runner lets the font/AA stack drift with the image, which is exactly what the -linux
+# baselines are supposed to make reproducible. `npm run check:standards` fails loud if the image tag and
+# the installed Playwright version ever drift apart (scripts/check-standards-rules.mjs, PLAYWRIGHT_CONTAINER
+# _PIN_REQUIRED_FILES). Bump procedure: bump `@playwright/test` in package.json → `npm install` → copy the
+# new resolved version from package-lock.json into the `container: image:` tag here AND in
+# update-visual-baselines.yml (`vX.Y.Z-jammy`) → `npm run check:standards` to confirm lockstep.
 
 on:
   push:
@@ -121,6 +129,13 @@ jobs:
     # re-enabling is gated on #2240's readiness (container-pinned baselines + PR-based refresh).
     if: ${{ false }}
     runs-on: ubuntu-latest
+    # Version-locked Playwright container (#2234): pinned to the exact `@playwright/test` version in
+    # package-lock.json so browsers + OS font/AA stack are byte-identical every run, on any host. The
+    # image ships chromium pre-installed at this same version, so no separate browser-install step is
+    # needed below (see the removed "Install Playwright chromium" step). Bump this tag in lockstep with
+    # any `@playwright/test` upgrade — `npm run check:standards` fails loud on drift.
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.1-jammy
     steps:
       # Same sibling layout as deploy.yml — WE's build shells out to FUI's component-render CLI.
       #   $GITHUB_WORKSPACE/web-everything  (this repo)
@@ -160,9 +175,9 @@ jobs:
         working-directory: web-everything
         run: npm run build:docs
 
-      - name: Install Playwright chromium
-        working-directory: web-everything
-        run: npx playwright install --with-deps chromium
+      # No "Install Playwright chromium" step here: the pinned container image already ships chromium
+      # pre-built at the exact `@playwright/test` version above, so a separate `playwright install` would
+      # be redundant (and could silently pull a *different* browser build if the pin ever drifted).
 
       # Serve the pre-built _site statically on :8080 (the visual spec's default port).
       # `npx serve` ships with Node and needs no extra install; `--single` avoids 404 on clean-URL routes.
