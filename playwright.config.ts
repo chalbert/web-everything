@@ -46,6 +46,22 @@ export default defineConfig({
     baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',
   },
+  // Deterministic-render hardening for the visual specs (#2237) — a `toHaveScreenshot` baseline is only a
+  // pure function of the styles under test if the capture options are pinned config-side, not left to
+  // each call site. `animations: 'disabled'` freezes CSS animations/transitions at their end state before
+  // capture, and `maxDiffPixelRatio` keeps sub-pixel AA noise from flapping the gate — both apply only
+  // where a test actually calls `toHaveScreenshot()` (tests/visual/rendered-site-visual.spec.ts today), so
+  // this is a no-op for every other project/spec.
+  expect: {
+    toHaveScreenshot: {
+      animations: 'disabled',
+      maxDiffPixelRatio: 0.01,
+      // Per-pixel color-difference tolerance (0–1). 0.2 is Playwright's own default — pinned literally
+      // (like the viewport/deviceScaleFactor below) so a future @playwright/test release can't quietly
+      // retune AA sensitivity out from under the committed baselines.
+      threshold: 0.2,
+    },
+  },
   // Starts the servers E2E needs. Locally each REUSES an already-running instance (never killing the
   // user's server); in CI they boot fresh.
   // (The service-worker fixture lane was removed with the local `plugs/` tree in #1047 — no
@@ -81,7 +97,20 @@ export default defineConfig({
       // Live-server specs against the running dev server (:3000 / :8080).
       name: 'chromium',
       testIgnore: ['**/_site/**', 'tests/interaction/**'],
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        // Pin viewport + deviceScaleFactor explicitly (#2237) — `devices['Desktop Chrome']` already
+        // resolves to these values today, but the visual specs' committed screenshot baselines
+        // (tests/visual/) depend on them staying put; a literal pin means a future @playwright/test
+        // release changing that device profile can never silently perturb a baseline out from under us.
+        viewport: { width: 1280, height: 720 },
+        deviceScaleFactor: 1,
+        // Reduced-motion emulation (#2237) — belt-and-braces alongside the per-screenshot `animations:
+        // 'disabled'` option above: forces any `@media (prefers-reduced-motion)` branch too, not just
+        // the CSS animations/transitions Playwright can freeze at capture time. Shared project-wide
+        // since it's a no-op for the non-visual (a11y/smoke/content) specs that also run here.
+        reducedMotion: 'reduce',
+      },
     },
     {
       // Deterministic client-side interaction specs against the fixture server — its own baseURL/port,
