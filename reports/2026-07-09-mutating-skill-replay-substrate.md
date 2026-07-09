@@ -15,7 +15,7 @@ the real skill in an ephemeral, revertible checkout (Fork B)?
   prescribes *"replaying the real skill in an ephemeral, revertible git worktree"* for Tier B and
   *"golden/snapshot tests"* for Tier A — *"realized as worktree-replay **rather than** a per-skill `--dry-run`
   retrofit (see #2274)."* So #2274 is a **ratify** of B + a **substrate** decision, not an open A-vs-B choice.
-- **The two tiers.** `we:scripts/lib/invariant-catalogue.json:8-11`: **Tier A** = *"Deterministic script/hook
+- **The two tiers.** `we:scripts/lib/invariant-catalogue.json:5-6`: **Tier A** = *"Deterministic script/hook
   layer — pure input (files/argv) to (files/exit code); CI-able golden/snapshot tests."* **Tier B** =
   *"Judgment skill layer (batch/drain/finish/next/review-program) — no deterministic output; validated by
   worktree-replay + invariant assertion, not snapshot."* Children: **#2273** Tier-A snapshot harness, **#2272**

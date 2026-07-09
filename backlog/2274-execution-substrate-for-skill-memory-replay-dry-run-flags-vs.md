@@ -31,7 +31,7 @@ real skill in an ephemeral, revertible checkout (Fork B)?
 - **A-vs-B is settled upstream.** `we:backlog/2268-validation-suite-for-skills-and-memory.md:30-36` prescribes
   *"replaying the real skill in an ephemeral, revertible git worktree … rather than a per-skill `--dry-run`
   retrofit (see #2274)."* So Fork A is rejected by the epic; #2274 ratifies B + decides the substrate.
-- **The two tiers** (`we:scripts/lib/invariant-catalogue.json:8-11`): **Tier A** = deterministic scripts, pure
+- **The two tiers** (`we:scripts/lib/invariant-catalogue.json:5-6`): **Tier A** = deterministic scripts, pure
   input→(files/exit code), golden/snapshot (child #2273); **Tier B** = judgment skills (batch/drain/finish/
   next/review-program), no deterministic output, replay + invariant assertion (child #2272).
 - **"worktree" is guard-blocked → lane clone.** `{#…isolate-by-clone}`
