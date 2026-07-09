@@ -1,9 +1,11 @@
 ---
 kind: epic
-status: open
+status: resolved
 relatedTo: ["2171", "2262", "2162", "2279"]
 tags: [lane, drain, review, merge-queue, multi-agent, agent]
 dateOpened: "2026-07-04"
+dateResolved: "2026-07-09"
+graduatedTo: none
 relatedReport: reports/2026-07-05-backlog-split-analysis-2285.md
 ---
 
