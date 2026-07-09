@@ -1,9 +1,12 @@
 ---
 kind: task
 parent: "1294"
-status: open
+status: resolved
 blockedBy: ["2296"]
 dateOpened: "2026-07-06"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
+graduatedTo: process/contract.ts, conformance-vectors/webprocess.vectors.ts, contracts/webprocess.ts
 tags: []
 ---
 
