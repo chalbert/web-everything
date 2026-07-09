@@ -1,5 +1,5 @@
 ---
-kind: story
+kind: decision
 size: 3
 parent: "2275"
 status: open
