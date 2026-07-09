@@ -115,3 +115,84 @@ tracking item is filed — the contract-scoping is the natural first move when t
 **No on-disk mutation.** #2360 stays a valid unsliced epic (no `size`, no `childlessReason` → shows the
 *slice* badge = decomposition-pending), which is correct: it's a real home for future work, awaiting its
 contract-scoping artifact.
+
+---
+
+# Focused run: `/slice 2355` (JVM native SSR renderer sub-epic)
+
+## Candidate
+
+**#2355 — Native JVM SSR renderer for directive regions** (`kind: epic`, `parent: 2069`,
+`blockedBy: [2354]`, unsliced — no children). A per-language sub-epic seeded by the #2069 roadmap split; its
+foundational blocker **#2354 is resolved** (vectors exported as language-neutral JSON +
+[we:conformance-vectors/webdirectives-ssr-harness-contract.md](conformance-vectors/webdirectives-ssr-harness-contract.md)).
+Not a roadmap epic — its natural children are the pieces of *one* renderer build, so it slices into
+**stories/tasks** (leaf level), not sub-epics.
+
+### Work-investigation pass
+
+No JVM code exists — pure greenfield build. But the seams are fully knowable: the Node reference oracle
+`fui:plugs/webdirectives/ssr/nodeReferenceRenderer.ts` is 266 well-factored lines the JVM port re-derives
+*the same bytes* for, with a clean per-directive `DirectiveRenderer` plug (`renderInner` / `stateTokens`).
+The 10 golden vectors group per-directive (`if/*`, `switch/*`, `state-tokens/*`, `for-each/*`,
+`resource-loader/*`, `defer/*`), so each slice gets its own fixture-driven demo (byte-for-byte per the #2354
+contract). The greenfield dimension is the *build/harness integration* (first non-JS toolchain in the
+constellation — none of 2356–2360 has landed one) — bounded and industry-standard (Gradle + HTML parser + a
+test reading the JSON resource and byte-comparing), so size-honest, not unknown-scope. #2030 ratified render
+internals a conforming **black box — not a fork**, so the whole thing is a pure build with nothing gated.
+
+### Could split — YES (foundational slice + per-directive fan-out)
+
+Reference grounding cites `fui:plugs/webdirectives/ssr/nodeReferenceRenderer.ts` (the Node oracle):
+
+| Slice | kind | size | Scope | blockedBy | Ref lines |
+|---|---|---|---|---|---|
+| **A. JVM renderer foundation + if/switch** | story | 5 | Greenfield JVM build subtree (`frontierui:plugs/webdirectives/ssr/jvm/`) + source parse + top-level `<template is>` dispatch loop + normative space-padded marker wrapping + `renderMarkerOptions` + shared helpers (`resolvePath`, mustache `interpolate`) + **JVM-side conformance harness runner** (reads the JSON vectors, byte-compares, wired into CI) + the two branch-select directives `if`/`switch` to prove the pipeline end-to-end. Demo: passes `if/*`, `switch/*`, `state-tokens/*`. | — | dispatch 235-264, markers 103-112, helpers 67-84, if/switch 154-176 |
+| **B. for-each** | story | 3 | Item expansion + `data-key` (only key channel) + empty-list markers-only + `count`/`key-hash` state tokens, incl. the **DJB2 port with the normative UTF-16-code-unit subtlety** so non-ASCII keys don't diverge. Demo: passes `for-each/*`. | A | for-each 116-150, djb2 95-101 |
+| **C. resource:loader + defer** | task | 2 | Two passthrough directives (inner-branch emit; `defer` emits placeholder branch only). Demo: passes `resource-loader/*`, `defer/*`. | A | 180-196 |
+
+**DAG (clean fan-out, acyclic):** `A → {B, C}`; B ∥ C proceed fully independently once A lands. Incremental
+delivery (each slice extends conformance coverage) + real independence — both hold.
+
+**Rubric check (leaf story/task form):**
+- **(1)** No buried fork — #2030 ruled JVM language/HTML-parser/build-tool choices a conforming black box,
+  not a decision. Nothing gated. ✓
+- **(2)** ≥2 nameable slices (3), each a real home — A/B stories, C a task under the epic. ✓
+- **(3)** Each re-estimates ≤5 with grounding in the reference oracle; A isolates the greenfield-build risk,
+  B/C are thin per-directive deltas. ✓
+- **(4)** Clean acyclic fan-out; B ∥ C independent after A; incremental delivery besides. ✓
+- **(5)** Each slice passes a byte-for-byte vector subset = a valid demoable state (A proves the pipeline via
+  `if`/`switch`; no half-algorithm intermediate). ✓
+
+### Note / dial for the human
+
+- **First-mover cost lives in JVM's slice A.** Standing up the first non-JS build + the cross-language harness
+  *runner* (which #2354 left to the FUI impl side — it shipped the contract + data, not the runner) is a
+  precedent all six language sub-epics (2356–2360) will re-need. Kept inside A per the #2069 decomposition's
+  deliberate scoping (extract later if reusable), rather than lifting a shared foundation up to #2069.
+
+### Reconciliation with the `/slice 2360` verdict above
+
+The `/slice 2360` section above ruled all six language sub-epics — **#2355 included** — could-not-split, on
+conditions (4) and (5). This run reaches the opposite verdict for JVM after reading two artifacts the 2360
+pass did not cite:
+
+- **(4) is a fan-out, not a "rigid linear chain."** The Node reference oracle
+  `fui:plugs/webdirectives/ssr/nodeReferenceRenderer.ts` implements the directives as **independent plugs on a
+  dispatch map** (the `DirectiveRenderer` interface, `RENDERERS` table), sharing only parse + marker-wrapping +
+  helpers. That shared part is slice A; each directive is an independent addition behind it — a genuine
+  `A → {B, C}` fan-out, not the `parse → expand all 7 → emit` chain the 2360 pass assumed.
+- **(5) grades per-vector, not all-or-nothing.** The #2354 harness contract
+  ([we:conformance-vectors/webdirectives-ssr-harness-contract.md](conformance-vectors/webdirectives-ssr-harness-contract.md))
+  grades **every vector independently** ("treat every vector independently… report all failing ids; conformant
+  iff `failed` is empty") and the vectors group per-directive. So a renderer passing `if/*`+`switch/*`
+  byte-for-byte is a **valid demoable state** (some-of-N complete, independent features) — not the "half an
+  algorithm" a partial renderer would be if grading were all-or-nothing.
+
+**Where 2360 is still right:** slices B/C are grounded in the *Node* reference, not their own *JVM* `file:line`
+paths (which don't exist until slice A lands) — the normal leaf-slice grounding bar is met by the oracle, not
+the target surface. Slice A **is** the contract-scoping-plus-foundation the 2360 pass recommends; this run just
+draws B/C's seams from the oracle now rather than deferring them. The divergence is JVM-specific only in that
+it was investigated against the oracle; **2356–2359 (Go/PHP/Rust/Python) warrant the same re-analysis** — the
+2360 blanket "applies identically to all six" no longer holds for the sliced case. (#2360 itself was left
+could-not-split by its own run and is not re-touched here.)
