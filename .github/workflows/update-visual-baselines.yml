@@ -129,7 +129,7 @@ jobs:
       # reach — file/track separately), land it via `gh workflow run ci.yml --ref <branch>` to backfill
       # the check, or an admin merge override.
       - name: Open baseline-refresh PR
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           path: web-everything
           token: ${{ secrets.GITHUB_TOKEN }}
