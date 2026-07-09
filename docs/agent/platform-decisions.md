@@ -2459,6 +2459,27 @@ baselines remain in-repo, *if* in-PR image-diff review proves too coarse in prac
 **graduate baselines off committed PNG** when git churn weighs (#1967). Both are opt-in later moves, not the
 default now.
 
+### Skill/memory replay substrate — an ephemeral throwaway clone, never the shared lane pool {#skill-memory-replay-substrate}
+
+The skill/memory validation suite (#2268) replays a **mutating** script/skill case inside an **ephemeral
+throwaway clone** — `mkdtempSync` + `git init`/`git clone` off the fixture corpus, run the *real* mutation,
+assert the invariant-catalogue checks on the resulting tree, `rmSync` in teardown — **never** the shared lane
+pool (decision #2274, ratified 2026-07-09; parent epic #2268; unblocks #2272, sibling #2273 owns the Tier-A
+snapshot on the same substrate). This is the pattern already shipping in
+`we:scripts/__tests__/lane-drain-numbering.test.mjs`, so it generalizes a proven shape rather than inventing a
+primitive. The shared `we:scripts/lane-pool.mjs` is **excluded as the substrate** because it is production
+infra: `acquire` exits 1 in CI (no pool exists, `we:scripts/lane-pool.mjs:474`), `reset --hard origin/main` +
+`clean -fd` destroys any seeded synthetic fixture (`:508-511`), and a red test strands a 4-hour lease that
+contends with the live drain. **This holds even when the case under test *is* the lane tooling:** point the
+real `we:scripts/lane-pool.mjs` at a fabricated `LANE_POOL_ROOT` under a `mkdtemp` dir (a throwaway origin +
+reference + pool), never at allocated production lanes — the pattern shipping in
+`we:scripts/__tests__/lane-pool-refresh-guard.test.mjs`. **`--dry-run` stays an operator-preview feature, never
+the suite's fidelity substrate** — a dry-run of a mutating op asserts the *preview* branch, not the real
+commit/rename/merge the suite regression-guards, so "faithful dry-run" is self-contradictory (the universal
+`--dry-run` retrofit was parent-excluded on that fidelity gap). Scope caveat: this settles only *where the
+mutation runs*; driving an LLM *judgment* (Tier-B) skill deterministically enough to assert on is a separate,
+unsolved #2272 problem that no substrate choice resolves.
+
 ### PR-flow rollout mechanism — automation isolates, human writes `main`, landing is fully automatic {#pr-flow-rollout-mechanism}
 
 The **mechanism** implementing [#1985 Rung 2](#non-destructive-closeout-prflow)'s adopt-PR-flow direction (that
