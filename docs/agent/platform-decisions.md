@@ -2324,6 +2324,33 @@ sub-package rule and [framework-free-core-vendor-segregation](#framework-free-co
 
 ---
 
+### Pool-root constellation siblings are real, pushable, built clones — one clone serves both render and the drain, not a render-only symlink {#pool-siblings-real-built-clones}
+
+The lane pool provisions each **other** constellation repo (`frontierui`, `plateau-app`) as a **real, pushable
+git clone at pool-root** (`<pool>/frontierui`, `<pool>/plateau-app`), fetched/reset to `main` and **built via
+that repo's `build:tools`** (where it has one) on provision/refresh. The **one** clone serves both consumers at
+the same `../<name>` path a lane resolves: **WE-lane render** reads its built `dist/`, and the **drain's
+cross-repo rebase-drop** fetches/pushes its `origin`. This is safe to share because rebase-drop is **pure git
+plumbing — merge-tree → commit-tree → push, no checkout** (`we:scripts/merge-ai-prs.mjs`), so it mutates only
+git objects/refs while render reads only `dist/` — disjoint filesystem regions. `siblingCloneName`/
+`siblingCloneDir` already resolve `../<name>`, so **no path fork is added**.
+
+This **supersedes the render-only symlink** (#2166, `ensureFuiSibling` → primary's `~/workspace/frontierui`).
+The symlink's one lost behavior: WE-lane render no longer reflects **uncommitted primary-FUI WIP** — it tracks
+the clone's committed ref (`main`). **Freshness ownership moves to the provisioner** (it rebuilds `dist/` on
+refresh; ~1.2s for FUI). Rejected alternative: keep the symlink + a *separate* push path — its only merit is
+insulating a mutable push clone from a stable render source, which guards a **future non-plumbing** drain op the
+"no checkout" design is committed against; **don't add that abstraction until a real requirement forces it** —
+split `siblingCloneDir` (one function) *then*. A plain `plateau-app` clone also un-breaks the lane's Vite
+dev-panel import (`vite.config.mts` → `../plateau-app/…`).
+
+**Lineage:** #2282 (ruling — option a; foundational slice of the #2275 drain-on-lane migration; build carried by
+the successor provisioner-generalization item). Supersedes the #2166 symlink. Coheres with
+[pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) (the drain is the sole `main` writer) and the #2123
+edit-work-runs-in-a-lane-clone rule.
+
+---
+
 ### A plugged-vs-unplugged faithfulness surface needs a clean realm per mode; same-document direct injection is the isolation *showcase*, the iframe is a consumer-distribution mode {#plug-gap-clean-realm-per-mode}
 
 When a surface exists to **show the gap** between a plugged (proposed-standard) and unplugged (safe-now)
