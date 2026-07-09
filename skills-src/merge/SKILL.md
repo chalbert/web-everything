@@ -15,7 +15,20 @@ the trigger + the ceremony around one invocation. It complements the two other t
 
 ## Preconditions
 
-- Run from the **WE checkout on `main`** (the post-merge sync pulls local `main`). `gh` authenticated.
+- **Run from a LEASED lane-pool clone on `main` — never the shared primary checkout (#2197 / ratified
+  #2123).** `/merge` advances `main` (the post-merge sync is `git pull --ff-only`), so the same isolation
+  [`/drain`](../drain/SKILL.md#preconditions) requires applies here. Acquire the same way:
+
+  ```
+  node scripts/lane-pool.mjs acquire --purpose=merge --session=<merge-session-slug> --json   # → {lane, path, …}; cd into .path
+  …dry-run, then live sweep…
+  node scripts/lane-pool.mjs release --lane=<lane> --session=<merge-session-slug>
+  ```
+
+  See [`/drain`'s preconditions](../drain/SKILL.md#preconditions) for the full acquire/release contract
+  (session-slug pairing, TTL self-reclaim, `LANE_POOL_ROOT` config) — it is the identical allocator, just a
+  different `--purpose`.
+- `gh` authenticated (`gh auth status`).
 - This MERGES pull requests. Always **dry-run first** and show the user the verdicts before a live sweep.
 
 ## Run it
