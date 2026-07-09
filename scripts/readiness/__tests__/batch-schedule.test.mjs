@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   contends, predecessorsOf, readyAfter, scheduleWaves, selectModel, scheduleReason, beforeInOrder,
+  orderedEntries,
 } from '../batch-schedule.mjs';
 
 // A probed entry, matching lane-partition's fixture shape.
@@ -96,6 +97,60 @@ describe('scheduleWaves — the layered plan; union == the pack, each item once'
     expect(selectModel(pack)).toBe('all-serial');
     // the placement copy still names the edge (blocked chained after its blocker)
     expect(scheduleReason(blocked, pack)).toMatch(/chained after #5 — blockedBy edge/);
+  });
+
+  it('#259 round-2 regression: a 3-item group with ONE num-inverting blockedBy edge chains all-serial (no cycle)', () => {
+    // The exact failure the per-pair predecessor decision produced: three items all touching one shared file
+    // (so all three pairwise contend), with a single blockedBy edge whose direction inverts numeric order.
+    //   A{num:3}, B{num:1, blockedBy:[3]}, C{num:2}
+    // Per-pair, the "before" edges A→B (blockedBy, num-inverted), B→C (1<2), C→A (2<3) CYCLED — readyAfter
+    // returned [] and the defensive flush dumped [[A,B,C]] as one all-parallel wave, dispatching B alongside
+    // its own blocker A. A single consistent linear order makes that impossible.
+    const A = entry(3, we('scripts/shared.mjs'));
+    const B = entry(1, we('scripts/shared.mjs'), { blockedBy: ['3'] });
+    const C = entry(2, we('scripts/shared.mjs'));
+    const pack = [A, B, C];
+    const waves = scheduleWaves(pack);
+    const waveOf = (num) => waves.findIndex((w) => w.some((e) => e.num === String(num)));
+    // an all-serial chain — one item per wave, never collapsed into a single all-parallel wave
+    expect(waves).toHaveLength(3);
+    expect(waves.every((w) => w.length === 1)).toBe(true);
+    expect(selectModel(pack)).toBe('all-serial');
+    expect(selectModel(pack)).not.toBe('all-parallel');
+    // the blockedBy edge is honored: A (num 3) lands strictly before B (num 1), and B is NEVER co-waved with A
+    expect(waveOf(3)).toBeLessThan(waveOf(1));
+    expect(waveOf(3)).not.toBe(waveOf(1));
+    // readyAfter never wrongly returns empty while items remain (the masked-by-flush symptom)
+    expect(readyAfter(pack, []).length).toBeGreaterThan(0);
+  });
+
+  it('#259 round-2: genuinely-CYCLIC blockedBy input is broken deterministically by numeric order, never all-parallel', () => {
+    // A real dependency cycle in the DATA (A blockedBy C, B blockedBy A, C blockedBy B), all sharing one file.
+    // There is no topological order; we break the cycle by numeric order rather than silently collapsing to
+    // concurrent dispatch, yielding a deterministic all-serial chain in num order 1 → 2 → 3.
+    const A = entry(1, we('scripts/shared.mjs'), { blockedBy: ['3'] });
+    const B = entry(2, we('scripts/shared.mjs'), { blockedBy: ['1'] });
+    const C = entry(3, we('scripts/shared.mjs'), { blockedBy: ['2'] });
+    const pack = [A, B, C];
+    const waves = scheduleWaves(pack);
+    expect(waves.map((w) => w.map((e) => e.num))).toEqual([['1'], ['2'], ['3']]);
+    expect(waves.some((w) => w.length > 1)).toBe(false); // NOT collapsed into one all-parallel wave
+    expect(selectModel(pack)).toBe('all-serial');
+    expect(selectModel(pack)).not.toBe('all-parallel');
+  });
+
+  it('#259 round-2: a non-cyclic item merely blocked BY a cycle keeps its ordering constraint', () => {
+    // A↔B form a real 2-cycle (A blockedBy B, B blockedBy A); D is blockedBy A but is NOT itself in a cycle.
+    // Breaking the cycle must not force the numerically-lowest item out ahead of its blocker: D still lands
+    // after A even though D would sort first numerically.
+    const D = entry(1, we('scripts/shared.mjs'), { blockedBy: ['2'] });
+    const A = entry(2, we('scripts/shared.mjs'), { blockedBy: ['3'] });
+    const B = entry(3, we('scripts/shared.mjs'), { blockedBy: ['2'] });
+    const pack = [D, A, B];
+    const order = orderedEntries(pack).map((e) => e.num);
+    // A and B are the cycle (2↔3); D (num 1) is blockedBy A (num 2) and must follow it despite the lower num
+    expect(order.indexOf('2')).toBeLessThan(order.indexOf('1'));
+    expect(selectModel(pack)).toBe('all-serial');
   });
 
   it('every item appears exactly once across the waves', () => {

@@ -32,7 +32,7 @@
  * PURE. No fs, no network — a probed-entry array in, a plan out. Proved by `__tests__/batch-schedule.test.mjs`.
  * Reuses the `lane-partition.mjs` primitives so the two predicates never drift.
  */
-import { filesOf, mustSerialize, conflicts, disjoint, blockEdge, blockedByEdge } from './lane-partition.mjs';
+import { filesOf, mustSerialize, conflicts, disjoint, blockEdge } from './lane-partition.mjs';
 
 /**
  * Deterministic dispatch order key. Numeric backlog NNN sorts numerically; a provisional `xNNNNNN` hash (or
@@ -66,29 +66,78 @@ export function contends(x, y) {
 }
 
 /**
- * Is contending `o` a PREDECESSOR of `item` — must `o` land in an EARLIER wave? A real `blockedBy` edge
- * decides the direction by its ORIENTATION, not by `num`: if `item` is blockedBy `o`, `o` goes first even
- * when it carries the HIGHER num (the bug this guards — numeric order would have scheduled the blocked item
- * ahead of its blocker). If instead `o` is blockedBy `item`, `item` leads and `o` is NOT a predecessor. With
- * no directional edge — pure file-overlap / merge-risk contention, or a degenerate mutual (cyclic) edge —
- * fall back to the deterministic numeric `beforeInOrder` tiebreak (which keeps a lower-numbered blocker and
- * ordinary contention behaving exactly as before).
+ * Does `item` sit inside a `blockedBy` CYCLE within `remaining`? — follows blocker edges (item → its
+ * blockedBy items → their blockedBy items …) restricted to `remaining` and reports whether the walk returns
+ * to `item`. Used only to break a genuinely-cyclic input deterministically: when the topo sort stalls we
+ * force-emit the numerically-lowest item that is ACTUALLY in a cycle, so a non-cyclic item merely blocked BY
+ * the cycle (e.g. `D` blockedBy a cyclic `A`) still keeps its satisfiable ordering constraint.
  */
-function isPredecessor(o, item) {
-  const oBlocksItem = blockedByEdge(item, o); // item.blockedBy ∋ o.num ⇒ o must land first
-  const itemBlocksO = blockedByEdge(o, item); // o.blockedBy ∋ item.num ⇒ item must land first
-  if (oBlocksItem !== itemBlocksO) return oBlocksItem; // a clean one-way edge wins over num order
-  return beforeInOrder(o, item);                       // no edge (or a cycle) ⇒ numeric tiebreak
+function inCycle(item, remaining, blockers) {
+  const self = String(item.num);
+  const stack = [...blockers.get(item)];
+  const seen = new Set();
+  while (stack.length) {
+    const n = stack.pop();
+    if (n === self) return true;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    const node = remaining.find((r) => String(r.num) === n);
+    if (node) for (const b of blockers.get(node)) stack.push(b);
+  }
+  return false;
 }
 
 /**
- * The contention-PREDECESSORS of an item within a pack: the items it contends with that must land before it.
- * Direction comes from a real `blockedBy` edge when present (blocker first, whatever its num), else from the
- * deterministic numeric order. An item is dispatchable once every predecessor has landed — this is what makes
- * a mutually-contending group run as a single serial chain rather than deadlocking.
+ * The pack in a SINGLE, globally-consistent linear order — the fix for the #259 round-2 per-pair cycle. A
+ * stable topological sort (Kahn) that treats real `blockedBy` edges among IN-PACK items as the HARD constraint
+ * (a blocker always precedes what it blocks, whatever its `num`) and uses the deterministic numeric
+ * `beforeInOrder` ONLY as the tiebreak among items the `blockedBy` DAG leaves mutually unordered. Because every
+ * pair is placed by ONE linear extension — never by an independent per-pair decision — the "contends-and-earlier"
+ * predecessor relation derived from this order can never form a directed cycle. That was the bug: deciding each
+ * contending pair on its own (a num-inverting `blockedBy` edge for one pair, numeric order for the rest) could
+ * cycle inside a group of 3+ mutually-contending items even when the `blockedBy` data itself was perfectly
+ * acyclic, so `readyAfter` returned empty and the defensive flush dumped everything into one all-parallel wave.
+ *
+ * GENUINELY-CYCLIC `blockedBy` DATA (a real dependency cycle in the INPUT, e.g. A→B→C→A) has no topological
+ * order. Rather than silently collapse to all-parallel we break it DETERMINISTICALLY by numeric order: when no
+ * item has all its in-pack blockers emitted, force-emit the numerically-lowest item that is itself in a cycle
+ * (`inCycle`), then continue. The result is still one deterministic linear order — an all-serial chain in
+ * numeric order among the cyclic items — never a collapse to concurrent dispatch.
+ */
+export function orderedEntries(entries) {
+  const byNum = new Map(entries.map((e) => [String(e.num), e]));
+  const blockers = new Map(entries.map((e) => [e, new Set(
+    (e.blockedBy || []).map(String).filter((n) => byNum.has(n) && n !== String(e.num)),
+  )]));
+  const emitted = new Set();
+  const order = [];
+  let remaining = entries.slice();
+  while (remaining.length) {
+    let ready = remaining.filter((e) => [...blockers.get(e)].every((n) => emitted.has(n)));
+    // Cyclic blockedBy DATA: no item is unblocked ⇒ the stuck graph contains a cycle. Break it by numeric
+    // order, but only among items truly IN a cycle so items merely blocked BY the cycle keep their constraint.
+    if (!ready.length) ready = remaining.filter((e) => inCycle(e, remaining, blockers));
+    let pick = ready[0];
+    for (const e of ready) if (beforeInOrder(e, pick)) pick = e;
+    order.push(pick);
+    emitted.add(String(pick.num));
+    remaining = remaining.filter((e) => e !== pick);
+  }
+  return order;
+}
+
+/**
+ * The contention-PREDECESSORS of an item within a pack: the items it contends with that come BEFORE it in the
+ * single globally-consistent `orderedEntries` order. Direction is therefore inherited from that one linear
+ * extension (real `blockedBy` edges honored as hard constraints, numeric order as tiebreak) — never from an
+ * independent per-pair decision — so the relation is guaranteed acyclic. An item is dispatchable once every
+ * predecessor has landed; this is what makes a mutually-contending group run as a single serial chain rather
+ * than deadlocking, and it is why `readyAfter` can never wrongly return empty while items remain.
  */
 export function predecessorsOf(item, entries) {
-  return entries.filter((o) => o !== item && contends(item, o) && isPredecessor(o, item));
+  const order = orderedEntries(entries);
+  const idx = order.indexOf(item);
+  return order.slice(0, idx).filter((o) => contends(item, o));
 }
 
 /**
@@ -124,8 +173,10 @@ export function scheduleWaves(entries) {
   let remaining = entries.slice();
   while (remaining.length) {
     const wave = readyAfter(entries, landed);
-    // Defensive: with a total order + acyclic "contends-and-earlier" relation this is always non-empty, but
-    // never spin — if nothing freed, flush the rest as one final wave rather than loop forever.
+    // Defensive, now PROVABLY unreachable: `orderedEntries` gives one consistent linear order, so the
+    // earliest not-yet-landed item in that order has all its predecessors (all strictly earlier) already
+    // landed and is therefore always ready ⇒ `wave` is non-empty whenever items remain (genuinely-cyclic
+    // input is linearized too, not stalled). Kept only so a future relation change can never spin forever.
     const dispatch = wave.length ? wave : remaining;
     waves.push(dispatch);
     for (const e of dispatch) landed.add(String(e.num));
