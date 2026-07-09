@@ -764,12 +764,16 @@ function runCli() {
       verdicts.push(v);
     }
   }
-  // #2222 — PRE-CHECK id-collision self-heal. A certified PR whose NEW backlog item reuses an id already on main
-  // fails the required `test` check (`ids must be unique`), so it never becomes landable and the merge blocks the
-  // post-merge heal. Detect it cheaply (base vs lane backlog names) and, only on a real collision, rebuild the
-  // lane tip with the new item renumbered to a free GAP id — CI re-runs green and it lands on a later pass.
-  // Local-repo candidates only (pure git plumbing needs the local clone); best-effort, never fatal. Dry-run
-  // annotates without pushing.
+  // #2222 — PRE-CHECK id-collision self-heal, retained here (THE drain, the sole writer to main, #2290) as a
+  // DORMANT BACKSTOP under JIT numbering (#2288/#2291): a new item is now born hash-keyed, so a lane's NEW item
+  // reusing a base `NNN` should be unrepresentable pre-land — this stays a cheap no-op on the common path, kept
+  // as defense-in-depth (not deleted) rather than pruned like the now-dead duplicate precheck this same helper
+  // used to run on the deprecated `/pr` producer route (pruned, #2291 — see pr-land.mjs).
+  // A certified PR whose NEW backlog item reuses an id already on main fails the required `test` check (`ids
+  // must be unique`), so it never becomes landable and the merge blocks the post-merge heal. Detect it cheaply
+  // (base vs lane backlog names) and, only on a real collision, rebuild the lane tip with the new item
+  // renumbered to a free GAP id — CI re-runs green and it lands on a later pass. Local-repo candidates only
+  // (pure git plumbing needs the local clone); best-effort, never fatal. Dry-run annotates without pushing.
   const healed = [];
   if (HEAL_COLLISION) {
     for (const v of verdicts) {

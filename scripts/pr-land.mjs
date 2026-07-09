@@ -76,7 +76,6 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
-import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { assertMayMerge, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { numberPendingHashes } from './lane-drain.mjs'; // JIT numbering, shared single source (#2288/#xzxc92d)
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs'; // post-land dup-NNN tripwire (#2318)
@@ -464,7 +463,6 @@ function runCli() {
       plan: [
         `node scripts/lint-locus-prefix.mjs --range=${REMOTE}/${BASE}..${refSha}   # #2331 producer locus-prefix re-check (fail fast on the #2170 review-append leak) — CI is not the first to catch it`,
         `git push ${REMOTE} ${SRC}:refs/heads/${REF}   # publish the lane clone's ${SRC} (${refSha.slice(0, 8)}) to the lane ref`,
-        HEAL ? `pre-check: id-collision heal (renumber a lane new-item that reuses a ${BASE} id to a free GAP id, rebuild ${REF}) (#2222)` : '(--no-heal: skip pre-check id-collision heal)',
         prCreateBodyGuard(BODY).ok ? `gh ${createArgs.join(' ')}` : `REFUSE (if no PR exists yet): ${prCreateBodyGuard(BODY).reason}  # #2332 fail-fast — an existing PR for this head is exempt`,
         PLAN.waitForChecks ? 'poll: gh pr view <pr> mergeStateStatus + gh pr checks <pr> --required  (wait until green; abort on red)' : '(--no-wait: skip check-wait, leave for a later drain pass)',
         // #2199 — the label is applied ONLY after the required checks are green, never eagerly at open.
@@ -500,22 +498,14 @@ function runCli() {
   try { gitC(['push', REMOTE, `${SRC}:refs/heads/${REF}`]); }
   catch (e) { emit({ repo: REPO, merged: false, reason: 'push-failed', detail: `git push ${REMOTE} ${SRC}:refs/heads/${REF} failed (${String(e.message || e).split('\n')[0]})` }, 3); }
 
-  // 2b. PRE-CHECK id-collision self-heal (#2222). BEFORE the required check runs, detect that this lane's NEW
-  //     backlog item reuses an id already on `${BASE}` (the same-num allocation storm) and rebuild the lane tip
-  //     with it renumbered to a free GAP id — so the FIRST CI run is already on the healed tip and goes green,
-  //     instead of the merge blocking on `ids must be unique` (which would strand the post-merge heal, #2276).
-  //     Pure plumbing on the lane ref (no checkout). Best-effort: a heal error is surfaced but never blocks the
-  //     land (the same non-fatal contract as the post-merge heal). Gated by `--no-heal`.
-  let precheckHealed = [];
-  if (HEAL) {
-    const h = healNnnCollision({ laneRef: REF, base: `${REMOTE}/${BASE}`, remote: REMOTE });
-    if (h.action === 'rebased') {
-      precheckHealed = h.renumbered || [];
-      if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] ↻ pre-check: renumbered new-item id collision(s) on ${REF} (${precheckHealed.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}) — CI runs on the healed tip\n`);
-    } else if (h.action === 'error' && !AS_JSON) {
-      process.stderr.write(`pr-land [${REPO}] ⚠ pre-check id-collision heal could not run (${h.reason}) — if the required check flags "ids must be unique", renumber the new item by hand\n`);
-    }
-  }
+  // 2b. (#2291 — pruned) The PRE-CHECK id-collision self-heal (#2222) that used to run here is now DEAD wiring:
+  //     under JIT numbering (#2288) a NEW backlog item is born with a collision-free hash id, never an `NNN`,
+  //     so "this lane's new item reuses a base NNN" is structurally unrepresentable before the drain assigns
+  //     the real number — this precheck could only ever return `{ action: 'none' }`. The shared collision-heal
+  //     helper (`scripts/lib/nnn-collision-heal.mjs`) is NOT deleted — it is retained as a dormant backstop at
+  //     the drain (`scripts/merge-ai-prs.mjs`'s `HEAL_COLLISION`, and folded into `rebase-drop-manifest.mjs`),
+  //     the sole writer to main. pr-land no longer merges by default (#2290), so healing HERE, before a PR the
+  //     drain will separately merge (and separately precheck-heal), was pure duplicated dead weight.
 
   // 3. Find an existing open PR for this head, else create a self-approved one.
   let prNum = null;
@@ -656,10 +646,8 @@ function runCli() {
     ...(reviewVerdict.label ? { reviewLabel: reviewVerdict.label, reviewLabelApplied: reviewVerdict.apply, escalateReasons: reviewVerdict.reasons, humanRequired: reviewVerdict.humanRequired } : {}),
     ...(drainTrigger ? { drainTriggered: !!drainTrigger.triggered } : {}),
     ...(primarySynced !== null ? { primarySynced } : {}),
-    ...(precheckHealed.length ? { precheckHealed } : {}),
     detail: `PR #${prNum} (${REF}) required checks green${labelApplied ? ` — labelled ${LABEL}` : ''}`
       + (reviewVerdict.label ? `${reviewVerdict.apply ? ' — labelled' : ' — already labelled'} ${reviewVerdict.label} (${reviewVerdict.reasons.join('; ')})` : '')
-      + (precheckHealed.length ? `; pre-check healed id collision(s): ${precheckHealed.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : '')
       + (PLAN.triggerDrain ? '; triggered a single-couple drain (the drain lands it — pr-land never merges)' : '; left for the drain to land'),
   }, 0);
 
