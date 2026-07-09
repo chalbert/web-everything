@@ -75,6 +75,52 @@ would yield.
 
 ---
 
+## Focused run: `/slice 2357` (appended)
+
+**#2357 — Native PHP SSR renderer for directive regions** (`kind: epic`, no size, `parent: 2069`,
+`blockedBy: [2354]`, unsliced — no children). One of #2069's six per-language sub-epics (slice **D**). The
+design lineage is fully resolved (#2030 black-box ruling, #2063 wire format + golden vectors, #2064 Node
+reference renderer/oracle, #2354 language-neutral vectors JSON + harness contract). A pure, fork-free build.
+
+### Investigation pass — what actually exists vs. what this epic must build
+
+- **The reference to conform to exists** — `fui:plugs/webdirectives/ssr/nodeReferenceRenderer.ts:1-266`
+  (the 266-line oracle), the seam `fui:plugs/webdirectives/ssr/ServerRenderer.ts`, and the byte-exact
+  goldens `we:conformance-vectors/webdirectives-ssr.vectors.json` (7 vectors) + the grading spec
+  `we:conformance-vectors/webdirectives-ssr-harness-contract.md`.
+- **The PHP surface does NOT exist.** `find … -name '*.php'` over both repos → zero hits. There is **no PHP
+  home**, no PHP build/test integration, and **no runnable cross-language harness *runner*** — #2354
+  delivered the vectors-as-data + the grading *contract* (a spec `.md`), but nothing that invokes a non-JS
+  renderer as a subprocess, feeds it `(input, data)`, and byte-compares against `expectedHtml`. The Node
+  renderer is graded by a vitest that *imports* it directly
+  (`fui:plugs/webdirectives/ssr/__tests__/nodeReferenceRenderer.conformance.test.ts`); a PHP renderer cannot
+  be imported into vitest, so that runner is net-new work owned here.
+
+### Verdict — could not split (yet)
+
+| # | title | failing condition | unblocking action |
+|---|-------|-------------------|-------------------|
+| **2357** | Native PHP SSR renderer | **(3)** impl surface doesn't exist — no proposed slice's files are `file:line`-citable (zero PHP, no cross-language runner); the per-directive seams a decomposition would rely on can't be grounded until the PHP home + harness runner exist. Reinforced by **(4)/(5)**: the only available decomposition is a rigid *foundational→tail* chain — scaffold + harness runner + marker framing + `for-each` (the hardest directive: `count`/`key-hash` DJB2-over-UTF-16/`data-key`) carries ~80% of the effort, while `if`+`switch` and `resource:loader`+`defer` are ~size-2 trivial adds atop shared infra with weak independence; and the renderer is graded as **one conforming black box**, so partial-conformance intermediate states (passing 3/7 vectors) are weak demoable states. | **Build 2357 as a single foundational pass** — scaffold the PHP renderer home + the cross-language harness *runner* realizing the #2354 contract + marker framing + all 7 directives, graded byte-for-byte. Its landed artifact then *exposes* real per-directive seams; re-run `/slice` only if that surface proves heavy. This is the epic's own flagged state: *"a future /slice candidate once its PHP renderer contract is scoped"* — the contract (PHP home, runner interface, build integration) is not yet scoped, and scoping it **is** the foundational build. |
+
+Consistent with how #2069 treated these sub-epics: *"the seams get drawn when each is itself sliced after
+its language contract is scoped."* PHP's contract isn't scoped, so this is a **could-not-split-here**, not a
+missed split. No `kind: decision` to register — the design is fully resolved (#2030); the action is simply
+*build it*, and nothing is design-gated.
+
+### Notes for the human
+
+- **Stale block — 2357 is now unblocked.** `blockedBy: [2354]` but #2354 is `status: resolved`, so the
+  precondition holds; 2357 is ready to build now. (Not mutated here — a could-not-split run doesn't touch the
+  backlog. Worth clearing the edge on the next honest-DAG pass or when the build starts.)
+- **Where the harness *runner* lives is a scoping call.** Its byte-compare/report **core** (load vectors
+  JSON → invoke a pluggable renderer command → compare → per-vector report) is language-agnostic and reusable
+  across all of #2069's B–G sub-epics; only the *invoke* glue (`php file.php`) is PHP-specific. That shared
+  core arguably belongs one level up under #2069 (a sibling of #2354), not buried in the PHP epic. Deciding
+  that is part of the foundational build — another reason the per-directive seams can't be cut cold today.
+- **No epic `childlessReason` fits** (the vocabulary is `blocked`/`untriaged`/`program`), and none is needed:
+  an unsliced epic with no `childlessReason` is the correct "not yet scoped into slices" state (it shows the
+  *slice* badge). This report is the durable record of the could-not-split verdict.
+
 ## Focused run: `/slice 2360`
 
 **#2360 — Native .NET SSR renderer for directive regions** (`kind: epic`, no `size`, `parent: 2069`,
