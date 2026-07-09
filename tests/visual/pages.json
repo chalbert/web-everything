@@ -1,5 +1,5 @@
 {
-  "_comment": "Curated page set for the interim visual-regression guard (#1966, epic #800, #799 option-C bootstrap). Keep this SMALL and visually STABLE — prefer detail/resolved pages over data-volatile catalog indexes (a growing grid churns full-page baselines). Each entry: { name, path, mask?: [css selectors painted over before the snapshot — use for dates/live counts/'currently-doing' status that change without a code edit] }. Add a page when a shared visual surface isn't covered; refresh baselines deliberately with `npm run check:visual:update` after an INTENDED look change. Baselines are committed PNGs under ./rendered-site-visual.spec.ts-snapshots/ and are platform-tagged (captured on the dev machine) — this is the in-repo LOCAL bootstrap; CI/hosted rendering stays deferred per #799.",
+  "_comment": "Curated page set for the visual-regression guard (#1966, epic #2232, #2236 frozen-fixture rebuild). Keep this SMALL and visually STABLE — prefer detail/resolved pages over data-volatile catalog indexes (a growing grid churns full-page baselines). Each entry: { name, path, mask?: [css selectors painted over before the snapshot — use for dates/live counts/'currently-doing' status that change without a code edit] }. ALL paths here are served by the DEDICATED fixture build (WE_VISUAL_FIXTURES=1, its own Playwright webServer entry + port — see playwright.config.ts and tests/visual/rendered-site-visual.spec.ts), never the live docs build: `/backlog/*` paths must resolve against the frozen, checked-in tests/visual/fixtures/backlog/*.md set (we:src/_data/backlog.js), not the live backlog/ directory. Non-backlog paths (home, capability/adapter pages) render byte-identical between the live and fixture builds — they don't read the backlog collection at all — so they're safe to list here too; the fixture server is just an isolated, deterministic place to render EVERY visual target from, decoupled from the developer's live :8080/:3000 dev server. TO ADD A NEW TARGET: (1) if it needs backlog content, add/extend fixture item(s) under tests/visual/fixtures/backlog/ (small, frozen, dated 2026-01-01, tagged [fixture, visual-regression] — never real backlog numbers); (2) add the { name, path, mask } entry here; (3) run `npm run check:visual:update` (boots the fixture server itself) to capture the first baseline, then review the diff before committing (see we:scripts/check-visual-baseline-update.mjs, #2179). Refresh existing baselines deliberately with the same command after an INTENDED look change. Baselines are committed PNGs under ./rendered-site-visual.spec.ts-snapshots/.",
   "pages": [
     {
       "name": "home",
@@ -8,7 +8,7 @@
     },
     {
       "name": "backlog-detail-section-card",
-      "path": "/backlog/014-gap-7-webscroll-project/",
+      "path": "/backlog/9001-fixture-visual-detail-target/",
       "mask": []
     },
     {
