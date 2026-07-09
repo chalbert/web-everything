@@ -72,3 +72,46 @@ would yield.
 - Slice A is the one seam I'm *adding* beyond the body: the vectors are TS-only today, so the first non-JS
   renderer needs them as consumable data + a grading contract. It's the "land foundational slice A first, its
   artifact exposes the seams for the rest" move — and it collapses 6× reinvention into one shared prerequisite.
+
+---
+
+## Focused run: `/slice 2360`
+
+**#2360 — Native .NET SSR renderer for directive regions** (`kind: epic`, no `size`, `parent: 2069`,
+`blockedBy: [2354]`, unsliced — no children). One of the six per-language renderer sub-epics carved from
+#2069 above (slice **F**). Foundational slice A (**#2354**) is now **resolved** —
+[we:conformance-vectors/webdirectives-ssr.vectors.json](../conformance-vectors/webdirectives-ssr.vectors.json)
++ [we:conformance-vectors/webdirectives-ssr-harness-contract.md](../conformance-vectors/webdirectives-ssr-harness-contract.md)
+exist — so the epic is unblocked to *start*, but not yet decomposable.
+
+### Could not split — pending the .NET renderer contract scoping
+
+| # | Title | Failing condition | Unblocking action |
+|---|---|---|---|
+| **2360** | Native .NET SSR renderer for directive regions | **Investigation pass (§work-investigation 3) + (4)/(5)** — impl surface doesn't exist in-repo and the renderer contract isn't scoped; the only decomposition is a rigid chain with no demoable intermediate | **Land a ".NET renderer contract-scoping" story first** (pins the .NET project layout, parser strategy, the `ServerRenderer` seam shape in .NET, harness invocation). Its artifact exposes the per-directive-family build seams — then re-run `/slice 2360`. |
+
+**Why not sliceable now (rubric):**
+
+- **(work-investigation 3) The surface doesn't exist to investigate.** The renderer is a from-scratch .NET
+  build in FUI (`frontierui:plugs/webdirectives/ssr/`); WE ships zero renderer (rule #6). There is **no .NET
+  code in this repo** — no `.cs`/`.csproj`, no `ssr/` dir — so no proposed slice can carry `file:line`-citable
+  named paths. Grounding is impossible until the contract is scoped. The body already anticipates this:
+  *"A future /slice candidate once its .NET renderer contract is scoped."*
+- **(1) is NOT the blocker — no buried fork.** #2030 ruled every language's internal render strategy a
+  **conforming black box, explicitly not a ratifiable decision**. So the unblocker is a **scoping story**, not
+  a `kind: decision` — this is the "land the foundational/scoping slice first" pattern, not "resolve fork X".
+- **(4) Rigid linear chain.** The natural decomposition (parse authoring source → expand all 7 directives →
+  emit byte-exact wire format w/ padding + state tokens → run the conformance harness) is a single chain where
+  each stage blocks the next; no ≥2 independent slices, no useful incremental delivery.
+- **(5) No valid demoable intermediate.** Conformance is graded **byte-for-byte against the full vector set** —
+  a partial renderer (e.g. `if`/`switch` but not keyed `for-each`, or markers without state tokens) fails the
+  vectors outright. No slice leaves the renderer in a conformant, demoable state until the whole thing passes.
+
+**Applies identically to the five sibling sub-epics** (#2355 JVM, #2356 Go, #2357 PHP, #2358 Rust, #2359
+Python). Each is the same pure-build-with-unscoped-contract shape; each is could-not-split until its own
+language-renderer contract is scoped. The deferral is already recorded on every sub-epic's body, so no new
+tracking item is filed — the contract-scoping is the natural first move when the sub-epic is picked up.
+
+**No on-disk mutation.** #2360 stays a valid unsliced epic (no `size`, no `childlessReason` → shows the
+*slice* badge = decomposition-pending), which is correct: it's a real home for future work, awaiting its
+contract-scoping artifact.
