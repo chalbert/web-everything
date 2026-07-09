@@ -2417,6 +2417,21 @@ reliability = #1995. Mechanism to prepare = #1996. Sibling of
 
 ---
 
+### Visual-regression substrate — self-hosted Playwright, in-repo baselines, no hosted SaaS {#visual-regression-substrate}
+
+The visual gate is **self-hosted Playwright in a pinned container** — never a hosted visual-review SaaS
+(Argos/Chromatic/Percy). Baselines are committed `-linux` PNGs generated in the pinned
+`mcr.microsoft.com/playwright:vX-jammy` image; review is the PR's rendered image diff (decision #2233,
+ratified 2026-07-09; parent epic #2232, slices #2234–#2240 target this substrate). Rationale: Playwright is
+already the incumbent (`@playwright/test` + `check:visual` + `tests/visual/` committed baselines), so the
+real choice was keep-the-incumbent vs rip-it-out-for-a-vendor mid-epic — a migration buys a review-UX gain
+for a token/secret, off-repo baseline storage, and a third party seeing rendered pages, all against the
+self-contained / [native-first](#native-first-baseline) ethos. **Two evidence-gated escape hatches stay
+live — revisit only on evidence, not pre-emptively:** (1) layer **Argos as a diff-review UI only** while
+baselines remain in-repo, *if* in-PR image-diff review proves too coarse in practice (#2233 fork 2); (2)
+**graduate baselines off committed PNG** when git churn weighs (#1967). Both are opt-in later moves, not the
+default now.
+
 ### PR-flow rollout mechanism — automation isolates, human writes `main`, landing is fully automatic {#pr-flow-rollout-mechanism}
 
 The **mechanism** implementing [#1985 Rung 2](#non-destructive-closeout-prflow)'s adopt-PR-flow direction (that
