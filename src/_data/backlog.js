@@ -25,7 +25,19 @@ const matter = require('gray-matter');
 const MarkdownIt = require('markdown-it');
 
 const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
-const BACKLOG_DIR = join(__dirname, '../../backlog');
+// #2236 — DETERMINISTIC VISUAL-FIXTURE MODE. The live `backlog/` directory churns on nearly every commit
+// (a new item filed, an unrelated item resolved, a title reworded) — none of which is a real LOOK change,
+// yet every backlog-derived page (`/backlog/` and `/backlog/<id>/` directly) would shift its rendered
+// content on each one, making a pixel-diff visual baseline un-greenable for reasons that have nothing to
+// do with styling/layout. When `WE_VISUAL_FIXTURES` is set (the dedicated fixture build the visual spec's
+// own Playwright `webServer` boots — see playwright.config.ts + tests/visual/rendered-site-visual.spec.ts),
+// the loader instead sources a small, frozen, checked-in fixture set (tests/visual/fixtures/backlog/*.md)
+// — same shape, same code path, zero content drift. The LIVE docs build (`npm run build:docs`,
+// `npm run dev`, `check:standards`, `npm test`, …) never sets this env var, so its behavior is completely
+// unchanged. See tests/visual/pages.json's header comment for how to add a new fixture-backed target.
+const BACKLOG_DIR = process.env.WE_VISUAL_FIXTURES
+  ? join(__dirname, '../../tests/visual/fixtures/backlog')
+  : join(__dirname, '../../backlog');
 const ROOT = join(__dirname, '../..');
 
 // The leading id token of a backlog filename stem — a landed numeric `NNN` (any width up to 5) OR a
@@ -671,8 +683,13 @@ module.exports = function backlog() {
   // session) for the per-row marker. Read defensively — a missing/garbled file just means "no batches".
   items.activeBatches = [];
   try {
-    const resPath = join(ROOT, '.claude/skills/batch-backlog-items/reservations.json');
-    if (existsSync(resPath)) {
+    // #2236 — fixture builds are frozen-content renders; never read the dev-only, gitignored soft-hold
+    // file (even if one happens to exist on the machine building the fixture site) so the fixture output
+    // stays a pure function of the checked-in fixture set, never incidental local session state.
+    const resPath = process.env.WE_VISUAL_FIXTURES
+      ? null
+      : join(ROOT, '.claude/skills/batch-backlog-items/reservations.json');
+    if (resPath && existsSync(resPath)) {
       const res = JSON.parse(readFileSync(resPath, 'utf8'));
       const ttlMs = (typeof res.ttlMinutes === 'number' ? res.ttlMinutes : 120) * 60_000;
       const now = Date.now();
