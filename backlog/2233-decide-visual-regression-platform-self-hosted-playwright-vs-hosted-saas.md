@@ -1,8 +1,12 @@
 ---
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-07-04"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#visual-regression-substrate"
 preparedDate: "2026-07-04"
 parent: "2232"
 tags: [ci, visual-regression, decision, playwright, tooling]
@@ -38,3 +42,29 @@ with in-PR image diffs; revisit only if PR-diff review proves too coarse in prac
 Take the defaults: **self-hosted Playwright in a pinned container with in-PR baseline review.** It is the
 top-tier setup for a repo like this (deterministic, vendor-free, auditable) and unblocks #2234 immediately.
 Ratify to proceed; downstream slices assume this default.
+
+## Ruling (ratified 2026-07-09)
+
+**Self-hosted Playwright wins both forks.** Fork 1 → self-hosted Playwright in a pinned container,
+baselines = committed `-linux` PNGs, review = in-PR image diff. Fork 2 → **not now** (no hosted diff-review
+UI yet).
+
+Grounding that decided it: **self-hosted Playwright is already the incumbent**, not a greenfield pick —
+`@playwright/test` + `check:visual` + committed baselines under `tests/visual/` are live, and every slice
+of parent #2232 (#2234 container-pin, #2235 linux-baselines, #2236–2240) is already scoped on Playwright.
+Zero Argos/Chromatic/Percy anywhere in the repo. So the real question was *keep the incumbent vs rip it out
+for a vendor mid-epic*, and the incumbent holds.
+
+Red-team of the default (steelman: adopt Argos): coarse in-PR review UX, the OSS/self-hostable Argos
+partly dissolving the ethos objection, and committed-PNG git bloat that #1967 already wants to escape. The
+attack failed on **timing/leverage, not merit**: migrating now discards the incumbent and plumbs a vendor
+token for a review-UX gain that **Fork 2 can add later without migrating** (Argos as review-surface-only,
+baselines stay in-repo), and #1967's churn concern is explicitly evidence-gated ("when churn weighs") — a
+later call, not a reason to pick SaaS up front. No principle violated; native-first/self-contained favors
+the default.
+
+**Escape hatches kept live:** Fork 2 (layer Argos as diff-review-only if in-PR review proves too coarse)
+and #1967 (graduate baselines off committed PNG when churn weighs). Revisit either on evidence, not now.
+
+Downstream slices #2234–#2240 are unblocked and may assume this substrate. `graduatedTo: none` (a substrate
+ruling, no new entity).
