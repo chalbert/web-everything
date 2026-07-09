@@ -1,9 +1,11 @@
 ---
 kind: epic
-status: open
+status: resolved
 locus: frontierui
 relatedProject: webcomponents
 dateOpened: "2026-07-01"
+dateResolved: "2026-07-09"
+graduatedTo: none
 tags: [packaging, transient-element, wrapper, migration, frontierui]
 ---
 
