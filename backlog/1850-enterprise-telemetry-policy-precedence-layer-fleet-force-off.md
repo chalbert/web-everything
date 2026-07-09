@@ -1,9 +1,13 @@
 ---
 kind: decision
 parent: "1848"
-status: open
+status: resolved
 preparedDate: "2026-07-01"
 dateOpened: "2026-06-27"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
+graduatedTo: none
+codifiedIn: one-off
 tags: [telemetry, enterprise, policy, privacy, placement]
 ---
 
@@ -47,3 +51,22 @@ This item shipped flagged `locus: plateau-app`, but that doesn't survive pre-fli
 **Default: (a).** A low-cost env-var/file-based policy source read by the FUI resolver; server-based
 distribution stays out of scope (no enterprise infra exists yet). On ratification, reset `locus` and
 `blockedBy` accordingly (#1849 is resolved) and re-scaffold the build as a `story·3`.
+
+## Ratified (2026-07-09) — (a)
+
+Ruled **(a)**: WE contract defines the `DevMetricsPolicy` shape + precedence order; FUI implements the
+resolver. The flagged `locus: plateau-app` is corrected — the build lands in **WE + FUI**, not the product
+tier (verified: plateau-app has no telemetry/consent substrate).
+
+- **Resolver seam (red-teamed, attack failed):** WE holds the *declarative shape + ordering rule* only;
+  FUI does the env-var/config-file **reading** and three-tier **resolution** before emitting. Reading the
+  environment is a side-effect = impl → FUI, keeping WE at zero-implementation (#6, #96). It is **not** a
+  WE-side pure function.
+- **Scope cut (deliberate):** env-var / config-file policy source only. Server-based fleet distribution
+  (the broader #1848 shape) stays out of scope until enterprise infra exists — the cheaper source is the
+  right first cut.
+- **(c) deferred:** a plateau-app example enterprise config is a reasonable follow-up slice, not part of
+  this build.
+
+Successor build scaffolded as **#2372** (`story·3`, parent #1848, locus WE + FUI). #1848 remains the
+open parent epic.

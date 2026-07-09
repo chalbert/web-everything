@@ -75,22 +75,142 @@ would yield.
 
 ---
 
-## Focused run: `/slice 2360`
+## `/slice 2356` — Native Go SSR renderer for directive regions (focused, appended 2026-07-09)
 
-**#2360 — Native .NET SSR renderer for directive regions** (`kind: epic`, no `size`, `parent: 2069`,
-`blockedBy: [2354]`, unsliced — no children). One of the six per-language renderer sub-epics carved from
-#2069 above (slice **F**). Foundational slice A (**#2354**) is now **resolved** —
-[we:conformance-vectors/webdirectives-ssr.vectors.json](../conformance-vectors/webdirectives-ssr.vectors.json)
-+ [we:conformance-vectors/webdirectives-ssr-harness-contract.md](../conformance-vectors/webdirectives-ssr-harness-contract.md)
-exist — so the epic is unblocked to *start*, but not yet decomposable.
+**#2356** (`kind: epic`, `parent: 2069`, `blockedBy: [2354]`, unsliced — no children). One of the
+per-language renderer sub-epics carved from the #2069 roadmap split above. Its foundational blocker **#2354
+is resolved** — the language-neutral vector export
+([we:conformance-vectors/webdirectives-ssr.vectors.json](../conformance-vectors/webdirectives-ssr.vectors.json))
+and the grading contract
+([we:conformance-vectors/webdirectives-ssr-harness-contract.md](../conformance-vectors/webdirectives-ssr-harness-contract.md))
+both landed — so the blocker DAG is clear and the item is now a live `/slice` candidate per the roadmap
+recursion.
 
-### Could not split — pending the .NET renderer contract scoping
+### Work-investigation pass
+
+- **The Go renderer contract is fully scoped, zero design ambiguity.** The harness contract pins grading
+  (byte-for-byte UTF-8 equality against `expectedHtml`, all 7 vectors, per-vector pass/fail), the DJB2
+  `key-hash` algorithm (UTF-16 code units — the one cross-language footgun), and the black-box ruling
+  (#2030 — render internals are a per-impl call, **not** a fork). No open question gates the build.
+- **The reference is one coherent module.** The Node oracle is a single ~266-line file
+  ([frontierui:plugs/webdirectives/ssr/nodeReferenceRenderer.ts](../../frontierui/plugs/webdirectives/ssr/nodeReferenceRenderer.ts))
+  behind a `(source, data) => string` seam
+  ([frontierui:plugs/webdirectives/ssr/ServerRenderer.ts](../../frontierui/plugs/webdirectives/ssr/ServerRenderer.ts)):
+  parser → 5 directive expanders (for-each keyed+empty, if, switch, resource:loader, defer) → byte-exact
+  serializer → state tokens (`count`/`key-hash`/`condition`/`value`), all sharing one type surface.
+- **The Go surface does not exist.** A `find` over the frontierui repo returns **zero Go source files and no
+  Go module manifest** — this is a from-scratch build in a language the repo has no tooling for yet. Unlike
+  Node it can't lean on a DOM shim (happy-dom) for parse+serialize; it must hand-roll HTML parsing and
+  byte-exact serialization, so the whole renderer is one tightly-coupled package.
+
+### Could not split — YES (foundational: the surface doesn't exist yet)
 
 | # | Title | Failing condition | Unblocking action |
 |---|---|---|---|
-| **2360** | Native .NET SSR renderer for directive regions | **Investigation pass (§work-investigation 3) + (4)/(5)** — impl surface doesn't exist in-repo and the renderer contract isn't scoped; the only decomposition is a rigid chain with no demoable intermediate | **Land a ".NET renderer contract-scoping" story first** (pins the .NET project layout, parser strategy, the `ServerRenderer` seam shape in .NET, harness invocation). Its artifact exposes the per-directive-family build seams — then re-run `/slice 2360`. |
+| **2356** | Native Go SSR renderer for directive regions | **Investigation pass** (greenfield — no Go code to draw seams in) + **(3)** no `file:line`-citable named paths + **(4)** only a rigid linear chain + **(5)** no intermediate state passes the full harness | **Build it single-pass** as the foundational Go artifact — this item *is* the foundational slice. Re-run `/slice` only once the Go package exists and proves large enough to expose real separable seams. |
 
-**Why not sliceable now (rubric):**
+**Why each condition fails:**
+
+- **Investigation / (3):** every hypothetical slice names Go source files that don't exist yet — a slice you
+  can't point at real code for is a hypothesis, not a slice. The `file:line` relaxation is for *sub-epic*
+  pure-build slices; 2356's natural children are **leaf stories** (it's one standard's impl, not a roadmap of
+  N standards), which must be grounded.
+- **(4) rigid linear chain:** the only decomposition is by-directive-family, but every family slice depends
+  on the shared parser + serializer + marker-emitter scaffolding of the first, all editing the same package.
+  No two proceed independently.
+- **(5) no valid demoable intermediate:** the demo for a conforming renderer **is** passing the byte-for-byte
+  harness (`failed` empty). A for-each-only renderer fails the if/switch/resource/defer vectors — a
+  half-an-algorithm intermediate, not a shippable state.
+- **Conservative instinct:** this is one ~300–500-line coherent Go package. Carving it into "add directive N"
+  stories that each edit the same file fragments one deliverable into pieces that only make sense together —
+  multiplied review overhead, zero independence gain. The needless-split anti-pattern.
+
+No decision/fork is buried (condition (1) holds — #2030 already ruled the internals a black box), so there
+is **nothing to file as a `kind: decision` card** and no Tier-B decision to register. The reason is purely
+*foundational*, not *undecided*.
+
+### Recommendation for the human — reclassify epic → story
+
+2356 reads as a single **size ~8 story**, not an epic: one coherent from-scratch renderer package, one
+deliverable, no independently-ownable sub-scopes. The #2069 roadmap split carved every language as a
+*sub-epic* uniformly, but the roadmap tell is "each child is *clearly* epic-sized" — a single-language port
+of one 266-line module is a story band, not a subsystem-of-subsystems. The friction that exposes this: an
+epic has no `childlessReason` for "atomic/foundational" (only `blocked`/`untriaged`/`program`), so 2356 will
+keep showing the **slice badge** it can't satisfy.
+
+**Cleanest fix (needs your call — this is a reclassification, not a `/slice` mutation):** splice 2356
+`kind: epic` → `kind: story`, `size: 8`, and set `unsplittableReason: foundational` (the story-side
+"atomic · surface doesn't exist yet" pill). It then drops the slice badge, sits in the batch/pick pool as an
+agent-ready build, and a later `/slice` can revisit only if the built package proves large. **Not done** —
+say the word and I will.
+
+## Focused run: `/slice 2357` (appended)
+
+**#2357 — Native PHP SSR renderer for directive regions** (`kind: epic`, no size, `parent: 2069`,
+`blockedBy: [2354]`, unsliced — no children). One of #2069's six per-language sub-epics (slice **D**). The
+design lineage is fully resolved (#2030 black-box ruling, #2063 wire format + golden vectors, #2064 Node
+reference renderer/oracle, #2354 language-neutral vectors JSON + harness contract). A pure, fork-free build.
+
+### Investigation pass — what actually exists vs. what this epic must build
+
+- **The reference to conform to exists** — `fui:plugs/webdirectives/ssr/nodeReferenceRenderer.ts:1-266`
+  (the 266-line oracle), the seam `fui:plugs/webdirectives/ssr/ServerRenderer.ts`, and the byte-exact
+  goldens `we:conformance-vectors/webdirectives-ssr.vectors.json` (7 vectors) + the grading spec
+  `we:conformance-vectors/webdirectives-ssr-harness-contract.md`.
+- **The PHP surface does NOT exist.** `find … -name '*.php'` over both repos → zero hits. There is **no PHP
+  home**, no PHP build/test integration, and **no runnable cross-language harness *runner*** — #2354
+  delivered the vectors-as-data + the grading *contract* (a spec `.md`), but nothing that invokes a non-JS
+  renderer as a subprocess, feeds it `(input, data)`, and byte-compares against `expectedHtml`. The Node
+  renderer is graded by a vitest that *imports* it directly
+  (`fui:plugs/webdirectives/ssr/__tests__/nodeReferenceRenderer.conformance.test.ts`); a PHP renderer cannot
+  be imported into vitest, so that runner is net-new work owned here.
+
+### Verdict — could not split (yet)
+
+| # | title | failing condition | unblocking action |
+|---|-------|-------------------|-------------------|
+| **2357** | Native PHP SSR renderer | **(3)** impl surface doesn't exist — no proposed slice's files are `file:line`-citable (zero PHP, no cross-language runner); the per-directive seams a decomposition would rely on can't be grounded until the PHP home + harness runner exist. Reinforced by **(4)/(5)**: the only available decomposition is a rigid *foundational→tail* chain — scaffold + harness runner + marker framing + `for-each` (the hardest directive: `count`/`key-hash` DJB2-over-UTF-16/`data-key`) carries ~80% of the effort, while `if`+`switch` and `resource:loader`+`defer` are ~size-2 trivial adds atop shared infra with weak independence; and the renderer is graded as **one conforming black box**, so partial-conformance intermediate states (passing 3/7 vectors) are weak demoable states. | **Build 2357 as a single foundational pass** — scaffold the PHP renderer home + the cross-language harness *runner* realizing the #2354 contract + marker framing + all 7 directives, graded byte-for-byte. Its landed artifact then *exposes* real per-directive seams; re-run `/slice` only if that surface proves heavy. This is the epic's own flagged state: *"a future /slice candidate once its PHP renderer contract is scoped"* — the contract (PHP home, runner interface, build integration) is not yet scoped, and scoping it **is** the foundational build. |
+
+Consistent with how #2069 treated these sub-epics: *"the seams get drawn when each is itself sliced after
+its language contract is scoped."* PHP's contract isn't scoped, so this is a **could-not-split-here**, not a
+missed split. No `kind: decision` to register — the design is fully resolved (#2030); the action is simply
+*build it*, and nothing is design-gated.
+
+### Notes for the human
+
+- **Stale block — 2357 is now unblocked.** `blockedBy: [2354]` but #2354 is `status: resolved`, so the
+  precondition holds; 2357 is ready to build now. (Not mutated here — a could-not-split run doesn't touch the
+  backlog. Worth clearing the edge on the next honest-DAG pass or when the build starts.)
+- **Where the harness *runner* lives is a scoping call.** Its byte-compare/report **core** (load vectors
+  JSON → invoke a pluggable renderer command → compare → per-vector report) is language-agnostic and reusable
+  across all of #2069's B–G sub-epics; only the *invoke* glue (`php file.php`) is PHP-specific. That shared
+  core arguably belongs one level up under #2069 (a sibling of #2354), not buried in the PHP epic. Deciding
+  that is part of the foundational build — another reason the per-directive seams can't be cut cold today.
+- **No epic `childlessReason` fits** (the vocabulary is `blocked`/`untriaged`/`program`), and none is needed:
+  an unsliced epic with no `childlessReason` is the correct "not yet scoped into slices" state (it shows the
+  *slice* badge). This report is the durable record of the could-not-split verdict.
+
+## Focused run: `/slice 2360`
+
+**#2360 — Native .NET SSR renderer for directive regions** (`kind: epic`, no `size`, `parent: 2069`).
+One of the six per-language renderer sub-epics carved from #2069 above (slice **F**). Foundational slice A
+(**#2354**) is now **resolved** —
+[we:conformance-vectors/webdirectives-ssr.vectors.json](../conformance-vectors/webdirectives-ssr.vectors.json)
++ [we:conformance-vectors/webdirectives-ssr-harness-contract.md](../conformance-vectors/webdirectives-ssr-harness-contract.md)
+exist — so the epic is unblocked to *start*. It is **partially decomposable**: one slice (the contract
+scoping) can be carved now; the build slices wait behind it.
+
+### Partial split — one slice carved (the contract-scoping pass); build slices deferred
+
+The **full build decomposition** can't be carved yet, but the epic yields **exactly one investigable slice now** — the .NET renderer contract-scoping pass — which is exactly the "carve the fork-free rows, defer the gated ones" partial-split move for a roadmap epic. Filed as #2360's first child:
+
+| Slice | kind | size | Home | Scope | blockedBy |
+|---|---|---|---|---|---|
+| **Scope the native .NET SSR renderer contract** | story | 3 | FUI | Pin the .NET project layout, authoring-template parser strategy, the `ServerRenderer` seam shape in .NET (mirroring the Node seam #2064), harness invocation (#2354 contract), and the resulting per-directive-family build-slice breakdown. Not a fork (#2030). | — |
+
+**Build slices deferred** — the parser / 7-directive-expander / byte-exact-emitter / harness-runner stories get scaffolded under #2360 **once the scoping slice lands** and its artifact fixes the seams. They can't be carved before then:
+
+**Why the build slices aren't carvable yet (rubric):**
 
 - **(work-investigation 3) The surface doesn't exist to investigate.** The renderer is a from-scratch .NET
   build in FUI (`frontierui:plugs/webdirectives/ssr/`); WE ships zero renderer (rule #6). There is **no .NET
@@ -108,13 +228,13 @@ exist — so the epic is unblocked to *start*, but not yet decomposable.
   vectors outright. No slice leaves the renderer in a conformant, demoable state until the whole thing passes.
 
 **Applies identically to the five sibling sub-epics** (#2355 JVM, #2356 Go, #2357 PHP, #2358 Rust, #2359
-Python). Each is the same pure-build-with-unscoped-contract shape; each is could-not-split until its own
-language-renderer contract is scoped. The deferral is already recorded on every sub-epic's body, so no new
-tracking item is filed — the contract-scoping is the natural first move when the sub-epic is picked up.
+Python). Each is the same pure-build-with-unscoped-contract shape; each yields the same one carvable slice —
+its own language-renderer contract-scoping pass — with its build slices deferred behind it. Only .NET's
+scoping slice is filed here (the item this run focused on); the siblings get theirs when picked up.
 
-**No on-disk mutation.** #2360 stays a valid unsliced epic (no `size`, no `childlessReason` → shows the
-*slice* badge = decomposition-pending), which is correct: it's a real home for future work, awaiting its
-contract-scoping artifact.
+**On-disk result.** #2360 becomes a **sliced epic** with one live child — the contract-scoping story
+(size 3). Its stale `blockedBy: [2354]` is cleared (#2354 resolved), so the epic is no longer blocked: it
+has an actionable first slice. The build slices are scaffolded under it once the scoping child lands.
 
 ---
 
