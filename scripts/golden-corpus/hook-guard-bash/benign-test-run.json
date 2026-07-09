@@ -1,0 +1,9 @@
+{
+  "id": "benign-test-run",
+  "cmd": "npm test -- run",
+  "ctx": {},
+  "basis": "allowed baseline",
+  "expect": {
+    "reason": null
+  }
+}

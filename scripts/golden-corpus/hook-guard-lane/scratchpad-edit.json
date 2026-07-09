@@ -1,0 +1,8 @@
+{
+  "id": "scratchpad-edit",
+  "filePathTemplate": "{{SCRATCHPAD_ROOT}}/example.md",
+  "expect": {
+    "decision": "allow"
+  },
+  "basis": "untracked scratch is exempt"
+}

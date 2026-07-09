@@ -1,0 +1,11 @@
+{
+  "id": "backlog-mutation-primary-cwd-override",
+  "cmd": "BACKLOG_MUTATE_OK=1 node scripts/backlog.mjs claim 2270",
+  "ctx": {
+    "primaryCwd": true
+  },
+  "basis": "#2302 escape hatch",
+  "expect": {
+    "reason": null
+  }
+}

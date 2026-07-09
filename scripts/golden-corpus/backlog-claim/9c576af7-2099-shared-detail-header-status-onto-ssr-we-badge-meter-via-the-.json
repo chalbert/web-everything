@@ -1,0 +1,11 @@
+{
+  "sha": "9c576af7892de57729c3c49cfd44a2cf5cc34209",
+  "date": "2026-07-02",
+  "file": "backlog/2099-shared-detail-header-status-onto-ssr-we-badge-meter-via-the-.md",
+  "verb": "claim",
+  "opts": {
+    "today": "2026-07-03"
+  },
+  "before": "---\nkind: story\nsize: 2\nparent: \"2021\"\nstatus: open\nblockedBy: [\"2098\"]\ndateOpened: \"2026-07-02\"\ntags: []\n---\n\n# Shared detail-header status onto SSR we-badge (+ meter) via the shared status macro\n\nConvert the shared projectStatus macro internals (we:src/_includes/project-status.njk:1-8) to the ratified #2019 shape — status as SSR we-badge, the status-meter row kept as trusted HTML beside it (we:scripts/lib/component-render-build-hook.cjs:246-266 precedent) — using the #2098 primitive. Call sites in the 10 importing templates (block/intent/adapter/plug/resource/state/demo/research-topic/project pages + we:src/demos.njk) unchanged: one macro conversion serves every detail header. JS-off correct; Playwright before/after.\n",
+  "after": "---\nkind: story\nsize: 2\nparent: \"2021\"\nstatus: active\nblockedBy: [\"2098\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Shared detail-header status onto SSR we-badge (+ meter) via the shared status macro\n\nConvert the shared projectStatus macro internals (we:src/_includes/project-status.njk:1-8) to the ratified #2019 shape — status as SSR we-badge, the status-meter row kept as trusted HTML beside it (we:scripts/lib/component-render-build-hook.cjs:246-266 precedent) — using the #2098 primitive. Call sites in the 10 importing templates (block/intent/adapter/plug/resource/state/demo/research-topic/project pages + we:src/demos.njk) unchanged: one macro conversion serves every detail header. JS-off correct; Playwright before/after.\n"
+}

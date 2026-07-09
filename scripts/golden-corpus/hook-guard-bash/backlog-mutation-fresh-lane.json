@@ -1,0 +1,12 @@
+{
+  "id": "backlog-mutation-fresh-lane",
+  "cmd": "node scripts/backlog.mjs resolve 2270",
+  "ctx": {
+    "primaryCwd": false,
+    "staleBehind": 0
+  },
+  "basis": "allowed baseline",
+  "expect": {
+    "reason": null
+  }
+}

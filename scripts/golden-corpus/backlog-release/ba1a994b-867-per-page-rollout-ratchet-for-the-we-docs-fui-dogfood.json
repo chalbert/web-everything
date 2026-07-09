@@ -1,0 +1,11 @@
+{
+  "sha": "ba1a994b21cdb89aabb3c417c9187ff767bbefba",
+  "date": "2026-07-02",
+  "file": "backlog/867-per-page-rollout-ratchet-for-the-we-docs-fui-dogfood.md",
+  "verb": "release",
+  "opts": {
+    "today": "2026-07-02"
+  },
+  "before": "---\nkind: story\nsize: 3\nparent: \"777\"\nstatus: active\nblockedBy: [\"865\", \"866\"]\ndateOpened: \"2026-06-17\"\ndateStarted: \"2026-07-02\"\ntags: []\n---\n\n# Per-page rollout ratchet for the WE-docs FUI dogfood\n\nConvert the WE-docs page set incrementally to FUI-mounted chrome/UI behind the #770 rendered-site a11y gate, so each conversion is proven WCAG-clean; mirror to FUI's own site where not already dogfooded. Follows the chrome + page-UI migration slices.\n",
+  "after": "---\nkind: story\nsize: 3\nparent: \"777\"\nstatus: open\nblockedBy: [\"865\", \"866\"]\ndateOpened: \"2026-06-17\"\ndateStarted: \"2026-07-02\"\ntags: []\n---\n\n# Per-page rollout ratchet for the WE-docs FUI dogfood\n\nConvert the WE-docs page set incrementally to FUI-mounted chrome/UI behind the #770 rendered-site a11y gate, so each conversion is proven WCAG-clean; mirror to FUI's own site where not already dogfooded. Follows the chrome + page-UI migration slices.\n"
+}

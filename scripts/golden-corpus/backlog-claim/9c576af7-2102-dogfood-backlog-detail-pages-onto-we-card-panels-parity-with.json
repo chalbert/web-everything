@@ -1,0 +1,11 @@
+{
+  "sha": "9c576af7892de57729c3c49cfd44a2cf5cc34209",
+  "date": "2026-07-02",
+  "file": "backlog/2102-dogfood-backlog-detail-pages-onto-we-card-panels-parity-with.md",
+  "verb": "claim",
+  "opts": {
+    "today": "2026-07-03"
+  },
+  "before": "---\nkind: story\nsize: 2\nparent: \"2021\"\nstatus: open\nblockedBy: [\"2098\", \"2018\"]\ndateOpened: \"2026-07-02\"\ntags: []\n---\n\n# Dogfood backlog detail pages onto we-card (panels; parity with the converted tile)\n\nConvert the 4 section-card fui-card panels of we:src/backlog-pages.njk (body, Contains, Blocked by, References) to SSR we-card via the #2098 primitive. Header badges keep the shared we:src/_includes/backlog-badges.njk macros exactly as #2018 converts them (ONE source with the tile — the tile-subset-of-detail parity rule, we:src/backlog-pages.njk:143-155). Rides behind #2018 (active, uncommitted working-tree edits on this file). JS-off correct; Playwright before/after.\n",
+  "after": "---\nkind: story\nsize: 2\nparent: \"2021\"\nstatus: active\nblockedBy: [\"2098\", \"2018\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Dogfood backlog detail pages onto we-card (panels; parity with the converted tile)\n\nConvert the 4 section-card fui-card panels of we:src/backlog-pages.njk (body, Contains, Blocked by, References) to SSR we-card via the #2098 primitive. Header badges keep the shared we:src/_includes/backlog-badges.njk macros exactly as #2018 converts them (ONE source with the tile — the tile-subset-of-detail parity rule, we:src/backlog-pages.njk:143-155). Rides behind #2018 (active, uncommitted working-tree edits on this file). JS-off correct; Playwright before/after.\n"
+}

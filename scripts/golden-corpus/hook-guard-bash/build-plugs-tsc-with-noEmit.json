@@ -1,0 +1,9 @@
+{
+  "id": "build-plugs-tsc-with-noEmit",
+  "cmd": "tsc -p tsconfig.plugs.json --noEmit",
+  "ctx": {},
+  "basis": "allowed typecheck form",
+  "expect": {
+    "reason": null
+  }
+}

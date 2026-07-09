@@ -1,0 +1,9 @@
+{
+  "id": "append-backlog-shell",
+  "cmd": "echo \"x\" >> backlog/100-foo.md",
+  "ctx": {},
+  "basis": "locus-prefix write-hook bypass",
+  "expect": {
+    "reason": "Don't append/in-place-edit backlog|reports/*.md from the shell (>>, tee -a, sed -i, perl -pi) — it bypasses the locus-prefix write hook so bare code-paths leak to the gate. Use the Edit/Write tools."
+  }
+}

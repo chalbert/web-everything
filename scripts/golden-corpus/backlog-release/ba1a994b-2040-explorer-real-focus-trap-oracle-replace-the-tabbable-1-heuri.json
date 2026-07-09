@@ -1,0 +1,11 @@
+{
+  "sha": "ba1a994b21cdb89aabb3c417c9187ff767bbefba",
+  "date": "2026-07-02",
+  "file": "backlog/2040-explorer-real-focus-trap-oracle-replace-the-tabbable-1-heuri.md",
+  "verb": "release",
+  "opts": {
+    "today": "2026-07-02"
+  },
+  "before": "---\nkind: story\nsize: 3\nparent: \"1522\"\nlocus: plateau-app\nstatus: active\ndateOpened: \"2026-07-01\"\ndateStarted: \"2026-07-02\"\ntags: []\n---\n\n# Explorer: real focus-trap oracle (replace the tabbable<=1 heuristic)\n\nThe noStuckFocus oracle only fires when a page has <=1 tabbable element total — it misses real modal/dialog focus traps. Detect a genuine trap by walking Tab within a container scope.\n\n## Lineage\nSurfaced 2026-07-01 in the first #1522 (Explorer CLI autonomy) goal-completeness pass — the existing noStuckFocus oracle was verified as a stub (fires only on ≤1 tabbable total). Report: [we:reports/2026-07-01-program-explorer-cli-autonomy.md](../reports/2026-07-01-program-explorer-cli-autonomy.md).\n",
+  "after": "---\nkind: story\nsize: 3\nparent: \"1522\"\nlocus: plateau-app\nstatus: open\ndateOpened: \"2026-07-01\"\ndateStarted: \"2026-07-02\"\ntags: []\n---\n\n# Explorer: real focus-trap oracle (replace the tabbable<=1 heuristic)\n\nThe noStuckFocus oracle only fires when a page has <=1 tabbable element total — it misses real modal/dialog focus traps. Detect a genuine trap by walking Tab within a container scope.\n\n## Lineage\nSurfaced 2026-07-01 in the first #1522 (Explorer CLI autonomy) goal-completeness pass — the existing noStuckFocus oracle was verified as a stub (fires only on ≤1 tabbable total). Report: [we:reports/2026-07-01-program-explorer-cli-autonomy.md](../reports/2026-07-01-program-explorer-cli-autonomy.md).\n"
+}

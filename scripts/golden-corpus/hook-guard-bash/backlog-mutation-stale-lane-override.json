@@ -1,0 +1,12 @@
+{
+  "id": "backlog-mutation-stale-lane-override",
+  "cmd": "STALE_LANE_OK=1 node scripts/backlog.mjs resolve 2270",
+  "ctx": {
+    "primaryCwd": false,
+    "staleBehind": 5
+  },
+  "basis": "#2323 escape hatch",
+  "expect": {
+    "reason": null
+  }
+}

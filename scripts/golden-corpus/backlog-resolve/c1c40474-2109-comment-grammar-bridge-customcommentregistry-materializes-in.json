@@ -1,0 +1,11 @@
+{
+  "sha": "c1c4047499deca090d10f1103ef02eed54110338",
+  "date": "2026-07-02",
+  "file": "backlog/2109-comment-grammar-bridge-customcommentregistry-materializes-in.md",
+  "verb": "resolve",
+  "opts": {
+    "today": "2026-07-03"
+  },
+  "before": "---\nkind: story\nsize: 3\nparent: \"2093\"\nstatus: active\nblockedBy: [\"2104\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Comment-grammar bridge — CustomCommentRegistry materializes invisible customNodes recipes\n\nBridge the comment grammar as the invisible recipes' pre-JS-invisibility authoring form (#2074 Risk 1): the CustomCommentRegistry walk (fui:plugs/webdirectives/CustomCommentRegistry.ts:50-117) reads customNodes definitions authored as <!--@… -->, keeping #1986's registry the polyfill instance the statute-overlap ruling names it. No-flash fixture + tests.\n",
+  "after": "---\nkind: story\nsize: 3\nparent: \"2093\"\nstatus: resolved\nblockedBy: [\"2104\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ndateResolved: \"2026-07-03\"\ntags: []\n---\n\n# Comment-grammar bridge — CustomCommentRegistry materializes invisible customNodes recipes\n\nBridge the comment grammar as the invisible recipes' pre-JS-invisibility authoring form (#2074 Risk 1): the CustomCommentRegistry walk (fui:plugs/webdirectives/CustomCommentRegistry.ts:50-117) reads customNodes definitions authored as <!--@… -->, keeping #1986's registry the polyfill instance the statute-overlap ruling names it. No-flash fixture + tests.\n"
+}

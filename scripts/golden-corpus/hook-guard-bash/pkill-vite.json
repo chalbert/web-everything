@@ -1,0 +1,9 @@
+{
+  "id": "pkill-vite",
+  "cmd": "pkill -f vite",
+  "ctx": {},
+  "basis": "never kill the user's dev server",
+  "expect": {
+    "reason": "Never kill the running dev server (pkill/killall vite|node). It's the user's own server — detect the already-running instance and probe its port (3000/4000/8080) instead."
+  }
+}

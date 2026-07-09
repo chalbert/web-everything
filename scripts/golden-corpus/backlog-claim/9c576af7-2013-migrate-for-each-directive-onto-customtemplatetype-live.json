@@ -1,0 +1,11 @@
+{
+  "sha": "9c576af7892de57729c3c49cfd44a2cf5cc34209",
+  "date": "2026-07-02",
+  "file": "backlog/2013-migrate-for-each-directive-onto-customtemplatetype-live.md",
+  "verb": "claim",
+  "opts": {
+    "today": "2026-07-03"
+  },
+  "before": "---\nkind: story\nsize: 3\nparent: \"1994\"\nstatus: open\nblockedBy: [\"2012\"]\ndateOpened: \"2026-07-01\"\ntags: []\n---\n\n# Migrate for-each directive onto CustomTemplateType (live)\n\nSlice C of #1994, blockedBy #2012. Convert ForEachBehavior off CustomAttribute onto CustomTemplateType (typed `<template>`, registered by type value per #1993: items='… as …' + bare key). Move #private init into connectedCallback (chunk-2 re-prototype constraint). Drop registerForEach's define. for-each is the only live directive of the three (registerForEach at fui:plugs/bootstrap.ts:295 + fui:plugs/bootstrapUnplugged.ts:193); with slice B's activation live, migrated for-each keeps working across all upgrade/insertion-cascade sites. Land only after B — dropping the CustomAttribute define without live customTemplateTypes activation silently, gate-invisibly breaks live for-each.\n",
+  "after": "---\nkind: story\nsize: 3\nparent: \"1994\"\nstatus: active\nblockedBy: [\"2012\"]\ndateOpened: \"2026-07-01\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Migrate for-each directive onto CustomTemplateType (live)\n\nSlice C of #1994, blockedBy #2012. Convert ForEachBehavior off CustomAttribute onto CustomTemplateType (typed `<template>`, registered by type value per #1993: items='… as …' + bare key). Move #private init into connectedCallback (chunk-2 re-prototype constraint). Drop registerForEach's define. for-each is the only live directive of the three (registerForEach at fui:plugs/bootstrap.ts:295 + fui:plugs/bootstrapUnplugged.ts:193); with slice B's activation live, migrated for-each keeps working across all upgrade/insertion-cascade sites. Land only after B — dropping the CustomAttribute define without live customTemplateTypes activation silently, gate-invisibly breaks live for-each.\n"
+}
