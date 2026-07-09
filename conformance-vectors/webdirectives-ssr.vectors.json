@@ -1,0 +1,118 @@
+{
+  "standard": "webdirectives",
+  "contract": "@webeverything/contracts/webdirectives",
+  "vectors": [
+    {
+      "id": "webdirectives-ssr/for-each/keyed-items-expanded",
+      "description": "A keyed `for-each` expands every item between paired markers; each item carries `data-key` (the only key channel). The open marker carries `count` (item count) and `key-hash` (DJB2 of the comma-joined projected key strings) as bounded resume tokens — raw key values stay on `data-key`, never in comment text. Marker space-padding is byte-exact.",
+      "input": "<template is=\"for-each\" items=\"users\" key=\"id\"><div class=\"user-row\">{{name}}</div></template>",
+      "data": {
+        "users": [
+          {
+            "id": 1,
+            "name": "Alice"
+          },
+          {
+            "id": 2,
+            "name": "Bob"
+          }
+        ]
+      },
+      "expectedHtml": "<!-- control:for-each items=\"users\" key=\"id\" count=\"2\" key-hash=\"0b866f0a\" -->\n<div class=\"user-row\" data-key=\"1\">Alice</div>\n<div class=\"user-row\" data-key=\"2\">Bob</div>\n<!-- /control:for-each -->"
+    },
+    {
+      "id": "webdirectives-ssr/for-each/empty-list-markers-only",
+      "description": "A keyed `for-each` over an empty list emits the paired markers with `count=\"0\"` and no item content (the region is still delimited so the client can hydrate an empty keyed region; no `key-hash` is emitted when the list is empty — nothing to hash).",
+      "input": "<template is=\"for-each\" items=\"users\" key=\"id\"><div class=\"user-row\">{{name}}</div></template>",
+      "data": {
+        "users": []
+      },
+      "expectedHtml": "<!-- control:for-each items=\"users\" key=\"id\" count=\"0\" -->\n<!-- /control:for-each -->"
+    },
+    {
+      "id": "webdirectives-ssr/if/true-branch-emitted",
+      "description": "A live `if` emits only the matching branch inside its markers; the `condition` resume token rides the open marker (state-token layout).",
+      "input": "<template is=\"if\" condition=\"isAdmin\"><button class=\"admin-action\">Delete</button></template>",
+      "data": {
+        "isAdmin": true
+      },
+      "expectedHtml": "<!-- control:if condition=\"isAdmin\" -->\n<button class=\"admin-action\">Delete</button>\n<!-- /control:if -->"
+    },
+    {
+      "id": "webdirectives-ssr/if/false-branch-empty-markers",
+      "description": "A false `if` emits empty markers only — zero-JS baseline shows nothing, and the client can toggle the region on without re-parsing structure.",
+      "input": "<template is=\"if\" condition=\"isAdmin\"><button class=\"admin-action\">Delete</button></template>",
+      "data": {
+        "isAdmin": false
+      },
+      "expectedHtml": "<!-- control:if condition=\"isAdmin\" -->\n<!-- /control:if -->"
+    },
+    {
+      "id": "webdirectives-ssr/switch/active-case-only",
+      "description": "A `switch` emits only the active case branch; the `value` resume token rides the open marker so the client resolves the same case on hydration (bounded in-marker state).",
+      "input": "<template is=\"switch\" value=\"status\"><case when=\"active\"><span class=\"badge success\">Active</span></case><case when=\"idle\"><span class=\"badge muted\">Idle</span></case></template>",
+      "data": {
+        "status": "active"
+      },
+      "expectedHtml": "<!-- control:switch value=\"status\" -->\n<span class=\"badge success\">Active</span>\n<!-- /control:switch -->"
+    },
+    {
+      "id": "webdirectives-ssr/resource-loader/resolved-data-inline",
+      "description": "A `resource:loader` emits the success template with resolved data inline (zero-JS baseline shows the resolved content); the non-`control` namespace still obeys the same space-padded marker grammar.",
+      "input": "<template is=\"resource:loader\" name=\"user-profile\"><user-card>{{profile.name}}</user-card></template>",
+      "data": {
+        "profile": {
+          "name": "Alice"
+        }
+      },
+      "expectedHtml": "<!-- resource:loader name=\"user-profile\" -->\n<user-card>Alice</user-card>\n<!-- /resource:loader -->"
+    },
+    {
+      "id": "webdirectives-ssr/defer/placeholder-branch-emitted",
+      "description": "A `defer` emits the placeholder (pre-trigger) branch plus its markers; the content branch is stamped client-side when the trigger fires, so the server bytes carry only the placeholder.",
+      "input": "<template is=\"defer\" on=\"visible\"><placeholder><div class=\"skeleton\"></div></placeholder><content><article>Loaded</article></content></template>",
+      "data": {},
+      "expectedHtml": "<!-- defer on=\"visible\" -->\n<div class=\"skeleton\"></div>\n<!-- /defer -->"
+    },
+    {
+      "id": "webdirectives-ssr/for-each/state-tokens-three-items",
+      "description": "A keyed `for-each` over three items carries `count=\"3\"` and the DJB2 `key-hash` of the comma-joined projected keys as bounded resume tokens in the open marker. This is the canonical state-serialization test for `for-each` (independent of the existing two-item keyed vector).",
+      "input": "<template is=\"for-each\" items=\"products\" key=\"sku\"><li class=\"product\">{{name}}</li></template>",
+      "data": {
+        "products": [
+          {
+            "sku": "A1",
+            "name": "Alpha"
+          },
+          {
+            "sku": "B2",
+            "name": "Beta"
+          },
+          {
+            "sku": "C3",
+            "name": "Gamma"
+          }
+        ]
+      },
+      "expectedHtml": "<!-- control:for-each items=\"products\" key=\"sku\" count=\"3\" key-hash=\"d792ea35\" -->\n<li class=\"product\" data-key=\"A1\">Alpha</li>\n<li class=\"product\" data-key=\"B2\">Beta</li>\n<li class=\"product\" data-key=\"C3\">Gamma</li>\n<!-- /control:for-each -->"
+    },
+    {
+      "id": "webdirectives-ssr/state-tokens/if-condition-resume-token",
+      "description": "`if` open marker carries `condition=\"<attr-name>\"` as the bounded resume token (so the client resolves the same branch on hydration without re-evaluating the data). The token is the attribute name, not the resolved value — a non-user-data string, safe in comment text.",
+      "input": "<template is=\"if\" condition=\"showBanner\"><div class=\"banner\">Welcome</div></template>",
+      "data": {
+        "showBanner": true
+      },
+      "expectedHtml": "<!-- control:if condition=\"showBanner\" -->\n<div class=\"banner\">Welcome</div>\n<!-- /control:if -->"
+    },
+    {
+      "id": "webdirectives-ssr/state-tokens/switch-value-resume-token",
+      "description": "`switch` open marker carries `value=\"<attr-name>\"` as the bounded resume token (so the client resolves the same case on hydration without re-evaluating the data). The token is the attribute name, not the resolved user-data value.",
+      "input": "<template is=\"switch\" value=\"theme\"><case when=\"dark\"><body class=\"dark\"></body></case><case when=\"light\"><body class=\"light\"></body></case></template>",
+      "data": {
+        "theme": "dark"
+      },
+      "expectedHtml": "<!-- control:switch value=\"theme\" -->\n<body class=\"dark\"></body>\n<!-- /control:switch -->"
+    }
+  ]
+}
