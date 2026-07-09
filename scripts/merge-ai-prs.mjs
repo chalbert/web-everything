@@ -974,7 +974,11 @@ function runCli() {
       const parkedSinceMs = getParkedSinceMs(parkState, { repo: v.repo, num: v.num });
       const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, parkedSinceMs, nowMs, ...(REVIEW_WINDOW_MS ? { windowMs: REVIEW_WINDOW_MS } : {}) });
       v.escalated = score.escalate ? 'yes' : 'no';
-      v.humanRequired = !!score.humanRequired; // #2285 v1 — gate-self conflict of interest: an agent may NOT auto-review this; a human must
+      // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
+      // makes an already-applied review:human label win even when a rebase narrows the diff back to
+      // humanRequired:false); the drain caller must report THAT verdict, never the fresh-diff score alone, or a
+      // label-only human park gets reported as agent-reviewable and an agent panel can clear its own gate change.
+      v.humanRequired = !!gate.humanRequired; // #2285 v1 — gate-self conflict of interest: an agent may NOT auto-review this; a human must
       v.escalateReasons = score.reasons;
       if (gate.action === 'park' || gate.action === 'wait-author') {
         v.decision = 'skip';
@@ -1020,8 +1024,8 @@ function runCli() {
         else if (!DRY_RUN) { const cleared = clearParked(parkState, { repo: v.repo, num: v.num }); if (cleared !== parkState) { parkState = cleared; parkStateChanged = true; } }
         // #2285 v1 — the skill's auto-review step consumes this: humanRequired PRs are left for the operator,
         // the rest are eligible for a fresh-context adversarial review subagent.
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!score.humanRequired, reasons: score.reasons });
-        if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}${score.humanRequired ? ', HUMAN required' : ', agent-reviewable'}): ${score.reasons.join('; ')}\n`);
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: score.reasons });
+        if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}${gate.humanRequired ? ', HUMAN required' : ', agent-reviewable'}): ${score.reasons.join('; ')}\n`);
       } else if (gate.action === 'merge-anyway') {
         // #2262 — the review window expired with no reviewer verdict: merge NOW (decision stays 'merge', its
         // default) rather than re-park forever, but never SILENTLY drop the owed review — auto-file it as a
