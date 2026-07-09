@@ -1,7 +1,7 @@
 ---
 kind: epic
 status: open
-blockedBy: ["x36zd34"]
+blockedBy: ["2342"]
 dateOpened: "2026-06-21"
 locus: plateau-app
 relatedReport: reports/2026-06-24-backlog-split-analysis.md

@@ -1,7 +1,7 @@
 ---
 kind: story
 size: 3
-parent: "xyablkl"
+parent: "2346"
 status: open
 dateOpened: "2026-07-09"
 tags: []
