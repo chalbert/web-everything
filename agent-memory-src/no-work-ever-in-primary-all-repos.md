@@ -8,9 +8,12 @@ metadata:
 ---
 
 **No work ever happens in the primary checkout.** Not the commit, not even the *edit*. Every edit-action —
-authoring, fixing, branding, everything — happens inside an isolated **lane clone**, and lands via a
-`lane/*` ref → PR. This is uniform across the whole constellation (webeverything, plateau-app, frontierui);
-there is no plateau-app/FUI carve-out just because those repos lack a lane-*edit* guard.
+authoring, fixing, branding, **agent-memory**, everything — happens inside an isolated **lane clone**, and
+lands via a `lane/*` ref → PR. This is uniform across the whole constellation (webeverything, plateau-app,
+frontierui); there is no plateau-app/FUI carve-out just because those repos lack a lane-*edit* guard, and
+(2026-07-09) **no agent-memory carve-out either** — `guard-lane.mjs`'s memory exemption was removed, so a
+primary memory edit (incl. via the `~/.claude/projects/<slug>/memory` symlink, which realpaths into
+`<repo>/agent-memory-src/`) is now DENIED like any tracked file. See [[lane-guard-only-bypass-for-personal-config]].
 
 **Why:** 2026-07-03 the user restated this as a standing rule ("we were clear in latest instruction — no
 work ever happens in primary"). I had violated it: I edited plateau-app `landing.ts` / `index.html` /
