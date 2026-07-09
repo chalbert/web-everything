@@ -77,8 +77,8 @@
  * drains could not sequence that. A remote-repo PR reads its manifest via the GitHub API (never a local clone).
  * REBASE-DROP (#2198) still needs pure LOCAL git plumbing (merge-tree/commit-tree/push) — for the local clone's
  * own repo it runs in `process.cwd()`; for a remote constellation repo (frontierui/plateau-app) it routes
- * through that repo's SIBLING clone (`../frontierui`, `../plateau-app`, provisioned by the drain-clone setup —
- * #2263) when one exists, so a CONFLICTING/BEHIND non-local lane tip can be rebuilt too. No sibling clone
+ * through that repo's SIBLING clone (`../frontierui`, `../plateau-app`, provisioned at the lane-pool root —
+ * #2263/#2303) when one exists, so a CONFLICTING/BEHIND non-local lane tip can be rebuilt too. No sibling clone
  * provisioned ⇒ left for its author, unchanged. Landing a frontierui/plateau PR still needs that repo's own
  * required `test` check + branch protection (#2242/#2243/#2246) or GitHub blocks the merge.
  *
@@ -643,7 +643,8 @@ function runCli() {
   // WE clone) lets the rebase-drop plumbing rebuild THAT repo's lane tip too, instead of leaving every
   // CONFLICTING/BEHIND frontierui/plateau-app PR for its author. Best-effort + read-only-check: a repo whose
   // sibling directory is missing (not provisioned) or isn't a git working copy falls back to the prior skip —
-  // nothing here clones on the fly (provisioning is the drain-clone setup's job, see skills-src/drain/SKILL.md).
+  // nothing here clones on the fly (provisioning is the lane-pool allocator's job — #2303, see
+  // skills-src/drain/SKILL.md's Preconditions).
   const siblingCloneDir = (repo) => {
     if (isLocalRepo(repo)) return null;
     const name = siblingCloneName(repo);
