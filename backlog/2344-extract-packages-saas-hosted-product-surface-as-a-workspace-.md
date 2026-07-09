@@ -2,9 +2,12 @@
 kind: story
 size: 5
 parent: "2346"
-status: open
+status: resolved
 blockedBy: ["2341"]
 dateOpened: "2026-07-09"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
+graduatedTo: "plateau:packages/saas/"
 tags: []
 ---
 
