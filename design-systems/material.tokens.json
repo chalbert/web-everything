@@ -1,0 +1,37 @@
+{
+  "$description": "Material 3 (M3) flavor — a full DTCG override of the webtheme platform default capturing Material 3's baseline light-scheme system roles in oklch: the #6750A4 md.sys.color.primary (the signature M3 purple, seeded from the baseline #6750A4 key color), the M3 shape scale (corner extra-small 4px / small 8px / medium 12px / large 16px / full pill), the M3 neutral roles (md.sys.color.outline #79747E for borders, md.sys.color.surface-variant #E7E0EC for muted containers, md.sys.color.on-surface-variant #49454F for supporting text), and the md.sys.color.surface #FFFBFE canvas. Overrides only the roles M3 names onto the platform default's roles; every other family inherits via `extends`. Values transcribe the Material 3 BASELINE light scheme (material.io / Material Theme Builder default). This SUPERSEDES the ~5-token `material-like` seed stub — see the paired gap list report (we:reports/2026-07-09-material-3-parity-gap-list.md) for what these roles CAN and CANNOT reach in a rendered FUI component, and note that M3's two signature affordances — STATE LAYERS and TONAL ELEVATION — have no single-value DTCG home at all (the headline M3-vs-tokens residual).",
+  "color": {
+    "$type": "color",
+    "$description": "Material 3's core color-scheme roles. M3 derives a full tonal palette from a seed key color; the baseline scheme's flat system roles (md.sys.color.primary / surface / outline …) are transcribed here onto the closest platform-default color role. M3's on-color foreground pairings (md.sys.color.on-primary etc.), its state-layer opacities, and its surface-tint tonal elevation have no platform-default home — recorded in the gap list.",
+    "bg-light": { "$value": "oklch(0.992 0.006 334.0)", "$description": "M3 md.sys.color.background / surface #FFFBFE (light canvas)." },
+    "bg-dark": { "$value": "oklch(0.225 0.008 297.2)", "$description": "M3 dark md.sys.color.surface #1C1B1F." },
+    "text-light": { "$value": "oklch(0.225 0.008 297.2)", "$description": "M3 md.sys.color.on-surface #1C1B1F (light)." },
+    "text-dark": { "$value": "oklch(0.915 0.008 332.1)", "$description": "M3 dark md.sys.color.on-surface #E6E1E5." },
+    "accent": { "$value": "oklch(0.496 0.130 293.7)", "$description": "M3 md.sys.color.primary #6750A4 — the signature Material 3 purple (baseline seed), vs a blue or near-black default." },
+    "on-primary": { "$value": "oklch(1.000 0.000 89.9)", "$description": "M3 md.sys.color.on-primary #FFFFFF — the readable foreground ON the primary surface. Resolves in the DTCG doc but has no bridge/alias home (a gap: on-color foreground pairing)." },
+    "surface": { "$value": "oklch(0.992 0.006 334.0)", "$description": "M3 md.sys.color.surface #FFFBFE — the card/panel surface." }
+  },
+  "radius": {
+    "$type": "dimension",
+    "$description": "Material 3's shape scale (md.sys.shape.corner.*). M3 names five corner sizes as constants (not calc-derived): extra-small 4px, small 8px, medium 12px, large 16px, and full (a pill/stadium for buttons and FABs).",
+    "base": { "$value": "4px", "$description": "M3 md.sys.shape.corner.extra-small — chips, text-field container top corners." },
+    "sm": { "$value": "8px", "$description": "M3 md.sys.shape.corner.small." },
+    "md": { "$value": "12px", "$description": "M3 md.sys.shape.corner.medium — the common card / medium-container radius." },
+    "lg": { "$value": "16px", "$description": "M3 md.sys.shape.corner.large — large cards, bottom sheets, dialogs." },
+    "full": { "$value": "9999px", "$description": "M3 md.sys.shape.corner.full — the pill/stadium shape of the M3 button and FAB." }
+  },
+  "ring": {
+    "$description": "Material 3's focus affordance. M3 draws a focus indicator as a 3px band in md.sys.color.primary around the focused control (the focus-visible ring); the platform-default `ring` role (#1316) is the closest home.",
+    "color": { "$value": "oklch(0.496 0.130 293.7)", "$description": "M3 focus indicator — md.sys.color.primary #6750A4." },
+    "width": { "$value": "3px", "$description": "M3 focus indicator thickness." },
+    "offset": { "$value": "2px", "$description": "M3 focus indicator offset from the control edge." }
+  },
+  "surface": {
+    "$type": "color",
+    "$description": "Material 3's neutral surface roles: md.sys.color.outline (#79747E) for borders/dividers, md.sys.color.surface-variant (#E7E0EC) for muted/filled containers, and md.sys.color.on-surface-variant (#49454F) for supporting/secondary text and text-field labels.",
+    "border": { "$value": "oklch(0.567 0.016 308.1)", "$description": "M3 md.sys.color.outline #79747E — the default control/card border and text-field outline." },
+    "input": { "$value": "oklch(0.567 0.016 308.1)", "$description": "M3 md.sys.color.outline #79747E — the outlined-text-field outline (same as border in the baseline scheme)." },
+    "muted": { "$value": "oklch(0.916 0.018 311.6)", "$description": "M3 md.sys.color.surface-variant #E7E0EC — the muted/filled container background (filled fields, tonal surfaces)." },
+    "muted-foreground": { "$value": "oklch(0.398 0.017 303.7)", "$description": "M3 md.sys.color.on-surface-variant #49454F — supporting text and text-field labels." }
+  }
+}

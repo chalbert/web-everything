@@ -1,0 +1,6 @@
+{
+  "extends": "@webtheme/default",
+  "themeTokens": "./material.tokens.json",
+  "intentDefaults": { "density": "comfortable", "motion": "natural", "surface": "lift" },
+  "traitDefaults": { "radius": "md" }
+}
