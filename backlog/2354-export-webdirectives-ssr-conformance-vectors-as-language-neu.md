@@ -2,8 +2,11 @@
 kind: story
 size: 3
 parent: "2069"
-status: open
+status: resolved
 dateOpened: "2026-07-09"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
+graduatedTo: "conformance-vectors/webdirectives-ssr.vectors.json + conformance-vectors/webdirectives-ssr-harness-contract.md (#2354)"
 tags: []
 ---
 
