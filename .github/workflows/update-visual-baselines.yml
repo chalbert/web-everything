@@ -10,6 +10,12 @@ name: Update visual baselines (linux)
 #   The workflow commits the refreshed -linux PNGs to the same branch via a bot commit.
 #
 # This is the CI-linux equivalent of `npm run check:visual:update` (local darwin refresh).
+#
+# Runs inside the same version-locked `mcr.microsoft.com/playwright:vX.Y.Z-jammy` container as the
+# ci.yml `visual` job (#2234) — the refresh MUST render on the exact same pinned image the check compares
+# against, or a baseline regenerated here could still fail `check:visual` in CI. Bump procedure: bump
+# `@playwright/test` in package.json → `npm install` → copy the new resolved version into the
+# `container: image:` tag here AND in ci.yml (`vX.Y.Z-jammy`) → `npm run check:standards` confirms lockstep.
 
 on:
   workflow_dispatch:
@@ -25,6 +31,10 @@ permissions:
 jobs:
   update-baselines:
     runs-on: ubuntu-latest
+    # Version-locked Playwright container (#2234) — same pin as the ci.yml `visual` job so refreshed
+    # baselines are generated on the exact image `check:visual` will later compare against.
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.1-jammy
     steps:
       # Check out the target branch so the committed PNGs land there.
       - name: Checkout WE
@@ -65,9 +75,8 @@ jobs:
         working-directory: web-everything
         run: npm run build:docs
 
-      - name: Install Playwright chromium
-        working-directory: web-everything
-        run: npx playwright install --with-deps chromium
+      # No "Install Playwright chromium" step here: the pinned container image already ships chromium
+      # pre-built at the exact `@playwright/test` version (see the `container:` pin above).
 
       - name: Serve built site
         working-directory: web-everything
