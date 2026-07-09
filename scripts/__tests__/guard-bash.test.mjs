@@ -33,8 +33,8 @@ describe('guard-bash — primary-cwd backlog-mutation block (#2302)', () => {
       expect(reason(`node scripts/backlog.mjs ${v} 2287`, { primaryCwd: false })).toBeNull(); // in a lane → allowed
     }
   });
-  it('the BACKLOG_MUTATE_OK=1 override passes through even from primary', () => {
-    expect(reason('BACKLOG_MUTATE_OK=1 node scripts/backlog.mjs resolve 2287', { primaryCwd: true })).toBeNull();
+  it('#2339 — the former BACKLOG_MUTATE_OK=1 override is REMOVED; primary is denied unconditionally, no escape', () => {
+    expect(reason('BACKLOG_MUTATE_OK=1 node scripts/backlog.mjs resolve 2287', { primaryCwd: true })).toMatch(/must run in a LANE clone/);
   });
   it('a session-state verb (reserve) is allowed from primary', () => {
     expect(reason('node scripts/backlog.mjs reserve 2279 --session=s', { primaryCwd: true })).toBeNull();
