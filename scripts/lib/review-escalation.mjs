@@ -209,22 +209,31 @@ export function bodyHasEscalationReason(body) {
  *   'merge'        — not escalated, OR reviewer accepted → land it now.
  *   'wait-author'  — reviewer asked for changes → the author lane fixes hot-context + re-pushes; skip for now.
  *   'park'         — escalated, no verdict yet → apply a park label, skip (parked alive). For an agent-reviewable
- *                    PR that label is review:pending and the window can time out; for a HUMAN-required PR
- *                    (#2285 v1) it is review:human and there is NO timeout (only a human may clear it).
+ *                    PR that label is review:pending and the window can time out; for a HUMAN-gated PR
+ *                    (#2285 v1) it is review:human and there is NO timeout (only a human may clear it). The
+ *                    human gate is STICKY on the LABEL (#2362): a PR ALREADY carrying review:human parks even
+ *                    if this pass's fresh score de-escalated it (e.g. the gate-self file dropped out on rebase).
  *   'merge-anyway' — agent-reviewable, no verdict, window EXPIRED → merge + auto-file the unfinished review
- *                    (never hang on a stalled agent-review). NEVER reached for a human-required PR.
+ *                    (never hang on a stalled agent-review). NEVER reached for a PR carrying/scoring review:human.
  * @param {{escalate:boolean, humanRequired?:boolean, labels?:Array, parkedSinceMs?:number|null, nowMs?:number, windowMs?:number}} o
  */
 export function decideReviewGate({ escalate, humanRequired = false, labels = [], parkedSinceMs = null, nowMs = 0, windowMs = DEFAULT_THRESHOLDS.windowMinutes * 60_000 } = {}) {
-  if (!escalate) return { action: 'merge', reason: 'no escalation signal — merge immediately' };
-  // A reviewer verdict (whoever applied it — for a human-required PR only a human can) always wins. review:accepted
-  // → merge; review:changes → the author lane fixes + re-pushes.
+  // A reviewer verdict (whoever applied it — for a human-gated PR only a human can) always wins, and is checked
+  // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
+  // merge; review:changes → the author lane fixes + re-pushes.
   if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) return { action: 'merge', reason: 'review:accepted — reviewer accepted, merge' };
   if (hasReviewLabel(labels, REVIEW_LABELS.changes)) return { action: 'wait-author', reason: 'review:changes — author lane fixes + re-pushes' };
-  // #2285 v1 — conflict of interest: the diff edits the auto-review trust chain. Park under review:human and
-  // NEVER time out — an agent (and the merge-anyway clock) must not clear a change to its own gate. Checked
-  // BEFORE the timeout branch so a human-required PR can never ride the window to merge-anyway.
-  if (humanRequired) return { action: 'park', reason: 'gate-self edit — a HUMAN review is required (review:human), no timeout', applyLabel: REVIEW_LABELS.human, humanRequired: true };
+  // #2285 v1 + #2362 — the human gate is STICKY on the LABEL, not only this pass's fresh score. Park under
+  // review:human and NEVER time out. Honour humanRequired (fresh gate-self score) OR an already-applied
+  // review:human label: the fresh score can flip to false if the diff NARROWED after the label was stamped
+  // (e.g. a gate-self file dropped out on rebase — exactly how #289 rode the merge-anyway window to land while
+  // still carrying review:human). The sticky label vetoes regardless, so once any pass gates a PR to a human,
+  // only a human clearing it (→ review:accepted, handled above) may merge. Checked BEFORE the !escalate-merge
+  // and timeout branches so a human-gated PR can never merge without a human — even if it later de-escalates.
+  if (humanRequired || hasReviewLabel(labels, REVIEW_LABELS.human)) {
+    return { action: 'park', reason: 'human-gated (review:human) — only a human may clear it, no timeout', applyLabel: REVIEW_LABELS.human, humanRequired: true };
+  }
+  if (!escalate) return { action: 'merge', reason: 'no escalation signal — merge immediately' };
   // Agent-reviewable escalation, no verdict yet. Time out to merge-anyway once the window elapses so a stalled
   // agent-review never wedges the queue; otherwise park alive and wait.
   if (parkedSinceMs != null && Number(nowMs) - Number(parkedSinceMs) >= Number(windowMs)) {
