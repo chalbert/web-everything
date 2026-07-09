@@ -7,6 +7,7 @@ blockedBy: ["2340"]
 dateOpened: "2026-07-09"
 dateStarted: "2026-07-09"
 dateResolved: "2026-07-09"
+graduatedTo: "plateau:packages/core/"
 tags: []
 ---
 
