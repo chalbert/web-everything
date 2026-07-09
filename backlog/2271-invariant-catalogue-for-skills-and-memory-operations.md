@@ -2,8 +2,11 @@
 kind: story
 size: 3
 parent: "2268"
-status: open
+status: resolved
 dateOpened: "2026-07-04"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
+graduatedTo: scripts/lib/invariant-catalogue.json
 tags: []
 ---
 

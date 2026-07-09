@@ -1,0 +1,354 @@
+{
+  "$schema": "invariant-catalogue/v1",
+  "description": "Backlog #2271 — the must-never-break guarantees per skill/script/memory op. This is the shared assertion vocabulary both validation-suite tiers under epic #2268 check against: Tier A (scripts/lib/*, check-*.mjs, hooks) asserts these deterministically from golden fixtures (#2270/#2273); Tier B (judgment skills: batch/drain/finish/next/review-program) asserts them by replaying the real skill in an ephemeral worktree and inspecting the resulting tree (#2272). Each entry is a single guarantee, not a test — 'howChecked' names the existing mechanism (if any) that already enforces or observes it today; 'status' says whether that mechanism is deterministic-and-wired (enforced), advisory/best-effort (advisory), or currently unenforced and relying on model judgment (judgment-only) — the last is exactly what Tier B exists to backstop. This file is additive: adding a new skill/script invariant should append an entry here, not restructure the schema.",
+  "tiers": {
+    "A": "Deterministic script/hook layer — pure input (files/argv) to (files/exit code); CI-able golden/snapshot tests.",
+    "B": "Judgment skill layer (batch/drain/finish/next/review-program) — no deterministic output; validated by worktree-replay + invariant assertion, not snapshot."
+  },
+  "invariants": [
+    {
+      "id": "backlog.claim.requires-open-status",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs claim",
+      "statement": "claim only transitions status: open → active (or → preparing with --as=preparing); any other starting status is refused, never silently coerced.",
+      "howChecked": "applyTransition(content, 'claim', …) precondition check in scripts/backlog/frontmatter.mjs; unit-tested in scripts/backlog/__tests__/frontmatter.test.mjs",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.claim.stamps-dateStarted",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs claim",
+      "statement": "a successful claim always stamps dateStarted=<today> into frontmatter alongside the status flip — never a status change with a missing dateStarted.",
+      "howChecked": "applyTransition() in scripts/backlog/frontmatter.mjs sets both fields in the same splice",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.claim.refuses-dirty-item-file",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs claim",
+      "statement": "claim refuses when the target item's own backlog/*.md is dirty in the working tree (claim-first guard), unless --force is passed.",
+      "howChecked": "scripts/backlog.mjs claim path (git status check ahead of the write); scripts/backlog/__tests__/claim-no-git-guard.test.mjs asserts the git-attribution read happens AFTER applyTransition, not before",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.resolve.requires-active-or-open-status",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs resolve",
+      "statement": "resolve only transitions status: active|open → resolved; any other starting status is refused.",
+      "howChecked": "applyTransition(content, 'resolve', …) in scripts/backlog/frontmatter.mjs",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.resolve.stamps-dateResolved",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs resolve",
+      "statement": "a successful resolve always stamps dateResolved=<today> — a resolved item without a dateResolved never exists.",
+      "howChecked": "applyTransition() in scripts/backlog/frontmatter.mjs",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.resolve.decision-requires-codifiedIn",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs resolve",
+      "statement": "a kind: decision item can never resolve without a valid codifiedIn (either pre-existing in frontmatter or supplied via --codified-to) — the #911 codification gate.",
+      "howChecked": "validateCodifiedIn() gate inside applyTransition() in scripts/backlog/frontmatter.mjs; scripts/backlog/__tests__/frontmatter.test.mjs 'codification gate on kind:decision (#911)'",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.resolve.epic-refuses-open-children",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs resolve",
+      "statement": "an epic with open (unresolved) children is refused at resolve unless --force is passed — the #658 no-open-slice guard; the refusal happens before any frontmatter write.",
+      "howChecked": "openChildrenOf(padded) check in scripts/backlog.mjs runs strictly before applyTransition(); scripts/backlog/__tests__/resolve-epic-guard.test.mjs asserts source order",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.release.requires-active-or-preparing",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs release",
+      "statement": "release only transitions status: active|preparing → open; stamps (dateStarted etc.) are left untouched.",
+      "howChecked": "applyTransition(content, 'release', …) in scripts/backlog/frontmatter.mjs",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.yield.refuses-tracked-file",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs yield",
+      "statement": "yield (renumbering a locally colliding item to the next free NNN) refuses a git-tracked file — a committed NNN is immutable and never renumbers; only an untracked/local-only collision may move.",
+      "howChecked": "tracked-file check ahead of the rename in scripts/backlog.mjs yieldNum()",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.scaffold.allocates-free-nnn-never-renumbers-existing",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs scaffold",
+      "statement": "scaffold allocates the next free NNN (or a provisional xNNNNNN hash for in-flight parallel lanes, #2288) for the NEW item; it never renumbers or reuses an already-landed item's id.",
+      "howChecked": "scripts/backlog.mjs scaffold() id-allocation path; cross-checked against scripts/backlog-renumber-collisions.mjs's boundary rule (a base id present in the batch is never yielded/reused, only a post-merge NEW-item collision is)",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.scaffold.session-born-active-else-open",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs scaffold",
+      "statement": "scaffold --session=<slug> births the item status: active + scaffoldedBy=<slug> (owned until settle); scaffold without --session births status: open.",
+      "howChecked": "scripts/backlog.mjs scaffold()",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.settle.only-from-born-active-scaffold",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs settle",
+      "statement": "settle publishes a born-active scaffold (created via scaffold --session) to status: open exactly once digest+edges+body are authored; it is the only path that flips that specific active→open transition.",
+      "howChecked": "scripts/backlog.mjs settle()",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.retype.frontmatter-only-no-lane-guard-off",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs retype",
+      "statement": "retype is the sanctioned pack-phase flag-fix (kind/size/status) and touches ONLY frontmatter fields via the CLI — it is never a substitute for a raw primary-tree Edit, and never requires LANE_GUARD_OFF.",
+      "howChecked": "scripts/backlog.mjs retype()",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog.queue.blocks-claim-release-until-drain-lands",
+      "tier": "A",
+      "subject": "scripts/backlog.mjs queue / unqueue",
+      "statement": "an item marked queue (ready-to-merge) refuses claim/release until the drain unqueues it at landing — unqueue is the drain's single clear point.",
+      "howChecked": "scripts/backlog.mjs claim()/release() consult loadQueued() before transitioning",
+      "status": "enforced"
+    },
+    {
+      "id": "check-memory.index-size-budget",
+      "tier": "A",
+      "subject": "scripts/check-memory.mjs (default sweep + --pre gate)",
+      "statement": "the always-loaded MEMORY.md index never exceeds MAX_BYTES (22 KB, headroom under the harness's ~24.4 KB silent-truncation limit) — a proposed edit that would breach it is DENIED before it lands, not just flagged after.",
+      "howChecked": "checkBudget() in scripts/check-memory.mjs, run both as the PreToolUse(Edit|Write) --pre gate (deny, exit 2) and the default sweep (flag, exit 2)",
+      "status": "enforced"
+    },
+    {
+      "id": "check-memory.index-line-length-budget",
+      "tier": "A",
+      "subject": "scripts/check-memory.mjs",
+      "statement": "no MEMORY.md index line exceeds MAX_LINE (200 chars) — an index line is a title + one short hook, never a paragraph.",
+      "howChecked": "checkBudget() in scripts/check-memory.mjs",
+      "status": "enforced"
+    },
+    {
+      "id": "check-memory.map-links-only-sub-indexes",
+      "tier": "A",
+      "subject": "scripts/check-memory.mjs",
+      "statement": "MEMORY.md (the always-loaded map) may only link index-*.md sub-indexes — a leaf topic-file link there regrows the always-loaded surface and is refused; the --pre gate denies only a NEWLY introduced leaf link so pre-existing drift doesn't lock the file.",
+      "howChecked": "leafLinks()/tree-shape check in scripts/check-memory.mjs, both --pre (new-link-only) and default sweep (any leaf link)",
+      "status": "enforced"
+    },
+    {
+      "id": "check-memory.every-topic-file-reachable",
+      "tier": "A",
+      "subject": "scripts/check-memory.mjs",
+      "statement": "every topic file under the memory dir is reachable from MEMORY.md or a sub-index — either by markdown link or by its stable `- N.` number reference; an orphaned topic file is a gate violation.",
+      "howChecked": "orphans computation in scripts/check-memory.mjs default sweep",
+      "status": "enforced"
+    },
+    {
+      "id": "check-memory.no-dangling-index-link",
+      "tier": "A",
+      "subject": "scripts/check-memory.mjs",
+      "statement": "every markdown link and `- N.` number reference inside MEMORY.md/a sub-index resolves to a file that actually exists in the memory dir.",
+      "howChecked": "scripts/check-memory.mjs default sweep",
+      "status": "enforced"
+    },
+    {
+      "id": "memory-reflect.propose-only-never-writes",
+      "tier": "A",
+      "subject": "scripts/memory-reflect.mjs",
+      "statement": "the close-out reflection pass is read-only — it computes/reports skew, orphans, near-duplicate candidates, and index headroom, but never prunes, edits, or writes a memory file itself; it always exits 0.",
+      "howChecked": "scripts/memory-reflect.mjs contains no fs write call; the human/agent acts on its printed checklist separately",
+      "status": "enforced"
+    },
+    {
+      "id": "guard-lane.denies-primary-tree-edit",
+      "tier": "A",
+      "subject": "scripts/guard-lane.mjs (PreToolUse Edit|Write)",
+      "statement": "an Edit/Write targeting a constellation PRIMARY checkout (webeverything/frontierui/plateau-app, not under .lanes/) is DENIED — every edit-action must run in an isolated lane clone (#2123) — except the agent-memory tree, which is exempt, and unless LANE_GUARD_OFF=1 is explicitly set.",
+      "howChecked": "scripts/guard-lane.mjs realpath classification (inPrimary && !inLane && !inAgentMemory → deny)",
+      "status": "enforced"
+    },
+    {
+      "id": "guard-lane.fails-open-on-internal-error",
+      "tier": "A",
+      "subject": "scripts/guard-lane.mjs",
+      "statement": "any internal guard error (unparseable event JSON, missing path, etc.) allows the tool call rather than blocking it — a guard bug must never wedge the agent.",
+      "howChecked": "scripts/guard-lane.mjs top-level try/catch → allow()",
+      "status": "enforced"
+    },
+    {
+      "id": "guard-bash.denies-direct-main-push",
+      "tier": "A",
+      "subject": "scripts/guard-bash.mjs (PreToolUse Bash)",
+      "statement": "a `git push` targeting a constellation `main` branch is denied — every change must reach main through a lane/* ref → PR → CI (#2203); escape only via MAIN_PUSH_OK=1.",
+      "howChecked": "scripts/guard-bash.mjs decide()/reason(); scripts/guard-bash.test.mjs",
+      "status": "enforced"
+    },
+    {
+      "id": "guard-bash.denies-stale-lane-mutation",
+      "tier": "A",
+      "subject": "scripts/guard-bash.mjs (PreToolUse Bash)",
+      "statement": "a backlog item-mutation subcommand (claim/resolve/release/scaffold/settle/retype/yield/cost/prepare-stamp) run in a lane clone whose HEAD is behind origin/main is denied — a stale checkout must never mint ids or stamp status against a stale view; escape only via STALE_LANE_OK=1.",
+      "howChecked": "scripts/guard-bash.mjs isBacklogMutation()/stale-lane check",
+      "status": "enforced"
+    },
+    {
+      "id": "guard-bash.denies-backlog-md-deletion-and-renumber",
+      "tier": "A",
+      "subject": "scripts/guard-bash.mjs (PreToolUse Bash)",
+      "statement": "`rm`/`git rm` of a backlog/*.md is denied (done items resolve, the file stays) and `mv`/`git mv` that changes a backlog item's NNN prefix is denied (NNN is immutable outside the sanctioned scripts).",
+      "howChecked": "scripts/guard-bash.mjs BACKLOG_MD-pattern checks",
+      "status": "enforced"
+    },
+    {
+      "id": "guard-bash.denies-locus-md-bypass-writes",
+      "tier": "A",
+      "subject": "scripts/guard-bash.mjs (PreToolUse Bash)",
+      "statement": "`>>`/`tee -a`/`sed -i`/`perl -*pi` targeting backlog/*.md or reports/*.md is denied — those bypass the Edit/Write locus-prefix hook, so the corpus must be mutated only through Edit/Write.",
+      "howChecked": "scripts/guard-bash.mjs CORPUS_MD-pattern checks",
+      "status": "enforced"
+    },
+    {
+      "id": "lint-locus-prefix.denies-bare-code-path-token-pre-write",
+      "tier": "A",
+      "subject": "scripts/lint-locus-prefix.mjs (--pre gate)",
+      "statement": "an Edit/Write to backlog/*.md or reports/*.md that would introduce a bare code-path token (e.g. `foo.ts`, `02-bar.html` without a repo-qualified locus prefix) is denied before it reaches disk — never lands even transiently for a concurrent session's check:standards to trip on.",
+      "howChecked": "scanRepoLocusPrefixes() reused from scripts/check-standards-rules.mjs, invoked pre-write in scripts/lint-locus-prefix.mjs --pre",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog-guard.denies-empty-summary-pre-write",
+      "tier": "A",
+      "subject": "scripts/backlog-guard.mjs (--pre gate)",
+      "statement": "an Edit/Write to a backlog item that would derive an empty summary (body leads with a `**Label:**`, a heading, or a list; or a body added to a frontmatter-only relatedReport pointer) is denied before it lands — the gate's 'missing required field summary' failure is predicted and blocked at write-time, not just caught later.",
+      "howChecked": "firstParagraph()/proposedContent() in scripts/backlog-guard.mjs --pre",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog-guard.denies-retired-undecided-sentinel",
+      "tier": "A",
+      "subject": "scripts/backlog-guard.mjs (--pre gate)",
+      "statement": "`childlessReason`/`unsplittableReason: undecided` is a retired sentinel — an Edit/Write introducing it is denied; the field must carry a real reason.",
+      "howChecked": "scripts/backlog-guard.mjs --pre regex check",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog-guard.warns-sized-story-with-children",
+      "tier": "A",
+      "subject": "scripts/backlog-guard.mjs (PostToolUse)",
+      "statement": "a kind: story that carries a size AND has children (another item's parent: pointing at it) double-counts in the burndown — flagged post-write since a sized-epic-with-children case the gate already catches, but a sized STORY with children previously slipped through.",
+      "howChecked": "scripts/backlog-guard.mjs default (post) path",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog-renumber-collisions.never-touches-base-ids",
+      "tier": "A",
+      "subject": "scripts/backlog-renumber-collisions.mjs",
+      "statement": "an id present in the batch base (--base-ref/--base-nums) is NEVER yielded or reused, even if it appears to collide — a base-id collision is a real edit conflict git already flagged, not an allocation race; only a post-merge NEW-item collision is renumbered.",
+      "howChecked": "scripts/backlog-renumber-collisions.mjs boundary check against the base id set",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog-renumber-collisions.idempotent-no-collision-is-noop",
+      "tier": "A",
+      "subject": "scripts/backlog-renumber-collisions.mjs",
+      "statement": "running the script when there is no NEW-item id collision is a no-op that exits 0 — it never mutates the tree speculatively.",
+      "howChecked": "scripts/backlog-renumber-collisions.mjs top-level control flow",
+      "status": "enforced"
+    },
+    {
+      "id": "backlog-renumber-collisions.uses-refile-never-git-mv",
+      "tier": "A",
+      "subject": "scripts/backlog-renumber-collisions.mjs",
+      "statement": "a yielded id is renamed via an fs write of the new file + fs unlink of the old (a refile), never `git mv` — `git mv` on a renumbering backlog file is exactly what guard-bash blocks as an illegal NNN change, and this sanctioned script must bypass that at the fs layer, not the shell layer.",
+      "howChecked": "scripts/backlog-renumber-collisions.mjs write path (writeFileSync + unlinkSync, no execFileSync('git','mv',…))",
+      "status": "enforced"
+    },
+    {
+      "id": "lane-manifest-write.malformed-manifest-never-written",
+      "tier": "A",
+      "subject": "scripts/lane-manifest-write.mjs",
+      "statement": "a manifest that fails schema validation against the lane-manifest primitive is never written to disk — exit 3, nothing reaches .lane-manifest.json, so a malformed manifest never reaches the queue.",
+      "howChecked": "scripts/lane-manifest-write.mjs validation gate ahead of writeFileSync",
+      "status": "enforced"
+    },
+    {
+      "id": "prune-landed-lanes.never-deletes-ref-with-live-content",
+      "tier": "A",
+      "subject": "scripts/prune-landed-lanes.mjs",
+      "statement": "a lane/* ref is only deleted after a content-verified check that it carries nothing main lacks — never a topological/no-merged heuristic alone (which the drain's squash/rebase-land defeats).",
+      "howChecked": "scripts/prune-landed-lanes.mjs content-diff safety check ahead of deletion",
+      "status": "enforced"
+    },
+    {
+      "id": "prune-landed-lanes.deletes-via-gh-api-never-git-push-delete",
+      "tier": "A",
+      "subject": "scripts/prune-landed-lanes.mjs",
+      "statement": "ref deletion always goes through the GitHub REST ref-delete API (gh api -X DELETE …), never `git push --delete` — a computed ref list would defeat guard-bash's literal-text lane/* proof, so the script routes around the guarded command class entirely rather than loosening it.",
+      "howChecked": "scripts/prune-landed-lanes.mjs deletion call sites (no execFileSync('git','push','--delete',…))",
+      "status": "enforced"
+    },
+    {
+      "id": "check-backlog-workflow.sliced-epic-and-born-active-invariants",
+      "tier": "A",
+      "subject": "scripts/check-backlog-workflow.mjs + scripts/lib/workflow-invariants.cjs",
+      "statement": "cross-item backlog rules the per-item schema validator can't see (a sliced epic's sizing must reflect its children; a born-active scaffold must settle within its expected window) are asserted from the whole corpus, not one file at a time.",
+      "howChecked": "validateWorkflowInvariants() in scripts/lib/workflow-invariants.cjs, fixture-tested in scripts/__tests__/workflow-invariants.test.mjs, also folded into check-standards.mjs",
+      "status": "enforced"
+    },
+    {
+      "id": "tier-b.lane-isolation-never-primary-checkout",
+      "tier": "B",
+      "subject": "batch / drain / finish / next-backlog-item / review-program (all judgment skills)",
+      "statement": "every judgment-skill run operates from an isolated lane/drain clone, never the shared primary checkout — a concurrent session's or the user's own dev server must never be disturbed by a Tier-B skill's edits.",
+      "howChecked": "stated precondition in each skill's SKILL.md (e.g. .claude/skills/drain/SKILL.md 'Preconditions'); backstopped mechanically at the file-edit layer by guard-lane.mjs (Tier A), but the SKILL-level choice of clone is currently judgment, not hook-enforced",
+      "status": "judgment-only"
+    },
+    {
+      "id": "tier-b.producer-never-merges-never-pushes-main",
+      "tier": "B",
+      "subject": "batch / a producer lane (the #2183 producer contract)",
+      "statement": "a producing lane opens a ready-to-merge PR and stops — it never merges, never pushes main, and never launches a drain itself; landing is exclusively the drain's job.",
+      "howChecked": "stated in the #2183 producer contract (repeated in every batch/lane task brief); backstopped at the git layer by guard-bash.mjs's direct-main-push denial (Tier A), but the 'stop after PR' discipline itself is currently judgment, not hook-enforced",
+      "status": "judgment-only"
+    },
+    {
+      "id": "tier-b.drain-reuses-shared-transport-never-admin-merge",
+      "tier": "B",
+      "subject": "drain",
+      "statement": "the drain lands a PR only via the same self-approved transport /pr uses (0 required reviewers + the required test check green) — never `gh pr merge --admin`, never a raw `git merge`/`git push` to main.",
+      "howChecked": "stated in .claude/skills/drain/SKILL.md 'Guardrails'; the underlying merge call goes through scripts/lib/pr-merge-gate.mjs, which is Tier-A-checkable, but the drain's choice to call it (vs. an admin override) is currently judgment",
+      "status": "judgment-only"
+    },
+    {
+      "id": "tier-b.review-human-never-auto-cleared",
+      "tier": "B",
+      "subject": "drain (auto-review of parked PRs)",
+      "statement": "a PR labelled review:human for a conflict-of-interest case (the drain edited the gate itself) is never auto-resolved by the drain — it never times out to merge-anyway and the drain never applies any review:* label to it itself; only a human clears it.",
+      "howChecked": "stated in .claude/skills/drain/SKILL.md 'Auto-review the parked PRs'",
+      "status": "judgment-only"
+    },
+    {
+      "id": "tier-b.finish-takes-over-in-place-never-restarts-from-scratch",
+      "tier": "B",
+      "subject": "finish",
+      "statement": "finishing a stuck lane takes over the producer's half-done work in that same lane and lands it — it does not discard the lane and redo the item from a fresh clone.",
+      "howChecked": "stated in .claude/skills/finish/SKILL.md",
+      "status": "judgment-only"
+    },
+    {
+      "id": "tier-b.batch-hard-stop-guarantees-termination",
+      "tier": "B",
+      "subject": "batch-backlog-items",
+      "statement": "a batch run has a hard stop that guarantees the session ends (never loops indefinitely across items), with a validation gate at every seam between items.",
+      "howChecked": "stated in .claude/skills/batch-backlog-items/SKILL.md",
+      "status": "judgment-only"
+    }
+  ]
+}
