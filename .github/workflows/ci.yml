@@ -7,9 +7,14 @@ name: CI
 # main can require it before merge (the #2138 merge-queue / self-approved-PR direction); it does not
 # block today's direct-push landing.
 #
-# Scope: the fast deterministic lanes + the visual-regression guard (#2177).
-# Unit suite (~10s) + gate (~3s) + the deterministic Playwright interaction lane (#2070 — self-contained
-# against a static fixture server, no app build) + visual regression against committed linux baselines.
+# Scope: the fast deterministic lanes + the visual-regression guard (#2177), split across parallel jobs
+# so the correctness lane doesn't wait on the slower build/browser steps:
+#   job `test`  — unit suite + coverage (80% bar) + repo health gate. The fast correctness lane.
+#   job `smoke` — deploy smoke (build:docs, #2220) + the deterministic Playwright interaction lane (#2070,
+#                 self-contained against a static fixture server, no app build). Runs concurrently with
+#                 `test`; both moved OFF `test`'s critical path here, so branch protection must require
+#                 BOTH `test` and `smoke` (see the note on the `smoke` job below).
+#   job `visual` — visual regression against committed linux baselines (currently disabled, see below).
 # The live-server a11y/content/smoke lanes still need a build-then-serve step — those CI-home under #800.
 #
 # Visual lane (job: visual): builds the docs site (requires FUI sibling, same as deploy.yml), serves the
@@ -84,16 +89,6 @@ jobs:
         working-directory: web-everything
         run: npm ci
 
-      # Deploy smoke (#2220): `build:docs` is the exact artifact the Cloudflare deploy publishes, but it
-      # otherwise only runs in the unrequired `visual` job and post-merge `deploy.yml`. Branch protection
-      # gates on `test` alone, so before this step a broken docs build (e.g. the #2184 transforms.cjs
-      # mis-wire) merged green and silently broke the deploy. FUI's pinned component-render CLI is already
-      # built above, so this needs no extra setup; ~15s. Keep it fast (build only, no serve/visual — that
-      # stays in the `visual` job) so the required check stays cheap.
-      - name: Build WE docs (deploy smoke)
-        working-directory: web-everything
-        run: npm run build:docs
-
       - name: Unit suite + coverage (80% bar, #2082)
         working-directory: web-everything
         run: npm run test:coverage
@@ -101,6 +96,77 @@ jobs:
       - name: Repo health gate
         working-directory: web-everything
         run: npm run check:standards
+
+  # Deploy-smoke + deterministic interaction lane. Split OUT of `test` so the fast correctness
+  # lane (coverage + gate) no longer waits on the ~25s docs build and the ~54s Playwright install +
+  # interaction run — the two now run on parallel runners, cutting CI wall-clock from ~3m to ~1m50s.
+  #
+  # REQUIRED-CHECK NOTE: `test` used to be the SOLE required status check, so keeping the #2220 deploy
+  # smoke (`build:docs`) and the #2070 interaction lane inside it was what made them gate merges. Now that
+  # both moved here, branch protection MUST add `smoke` as a required check too — otherwise a broken docs
+  # build or interaction regression merges green again (the exact #2184 failure mode #2220 closed). Adding
+  # `smoke` to the required set is a repo-admin action, not a code change; do it when this lands.
+  #
+  # It repeats the sibling-layout setup (checkout ×2 + both `npm ci` + FUI build:tools, ~25s) because
+  # GitHub jobs don't share a workspace; that duplicated setup runs concurrently with `test`, so it costs
+  # runner-minutes, not wall-clock. The `visual` job (below, disabled) already duplicates the same setup.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      # Same sibling layout as `test` / deploy.yml — WE's `build:docs` shells out to FUI's render CLI.
+      #   $GITHUB_WORKSPACE/web-everything  (this repo)
+      #   $GITHUB_WORKSPACE/frontierui      (the tool sibling)
+      - name: Checkout WE
+        uses: actions/checkout@v4
+        with:
+          path: web-everything
+      - name: Checkout FUI (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: chalbert/frontierui
+          token: ${{ secrets.FUI_READ_TOKEN }}
+          path: frontierui
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web-everything/package-lock.json
+            frontierui/package-lock.json
+
+      # FUI first (ratified #1946/#2016 ordering): the `@frontierui/*` alias resolves to sibling source and
+      # `build:docs` calls the pinned component-render CLI produced by build:tools.
+      - name: Install + build FUI tools
+        working-directory: frontierui
+        run: |
+          npm ci
+          npm run build:tools
+
+      - name: Install
+        working-directory: web-everything
+        run: npm ci
+
+      # Deploy smoke (#2220): `build:docs` is the exact artifact the Cloudflare deploy publishes. Before it
+      # gated CI a broken docs build (e.g. the #2184 transforms.cjs mis-wire) merged green and silently
+      # broke the deploy. FUI's render CLI is already built above, so this needs no extra setup; ~25s.
+      - name: Build WE docs (deploy smoke)
+        working-directory: web-everything
+        run: npm run build:docs
+
+      # Cache the Playwright browser bundle keyed on the installed @playwright/test version, so the ~19s
+      # `playwright install` only re-downloads chromium when the version actually changes. `--with-deps`
+      # (apt system libs) still runs each time — those aren't cacheable across runners — but the browser
+      # download, the bulk of the cost, is served from cache on a hit.
+      - name: Resolve Playwright version
+        id: pw
+        working-directory: web-everything
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
 
       # Deterministic Playwright interaction lane (#2070): drives the client-side backlog-table behaviour
       # over a fixed fixture page served by tests/interaction/serve.mjs. WE_INTERACTION_ONLY skips the app
