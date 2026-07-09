@@ -192,20 +192,25 @@ missed split. No `kind: decision` to register — the design is fully resolved (
 
 ## Focused run: `/slice 2360`
 
-**#2360 — Native .NET SSR renderer for directive regions** (`kind: epic`, no `size`, `parent: 2069`,
-`blockedBy: [2354]`, unsliced — no children). One of the six per-language renderer sub-epics carved from
-#2069 above (slice **F**). Foundational slice A (**#2354**) is now **resolved** —
+**#2360 — Native .NET SSR renderer for directive regions** (`kind: epic`, no `size`, `parent: 2069`).
+One of the six per-language renderer sub-epics carved from #2069 above (slice **F**). Foundational slice A
+(**#2354**) is now **resolved** —
 [we:conformance-vectors/webdirectives-ssr.vectors.json](../conformance-vectors/webdirectives-ssr.vectors.json)
 + [we:conformance-vectors/webdirectives-ssr-harness-contract.md](../conformance-vectors/webdirectives-ssr-harness-contract.md)
-exist — so the epic is unblocked to *start*, but not yet decomposable.
+exist — so the epic is unblocked to *start*. It is **partially decomposable**: one slice (the contract
+scoping) can be carved now; the build slices wait behind it.
 
-### Could not split — pending the .NET renderer contract scoping
+### Partial split — one slice carved (the contract-scoping pass); build slices deferred
 
-| # | Title | Failing condition | Unblocking action |
-|---|---|---|---|
-| **2360** | Native .NET SSR renderer for directive regions | **Investigation pass (§work-investigation 3) + (4)/(5)** — impl surface doesn't exist in-repo and the renderer contract isn't scoped; the only decomposition is a rigid chain with no demoable intermediate | **Land a ".NET renderer contract-scoping" story first** (pins the .NET project layout, parser strategy, the `ServerRenderer` seam shape in .NET, harness invocation). Its artifact exposes the per-directive-family build seams — then re-run `/slice 2360`. |
+The **full build decomposition** can't be carved yet, but the epic yields **exactly one investigable slice now** — the .NET renderer contract-scoping pass — which is exactly the "carve the fork-free rows, defer the gated ones" partial-split move for a roadmap epic. Filed as #2360's first child:
 
-**Why not sliceable now (rubric):**
+| Slice | kind | size | Home | Scope | blockedBy |
+|---|---|---|---|---|---|
+| **Scope the native .NET SSR renderer contract** | story | 3 | FUI | Pin the .NET project layout, authoring-template parser strategy, the `ServerRenderer` seam shape in .NET (mirroring the Node seam #2064), harness invocation (#2354 contract), and the resulting per-directive-family build-slice breakdown. Not a fork (#2030). | — |
+
+**Build slices deferred** — the parser / 7-directive-expander / byte-exact-emitter / harness-runner stories get scaffolded under #2360 **once the scoping slice lands** and its artifact fixes the seams. They can't be carved before then:
+
+**Why the build slices aren't carvable yet (rubric):**
 
 - **(work-investigation 3) The surface doesn't exist to investigate.** The renderer is a from-scratch .NET
   build in FUI (`frontierui:plugs/webdirectives/ssr/`); WE ships zero renderer (rule #6). There is **no .NET
@@ -223,13 +228,13 @@ exist — so the epic is unblocked to *start*, but not yet decomposable.
   vectors outright. No slice leaves the renderer in a conformant, demoable state until the whole thing passes.
 
 **Applies identically to the five sibling sub-epics** (#2355 JVM, #2356 Go, #2357 PHP, #2358 Rust, #2359
-Python). Each is the same pure-build-with-unscoped-contract shape; each is could-not-split until its own
-language-renderer contract is scoped. The deferral is already recorded on every sub-epic's body, so no new
-tracking item is filed — the contract-scoping is the natural first move when the sub-epic is picked up.
+Python). Each is the same pure-build-with-unscoped-contract shape; each yields the same one carvable slice —
+its own language-renderer contract-scoping pass — with its build slices deferred behind it. Only .NET's
+scoping slice is filed here (the item this run focused on); the siblings get theirs when picked up.
 
-**No on-disk mutation.** #2360 stays a valid unsliced epic (no `size`, no `childlessReason` → shows the
-*slice* badge = decomposition-pending), which is correct: it's a real home for future work, awaiting its
-contract-scoping artifact.
+**On-disk result.** #2360 becomes a **sliced epic** with one live child — the contract-scoping story
+(size 3). Its stale `blockedBy: [2354]` is cleared (#2354 resolved), so the epic is no longer blocked: it
+has an actionable first slice. The build slices are scaffolded under it once the scoping child lands.
 
 ---
 
