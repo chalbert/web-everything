@@ -2,10 +2,12 @@
 kind: story
 size: 5
 parent: "912"
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-22"
+dateResolved: "2026-07-09"
+graduatedTo: none
 locus: frontierui
 relatedProject: webdocs
 tags: [webdocs, block-explorer, workbench, polyglot]
@@ -188,3 +190,32 @@ What remains is **pure agent work**, not human setup: the `fui:workbench/mount.t
 import → same-document mount into the stage → `window.onerror`/`unhandledrejection` surfacing) + the three
 Fork-1(a) amendments, browser-verified against a freshly-spun throwaway maas origin. Resume via
 `/next 1030` in a frontierui session that owns a dev-server lifecycle.
+
+## 2026-07-09 — DONE (frontierui PR #28)
+
+Built + landed the workbench-side integration exactly as scoped. **frontierui PR
+[#28](https://github.com/chalbert/frontierui/pull/28)** (`lane/1030-workbench-live-mount`):
+
+- **`fui:workbench/loader.ts`** — the `served` arm now surfaces the served module's `mount()`/`unmount()`
+  live contract (`live`) + an optional `load` that registers the native element locally (framework-free,
+  #955-B) so the React/Vue wrapper drives a genuinely-live `<tag>`, not an inert placeholder.
+- **`fui:workbench/live-test/liveMount.ts`** (new) — the host-side lifecycle the #1518 served module doesn't
+  own: subject-node resolution (a `MutationObserver` catches React's possibly-deferred commit) + async
+  runtime-error surfacing (`window` `error`/`unhandledrejection`, beyond the wrapper's own ErrorBoundary).
+- **`fui:workbench/mount.ts`** — `renderStage` live branch with the three #1594 Fork-1(a) amendments:
+  (1) subject-node resolution (panels read the wrapper's inner element), (2) prop-routed control
+  (`handle.update(props)`), (3) `unmount()` teardown on refresh (no leaked framework root). Adds a
+  Runtime-errors panel; `exportAsCode` emits the wrapper source for a live subject (the #1594
+  "supported by default" Storybook custom-`render` footgun).
+- **`fui:workbench/registry.ts`** — a `<background-tasks>`-live served block + `withServedOrigin()`;
+  **`fui:demos/workbench.ts`** honours `?maas=<origin>` (library stays origin-agnostic).
+
+**Verified:** browser-verified against a real cross-origin `?form=react-live` module (throwaway :6181/:6182
+pair, user's servers untouched) — the wrapper renders the real `<background-tasks>` into the stage,
+`update({retry})` reflects onto the live element, `unmount()` tears the root down clean. 47 workbench vitest
+tests green (new `liveMount` unit + `mountLive` integration cover all three amendments + the error surface);
+`check:standards` 0 errors.
+
+**Leftover filed → #2374:** the full workbench demo entry has a **pre-existing** `node:fs/promises`-externalized
+break (reproduces on `main` with the stock `?block=auto-complete`), so the live block is verified via its own
+code path rather than the demo's `workbenchReady`. Not a #1030 regression; downstream of the demo-graph fix.
