@@ -16,6 +16,18 @@ name: release-please
 # we:.github/workflows/publish-contracts.yml (GitHub suppresses workflow-triggered-by-GITHUB_TOKEN to avoid
 # recursion) — so publishing is done inline here, not there. publish-contracts.yml stays as the manual
 # (workflow_dispatch / hand-pushed tag) fallback.
+#
+# Publish resilience (#907, #xjcbsad): the publish job gates on `always() && releases_created == 'true'`,
+# NOT the release-please job's success. Rationale — on the first 0.1.0 release (run 28606668569,
+# 2026-07-02) release-please created the contracts-v0.1.0 tag + GitHub Release *successfully*, then threw on
+# a cosmetic post-release step ("Unable to create comment because issue is locked"), which marked the job
+# `failure`. Under a plain `needs:` gate that failure SKIPPED publish — so `npm publish` never ran and the
+# registry stayed empty despite a real release existing. `always()` decouples the publish from that
+# cosmetic error; `releases_created == 'true'` still fences it to runs where a release was actually cut, so
+# a genuine pre-release failure (no release, empty output) correctly skips publish. The release-please job
+# is left to fail loudly on real problems (we do NOT mask it with continue-on-error). Separately unlocking
+# whatever conversation release-please tries to comment on removes the red-job noise, but is repo state, not
+# a workflow lever — the guard is what guarantees the publish regardless.
 
 on:
   push:
@@ -40,9 +52,12 @@ jobs:
 
   publish:
     needs: release-please
-    # Single-package repo: releases_created is sufficient. When a second package lands, gate on the
-    # per-path output `contracts--release_created` instead.
-    if: needs.release-please.outputs.releases_created == 'true'
+    # `always()` so a cosmetic post-release failure in the release-please job (e.g. commenting on a locked
+    # conversation) can't skip a publish once a release was actually cut — see the "Publish resilience" note
+    # in the header. `releases_created == 'true'` still fences publish to real releases (empty output on a
+    # genuine pre-release failure → skip). Single-package repo: releases_created is sufficient; when a second
+    # package lands, gate on the per-path output `contracts--release_created` instead.
+    if: always() && needs.release-please.outputs.releases_created == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
