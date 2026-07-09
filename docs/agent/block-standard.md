@@ -524,9 +524,13 @@ directive — the markup vehicle carrying its name + options + body. The rule #1
 1. **`is=` is not the minted directive-form contract.** A directive is never *standardized* as a customized
    built-in (`<template is="…">`, `extends HTMLTemplateElement`). `is=` stays **accepted-for-authors** — a
    lower-compliance opt-in, per rule 2's "nothing forbidden" (#1321) — but **no catalog directive is built to
-   it** (Safari-never, *never load-bearing* per rubric rule 4). The built `portal` migrates off
-   `{extends:'template'}` (its `<template is="portal-directive">` shape supersedes the #1000 Fork-4 authoring
-   detail — cite in the migration child).
+   it** (Safari-never, *never load-bearing* per rubric rule 4). The built `portal` **migrated off**
+   `{extends:'template'}` in [#1988](/backlog/1988-migrate-portal-off-the-is-customized-built-in-to-the-type-ty/):
+   `PortalDirective` now extends `CustomTemplateType` and registers on `CustomTemplateTypeRegistry` by its
+   `type` value (`<template type="portal">`), retiring `CustomTemplateDirective` as a directive base. Its
+   `<template is="portal-directive">` shape **supersedes** the #1000 Fork-4 authoring detail — Fork 4 ruled
+   the deferred-target *behavior*, not the `is=` spelling (its examples showed `is="portal"` illustratively),
+   so nothing there was overturned, only the example spelling migrated to the ratified directive form.
 
 2. **Three forms, by body shape:**
 
