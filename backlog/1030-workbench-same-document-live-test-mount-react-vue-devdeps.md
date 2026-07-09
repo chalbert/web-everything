@@ -4,7 +4,6 @@ size: 5
 parent: "912"
 status: open
 blockedBy: []
-humanGate: { kind: setup, short: "Restart the :3002 second-origin (serves a stale form set) from a session that owns the dev server, then decide the live-mount-into-stage fork.", what: "Mechanism PROVEN end-to-end (batch-2026-06-22-1575-1030: cross-origin import of ?form=react-live -> same-document mount()/unmount() rendered React DOM, CORS OK; #1501/#1518/#1556 all resolved). Two residuals remain, both needing a focused frontierui session that OWNS the dev-server lifecycle: (1) acceptance is a live mount on the running :3002 second-origin, but :3002 is part of the user's npm run dev and serves a STALE form set; the maas vite-plugin middleware does not hot-reload, so it needs a process RESTART a concurrent batch can't perform (don't-kill-dev-server); (2) an undecided design fork — does the live mount render INTO THE STAGE (replacing the native custom element as the subject, so inspector/event/anatomy panels cover it for free) vs a separate Polyglot live-preview needing new introspection wiring for a non-custom-element React render. Decide (2), then build + browser-verify against a freshly-restarted :3002." }
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-22"
 locus: frontierui
