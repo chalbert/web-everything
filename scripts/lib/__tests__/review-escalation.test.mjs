@@ -130,6 +130,18 @@ describe('decideReviewGate — the non-blocking watch window', () => {
   it('escalated + review:changes → wait for the author lane', () => {
     expect(decideReviewGate({ escalate: true, labels: [REVIEW_LABELS.changes] }).action).toBe('wait-author');
   });
+  // #2365 follow-up: the wait-author branch precedes the human gate, so a gate-self PR that ALSO carries
+  // review:changes must still report humanRequired:true — the caller (merge-ai-prs.mjs) keys the drain's
+  // auto-review routing on gate.humanRequired; false here would let an agent panel clear a gate-self edit a
+  // human bounced (the exact conflict-of-interest #2362 closes).
+  it('wait-author still reports humanRequired for a gate-self PR carrying review:changes (#2365)', () => {
+    // fresh gate-self score + review:changes
+    expect(decideReviewGate({ escalate: true, humanRequired: true, labels: [REVIEW_LABELS.changes] }).humanRequired).toBe(true);
+    // sticky review:human label + review:changes (fresh score narrowed to false on rebase)
+    expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.changes, REVIEW_LABELS.human] }).humanRequired).toBe(true);
+    // a plain (non-gate-self) review:changes stays agent-routable — humanRequired falsy
+    expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.changes] }).humanRequired).toBeFalsy();
+  });
   it('escalated, no verdict, window not expired → park alive (apply review:pending), never block', () => {
     const g = decideReviewGate({ escalate: true, parkedSinceMs: 1000, nowMs: 1000 + 60_000, windowMs: 30 * 60_000 });
     expect(g.action).toBe('park');
