@@ -5,6 +5,8 @@ parent: "2346"
 status: open
 blockedBy: ["2341"]
 dateOpened: "2026-07-09"
+costUsd: 7.79
+costSessions: 1
 tags: []
 ---
 

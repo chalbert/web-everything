@@ -2,6 +2,8 @@
 kind: task
 status: open
 dateOpened: "2026-07-09"
+costUsd: 7.79
+costSessions: 1
 tags: []
 ---
 
