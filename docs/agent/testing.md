@@ -164,6 +164,8 @@ If FUI is missing entirely, provision warns and skips the link (the pool is stil
 - For rendering/screenshots, a **static build is most reliable**: `npx @11ty/eleventy --output=/tmp/site-X --quiet`, then `python3 -m http.server` in that dir. (This is how you diff two commits: build each into its own dir, serve on two ports, screenshot.)
 - **Visual baselines** (`tests/visual/*.spec.ts`) hardcode `baseURL: http://localhost:8080`, so regenerating them from a lane needs the lane's docs server bound to `:8080` (collides with the main checkout). Until that port is env-ized, regen baselines from a checkout that owns `:8080`.
 
+> **Visual-regression substrate is self-hosted Playwright, in-repo committed `-linux` PNG baselines — no hosted SaaS** (decision #2233, ratified 2026-07-09). The governing rule + rationale + evidence-gated escape hatches (Argos-as-review-UI-only #2233 fork 2; graduate-baselines-off-PNG #1967) live in [platform-decisions.md#visual-regression-substrate](./platform-decisions.md#visual-regression-substrate).
+
 ## Web Cases — protocol conformance fixtures
 "Web Cases" are the source of truth for protocol conformity: live documentation examples **and** input fixtures for E2E conformance testing.
 - **Directory**: `src/cases/<protocol-id>/`
