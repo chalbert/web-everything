@@ -94,7 +94,7 @@
     "dependency-injection"
   ],
   "author": "Web Everything Project",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "detect-gpu": "^5.0.70",
     "typescript": "^5.9.3",
