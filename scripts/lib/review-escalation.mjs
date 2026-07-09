@@ -165,6 +165,32 @@ export function hasReviewLabel(labels, label) {
 }
 
 /**
+ * #2366 — the HARD REFUSAL a merge step must apply on ANY path that does NOT run the full escalation rubric
+ * this pass (chiefly the bare `/merge` orphan sweep — `REVIEW_ESCALATION` is `--label`-gated in
+ * `merge-ai-prs.mjs`, so a bare sweep never calls `decideReviewGate` at all). WITHOUT this, a concurrent lander
+ * (a second `/merge` sweep, or a bare one racing the label-scoped `/drain`) reads a PR's OTHER signals
+ * (AI-generated, required check green, mergeable) and merges it straight through, even though a prior drain
+ * pass already parked it under `review:pending`/`review:human` (an owed independent review, never cleared) or
+ * bounced it under `review:changes` (the author lane hasn't fixed it yet) — exactly how plateau#11 and
+ * web-everything#290 shipped 2 bugs the review panel had already caught but never got to act on. `review:accepted`
+ * always clears it (the reviewer's verdict wins over everything else). Pure.
+ *
+ * A caller that DOES run `decideReviewGate` this pass (the label-scoped `/drain` role) must NOT also apply this
+ * check — `decideReviewGate` already re-derives the correct verdict from a FRESH rubric score, including the
+ * merge-anyway timeout override (an escalated PR whose watch window expired with no reviewer verdict merges
+ * anyway rather than being permanently stranded, #2262) — a path this blunt label-presence check does not know
+ * about and would wrongly block forever.
+ * @param {Array} labels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
+ * @returns {boolean} true iff this PR carries an un-cleared review-escalation label and must be refused
+ */
+export function hasUnclearedReviewLabel(labels) {
+  if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) return false;
+  return hasReviewLabel(labels, REVIEW_LABELS.pending)
+    || hasReviewLabel(labels, REVIEW_LABELS.human)
+    || hasReviewLabel(labels, REVIEW_LABELS.changes);
+}
+
+/**
  * #2307 — should a caller (producer OR drain) actually ISSUE the `gh pr edit --add-label` call for a verdict
  * label? Pure. `false` when there is no label to apply, or the PR already carries it — the producer applies the
  * label at open, so a LATER drain pass re-scoring the same PR must treat it as already-scored and never
