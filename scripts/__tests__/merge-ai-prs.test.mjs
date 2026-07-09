@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, parseNumstat, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -606,6 +606,95 @@ describe('syncPrimaryOnLand — post-land primary ff-sync decision (#xwokc1n, PR
     const g = fakeGit({ [`-C ${P} rev-parse --abbrev-ref HEAD`]: { throw: 'not a git repo' } });
     const r = syncPrimaryOnLand({ exec: g.exec, primary: P });
     expect(r).toMatchObject({ synced: false, reason: 'not-a-repo', warn: true });
+  });
+});
+
+describe('resyncDetachedCwdForLand (#2348 — a lane clone\'s detached HEAD stranded JIT numbering/regen on a stale tree)', () => {
+  // Same capturing fake-exec shape as regenDerivedOnLand's tests above.
+  const fakeExec = (script = {}) => {
+    const calls = [];
+    const exec = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts, key: `${cmd} ${args.join(' ')}` });
+      const h = script[`${cmd} ${args.join(' ')}`];
+      if (h && h.throw) throw new Error(h.throw);
+      return h && 'stdout' in h ? h.stdout : '';
+    };
+    return { exec, calls };
+  };
+  const SYMREF = 'git symbolic-ref -q HEAD';
+  const STATUS = 'git status --porcelain --untracked-files=no';
+  const ANCESTOR = 'git merge-base --is-ancestor HEAD origin/main';
+  const detachedClean = { [SYMREF]: { throw: 'not a symbolic ref' }, [STATUS]: { stdout: '' } };
+
+  it('not landedLocal → no-op, no git touched', () => {
+    const { exec, calls } = fakeExec();
+    const r = resyncDetachedCwdForLand({ exec, landedLocal: false, localSynced: false });
+    expect(r).toMatchObject({ resynced: false, skipped: 'not-applicable' });
+    expect(calls.length).toBe(0);
+  });
+
+  it('already localSynced (the primary, attached branch pull already worked) → no-op, no git touched', () => {
+    const { exec, calls } = fakeExec();
+    const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: true });
+    expect(r).toMatchObject({ resynced: false, skipped: 'not-applicable' });
+    expect(calls.length).toBe(0);
+  });
+
+  it('ATTACHED branch (symbolic-ref succeeds) but pull still failed (a real divergence) → left untouched, never detached', () => {
+    const { exec, calls } = fakeExec({ [SYMREF]: { stdout: 'refs/heads/main' } });
+    const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+    expect(r).toMatchObject({ resynced: false, skipped: 'attached' });
+    expect(calls.some((c) => c.args[0] === 'checkout')).toBe(false); // the primary's own main is NEVER detached
+  });
+
+  it('DETACHED + clean tracked tree + HEAD already an ancestor → fetch + is-ancestor + checkout --detach, resynced', () => {
+    const { exec, calls } = fakeExec(detachedClean);
+    const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+    expect(r).toMatchObject({ resynced: true });
+    expect(calls.some((c) => c.key === 'git fetch origin main --quiet')).toBe(true);
+    expect(calls.some((c) => c.key === ANCESTOR)).toBe(true);
+    expect(calls.some((c) => c.key === 'git checkout --detach origin/main --quiet')).toBe(true);
+  });
+
+  it('DETACHED + UNTRACKED-only cruft does NOT block the resync (mirrors syncPrimaryOnLand\'s PR #202 fix)', () => {
+    const { exec } = fakeExec(detachedClean); // --untracked-files=no already excludes it
+    const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+    expect(r.resynced).toBe(true);
+  });
+
+  it('DETACHED + TRACKED local changes → skipped dirty, never resets a dirty tree', () => {
+    const { exec, calls } = fakeExec({ [SYMREF]: { throw: 'not a symbolic ref' }, [STATUS]: { stdout: ' M scripts/x.mjs' } });
+    const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+    expect(r).toMatchObject({ resynced: false, skipped: 'dirty' });
+    expect(calls.some((c) => c.args[0] === 'checkout')).toBe(false);
+    expect(calls.some((c) => c.args[0] === 'fetch')).toBe(false); // never even fetches a tree it won't touch
+  });
+
+  it('DETACHED + clean tree but the fetch itself fails → reported, never thrown, never checks out', () => {
+    const { exec, calls } = fakeExec({ ...detachedClean, 'git fetch origin main --quiet': { throw: 'network unreachable' } });
+    const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+    expect(r).toMatchObject({ resynced: false, skipped: 'exec-failed' });
+    expect(r.detail).toMatch(/network unreachable/);
+    expect(calls.some((c) => c.args[0] === 'checkout')).toBe(false);
+  });
+
+  // #2348 review — a lane clone can carry MORE local commits than the couple this pass just landed (e.g. a
+  // session already committed a second item's work in the same clone before pushing it). Detaching onto
+  // origin/main in that state would silently ORPHAN those unpushed commits (reflog-only). Verified live
+  // against this very lane during the review: `git merge-base --is-ancestor HEAD origin/main` on a clone
+  // carrying an unpushed resolve commit exits 1 — exactly the case this guard exists to catch.
+  it('DETACHED + clean tree but HEAD is NOT an ancestor of origin/main (unpushed local commits) → skipped, never detaches', () => {
+    const { exec, calls } = fakeExec({ ...detachedClean, [ANCESTOR]: { throw: 'exit 1' } });
+    const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+    expect(r).toMatchObject({ resynced: false, skipped: 'unpublished-commits' });
+    expect(calls.some((c) => c.args[0] === 'checkout')).toBe(false); // never orphans the unpushed commit(s)
+  });
+
+  it('DETACHED + clean tree, HEAD ancestor OK, but the checkout itself fails → reported, never thrown', () => {
+    const { exec } = fakeExec({ ...detachedClean, 'git checkout --detach origin/main --quiet': { throw: 'would overwrite local changes' } });
+    const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+    expect(r).toMatchObject({ resynced: false, skipped: 'exec-failed' });
+    expect(r.detail).toMatch(/would overwrite/);
   });
 });
 
