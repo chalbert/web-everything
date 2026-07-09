@@ -72,3 +72,74 @@ would yield.
 - Slice A is the one seam I'm *adding* beyond the body: the vectors are TS-only today, so the first non-JS
   renderer needs them as consumable data + a grading contract. It's the "land foundational slice A first, its
   artifact exposes the seams for the rest" move — and it collapses 6× reinvention into one shared prerequisite.
+
+---
+
+## `/slice 2356` — Native Go SSR renderer for directive regions (focused, appended 2026-07-09)
+
+**#2356** (`kind: epic`, `parent: 2069`, `blockedBy: [2354]`, unsliced — no children). One of the
+per-language renderer sub-epics carved from the #2069 roadmap split above. Its foundational blocker **#2354
+is resolved** — the language-neutral vector export
+([we:conformance-vectors/webdirectives-ssr.vectors.json](../conformance-vectors/webdirectives-ssr.vectors.json))
+and the grading contract
+([we:conformance-vectors/webdirectives-ssr-harness-contract.md](../conformance-vectors/webdirectives-ssr-harness-contract.md))
+both landed — so the blocker DAG is clear and the item is now a live `/slice` candidate per the roadmap
+recursion.
+
+### Work-investigation pass
+
+- **The Go renderer contract is fully scoped, zero design ambiguity.** The harness contract pins grading
+  (byte-for-byte UTF-8 equality against `expectedHtml`, all 7 vectors, per-vector pass/fail), the DJB2
+  `key-hash` algorithm (UTF-16 code units — the one cross-language footgun), and the black-box ruling
+  (#2030 — render internals are a per-impl call, **not** a fork). No open question gates the build.
+- **The reference is one coherent module.** The Node oracle is a single ~266-line file
+  ([frontierui:plugs/webdirectives/ssr/nodeReferenceRenderer.ts](../../frontierui/plugs/webdirectives/ssr/nodeReferenceRenderer.ts))
+  behind a `(source, data) => string` seam
+  ([frontierui:plugs/webdirectives/ssr/ServerRenderer.ts](../../frontierui/plugs/webdirectives/ssr/ServerRenderer.ts)):
+  parser → 5 directive expanders (for-each keyed+empty, if, switch, resource:loader, defer) → byte-exact
+  serializer → state tokens (`count`/`key-hash`/`condition`/`value`), all sharing one type surface.
+- **The Go surface does not exist.** A `find` over the frontierui repo returns **zero Go source files and no
+  Go module manifest** — this is a from-scratch build in a language the repo has no tooling for yet. Unlike
+  Node it can't lean on a DOM shim (happy-dom) for parse+serialize; it must hand-roll HTML parsing and
+  byte-exact serialization, so the whole renderer is one tightly-coupled package.
+
+### Could not split — YES (foundational: the surface doesn't exist yet)
+
+| # | Title | Failing condition | Unblocking action |
+|---|---|---|---|
+| **2356** | Native Go SSR renderer for directive regions | **Investigation pass** (greenfield — no Go code to draw seams in) + **(3)** no `file:line`-citable named paths + **(4)** only a rigid linear chain + **(5)** no intermediate state passes the full harness | **Build it single-pass** as the foundational Go artifact — this item *is* the foundational slice. Re-run `/slice` only once the Go package exists and proves large enough to expose real separable seams. |
+
+**Why each condition fails:**
+
+- **Investigation / (3):** every hypothetical slice names Go source files that don't exist yet — a slice you
+  can't point at real code for is a hypothesis, not a slice. The `file:line` relaxation is for *sub-epic*
+  pure-build slices; 2356's natural children are **leaf stories** (it's one standard's impl, not a roadmap of
+  N standards), which must be grounded.
+- **(4) rigid linear chain:** the only decomposition is by-directive-family, but every family slice depends
+  on the shared parser + serializer + marker-emitter scaffolding of the first, all editing the same package.
+  No two proceed independently.
+- **(5) no valid demoable intermediate:** the demo for a conforming renderer **is** passing the byte-for-byte
+  harness (`failed` empty). A for-each-only renderer fails the if/switch/resource/defer vectors — a
+  half-an-algorithm intermediate, not a shippable state.
+- **Conservative instinct:** this is one ~300–500-line coherent Go package. Carving it into "add directive N"
+  stories that each edit the same file fragments one deliverable into pieces that only make sense together —
+  multiplied review overhead, zero independence gain. The needless-split anti-pattern.
+
+No decision/fork is buried (condition (1) holds — #2030 already ruled the internals a black box), so there
+is **nothing to file as a `kind: decision` card** and no Tier-B decision to register. The reason is purely
+*foundational*, not *undecided*.
+
+### Recommendation for the human — reclassify epic → story
+
+2356 reads as a single **size ~8 story**, not an epic: one coherent from-scratch renderer package, one
+deliverable, no independently-ownable sub-scopes. The #2069 roadmap split carved every language as a
+*sub-epic* uniformly, but the roadmap tell is "each child is *clearly* epic-sized" — a single-language port
+of one 266-line module is a story band, not a subsystem-of-subsystems. The friction that exposes this: an
+epic has no `childlessReason` for "atomic/foundational" (only `blocked`/`untriaged`/`program`), so 2356 will
+keep showing the **slice badge** it can't satisfy.
+
+**Cleanest fix (needs your call — this is a reclassification, not a `/slice` mutation):** splice 2356
+`kind: epic` → `kind: story`, `size: 8`, and set `unsplittableReason: foundational` (the story-side
+"atomic · surface doesn't exist yet" pill). It then drops the slice badge, sits in the batch/pick pool as an
+agent-ready build, and a later `/slice` can revisit only if the built package proves large. **Not done** —
+say the word and I will.
