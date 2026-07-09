@@ -30,6 +30,12 @@
  * critiquing it — stays with the subagents). The round cap itself (`NEGOTIATION_ROUND_CAP`) is a tuning knob,
  * not a magic number scattered per caller.
  *
+ * #2310 (v3, under epic #2285) fans v2's single reviewer out into a MULTI-MANDATE PANEL — distinct mandated
+ * reviewers (correctness / security / simplicity / standards-conformance, the `/code-review` lenses) each judge
+ * the diff independently (`buildPanelMandate()`, `MANDATE_LENSES`/`MANDATORY_LENSES`/`ADVISORY_LENSES`), and
+ * `derivePanelVerdict()` reduces their per-lens verdicts to the ONE combined verdict `deriveNegotiationOutcome`
+ * already consumes — the round loop itself is unchanged, v3 only adds the many-verdicts-to-one reduction.
+ *
  * Pure, unit-tested in `we:scripts/lib/__tests__/review-core.test.mjs`.
  */
 
@@ -205,4 +211,127 @@ export function deriveNegotiationOutcome({ verdict, round, roundCap = NEGOTIATIO
   if (verdict === VERDICTS.NEEDS_HUMAN) return NEGOTIATION_OUTCOMES.ESCALATE;
   if (verdict === VERDICTS.ACCEPT) return NEGOTIATION_OUTCOMES.LAND;
   return round < roundCap ? NEGOTIATION_OUTCOMES.CONTINUE : NEGOTIATION_OUTCOMES.ESCALATE;
+}
+
+/**
+ * #2310 (v3, under epic #2285) — the MULTI-MANDATE REVIEWER PANEL. v2's single reviewer fans out into distinct
+ * mandated lenses (the `/code-review` dimensions), each judging the SAME diff independently via `buildMandate`
+ * (one subagent per lens, seeded with `buildPanelMandate`). The panel's combined verdict then drives the SAME
+ * `deriveNegotiationOutcome` round loop v2 already established — v3 only adds the "many lens verdicts → one
+ * panel verdict" reduction; the negotiate/land/escalate machinery is unchanged and single-sourced.
+ *
+ * Settled at spec (#2310): which lenses are MANDATORY (must unanimously accept to land) vs. ADVISORY
+ * (surfaced, never blocking) is a judgment call about what already has a deterministic backstop (#51 — hookable
+ * vs. judgment). `correctness` and `security` are genuine invariants with no other gate: a landed diff must not
+ * be broken or exploitable, so they are MANDATORY. `standards-conformance` already has a deterministic backstop
+ * (`npm run check:standards`, run as its own lane gate before every PR — #2199) — the panel's lens is a semantic
+ * second opinion on top of that mechanical gate, not the only line of defense, so it is ADVISORY. `simplicity`
+ * is a genuine stylistic judgment call (reasonable reviewers can disagree without the diff being unsafe to
+ * land), so it is ADVISORY too. Advisory findings are ALWAYS surfaced (never silently dropped) but never block
+ * the unanimous-accept land path on their own.
+ */
+export const MANDATE_LENSES = Object.freeze({
+  CORRECTNESS: 'correctness',
+  SECURITY: 'security',
+  SIMPLICITY: 'simplicity',
+  STANDARDS: 'standards-conformance',
+});
+
+/** Lenses that must UNANIMOUSLY accept for the panel to land the PR (#2310). A tuning knob (exported, not
+ *  hardcoded per caller) — see the module doc above for why correctness/security are the mandatory pair. */
+export const MANDATORY_LENSES = Object.freeze([MANDATE_LENSES.CORRECTNESS, MANDATE_LENSES.SECURITY]);
+
+/** Lenses that are ALWAYS surfaced but never block the unanimous-accept land path (#2310) — see the module doc
+ *  above for why standards-conformance/simplicity are advisory. */
+export const ADVISORY_LENSES = Object.freeze([MANDATE_LENSES.SIMPLICITY, MANDATE_LENSES.STANDARDS]);
+
+/** Every panel lens, mandatory first — the full fan-out set a v3 panel round spawns one reviewer per. */
+export const PANEL_LENSES = Object.freeze([...MANDATORY_LENSES, ...ADVISORY_LENSES]);
+
+/**
+ * Build the mandate handed to ONE lens reviewer in the v3 panel (#2310) — wraps `buildMandate({ mandate: lens
+ * })` (same diff-only, no-checkout #2336 isolation every reviewer shares) with the panel framing: this
+ * reviewer judges its OWN lens only and must not soften its verdict to pre-empt another lens's concern — a
+ * genuine cross-mandate tradeoff is for a human to resolve, never for one reviewer to compromise away.
+ * @param {{lens: string, contextIsolation?: string}} o
+ * @returns {string}
+ */
+export function buildPanelMandate({ lens, contextIsolation = 'diff-only' } = {}) {
+  if (!PANEL_LENSES.includes(lens)) {
+    throw new Error(`buildPanelMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
+  }
+  const base = buildMandate({ contextIsolation, mandate: lens });
+  return [
+    base,
+    `You are ONE of several independent mandate reviewers on this diff, each judging a single lens`,
+    `(the full panel: ${PANEL_LENSES.join(', ')}).`,
+    'Judge ONLY your own lens — do not comment on concerns outside it, and do not soften or withhold your',
+    'verdict to accommodate what you guess another lens\'s reviewer might want. A genuine tradeoff BETWEEN',
+    'mandates (e.g. security wants X, simplicity wants not-X) is human judgment by definition — surface your',
+    'honest verdict for your own lens and let the panel reduction detect the conflict; do not resolve it yourself.',
+  ].join(' ');
+}
+
+/**
+ * Tag each lens's findings with their originating lens (so a merged findings list — the editor mandate, the
+ * operator-facing summary — never loses provenance) and flatten into one list. Pure.
+ * @param {Object<string, Array<object>>} lensFindings - `{ [lens]: rawFindings[] }`.
+ * @returns {Finding[]}
+ */
+export function buildPanelFindings(lensFindings = {}) {
+  return Object.entries(lensFindings).flatMap(([lens, findings]) =>
+    normalizeFindings(findings).map((f) => ({ ...f, category: f.category ? `${lens}/${f.category}` : lens })),
+  );
+}
+
+/**
+ * Reduce the panel's per-lens verdicts to ONE combined verdict the existing `deriveNegotiationOutcome` round
+ * loop consumes unchanged (#2310). Pure — mirrors `deriveVerdict`'s single-sourcing:
+ *
+ *   - `humanRequired` (the #2285 v1 conflict-of-interest flag) → `needs-human`, ALWAYS, same as `deriveVerdict`.
+ *   - `conflict` → `needs-human`. Whether the mandatory lenses' findings are a genuine MUTUALLY-EXCLUSIVE
+ *     tradeoff (not just "both want changes") is a semantic read of the findings text — judgment, not a thing
+ *     this pure function can detect from verdict labels alone (#51: the derivation stays mechanical, the
+ *     judgment stays with the caller/subagents reading the actual findings) — so the caller passes it in
+ *     explicitly, the same pattern `deriveVerdict`'s `humanRequired` already establishes.
+ *   - every MANDATORY lens verdict is `accept` → `accept` (the "unanimous accept lands" spec line — unanimity
+ *     is scored over the mandatory lenses; an advisory lens's outstanding findings are surfaced, never blocking).
+ *   - otherwise → `changes` (at least one mandatory lens wants changes; feeds the SAME round-cap loop v2 uses).
+ *
+ * @param {{lensVerdicts: Object<string, 'accept'|'changes'|'needs-human'>, humanRequired?: boolean,
+ *   conflict?: boolean, mandatoryLenses?: string[]}} o
+ * @returns {'accept'|'changes'|'needs-human'}
+ */
+export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, mandatoryLenses = MANDATORY_LENSES } = {}) {
+  if (humanRequired || conflict) return VERDICTS.NEEDS_HUMAN;
+  if (!mandatoryLenses.length) {
+    // Guard the `Array.prototype.every` vacuous-truth trap: an empty mandatory set must never silently read as
+    // "everyone accepted" — a caller that misconfigures `mandatoryLenses` to `[]` gets a loud error, not a
+    // free `accept` with zero verdicts actually checked.
+    throw new Error('derivePanelVerdict: mandatoryLenses must be non-empty — an empty set would vacuously "accept"');
+  }
+  const mandatoryVerdicts = mandatoryLenses.map((lens) => lensVerdicts[lens]);
+  const missing = mandatoryLenses.filter((lens) => !lensVerdicts[lens]);
+  if (missing.length) {
+    throw new Error(`derivePanelVerdict: missing verdict for mandatory lens(es): ${missing.join(', ')}`);
+  }
+  if (mandatoryVerdicts.some((v) => v === VERDICTS.NEEDS_HUMAN)) return VERDICTS.NEEDS_HUMAN;
+  if (mandatoryVerdicts.every((v) => v === VERDICTS.ACCEPT)) return VERDICTS.ACCEPT;
+  return VERDICTS.CHANGES;
+}
+
+/**
+ * Render the per-lens verdict table the drain posts on escalation (#2310's "how a split verdict is surfaced to
+ * the operator" spec line) — one row per lens, tagged mandatory/advisory, so a human reading the escalation
+ * comment sees at a glance WHICH lens(es) disagreed and whether the disagreement was ever blocking. Pure.
+ * @param {{lensVerdicts?: Object<string, string>, mandatoryLenses?: string[], lenses?: string[]}} [o]
+ * @returns {string} a markdown table.
+ */
+export function renderPanelVerdictTable({ lensVerdicts = {}, mandatoryLenses = MANDATORY_LENSES, lenses = PANEL_LENSES } = {}) {
+  const rows = lenses.map((lens) => {
+    const verdict = lensVerdicts[lens] ?? '(no verdict)';
+    const weight = mandatoryLenses.includes(lens) ? 'mandatory' : 'advisory';
+    return `| ${lens} | ${weight} | ${verdict} |`;
+  });
+  return ['| lens | weight | verdict |', '| --- | --- | --- |', ...rows].join('\n');
 }
