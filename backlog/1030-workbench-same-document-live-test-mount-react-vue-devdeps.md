@@ -216,6 +216,6 @@ pair, user's servers untouched) — the wrapper renders the real `<background-ta
 tests green (new `liveMount` unit + `mountLive` integration cover all three amendments + the error surface);
 `check:standards` 0 errors.
 
-**Leftover filed → #2374:** the full workbench demo entry has a **pre-existing** `node:fs/promises`-externalized
+**Leftover filed → #2308:** the full workbench demo entry has a **pre-existing** `node:fs/promises`-externalized
 break (reproduces on `main` with the stock `?block=auto-complete`), so the live block is verified via its own
 code path rather than the demo's `workbenchReady`. Not a #1030 regression; downstream of the demo-graph fix.
