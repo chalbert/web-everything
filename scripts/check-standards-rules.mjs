@@ -2136,3 +2136,59 @@ export function validateUntrackedDerivedArtifacts(untrackedPaths, { derivedDirs 
   }
   return { errors, warnings: [] };
 }
+
+// ── Playwright container-image pin lockstep (#2234) ────────────────────────────
+// The visual-regression CI jobs (ci.yml's `visual` job + update-visual-baselines.yml) render inside a
+// version-locked `mcr.microsoft.com/playwright:vX.Y.Z-jammy` container so rendered pixels stay
+// byte-reproducible across machines/CI — that's the whole point of the pin (#2234, decision #2233's
+// substrate). The image tag is hand-written in workflow YAML and can silently drift from the
+// `@playwright/test` version actually installed (a `package.json` bump updates one, not the other); a
+// drifted container ships a *different* bundled browser build than the test runner expects, quietly
+// re-introducing the exact byte-reproducibility gap this pin exists to close. Fail loud instead.
+
+/** Workflow files required to carry an in-lockstep container pin (the render + the refresh flow). */
+export const PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES = [
+  '.github/workflows/ci.yml',
+  '.github/workflows/update-visual-baselines.yml',
+];
+
+/** Extract every `vX.Y.Z-jammy` Playwright container image tag referenced in a workflow file's text. */
+export function extractPlaywrightContainerTags(text) {
+  return [...text.matchAll(/mcr\.microsoft\.com\/playwright:(v[0-9.]+-jammy)/g)].map((m) => m[1]);
+}
+
+/**
+ * Playwright container-pin lockstep: every workflow in `filesReferences` must carry at least one
+ * `mcr.microsoft.com/playwright:vX.Y.Z-jammy` reference, and every tag found must equal
+ * `v${installedVersion}-jammy` — no drift between the container's bundled browser build and the
+ * npm-installed `@playwright/test` version. Pure: takes the resolved installed version + each file's
+ * extracted tags (via extractPlaywrightContainerTags); the fs/lockfile reads stay in check-standards.mjs.
+ */
+export function validatePlaywrightContainerPin({ installedVersion, filesReferences }) {
+  const errors = [];
+  if (!installedVersion) {
+    errors.push({ message:
+      `Playwright container pin: could not resolve the installed @playwright/test version from ` +
+      `package-lock.json — cannot verify the container image tag is in lockstep (#2234).` });
+    return { errors, warnings: [] };
+  }
+  const expectedTag = `v${installedVersion}-jammy`;
+  for (const { file, tags } of filesReferences) {
+    if (tags.length === 0) {
+      errors.push({ message:
+        `Playwright container pin: ${file} has no "mcr.microsoft.com/playwright:${expectedTag}" container ` +
+        `image reference — the visual-regression job(s) must render inside the version-locked Playwright ` +
+        `container so pixels stay byte-reproducible across machines/CI (#2234).` });
+      continue;
+    }
+    for (const tag of tags) {
+      if (tag !== expectedTag)
+        errors.push({ message:
+          `Playwright container pin drift: ${file} pins "mcr.microsoft.com/playwright:${tag}" but the ` +
+          `installed @playwright/test version is ${installedVersion} (expects "${expectedTag}"). Bump the ` +
+          `image tag alongside every @playwright/test version bump (#2234) — a mismatched container build ` +
+          `re-introduces the byte-reproducibility drift this pin exists to close.` });
+    }
+  }
+  return { errors, warnings: [] };
+}

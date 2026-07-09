@@ -1,9 +1,12 @@
 ---
 kind: task
-status: open
+status: resolved
 parent: "2232"
 blockedBy: [2233]
 dateOpened: "2026-07-04"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
+graduatedTo: none
 tags: [ci, visual-regression, playwright, determinism]
 ---
 
