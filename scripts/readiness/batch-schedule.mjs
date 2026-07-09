@@ -32,7 +32,7 @@
  * PURE. No fs, no network — a probed-entry array in, a plan out. Proved by `__tests__/batch-schedule.test.mjs`.
  * Reuses the `lane-partition.mjs` primitives so the two predicates never drift.
  */
-import { filesOf, mustSerialize, conflicts, disjoint, blockEdge } from './lane-partition.mjs';
+import { filesOf, mustSerialize, conflicts, disjoint, blockEdge, blockedByEdge } from './lane-partition.mjs';
 
 /**
  * Deterministic dispatch order key. Numeric backlog NNN sorts numerically; a provisional `xNNNNNN` hash (or
@@ -66,12 +66,29 @@ export function contends(x, y) {
 }
 
 /**
- * The contention-PREDECESSORS of an item within a pack: the items it contends with that are ordered strictly
- * before it. An item is dispatchable once every predecessor has landed — this is what makes a mutually-
- * contending group run as a single serial chain (item k waits for k−1) rather than deadlocking.
+ * Is contending `o` a PREDECESSOR of `item` — must `o` land in an EARLIER wave? A real `blockedBy` edge
+ * decides the direction by its ORIENTATION, not by `num`: if `item` is blockedBy `o`, `o` goes first even
+ * when it carries the HIGHER num (the bug this guards — numeric order would have scheduled the blocked item
+ * ahead of its blocker). If instead `o` is blockedBy `item`, `item` leads and `o` is NOT a predecessor. With
+ * no directional edge — pure file-overlap / merge-risk contention, or a degenerate mutual (cyclic) edge —
+ * fall back to the deterministic numeric `beforeInOrder` tiebreak (which keeps a lower-numbered blocker and
+ * ordinary contention behaving exactly as before).
+ */
+function isPredecessor(o, item) {
+  const oBlocksItem = blockedByEdge(item, o); // item.blockedBy ∋ o.num ⇒ o must land first
+  const itemBlocksO = blockedByEdge(o, item); // o.blockedBy ∋ item.num ⇒ item must land first
+  if (oBlocksItem !== itemBlocksO) return oBlocksItem; // a clean one-way edge wins over num order
+  return beforeInOrder(o, item);                       // no edge (or a cycle) ⇒ numeric tiebreak
+}
+
+/**
+ * The contention-PREDECESSORS of an item within a pack: the items it contends with that must land before it.
+ * Direction comes from a real `blockedBy` edge when present (blocker first, whatever its num), else from the
+ * deterministic numeric order. An item is dispatchable once every predecessor has landed — this is what makes
+ * a mutually-contending group run as a single serial chain rather than deadlocking.
  */
 export function predecessorsOf(item, entries) {
-  return entries.filter((o) => o !== item && beforeInOrder(o, item) && contends(item, o));
+  return entries.filter((o) => o !== item && contends(item, o) && isPredecessor(o, item));
 }
 
 /**

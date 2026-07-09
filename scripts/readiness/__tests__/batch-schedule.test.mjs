@@ -80,6 +80,24 @@ describe('scheduleWaves — the layered plan; union == the pack, each item once'
     expect(selectModel([a, b, c])).toBe('mixed');
   });
 
+  it('a HIGHER-numbered blocker still dispatches BEFORE the lower-numbered item it blocks', () => {
+    // #259 negotiation regression: item 2 is blockedBy item 5, so item 5 MUST land first even though 5 > 2.
+    // The scheduler must honor the blockedBy DIRECTION, not the numeric num order (which would emit [[2],[5]]).
+    const blocked = entry(2, we('src/b.ts'), { blockedBy: ['5'] });
+    const blocker = entry(5, we('src/a.ts'));
+    const pack = [blocker, blocked];
+    // the blocker leads; the blocked item waits on it
+    expect(predecessorsOf(blocker, pack).map((e) => e.num)).toEqual([]);
+    expect(predecessorsOf(blocked, pack).map((e) => e.num)).toEqual(['5']);
+    // nothing landed ⇒ only the blocker is dispatchable
+    expect(readyAfter(pack, []).map((e) => e.num)).toEqual(['5']);
+    // waves: blocker first, then the item it blocks
+    expect(scheduleWaves(pack).map((w) => w.map((e) => e.num))).toEqual([['5'], ['2']]);
+    expect(selectModel(pack)).toBe('all-serial');
+    // the placement copy still names the edge (blocked chained after its blocker)
+    expect(scheduleReason(blocked, pack)).toMatch(/chained after #5 — blockedBy edge/);
+  });
+
   it('every item appears exactly once across the waves', () => {
     const items = [entry(1, we('x', 'shared')), entry(2, we('y', 'shared')), entry(3, we('z')), entry(4, null)];
     const flat = scheduleWaves(items).flat().map((e) => e.num).sort();
