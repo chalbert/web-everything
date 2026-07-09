@@ -1,13 +1,24 @@
 name: Update visual baselines (linux)
 
 # Regenerates the -chromium-linux Playwright snapshot baselines for the visual-regression guard
-# (#2177 / #1966). Run this after any intentional look change, or to seed linux baselines for the
-# first time. The updated PNGs are committed directly to the target branch so `check:visual` in CI
-# stays green going forward.
+# (#2177 / #1966) and opens a PULL REQUEST carrying the refreshed PNGs — the PR's rendered image diff
+# IS the review surface (#2238). This retires the #2179 verdict/mtime sidecar gate
+# (scripts/check-visual-baseline-update.mjs, removed): that gate required an approved verdict JSON
+# written AFTER the snapshot PNG, but a bot workflow can never author a verdict postdating its own
+# regenerated PNG — so the two were in permanent deadlock and linux baselines could never be seeded.
 #
 # Usage:
-#   GitHub UI → Actions → "Update visual baselines (linux)" → Run workflow → choose branch.
-#   The workflow commits the refreshed -linux PNGs to the same branch via a bot commit.
+#   GitHub UI → Actions → "Update visual baselines (linux)" → Run workflow → choose base branch.
+#   The workflow pushes a `visual-baselines/refresh-<run id>` branch and opens a PR against that base
+#   branch. It NEVER commits straight to the base branch. No diff → no PR (no-op).
+#
+# REVIEW BAR (#2238) — before approving/merging a baseline-refresh PR, the reviewer (human or AI) must
+# open the PR's "Files changed" tab and, for EVERY changed PNG, confirm the pixel diff matches an
+# intentional, already-landed look change (cite the PR/commit that caused it) — not an accidental
+# regression, a flaky render, or drift from an unrelated dependency bump. A baseline PR with no known
+# corresponding look change gets rejected/closed, never approved on faith. This PR review (backed by
+# branch protection requiring an approval before merge) IS the recorded judgment — no separate sidecar
+# artifact is needed.
 #
 # Linux-in-container is the SOLE baseline target (#2235; a prior darwin set was dropped once rendering
 # was pinned to this container, #2234) — a bare local `npm run check:visual:update` on a non-linux host
@@ -25,12 +36,13 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "Branch to update baselines on (defaults to main)"
+        description: "Base branch to refresh baselines against (defaults to main)"
         required: false
         default: "main"
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   update-baselines:
@@ -40,13 +52,13 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.58.1-jammy
     steps:
-      # Check out the target branch so the committed PNGs land there.
+      # Check out the base branch so the diff (and the PR) is against it.
       - name: Checkout WE
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.branch || 'main' }}
           path: web-everything
-          # Need write permission for the commit-back step.
+          # Need write permission for the branch push in the "Open baseline-refresh PR" step.
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout FUI (sibling)
@@ -105,16 +117,34 @@ jobs:
           # baseline refresh hangs on webServer, which is why the -linux baselines were never seeded.
           WE_PREBUILT_SITE: "1"
 
-      # Commit the updated -linux baselines back to the branch.
-      - name: Commit updated baselines
-        working-directory: web-everything
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tests/visual/rendered-site-visual.spec.ts-snapshots/
-          if git diff --cached --quiet; then
-            echo "No baseline changes — snapshots are already up to date."
-          else
-            git commit -m "chore(visual): refresh linux baselines [update-visual-baselines workflow]"
-            git push origin HEAD:${{ github.event.inputs.branch || 'main' }}
-          fi
+      # Push the refreshed baselines to a dedicated branch and open (or update, on re-dispatch) a PR
+      # against the base branch — the PR's rendered image diff is the review surface (#2238). Scoped to
+      # the snapshots dir via add-paths so an incidental _site/ build artifact never rides along. A clean
+      # working tree (no baseline change) is a no-op: no branch, no PR.
+      #
+      # KNOWN GAP: this step authors the branch push + PR with the default `secrets.GITHUB_TOKEN`. Per
+      # GitHub's own recursion guard (same behavior release-please.yml documents for its Release PR), a
+      # push/PR made with the default GITHUB_TOKEN does NOT trigger `pull_request`-triggered workflows —
+      # so ci.yml's `test` job (main's sole required status check, branch-protection `strict` mode) will
+      # never report on this PR, and it can sit permanently unmergeable through the normal route. Until a
+      # repo PAT/App-token secret is provisioned for this step (a credential action, out of an agent's
+      # reach — file/track separately), land it via `gh workflow run ci.yml --ref <branch>` to backfill
+      # the check, or an admin merge override.
+      - name: Open baseline-refresh PR
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        with:
+          path: web-everything
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: ${{ github.event.inputs.branch || 'main' }}
+          branch: visual-baselines/refresh-${{ github.run_id }}
+          add-paths: tests/visual/rendered-site-visual.spec.ts-snapshots/
+          commit-message: "chore(visual): refresh linux baselines [update-visual-baselines workflow]"
+          title: "chore(visual): refresh linux baselines"
+          body: |
+            Regenerated `-chromium-linux` Playwright snapshot baselines via the
+            "Update visual baselines (linux)" workflow (run [`${{ github.run_id }}`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})), against base branch `${{ github.event.inputs.branch || 'main' }}`.
+
+            **Review bar (#2238):** open "Files changed" and, for every changed PNG, confirm the pixel
+            diff matches an intentional, already-landed look change (cite the PR/commit) before
+            approving. No unreviewed baseline merges — this PR's review IS the visual-baseline gate
+            (retires the #2179 verdict/mtime sidecar gate).
