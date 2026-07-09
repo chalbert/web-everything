@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "777"
-status: active
+status: resolved
 dateOpened: "2026-06-17"
 dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#gate-rollout-ratchet"
 preparedDate: "2026-07-02"
 relatedReport: reports/2026-07-02-a11y-ratchet-promotion-endgame.md
 tags: [dogfood, a11y, ratchet, ci-gate]
