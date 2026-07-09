@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "2275"
-status: active
+status: resolved
 dateOpened: "2026-07-06"
 dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#pool-siblings-real-built-clones"
 tags: []
 ---
 
