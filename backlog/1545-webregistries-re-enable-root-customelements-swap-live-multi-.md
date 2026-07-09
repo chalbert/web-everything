@@ -2,10 +2,11 @@
 kind: story
 size: 3
 parent: "1483"
-status: open
+status: resolved
 locus: frontierui
-humanGate: { kind: setup, short: "Live-verify the root customElements swap on :3000 / :4000 / FUI demos from a session that owns the dev servers.", what: "Re-enables the root `window.customElements` swap that previously white-paged the plateau site; acceptance requires live-verifying plateau-app (:4000) + WE site (:3000) + FUI demos render with no upgrade crash while OWNING the dev-server lifecycle. A concurrent batch can't restart/recover the user's running :3000/:4000 (don't-kill-dev-server). Needs a focused session that owns the servers — the reason 4 prior batch pre-flights declined it." }
 dateOpened: "2026-06-22"
+dateResolved: "2026-07-09"
+graduatedTo: "fui:plugs/webregistries/index.ts (root swap re-enabled)"
 tags: []
 ---
 
@@ -39,3 +40,30 @@ conflict), so the root registry should **delegate `define()` to the native regis
 class natively)** and let the browser's native upgrade install private fields correctly — reserving the
 stand-in/determination path for genuinely-scoped (shadow) registries. Needs a card before #1545 can be
 re-attempted.
+
+## RESOLVED 2026-07-09 — root swap re-enabled (FUI PR #25, merged)
+
+The recommended fix direction landed as **#1593** (native-delegate): at root scope the registry's
+`define()` defines the REAL class natively, so the browser's native upgrade-on-define constructs
+already-parsed autonomous elements with the real constructor (installing `#private` fields). With #1593
+in `main`, this slice re-enabled the swap:
+
+- **`fui:plugs/webregistries/index.ts`** — uncommented `applyPatches()` step 3: root `window.customElements`
+  is now a `CustomElementRegistryImpl` in root-scope mode (`setRootScope(document)`).
+- **`fui:plugs/webregistries/CustomElementRegistry.ts`** — made the `define()` instance-field-callback
+  harvest (`new element()`) resilient (try/catch → prototype fallback): the swap now routes form-associated
+  elements through this path, whose constructor calls `this.attachInternals()` — a real-browser API
+  happy-dom lacks. Fixed the `patch-interaction` full-bootstrap stress test; real browsers are unaffected.
+- **`fui:.../globalPatching.test.ts`** — updated to assert the root registry is now the root-scoped impl.
+
+**Live-verified owning the dev-server lifecycle** (the humanGate — Playwright, real Chromium, primary FUI
+checkout, then restored so the change rode the lane→PR):
+
+- **plateau-app :4000** ✓ renders (body 824, `route-view` upgraded), **zero `#routes`/upgrade crashes** —
+  the exact case that white-paged before.
+- **WE site :3000** ✓ renders (body 7566).
+- **FUI demos :6002** ✓ renders (body 25623).
+
+FUI gate: 75/75 webregistries + patch-interaction unit tests green; `tsc` clean for the changeset. FUI-only
+(no `we:plugs` byte-replica — #1047 deleted that copy). `humanGate` cleared. Stale-block follow-ups now
+surfaced by the gate: **#1860** and **#640** are `blockedBy: #1545` (now resolved) — re-point or start them.
