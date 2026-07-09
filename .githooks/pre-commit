@@ -11,7 +11,8 @@
 # `|| exit $?` after each gate so the first failure stops the hook and propagates the right exit code.
 npm run --silent lint:locus || exit $?
 
-# #2179 — AI visual-baseline gate. Blocks a bare snapshot commit (PNG files in *-snapshots/ dirs)
-# that lacks a corresponding approved AI verdict in tests/visual/verdicts/.
-# WORKFLOW: check:visual → visual-baseline-review.mjs → approve verdict → check:visual:update → commit.
-node scripts/check-visual-baseline-update.mjs --staged
+# #2179's pre-commit verdict/mtime gate (scripts/check-visual-baseline-update.mjs) is RETIRED (#2238):
+# it deadlocked the CI baseline-refresh workflow, which can never author a verdict that postdates its
+# own regenerated PNG. Baseline review now happens in the PR that carries the changed snapshot(s) — the
+# rendered image diff IS the review surface (see .github/workflows/update-visual-baselines.yml and
+# #2183's blanket "changes land via reviewed PR" rule) — so no separate sidecar gate is needed here.
