@@ -1,11 +1,16 @@
 /**
  * @file scripts/__tests__/lane-pool-refresh-guard.test.mjs
- * @description Proof of the #2267 dirty-or-ahead guard in `scripts/lane-pool.mjs`. `refreshLane()` used to
- *   unconditionally `git reset --hard` + `git clean -fd` every lane on `refresh`/`provision`, silently
- *   destroying a concurrent session's uncommitted edits or locally-committed-but-unpushed work. These tests
- *   spawn the real CLI against a throwaway local origin + reference checkout (no network, no shared pool
- *   root) and assert: a dirty lane is left untouched; an ahead (unpushed-commit) lane is left untouched; a
- *   clean/up-to-date lane still fast-forwards; and `--force` restores the old unconditional reset.
+ * @description Proof of the #2267 dirty-or-ahead guard AND the #2337(b) live-lease gate in
+ *   `scripts/lane-pool.mjs`. `refreshLane()` used to unconditionally `git reset --hard` + `git clean -fd`
+ *   every lane on `refresh`/`provision`, silently destroying a concurrent session's uncommitted edits or
+ *   locally-committed-but-unpushed work; `--force` restores that reset for dirty/ahead (staleness), but per
+ *   #2337(b) must NEVER stomp a LIVE lease (an ownership hold) on any of the three forced entry points —
+ *   `refresh --force` / `provision --force` (skip loud) and `acquire --lane=N --force` (hard-fail, pointing
+ *   at `release --force`). These tests spawn the real CLI against a throwaway local origin + reference
+ *   checkout (no network, no shared pool root) and assert: a dirty lane is left untouched; an ahead
+ *   (unpushed-commit) lane is left untouched; a clean/up-to-date lane still fast-forwards; `--force` still
+ *   recycles a free-but-dirty lane; `--force` does NOT recycle a live-leased lane; `acquire --lane=N --force`
+ *   hard-fails on a live lease; and `release --force` is the documented escape hatch.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
@@ -152,11 +157,11 @@ describe('lane-pool refresh/provision dirty-or-ahead guard (#2267)', () => {
     expect(readFileSync(join(lane, 'untracked-during-lease.txt'), 'utf8')).toContain('consumer work');
   });
 
-  // #2329 — CHARACTERIZATION of the residual data-loss path (the item's open decision): `--force` overrides
-  // BOTH the lease skip AND the dirty/ahead skip, so it silently eats a LEASED lane's untracked work. This
-  // locks the CURRENT behaviour as the baseline the follow-up policy decision moves against — it is the only
-  // path (besides an expired/absent lease) that reproduces the 2026-07-07 loss; the un-forced path is safe.
-  it('--force DOES eat a leased lane\'s untracked work (the residual policy gap, characterized)', () => {
+  // #2337(b) ruling — `--force` overrides the dirty/ahead STALENESS guard but must NEVER stomp a LIVE
+  // lease (an ownership hold, distinct from tree residue). `refresh --force` on a leased lane now SKIPS it
+  // (loud), so the lease-holder's untracked work SURVIVES — flipped from the pre-#2337 characterization
+  // that this same scenario silently ate the work.
+  it('--force does NOT eat a leased lane\'s untracked work — the lease still skips it (#2337b)', () => {
     provisionOne();
     const acq = runPool(
       ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install', '--no-reset'],
@@ -164,7 +169,22 @@ describe('lane-pool refresh/provision dirty-or-ahead guard (#2267)', () => {
     );
     expect(acq.code).toBe(0);
     const lane = acq.out.trim().split('\n').pop();
-    writeFileSync(join(lane, 'untracked-eaten.txt'), 'lost on --force\n');
+    writeFileSync(join(lane, 'untracked-eaten.txt'), 'survives --force now\n');
+
+    const r = runPool(
+      ['refresh', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install', '--force'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(r.code).toBe(0);
+    expect(r.out + r.err).toMatch(/SKIPPED/); // lease skip fires even under --force
+    expect(readFileSync(join(lane, 'untracked-eaten.txt'), 'utf8')).toContain('survives --force now');
+  });
+
+  // #2337(b) — a free-but-DIRTY (unleased) lane is still recycled by `--force`, exactly as before: the
+  // override targets tree-staleness, not ownership, so this path is unchanged.
+  it('--force still eats a free-but-dirty (unleased) lane\'s untracked work (unchanged)', () => {
+    const lane = provisionOne();
+    writeFileSync(join(lane, 'untracked-free-dirty.txt'), 'no lease here\n');
 
     const r = runPool(
       ['refresh', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install', '--force'],
@@ -172,7 +192,53 @@ describe('lane-pool refresh/provision dirty-or-ahead guard (#2267)', () => {
     );
     expect(r.code).toBe(0);
     expect(r.out + r.err).not.toMatch(/SKIPPED/);
-    expect(existsSync(join(lane, 'untracked-eaten.txt'))).toBe(false); // silently discarded — the known gap
+    expect(existsSync(join(lane, 'untracked-free-dirty.txt'))).toBe(false); // free lane, no lease → still recycled
+  });
+
+  // #2337(b) point 1 — `acquire --lane=N --force` is the THIRD forced entry point (besides refresh/provision
+  // --force) that reclaimed a live lease and reset the lane; it must now hard-fail instead, pointing at the
+  // deliberate override (`release --force`), and must NOT touch the lane's untracked work.
+  it('acquire --lane=N --force HARD-FAILS on a live-leased lane, work untouched (#2337b)', () => {
+    provisionOne();
+    const acq = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install', '--no-reset', '--session=holder'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(acq.code).toBe(0);
+    const lane = acq.out.trim().split('\n').pop();
+    writeFileSync(join(lane, 'untouched-by-force-acquire.txt'), 'still here\n');
+
+    const r = runPool(
+      ['acquire', '--lane=1', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install', '--force', '--session=intruder'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(r.code).not.toBe(0);
+    expect(r.err).toMatch(/LIVE lease/);
+    expect(r.err).toMatch(/release/);
+    expect(readFileSync(join(lane, 'untouched-by-force-acquire.txt'), 'utf8')).toContain('still here');
+  });
+
+  // #2337(b) point 3 — the documented escape hatch: `release --force` drops the lease, then a subsequent
+  // `acquire --lane=N --force` (or even a plain acquire) succeeds normally.
+  it('release --force then re-acquire succeeds (the documented deliberate override)', () => {
+    provisionOne();
+    const acq = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install', '--no-reset', '--session=holder'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(acq.code).toBe(0);
+
+    const rel = runPool(
+      ['release', '--lane=1', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--force', '--session=intruder'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(rel.code).toBe(0);
+
+    const reacq = runPool(
+      ['acquire', '--lane=1', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install', '--session=intruder'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(reacq.code).toBe(0);
   });
 
   it('provision also honors the guard for an already-existing dirty lane', () => {

@@ -44,10 +44,17 @@
  * has skipped. `refresh`/`provision` never silently discard a lane that is DIRTY (uncommitted edits) or
  * AHEAD of origin/<branch> (locally-committed-but-unpushed commits) — such a lane is SKIPPED (left
  * untouched) and reported, because `reset --hard` + `clean -fd` would otherwise destroy that work with no
- * recovery. Pass --force to restore the old unconditional reset-everything behavior. The only state a
- * lane can rely on surviving a concurrent refresh/provision is what has ALREADY been pushed to origin
- * (i.e. landed via `pr-land` onto its `lane/*` ref, per #1934) — treat anything else as ephemeral and
- * push early.
+ * recovery. Pass --force to restore the old unconditional reset-everything behavior for a dirty/ahead lane.
+ * The only state a lane can rely on surviving a concurrent refresh/provision is what has ALREADY been
+ * pushed to origin (i.e. landed via `pr-land` onto its `lane/*` ref, per #1934) — treat anything else as
+ * ephemeral and push early.
+ *
+ * SAFETY (#2275/#2337): a LIVE lease (an exclusive hold stamped by `acquire`, presumed alive within TTL) is
+ * a STRONGER guard than dirty/ahead — it protects an active consumer, not just tree residue. `--force`
+ * overrides the dirty/ahead staleness guard but NEVER a live lease: `refresh --force` / `provision --force`
+ * SKIP a live-leased lane with a loud log (never reset it); `acquire --lane=N --force` on a live-leased lane
+ * HARD-FAILS, pointing at the deliberate override — `release --force` (drop the lease), then re-acquire. No
+ * separate `--force-lease` flag exists; `release --force` is the one escape hatch for a live lease.
  */
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, readlinkSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -344,14 +351,18 @@ function laneDirtyOrAhead(dir, branch) {
 function refreshLane(repo, n, { force = false } = {}) {
   const dir = laneDir(repo, n);
   git(['fetch', 'origin', '--prune', '--quiet'], dir);
+  // #2337(b) — a LIVE lease is an ownership hold (a process is presumed alive within TTL), distinct from the
+  // dirty/ahead STALENESS guard below. `--force` exists to recycle stale residue, not to stomp an active
+  // consumer, so the lease check runs REGARDLESS of `--force`: a leased lane is always skipped (loud), never
+  // reset. The deliberate override is `release --force` (drop the lease), not this flag.
+  const lease = liveLease(dir, Date.now(), ttlMsFromFlags());
+  if (lease) {
+    log(`  lane-${n}: SKIPPED (${describeLease(lease)}) — LIVE lease; --force does not override it (#2337); use \`release --lane=${n} --force\` first`);
+    return { skipped: true, leased: true, dirty: false, uncommitted: 0, ahead: 0 };
+  }
   if (!force) {
-    // #2275 — a LIVE lease makes a lane off-limits to recycle, exactly like dirty/ahead work: a consumer
-    // (drain/merge/batch/solo) holds it and a `reset --hard` mid-use would yank its tree. `--force` overrides.
-    const lease = liveLease(dir, Date.now(), ttlMsFromFlags());
-    if (lease) {
-      log(`  lane-${n}: SKIPPED (${describeLease(lease)}) — use --force to override`);
-      return { skipped: true, leased: true, dirty: false, uncommitted: 0, ahead: 0 };
-    }
+    // #2267 — dirty/ahead is a property of the TREE (possibly abandoned residue from a dead session), which
+    // `--force` exists to recycle. Skippable by `--force`, unlike the lease check above.
     const { dirty, uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
     if (dirty || ahead > 0) {
       log(`  lane-${n}: SKIPPED (dirty/ahead — ${uncommitted} uncommitted, ${ahead} ahead) — use --force to override`);
@@ -443,9 +454,10 @@ function cmdRefresh(repo) {
 // is just the reset-to-origin/main state below, now protected by the hold).
 
 // Try to claim a specific lane's marker atomically (O_EXCL). Returns true iff THIS call created the marker.
-// A live lease owned by someone else ⇒ false (taken). A stale marker ⇒ reclaimed (rm + retry, the small
-// documented race). Own live lease ⇒ true (idempotent re-acquire by the same session).
-function tryClaimLane(dir, session, nowMs, ttlMs, { force = false } = {}) {
+// A live lease owned by someone else ⇒ false (taken — #2337(b), NOT overridable by `--force`; the deliberate
+// override is `release --force` then re-acquire, per the ruling's "no new flag" contract). A stale marker ⇒
+// reclaimed (rm + retry, the small documented race). Own live lease ⇒ true (idempotent re-acquire).
+function tryClaimLane(dir, session, nowMs, ttlMs) {
   const body = JSON.stringify(
     leaseBody({ session, purpose: flags.purpose, acquiredAt: new Date(nowMs).toISOString(), ttlMinutes: ttlMinutesFromFlags(), host: hostname(), pid: process.pid }),
     null, 2,
@@ -459,11 +471,11 @@ function tryClaimLane(dir, session, nowMs, ttlMs, { force = false } = {}) {
   }
   const existing = readLease(dir);
   if (leaseOwnedBy(existing, session)) { writeFileSync(file, body); return true; } // refresh our own hold
-  if (force || isLeaseStale(existing, nowMs, ttlMs)) {
-    rmSync(file, { force: true });                 // reclaim a stale/forced lease (unlink→create race: acceptable)
+  if (isLeaseStale(existing, nowMs, ttlMs)) {
+    rmSync(file, { force: true });                 // reclaim a stale lease (unlink→create race: acceptable)
     try { writeFileSync(file, body, { flag: 'wx' }); return true; } catch { return false; }
   }
-  return false; // a live lease held by another session — this lane is taken
+  return false; // a LIVE lease held by another session — this lane is taken, even with --force
 }
 
 function cmdAcquire(repo) {
@@ -487,8 +499,18 @@ function cmdAcquire(repo) {
     const n = Number(flags.lane);
     const dir = laneDir(repo, n);
     if (!existsSync(dir)) fail(`lane-${n} does not exist (${dir})`);
-    if (!tryClaimLane(dir, session, nowMs, ttlMs, { force: !!flags.force }))
-      fail(`lane-${n} is ${describeLease(readLease(dir)) || 'held'} — pick another or pass --force`);
+    if (!tryClaimLane(dir, session, nowMs, ttlMs)) {
+      const lease = readLease(dir);
+      // #2337(b) — a LIVE lease hard-fails `acquire --lane=N --force` too (force never overrides a live
+      // lease); point at the deliberate override (`release --force`) instead of implying --force helps.
+      if (lease && !isLeaseStale(lease, nowMs, ttlMs)) {
+        fail(
+          `lane-${n} is ${describeLease(lease)} — a LIVE lease; --force does not override it (#2337). ` +
+            `Release it first (\`release --lane=${n} --force\`), then acquire, or pick another lane.`,
+        );
+      }
+      fail(`lane-${n} is ${describeLease(lease) || 'held'} — pick another lane`);
+    }
     chosen = n;
   } else {
     // Auto-pick: lowest acquirable, then atomically claim; on a lost race retry the next candidate.
@@ -497,7 +519,7 @@ function cmdAcquire(repo) {
       const infos = lanes.filter((n) => !excluded.has(n)).map(infoFor);
       const pick = chooseFreeLane(infos, nowMs, ttlMs);
       if (pick === null) fail(`no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`);
-      if (tryClaimLane(laneDir(repo, pick), session, nowMs, ttlMs, { force: !!flags.force })) chosen = pick;
+      if (tryClaimLane(laneDir(repo, pick), session, nowMs, ttlMs)) chosen = pick;
       else excluded.add(pick); // a concurrent acquire won this one — try the next
     }
   }
