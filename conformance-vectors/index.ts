@@ -29,7 +29,9 @@ export { webdocsDocSpecSuite, assertDocSpecSuite, DocSpecSchemaError } from './w
 // The Web Directives SSR wire-format suite (#2063/#2030) is a pure (directive tree + data) → exact HTML bytes
 // golden-vector suite — like webdocs, a different shape from the interaction-script ConformanceVectorSuite, so
 // exported on its own, not in `conformanceSuites`. It pins the language-agnostic SSR wire format every renderer
-// conforms to (the FUI Node reference renderer #2064 is the oracle).
+// conforms to (the FUI Node reference renderer #2064 is the oracle). Its language-neutral JSON export
+// (`webdirectives-ssr.vectors.json`) + cross-language grading harness contract
+// (`webdirectives-ssr-harness-contract.md`) are #2354 — what every non-JS renderer (#2069) is graded against.
 export {
   webdirectivesSsrSuite,
   assertSsrWireSuite,
