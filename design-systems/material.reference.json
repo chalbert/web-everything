@@ -1,0 +1,38 @@
+{
+  "$description": "Material 3 parity REFERENCE SET for the #2024 conformance harness — WE-owned data, not harness code. The canonical component set (button/input/card) and the Material 3 md.sys.* roles each is themed by, each naming the resolved DTCG path the flavor (we:design-systems/material.tokens.json) authors that role onto. The harness (fui:plugs/webtheme/conformanceHarness.ts scoreFlavor) diffs each role against what the tokens+intents model can land on a rendered component and emits a per-component compliance score + gap list. Authored by #2023 as the FULL M3 flavor superseding the material-like seed's 2-role reference. Scoring THIS through the SAME scoreFlavor as shadcn/ant/carbon/fluent — with zero M3-specific code — is the #2024 target-agnostic proof (acceptance 2). The two M3 signatures — state layers and tonal elevation — surface as gaps (no token home), the expected M3-vs-tokens residual.",
+  "target": "Material 3",
+  "components": [
+    {
+      "component": "button",
+      "roles": [
+        { "role": "md.sys.color.primary", "dtcgPath": "color.accent" },
+        { "role": "md.sys.color.on-primary", "dtcgPath": "color.on-primary" },
+        { "role": "md.sys.shape.corner-full (pill)", "dtcgPath": "radius.full" },
+        { "role": "md.sys.state.hover-state-layer", "dtcgPath": "color.state-layer" },
+        { "role": "md.sys.state.focus-indicator", "dtcgPath": "ring.color" },
+        { "role": "md.sys.elevation.level1 (hover)", "dtcgPath": "color.tonal-elevation" }
+      ]
+    },
+    {
+      "component": "input",
+      "roles": [
+        { "role": "md.sys.color.outline (border)", "dtcgPath": "surface.border" },
+        { "role": "md.comp.outlined-text-field.input", "dtcgPath": "surface.input" },
+        { "role": "md.sys.color.on-surface-variant (label)", "dtcgPath": "surface.muted-foreground" },
+        { "role": "md.sys.state.focus-indicator", "dtcgPath": "ring.color" },
+        { "role": "md.sys.shape.corner-md (container)", "dtcgPath": "radius.md" }
+      ]
+    },
+    {
+      "component": "card",
+      "roles": [
+        { "role": "md.sys.color.surface", "dtcgPath": "color.surface" },
+        { "role": "md.sys.shape.corner-large", "dtcgPath": "radius.lg" },
+        { "role": "md.sys.color.outline-variant (border)", "dtcgPath": "surface.border" },
+        { "role": "md.sys.color.on-surface-variant (supporting)", "dtcgPath": "surface.muted-foreground" },
+        { "role": "md.sys.color.surface-variant (muted)", "dtcgPath": "surface.muted" },
+        { "role": "md.sys.elevation.level1 (tonal)", "dtcgPath": "color.tonal-elevation" }
+      ]
+    }
+  ]
+}

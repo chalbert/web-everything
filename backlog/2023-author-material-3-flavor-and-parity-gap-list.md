@@ -2,9 +2,12 @@
 kind: story
 size: 8
 parent: "1226"
-status: open
+status: resolved
 blockedBy: ["2017", "2022"]
 dateOpened: "2026-07-01"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
+relatedReport: reports/2026-07-09-material-3-parity-gap-list.md
 tags: [parity, flavor, material, dtcg, gap-list]
 ---
 

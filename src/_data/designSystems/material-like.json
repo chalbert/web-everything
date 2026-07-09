@@ -1,7 +1,7 @@
 {
   "id": "material-like",
   "name": "Material-like",
-  "summary": "MD3-flavored bundle — comfortable density, natural motion, lift surfaces, generously rounded corners. Exercises every optional field of the manifest schema.",
+  "summary": "SUPERSEDED by the full `material` flavor (#2023). Retained as the historical minimal ~5-token MD3 seed that first exercised every optional field of the manifest schema; the real Material 3 baseline flavor (design-systems/material.designsystem.json) is now the scored, rendered-and-diffed parity target.",
   "status": "concept",
   "ownedByProject": "webtheme",
   "manifest": "design-systems/material-like.designsystem.json"

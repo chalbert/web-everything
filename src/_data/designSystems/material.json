@@ -1,0 +1,8 @@
+{
+  "id": "material",
+  "name": "Material 3",
+  "summary": "A real Material 3 flavor (#2023) — Google's baseline light scheme transcribed as a full DTCG override: the #6750A4 md.sys.color.primary signature purple, the M3 shape scale (corner extra-small 4px → large 16px → full pill), md.sys.color.outline #79747E border/input, md.sys.color.surface-variant #E7E0EC muted container, and md.sys.color.on-surface-variant #49454F supporting text. Supersedes the material-like seed stub. Loaded through the #2017 manifest loader; its paired gap list records what tokens+intents reproduce and what needs a new intent/trait/token role — including M3's two signature affordances, STATE LAYERS and TONAL ELEVATION, which have no single-value token home.",
+  "status": "concept",
+  "ownedByProject": "webtheme",
+  "manifest": "design-systems/material.designsystem.json"
+}

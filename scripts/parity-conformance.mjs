@@ -23,7 +23,7 @@
  * token sidecar, and reference set under `we:design-systems/`) and the emitted *report*.
  *
  * Usage:
- *   node scripts/parity-conformance.mjs [flavor ...]   # default: shadcn material-like
+ *   node scripts/parity-conformance.mjs [flavor ...]   # default: shadcn material carbon
  *   node scripts/parity-conformance.mjs --check        # re-emit and fail if any on-disk report drifts
  *
  * @module parity-conformance
@@ -142,7 +142,7 @@ async function main() {
   const args = process.argv.slice(2);
   const check = args.includes('--check');
   const flavors = args.filter((a) => !a.startsWith('--'));
-  const targets = flavors.length ? flavors : ['shadcn', 'material-like', 'carbon'];
+  const targets = flavors.length ? flavors : ['shadcn', 'material', 'carbon'];
 
   const harness = await loadHarness();
   if (!harness) {
