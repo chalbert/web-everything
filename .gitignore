@@ -30,7 +30,6 @@ error-summary/**/*.d.ts
 commitment-policy/**/*.js
 commitment-policy/**/*.d.ts
 .claude/lane-ports.json
-tests/visual/review/
 # Per-session runtime bookkeeping (TTL'd, machine-local) — tooling recreates on demand (#952).
 # SoT relocated to skills-src/ (#2266), so ignore the real path; capacity.json is durable calibration → stays tracked.
 skills-src/batch-backlog-items/claims.json

@@ -130,6 +130,18 @@ describe('decideReviewGate — the non-blocking watch window', () => {
   it('escalated + review:changes → wait for the author lane', () => {
     expect(decideReviewGate({ escalate: true, labels: [REVIEW_LABELS.changes] }).action).toBe('wait-author');
   });
+  // #2365 follow-up: the wait-author branch precedes the human gate, so a gate-self PR that ALSO carries
+  // review:changes must still report humanRequired:true — the caller (merge-ai-prs.mjs) keys the drain's
+  // auto-review routing on gate.humanRequired; false here would let an agent panel clear a gate-self edit a
+  // human bounced (the exact conflict-of-interest #2362 closes).
+  it('wait-author still reports humanRequired for a gate-self PR carrying review:changes (#2365)', () => {
+    // fresh gate-self score + review:changes
+    expect(decideReviewGate({ escalate: true, humanRequired: true, labels: [REVIEW_LABELS.changes] }).humanRequired).toBe(true);
+    // sticky review:human label + review:changes (fresh score narrowed to false on rebase)
+    expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.changes, REVIEW_LABELS.human] }).humanRequired).toBe(true);
+    // a plain (non-gate-self) review:changes stays agent-routable — humanRequired falsy
+    expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.changes] }).humanRequired).toBeFalsy();
+  });
   it('escalated, no verdict, window not expired → park alive (apply review:pending), never block', () => {
     const g = decideReviewGate({ escalate: true, parkedSinceMs: 1000, nowMs: 1000 + 60_000, windowMs: 30 * 60_000 });
     expect(g.action).toBe('park');
@@ -158,6 +170,32 @@ describe('decideReviewGate — the non-blocking watch window', () => {
   });
   it('humanRequired + review:accepted → merge (a human verdict still wins)', () => {
     expect(decideReviewGate({ escalate: true, humanRequired: true, labels: [REVIEW_LABELS.accepted] }).action).toBe('merge');
+  });
+
+  // #2362 — the review:human LABEL is a STICKY veto: a PR ALREADY carrying it must never merge even when this
+  // pass's fresh score no longer classifies it human-required (the #289 regression: a gate-self file dropped
+  // out of the diff on rebase, so the re-score returned humanRequired:false and it rode the window to land).
+  it('review:human LABEL vetoes merge even when the fresh score is humanRequired:false', () => {
+    const g = decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human], parkedSinceMs: null });
+    expect(g.action).toBe('park');
+    expect(g.applyLabel).toBe(REVIEW_LABELS.human);
+    expect(g.humanRequired).toBe(true);
+  });
+  it('review:human LABEL NEVER times out to merge-anyway even past the window (the #289 hole, closed)', () => {
+    const g = decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human], parkedSinceMs: 0, nowMs: 999 * 60_000, windowMs: 30 * 60_000 });
+    expect(g.action).toBe('park');
+  });
+  it('review:human LABEL vetoes even a DE-ESCALATED PR (escalate:false, no gate-self signal left)', () => {
+    // diff narrowed so far it no longer escalates — the sticky label must still block the !escalate fast-merge.
+    const g = decideReviewGate({ escalate: false, humanRequired: false, labels: [REVIEW_LABELS.human] });
+    expect(g.action).toBe('park');
+    expect(g.applyLabel).toBe(REVIEW_LABELS.human);
+  });
+  it('review:human LABEL + review:accepted → merge (a human explicitly cleared the gate, still wins first)', () => {
+    expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human, REVIEW_LABELS.accepted] }).action).toBe('merge');
+  });
+  it('review:human LABEL + review:changes → wait-author (a reviewer bounce still routes to the author lane)', () => {
+    expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human, REVIEW_LABELS.changes] }).action).toBe('wait-author');
   });
 });
 

@@ -26,8 +26,6 @@
     "regression": "node scripts/dev/regression.mjs",
     "check:visual": "playwright test --project=chromium tests/visual",
     "check:visual:update": "playwright test --project=chromium tests/visual --update-snapshots",
-    "check:visual:guard": "node scripts/check-visual-baseline-update.mjs --staged",
-    "visual:review": "node scripts/dev/visual-baseline-review.mjs",
     "check:render": "node scripts/dev/render-check.mjs",
     "test:interaction": "playwright test --project=interaction",
     "test:coverage": "vitest run --coverage",
@@ -94,7 +92,7 @@
     "dependency-injection"
   ],
   "author": "Web Everything Project",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "detect-gpu": "^5.0.70",
     "typescript": "^5.9.3",

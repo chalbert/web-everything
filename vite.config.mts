@@ -207,7 +207,7 @@ export default defineConfig({
       '^/\\.11ty/': proxyToEleventy(),
       // Proxy doc pages and assets to 11ty server (but not demos/*.html, TypeScript plugs, or blocks)
       // Note: /blocks/*.ts are served by Vite, /blocks/ doc pages are proxied
-      '^/(projects|adapters|intents|capabilities|compat|protocols|design-systems|presets|plugs/(?!.*\\.ts)|cases|mission|semantics|states|resources|author|governance|rules|research|backlog|validation-rules|conformance|project-lifecycle|specs|assets|css|js|sitemap.xml|build-id.json|active-progress.json)':
+      '^/(projects|adapters|intents|capabilities|compat|protocols|design-systems|presets|plugs/(?!.*\\.ts)|cases|mission|semantics|states|resources|author|governance|rules|privacy|research|backlog|validation-rules|conformance|project-lifecycle|specs|assets|css|js|sitemap.xml|build-id.json|active-progress.json)':
         proxyToEleventy(),
       // Proxy /blocks/ doc pages but not /blocks/*.ts files
       '^/blocks/(?!.*\\.ts)': proxyToEleventy(),
