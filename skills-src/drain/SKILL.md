@@ -28,39 +28,52 @@ serially, in a later session, under the same self-approved PR transport the prod
 
 ## Preconditions
 
-- **Run from an isolated clean clone on `main` — NEVER the shared primary checkout (#2197 / ratified #2123).**
-  The drain is an edit-action session (it advances `main` and, per #2198, rebuilds lane tips), so #2123's
-  "every edit-action session runs in an isolated clone" applies. The primary tree almost always carries a peer
+- **Run from a LEASED lane-pool clone — NEVER the shared primary checkout (#2197 / ratified #2123).** The
+  drain is an edit-action session (it advances `main` and, per #2198, rebuilds lane tips), so #2123's "every
+  edit-action session runs in an isolated clone" applies. The primary tree almost always carries a peer
   session's uncommitted work, and the drain's own post-merge `git pull --ff-only --autostash` then hits an
   autostash-pop conflict and strands the tree mid-merge (observed 2026-07-03: an autostash-pop conflict on
-  `claims.json` left the primary half-merged; recovery was manual). Provision a fresh clone instead:
+  `claims.json` left the primary half-merged; recovery was manual). **Acquire a lease on the general
+  lane-pool allocator (#2275/#2303)** instead of hand-rolling a clone — the drain is just another consumer
+  of the same primitive `/batch`/solo `#2123` lanes use:
 
   ```
-  git clone --local <primary> ../we-drain-clean && cd ../we-drain-clean
-  git remote set-url origin <origin-url>           # push PRs to the real remote
-  git reset --hard <origin/main sha>               # land on the true main (the local clone may be stale)
-  ln -s <primary>/node_modules node_modules        # generators/gates need deps (+ siblings ../frontierui, ../plateau-app)
+  node scripts/lane-pool.mjs acquire --purpose=drain --session=<drain-session-slug> --json
   ```
 
-  A clone sibling of `webeverything` keeps `../frontierui` resolvable (cross-repo artifact builds need it).
-  **Provision `../frontierui` and `../plateau-app` too (#2263)** — real clones next to `we-drain-clean`, same
-  pattern as the WE clone itself:
+  This claims an exclusive `.git/.lane-lease` marker on the lowest free pool lane (or `--lane=N`), then
+  `reset --hard`s it to `origin/<branch>` and ensures its `node_modules` (`npm ci`, real per-lane deps — no
+  primary symlink) — exactly the "land on true `main` with deps present" state the old hand-rolled recipe
+  manually constructed, but held so no concurrent `refresh`/`provision`/`acquire` can yank it mid-cascade.
+  The JSON reply is `{ lane, path, session, purpose, branch }` — `cd` into `.path` and work there. `cd` back
+  to `.path`'s repo root before every command below; do not run them from the primary. When the drain is
+  done (a one-shot pass finishes, or a `--watch` loop exits/is stopped), hand the lane back:
 
   ```
-  git clone <frontierui-origin-url> ../frontierui && (cd ../frontierui && git reset --hard origin/main)
-  git clone <plateau-app-origin-url> ../plateau-app && (cd ../plateau-app && git reset --hard origin/main)
+  node scripts/lane-pool.mjs release --lane=<lane> --session=<drain-session-slug>
   ```
 
-  With those present, `--all-repos`'s rebase-drop (#2198) can rebuild a CONFLICTING/BEHIND frontierui/
-  plateau-app lane tip too — routed through the matching sibling clone, not just the local WE one. Missing a
-  sibling clone is a graceful degrade, not an error: that repo's rebase-drop candidates fall back to `left for
-  its author`, exactly as before #2263. The branch guard blocks `checkout -B`/`worktree add` even in a clone,
-  so move `main` with `git reset --hard`, not a checkout. **Never `git pull` in the primary** — the sync below
-  runs in the clone only.
+  `--session` (or the `LANE_SESSION` env) ties one `acquire` to its matching `release` — reuse the SAME
+  slug for both calls. A `--watch` drain acquires ONCE at start and releases ONCE at exit, not per pass. If a
+  release is skipped (a killed `--watch`), the lease self-reclaims after its TTL (`DEFAULT_LEASE_TTL_MINUTES`
+  = 240) — a crashed drain returns its lane to the pool the same day, not never. The checkout root is
+  allocator config (`LANE_POOL_ROOT` env, default `~/workspace/.lanes`) — no skill embeds a literal
+  `../we-drain-clean` or `.lanes` path.
+
+  The pool already carries the render sibling every WE checkout needs: `../frontierui` at the pool root
+  (`scripts/lane-pool.mjs` `ensureFuiSibling`, #2166), resolvable from a leased lane exactly as from a
+  provisioned one — no extra step. `../plateau-app` has no pool-root sibling **yet** (tracked separately,
+  #2349 — generalizing the FUI symlink into a per-repo pushable+built clone for both `frontierui` and
+  `plateau-app`); until that lands, `--all-repos`' rebase-drop (#2198) degrades exactly as it did before
+  #2263 for any repo with no sibling present — `left for its author`, never an error. The branch guard blocks
+  `checkout -B`/`worktree add` even in a lane, so `acquire`'s own `reset --hard` is how the lane lands on
+  `main` — never a manual checkout. **Never `git pull` in the primary** — all of this runs in the leased lane
+  only.
 - `gh` is authenticated (`gh auth status`) — landing is the same self-approved `gh pr merge` (0 required
   reviewers + the required `test` check) `/pr` uses. See [`/pr`](../pr/SKILL.md) for the transport.
-- The clone's tree is clean: the post-merge sync (`git pull --ff-only --autostash`, in the clone) is a pure
-  fast-forward there, so it never conflicts with a peer session's edits the way the primary would.
+- The lane's tree is clean on acquire (a fresh `reset --hard` + `clean -fd`): the post-merge sync (`git pull
+  --ff-only --autostash`, in the lane) is a pure fast-forward there, so it never conflicts with a peer
+  session's edits the way the primary would.
 
 ## Run it (the label lander — #2194)
 
@@ -77,9 +90,10 @@ the edges — the #2188 convergence).
 > a single cross-repo sequencer can order that. Every `gh` call is `--repo`-scoped; a remote-repo PR reads its
 > manifest via the GitHub API (never a local clone). The rebase-drop (#2198) still needs local git plumbing
 > (merge-tree/commit-tree/push): for the LOCAL clone's own repo it runs in place; for a remote repo it routes
-> through that repo's **sibling clone** (`../frontierui`, `../plateau-app`) when the precondition above
-> provisioned one (#2263) — so a CONFLICTING/BEHIND non-local lane tip gets rebuilt too, not just left for its
-> author. No sibling clone provisioned ⇒ unchanged legacy skip. **Landing a frontierui/plateau PR still needs
+> through that repo's **sibling clone** (`../frontierui`, `../plateau-app`) when the leased lane's pool root
+> carries one (#2263; the pool-root `../frontierui` symlink, #2166 — see the precondition above) — so a
+> CONFLICTING/BEHIND non-local lane tip gets rebuilt too, not just left for its author. No sibling clone
+> provisioned ⇒ unchanged legacy skip. **Landing a frontierui/plateau PR still needs
 > that repo's own required `test` check + branch protection (#2242/#2243/#2246)** or GitHub blocks the merge;
 > until those land, those PRs surface here as `skip (required check "test" is not green)` rather than silently
 > vanishing. Pass `--this-repo` to scope to the cwd repo only, or `--repos=owner/a,owner/b` for an explicit set.
@@ -114,11 +128,15 @@ refinement should read the batch journals directly to drop that coupling; the ex
 > **Pass `--primary=<primary>` so the post-land sync can find your primary checkout (#xwokc1n).** After each
 > land the drain fast-forwards the user's primary checkout to the advanced `origin/main` so it never rots. It
 > locates that primary via `--primary=<path>` (or the `WE_PRIMARY` env), falling back to the clone's git
-> alternates. The provisioning above uses `git clone --local`, which creates **no** alternates file — so
-> **without `--primary`/`WE_PRIMARY` the primary is never synced and silently drifts** (observed 75 commits
-> behind). The sync is a pure `git pull --ff-only` and **only touches a primary that is on `main` with a clean
-> tree** — a dirty primary (a peer session's uncommitted work) is left UNTOUCHED and logged, never autostashed
-> or stranded (the 2026-07-03 incident). Omit the flag deliberately if you do NOT want your primary advanced.
+> alternates. **A leased lane-pool clone (#2303) IS `git clone --reference`-based**, so it carries an
+> alternates file pointing at the pool's reference checkout (normally the primary) — the fallback now
+> usually resolves it automatically, unlike the old hand-rolled `git clone --local` recipe (which created
+> **no** alternates file, so without `--primary`/`WE_PRIMARY` the primary silently drifted — observed 75
+> commits behind). Still pass `--primary`/`WE_PRIMARY` explicitly when you want it guaranteed (e.g. the pool
+> was provisioned with a non-primary `--reference`). The sync is a pure `git pull --ff-only` and **only
+> touches a primary that is on `main` with a clean tree** — a dirty primary (a peer session's uncommitted
+> work) is left UNTOUCHED and logged, never autostashed or stranded (the 2026-07-03 incident). Omit the flag
+> deliberately if you do NOT want your primary advanced.
 
 ## How it works (per pass)
 
