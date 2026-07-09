@@ -1,0 +1,9 @@
+{
+  "id": "git-push-main",
+  "cmd": "git push origin main",
+  "ctx": {},
+  "basis": "#2203 strict lane-only",
+  "expect": {
+    "reason": "direct push to `main` is blocked (strict lane-only enforcement, #2203). Push to a `lane/*` ref and land via a PR so CI gates it: `git push origin HEAD:refs/heads/lane/<name>` then `pr-land`. Sanctioned override (rare): prefix `MAIN_PUSH_OK=1`."
+  }
+}

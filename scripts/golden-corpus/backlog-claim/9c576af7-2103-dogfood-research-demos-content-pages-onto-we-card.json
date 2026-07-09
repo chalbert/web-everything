@@ -1,0 +1,11 @@
+{
+  "sha": "9c576af7892de57729c3c49cfd44a2cf5cc34209",
+  "date": "2026-07-02",
+  "file": "backlog/2103-dogfood-research-demos-content-pages-onto-we-card.md",
+  "verb": "claim",
+  "opts": {
+    "today": "2026-07-03"
+  },
+  "before": "---\nkind: story\nsize: 2\nparent: \"2021\"\nstatus: open\nblockedBy: [\"2098\"]\ndateOpened: \"2026-07-02\"\ntags: []\n---\n\n# Dogfood research/demos content pages onto we-card\n\nConvert the content-page card surfaces: the three hand-rolled project-card tiles in we:src/research.njk (we:src/research.njk:13,35,59 — design-references banner, topic grid, empty-state) and the standard-card demo grid + empty-state panel in we:src/demos.njk to SSR we-card tiles via the #2098 primitive (we:src/semantics.njk already converted as the #2098 proof-of-life). JS-off correct; Playwright before/after.\n",
+  "after": "---\nkind: story\nsize: 2\nparent: \"2021\"\nstatus: active\nblockedBy: [\"2098\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Dogfood research/demos content pages onto we-card\n\nConvert the content-page card surfaces: the three hand-rolled project-card tiles in we:src/research.njk (we:src/research.njk:13,35,59 — design-references banner, topic grid, empty-state) and the standard-card demo grid + empty-state panel in we:src/demos.njk to SSR we-card tiles via the #2098 primitive (we:src/semantics.njk already converted as the #2098 proof-of-life). JS-off correct; Playwright before/after.\n"
+}

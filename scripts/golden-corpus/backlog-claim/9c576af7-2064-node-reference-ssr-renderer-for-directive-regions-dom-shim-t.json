@@ -1,0 +1,11 @@
+{
+  "sha": "9c576af7892de57729c3c49cfd44a2cf5cc34209",
+  "date": "2026-07-02",
+  "file": "backlog/2064-node-reference-ssr-renderer-for-directive-regions-dom-shim-t.md",
+  "verb": "claim",
+  "opts": {
+    "today": "2026-07-03"
+  },
+  "before": "---\nkind: story\nsize: 5\nparent: \"2005\"\nstatus: open\nblockedBy: [\"2063\"]\ndateOpened: \"2026-07-01\"\ntags: []\n---\n\n# Node reference SSR renderer for directive regions — DOM-shim then serialize, behind a swappable ServerRenderer seam\n\nSecond slice of the SSR surface (per #2030). Ship the Node/JS reference renderer that expands comment-anchor directive regions server-side and emits the WE-standard wire format (#2063). Strategy (recorded, deps/perf axis, later-optimizable): build the region tree via a lightweight DOM shim (linkedom-class) so the existing upgrade/stamp/inspector code runs unchanged, then serialize — reuses the JS client so server+client can't drift. Sits behind a swappable ServerRenderer seam so a zero-dep string renderer or a non-JS renderer drops in without touching callers. MUST pass the #2063 conformance vectors byte-for-byte; it is the vector oracle. The reuse-the-client win is JS-only, not portable.\n",
+  "after": "---\nkind: story\nsize: 5\nparent: \"2005\"\nstatus: active\nblockedBy: [\"2063\"]\ndateOpened: \"2026-07-01\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Node reference SSR renderer for directive regions — DOM-shim then serialize, behind a swappable ServerRenderer seam\n\nSecond slice of the SSR surface (per #2030). Ship the Node/JS reference renderer that expands comment-anchor directive regions server-side and emits the WE-standard wire format (#2063). Strategy (recorded, deps/perf axis, later-optimizable): build the region tree via a lightweight DOM shim (linkedom-class) so the existing upgrade/stamp/inspector code runs unchanged, then serialize — reuses the JS client so server+client can't drift. Sits behind a swappable ServerRenderer seam so a zero-dep string renderer or a non-JS renderer drops in without touching callers. MUST pass the #2063 conformance vectors byte-for-byte; it is the vector oracle. The reuse-the-client win is JS-only, not portable.\n"
+}

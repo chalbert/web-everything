@@ -1,0 +1,11 @@
+{
+  "sha": "8a081f6ec017767549b3989c351429eb73f7edaa",
+  "date": "2026-07-03",
+  "file": "backlog/2136-build-the-error-boundary-directive-comment-boundary-live-reg.md",
+  "verb": "resolve",
+  "opts": {
+    "today": "2026-07-03"
+  },
+  "before": "---\nkind: story\nsize: 5\nparent: \"1975\"\nstatus: active\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Build the error-boundary directive (comment boundary, live region + inert fallback)\n\nBuild the ratified error-boundary directive (#1978 GO) in FUI's webdirectives plug. Applies #1983's mixed form: live comment-bounded guarded region hosting a nested inert <template slot=fallback> stamped only when a render/connect error is caught in the region. Scope fence per #1978: existence-gating only (guarded-vs-fallback selection) — no error transformation or retry logic in markup. Register via the customNodes frame (#2074): the comment boundary is a CustomNode (CustomComment instance) per #1986. Pairs with async's catch (#1976) — async rejection vs this sync render error. Parent #1975; naming per #1987.\n",
+  "after": "---\nkind: story\nsize: 5\nparent: \"1975\"\nstatus: resolved\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ndateResolved: \"2026-07-03\"\ntags: []\n---\n\n# Build the error-boundary directive (comment boundary, live region + inert fallback)\n\nBuild the ratified error-boundary directive (#1978 GO) in FUI's webdirectives plug. Applies #1983's mixed form: live comment-bounded guarded region hosting a nested inert <template slot=fallback> stamped only when a render/connect error is caught in the region. Scope fence per #1978: existence-gating only (guarded-vs-fallback selection) — no error transformation or retry logic in markup. Register via the customNodes frame (#2074): the comment boundary is a CustomNode (CustomComment instance) per #1986. Pairs with async's catch (#1976) — async rejection vs this sync render error. Parent #1975; naming per #1987.\n"
+}

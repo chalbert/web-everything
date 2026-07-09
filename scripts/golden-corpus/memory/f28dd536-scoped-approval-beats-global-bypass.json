@@ -1,0 +1,9 @@
+{
+  "sha": "f28dd5360d244c8e9fbeccb3965b452a77232a9e",
+  "date": "2026-07-04",
+  "file": ".claude/agent-memory/scoped-approval-beats-global-bypass.md",
+  "isIndex": false,
+  "changeType": "created",
+  "before": null,
+  "after": "---\nname: scoped-approval-beats-global-bypass\ndescription: For autonomous/self-improving agent loops, prefer scoped per-category auto-approval over a global permission bypass\nmetadata:\n  type: feedback\n---\n\nSelf-improving / unattended agent loops are the highest-risk, least-supervised workload AND the one that\nmost needs to edit protected state (memory/skills). Reaching for `--dangerously-skip-permissions` to unblock\nthem is the wrong instinct — it strips ALL guardrails from exactly the run you least want unguarded, and its\nblast radius lands on the primary tree.\n\n**Why:** the flag is all-or-nothing and global; a scoped mechanism auto-approves ONLY the specific protected\ncategory (e.g. a memory/skills path prefix) while every other write stays gated, keeping the safety envelope\nintact everywhere else.\n\n**How to apply:** when an autonomous loop stalls on a permission gate, scope the auto-approval to the exact\nprotected path/category before reaching for a global bypass. Only fall back to the global flag when no scoped\nlever exists.\n\nEstablished 2026-07-04 when the owner overturned the prepared NOT-YET verdict on #2265 (relocate\nagent-memory/skills SoT out of `.claude` + scoped redirect hook), objecting that the NOT-YET default's\n`--dangerously-skip-permissions` fallback \"blocks launching self-sustaining and self-improving loops.\"\nRelated: [[autonomous-loops-non-blocking-red-team-not-prompts]] (the approval-*model* axis — machine red-team\ninstead of per-iteration human prompts); this entry is the permission-*scope* axis.\n"
+}

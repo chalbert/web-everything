@@ -1,0 +1,8 @@
+{
+  "id": "primary-checkout-edit",
+  "filePathTemplate": "{{PRIMARY_ROOT}}/webeverything/scripts/example.mjs",
+  "expect": {
+    "decision": "deny"
+  },
+  "basis": "#2123 lane isolation"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "rm-backlog-md",
+  "cmd": "rm backlog/2270-harvest-a-golden-corpus-of-skill-memory-fixtures-from-git-hi.md",
+  "ctx": {},
+  "basis": "resolve, never rm",
+  "expect": {
+    "reason": "Never delete a backlog/*.md — a done item becomes status:resolved (the file stays as the record). Resolve it, don't rm it."
+  }
+}

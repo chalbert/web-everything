@@ -1,0 +1,9 @@
+{
+  "id": "git-mv-renumber",
+  "cmd": "git mv backlog/100-foo.md backlog/200-foo.md",
+  "ctx": {},
+  "basis": "NNN immutable",
+  "expect": {
+    "reason": "Never renumber a backlog item (100 → 200) — NNN is immutable. A new item takes the next free number; yield this one."
+  }
+}

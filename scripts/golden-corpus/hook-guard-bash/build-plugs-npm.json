@@ -1,0 +1,9 @@
+{
+  "id": "build-plugs-npm",
+  "cmd": "npm run build:plugs",
+  "ctx": {},
+  "basis": "shadow .js/.d.ts footgun",
+  "expect": {
+    "reason": "build:plugs / `tsc -p tsconfig.plugs.json` emits shadow .js/.d.ts into the tree (breaks vitest, fakes a red gate). To typecheck plugs use `tsc --noEmit`."
+  }
+}

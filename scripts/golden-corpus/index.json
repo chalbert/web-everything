@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "corpusAsOf": "2026-07-08",
+  "counts": {
+    "backlog-claim": 12,
+    "backlog-resolve": 12,
+    "backlog-release": 12,
+    "backlog-settle": 0,
+    "backlog-created": 12,
+    "memory": 12,
+    "hook-locus-prefix": 12,
+    "hook-guard-bash": 16,
+    "hook-guard-lane": 4
+  },
+  "total": 92,
+  "categories": {
+    "backlog-claim": {
+      "source": "git-mined",
+      "selfValidated": true,
+      "note": "open→active via the real applyTransition(before, \"claim\", opts); kept only if replay reproduces the historical after byte-for-byte."
+    },
+    "backlog-resolve": {
+      "source": "git-mined",
+      "selfValidated": true,
+      "note": "active|open→resolved via applyTransition(before, \"resolve\", opts), including graduatedTo/codifiedIn where the historical commit set them."
+    },
+    "backlog-release": {
+      "source": "git-mined",
+      "selfValidated": true,
+      "note": "active|preparing→open via applyTransition(before, \"release\", {})."
+    },
+    "backlog-settle": {
+      "source": "git-mined",
+      "selfValidated": true,
+      "note": "born-active scaffold→open; replays the inline transform scripts/backlog.mjs#settle uses (not exported there as a pure function)."
+    },
+    "backlog-created": {
+      "source": "git-mined",
+      "selfValidated": false,
+      "note": "a backlog item's first-appearance revision (before === null) — structural fixtures for scaffold-shape regressions."
+    },
+    "memory": {
+      "source": "git-mined",
+      "selfValidated": false,
+      "note": "MEMORY.md index + agent-memory-src/*.md per-entry rule adds/changes (current and pre-#2266 legacy .claude/agent-memory/ homes aliased together)."
+    },
+    "hook-locus-prefix": {
+      "source": "git-mined",
+      "selfValidated": true,
+      "note": "a backlog/reports edit that FIXES a bare code-path ref; scanRepoLocusPrefixes flags `before` and is clean on `after` for the same file."
+    },
+    "hook-guard-bash": {
+      "source": "spec-derived",
+      "selfValidated": false,
+      "note": "guard-bash denies BEFORE a commit exists, so no historical \"denied\" commit is mineable; each case is grounded in an incident documented in guard-bash.mjs's own header comment, run through the real exported decide() at mine time."
+    },
+    "hook-guard-lane": {
+      "source": "spec-derived-template",
+      "selfValidated": false,
+      "note": "same \"fires pre-commit\" gap as guard-bash, PLUS its input is a filesystem path classified against the real ~/workspace layout — not portable as a literal path. Fixtures carry {{PRIMARY_ROOT}}/{{LANE_ROOT}}/{{SCRATCHPAD_ROOT}} placeholders for the replaying harness to substitute."
+    }
+  }
+}

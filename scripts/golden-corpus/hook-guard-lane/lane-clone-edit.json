@@ -1,0 +1,8 @@
+{
+  "id": "lane-clone-edit",
+  "filePathTemplate": "{{LANE_ROOT}}/.lanes/web-everything/lane-1/scripts/example.mjs",
+  "expect": {
+    "decision": "allow"
+  },
+  "basis": "allowed: already in a lane"
+}

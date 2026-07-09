@@ -1,0 +1,11 @@
+{
+  "sha": "9c576af7892de57729c3c49cfd44a2cf5cc34209",
+  "date": "2026-07-02",
+  "file": "backlog/1925-delete-the-we-reliability-runtime-keep-contract-vectors.md",
+  "verb": "claim",
+  "opts": {
+    "today": "2026-07-03"
+  },
+  "before": "---\nkind: story\nsize: 2\nparent: \"1294\"\nstatus: open\nblockedBy: [\"1922\"]\ndateOpened: \"2026-06-28\"\ntags: []\n---\n\n# Delete the WE reliability runtime (keep contract + vectors)\n\nSlice 4 of the reliability relocation cascade (#1294). Delete the executable reliability runtime from WE (we:reliability/provider.ts, we:reliability/registry.ts) now that fui:reliability hosts it and conformance is proven from the binding+vectors. WE retains we:reliability/contract.ts + the vector corpus — the #1282 zero-executable end-state for reliability. Mirrors webpolicy W4 (#1802).\n",
+  "after": "---\nkind: story\nsize: 2\nparent: \"1294\"\nstatus: active\nblockedBy: [\"1922\"]\ndateOpened: \"2026-06-28\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Delete the WE reliability runtime (keep contract + vectors)\n\nSlice 4 of the reliability relocation cascade (#1294). Delete the executable reliability runtime from WE (we:reliability/provider.ts, we:reliability/registry.ts) now that fui:reliability hosts it and conformance is proven from the binding+vectors. WE retains we:reliability/contract.ts + the vector corpus — the #1282 zero-executable end-state for reliability. Mirrors webpolicy W4 (#1802).\n"
+}
