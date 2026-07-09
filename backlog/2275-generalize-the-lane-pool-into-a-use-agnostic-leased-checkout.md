@@ -1,9 +1,11 @@
 ---
 kind: epic
-status: open
+status: resolved
 blockedBy: ["2267"]
 relatedTo: ["2219", "2077", "1933", "1945", "2162"]
 dateOpened: "2026-07-04"
+dateResolved: "2026-07-09"
+graduatedTo: none
 relatedReport: reports/2026-07-05-2275-split-analysis.md
 tags: [lane-pool, infra, pr-flow, productization]
 ---
