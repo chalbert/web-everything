@@ -1,0 +1,68 @@
+---
+layout: base.njk
+title: Privacy Notice - Web Everything
+permalink: /privacy/
+---
+
+<div class="intro">
+    <h1>Privacy Notice</h1>
+    <p class="lead" style="font-size: 1.35rem; line-height: 1.45; color: var(--color-text-muted); margin-bottom: 2rem;">
+        Short, because there isn't much to say: no analytics, no third-party tracking,
+        one strictly-necessary cookie.
+    </p>
+</div>
+
+<div class="content-box" style="margin-bottom: 3rem;">
+    <h2>What this site collects</h2>
+    <p>
+        This site runs on <strong>Cloudflare Workers</strong>, which sits in front of every
+        request as a <em>data processor</em> — it necessarily sees request metadata (IP
+        address, User-Agent, request path, timestamps) to serve pages and protect the
+        site from abuse. That processing is standard for any web host and is <strong>not
+        shared with, or used by, any analytics or advertising service</strong> — this site
+        runs none. An IP address is personal data under GDPR even without a cookie, which
+        is why this notice exists at all despite the small footprint below.
+    </p>
+</div>
+
+<div class="content-box" style="margin-bottom: 3rem;">
+    <h2>The one cookie this site sets</h2>
+    <p>
+        A single cookie, <code>we_gate</code>, is set only after you submit the entry
+        code on the splash gate. It is a signed token that simply remembers "this browser
+        already typed the code" for <strong>30 days</strong>, so you aren't asked again on
+        every visit. It carries no identity, no tracking ID, and no third party ever reads
+        it.
+    </p>
+    <p>
+        Because <code>we_gate</code> is <strong>strictly necessary</strong> for the site to
+        function (there is no content to show without it) and nothing else is set, this
+        falls under the ePrivacy "strictly necessary" exemption — <strong>no cookie-consent
+        banner is required</strong>, and none is shown.
+    </p>
+</div>
+
+<div class="content-box" style="margin-bottom: 3rem;">
+    <h2>What isn't here</h2>
+    <ul>
+        <li>No analytics (no Google Analytics, no Cloudflare Zaraz, no first-party pixel).</li>
+        <li>No advertising or retargeting cookies.</li>
+        <li>No third-party embeds that set their own cookies.</li>
+        <li>No account system, no forms that collect personal data beyond the entry code above.</li>
+    </ul>
+    <p>
+        If that ever changes — an analytics tool, a Zaraz integration, any additional
+        cookie — this notice will be rewritten first and a consent banner added before the
+        change ships. Until then, the honest answer is that there is very little to
+        disclose.
+    </p>
+</div>
+
+<div class="content-box">
+    <h2>Questions</h2>
+    <p>
+        This project is currently the work of a single author (see
+        <a href="/governance/">Governance</a>). For a privacy question, open an issue on
+        <a href="https://github.com/chalbert/webeverything">the GitHub repo</a>.
+    </p>
+</div>
