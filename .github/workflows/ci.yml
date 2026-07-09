@@ -13,9 +13,13 @@ name: CI
 # The live-server a11y/content/smoke lanes still need a build-then-serve step — those CI-home under #800.
 #
 # Visual lane (job: visual): builds the docs site (requires FUI sibling, same as deploy.yml), serves the
-# built _site statically on :8080, and runs `check:visual` against committed -chromium-linux baselines.
-# Linux baselines live alongside the darwin ones in tests/visual/rendered-site-visual.spec.ts-snapshots/.
-# Refresh them by running the `update-visual-baselines` workflow (.github/workflows/update-visual-baselines.yml).
+# built _site statically on :8080, and runs `check:visual` against committed -chromium-linux baselines —
+# the SOLE baseline set (#2235; a prior darwin set was dropped once rendering was pinned to the container,
+# #2234, making linux-in-container the one reproducible target) in
+# tests/visual/rendered-site-visual.spec.ts-snapshots/. Refresh them by running the `update-visual-baselines`
+# workflow (.github/workflows/update-visual-baselines.yml) — a local, non-containerized `check:visual:update`
+# run on a non-linux host would still produce mismatched filenames, so refreshing stays a container-only
+# operation (CI job above or the update-visual-baselines workflow), never a local darwin update.
 # The `visual` job renders inside a version-locked `mcr.microsoft.com/playwright:vX.Y.Z-jammy` container
 # pinned to the `@playwright/test` version installed in package-lock.json (#2234) — rendering on a bare
 # `ubuntu-latest` runner lets the font/AA stack drift with the image, which is exactly what the -linux
@@ -115,10 +119,15 @@ jobs:
   # and runs `check:visual` against committed -chromium-linux baselines. Separate job so its ~2–3 min
   # build cost doesn't slow the fast `test` job. Runs on the same events (push/PR/dispatch).
   #
-  # Baseline hygiene: committed PNGs under tests/visual/rendered-site-visual.spec.ts-snapshots/
-  # are platform-tagged. The darwin originals (local dev) stay alongside the linux ones (CI). Refresh
-  # linux baselines via `workflow_dispatch` on `.github/workflows/update-visual-baselines.yml` after
-  # an intentional look change (same discipline as `npm run check:visual:update` locally).
+  # Baseline hygiene (#2235): committed PNGs under tests/visual/rendered-site-visual.spec.ts-snapshots/
+  # are a SINGLE platform target — container-linux — not platform-branched; a prior darwin set was
+  # dropped once rendering was pinned to the container (#2234). Refresh linux baselines via
+  # `workflow_dispatch` on `.github/workflows/update-visual-baselines.yml` after an intentional look
+  # change. A bare local `npm run check:visual:update` on a non-linux host writes `-chromium-<host
+  # platform>.png` files that do NOT match the committed `-chromium-linux.png` baselines — do not commit
+  # those; either run the refresh workflow above, or run the container image below locally (`docker run
+  # --rm -v "$PWD/..:/workspace" -w /workspace/web-everything <the pinned image tag> …`, mirroring this
+  # job's steps) to produce a real linux-matching baseline.
   visual:
     # DISABLED (#2232) pending the visual-regression rebuild epic. The gate has no committed
     # -chromium-linux baselines to compare against (they could never be seeded — the refresh workflow

@@ -23,6 +23,15 @@
 // a new fixture-backed target). Baselines: ./rendered-site-visual.spec.ts-snapshots/ — refresh
 // DELIBERATELY with `npm run check:visual:update` after an intended look change.
 //
+// #2235 — SINGLE-PLATFORM (container-linux) baselines only; a prior darwin set was dropped once
+// rendering was pinned to the version-locked Playwright container (#2234). Playwright suffixes each
+// baseline filename with the rendering host's platform, so `check:visual`/`check:visual:update` run bare
+// on a macOS dev machine writes `-chromium-darwin.png` files that will never match the committed
+// `-chromium-linux.png` baselines (spurious "missing baseline" failures, not real regressions). Refresh
+// or verify against the real baselines via `.github/workflows/update-visual-baselines.yml`
+// (workflow_dispatch) or by running the pinned container image locally (same image tag as that workflow
+// and the ci.yml `visual` job) — never by committing a darwin-suffixed PNG.
+//
 // Threshold note: `maxDiffPixelRatio` is generous (1%) on purpose — this guard targets STRUCTURAL/style
 // regressions (a vanished card frame is a huge diff), not pixel-perfect parity, so minor antialiasing/text
 // reflow under a percent of the page won't false-fail. Tighten per-page later if a surface warrants it.
