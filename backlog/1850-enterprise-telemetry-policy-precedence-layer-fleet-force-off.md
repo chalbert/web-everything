@@ -68,5 +68,5 @@ tier (verified: plateau-app has no telemetry/consent substrate).
 - **(c) deferred:** a plateau-app example enterprise config is a reasonable follow-up slice, not part of
   this build.
 
-Successor build scaffolded as **#xgf7ale** (`story·3`, parent #1848, locus WE + FUI). #1848 remains the
+Successor build scaffolded as **#2372** (`story·3`, parent #1848, locus WE + FUI). #1848 remains the
 open parent epic.
