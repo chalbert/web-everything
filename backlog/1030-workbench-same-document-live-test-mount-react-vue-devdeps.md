@@ -169,3 +169,23 @@ needing net-new introspection wiring. The build (cross-origin import → same-do
 panel wiring) **can't be authored until that render target is ruled**, since it dictates where `mount(el, …)`
 points and how the panels introspect. Set `blockedBy: 1594`. The :3002-restart residual still stands, but it
 is downstream of the decision, not a substitute for it.
+
+## 2026-07-09 — `humanGate` removed; item is now agent-doable in a focused FUI session
+
+The `humanGate: { kind: setup }` (restart :3002 + decide the render fork) is **dropped** — both of its two
+stated reasons are stale:
+
+1. **The render-target fork is RESOLVED.** #1594 ratified 2026-06-22 → render the live subject **into the
+   stage** (Fork 1a; codified `we:docs/agent/platform-decisions.md#single-introspection-slot`). #1594 itself
+   states "**#1030 now agent-ready**" with the three amendments (subject-node resolution, prop-routed
+   `instance.update`, `unmount()` teardown) folded into this item's scope. `blockedBy` is correctly clear
+   (#1594 resolved).
+2. **The ":3002 restart" is not human-only.** batch-2026-06-22-1575-1030 already proved the full mechanism
+   end-to-end against a **throwaway maas origin** (:3009) with the user's :3002 untouched. So "verify against
+   the running :3002" is a self-imposed acceptance framing, not a hard requirement — a focused frontierui
+   session can spin its own throwaway origin and browser-verify, exactly as that batch did.
+
+What remains is **pure agent work**, not human setup: the `fui:workbench/mount.ts` integration (cross-origin
+import → same-document mount into the stage → `window.onerror`/`unhandledrejection` surfacing) + the three
+Fork-1(a) amendments, browser-verified against a freshly-spun throwaway maas origin. Resume via
+`/next 1030` in a frontierui session that owns a dev-server lifecycle.
