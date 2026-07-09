@@ -1,8 +1,10 @@
 ---
 kind: epic
 parent: "1971"
-status: open
+status: resolved
 dateOpened: "2026-07-01"
+dateResolved: "2026-07-09"
+graduatedTo: none
 tags: []
 ---
 
