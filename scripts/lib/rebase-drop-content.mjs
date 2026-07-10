@@ -1,0 +1,293 @@
+/**
+ * rebase-drop-content.mjs — #2371, the "safe-content" extension of the drain's rebase-drop (#2198) beyond the
+ * manifest-only case: any provably-safe content conflict, i.e. a `git merge-tree` conflict where EVERY hunk is
+ * NON-OVERLAPPING (the two sides changed disjoint base-line ranges — classic append/append, or edits to
+ * different regions). This is a WIDENING of the deterministic-vs-judgment band (#51) by exactly one step: an
+ * overlapping hunk (both sides touched the SAME base lines) is genuine semantic divergence and is left, as
+ * before, for `/finish`. See `backlog/2371-safe-content-rebase-drop-auto-resolve-non-overlapping-hunk-c.md`.
+ *
+ * WHY THIS IS NOT `git merge-file`: git's own line-based 3-way merge treats two pure appends to the SAME file
+ * tail as a conflict too (both insertions anchor at the identical position, so it cannot order them) — exactly
+ * the observed 2026-07-09 storm (~5 `/slice` PRs each appending a verdict to one report file, all CONFLICTING).
+ * That is precisely the case this item wants auto-resolved: neither side touched any EXISTING base line, so
+ * there is nothing to arbitrate — both appends are kept (deterministic order: the `base` arg's side first, then
+ * the lane's). The hunk model here is therefore base-line-RANGE overlap, not merge-file's stricter anchor-based
+ * conflict detection: `diffLines` computes each side's changed base-line ranges independently (base→ours,
+ * base→theirs); two hunks overlap only if their base ranges truly intersect. Two zero-width insertions at the
+ * SAME position (the append/append case) never intersect by construction, so they compose safely.
+ *
+ * PLUMBING: reuses `parseMergeTree` (rebase-drop-manifest.mjs) for the tree-OID + conflicted-path list, adds
+ * `parseConflictStages` to pull each conflicted path's THREE blob OIDs (stage 1=common ancestor, 2=`base`-arg
+ * side, 3=lane side) straight off the same `git merge-tree --write-tree` output — no extra git calls needed to
+ * learn WHAT conflicts. Reading blob CONTENT (`cat-file -p <oid>`) and writing a resolved blob back
+ * (`hash-object -w --stdin` + `update-index --cacheinfo`) is the same no-checkout, temp-index pattern
+ * `rebase-drop-manifest.mjs` and `nnn-collision-heal.mjs` already use — this file adds no new transport, only a
+ * new (still pure, still injectable-`run`) classification + resolution step.
+ *
+ * SCOPE GUARD: only a path with ALL THREE stages present, all mode `100644` (a regular file, not a rename/
+ * delete/mode conflict), and non-binary content (no NUL byte) is even attempted — anything else is `real`
+ * (skip). A file too large to diff safely (either side over `MAX_DIFF_LINES`) is also `real` — this stays a
+ * PROVABLY-safe resolver, never a best-effort guess on a giant/binary blob.
+ */
+
+import { spawnSync } from 'node:child_process';
+import { LANE_MANIFEST, parseMergeTree } from './rebase-drop-manifest.mjs';
+
+export { LANE_MANIFEST };
+
+/** DP diff is O(n·m) time AND space; a two-sided 3000×3000 int32 table is ~36MB, generous for any real report/
+ *  doc file and cheap insurance against a pathological huge blob hanging the drain. Beyond this, `diffLines`
+ *  returns null and the path is treated as unsafe (skip → `/finish`), never a slow/best-effort guess. */
+export const MAX_DIFF_LINES = 3000;
+
+// ── pure line diff/merge ─────────────────────────────────────────────────────────────────────────────────
+
+/** Split text into lines that RETAIN their trailing `\n` (the final line keeps none if the text doesn't end in
+ *  one) — so re-joining with `.join('')` reproduces the exact original bytes, no reconstruction ambiguity. */
+export function splitLinesKeepEnds(text) {
+  if (text === '') return [];
+  return String(text).match(/[^\n]*\n|[^\n]+$/g) || [];
+}
+
+/**
+ * Line-based LCS diff from `a` to `b`. Pure. Returns hunks — contiguous non-equal runs, each
+ * `{ aStart, aEnd, bStart, bEnd }` (end exclusive) marking a base range REPLACED (aEnd>aStart AND bEnd>bStart),
+ * DELETED (bEnd===bStart), or INSERTED (aEnd===aStart) with `b[bStart:bEnd]`. Returns `null` if either side
+ * exceeds `MAX_DIFF_LINES` (too large to diff safely — the caller treats that as unsafe/real).
+ */
+export function diffLines(a, b) {
+  const n = a.length, m = b.length;
+  if (n > MAX_DIFF_LINES || m > MAX_DIFF_LINES) return null;
+  // dp[i][j] = LCS length of a[i:], b[j:]. Built bottom-up (Int32Array rows keep this cheap).
+  const dp = new Array(n + 1);
+  for (let i = 0; i <= n; i++) dp[i] = new Int32Array(m + 1);
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const hunks = [];
+  let i = 0, j = 0, cur = null;
+  const flush = () => { if (cur) { hunks.push(cur); cur = null; } };
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { flush(); i++; j++; continue; }
+    if (dp[i + 1][j] >= dp[i][j + 1]) {
+      if (!cur) cur = { aStart: i, aEnd: i, bStart: j, bEnd: j };
+      cur.aEnd = i + 1; i++;
+    } else {
+      if (!cur) cur = { aStart: i, aEnd: i, bStart: j, bEnd: j };
+      cur.bEnd = j + 1; j++;
+    }
+  }
+  while (i < n) { if (!cur) cur = { aStart: i, aEnd: i, bStart: j, bEnd: j }; cur.aEnd = i + 1; i++; }
+  while (j < m) { if (!cur) cur = { aStart: i, aEnd: i, bStart: j, bEnd: j }; cur.bEnd = j + 1; j++; }
+  flush();
+  return hunks;
+}
+
+/** Do two hunks (base-line-range `[aStart,aEnd)`) truly intersect? Pure. Two ZERO-WIDTH insertions at the same
+ *  position (`aStart === aEnd` for both, same value) do NOT overlap by this definition — the append/append
+ *  case this item exists to unblock. */
+export function hunksOverlap(h1, h2) {
+  return !(h1.aEnd <= h2.aStart || h2.aEnd <= h1.aStart);
+}
+
+/**
+ * Merge `oursHunks` + `theirsHunks` (both diffed against the SAME `baseLines`) into one line array, given they
+ * are already known non-overlapping. Pure. At a shared insertion point, `ours` composes before `theirs`
+ * (deterministic, stable order — not a judgment call, just a tie-break for zero-width ties).
+ */
+export function unionMerge(baseLines, oursHunks, theirsHunks, oursLines, theirsLines) {
+  const tagged = [
+    ...oursHunks.map((h) => ({ ...h, side: 0, lines: oursLines.slice(h.bStart, h.bEnd) })),
+    ...theirsHunks.map((h) => ({ ...h, side: 1, lines: theirsLines.slice(h.bStart, h.bEnd) })),
+  ].sort((x, y) => x.aStart - y.aStart || x.side - y.side);
+  const out = [];
+  let pos = 0;
+  for (const h of tagged) {
+    if (h.aStart > pos) { out.push(...baseLines.slice(pos, h.aStart)); pos = h.aStart; }
+    out.push(...h.lines);
+    pos = Math.max(pos, h.aEnd);
+  }
+  out.push(...baseLines.slice(pos));
+  return out;
+}
+
+/**
+ * The core decision: can `baseLines`/`oursLines`/`theirsLines` merge with NO judgment call? Pure.
+ * @returns {{ok:true, lines:string[]}|{ok:false, reason:string}}
+ */
+export function threeWayMergeLines(baseLines, oursLines, theirsLines) {
+  const oursHunks = diffLines(baseLines, oursLines);
+  const theirsHunks = diffLines(baseLines, theirsLines);
+  if (!oursHunks || !theirsHunks) return { ok: false, reason: 'file too large to diff safely' };
+  for (const h1 of oursHunks) for (const h2 of theirsHunks) {
+    if (hunksOverlap(h1, h2)) return { ok: false, reason: 'overlapping hunk (both sides changed the same lines)' };
+  }
+  return { ok: true, lines: unionMerge(baseLines, oursHunks, theirsHunks, oursLines, theirsLines) };
+}
+
+/** Text-level wrapper around `threeWayMergeLines` — the unit the git plumbing actually reads/writes. Pure.
+ *  Refuses binary content (a NUL byte anywhere) outright; a binary diff has no "line" to reason about. */
+export function mergeTextThreeWay(baseText, oursText, theirsText) {
+  if (baseText.includes('\0') || oursText.includes('\0') || theirsText.includes('\0')) {
+    return { ok: false, reason: 'binary content' };
+  }
+  const r = threeWayMergeLines(splitLinesKeepEnds(baseText), splitLinesKeepEnds(oursText), splitLinesKeepEnds(theirsText));
+  if (!r.ok) return r;
+  return { ok: true, text: r.lines.join('') };
+}
+
+// ── merge-tree conflict-stage parsing ────────────────────────────────────────────────────────────────────
+
+/**
+ * Parse `git merge-tree --write-tree`'s "Conflicted file info" block into per-path, per-stage blob info. Pure.
+ * Stage 1 = common ancestor, 2 = the FIRST tree arg's side (`base` in this repo's call convention), 3 = the
+ * SECOND tree arg's side (the lane ref). A path missing a stage means it didn't exist on that side (add/add or
+ * delete conflict) — never content-mergeable; the caller's scope guard requires all three.
+ * @returns {Object<string, {1?:{mode,oid}, 2?:{mode,oid}, 3?:{mode,oid}}>}
+ */
+export function parseConflictStages(stdout, exitCode) {
+  const byPath = {};
+  if (Number(exitCode) === 0) return byPath;
+  const lines = String(stdout ?? '').split('\n');
+  for (const line of lines.slice(1)) {
+    if (line.trim() === '') break;
+    const m = line.match(/^(\d{6}) ([0-9a-f]+) ([1-3])\t(.+)$/);
+    if (!m) continue;
+    const [, mode, oid, stage, path] = m;
+    byPath[path] = byPath[path] || {};
+    byPath[path][stage] = { mode, oid };
+  }
+  return byPath;
+}
+
+/**
+ * Given the non-manifest conflicting paths + their parsed stage info, decide whether EVERY one is a safe
+ * non-overlapping 3-way content merge. Pure, given an injected `readBlob(oid) -> text|null` (the only I/O).
+ * Short-circuits on the FIRST unsafe path (order = input order) — a single overlapping/unsafe path means the
+ * whole PR stays a skip, so there is nothing to gain from planning the rest.
+ * @returns {{ok:true, merges:Object<string,string>}|{ok:false, reason:string, path:string}}
+ */
+export function planContentMerges(paths, stages, readBlob) {
+  const merges = {};
+  for (const path of paths) {
+    const st = stages[path] || {};
+    if (!st['1'] || !st['2'] || !st['3']) return { ok: false, reason: 'add/delete or rename conflict (no common-ancestor stage)', path };
+    if (st['1'].mode !== '100644' || st['2'].mode !== '100644' || st['3'].mode !== '100644') {
+      return { ok: false, reason: 'non-regular-file mode conflict', path };
+    }
+    const base = readBlob(st['1'].oid);
+    const ours = readBlob(st['2'].oid);
+    const theirs = readBlob(st['3'].oid);
+    if (base == null || ours == null || theirs == null) return { ok: false, reason: 'could not read blob content', path };
+    const merged = mergeTextThreeWay(base, ours, theirs);
+    if (!merged.ok) return { ok: false, reason: merged.reason, path };
+    merges[path] = merged.text;
+  }
+  return { ok: true, merges };
+}
+
+// ── imperative git boundary ──────────────────────────────────────────────────────────────────────────────
+
+const firstLine = (s) => String(s || '').split('\n')[0];
+
+/** The default real git runner — mirrors `rebase-drop-manifest.mjs`'s `gitRunner`, extended with `opts.input`
+ *  (stdin, needed by `git hash-object --stdin`) so this file needs no direct filesystem access at all. */
+export function gitRunner(cmd, args, { env, input, cwd } = {}) {
+  const r = spawnSync(cmd, args, { encoding: 'utf8', input, env: env ? { ...process.env, ...env } : process.env, ...(cwd ? { cwd } : {}) });
+  return { status: r.status == null ? 1 : r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+}
+
+/**
+ * Rebuild a lane PR's tip onto `<base>`, auto-resolving every conflicting NON-manifest path via a safe
+ * non-overlapping 3-way content merge (dropping the manifest too, if it also conflicts). Does NOT merge (the
+ * caller does) — mirrors `rebaseDropManifest`'s contract exactly, one step wider. Returns one of:
+ *   { action:'rebased', newCommit, mergedPaths, droppedManifest, base, laneRef } — pushed a resolved tip.
+ *   { action:'skip',  reason, conflictPaths }  — clean/manifest-only (nothing for THIS resolver to do — the
+ *                                                caller should have already tried `rebaseDropManifest`), or a
+ *                                                real (overlapping/unsafe) conflict found while planning.
+ *   { action:'error', reason }                 — a plumbing step failed.
+ *
+ * @param {object} o
+ * @param {string} o.laneRef
+ * @param {string} [o.base='origin/main']
+ * @param {string} [o.remote='origin']
+ * @param {string} [o.readRef]
+ * @param {boolean}[o.fetch=true]
+ * @param {string} [o.manifest='.lane-manifest.json']
+ * @param {string} [o.message]
+ * @param {string} [o.tmpIndex]
+ * @param {string} [o.cwd]           run every git invocation in THIS directory (a sibling clone), #2263-style.
+ * @param {(cmd:string,args:string[],opts?:object)=>{status:number,stdout:string,stderr:string}} [o.run]
+ */
+export function rebaseDropContent({
+  laneRef,
+  base = 'origin/main',
+  remote = 'origin',
+  readRef,
+  fetch = true,
+  manifest = LANE_MANIFEST,
+  message,
+  tmpIndex = '.git/rebase-drop-content-index',
+  cwd,
+  run = gitRunner,
+} = {}) {
+  if (!laneRef) return { action: 'error', reason: 'no laneRef given' };
+  const mergeRef = readRef || `${remote}/${laneRef}`;
+
+  if (fetch) {
+    const f = run('git', ['fetch', remote, laneRef], { cwd });
+    if (f.status !== 0) return { action: 'error', reason: `fetch ${laneRef} failed (${firstLine(f.stderr)})` };
+  }
+
+  const mt = run('git', ['merge-tree', '--write-tree', base, mergeRef], { cwd });
+  const parsed = parseMergeTree(mt.stdout, mt.status);
+  if (!parsed.tree) return { action: 'error', reason: `merge-tree produced no tree (${firstLine(mt.stderr)})` };
+  if (parsed.clean || parsed.conflictPaths.length === 0) {
+    return { action: 'skip', reason: 'no conflict — not a content-rebase-drop candidate', conflictPaths: [] };
+  }
+
+  const nonManifest = parsed.conflictPaths.filter((p) => p !== manifest);
+  if (nonManifest.length === 0) {
+    return { action: 'skip', reason: 'manifest-only conflict — use rebaseDropManifest', conflictPaths: parsed.conflictPaths };
+  }
+
+  const stages = parseConflictStages(mt.stdout, mt.status);
+  const readBlob = (oid) => {
+    const cat = run('git', ['cat-file', '-p', oid], { cwd });
+    return cat.status === 0 ? cat.stdout : null;
+  };
+  const plan = planContentMerges(nonManifest, stages, readBlob);
+  if (!plan.ok) {
+    return { action: 'skip', reason: `overlapping/unsafe conflict in ${plan.path} (${plan.reason})`, conflictPaths: parsed.conflictPaths };
+  }
+
+  // Build the resolved tree in a TEMP index — never touches HEAD or the working tree (mirrors rebase-drop-manifest).
+  const env = { GIT_INDEX_FILE: tmpIndex };
+  const read = run('git', ['read-tree', parsed.tree], { env, cwd });
+  if (read.status !== 0) return { action: 'error', reason: `read-tree failed (${firstLine(read.stderr)})` };
+  const droppedManifest = parsed.conflictPaths.includes(manifest);
+  if (droppedManifest) run('git', ['rm', '--cached', '--ignore-unmatch', manifest], { env, cwd });
+  for (const [path, text] of Object.entries(plan.merges)) {
+    const ho = run('git', ['hash-object', '-w', '--stdin'], { env, input: text, cwd });
+    const oid = String(ho.stdout || '').trim();
+    if (ho.status !== 0 || !oid) return { action: 'error', reason: `hash-object ${path} failed (${firstLine(ho.stderr)})` };
+    const up = run('git', ['update-index', '--cacheinfo', `100644,${oid},${path}`], { env, cwd });
+    if (up.status !== 0) return { action: 'error', reason: `update-index ${path} failed (${firstLine(up.stderr)})` };
+  }
+  const wt = run('git', ['write-tree'], { env, cwd });
+  const resolvedTree = String(wt.stdout || '').trim();
+  if (wt.status !== 0 || !resolvedTree) return { action: 'error', reason: `write-tree failed (${firstLine(wt.stderr)})` };
+
+  const mergedPaths = Object.keys(plan.merges);
+  const msg = message || `drain: rebase ${laneRef} onto ${base}, auto-resolve non-overlapping content conflict(s) in ${mergedPaths.join(', ')}${droppedManifest ? `, drop transient ${manifest}` : ''}`;
+  const ct = run('git', ['commit-tree', resolvedTree, '-p', base, '-p', mergeRef, '-m', msg], { cwd });
+  const newCommit = String(ct.stdout || '').trim();
+  if (ct.status !== 0 || !newCommit) return { action: 'error', reason: `commit-tree failed (${firstLine(ct.stderr)})` };
+
+  const push = run('git', ['push', remote, `${newCommit}:refs/heads/${laneRef}`], { cwd });
+  if (push.status !== 0) return { action: 'error', reason: `push to ${laneRef} failed (${firstLine(push.stderr)})` };
+
+  return { action: 'rebased', newCommit, mergedPaths, droppedManifest, base, laneRef };
+}
