@@ -7,7 +7,7 @@ tags: [drain, review, coordination, subagents]
 
 # Drain auto-converges review/fix in-process (role-separated subagents) vs. bounce review:changes to the author
 
-Today a `review:changes` verdict bounces the PR back to the author lane to fix + repush — a **cross-session round-trip** (drain → author → drain). Since the drain (`we:scripts/merge-ai-prs.mjs`) already runs review via subagents in-process, should it also run the **fix** in-process — a role-separated *fixer* subagent writes the change to the lane ref, a *distinct fresh reviewer* subagent then accepts — converging in-drain with no bounce? This complements the overlap-stack epic ([#x6yoscx](/backlog/x6yoscx/)): stacking kills *conflict* round-trips; this kills *review* round-trips. Together a serial batch lands with near-zero cross-session hops.
+Today a `review:changes` verdict bounces the PR back to the author lane to fix + repush — a **cross-session round-trip** (drain → author → drain). Since the drain (`we:scripts/merge-ai-prs.mjs`) already runs review via subagents in-process, should it also run the **fix** in-process — a role-separated *fixer* subagent writes the change to the lane ref, a *distinct fresh reviewer* subagent then accepts — converging in-drain with no bounce? This complements the overlap-stack epic ([#2387](/backlog/2387/)): stacking kills *conflict* round-trips; this kills *review* round-trips. Together a serial batch lands with near-zero cross-session hops.
 
 ## The invariant it must preserve (and how)
 
@@ -28,4 +28,4 @@ The hard constraint is the **non-author review invariant**: *a landed PR was acc
 
 **Recommendation:** A, scoped tightly — the win (no bounce on the common cheap case) is real and the invariant is preservable by construction, but only if the scope threshold and the #2285 carve-out are enforced from day one. If we can't cleanly classify "cheap vs judgment," fall back to B.
 
-*Not blocked by [#x6yoscx](/backlog/x6yoscx/) — independent, same coordination-reduction theme. Ruling this fork spawns the build story/epic; it does not itself build anything.*
+*Not blocked by [#2387](/backlog/2387/) — independent, same coordination-reduction theme. Ruling this fork spawns the build story/epic; it does not itself build anything.*

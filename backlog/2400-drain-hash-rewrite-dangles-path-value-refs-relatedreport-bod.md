@@ -13,7 +13,7 @@ At land the drain's `applyLedger` (`we:scripts/backlog/id.mjs`, called from `we:
 
 ## Real repro (this session)
 
-Landing the overlap-stack epic numbered `x6yoscx → 2387`. `applyLedger` rewrote the item's `relatedReport` filename stem `-x6yoscx` → `-2387` but left the report file itself named with the `-x6yoscx` stem. Result on `main`: (1) `relatedReport does not exist`, and (2) the real report is now *hidden* (nothing references it) — **two `check:standards` errors → red main**, blocking the whole merge queue. Hotfixed by renaming the report (#357), but the root cause is live: any landing item whose `relatedReport` filename embeds its own hash reproduces it.
+Landing the overlap-stack epic numbered `2387 → 2387`. `applyLedger` rewrote the item's `relatedReport` filename stem `-2387` → `-2387` but left the report file itself named with the `-2387` stem. Result on `main`: (1) `relatedReport does not exist`, and (2) the real report is now *hidden* (nothing references it) — **two `check:standards` errors → red main**, blocking the whole merge queue. Hotfixed by renaming the report (#357), but the root cause is live: any landing item whose `relatedReport` filename embeds its own hash reproduces it.
 
 Same **blind-rewrite over-reach** class the red-team caught for `bornAs` (#2392, whose fix is a targeted `applyLedger` exclusion) — this is the sibling case for path-shaped values.
 
