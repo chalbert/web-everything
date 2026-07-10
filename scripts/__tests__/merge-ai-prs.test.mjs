@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON } from '../merge-ai-prs.mjs';
 import { scoreEscalation } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -184,6 +184,100 @@ describe('merge-ai-prs — planLabelDrain blockedBy ordering (#2188)', () => {
   it('sorts numeric items by number, and hash items after every numbered item (tie-break by PR#)', () => {
     const { ready } = planLabelDrain([cand(3, 'xuj0wtn'), cand(2, 2201), cand(4, 'xiea3rt'), cand(1, 2199)]);
     expect(ready.map((c) => c.num)).toEqual([1, 2, 3, 4]); // 2199, 2201, then hashes by PR# (3 before 4)
+  });
+});
+
+describe('merge-ai-prs — #2393 proof-of-land stackParents gate (planLabelDrain)', () => {
+  // a candidate that may carry stackParents (the overlap-stack edge) alongside its blockedBy edge.
+  const sc = (num, item, stackParents = [], { blockedBy = [], decision = 'merge' } = {}) => ({ num, item, blockedBy, stackParents, decision });
+
+  it('a chain lands IN ORDER: the child defers while its parent is open, then frees once the parent is proven landed this pass', () => {
+    // child (#2 stackParents [parent]) + parent (#1). Pass 1: parent open ⇒ child NOT proven ⇒ deferred.
+    const p1 = planLabelDrain([sc(2, 'xchild0', ['xparen0']), sc(1, 'xparen0', [])]);
+    expect(p1.ready.map((c) => c.num)).toEqual([1]);
+    expect(p1.deferred).toEqual([{ num: 2, item: 'xchild0', waitOn: ['xparen0'] }]);
+
+    // the caller merged the parent's WE carrier this pass (adds it to landedThisPass) + removed it from the set.
+    const p2 = planLabelDrain([sc(2, 'xchild0', ['xparen0'])], { landedThisPass: new Set(['xparen0']) });
+    expect(p2.ready.map((c) => c.num)).toEqual([2]);
+    expect(p2.deferred).toEqual([]);
+  });
+
+  it('a RED/ABSENT parent DEFERS its descendants (positive proof — absence is NEVER read as landed)', () => {
+    // parent (#1) is red (decision:skip) so it stays open + NEVER enters landedThisPass. The child (#2) must
+    // NOT land past it — even though a bare blockedBy-style "absent ⇒ landed" would wrongly free it.
+    const red = planLabelDrain([sc(2, 'xchild0', ['xparen0']), sc(1, 'xparen0', [], { decision: 'skip' })]);
+    expect(red.ready).toEqual([]);
+    expect(red.deferred.map((d) => d.num)).toEqual([2]);
+
+    // a parent that is entirely ABSENT from the candidate set and has NO bornAs proof is likewise NOT proven —
+    // a provisional hash we cannot positively prove landed defers the descendant (the stowaway guard).
+    const absent = planLabelDrain([sc(5, 'xchild0', ['xghost0'])]);
+    expect(absent.ready).toEqual([]);
+    expect(absent.deferred).toEqual([{ num: 5, item: 'xchild0', waitOn: ['xghost0'] }]);
+  });
+
+  it('a parent bornAs-proven on main (provenOnMain) frees the child even when absent from the candidate set', () => {
+    const { ready, deferred } = planLabelDrain([sc(5, 'xchild0', ['xparen0'])], { provenOnMain: new Set(['xparen0']) });
+    expect(ready.map((c) => c.num)).toEqual([5]);
+    expect(deferred).toEqual([]);
+  });
+
+  it('a NUMERIC stackParent absent from the candidate set is already-landed (a number only exists post-land)', () => {
+    // #2288 JIT numbering assigns a NNN only at land, so a numeric stackParent not in play is landed ⇒ ready.
+    const { ready } = planLabelDrain([sc(5, 'xchild0', [2199])]);
+    expect(ready.map((c) => c.num)).toEqual([5]);
+  });
+
+  it('a DISJOINT sibling (no stackParents) is UNAFFECTED — degrades to the legacy ready sweep', () => {
+    const { ready, deferred } = planLabelDrain([sc(3, 'xsib000', []), sc(1, 'xother0', [])]);
+    expect(ready.map((c) => c.num).sort()).toEqual([1, 3]);
+    expect(deferred).toEqual([]);
+  });
+
+  it('both gates compose: a candidate blocked on BOTH an open blockedBy and an unproven stackParent lists both waitOn', () => {
+    const { deferred } = planLabelDrain([
+      sc(3, 'xdep000', ['xstk000'], { blockedBy: ['xblk000'] }),
+      sc(1, 'xblk000', []),
+      sc(2, 'xstk000', []),
+    ]);
+    const d = deferred.find((x) => x.num === 3);
+    expect(d.waitOn.sort()).toEqual(['xblk000', 'xstk000']);
+  });
+});
+
+describe('merge-ai-prs — #2393 impl-PR→WE-manifest laneRef join (joinImplToCouples)', () => {
+  // a WE carrier (its own manifest) + its couple's lane refs; and a manifest-less impl PR keyed by headRef.
+  const we = (num, item, { blockedBy = [], stackParents = [], refs = [] } = {}) =>
+    ({ num, repo: null, headRef: `lane/${item}`, hasManifest: true, manifestRefs: refs, item, blockedBy, stackParents });
+  const impl = (num, headRef) => ({ num, repo: 'chalbert/frontierui', headRef, hasManifest: false, item: null, blockedBy: [], stackParents: [] });
+
+  it('a manifest-less impl PR INHERITS its couple item + blockedBy + stackParents (closes the impl-orphan-always-ready hole)', () => {
+    const couple = we(10, 'xitem00', { blockedBy: ['xblk000'], stackParents: ['xpar000'], refs: ['lane/xitem00', 'lane/xitem00-fui'] });
+    const implPr = impl(20, 'lane/xitem00-fui');
+    joinImplToCouples([couple, implPr]);
+    expect(implPr.item).toBe('xitem00');
+    expect(implPr.blockedBy).toEqual(['xblk000']);
+    expect(implPr.stackParents).toEqual(['xpar000']);
+    expect(implPr.joinedToCouple).toBe('xitem00');
+  });
+
+  it('once joined, the impl PR is GATED WITH its couple — it defers whenever the couple defers (no stowaway at the impl level)', () => {
+    const couple = we(10, 'xitem00', { stackParents: ['xpar000'], refs: ['lane/xitem00-fui'] });
+    const implPr = impl(20, 'lane/xitem00-fui');
+    const verdicts = joinImplToCouples([couple, implPr]).map((v) => ({ ...v, decision: 'merge' }));
+    // parent unproven ⇒ BOTH the WE couple and its impl PR defer together.
+    const { ready, deferred } = planLabelDrain(verdicts);
+    expect(ready).toEqual([]);
+    expect(deferred.map((d) => d.num).sort()).toEqual([10, 20]);
+  });
+
+  it('a TRUE orphan (a headRef in no couple manifest) stays an always-ready orphan — the bare /merge sweep is unchanged', () => {
+    const orphan = impl(30, 'lane/unrelated');
+    joinImplToCouples([we(10, 'xitem00', { refs: ['lane/xitem00'] }), orphan]);
+    expect(orphan.item).toBeNull();
+    expect(orphan.joinedToCouple).toBeUndefined();
+    expect(planLabelDrain([{ ...orphan, decision: 'merge' }]).ready.map((c) => c.num)).toEqual([30]);
   });
 });
 

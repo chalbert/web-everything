@@ -1,0 +1,4 @@
+{
+  "_doc": "Durable drain capability marker (#2387 F4 / #2393). Committed to origin/main to advertise that the drain (scripts/merge-ai-prs.mjs) enforces the overlap-stacking proof-of-land gate: a stacked couple lands only when every stackParent is proven landed (landed this drain run, or bornAs-proven on main). The batch producer reads gateVersion off origin/main and STACKS ONLY when it is >= the version it requires, defaulting HARD to plain siblings on any read failure / version mismatch. Bump gateVersion (and scripts/readiness/drain-capability.mjs's GATE_VERSION) only when the gate's safety contract changes. See scripts/readiness/drain-capability.mjs.",
+  "gateVersion": 1
+}
