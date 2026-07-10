@@ -99,10 +99,10 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
     it('a repo entry may omit base while a sibling repo carries one (per-repo, not manifest-wide)', () => {
       const m = buildManifest({
         item: 5,
-        repos: [{ repo: 'we', ref: 'lane/5-we' }, { repo: 'frontierui', ref: 'lane/5-fui', base: 'abc123' }],
+        repos: [{ repo: 'we', ref: 'lane/5-we' }, { repo: 'frontierui', ref: 'lane/5-fui', base: 'abc1234' }],
       });
       expect(m.repos.find((r) => r.repo === 'we')).not.toHaveProperty('base');
-      expect(m.repos.find((r) => r.repo === 'frontierui').base).toBe('abc123');
+      expect(m.repos.find((r) => r.repo === 'frontierui').base).toBe('abc1234');
       expect(validateManifest(m).ok).toBe(true);
     });
 
@@ -119,6 +119,34 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
       const badStackParents = { item: 9, repos: [{ repo: 'we', ref: 'lane/9-we', carriesResolve: true }], stackParents: 'not-an-array', blockedBy: [], mergeRiskFiles: [] };
       expect(validateManifest(badStackParents).ok).toBe(false);
       expect(validateManifest(badStackParents).errors.join(' ')).toMatch(/stackParents must be an array/);
+    });
+
+    it('the base type guard is REACHABLE on the real build/parse path (buildManifest no longer String()-coerces base)', () => {
+      // Regression for the finding: buildManifest used to `String()`-flatten base, so a non-string base
+      // (123 → '123', {} → '[object Object]') slipped past validateManifest's typeof guard. Now the raw
+      // value is carried, so the guard actually fires — proven WITHOUT hand-building the object.
+      const numBase = buildManifest({ item: 9, repos: [{ repo: 'we', ref: 'lane/9-we', base: 123 }] });
+      expect(typeof numBase.repos[0].base).not.toBe('string');   // carried raw, NOT coerced to '123'
+      expect(validateManifest(numBase).ok).toBe(false);
+      expect(validateManifest(numBase).errors.join(' ')).toMatch(/invalid `base`/);
+
+      // Through the full JSON parse path too (an object base survives buildManifest un-flattened → rejected).
+      const parsed = parseManifest(JSON.stringify({ item: 9, repos: [{ repo: 'we', ref: 'lane/9-we', base: { evil: 1 }, carriesResolve: true }] }));
+      expect(validateManifest(parsed).ok).toBe(false);
+      expect(validateManifest(parsed).errors.join(' ')).toMatch(/invalid `base`/);
+    });
+
+    it('rejects a leading-dash / non-hex base (blocks the stacked-drain git arg-injection primitive)', () => {
+      // The stacked drain later `git reset`s each repo to `base`; a leading-dash value is an argument-
+      // injection vector, and the manifest rides the editable, un-reviewed PR body. The hex-shape gate
+      // rejects it — tested on the real buildManifest path, not a hand-built object.
+      const injection = buildManifest({ item: 9, repos: [{ repo: 'we', ref: 'lane/9-we', base: '--upload-pack=touch /tmp/pwn' }] });
+      expect(validateManifest(injection).ok).toBe(false);
+      expect(validateManifest(injection).errors.join(' ')).toMatch(/invalid `base`/);
+
+      // A plausible-looking but non-hex / too-short string is rejected too (only 7–64 hex chars pass).
+      expect(validateManifest(buildManifest({ item: 9, repos: [{ repo: 'we', ref: 'lane/9-we', base: 'zzz' }] })).ok).toBe(false);
+      expect(validateManifest(buildManifest({ item: 9, repos: [{ repo: 'we', ref: 'lane/9-we', base: 'abc12' }] })).ok).toBe(false); // 5 hex < 7
     });
 
     it('round-trips stackParents + per-repo base through serialize/parse', () => {

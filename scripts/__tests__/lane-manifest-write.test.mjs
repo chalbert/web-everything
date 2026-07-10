@@ -52,7 +52,7 @@ describe('lane-manifest-write (#2174 producer stop-at-push)', () => {
     const out = join(dir, '.lane-manifest.json');
     const r = run([
       '--item=2387',
-      '--repos=[{"repo":"we","ref":"lane/s-2387"},{"repo":"frontierui","ref":"lane/s-2387","base":"ownsha"}]',
+      '--repos=[{"repo":"we","ref":"lane/s-2387"},{"repo":"frontierui","ref":"lane/s-2387","base":"facef00d"}]',
       '--stack-parent=2151', '--stack-parent=x7k2q9a',
       '--base=deadbeef',
       '--out=' + out, '--json',
@@ -62,7 +62,7 @@ describe('lane-manifest-write (#2174 producer stop-at-push)', () => {
     expect(validateManifest(m).ok).toBe(true);
     expect(m.stackParents).toEqual([2151, 'x7k2q9a']);
     expect(m.repos.find((x) => x.repo === 'we').base).toBe('deadbeef');        // gets the --base default
-    expect(m.repos.find((x) => x.repo === 'frontierui').base).toBe('ownsha'); // its own base wins
+    expect(m.repos.find((x) => x.repo === 'frontierui').base).toBe('facef00d'); // its own base wins
     rmSync(dir, { recursive: true, force: true });
   });
 

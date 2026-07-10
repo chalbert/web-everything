@@ -47,7 +47,11 @@ for (const a of argv) {
   const m = a.match(/^--([^=]+)(?:=(.*))?$/);
   if (m) flags[m[1]] = m[2] === undefined ? true : m[2];
 }
-// #2387 F3 — `--stack-parent` is REPEATABLE (one flag per parent), unlike every other flag above (last-wins);
+// #2387 F3 — `--stack-parent` is REPEATABLE (one flag per parent), unlike every other flag above (last-wins).
+// This DELIBERATELY diverges from its data-twin `--blocked-by` (one comma-separated flag): the ratified item
+// spec (#2389 / #2387 F3) names the flag as "`--stack-parent` (repeatable)", so the repeatable shape is the
+// specified interface, not an oversight. The repeatable form also keeps each id an opaque token (a future
+// batch-slug parent could contain a comma), whereas splitting on `,` bakes in an id-charset assumption. So we
 // collect every occurrence separately instead of letting the last one clobber the rest.
 const stackParents = argv
   .map((a) => a.match(/^--stack-parent=(.*)$/))
