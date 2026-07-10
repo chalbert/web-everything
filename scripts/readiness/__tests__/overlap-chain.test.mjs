@@ -107,6 +107,20 @@ describe('selective chaining (#2387 F1)', () => {
     expect(b.stacked).toBe(false);
     expect(b.reason).toMatch(/no pushed frontier/);
   });
+
+  it('recordPushed fuses a frontier-less (dropped-root) overlap for visibility WITHOUT capping — still stackable', () => {
+    const plan = createStackPlan({ supported: true });
+    planNextItem(plan, { id: 'A', files: ['we:shared.txt'] });
+    dropItem(plan, { id: 'A' }); // carried — its chain stays live but frontier-less
+    const b = planNextItem(plan, { id: 'B', files: ['we:shared.txt'] });
+    expect(b.stacked).toBe(false); // nothing pushed to stack on
+    push(plan, 'B', ['we:shared.txt']);
+    // The two shared.txt chains fused at record; no pushed-vs-pushed conflict exists, so the fused chain is
+    // NOT capped and C stacks on B normally.
+    const c = planNextItem(plan, { id: 'C', files: ['we:shared.txt'] });
+    expect(c.stacked).toBe(true);
+    expect(c.base).toBe('B');
+  });
 });
 
 describe('depth cap — sibling fallback + capped re-root (never stackable)', () => {
@@ -139,6 +153,39 @@ describe('depth cap — sibling fallback + capped re-root (never stackable)', ()
     // The capped flag is sticky for the whole plan: E after D is still a sibling.
     const e = planNextItem(plan, { id: 'E', files: ['we:shared.txt'] });
     expect(e.stacked).toBe(false);
+  });
+
+  it('the cap binds on the RECHECK path too — excess onto an at-cap frontier is undeclared-capped, never an over-cap rebase (#2394 r2)', () => {
+    const plan = createStackPlan({ supported: true, depthCap: 2 });
+    planNextItem(plan, { id: 'A', files: ['we:shared.txt'] });
+    push(plan, 'A', ['we:shared.txt']);
+    expect(planNextItem(plan, { id: 'B', files: ['we:shared.txt'] }).stacked).toBe(true);
+    push(plan, 'B', ['we:shared.txt']); // chain now AT the cap (depth 2)
+
+    // E DECLARES disjoint (planNextItem's cap never fires) but actually touches the chain's hot file — the
+    // rebase-required → applyRebase path would grow the chain to depth 3, 4, … unbounded without this guard.
+    planNextItem(plan, { id: 'E', files: ['we:e.txt'] });
+    const v = recheckAtPush(plan, { id: 'E', actualFiles: ['we:e.txt', 'we:shared.txt'] });
+    expect(v.ok).toBe(true);
+    expect(v.verdict, 'rebase directive disarmed: fusing would exceed depthCap').toBe('undeclared-capped');
+    expect(v.onto).toEqual([]);
+
+    // Pushed as the sibling it is, the cluster fuses and goes CAPPED — later items cannot stack either.
+    push(plan, 'E', ['we:e.txt', 'we:shared.txt']);
+    const f = planNextItem(plan, { id: 'F', files: ['we:shared.txt'] });
+    expect(f.stacked).toBe(false);
+    expect(f.reason).toMatch(/depth-capped/);
+  });
+
+  it('at exactly the cap the recheck still directs the rebase (fused depth == depthCap is allowed)', () => {
+    const plan = createStackPlan({ supported: true, depthCap: 2 });
+    planNextItem(plan, { id: 'A', files: ['we:shared.txt'] });
+    push(plan, 'A', ['we:shared.txt']); // depth 1
+    planNextItem(plan, { id: 'E', files: ['we:e.txt'] });
+    const v = recheckAtPush(plan, { id: 'E', actualFiles: ['we:e.txt', 'we:shared.txt'] });
+    expect(v.ok).toBe(false);
+    expect(v.verdict).toBe('rebase-required'); // fused depth would be 2 = cap — still bounded
+    expect(v.onto).toEqual(['A']);
   });
 
   it('recheck excess touching a capped cluster is undeclared-capped — rebase directive disarmed, push as sibling', () => {

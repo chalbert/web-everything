@@ -15,11 +15,14 @@
  *     2. A provably-disjoint item lands independently while the chain is open.
  *     3. An UNDER-DECLARED sibling is caught at push (`recheck` exit 4 = rebase-required), rebased onto the
  *        chain frontier IN-SESSION, and only then shipped — never reaching the drain as a mislabelled sibling.
- *   Plus a negative: `init` against an origin lacking the capability marker reports `supported:false`.
+ *   Plus (review round 2): the BRIDGE path through the CLI (pinned `mergeTips`, clean recheck + land), the
+ *   `init` re-init guard (a mid-batch re-init must never erase the chain state), the --base trust boundary
+ *   (bound to the recorded acquire point; option-shaped values rejected before git), the fail-loud sha pins,
+ *   and negatives: `init` against an origin lacking the capability marker reports `supported:false`.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -264,6 +267,134 @@ describe('lane-stack e2e (#2394) — real git overlap-stacking', () => {
       expect(tryMerge(land, `origin/lane/${id}`), `lane/${id} must merge clean`).toBe(0);
     }
     expect(readFileSync(join(land, 'shared.txt'), 'utf8')).toBe('base\nA\nB\nC\nE\n');
+  });
+});
+
+describe('lane-stack e2e (#2394) — bridge through the CLI', () => {
+  it('Scenario 4: an item bridging two chains gets PINNED merge tips, rechecks clean, and lands conflict-free', () => {
+    expect(runStack(['init', `--plan=${planPath}`], primaryDir).code).toBe(0);
+
+    // Two disjoint single-item chains A (a.txt) and B (b.txt).
+    expect(runStack(['plan-item', `--plan=${planPath}`, '--id=A', '--files=we:a.txt'], primaryDir).json.stacked).toBe(false);
+    const laneA = makeLane('A', null);
+    writeFile(laneA, 'a.txt', 'a\n');
+    commitAll(laneA, 'A: a');
+    const aSha = pushLane(laneA, 'A');
+    expect(runStack(['record', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--tip-ref=lane/A'], laneA).code).toBe(0);
+
+    expect(runStack(['plan-item', `--plan=${planPath}`, '--id=B', '--files=we:b.txt'], primaryDir).json.stacked).toBe(false);
+    const laneB = makeLane('B', null);
+    writeFile(laneB, 'b.txt', 'b\n');
+    commitAll(laneB, 'B: b');
+    const bSha = pushLane(laneB, 'B');
+    expect(runStack(['record', `--plan=${planPath}`, '--id=B', '--base=origin/main', '--tip-ref=lane/B'], laneB).code).toBe(0);
+
+    // E touches both → BRIDGE: acquire at the base parent's PINNED sha, merge the other parent's PINNED
+    // sha (`mergeTips`) in-session — never the mutable lane refs, which a takeover/force-push could move.
+    const planE = runStack(['plan-item', `--plan=${planPath}`, '--id=E', '--files=we:a.txt,we:b.txt'], primaryDir);
+    expect(planE.code, planE.err).toBe(0);
+    expect(planE.json.stacked).toBe(true);
+    expect(new Set(planE.json.stackParents)).toEqual(new Set(['A', 'B']));
+    expect(planE.json.mergeParents.length).toBe(1);
+    const shaOf = { A: aSha, B: bSha };
+    const mergeId = planE.json.mergeParents[0];
+    expect(planE.json.acquireBase, 'acquire pinned to the base parent\'s recorded sha').toBe(shaOf[planE.json.base]);
+    expect(planE.json.mergeTips[mergeId].we.sha, 'merge parent surfaced as a PINNED sha, not a bare item id').toBe(shaOf[mergeId]);
+    expect(planE.json.detail).toMatch(/PINNED tip/);
+
+    const laneE = makeLane('E', planE.json.acquireBase);
+    expect(tryMerge(laneE, planE.json.mergeTips[mergeId].we.sha), 'in-session merge of the pinned tip is clean').toBe(0);
+    writeFile(laneE, 'a.txt', 'a\nE\n');
+    writeFile(laneE, 'b.txt', 'b\nE\n');
+    commitAll(laneE, 'E: bridges a+b');
+
+    const recheckE = runStack(['recheck', `--plan=${planPath}`, '--id=E', `--base=${planE.json.acquireBase}`], laneE);
+    expect(recheckE.code, `bridge recheck must be clean: ${recheckE.err}`).toBe(0);
+    expect(recheckE.json.verdict).toBe('clean');
+    pushLane(laneE, 'E');
+    expect(runStack(['record', `--plan=${planPath}`, '--id=E', `--base=${planE.json.acquireBase}`, '--tip-ref=lane/E'], laneE).code).toBe(0);
+
+    // Both parents are ancestors of the bridge, so A → B → E all land three-way clean.
+    const land = join(base, 'land');
+    git(['clone', '--quiet', originDir, land]);
+    for (const id of ['A', 'B', 'E']) {
+      expect(tryMerge(land, `origin/lane/${id}`), `lane/${id} must merge clean`).toBe(0);
+    }
+    expect(readFileSync(join(land, 'a.txt'), 'utf8')).toBe('a\nE\n');
+    expect(readFileSync(join(land, 'b.txt'), 'utf8')).toBe('b\nE\n');
+  });
+
+  it('plan-item hard-fails when a parent tip sha is missing — never falls back to the mutable ref', () => {
+    expect(runStack(['init', `--plan=${planPath}`], primaryDir).code).toBe(0);
+    expect(runStack(['plan-item', `--plan=${planPath}`, '--id=A', '--files=we:shared.txt'], primaryDir).code).toBe(0);
+    const laneA = makeLane('A', null);
+    writeFile(laneA, 'shared.txt', 'base\nA\n');
+    commitAll(laneA, 'A: shared');
+    pushLane(laneA, 'A');
+    expect(runStack(['record', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--tip-ref=lane/A'], laneA).code).toBe(0);
+
+    // Corrupt the plan the way a sha-less record once could: the tip carries only the mutable ref.
+    const plan = JSON.parse(readFileSync(planPath, 'utf8'));
+    plan.items.A.tips.we = { ref: 'lane/A' };
+    writeFileSync(planPath, JSON.stringify(plan));
+
+    const b = runStack(['plan-item', `--plan=${planPath}`, '--id=B', '--files=we:shared.txt'], primaryDir);
+    expect(b.code, 'an un-pinned acquire must be refused, not emitted as the movable ref').toBe(3);
+    expect(b.json.detail).toMatch(/no recorded tip sha/);
+  });
+});
+
+describe('lane-stack e2e (#2394) — init re-init guard', () => {
+  it('a second init refuses (exit 3) and leaves the plan intact; --force starts a fresh plan', () => {
+    expect(runStack(['init', `--plan=${planPath}`], primaryDir).code).toBe(0);
+    expect(runStack(['plan-item', `--plan=${planPath}`, '--id=A', '--files=we:a.txt'], primaryDir).code).toBe(0);
+    const before = readFileSync(planPath, 'utf8');
+
+    const again = runStack(['init', `--plan=${planPath}`], primaryDir);
+    expect(again.code, 'a mid-batch re-init must hard-fail, never silently erase the chain state').toBe(3);
+    expect(again.json.detail).toMatch(/already exists/);
+    expect(readFileSync(planPath, 'utf8'), 'the plan file is untouched').toBe(before);
+
+    const forced = runStack(['init', `--plan=${planPath}`, '--force'], primaryDir);
+    expect(forced.code).toBe(0);
+    expect(JSON.parse(readFileSync(planPath, 'utf8')).items).toEqual({});
+  });
+});
+
+describe('lane-stack e2e (#2394) — the --base trust boundary', () => {
+  it('recheck rejects a --base that is not the recorded acquire point — a later base cannot shrink the certified diff', () => {
+    expect(runStack(['init', `--plan=${planPath}`], primaryDir).code).toBe(0);
+    expect(runStack(['plan-item', `--plan=${planPath}`, '--id=A', '--files=we:a.txt'], primaryDir).code).toBe(0);
+    const laneA = makeLane('A', null);
+    writeFile(laneA, 'shared.txt', 'base\nsneaky\n'); // undeclared edit in an EARLY commit
+    commitAll(laneA, 'A: sneaky shared edit');
+    const midSha = git(['rev-parse', 'HEAD'], laneA);
+    writeFile(laneA, 'a.txt', 'a\n');
+    commitAll(laneA, 'A: declared a');
+
+    // --base=<the lane's own later commit> would hide the sneaky commit from the diff → hard exit 3.
+    const bad = runStack(['recheck', `--plan=${planPath}`, '--id=A', `--base=${midSha}`], laneA);
+    expect(bad.code, 'a self-attested wrong base must be rejected, never certified clean').toBe(3);
+    expect(bad.json.detail).toMatch(/acquire point/);
+
+    // The honest base works and the full actual set — sneaky edit included — is what gets certified.
+    const good = runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main'], laneA);
+    expect(good.code, good.err).toBe(0);
+    expect(good.json.undeclared).toContain('we:shared.txt');
+  });
+
+  it('an option-shaped --base is rejected (exit 3) and never reaches git as an option (no always-pass diff)', () => {
+    expect(runStack(['init', `--plan=${planPath}`], primaryDir).code).toBe(0);
+    expect(runStack(['plan-item', `--plan=${planPath}`, '--id=A', '--files=we:a.txt'], primaryDir).code).toBe(0);
+    const laneA = makeLane('A', null);
+    writeFile(laneA, 'a.txt', 'a\n');
+    commitAll(laneA, 'A: a');
+
+    const evil = join(base, 'evil-output');
+    const r = runStack(['recheck', `--plan=${planPath}`, '--id=A', `--base=--output=${evil}`], laneA);
+    expect(r.code, 'an option-shaped base must hard-fail, not empty the diff').toBe(3);
+    expect(r.json.detail).toMatch(/does not resolve/);
+    expect(existsSync(evil), 'the injected --output never executed').toBe(false);
   });
 });
 

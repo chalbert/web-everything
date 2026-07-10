@@ -101,6 +101,26 @@ function liveChain(plan, chainId) {
 }
 
 /**
+ * THE one chain-fusion mutation (#2394 review round 2 — previously hand-rolled at four sites with drifting
+ * rules). Absorb live chain `fromId` into live chain `intoId`: union the files, carry the deeper depth, and
+ * propagate the CAPPED flag (conflict-bound history survives any fusion — a cluster that fuses with a capped
+ * chain is itself conflict-bound). `fromId` becomes a `mergedInto` pointer at its live root. Both ids may be
+ * stale — they are resolved to live roots here; fusing a chain with itself is a no-op.
+ */
+function fuseChains(plan, intoId, fromId) {
+  const liveInto = liveChainId(plan, intoId);
+  const liveFrom = liveChainId(plan, fromId);
+  if (liveInto === liveFrom) return liveInto;
+  const into = plan.chains[liveInto];
+  const from = plan.chains[liveFrom];
+  into.files = [...new Set([...into.files, ...from.files])];
+  into.depth = Math.max(into.depth, from.depth);
+  if (from.capped) into.capped = true;
+  from.mergedInto = liveInto;
+  return liveInto;
+}
+
+/**
  * The distinct LIVE chains whose cumulative file-sets intersect `files`. Only live roots are scanned — a
  * merged chain's files were absorbed into its live root at fusion time, so its stale entry never needs
  * pointer-chasing here (the live root the scan already visits carries the superset).
@@ -159,12 +179,8 @@ export function planNextItem(plan, { id, files }) {
   if (rawOverlaps.some((o) => o.chain.capped)) {
     const d = sibling('overlaps a depth-capped chain — its history is conflict-bound (drain will rewrite it at land), so no clean-lineage certificate is possible; sibling, drain may pay a rebase (today’s cost)');
     const ownId = plan.items[itemId].chain;
-    const own = plan.chains[ownId];
-    own.capped = true;
-    for (const o of rawOverlaps) {
-      own.files = [...new Set([...own.files, ...o.chain.files])];
-      o.chain.mergedInto = ownId;
-    }
+    for (const o of rawOverlaps) fuseChains(plan, ownId, o.chainId);
+    plan.chains[ownId].capped = true;
     return d;
   }
 
@@ -189,12 +205,9 @@ export function planNextItem(plan, { id, files }) {
     // become siblings in the same capped cluster (the branch above) — the cap's cost stays "one drain rebase
     // PER capped sibling", never a silently-broken stacked guarantee.
     const d = sibling(`depth cap (${plan.depthCap}) reached — sibling fallback, chain re-rooted (capped: not stackable)`);
-    const rerooted = plan.chains[plan.items[itemId].chain];
-    rerooted.capped = true;
-    for (const o of overlaps) {
-      rerooted.files = [...new Set([...rerooted.files, ...o.chain.files])];
-      o.chain.mergedInto = plan.items[itemId].chain;
-    }
+    const rerootedId = plan.items[itemId].chain;
+    for (const o of overlaps) fuseChains(plan, rerootedId, o.chainId);
+    plan.chains[rerootedId].capped = true;
     return d;
   }
 
@@ -202,9 +215,9 @@ export function planNextItem(plan, { id, files }) {
   const [baseParent, ...mergeParents] = parents;
   // Fuse: everything joins the deepest (base) chain; the bridged chains point at it.
   const baseChainId = overlaps[0].chainId;
+  for (const o of overlaps.slice(1)) fuseChains(plan, baseChainId, o.chainId); // frontier + depth advance at recordPushed
   const baseChain = liveChain(plan, baseChainId);
-  baseChain.files = [...new Set([...baseChain.files, ...declared, ...overlaps.slice(1).flatMap((o) => o.chain.files)])];
-  for (const o of overlaps.slice(1)) o.chain.mergedInto = baseChainId; // frontier + depth advance at recordPushed
+  baseChain.files = [...new Set([...baseChain.files, ...declared])];
   plan.items[itemId] = { id: itemId, declared, chain: baseChainId, stackParents: parents, sibling: false, pushed: false, actual: null, tips: null };
   return {
     id: itemId,
@@ -228,12 +241,14 @@ export function planNextItem(plan, { id, files }) {
  *     (the excess is absorbed into the item's chain at `recordPushed` so later planning sees reality).
  *   • `rebase-required`     — excess overlaps other chain(s): do NOT push. `ok:false`; `onto` names the
  *     frontier item-ids to rebase onto in-session (then `applyRebase`, re-gate, re-run this check).
- *   • `undeclared-capped`   — the item (or its excess) touches a CAPPED cluster: a rebase onto any frontier
- *     would mint a clean-lineage certificate the drain's rewrite of the capped root falsifies, so the
- *     directive is disarmed and the item ships as the sibling it is — the drain pays the rebase (today's
- *     cost, honestly labelled). Applies even when the excess ALSO overlaps a normal chain: a partial
- *     certificate (stacked on the normal frontier, still conflict-bound with the capped cluster) would be
- *     a false guarantee, worse than a plain sibling that claims nothing.
+ *   • `undeclared-capped`   — the item (or its excess) touches a CAPPED cluster, OR the directed rebase
+ *     would fuse the item past `depthCap` (the cap binds on this path exactly as in planNextItem — else a
+ *     run of under-declared items grows a chain without bound): a rebase onto the frontier would mint a
+ *     clean-lineage certificate the drain's rewrite falsifies (capped) or a stack the cap forbids (depth),
+ *     so the directive is disarmed and the item ships as the sibling it is — the drain pays the rebase
+ *     (today's cost, honestly labelled). Applies even when the excess ALSO overlaps a normal chain: a
+ *     partial certificate (stacked on the normal frontier, still conflict-bound with the capped cluster)
+ *     would be a false guarantee, worse than a plain sibling that claims nothing.
  *   • `stacking-unsupported`— capability off: the rebase directive is disarmed (it would CREATE a stacked
  *     PR the drain can't gate); excess is reported for the ledger but the item ships as the sibling it is.
  *
@@ -258,6 +273,14 @@ export function recheckAtPush(plan, { id, actualFiles }) {
   }
   const clashes = overlapsAll.filter((o) => o.chain.frontier != null);
   if (clashes.length === 0) return { ok: true, verdict: 'undeclared-disjoint', undeclared, onto: [], ontoTips: {} };
+  // The depth cap binds at push time too (#2394 review round 2): a rebase onto these frontiers would fuse
+  // the item into the clash chain(s) and `recordPushed` would bump the fused depth PAST `depthCap` —
+  // unbounded growth invisible to planNextItem's cap because the item DECLARED disjoint. Same rule as the
+  // planner's fallback: past the cap the item ships as the sibling it is (the drain pays the rebase,
+  // honestly labelled `undeclared-capped`), and `recordPushed` then fuses + caps the cluster so nothing
+  // later stacks on this conflict-bound frontier either.
+  const fusedDepth = Math.max(liveChain(plan, item.chain).depth, ...clashes.map((o) => o.chain.depth)) + 1;
+  if (fusedDepth > plan.depthCap) return { ok: true, verdict: 'undeclared-capped', undeclared, onto: [], ontoTips: {} };
   const onto = clashes.map((o) => o.chain.frontier);
   const ontoTips = Object.fromEntries(onto.map((p) => [p, plan.items[p] ? plan.items[p].tips : null]));
   return { ok: false, verdict: 'rebase-required', undeclared, onto, ontoTips };
@@ -280,23 +303,11 @@ export function applyRebase(plan, { id, onto, actualFiles = [] }) {
     const parent = plan.items[parentId];
     if (!parent) throw new Error(`rebase parent ${parentId} is not in the plan`);
     if (!item.stackParents.includes(parentId)) item.stackParents.push(parentId);
-    // Re-resolve BOTH live roots inside the loop: a multi-parent rebase (`onto` from a bridge-shaped
-    // violation) must fuse EVERY parent's chain into one. The previous iteration merged the item's chain
-    // into that parent's — comparing against a pre-loop snapshot would overwrite `mergedInto` per
-    // iteration and leave every parent chain except the last live with its stale frontier, re-creating
-    // the blind drain conflict this whole module exists to prevent.
-    const ownId = liveChainId(plan, item.chain);
-    const parentLiveId = liveChainId(plan, parent.chain);
-    if (parentLiveId !== ownId) {
-      // Fuse into the parent's chain (it has the pushed frontier); the item's own chain points at it.
-      const ownChain = plan.chains[ownId];
-      const parentChain = plan.chains[parentLiveId];
-      parentChain.files = [...new Set([...parentChain.files, ...ownChain.files])];
-      parentChain.depth = Math.max(parentChain.depth, ownChain.depth);
-      if (ownChain.capped) parentChain.capped = true; // conflict-bound history survives a fusion
-      ownChain.mergedInto = parentLiveId;
-      item.chain = parentLiveId;
-    }
+    // Fuse into the parent's chain (it has the pushed frontier); the item's own chain points at it.
+    // fuseChains re-resolves BOTH live roots per iteration: a multi-parent rebase (`onto` from a
+    // bridge-shaped violation) must fuse EVERY parent's chain into one — comparing against a pre-loop
+    // snapshot would overwrite `mergedInto` per iteration and leave stale live frontiers behind.
+    item.chain = fuseChains(plan, parent.chain, item.chain);
   }
   item.sibling = false;
   item.declared = [...new Set([...item.declared, ...normFiles(actualFiles)])];
@@ -323,14 +334,17 @@ export function recordPushed(plan, { id, actualFiles = [], tips = null }) {
   c.files = [...new Set([...c.files, ...item.actual])];
   c.frontier = itemId;
   c.depth += 1;
-  // Capped propagation: a pushed item whose ACTUALS touch a capped cluster (an `undeclared-capped` push)
-  // has conflict-bound history itself — the drain will rewrite the cluster at land — so its chain fuses
-  // into the cluster and inherits the capped flag: nothing may stack on this frontier either.
+  // Overlap propagation (#2394 review round 2 — was capped-only): reaching record with a still-live
+  // overlapping chain means the recheck disarmed its rebase directive (capped cluster, the depth cap, or
+  // stacking-unsupported) — the item pushed WITHOUT stacking on that chain. Fuse them so the whole file
+  // cluster stays one overlap-visible chain, and when the other side has PUSHED history (a frontier, or it
+  // was already capped) mark the fused chain CAPPED: this item's pushed history is conflict-bound with that
+  // frontier — the drain will rewrite one of them at land — so nothing may stack on it. A frontier-less
+  // overlap (a dropped/carried root) fuses for visibility only: no pushed history exists to conflict with,
+  // so the fused chain stays stackable.
   for (const o of overlappingChains(plan, c.files, itemId)) {
-    if (!o.chain.capped) continue;
-    c.files = [...new Set([...c.files, ...o.chain.files])];
-    c.capped = true;
-    o.chain.mergedInto = ownId;
+    if (o.chain.capped || o.chain.frontier != null) c.capped = true;
+    fuseChains(plan, ownId, o.chainId);
   }
 }
 
