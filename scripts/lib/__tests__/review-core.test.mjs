@@ -23,6 +23,9 @@ import {
   buildMandate,
   buildEditorMandate,
   deriveNegotiationOutcome,
+  REVIEW_DISPOSITIONS,
+  REVIEW_REASONS,
+  deriveReviewDisposition,
   buildPanelMandate,
   buildPanelFindings,
   derivePanelVerdict,
@@ -170,6 +173,86 @@ describe('deriveNegotiationOutcome (#2311)', () => {
 
   it('honors a caller-supplied roundCap instead of the default', () => {
     expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: 1, roundCap: 1 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+  });
+});
+
+describe('deriveReviewDisposition (#2285 — one reason→disposition derivation, all reviews)', () => {
+  it('gate-self converges to fix but NEVER auto-lands — a human gates the trust-chain edit', () => {
+    expect(deriveReviewDisposition({ reason: REVIEW_REASONS.GATE_SELF }))
+      .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
+  });
+
+  it('a plain sensitivity park converges AND may auto-land (today\'s agent-reviewable path)', () => {
+    for (const reason of [REVIEW_REASONS.BLAST_RADIUS, REVIEW_REASONS.SIZE, REVIEW_REASONS.DISMISSED_FINDINGS, REVIEW_REASONS.CROSS_REPO, REVIEW_REASONS.SAMPLING]) {
+      expect(deriveReviewDisposition({ reason })).toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
+    }
+  });
+
+  it('a deadlock reason hands straight to a human — no (re-)convergence', () => {
+    for (const reason of [REVIEW_REASONS.NON_CONVERGENCE, REVIEW_REASONS.MANDATE_CONFLICT]) {
+      expect(deriveReviewDisposition({ reason })).toEqual({ mode: REVIEW_DISPOSITIONS.HUMAN, autoLand: false });
+    }
+  });
+
+  it('strictest reason wins when several apply — deadlock beats gate-self beats plain', () => {
+    expect(deriveReviewDisposition({ reasons: [REVIEW_REASONS.BLAST_RADIUS, REVIEW_REASONS.GATE_SELF] }))
+      .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false }); // gate-self pins autoLand:false
+    expect(deriveReviewDisposition({ reasons: [REVIEW_REASONS.GATE_SELF, REVIEW_REASONS.NON_CONVERGENCE] }))
+      .toEqual({ mode: REVIEW_DISPOSITIONS.HUMAN, autoLand: false }); // deadlock wins outright
+  });
+
+  it('is exhaustive — every REVIEW_REASONS value derives a disposition (no unknown-reason throw)', () => {
+    for (const reason of Object.values(REVIEW_REASONS)) {
+      expect(() => deriveReviewDisposition({ reason })).not.toThrow();
+    }
+  });
+
+  it('throws on an unknown reason and on no reason at all (exhaustive discipline)', () => {
+    expect(() => deriveReviewDisposition({ reason: 'made-up' })).toThrow(/unknown reason/);
+    expect(() => deriveReviewDisposition({})).toThrow(/at least one reason/);
+  });
+
+  // Regression guard (#2285): the drain's real `reasons` array (from scoreEscalation) carries DECORATED strings,
+  // NOT bare tokens. These literals are copied VERBATIM from scoreEscalation's `reasons.push(...)` templates in
+  // `scripts/lib/review-escalation.mjs` — if that file's format drifts, this test is the tripwire that catches
+  // the two files silently disagreeing (the parked-PR branch would otherwise wedge on an `unknown reason(s)` throw).
+  describe('canonicalizes the DECORATED scoreEscalation reason strings the drain actually carries', () => {
+    it('a decorated gate-self reason converges but never auto-lands (the exact scoreEscalation format)', () => {
+      expect(deriveReviewDisposition({ reason: 'gate-self (scripts/lib/review-escalation.mjs) — human review required' }))
+        .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
+    });
+
+    it('each decorated sensitivity reason converges AND may auto-land', () => {
+      const decorated = [
+        'blast-radius (scripts/foo.mjs, scripts/bar.mjs, scripts/baz.mjs, …)',
+        'size (1080 ≥ 400 changed lines)',
+        'dismissed-findings (2 pre-PR review finding(s) the lane dismissed)',
+        'cross-repo impl+WE couple',
+        'sampling floor (1-in-10)',
+      ];
+      for (const reason of decorated) {
+        expect(deriveReviewDisposition({ reason })).toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
+      }
+    });
+
+    it('accepts the parked `reasons` array VERBATIM — decorated strings, strictest wins (gate-self pins autoLand:false)', () => {
+      // Exactly the shape the drain's `parked` JSON stamps: several decorated reasons, mixed families.
+      const parkedReasons = [
+        'blast-radius (scripts/lib/review-core.mjs)',
+        'size (1080 ≥ 400 changed lines)',
+        'gate-self (scripts/merge-ai-prs.mjs) — human review required',
+        'sampling floor (1-in-10)',
+      ];
+      expect(() => deriveReviewDisposition({ reasons: parkedReasons })).not.toThrow();
+      expect(deriveReviewDisposition({ reasons: parkedReasons }))
+        .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
+    });
+
+    it('mixes bare and decorated tokens freely, and still throws on a genuinely unknown decorated reason', () => {
+      expect(deriveReviewDisposition({ reasons: [REVIEW_REASONS.BLAST_RADIUS, 'sampling floor (1-in-10)'] }))
+        .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
+      expect(() => deriveReviewDisposition({ reason: 'sizeable rewrite (not a real signal)' })).toThrow(/unknown reason/);
+    });
   });
 });
 

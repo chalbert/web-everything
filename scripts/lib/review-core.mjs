@@ -213,6 +213,105 @@ export function deriveNegotiationOutcome({ verdict, round, roundCap = NEGOTIATIO
   return round < roundCap ? NEGOTIATION_OUTCOMES.CONTINUE : NEGOTIATION_OUTCOMES.ESCALATE;
 }
 
+/** The two things a review surface can DO about an escalated PR (#2285, sibling #2326). This is the ONE place
+ *  the "run the fix/review convergence" vs "hand straight to a human" branch lives — lifted out of the drain's
+ *  prose so every review consumer (drain, /review, /merge) shares it, keyed on WHY the PR needs attention. */
+export const REVIEW_DISPOSITIONS = Object.freeze({
+  CONVERGE: 'converge', // run the panel↔editor negotiation loop to fix the diff
+  HUMAN: 'human',       // hand straight to a human — no (further) convergence
+});
+
+/**
+ * The escalation-reason vocabulary the disposition is keyed on (#2285). Two families:
+ *   • SENSITIVITY reasons — a rule fired at classification time, BEFORE any review deadlock. An agent
+ *     reviewer/editor is still independent and useful, so these CONVERGE. `gate-self` is the trust-chain case:
+ *     it converges too, but as an ADVISORY fix that never auto-lands (a human gates the merge, #2285).
+ *   • DEADLOCK reasons — the panel↔editor loop ALREADY ran and could not agree. Re-converging just repeats the
+ *     deadlock, so these go straight to a HUMAN.
+ * These are the BARE (canonical) tokens; they are the un-decorated form of `scoreEscalation`'s fired signals
+ * (`we:scripts/lib/review-escalation.mjs`, e.g. `blast-radius (…)`, `sampling floor (1-in-10)`) — which
+ * `deriveReviewDisposition` canonicalizes back to these via `canonicalizeReason` — plus the two escalating
+ * negotiation outcomes (round-cap non-convergence, mandate conflict).
+ */
+export const REVIEW_REASONS = Object.freeze({
+  // sensitivity (pre-review) — converge
+  GATE_SELF: 'gate-self',
+  BLAST_RADIUS: 'blast-radius',
+  SIZE: 'size',
+  DISMISSED_FINDINGS: 'dismissed-findings',
+  CROSS_REPO: 'cross-repo',
+  SAMPLING: 'sampling',
+  // deadlock (post-review) — human
+  NON_CONVERGENCE: 'non-convergence',
+  MANDATE_CONFLICT: 'mandate-conflict',
+});
+
+const DEADLOCK_REASONS = Object.freeze([REVIEW_REASONS.NON_CONVERGENCE, REVIEW_REASONS.MANDATE_CONFLICT]);
+const SENSITIVITY_REASONS = Object.freeze([
+  REVIEW_REASONS.GATE_SELF, REVIEW_REASONS.BLAST_RADIUS, REVIEW_REASONS.SIZE,
+  REVIEW_REASONS.DISMISSED_FINDINGS, REVIEW_REASONS.CROSS_REPO, REVIEW_REASONS.SAMPLING,
+]);
+
+/** Every known reason token (both families) — the canonical vocabulary a decorated reason string is matched against. */
+const ALL_REASON_TOKENS = Object.freeze([...SENSITIVITY_REASONS, ...DEADLOCK_REASONS]);
+
+/**
+ * Canonicalize ONE raw reason string to its bare `REVIEW_REASONS` token, or `null` if unrecognized. Pure.
+ * The drain carries DECORATED reasons (from `scoreEscalation`, `we:scripts/lib/review-escalation.mjs`) —
+ * `blast-radius (a.mjs, b.mjs)`, `gate-self (…) — human review required`, `size (1080 ≥ 400 changed lines)`,
+ * `dismissed-findings (…)`, `cross-repo impl+WE couple`, `sampling floor (1-in-10)` — each of which BEGINS with
+ * its bare token followed by a boundary (a space or `(`). A bare token (e.g. `'gate-self'`) matches exactly too.
+ * Matches the LONGEST token prefix so that, should two tokens ever both prefix a string (none do today), the more
+ * specific one wins rather than an arbitrary order. The boundary check keeps a token from matching a longer word
+ * that merely starts with it (e.g. a hypothetical `sizeable` never reads as `size`).
+ * @param {string} raw
+ * @returns {string|null} the bare token, or null if no known token prefixes it at a boundary.
+ */
+function canonicalizeReason(raw) {
+  const s = String(raw).trim();
+  const matches = ALL_REASON_TOKENS
+    .filter((tok) => s === tok || (s.startsWith(tok) && /^[\s(]/.test(s.slice(tok.length))))
+    .sort((a, b) => b.length - a.length);
+  return matches[0] ?? null;
+}
+
+/**
+ * Derive what a review surface DOES about an escalated PR, from the reason(s) it escalated for (#2285). Pure,
+ * exhaustive over REVIEW_REASONS, strictest-reason-wins when several apply. Returns `{ mode, autoLand }`:
+ *   • mode: `converge` → run the panel↔editor negotiation loop; `human` → hand to a human, do not converge.
+ *   • autoLand: may an AGENT land the PR on an accept verdict? `false` = a human gates the merge regardless — the
+ *     single enforcement point for the #2285 conflict-of-interest invariant (a trust-chain edit is human-cleared
+ *     only; the panel may FIX it but never CLEAR it).
+ *
+ * Precedence (most restrictive first):
+ *   1. any DEADLOCK reason → `{ human, autoLand:false }` — the loop already failed to converge; a human decides.
+ *   2. `gate-self`         → `{ converge, autoLand:false }` — converge to fix (advisory), but a human gates merge.
+ *   3. any other sensitivity reason → `{ converge, autoLand:true }` — today's agent-reviewable path, unchanged.
+ *
+ * Accepts EITHER bare `REVIEW_REASONS` tokens (`'gate-self'`, `'blast-radius'`, …) OR the DECORATED reason
+ * strings `scoreEscalation` (`we:scripts/lib/review-escalation.mjs`) actually emits and the drain carries in its
+ * `parked` JSON verbatim (`blast-radius (a.mjs, …)`, `gate-self (…) — human review required`,
+ * `size (1080 ≥ 400 changed lines)`, `dismissed-findings (…)`, `cross-repo impl+WE couple`,
+ * `sampling floor (1-in-10)`) — each is canonicalized to its bare token via `canonicalizeReason` before the
+ * precedence check, so `deriveReviewDisposition({ reasons })` works when handed the parked array as-is. Still
+ * throws `unknown reason(s)` on a genuinely unrecognized reason and `at least one reason` on empty input.
+ *
+ * @param {{reason?: string, reasons?: string[]}} o - one reason, or several (several ⇒ strictest wins); each may
+ *   be a bare token OR a decorated `scoreEscalation` reason string.
+ * @returns {{mode: 'converge'|'human', autoLand: boolean}}
+ */
+export function deriveReviewDisposition({ reason, reasons } = {}) {
+  const raw = (Array.isArray(reasons) ? reasons : reason ? [reason] : []).filter(Boolean);
+  if (!raw.length) throw new Error('deriveReviewDisposition: at least one reason is required');
+  const canon = raw.map((r) => ({ raw: r, token: canonicalizeReason(r) }));
+  const unknown = canon.filter((c) => c.token == null).map((c) => c.raw);
+  if (unknown.length) throw new Error(`deriveReviewDisposition: unknown reason(s): ${unknown.join(', ')}`);
+  const list = canon.map((c) => c.token);
+  if (list.some((r) => DEADLOCK_REASONS.includes(r))) return { mode: REVIEW_DISPOSITIONS.HUMAN, autoLand: false };
+  if (list.includes(REVIEW_REASONS.GATE_SELF)) return { mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false };
+  return { mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true };
+}
+
 /**
  * #2310 (v3, under epic #2285) — the MULTI-MANDATE REVIEWER PANEL. v2's single reviewer fans out into distinct
  * mandated lenses (the `/code-review` dimensions), each judging the SAME diff independently via `buildMandate`
