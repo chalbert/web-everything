@@ -205,6 +205,16 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
   PR **never times out** to `merge-anyway` and is **never agent-clearable** — an agent policing a change to its
   own leash is the conflict of interest the gate exists for; the panel may improve the diff but only a human
   merges it (the #2285 invariant, enforced by `autoLand: false`).
+
+  > **Single PAT ⇒ you cannot verify a gate-self clearance by actor (#2416).** The whole constellation runs on
+  > ONE personal access token, so EVERY `review:accepted` label + `"cleared by the operator"` comment is
+  > applied as `chalbert` whether a human ran [`/review`](../review/SKILL.md) or an automation (a
+  > closing-session / batch flow) did. The GitHub actor therefore proves nothing — this is exactly the #2416
+  > gap ("honor `review:accepted` only when a human applied it"), for which the buildable fix is a
+  > closed-set-of-callers guarantee, NOT actor provenance. **Operational rule when draining:** if a `gate-self`
+  > PR arrives already carrying `review:accepted`, do NOT treat the label/comment as proof of human clearance —
+  > surface it and get the operator to confirm they personally cleared it before letting it land. Do not,
+  > however, treat "shows as `chalbert`" as suspicious on its own — it is the only actor there is.
 - **sensitivity park (`humanRequired: false`) → `{ mode: converge, autoLand: true }` — agent-reviewable.** Escalated (blast-radius / size / dismissed-findings / sampling)
   but independent of the producer. **v3 (#2310) runs a bounded MULTI-MANDATE PANEL↔editor NEGOTIATION LOOP** —
   v2's single reviewer fans out into a panel of distinct mandated reviewers (`PANEL_LENSES`: `correctness` /
