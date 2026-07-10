@@ -9,6 +9,7 @@ import {
   MANIFEST_FILENAME, INTEGRATION_ORDER,
   buildManifest, validateManifest, orderedRepos, parseManifest, serializeManifest,
   MANIFEST_BODY_BEGIN, MANIFEST_BODY_END, manifestBodyBlock, embedManifestInBody, extractManifestFromBody,
+  manifestAuditLine,
 } from '../lane-manifest.mjs';
 
 describe('lane-manifest primitive (#2138 Fork 2)', () => {
@@ -131,6 +132,35 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
     it('extract ignores content around the block and survives an appended escalation-reason section', () => {
       const body = embedManifestInBody('intro', crossRepo) + '\n\n## Review escalation\n- size (…)\n';
       expect(extractManifestFromBody(body)).toEqual(crossRepo);
+    });
+  });
+
+  describe('manifestAuditLine (xnsk54v follow-up — tamper-evidence record of acted-on escalation values)', () => {
+    it('emits a stable one-line record of the escalation-sensitive values', () => {
+      const line = manifestAuditLine({ dismissedFindings: 3, crossRepo: true, blockedBy: [2151, 'x7k2q9a'] });
+      expect(line).toBe('manifest acted-on: dismissedFindings=3 crossRepo=true blockedBy=[2151,x7k2q9a]');
+      // Deterministic — same input ⇒ byte-identical output (what lets the reason-comment dedupe skip a re-post).
+      expect(manifestAuditLine({ dismissedFindings: 3, crossRepo: true, blockedBy: [2151, 'x7k2q9a'] })).toBe(line);
+    });
+
+    it('handles missing / zero / empty inputs (an orphan PR carries no escalation risk)', () => {
+      expect(manifestAuditLine()).toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]');
+      expect(manifestAuditLine({})).toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]');
+      expect(manifestAuditLine({ dismissedFindings: 0, crossRepo: false, blockedBy: [] }))
+        .toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]');
+    });
+
+    it('coerces defensively — NaN/negative dismissedFindings → 0, truthy crossRepo → bool, non-array blockedBy → []', () => {
+      expect(manifestAuditLine({ dismissedFindings: NaN, crossRepo: 1, blockedBy: null }))
+        .toBe('manifest acted-on: dismissedFindings=0 crossRepo=true blockedBy=[]');
+      expect(manifestAuditLine({ dismissedFindings: -4, crossRepo: 0, blockedBy: undefined }))
+        .toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]');
+    });
+
+    it('a CHANGED acted-on value yields a DIFFERENT line (a body edit becomes diff-detectable)', () => {
+      const before = manifestAuditLine({ dismissedFindings: 2, crossRepo: true, blockedBy: [] });
+      const afterEdit = manifestAuditLine({ dismissedFindings: 0, crossRepo: false, blockedBy: [] });
+      expect(before).not.toBe(afterEdit); // the tamper-evidence property
     });
   });
 });

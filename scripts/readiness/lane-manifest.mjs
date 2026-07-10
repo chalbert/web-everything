@@ -159,6 +159,29 @@ export function extractManifestFromBody(body) {
 
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+/**
+ * Tamper-evidence audit line (xnsk54v follow-up) — a STABLE one-line record of the escalation-sensitive
+ * manifest values the drain/merge automation ACTED ON when it made an escalation/land decision. Since the
+ * manifest now rides the PR BODY (editable by anyone with write access, NOT part of the reviewed commit-set),
+ * `dismissedFindings` (which feeds `scoreEscalation` — higher ⇒ MORE review scrutiny), `crossRepo`, and
+ * `blockedBy` can be edited AFTER review to suppress the drain's re-score backstop with no commit trace. The
+ * sibling commit-set-drift gate (#2409) does not catch a body-only edit (it doesn't advance HEAD). Recording
+ * this line into a DURABLE, timestamped `gh pr comment` (separate from the body) makes such a post-review edit
+ * DETECTABLE: diff the recorded acted-on values against the live body. Prevention is not the goal — evidence is.
+ *
+ * Pure and deterministic (stable key order, no `Date`/fs) so an unchanged decision yields byte-identical output
+ * — that stability is what lets the reason-comment dedupe skip a re-post, and a CHANGED value post a fresh,
+ * separately-timestamped comment (the tamper trail). Tolerant of missing/zero/empty inputs.
+ *
+ * @param {{dismissedFindings?:number, crossRepo?:boolean, blockedBy?:Array<number|string>}} [v]
+ */
+export function manifestAuditLine({ dismissedFindings, crossRepo, blockedBy } = {}) {
+  const n = Number.isFinite(Number(dismissedFindings)) ? Math.max(0, Number(dismissedFindings)) : 0;
+  const cross = !!crossRepo;
+  const blocked = (Array.isArray(blockedBy) ? blockedBy : []).map((x) => String(x));
+  return `manifest acted-on: dismissedFindings=${n} crossRepo=${cross} blockedBy=[${blocked.join(',')}]`;
+}
+
 /** Serialize a manifest to `.lane-manifest.json` text (with a self-documenting `_doc` header). */
 export function serializeManifest(m) {
   return JSON.stringify(

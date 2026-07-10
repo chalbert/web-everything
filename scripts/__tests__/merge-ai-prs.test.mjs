@@ -854,6 +854,28 @@ describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, n
     expect(hasDrainReasonComment(comments, 'skip', reason)).toBe(false);
   });
 
+  it('xnsk54v — an audit line is appended to the comment and threads through the dedupe (tamper-evidence)', () => {
+    const reason = 'escalated — awaiting an independent review (review:pending)';
+    const auditA = 'manifest acted-on: dismissedFindings=3 crossRepo=true blockedBy=[]';
+    const auditB = 'manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]'; // a post-review body edit
+    const body = buildDrainReasonComment('park', reason, auditA);
+    expect(body).toContain(reason);
+    expect(body).toContain(auditA);
+    // Same reason + same acted-on values → dedupe hit (idempotent; a --watch loop never reposts unchanged).
+    expect(hasDrainReasonComment([{ body }], 'park', reason, auditA)).toBe(true);
+    // Same reason but a CHANGED acted-on value → NO dedupe → a fresh, separately-timestamped comment posts.
+    expect(hasDrainReasonComment([{ body }], 'park', reason, auditB)).toBe(false);
+  });
+
+  it('xnsk54v — omitting the audit line is backward-compatible (orphan/impl PR comments are unchanged)', () => {
+    const reason = 'not mergeable (mergeable=CONFLICTING)';
+    const withNoAudit = buildDrainReasonComment('skip', reason);
+    expect(withNoAudit).toBe(buildDrainReasonComment('skip', reason, undefined));
+    expect(withNoAudit).not.toContain('manifest acted-on:');
+    // A no-audit prior post still dedupes a no-audit re-post.
+    expect(hasDrainReasonComment([{ body: withNoAudit }], 'skip', reason)).toBe(true);
+  });
+
   it('hasDrainReasonComment tolerates a missing/odd comments array', () => {
     expect(hasDrainReasonComment(undefined, 'skip', 'x')).toBe(false);
     expect(hasDrainReasonComment([{}, { body: null }], 'skip', 'x')).toBe(false);
