@@ -81,9 +81,11 @@ function pushLane(cwd, id) {
   return git(['rev-parse', 'HEAD'], cwd);
 }
 
-/** Attempt a merge; return the exit code (0 = clean, non-zero = conflict). Never throws. */
+/** Attempt a merge; return the exit code (0 = clean, non-zero = conflict). Never throws. The inline
+ *  identity matters: a `--no-ff` merge CREATES a commit, and a CI runner has no global user.name/email —
+ *  without it git exits 128 ("committer identity unknown") and every merge reads as a spurious conflict. */
 function tryMerge(cwd, ref) {
-  const r = spawnSync('git', ['merge', '--no-ff', '--no-edit', ref], { cwd, encoding: 'utf8' });
+  const r = spawnSync('git', ['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'merge', '--no-ff', '--no-edit', ref], { cwd, encoding: 'utf8' });
   return r.status ?? 1;
 }
 
