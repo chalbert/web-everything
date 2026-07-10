@@ -21,7 +21,7 @@ times out and is not agent-clearable, stalling a clean PR on the human path.
 ## Live repro (2026-07-09)
 
 Filing a one-file backlog item opened **PR #324** (net diff: a single
-`we:backlog/xroy4fk-…md`, verified identical across the GitHub files list, the
+`we:backlog/2371-…md`, verified identical across the GitHub files list, the
 two-dot `origin/main..HEAD`, and the three-dot `origin/main...HEAD`). Yet
 `pr-land --label-on-green` labelled it `review:human` with:
 
