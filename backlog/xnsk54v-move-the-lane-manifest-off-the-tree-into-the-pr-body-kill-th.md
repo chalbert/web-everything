@@ -1,10 +1,11 @@
 ---
 kind: story
 size: 8
-status: active
+status: resolved
 scaffoldedBy: "manifest-pr-body"
 dateScaffolded: "2026-07-10"
 dateOpened: "2026-07-10"
+dateResolved: "2026-07-10"
 tags: [lane, pr-flow, merge-queue, drain, manifest]
 ---
 
