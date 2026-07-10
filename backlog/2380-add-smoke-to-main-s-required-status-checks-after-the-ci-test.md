@@ -1,7 +1,9 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-09"
+dateResolved: "2026-07-10"
+graduatedTo: none
 relatedTo: ["2152", "2220", "2070"]
 tags: [ci, branch-protection, pr-flow]
 ---
