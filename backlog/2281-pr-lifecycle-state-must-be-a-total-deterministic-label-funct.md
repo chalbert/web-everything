@@ -1,8 +1,12 @@
 ---
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-07-05"
+dateStarted: "2026-07-10"
+dateResolved: "2026-07-10"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#ci-lifecycle-total-label-function"
 preparedDate: "2026-07-09"
 tags: [pr-lifecycle, labels, drain, determinism]
 ---
@@ -167,8 +171,33 @@ merit/convention call independent of cost (prio: clear).
 
 ---
 
+## Ruling (ratified 2026-07-10)
+
+Directive-author ratified both forks at the recommended defaults, after a fresh adversarial pass on (b) held on
+all axes:
+
+- **Fork 1 — granularity: (b) total coverage.** Every ci-lifecycle state carries a deterministic label —
+  `checking` / `ci:failed` / `blocked` / `ready-to-merge` — exactly one per open AI PR, set by the *existing*
+  CI-truth reconcile pass generalized to all lifecycle labels (self-healing sweep, not per-tick `pr-land`
+  writes). (a) terminal-only **declined**: it reads one state from absence (the directive's exact prohibition)
+  and fails its own totality claim (bare-stranded-terminal), while the fix it needs is the same generalization
+  (b) uses — so its only advantage (less churn) evaporates.
+- **Fork 2 — names: `ci:failed` + bare `blocked`.** `ci:failed` opens a deterministic `ci:*` state family;
+  `blocked` stays bare to match its sibling `ready-to-merge`. `needs-fix` / `blocked:deps` rejected.
+- **Composition (codified, not re-decided):** lifecycle labels mutually exclusive among themselves, orthogonal
+  to `review:*`; the `ready-to-merge` **landing-gate** absence-semantics (#2183 F1 / #2138 F4) preserved — this
+  governs the **ci-lifecycle dimension** only.
+
+**Fresh red-team (2026-07-10):** strongest case for (a) is fewer labels / no `checking` noise — defused (the
+reconcile pass (a) needs anyway makes (b) nearly free). (b) vs the preserved absence-semantics — no collision:
+non-green PRs now carry `checking`/`ci:failed`/`blocked` instead of being bare, which *strengthens*
+"unlabelled-`ready-to-merge` = not queued"; the drain's `--label ready-to-merge` query is unaffected. Principle
+check (impl-is-not-a-standard) — labels are the human+drain-visible contract, not impl leakage. Attack fails on
+all axes.
+
+**Codified:** `we:docs/agent/platform-decisions.md#ci-lifecycle-total-label-function`.
+**Successor build (agent-ready):** #xqd7m2u — generalize the reconcile transition table + mint labels + tests.
+
 Relates #2199 (the `ready-to-merge`-on-green precedent this generalizes), #2216 (the CI-truth reconcile pass
-that makes (b) cheap and (a) sound), #2262 (the `review:*` mint step new labels join), #2171 (the review
-rubric), #2183 F1 / #2138 F4 (the `ready-to-merge` absence-semantics this decision preserves). Ratifying = the
-directive-author picks Fork 1 granularity ((b) default, or opt into (a)) + Fork 2 names, then build the
-generalized reconcile transition table + tests.
+that makes (b) cheap and (a) unsound), #2262 (the `review:*` mint step new labels join), #2171 (the review
+rubric), #2183 F1 / #2138 F4 (the `ready-to-merge` absence-semantics this decision preserves).
