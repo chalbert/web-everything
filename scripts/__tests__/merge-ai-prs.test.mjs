@@ -6,6 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON } from '../merge-ai-prs.mjs';
+import { scoreEscalation } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -445,7 +446,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
   it('diffs `<remote>/<base>` against `rev` directly (a plain two-tree comparison, content-only) and parses via parseNumstat', () => {
     const { exec } = fakeExec({ 'git diff --numstat origin/main deadbeef': { stdout: '3\t1\tscripts/pr-land.mjs\n' } });
     const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef' });
-    expect(r).toEqual({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 4, scored: true });
+    expect(r).toEqual({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 4, scored: true, humanBasisFiles: ['scripts/pr-land.mjs'] });
   });
 
   it('a file already landed upstream (net-identical) never appears — the false-positive #2373 exists to prevent', () => {
@@ -463,7 +464,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
       'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' },
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef' });
-    expect(r).toEqual({ changedFiles: ['README.md'], diffLines: 1, scored: true });
+    expect(r).toEqual({ changedFiles: ['README.md'], diffLines: 1, scored: true, humanBasisFiles: ['README.md'] });
     expect(calls.some((c) => c.args[0] === 'diff')).toBe(true);
   });
 
@@ -475,7 +476,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
       'git diff --numstat origin/main lane/x': { stdout: '1\t0\tREADME.md\n' }, // stale local — WRONG, must not win
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
-    expect(r).toEqual({ changedFiles: ['scripts/merge-ai-prs.mjs'], diffLines: 4, scored: true });
+    expect(r).toEqual({ changedFiles: ['scripts/merge-ai-prs.mjs'], diffLines: 4, scored: true, humanBasisFiles: ['scripts/merge-ai-prs.mjs'] });
     // Resolved on the FIRST diff attempt — the remote-tracking ref — so the stale-local candidate is never reached.
     const diffCalls = calls.filter((c) => c.args[0] === 'diff');
     expect(diffCalls.length).toBe(1);
@@ -488,7 +489,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
       // no local `lane/x` branch — the bare-rev candidate would throw (unstubbed) if ever reached
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
-    expect(r).toEqual({ changedFiles: ['scripts/merge-ai-prs.mjs'], diffLines: 4, scored: true });
+    expect(r).toEqual({ changedFiles: ['scripts/merge-ai-prs.mjs'], diffLines: 4, scored: true, humanBasisFiles: ['scripts/merge-ai-prs.mjs'] });
     expect(calls.filter((c) => c.args[0] === 'diff').length).toBe(1);
   });
 
@@ -498,7 +499,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
       'git diff --numstat origin/main deadbeef': { stdout: '3\t1\tscripts/pr-land.mjs\n' },
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef' }); // producer: no fetchExtraRefs
-    expect(r).toEqual({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 4, scored: true });
+    expect(r).toEqual({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 4, scored: true, humanBasisFiles: ['scripts/pr-land.mjs'] });
     const diffCalls = calls.filter((c) => c.args[0] === 'diff');
     expect(diffCalls.map((c) => c.key)).toEqual([
       'git diff --numstat origin/main origin/deadbeef', // tried first, fails fast (invalid ref)
@@ -515,7 +516,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
       'git diff --numstat origin/main FETCH_HEAD': { stdout: '' },
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
-    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false });
+    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] });
     expect(calls.some((c) => c.key === 'git diff --numstat origin/main FETCH_HEAD')).toBe(false);
   });
 
@@ -525,14 +526,14 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
       'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x' }); // no fetchExtraRefs
-    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false });
+    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] });
     expect(calls.some((c) => c.key === 'git diff --numstat origin/main FETCH_HEAD')).toBe(false);
   });
 
   it('no exec / no rev → scored:false without touching git at all', () => {
-    expect(computeNetDiffChangedFiles({})).toEqual({ changedFiles: [], diffLines: 0, scored: false });
+    expect(computeNetDiffChangedFiles({})).toEqual({ changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] });
     const { exec, calls } = fakeExec();
-    expect(computeNetDiffChangedFiles({ exec })).toEqual({ changedFiles: [], diffLines: 0, scored: false });
+    expect(computeNetDiffChangedFiles({ exec })).toEqual({ changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] });
     expect(calls.length).toBe(0);
   });
 
@@ -540,6 +541,84 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     const { exec, calls } = fakeExec({ 'git diff --numstat upstream/release deadbeef': { stdout: '1\t0\tREADME.md\n' } });
     computeNetDiffChangedFiles({ exec, remote: 'upstream', base: 'release', rev: 'deadbeef', fetchExtraRefs: ['lane/x'] });
     expect(calls[0]).toMatchObject({ args: ['fetch', 'upstream', '+release:refs/remotes/upstream/release', 'lane/x', '--quiet'] });
+  });
+
+  // #2390 — a STACKED lane records the SHA it was cut from (its predecessor's tip) as the manifest per-repo
+  // `base`; scoring the SIZE from THAT base de-inflates the lane to its OWN delta, not the cumulative stack vs
+  // main. #2390-review-fix — but the human-gate basis (`humanBasisFiles`) stays the cumulative origin/main…head,
+  // and the base is trusted for the size de-inflation ONLY when it is a strict ancestor of head.
+  it('#2390 — a stacked lane (baseRev = strict-ancestor manifest base) de-inflates SIZE to base…head, but humanBasisFiles stays the cumulative origin/main…head (keeps the ancestor gate-self edit)', () => {
+    const { exec, calls } = fakeExec({
+      // Cumulative diff INCLUDES an ancestor's gate-self edit; the own delta (from the base) does not.
+      'git diff --numstat origin/main origin/lane/child': { stdout: '4\t2\tbacklog/2390-own.md\n2\t0\tscripts/lib/review-escalation.mjs\n' },
+      'git diff --numstat a1b2c3d4e5f6 origin/lane/child': { stdout: '4\t2\tbacklog/2390-own.md\n' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'a1b2c3d4e5f6', fetchExtraRefs: ['lane/child'] });
+    expect(r.changedFiles).toEqual(['backlog/2390-own.md']); // SIZE de-inflated to the own delta
+    expect(r.diffLines).toBe(6);
+    expect(r.scored).toBe(true);
+    expect(r.humanBasisFiles).toEqual(['backlog/2390-own.md', 'scripts/lib/review-escalation.mjs']); // cumulative — gate file preserved
+    const diffCalls = calls.filter((c) => c.args[0] === 'diff');
+    expect(diffCalls.some((c) => c.key === 'git diff --numstat a1b2c3d4e5f6 origin/lane/child')).toBe(true); // own-delta off the base SHA
+    expect(diffCalls.some((c) => c.key === 'git diff --numstat origin/main origin/lane/child')).toBe(true); // human basis off origin/main
+  });
+
+  it('#2390-review-fix — the base tracking-ref is ALWAYS fetched, even when stacked (the cumulative human-gate basis needs origin/main; a stacked base can never suppress it)', () => {
+    const { exec, calls } = fakeExec({
+      'git diff --numstat origin/main origin/lane/child': { stdout: '1\t0\tREADME.md\n' },
+      'git diff --numstat a1b2c3d4e5f6 origin/lane/child': { stdout: '1\t0\tREADME.md\n' },
+    });
+    computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'a1b2c3d4e5f6', fetchExtraRefs: ['lane/child'] });
+    const fetch = calls.find((c) => c.args[0] === 'fetch');
+    expect(fetch.args).toEqual(['fetch', 'origin', '+main:refs/remotes/origin/main', 'lane/child', '--quiet']);
+  });
+
+  it('#2390 — a malformed (non-hex) baseRev is IGNORED — the origin/main basis serves BOTH size and the human gate, never an injected git arg', () => {
+    const { exec, calls } = fakeExec({ 'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' } });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef', baseRev: '--upload-pack=evil' });
+    expect(r).toEqual({ changedFiles: ['README.md'], diffLines: 1, scored: true, humanBasisFiles: ['README.md'] });
+    expect(calls.some((c) => c.args.includes('--upload-pack=evil'))).toBe(false); // the poison value never reaches git
+    expect(calls[0].args[2]).toBe('+main:refs/remotes/origin/main'); // sibling basis restored
+  });
+
+  // ── #2390-review-fix — the CORE security guarantees: a self-declared / mis-set base can de-inflate SIZE but
+  //    can NEVER narrow or suppress the gate-self / review:human trigger. ────────────────────────────────────
+  it('#2390-review-fix — an ANCESTOR gate-self edit that drops out of the own-delta is STILL caught: it rides humanBasisFiles → scoreEscalation humanRequired:true', () => {
+    const { exec } = fakeExec({
+      // Cumulative origin/main…head carries the ancestor's edit to the lander itself (a trust-chain file).
+      'git diff --numstat origin/main origin/lane/child': { stdout: '2\t0\tbacklog/2390-child.md\n5\t1\tscripts/merge-ai-prs.mjs\n' },
+      // The own delta (base…head) does NOT — the gate-self edit was the ancestor's, before this lane's base.
+      'git diff --numstat feedface origin/lane/child': { stdout: '2\t0\tbacklog/2390-child.md\n' },
+    });
+    const net = computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'feedface', fetchExtraRefs: ['lane/child'] });
+    expect(net.changedFiles).not.toContain('scripts/merge-ai-prs.mjs'); // SIZE de-inflated (the ancestor edit is out)
+    expect(net.humanBasisFiles).toContain('scripts/merge-ai-prs.mjs'); // but the human gate still sees it
+    const score = scoreEscalation({ changedFiles: net.changedFiles, diffLines: net.diffLines, humanBasisFiles: net.humanBasisFiles });
+    expect(score.humanRequired).toBe(true); // THE FIX: a trust-chain edit forces review:human even from an ancestor
+  });
+
+  it('#2390-review-fix — a mis-set base==head is REJECTED (rev-parse equal ⇒ not a strict ancestor): the own-delta falls back to the cumulative basis, so an empty base…head can never silently under-score', () => {
+    const { exec, calls } = fakeExec({
+      'git diff --numstat origin/main origin/lane/child': { stdout: '3\t0\tscripts/lib/review-escalation.mjs\n' },
+      'git rev-parse cafebabecafe': { stdout: 'cafebabecafe\n' },
+      'git rev-parse origin/lane/child': { stdout: 'cafebabecafe\n' }, // head resolves to the SAME sha as base
+    });
+    const net = computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'cafebabecafe', fetchExtraRefs: ['lane/child'] });
+    expect(net.changedFiles).toEqual(['scripts/lib/review-escalation.mjs']); // fell back to cumulative — NOT an empty under-score
+    expect(net.humanBasisFiles).toEqual(['scripts/lib/review-escalation.mjs']);
+    expect(calls.some((c) => c.key === 'git diff --numstat cafebabecafe origin/lane/child')).toBe(false); // own-delta never attempted
+    expect(scoreEscalation({ changedFiles: net.changedFiles, diffLines: net.diffLines, humanBasisFiles: net.humanBasisFiles }).humanRequired).toBe(true);
+  });
+
+  it('#2390-review-fix — a base that is NOT an ancestor of head is REJECTED (merge-base --is-ancestor non-zero): fall back to the cumulative origin/main basis rather than trust an unrelated-tree base', () => {
+    const { exec, calls } = fakeExec({
+      'git diff --numstat origin/main origin/lane/child': { stdout: '2\t0\tbacklog/x.md\n1\t0\tscripts/merge-ai-prs.mjs\n' },
+      'git merge-base --is-ancestor deadbeefdead origin/lane/child': { throw: 'not an ancestor' },
+    });
+    const net = computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'deadbeefdead', fetchExtraRefs: ['lane/child'] });
+    expect(net.changedFiles).toEqual(['backlog/x.md', 'scripts/merge-ai-prs.mjs']); // cumulative — a bad base never de-inflates
+    expect(calls.some((c) => c.key === 'git diff --numstat deadbeefdead origin/lane/child')).toBe(false); // own-delta never attempted
+    expect(scoreEscalation({ changedFiles: net.changedFiles, diffLines: net.diffLines, humanBasisFiles: net.humanBasisFiles }).humanRequired).toBe(true);
   });
 });
 

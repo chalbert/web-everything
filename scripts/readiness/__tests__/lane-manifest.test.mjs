@@ -226,23 +226,34 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
   describe('manifestAuditLine (xnsk54v follow-up — tamper-evidence record of acted-on escalation values)', () => {
     it('emits a stable one-line record of the escalation-sensitive values', () => {
       const line = manifestAuditLine({ dismissedFindings: 3, crossRepo: true, blockedBy: [2151, 'x7k2q9a'] });
-      expect(line).toBe('manifest acted-on: dismissedFindings=3 crossRepo=true blockedBy=[2151,x7k2q9a]');
+      expect(line).toBe('manifest acted-on: dismissedFindings=3 crossRepo=true blockedBy=[2151,x7k2q9a] base=none');
       // Deterministic — same input ⇒ byte-identical output (what lets the reason-comment dedupe skip a re-post).
       expect(manifestAuditLine({ dismissedFindings: 3, crossRepo: true, blockedBy: [2151, 'x7k2q9a'] })).toBe(line);
     });
 
+    it('#2390-review-fix — records the per-repo stacked `base` (sanitized to a git object hash; `none`/malformed → none)', () => {
+      // A truthful strict-ancestor base is recorded verbatim, so the de-inflating basis is part of the trail.
+      expect(manifestAuditLine({ dismissedFindings: 0, crossRepo: false, blockedBy: [], base: 'a1b2c3d4e5f6' }))
+        .toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[] base=a1b2c3d4e5f6');
+      // A malformed / injection base value is never emitted raw — it renders as `none` (mirrors what the scorer trusts).
+      expect(manifestAuditLine({ base: '--upload-pack=evil' }))
+        .toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[] base=none');
+      // A CHANGED base yields a DIFFERENT line — a body edit of `base` becomes diff-detectable like the others.
+      expect(manifestAuditLine({ base: 'a1b2c3d4e5f6' })).not.toBe(manifestAuditLine({ base: 'facef00dface' }));
+    });
+
     it('handles missing / zero / empty inputs (an orphan PR carries no escalation risk)', () => {
-      expect(manifestAuditLine()).toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]');
-      expect(manifestAuditLine({})).toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]');
+      expect(manifestAuditLine()).toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[] base=none');
+      expect(manifestAuditLine({})).toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[] base=none');
       expect(manifestAuditLine({ dismissedFindings: 0, crossRepo: false, blockedBy: [] }))
-        .toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]');
+        .toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[] base=none');
     });
 
     it('coerces only NON-finite defensively (NaN → 0), truthy crossRepo → bool, non-array blockedBy → []', () => {
       expect(manifestAuditLine({ dismissedFindings: NaN, crossRepo: 1, blockedBy: null }))
-        .toBe('manifest acted-on: dismissedFindings=0 crossRepo=true blockedBy=[]');
+        .toBe('manifest acted-on: dismissedFindings=0 crossRepo=true blockedBy=[] base=none');
       expect(manifestAuditLine({ dismissedFindings: undefined, crossRepo: 0, blockedBy: undefined }))
-        .toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]');
+        .toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[] base=none');
     });
 
     it('records a finite NEGATIVE dismissedFindings VERBATIM — never clamps to 0 (record==acted-on)', () => {
@@ -250,10 +261,10 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
       // RAW to scoreEscalation (the caller isFinite-guards but does NOT clamp). The record must mirror that
       // exactly, or the recorded value would silently diverge from the acted-on value — defeating the fix.
       expect(manifestAuditLine({ dismissedFindings: -4, crossRepo: false, blockedBy: [] }))
-        .toBe('manifest acted-on: dismissedFindings=-4 crossRepo=false blockedBy=[]');
+        .toBe('manifest acted-on: dismissedFindings=-4 crossRepo=false blockedBy=[] base=none');
       // A numeric string the caller passes as-is still renders faithfully as its numeric value.
       expect(manifestAuditLine({ dismissedFindings: -1, crossRepo: true, blockedBy: [2151] }))
-        .toBe('manifest acted-on: dismissedFindings=-1 crossRepo=true blockedBy=[2151]');
+        .toBe('manifest acted-on: dismissedFindings=-1 crossRepo=true blockedBy=[2151] base=none');
     });
 
     it('a CHANGED acted-on value yields a DIFFERENT line (a body edit becomes diff-detectable)', () => {
@@ -279,7 +290,7 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
       expect(line).not.toContain('>');
       expect(line).not.toContain('!');
       // The sanitized ids keep only alphanumerics / `-` / `_`; every injection character is dropped.
-      expect(line).toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[2151--drain-land-reason--,9injected,ok-id_1]');
+      expect(line).toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[2151--drain-land-reason--,9injected,ok-id_1] base=none');
     });
   });
 });

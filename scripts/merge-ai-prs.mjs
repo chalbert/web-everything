@@ -106,7 +106,7 @@ import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs';
 import { withNumberingLock } from './readiness/drain-lock.mjs'; // #2391 — the numbering-critical-section mutex (sole-serial-writer)
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
-import { extractManifestFromBody, manifestAuditLine, asItemId } from './readiness/lane-manifest.mjs';
+import { extractManifestFromBody, manifestAuditLine, asItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
 
 // #2262 — the local, machine-scoped park-age clock the review-escalation watch-window gate reads its
 // `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
@@ -564,6 +564,26 @@ export function parseNumstat(numstat) {
 }
 
 /**
+ * #2390-review-fix — is `ancestor` a STRICT ancestor of `descendant` (an ancestor, AND not the same commit)?
+ * Used to gate the stacked-lane SIZE de-inflation: a self-declared/mis-set `base` is trusted for `base…head`
+ * ONLY if it provably sits behind head, so it can never be `base==head` (an empty own-delta silently
+ * `scored:true` under-score) nor an unrelated tree. `git merge-base --is-ancestor` exits 0 for an ancestor
+ * (INCLUDING equality), so equality is rejected separately via `rev-parse`. Any git error → `false` (don't
+ * trust the base → the caller uses the safe cumulative basis). Pure aside from the injected `exec`.
+ */
+function isStrictAncestor(exec, ancestor, descendant) {
+  try {
+    exec('git', ['merge-base', '--is-ancestor', ancestor, descendant], { stdio: ['ignore', 'ignore', 'ignore'] });
+  } catch { return false; } // non-zero exit (not an ancestor) or unresolvable → don't trust the base
+  try {
+    const a = String(exec('git', ['rev-parse', ancestor], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').trim();
+    const b = String(exec('git', ['rev-parse', descendant], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').trim();
+    if (a && b && a === b) return false; // base == head → degenerate empty own-delta, reject
+  } catch { /* can't resolve to SHAs → is-ancestor already vouched it's a distinct ancestor path */ }
+  return true;
+}
+
+/**
  * #2373 — the SHARED net-diff basis for the review-escalation rubric, used by BOTH the producer
  * (`pr-land.mjs`'s `applyReviewEscalationLabel`) and the drain backstop below — the ONE place this basis is
  * computed, so the two paths can't independently drift (#1821 fixed the drain path's basis; #2373 found the
@@ -593,23 +613,53 @@ export function parseNumstat(numstat) {
  * resolves the function returns `scored:false` and the caller correctly falls through to its GitHub files-list
  * backstop (the safe, over-scoring direction). `fetchExtraRefs` still fetches the head ref so `<remote>/<rev>`
  * resolves in the normal sibling-clone case — it just never gets offered as a diff candidate via `FETCH_HEAD`.
- * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
+ * #2390 — a STACKED lane records the commit SHA it was cut from (its predecessor's tip) as the manifest
+ * per-repo `base`. Pass it as `baseRev` and the SIZE / blast-radius diff (`changedFiles`/`diffLines`) is
+ * computed from THAT base — so the lane's blast-radius is scored on its OWN delta, killing cumulative-stack
+ * inflation. A plain sibling lane carries no base → `baseRev` is null → the unchanged `<remote>/<base>` basis.
+ *
+ * #2390-review-fix — but the base rides the EDITABLE PR body, so it MUST NOT be able to shrink the
+ * `humanRequired` / gate-self trigger. Two guards:
+ *   1. `humanBasisFiles` is ALWAYS the cumulative `<remote>/<base>…head` file set (never de-inflated by
+ *      `baseRev`). `scoreEscalation` reads the gate-self signal from it, so an ancestor's OR the child's edit
+ *      to the auto-review trust chain always forces `review:human` — a self-declared/mis-set base can shrink
+ *      SIZE but never suppress the human gate (over-escalating is the safe direction, #2285).
+ *   2. `baseRev` is trusted for the SIZE de-inflation ONLY when it is a STRICT ancestor of head (never
+ *      `base==head`, which would be an empty own-delta silently `scored:true` under-score; never an unrelated
+ *      tree). Otherwise the own-delta falls back to the cumulative basis. `baseRev` is also shape-guarded to a
+ *      git object hash so a malformed manifest value can never become an injected `git` argument.
+ * The base tracking-ref is ALWAYS force-updated (the cumulative basis needs it); `baseRev` reaches via the
+ * fetched head ref. Any diff failure falls through to `scored:false`, the safe over-scoring direction.
+ * @param {{exec:Function, remote?:string, base?:string, baseRev?:string|null, rev:string, fetchExtraRefs?:string[]}} opts
  *   `exec(cmd, args, opts)` — inject `execFileSync`-shaped exec so this stays unit-testable with a fake.
- * @returns {{changedFiles:string[], diffLines:number, scored:boolean}}
+ * @returns {{changedFiles:string[], diffLines:number, scored:boolean, humanBasisFiles:string[]}}
  */
-export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
-  if (typeof exec !== 'function' || !rev) return { changedFiles: [], diffLines: 0, scored: false };
+export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'main', baseRev = null, rev, fetchExtraRefs = [] } = {}) {
+  if (typeof exec !== 'function' || !rev) return { changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] };
+  const baseRevOk = typeof baseRev === 'string' && /^[0-9a-f]{7,64}$/i.test(baseRev);
+  const baseRef = `${remote}/${base}`;
   try {
+    // ALWAYS force-update the base tracking-ref (#2373 opportunistic-fetch fix): the cumulative human-gate basis
+    // below is `<remote>/<base>…head`, which a stacked `baseRev` must never be able to shrink (#2390-review-fix).
     exec('git', ['fetch', remote, `+${base}:refs/remotes/${remote}/${base}`, ...fetchExtraRefs, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] });
   } catch { /* degrade to whatever is locally cached — the diff attempts below still run */ }
   const candidates = [`${remote}/${rev}`, rev];
   for (const candidate of candidates) {
+    // The cumulative `<remote>/<base>…head` diff is BOTH the human-gate basis AND the candidate-resolves probe.
+    let humanBasis;
     try {
-      const out = exec('git', ['diff', '--numstat', `${remote}/${base}`, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-      return { ...parseNumstat(out), scored: true };
-    } catch { /* try next candidate */ }
+      humanBasis = parseNumstat(exec('git', ['diff', '--numstat', baseRef, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+    } catch { continue; /* candidate doesn't resolve — try the next one */ }
+    // SIZE / blast-radius de-inflate to the OWN delta (`baseRev…head`) ONLY when `baseRev` provably is a STRICT
+    // ancestor of head; otherwise use the cumulative basis (the safe over-scoring direction).
+    let own = humanBasis;
+    if (baseRevOk && isStrictAncestor(exec, baseRev, candidate)) {
+      try { own = parseNumstat(exec('git', ['diff', '--numstat', baseRev, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })); }
+      catch { own = humanBasis; /* own-delta diff failed → fall back to the cumulative basis */ }
+    }
+    return { changedFiles: own.changedFiles, diffLines: own.diffLines, scored: true, humanBasisFiles: humanBasis.changedFiles };
   }
-  return { changedFiles: [], diffLines: 0, scored: false };
+  return { changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] };
 }
 
 /**
@@ -945,6 +995,11 @@ function runCli() {
       v.hasManifest = m != null; // #2183 — carries the transient manifest on its head → must be stripped before merge
       // #2171 review-escalation signals off the manifest: cross-repo couple (>1 repo) + dismissed pre-PR findings.
       v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
+      // #2390 — the SHA this repo's lane was cut from (a predecessor tip when overlap-stacked, #2387). Scoring
+      // from it below diffs the lane on its OWN delta, not the cumulative stack. `isLocalRepo` is the WE clone
+      // the drain runs in → key `we` (default when the origin slug is underivable); a sibling slug maps by short
+      // name. A missing/unmatched base is `null` → the scorer falls through to the unchanged `origin/main` basis.
+      v.base = manifestBaseForRepo(m, isLocalRepo(v.repo) ? (repoKeyFromSlug(localSlug) || 'we') : repoKeyFromSlug(v.repo));
       v.dismissedFindings = m && Number.isFinite(Number(m.dismissedFindings)) ? Number(m.dismissedFindings) : 0;
       v.prLabels = p.labels || [];
       verdicts.push(v);
@@ -1120,6 +1175,9 @@ function runCli() {
       if (v.decision !== 'merge') continue;
       let changedFiles = [];
       let diffLines = 0;
+      // #2390-review-fix — the CUMULATIVE origin/main…head file set the gate-self/human trigger scores over
+      // (never de-inflated by a stacked base). `null` → scoreEscalation falls back to `changedFiles`.
+      let humanBasisFiles = null;
       // #2373 — score off the SHARED net-diff basis (`computeNetDiffChangedFiles`, also used by the
       // producer path in pr-land.mjs — the ONE place this basis is computed, #1821's original fix folded
       // in). Best-effort local git read (needs the local clone or a provisioned sibling clone); falls back
@@ -1128,9 +1186,10 @@ function runCli() {
       let netScored = false;
       if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
         const exec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts });
-        const net = computeNetDiffChangedFiles({ exec, rev: v.headRef, fetchExtraRefs: [v.headRef] });
+        const net = computeNetDiffChangedFiles({ exec, rev: v.headRef, baseRev: v.base, fetchExtraRefs: [v.headRef] });
         changedFiles = net.changedFiles;
         diffLines = net.diffLines;
+        humanBasisFiles = net.humanBasisFiles;
         netScored = net.scored;
       }
       if (!netScored) {
@@ -1138,9 +1197,12 @@ function runCli() {
           const files = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'files'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').files || [];
           changedFiles = files.map((f) => f.path).filter(Boolean);
           diffLines = files.reduce((s, f) => s + (Number(f.additions) || 0) + (Number(f.deletions) || 0), 0);
+          // The gh files list is the PR's full diff vs its base branch (main) — already cumulative, so it IS the
+          // human-gate basis (a stacked base never de-inflates this fallback path).
+          humanBasisFiles = changedFiles;
         } catch { /* signal-fetch miss → score on the manifest signals alone */ }
       }
-      const score = scoreEscalation({ changedFiles, diffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, prNum: Number(v.num), thresholds: SAMPLE_NTH ? { sampleNth: SAMPLE_NTH } : {} });
+      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, prNum: Number(v.num), thresholds: SAMPLE_NTH ? { sampleNth: SAMPLE_NTH } : {} });
       const parkedSinceMs = getParkedSinceMs(parkState, { repo: v.repo, num: v.num });
       const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, parkedSinceMs, nowMs, ...(REVIEW_WINDOW_MS ? { windowMs: REVIEW_WINDOW_MS } : {}) });
       v.escalated = score.escalate ? 'yes' : 'no';

@@ -86,7 +86,7 @@ import {
   scoreEscalation, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META,
   buildEscalationReasonBlock, bodyHasEscalationReason,
 } from './lib/review-escalation.mjs'; // #2307 — deterministic review-escalation label AT PR-OPEN
-import { parseManifest, embedManifestInBody } from './readiness/lane-manifest.mjs'; // xnsk54v — manifest rides the PR body, not a tracked file
+import { parseManifest, embedManifestInBody, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs'; // xnsk54v — manifest rides the PR body, not a tracked file
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -385,14 +385,14 @@ export function classifyChecks(rows) {
  * the SAME two the drain (`merge-ai-prs.mjs`) reads back later, so producer- and drain-applied verdicts can
  * never drift. `currentLabels` is normally empty at open (a fresh PR) but is honoured either way — re-running
  * pr-land against an already-labelled PR (e.g. a retried `--label-on-green`) must not double-apply.
- * @param {{changedFiles?:string[], diffLines?:number, dismissedFindings?:number, crossRepo?:boolean,
- *          prNum?:number, currentLabels?:Array}} o
+ * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
+ *          crossRepo?:boolean, prNum?:number, currentLabels?:Array}} o
  * @returns {{label:string|null, apply:boolean, reasons:string[], humanRequired:boolean}}
  */
 export function resolveProducerReviewLabel({
-  changedFiles = [], diffLines = 0, dismissedFindings = 0, crossRepo = false, prNum = 0, currentLabels = [],
+  changedFiles = [], diffLines = 0, humanBasisFiles = null, dismissedFindings = 0, crossRepo = false, prNum = 0, currentLabels = [],
 } = {}) {
-  const score = scoreEscalation({ changedFiles, diffLines, dismissedFindings, crossRepo, prNum });
+  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, prNum });
   const label = producerReviewLabel(score);
   return { label, apply: shouldApplyReviewLabel(label, currentLabels), reasons: score.reasons, humanRequired: !!score.humanRequired };
 }
@@ -560,21 +560,31 @@ function runCli() {
   // touched them.
   const applyReviewEscalationLabel = () => {
     const exec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: REPO, ...opts });
-    const net = computeNetDiffChangedFiles({ exec, remote: REMOTE, base: BASE, rev: refSha });
-    const changedFiles = net.changedFiles;
-    const diffLines = net.diffLines;
     // xnsk54v — prefer the SCRATCH manifest (--manifest-file, the new off-tree carrier); fall back to the
-    // legacy tree-committed `.lane-manifest.json` off the ref for a lane that still commits it.
+    // legacy tree-committed `.lane-manifest.json` off the ref for a lane that still commits it. Loaded BEFORE
+    // the net diff so #2390's per-repo `base` can seed the diff basis.
     let manifest = LANE_MANIFEST;
     if (!manifest) {
       const manifestRaw = tryGit(['show', `${refSha}:.lane-manifest.json`]);
       if (manifestRaw) { try { manifest = JSON.parse(manifestRaw); } catch { /* malformed — degrade to no manifest signal */ } }
     }
+    // #2390 — score this lane on its OWN delta from the manifest per-repo `base` (its predecessor's tip when
+    // overlap-stacked), NOT the cumulative diff vs main — the SAME basis the drain backstop uses (#2373's
+    // no-drift invariant). The repo key comes from this clone's origin slug; a sibling lane has no base → null →
+    // the unchanged `origin/main` basis.
+    const originSlug = (() => { try { const u = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); const m = u.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/); return m ? m[1] : null; } catch { return null; } })();
+    const baseRev = manifestBaseForRepo(manifest, repoKeyFromSlug(originSlug));
+    const net = computeNetDiffChangedFiles({ exec, remote: REMOTE, base: BASE, baseRev, rev: refSha });
+    const changedFiles = net.changedFiles;
+    const diffLines = net.diffLines;
+    // #2390-review-fix — the CUMULATIVE origin/main…head basis the gate-self/human trigger scores over; a
+    // stacked base de-inflates SIZE (`changedFiles`) but can never shrink this.
+    const humanBasisFiles = net.humanBasisFiles;
     const crossRepo = manifest && Array.isArray(manifest.repos) ? manifest.repos.length > 1 : false;
     const dismissedFindings = manifest && Number.isFinite(Number(manifest.dismissedFindings)) ? Number(manifest.dismissedFindings) : 0;
     let currentLabels = [];
     try { currentLabels = (JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'labels'])).labels || []).map((l) => l.name); } catch { /* fresh PR — no labels yet */ }
-    const verdict = resolveProducerReviewLabel({ changedFiles, diffLines, dismissedFindings, crossRepo, prNum: Number(prNum), currentLabels });
+    const verdict = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, prNum: Number(prNum), currentLabels });
     if (verdict.label && verdict.apply) {
       const meta = REVIEW_LABEL_META[verdict.label];
       try { ghC(['label', 'create', verdict.label, '--color', meta.color, '--description', meta.description]); } catch { /* already exists — fine */ }

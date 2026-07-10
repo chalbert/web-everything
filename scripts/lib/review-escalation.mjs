@@ -99,12 +99,23 @@ export function isGateSelfPath(path) {
  * essential. It's a *classification* of an already-escalating PR (a gate-self file is always blast-radius too),
  * never a fresh escalation trigger.
  *
- * @param {{changedFiles?:string[], diffLines?:number, dismissedFindings?:number, crossRepo?:boolean,
- *          prNum?:number, thresholds?:object}} o
+ * #2390-review-fix — the gate-self / `humanRequired` trigger reads `humanBasisFiles` (the CUMULATIVE
+ * `origin/main…head` file set), NOT the possibly-de-inflated own-delta `changedFiles`. A stacked lane may
+ * de-inflate its SIZE / blast-radius by scoring `base…head` (that is #2390's legitimate intent), but a
+ * self-declared / mis-set `base` MUST NOT be able to shrink the basis the human gate reads — else an ancestor's
+ * edit to the auto-review trust chain (or a `base==head` mis-set) would drop out of the diff and merge with NO
+ * human review (defeats #2285). So the human gate always sees the full cumulative set: an ancestor's OR the
+ * child's gate-self edit always forces `review:human`. Over-escalating here is the safe direction. When
+ * `humanBasisFiles` is omitted it falls back to `changedFiles` (the non-stacked case, where the two are
+ * identical), so every existing caller is unchanged.
+ *
+ * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
+ *          crossRepo?:boolean, prNum?:number, thresholds?:object}} o
  */
 export function scoreEscalation({
   changedFiles = [],
   diffLines = 0,
+  humanBasisFiles = null,
   dismissedFindings = 0,
   crossRepo = false,
   prNum = 0,
@@ -117,7 +128,10 @@ export function scoreEscalation({
   const blastFiles = (Array.isArray(changedFiles) ? changedFiles : []).filter(isBlastRadiusPath);
   if (blastFiles.length) { signals.blastRadius = blastFiles; reasons.push(`blast-radius (${blastFiles.slice(0, 3).join(', ')}${blastFiles.length > 3 ? ', …' : ''})`); }
 
-  const gateSelfFiles = (Array.isArray(changedFiles) ? changedFiles : []).filter(isGateSelfPath);
+  // #2390-review-fix — gate-self over the cumulative basis (a self-declared/mis-set stacked `base` can never
+  // shrink it), falling back to `changedFiles` when no separate basis is supplied.
+  const gateBasis = Array.isArray(humanBasisFiles) ? humanBasisFiles : (Array.isArray(changedFiles) ? changedFiles : []);
+  const gateSelfFiles = gateBasis.filter(isGateSelfPath);
   const humanRequired = gateSelfFiles.length > 0;
   if (humanRequired) { signals.gateSelf = gateSelfFiles; reasons.push(`gate-self (${gateSelfFiles.join(', ')}) — human review required`); }
 
