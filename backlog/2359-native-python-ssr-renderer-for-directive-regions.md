@@ -2,8 +2,11 @@
 kind: story
 size: 8
 parent: "2069"
-status: open
+status: resolved
 dateOpened: "2026-07-09"
+dateStarted: "2026-07-10"
+dateResolved: "2026-07-10"
+graduatedTo: "frontierui:plugs/webdirectives/ssr/python/"
 tags: []
 ---
 
