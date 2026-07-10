@@ -1,7 +1,6 @@
 ---
 kind: story
 size: 8
-parent: "2193"
 status: active
 scaffoldedBy: "manifest-pr-body"
 dateScaffolded: "2026-07-10"

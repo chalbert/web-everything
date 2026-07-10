@@ -210,7 +210,8 @@ a PR head. There is no shared serial lane and no central pre-claim.)*
    PRs touching one file just cost the drain a rebase, never a silent bad merge. A light probe survives only to
    detect the non-WE repos an item spans (for pool provisioning + per-repo PRs).
 3. **Claim-in-lane; the claim rides the PR.** Each lane resets its clone to `origin/main`, runs
-   `backlog.mjs claim` there, works, resolves, writes its `.lane-manifest.json`, commits, pushes `lane/*`, and
+   `backlog.mjs claim` there, works, resolves, writes its lane manifest to a **scratch file** (ridden in the PR
+   body, not committed — xnsk54v), pushes `lane/*`, and
    opens the PR. Because the claim + resolve ride the PR, an item that fails in-lane is **never left `active`
    on `main`** — so there is no closeout "reopen unlanded" step here. A lane whose scoped fast-fail is red
    opens **no PR** (it is carried, recoverable).
@@ -266,9 +267,11 @@ The script (read its header for the full contract): a **light probe** (which non
 no touch-set/partition) → **provision** a lane pool per affected repo + create the `ready-to-merge` label once
 (**no pre-claim, no base ref, no commit to `main`**) → `parallel()` **one agent per item in its own lane clone**
 (`cd <lane>` → `reset --hard origin/main` → `backlog.mjs claim` there) that works its own files, gates locally
-with `check:standards --local --files=…` (#1937 best-effort fast-fail), resolves, writes its
-`.lane-manifest.json`, commits explicit paths, pushes `HEAD:lane/<slug>-<n>` per repo, and **opens a
-ready-to-merge PR per ref** via `pr-land --label-on-green` (waits for required checks, labels only when green —
+with `check:standards --local --files=…` (#1937 best-effort fast-fail), resolves, writes its lane manifest to a
+**scratch file** (`--out=/tmp/…`, not committed — xnsk54v), commits explicit paths, pushes `HEAD:lane/<slug>-<n>`
+per repo, and **opens a
+ready-to-merge PR per ref** via `pr-land --label-on-green --manifest-file=…` (embeds the manifest in the WE PR
+body, waits for required checks, labels only when green —
 #2199) → **finalize** writes a local (uncommitted)
 `queued.json` signal per PR'd item (so the same checkout won't re-offer them, and the existing `/drain` can
 land them today). It returns `{ ledger, itemsWorked, prsOpened, prUrls, queued, crossRepoItems,
@@ -280,7 +283,8 @@ repos. The backlog item + its resolve **always live in WE**; the light probe rep
 touches (`extraRepos`), and the orchestrator **provisions a lane pool per affected repo** (`lane-pool.mjs` is
 repo-parameterized), dispatches the item across its **coupled clones**, pushes `lane/<slug>-<n>` to **each
 repo's own origin**, and **opens one PR per repo**. **Cross-repo atomicity is the drain's job**, by *ordering*:
-the WE PR carries the item's `.lane-manifest.json` naming the repos **impl-first/WE-last**, and the drain lands
+the WE PR **body** carries the item's lane manifest naming the repos **impl-first/WE-last** (xnsk54v — off the
+tree), and the drain lands
 them in that order so a failed impl merge never leaves a false `resolved` (WE carries the `active→resolved`
 flip and lands last).
 

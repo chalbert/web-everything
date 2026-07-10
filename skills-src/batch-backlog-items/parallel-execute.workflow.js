@@ -1,11 +1,11 @@
 export const meta = {
   name: 'batch-parallel-execute',
-  description: 'Execute a /workflow (parallel) batch on the #2183 PR-fan-out model: a light probe detects the constellation repos each item spans → provision a lane pool per affected repo (+ create the ready-to-merge label once) → work each item as its OWN agent in its coupled lane CLONE (claim-in-lane, work, resolve, write .lane-manifest.json, commit, push lane/<n> per repo), then OPEN A READY-TO-MERGE PR per pushed ref (pr-land --label-on-green: wait for required checks, label only when green — #2199). The producer makes ZERO commits to main, never integrates inline, and never launches or waits on the drain — it completes when every item is an open ready-to-merge PR. A separate, optional drain lands them later in blockedBy order. Per-item progress. Returns a ledger.',
+  description: 'Execute a /workflow (parallel) batch on the #2183 PR-fan-out model: a light probe detects the constellation repos each item spans → provision a lane pool per affected repo (+ create the ready-to-merge label once) → work each item as its OWN agent in its coupled lane CLONE (claim-in-lane, work, resolve, write the lane manifest to a SCRATCH file, push lane/<n> per repo), then OPEN A READY-TO-MERGE PR per pushed ref (pr-land --label-on-green embeds the manifest in the WE PR body — xnsk54v — and waits for required checks, labels only when green — #2199). The producer makes ZERO commits to main, never integrates inline, and never launches or waits on the drain — it completes when every item is an open ready-to-merge PR. A separate, optional drain lands them later in blockedBy order. Per-item progress. Returns a ledger.',
   whenToUse: 'Invoked by the batch-backlog-items skill ONLY for /workflow (or --parallel), after the main loop has done the conversational pack/plan/one-"go". Not for the default serial /batch.',
   phases: [
     { title: 'Probe', detail: 'light: detect the non-WE constellation repos each item spans (for pool provisioning + per-repo PRs)' },
     { title: 'Provision', detail: 'provision a lane pool PER affected repo + ensure the ready-to-merge label exists (NO pre-claim, NO base ref, NO commit to main)' },
-    { title: 'Lanes', detail: 'one agent per item in its coupled clone: claim-in-lane → work → resolve → manifest → push lane/<n> per repo → open a ready-to-merge PR per ref' },
+    { title: 'Lanes', detail: 'one agent per item in its coupled clone: claim-in-lane → work → resolve → manifest to scratch → push lane/<n> per repo → open a ready-to-merge PR per ref (manifest in the WE PR body)' },
     { title: 'Finalize', detail: 'record a local (uncommitted) ready-to-merge signal per PR’d item so the same checkout does not re-offer it; NO integrate, NO drain launch' },
   ],
 };
@@ -32,14 +32,14 @@ export const meta = {
 //
 // A LIGHT probe is retained ONLY to detect the non-WE constellation repos (#96 — frontierui, plateau-app) an
 // item's impl spans, so the right lane pools are provisioned and a PR is opened per repo. A cross-repo item
-// becomes ONE PR per repo; the WE PR carries the item's `.lane-manifest.json` (#2163) so the drain lands the
-// couple impl-first/WE-last in cross-item blockedBy order.
+// becomes ONE PR per repo; the WE PR BODY carries the item's lane manifest (#2163, moved off the tree in
+// xnsk54v) so the drain lands the couple impl-first/WE-last in cross-item blockedBy order.
 //
 // THE READY-TO-MERGE SIGNAL (#2183 F1 = a PR LABEL). Each opened PR is labelled `ready-to-merge` (created once
 // in Provision). This is the forward signal the drain↔/merge convergence (#2188) will discover by. As an
 // interim so the EXISTING drain works today, Finalize also writes a LOCAL (uncommitted) `queued.json` entry
 // per PR'd item via `backlog.mjs queue` — it lets `we:scripts/lane-drain.mjs` land the couples now (it reads
-// the manifest off the pushed lane ref) AND gives readiness/claim an offline "don't re-offer" signal (Rule
+// the manifest off the PR body — xnsk54v) AND gives readiness/claim an offline "don't re-offer" signal (Rule
 // #105) WITHOUT committing anything to main.
 //
 // This script runs in the Workflow JS sandbox: no fs, no child_process, no Date/Math.random. ALL side effects
@@ -160,9 +160,9 @@ const ITEM_RESULT_SCHEMA = {
           labelled: { type: 'boolean', description: 'true if the ready-to-merge label was applied' },
         },
       },
-      description: 'one entry per repo this item opened a ready-to-merge PR in (we + any frontierui/plateau-app). For a WE-only item this is just the we entry. The we entry\'s ref is the one whose commit carries the .lane-manifest.json the drain reads.',
+      description: 'one entry per repo this item opened a ready-to-merge PR in (we + any frontierui/plateau-app). For a WE-only item this is just the we entry. The we entry\'s PR is the one whose BODY carries the lane manifest the drain reads (xnsk54v — off the PR body, not a committed file).',
     },
-    resolveCommit: { type: 'string', description: 'the full SHA of the WE commit that resolved this item (git rev-parse HEAD in the WE clone after the resolve+manifest commit).' },
+    resolveCommit: { type: 'string', description: 'the full SHA of the WE commit that resolved this item (git rev-parse HEAD in the WE clone after the resolve commit; the manifest is a scratch file, not committed).' },
     changedFiles: {
       type: 'array', items: { type: 'string' },
       description: 'EVERY file this item changed, REPO-QUALIFIED as "<repo>:<repo-relative-path>" (e.g. "we:backlog/2189.md", "frontierui:src/foo.ts").',
@@ -419,10 +419,13 @@ function laneItemPrompt(it, laneDirs) {
     `   Then COMMIT each repo's own files (git add <explicit paths>; NEVER -A; NEVER stage another item's files).`,
     `   Commit message per repo: \`backlog: resolve #${N} — ${it.slug}\`.`,
     ``,
-    `6. WRITE THE MANIFEST (the drain reads it to land the couple in order). In the WE clone, AFTER the resolve`,
-    `   commit: \`node scripts/lane-manifest-write.mjs --item=${N} --repos='${JSON.stringify(reposManifest)}'${it.blockedBy && it.blockedBy.length ? ` --blocked-by=${it.blockedBy.join(',')}` : ''} --batch-slug=${batchSlug}\``,
-    `   then \`git add .lane-manifest.json && git commit --amend --no-edit\` (ONE commit carries work + resolve +`,
-    `   manifest — a one-sided ADD keeps the WE-lane merge conflict-free). Only the WE clone writes the manifest.`,
+    `6. WRITE THE MANIFEST TO A SCRATCH FILE (the drain reads it off the PR BODY to land the couple in order —`,
+    `   xnsk54v: it rides the PR body, NOT a committed file). In the WE clone, AFTER the resolve commit, write it`,
+    `   to a scratch path and do NOT commit it into the tree:`,
+    `   \`node scripts/lane-manifest-write.mjs --item=${N} --repos='${JSON.stringify(reposManifest)}'${it.blockedBy && it.blockedBy.length ? ` --blocked-by=${it.blockedBy.join(',')}` : ''} --batch-slug=${batchSlug} --out=/tmp/lane-manifest-${laneKeyOf(it)}.json\``,
+    `   You hand this file to the WE pr-land in step 8 via \`--manifest-file\`; pr-land embeds it in the PR body.`,
+    `   NEVER \`git add .lane-manifest.json\` — no manifest file lands in the tree (that shared-path file was the`,
+    `   whole cause of the merge-queue conflict + rebase-drop bloat). Only the WE clone writes the manifest.`,
     ``,
     `7. PRE-PR INDEPENDENT REVIEW (#2170) — in the WE clone, AFTER the manifest commit, BEFORE the PR. Get your`,
     `   lane diff (\`node scripts/lane-review.mjs diff --base=origin/main\`) and SPAWN AN INDEPENDENT REVIEW`,
@@ -430,9 +433,9 @@ function laneItemPrompt(it, laneDirs) {
     `   finding IN THIS LANE now (re-run the scoped fast-fail, then \`git commit --amend --no-edit\` onto the`,
     `   resolve commit). Findings you DISMISS go in dismissedFindings (finding + one-line reason [+ severity/`,
     `   location]); NEVER drop one silently — they become the PR body audit trail.`,
-    `   • #2171 — if you DISMISSED any finding, re-stamp the manifest with the count so the drain's escalation`,
-    `     rubric sees its strongest signal: \`node scripts/lane-manifest-write.mjs --item=${N} --repos='${JSON.stringify(reposManifest)}'${it.blockedBy && it.blockedBy.length ? ` --blocked-by=${it.blockedBy.join(',')}` : ''} --batch-slug=${batchSlug} --dismissed=<count>\``,
-    `     then \`git add .lane-manifest.json && git commit --amend --no-edit\` (fold into the same one commit).`,
+    `   • #2171 — if you DISMISSED any finding, re-write the SCRATCH manifest with the count so the drain's`,
+    `     escalation rubric sees its strongest signal: \`node scripts/lane-manifest-write.mjs --item=${N} --repos='${JSON.stringify(reposManifest)}'${it.blockedBy && it.blockedBy.length ? ` --blocked-by=${it.blockedBy.join(',')}` : ''} --batch-slug=${batchSlug} --dismissed=<count> --out=/tmp/lane-manifest-${laneKeyOf(it)}.json\``,
+    `     (overwrite the scratch file — no commit; it rides the PR body via pr-land's --manifest-file in step 8).`,
     ``,
     `8. OPEN A READY-TO-MERGE PR PER REPO (#2199 — labelled ONLY when green). For EACH repo in ${JSON.stringify(repos)}`,
     `   (impl first, WE last), run pr-land in \`--label-on-green\` mode: it opens a self-approved PR, WAITS for the`,
@@ -441,7 +444,7 @@ function laneItemPrompt(it, laneDirs) {
     `   PR whose CI ends up red is thus never labelled (the lane already fixed it in step 4, so this is a backstop).`,
     `   Compose the PR body from your dismissed findings first: \`node scripts/lane-review.mjs body`,
     `   --base=origin/main > /tmp/pr-body-${laneKeyOf(it)}.md\` (best-effort; if it fails, skip --body-file).`,
-    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --body-file=/tmp/pr-body-${laneKeyOf(it)}.md --json\``,
+    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --manifest-file=/tmp/lane-manifest-${laneKeyOf(it)}.json --body-file=/tmp/pr-body-${laneKeyOf(it)}.md --json\``,
     `     (publishes your HEAD → the lane ref, opens the PR, waits for required checks, labels when green — no merge).`,
     `     Parse the PR number (\`pr\`) and \`labelApplied\` from its JSON. reason:"labelled-on-green" = labelled OK;`,
     `     reason:"check-red"/"check-timeout" = PR open but UNLABELLED (carried for labelling — the lane's CI wasn't green).`,

@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   MANIFEST_FILENAME, INTEGRATION_ORDER,
   buildManifest, validateManifest, orderedRepos, parseManifest, serializeManifest,
+  MANIFEST_BODY_BEGIN, MANIFEST_BODY_END, manifestBodyBlock, embedManifestInBody, extractManifestFromBody,
 } from '../lane-manifest.mjs';
 
 describe('lane-manifest primitive (#2138 Fork 2)', () => {
@@ -75,5 +76,43 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
     expect(parseManifest('')).toBeNull();
     expect(parseManifest('   ')).toBeNull();
     expect(parseManifest('{ not json')).toBeNull();
+  });
+
+  describe('PR-body carrier (xnsk54v — manifest rides the PR body, not a committed file)', () => {
+    it('embed→extract round-trips a manifest through a human PR body', () => {
+      const body = '## What\n\nFixes the thing.\n';
+      const withManifest = embedManifestInBody(body, crossRepo);
+      expect(withManifest).toContain(MANIFEST_BODY_BEGIN);
+      expect(withManifest).toContain(MANIFEST_BODY_END);
+      expect(withManifest).toContain('Fixes the thing.'); // human body preserved
+      expect(extractManifestFromBody(withManifest)).toEqual(crossRepo);
+    });
+
+    it('embed is idempotent — re-embedding REPLACES the block in place, never appends a second', () => {
+      const once = embedManifestInBody('body text', crossRepo);
+      const updated = buildManifest({ item: 2138, repos: [{ repo: 'we', ref: 'lane/2138-we-o3' }], dismissedFindings: 5 });
+      const twice = embedManifestInBody(once, updated);
+      expect(twice.match(new RegExp(MANIFEST_BODY_BEGIN, 'g')) || []).toHaveLength(1); // exactly one block
+      expect(extractManifestFromBody(twice)).toEqual(updated);                          // and it's the new one
+    });
+
+    it('embeds into a null/empty body (manifest-only body is still a valid carrier)', () => {
+      const block = embedManifestInBody(null, crossRepo);
+      expect(extractManifestFromBody(block)).toEqual(crossRepo);
+      expect(manifestBodyBlock(crossRepo)).toContain('```json');
+    });
+
+    it('extract returns null when there is no block, or the block JSON is garbage', () => {
+      expect(extractManifestFromBody('a plain PR body with no manifest')).toBeNull();
+      expect(extractManifestFromBody('')).toBeNull();
+      expect(extractManifestFromBody(null)).toBeNull();
+      const broken = `${MANIFEST_BODY_BEGIN}\n\`\`\`json\n{ not json\n\`\`\`\n${MANIFEST_BODY_END}`;
+      expect(extractManifestFromBody(broken)).toBeNull();
+    });
+
+    it('extract ignores content around the block and survives an appended escalation-reason section', () => {
+      const body = embedManifestInBody('intro', crossRepo) + '\n\n## Review escalation\n- size (…)\n';
+      expect(extractManifestFromBody(body)).toEqual(crossRepo);
+    });
   });
 });
