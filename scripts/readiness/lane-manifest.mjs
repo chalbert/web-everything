@@ -54,7 +54,13 @@ function orderRank(repo) {
  * flip (always WE — the item + claims.json always live in WE); defaulted onto the `we` repo when omitted.
  * Pure — returns a plain object; run {@link validateManifest} for the invariants.
  *
- * @param {{item:number|string, batchSlug?:string, repos:Array<{repo:string, ref:string, carriesResolve?:boolean}>, blockedBy?:Array<number|string>, mergeRiskFiles?:string[]}} input
+ * `stackParents` (#2387 F3) — an `asItemId` list naming the frontier-tip item(s) this lane was cut from or
+ * merged onto (overlap-stacked batching). A per-repo `base` (a commit SHA string) records the base each
+ * repo's lane was reset to. Both are OPTIONAL and default to absent/empty — a manifest built without either
+ * carries today's plain-sibling behavior unchanged (backward compatible). Neither is consumed by the drain
+ * yet (that lands in the later `proof-gated-stacked-drain` slice); this is just the primitive + round-trip.
+ *
+ * @param {{item:number|string, batchSlug?:string, repos:Array<{repo:string, ref:string, carriesResolve?:boolean, base?:string}>, stackParents?:Array<number|string>, blockedBy?:Array<number|string>, mergeRiskFiles?:string[]}} input
  */
 export function buildManifest(input) {
   const item = asItemId(input.item); // NNN or provisional hash (#2288)
@@ -64,12 +70,22 @@ export function buildManifest(input) {
       ref: String(r.ref),
       // WE carries the resolve by default; honor an explicit flag otherwise.
       carriesResolve: r.carriesResolve != null ? !!r.carriesResolve : r.repo === 'we',
+      // #2387 F3 — the commit SHA this repo's lane was based on (a predecessor lane tip when stacked, or
+      // omitted for a plain sibling off origin/main). Optional; never written as an empty string. Carry a
+      // non-string value RAW (un-coerced) rather than `String()`-flattening it: a `String()` here would turn
+      // `base:123`→`'123'` and `base:{}`→`'[object Object]'`, both of which slip past validateManifest's
+      // type guard as plausible strings. Passing it through raw keeps that guard REACHABLE so a malformed
+      // base is actually rejected instead of silently coerced into a bad `git` argument.
+      ...(r.base != null && r.base !== '' ? { base: r.base } : {}),
     }))
     .sort((a, b) => orderRank(a.repo) - orderRank(b.repo) || a.repo.localeCompare(b.repo));
   return {
     item,
     ...(input.batchSlug ? { batchSlug: String(input.batchSlug) } : {}),
     repos,
+    // #2387 F3 — frontier-tip item(s) this lane was cut from / merged onto (overlap-stacking). Same
+    // NNN-or-hash coercion as blockedBy; defaults to [] (a plain sibling lane, today's behavior).
+    stackParents: (input.stackParents ?? []).map(asItemId).filter(isItemId),
     blockedBy: (input.blockedBy ?? []).map(asItemId).filter(isItemId),
     mergeRiskFiles: (input.mergeRiskFiles ?? []).map((f) => String(f)),
     // #2171 — the count of pre-PR review findings the lane DISMISSED (#2170). The drain's escalation rubric
@@ -95,11 +111,22 @@ export function validateManifest(m) {
   for (const r of repos) {
     if (!r || !r.repo) errors.push('a repo entry is missing `repo`');
     else if (!r.ref) errors.push(`repo "${r.repo}" is missing its lane \`ref\``);
+    // #2387 F3 — `base` is optional, but when present it must be a git object hash: 7–64 hex chars. This
+    // rejects (a) a non-string (bool/number/object — the reachable-guard case now that buildManifest no
+    // longer String()-coerces it) and (b) any leading-dash / non-hex string. The stacked drain later
+    // `git reset`s each repo to `base`; a value like `--upload-pack=…` would be an argument-injection
+    // primitive, and this manifest rides the editable, un-reviewed PR body — so the shape check is a gate.
+    else if (r.base != null && !(typeof r.base === 'string' && /^[0-9a-f]{7,64}$/i.test(r.base))) errors.push(`repo "${r.repo}" has an invalid \`base\` (must be a git object hash: 7–64 hex chars)`);
   }
   if (repos.length && !repos.some((r) => r.repo === 'we')) errors.push('the WE repo must be present (WE carries the resolve; the item + claims.json live in WE)');
   const carriers = repos.filter((r) => r.carriesResolve);
   if (repos.length && carriers.length !== 1) errors.push(`exactly one repo must carry the resolve (found ${carriers.length})`);
   else if (carriers.length === 1 && carriers[0].repo !== 'we') errors.push(`the resolve must be carried by WE, not "${carriers[0].repo}" (impl-first/WE-last)`);
+  // #2387 F3 — stackParents, if present, must be an array of valid item ids (NNN or xNNNNNN hash).
+  if (m.stackParents != null) {
+    if (!Array.isArray(m.stackParents)) errors.push('stackParents must be an array');
+    else if (!m.stackParents.every(isItemId)) errors.push('stackParents must contain only numeric NNN or xNNNNNN hash ids');
+  }
   return { ok: errors.length === 0, errors };
 }
 
@@ -203,7 +230,7 @@ export function serializeManifest(m) {
   return JSON.stringify(
     {
       _doc:
-        'Durable lane manifest for the #2138 deferred merge queue (Fork 2). A NEW file in the WE lane commit (one-sided add — preserves the #1869 conflict-free WE-lane merge, stays out of the resolve diff). Carries this queued item\'s cross-repo shape so a LATER drain session can land it: `repos` in impl-first/WE-last merge order (WE `carriesResolve`, lands last), cross-item `blockedBy` (do not drain until those land), and `mergeRiskFiles` for Fork 3\'s whitelisted-additive check. The drain DELETES this file at landing (co-located with the lane/* ref deletion). Written/deleted by the drain command (#2162); built/validated by this module (#2163). Pairs with the ready-to-merge token (#2161).',
+        'Durable lane manifest for the #2138 deferred merge queue (Fork 2). A NEW file in the WE lane commit (one-sided add — preserves the #1869 conflict-free WE-lane merge, stays out of the resolve diff). Carries this queued item\'s cross-repo shape so a LATER drain session can land it: `repos` in impl-first/WE-last merge order (WE `carriesResolve`, lands last; each repo may carry an optional `base` commit-hash it was reset to for overlap-stacked batching, #2387 F3), cross-item `blockedBy` (do not drain until those land), `stackParents` (the frontier-tip item(s) this lane was cut from / merged onto, #2387 F3 — empty for a plain sibling), and `mergeRiskFiles` for Fork 3\'s whitelisted-additive check. The drain DELETES this file at landing (co-located with the lane/* ref deletion). Written/deleted by the drain command (#2162); built/validated by this module (#2163). Pairs with the ready-to-merge token (#2161).',
       ...m,
     },
     null,
