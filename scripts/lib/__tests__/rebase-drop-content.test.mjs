@@ -12,6 +12,7 @@ import {
   unionMerge,
   threeWayMergeLines,
   mergeTextThreeWay,
+  decodeBlobTextStrict,
   parseConflictStages,
   planContentMerges,
   rebaseDropContent,
@@ -128,6 +129,28 @@ describe('mergeTextThreeWay', () => {
     const r = mergeTextThreeWay('a\0b', 'a\0b\nx', 'a\0b\ny');
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('binary content');
+  });
+});
+
+describe('decodeBlobTextStrict (byte-exactness guard)', () => {
+  it('valid UTF-8 bytes round-trip to the exact text', () => {
+    const buf = Buffer.from('héllo — café\n', 'utf8'); // multi-byte UTF-8, still lossless
+    expect(decodeBlobTextStrict(buf)).toBe('héllo — café\n');
+  });
+  it('a plain string (already-safe text) is passed through', () => {
+    expect(decodeBlobTextStrict('a\nb\n')).toBe('a\nb\n');
+  });
+  it('a NUL-free but NON-UTF-8 blob (latin-1 byte) → null, NOT lossily decoded to U+FFFD', () => {
+    const buf = Buffer.from([0x61, 0xe9, 0x0a]); // 'a', lone 0xE9 (latin-1 'é' / invalid UTF-8), '\n'
+    expect(buf.includes(0)).toBe(false); // NUL-free: the old NUL-only guard would have let this through
+    expect(buf.toString('utf8')).toContain('�'); // proof the utf8 decode is lossy
+    expect(decodeBlobTextStrict(buf)).toBeNull();
+  });
+  it('a NUL byte is caught even though NUL itself is valid UTF-8', () => {
+    expect(decodeBlobTextStrict(Buffer.from([0x61, 0x00, 0x62]))).toBeNull();
+  });
+  it('null in → null out', () => {
+    expect(decodeBlobTextStrict(null)).toBeNull();
   });
 });
 
@@ -318,6 +341,30 @@ describe('rebaseDropContent', () => {
     expect(r.action).toBe('skip');
     expect(r.reason).toMatch(/reports\/x\.md/);
     expect(r.reason).toMatch(/overlapping/);
+    expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(false);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+
+  it('a NUL-free but NON-UTF-8 blob → skip (byte-exactness guard), no commit-tree/push', () => {
+    const out = conflictOutStages([
+      { path: 'reports/x.md', stages: { 1: { mode: '100644', oid: oid('base') }, 2: { mode: '100644', oid: oid('ours') }, 3: { mode: '100644', oid: oid('thr') } } },
+    ]);
+    // stage-3 (theirs) is raw latin-1: 'a', lone 0xE9 ('é' / invalid UTF-8), '\n' — NUL-free, so the old
+    // NUL-only guard would have lossily decoded it to U+FFFD and hashed the corrupted bytes back onto main.
+    const blobs = {
+      [oid('base')]: Buffer.from('a\n', 'utf8'),
+      [oid('ours')]: Buffer.from('a\nOURS\n', 'utf8'),
+      [oid('thr')]: Buffer.from([0x61, 0xe9, 0x0a]),
+    };
+    const { run, calls } = scriptedRun({
+      'merge-tree': { status: 1, stdout: out },
+      'cat-file': (args) => ({ status: 0, stdout: blobs[args[2]] ?? Buffer.alloc(0) }),
+    });
+    const r = rebaseDropContent({ laneRef: 'lane/x-latin1', run });
+    expect(r.action).toBe('skip');
+    expect(r.reason).toMatch(/reports\/x\.md/);
+    expect(r.reason).toMatch(/non-UTF-8/);
+    expect(calls.some((c) => c.args[0] === 'hash-object')).toBe(false);
     expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(false);
     expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
   });

@@ -25,9 +25,13 @@
  * new (still pure, still injectable-`run`) classification + resolution step.
  *
  * SCOPE GUARD: only a path with ALL THREE stages present, all mode `100644` (a regular file, not a rename/
- * delete/mode conflict), and non-binary content (no NUL byte) is even attempted — anything else is `real`
- * (skip). A file too large to diff safely (either side over `MAX_DIFF_LINES`) is also `real` — this stays a
- * PROVABLY-safe resolver, never a best-effort guess on a giant/binary blob.
+ * delete/mode conflict), and safely-decodable UTF-8 text content is even attempted — anything else is `real`
+ * (skip). "Safe text" here means the raw blob bytes carry NO NUL byte AND round-trip losslessly through a
+ * UTF-8 decode+encode: blobs are read as raw `Buffer`s (never utf8-decoded at the git boundary), so a NUL-free
+ * but non-UTF-8 blob (latin-1 / other 8-bit text / an invalid byte sequence) is caught here instead of being
+ * lossily coerced to U+FFFD and hashed back altered — that would defeat the byte-exact guarantee. A file too
+ * large to diff safely (either side over `MAX_DIFF_LINES`) is also `real` — this stays a PROVABLY-safe
+ * resolver, never a best-effort guess on a giant/binary/non-UTF-8 blob.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -138,6 +142,24 @@ export function mergeTextThreeWay(baseText, oursText, theirsText) {
   return { ok: true, text: r.lines.join('') };
 }
 
+/**
+ * Decode RAW blob bytes to text ONLY when they are safe, lossless text — the byte-exactness guard. Pure.
+ * Returns the decoded string, or `null` when the content must NOT be touched: it holds a NUL byte (binary), or
+ * it does NOT round-trip through a UTF-8 decode+encode (latin-1 / other 8-bit text / an invalid UTF-8 byte
+ * sequence). Without this, `git cat-file -p`'s utf8 decode would lossily coerce such bytes to U+FFFD *before*
+ * the NUL check, and hashing that back would land ALTERED content on main. A NUL byte is itself valid UTF-8
+ * (round-trips fine), so it needs its own explicit check. Accepts a `Buffer` (the real git path) or a `string`
+ * (already-safe text, e.g. an injected test blob) — a string is normalized through UTF-8 and always passes.
+ */
+export function decodeBlobTextStrict(raw) {
+  if (raw == null) return null;
+  const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), 'utf8');
+  if (bytes.includes(0)) return null; // NUL byte → binary, not line-mergeable text
+  const text = bytes.toString('utf8');
+  if (!Buffer.from(text, 'utf8').equals(bytes)) return null; // lossy decode (non-UTF-8) → would corrupt on write-back
+  return text;
+}
+
 // ── merge-tree conflict-stage parsing ────────────────────────────────────────────────────────────────────
 
 /**
@@ -164,7 +186,9 @@ export function parseConflictStages(stdout, exitCode) {
 
 /**
  * Given the non-manifest conflicting paths + their parsed stage info, decide whether EVERY one is a safe
- * non-overlapping 3-way content merge. Pure, given an injected `readBlob(oid) -> text|null` (the only I/O).
+ * non-overlapping 3-way content merge. Pure, given an injected `readBlob(oid) -> Buffer|string|null` — RAW blob
+ * bytes (the only I/O); each is strictly decoded via `decodeBlobTextStrict`, so a NUL-free but non-UTF-8 blob
+ * is rejected as unsafe rather than lossily coerced to U+FFFD and hashed back altered.
  * Short-circuits on the FIRST unsafe path (order = input order) — a single overlapping/unsafe path means the
  * whole PR stays a skip, so there is nothing to gain from planning the rest.
  * @returns {{ok:true, merges:Object<string,string>}|{ok:false, reason:string, path:string}}
@@ -177,10 +201,14 @@ export function planContentMerges(paths, stages, readBlob) {
     if (st['1'].mode !== '100644' || st['2'].mode !== '100644' || st['3'].mode !== '100644') {
       return { ok: false, reason: 'non-regular-file mode conflict', path };
     }
-    const base = readBlob(st['1'].oid);
-    const ours = readBlob(st['2'].oid);
-    const theirs = readBlob(st['3'].oid);
-    if (base == null || ours == null || theirs == null) return { ok: false, reason: 'could not read blob content', path };
+    const baseRaw = readBlob(st['1'].oid);
+    const oursRaw = readBlob(st['2'].oid);
+    const theirsRaw = readBlob(st['3'].oid);
+    if (baseRaw == null || oursRaw == null || theirsRaw == null) return { ok: false, reason: 'could not read blob content', path };
+    const base = decodeBlobTextStrict(baseRaw);
+    const ours = decodeBlobTextStrict(oursRaw);
+    const theirs = decodeBlobTextStrict(theirsRaw);
+    if (base == null || ours == null || theirs == null) return { ok: false, reason: 'binary or non-UTF-8 content (not safe to round-trip as text)', path };
     const merged = mergeTextThreeWay(base, ours, theirs);
     if (!merged.ok) return { ok: false, reason: merged.reason, path };
     merges[path] = merged.text;
@@ -193,10 +221,13 @@ export function planContentMerges(paths, stages, readBlob) {
 const firstLine = (s) => String(s || '').split('\n')[0];
 
 /** The default real git runner — mirrors `rebase-drop-manifest.mjs`'s `gitRunner`, extended with `opts.input`
- *  (stdin, needed by `git hash-object --stdin`) so this file needs no direct filesystem access at all. */
-export function gitRunner(cmd, args, { env, input, cwd } = {}) {
-  const r = spawnSync(cmd, args, { encoding: 'utf8', input, env: env ? { ...process.env, ...env } : process.env, ...(cwd ? { cwd } : {}) });
-  return { status: r.status == null ? 1 : r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+ *  (stdin, needed by `git hash-object --stdin`) so this file needs no direct filesystem access at all.
+ *  `opts.encoding: 'buffer'` returns `stdout` as a raw `Buffer` (never utf8-decoded) — required to read blob
+ *  content byte-exact, so non-UTF-8 bytes are caught by `decodeBlobTextStrict` instead of silently lossy. */
+export function gitRunner(cmd, args, { env, input, cwd, encoding = 'utf8' } = {}) {
+  const r = spawnSync(cmd, args, { encoding, input, env: env ? { ...process.env, ...env } : process.env, ...(cwd ? { cwd } : {}) });
+  const empty = encoding === 'buffer' ? Buffer.alloc(0) : '';
+  return { status: r.status == null ? 1 : r.status, stdout: r.stdout ?? empty, stderr: r.stderr == null ? '' : String(r.stderr) };
 }
 
 /**
@@ -254,8 +285,10 @@ export function rebaseDropContent({
   }
 
   const stages = parseConflictStages(mt.stdout, mt.status);
+  // Read blob content as RAW bytes (encoding:'buffer') — never utf8-decoded at the git boundary — so
+  // `decodeBlobTextStrict` (in planContentMerges) can reject NUL-free non-UTF-8 blobs instead of corrupting them.
   const readBlob = (oid) => {
-    const cat = run('git', ['cat-file', '-p', oid], { cwd });
+    const cat = run('git', ['cat-file', '-p', oid], { cwd, encoding: 'buffer' });
     return cat.status === 0 ? cat.stdout : null;
   };
   const plan = planContentMerges(nonManifest, stages, readBlob);
