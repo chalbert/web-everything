@@ -4,6 +4,7 @@ size: 13
 status: open
 dateOpened: "2026-07-10"
 relatedReport: reports/2026-07-10-ai-code-review-best-practices.md
+relatedTo: ["2285", "2398"]
 tags: [drain, review, convergence, subagents]
 ---
 

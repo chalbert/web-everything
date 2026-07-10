@@ -67,8 +67,9 @@ but surfaced **two** pieces #2285 genuinely does not cover — both *builds* (pr
    cheap/mechanical class and escalating judgment-heavy fixes **immediately**. #2285 ships a **reactive**
    model instead: every agent-reviewable `changes` verdict burns up to `NEGOTIATION_ROUND_CAP` (3) editor
    rounds, *then* escalates on non-convergence (`we:scripts/lib/review-core.mjs:210-213`). The signals #2398
-   names (`dismissedFindings`, `mergeRiskFiles`) live in `we:scripts/lib/review-escalation.mjs:55,103,121` but
-   gate **park-vs-not**, not **fix-vs-escalate**. A proactive classifier that short-circuits judgment-heavy
+   names (`dismissedFindings`, `gateSelf`) are populated in `scoreEscalation`
+   (`we:scripts/lib/review-escalation.mjs:108,120-126` — the `dismissedFindings` param at `:108`, the signal
+   pushes at `:120-126`) but gate **park-vs-not**, not **fix-vs-escalate**. A proactive classifier that short-circuits judgment-heavy
    fixes before spending rounds is a real, unshipped refinement.
 2. **In-drain red-CI (`test-red`) auto-fix.** #2285's loop fixes *review findings*, not a PR whose only
    problem is a red required `test` check. Today a `test-red` lane is recovered by the **separate** `/finish` /
