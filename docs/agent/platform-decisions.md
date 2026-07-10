@@ -2713,6 +2713,36 @@ Report `we:reports/2026-07-02-deferred-merge-queue-substrate.md`.
 
 ---
 
+### Agent fix/convergence: peer-agreement is not validation — independence rests on a distinct fresh validator, and the deterministic land-gate must be gaming-proofed {#agent-convergence-independent-validation}
+
+**Ratified 2026-07-04 (#2398, graduated to epic #2285).** When the drain converges an agent-authored fix
+in-process (the editor↔reviewer negotiation loop shipped by #2311/#2310, wired live by #2326), the loop is one
+**convergence bar**, not two paths: it lands only when *all* hold — **approach agreed · an independent validator
+accepts · `check:standards` green · required `test` (CI) green · no test-tampering.** "CI green" is the
+deterministic clause of that bar, not a separate feature; a red required `test` is just one open issue the loop
+must fix before it may declare agreement (retiring the separate `lane-resume` `test-red` strand).
+
+Two invariants govern *how* it converges (option **B** over "fresh reviewer every round"; both preserve the
+core invariant — **a landed PR is accepted by an agent that did not author the fix**):
+
+1. **Peer-agreement ≠ validation.** Two agents co-negotiating a fix share priors; their mutual agreement is
+   consensus, not independent review. The non-author invariant therefore rests **entirely on a distinct fresh
+   validator** — adversarial ("find the reason to reject") persona, rubric-anchored verdict, fresh context, given
+   *diff + tests + rubric only* (never the peers' self-assessment — sycophancy → it ratifies). The stronger form
+   is a small **diverse panel/jury** (different model/provider) to dilute self-preference/position/verbosity bias.
+2. **A deterministic gate must be protected from the agents trying to pass it.** "CI green" is directly gameable
+   (documented reward-hacking: agents weaken/delete tests or special-case outputs). The gate is only sound with
+   **anti-test-gaming guards** — test files read-only to the author peers (or diff-gate any test change), fail the
+   land if coverage drops or tests are removed/skipped, require a test that fails on pre-change behavior for logic
+   fixes, and have the validator inspect for test tampering.
+
+Applies to any AI-review/convergence surface in the constellation, not just the drain. Non-convergence (round cap)
+or `needs-human` escalates to `review:human`, unchanged. Ship unattended auto-fix behind an off-by-default flag,
+scoped to small/non-security diffs first, graduating per-repo on a clean track record (staged autonomy). Grounded
+by `we:reports/2026-07-10-ai-code-review-best-practices.md`; the build lands under epic #2285.
+
+---
+
 ### Behaviour/event attribute *names* are colon-namespaced — a collision-safe internal authoring spelling, not the platform-shaped standard proposal {#attribute-name-colon-namespacing}
 
 Decided **per surface** (separators track what each namespace permits, not uniformity — [registry-name-guard](#registry-name-guard-namespace) `:672`). **(Fork 1)** Behaviour/event attribute **names** stay **colon-namespaced** *when they belong to a family* (`view:*`, `on:*`, `nav:*`, `droplist:*`, `route:*`, `grid:*`) — collision-safe by construction (a native HTML attribute name never contains a colon). **A *family-less* behaviour keeps the simplest possible name — a bare single hyphen (`type-ahead`, `focus-delegation`) — and takes no colon** (amended by #1991, 2026-07-01): native HTML separates multi-word attribute names by **smashing, not hyphenating** (`shadowrootmode`, `contenteditable`, `crossorigin`), and bare hyphenated native attrs are two legacy cases (`accept-charset`, `http-equiv`) plus the `data-*`/`aria-*` prefix families — so a bare single-hyphen author attr is not at meaningful native-collision risk, and a colon on a *singleton* buys neither sibling-disambiguation nor readability. The colon is reserved for where it pays off: a **family** = a surface/domain with ≥2 related members (or an established control-flow/event group). A family-less name that later gains a sibling colon-ifies then (a one-time mechanical rename). The load-bearing **framing**: colon is WE's *current collision-safe **internal authoring** spelling* for namespaced directives, **not** WE's claimed *platform-shaped standard proposal*. A colon on an HTML attribute spec-*connotes* an XML namespace (`xml:lang`); WE's `:` is the ownership-colon idiom (`:672` + #1913), **not** an XML-namespace declaration. The closest *proposed* author-attribute standard is **hyphen** (`enh-*`, WICG#1029/whatwg#2271); WE **declines to chase it while unshipped** (don't-chase-a-draft), and the separator is intended to be **app-configurable** (the reconciliation bridge to the eventual ratified spelling — mechanism deferred to #1992). If a hyphen form is ever adopted it is **`enh-*`**, **never `we-*`** (a pure vendor prefix contradicts proposing-in-platform-shape). **(Fork 2)** Third-party `<template type=…>` **values** are **`owner-kind` hyphen** (`type="acme-card"`; bare `type="if"` reserved for **core**) — native `type` values are never colon-namespaced, hyphen matches the custom-element idiom and keeps RFC 6648 ownership-not-status without reopening #1983's no-native-analog defect. **Settled by precedent (not forks):** native-aligned attrs → **bare** (`multiple`); author data → **`data-*`**; comment-directive names → colon `ns:name` (grammar-locked, no native-attribute collision risk). Detail codified in `conventions.md#attributes`.
