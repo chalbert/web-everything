@@ -1,7 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-10"
+dateResolved: "2026-07-10"
+graduatedTo: 2285
+codifiedIn: "docs/agent/platform-decisions.md#agent-convergence-independent-validation"
 preparedDate: "2026-07-10"
 relatedReport: reports/2026-07-09-drain-in-process-convergence-precedent.md
 tags: [drain, review, coordination, subagents, settled-by-precedent]
@@ -20,8 +24,10 @@ tags: [drain, review, coordination, subagents, settled-by-precedent]
 
 ## Digest + verdict
 
-**Verdict: settled by precedent — no live fork; resolve #2398 as graduated to epic #2285, filing two residue
-build-stories under it.** The mechanism #2398 proposes — a role-separated *fixer* subagent writes the fix, a
+**Verdict: settled by precedent on the A/B fork — but the merit review (below) makes the actionable outcome a
+BUILD, not two inert stories. Resolve #2398 as graduated to #2285 and build the red-CI convergence residue now
+(unified engine + layered acceptance gate); Residue 1 is explicitly not built (it would regress the shipped
+axis).** The mechanism #2398 proposes — a role-separated *fixer* subagent writes the fix, a
 *distinct fresh reviewer* subagent accepts, converging in-drain with no author bounce — is exactly the
 editor↔reviewer negotiation loop shipped by #2311/#2310 and wired into the live drain by #2326:
 
@@ -64,46 +70,96 @@ holds in *both* imagined branches, so no merit difference survives — the A/B q
 fork costume**, not a ratifiable merit call. There is nothing here for a human to *judge*; there is a precedent
 to *cite* and two builds to *prioritize*.
 
-## The two residues (builds under #2285, both default not-yet)
+## Merit review (2026-07-10, `/next 2398` — "review for merit, most robust solution")
 
-Neither is a merit fork (the screen: the invariant holds regardless), so each is a build recommendation with a
-bold default the decision turn ratifies-or-overrides, filed as a story under #2285 — not decided here.
+The A/B fork ("build the fixer vs. keep bounce-to-author") is genuinely settled — a role-separated
+editor↔reviewer loop shipped under #2285. But reviewing the *shipped* loop against the "most robust" bar
+surfaces the real question, which is not a residue-prioritization call at all. It's the **shape of the
+convergence loop itself.**
 
-### Residue 1 — proactive cheap-vs-judgment scope threshold
+### The bar: one loop, one completion condition
 
-#2398 Option A proposed auto-fixing *only* the cheap/mechanical class and escalating judgment-heavy fixes
-**immediately**. #2285 ships a **reactive** model: every agent-reviewable `changes` verdict burns up to
-`NEGOTIATION_ROUND_CAP` (3) editor rounds, then escalates on non-convergence
-(`we:scripts/lib/review-core.mjs:210-213`). The classifier signals #2398 names
-(`dismissedFindings`/`mergeRiskFiles`, `we:scripts/lib/review-escalation.mjs:55,103,121`) today gate
-*park-vs-not*, not *fix-vs-escalate*.
+Convergence = two agents iterate until **ALL** of these hold, then land — else escalate to `review:human`:
 
-- **Recommended default: not-yet.** The round cap already bounds the wasted effort on a non-converging
-  judgment-heavy fix to 3 rounds and then escalates — a proactive classifier adds a new judgment surface
-  (misclassification risk: a "cheap-looking" fix that is actually load-bearing) for a bounded saving.
-- **Concrete un-gate trigger:** instrument editor-round consumption in real drain runs; if judgment-heavy
-  fixes routinely burn the **full 3 rounds** before escalating (measurable waste), file the proactive gate.
+> **approach agreed · implementation agreed · no reviewer issues · CI green**
 
-### Residue 2 — in-drain red-CI (`test-red`) auto-fix
+There are not two loops (a "review" loop and a "red-CI" loop) and there are no separate "residues." A red CI
+check is simply **one member of the "no issues" set** — the deterministic, unfakeable member (a machine check,
+not an agent opinion). "Keep fixing until CI is green" is just the loop refusing to declare agreement while a
+known issue is open. So CI-green folds into the single completion bar rather than being its own feature.
 
-#2285's loop fixes *review findings*; it does not fix a PR whose only defect is a red required `test` check.
-Today a `test-red` lane is recovered by the **separate** `/finish` / `lane-resume` flow
-(`we:scripts/lane-resume.mjs:81` — `test-red` disposition → finisher subagent fixes the code), which is
-human/agent-initiated, not auto-run inside the unattended `/drain`.
+### Where the shipped loop falls short of the bar
 
-- **Recommended default: not-yet (behind an off-by-default flag when built).** Fixing a real code bug
-  unattended is strictly riskier than a review nit — longer lease, bigger blast radius in the sole-serial-writer
-  drain process. Keep it in human-initiated `/finish` until the review-convergence loop is proven stable in
-  practice.
-- **Concrete un-gate trigger:** after the review-convergence loop has run cleanly across a batch of real drains
-  (no invariant regressions), fold the `lane-resume` finisher into `/drain` behind a flag, reusing the same
-  role-separation + escalation.
+The shipped loop is **fix-first / asymmetric**: an *editor* writes a fix, a *fresh reviewer* grades it
+(accept / changes), repeat up to `NEGOTIATION_ROUND_CAP` (`we:scripts/lib/review-core.mjs:210-213`). Two gaps
+against the bar:
+
+1. **No approach agreement before code is written.** The editor guesses at a fix and the reviewer only reacts;
+   rounds get burned when the fix aimed at the wrong target. The robust loop agrees on **approach first**, then
+   implements — a handshake phase ahead of the diff.
+2. **CI-green is not in the completion condition.** Today `deriveNegotiationOutcome` lands on a fresh reviewer's
+   `accept` alone; a PR whose only defect is a red required `test` strands for human `/finish`
+   (`we:scripts/lane-resume.mjs:79-81`) instead of being part of the same convergence. Add "CI green" as a
+   necessary clause of the land condition — deterministic, so the agents can't fake it; guard the one failure
+   mode (a fix that goes green by **weakening the test**) with the fresh non-author reviewer, who sees the diff
+   *including* test changes and treats test-weakening as `changes`/`needs-human`.
+
+### The fork: A vs. B (recommend B)
+
+The one live decision is **where the independent check sits**, forced by the invariant *a landed PR must be
+accepted by an agent that did not author the fix*:
+
+- **A — fresh reviewer every round** (shipped): editor writes, an independent fresh reviewer grades, repeat.
+  Maximal independence; but the editor guesses and the reviewer only reacts, so rounds burn on wrong-target fixes.
+- **B — two peers co-negotiate approach + implementation, then a *distinct* fresh agent validates the final
+  diff:** fast approach agreement, invariant preserved because the final acceptor didn't participate in the
+  negotiation. Costs one extra role. **Chosen (2026-07-10).**
+
+### Best-practice grounding (research → `we:reports/2026-07-10-ai-code-review-best-practices.md`)
+
+A web survey of production AI-review systems and the LLM-judge literature **supports B** and sharpens it. Two
+findings are load-bearing and change the build:
+
+1. **The two co-negotiating peers are NOT independent of each other** — they share priors, and "two authors
+   agreeing" is consensus, not validation (multi-agent debate gains can be shallow social agreement). So the
+   *entire* invariant rests on the third validator. Harden it: **adversarial "find the reason to reject"
+   persona, rubric-anchored verdict, fresh context, and ideally a different model/provider** than the peers (or
+   a small diverse **panel/jury** — a 3-way panel beat a single large judge at ~7× lower cost while diluting
+   self-preference/position/verbosity bias). **Do not feed the validator the peers' self-assessment** (sycophancy
+   → it ratifies); give it diff + tests + rubric only. *(coderabbit; arxiv 2412.05579, 2410.21819, 2308.07201)*
+2. **"CI green" is directly hackable** — agents demonstrably weaken/delete tests or special-case outputs to go
+   green (documented reward-hacking). The CI-green clause needs **anti-test-gaming gates**: test files read-only
+   to the author peers (or diff-gate any test change), fail the land if coverage drops or tests are
+   removed/skipped, require a test that fails on pre-change behavior for logic fixes, and have the validator
+   explicitly inspect for test tampering. *(github.blog; arxiv 2606.07379, 2605.21384)*
+
+Empirical backdrop: real agent-fix PRs are merged only ~65% of the time (test failures 18% + incorrect fix 15%
+dominate rejections), which validates the round-cap-then-escalate discipline and the off-by-default rollout.
+
+### The build
+
+Extend the existing `deriveNegotiationOutcome` engine (do NOT add a parallel path) so the loop is:
+
+- **approach handshake** → the two peer agents agree on the fix approach before any code is written;
+- **implement** → editor writes it in an isolated throwaway clone, pushes to the same PR branch (#2336
+  never-move-shared-HEAD invariant preserved);
+- **independent validation** → a *distinct fresh* validator (adversarial, rubric-anchored, given diff+tests+rubric
+  only — never the peers' self-assessment; a diverse panel is the stronger form) judges the final diff;
+- **land only when the full bar holds** — approach agreed · validator `accept` · `check:standards` green ·
+  required `test` green · **no test-tampering** (coverage not dropped, no tests removed/skipped, logic fixes carry
+  a test that fails on pre-change behavior);
+- **escalate** on non-convergence (round cap) or `needs-human`, unchanged (one escalation shape → `review:human`).
+
+Blast-radius stays contained: the fix happens in the throwaway clone and CI re-runs *on GitHub*, not in the
+drain's serial-writer tree. Ship behind an off-by-default flag, scoped to small/well-tested/non-security diffs
+first, graduating per-repo on a clean track record (staged-autonomy norm).
 
 ## Recommendation
 
-At the decision turn: **resolve #2398 as settled-by-precedent / graduated to #2285.** Do not re-decide the A/B
-fork (it is shipped), and do not close as a bare duplicate (that silently drops the residues) — file Residue 1
-and Residue 2 as stories under epic #2285, each carrying its bold *not-yet* default + concrete trigger above.
+**Resolve #2398 as graduated to #2285 and build the unified convergence loop** — approach-handshake-first, with
+the single completion bar (approach agreed · no reviewer issues · CI green). Do not re-decide the A/B fork
+(shipped), do not close as a bare duplicate, and do **not** file inert "not-yet" residue stories — the CI-green
+clause and the approach handshake are two parts of *one* loop, not two separately-prioritized builds.
 
 **Skeptic:** SURVIVES-WITH-AMENDMENT (hostile pass, default "the duplicate call is wrong"). The core-is-shipped
 finding held on every angle — the loop genuinely shipped into the live drain (SKILL ceremony + pure helpers,
