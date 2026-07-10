@@ -103,7 +103,8 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel } from './lib/review-escalation.mjs';
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
 import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
-import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs';
+import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor } from './lane-drain.mjs';
+import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
 import { withNumberingLock } from './readiness/drain-lock.mjs'; // #2391 — the numbering-critical-section mutex (sole-serial-writer)
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
 import { extractManifestFromBody, manifestAuditLine, asItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
@@ -297,18 +298,72 @@ export function needsManifestStripBeforeMerge(v) {
 }
 
 /**
- * Order a set of merge candidates for ONE cascade pass, honouring cross-item `blockedBy` (#2188). Pure.
- * This is the drain↔/merge convergence: the `ready-to-merge` label bounds the set, and each PR's
- * `.lane-manifest.json` (read off its head ref) supplies its backlog `item` + `blockedBy` items. A PR is
- * READY this pass only if none of its `blockedBy` items is still OPEN in the candidate set (an unlanded
- * blocker — whether a not-yet-merged sibling or a red/skip PR — defers its dependents, exactly like the
- * lane-drain `planWatch` cascade). Orphan PRs (no manifest → item null, blockedBy []) are always ready, so
- * this degrades to the legacy unordered sweep when nothing carries a manifest.
+ * #2393 — the impl-PR→WE-manifest `laneRef` join. Pure. Closes the impl-orphan-always-ready hole: only a WE
+ * lane carries a `.lane-manifest.json`, so a couple's IMPL PR (frontierui/plateau-app) — and any WE PR whose
+ * manifest didn't parse — reads as a manifest-less ORPHAN, which `planLabelDrain` treats as always-ready. An
+ * impl PR could then land AHEAD of its couple, dragging the impl half of a deferred/broken couple onto main
+ * with no WE resolve (a stowaway at the impl level).
  *
- * @param {Array<{num:number, item:(number|string|null), blockedBy:Array<number|string>, decision:'merge'|'skip'}>} candidates
+ * The couple's WE manifest already names every repo's lane ref in `repos[]` (impl-first/WE-last). So we index
+ * each carrying PR by ALL of its couple's lane refs, then let every manifest-less PR INHERIT its couple's
+ * `item` + `blockedBy` + `stackParents` by matching its own `headRef` against that index. An impl PR thereby
+ * carries the SAME gate as its couple's WE PR — it defers whenever the couple defers, and is never
+ * independently "ready" ahead of it. A TRUE orphan (a headRef in no couple manifest — a hand-opened PR, a
+ * `/merge` sweep target) matches nothing and stays a plain always-ready orphan, so the bare sweep is unchanged.
+ *
+ * MUTATES + returns the same array (the caller works with the joined verdicts). A carrying PR keeps its own
+ * manifest fields untouched. `manifestRefs` is the couple's lane-ref list (built in the collect loop from
+ * `m.repos[].ref`); a PR with none defines no couple.
+ *
+ * @param {Array<{num:number, repo:(string|null), headRef?:string, hasManifest?:boolean, manifestRefs?:string[], item?:(number|string|null), blockedBy?:Array<number|string>, stackParents?:Array<number|string>}>} verdicts
+ * @returns {typeof verdicts}
+ */
+export function joinImplToCouples(verdicts) {
+  const list = Array.isArray(verdicts) ? verdicts : [];
+  // Index every carrying PR (a WE couple manifest) by each of its couple's lane refs. First writer wins — a
+  // lane ref belongs to exactly one couple, so a duplicate is defensive noise, never a real second couple.
+  const byRef = new Map();
+  for (const v of list) {
+    if (!v || !v.hasManifest) continue;
+    for (const ref of Array.isArray(v.manifestRefs) ? v.manifestRefs : []) {
+      if (ref && !byRef.has(ref)) byRef.set(ref, v);
+    }
+  }
+  for (const v of list) {
+    if (!v || v.hasManifest) continue;             // a carrying PR keeps its own manifest
+    const couple = v.headRef ? byRef.get(v.headRef) : null;
+    if (!couple) continue;                          // a true orphan → unchanged always-ready behaviour
+    v.item = couple.item;                           // inherit the couple's identity + gate edges
+    v.blockedBy = Array.isArray(couple.blockedBy) ? couple.blockedBy.slice() : [];
+    v.stackParents = Array.isArray(couple.stackParents) ? couple.stackParents.slice() : [];
+    v.joinedToCouple = couple.item;                 // marks an impl PR gated via its couple (diagnostics/tests)
+  }
+  return list;
+}
+
+/**
+ * Order a set of merge candidates for ONE cascade pass, honouring cross-item `blockedBy` (#2188) AND the
+ * overlap-stacking proof-of-land gate (#2387 F5 / #2393). Pure.
+ * This is the drain↔/merge convergence: the `ready-to-merge` label bounds the set, and each PR's
+ * `.lane-manifest.json` (read off its head ref) supplies its backlog `item` + `blockedBy` + `stackParents`. A
+ * PR is READY this pass only if BOTH gates pass:
+ *   - `blockedBy` (the hard semantic edge): none of its `blockedBy` items is still OPEN in the candidate set —
+ *     an unlanded blocker (a not-yet-merged sibling or a red/skip PR) defers its dependents.
+ *   - `stackParents` (the overlap-stack edge, #2393): every stackParent is PROVEN LANDED — either landed
+ *     THIS drain run (the caller's in-memory `landedThisPass` set, keyed on the WE-carrier merge) OR
+ *     `bornAs`-proven on `origin/main` (the caller's `provenOnMain` set, from `landedNumberFor`). This is a
+ *     POSITIVE, identity-based proof: absence from the candidate set is NEVER read as "landed" (that is the
+ *     stowaway F5 forbids — salvaging a descendant past an unlanded parent silently drags the parent's
+ *     unreviewed code onto main under the child's number). A stackParent still OPEN in the candidate set, or a
+ *     provisional hash with no proof, DEFERS the descendant.
+ * Orphan PRs (no manifest → item null, blockedBy [], stackParents []) are always ready, so this degrades to
+ * the legacy unordered sweep when nothing carries a manifest.
+ *
+ * @param {Array<{num:number, item:(number|string|null), blockedBy:Array<number|string>, stackParents?:Array<number|string>, decision:'merge'|'skip'}>} candidates
+ * @param {{landedThisPass?:Set, provenOnMain?:Set}} [proof]  positive proof-of-land sets (both `asItemId`-keyed)
  * @returns {{ready:Array, deferred:Array<{num,item,waitOn:Array<number|string>}>}}  ready is ordered (item asc, then PR#).
  */
-export function planLabelDrain(candidates) {
+export function planLabelDrain(candidates, { landedThisPass = new Set(), provenOnMain = new Set() } = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
   // Every candidate still in play keeps its item "open" — a red/skip blocker must still defer its dependents,
   // so the open set is ALL candidate items, not just the mergeable ones. (A merged item is removed by the
@@ -320,11 +375,30 @@ export function planLabelDrain(candidates) {
   // EVERY hash `blockedBy` edge would spuriously resolve `openItems.has(NaN)` → true against ANY other open
   // hash item, not just its actual blocker (defers/frees the wrong item).
   const openItems = new Set(list.map((c) => c.item).filter((x) => x != null).map(asItemId));
+  // #2393 — is a `stackParent` PROVEN LANDED? POSITIVE proof by identity (F5), NEVER ref-absence:
+  //   1. landed THIS run  — the caller adds the item on its WE-carrier merge (aligned with `bornAs`, which is
+  //      stamped only at the WE land, so a green impl PR of a red couple never counts its parent "landed").
+  //   2. still an OPEN candidate — NOT landed yet → defer (the ordinary in-pass sequencing: it frees the
+  //      descendant only once it actually merges and leaves the set next pass, exactly like a blockedBy edge).
+  //   3. `bornAs`-proven on main — landed in a PRIOR session (the caller's `provenOnMain`, from `landedNumberFor`).
+  //   4. a NUMERIC NNN not in the candidate set — a number only exists post-land (JIT numbering, #2288), so an
+  //      already-numbered parent absent from this pass is landed.
+  //   5. otherwise (a provisional hash, no proof, not a candidate) — NOT proven → defer. This is the stowaway
+  //      guard: a descendant is never salvaged past a parent whose land we cannot positively prove.
+  const stackProven = (sp) => {
+    const id = asItemId(sp);
+    if (landedThisPass.has(id)) return true;   // (1)
+    if (openItems.has(id)) return false;       // (2)
+    if (provenOnMain.has(id)) return true;     // (3)
+    return typeof id === 'number' && Number.isFinite(id); // (4); a hash → false (5)
+  };
   const ready = [];
   const deferred = [];
   for (const c of list) {
     if (c.decision !== 'merge') continue;
-    const waitOn = (Array.isArray(c.blockedBy) ? c.blockedBy : []).map(asItemId).filter((b) => openItems.has(b));
+    const blockWait = (Array.isArray(c.blockedBy) ? c.blockedBy : []).map(asItemId).filter((b) => openItems.has(b));
+    const stackWait = (Array.isArray(c.stackParents) ? c.stackParents : []).map(asItemId).filter((sp) => !stackProven(sp));
+    const waitOn = [...new Set([...blockWait, ...stackWait])];
     if (waitOn.length === 0) ready.push(c);
     else deferred.push({ num: c.num, item: c.item, waitOn });
   }
@@ -993,6 +1067,11 @@ function runCli() {
       v.item = m && m.item != null ? asItemId(m.item) : null;
       v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(asItemId) : [];
       v.hasManifest = m != null; // #2183 — carries the transient manifest on its head → must be stripped before merge
+      // #2393 — the overlap-stacking edge + the couple's lane refs. `stackParents` gates this PR behind its
+      // parents' proven land; `manifestRefs` (every repo's lane ref in this couple, impl-first/WE-last) is what
+      // `joinImplToCouples` indexes so a manifest-LESS impl PR inherits this couple's item/blockedBy/stackParents.
+      v.stackParents = m && Array.isArray(m.stackParents) ? m.stackParents.map(asItemId) : [];
+      v.manifestRefs = m && Array.isArray(m.repos) ? m.repos.map((r) => r && r.ref).filter(Boolean) : [];
       // #2171 review-escalation signals off the manifest: cross-repo couple (>1 repo) + dismissed pre-PR findings.
       v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
       // #2390 — the SHA this repo's lane was cut from (a predecessor tip when overlap-stacked, #2387). Scoring
@@ -1005,6 +1084,28 @@ function runCli() {
       verdicts.push(v);
     }
   }
+  // #2393 — the impl-PR→WE-manifest `laneRef` join: a manifest-less impl PR (frontierui/plateau-app) INHERITS
+  // its couple's item + blockedBy + stackParents from the WE manifest that names its head ref in `repos[]`, so
+  // it is gated WITH its couple (couple-granular, impl-first/WE-last) instead of reading as an always-ready
+  // orphan. Runs once the GLOBAL candidate list is complete (a couple's impl + WE PRs can be in different repos).
+  joinImplToCouples(verdicts);
+  // #2393 — the `stackParents` proof-of-land gate's SECOND proof source: a parent that landed in a PRIOR drain
+  // session, read off `origin/main`'s durable `bornAs:<hash>` record (#2392). Computed ONCE per pass over every
+  // distinct stackParent hash (numeric ids are already-landed by construction — handled inside planLabelDrain;
+  // a parent landing THIS run is captured by the caller's in-memory `landedThisPass`). `landedNumberFor` is a
+  // local `git grep origin/main` — cheap, best-effort (a miss → not proven → the descendant defers, the safe
+  // direction). Only meaningful for the local WE clone (where origin/main carries the backlog).
+  const provenOnMain = new Set();
+  const stackParentIds = new Set();
+  for (const v of verdicts) for (const sp of Array.isArray(v.stackParents) ? v.stackParents : []) stackParentIds.add(asItemId(sp));
+  for (const sp of stackParentIds) {
+    if (isHash(String(sp)) && landedNumberFor(String(sp), process.cwd()) != null) provenOnMain.add(sp);
+  }
+  // #2393 — the in-memory "landed THIS run" proof set, populated on each WE-carrier merge below (the WE PR is
+  // the resolve carrier + the point `bornAs` is stamped, so a descendant only counts a parent landed once the
+  // parent's WE side lands — never on a green impl PR of an otherwise-broken couple). Threaded into every
+  // planLabelDrain call this pass so a chain lands in order.
+  const landedThisPass = new Set();
   // #2222 — PRE-CHECK id-collision self-heal, retained here (THE drain, the sole writer to main, #2290) as a
   // DORMANT BACKSTOP under JIT numbering (#2288/#2291): a new item is now born hash-keyed, so a lane's NEW item
   // reusing a base `NNN` should be unrepresentable pre-land — this stays a cheap no-op on the common path, kept
@@ -1315,8 +1416,9 @@ function runCli() {
   const pendingRebased = []; // #2198 — PRs rebuilt onto main this pass; CI re-running, land on a later pass
   let deferred = [];
   if (DRY_RUN) {
-    // Report the planned first-pass order (blockedBy-honoured) without merging.
-    const plan = planLabelDrain(verdicts);
+    // Report the planned first-pass order (blockedBy + #2393 stackParents-honoured) without merging. Nothing has
+    // landed this run, so `landedThisPass` is empty — the plan reflects only prior-session `bornAs` proof.
+    const plan = planLabelDrain(verdicts, { landedThisPass, provenOnMain });
     deferred = plan.deferred;
     if (!AS_JSON) {
       process.stderr.write(`  merge order: ${plan.ready.map((c) => repoTag(c.repo) + c.num + (c.item ? `→${c.item}` : '')).join(' → ') || '(none ready)'}\n`);
@@ -1331,7 +1433,7 @@ function runCli() {
     // collide in the cascade bookkeeping.
     const sameCand = (a, b) => a.num === b.num && a.repo === b.repo;
     for (;;) {
-      const plan = planLabelDrain(remaining);
+      const plan = planLabelDrain(remaining, { landedThisPass, provenOnMain });
       deferred = plan.deferred;
       if (!plan.ready.length) break;
       let progressed = false;
@@ -1359,6 +1461,12 @@ function runCli() {
           mergePr({ pr: c.num, repo: c.repo, method: 'merge', caller: 'drain' });
           merged.push({ num: c.num, repo: c.repo }); progressed = true;
           remaining = remaining.filter((x) => !sameCand(x, c)); // merged → item leaves the open set (frees dependents)
+          // #2393 — a WE-carrier merge (the PR carrying its OWN manifest = the resolve carrier + where `bornAs`
+          // is stamped) PROVES the couple landed this run: record its item so a descendant that stackParents on
+          // it becomes ready next pass. Keyed on `hasManifest` (NOT an inherited impl PR) so a green impl PR of
+          // an otherwise-broken couple never counts the couple "landed" — that alignment with `bornAs` is what
+          // keeps the stowaway guard honest.
+          if (c.hasManifest && c.item != null) landedThisPass.add(asItemId(c.item));
           if (!AS_JSON) process.stderr.write(`  ✓ merged ${repoTag(c.repo)}${c.num}${c.item ? ` (#${c.item})` : ''}\n`);
         } catch (e) {
           const detail = String(e.message || e).split('\n')[0];
