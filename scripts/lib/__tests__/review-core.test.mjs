@@ -211,6 +211,49 @@ describe('deriveReviewDisposition (#2285 — one reason→disposition derivation
     expect(() => deriveReviewDisposition({ reason: 'made-up' })).toThrow(/unknown reason/);
     expect(() => deriveReviewDisposition({})).toThrow(/at least one reason/);
   });
+
+  // Regression guard (#2285): the drain's real `reasons` array (from scoreEscalation) carries DECORATED strings,
+  // NOT bare tokens. These literals are copied VERBATIM from scoreEscalation's `reasons.push(...)` templates in
+  // `scripts/lib/review-escalation.mjs` — if that file's format drifts, this test is the tripwire that catches
+  // the two files silently disagreeing (the parked-PR branch would otherwise wedge on an `unknown reason(s)` throw).
+  describe('canonicalizes the DECORATED scoreEscalation reason strings the drain actually carries', () => {
+    it('a decorated gate-self reason converges but never auto-lands (the exact scoreEscalation format)', () => {
+      expect(deriveReviewDisposition({ reason: 'gate-self (scripts/lib/review-escalation.mjs) — human review required' }))
+        .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
+    });
+
+    it('each decorated sensitivity reason converges AND may auto-land', () => {
+      const decorated = [
+        'blast-radius (scripts/foo.mjs, scripts/bar.mjs, scripts/baz.mjs, …)',
+        'size (1080 ≥ 400 changed lines)',
+        'dismissed-findings (2 pre-PR review finding(s) the lane dismissed)',
+        'cross-repo impl+WE couple',
+        'sampling floor (1-in-10)',
+      ];
+      for (const reason of decorated) {
+        expect(deriveReviewDisposition({ reason })).toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
+      }
+    });
+
+    it('accepts the parked `reasons` array VERBATIM — decorated strings, strictest wins (gate-self pins autoLand:false)', () => {
+      // Exactly the shape the drain's `parked` JSON stamps: several decorated reasons, mixed families.
+      const parkedReasons = [
+        'blast-radius (scripts/lib/review-core.mjs)',
+        'size (1080 ≥ 400 changed lines)',
+        'gate-self (scripts/merge-ai-prs.mjs) — human review required',
+        'sampling floor (1-in-10)',
+      ];
+      expect(() => deriveReviewDisposition({ reasons: parkedReasons })).not.toThrow();
+      expect(deriveReviewDisposition({ reasons: parkedReasons }))
+        .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
+    });
+
+    it('mixes bare and decorated tokens freely, and still throws on a genuinely unknown decorated reason', () => {
+      expect(deriveReviewDisposition({ reasons: [REVIEW_REASONS.BLAST_RADIUS, 'sampling floor (1-in-10)'] }))
+        .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
+      expect(() => deriveReviewDisposition({ reason: 'sizeable rewrite (not a real signal)' })).toThrow(/unknown reason/);
+    });
+  });
 });
 
 describe('MANDATE_LENSES / MANDATORY_LENSES / ADVISORY_LENSES / PANEL_LENSES (#2310)', () => {
