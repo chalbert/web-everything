@@ -106,7 +106,7 @@ import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs';
 import { withNumberingLock } from './readiness/drain-lock.mjs'; // #2391 — the numbering-critical-section mutex (sole-serial-writer)
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
-import { extractManifestFromBody, manifestAuditLine, asItemId } from './readiness/lane-manifest.mjs';
+import { extractManifestFromBody, manifestAuditLine, asItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
 
 // #2262 — the local, machine-scoped park-age clock the review-escalation watch-window gate reads its
 // `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
@@ -593,19 +593,36 @@ export function parseNumstat(numstat) {
  * resolves the function returns `scored:false` and the caller correctly falls through to its GitHub files-list
  * backstop (the safe, over-scoring direction). `fetchExtraRefs` still fetches the head ref so `<remote>/<rev>`
  * resolves in the normal sibling-clone case — it just never gets offered as a diff candidate via `FETCH_HEAD`.
- * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
+ * #2390 — a STACKED lane records the commit SHA it was cut from (its predecessor's tip) as the manifest
+ * per-repo `base`. Pass it as `baseRev` and the diff is computed from THAT base, not `<remote>/<base>` — so
+ * the lane is scored/reviewed on its OWN delta (`baseRev` is an ancestor of head, so this two-tree diff is
+ * exactly the child's change), killing cumulative-stack blast-radius inflation and the spurious `review:human`
+ * an ancestor's gate-self file would otherwise inherit. A plain sibling lane carries no base → `baseRev` is
+ * null → the unchanged `<remote>/<base>` basis. `baseRev` is guarded to a git object hash so a malformed
+ * manifest value can never become an injected `git` argument (validateManifest enforces the same; belt-and-
+ * braces here). When `baseRev` is used the base tracking-ref fetch is dropped — the base is reachable from the
+ * head ref `fetchExtraRefs` already fetches — and any diff failure still falls through to `scored:false`, the
+ * safe over-scoring direction (the caller then reads the GitHub files list).
+ * @param {{exec:Function, remote?:string, base?:string, baseRev?:string|null, rev:string, fetchExtraRefs?:string[]}} opts
  *   `exec(cmd, args, opts)` — inject `execFileSync`-shaped exec so this stays unit-testable with a fake.
  * @returns {{changedFiles:string[], diffLines:number, scored:boolean}}
  */
-export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
+export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'main', baseRev = null, rev, fetchExtraRefs = [] } = {}) {
   if (typeof exec !== 'function' || !rev) return { changedFiles: [], diffLines: 0, scored: false };
+  const useManifestBase = typeof baseRev === 'string' && /^[0-9a-f]{7,64}$/i.test(baseRev);
   try {
-    exec('git', ['fetch', remote, `+${base}:refs/remotes/${remote}/${base}`, ...fetchExtraRefs, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] });
+    // `baseRev` is an ancestor of the head ref — fetched with it — so no `<remote>/<base>` tracking-ref update
+    // is needed when stacked. A sibling still force-updates `<remote>/<base>` (the #2373 opportunistic-fetch fix).
+    const fetchArgs = useManifestBase
+      ? ['fetch', remote, ...fetchExtraRefs, '--quiet']
+      : ['fetch', remote, `+${base}:refs/remotes/${remote}/${base}`, ...fetchExtraRefs, '--quiet'];
+    exec('git', fetchArgs, { stdio: ['ignore', 'ignore', 'ignore'] });
   } catch { /* degrade to whatever is locally cached — the diff attempts below still run */ }
+  const leftRef = useManifestBase ? baseRev : `${remote}/${base}`;
   const candidates = [`${remote}/${rev}`, rev];
   for (const candidate of candidates) {
     try {
-      const out = exec('git', ['diff', '--numstat', `${remote}/${base}`, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const out = exec('git', ['diff', '--numstat', leftRef, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
       return { ...parseNumstat(out), scored: true };
     } catch { /* try next candidate */ }
   }
@@ -945,6 +962,11 @@ function runCli() {
       v.hasManifest = m != null; // #2183 — carries the transient manifest on its head → must be stripped before merge
       // #2171 review-escalation signals off the manifest: cross-repo couple (>1 repo) + dismissed pre-PR findings.
       v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
+      // #2390 — the SHA this repo's lane was cut from (a predecessor tip when overlap-stacked, #2387). Scoring
+      // from it below diffs the lane on its OWN delta, not the cumulative stack. `isLocalRepo` is the WE clone
+      // the drain runs in → key `we` (default when the origin slug is underivable); a sibling slug maps by short
+      // name. A missing/unmatched base is `null` → the scorer falls through to the unchanged `origin/main` basis.
+      v.base = manifestBaseForRepo(m, isLocalRepo(v.repo) ? (repoKeyFromSlug(localSlug) || 'we') : repoKeyFromSlug(v.repo));
       v.dismissedFindings = m && Number.isFinite(Number(m.dismissedFindings)) ? Number(m.dismissedFindings) : 0;
       v.prLabels = p.labels || [];
       verdicts.push(v);
@@ -1128,7 +1150,7 @@ function runCli() {
       let netScored = false;
       if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
         const exec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts });
-        const net = computeNetDiffChangedFiles({ exec, rev: v.headRef, fetchExtraRefs: [v.headRef] });
+        const net = computeNetDiffChangedFiles({ exec, rev: v.headRef, baseRev: v.base, fetchExtraRefs: [v.headRef] });
         changedFiles = net.changedFiles;
         diffLines = net.diffLines;
         netScored = net.scored;

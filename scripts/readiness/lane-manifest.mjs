@@ -140,6 +140,37 @@ export function orderedRepos(m) {
   return [...(m?.repos ?? [])].sort((a, b) => orderRank(a.repo) - orderRank(b.repo) || a.repo.localeCompare(b.repo));
 }
 
+/**
+ * #2390 — the manifest repo KEY (`we`/`frontierui`/`plateau-app`) for a git slug or short name. Pure. The
+ * escalation scorers (the drain in `merge-ai-prs.mjs`, the producer in `pr-land.mjs`) hold a repo as an
+ * `owner/name` slug or `null` (the cwd repo); the manifest keys it by the SHORT name, with `web-everything`
+ * carried as `we` (its `INTEGRATION_ORDER` key). Maps a slug (`chalbert/frontierui` → `frontierui`), a bare
+ * short name (`web-everything` → `we`), and passes an already-canonical key through. `null`/empty → `null`.
+ * @param {string|null|undefined} slug
+ * @returns {string|null}
+ */
+export function repoKeyFromSlug(slug) {
+  if (!slug || typeof slug !== 'string') return null;
+  const name = slug.includes('/') ? slug.split('/').pop() : slug;
+  return name === 'web-everything' ? 'we' : name;
+}
+
+/**
+ * #2390 — the per-repo `base` SHA a lane was cut from, for a given manifest repo key, or `null` when the
+ * manifest carries none for that repo (a plain sibling lane, or no manifest at all). Pure. Scoring a STACKED
+ * lane's escalation from THIS base (its predecessor's tip) instead of `origin/main` diffs it on its own delta,
+ * killing cumulative-stack blast-radius inflation and the spurious `review:human` an ancestor's gate-self file
+ * would otherwise induce. A `null` return makes both scorers fall through to the unchanged `origin/main` basis.
+ * @param {{repos?:Array<{repo?:string, base?:string}>}|null|undefined} manifest
+ * @param {string|null} repoKey
+ * @returns {string|null}
+ */
+export function manifestBaseForRepo(manifest, repoKey) {
+  if (!manifest || !Array.isArray(manifest.repos) || !repoKey) return null;
+  const entry = manifest.repos.find((r) => r && r.repo === repoKey);
+  return entry && typeof entry.base === 'string' && entry.base ? entry.base : null;
+}
+
 /** Tolerant parse of `.lane-manifest.json` text → a manifest object, or `null` on empty/invalid JSON. */
 export function parseManifest(text) {
   if (!text || !text.trim()) return null;

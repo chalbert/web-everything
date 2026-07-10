@@ -6,6 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON } from '../merge-ai-prs.mjs';
+import { scoreEscalation } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -540,6 +541,44 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     const { exec, calls } = fakeExec({ 'git diff --numstat upstream/release deadbeef': { stdout: '1\t0\tREADME.md\n' } });
     computeNetDiffChangedFiles({ exec, remote: 'upstream', base: 'release', rev: 'deadbeef', fetchExtraRefs: ['lane/x'] });
     expect(calls[0]).toMatchObject({ args: ['fetch', 'upstream', '+release:refs/remotes/upstream/release', 'lane/x', '--quiet'] });
+  });
+
+  // #2390 — a STACKED lane records the SHA it was cut from (its predecessor's tip) as the manifest per-repo
+  // `base`; scoring from THAT base diffs the lane on its OWN delta, not the cumulative stack vs main.
+  it('#2390 — a stacked lane (baseRev = manifest base) diffs from that base, NOT origin/main, so ancestor files never inflate the diff', () => {
+    const { exec, calls } = fakeExec({
+      'git diff --numstat a1b2c3d4e5f6 origin/lane/child': { stdout: '4\t2\tbacklog/2390-own.md\n' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'a1b2c3d4e5f6', fetchExtraRefs: ['lane/child'] });
+    expect(r).toEqual({ changedFiles: ['backlog/2390-own.md'], diffLines: 6, scored: true });
+    const diffCalls = calls.filter((c) => c.args[0] === 'diff');
+    expect(diffCalls[0].key).toBe('git diff --numstat a1b2c3d4e5f6 origin/lane/child'); // left operand is the base SHA
+    expect(calls.some((c) => c.key.startsWith('git diff --numstat origin/main'))).toBe(false); // never vs main
+  });
+
+  it('#2390 — when stacked, the `+base:` tracking-ref fetch is DROPPED (the base is an ancestor of the fetched head ref)', () => {
+    const { exec, calls } = fakeExec({ 'git diff --numstat a1b2c3d4e5f6 origin/lane/child': { stdout: '1\t0\tREADME.md\n' } });
+    computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'a1b2c3d4e5f6', fetchExtraRefs: ['lane/child'] });
+    const fetch = calls.find((c) => c.args[0] === 'fetch');
+    expect(fetch.args).toEqual(['fetch', 'origin', 'lane/child', '--quiet']); // head ref only — no `+main:refs/remotes/origin/main`
+  });
+
+  it('#2390 — a malformed (non-hex) baseRev is IGNORED — it falls back to the origin/main basis, never an injected git arg', () => {
+    const { exec, calls } = fakeExec({ 'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' } });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef', baseRev: '--upload-pack=evil' });
+    expect(r).toEqual({ changedFiles: ['README.md'], diffLines: 1, scored: true });
+    expect(calls.some((c) => c.args.includes('--upload-pack=evil'))).toBe(false); // the poison value never reaches git
+    expect(calls[0].args[2]).toBe('+main:refs/remotes/origin/main'); // sibling basis restored
+  });
+
+  it('#2390 — no spurious review:human inherited from an ancestor: the own-delta diff excludes the ancestor gate-self file, so scoreEscalation is humanRequired:false', () => {
+    // The cumulative diff (vs main) WOULD list the ancestor's gate-self edit; the own-delta (from the base) does not.
+    const { exec } = fakeExec({ 'git diff --numstat aaaaaaa origin/lane/child': { stdout: '2\t0\tbacklog/2390-child.md\n' } });
+    const own = computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'aaaaaaa', fetchExtraRefs: ['lane/child'] });
+    expect(own.changedFiles).not.toContain('scripts/lib/review-escalation.mjs');
+    expect(scoreEscalation({ changedFiles: own.changedFiles, diffLines: own.diffLines }).humanRequired).toBe(false);
+    // Sanity: the ancestor's gate-self file WOULD trip humanRequired if it leaked in via the cumulative diff.
+    expect(scoreEscalation({ changedFiles: ['scripts/lib/review-escalation.mjs', 'backlog/2390-child.md'], diffLines: 10 }).humanRequired).toBe(true);
   });
 });
 

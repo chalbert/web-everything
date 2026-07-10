@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { parseManifest, validateManifest } from '../readiness/lane-manifest.mjs';
+import { parseManifest, validateManifest, repoKeyFromSlug, manifestBaseForRepo } from '../readiness/lane-manifest.mjs';
 
 const SCRIPT = resolve(process.cwd(), 'scripts/lane-manifest-write.mjs');
 function run(args) {
@@ -85,5 +85,38 @@ describe('lane-manifest-write (#2174 producer stop-at-push)', () => {
     expect(path).not.toBe(resolve(process.cwd(), '.lane-manifest.json')); // NOT committed into the tree
     expect(parseManifest(readFileSync(path, 'utf8')).item).toBe(2174);    // and it really wrote there
     rmSync(path, { force: true });
+  });
+});
+
+describe('#2390 — repoKeyFromSlug (map a git slug/short name → the manifest repo key)', () => {
+  it('maps web-everything (slug OR bare name) to the `we` key', () => {
+    expect(repoKeyFromSlug('chalbert/web-everything')).toBe('we');
+    expect(repoKeyFromSlug('web-everything')).toBe('we');
+  });
+  it('passes the impl-repo short names through (slug or bare)', () => {
+    expect(repoKeyFromSlug('chalbert/frontierui')).toBe('frontierui');
+    expect(repoKeyFromSlug('plateau-app')).toBe('plateau-app');
+    expect(repoKeyFromSlug('we')).toBe('we'); // already canonical
+  });
+  it('is null-safe (null/empty/non-string → null)', () => {
+    expect(repoKeyFromSlug(null)).toBe(null);
+    expect(repoKeyFromSlug('')).toBe(null);
+    expect(repoKeyFromSlug(undefined)).toBe(null);
+    expect(repoKeyFromSlug(42)).toBe(null);
+  });
+});
+
+describe('#2390 — manifestBaseForRepo (the per-repo stacked base a scorer diffs from)', () => {
+  const m = { repos: [{ repo: 'frontierui', ref: 'x', base: 'facef00d' }, { repo: 'we', ref: 'x', base: 'deadbeef' }] };
+  it('returns the matching repo\'s base SHA', () => {
+    expect(manifestBaseForRepo(m, 'we')).toBe('deadbeef');
+    expect(manifestBaseForRepo(m, 'frontierui')).toBe('facef00d');
+  });
+  it('returns null for an unmatched repo, a base-less entry, or a no-manifest input (→ the scorer\'s origin/main fallback)', () => {
+    expect(manifestBaseForRepo(m, 'plateau-app')).toBe(null);             // not in this couple
+    expect(manifestBaseForRepo({ repos: [{ repo: 'we', ref: 'x' }] }, 'we')).toBe(null); // sibling — no base
+    expect(manifestBaseForRepo(null, 'we')).toBe(null);
+    expect(manifestBaseForRepo({}, 'we')).toBe(null);
+    expect(manifestBaseForRepo(m, null)).toBe(null);
   });
 });
