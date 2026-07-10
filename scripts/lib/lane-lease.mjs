@@ -60,9 +60,56 @@ export function chooseFreeLane(laneInfos, nowMs, ttlMs) {
   return eligible.length ? eligible[0].lane : null;
 }
 
-/** Build a lease marker object. Caller stamps `acquiredAt` (ISO) so this stays clock-free / testable. */
-export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid }) {
-  return { session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null, pid: pid ?? null };
+/** Build a lease marker object. Caller stamps `acquiredAt` (ISO) so this stays clock-free / testable.
+ *  `ownerSession` (#2367) is the DURABLE session identity (`CLAUDE_CODE_SESSION_ID`, captured at acquire) —
+ *  the PRIMARY, authoritative ownership signal `isForeignLease` compares against: it is stable across a
+ *  session's separate Bash-tool calls yet distinct between concurrent sessions, and — unlike pid-ancestry —
+ *  does NOT false-match two independent sessions that merely share an upper process ancestor (terminal, a
+ *  parallel-lane orchestrator). `pid` is informational only (human-readable `status`/debug; a leaf that
+ *  exits right after `acquire`, never useful for ownership). `ancestry` (the `pid-ancestry.mjs#getAncestryPids`
+ *  chain at acquire) is the LEGACY fallback signal, only consulted for older leases that predate `ownerSession`. */
+export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ancestry, ownerSession }) {
+  return {
+    session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null,
+    pid: pid ?? null, ancestry: ancestry ?? null, ownerSession: ownerSession ?? null,
+  };
+}
+
+/**
+ * Do `mine` and `lease`'s recorded ancestry share ANY pid? Pure overlap test — the #2367 LEGACY ownership
+ * heuristic (used only when the durable `ownerSession` is unavailable, see `isForeignLease`). A single scalar
+ * pid comparison does not survive separate shell invocations (each Bash-tool call gets a fresh wrapper pid, a
+ * leaf that dies before any later call runs); a full ancestry-CHAIN overlap does, because both chains converge
+ * on the one process common to both moments — the session's own long-lived anchor. NOTE: this heuristic
+ * OVER-MATCHES when two genuinely independent sessions share an upper ancestor (terminal / orchestrator) — the
+ * reason `ownerSession` supersedes it as the primary signal. `lease.pid` (informational-only, see `leaseBody`)
+ * is folded in as a last-resort single-value fallback so an OLDER lease (acquired before `ancestry` existed)
+ * still gets a best-effort check rather than silently no-oping forever.
+ */
+export function ancestryOverlaps(mine, lease) {
+  if (!Array.isArray(mine) || mine.length === 0 || !lease) return false;
+  const theirs = Array.isArray(lease.ancestry) && lease.ancestry.length ? lease.ancestry : (lease.pid ? [lease.pid] : []);
+  if (theirs.length === 0) return false;
+  const set = new Set(mine.map(Number));
+  return theirs.some((p) => set.has(Number(p)));
+}
+
+/**
+ * Is `lease` held by a session OTHER than mine? The #2367 ownership decision — pure & unit-tested; the impure
+ * `ps`/fs/env collection lives in the CLI (guard-bash.mjs) / `pid-ancestry.mjs`.
+ *
+ *   PRIMARY (durable): when BOTH the lease and the caller carry a session id, the lease is FOREIGN iff
+ *     `lease.ownerSession !== mySessionId`. This is authoritative and does NOT fail open on shared upper
+ *     process ancestors — the failure mode that made the ancestry-only test unsafe in the guard's own target
+ *     topology (parallel lanes under one orchestrator, where every session's ancestry overlaps every other's).
+ *   FALLBACK (legacy): an OLDER lease with no `ownerSession`, or a caller that couldn't read a session id,
+ *     falls back to the `ancestryOverlaps` heuristic (best-effort — see its over-match caveat).
+ *   No lease ⇒ never foreign.
+ */
+export function isForeignLease({ lease, mySessionId, myAncestry } = {}) {
+  if (!lease) return false;
+  if (lease.ownerSession && mySessionId) return lease.ownerSession !== mySessionId;
+  return !ancestryOverlaps(myAncestry, lease);
 }
 
 /** One-line human description of a lease for `status` output. */
