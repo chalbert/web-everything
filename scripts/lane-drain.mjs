@@ -62,7 +62,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
 import { parseQueued, isQueued, queuedNums } from './readiness/queued-state.mjs';
-import { parseManifest, validateManifest, orderedRepos, MANIFEST_FILENAME } from './readiness/lane-manifest.mjs';
+import { parseManifest, validateManifest, orderedRepos, extractManifestFromBody, MANIFEST_FILENAME } from './readiness/lane-manifest.mjs';
 import { isHash, isNum, idFromName, applyLedger } from './backlog/id.mjs';
 
 // ── flag parsing (mirrors pr-land.mjs / lane-review.mjs) ──────────────────────────────────────────────
@@ -340,12 +340,26 @@ function readQueued(queuedPath) {
   try { return parseQueued(readFileSync(queuedPath, 'utf8')); } catch { return parseQueued(''); }
 }
 
-// Read a queued item's `.lane-manifest.json` off its WE lane ref (the queued entry's `lane`). The manifest is
-// a NEW file in the WE lane commit, so it is NOT on main yet — fetch the ref and read it out of the object,
-// never the working tree. Returns a parsed manifest or null (missing ref / no manifest / bad JSON → the item
-// is `unresolvable`, skipped-and-reported by planWatch, never drained).
+// Read a queued item's manifest for its WE lane `ref` (the queued entry's `lane`). Returns a parsed manifest
+// or null (no manifest anywhere → the item is `unresolvable`, skipped-and-reported by planWatch, never drained).
+//
+// xnsk54v — the manifest now rides the PR BODY (drain-only orchestration metadata belongs on the PR, not
+// committed into the tree). Try the PR first via `gh pr list --head <ref>`; fall back to the legacy
+// tree-committed `.lane-manifest.json` off the ref for lanes queued BEFORE the cutover (drop the tree fallback
+// once the queue has fully turned over). Reading off an object/PR — never the working tree.
+function readManifestFromPrBody(CWD, ref) {
+  try {
+    const out = execFileSync('gh', ['pr', 'list', '--head', ref, '--state', 'open', '--json', 'body'], { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return extractManifestFromBody(JSON.parse(out)?.[0]?.body);
+  } catch { return null; } // gh absent / no open PR for the ref / no block → fall through to the ref file
+}
+
 function readManifestOffRef(CWD, ref) {
   if (!ref) return null;
+  const fromPr = readManifestFromPrBody(CWD, ref);
+  if (fromPr) return fromPr;
+  // Legacy fallback: the tree-committed manifest is a NEW file in the WE lane commit, not on main yet — fetch
+  // the ref and read it out of the object.
   try { execFileSync('git', ['fetch', 'origin', ref, '--quiet'], { cwd: CWD, stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* best-effort; the ref may already be local */ }
   for (const rev of ['FETCH_HEAD', `origin/${ref}`, ref]) {
     try {
