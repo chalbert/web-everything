@@ -398,7 +398,12 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
       calls.push({ cmd, args, opts, key: `${cmd} ${args.join(' ')}` });
       const h = script[`${cmd} ${args.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
-      return h && 'stdout' in h ? h.stdout : '';
+      if (h && 'stdout' in h) return h.stdout;
+      // Faithful to real git: an UNSTUBBED `git diff` against a ref this fake doesn't know throws
+      // (unknown revision) rather than silently returning '' — so an invalid candidate (e.g. the producer's
+      // `<remote>/<sha>`) fails fast and the fallthrough is exercised as it would be against real git.
+      if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      return '';
     };
     return { exec, calls };
   };
@@ -434,14 +439,43 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     expect(calls.some((c) => c.args[0] === 'diff')).toBe(true);
   });
 
-  it('resolves a foreign/sibling clone\'s PR via `<remote>/<rev>` when `rev` is not a local branch (the head ref was fetched by `fetchExtraRefs`)', () => {
+  it('#2373-review-r2 — the REMOTE-tracking candidate `<remote>/<rev>` is tried BEFORE the bare `rev` (dodges a stale-local-branch-name collision in the drain, where `rev` is `v.headRef`, a branch NAME)', () => {
+    // Both candidates would "resolve" here; only the ORDER distinguishes them. origin/lane/x (freshly fetched)
+    // carries the real diff; a stale local `lane/x` carries a WRONG/partial one. Remote-first must win.
     const { exec, calls } = fakeExec({
-      'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
-      'git diff --numstat origin/main origin/lane/x': { stdout: '2\t2\tscripts/merge-ai-prs.mjs\n' },
+      'git diff --numstat origin/main origin/lane/x': { stdout: '2\t2\tscripts/merge-ai-prs.mjs\n' }, // fresh remote — correct
+      'git diff --numstat origin/main lane/x': { stdout: '1\t0\tREADME.md\n' }, // stale local — WRONG, must not win
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
     expect(r).toEqual({ changedFiles: ['scripts/merge-ai-prs.mjs'], diffLines: 4, scored: true });
-    expect(calls.filter((c) => c.args[0] === 'diff').length).toBe(2);
+    // Resolved on the FIRST diff attempt — the remote-tracking ref — so the stale-local candidate is never reached.
+    const diffCalls = calls.filter((c) => c.args[0] === 'diff');
+    expect(diffCalls.length).toBe(1);
+    expect(diffCalls[0].key).toBe('git diff --numstat origin/main origin/lane/x');
+  });
+
+  it('resolves a foreign/sibling clone\'s PR via `<remote>/<rev>` when `rev` is not a local branch (the head ref was fetched by `fetchExtraRefs`)', () => {
+    const { exec, calls } = fakeExec({
+      'git diff --numstat origin/main origin/lane/x': { stdout: '2\t2\tscripts/merge-ai-prs.mjs\n' },
+      // no local `lane/x` branch — the bare-rev candidate would throw (unstubbed) if ever reached
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r).toEqual({ changedFiles: ['scripts/merge-ai-prs.mjs'], diffLines: 4, scored: true });
+    expect(calls.filter((c) => c.args[0] === 'diff').length).toBe(1);
+  });
+
+  it('#2373-review-r2 — PRODUCER path (`rev` is a resolved local SHA): `<remote>/<sha>` is an invalid ref that fails fast, then the bare SHA resolves — one extra cheap failed git call, no behavior change', () => {
+    const { exec, calls } = fakeExec({
+      // `origin/deadbeef` is NOT stubbed → the fake throws (unknown revision), mirroring real git on an invalid ref.
+      'git diff --numstat origin/main deadbeef': { stdout: '3\t1\tscripts/pr-land.mjs\n' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef' }); // producer: no fetchExtraRefs
+    expect(r).toEqual({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 4, scored: true });
+    const diffCalls = calls.filter((c) => c.args[0] === 'diff');
+    expect(diffCalls.map((c) => c.key)).toEqual([
+      'git diff --numstat origin/main origin/deadbeef', // tried first, fails fast (invalid ref)
+      'git diff --numstat origin/main deadbeef', // falls through to the real local SHA
+    ]);
   });
 
   it('#2373-review — neither `rev` nor `<remote>/<rev>` resolves → scored:false (FETCH_HEAD is NOT a fallback candidate: it would resolve to `<remote>/<base>` — base is first in the fetch refspec — and "succeed" with a base-vs-base EMPTY diff, masking this real miss; scored:false lets the caller fall through to its GitHub files-list backstop)', () => {

@@ -527,10 +527,16 @@ export function parseNumstat(numstat) {
  * content-only and ancestry-independent, deliberately NOT a three-dot/merge-base diff — always scores off
  * the CURRENT upstream base, never one a concurrently-landed PR has since advanced past.
  *
- * Tries a short fallback chain for `rev` (`rev` itself, then `<remote>/rev`) since a foreign/sibling clone
- * scoring another repo's PR may not have `rev` as a local branch. `rev` is tried FIRST: for the producer path
- * (`rev` is always an already-resolved local SHA) this succeeds immediately; `<remote>/<rev>` covers the
- * sibling-clone case where the head ref was fetched (`fetchExtraRefs` carries it). `FETCH_HEAD` is DELIBERATELY
+ * Tries a short fallback chain for `rev` (`<remote>/<rev>` first, then the bare `rev`) since a foreign/sibling
+ * clone scoring another repo's PR may not have `rev` as a local branch. `<remote>/<rev>` is tried FIRST, not the
+ * bare `rev` (#2373-review-r2): in the DRAIN path `rev` is a branch NAME (`v.headRef`), and the clone may hold a
+ * STALE local branch of that same name — a bare `git diff <remote>/<base> <headRef>` would then resolve against
+ * that stale local branch and return `scored:true` with wrong/partial `changedFiles`, under-scoring escalation
+ * (the UNSAFE direction: a gate-self PR whose gate-touching files are missing from the diff could slip past).
+ * `fetchExtraRefs` freshly fetched the head ref, so `<remote>/<rev>` is the just-fetched truth — consulting it
+ * before any local branch of the same name dodges that collision. The PRODUCER path is unaffected: there `rev`
+ * is an already-resolved local SHA, so `<remote>/<sha>` (e.g. `origin/abc123`) is an invalid ref that fails fast
+ * (one extra cheap failed git call), falling through to the bare `rev` SHA which resolves. `FETCH_HEAD` is DELIBERATELY
  * NOT a candidate (#2373-review): the base is listed FIRST in the fetch refspec and `git diff FETCH_HEAD` /
  * `git rev-parse FETCH_HEAD` resolve to that first line, so `FETCH_HEAD` always points at `<remote>/<base>` —
  * a `FETCH_HEAD` diff would therefore be base-vs-base (an EMPTY diff) and "succeed" with `scored:true` and zero
@@ -547,7 +553,7 @@ export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'ma
   try {
     exec('git', ['fetch', remote, `+${base}:refs/remotes/${remote}/${base}`, ...fetchExtraRefs, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] });
   } catch { /* degrade to whatever is locally cached — the diff attempts below still run */ }
-  const candidates = [rev, `${remote}/${rev}`];
+  const candidates = [`${remote}/${rev}`, rev];
   for (const candidate of candidates) {
     try {
       const out = exec('git', ['diff', '--numstat', `${remote}/${base}`, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
