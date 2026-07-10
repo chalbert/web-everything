@@ -12,6 +12,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // Move pre into wrapper
         wrapper.appendChild(pre);
 
+        // `pre` scrolls horizontally (CSS `overflow-x: auto`, style.css) once its content is wider
+        // than the viewport — a long unbroken line (a shell command, a URL) that `overflow-wrap` can't
+        // break. A scrollable region must itself be reachable by keyboard (WCAG 2.1.1 / axe
+        // scrollable-region-focusable, #2376): tabindex=0 lets arrow/Tab keys scroll it like any other
+        // focusable widget, without changing the visual/copy-button behavior above.
+        if (!pre.hasAttribute('tabindex')) pre.setAttribute('tabindex', '0');
+
         // Create copy button
         const button = document.createElement('button');
         button.className = 'copy-button';

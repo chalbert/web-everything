@@ -1,4 +1,5 @@
 ---
+layout: base.njk
 title: "Web Contexts: Spec & Implementation Analysis"
 description: Comparative analysis of web context APIs, framework implementations, and the HTML Injector approach.
 ---

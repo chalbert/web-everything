@@ -1,5 +1,5 @@
 {
   "term": "toggle (event)",
   "definition": "Event fired after a visibility change completes. Non-cancelable notification of completed state transition.",
-  "usage": "Matches Popover API and <code>&lt;details&gt;</code> element pattern. Event detail contains <code>oldState</code> and <code>newState</code>."
+  "usage": "Matches Popover API and <code>&amp;lt;details&amp;gt;</code> element pattern. Event detail contains <code>oldState</code> and <code>newState</code>."
 }
