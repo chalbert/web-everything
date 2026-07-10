@@ -1,8 +1,10 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-07-09"
+dateStarted: "2026-07-10"
+dateResolved: "2026-07-10"
 tags: [drain, rebase-drop, merge]
 crossRef: { url: /backlog/2198/, label: "#2198 — the manifest-only rebase-drop this extends" }
 ---
