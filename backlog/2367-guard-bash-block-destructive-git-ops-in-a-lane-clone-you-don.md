@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-07-09"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-10"
+graduatedTo: "scripts/guard-bash.mjs (#2367 destructive-lane-git-op guard) + scripts/lib/lane-lease.mjs isForeignLease"
 tags: []
 ---
 

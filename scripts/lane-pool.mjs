@@ -531,8 +531,19 @@ function cmdRefresh(repo) {
 // override is `release --force` then re-acquire, per the ruling's "no new flag" contract). A stale marker ⇒
 // reclaimed (rm + retry, the small documented race). Own live lease ⇒ true (idempotent re-acquire).
 function tryClaimLane(dir, session, nowMs, ttlMs) {
+  // #2367 — stamp a DURABLE session identity (`CLAUDE_CODE_SESSION_ID`, exposed to this subprocess) so a later
+  // guard can tell "my own lease" from another live session's AUTHORITATIVELY — it is stable across a session's
+  // separate Bash-tool calls yet distinct between concurrent sessions, and does NOT false-match two independent
+  // sessions that merely share an upper process ancestor (terminal / a parallel-lane orchestrator). This is the
+  // SOLE ownership signal (r2 removed the pid-ancestry fallback, whose chain overlap over-matched exactly that
+  // shared-ancestor topology and so failed open while looking protective — see `isForeignLease`, lane-lease.mjs).
+  // `pid` stays as an informational-only field (human-readable `status`/debug), never used for ownership.
   const body = JSON.stringify(
-    leaseBody({ session, purpose: flags.purpose, acquiredAt: new Date(nowMs).toISOString(), ttlMinutes: ttlMinutesFromFlags(), host: hostname(), pid: process.pid }),
+    leaseBody({
+      session, purpose: flags.purpose, acquiredAt: new Date(nowMs).toISOString(), ttlMinutes: ttlMinutesFromFlags(),
+      host: hostname(), pid: process.pid,
+      ownerSession: process.env.CLAUDE_CODE_SESSION_ID || null,
+    }),
     null, 2,
   ) + '\n';
   const file = LEASE_MARKER(dir);

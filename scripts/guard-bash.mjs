@@ -19,6 +19,18 @@
  *     19 commits behind ran the pre-#2288 "next free NNN" allocator and minted a colliding/low-gap
  *     number, #2323). Refuse and tell the caller to refresh (`git fetch && git reset --hard origin/main
  *     && git clean -fd`) rather than silently proceeding. Escape: `STALE_LANE_OK=1`.
+ *   • a destructive git op (`reset --hard`, `clean -f[d]`, `checkout/restore/switch` that discards the tree,
+ *     a force-push — normalized past wrapper/path/global-flag disguises by `canonicalGitOp`) run with cwd
+ *     inside a `.lanes/<repo>/lane-N/` clone whose LIVE lease (`scripts/lib/lane-lease.mjs`) is held by
+ *     ANOTHER session — the hole behind a 2026-07-09 incident: a `/slice` ran `git reset --hard` in a lane a
+ *     concurrent session had just leased; the acquire correctly refused, but the `;`-chained reset ran
+ *     regardless and clobbered the peer's clone. Ownership is decided by `isForeignLease` from the DURABLE
+ *     session id ALONE (`CLAUDE_CODE_SESSION_ID`, stamped as `ownerSession` at `acquire`, read here from the
+ *     same env first): a live lease whose `ownerSession` differs from mine ⇒ FOREIGN ⇒ deny; equal ⇒ my lane ⇒
+ *     allow. Stale/absent lease, a lease with no `ownerSession`, or no session id here ⇒ allow (the documented
+ *     fail-open degraded mode — r2 removed the earlier pid-ancestry fallback, which over-matched two independent
+ *     sessions sharing an upper process ancestor and so failed open while looking protective). Escape:
+ *     `LANE_CLOBBER_OK=1`.
  *
  * Input: PreToolUse JSON on stdin. Output: a deny decision (JSON) when blocked; nothing otherwise.
  * Fails open on unparseable input. The pure `reason`/`decide` are unit-tested (guard-bash.test.mjs).
@@ -27,6 +39,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname, join } from 'node:path';
+import { LEASE_FILENAME, isLeaseStale, isForeignLease } from './lib/lane-lease.mjs';
 
 const BACKLOG_MD = /(?:^|[\s'"=(])(?:\.\/)?backlog\/(\d+)-[^\s'")]*\.md/;
 const CORPUS_MD = /(?:^|[\s'"=(])(?:\.\/)?(?:backlog|reports)\/[^\s'")]*\.md/;
@@ -59,6 +72,103 @@ export function isPrimaryCwd(cwd, primaries = []) {
  *  git call (the CLI does the actual "how far behind" git call and passes the count in via ctx). */
 export function isLaneCwd(cwd) {
   return !!cwd && String(cwd).includes('/.lanes/');
+}
+
+// #2367 — the destructive-git-op guard for a lane clone leased by ANOTHER session ─────────────────────
+
+/** The lane clone ROOT (`…/.lanes/<repo>/lane-N`) a `cwd` sits at or under, or null. Pure — string test
+ *  only; the CLI resolves the `.git/<LEASE_FILENAME>` marker path from this. */
+export function laneRootFromCwd(cwd) {
+  if (!cwd) return null;
+  const m = String(cwd).match(/^(.*\/\.lanes\/[^/]+\/lane-\d+)(?:\/.*)?$/);
+  return m ? m[1] : null;
+}
+
+/** Normalize the leading git invocation of a single command segment to a canonical `git <subcommand> …`
+ *  string, or '' if the segment is not a git invocation. Pure — closes the #2367 matcher-BYPASS holes an
+ *  `^git`-anchored test misses (accidental-collision threat model, NOT adversarial evasion): it unwraps a
+ *  leading subshell `(`/group `{`, peels wrapper commands (`env [VAR=v…]`, `time`, `command`, `builtin`,
+ *  `nice`, `xargs [opts]`, `sudo [-n] [-u <user>]`), strips surrounding quotes / a leading backslash off the
+ *  program word (`"git"`/`'git'`/`\git`→`git`) and resolves a path-qualified git to its basename
+ *  (`/usr/bin/git`→`git`), then skips git's leading GLOBAL flags (`-C <path>`, `-c <k=v>`, `--git-dir=…`, …) so
+ *  the REAL subcommand is what the danger patterns match. Deliberately does NOT chase adversarial disguises
+ *  (`git$IFS…`, `$(echo git)`, `bash -c "…"`, `ssh host git`): this guard is advisory with a one-env-var escape
+ *  (`LANE_CLOBBER_OK=1`), so an actor bent on evasion never needs them — see #2367 r2 dismissal. */
+export function canonicalGitOp(cmd) {
+  let c = String(cmd || '').trim();
+  if (!c) return '';
+  c = c.replace(/^[({]\s*/, '').trim();                 // unwrap a leading subshell `(…` / brace group `{ …`
+  let tokens = c.split(/\s+/);
+  // Peel leading wrapper commands until the real program word is exposed (bounded: each pass shifts ≥1 token).
+  // Self-sufficient — also eats a bare `VAR=val` shell-assignment prefix and `sudo [-opts]` so callers can pass
+  // a raw segment (no pre-strip needed) and every disguise is normalized in one place.
+  for (let guard = 0; guard < tokens.length && tokens.length; guard++) {
+    const w = tokens[0];
+    if (/^[A-Za-z_]\w*=/.test(w)) {                       // bare `FOO=1 git …` shell-assignment prefix
+      tokens.shift();
+    } else if (w === 'env') {
+      tokens.shift();
+      while (tokens.length && /^[A-Za-z_]\w*=/.test(tokens[0])) tokens.shift();  // env VAR=val … <cmd>
+    } else if (w === 'time' || w === 'command' || w === 'builtin' || w === 'nice') {
+      tokens.shift();
+    } else if (w === 'sudo') {
+      tokens.shift();
+      while (tokens.length && tokens[0].startsWith('-')) {                        // sudo -n -u <user> … <cmd>
+        const opt = tokens.shift();
+        if (opt === '-u' || opt === '-g' || opt === '-U') tokens.shift();         // option that takes an argument
+      }
+    } else if (w === 'xargs') {
+      tokens.shift();
+      while (tokens.length && tokens[0].startsWith('-')) tokens.shift();          // xargs -n1 -I{} … <cmd>
+    } else break;
+  }
+  // Normalize the program word: strip surrounding quotes ("git"/'git'), a leading backslash (\git), then
+  // resolve a path-qualified git to its basename (/usr/bin/git → git) — accidental-disguise forms only.
+  const prog = (tokens[0] || '').replace(/^(['"])(.*)\1$/, '$2').replace(/^\\+/, '').replace(/^.*\//, '');
+  if (!tokens.length || prog !== 'git') return '';
+  tokens[0] = 'git';
+  // Skip git's leading global flags to reach the real subcommand.
+  let i = 1;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (t === '-C' || t === '-c' || t === '--git-dir' || t === '--work-tree' || t === '--namespace') { i += 2; continue; }
+    if (t.startsWith('-')) { i += 1; continue; }        // `--git-dir=…` / `--no-pager` / `--paginate` / `-p`
+    break;
+  }
+  return 'git ' + tokens.slice(i).join(' ');
+}
+
+/** Is this command segment a destructive git op that would CLOBBER a lane clone (working tree or its remote
+ *  branch) in place — `reset --hard`; `clean` with a force flag (`-fd`, and `-f`/`-fx` alone still deletes
+ *  untracked FILES); `checkout`/`restore`/`switch` that discard the tree (`checkout [<ref>] [--] .`,
+ *  `checkout -f <ref>`, `restore [--worktree/--staged/--] .`, `switch -f`); or a force-push (flag OR a
+ *  leading-`+` refspec)? Normalizes via `canonicalGitOp` first (so wrappers / path-qualified git / global
+ *  flags can't slip past). Pure (unit-tested); the #2367 danger table in `reason()` gates behind `ctx.foreignLiveLease`. */
+export function isDestructiveLaneGitOp(cmd) {
+  const c = canonicalGitOp(cmd);
+  if (!c) return false;
+  if (/^git\s+reset\b[^|;&]*--hard\b/.test(c)) return true;
+  // `clean` with a FORCE flag — deletes untracked files (`-f`/`-fx`) and, with `-d`, untracked dirs. A force
+  // flag is the destructive trigger; `-d` alone (no force) is a no-op, so force-present is the whole test.
+  if (/^git\s+clean\b/.test(c) && /(?:^|\s)(?:--force|-[a-zA-Z]*f[a-zA-Z]*)(?=\s|$)/.test(c)) return true;
+  if (/^git\s+checkout\s+(?:\S+\s+)?(?:--\s+)?\.(?:\s|$)/.test(c)) return true;   // checkout [<ref>] [--] .
+  if (/^git\s+checkout\b[^|;&]*\s(?:-f|--force)(?=\s|$)/.test(c)) return true;    // checkout -f <ref>
+  if (/^git\s+restore\b[^|;&]*\s\.(?:\s|$)/.test(c)) return true;                 // restore [--worktree/--staged/--] .
+  if (/^git\s+switch\b[^|;&]*\s(?:-f|--force|--discard-changes)(?=\s|$)/.test(c)) return true; // switch -f <branch>
+  if (/^git\s+push\b/.test(c) &&
+      (/(?:^|\s)(?:-f|--force|--force-with-lease)(?=\s|$)/.test(c) || /(?:^|\s)\+\S/.test(c))) return true; // force-push (flag or +refspec)
+  return false;
+}
+
+/** Does ANY `&&`/`|`/`;`-separated segment of `command` look like a destructive lane git op? Pure — mirrors
+ *  `decide`'s segment split. The CLI uses this as a cheap pre-filter so the `fs` lease-ownership check below
+ *  only runs when it could possibly matter (the overwhelming majority of Bash calls skip it). Passes each raw
+ *  segment straight to `isDestructiveLaneGitOp` — `canonicalGitOp` strips env/sudo/wrapper disguises itself. */
+export function hasDestructiveLaneOp(command) {
+  if (!command) return false;
+  return String(command)
+    .split(/(?:&&|\|\||[;&|]|\n)+/)
+    .some((seg) => isDestructiveLaneGitOp(seg.trim()));
 }
 
 // #2335 — the harness resets the reported Bash cwd to the PRIMARY checkout between tool calls, so the
@@ -102,8 +212,11 @@ export function resolveEffectiveCwd(command, reportedCwd, resolvePath = resolve)
 /** Return a deny reason for one shell segment, or null to allow. Pure. `ctx.primaryCwd` = the Bash cwd is a
  *  constellation primary checkout (computed by the CLI via isPrimaryCwd) — gates the #2302 backlog-mutation rule.
  *  `ctx.staleBehind` = how many commits the lane's HEAD sits behind its upstream (computed by the CLI via a git
- *  call — kept out of this pure function so it stays unit-testable with a plain number) — gates the #2323 rule. */
-export function reason(segment, { primaryCwd = false, staleBehind = 0 } = {}) {
+ *  call — kept out of this pure function so it stays unit-testable with a plain number) — gates the #2323 rule.
+ *  `ctx.foreignLiveLease` = this lane clone carries a LIVE lease held by a DIFFERENT session (computed by the
+ *  CLI via a lease-file read + a durable session-id compare — kept out of this pure function for the same reason)
+ *  — gates the #2367 destructive-op rule. */
+export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false } = {}) {
   const s = segment.trim();
   if (!s) return null;
 
@@ -124,10 +237,21 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0 } = {}) {
   // primary — that path is already denied above) AND the CLI found it behind. Sanctioned override: STALE_LANE_OK=1.
   if (!primaryCwd && staleBehind > 0 && isBacklogMutation(s) && !/\bSTALE_LANE_OK=1\b/.test(s))
     return `This lane clone is ${staleBehind} commit(s) behind origin/main — a mutation here would run STALE scripts/ against a STALE backlog view and can mint a colliding/wrong NNN (#2323). Refresh first: \`git fetch origin --prune && git reset --hard origin/main && git clean -fd\`. Sanctioned override (rare): prefix \`STALE_LANE_OK=1\`.`;
+
   // The command word(s) of this segment, after stripping leading env-assignments / sudo — so we match
   // actual INVOCATIONS (anchored at command position), not mentions buried in a quoted arg like a commit
   // message. `git commit -m "...pkill vite..."` has command `git`, so the pkill rule no longer fires.
   const cmd = s.replace(/^(?:\w+=\S+\s+)*(?:sudo\s+)?/, '');
+
+  // #2367 — a destructive git op (reset --hard / clean -f[d] / checkout/restore/switch discard / force-push)
+  // run with cwd inside a lane clone that carries a LIVE lease from ANOTHER session would clobber their
+  // in-flight work — the hole a 2026-07-09 incident opened (a concurrent `/slice`'s `;`-chained `reset --hard`
+  // ran anyway after its own `acquire` was correctly refused). `ctx.foreignLiveLease` is precomputed by the CLI
+  // (readLaneLease + `isForeignLease`: the durable `ownerSession` session id alone; a cost only paid when cwd
+  // is a lane AND the command looks destructive). Only fires for a segment that IS itself the destructive op
+  // (a lane's OWN session running one is unaffected — its `ownerSession` matches). Escape: `LANE_CLOBBER_OK=1`.
+  if (!primaryCwd && foreignLiveLease && isDestructiveLaneGitOp(s) && !/\bLANE_CLOBBER_OK=1\b/.test(s))
+    return 'This lane clone carries a LIVE lease held by ANOTHER session — a destructive git op here (reset --hard/clean -fd/checkout -- ./force-push) would clobber their in-flight work (#2367). If this really is your own lane, release it first (or re-acquire) rather than running this here; otherwise pick a different lane. Sanctioned override (rare): prefix `LANE_CLOBBER_OK=1`.';
 
   // Only an actual RUN of build:plugs (a runner invocation), not a mention (grep/echo/read).
   if (/\b(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b[^|;&]*\bbuild:plugs\b/.test(s) || (/\btsc\b[^|;&]*-p\s+\S*tsconfig\.plugs\.json/.test(s) && !/--noEmit/.test(s)))
@@ -169,7 +293,8 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0 } = {}) {
 }
 
 /** First deny reason across a command's `&&`/`|`/`;`-separated segments, or null. Pure. `ctx` is passed to
- *  each `reason` call (carries `primaryCwd` for the #2302 rule and `staleBehind` for the #2323 rule). */
+ *  each `reason` call (carries `primaryCwd` for the #2302 rule, `staleBehind` for the #2323 rule, and
+ *  `foreignLiveLease` for the #2367 rule). */
 export function decide(command, ctx = {}) {
   if (!command) return null;
   for (const seg of String(command).split(/(?:&&|\|\||[;&|]|\n)+/)) {
@@ -193,15 +318,48 @@ function commitsBehindUpstream(cwd) {
   }
 }
 
+// #2367 — read a lane clone's lease marker (`.git/<LEASE_FILENAME>`, written by `lane-pool.mjs acquire`).
+// Impure (fs read); mirrors lane-pool.mjs's own `readLease` (kept separate — this side has no reason to
+// depend on the CLI-flags-shaped lane-pool.mjs module). A missing/corrupt marker is "no lease" — fail open.
+function readLaneLease(laneRoot) {
+  try {
+    const parsed = JSON.parse(readFileSync(join(laneRoot, '.git', LEASE_FILENAME), 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+// #2367 — is `cwd` (a lane clone about to run what LOOKS like a destructive git op) leased LIVE by ANOTHER
+// session? Impure (fs + env); the CLI only calls this when both are already true (isLaneCwd +
+// hasDestructiveLaneOp) so the cost is paid on a tiny slice of Bash calls. Stale/absent lease ⇒ false (allow).
+// Ownership is decided by the pure `isForeignLease` from the durable `ownerSession`/`mySessionId` session ids
+// ALONE (r2 removed the pid-ancestry fallback — it over-matched independent sessions sharing an upper ancestor).
+// Degraded (no ownerSession on the lease, or no session id here) ⇒ isForeignLease returns false ⇒ allow, the
+// documented fail-open. Returns true only for a genuine foreign hold.
+function isForeignLiveLease(cwd, mySessionId) {
+  const laneRoot = laneRootFromCwd(cwd);
+  if (!laneRoot) return false;
+  const lease = readLaneLease(laneRoot);
+  if (!lease || isLeaseStale(lease, Date.now())) return false;
+  return isForeignLease({ lease, mySessionId });
+}
+
 // ── CLI: read the PreToolUse event, emit a deny decision when blocked ──────────────────────────────────
 const IS_CLI = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (IS_CLI) {
   let cmd = '';
   let primaryCwd = false;
   let staleBehind = 0;
+  let foreignLiveLease = false;
   try {
     const ev = JSON.parse(readFileSync(0, 'utf8'));
     cmd = (ev.tool_input || {}).command || '';
+    // #2367 — the DURABLE session identity. Key on `CLAUDE_CODE_SESSION_ID` (env) FIRST — the SAME source
+    // `lane-pool.mjs acquire` stamps into the lease's `ownerSession`, so my own lease can never read as foreign
+    // due to a string-source mismatch (r2 correctness fix). The hook payload's `session_id` is only a secondary
+    // cross-check/fallback for the rare call where the env is unset. Used to tell my own lease from a peer's.
+    const mySessionId = process.env.CLAUDE_CODE_SESSION_ID || ev.session_id || null;
     // #2302 — the Bash cwd decides primary-vs-lane. Derive the constellation primary roots from THIS script's
     // location (<workspace>/<repo>/scripts/guard-bash.mjs) and realpath both sides so a symlinked workspace
     // still matches. Fail-OPEN (leave primaryCwd=false) on any error — a guard bug must never wedge the agent.
@@ -216,8 +374,11 @@ if (IS_CLI) {
     // #2323 — only pay for the git call when it could possibly matter: a lane cwd about to run a
     // backlog-mutation command. Every other Bash call (the overwhelming majority) skips it entirely.
     if (!primaryCwd && isLaneCwd(cwd) && isBacklogMutation(cmd)) staleBehind = commitsBehindUpstream(cwd);
+    // #2367 — only pay for the lease read + session-id compare when it could possibly matter: a lane cwd about
+    // to run something that LOOKS like a destructive git op. Every other Bash call skips it entirely.
+    if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) foreignLiveLease = isForeignLiveLease(cwd, mySessionId);
   } catch { process.exit(0); }
-  const r = decide(cmd, { primaryCwd, staleBehind });
+  const r = decide(cmd, { primaryCwd, staleBehind, foreignLiveLease });
   if (r) {
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Blocked: ' + r },
