@@ -23,6 +23,9 @@ import {
   buildMandate,
   buildEditorMandate,
   deriveNegotiationOutcome,
+  REVIEW_DISPOSITIONS,
+  REVIEW_REASONS,
+  deriveReviewDisposition,
   buildPanelMandate,
   buildPanelFindings,
   derivePanelVerdict,
@@ -170,6 +173,43 @@ describe('deriveNegotiationOutcome (#2311)', () => {
 
   it('honors a caller-supplied roundCap instead of the default', () => {
     expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: 1, roundCap: 1 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+  });
+});
+
+describe('deriveReviewDisposition (#2285 — one reason→disposition derivation, all reviews)', () => {
+  it('gate-self converges to fix but NEVER auto-lands — a human gates the trust-chain edit', () => {
+    expect(deriveReviewDisposition({ reason: REVIEW_REASONS.GATE_SELF }))
+      .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
+  });
+
+  it('a plain sensitivity park converges AND may auto-land (today\'s agent-reviewable path)', () => {
+    for (const reason of [REVIEW_REASONS.BLAST_RADIUS, REVIEW_REASONS.SIZE, REVIEW_REASONS.DISMISSED_FINDINGS, REVIEW_REASONS.CROSS_REPO, REVIEW_REASONS.SAMPLING]) {
+      expect(deriveReviewDisposition({ reason })).toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
+    }
+  });
+
+  it('a deadlock reason hands straight to a human — no (re-)convergence', () => {
+    for (const reason of [REVIEW_REASONS.NON_CONVERGENCE, REVIEW_REASONS.MANDATE_CONFLICT]) {
+      expect(deriveReviewDisposition({ reason })).toEqual({ mode: REVIEW_DISPOSITIONS.HUMAN, autoLand: false });
+    }
+  });
+
+  it('strictest reason wins when several apply — deadlock beats gate-self beats plain', () => {
+    expect(deriveReviewDisposition({ reasons: [REVIEW_REASONS.BLAST_RADIUS, REVIEW_REASONS.GATE_SELF] }))
+      .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false }); // gate-self pins autoLand:false
+    expect(deriveReviewDisposition({ reasons: [REVIEW_REASONS.GATE_SELF, REVIEW_REASONS.NON_CONVERGENCE] }))
+      .toEqual({ mode: REVIEW_DISPOSITIONS.HUMAN, autoLand: false }); // deadlock wins outright
+  });
+
+  it('is exhaustive — every REVIEW_REASONS value derives a disposition (no unknown-reason throw)', () => {
+    for (const reason of Object.values(REVIEW_REASONS)) {
+      expect(() => deriveReviewDisposition({ reason })).not.toThrow();
+    }
+  });
+
+  it('throws on an unknown reason and on no reason at all (exhaustive discipline)', () => {
+    expect(() => deriveReviewDisposition({ reason: 'made-up' })).toThrow(/unknown reason/);
+    expect(() => deriveReviewDisposition({})).toThrow(/at least one reason/);
   });
 });
 
