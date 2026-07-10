@@ -115,9 +115,12 @@ import { extractManifestFromBody, manifestAuditLine, asItemId, repoKeyFromSlug, 
 // against cwd (the drain always runs from the target repo's root).
 const REVIEW_PARK_STATE_PATH = resolve(process.cwd(), '.claude/skills/drain/review-park-state.json');
 
-// #2414 — the local, machine-scoped REVIEWED-MANIFEST BASELINE the land-time tamper gate diffs a landing PR
-// against (see review-baseline-state.mjs for why losing this file fails SAFE — the PR re-captures a fresh
-// baseline and the gate fails open). Co-located with the park-state cache; resolved against cwd.
+// #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
+// landing PR against. Covers "edits after the drain first sees the ready-to-merge PR" (post-queue), NOT
+// everything since review. CACHE-LOSS is NOT a benign fail-safe: losing this file makes the gate fail OPEN AND
+// re-capture the current (possibly-tampered) body as the new trusted baseline — a durable bypass if the loss
+// races a tamper (see review-baseline-state.mjs's cache-loss residual). Co-located with the park-state cache;
+// resolved against cwd.
 const REVIEW_BASELINE_STATE_PATH = resolve(process.cwd(), '.claude/skills/drain/review-baseline-state.json');
 
 const argv = process.argv.slice(2);
@@ -1276,9 +1279,11 @@ function runCli() {
     // permanently stranded. Best-effort, tolerant read — a missing/corrupt file just starts every PR's clock now.
     let parkState = emptyParkState();
     try { parkState = parseParkState(readFileSync(REVIEW_PARK_STATE_PATH, 'utf8')); } catch { /* no file yet — fresh clocks */ }
-    // #2414 — the reviewed-manifest baseline store: captured first-seen below, diffed at land to catch a
-    // post-review body edit that WEAKENS the manifest (edit-DOWN or full STRIP). Tolerant read — a
-    // missing/corrupt file just means every PR re-captures a fresh baseline (the gate fails open).
+    // #2414 — the first-drain-sighting manifest baseline store: captured first-seen below, diffed at land to
+    // catch a post-queue body edit that WEAKENS the manifest (edit-DOWN or full STRIP). Tolerant read — a
+    // missing/corrupt file makes every PR re-capture from its CURRENT body; if that current body is already
+    // tampered (cache lost while a tamper is live), the gate both fails open AND launders the tampered values
+    // into the new baseline for all future passes (durable bypass, not a one-pass gap — see the module doc).
     let baselineState = emptyBaselineState();
     try { baselineState = parseBaselineState(readFileSync(REVIEW_BASELINE_STATE_PATH, 'utf8')); } catch { /* no file yet — fresh baselines */ }
     let baselineStateChanged = false;
@@ -1316,15 +1321,22 @@ function runCli() {
         } catch { /* signal-fetch miss → score on the manifest signals alone */ }
       }
       const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, prNum: Number(v.num), thresholds: SAMPLE_NTH ? { sampleNth: SAMPLE_NTH } : {} });
-      // #2414 — reviewed-manifest baseline gate. The manifest values (`v.hasManifest`/`dismissedFindings`/
-      // `crossRepo`/`blockedBy`) are re-read from the LIVE PR body every pass (readPrManifest), so we can
-      // capture what the drain FIRST saw and diff a later pass against it. #2415 records tamper-EVIDENCE into a
-      // durable comment, but its land stamp is gated on `c.hasManifest`, so a full manifest STRIP (block
-      // deleted → hasManifest false → "no manifest, always ready") slips through with NO record. Diffing the
-      // live manifest against the reviewed baseline GATES both the strip and the edit-DOWN uniformly, and —
-      // because the baseline is captured at review and checked at land regardless — without depending on a
-      // prior park having fired. First-seen-wins (recordBaseline keeps the honest first capture); the diff
-      // flags ONLY the escalation-WEAKENING direction, so an honest strengthening edit never blocks a land.
+      // #2414 — first-drain-sighting manifest baseline gate. The manifest values (`v.hasManifest`/
+      // `dismissedFindings`/`crossRepo`/`blockedBy`) are re-read from the LIVE PR body every pass
+      // (readPrManifest), so we can capture what the drain FIRST saw for a ready-to-merge PR and diff a later
+      // pass against it. #2415 records tamper-EVIDENCE into a durable comment, but its land stamp is gated on
+      // `c.hasManifest`, so a full manifest STRIP (block deleted → hasManifest false → "no manifest, always
+      // ready") slips through with NO record. Diffing the live manifest against the first-sighting baseline
+      // GATES both the strip and the edit-DOWN uniformly, and — because the baseline is captured at first
+      // sighting and checked at land regardless — without depending on a prior park having fired. First-seen-
+      // wins (recordBaseline keeps the honest first capture); the diff flags ONLY the escalation-WEAKENING
+      // direction, so an honest strengthening edit never blocks a land.
+      // COVERAGE (honest): this is a POST-QUEUE window, not a from-review guarantee. A manifest weakened BEFORE
+      // the PR reached ready-to-merge is captured here in its already-weak form and becomes the trusted baseline
+      // — the gate is a no-op for that PR. And if the local cache is lost while a tamper is live, `priorBaseline`
+      // is null so the tampered body is (re-)captured as the baseline AND the diff fails open — a durable
+      // bypass. The same code path can't tell a cache-loss re-sighting from a genuine first sighting without a
+      // durable per-PR signal, so it is not defended here (see review-baseline-state.mjs's cache-loss residual).
       const liveManifestValues = { hasManifest: !!v.hasManifest, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, blockedBy: v.blockedBy };
       const priorBaseline = getBaseline(baselineState, { repo: v.repo, num: v.num });
       if (!priorBaseline && !DRY_RUN) {
@@ -1436,8 +1448,10 @@ function runCli() {
       }
     }
     if (parkStateChanged && !DRY_RUN) { try { writeFileSync(REVIEW_PARK_STATE_PATH, serializeParkState(parkState)); } catch { /* best-effort local cache — a write miss just re-parks fresh next pass */ } }
-    // #2414 — persist the reviewed-manifest baselines captured this pass. Best-effort local cache — a write
-    // miss just means each PR re-captures a fresh baseline next pass (the gate fails open, the accepted residual).
+    // #2414 — persist the first-drain-sighting baselines captured this pass. Best-effort local cache — but a
+    // write miss is NOT a benign "re-capture fresh next pass": if the miss drops an honest baseline while a
+    // tamper is live, next pass re-captures the tampered body as the trusted baseline AND the gate fails open
+    // (durable bypass, not a one-pass gap — see review-baseline-state.mjs's cache-loss residual).
     if (baselineStateChanged && !DRY_RUN) { try { writeFileSync(REVIEW_BASELINE_STATE_PATH, serializeBaselineState(baselineState)); } catch { /* best-effort local cache */ } }
   }
 
@@ -1503,10 +1517,12 @@ function runCli() {
           // never throws), so it can neither block nor alter the merge below — it only records.
           // NOTE: this land stamp fires only under `c.hasManifest`, so on its own it records the edit-a-value-DOWN
           // variant but NOT a full manifest STRIP (deleting the whole block flips `hasManifest` false → no land
-          // record). #2414 closes that: the escalation loop above diffs each candidate's LIVE manifest against the
-          // reviewed BASELINE (captured first-seen) and RE-PARKS a landing PR whose manifest was weakened — a
-          // stripped manifest OR an edit-down — BEFORE it reaches this cascade. So a tampered PR is already `skip`
-          // here; this stamp remains the durable acted-on record for the honest manifest PRs that do land.
+          // record). #2414 narrows that: the escalation loop above diffs each candidate's LIVE manifest against
+          // the FIRST-DRAIN-SIGHTING baseline (captured first-seen, post-queue) and RE-PARKS a landing PR whose
+          // manifest was weakened — a stripped manifest OR an edit-down — BEFORE it reaches this cascade. So a
+          // tampered PR seen intact at first sighting is already `skip` here; this stamp remains the durable
+          // acted-on record for the honest manifest PRs that do land. (Residual: a manifest already weak at first
+          // sighting, or a local baseline-cache loss racing a tamper, is NOT caught — see #2414's cache-loss doc.)
           if (c.hasManifest) {
             const posted = postDrainReasonComment(c.repo, c.num, 'land', LAND_REASON, auditLineFor(c));
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} acted-on manifest values stamped on PR before merge\n`);

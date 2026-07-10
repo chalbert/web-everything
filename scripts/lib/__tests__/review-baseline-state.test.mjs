@@ -1,7 +1,10 @@
 /**
- * @file review-baseline-state.test.mjs — proof of the #2414 reviewed-manifest baseline: the durable capture
- *   of the escalation-sensitive manifest values the drain FIRST saw, and the land-time diff that refuses a
- *   PR whose LIVE manifest was WEAKENED after review (a value edited down, or a stripped manifest).
+ * @file review-baseline-state.test.mjs — proof of the #2414 first-drain-sighting manifest baseline: the
+ *   durable capture of the escalation-sensitive manifest values the drain FIRST saw for a ready-to-merge PR
+ *   (post-queue), and the land-time diff that refuses a PR whose LIVE manifest was WEAKENED after that first
+ *   sighting (a value edited down, or a stripped manifest). NOTE the cache-loss residual proven below: a null
+ *   baseline fails OPEN, and the CLI's paired recordBaseline re-captures the live body — so losing the cache
+ *   while a tamper is live durably re-baselines to the tampered values (a bypass, not a one-pass gap).
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -89,7 +92,7 @@ describe('clearBaseline', () => {
 });
 
 describe('diffBaseline — flags ONLY weakening (escalation-suppressing) edits', () => {
-  it('no baseline → not tampered (fails OPEN — the accepted residual)', () => {
+  it('no baseline → not tampered (fails OPEN — the cache-loss residual, NOT a benign transient)', () => {
     expect(diffBaseline(null, vals())).toEqual({ tampered: false, reasons: [] });
   });
   it('identical live values → not tampered', () => {
@@ -134,5 +137,35 @@ describe('diffBaseline — flags ONLY weakening (escalation-suppressing) edits',
   });
   it('a manifest ADDED where the baseline had none is not weakening', () => {
     expect(diffBaseline(vals({ hasManifest: false }), vals({ hasManifest: true })).tampered).toBe(false);
+  });
+});
+
+// Finding A (PR #394 review) — pin the DURABLE cache-loss bypass so the trust-chain file proves the residual
+// rather than hiding it behind a "re-captures a fresh baseline" undersell. This models the CLI sequence in
+// merge-ai-prs.mjs (getBaseline → if null, recordBaseline(live) → diffBaseline(prior, live)) after the local
+// cache is lost while a tamper is live. It is NOT desired behaviour — it documents an ACCEPTED, not-cleanly-
+// closable residual (see review-baseline-state.mjs's module doc). If a future change defends cache loss, this
+// test should flip, not be deleted.
+describe('cache-loss residual — a lost baseline durably re-baselines to the tampered values (Finding A)', () => {
+  it('honest capture then cache loss then land: the tampered body is re-captured AND passes the diff', () => {
+    // 1) Honest first sighting captured dismissedFindings=3 (later persisted to the local cache).
+    const honest = recordBaseline(emptyBaselineState(), { repo: 'org/we', num: 110 }, vals({ dismissedFindings: 3 }));
+    expect(getBaseline(honest, { repo: 'org/we', num: 110 }).dismissedFindings).toBe(3);
+
+    // 2) The local cache file is LOST (empty state) and, meanwhile, the PR body is edited DOWN to 0.
+    const afterLoss = emptyBaselineState();
+    const tamperedLive = vals({ dismissedFindings: 0 });
+    const priorBaseline = getBaseline(afterLoss, { repo: 'org/we', num: 110 }); // null — cache is gone
+    expect(priorBaseline).toBeNull();
+
+    // 3) The land pass fails OPEN — the tamper is NOT flagged...
+    expect(diffBaseline(priorBaseline, tamperedLive)).toEqual({ tampered: false, reasons: [] });
+
+    // 4) ...AND recordBaseline (fired by the CLI on the null read) now trusts the tampered values as the NEW
+    //    baseline — so it durably launders the tamper for every future pass, not just this one.
+    const relaunder = recordBaseline(afterLoss, { repo: 'org/we', num: 110 }, tamperedLive);
+    expect(getBaseline(relaunder, { repo: 'org/we', num: 110 }).dismissedFindings).toBe(0);
+    // A subsequent pass reading the (still-tampered) body against this poisoned baseline sees no mismatch.
+    expect(diffBaseline(getBaseline(relaunder, { repo: 'org/we', num: 110 }), tamperedLive).tampered).toBe(false);
   });
 });

@@ -1,8 +1,15 @@
 /**
  * @file scripts/lib/review-baseline-state.mjs
- * @description The durable REVIEWED-MANIFEST BASELINE the #2414 land-time tamper gate diffs a landing PR
+ * @description The FIRST-DRAIN-SIGHTING manifest baseline the #2414 land-time tamper gate diffs a landing PR
  *   against — the escalation-sensitive manifest values (`hasManifest` bit, `dismissedFindings`, `crossRepo`,
  *   `blockedBy`) as the drain FIRST saw them, so a later body edit that WEAKENS them is caught at land.
+ *
+ * NAMING / COVERAGE (be honest — this is a trust-chain file): the baseline is captured the FIRST pass the drain
+ * builds a merge verdict for a READY-TO-MERGE PR — i.e. POST-QUEUE, not "at review". So the honest coverage is
+ * "edits made AFTER the drain first sees the ready-to-merge PR", NOT "everything since review". A producer who
+ * weakens the manifest BEFORE the PR reaches `ready-to-merge` has that ALREADY-WEAK value captured as the
+ * trusted baseline — for that PR the gate is a permanent no-op (it can only catch a further weakening from the
+ * already-weak floor). This gate narrows the post-queue tamper window; it is NOT a from-review guarantee.
  *
  * WHY (#2414, follow-up to #2415/PR #375): the manifest rides the editable PR BODY, not the reviewed
  * commit-set. #2415 records the acted-on values into a durable, timestamped `gh pr comment` at each
@@ -12,11 +19,11 @@
  * record is written — a full STRIP is stealthier than the modeled edit-DOWN and slips the #2415 evidence net.
  *
  * This module upgrades the evidence toward a GATE: the drain captures the manifest values the FIRST pass it
- * reviews a candidate (first-seen-wins, so it does NOT depend on a prior park having fired), and at land — for
- * EVERY landing PR — diffs the LIVE manifest against that baseline BEFORE merge. A WEAKENING mismatch (a value
- * edited DOWN to suppress escalation, OR the manifest now absent when the baseline had one) refuses the
- * auto-land and re-parks for a fresh look. Because the baseline is captured at review and the check runs at
- * land regardless of a prior park, this catches the STRIP and the edit-DOWN uniformly.
+ * builds a verdict for a candidate (first-seen-wins, so it does NOT depend on a prior park having fired), and
+ * at land — for EVERY landing PR — diffs the LIVE manifest against that baseline BEFORE merge. A WEAKENING
+ * mismatch (a value edited DOWN to suppress escalation, OR the manifest now absent when the baseline had one)
+ * refuses the auto-land and re-parks for a fresh look. Because the baseline is captured at first sighting and
+ * the check runs at land regardless of a prior park, this catches the STRIP and the edit-DOWN uniformly.
  *
  * ONLY the weakening direction is flagged (fewer dismissed findings, crossRepo cleared, a dropped blocker, a
  * stripped manifest) — a STRENGTHENING edit (more scrutiny: added blocker, raised dismissedFindings, crossRepo
@@ -26,11 +33,23 @@
  *
  * PURE — no fs, no `Date` reads (mirrors review-park-state.mjs). The CLI (`merge-ai-prs.mjs`) owns the fs
  * boundary: it reads the state file (tolerantly — a missing/corrupt file degrades to empty, never breaking the
- * drain), calls these functions, and writes the result back. Local, machine-scoped, best-effort: losing the
- * file just drops the baseline for PRs seen only on this machine, so the gate FAILS OPEN (that PR re-captures a
- * fresh baseline from its current body) — the accepted residual, matching the sibling gates (an actor who edits
+ * drain), calls these functions, and writes the result back. Local, machine-scoped, best-effort.
+ *
+ * KNOWN RESIDUAL — cache loss is a DURABLE bypass, not a transient gap (be precise): losing this file drops the
+ * baseline for PRs seen only on this machine. On the next pass `getBaseline` returns `null`, so `diffBaseline`
+ * fails OPEN (that PR passes the gate) AND `recordBaseline` immediately RE-CAPTURES the current — possibly
+ * already-tampered — live body as the NEW first-seen baseline. So if a cache loss coincides with a tamper, the
+ * gate does not merely miss it for one pass: it re-baselines to the tampered values and TRUSTS them for every
+ * future pass. This is a durable silent bypass, not a one-pass window. It is not cleanly closable here without a
+ * durable per-PR signal: the same code path can't tell a cache-loss re-sighting apart from a genuine first
+ * sighting (the sibling park-state cache is co-located and lost with it), and the only durable trace — #2415's
+ * `gh pr comment` audit line — exists for just a subset of prior sightings (non-human parks, skips, land
+ * stamps; absent for dependency/check-held candidates and for `review:human` parks). Gating on it would also
+ * break the deliberate "safe to delete" property below (a legitimate cache wipe would mass-re-park every PR
+ * that ever got a drain comment). So this residual is accepted, matching the sibling gates (an actor who edits
  * AND deletes the baseline together is not defeated). PR numbers are monotonic, so a merged PR's dead entry can
- * never match a future PR; the file is safe to delete.
+ * never match a future PR; the file is safe to delete — but understand that a delete that races a live tamper
+ * launders it into the new baseline as above.
  */
 
 /** A fresh, empty baseline-state (no file yet, or an unreadable one). */
@@ -81,11 +100,14 @@ export function serializeBaselineState(state) {
   return JSON.stringify(
     {
       _doc:
-        "The #2414 reviewed-manifest baseline. Records the escalation-sensitive manifest values " +
-        "(hasManifest/dismissedFindings/crossRepo/blockedBy) the drain FIRST saw for each PR, so the land-time " +
-        "tamper gate can diff a landing PR's LIVE manifest against them and refuse+re-park on a WEAKENING edit " +
-        "(a value edited down to suppress escalation, OR a stripped manifest). Local, machine-scoped, " +
-        "best-effort — safe to delete (a PR just re-captures a fresh baseline; the gate fails open).",
+        "The #2414 first-drain-sighting manifest baseline. Records the escalation-sensitive manifest values " +
+        "(hasManifest/dismissedFindings/crossRepo/blockedBy) the drain FIRST saw for each ready-to-merge PR " +
+        "(post-queue — NOT everything since review), so the land-time tamper gate can diff a landing PR's LIVE " +
+        "manifest against them and refuse+re-park on a WEAKENING edit (a value edited down to suppress " +
+        "escalation, OR a stripped manifest). Local, machine-scoped, best-effort. CACHE-LOSS CAVEAT: deleting " +
+        "this file does not just re-capture a fresh baseline harmlessly — if the delete races a live tamper, " +
+        "the gate fails OPEN for that PR AND re-captures the tampered values as the new trusted baseline for " +
+        "all future passes (a durable bypass, not a one-pass gap).",
       baselines: (state?.baselines ?? []).map(({ repo, num, values }) => ({ repo, num, values })),
     },
     null,
@@ -93,8 +115,10 @@ export function serializeBaselineState(state) {
   ) + '\n';
 }
 
-/** The recorded baseline values for `(repo, num)`, or `null` if it isn't tracked (never reviewed on this
- *  machine, or the file was lost). Pure read — `null` is what makes the land gate fail OPEN. */
+/** The recorded baseline values for `(repo, num)`, or `null` if it isn't tracked (never seen on this machine,
+ *  or the file was lost). Pure read — `null` is what makes the land gate fail OPEN, AND (paired with
+ *  `recordBaseline` in the CLI) re-capture the current live body as the new baseline: a cache loss that races a
+ *  tamper is therefore a DURABLE bypass, not a transient gap (see the module doc's cache-loss residual). */
 export function getBaseline(state, { repo, num }) {
   const k = baselineKey(repo, num);
   const entry = (state?.baselines ?? []).find((b) => b.key === k);
@@ -102,10 +126,13 @@ export function getBaseline(state, { repo, num }) {
 }
 
 /**
- * Capture the reviewed baseline for `(repo, num)` from the values the drain saw this pass. FIRST-SEEN-WINS,
- * idempotent: a PR already tracked KEEPS its original baseline — a later pass reading an already-tampered body
- * must NOT overwrite the honest baseline, or the edit-DOWN would silently become the new "reviewed" truth.
- * Pure — returns new state (same reference when already tracked, so the CLI can skip a needless file write).
+ * Capture the first-drain-sighting baseline for `(repo, num)` from the values the drain saw this pass.
+ * FIRST-SEEN-WINS, idempotent: a PR already tracked KEEPS its original baseline — a later pass reading an
+ * already-tampered body must NOT overwrite the honest baseline, or the edit-DOWN would silently become the new
+ * trusted truth. Pure — returns new state (same reference when already tracked, so the CLI can skip a needless
+ * file write). NOTE the flip side of first-seen-wins: if the local cache was LOST, `getBaseline` returns null
+ * so this "first" capture stores whatever the body says NOW — including a live tamper — as the new trusted
+ * baseline. That is the durable cache-loss bypass documented in the module doc; it is not defended here.
  */
 export function recordBaseline(state, { repo, num }, values) {
   const k = baselineKey(repo, num);
@@ -116,7 +143,7 @@ export function recordBaseline(state, { repo, num }, values) {
 
 /** Clear the baseline for `(repo, num)`. Pure, idempotent (same reference when nothing tracked). Exposed for
  *  callers that want to prune a settled PR; the drain does NOT call it on a gate-clear (the baseline must
- *  OUTLIVE the honest review to catch a LATER edit-down) — dead entries for merged PRs are harmless. */
+ *  OUTLIVE the first sighting to catch a LATER edit-down) — dead entries for merged PRs are harmless. */
 export function clearBaseline(state, { repo, num }) {
   const k = baselineKey(repo, num);
   const baselines = state?.baselines ?? [];
@@ -125,11 +152,13 @@ export function clearBaseline(state, { repo, num }) {
 }
 
 /**
- * Diff a landing PR's LIVE manifest values against the reviewed `baseline`. Pure. Returns
+ * Diff a landing PR's LIVE manifest values against the first-drain-sighting `baseline`. Pure. Returns
  * `{ tampered:boolean, reasons:string[] }` — `tampered` true iff any WEAKENING (escalation-suppressing) edit
- * is found. No baseline (never reviewed here, or the file was lost) → `{ tampered:false, reasons:[] }` (fails
- * OPEN, the accepted residual). Weakening cases, in the direction that LOWERS review scrutiny:
- *   • manifest STRIPPED — present at review, absent at land (`hasManifest` flipped false so the PR degrades to
+ * is found. No baseline (never seen here, or the file was lost) → `{ tampered:false, reasons:[] }` — fails
+ * OPEN. This is NOT a benign transient: paired with `recordBaseline` the same null re-captures the live body as
+ * the new baseline, so a cache loss that races a tamper durably launders the tampered values into the trusted
+ * baseline (see the module doc's cache-loss residual). Weakening cases, in the direction that LOWERS scrutiny:
+ *   • manifest STRIPPED — present at first drain sighting, absent at land (`hasManifest` flipped false so the PR degrades to
  *     always-ready). This is the whole reason #2415's `c.hasManifest`-gated land stamp misses a full strip; a
  *     strip zeroes every other field, so it is reported alone.
  *   • dismissedFindings edited DOWN — fewer dismissed findings ⇒ the `dismissed` escalation signal is weaker
@@ -146,7 +175,7 @@ export function diffBaseline(baseline, liveRaw) {
   const live = normalizeValues(liveRaw);
   const reasons = [];
   if (baseline.hasManifest && !live.hasManifest) {
-    reasons.push('manifest STRIPPED (present at review, absent at land — the PR would degrade to always-ready)');
+    reasons.push('manifest STRIPPED (present at first drain sighting, absent at land — the PR would degrade to always-ready)');
     return { tampered: true, reasons };
   }
   if (live.dismissedFindings < baseline.dismissedFindings) {
