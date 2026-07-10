@@ -60,9 +60,31 @@ export function chooseFreeLane(laneInfos, nowMs, ttlMs) {
   return eligible.length ? eligible[0].lane : null;
 }
 
-/** Build a lease marker object. Caller stamps `acquiredAt` (ISO) so this stays clock-free / testable. */
-export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid }) {
-  return { session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null, pid: pid ?? null };
+/** Build a lease marker object. Caller stamps `acquiredAt` (ISO) so this stays clock-free / testable.
+ *  `pid` is informational only (the acquiring process's own pid, for human-readable `status`/debug output —
+ *  it is a leaf that exits right after `acquire` returns, so it is NEVER useful for an ownership test).
+ *  `ancestry` (#2367) is the array `pid-ancestry.mjs#getAncestryPids` captured AT ACQUIRE TIME, walking up
+ *  from the acquiring process — the actual ownership signal `ancestryOverlaps` compares against. */
+export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ancestry }) {
+  return { session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null, pid: pid ?? null, ancestry: ancestry ?? null };
+}
+
+/**
+ * Do `mine` and `lease`'s recorded ancestry share ANY pid? Pure overlap test — the #2367 ownership decision
+ * ("my lease" vs "another live leaseholder") WITHOUT a session-id. A single scalar pid comparison does not
+ * survive separate shell invocations (each Bash-tool call gets a fresh wrapper pid, a leaf that dies before
+ * any later call runs); a full ancestry-CHAIN overlap does, because both chains converge on the one process
+ * common to both moments — the session's own long-lived anchor — regardless of how many short-lived wrapper
+ * shells sit in between. `lease.pid` (informational-only, see `leaseBody`) is folded in as a last-resort
+ * single-value fallback so an OLDER lease (acquired before `ancestry` existed) still gets a best-effort
+ * check rather than silently no-oping forever.
+ */
+export function ancestryOverlaps(mine, lease) {
+  if (!Array.isArray(mine) || mine.length === 0 || !lease) return false;
+  const theirs = Array.isArray(lease.ancestry) && lease.ancestry.length ? lease.ancestry : (lease.pid ? [lease.pid] : []);
+  if (theirs.length === 0) return false;
+  const set = new Set(mine.map(Number));
+  return theirs.some((p) => set.has(Number(p)));
 }
 
 /** One-line human description of a lease for `status` output. */
