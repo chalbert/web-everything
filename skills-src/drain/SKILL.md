@@ -203,7 +203,7 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
 > escalation rubric off for EVERY candidate in that pass, so a fresh PR with no `review:*` label yet (even a
 > gate-self diff) would merge unscored. Only run it when the stuck `review:pending` PR is the ONLY unlabelled
 > candidate: scope the pass (`--this-repo`, a narrow `--label`) and confirm with `--dry-run` that the plan is
-> that one PR first. A per-PR override flag is future work. Landing unreviewed code on a clock is never the
+> that one PR first. A per-PR override is tracked as backlog item #x2u9e9d. Landing unreviewed code on a clock is never the
 > drain's failure mode.
 
 - **`gate-self` (`humanRequired: true`) → `{ mode: converge, autoLand: false }`.** The diff edits the **auto-review

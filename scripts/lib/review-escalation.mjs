@@ -150,10 +150,11 @@ export function scoreEscalation({
  * #2307 — the deterministic review label the PRODUCER (`pr-land.mjs`) applies at PR-OPEN, from the SAME
  * `scoreEscalation` verdict the drain scores later — so a PR that will need review carries `review:human` /
  * `review:pending` from the start, never only after a drain happens to sweep it (#2281's rule applied to the
- * review dimension). Pure — a producer-time simplification of `decideReviewGate`: at open there is no prior
- * park state / reviewer verdict / timeout to weigh yet (nothing has been parked), so the outcome collapses to
- * the rubric's own escalate/humanRequired verdict. `null` means no review label to apply (a plain `merge`
- * PR — `ready-to-merge` alone is enough).
+ * review dimension). Pure — a producer-time simplification of `decideReviewGate`: besides the fresh rubric
+ * score, the ONLY other input that gate weighs is the PR's observed `review:*` labels (a reviewer verdict, or
+ * the sticky `review:human` gate), and at open none exist yet — so the outcome collapses to the rubric's own
+ * escalate/humanRequired verdict. `null` means no review label to apply (a plain `merge` PR —
+ * `ready-to-merge` alone is enough).
  * @param {{escalate:boolean, humanRequired?:boolean}} score
  * @returns {string|null}
  */
