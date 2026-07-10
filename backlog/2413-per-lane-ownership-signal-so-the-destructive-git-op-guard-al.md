@@ -1,5 +1,5 @@
 ---
-kind: story
+kind: decision
 size: 5
 status: open
 dateOpened: "2026-07-10"
@@ -28,6 +28,19 @@ The absent-lease gap above is the primary cause. There is also a **secondary** p
 - Process-ancestry over-matches: siblings share the orchestrator ancestor, so an ancestry test reads every sibling as the owner (that was the original fail-open the #2367 PR removed).
 
 So the fix needs **both** a stamped per-lane lease **and** a unique per-lane identity on it — one without the other still leaves siblings indistinguishable.
+
+## Verified 2026-07-10 (batch lane, dropped as outgrew) — a per-lane stamp alone breaks the OWNER
+
+Stamping a per-lane `ownerSession` alone doesn't just under-protect — it breaks the OWNING lane's own ops,
+failing acceptance #2. [we:scripts/guard-bash.mjs](scripts/guard-bash.mjs) reads `mySessionId` from
+`CLAUDE_CODE_SESSION_ID` (env) first, `ev.session_id` only as fallback (`we:scripts/guard-bash.mjs:362`).
+Under the parallel topology every sibling's Bash call inherits the SAME shared env id. So once dispatch stamps
+a unique per-lane `ownerSession` (e.g. `A1`), `isForeignLease` compares it to the still-shared `mySessionId` —
+never equal — and denies EVERY actor, including the lane's rightful owner. The missing piece is a
+per-lane-readable identity on the READ side (`mySessionId`), not only a per-lane stamp on the lease; no such
+channel exists today. That makes this an open design question (survey candidate identity channels — e.g. a
+lane-local marker file the guard reads from the op's cwd, a per-lane env injection at agent spawn, or
+hook-payload session ids), not a mechanical build — hence the retype story→decision.
 
 ## What's needed — the design decision
 
