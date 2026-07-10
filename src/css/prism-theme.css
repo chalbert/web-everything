@@ -53,7 +53,10 @@ pre {
 .token.prolog,
 .token.doctype,
 .token.cdata {
-	color: #5c6370;
+	/* Lightened from One Dark's #5c6370 (2.32:1 on the #282c34 pre background — fails WCAG AA) to
+	   #949eab (5.16:1) so code-comment tokens clear the 4.5:1 normal-text threshold; same rationale
+	   as the inline-code color fix above (#793, #2376). */
+	color: #949eab;
 }
 
 .token.punctuation {
