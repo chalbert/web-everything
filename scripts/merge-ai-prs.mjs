@@ -91,7 +91,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve, join, dirname } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
-import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel } from './lib/review-escalation.mjs';
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel } from './lib/review-escalation.mjs';
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
 import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs';
@@ -896,6 +896,34 @@ function runCli() {
         if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} rebased onto main${r.dropped ? ' (manifest dropped)' : ''}${healTag}${cloneDir ? ` (via ${cloneDir})` : ''} → ${r.newCommit.slice(0, 9)}\n`);
       } else if (!AS_JSON) {
         process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} left skipped: ${r.reason}\n`);
+      }
+    }
+  }
+
+  // #2366 — CONCURRENT-LANDER BACKSTOP. The bare `/merge` orphan sweep never runs the `REVIEW_ESCALATION` pass
+  // below (that pass is `--label`-gated), so without this it would happily merge a PR a label-scoped `/drain`
+  // pass already parked under `review:pending`/`review:human`, or bounced under `review:changes` — the race
+  // that shipped plateau#11 and web-everything#290 before their review panels' verdicts landed. Only fires when
+  // this pass ISN'T already running the full rubric (`decideReviewGate` re-derives the correct verdict itself,
+  // incl. the merge-anyway timeout override — double-gating here would wrongly strand a timed-out PR forever).
+  //
+  // The `!REVIEW_ESCALATION` gate catches TWO invocations, and they get DIFFERENT refusals (see
+  // `hasUnclearedReviewLabel`'s `allowPending`): the truly-bare sweep (no `--label`) has no verdict owner, so it
+  // refuses every un-cleared label (`allowPending: false`); a `--label --no-review-escalation` run is the
+  // operator deliberately waiving escalation to push a green-but-parked `review:pending` PR through (#2262's
+  // documented manual override), so it honors that on `review:pending` (`allowPending: true`) but STILL refuses
+  // `review:human` (human-only, never waivable — #2285) and `review:changes` (reviewer rejected). A blunt gate
+  // that refused all three under the override would strand the very PR the operator invoked the flag to land;
+  // one that relaxed all three would let an un-reviewed gate-self edit merge — both are wrong.
+  if (!REVIEW_ESCALATION) {
+    const allowPending = !!label; // `--label ... --no-review-escalation`: explicit operator override, honor review:pending
+    for (const v of verdicts) {
+      if (v.decision !== 'merge') continue;
+      if (hasUnclearedReviewLabel(v.prLabels, { allowPending })) {
+        v.decision = 'skip';
+        v.reason = allowPending
+          ? 'review:human/review:changes not cleared — refusing to merge even under --no-review-escalation (human-only / reviewer-rejected, #2366)'
+          : 'review-escalation label not cleared (review:pending/review:human/review:changes present without review:accepted) — refusing to merge (#2366)';
       }
     }
   }
