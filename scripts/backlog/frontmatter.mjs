@@ -207,3 +207,27 @@ export function applyTransition(content, verb, { today, graduatedTo, codifiedTo,
   }
   return { error: `unknown verb "${verb}"` };
 }
+
+/**
+ * settle — publish a born-active scaffold (`scaffold --session=<slug>`) to `status: open` once its
+ * digest+edges+body are authored: active → open, stripping the session-ownership stamps
+ * (`scaffoldedBy`/`dateScaffolded`). Only legal from a scaffold that actually carries `scaffoldedBy` — a
+ * normally-claimed item is closed by `applyTransition(…, 'resolve', …)`, not this. Extracted out of
+ * `scripts/backlog.mjs#settle` (and no longer duplicated in `scripts/mine-golden-corpus.mjs`'s
+ * self-validation replay) so there is exactly one implementation the CLI, the corpus miner, and the
+ * Tier-A snapshot harness (#2273) all call — a single source of truth immune to two-copy drift.
+ *
+ * PURE — same contract as `applyTransition`: no fs, no process, no `Date`.
+ *
+ * @param {string} content
+ * @returns {{ content: string } | { error: string }}
+ */
+export function applySettle(content) {
+  if (!/^scaffoldedBy:/m.test(content))
+    return { error: 'not a born-active scaffold (no scaffoldedBy) — a claimed item is closed by resolve, not settle' };
+  const next = content
+    .replace(/^status: active$/m, 'status: open')
+    .replace(/^scaffoldedBy: .*\n/m, '')
+    .replace(/^dateScaffolded: .*\n/m, '');
+  return { content: next };
+}
