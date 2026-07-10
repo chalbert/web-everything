@@ -1,5 +1,5 @@
 {
   "term": "Message Function",
-  "definition": "A resolved message represented as <code>(params?) =&amp;gt; string</code> — a function that formats a message with the given parameters using native <code>Intl</code>. The common shape for runtime (MF2) and compile-time (tree-shaken) messages alike.",
+  "definition": "A resolved message represented as <code>(params?) =&gt; string</code> — a function that formats a message with the given parameters using native <code>Intl</code>. The common shape for runtime (MF2) and compile-time (tree-shaken) messages alike.",
   "usage": "Returned by <code>CustomTranslationProvider.resolve()</code>; typed as <code>MessageFn</code>."
 }

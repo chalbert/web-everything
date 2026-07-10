@@ -1,5 +1,5 @@
 {
   "term": "Customizable Select (appearance: base-select)",
-  "definition": "The native customizable select (appearance: base-select) that lets author markup and CSS style the options list, the picker, and the selected-value rendering of a real &amp;lt;select&amp;gt; while keeping its built-in accessibility and form behavior.",
+  "definition": "The native customizable select (appearance: base-select) that lets author markup and CSS style the options list, the picker, and the selected-value rendering of a real <select> while keeping its built-in accessibility and form behavior.",
   "usage": "Resolved native-first via the capabilityMatrix as the substrate for the droplist / dropdown family; a composed listbox+popover overlay is the polyfill fallback."
 }

@@ -1,5 +1,5 @@
 {
   "term": "Declarative Shadow DOM",
-  "definition": "The <code>&amp;lt;template shadowrootmode&amp;gt;</code> pattern that allows shadow DOM content to be included in server-rendered HTML and parsed by the browser without JavaScript.",
+  "definition": "The <code>&lt;template shadowrootmode&gt;</code> pattern that allows shadow DOM content to be included in server-rendered HTML and parsed by the browser without JavaScript.",
   "usage": "Used by Web Components SSR Contract for custom elements with shadow DOM."
 }
