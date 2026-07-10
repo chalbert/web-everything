@@ -7,20 +7,24 @@ dateOpened: "2026-07-10"
 tags: [drain, numbering, lane-pool, bug]
 ---
 
-# JIT numbering strands a hash when the drain lands from an ATTACHED lane-pool branch (not just a detached HEAD)
+# JIT numbering strands a hash when the drain lands from a lane left on a STALE `lane/*` branch
 
-#2348 closed the JIT-numbering strand for a **detached** cwd (`resyncDetachedCwdForLand` in `we:scripts/merge-ai-prs.mjs` `checkout --detach origin/main` before `numberPendingHashes`, so its `push origin HEAD:main` fast-forwards). But it fires **only when cwd is detached** — an attached branch is left on the warn-only path. A **lane-pool lease (`we:scripts/lane-pool.mjs`) comes up ATTACHED** (its `reset --hard` keeps HEAD on `main`, or on a leftover `lane/*` branch from a prior rebase-drop), so the resync never fires and the hash strands again — on a route #2348 doesn't cover.
+When `/pr`'s single-couple drain lands a **hash-born** item from a pool lane whose HEAD sits on a **stale `lane/*` branch** (not cleanly on `main`), the post-merge sync can't reach the just-merged tip, so `numberPendingHashes` (`we:scripts/lane-drain.mjs`) commits the hash→NNN on the **wrong parent** and its `git push origin HEAD:main` is a silent non-ff — the item lands on `main` **still hash-keyed**. #2348 fixed this for a **detached** cwd (`resyncDetachedCwdForLand` `checkout --detach origin/main` before numbering); it does **not** rescue a lane attached to a stale `lane/*` branch, so the strand recurs on that route.
 
-**Repro (this session, 2026-07-10):** a hash-born epic (`xq5aks4`) landed via `/pr` → single-couple drain (`merge-ai-prs --only=388`) from a leased pool lane sitting on a stale attached `lane/file-2417` branch. It merged as PR #388 but landed on `origin/main` **still hash-keyed**; `numberPendingHashes` committed `xq5aks4→#2418` locally on the pre-merge tip and its `git push origin HEAD:main` was a silent non-ff — the same strand. Recovery was manual: reset the lane to `origin/main`, re-run `numberPendingHashes`, and `MAIN_PUSH_OK=1 git push origin HEAD:main` by hand (→ #2418). The manual override push is the exact "not through the drain" bypass we want to eliminate.
+**A/B evidence (this session, 2026-07-10) — the disambiguator:**
+- **#2418 STRANDED.** Hash-born epic `xq5aks4` landed via `merge-ai-prs --only=388` from lane-3, which was sitting on a leftover `lane/file-2417` branch (from an earlier drain's rebase-drop). Post-merge `pull --ff-only` couldn't advance, numbering committed on the pre-merge tip, push was a silent non-ff → landed hash-keyed. Manual recovery: `git reset --hard origin/main` + re-run `numberPendingHashes` + `MAIN_PUSH_OK=1 git push origin HEAD:main` (→ #2418). That override push is the "not through the drain" bypass to eliminate.
+- **#2419 numbered CLEANLY.** Filing *this very item* landed `x1m25ov→#2419` from lane-5, which was freshly, cleanly attached to `main` at `origin/main`. Post-merge `pull --ff-only` fast-forwarded, numbering ran on the merged tip, ff-push succeeded — **no manual step**.
 
-**Two coupled causes:**
-1. **`resyncDetachedCwdForLand` is detached-only.** It should also resync an **attached-but-not-`main`** lane branch (a `lane/*` clone tip) — and, for a pool lane attached to `main`, fast-forward local `main` to the merged tip — whenever cwd is clean and HEAD is an ancestor of `origin/main`, before numbering. The land route, not the HEAD-attachment shape, should decide whether to resync.
-2. **The lane pool leaves a lane on a stale branch.** `acquire` reset the working tree to `origin/main` content but left HEAD attached to a leftover `lane/file-2417` branch from a prior rebase-drop. This is the same root that produced every "local main NOT fast-forwarded (diverged)" warning this session. `acquire`/`release` should return a lane to a clean, well-known state (detached at `origin/main`, or a fast-forwarded `main`), never a stray `lane/*` tip.
+So the culprit is specifically the **stale `lane/*` branch**, *not* attachment per se: an attached-but-clean-`main` lane numbers fine (#2419 proves it). This corrects an earlier framing of this bug that blamed attached HEADs in general.
+
+**Causes, in priority order:**
+1. **The lane pool leaves a lane on a stray `lane/*` branch (primary).** `acquire` reset the working tree to `origin/main` content but left HEAD attached to a leftover `lane/file-2417` from a prior rebase-drop. Same root as every "local main NOT fast-forwarded (diverged)" warning this session. `acquire`/`release` should always return a lane to a clean, well-known state (on `main` ff'd to `origin/main`, or detached at `origin/main`) — never a stray `lane/*` tip. Recover a stray with `git branch -f main <tip>` (the guard's sanctioned move), never a manual checkout.
+2. **`resyncDetachedCwdForLand` is detached-only (secondary backstop).** Even with a clean pool, it should also rescue a lane whose HEAD is on a stale `lane/*` branch that is an ancestor of `origin/main` — ff local `main`/resync to the merged tip before numbering — so the land route, not the HEAD shape, decides whether to resync.
 
 ## Definition of done
-- A hash-born item landed via `/pr`'s single-couple drain **from a pool lane** (attached, incl. a leftover `lane/*` branch) is numbered on `main` with **no manual `MAIN_PUSH_OK` push** — the numbering fast-forwards through the drain's own `publishMain`.
+- A hash-born item landed via `/pr`'s single-couple drain from a pool lane — **including one that started on a stale `lane/*` branch** — is numbered on `main` with **no manual `MAIN_PUSH_OK` push**; numbering ff-pushes through the drain's own `publishMain`.
 - `acquire` leaves the lane in a clean, documented HEAD state; a stray `lane/*` tip from a prior rebase-drop is recovered (`git branch -f main <tip>`), never left attached.
-- Regression test: numbering from an attached-branch cwd resyncs and ff-pushes (mirror the 9 detached-cwd cases #2348 added).
+- Regression test: numbering from a cwd on a stale `lane/*` branch (ancestor of `origin/main`) resyncs and ff-pushes (mirror the 9 detached-cwd cases #2348 added).
 
 relatedTo #2348 (detached-route fix this extends), #2318 (duplicate-NNN tripwire), #2290 (drain = sole serial writer), #2391 (numbering mutex), #2418 (main-loop-as-coordinator — surfaced by the same drain-session introspection).
 
