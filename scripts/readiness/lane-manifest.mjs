@@ -28,9 +28,14 @@
 import { isHash } from '../backlog/id.mjs';
 
 /** An item/edge id is a numeric NNN (landed) or an `xNNNNNN` hash (provisional, #2288) — keep a hash as a
- * string, coerce a number to Number (backward compat with pre-#2288 numeric manifests). */
-const asItemId = (v) => (isHash(String(v)) ? String(v) : Number(v));
-const isItemId = (v) => isHash(String(v)) || Number.isFinite(Number(v));
+ * string, coerce a number to Number (backward compat with pre-#2288 numeric manifests).
+ * Exported (#2388) — `merge-ai-prs.mjs`'s plan-label-drain cascade needs the SAME hash-aware coercion the
+ * manifest builder uses. A bare `Number(v)` on a hash id (e.g. `"x5lail9"`) yields `NaN`, and a `Set` uses
+ * SameValueZero equality where `NaN === NaN` — so EVERY hash-keyed item collapses into one indistinguishable
+ * "open" bucket and every hash `blockedBy` edge spuriously matches every other hash item. `asItemId` keeps a
+ * hash as its own distinct string so `Set.has`/`===` compare correctly. */
+export const asItemId = (v) => (isHash(String(v)) ? String(v) : Number(v));
+export const isItemId = (v) => isHash(String(v)) || Number.isFinite(Number(v));
 
 /** The manifest filename — a NEW file in the WE lane commit (one-sided add; drain deletes at landing). */
 export const MANIFEST_FILENAME = '.lane-manifest.json';
