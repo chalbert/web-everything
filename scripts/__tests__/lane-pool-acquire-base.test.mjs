@@ -126,6 +126,32 @@ describe('lane-pool acquire --base=<ref> (#2386)', () => {
     expect(retry.code).toBe(0);
   });
 
+  it('rejects --base + --no-reset as mutually exclusive, before claiming any lane (touches nothing)', () => {
+    provision(1);
+    pushPredecessorLaneRef('lane/predecessor-combo', 'combo-tip\n');
+    const lane = join(poolRoot, 'basetest', 'lane-1');
+
+    const r = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install', '--base=lane/predecessor-combo', '--no-reset', '--json'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    // Fails loud rather than silently misreporting the base as applied under --no-reset.
+    expect(r.code).not.toBe(0);
+    expect(r.err).toMatch(/--base=lane\/predecessor-combo/);
+    expect(r.err).toMatch(/--no-reset/);
+    expect(r.err).toMatch(/mutually exclusive/);
+    // No JSON on stdout — it never got as far as reporting a lane.
+    expect(r.out.trim()).toBe('');
+    // The guard runs BEFORE any lane is claimed: no lease was taken, so lane-1 acquires cleanly with no
+    // --force release needed, and its working tree is exactly as `provision` left it.
+    expect(readFileSync(join(lane, 'file.txt'), 'utf8')).toBe('main-tip\n');
+    const retry = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install', '--json'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(retry.code).toBe(0);
+  });
+
   it('absent --base preserves current origin/<branch> behavior (unchanged)', () => {
     provision(1);
     pushPredecessorLaneRef('lane/irrelevant', 'should-not-be-used\n');

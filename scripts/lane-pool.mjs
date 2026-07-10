@@ -563,6 +563,14 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
 }
 
 function cmdAcquire(repo) {
+  // #2386 — `--base` and `--no-reset` are mutually exclusive: `--base=<ref>` means "reset this clone to <ref>",
+  // and `--no-reset` skips the reset entirely. Honoring both would skip the reset yet still report the base as
+  // applied (log line + JSON `base`), so an orchestrator stacking a serial batch would believe the lane sits on
+  // the predecessor tip when HEAD was never moved. Reject the combo BEFORE claiming any lane (touches nothing) —
+  // failing loud beats silently misreporting for a primitive other automation trusts.
+  if (flags.base && flags['no-reset']) {
+    fail(`--base=${flags.base} and --no-reset are mutually exclusive: --base resets the clone to that ref, which --no-reset would skip. Pass one or the other.`);
+  }
   const session = defaultSession();
   const nowMs = Date.now();
   const ttlMs = ttlMsFromFlags();
