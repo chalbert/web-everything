@@ -182,21 +182,30 @@ author-bounce with a bounded editor↔reviewer negotiation loop** (below). The o
 > `renderPanelVerdictTable()` (the operator-facing split-verdict surface).
 
 The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isGateSelfPath`) and emits it
-in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`:
+in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`.
 
-- **`humanRequired: true` → `review:human`.** The diff edits the **auto-review trust chain itself**
-  (`we:scripts/lib/review-escalation.mjs` or `we:scripts/merge-ai-prs.mjs`) — the code that decides whether the
-  gate fires and what clears it. An agent reviewing this would be policing a change to its own leash (conflict
-  of interest), so a **human** review is essential. The drain applies `review:human` and this PR **never times
-  out** to `merge-anyway`. It is **not agent-clearable** — never auto-apply `review:accepted` to a `review:human`
-  PR.
-  **New (#2326) — still run an ADVISORY AI review.** Don't leave it dark: run the shared core on the
-  `review:human` diff too (seed a fresh-context subagent with `buildMandate()`; shape via `normalizeFindings()`
-  + `deriveVerdict()`) and **post its take as a PR comment clearly marked `🤖 advisory AI review (non-clearing)`**
-  — findings + verdict, to inform the human. It **must not** apply any `review:*` label (the conflict-of-interest
-  invariant is unchanged); it only informs. Then surface the PR for the operator, who clears it with
-  [`/review <PR>`](../review/SKILL.md).
-- **`humanRequired: false` → agent-reviewable.** Escalated (blast-radius / size / dismissed-findings / sampling)
+> **The converge-vs-human branch is ONE derivation (#2285).** Don't hand-branch on `humanRequired` — call
+> `deriveReviewDisposition({ reasons })` in `we:scripts/lib/review-core.mjs` and act on `{ mode, autoLand }`. It
+> is single-sourced so **every** review surface (this drain, `/review`, `/merge`) shares the policy, keyed on WHY
+> the PR escalated. `mode: 'converge'` → run the panel↔editor loop below; `mode: 'human'` → hand straight to a
+> human, no convergence. `autoLand: false` → an agent may FIX but never CLEAR it (a human gates the merge). Map
+> the drain's signals to reasons: `humanRequired` ⇒ `gate-self`; the escalation `reasons` (blast-radius / size /
+> dismissed-findings / cross-repo / sampling) are the sensitivity reasons; a negotiation that hits the round cap
+> or a mandate conflict (below) is `non-convergence` / `mandate-conflict`.
+
+- **`gate-self` (`humanRequired: true`) → `{ mode: converge, autoLand: false }`.** The diff edits the **auto-review
+  trust chain itself** (`we:scripts/lib/review-escalation.mjs` or `we:scripts/merge-ai-prs.mjs`) — the code that
+  decides whether the gate fires and what clears it. This is a **sensitivity** park, not a deadlock, so an agent
+  reviewer/editor is still useful: **run the SAME panel↔editor negotiation loop as the agent-reviewable path
+  below** to actually fix any clear bug (an advisory FIX, not just an advisory comment). The one difference is
+  `autoLand: false` — on a `land` outcome the drain **does NOT apply `review:accepted`**; it keeps `review:human`,
+  posts the converged diff's findings + verdict table as a PR comment clearly marked `🤖 advisory AI review /
+  fix (non-clearing)` **and flags that the diff now carries agent-authored trust-chain edits the human must
+  scrutinize**, and surfaces the PR to the operator, who clears it with [`/review <PR>`](../review/SKILL.md). This
+  PR **never times out** to `merge-anyway` and is **never agent-clearable** — an agent policing a change to its
+  own leash is the conflict of interest the gate exists for; the panel may improve the diff but only a human
+  merges it (the #2285 invariant, enforced by `autoLand: false`).
+- **sensitivity park (`humanRequired: false`) → `{ mode: converge, autoLand: true }` — agent-reviewable.** Escalated (blast-radius / size / dismissed-findings / sampling)
   but independent of the producer. **v3 (#2310) runs a bounded MULTI-MANDATE PANEL↔editor NEGOTIATION LOOP** —
   v2's single reviewer fans out into a panel of distinct mandated reviewers (`PANEL_LENSES`: `correctness` /
   `security` / `simplicity` / `standards-conformance`, the `/code-review` lenses), driven up to
@@ -219,11 +228,18 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
      conflict, it is ordinary non-convergence and follows the round-cap path below.
   3. **Decide what's next** — `deriveNegotiationOutcome({ verdict, round, roundCap })` on the REDUCED panel
      verdict from step 2 (pure; the round-cap decision is deterministic, not a judgment call):
-     - **`land`** (verdict `accept` — every mandatory lens unanimously accepted) → apply `review:accepted`
-       (`gh pr edit <num> --repo <repo> --add-label review:accepted`) and **re-run the drain** (a bare pass) —
-       the invariant holds: non-author reviewers accepted the FINAL diff.
+     - **`land`** (verdict `accept` — every mandatory lens unanimously accepted) → **gate on the disposition's
+       `autoLand`.** `autoLand: true` (a plain sensitivity park) → apply `review:accepted` (`gh pr edit <num>
+       --repo <repo> --add-label review:accepted`) and **re-run the drain** (a bare pass) — the invariant holds:
+       non-author reviewers accepted the FINAL diff. `autoLand: false` (`gate-self`) → **do NOT apply
+       `review:accepted`**: the panel converged and fixed the diff, but a human must clear a trust-chain edit.
+       Keep `review:human`, post the converged findings + `renderPanelVerdictTable(...)` as the `🤖 advisory AI
+       review / fix (non-clearing)` comment, and surface the PR to the operator — the fix rode the PR branch, the
+       clearance did not.
      - **`escalate`** (verdict `needs-human` — a genuine mandate `conflict` or the global `humanRequired`
-       conflict-of-interest flag — OR `changes` with `round >= roundCap`) → apply `review:human` (never
+       conflict-of-interest flag — OR `changes` with `round >= roundCap`) → this is the `deriveReviewDisposition`
+       DEADLOCK case (`mandate-conflict` / `non-convergence` → `{ mode: human }`): the loop already ran and could
+       not agree, so **hand it to the human — do NOT re-enter convergence.** Apply `review:human` (never
        `review:changes`/author-bounce — that path is retired by v2) and post BOTH the round-by-round findings
        history AND `renderPanelVerdictTable({ lensVerdicts, mandatoryLenses })` (the per-lens
        mandatory/advisory/verdict breakdown) as a PR comment, so the human sees exactly which lens(es)
