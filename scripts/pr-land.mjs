@@ -385,14 +385,14 @@ export function classifyChecks(rows) {
  * the SAME two the drain (`merge-ai-prs.mjs`) reads back later, so producer- and drain-applied verdicts can
  * never drift. `currentLabels` is normally empty at open (a fresh PR) but is honoured either way — re-running
  * pr-land against an already-labelled PR (e.g. a retried `--label-on-green`) must not double-apply.
- * @param {{changedFiles?:string[], diffLines?:number, dismissedFindings?:number, crossRepo?:boolean,
- *          prNum?:number, currentLabels?:Array}} o
+ * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
+ *          crossRepo?:boolean, prNum?:number, currentLabels?:Array}} o
  * @returns {{label:string|null, apply:boolean, reasons:string[], humanRequired:boolean}}
  */
 export function resolveProducerReviewLabel({
-  changedFiles = [], diffLines = 0, dismissedFindings = 0, crossRepo = false, prNum = 0, currentLabels = [],
+  changedFiles = [], diffLines = 0, humanBasisFiles = null, dismissedFindings = 0, crossRepo = false, prNum = 0, currentLabels = [],
 } = {}) {
-  const score = scoreEscalation({ changedFiles, diffLines, dismissedFindings, crossRepo, prNum });
+  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, prNum });
   const label = producerReviewLabel(score);
   return { label, apply: shouldApplyReviewLabel(label, currentLabels), reasons: score.reasons, humanRequired: !!score.humanRequired };
 }
@@ -577,11 +577,14 @@ function runCli() {
     const net = computeNetDiffChangedFiles({ exec, remote: REMOTE, base: BASE, baseRev, rev: refSha });
     const changedFiles = net.changedFiles;
     const diffLines = net.diffLines;
+    // #2390-review-fix — the CUMULATIVE origin/main…head basis the gate-self/human trigger scores over; a
+    // stacked base de-inflates SIZE (`changedFiles`) but can never shrink this.
+    const humanBasisFiles = net.humanBasisFiles;
     const crossRepo = manifest && Array.isArray(manifest.repos) ? manifest.repos.length > 1 : false;
     const dismissedFindings = manifest && Number.isFinite(Number(manifest.dismissedFindings)) ? Number(manifest.dismissedFindings) : 0;
     let currentLabels = [];
     try { currentLabels = (JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'labels'])).labels || []).map((l) => l.name); } catch { /* fresh PR — no labels yet */ }
-    const verdict = resolveProducerReviewLabel({ changedFiles, diffLines, dismissedFindings, crossRepo, prNum: Number(prNum), currentLabels });
+    const verdict = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, prNum: Number(prNum), currentLabels });
     if (verdict.label && verdict.apply) {
       const meta = REVIEW_LABEL_META[verdict.label];
       try { ghC(['label', 'create', verdict.label, '--color', meta.color, '--description', meta.description]); } catch { /* already exists — fine */ }

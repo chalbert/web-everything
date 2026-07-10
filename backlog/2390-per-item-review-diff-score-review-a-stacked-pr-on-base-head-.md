@@ -13,7 +13,9 @@ tags: []
 
 # Per-item review diff: score/review a stacked PR on base...head, not vs main
 
-Compute the escalation score + reviewer-subagent input in we:scripts/merge-ai-prs.mjs as base...head (from the manifest base) instead of vs main, so a stacked PR is reviewed on its OWN delta — killing cumulative-diff blast-radius inflation and spurious review:human inheritance from ancestors. Tests: a deep stacked PR scores on its own change, not the cumulative stack; no spurious review:human inherited from an ancestor.
+Compute the escalation score + reviewer-subagent input in we:scripts/merge-ai-prs.mjs as base...head (from the manifest base) instead of vs main, so a stacked PR is scored on its OWN delta — killing cumulative-diff blast-radius SIZE inflation. Tests: a deep stacked PR scores its SIZE on its own change, not the cumulative stack.
+
+**Security constraint (review-fix):** the `base` rides the EDITABLE PR body, so it must NEVER be able to narrow or suppress the gate-self / `review:human` trigger. The human-gate basis therefore stays the cumulative `origin/main…head` file set, and the base is trusted for the SIZE de-inflation only when it provably is a strict ancestor of head. An ancestor's OR the child's edit to the auto-review trust chain always forces `review:human` (over-escalation is the safe direction, #2285).
 
 ## Progress
 
@@ -21,6 +23,8 @@ Compute the escalation score + reviewer-subagent input in we:scripts/merge-ai-pr
 - **Branch:** lane-5 (`lane/2390-per-item-review-diff-score`)
 - **Done:**
   - we:scripts/readiness/lane-manifest.mjs — added two pure helpers: `repoKeyFromSlug` (git slug/short name → manifest repo key, `web-everything`→`we`) and `manifestBaseForRepo` (the per-repo stacked `base` SHA a scorer diffs from, or `null`).
-  - we:scripts/merge-ai-prs.mjs — `computeNetDiffChangedFiles` gained an optional `baseRev`: when a git-hash-shaped manifest base is passed it diffs `base…head` (own delta) and drops the `+main:` tracking-ref fetch; a malformed value is ignored (falls back to `origin/main`). The drain sets `v.base` from the couple manifest for the PR's repo and passes it into the scorer.
-  - we:scripts/pr-land.mjs — the producer (the SHARED #2373 basis) passes the same manifest base, so producer + drain never drift and no spurious `review:human` is applied at PR-open (which the drain's sticky-label logic would otherwise keep).
-- **Notes:** any failure to resolve a base → `null` → the exact prior `origin/main` behavior, so siblings are untouched and the change is strictly safe. Tests added in we:scripts/__tests__/merge-ai-prs.test.mjs (baseRev own-delta, dropped `+main` fetch, injection guard, no-spurious-review:human via `scoreEscalation`) and we:scripts/__tests__/lane-manifest-write.test.mjs (both helpers).
+  - we:scripts/merge-ai-prs.mjs — `computeNetDiffChangedFiles` gained an optional `baseRev`. It returns `humanBasisFiles` = the cumulative `origin/main…head` file set (the gate-self / human-gate basis, which `baseRev` can never shrink), and de-inflates `changedFiles`/`diffLines` (SIZE) to `base…head` ONLY when `baseRev` is a strict ancestor of head (`isStrictAncestor`: rejects `base==head` and any non-ancestor/unrelated tree). A malformed value is ignored (falls back to `origin/main`); the `+main:` tracking-ref fetch is ALWAYS run. The drain sets `v.base` from the couple manifest and passes it into the scorer.
+  - we:scripts/lib/review-escalation.mjs — `scoreEscalation` reads the gate-self / `humanRequired` signal from `humanBasisFiles` (falling back to `changedFiles` when absent), so a de-inflated own-delta can shrink SIZE but never the human gate.
+  - we:scripts/pr-land.mjs — the producer passes the same manifest base and threads `humanBasisFiles` through `resolveProducerReviewLabel`, so producer + drain never drift.
+  - we:scripts/readiness/lane-manifest.mjs — `manifestAuditLine` now records `base=<hash>|none` so the de-inflating basis is in the tamper-evident trail; two pure helpers `repoKeyFromSlug` + `manifestBaseForRepo`.
+- **Notes:** any failure to resolve a base → `null` → the exact prior `origin/main` behavior, so siblings are untouched. Tests added in we:scripts/__tests__/merge-ai-prs.test.mjs (own-delta SIZE de-inflation + cumulative `humanBasisFiles`; ancestor gate-self edit still forces `humanRequired:true`; `base==head` and non-ancestor base rejected → cumulative fallback; injection guard), we:scripts/readiness/__tests__/lane-manifest.test.mjs (audit-line `base`), and we:scripts/__tests__/lane-manifest-write.test.mjs (both helpers).

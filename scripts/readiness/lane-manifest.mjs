@@ -252,13 +252,19 @@ function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
  * (`x7k2q9a`) — so real values round-trip verbatim, while every structural / injection character (CR/LF, the
  * line's own `, [ ]` delimiters, and the `< > !` a `<!-- … -->` marker needs) is dropped.
  *
- * @param {{dismissedFindings?:number, crossRepo?:boolean, blockedBy?:Array<number|string>}} [v]
+ * #2390-review-fix — also records the per-repo stacked `base` the scorer de-inflated SIZE from (the same
+ * value that rides the editable PR body), so the diff basis is part of the tamper-evident trail — a later body
+ * edit of `base` becomes diff-detectable like the other acted-on values. Sanitized to a git object hash;
+ * `none` when absent or malformed (mirrors what the scorer actually trusts).
+ *
+ * @param {{dismissedFindings?:number, crossRepo?:boolean, blockedBy?:Array<number|string>, base?:string}} [v]
  */
-export function manifestAuditLine({ dismissedFindings, crossRepo, blockedBy } = {}) {
+export function manifestAuditLine({ dismissedFindings, crossRepo, blockedBy, base } = {}) {
   const n = Number.isFinite(Number(dismissedFindings)) ? Number(dismissedFindings) : 0;
   const cross = !!crossRepo;
   const blocked = (Array.isArray(blockedBy) ? blockedBy : []).map((x) => String(x).replace(/[^A-Za-z0-9_-]/g, ''));
-  return `manifest acted-on: dismissedFindings=${n} crossRepo=${cross} blockedBy=[${blocked.join(',')}]`;
+  const b = typeof base === 'string' && /^[0-9a-f]{7,64}$/i.test(base) ? base : 'none';
+  return `manifest acted-on: dismissedFindings=${n} crossRepo=${cross} blockedBy=[${blocked.join(',')}] base=${b}`;
 }
 
 /** Serialize a manifest to `.lane-manifest.json` text (with a self-documenting `_doc` header). */
