@@ -191,6 +191,19 @@ const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['i
 const shJSON = (cmd, args, dflt) => { try { return JSON.parse(sh(cmd, args) || 'null') ?? dflt; } catch { return dflt; } };
 
 /**
+ * Build the `gh api` argv that reads a remote repo's `.lane-manifest.json` off a head ref. Pure/exported so
+ * the `--method GET` is regression-guarded. `--method GET` is REQUIRED: `gh api` silently switches to POST the
+ * moment an `-f`/`--field` param is present with no explicit method, and a POST to the read-only contents
+ * endpoint 404s — which `readManifest`'s catch would swallow to null, so every remote lane would drop its
+ * item/blockedBy (the very ordering this constellation sweep exists for). GET keeps `-f ref=` as a query param.
+ * @param {string} repo — "owner/name"
+ * @param {string} ref  — the PR head ref
+ */
+export function remoteManifestApiArgs(repo, ref) {
+  return ['api', '--method', 'GET', `repos/${repo}/contents/.lane-manifest.json`, '-f', `ref=${ref}`, '-q', '.content'];
+}
+
+/**
  * Read a lane's `.lane-manifest.json` off its head ref. Returns {item, repos, blockedBy} or null.
  * #2383 — repo-aware, mirroring `/drain`: for the LOCAL repo (`repo` null/self) read it from local git; for a
  * REMOTE constellation repo read it via the GitHub API (`gh api …/contents/.lane-manifest.json?ref=<headRef>`
@@ -201,7 +214,7 @@ const shJSON = (cmd, args, dflt) => { try { return JSON.parse(sh(cmd, args) || '
 function readManifest(ref, { repo = null } = {}) {
   if (repo) {
     try {
-      const b64 = execFileSync('gh', ['api', `repos/${repo}/contents/.lane-manifest.json`, '-f', `ref=${ref}`, '-q', '.content'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const b64 = execFileSync('gh', remoteManifestApiArgs(repo, ref), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       if (!b64) return null;
       const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
       return { item: m.item ?? null, repos: m.repos || [], blockedBy: m.blockedBy || [] };

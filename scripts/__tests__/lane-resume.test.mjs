@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyLane, orderByBlockedBy, landDecision, land } from '../lane-resume.mjs';
+import { classifyLane, orderByBlockedBy, landDecision, land, remoteManifestApiArgs } from '../lane-resume.mjs';
 
 const resolved = new Set([2110, 2113]); // blockers already landed on main
 
@@ -197,5 +197,14 @@ describe('lane-resume — land is repo-aware (#2383: /finish spans all constella
     land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] } });
     expect(labelEdit(calls).args).not.toContain('--repo');
     expect(drainTrigger(calls).args).toContain('--this-repo');
+  });
+
+  it('the remote-manifest `gh api` read forces `--method GET` (else `-f` makes gh POST → 404 → every remote lane silently drops item/blockedBy)', () => {
+    const args = remoteManifestApiArgs('chalbert/plateau-app', 'lane/x-2343');
+    // GET must be explicit and precede the endpoint (a POST to the read-only contents endpoint 404s).
+    expect(args).toContain('--method');
+    expect(args[args.indexOf('--method') + 1]).toBe('GET');
+    expect(args).toContain('repos/chalbert/plateau-app/contents/.lane-manifest.json');
+    expect(args).toEqual(expect.arrayContaining(['-f', 'ref=lane/x-2343']));
   });
 });
