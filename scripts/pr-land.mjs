@@ -78,6 +78,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { assertMayMerge, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs'; // JIT numbering + dirty-probe, shared single source (#2288/#xzxc92d/#2348)
+import { withNumberingLock } from './readiness/drain-lock.mjs'; // #2391 — the numbering-critical-section mutex (sole-serial-writer)
 export { isPostLandTreeDirty }; // re-exported for backward compat — callers/tests still import it off pr-land.mjs
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs'; // post-land dup-NNN tripwire (#2318)
 import { computeNetDiffChangedFiles } from './merge-ai-prs.mjs'; // SHARED net-diff basis w/ the drain, single source (#1821/#2373)
@@ -720,9 +721,16 @@ function runCli() {
       // `numberPendingHashes` (single source, never a fork); it commits the rename+rewrite locally, so the push
       // below carries the numbering to main together with the merge. Best-effort — a numbering error is
       // surfaced but never unwinds the successful merge (the post-land heal is the collision backstop).
-      const numbered = numberPendingHashes(REPO);
-      if (numbered && numbered.error) process.stderr.write(`pr-land [${REPO}] ⚠ JIT numbering skipped (${numbered.error}) — a provisional hash may reach ${BASE} un-numbered; run the drain's numbering by hand\n`);
-      gitPushMain([REMOTE, `${BASE}:${BASE}`]);
+      // #2391 — number+publish is the NUMBERING CRITICAL SECTION (sole-serial-writer, #2288/#2290). Wrap it in
+      // the TTL-bounded numbering mutex so this break-glass land never races a concurrent drain onto the same NNN.
+      const numLock = withNumberingLock(() => {
+        const n = numberPendingHashes(REPO);
+        if (n && n.error) process.stderr.write(`pr-land [${REPO}] ⚠ JIT numbering skipped (${n.error}) — a provisional hash may reach ${BASE} un-numbered; run the drain's numbering by hand\n`);
+        gitPushMain([REMOTE, `${BASE}:${BASE}`]);
+        return n;
+      });
+      const numbered = numLock.result;
+      if (numLock.contended) process.stderr.write(`pr-land [${REPO}] ⚠ numbering mutex not acquired (held by ${numLock.heldBy || '?'}) — numbered+pushed without it (#2391); the #2318 duplicate-NNN tripwire is the backstop\n`);
       if (SYNC_PRIMARY) syncPrimaryMain(); // ff-sync the user's primary checkout too (the lane's local BASE is already merged)
       // #xsyia6k — snapshot the duplicate set on BASE BEFORE the heal mutates the local tree. gitPushMain above
       // just published the merged tree to ${BASE}, so this reflects what actually sits on BASE; the tripwire below

@@ -104,6 +104,7 @@ import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, bu
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
 import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs';
+import { withNumberingLock } from './readiness/drain-lock.mjs'; // #2391 — the numbering-critical-section mutex (sole-serial-writer)
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
 import { extractManifestFromBody, manifestAuditLine } from './readiness/lane-manifest.mjs';
 
@@ -1363,15 +1364,22 @@ function runCli() {
   // Shares lane-drain's `numberPendingHashes` (single source, never a fork). Best-effort/non-fatal.
   let numbered = { assigned: [], committed: false };
   if (landedLocal && !DRY_RUN) {
-    numbered = numberPendingHashes(process.cwd());
-    if (numbered.committed) {
-      try {
-        execFileSync('git', ['push', 'origin', 'HEAD:main'], { env: { ...process.env, MAIN_PUSH_OK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
-        if (!AS_JSON) process.stderr.write(`  ✓ JIT-numbered ${numbered.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} + pushed to main (#2288)\n`);
-      } catch (e) {
-        if (!AS_JSON) process.stderr.write(`  ⚠ JIT numbering committed locally but push FAILED (${String(e.message || e).split('\n')[0]}) — push main by hand\n`);
+    // #2391 — number+publish is the NUMBERING CRITICAL SECTION (sole-serial-writer, #2288/#2290). Guard it with
+    // the TTL-bounded numbering mutex so a concurrent drain/land never mints the same NNN off the same base.
+    const numLock = withNumberingLock(() => {
+      const n = numberPendingHashes(process.cwd());
+      if (n.committed) {
+        try {
+          execFileSync('git', ['push', 'origin', 'HEAD:main'], { env: { ...process.env, MAIN_PUSH_OK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+          if (!AS_JSON) process.stderr.write(`  ✓ JIT-numbered ${n.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} + pushed to main (#2288)\n`);
+        } catch (e) {
+          if (!AS_JSON) process.stderr.write(`  ⚠ JIT numbering committed locally but push FAILED (${String(e.message || e).split('\n')[0]}) — push main by hand\n`);
+        }
       }
-    }
+      return n;
+    });
+    numbered = numLock.result;
+    if (numLock.contended && !AS_JSON) process.stderr.write(`  ⚠ numbering mutex not acquired (held by ${numLock.heldBy || '?'}) — numbered without it (#2391); the #2318 duplicate-NNN tripwire is the backstop\n`);
   }
 
   // #2318 — POST-LAND DUPLICATE-NNN TRIPWIRE (LOUD-ONLY, #xsyia6k). JIT numbering (#2288) makes two lanes racing
