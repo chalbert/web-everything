@@ -13,7 +13,7 @@ When `/pr`'s single-couple drain lands a **hash-born** item from a pool lane who
 
 **A/B evidence (this session, 2026-07-10) — the disambiguator:**
 - **#2418 STRANDED.** Hash-born epic `xq5aks4` landed via `merge-ai-prs --only=388` from lane-3, which was sitting on a leftover `lane/file-2417` branch (from an earlier drain's rebase-drop). Post-merge `pull --ff-only` couldn't advance, numbering committed on the pre-merge tip, push was a silent non-ff → landed hash-keyed. Manual recovery: `git reset --hard origin/main` + re-run `numberPendingHashes` + `MAIN_PUSH_OK=1 git push origin HEAD:main` (→ #2418). That override push is the "not through the drain" bypass to eliminate.
-- **#2419 numbered CLEANLY.** Filing *this very item* landed `x1m25ov→#2419` from lane-5, which was freshly, cleanly attached to `main` at `origin/main`. Post-merge `pull --ff-only` fast-forwarded, numbering ran on the merged tip, ff-push succeeded — **no manual step**.
+- **#2419 numbered CLEANLY.** Filing *this very item* landed `2419→#2419` from lane-5, which was freshly, cleanly attached to `main` at `origin/main`. Post-merge `pull --ff-only` fast-forwarded, numbering ran on the merged tip, ff-push succeeded — **no manual step**.
 
 So the culprit is specifically the **stale `lane/*` branch**, *not* attachment per se: an attached-but-clean-`main` lane numbers fine (#2419 proves it). This corrects an earlier framing of this bug that blamed attached HEADs in general.
 

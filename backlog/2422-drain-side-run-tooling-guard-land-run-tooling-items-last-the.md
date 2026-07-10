@@ -1,4 +1,5 @@
 ---
+bornAs: x492os3
 kind: story
 size: 5
 status: open
