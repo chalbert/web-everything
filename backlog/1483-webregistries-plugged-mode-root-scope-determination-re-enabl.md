@@ -1,9 +1,11 @@
 ---
 kind: epic
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-22"
+dateResolved: "2026-07-10"
+graduatedTo: none
 tags: []
 ---
 
