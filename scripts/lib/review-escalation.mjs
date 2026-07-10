@@ -193,10 +193,14 @@ export function hasReviewLabel(labels, label) {
  * web-everything#290 shipped 2 bugs the review panel had already caught but never got to act on. `review:accepted`
  * always clears it (the reviewer's verdict wins over everything else). Pure.
  *
- * A caller that DOES run `decideReviewGate` this pass (the label-scoped `/drain` role) must NOT also apply this
- * check — `decideReviewGate` already re-derives the correct verdict from a FRESH rubric score (and honors the
- * operator's `--no-review-escalation` override), so double-gating on raw label presence here would fight the
- * richer verdict.
+ * A caller that DOES run `decideReviewGate` this pass (the label-scoped `/drain` role, escalation ON) must NOT
+ * also apply this check — `decideReviewGate` already re-derives the correct verdict from a FRESH rubric score,
+ * so double-gating on raw label presence here would fight the richer verdict. Note `decideReviewGate` never
+ * sees the `--no-review-escalation` flag: under that override the CLI SKIPS `decideReviewGate` entirely
+ * (`REVIEW_ESCALATION` is false in `merge-ai-prs.mjs`), and the override is honored HERE — the CLI's
+ * `!REVIEW_ESCALATION` branch calls this check with `allowPending: true`, which is the ONLY place the
+ * override's `review:human`/`review:changes` refusals are enforced. Do not route the override through
+ * `decideReviewGate` (it has no such input) or prune this check as redundant on that path.
  *
  * `allowPending` (#2366 fix-up) — the ONE knob that separates the two `!REVIEW_ESCALATION` callers. The BARE
  * `/merge` orphan sweep (no `--label`) has no owner for the review verdict, so it refuses ALL un-cleared labels
