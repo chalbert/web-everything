@@ -21,8 +21,13 @@
  *    leaving a persistent fingerprint *across* days. **Fixed, not configurable** (a knob would fragment
  *    the aggregate) — so there is no id-model option in this contract.
  *  - **Fork-3 (a):** consent is **opt-IN** — `DevMetricsConsent` defaults to `'unset'`, which resolves to
- *    "do not emit" until the developer affirmatively grants. (The enterprise-policy precedence layer and
- *    the hosted aggregation endpoint are out of #1849's scope — decoupled to their own items.)
+ *    "do not emit" until the developer affirmatively grants. (The hosted aggregation endpoint stays out of
+ *    #1849's scope — a separate item.)
+ *
+ * The enterprise-policy precedence layer (#2372, ratified #1850 fork a) extends this vocabulary with
+ * `DevMetricsPolicy` — the declarative **shape + ordering** of enterprise > per-dev > default. This module
+ * fixes the contract only; FUI's `resolveDevMetricsPolicy` (`fui:plugs/webanalytics/devMetrics.ts`) reads
+ * the env-var/config-file source and performs the actual precedence resolution.
  */
 
 /**
@@ -92,6 +97,45 @@ export interface DevMetricsSink {
  * The tri-state consent value (#1797 Fork-3, opt-IN). `'unset'` is the default and resolves to **do not
  * emit** — no data flows until the developer affirmatively `'granted'`. A single env-var/flag escape and
  * a first-run prompt drive the transition (both in the reference emitter). The enterprise-policy
- * precedence layer is intentionally absent — it is a separate, out-of-scope item.
+ * precedence layer (#2372, below) sits *above* this tier — see {@link DevMetricsPolicy}.
  */
 export type DevMetricsConsent = 'unset' | 'granted' | 'denied';
+
+/**
+ * Where an enterprise-forced consent value may come from (#2372, ratified #1850 fork a) — an env-var name
+ * or a config-file path. **Declarative shape only**: WE fixes what a policy source *looks like*; actually
+ * reading the environment or the filesystem is a side-effect, so it stays out of WE and lands in FUI's
+ * resolver (`fui:plugs/webanalytics/devMetrics.ts`), never here (#6 — WE holds zero implementation; #96 —
+ * WE owns contract, FUI owns impl).
+ */
+export interface DevMetricsPolicySource {
+  /** Env-var name an enterprise policy may set (e.g. `'WE_DEV_METRICS_POLICY'`). */
+  readonly envVar: string;
+  /** Config-file path an enterprise policy may supply (e.g. `/etc/webeverything/dev-metrics.json`). */
+  readonly configFilePath: string;
+}
+
+/**
+ * The enterprise-tier consent override (#2372, #1850 fork a). Narrower than the per-dev tri-state
+ * {@link DevMetricsConsent}: an enterprise policy only ever forces telemetry **off** (the common
+ * compliance case) or **on** (fleet-wide opt-in) — it has no `'unset'` state of its own. Absence of an
+ * enterprise policy simply means this tier does not apply, and resolution falls through to per-dev
+ * consent.
+ */
+export type DevMetricsEnterpriseConsent = 'forced-off' | 'forced-on';
+
+/**
+ * The three-tier consent-precedence contract ratified in #1850 fork a: **enterprise policy > per-dev
+ * consent > opt-in default**. WE fixes the *shape* and the *ordering* declaratively only — no reading, no
+ * resolution logic lives here. FUI's reference resolver (`resolveDevMetricsPolicy` in
+ * `fui:plugs/webanalytics/devMetrics.ts`) reads `source` (env var / config file) and walks this precedence
+ * before the emitter is allowed to fire; a per-dev `'granted'` can never override an enterprise
+ * `'forced-off'`. Scope (deliberate cut, #1850): env-var/config-file source only — server-based fleet
+ * distribution stays out of scope until enterprise infra exists (tracked under the #1848 epic).
+ */
+export interface DevMetricsPolicy {
+  /** Declared precedence order, most-authoritative first. Fixed; not a knob. */
+  readonly precedence: readonly ['enterprise', 'per-dev', 'default'];
+  /** Where an enterprise-forced value may be read from. */
+  readonly source: DevMetricsPolicySource;
+}
