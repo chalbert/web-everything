@@ -29,11 +29,15 @@
   </li>
 </ul>
 <p>
-  Consequence: the only per-operation channel that can distinguish siblings is the <strong>command string
-  itself</strong> — which only the guard reads (it already parses <code>LANE_CLOBBER_OK=1</code> and
-  <code>STALE_LANE_OK=1</code> assertions out of it). Sibling-level denial therefore requires a small
-  guard-side comparison extension; the item's original &ldquo;not a change to the guard&rdquo; claim holds
-  only for the weaker cross-session scope. The prepared forks make exactly that trade explicit.
+  Consequence: the <strong>command string</strong> is the only per-operation channel carrying holder
+  (lane-coupling) identity with both ends in-repo — which only the guard reads (it already parses
+  <code>LANE_CLOBBER_OK=1</code> and <code>STALE_LANE_OK=1</code> assertions out of it). Sibling-level
+  denial therefore requires a small guard-side comparison extension; the item's original &ldquo;not a
+  change to the guard&rdquo; claim holds only for the weaker cross-session scope. The prepared forks make
+  exactly that trade explicit. (One ambient per-<em>subagent process</em> channel also exists at the
+  guard — the hooks payload's experimental <code>agent_id</code>; it is named and <strong>excluded</strong>
+  as Fork 2 (c) in the item: the acquire-side owner stamp cannot see the payload-only field, the hook
+  fires before acquire's outcome exists, and absence degrades silently to shared-session scope.)
 </p>
 
 <h2>Prior art</h2>
