@@ -96,6 +96,24 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
       expect(extractManifestFromBody(twice)).toEqual(updated);                          // and it's the new one
     });
 
+    it('preserves `$`-special sequences ($&, $1, $$) in manifest content across embed→extract and re-embed', () => {
+      // A String.prototype.replace REPLACEMENT string would interpret `$&`/`$1`/`$$`; the function
+      // replacement must insert the block literally so these round-trip unchanged (and stay unchanged
+      // on the idempotent re-embed path).
+      const dollar = buildManifest({
+        item: 2138,
+        repos: [{ repo: 'we', ref: 'lane/2138-we-o1' }],
+        mergeRiskFiles: ['we:foo$&bar', 'we:baz$1qux', 'we:a$$b'],
+      });
+      const once = embedManifestInBody('## What\n\nintro\n', dollar);
+      expect(extractManifestFromBody(once)).toEqual(dollar);
+      // Re-embed onto a body that already carries a block → the idempotent replace path.
+      const twice = embedManifestInBody(once, dollar);
+      expect(twice.match(new RegExp(MANIFEST_BODY_BEGIN, 'g')) || []).toHaveLength(1);
+      expect(extractManifestFromBody(twice)).toEqual(dollar);
+      expect(twice).toContain('we:foo$&bar'); // literal, not the interpreted match
+    });
+
     it('embeds into a null/empty body (manifest-only body is still a valid carrier)', () => {
       const block = embedManifestInBody(null, crossRepo);
       expect(extractManifestFromBody(block)).toEqual(crossRepo);

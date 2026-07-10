@@ -509,7 +509,6 @@ function runCli() {
   // 3. Find an existing open PR for this head, else create a self-approved one.
   let prNum = null;
   try { prNum = JSON.parse(ghC(['pr', 'list', '--head', REF, '--state', 'open', '--json', 'number']))?.[0]?.number ?? null; } catch { /* gh may be absent */ }
-  const preExistingPr = prNum != null;
   if (prNum == null) {
     // #2332 — fail fast BEFORE creating: never open a bodyless PR (the #2324 drain gate would refuse to land
     // it, stalling the queue for a human to hand-fill the body). Create-path only — an existing PR is exempt.

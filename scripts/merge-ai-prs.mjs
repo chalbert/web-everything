@@ -105,6 +105,7 @@ import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, r
 import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs';
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
+import { extractManifestFromBody } from './readiness/lane-manifest.mjs';
 
 // #2262 — the local, machine-scoped park-age clock the review-escalation watch-window gate reads its
 // `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
@@ -788,11 +789,24 @@ function runCli() {
     process.exit(code);
   };
 
-  // Read a PR's `.lane-manifest.json` off its head ref (#2188). Only a WE PR carries one (the producer writes
-  // it into the WE lane commit); an orphan/impl PR has none → { item:null, blockedBy:[] } → always ready (the
-  // legacy unordered behaviour). Best-effort: a fetch/parse miss degrades to no-manifest, never throws.
+  // Read a PR's lane manifest (#2188). xnsk54v — the manifest now rides the PR BODY (drain-only orchestration
+  // metadata belongs ON the PR, not committed into the tree), so read it PR-BODY-FIRST via
+  // `gh pr list --head <headRef> --json body` → `extractManifestFromBody`, mirroring lane-drain.mjs's
+  // `readManifestFromPrBody`/`readManifestOffRef`. Fall back to the legacy tree-committed
+  // `.lane-manifest.json` off the head ref for lanes queued BEFORE the cutover. Only a WE PR carries one; an
+  // orphan/impl PR has none → null → always ready (the legacy unordered behaviour). Best-effort throughout: a
+  // fetch/parse miss degrades to no-manifest, never throws.
+  const readManifestFromPrBody = (repo, headRef) => {
+    try {
+      const out = execFileSync('gh', ['pr', 'list', '--head', headRef, '--state', 'open', ...repoFlag(repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      return extractManifestFromBody(JSON.parse(out || '[]')?.[0]?.body);
+    } catch { return null; } // gh absent / no open PR for the ref / no block → fall through to the ref file
+  };
   const readPrManifest = (repo, headRef) => {
     if (!headRef) return null;
+    const fromPr = readManifestFromPrBody(repo, headRef);
+    if (fromPr) return fromPr;
+    // ── Legacy fallback: the tree-committed manifest (lanes queued before the PR-body cutover). ──
     if (!isLocalRepo(repo)) {
       // #2257 — a remote-repo PR has no local clone to `git show`; read the manifest off its head ref via the
       // GitHub API (`gh api …/contents/.lane-manifest.json?ref=<headRef>` → base64 `.content`). Best-effort:

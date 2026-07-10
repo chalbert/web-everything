@@ -141,7 +141,9 @@ export function embedManifestInBody(body, m) {
   const block = manifestBodyBlock(m);
   const base = body == null ? '' : String(body);
   const re = new RegExp(`${escapeRe(MANIFEST_BODY_BEGIN)}[\\s\\S]*?${escapeRe(MANIFEST_BODY_END)}`);
-  if (re.test(base)) return base.replace(re, block);
+  // Use a function replacement so `$`-special sequences in the manifest JSON (`$&`, `$1`, `$$`) are
+  // inserted literally rather than interpreted as String.prototype.replace substitution patterns.
+  if (re.test(base)) return base.replace(re, () => block);
   return base.trim() ? `${base.replace(/\s*$/, '')}\n\n${block}\n` : `${block}\n`;
 }
 
