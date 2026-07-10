@@ -35,7 +35,6 @@ import {
   decideReviewGate,
   producerReviewLabel,
   hasUnclearedReviewLabel,
-  DEFAULT_THRESHOLDS,
 } from '../review-escalation.mjs';
 import { assertMayMerge, hasNonEmptyBody } from '../pr-merge-gate.mjs';
 import { classifyChecks } from '../../pr-land.mjs';
@@ -58,14 +57,14 @@ const GATE_SELF_FILES = [
   'scripts/lib/__tests__/gate-invariants.test.mjs', // THIS file — self-referenced (see header)
 ];
 const LEAF_FILES = ['backlog/123-x.md', 'demos/spa.html', 'src/_data/other.json', 'reports/2026-07-09-x.md'];
-const WINDOW = DEFAULT_THRESHOLDS.windowMinutes * 60_000;
-// the three park-age situations decideReviewGate distinguishes: never parked, inside the window, long past it
+// x30jq9n — the merge-anyway timeout is REMOVED; decideReviewGate no longer reads park age. These legacy
+// park-age shapes are still swept below purely as tripwires: a caller passing them must change NOTHING.
 const PARK_AGES = [
   { parkedSinceMs: null, nowMs: 0 },              // never parked
-  { parkedSinceMs: 0, nowMs: WINDOW - 1 },        // inside the window
-  { parkedSinceMs: 0, nowMs: WINDOW * 100 },      // far past the window (would time out if allowed)
+  { parkedSinceMs: 0, nowMs: 60_000 },            // freshly parked
+  { parkedSinceMs: 0, nowMs: 1e12 },              // absurdly old park (would have timed out under the old window)
 ];
-const AUTO_MERGE_ACTIONS = ['merge', 'merge-anyway']; // the two actions that put a PR onto main without a human
+const AUTO_MERGE_ACTIONS = ['merge']; // the ONE action that puts a PR onto main without a human (merge-anyway removed, x30jq9n)
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 // INVARIANT 1 — a diff that touches the gate's own trust chain is ALWAYS human-required (and escalates).
@@ -130,7 +129,7 @@ describe('INVARIANT 2 — human-gated ⇒ no auto-merge without review:accepted'
           if (tainted && !accepted) {
             // the safety property: a human-gated PR with no human accept must NOT land, ever.
             expect(AUTO_MERGE_ACTIONS).not.toContain(g.action);
-            // and it must specifically never time out (the #289 hole) — merge-anyway is off the table
+            // and no timeout path may resurrect (x30jq9n removed merge-anyway; the #289 hole stays closed)
             expect(g.action).not.toBe('merge-anyway');
             // the caller keys its auto-review routing on this: a tainted PR always reports humanRequired
             expect(g.humanRequired).toBe(true);
