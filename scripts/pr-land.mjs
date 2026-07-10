@@ -80,7 +80,7 @@ import { assertMayMerge, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs'; // JIT numbering + dirty-probe, shared single source (#2288/#xzxc92d/#2348)
 export { isPostLandTreeDirty }; // re-exported for backward compat — callers/tests still import it off pr-land.mjs
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs'; // post-land dup-NNN tripwire (#2318)
-import { parseNumstat } from './merge-ai-prs.mjs'; // net two-dot diff parser, shared single source (#1821)
+import { computeNetDiffChangedFiles } from './merge-ai-prs.mjs'; // SHARED net-diff basis w/ the drain, single source (#1821/#2373)
 import {
   scoreEscalation, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META,
   buildEscalationReasonBlock, bodyHasEscalationReason,
@@ -528,12 +528,19 @@ function runCli() {
   // (dismissedFindings / cross-repo couple shape), and the PR number (sampling floor). Best-effort: a
   // signal-fetch miss degrades to no-escalate — never blocks a green land over a scoring hiccup, and the
   // drain's own idempotent backstop pass still catches an unlabelled-but-should-be PR later.
+  //
+  // #2373 — the diff basis comes from `computeNetDiffChangedFiles` (SHARED with the drain backstop's own
+  // scoring, in merge-ai-prs.mjs), which fetches `BASE` with an EXPLICIT destination refspec
+  // (`+BASE:refs/remotes/REMOTE/BASE`) rather than a bare `git fetch REMOTE BASE`: the bare form relies on
+  // git's opportunistic tracking-ref update and can silently leave a stale local `REMOTE/BASE` even after a
+  // "successful" fetch, sweeping already-landed upstream commits (e.g. a gate-fix another lane merged onto
+  // `main` between this lane's claim and its PR-open, live repro: PR #324) into the score as if the PR itself
+  // touched them.
   const applyReviewEscalationLabel = () => {
-    tryGit(['fetch', REMOTE, BASE, '--quiet']);
-    let changedFiles = [];
-    let diffLines = 0;
-    const diffOut = tryGit(['diff', '--numstat', `${REMOTE}/${BASE}`, refSha]);
-    if (diffOut != null) ({ changedFiles, diffLines } = parseNumstat(diffOut));
+    const exec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: REPO, ...opts });
+    const net = computeNetDiffChangedFiles({ exec, remote: REMOTE, base: BASE, rev: refSha });
+    const changedFiles = net.changedFiles;
+    const diffLines = net.diffLines;
     let manifest = null;
     const manifestRaw = tryGit(['show', `${refSha}:.lane-manifest.json`]);
     if (manifestRaw) { try { manifest = JSON.parse(manifestRaw); } catch { /* malformed — degrade to no manifest signal */ } }
