@@ -18,14 +18,15 @@ tags: [drain, review, coordination, subagents, settled-by-precedent]
 > found the core question is **already ratified and shipped** under epic
 > [#2285](/backlog/2285-negotiated-agent-review-for-the-drain/) (all children resolved). The original A/B fork
 > ("build the in-process fixer vs. keep bounce-to-author") is **settled by precedent** — so this is not a merit
-> fork to decide but a **validation gate whose verdict is: resolve as graduated to #2285.** The survey and a
+> fork to decide but a **validation gate whose verdict is: resolve as graduated to the successor epic `xwfwuze`.** The survey and a
 > hostile skeptic pass surfaced **two** genuine unshipped residues (a proactive scope threshold; in-drain
-> red-CI auto-fix) — both *builds* (prioritization), not forks — to file under #2285.
+> red-CI auto-fix) — both *builds* (prioritization), not forks; the merit review below folds them into the
+> single successor epic `xwfwuze` (superseding the earlier "file under #2285" framing).
 
 ## Digest + verdict
 
 **Verdict: settled by precedent on the A/B fork — but the merit review (below) makes the actionable outcome a
-BUILD, not two inert stories. Resolve #2398 as graduated to #2285 and build the red-CI convergence residue now
+BUILD, not two inert stories. Resolve #2398 as graduated to `xwfwuze` (successor to #2285) and build the red-CI convergence residue now
 (unified engine + layered acceptance gate); Residue 1 is explicitly not built (it would regress the shipped
 axis).** The mechanism #2398 proposes — a role-separated *fixer* subagent writes the fix, a
 *distinct fresh reviewer* subagent accepts, converging in-drain with no author bounce — is exactly the
@@ -156,7 +157,7 @@ first, graduating per-repo on a clean track record (staged-autonomy norm).
 
 ## Recommendation
 
-**Resolve #2398 as graduated to #2285 and build the unified convergence loop** — approach-handshake-first, with
+**Resolve #2398 as graduated to `xwfwuze` (successor to #2285) and build the unified convergence loop** — approach-handshake-first, with
 the single completion bar (approach agreed · no reviewer issues · CI green). Do not re-decide the A/B fork
 (shipped), do not close as a bare duplicate, and do **not** file inert "not-yet" residue stories — the CI-green
 clause and the approach handshake are two parts of *one* loop, not two separately-prioritized builds.
@@ -166,16 +167,18 @@ finding held on every angle — the loop genuinely shipped into the live drain (
 the same execution model as the rest of the drain, `we:skills-src/drain/SKILL.md:199-246`), red-CI is correctly
 *not* the core, and no invariant is left unaddressed. **Amendment:** the residue is **two** pieces, not one —
 the skeptic surfaced the proactive scope threshold (Residue 1) alongside the red-CI item (Residue 2); both
-folded in above. Verdict adjusted from "close as duplicate" to "resolve as graduated + file two build-stories."
+folded in above. Verdict adjusted from "close as duplicate" to "resolve as graduated to `xwfwuze` + build one
+unified convergence loop" — the merit review below folds the two pieces into slices of that single successor
+epic, not two separately-filed stories.
 
 **Screen:** clear (fresh-context two-confusion). (1) *Boundary* — clear: the drain's in-process subagent
 choreography is WE-internal orchestration (`we:scripts/merge-ai-prs.mjs` + `we:scripts/lib/review-core.mjs`),
 no consumer-visible surface across the WE↔FUI↔Plateau boundary; correctly placed. (2) *Merit vs prioritization*
 — flagged(prio): the non-author invariant is preserved in **both** branches, so no merit difference survives
 free-and-maintained; the A/B "fork" is prioritization in costume. **Fix applied:** the item is authored as a
-settled-by-precedent ruling + two separately-prioritized builds, not as a merit fork with a pick.
+settled-by-precedent ruling graduated to a single unified build (epic `xwfwuze`), not as a merit fork with a pick.
 
 ---
 
 *Complements the overlap-stack coordination theme (stacking kills *conflict* round-trips; #2285 already killed
-*review* round-trips). Ruling this graduates it to #2285; it does not itself build anything.*
+*review* round-trips). Ruling this graduates it to `xwfwuze` (the successor epic to #2285); it does not itself build anything.*
