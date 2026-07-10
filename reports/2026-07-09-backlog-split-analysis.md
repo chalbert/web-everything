@@ -450,3 +450,51 @@ story (A), the for-each story (B, `blockedBy: [A]`), and the resource:loader+def
 `blockedBy: [A]`). #2360's body is updated to a "Sliced" framing recording the DAG (mirrors #2355's shape).
 **2356–2358 (Go/PHP/Rust) still warrant the same re-analysis** the JVM section flagged — not done here
 (out of scope for #2374, which is .NET-only); each is its own future scoping/re-analysis pass.
+
+---
+
+# Focused run: `/slice 1848` (enterprise-functionality umbrella — next-wave carve, appended 2026-07-09)
+
+## Context
+
+#1848 is the enterprise-functionality umbrella epic. It surfaced from `/resolve` discovery as "all slices
+done" (children #1850 locus-decision + #2372 telemetry-policy precedence layer both resolved) but **failed
+scope-delivered review**: its body names *three* enterprise shapes and only one shipped.
+
+| Named shape (body) | State |
+|---|---|
+| Fleet policy distribution (e.g. telemetry consent override) | ✅ delivered — #2372 (WE `DevMetricsPolicy` contract + FUI three-tier resolver), the body's "first concrete instance" |
+| SaaS account controls | ❌ never carved |
+| Dev-browser enterprise configuration | ❌ never carved |
+
+Closing #1848 now is the #1167/#1210 "resolved over uncarved scope" trap → keep open, carve the next wave.
+Program Test: **fails** — enterprise functionality is a named finite set of shapes (not a perpetual
+currency/conformance front), so it's a burndown umbrella, not a program; no `childlessReason: program`.
+
+## Could split — the two named-but-uncarved shapes, as next-wave story children
+
+Neither remaining strand is a clean size-≤3 *task* today — each is a story-sized area that reopens the
+umbrella honestly and gets sliced/scoped further on pickup. Carve the next wave (not the whole tail):
+
+| Slice | kind | size | Home | Scope | blockedBy |
+|---|---|---|---|---|---|
+| **A. Enterprise SaaS account controls** | story | 8 | plateau-app (hosted control-plane, alongside #091/#092) | Centrally-managed org / seat / role / account policy overriding per-user settings on org-owned accounts — the SaaS analog of #2372's server-based precedence layer. Under-specified → needs its own `/prepare` (account-model + control-plane surface) then `/slice` on pickup. | — |
+| **B. Dev-browser enterprise configuration** | story | 5 | plateau-app / packages/dev-browser (#2342) | Managed policy layer overriding per-developer dev-browser settings, reusing #2372's precedence shape. Gated on the dev-browser shell existing. | 1391 |
+
+**DAG:** A and B independent of each other; B `blockedBy` the dev-browser shell build (#1391). Each leaves
+#1848 open with honest open children — the "all slices done" nudge clears because real open work now sits
+under it, not a flag.
+
+## Could not split (into batchable tasks *now*)
+
+- **A (SaaS account controls)** — condition failed: *size is unresolved-scope, not just volume* (no concrete
+  deliverable spec yet). Unblock: scaffold the story above; `/prepare` the account-model/control-plane
+  decision, then `/slice`.
+- **B (dev-browser enterprise config)** — condition failed: *home still being built / blocked* (the
+  dev-browser shell, #1391, is open). Unblock: land the shell, then B is carvable.
+
+## Reconciliation applied
+
+Per `/resolve` step 1a (FAIL → reconcile, never leave parked): **not a program → scaffold the next wave**.
+Convert #1848 in place to a storied epic and scaffold A + B as open children. #1848 stays open, no longer
+reads "all slices done", and resolves only when its last enterprise shape lands.
