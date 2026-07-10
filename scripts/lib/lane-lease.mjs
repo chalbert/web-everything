@@ -60,9 +60,43 @@ export function chooseFreeLane(laneInfos, nowMs, ttlMs) {
   return eligible.length ? eligible[0].lane : null;
 }
 
-/** Build a lease marker object. Caller stamps `acquiredAt` (ISO) so this stays clock-free / testable. */
-export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid }) {
-  return { session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null, pid: pid ?? null };
+/** Build a lease marker object. Caller stamps `acquiredAt` (ISO) so this stays clock-free / testable.
+ *  `ownerSession` (#2367) is the DURABLE session identity (`CLAUDE_CODE_SESSION_ID`, captured at acquire) —
+ *  the SOLE ownership signal `isForeignLease` compares against: it is stable across a session's separate
+ *  Bash-tool calls yet distinct between concurrent sessions, and does NOT false-match two independent sessions
+ *  that merely share an upper process ancestor (terminal, a parallel-lane orchestrator) — the over-match that
+ *  made the earlier pid-ancestry heuristic unsafe in this guard's target topology (r2: pid-ancestry removed).
+ *  `pid` is informational only (human-readable `status`/debug; a leaf that exits right after `acquire`, never
+ *  useful for ownership). */
+export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession }) {
+  return {
+    session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null,
+    pid: pid ?? null, ownerSession: ownerSession ?? null,
+  };
+}
+
+/**
+ * Is `lease` held by a session OTHER than mine? The #2367 ownership decision — pure & unit-tested; the impure
+ * fs/env collection lives in the CLI (guard-bash.mjs). Decided from the durable session ids ALONE (r2 removed
+ * the pid-ancestry fallback, whose chain-overlap OVER-MATCHED two independent sessions sharing an upper process
+ * ancestor — the guard's own target topology, parallel lanes under one orchestrator — and so failed OPEN in the
+ * one place it mattered while looking protective).
+ *
+ *   OWNED / FOREIGN: when the lease carries an `ownerSession` AND the caller read a `mySessionId`, the lease is
+ *     FOREIGN iff `lease.ownerSession !== mySessionId` (equal ⇒ mine). Authoritative — the owner's own lease can
+ *     never read as foreign because both sides key on the same `CLAUDE_CODE_SESSION_ID` string.
+ *   DEGRADED (fail-OPEN, ALLOW ⇒ returns false): the lease has no `ownerSession` (an older lease, or one whose
+ *     acquire couldn't read the env), OR the caller has no `mySessionId`. Without an identity signal on both
+ *     sides "owner" and "foreign" are fundamentally indistinguishable, so this deliberately treats the lease as
+ *     NOT foreign — matching the guard's established fail-open posture (a guard bug must never wedge the agent).
+ *     This is the intentional trade-off of r2: drop the misleading "protective-looking but unsafe" pid-ancestry
+ *     fallback rather than replace it with a noisy fail-closed.
+ *   No lease ⇒ never foreign.
+ */
+export function isForeignLease({ lease, mySessionId } = {}) {
+  if (!lease) return false;
+  if (lease.ownerSession && mySessionId) return lease.ownerSession !== mySessionId;
+  return false; // degraded: no identity signal on both sides ⇒ fail-open (allow) — see doc above
 }
 
 /** One-line human description of a lease for `status` output. */
