@@ -2,7 +2,8 @@
  * @file scripts/readiness/__tests__/overlap-chain.test.mjs
  * @description Unit proof of #2394's pure overlap-stacking planner (`overlap-chain.mjs`): selective
  *   union-find chaining on DECLARED file-sets (sibling / stack-on-frontier / bridge), the depth cap's
- *   sibling fallback + re-root, the capability gate's hard default to siblings, and the push-time
+ *   sibling fallback + CAPPED re-root (a conflict-bound cluster nothing may stack on for the rest of the
+ *   plan), the capability gate's hard default to siblings, and the push-time
  *   `actual ⊆ declared` re-check verdicts (clean / undeclared-disjoint / rebase-required) with the
  *   apply-rebase repair loop. The git/fs boundary lives in `we:scripts/lane-stack.mjs`, e2e-proven in
  *   `we:scripts/__tests__/lane-stack-e2e.test.mjs`.
@@ -108,8 +109,8 @@ describe('selective chaining (#2387 F1)', () => {
   });
 });
 
-describe('depth cap — sibling fallback + re-root', () => {
-  it(`defaults to ${DEFAULT_DEPTH_CAP} and falls back to a sibling past the cap, re-rooting the chain`, () => {
+describe('depth cap — sibling fallback + capped re-root (never stackable)', () => {
+  const cappedPlan = () => {
     const plan = createStackPlan({ supported: true, depthCap: 2 });
     planNextItem(plan, { id: 'A', files: ['we:shared.txt'] });
     push(plan, 'A', ['we:shared.txt']);
@@ -121,12 +122,40 @@ describe('depth cap — sibling fallback + re-root', () => {
     expect(c.stacked).toBe(false); // depth would be 3 > cap 2
     expect(c.reason).toMatch(/depth cap/);
     push(plan, 'C', ['we:shared.txt']);
+    return plan;
+  };
 
-    // Re-root: the next overlapping item stacks on C's new shallow chain, not the over-deep one.
+  it(`defaults to ${DEFAULT_DEPTH_CAP}; past the cap the fallback sibling re-roots a CAPPED chain no later item stacks on`, () => {
+    const plan = cappedPlan();
+    // C's history is conflict-bound with the pushed frontier B (both edit shared.txt off different bases) —
+    // the drain WILL rewrite C at land. Stacking D on C would certify a clean lineage that rewrite falsifies,
+    // so D must be a sibling too (each capped-cluster member pays its own drain rebase — today's cost).
     const d = planNextItem(plan, { id: 'D', files: ['we:shared.txt'] });
-    expect(d.stacked).toBe(true);
-    expect(d.base).toBe('C');
-    expect(d.stackParents).toEqual(['C']);
+    expect(d.stacked).toBe(false);
+    expect(d.stackParents).toEqual([]);
+    expect(d.reason).toMatch(/depth-capped/);
+    push(plan, 'D', ['we:shared.txt']);
+
+    // The capped flag is sticky for the whole plan: E after D is still a sibling.
+    const e = planNextItem(plan, { id: 'E', files: ['we:shared.txt'] });
+    expect(e.stacked).toBe(false);
+  });
+
+  it('recheck excess touching a capped cluster is undeclared-capped — rebase directive disarmed, push as sibling', () => {
+    const plan = cappedPlan();
+    planNextItem(plan, { id: 'G', files: ['we:g.txt'] }); // declared-disjoint sibling
+    const v = recheckAtPush(plan, { id: 'G', actualFiles: ['we:g.txt', 'we:shared.txt'] });
+    expect(v.ok).toBe(true); // pushable — but as the sibling it is, never via a rebase-onto-capped-frontier
+    expect(v.verdict).toBe('undeclared-capped');
+    expect(v.onto).toEqual([]);
+    expect(v.undeclared).toEqual(['we:shared.txt']);
+
+    // And once pushed, G's own frontier is capped too (its history now touches the conflict-bound cluster):
+    // a later item overlapping G's files must not stack on G.
+    push(plan, 'G', ['we:g.txt', 'we:shared.txt']);
+    const h = planNextItem(plan, { id: 'H', files: ['we:g.txt'] });
+    expect(h.stacked).toBe(false);
+    expect(h.reason).toMatch(/depth-capped/);
   });
 });
 
@@ -173,6 +202,36 @@ describe('push-time recheck (#2387 F1 — actual ⊆ declared)', () => {
     push(plan, 'E', ['we:e.txt', 'we:shared.txt']);
     const f = planNextItem(plan, { id: 'F', files: ['we:shared.txt'] });
     expect(f.base).toBe('E');
+  });
+
+  it('a MULTI-parent apply-rebase fuses EVERY parent chain — no stale live frontier survives', () => {
+    // Two disjoint pushed chains + a sibling whose actuals bridge both.
+    const plan = createStackPlan({ supported: true });
+    planNextItem(plan, { id: 'A', files: ['we:a.txt'] });
+    push(plan, 'A', ['we:a.txt']);
+    planNextItem(plan, { id: 'B', files: ['we:b.txt'] });
+    push(plan, 'B', ['we:b.txt']);
+    planNextItem(plan, { id: 'E', files: ['we:e.txt'] }); // declared-disjoint sibling
+
+    const v = recheckAtPush(plan, { id: 'E', actualFiles: ['we:e.txt', 'we:a.txt', 'we:b.txt'] });
+    expect(v.ok).toBe(false);
+    expect(new Set(v.onto)).toEqual(new Set(['A', 'B']));
+
+    applyRebase(plan, { id: 'E', onto: v.onto, actualFiles: ['we:e.txt', 'we:a.txt', 'we:b.txt'] });
+    expect(new Set(plan.items.E.stackParents)).toEqual(new Set(['A', 'B']));
+    expect(recheckAtPush(plan, { id: 'E', actualFiles: ['we:e.txt', 'we:a.txt', 'we:b.txt'] }).ok).toBe(true);
+    push(plan, 'E', ['we:e.txt', 'we:a.txt', 'we:b.txt']);
+
+    // BOTH parents' chains fused into one live chain with frontier E: an item overlapping EITHER side stacks
+    // on E — were A's chain left live with its stale frontier, F would stack on A's tip, a base missing E's
+    // pushed a.txt edits, and the drain would hit a blind conflict on a certified-stacked lane.
+    const f = planNextItem(plan, { id: 'F', files: ['we:a.txt'] });
+    expect(f.stacked).toBe(true);
+    expect(f.base).toBe('E');
+    push(plan, 'F', ['we:a.txt']);
+    const g = planNextItem(plan, { id: 'G', files: ['we:b.txt'] });
+    expect(g.stacked).toBe(true);
+    expect(g.base).toBe('F'); // same single fused chain, frontier advanced past E
   });
 
   it("an item's overlap with its OWN chain (its parents' files) is never a violation", () => {

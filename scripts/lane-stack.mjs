@@ -23,7 +23,7 @@
  *
  * Usage:
  *   node scripts/lane-stack.mjs init --plan=/tmp/stack-<slug>.json [--depth-cap=4] [--json]
- *   node scripts/lane-stack.mjs plan-item --plan=<file> --id=2394 --files=we:a.mjs,we:b.md [--json]
+ *   node scripts/lane-stack.mjs plan-item --plan=<file> --id=2394 --files=we:a.mjs,we:b.md [--repo=we] [--json]
  *   node scripts/lane-stack.mjs recheck --plan=<file> --id=2394 --base=origin/main [--repo=we] [--json]
  *   node scripts/lane-stack.mjs apply-rebase --plan=<file> --id=2394 --onto=2391 --base=<new-base> [--repo=we]
  *   node scripts/lane-stack.mjs record --plan=<file> --id=2394 --base=<ref> --tip-ref=lane/<slug>-2394 [--repo=we]
@@ -84,15 +84,22 @@ const id = flags.id != null ? String(flags.id) : null;
 
 switch (cmd) {
   case 'init': {
-    // The capability read (#2393/#2387 F4): `git show origin/main:<marker>` after a best-effort fetch, so
-    // the verdict reflects the CURRENT main, not a stale local view. ANY failure (no origin, no marker,
-    // malformed JSON, version below what this producer needs) ⇒ supported:false — plan pure siblings.
-    try { git(['fetch', 'origin', '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* offline — the show below decides */ }
-    const { marker, supported } = readCapabilityFromMain((p) => git(['show', `origin/main:${p}`]));
+    // The capability read (#2393/#2387 F4): `git show origin/main:<marker>` after a MANDATORY fetch, so the
+    // verdict reflects the CURRENT main, never a stale local view. A failed fetch IS a read failure — the
+    // invariant is "default HARD to siblings on ANY read failure", and a stale local `origin/main` can still
+    // advertise a capability that was since revoked on the real main (fail-open). So: fetch failure, no
+    // origin, no marker, malformed JSON, version below required — ALL ⇒ supported:false, plan pure siblings.
+    let fetchError = null;
+    // stdout must stay piped (the git() helper trims the returned string); only stderr is squelched.
+    try { git(['fetch', 'origin', '--quiet'], { stdio: ['ignore', 'pipe', 'ignore'] }); }
+    catch (e) { fetchError = String(e.message || e).split('\n')[0]; }
+    const { marker, supported } = fetchError
+      ? { marker: null, supported: false }
+      : readCapabilityFromMain((p) => git(['show', `origin/main:${p}`]));
     const depthCap = flags['depth-cap'] != null ? Number(flags['depth-cap']) : undefined;
     const plan = createStackPlan({ supported, ...(Number.isInteger(depthCap) ? { depthCap } : {}) });
     savePlan(plan);
-    emit({ ok: true, supported, gateVersion: marker ? marker.gateVersion : null, depthCap: plan.depthCap, plan: planPath, detail: `plan initialized at ${planPath} — stacking ${supported ? `ENABLED (gateVersion ${marker.gateVersion} on origin/main)` : `DISABLED (no usable ${CAPABILITY_MARKER_PATH} on origin/main — plain siblings)`}` }, 0);
+    emit({ ok: true, supported, gateVersion: marker ? marker.gateVersion : null, depthCap: plan.depthCap, plan: planPath, detail: `plan initialized at ${planPath} — stacking ${supported ? `ENABLED (gateVersion ${marker.gateVersion} on origin/main)` : `DISABLED (${fetchError ? `git fetch origin failed (${fetchError}) — cannot confirm the CURRENT main` : `no usable ${CAPABILITY_MARKER_PATH} on origin/main`} — plain siblings)`}` }, 0);
     break;
   }
   case 'plan-item': {
@@ -104,7 +111,14 @@ switch (cmd) {
     catch (e) { fail(String(e.message || e)); }
     savePlan(plan);
     const tips = decision.baseTips || {};
-    const acquireBase = decision.stacked ? Object.values(tips).map((t) => t && (t.ref || t.sha)).find(Boolean) || null : null;
+    // The acquire base is the parent's RECORDED tip SHA for this repo (`--repo`, default `we`), never the
+    // mutable branch ref: the sha pins the child to the exact state the parent's push-time re-check audited.
+    // A ref could be moved (a /finish takeover, any force-push) between record and acquire, and foreign
+    // commits on both sides of the child's later `git diff <base>...HEAD` would vanish from its actual set —
+    // invisible cargo past the actual⊆declared gate. `lane-pool acquire --base` accepts a raw sha.
+    const repo = typeof flags.repo === 'string' && flags.repo ? flags.repo : 'we';
+    const tip = tips[repo] || null;
+    const acquireBase = decision.stacked ? (tip && (tip.sha || tip.ref)) || null : null;
     emit({
       ok: true, ...decision, acquireBase,
       detail: decision.stacked
@@ -123,7 +137,7 @@ switch (cmd) {
     emit({
       ok: verdict.ok, ...verdict,
       detail: verdict.ok
-        ? `#${id} ${verdict.verdict}${verdict.undeclared.length ? ` (undeclared but overlap-free: ${verdict.undeclared.join(', ')})` : ''} — push`
+        ? `#${id} ${verdict.verdict}${verdict.undeclared.length ? ` (undeclared: ${verdict.undeclared.join(', ')}${verdict.verdict === 'undeclared-capped' ? ' — touches a depth-capped cluster; ships as the sibling it is, the drain pays the rebase' : ''})` : ''} — push`
         : `#${id} REBASE-REQUIRED — actual ⊄ declared and the excess (${verdict.undeclared.join(', ')}) overlaps chain frontier(s) #${verdict.onto.join(', #')}. Rebase onto the frontier tip IN-SESSION, re-gate, \`apply-rebase --onto=${verdict.onto.join(',')}\`, re-run recheck. NEVER push this as a certified-disjoint sibling.`,
     }, verdict.ok ? 0 : 4);
     break;
@@ -145,8 +159,10 @@ switch (cmd) {
     const repo = typeof flags.repo === 'string' && flags.repo ? flags.repo : 'we';
     let sha = null;
     try { sha = git(['rev-parse', 'HEAD']); } catch { /* recorded without a sha only if rev-parse fails */ }
-    let tips = { [repo]: { sha, ...(typeof flags['tip-ref'] === 'string' ? { ref: flags['tip-ref'] } : {}) } };
-    if (typeof flags.tips === 'string') { try { tips = JSON.parse(flags.tips); } catch { fail('--tips must be valid JSON ({ "<repo>": {"sha":…, "ref":…} })'); } }
+    // The CLI is SINGLE-repo per couple (`--repo`, default `we`) — the one path the e2e suite proves. The
+    // tips object stays repo-keyed to match the plan's repo-qualified file model; a multi-repo stacking
+    // surface (if ever needed) must arrive with its own tests, not as an untested JSON side-door here.
+    const tips = { [repo]: { sha, ...(typeof flags['tip-ref'] === 'string' ? { ref: flags['tip-ref'] } : {}) } };
     try { recordPushed(plan, { id, actualFiles: actualFiles(), tips }); }
     catch (e) { fail(String(e.message || e)); }
     savePlan(plan);

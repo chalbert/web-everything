@@ -171,12 +171,15 @@ proof-of-land gate, which is exactly why stacking is capability-gated rather tha
   [we:scripts/readiness/overlap-chain.mjs](../../../scripts/readiness/overlap-chain.mjs) (union-find
   overlap chains on declared repo-qualified file-sets; a bridge item records **both** tips as
   `stackParents`; past the depth cap an item falls back to a sibling and re-roots the chain).
-- **Per item, before acquiring its lane (step 3)** — `node scripts/lane-stack.mjs plan-item --id=<NNN>
-  --files=<declared repo-qualified set, e.g. we:scripts/x.mjs,we:backlog/NNN-….md>`. Acquire per its
-  decision: `node scripts/lane-pool.mjs acquire --base=<acquireBase>`
-  ([we:scripts/lane-pool.mjs](../../../scripts/lane-pool.mjs), #2386) when stacked — starting the lane at
-  the predecessor's pushed tip instead of `origin/main`; a **bridge** decision additionally lists
-  `mergeParents` whose tips you `git merge` in-session, after acquiring.
+- **Per item, before acquiring its lane (step 3)** — `node scripts/lane-stack.mjs plan-item
+  --plan=<scratch>.json --id=<NNN> --files=<declared repo-qualified set, e.g.
+  we:scripts/x.mjs,we:backlog/NNN-….md>`. Acquire per its decision:
+  `node scripts/lane-pool.mjs acquire --base=<acquireBase>`
+  ([we:scripts/lane-pool.mjs](../../../scripts/lane-pool.mjs), #2386) when stacked — `acquireBase` is the
+  parent's **recorded tip sha** (pinning the child to the exact state the parent's push-time re-check
+  audited, not the movable lane ref), starting the lane at the predecessor's pushed tip instead of
+  `origin/main`; a **bridge** decision additionally lists `mergeParents` whose tips you `git merge`
+  in-session, after acquiring.
 - **After the resolve commit, before `pr-land` (still step 3)** — `node scripts/lane-stack.mjs recheck
   --plan=<scratch>.json --id=<NNN> --base=<the ref you acquired at>`: recomputes the item's ACTUAL touched
   files (`git diff --name-only <base>...HEAD`) and asserts actual ⊆ declared. **Exit 4 = rebase-required**

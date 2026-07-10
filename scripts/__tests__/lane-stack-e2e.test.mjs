@@ -117,7 +117,7 @@ function buildChain() {
   expect(planB.code, planB.err).toBe(0);
   expect(planB.json.stacked).toBe(true);
   expect(planB.json.base).toBe('A');
-  expect(planB.json.acquireBase, 'stacked item acquires on the parent lane ref').toBe('lane/A');
+  expect(planB.json.acquireBase, 'stacked item acquires on the parent\'s RECORDED tip sha — pinned to the audited state, not the movable lane ref').toBe(aSha);
 
   const laneB = makeLane('B', aSha); // starts AT A's tip
   expect(readFileSync(join(laneB, 'shared.txt'), 'utf8'), 'lane B sees A\'s not-yet-merged content').toBe('base\nA\n');
@@ -135,7 +135,7 @@ function buildChain() {
   expect(planC.code, planC.err).toBe(0);
   expect(planC.json.stacked).toBe(true);
   expect(planC.json.base, 'frontier moved past A to B').toBe('B');
-  expect(planC.json.acquireBase).toBe('lane/B');
+  expect(planC.json.acquireBase).toBe(bSha);
 
   const laneC = makeLane('C', bSha);
   writeFile(laneC, 'shared.txt', 'base\nA\nB\nC\n');
@@ -277,5 +277,20 @@ describe('lane-stack e2e (#2394) — capability gate', () => {
     const init = runStack(['init', `--plan=${join(base, 'plan-nomarker.json')}`], clone);
     expect(init.code, init.err).toBe(0);
     expect(init.json.supported, 'no marker on origin/main ⇒ hard default to plain siblings').toBe(false);
+  });
+
+  it('init reports supported:false when `git fetch origin` fails, even with a stale local marker', () => {
+    // The marker IS on this clone's stale origin/main remote-tracking ref — but the fetch that would confirm
+    // the CURRENT main fails (origin unreachable). Fail-open here would let a capability revoked on the real
+    // main keep enabling stacking; the invariant is "default HARD to siblings on ANY read failure".
+    const clone = join(base, 'stale-clone');
+    git(['clone', '--quiet', originDir, clone]);
+    expect(git(['rev-parse', '--verify', 'origin/main'], clone)).toBeTruthy(); // stale ref present locally
+    git(['remote', 'set-url', 'origin', join(base, 'gone.git')], clone); // origin now unreachable
+
+    const init = runStack(['init', `--plan=${join(base, 'plan-unfetchable.json')}`], clone);
+    expect(init.code, init.err).toBe(0);
+    expect(init.json.supported, 'fetch failure ⇒ hard default to plain siblings').toBe(false);
+    expect(init.json.detail).toMatch(/fetch/);
   });
 });
