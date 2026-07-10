@@ -72,6 +72,22 @@ export function nextHash(existingIds = []) {
 }
 
 /**
+ * Blind, whole-token swap of every ledgered hash → its `NNN` in `text`. `entries` is the ledger's
+ * `[hash, nnn]` pairs (already filtered to real hashes). Each hash (`x` + 6 base36) is globally unique
+ * and never recurs in prose, so a word-boundary replace is provably safe. Shared by `applyLedger` (both
+ * the body-ref rewrite and the path-token `from → to` computation) and the drain's on-disk report rewrite,
+ * so all three use ONE definition of "apply the whole ledger" (no drift between them).
+ * @param {string} text
+ * @param {[string,string][]} entries
+ * @returns {string}
+ */
+export function swapHashes(text, entries) {
+  let out = text;
+  for (const [hash, nnn] of entries) out = out.replace(new RegExp(`\\b${hash}\\b`, 'g'), String(nnn));
+  return out;
+}
+
+/**
  * Compute the renames + content rewrites to number one-or-more provisional items — the PURE core of the
  * drain's at-land numbering (#2288). Given every backlog file (stem `name` + raw `content`) and a
  * `ledger` mapping each in-flight `hash → assigned NNN`, it returns:
@@ -89,8 +105,8 @@ export function nextHash(existingIds = []) {
  * blind swap above rewrites the *reference* correctly, but the referenced *file* is NOT one of `files`
  * (it lives outside `backlog/`), so nothing renames it — the ref would dangle + the report would be
  * hidden on main (the #2387 red-main regression). So we also collect every path-shaped token that
- * embeds a ledgered hash and return the `{from, to}` file rename for the drain to `git mv` + rewrite in
- * the same land commit. Tokens under `backlog/` are excluded (those files are renamed via `renames`);
+ * embeds a ledgered hash and return the `{from, to}` file rename for the drain to enact in the same land
+ * commit — via this module's established `git rm` OLD + write-to-NEW convention (NOT `git mv`) + rewrite. Tokens under `backlog/` are excluded (those files are renamed via `renames`);
  * a `/backlog/<hash>/` URL has no extension so it isn't matched here — its ref-rewrite to
  * `/backlog/<NNN>/` is correct and needs no file rename. PURE (pattern only): the drain verifies the
  * file EXISTS before acting, so a path token with no on-disk file (a bare URL, a prose mention) is a
@@ -109,20 +125,22 @@ export function applyLedger(files, ledger) {
   const pathRenames = [];
   const pathSeen = new Set();
   for (const { name, content } of files) {
-    let text = content;
-    for (const [hash, nnn] of entries) {
-      text = text.replace(new RegExp(`\\b${hash}\\b`, 'g'), String(nnn));
-      // Collect on-disk path values embedding this hash (see `pathRenames` in the doc above). Match a
-      // path-shaped run (dir/file chars) that carries the hash AND ends in a `.ext`; scan the ORIGINAL
-      // content (post-swap the hash is gone). Skip `backlog/*` — handled by `renames`.
+    // Body/frontmatter refs: apply the WHOLE ledger's blind hash→NNN swap in one pass.
+    const text = swapHashes(content, entries);
+    // Collect on-disk path values embedding ANY ledgered hash (see `pathRenames` in the doc above). Match a
+    // path-shaped run (dir/file chars) that carries a hash AND ends in a `.ext`; scan the ORIGINAL content
+    // (post-swap the hash is gone). Skip `backlog/*` — handled by `renames`. Each `from` is emitted ONCE,
+    // deduped, with a `to` that applies the WHOLE ledger — a filename can embed TWO ledgered hashes
+    // (`reports/<hashA>-<hashB>-notes.md`), and the body ref rewrites BOTH; computing `to` per-iteration
+    // (this hash only) would leave the other hash unswapped → renamed file and rewritten ref disagree,
+    // re-creating the dangling-ref/hidden-report failure this whole path-rename exists to prevent (#2400).
+    for (const [hash] of entries) {
       const pathRe = new RegExp(`(?<![\\w./-])([\\w./-]*\\b${hash}\\b[\\w./-]*\\.[\\w]+)`, 'g');
       for (const m of content.matchAll(pathRe)) {
         const from = m[1];
         if (from.startsWith('backlog/') || pathSeen.has(from)) continue;
-        const to = from.replace(new RegExp(`\\b${hash}\\b`, 'g'), String(nnn));
-        if (to === from) continue;
         pathSeen.add(from);
-        pathRenames.push({ from, to });
+        pathRenames.push({ from, to: swapHashes(from, entries) }); // whole-ledger swap → all embedded hashes numbered
       }
     }
     const idTok = idFromName(name);

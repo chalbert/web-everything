@@ -7,7 +7,7 @@
  * case where a dependent references an already-numbered blocker by its old hash).
  */
 import { describe, it, expect } from 'vitest';
-import { HASH_RE, ID_TOKEN_RE, isHash, isNum, idFromName, slugFromName, normalizeId, nextHash, applyLedger } from '../id.mjs';
+import { HASH_RE, ID_TOKEN_RE, isHash, isNum, idFromName, slugFromName, normalizeId, nextHash, applyLedger, swapHashes } from '../id.mjs';
 
 describe('id token parsing (#2288)', () => {
   it('idFromName reads a numeric NNN or an xNNNNNN hash off a stem/ref', () => {
@@ -175,5 +175,26 @@ describe('applyLedger — on-disk path-value refs (#2400)', () => {
   it('leaves an item with no path-value ref untouched (pathRenames empty)', () => {
     const files = [file('x6yoscx-epic', '---\nkind: story\n---\n# Epic\n\nplain body, no report.\n')];
     expect(applyLedger(files, { x6yoscx: '2387' }).pathRenames).toEqual([]);
+  });
+
+  it('rewrites ALL ledgered hashes in a report filename embedding TWO of them — rename target matches the body ref (#2400 double-hash)', () => {
+    // A single report filename can carry two co-numbered hashes. The body ref-rewrite swaps BOTH; the file
+    // rename target MUST swap both too, or the renamed file and the rewritten ref disagree → dangling ref /
+    // hidden report (the exact failure this path-rename exists to prevent). Emitted ONCE, fully rewritten.
+    const files = [
+      file('x6yoscx-epic', '---\nkind: epic\nrelatedReport: reports/x6yoscx-x7k2q9a-notes.md\n---\n# Epic\n'),
+    ];
+    const { rewrites, pathRenames } = applyLedger(files, { x6yoscx: '2387', x7k2q9a: '2388' });
+    // Body ref rewrites both hashes…
+    expect(rewrites[0].content).toContain('relatedReport: reports/2387-2388-notes.md');
+    // …and the rename target agrees exactly — one entry, not one-per-hash, both hashes swapped.
+    expect(pathRenames).toEqual([{ from: 'reports/x6yoscx-x7k2q9a-notes.md', to: 'reports/2387-2388-notes.md' }]);
+  });
+});
+
+describe('swapHashes — shared whole-ledger blind swap (#2400)', () => {
+  it('replaces every ledgered hash as a whole token, leaves unledgered hashes/prose alone', () => {
+    const out = swapHashes('a x6yoscx and x7k2q9a but not xnope01', [['x6yoscx', '2387'], ['x7k2q9a', '2388']]);
+    expect(out).toBe('a 2387 and 2388 but not xnope01');
   });
 });

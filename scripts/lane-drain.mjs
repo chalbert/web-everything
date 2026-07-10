@@ -58,12 +58,12 @@
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, readdirSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve, join, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
 import { parseQueued, isQueued, queuedNums } from './readiness/queued-state.mjs';
 import { parseManifest, validateManifest, orderedRepos, extractManifestFromBody, MANIFEST_FILENAME } from './readiness/lane-manifest.mjs';
-import { isHash, isNum, idFromName, applyLedger } from './backlog/id.mjs';
+import { isHash, isNum, idFromName, applyLedger, swapHashes } from './backlog/id.mjs';
 import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 dual-lock: numbering mutex + whole-process drain lease
 
 // ── flag parsing (mirrors pr-land.mjs / lane-review.mjs) ──────────────────────────────────────────────
@@ -495,9 +495,17 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   }
 
   const { renames, rewrites, pathRenames } = applyLedger(files, ledger);
-  // #2400 — keep only the path-value refs whose file actually exists on disk (a bare URL / prose mention
-  // resolves to no file and is a harmless no-op); these get a `git mv` + internal-ref rewrite below.
-  const livePathRenames = pathRenames.filter(({ from }) => existsSync(join(CWD, from)));
+  // #2400 — path-value refs are derived from UNTRUSTED backlog content, so CONFINE them to inside the repo
+  // before acting: a crafted `relatedReport`/body token like `../../../outside/notes-<hash>.md` would
+  // otherwise make `writeFileSync(join(CWD, to))` + `git rm from` write outside the tree and delete an
+  // arbitrary file. Reject any absolute path or any token that escapes CWD after resolve (both `from` and
+  // `to`), then keep only those whose file actually exists on disk (a bare URL / prose mention resolves to
+  // no file and is a harmless no-op). Survivors get a `git rm` OLD + write-to-NEW + internal-ref rewrite below.
+  const repoRoot = resolve(CWD);
+  const inRepo = (p) => typeof p === 'string' && p !== '' && !isAbsolute(p) &&
+    (resolve(CWD, p) === repoRoot || resolve(CWD, p).startsWith(repoRoot + sep));
+  const livePathRenames = pathRenames.filter(({ from, to }) =>
+    inRepo(from) && inRepo(to) && existsSync(join(CWD, from)));
   // #2319 — `number-stranded --dry-run`: report the planned mapping + renames without touching the tree/index.
   if (dryRun) return {
     assigned, committed: false, dryRun: true,
@@ -530,10 +538,9 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   // whose stem embeds a numbered hash, and rewrite its internal self-refs (`/slice <hash>`, `#<hash>`) with
   // the same whole-ledger blind swap. Without this the item's rewritten ref dangles + the report is hidden →
   // the #2387 red-main regression. These paths live OUTSIDE `backlog/`, so `git rm` + write-to-new, not `git mv`.
+  const ledgerEntries = Object.entries(ledger).filter(([h]) => isHash(h));
   for (const { from, to } of livePathRenames) {
-    let content = readFileSync(join(CWD, from), 'utf8');
-    for (const [hash, nnn] of Object.entries(ledger).filter(([h]) => isHash(h)))
-      content = content.replace(new RegExp(`\\b${hash}\\b`, 'g'), String(nnn));
+    const content = swapHashes(readFileSync(join(CWD, from), 'utf8'), ledgerEntries);
     writeFileSync(join(CWD, to), content);
     if (quietGit(CWD, ['rm', '--quiet', from]) == null)
       return { assigned, committed: false, error: `git rm ${from} failed` };
