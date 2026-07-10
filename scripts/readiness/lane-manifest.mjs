@@ -140,6 +140,39 @@ export function orderedRepos(m) {
   return [...(m?.repos ?? [])].sort((a, b) => orderRank(a.repo) - orderRank(b.repo) || a.repo.localeCompare(b.repo));
 }
 
+/**
+ * #2390 — the manifest repo KEY (`we`/`frontierui`/`plateau-app`) for a git slug or short name. Pure. The
+ * escalation scorers (the drain in `merge-ai-prs.mjs`, the producer in `pr-land.mjs`) hold a repo as an
+ * `owner/name` slug or `null` (the cwd repo); the manifest keys it by the SHORT name, with `web-everything`
+ * carried as `we` (its `INTEGRATION_ORDER` key). Maps a slug (`chalbert/frontierui` → `frontierui`), a bare
+ * short name (`web-everything` → `we`), and passes an already-canonical key through. `null`/empty → `null`.
+ * @param {string|null|undefined} slug
+ * @returns {string|null}
+ */
+export function repoKeyFromSlug(slug) {
+  if (!slug || typeof slug !== 'string') return null;
+  const name = slug.includes('/') ? slug.split('/').pop() : slug;
+  return name === 'web-everything' ? 'we' : name;
+}
+
+/**
+ * #2390 — the per-repo `base` SHA a lane was cut from, for a given manifest repo key, or `null` when the
+ * manifest carries none for that repo (a plain sibling lane, or no manifest at all). Pure. Scoring a STACKED
+ * lane's SIZE / blast-radius from THIS base (its predecessor's tip) instead of `origin/main` diffs it on its own
+ * delta, killing cumulative-stack blast-radius inflation. A `null` return makes both scorers fall through to the
+ * unchanged `origin/main` basis. NOTE (#2390-review-fix): this only de-inflates the SIZE basis — the gate-self /
+ * `review:human` trigger always reads the cumulative `origin/main…head` set (see `computeNetDiffChangedFiles`'s
+ * `humanBasisFiles`), so a self-declared/mis-set base here can never suppress a human review.
+ * @param {{repos?:Array<{repo?:string, base?:string}>}|null|undefined} manifest
+ * @param {string|null} repoKey
+ * @returns {string|null}
+ */
+export function manifestBaseForRepo(manifest, repoKey) {
+  if (!manifest || !Array.isArray(manifest.repos) || !repoKey) return null;
+  const entry = manifest.repos.find((r) => r && r.repo === repoKey);
+  return entry && typeof entry.base === 'string' && entry.base ? entry.base : null;
+}
+
 /** Tolerant parse of `.lane-manifest.json` text → a manifest object, or `null` on empty/invalid JSON. */
 export function parseManifest(text) {
   if (!text || !text.trim()) return null;
@@ -221,13 +254,19 @@ function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
  * (`x7k2q9a`) — so real values round-trip verbatim, while every structural / injection character (CR/LF, the
  * line's own `, [ ]` delimiters, and the `< > !` a `<!-- … -->` marker needs) is dropped.
  *
- * @param {{dismissedFindings?:number, crossRepo?:boolean, blockedBy?:Array<number|string>}} [v]
+ * #2390-review-fix — also records the per-repo stacked `base` the scorer de-inflated SIZE from (the same
+ * value that rides the editable PR body), so the diff basis is part of the tamper-evident trail — a later body
+ * edit of `base` becomes diff-detectable like the other acted-on values. Sanitized to a git object hash;
+ * `none` when absent or malformed (mirrors what the scorer actually trusts).
+ *
+ * @param {{dismissedFindings?:number, crossRepo?:boolean, blockedBy?:Array<number|string>, base?:string}} [v]
  */
-export function manifestAuditLine({ dismissedFindings, crossRepo, blockedBy } = {}) {
+export function manifestAuditLine({ dismissedFindings, crossRepo, blockedBy, base } = {}) {
   const n = Number.isFinite(Number(dismissedFindings)) ? Number(dismissedFindings) : 0;
   const cross = !!crossRepo;
   const blocked = (Array.isArray(blockedBy) ? blockedBy : []).map((x) => String(x).replace(/[^A-Za-z0-9_-]/g, ''));
-  return `manifest acted-on: dismissedFindings=${n} crossRepo=${cross} blockedBy=[${blocked.join(',')}]`;
+  const b = typeof base === 'string' && /^[0-9a-f]{7,64}$/i.test(base) ? base : 'none';
+  return `manifest acted-on: dismissedFindings=${n} crossRepo=${cross} blockedBy=[${blocked.join(',')}] base=${b}`;
 }
 
 /** Serialize a manifest to `.lane-manifest.json` text (with a self-documenting `_doc` header). */
