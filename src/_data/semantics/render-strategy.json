@@ -1,5 +1,5 @@
 {
   "term": "Render Strategy",
   "definition": "A registered mechanism that turns a parsed element tree plus a change source into committed DOM updates, satisfying the <code>CustomRenderStrategy</code> contract (<code>mount</code>, optional <code>update</code>, optional <code>dispose</code>). Capability is feature-detected by which optional methods are present — a strategy without <code>update</code> is mount-once. The four registered strategies are declarative-static (the native-first default), vdom, fine-grained, and imperative. The sibling of <a href=\"#change-strategy\">Change Strategy</a>: change strategies detect what mutated, render strategies commit how the DOM reflects it.",
-  "usage": "Render Strategy Protocol (Web Components). A technical contract, not a UX preference — surfaces under /protocols/, never /intents/. The JSX adapter and the declarative &lt;component&gt; element are consumers that target a chosen strategy."
+  "usage": "Render Strategy Protocol (Web Components). A technical contract, not a UX preference — surfaces under /protocols/, never /intents/. The JSX adapter and the declarative &amp;lt;component&amp;gt; element are consumers that target a chosen strategy."
 }
