@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { numberPendingHashes } from '../lane-drain.mjs';
@@ -144,6 +144,72 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     // The leftover's blockedBy edge to the couple is repaired to the couple's assigned number.
     expect(readFileSync(join(repo, 'backlog/2202-followup.md'), 'utf8')).toContain('blockedBy: ["2201"]');
     expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('renames a relatedReport file whose stem embeds the hash + rewrites its internal refs (#2400, the #2387 regression)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xepic01-overlap.md',
+      '---\nkind: epic\nstatus: resolved\nrelatedReport: reports/2026-07-10-split-analysis-xepic01.md\n---\n# Overlap epic\n');
+    write('reports/2026-07-10-split-analysis-xepic01.md', '# Split analysis\n\nFocused run: `/slice xepic01`. Candidate #xepic01.\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'reports', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xepic01', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+    // The item's relatedReport ref is rewritten to the number…
+    expect(readFileSync(join(repo, 'backlog/2201-overlap.md'), 'utf8'))
+      .toContain('relatedReport: reports/2026-07-10-split-analysis-2201.md');
+    // …and the report FILE is renamed to match (no dangle, not hidden)…
+    expect(() => readFileSync(join(repo, 'reports/2026-07-10-split-analysis-xepic01.md'), 'utf8')).toThrow();
+    const report = readFileSync(join(repo, 'reports/2026-07-10-split-analysis-2201.md'), 'utf8');
+    // …with its own internal hash refs rewritten too.
+    expect(report).toContain('/slice 2201');
+    expect(report).toContain('#2201');
+    expect(report).not.toContain('xepic01');
+    // Everything landed in the one numbering commit — working tree clean.
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('rewrites a body /backlog/<hash>/ URL to the number with no report file to rename (#2400)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xitem01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n\nSee /backlog/xitem01/ for context.\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    numberPendingHashes(repo);
+    expect(readFileSync(join(repo, 'backlog/2201-alpha.md'), 'utf8')).toContain('/backlog/2201/');
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('REFUSES a traversal path-value ref — never writes/deletes outside the repo (#2400 containment)', () => {
+    // A crafted relatedReport with `..` escapes would otherwise make the drain writeFileSync the rewritten
+    // NEW path + `git rm` the OLD one, both OUTSIDE the tree — writing an arbitrary file and deleting a real
+    // one. The victim below sits ABOVE the repo root and embeds the hash so the ref resolves to a real file
+    // (existsSync true) — the exact condition the confinement check must veto. The item still numbers fine.
+    const victimName = `pr385-victim-${Date.now()}-xevil01.md`;
+    const victimPath = join(repo, '..', victimName);        // outside the repo root
+    const numberedSibling = join(repo, '..', victimName.replace('xevil01', '2201'));
+    writeFileSync(victimPath, '# I live outside the repo and must not be touched\n');
+    try {
+      write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+      write('backlog/xevil01-attack.md',
+        `---\nkind: story\nstatus: resolved\nrelatedReport: ../${victimName}\n---\n# Attack\n`);
+      write(QUEUED_REL, JSON.stringify({ queued: [] }));
+      git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+      const res = numberPendingHashes(repo);
+      // The item itself is still numbered — the malicious ref is simply not acted on as a file rename.
+      expect(res.assigned).toEqual([{ hash: 'xevil01', nnn: '2201' }]);
+      expect(backlogNames()).toContain('2201-attack.md');
+      // The out-of-repo victim is untouched: original content intact, NOT deleted, no numbered sibling written.
+      expect(existsSync(victimPath)).toBe(true);
+      expect(readFileSync(victimPath, 'utf8')).toContain('must not be touched');
+      expect(existsSync(numberedSibling)).toBe(false);
+    } finally {
+      try { rmSync(victimPath, { force: true }); } catch { /* best-effort */ }
+      try { rmSync(numberedSibling, { force: true }); } catch { /* best-effort */ }
+    }
   });
 
   it('skips an UNTRACKED hash file (local cruft) instead of aborting the tracked couple (PR #194)', () => {
