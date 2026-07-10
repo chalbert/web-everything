@@ -494,6 +494,10 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
     assigned.push({ hash, nnn });
   }
 
+  // applyLedger numbers each item AND stamps its bornAs:<hash> proof-of-land (#2392) — the durable,
+  // cross-clone, renumber-immune landed record read back via landedNumberFor. Derived from the same
+  // ledger that assigns the number, so the local id-ledger.json (numbering bookkeeping) and
+  // bornAs-on-main (the sole cross-clone landed proof) cannot diverge.
   const { renames, rewrites } = applyLedger(files, ledger);
   // #2319 — `number-stranded --dry-run`: report the planned mapping + renames without touching the tree/index.
   if (dryRun) return { assigned, committed: false, dryRun: true, renamed: renames.map((r) => r.to), wouldRename: renames.map((r) => ({ from: r.from, to: r.to })) };
@@ -531,6 +535,30 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   const summary = assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ');
   const committed = quietGit(CWD, ['commit', '-m', `drain: JIT-number ${summary} at land (#2288)`, '--', ...paths]) != null;
   return { assigned, committed, renamed: renames.map((r) => r.to), changedPaths: paths };
+}
+
+/**
+ * Resolve a birth-hash to the NNN it LANDED as, by reading the sole cross-clone proof-of-land: the
+ * `bornAs:<hash>` line `numberPendingHashes` stamped into a numbered item's frontmatter on origin/main
+ * (#2392). Returns the landed NNN string, or null when the hash has no bornAs record on main (it has not
+ * landed). Unlike the local `id-ledger.json` — per-clone numbering bookkeeping, invisible to other
+ * clones — this reads the SHARED main tree, so any clone can ask "did hash X land, and as what number?".
+ * That is the durable, renumber-immune lookup the serial-batch→drain coordination gate (#2387) needs;
+ * bornAs is derived from the ledger at land, so the two never disagree. Best-effort: a git failure (no
+ * origin/main ref, no match) reads as "not landed" → null.
+ * @param {string} hash  the item's birth hash (`x`+6 base36)
+ * @param {string} [CWD]  a clone whose origin/main carries the landed backlog
+ * @returns {string|null}
+ */
+export function landedNumberFor(hash, CWD = resolveWeRoot()) {
+  if (!isHash(hash)) return null;
+  // Whole-line match on origin/main so a longer token can never partial-hit; `-l` lists the matching
+  // path(s) as `origin/main:backlog/NNN-slug.md` — the NNN in that path is the landed number.
+  const out = quietGit(CWD, ['grep', '-l', '-E', `^bornAs: ${hash}$`, 'origin/main', '--', 'backlog/']);
+  if (!out) return null;
+  const line = out.split('\n').find(Boolean) || '';
+  const m = line.match(/backlog\/(\d{1,5})-.*\.md$/);
+  return m ? m[1] : null;
 }
 
 // Sync local main to the merged origin/main via a LOCAL fast-forward (never a work-merge — the couple's work
