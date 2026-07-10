@@ -105,7 +105,7 @@ import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, r
 import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs';
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
-import { extractManifestFromBody, manifestAuditLine } from './readiness/lane-manifest.mjs';
+import { extractManifestFromBody, manifestAuditLine, asItemId } from './readiness/lane-manifest.mjs';
 
 // #2262 — the local, machine-scoped park-age clock the review-escalation watch-window gate reads its
 // `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
@@ -304,24 +304,44 @@ export function needsManifestStripBeforeMerge(v) {
  * lane-drain `planWatch` cascade). Orphan PRs (no manifest → item null, blockedBy []) are always ready, so
  * this degrades to the legacy unordered sweep when nothing carries a manifest.
  *
- * @param {Array<{num:number, item:(number|null), blockedBy:number[], decision:'merge'|'skip'}>} candidates
- * @returns {{ready:Array, deferred:Array<{num,item,waitOn:number[]}>}}  ready is ordered (item asc, then PR#).
+ * @param {Array<{num:number, item:(number|string|null), blockedBy:Array<number|string>, decision:'merge'|'skip'}>} candidates
+ * @returns {{ready:Array, deferred:Array<{num,item,waitOn:Array<number|string>}>}}  ready is ordered (item asc, then PR#).
  */
 export function planLabelDrain(candidates) {
   const list = Array.isArray(candidates) ? candidates : [];
   // Every candidate still in play keeps its item "open" — a red/skip blocker must still defer its dependents,
   // so the open set is ALL candidate items, not just the mergeable ones. (A merged item is removed by the
   // caller between passes, which is what frees the dependent.)
-  const openItems = new Set(list.map((c) => c.item).filter((x) => x != null).map(Number));
+  //
+  // #2388 — `asItemId` (not `Number`) so a hash-keyed item (JIT numbering, #2288) stays its own distinct
+  // string in the Set. A bare `Number("x5lail9")` is `NaN`, and `Set` uses SameValueZero equality where
+  // `NaN === NaN` — so EVERY hash item would collapse into ONE indistinguishable "open" entry, and below,
+  // EVERY hash `blockedBy` edge would spuriously resolve `openItems.has(NaN)` → true against ANY other open
+  // hash item, not just its actual blocker (defers/frees the wrong item).
+  const openItems = new Set(list.map((c) => c.item).filter((x) => x != null).map(asItemId));
   const ready = [];
   const deferred = [];
   for (const c of list) {
     if (c.decision !== 'merge') continue;
-    const waitOn = (Array.isArray(c.blockedBy) ? c.blockedBy : []).map(Number).filter((b) => openItems.has(b));
+    const waitOn = (Array.isArray(c.blockedBy) ? c.blockedBy : []).map(asItemId).filter((b) => openItems.has(b));
     if (waitOn.length === 0) ready.push(c);
     else deferred.push({ num: c.num, item: c.item, waitOn });
   }
-  ready.sort((a, b) => (Number(a.item ?? Infinity) - Number(b.item ?? Infinity)) || (a.num - b.num));
+  // Numeric items (landed NNNs) sort by number ascending, as before. A hash item has no numeric order yet
+  // (JIT numbering assigns the real NNN only at land, #2288) so it sorts after every numbered item; ties
+  // (incl. between distinct hashes) break on PR # — never on the item id itself, so two different hashes
+  // never collide into one NaN-comparator bucket the way `Number(hash) - Number(hash)` (NaN) used to.
+  // A hash item's relative order vs. ANOTHER item it is `blockedBy` is already governed by that edge, not
+  // this comparator: two mutually-dependent items can never BOTH be `ready` in the same pass (the dependent's
+  // blocker is still `openItems` until the caller's outer cascade merges it and recomputes the next pass) —
+  // so within one `ready` array there is no live blockedBy/stackParents edge left to order by; the topology
+  // is instead realized ACROSS passes by the caller re-invoking this function after each merge.
+  const rank = (item) => {
+    if (item == null) return Infinity;
+    const id = asItemId(item);
+    return typeof id === 'string' ? Infinity : id;
+  };
+  ready.sort((a, b) => (rank(a.item) - rank(b.item)) || (a.num - b.num));
   return { ready, deferred };
 }
 
@@ -915,8 +935,12 @@ function runCli() {
       // #2188: attach the manifest (backlog `item` + cross-item `blockedBy`) so the GLOBAL cascade honours
       // cross-repo dependencies. Only a WE lane carries one; the rest degrade to no-manifest → always ready.
       const m = readPrManifest(repo, p.headRefName);
-      v.item = m && m.item != null ? Number(m.item) : null;
-      v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(Number) : [];
+      // #2388 — `asItemId` (not a bare `Number()`) keeps a hash-keyed item (e.g. `x5lail9`, JIT numbering
+      // #2288) as its own distinct string; the legacy fallback path below reads a raw un-normalized manifest
+      // off `git show`/`gh api` (bypassing `buildManifest`'s own `asItemId` pass), so this coercion is still
+      // needed even though the PR-body path already normalized it.
+      v.item = m && m.item != null ? asItemId(m.item) : null;
+      v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(asItemId) : [];
       v.hasManifest = m != null; // #2183 — carries the transient manifest on its head → must be stripped before merge
       // #2171 review-escalation signals off the manifest: cross-repo couple (>1 repo) + dismissed pre-PR findings.
       v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
