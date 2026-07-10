@@ -876,6 +876,27 @@ describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, n
     expect(hasDrainReasonComment([{ body: withNoAudit }], 'skip', reason)).toBe(true);
   });
 
+  it("xnsk54v land-path — the 'land' kind records the acted-on values BEFORE a merge (closes the attack-success gap)", () => {
+    // The park/skip paths only fire when the drain does NOT merge, so they record nothing in the attack's
+    // SUCCESS state (dismissedFindings edited DOWN so the PR LANDS). The 'land' comment fires just before the
+    // merge on a manifest-carrying PR, so a landed PR always carries a durable record of what the drain acted on.
+    const reason = 'landing — recording the acted-on manifest escalation values before merge';
+    const auditActed = 'manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]'; // the tampered-down value the drain actually acted on
+    const body = buildDrainReasonComment('land', reason, auditActed);
+    expect(body).toContain('drain-land-reason'); // its own marker kind, distinct from park/skip
+    expect(body).toContain('Landed by the drain');
+    expect(body).toContain(reason);
+    expect(body).toContain(auditActed);
+    // Idempotent: a --watch re-pass over the same land value dedupes (no duplicate record).
+    expect(hasDrainReasonComment([{ body }], 'land', reason, auditActed)).toBe(true);
+    // A land marker never collides with a park/skip marker of the same text.
+    expect(hasDrainReasonComment([{ body }], 'park', reason, auditActed)).toBe(false);
+    expect(hasDrainReasonComment([{ body }], 'skip', reason, auditActed)).toBe(false);
+    // A CHANGED acted-on value posts a fresh, separately-timestamped land record (the tamper trail).
+    const auditOther = 'manifest acted-on: dismissedFindings=3 crossRepo=true blockedBy=[]';
+    expect(hasDrainReasonComment([{ body }], 'land', reason, auditOther)).toBe(false);
+  });
+
   it('hasDrainReasonComment tolerates a missing/odd comments array', () => {
     expect(hasDrainReasonComment(undefined, 'skip', 'x')).toBe(false);
     expect(hasDrainReasonComment([{}, { body: null }], 'skip', 'x')).toBe(false);

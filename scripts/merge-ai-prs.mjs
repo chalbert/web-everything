@@ -414,14 +414,20 @@ export function shouldRepollForLabelLag({ label, found, expect, retried } = {}) 
  */
 export function drainReasonMarker(kind) { return `<!-- drain-${kind}-reason -->`; }
 
-/** Build the comment body for a park/skip reason. Pure.
+/** Build the comment body for a park/skip/land reason. Pure.
+ *  `kind` — 'park' (review-escalation parked it), 'skip' (a real conflict / red check), or 'land' (xnsk54v
+ *  follow-up — the drain is about to MERGE a manifest-carrying PR; this records what it acted on BEFORE the
+ *  merge, so the attack's SUCCESS state — `dismissedFindings` edited DOWN so the PR lands — still leaves a
+ *  durable trail).
  *  `auditLine` (xnsk54v follow-up) — the optional `manifestAuditLine` recording the escalation-sensitive
  *  manifest values (`dismissedFindings`/`crossRepo`/`blockedBy`) this decision ACTED ON. Because the manifest
  *  now lives in the editable, un-reviewed PR body, folding the acted-on values into this durable, timestamped
  *  comment makes a later body edit tamper-evident (diff recorded-vs-live). Appended verbatim; omitted when
  *  absent (an orphan/impl PR carrying no manifest is unchanged). */
 export function buildDrainReasonComment(kind, reasonText, auditLine) {
-  const heading = kind === 'park' ? '⏸ **Parked for review by the drain**' : '· **Skipped by the drain**';
+  const heading = kind === 'park' ? '⏸ **Parked for review by the drain**'
+    : kind === 'land' ? '✅ **Landed by the drain**'
+    : '· **Skipped by the drain**';
   const audit = auditLine ? `\n\n${auditLine}` : '';
   return `${drainReasonMarker(kind)}\n${heading}\n\n${reasonText}${audit}`;
 }
@@ -1235,6 +1241,19 @@ function runCli() {
       let progressed = false;
       for (const c of plan.ready) {
         try {
+          // xnsk54v follow-up (land-path tamper-evidence) — the park/skip comment paths only fire when the drain
+          // does NOT merge, so they record NOTHING in the attack's SUCCESS state: `dismissedFindings` edited DOWN
+          // to suppress escalation so the PR LANDS. Close that gap by stamping the acted-on manifest values onto
+          // the PR as a durable, timestamped comment BEFORE the merge — a landed manifest PR then always carries
+          // a record of the escalation-sensitive values the drain acted on. Manifest-carrying PRs only (an
+          // orphan/impl PR has nothing body-sourced to record — its behaviour is byte-identical to before).
+          // Decision-preserving: `postDrainReasonComment` swallows every `gh` error internally (returns a bool,
+          // never throws), so it can neither block nor alter the merge below — it only records.
+          if (c.hasManifest) {
+            const landAudit = manifestAuditLine({ dismissedFindings: c.dismissedFindings, crossRepo: c.crossRepo, blockedBy: c.blockedBy });
+            const posted = postDrainReasonComment(c.repo, c.num, 'land', 'landing — recording the acted-on manifest escalation values before merge', landAudit);
+            if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} acted-on manifest values stamped on PR before merge\n`);
+          }
           // #2290 — the drain is the SOLE writer to main: the one `gh pr merge` now routes through the shared
           // gate (caller 'drain' — the only caller the gate permits). Behaviour is identical to the prior
           // inline call (`gh pr merge <n> [--repo …] --merge --delete-branch`, throw on a non-zero gh exit).

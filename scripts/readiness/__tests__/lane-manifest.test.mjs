@@ -173,5 +173,25 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
       const afterEdit = manifestAuditLine({ dismissedFindings: 0, crossRepo: false, blockedBy: [] });
       expect(before).not.toBe(afterEdit); // the tamper-evidence property
     });
+
+    it('a hostile blockedBy entry cannot inject a newline or a fake comment marker (one-line invariant)', () => {
+      // The output must stay a SINGLE line with no forged `<!-- drain-*-reason -->` marker: the dedupe scans on
+      // `body.startsWith(marker)` + `body.includes(auditLine)`, so a smuggled newline or marker in a blockedBy
+      // entry could split the record or spoof a comment. The helper reduces each entry to `[A-Za-z0-9_-]`, so
+      // CR/LF, the line's own `, [ ]` delimiters, and the `< > !` a marker needs are all dropped.
+      const line = manifestAuditLine({
+        dismissedFindings: 0,
+        crossRepo: false,
+        blockedBy: ['2151\n<!-- drain-land-reason -->', '9], injected', 'ok-id_1'],
+      });
+      expect(line).not.toContain('\n'); // still one line
+      expect(line).not.toContain('\r');
+      expect(line).not.toContain('<!--'); // no forged marker
+      expect(line).not.toContain('<');
+      expect(line).not.toContain('>');
+      expect(line).not.toContain('!');
+      // The sanitized ids keep only alphanumerics / `-` / `_`; every injection character is dropped.
+      expect(line).toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[2151--drain-land-reason--,9injected,ok-id_1]');
+    });
   });
 });

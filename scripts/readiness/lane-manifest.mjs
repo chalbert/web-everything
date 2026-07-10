@@ -180,12 +180,21 @@ function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
  * silently defeating the record==acted-on invariant the whole fix rests on. So a finite value round-trips
  * verbatim (negatives included); coercion guards only NON-finite/undefined so the line can't crash or inject.
  *
+ * OUTPUT CONTRACT — always a SINGLE line, no embedded newline and no HTML-comment marker, regardless of input.
+ * The dedupe in `hasDrainReasonComment` relies on the line being one stable token (`body.includes(auditLine)`)
+ * that can't be split by a smuggled newline nor spoof a marker into a `startsWith(marker)` scan. In the real
+ * drain path `blockedBy` is `.map(Number)` upstream so entries are already numbers, but this exported helper is
+ * called with raw values elsewhere — so each `blockedBy` entry is stringified and reduced to a safe allowlist:
+ * only `[A-Za-z0-9_-]` survive. That is exactly the shape of a legitimate backlog id — numeric (`2151`) or slug
+ * (`x7k2q9a`) — so real values round-trip verbatim, while every structural / injection character (CR/LF, the
+ * line's own `, [ ]` delimiters, and the `< > !` a `<!-- … -->` marker needs) is dropped.
+ *
  * @param {{dismissedFindings?:number, crossRepo?:boolean, blockedBy?:Array<number|string>}} [v]
  */
 export function manifestAuditLine({ dismissedFindings, crossRepo, blockedBy } = {}) {
   const n = Number.isFinite(Number(dismissedFindings)) ? Number(dismissedFindings) : 0;
   const cross = !!crossRepo;
-  const blocked = (Array.isArray(blockedBy) ? blockedBy : []).map((x) => String(x));
+  const blocked = (Array.isArray(blockedBy) ? blockedBy : []).map((x) => String(x).replace(/[^A-Za-z0-9_-]/g, ''));
   return `manifest acted-on: dismissedFindings=${n} crossRepo=${cross} blockedBy=[${blocked.join(',')}]`;
 }
 
