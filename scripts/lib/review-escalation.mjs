@@ -70,6 +70,11 @@ export function isBlastRadiusPath(path) {
 const GATE_SELF_PATHS = [
   /(^|\/)scripts\/lib\/review-escalation\.mjs$/, // the escalation rubric itself (this file)
   /(^|\/)scripts\/merge-ai-prs\.mjs$/,           // the lander that reads the verdict labels + decides to merge
+  // The tripwire suite that PROVES the safety invariants of the two files above (gate-self ⇒ human, no
+  // auto-merge under review:human, red never mergeable, drain sole-writer, …). It is in this list on purpose:
+  // weakening an invariant is the one gate change an agent must not clear, so editing it forces review:human —
+  // shrinking human review of gate changes down to "changes to what the invariants assert". See the file header.
+  /(^|\/)scripts\/lib\/__tests__\/gate-invariants\.test\.mjs$/,
 ];
 
 /** Does this repo-relative path edit the auto-review trust chain (→ a human review is essential)? Pure. */
