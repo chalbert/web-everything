@@ -73,6 +73,66 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
     expect(validateManifest(back).ok).toBe(true);
   });
 
+  describe('#2387 F3 — stackParents + per-repo base (overlap-stacked batching)', () => {
+    it('defaults stackParents to [] and omits `base` when neither is passed (today\'s sibling behavior)', () => {
+      const m = buildManifest({ item: 1, repos: [{ repo: 'we', ref: 'lane/1-a' }] });
+      expect(m.stackParents).toEqual([]);
+      expect(m.repos[0]).not.toHaveProperty('base');
+      expect(validateManifest(m).ok).toBe(true);
+    });
+
+    it('carries stackParents (asItemId — NNN or hash) and a per-repo base SHA', () => {
+      const m = buildManifest({
+        item: 2387,
+        repos: [
+          { repo: 'we', ref: 'lane/2387-we', base: 'deadbeef' },
+          { repo: 'frontierui', ref: 'lane/2387-fui', base: 'cafef00d' },
+        ],
+        stackParents: [2151, 'x7k2q9a'],
+      });
+      expect(m.stackParents).toEqual([2151, 'x7k2q9a']);
+      expect(m.repos.find((r) => r.repo === 'we').base).toBe('deadbeef');
+      expect(m.repos.find((r) => r.repo === 'frontierui').base).toBe('cafef00d');
+      expect(validateManifest(m).ok).toBe(true);
+    });
+
+    it('a repo entry may omit base while a sibling repo carries one (per-repo, not manifest-wide)', () => {
+      const m = buildManifest({
+        item: 5,
+        repos: [{ repo: 'we', ref: 'lane/5-we' }, { repo: 'frontierui', ref: 'lane/5-fui', base: 'abc123' }],
+      });
+      expect(m.repos.find((r) => r.repo === 'we')).not.toHaveProperty('base');
+      expect(m.repos.find((r) => r.repo === 'frontierui').base).toBe('abc123');
+      expect(validateManifest(m).ok).toBe(true);
+    });
+
+    it('never writes an empty-string base (treated as absent)', () => {
+      const m = buildManifest({ item: 6, repos: [{ repo: 'we', ref: 'lane/6-we', base: '' }] });
+      expect(m.repos[0]).not.toHaveProperty('base');
+    });
+
+    it('rejects a non-string/empty base and a malformed stackParents', () => {
+      const badBase = { item: 9, repos: [{ repo: 'we', ref: 'lane/9-we', base: 123, carriesResolve: true }], blockedBy: [], mergeRiskFiles: [] };
+      expect(validateManifest(badBase).ok).toBe(false);
+      expect(validateManifest(badBase).errors.join(' ')).toMatch(/invalid `base`/);
+
+      const badStackParents = { item: 9, repos: [{ repo: 'we', ref: 'lane/9-we', carriesResolve: true }], stackParents: 'not-an-array', blockedBy: [], mergeRiskFiles: [] };
+      expect(validateManifest(badStackParents).ok).toBe(false);
+      expect(validateManifest(badStackParents).errors.join(' ')).toMatch(/stackParents must be an array/);
+    });
+
+    it('round-trips stackParents + per-repo base through serialize/parse', () => {
+      const m = buildManifest({
+        item: 2387,
+        repos: [{ repo: 'we', ref: 'lane/2387-we', base: 'deadbeef' }],
+        stackParents: [2151],
+      });
+      const back = parseManifest(serializeManifest(m));
+      expect(back).toEqual(m);
+      expect(validateManifest(back).ok).toBe(true);
+    });
+  });
+
   it('parse tolerates empty/garbage → null (drain skips-and-reports, never crashes)', () => {
     expect(parseManifest('')).toBeNull();
     expect(parseManifest('   ')).toBeNull();
