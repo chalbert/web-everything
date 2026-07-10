@@ -150,11 +150,22 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
         .toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]');
     });
 
-    it('coerces defensively — NaN/negative dismissedFindings → 0, truthy crossRepo → bool, non-array blockedBy → []', () => {
+    it('coerces only NON-finite defensively (NaN → 0), truthy crossRepo → bool, non-array blockedBy → []', () => {
       expect(manifestAuditLine({ dismissedFindings: NaN, crossRepo: 1, blockedBy: null }))
         .toBe('manifest acted-on: dismissedFindings=0 crossRepo=true blockedBy=[]');
-      expect(manifestAuditLine({ dismissedFindings: -4, crossRepo: 0, blockedBy: undefined }))
+      expect(manifestAuditLine({ dismissedFindings: undefined, crossRepo: 0, blockedBy: undefined }))
         .toBe('manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]');
+    });
+
+    it('records a finite NEGATIVE dismissedFindings VERBATIM — never clamps to 0 (record==acted-on)', () => {
+      // The tamper scenario: a body edited to `dismissedFindings: -4` scores LOWER (less scrutiny) and is fed
+      // RAW to scoreEscalation (the caller isFinite-guards but does NOT clamp). The record must mirror that
+      // exactly, or the recorded value would silently diverge from the acted-on value — defeating the fix.
+      expect(manifestAuditLine({ dismissedFindings: -4, crossRepo: false, blockedBy: [] }))
+        .toBe('manifest acted-on: dismissedFindings=-4 crossRepo=false blockedBy=[]');
+      // A numeric string the caller passes as-is still renders faithfully as its numeric value.
+      expect(manifestAuditLine({ dismissedFindings: -1, crossRepo: true, blockedBy: [2151] }))
+        .toBe('manifest acted-on: dismissedFindings=-1 crossRepo=true blockedBy=[2151]');
     });
 
     it('a CHANGED acted-on value yields a DIFFERENT line (a body edit becomes diff-detectable)', () => {

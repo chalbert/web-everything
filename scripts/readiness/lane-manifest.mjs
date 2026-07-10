@@ -173,10 +173,17 @@ function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
  * — that stability is what lets the reason-comment dedupe skip a re-post, and a CHANGED value post a fresh,
  * separately-timestamped comment (the tamper trail). Tolerant of missing/zero/empty inputs.
  *
+ * Record FAITHFULLY — mirror what `scoreEscalation` actually acted on. The caller (merge-ai-prs.mjs ~line 891)
+ * sets `v.dismissedFindings` with an `isFinite` guard ONLY, NOT a clamp — so a body edited to a finite negative
+ * (e.g. `-4`, which scores LOWER = LESS scrutiny) is fed RAW to the escalation decision. Clamping it to 0 here
+ * would make the record diverge from the acted-on value in EXACTLY the tamper scenario this fix targets,
+ * silently defeating the record==acted-on invariant the whole fix rests on. So a finite value round-trips
+ * verbatim (negatives included); coercion guards only NON-finite/undefined so the line can't crash or inject.
+ *
  * @param {{dismissedFindings?:number, crossRepo?:boolean, blockedBy?:Array<number|string>}} [v]
  */
 export function manifestAuditLine({ dismissedFindings, crossRepo, blockedBy } = {}) {
-  const n = Number.isFinite(Number(dismissedFindings)) ? Math.max(0, Number(dismissedFindings)) : 0;
+  const n = Number.isFinite(Number(dismissedFindings)) ? Number(dismissedFindings) : 0;
   const cross = !!crossRepo;
   const blocked = (Array.isArray(blockedBy) ? blockedBy : []).map((x) => String(x));
   return `manifest acted-on: dismissedFindings=${n} crossRepo=${cross} blockedBy=[${blocked.join(',')}]`;
