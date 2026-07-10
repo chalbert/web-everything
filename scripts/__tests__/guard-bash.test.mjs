@@ -4,7 +4,10 @@
  *   sanctioned `MAIN_PUSH_OK=1` escape passes through. The stdin/JSON I/O is the boundary; `decide` is pure.
  */
 import { describe, it, expect } from 'vitest';
-import { decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd, resolveEffectiveCwd } from '../guard-bash.mjs';
+import {
+  decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd, resolveEffectiveCwd,
+  laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
+} from '../guard-bash.mjs';
 
 describe('guard-bash — primary-cwd backlog-mutation block (#2302)', () => {
   const P = ['/ws/webeverything', '/ws/frontierui'];
@@ -107,6 +110,109 @@ describe('guard-bash — resolveEffectiveCwd honours a leading `cd` (#2335)', ()
     expect(isPrimaryCwd(eff, [PRIMARY])).toBe(false);
     expect(isLaneCwd(eff)).toBe(true);
     expect(reason('node scripts/backlog.mjs claim 2335', { primaryCwd: false })).toBeNull();
+  });
+});
+
+describe('guard-bash — foreign-live-lease destructive-op block (#2367)', () => {
+  it('laneRootFromCwd: extracts the lane ROOT from cwd at or under it; null off a lane', () => {
+    expect(laneRootFromCwd('/ws/.lanes/web-everything/lane-8')).toBe('/ws/.lanes/web-everything/lane-8');
+    expect(laneRootFromCwd('/ws/.lanes/web-everything/lane-8/scripts')).toBe('/ws/.lanes/web-everything/lane-8');
+    expect(laneRootFromCwd('/ws/.lanes/frontierui/lane-12/src/deep/dir')).toBe('/ws/.lanes/frontierui/lane-12');
+    expect(laneRootFromCwd('/ws/webeverything')).toBeNull();
+    expect(laneRootFromCwd(undefined)).toBeNull();
+  });
+
+  it('isDestructiveLaneGitOp: recognizes reset --hard, clean (any force flag), checkout/restore/switch discard, force-push', () => {
+    expect(isDestructiveLaneGitOp('git reset --hard origin/main')).toBe(true);
+    expect(isDestructiveLaneGitOp('git reset --hard')).toBe(true);
+    expect(isDestructiveLaneGitOp('git reset --soft HEAD~1')).toBe(false);
+    expect(isDestructiveLaneGitOp('git clean -fd')).toBe(true);
+    expect(isDestructiveLaneGitOp('git clean -df')).toBe(true);
+    expect(isDestructiveLaneGitOp('git clean -f -d')).toBe(true);
+    expect(isDestructiveLaneGitOp('git clean --force -d')).toBe(true);
+    expect(isDestructiveLaneGitOp('git clean -f')).toBe(true);        // #2367 gap — -f alone still DELETES untracked files
+    expect(isDestructiveLaneGitOp('git clean -fx')).toBe(true);       // -fx (files + ignored) without -d — still destructive
+    expect(isDestructiveLaneGitOp('git clean -n')).toBe(false);       // dry-run, no force → harmless
+    expect(isDestructiveLaneGitOp('git clean -n -fd')).toBe(true);    // dry-run flag alongside a force flag — matched (conservative)
+    expect(isDestructiveLaneGitOp('git checkout -- .')).toBe(true);
+    expect(isDestructiveLaneGitOp('git checkout .')).toBe(true);
+    expect(isDestructiveLaneGitOp('git checkout HEAD -- .')).toBe(true);  // #2367 gap — ref before the pathspec
+    expect(isDestructiveLaneGitOp('git checkout -f main')).toBe(true);    // #2367 gap — force-checkout discards the tree
+    expect(isDestructiveLaneGitOp('git checkout -- src/foo.ts')).toBe(false);
+    expect(isDestructiveLaneGitOp('git checkout main')).toBe(false);
+    expect(isDestructiveLaneGitOp('git restore .')).toBe(true);          // #2367 gap
+    expect(isDestructiveLaneGitOp('git restore --worktree .')).toBe(true);
+    expect(isDestructiveLaneGitOp('git restore --staged -- .')).toBe(true);
+    expect(isDestructiveLaneGitOp('git restore src/foo.ts')).toBe(false);
+    expect(isDestructiveLaneGitOp('git switch -f main')).toBe(true);      // #2367 gap — force-switch discards the tree
+    expect(isDestructiveLaneGitOp('git switch --discard-changes main')).toBe(true);
+    expect(isDestructiveLaneGitOp('git switch main')).toBe(false);
+    expect(isDestructiveLaneGitOp('git push --force origin lane/foo')).toBe(true);
+    expect(isDestructiveLaneGitOp('git push -f origin lane/foo')).toBe(true);
+    expect(isDestructiveLaneGitOp('git push --force-with-lease origin lane/foo')).toBe(true);
+    expect(isDestructiveLaneGitOp('git push origin +main')).toBe(true);          // #2367 gap — +refspec force syntax
+    expect(isDestructiveLaneGitOp('git push origin +HEAD:lane/x')).toBe(true);
+    expect(isDestructiveLaneGitOp('git push origin lane/foo')).toBe(false);
+    expect(isDestructiveLaneGitOp('git status')).toBe(false);
+    expect(isDestructiveLaneGitOp('')).toBe(false);
+  });
+
+  it('canonicalGitOp / isDestructiveLaneGitOp: matcher-BYPASS forms no longer evade the check (#2367)', () => {
+    // path-qualified git
+    expect(canonicalGitOp('/usr/bin/git reset --hard')).toBe('git reset --hard');
+    expect(isDestructiveLaneGitOp('/usr/bin/git reset --hard')).toBe(true);
+    // wrapper commands
+    expect(isDestructiveLaneGitOp('env git reset --hard')).toBe(true);
+    expect(isDestructiveLaneGitOp('env GIT_PAGER=cat git clean -fd')).toBe(true);
+    expect(isDestructiveLaneGitOp('time git reset --hard')).toBe(true);
+    expect(isDestructiveLaneGitOp('command git reset --hard')).toBe(true);
+    expect(isDestructiveLaneGitOp('xargs git reset --hard')).toBe(true);
+    expect(isDestructiveLaneGitOp('xargs -n1 git checkout -- .')).toBe(true);
+    // git global flags before the subcommand
+    expect(canonicalGitOp('git -C /some/path reset --hard')).toBe('git reset --hard');
+    expect(isDestructiveLaneGitOp('git -C /some/path reset --hard')).toBe(true);
+    expect(isDestructiveLaneGitOp('git -c core.pager=cat clean -fd')).toBe(true);
+    // leading subshell / brace-group open
+    expect(isDestructiveLaneGitOp('(git reset --hard)')).toBe(true);
+    expect(isDestructiveLaneGitOp('{ git clean -fd')).toBe(true);
+    // still returns '' / false for non-git
+    expect(canonicalGitOp('echo git reset --hard')).toBe('');
+    expect(isDestructiveLaneGitOp('echo git reset --hard')).toBe(false);
+  });
+
+  it('hasDestructiveLaneOp: true if ANY &&/;/| segment is destructive, honouring env/sudo + bypass normalization', () => {
+    expect(hasDestructiveLaneOp('git fetch origin && git reset --hard origin/main')).toBe(true);
+    expect(hasDestructiveLaneOp('FOO=1 git reset --hard')).toBe(true);
+    expect(hasDestructiveLaneOp('git fetch && /usr/bin/git -C . reset --hard')).toBe(true); // bypass form in a later segment
+    expect(hasDestructiveLaneOp('echo x | xargs git clean -fd')).toBe(true);
+    expect(hasDestructiveLaneOp('git status; git log')).toBe(false);
+    expect(hasDestructiveLaneOp('')).toBe(false);
+  });
+
+  it('denies a destructive op only when foreignLiveLease is true, not for own/absent/stale-lease lanes', () => {
+    const cmd = 'git reset --hard origin/main';
+    expect(reason(cmd, { primaryCwd: false, foreignLiveLease: true })).toMatch(/LIVE lease held by ANOTHER session/);
+    expect(reason(cmd, { primaryCwd: false, foreignLiveLease: false })).toBeNull(); // own lane / no live lease
+    expect(reason(cmd, { primaryCwd: false })).toBeNull();                          // default ctx
+  });
+
+  it('never fires from a primary cwd (a lane-only concept)', () => {
+    expect(reason('git reset --hard', { primaryCwd: true, foreignLiveLease: true })).toBeNull();
+  });
+
+  it('does not fire on a non-destructive command, even with a foreign live lease', () => {
+    expect(reason('git status', { primaryCwd: false, foreignLiveLease: true })).toBeNull();
+    expect(reason('git push origin lane/foo', { primaryCwd: false, foreignLiveLease: true })).toBeNull();
+  });
+
+  it('the LANE_CLOBBER_OK=1 override passes a foreign-live-lease destructive op through', () => {
+    expect(reason('LANE_CLOBBER_OK=1 git reset --hard', { primaryCwd: false, foreignLiveLease: true })).toBeNull();
+    expect(decide('LANE_CLOBBER_OK=1 git clean -fd', { primaryCwd: false, foreignLiveLease: true })).toBeNull();
+  });
+
+  it('decide() surfaces the #2367 denial across a full command via ctx', () => {
+    expect(decide('git fetch && git reset --hard origin/main', { primaryCwd: false, foreignLiveLease: true }))
+      .toMatch(/LIVE lease held by ANOTHER session/);
   });
 });
 

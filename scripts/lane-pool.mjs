@@ -70,6 +70,7 @@ import {
   describeLease,
   leaseOwnedBy,
 } from './lib/lane-lease.mjs';
+import { getAncestryPids } from './lib/pid-ancestry.mjs';
 
 // ── tiny arg parsing ──────────────────────────────────────────────────────────────────────────────
 const [, , cmd, ...rest] = process.argv;
@@ -531,8 +532,21 @@ function cmdRefresh(repo) {
 // override is `release --force` then re-acquire, per the ruling's "no new flag" contract). A stale marker ⇒
 // reclaimed (rm + retry, the small documented race). Own live lease ⇒ true (idempotent re-acquire).
 function tryClaimLane(dir, session, nowMs, ttlMs) {
+  // #2367 — stamp a DURABLE session identity (`CLAUDE_CODE_SESSION_ID`, exposed to this subprocess) so a later
+  // guard can tell "my own lease" from another live session's AUTHORITATIVELY — it is stable across a session's
+  // separate Bash-tool calls yet distinct between concurrent sessions, and (unlike pid-ancestry) does NOT
+  // false-match two independent sessions that merely share an upper process ancestor (terminal / a parallel-lane
+  // orchestrator) — the fail-open hole the ancestry-only signal had in this guard's own target topology. The
+  // pid-ancestry chain is still captured as a best-effort LEGACY fallback for readers that predate `ownerSession`
+  // (a single captured pid can't serve: this `acquire` is a LEAF that exits when the command returns — never an
+  // ancestor of a LATER, separate Bash-tool call; only the FULL live ancestry chain, walked now, overlaps the
+  // session's long-lived anchor at guard time — see `ancestryOverlaps`, lane-lease.mjs).
   const body = JSON.stringify(
-    leaseBody({ session, purpose: flags.purpose, acquiredAt: new Date(nowMs).toISOString(), ttlMinutes: ttlMinutesFromFlags(), host: hostname(), pid: process.pid }),
+    leaseBody({
+      session, purpose: flags.purpose, acquiredAt: new Date(nowMs).toISOString(), ttlMinutes: ttlMinutesFromFlags(),
+      host: hostname(), pid: process.pid, ancestry: getAncestryPids(process.pid),
+      ownerSession: process.env.CLAUDE_CODE_SESSION_ID || null,
+    }),
     null, 2,
   ) + '\n';
   const file = LEASE_MARKER(dir);
