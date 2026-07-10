@@ -162,7 +162,7 @@ proof-of-land gate, which is exactly why stacking is capability-gated rather tha
 
 **The seam wiring** — grafts onto the loop above, doesn't replace it:
 
-- **Pack (step 2, after the "go")** — once, in the **primary checkout**:
+- **Pack (step 2, after the "go")** — **once**, in the **primary checkout**:
   `node scripts/lane-stack.mjs init --plan=<scratch>.json` (see
   [we:scripts/lane-stack.mjs](../../../scripts/lane-stack.mjs)). It reads the #2393 capability marker off
   `origin/main` via `git show`; stacking is **ENABLED** only when the marker advertises `gateVersion >= 1`
@@ -170,7 +170,10 @@ proof-of-land gate, which is exactly why stacking is capability-gated rather tha
   item (the conservative default). This delegates to the pure planner
   [we:scripts/readiness/overlap-chain.mjs](../../../scripts/readiness/overlap-chain.mjs) (union-find
   overlap chains on declared repo-qualified file-sets; a bridge item records **both** tips as
-  `stackParents`; past the depth cap an item falls back to a sibling and re-roots the chain).
+  `stackParents`; past the depth cap an item falls back to a sibling and re-roots the chain). `init` runs
+  ONCE — an existing plan file is a hard error (a mid-batch re-init would erase the chain state the
+  push-time gate depends on); if a resumed session hits that error, the plan is already live — keep using
+  it, and pass `--force` ONLY when a brand-new batch deliberately reuses the path.
 - **Per item, before acquiring its lane (step 3)** — `node scripts/lane-stack.mjs plan-item
   --plan=<scratch>.json --id=<NNN> --files=<declared repo-qualified set, e.g.
   we:scripts/x.mjs,we:backlog/NNN-….md>`. Acquire per its decision:
@@ -178,11 +181,15 @@ proof-of-land gate, which is exactly why stacking is capability-gated rather tha
   ([we:scripts/lane-pool.mjs](../../../scripts/lane-pool.mjs), #2386) when stacked — `acquireBase` is the
   parent's **recorded tip sha** (pinning the child to the exact state the parent's push-time re-check
   audited, not the movable lane ref), starting the lane at the predecessor's pushed tip instead of
-  `origin/main`; a **bridge** decision additionally lists `mergeParents` whose tips you `git merge`
-  in-session, after acquiring.
+  `origin/main`; a **bridge** decision additionally lists `mergeParents`, each with a **pinned tip sha** in
+  `mergeTips` — after acquiring, `git merge` those **shas** in-session, never the mutable `origin/lane/…`
+  refs (a moved ref would ride foreign commits into the bridge past the gate).
 - **After the resolve commit, before `pr-land` (still step 3)** — `node scripts/lane-stack.mjs recheck
   --plan=<scratch>.json --id=<NNN> --base=<the ref you acquired at>`: recomputes the item's ACTUAL touched
-  files (`git diff --name-only <base>...HEAD`) and asserts actual ⊆ declared. **Exit 4 = rebase-required**
+  files (`git diff --name-only <base>...HEAD`) and asserts actual ⊆ declared. The `--base` is **validated,
+  not trusted** — it must diff from the plan's recorded acquire point (the pinned parent-tip sha when
+  stacked, the origin/main fork point for a sibling), so a stale or wrong base hard-fails instead of
+  silently shrinking the certified set. **Exit 4 = rebase-required**
   — a hard stop, not a warning: rebase onto the printed frontier tip **in-session** (context hot), re-gate,
   `apply-rebase`, then re-run `recheck` (must exit 0) before pushing. **Never push a mislabelled
   certified-disjoint sibling to the deferred drain.**
