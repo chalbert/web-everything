@@ -906,12 +906,24 @@ function runCli() {
   // that shipped plateau#11 and web-everything#290 before their review panels' verdicts landed. Only fires when
   // this pass ISN'T already running the full rubric (`decideReviewGate` re-derives the correct verdict itself,
   // incl. the merge-anyway timeout override — double-gating here would wrongly strand a timed-out PR forever).
+  //
+  // The `!REVIEW_ESCALATION` gate catches TWO invocations, and they get DIFFERENT refusals (see
+  // `hasUnclearedReviewLabel`'s `allowPending`): the truly-bare sweep (no `--label`) has no verdict owner, so it
+  // refuses every un-cleared label (`allowPending: false`); a `--label --no-review-escalation` run is the
+  // operator deliberately waiving escalation to push a green-but-parked `review:pending` PR through (#2262's
+  // documented manual override), so it honors that on `review:pending` (`allowPending: true`) but STILL refuses
+  // `review:human` (human-only, never waivable — #2285) and `review:changes` (reviewer rejected). A blunt gate
+  // that refused all three under the override would strand the very PR the operator invoked the flag to land;
+  // one that relaxed all three would let an un-reviewed gate-self edit merge — both are wrong.
   if (!REVIEW_ESCALATION) {
+    const allowPending = !!label; // `--label ... --no-review-escalation`: explicit operator override, honor review:pending
     for (const v of verdicts) {
       if (v.decision !== 'merge') continue;
-      if (hasUnclearedReviewLabel(v.prLabels)) {
+      if (hasUnclearedReviewLabel(v.prLabels, { allowPending })) {
         v.decision = 'skip';
-        v.reason = 'review-escalation label not cleared (review:pending/review:human/review:changes present without review:accepted) — refusing to merge (#2366)';
+        v.reason = allowPending
+          ? 'review:human/review:changes not cleared — refusing to merge even under --no-review-escalation (human-only / reviewer-rejected, #2366)'
+          : 'review-escalation label not cleared (review:pending/review:human/review:changes present without review:accepted) — refusing to merge (#2366)';
       }
     }
   }

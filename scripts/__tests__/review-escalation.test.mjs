@@ -62,3 +62,30 @@ describe('review-escalation — #2366 hasUnclearedReviewLabel (the concurrent-la
     expect(hasUnclearedReviewLabel([REVIEW_LABELS.accepted, REVIEW_LABELS.pending])).toBe(false);
   });
 });
+
+describe('review-escalation — #2366 hasUnclearedReviewLabel { allowPending } (the --no-review-escalation operator override)', () => {
+  // allowPending: true is the `--label ... --no-review-escalation` path — the operator deliberately waived the
+  // rubric to land a green-but-parked review:pending PR (#2262), so review:pending no longer refuses; but the
+  // human-only / reviewer-rejected gates are NEVER waivable by this flag and must still refuse (#2285).
+  it('honors the operator on review:pending (no longer refused under the override)', () => {
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }], { allowPending: true })).toBe(false);
+    expect(hasUnclearedReviewLabel([REVIEW_LABELS.pending], { allowPending: true })).toBe(false);
+  });
+  it('STILL refuses review:human under the override (gate-self is human-only, never waivable — #2285)', () => {
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }], { allowPending: true })).toBe(true);
+  });
+  it('STILL refuses review:changes under the override (reviewer rejected; author must re-push)', () => {
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.changes }], { allowPending: true })).toBe(true);
+  });
+  it('refuses review:human even when a stale review:pending rides alongside under the override', () => {
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.human }], { allowPending: true })).toBe(true);
+  });
+  it('review:accepted still clears everything under the override', () => {
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(false);
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.changes }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(false);
+  });
+  it('default (allowPending omitted / false) is the bare-sweep behaviour — review:pending still refuses', () => {
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }])).toBe(true);
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }], { allowPending: false })).toBe(true);
+  });
+});

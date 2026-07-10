@@ -180,12 +180,25 @@ export function hasReviewLabel(labels, label) {
  * merge-anyway timeout override (an escalated PR whose watch window expired with no reviewer verdict merges
  * anyway rather than being permanently stranded, #2262) — a path this blunt label-presence check does not know
  * about and would wrongly block forever.
+ *
+ * `allowPending` (#2366 fix-up) — the ONE knob that separates the two `!REVIEW_ESCALATION` callers. The BARE
+ * `/merge` orphan sweep (no `--label`) has no owner for the review verdict, so it refuses ALL un-cleared labels
+ * (`allowPending: false`, the default — the plateau#11 / web-everything#290 race). But `--label
+ * --no-review-escalation` is an OPERATOR deliberately waiving the escalation rubric to push a green-but-parked
+ * `review:pending` PR through (backlog #2262's documented manual override for a sampled PR with no reviewer
+ * daemon) — that path passes `allowPending: true` so it honors the operator on `review:pending`, yet STILL
+ * refuses `review:human` (a gate-self edit is human-only, never waivable by this flag — #2285) and
+ * `review:changes` (the reviewer actively rejected the diff; the author lane must re-push). Without this split a
+ * blunt `!REVIEW_ESCALATION` gate either strands a timed-out `review:pending` forever OR (if relaxed wholesale)
+ * lets an un-reviewed `review:human`/`review:changes` PR merge under the override — both wrong.
  * @param {Array} labels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
+ * @param {{allowPending?: boolean}} [opts] - `allowPending: true` on the explicit `--no-review-escalation`
+ *   operator override — refuse only `review:human`/`review:changes`, not `review:pending`.
  * @returns {boolean} true iff this PR carries an un-cleared review-escalation label and must be refused
  */
-export function hasUnclearedReviewLabel(labels) {
+export function hasUnclearedReviewLabel(labels, { allowPending = false } = {}) {
   if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) return false;
-  return hasReviewLabel(labels, REVIEW_LABELS.pending)
+  return (!allowPending && hasReviewLabel(labels, REVIEW_LABELS.pending))
     || hasReviewLabel(labels, REVIEW_LABELS.human)
     || hasReviewLabel(labels, REVIEW_LABELS.changes);
 }
