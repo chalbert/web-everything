@@ -2,7 +2,7 @@
 kind: story
 size: 5
 status: open
-blockedBy: ["2346"]
+blockedBy: ["2382"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-07-09"
 tags: []
@@ -58,3 +58,13 @@ plateau:vite.config.mts) rebases with only line offsets. The 5 marketing mounts 
 `@plateau/saas` package and still read `(window as any).attributes`; a package can't import the app's
 runtime, so inject the upgrade capability into the package (a small `setBehaviorUpgrader()` seam the app
 calls once at bootstrap, or thread an `upgrade` param through the `mount*()` fns) rather than a global.
+
+## Progress (2026-07-09) — re-pointed: #2346 resolved, boot fixed (#2381), now waits on the build-red #2382
+
+The umbrella blocker **#2346 resolved** (monorepo split delivered) and the boot-after-extraction blocker
+**#2381 resolved** — so a fresh plateau-app dev server boots again and the unplugged migration is
+verifiable. The one remaining open piece of the same extraction fallout is **#2382** (the conformance
+build entry still points at an embed file #2341 deleted → red production build). #640's own reasons for
+waiting listed *both* the boot 500 (now fixed) and the red build; the build half is #2382. Re-pointed
+`blockedBy: [2346]` → `[2382]` — the genuine remaining open dependency. Clears once #2382 lands; if the
+red build turns out not to gate the dev-verified unplugged migration, drop the edge and start #640.
