@@ -2,8 +2,11 @@
 kind: story
 size: 5
 parent: "2355"
-status: open
+status: resolved
 dateOpened: "2026-07-09"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-10"
+graduatedTo: "frontierui:plugs/webdirectives/ssr/jvm/ (JVM native SSR renderer foundation + if/switch, #2368)"
 tags: []
 ---
 
