@@ -38,8 +38,10 @@ const REPO_MEM_DIR = join(ROOT, '.claude', 'agent-memory');
 const MEM_DIR = existsSync(USER_MEM_DIR) ? USER_MEM_DIR : (existsSync(REPO_MEM_DIR) ? REPO_MEM_DIR : USER_MEM_DIR);
 const INDEX = join(MEM_DIR, 'MEMORY.md');
 
-/** Size + per-line checks on a MEMORY.md string. Returns an array of violation strings. */
-function checkBudget(content) {
+/** Size + per-line checks on a MEMORY.md string. Returns an array of violation strings. Exported (#2273)
+ *  so the Tier-A golden-corpus snapshot harness can assert a mined MEMORY.md fixture stays inside the
+ *  budget this gate enforces, without re-deriving the MAX_BYTES/MAX_LINE constants a second time. */
+export function checkBudget(content) {
   const v = [];
   const bytes = Buffer.byteLength(content, 'utf8');
   if (bytes > MAX_BYTES) v.push(`index is ${(bytes / 1024).toFixed(1)} KB — over the ${(MAX_BYTES / 1024)} KB budget (trim lines / right-home to platform-decisions.md / consolidate a cluster)`);
@@ -49,6 +51,12 @@ function checkBudget(content) {
   });
   return { v, bytes };
 }
+
+// #2273 — guard the CLI body behind an entry-point check (mirrors scripts/guard-bash.mjs) so importing
+// this module for its pure `checkBudget` export (the Tier-A golden-corpus snapshot harness) never also
+// runs the sweep / --pre gate / `process.exit(...)` as a side effect of the import.
+const IS_CLI = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (IS_CLI) {
 
 // ── --pre: write-time gate on the hook event ────────────────────────────────────────────────
 if (process.argv.includes('--pre')) {
@@ -166,3 +174,5 @@ if (v.length) {
 if (bytes > WARN_BYTES) console.warn(`  ⚠ ${(bytes / 1024).toFixed(1)} KB — within budget but past the ${WARN_BYTES / 1024} KB warn line; consider right-homing a project rule.`);
 console.log('✓ memory index within budget.');
 process.exit(0);
+
+} // IS_CLI
