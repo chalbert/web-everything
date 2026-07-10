@@ -146,6 +146,42 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     expect(git('status', '--porcelain').trim()).toBe('');
   });
 
+  it('renames a relatedReport file whose stem embeds the hash + rewrites its internal refs (#2400, the #2387 regression)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xepic01-overlap.md',
+      '---\nkind: epic\nstatus: resolved\nrelatedReport: reports/2026-07-10-split-analysis-xepic01.md\n---\n# Overlap epic\n');
+    write('reports/2026-07-10-split-analysis-xepic01.md', '# Split analysis\n\nFocused run: `/slice xepic01`. Candidate #xepic01.\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'reports', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xepic01', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+    // The item's relatedReport ref is rewritten to the number…
+    expect(readFileSync(join(repo, 'backlog/2201-overlap.md'), 'utf8'))
+      .toContain('relatedReport: reports/2026-07-10-split-analysis-2201.md');
+    // …and the report FILE is renamed to match (no dangle, not hidden)…
+    expect(() => readFileSync(join(repo, 'reports/2026-07-10-split-analysis-xepic01.md'), 'utf8')).toThrow();
+    const report = readFileSync(join(repo, 'reports/2026-07-10-split-analysis-2201.md'), 'utf8');
+    // …with its own internal hash refs rewritten too.
+    expect(report).toContain('/slice 2201');
+    expect(report).toContain('#2201');
+    expect(report).not.toContain('xepic01');
+    // Everything landed in the one numbering commit — working tree clean.
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('rewrites a body /backlog/<hash>/ URL to the number with no report file to rename (#2400)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xitem01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n\nSee /backlog/xitem01/ for context.\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    numberPendingHashes(repo);
+    expect(readFileSync(join(repo, 'backlog/2201-alpha.md'), 'utf8')).toContain('/backlog/2201/');
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
   it('skips an UNTRACKED hash file (local cruft) instead of aborting the tracked couple (PR #194)', () => {
     write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
     write('backlog/xland01-item.md', '---\nkind: story\nstatus: resolved\n---\n# Landed item\n');

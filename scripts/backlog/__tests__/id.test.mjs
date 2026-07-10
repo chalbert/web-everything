@@ -125,6 +125,55 @@ describe('applyLedger — the drain numbering brain (#2288)', () => {
 
   it('is a no-op with an empty ledger', () => {
     const files = [file('x7k2q9a-alpha', '# Alpha x7k2q9a\n')];
-    expect(applyLedger(files, {})).toEqual({ renames: [], rewrites: [] });
+    expect(applyLedger(files, {})).toEqual({ renames: [], rewrites: [], pathRenames: [] });
+  });
+});
+
+describe('applyLedger — on-disk path-value refs (#2400)', () => {
+  const file = (name, content) => ({ name, content });
+
+  it('flags a relatedReport whose report filename embeds the numbered hash for rename', () => {
+    // The #2387 regression: relatedReport stem IS the item's own birth hash → rewrite the ref AND rename the file.
+    const files = [
+      file('x6yoscx-epic', '---\nkind: epic\nrelatedReport: reports/2026-07-10-split-analysis-x6yoscx.md\n---\n# Epic\n'),
+    ];
+    const { renames, rewrites, pathRenames } = applyLedger(files, { x6yoscx: '2387' });
+    expect(renames).toEqual([{ from: 'x6yoscx-epic', to: '2387-epic' }]);
+    // The reference is rewritten in the item body…
+    expect(rewrites[0].content).toContain('relatedReport: reports/2026-07-10-split-analysis-2387.md');
+    // …and the referenced file is flagged for rename to the matching stem.
+    expect(pathRenames).toEqual([
+      { from: 'reports/2026-07-10-split-analysis-x6yoscx.md', to: 'reports/2026-07-10-split-analysis-2387.md' },
+    ]);
+  });
+
+  it('flags a body markdown link to a reports/…-<hash>.md file', () => {
+    const files = [
+      file('x6yoscx-epic', '---\nkind: epic\n---\n# Epic\n\nSee [the report](reports/x6yoscx-notes.md).\n'),
+    ];
+    const { pathRenames } = applyLedger(files, { x6yoscx: '2387' });
+    expect(pathRenames).toEqual([{ from: 'reports/x6yoscx-notes.md', to: 'reports/2387-notes.md' }]);
+  });
+
+  it('does NOT flag a /backlog/<hash>/ URL (no file to rename — the ref-rewrite is enough)', () => {
+    const files = [
+      file('x6yoscx-epic', '---\nkind: epic\n---\n# Epic\n\nBlocks /backlog/x6yoscx/ downstream.\n'),
+    ];
+    const { rewrites, pathRenames } = applyLedger(files, { x6yoscx: '2387' });
+    expect(pathRenames).toEqual([]);              // a directory URL has no extension → not a file rename
+    expect(rewrites[0].content).toContain('/backlog/2387/'); // but the URL still tracks the new number
+  });
+
+  it('excludes a literal backlog/*.md path (renamed via `renames`, not double-handled)', () => {
+    const files = [
+      file('x6yoscx-epic', '---\nkind: epic\n---\n# Epic\n\nsee backlog/x6yoscx-epic.md\n'),
+    ];
+    const { pathRenames } = applyLedger(files, { x6yoscx: '2387' });
+    expect(pathRenames).toEqual([]);
+  });
+
+  it('leaves an item with no path-value ref untouched (pathRenames empty)', () => {
+    const files = [file('x6yoscx-epic', '---\nkind: story\n---\n# Epic\n\nplain body, no report.\n')];
+    expect(applyLedger(files, { x6yoscx: '2387' }).pathRenames).toEqual([]);
   });
 });
