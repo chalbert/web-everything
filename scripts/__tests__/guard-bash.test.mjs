@@ -175,9 +175,33 @@ describe('guard-bash — foreign-live-lease destructive-op block (#2367)', () =>
     // leading subshell / brace-group open
     expect(isDestructiveLaneGitOp('(git reset --hard)')).toBe(true);
     expect(isDestructiveLaneGitOp('{ git clean -fd')).toBe(true);
+    // r2 — quoted / backslash-escaped git token normalizes to `git`
+    expect(canonicalGitOp('"git" reset --hard')).toBe('git reset --hard');
+    expect(canonicalGitOp("'git' reset --hard")).toBe('git reset --hard');
+    expect(canonicalGitOp('\\git reset --hard')).toBe('git reset --hard');
+    expect(isDestructiveLaneGitOp('"git" reset --hard')).toBe(true);
+    expect(isDestructiveLaneGitOp("'git' clean -fd")).toBe(true);
+    expect(isDestructiveLaneGitOp('\\git checkout -- .')).toBe(true);
+    // r2 — `sudo [-n] [-u <user>]` prefix peeled off before the git token
+    expect(canonicalGitOp('sudo git reset --hard')).toBe('git reset --hard');
+    expect(canonicalGitOp('sudo -u deploy git reset --hard')).toBe('git reset --hard');
+    expect(canonicalGitOp('sudo -n -u deploy git clean -fd')).toBe('git clean -fd');
+    expect(isDestructiveLaneGitOp('sudo -u deploy git reset --hard')).toBe(true);
+    expect(isDestructiveLaneGitOp('sudo -n git clean -fd')).toBe(true);
+    // r2 — a bare `VAR=val` shell-assignment prefix is peeled too (canonicalGitOp is now self-sufficient)
+    expect(canonicalGitOp('FOO=1 git reset --hard')).toBe('git reset --hard');
+    expect(isDestructiveLaneGitOp('FOO=1 BAR=2 git reset --hard')).toBe(true);
     // still returns '' / false for non-git
     expect(canonicalGitOp('echo git reset --hard')).toBe('');
     expect(isDestructiveLaneGitOp('echo git reset --hard')).toBe(false);
+    // DISMISSED (adversarial-evasion gold-plating, #2367 r2) — advisory guard, accidental-collision threat
+    // model, one-env-var escape (LANE_CLOBBER_OK=1); an evader never needs these, so they stay UN-matched.
+    expect(canonicalGitOp('git$IFS$9reset --hard')).toBe('');   // IFS word-splitting trick
+    expect(canonicalGitOp('$(echo git) reset --hard')).toBe(''); // command substitution
+    expect(canonicalGitOp('bash -c "git reset --hard"')).toBe(''); // nested shell
+    expect(canonicalGitOp('sh -c "git reset --hard"')).toBe('');
+    expect(canonicalGitOp('ssh host git reset --hard')).toBe(''); // remote exec
+    expect(isDestructiveLaneGitOp('bash -c "git reset --hard"')).toBe(false);
   });
 
   it('hasDestructiveLaneOp: true if ANY &&/;/| segment is destructive, honouring env/sudo + bypass normalization', () => {
@@ -185,6 +209,7 @@ describe('guard-bash — foreign-live-lease destructive-op block (#2367)', () =>
     expect(hasDestructiveLaneOp('FOO=1 git reset --hard')).toBe(true);
     expect(hasDestructiveLaneOp('git fetch && /usr/bin/git -C . reset --hard')).toBe(true); // bypass form in a later segment
     expect(hasDestructiveLaneOp('echo x | xargs git clean -fd')).toBe(true);
+    expect(hasDestructiveLaneOp('git status && sudo -u deploy git reset --hard')).toBe(true); // r2 — sudo -u form
     expect(hasDestructiveLaneOp('git status; git log')).toBe(false);
     expect(hasDestructiveLaneOp('')).toBe(false);
   });
@@ -194,6 +219,13 @@ describe('guard-bash — foreign-live-lease destructive-op block (#2367)', () =>
     expect(reason(cmd, { primaryCwd: false, foreignLiveLease: true })).toMatch(/LIVE lease held by ANOTHER session/);
     expect(reason(cmd, { primaryCwd: false, foreignLiveLease: false })).toBeNull(); // own lane / no live lease
     expect(reason(cmd, { primaryCwd: false })).toBeNull();                          // default ctx
+  });
+
+  it('r2 — reason() sees through a sudo/quoted disguise on the destructive op', () => {
+    expect(reason('sudo -u deploy git reset --hard origin/main', { primaryCwd: false, foreignLiveLease: true }))
+      .toMatch(/LIVE lease held by ANOTHER session/);
+    expect(reason('"git" clean -fd', { primaryCwd: false, foreignLiveLease: true }))
+      .toMatch(/LIVE lease held by ANOTHER session/);
   });
 
   it('never fires from a primary cwd (a lane-only concept)', () => {

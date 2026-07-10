@@ -62,54 +62,41 @@ export function chooseFreeLane(laneInfos, nowMs, ttlMs) {
 
 /** Build a lease marker object. Caller stamps `acquiredAt` (ISO) so this stays clock-free / testable.
  *  `ownerSession` (#2367) is the DURABLE session identity (`CLAUDE_CODE_SESSION_ID`, captured at acquire) —
- *  the PRIMARY, authoritative ownership signal `isForeignLease` compares against: it is stable across a
- *  session's separate Bash-tool calls yet distinct between concurrent sessions, and — unlike pid-ancestry —
- *  does NOT false-match two independent sessions that merely share an upper process ancestor (terminal, a
- *  parallel-lane orchestrator). `pid` is informational only (human-readable `status`/debug; a leaf that
- *  exits right after `acquire`, never useful for ownership). `ancestry` (the `pid-ancestry.mjs#getAncestryPids`
- *  chain at acquire) is the LEGACY fallback signal, only consulted for older leases that predate `ownerSession`. */
-export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ancestry, ownerSession }) {
+ *  the SOLE ownership signal `isForeignLease` compares against: it is stable across a session's separate
+ *  Bash-tool calls yet distinct between concurrent sessions, and does NOT false-match two independent sessions
+ *  that merely share an upper process ancestor (terminal, a parallel-lane orchestrator) — the over-match that
+ *  made the earlier pid-ancestry heuristic unsafe in this guard's target topology (r2: pid-ancestry removed).
+ *  `pid` is informational only (human-readable `status`/debug; a leaf that exits right after `acquire`, never
+ *  useful for ownership). */
+export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession }) {
   return {
     session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null,
-    pid: pid ?? null, ancestry: ancestry ?? null, ownerSession: ownerSession ?? null,
+    pid: pid ?? null, ownerSession: ownerSession ?? null,
   };
 }
 
 /**
- * Do `mine` and `lease`'s recorded ancestry share ANY pid? Pure overlap test — the #2367 LEGACY ownership
- * heuristic (used only when the durable `ownerSession` is unavailable, see `isForeignLease`). A single scalar
- * pid comparison does not survive separate shell invocations (each Bash-tool call gets a fresh wrapper pid, a
- * leaf that dies before any later call runs); a full ancestry-CHAIN overlap does, because both chains converge
- * on the one process common to both moments — the session's own long-lived anchor. NOTE: this heuristic
- * OVER-MATCHES when two genuinely independent sessions share an upper ancestor (terminal / orchestrator) — the
- * reason `ownerSession` supersedes it as the primary signal. `lease.pid` (informational-only, see `leaseBody`)
- * is folded in as a last-resort single-value fallback so an OLDER lease (acquired before `ancestry` existed)
- * still gets a best-effort check rather than silently no-oping forever.
- */
-export function ancestryOverlaps(mine, lease) {
-  if (!Array.isArray(mine) || mine.length === 0 || !lease) return false;
-  const theirs = Array.isArray(lease.ancestry) && lease.ancestry.length ? lease.ancestry : (lease.pid ? [lease.pid] : []);
-  if (theirs.length === 0) return false;
-  const set = new Set(mine.map(Number));
-  return theirs.some((p) => set.has(Number(p)));
-}
-
-/**
  * Is `lease` held by a session OTHER than mine? The #2367 ownership decision — pure & unit-tested; the impure
- * `ps`/fs/env collection lives in the CLI (guard-bash.mjs) / `pid-ancestry.mjs`.
+ * fs/env collection lives in the CLI (guard-bash.mjs). Decided from the durable session ids ALONE (r2 removed
+ * the pid-ancestry fallback, whose chain-overlap OVER-MATCHED two independent sessions sharing an upper process
+ * ancestor — the guard's own target topology, parallel lanes under one orchestrator — and so failed OPEN in the
+ * one place it mattered while looking protective).
  *
- *   PRIMARY (durable): when BOTH the lease and the caller carry a session id, the lease is FOREIGN iff
- *     `lease.ownerSession !== mySessionId`. This is authoritative and does NOT fail open on shared upper
- *     process ancestors — the failure mode that made the ancestry-only test unsafe in the guard's own target
- *     topology (parallel lanes under one orchestrator, where every session's ancestry overlaps every other's).
- *   FALLBACK (legacy): an OLDER lease with no `ownerSession`, or a caller that couldn't read a session id,
- *     falls back to the `ancestryOverlaps` heuristic (best-effort — see its over-match caveat).
+ *   OWNED / FOREIGN: when the lease carries an `ownerSession` AND the caller read a `mySessionId`, the lease is
+ *     FOREIGN iff `lease.ownerSession !== mySessionId` (equal ⇒ mine). Authoritative — the owner's own lease can
+ *     never read as foreign because both sides key on the same `CLAUDE_CODE_SESSION_ID` string.
+ *   DEGRADED (fail-OPEN, ALLOW ⇒ returns false): the lease has no `ownerSession` (an older lease, or one whose
+ *     acquire couldn't read the env), OR the caller has no `mySessionId`. Without an identity signal on both
+ *     sides "owner" and "foreign" are fundamentally indistinguishable, so this deliberately treats the lease as
+ *     NOT foreign — matching the guard's established fail-open posture (a guard bug must never wedge the agent).
+ *     This is the intentional trade-off of r2: drop the misleading "protective-looking but unsafe" pid-ancestry
+ *     fallback rather than replace it with a noisy fail-closed.
  *   No lease ⇒ never foreign.
  */
-export function isForeignLease({ lease, mySessionId, myAncestry } = {}) {
+export function isForeignLease({ lease, mySessionId } = {}) {
   if (!lease) return false;
   if (lease.ownerSession && mySessionId) return lease.ownerSession !== mySessionId;
-  return !ancestryOverlaps(myAncestry, lease);
+  return false; // degraded: no identity signal on both sides ⇒ fail-open (allow) — see doc above
 }
 
 /** One-line human description of a lease for `status` output. */
