@@ -33,10 +33,13 @@ reason, both re-verified 2026-07-10:
    lane-agent `acquire` would stamp the *shared* session id as `ownerSession`, making **every sibling
    read as owner in every lane of the batch**.
 
-**Framing correction over the original card:** the only per-operation channel that can distinguish
-siblings is the **command string itself**, which only the guard reads — and the guard already parses
-per-op assertions out of it (`LANE_CLOBBER_OK=1`, we:scripts/guard-bash.mjs:253; `STALE_LANE_OK=1`,
-we:scripts/guard-bash.mjs:238). So the card's "a change to the lane-dispatch machinery, **not** to the
+**Framing correction over the original card:** the **command string** is the only per-op channel that
+carries **holder (lane-coupling) identity with both ends in-repo** — the orchestrator authors it, and
+only the guard reads it, already parsing per-op assertions out of it (`LANE_CLOBBER_OK=1`,
+we:scripts/guard-bash.mjs:253; `STALE_LANE_OK=1`, we:scripts/guard-bash.mjs:238). (One ambient
+per-*subagent process* channel also exists at the guard — the hook payload's `agent_id`, experimental,
+Claude Code ≥ 2.1.196, payload-only, unprobed for this repo's workflow-spawned agents; it is named and
+excluded as Fork 2 (c) below.) So the card's "a change to the lane-dispatch machinery, **not** to the
 guard" and its acceptance "a **sibling**'s destructive op is **denied**" cannot both hold: sibling-level
 denial requires a small guard-side comparison extension. Fork 2 makes that trade the explicit call.
 
@@ -137,8 +140,10 @@ from the template; option (b) keeps it and adds a second writer of coupling stat
 
 *Fork-existence: the guard has exactly one posture for a lease the parallel dispatch stamped —
 "`ownerSession` match suffices" and "`ownerSession` match does not suffice" are mutually exclusive
-semantics for the same marker; and the empirical constraint (siblings share every ambient id) means no
-third branch exists in which `isForeignLease` alone tells siblings apart.*
+semantics for the same marker. The empirical constraint (siblings share every ambient **env/process**
+id) rules out `isForeignLease` alone telling siblings apart; the one ambient third channel that does
+exist mechanically — the hook payload's per-subagent `agent_id` — is named and excluded as option (c)
+below, not ignored.*
 
 - **(a) Session-level ownership only — guard untouched.** The Fork 1 lease's `ownerSession` is the
   shared top-level session id, so the guard denies **other top-level sessions** (the actual 2026-07-09
@@ -186,12 +191,39 @@ third branch exists in which `isForeignLease` alone tells siblings apart.*
   precedent only** — it teaches a per-session `export`, which provably cannot survive a lane agent's
   separate Bash calls; (b) inverts it into per-op inline carriage, a new discipline the template must
   teach explicitly.
+- **(c) Hook-payload `agent_id` ownership — named and excluded (probe-gated).** The Claude Code hooks
+  docs ("Subagent Identification"; experimental, ≥ 2.1.196) give the PreToolUse payload a per-subagent
+  `agent_id` on subagent tool calls — an ambient channel at the guard that *mechanically* distinguishes
+  siblings with zero command-string discipline. Excluded on four grounds (round-2 skeptic, 2026-07-10):
+  (1) **the mint/check split is unbridgeable** — the one process that can atomically stamp ownership
+  (`acquire`, the O_EXCL write, we:scripts/lane-pool.mjs:533-545) is a Bash subprocess that cannot see
+  the payload-only `agent_id`, while the one observer that can see it (the PreToolUse hook) fires
+  *before* acquire's outcome exists — a sidecar recorded pre-outcome is poisoned by the live modulo-wrap
+  collision (loser recorded as owner ⇒ the true owner denied in its own lane); (2) **retry lockout** — a
+  replacement agent (the anticipated died→carried path) has a new `agent_id` and is denied in its own
+  lane; (3) **silent degradation** — absent/renamed `agent_id` (experimental field, unprobed for
+  workflow-spawned agents here) falls back to the shared `ownerSession` ⇒ sibling ops *allowed* while
+  the item claims sibling denial — fail-open in the one place it matters, the exact r2 pid-ancestry
+  pattern (we:scripts/lib/lane-lease.mjs:80-93), and the inversion of (b)'s hardest-won fail-closed
+  rider; (4) **the guard becomes a state-writer** — a new failure class (a command that merely *mentions*
+  acquire corrupting ownership state) plus a second ownership file duplicating the lease's TTL/cleanup
+  machinery. **Collapse argument (recorded so re-litigation doesn't reopen it):** any repair that routes
+  `agent_id` through the command string *is* option (b) with a harness-owned, experimental token instead
+  of a repo-minted slug — strictly worse. Prior-art check: `agent_id` is process identity (pid-shaped:
+  ambient, ephemeral, third-party-owned) — the branch the survey already closed in principle.
 
 `Skeptic:` SURVIVES-WITH-AMENDMENT — the attack it beat: "fail-closed breaks the lane's legitimate
 mid-work destructive ops" (enumeration of the real template found zero guard-visible destructive ops on
 the sanctioned path, and the drain is never denied its own prep). Amendments folded: marked/no-id
 precedence defined + acceptance bullet 3 rescoped, marker hardened to a dedicated lease field, deny
 message teaches the re-assert.
+
+`Skeptic (round 2):` FLIP-REFUTED — after landing, the hook-payload `agent_id` channel surfaced (via the
+concurrent PR #402's `ev.session_id` hint + a docs check) and falsified the original "command string is
+the *only* per-op channel" absolute; a proposed default-flip to a new option (c) built on it was
+attacked and **refuted** (mint/check split unbridgeable; silent fail-open degradation = the r2 pattern).
+Resolution: premise rescoped to "only channel carrying *lane-coupling* identity with both ends in-repo",
+(c) added as a named, probe-gated excluded branch above, **default stays (b)**.
 
 `Screen:` clear — fresh-context two-confusion screen (2026-07-10): the branches produce opposite guard
 verdicts on the same sibling op (contract level, not an internal encoding), and option (a) is a

@@ -58,7 +58,7 @@ to check.
   we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js:358-359) — an `export` cannot carry
   identity between steps.
 
-## Empirical verification — no ambient per-lane signal exists
+## Empirical verification — no ambient per-lane signal exists in the env/process channels
 
 Re-verified live during this prep (2026-07-10, this session): a subagent spawned by this session printed
 the **identical** `CLAUDE_CODE_SESSION_ID` as the parent, plus `CLAUDE_CODE_CHILD_SESSION=1` (a constant
@@ -70,13 +70,26 @@ flag, not an id). No other `CLAUDE*` env var is per-agent. This confirms the ite
   exact fail-open r2 removed.
 - Shell exports don't survive across Bash calls, so identity cannot be parked in the environment.
 
-**Consequence:** the only per-operation channel that can distinguish siblings is the **command string
-itself** — which only the guard reads. Any design that achieves sibling-level denial therefore requires a
-(small) guard-side comparison extension. The item's original "a change to the lane-dispatch machinery,
-not to the guard" holds only for the weaker cross-session-only scope; its own acceptance ("a destructive
-git op run in a **sibling** parallel lane's clone is **denied**") is unreachable without touching the
-guard. The prepared item reconciles this: the *stamp* lives in dispatch (Fork 1); whether the guard
-learns a per-op assertion is the real merit fork (Fork 2).
+**Consequence:** the **command string** is the only per-operation channel carrying **holder
+(lane-coupling) identity with both ends in-repo** — which only the guard reads. Any design that achieves
+sibling-level denial therefore requires a (small) guard-side comparison extension. The item's original
+"a change to the lane-dispatch machinery, not to the guard" holds only for the weaker cross-session-only
+scope; its own acceptance ("a destructive git op run in a **sibling** parallel lane's clone is
+**denied**") is unreachable without touching the guard. The prepared item reconciles this: the *stamp*
+lives in dispatch (Fork 1); whether the guard learns a per-op assertion is the real merit fork (Fork 2).
+
+**Round-2 correction (same day, post-land):** one ambient per-*subagent process* channel does exist at
+the guard — the Claude Code hooks payload's `agent_id`/`agent_type` fields on subagent tool calls
+("Subagent Identification", experimental, ≥ 2.1.196, payload-only; surfaced via the concurrent PR #402's
+`ev.session_id` hint, then docs-verified). The original absolute ("the only per-operation channel") was
+over-broad and is rescoped above. A proposed Fork 2 default-flip onto that channel was skeptic-attacked
+and **refuted**: `acquire` (the O_EXCL owner-stamp, a Bash subprocess) cannot see the payload-only field,
+while the PreToolUse hook that can see it fires *before* acquire's outcome exists — so an ownership
+sidecar is poisoned by the live modulo-wrap collision and locks a replacement agent (new `agent_id`) out
+of its own lane; absent/renamed field degrades silently to shared-session scope (the r2 fail-open
+pattern); and any repair that routes the id through the command string collapses into option (b) with a
+harness-owned token. The channel is recorded in the item as Fork 2 (c), a named, probe-gated **excluded**
+branch; the default stays (b).
 
 ## Prior art
 
