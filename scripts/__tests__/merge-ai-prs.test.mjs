@@ -714,6 +714,67 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     expect(calls.some((c) => c.key === 'git diff --numstat deadbeefdead origin/lane/child')).toBe(false); // own-delta never attempted
     expect(scoreEscalation({ changedFiles: net.changedFiles, diffLines: net.diffLines, humanBasisFiles: net.humanBasisFiles }).humanRequired).toBe(true);
   });
+
+  // ── #2404 — twin of #2373: a FRESH base against an UN-REBASED head over-reports (PR #364 repro: a 2-file
+  //    docs-only PR scored dozens of "changed" files that were purely upstream-advanced). The diff basis must
+  //    be the lane's own fork point (`merge-base(origin/main, head)`), not the base tip directly. ────────────
+  it('#2404 — a head BEHIND an advanced base diffs off `merge-base(origin/main, head)`, not the base tip, so upstream-only advances never appear as the PR\'s own changes', () => {
+    const { exec, calls } = fakeExec({
+      // origin/main has advanced past the lane's fork point with commits touching gate-self files; a bare
+      // origin/main..head diff would sweep those in. merge-base finds the true fork point.
+      'git merge-base origin/main origin/lane/x': { stdout: 'forkpoint1234\n' },
+      'git diff --numstat forkpoint1234 origin/lane/x': { stdout: '2\t0\tbacklog/2404-x.md\n' },
+      // Unused if the fix works — proves the cumulative-from-tip basis is NOT what gets diffed.
+      'git diff --numstat origin/main origin/lane/x': { stdout: '2\t0\tbacklog/2404-x.md\n15\t58\tscripts/merge-ai-prs.mjs\n6\t13\tscripts/pr-land.mjs\n' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r).toEqual({ changedFiles: ['backlog/2404-x.md'], diffLines: 2, scored: true, humanBasisFiles: ['backlog/2404-x.md'] });
+    expect(r.changedFiles).not.toContain('scripts/merge-ai-prs.mjs'); // no false gate-self hit
+    expect(calls.some((c) => c.key === 'git diff --numstat origin/main origin/lane/x')).toBe(false); // the tip-basis diff is never attempted
+    expect(scoreEscalation({ changedFiles: r.changedFiles, diffLines: r.diffLines, humanBasisFiles: r.humanBasisFiles }).humanRequired).toBe(false);
+  });
+
+  it('#2404 — a head already rebased onto origin/main is unaffected: merge-base(origin/main, head) == origin/main, so the diff basis is unchanged', () => {
+    const { exec, calls } = fakeExec({
+      'git merge-base origin/main deadbeef': { stdout: 'origin/main\n' },
+      'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef' }); // producer: `<remote>/<sha>` fails fast first, falls through to the bare SHA (as in the pre-#2404 fallback-chain test)
+    expect(r).toEqual({ changedFiles: ['README.md'], diffLines: 1, scored: true, humanBasisFiles: ['README.md'] });
+    expect(calls.filter((c) => c.args[0] === 'diff').map((c) => c.key)).toEqual([
+      'git diff --numstat origin/main origin/deadbeef', // tried first, fails fast (invalid ref)
+      'git diff --numstat origin/main deadbeef', // falls through to the real local SHA, narrowed to the fork point (== origin/main here)
+    ]);
+  });
+
+  it('#2404 — an unresolvable merge-base (no common history) degrades to the base tip itself — the prior, safe over-scoring behavior, never a scoring failure', () => {
+    const { exec } = fakeExec({
+      'git merge-base origin/main deadbeef': { throw: 'no common ancestors' },
+      'git diff --numstat origin/main deadbeef': { stdout: '3\t1\tscripts/pr-land.mjs\n' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef' });
+    expect(r).toEqual({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 4, scored: true, humanBasisFiles: ['scripts/pr-land.mjs'] });
+  });
+
+  it('#2404 — the merge-base narrowing benefits `own` too when a lane is ALSO stacked (baseRev): the strict-ancestor own-delta wins over the merge-base cumulative basis, as before', () => {
+    const { exec } = fakeExec({
+      'git merge-base origin/main origin/lane/child': { stdout: 'forkpoint\n' },
+      'git diff --numstat forkpoint origin/lane/child': { stdout: '4\t2\tbacklog/2390-own.md\n2\t0\tscripts/lib/review-escalation.mjs\n' },
+      'git diff --numstat a1b2c3d4e5f6 origin/lane/child': { stdout: '4\t2\tbacklog/2390-own.md\n' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'a1b2c3d4e5f6', fetchExtraRefs: ['lane/child'] });
+    expect(r.changedFiles).toEqual(['backlog/2390-own.md']); // SIZE de-inflated via the strict-ancestor baseRev, unchanged
+    expect(r.humanBasisFiles).toEqual(['backlog/2390-own.md', 'scripts/lib/review-escalation.mjs']); // cumulative narrowed to the fork point, gate file preserved
+  });
+
+  it('#2404-review — a `git merge-base` that prints MULTIPLE lines (criss-cross-merge history, several equally-valid best common ancestors) uses only the FIRST — an embedded newline would otherwise make an invalid single-arg revision', () => {
+    const { exec } = fakeExec({
+      'git merge-base origin/main deadbeef': { stdout: 'forkpoint1\nforkpoint2\n' },
+      'git diff --numstat forkpoint1 deadbeef': { stdout: '1\t0\tREADME.md\n' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef' });
+    expect(r).toEqual({ changedFiles: ['README.md'], diffLines: 1, scored: true, humanBasisFiles: ['README.md'] });
+  });
 });
 
 describe('needsManifestStripBeforeMerge (#2183 — first-lander manifest-leak fix)', () => {
