@@ -158,9 +158,11 @@ export function repoKeyFromSlug(slug) {
 /**
  * #2390 — the per-repo `base` SHA a lane was cut from, for a given manifest repo key, or `null` when the
  * manifest carries none for that repo (a plain sibling lane, or no manifest at all). Pure. Scoring a STACKED
- * lane's escalation from THIS base (its predecessor's tip) instead of `origin/main` diffs it on its own delta,
- * killing cumulative-stack blast-radius inflation and the spurious `review:human` an ancestor's gate-self file
- * would otherwise induce. A `null` return makes both scorers fall through to the unchanged `origin/main` basis.
+ * lane's SIZE / blast-radius from THIS base (its predecessor's tip) instead of `origin/main` diffs it on its own
+ * delta, killing cumulative-stack blast-radius inflation. A `null` return makes both scorers fall through to the
+ * unchanged `origin/main` basis. NOTE (#2390-review-fix): this only de-inflates the SIZE basis — the gate-self /
+ * `review:human` trigger always reads the cumulative `origin/main…head` set (see `computeNetDiffChangedFiles`'s
+ * `humanBasisFiles`), so a self-declared/mis-set base here can never suppress a human review.
  * @param {{repos?:Array<{repo?:string, base?:string}>}|null|undefined} manifest
  * @param {string|null} repoKey
  * @returns {string|null}
