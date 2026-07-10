@@ -156,6 +156,34 @@ describe('merge-ai-prs — planLabelDrain blockedBy ordering (#2188)', () => {
     const { ready } = planLabelDrain([cand(8, 2205), cand(4, 2201), cand(6, 2201)]);
     expect(ready.map((c) => c.num)).toEqual([4, 6, 8]); // item 2201 (PRs 4,6) before 2205 (PR 8)
   });
+
+  // #2388 — hash-keyed items (JIT numbering, #2288) must not collapse into a single `Number(hash) === NaN`
+  // bucket: a bare `Number()` coercion makes every hash item indistinguishable (`NaN === NaN` under Set's
+  // SameValueZero equality), so a hash blockedBy edge would spuriously match ANY other open hash item.
+  it('a hash-keyed blockedBy DEFERS while its blocker is open, then FREES once the blocker leaves the set', () => {
+    const deferredPass = planLabelDrain([cand(2, 'x5lail9', ['xiea3rt']), cand(1, 'xiea3rt', [])]);
+    expect(deferredPass.ready.map((c) => c.num)).toEqual([1]);
+    expect(deferredPass.deferred).toEqual([{ num: 2, item: 'x5lail9', waitOn: ['xiea3rt'] }]);
+
+    // the caller's cascade removes a merged item between passes (mirrors the real for(;;) loop) — freeing it.
+    const freedPass = planLabelDrain([cand(2, 'x5lail9', ['xiea3rt'])]);
+    expect(freedPass.ready.map((c) => c.num)).toEqual([2]);
+    expect(freedPass.deferred).toEqual([]);
+  });
+
+  it('two DISTINCT hash items are never conflated into one NaN bucket', () => {
+    // #2 is blockedBy a hash (#xuj0wtn) that is NOT the OTHER open hash item (#xiea3rt) — a `Number()`
+    // coercion would make both blockedBy/openItems entries collapse to `NaN`, so #2 would wrongly defer on
+    // #xiea3rt even though its real blocker is absent from the candidate set (already landed).
+    const { ready, deferred } = planLabelDrain([cand(2, 'x5lail9', ['xuj0wtn']), cand(1, 'xiea3rt', [])]);
+    expect(ready.map((c) => c.num)).toEqual([1, 2]); // both ready: #2's actual blocker isn't in play
+    expect(deferred).toEqual([]);
+  });
+
+  it('sorts numeric items by number, and hash items after every numbered item (tie-break by PR#)', () => {
+    const { ready } = planLabelDrain([cand(3, 'xuj0wtn'), cand(2, 2201), cand(4, 'xiea3rt'), cand(1, 2199)]);
+    expect(ready.map((c) => c.num)).toEqual([1, 2, 3, 4]); // 2199, 2201, then hashes by PR# (3 before 4)
+  });
 });
 
 describe('merge-ai-prs — parseWatchOpts (#2194 /drain watch)', () => {
