@@ -27,7 +27,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyTransition, readField } from './backlog/frontmatter.mjs';
+import { applyTransition, applySettle, readField } from './backlog/frontmatter.mjs';
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
 import { decide } from './guard-bash.mjs';
 import { classifyBacklogTransition, isMemoryPath, isMemoryIndexPath, shortSha } from './golden-corpus-lib.mjs';
@@ -82,14 +82,12 @@ function commitsByMessage(pattern) {
   catch { return []; }
 }
 
-// ── settle() self-validation — mirrors the inline transform in scripts/backlog.mjs#settle (not
-// exported there as a pure function; replicated here so a mined settle fixture is verified the same
-// way claim/resolve/release are, via applyTransition). Kept local + tiny so drift is easy to spot. ──
+// ── settle() self-validation — replays the REAL exported `applySettle` (scripts/backlog/frontmatter.mjs,
+// #2273) so a mined settle fixture is verified against the same single implementation `backlog.mjs#settle`
+// and the Tier-A snapshot harness call — no second hand-copied regex to drift out of sync. ──────────────
 function replaySettle(before) {
-  if (!/^scaffoldedBy:/m.test(before)) return null;
-  return before.replace(/^status: active$/m, 'status: open')
-    .replace(/^scaffoldedBy: .*\n/m, '')
-    .replace(/^dateScaffolded: .*\n/m, '');
+  const res = applySettle(before);
+  return res.error ? null : res.content;
 }
 
 // ── category 1: backlog transitions (claim/resolve/release/settle) + creation ──────────────────────
@@ -233,7 +231,10 @@ function buildGuardLaneFixtures() {
   return [
     { id: 'primary-checkout-edit', filePathTemplate: '{{PRIMARY_ROOT}}/webeverything/scripts/example.mjs', expect: { decision: 'deny' }, basis: '#2123 lane isolation' },
     { id: 'lane-clone-edit', filePathTemplate: '{{LANE_ROOT}}/.lanes/web-everything/lane-1/scripts/example.mjs', expect: { decision: 'allow' }, basis: 'allowed: already in a lane' },
-    { id: 'agent-memory-edit-in-primary', filePathTemplate: '{{PRIMARY_ROOT}}/webeverything/.claude/agent-memory/example.md', expect: { decision: 'allow' }, basis: 'agent-memory carve-out (#2266)' },
+    // Agent memory is NO LONGER exempt (2026-07-09 guard-lane.mjs policy tightening, superseding the
+    // earlier #2266 carve-out this fixture used to assert) — a primary-tree memory edit is denied like
+    // any other tracked file. #2273's replay harness caught this fixture drifting from that change.
+    { id: 'agent-memory-edit-in-primary', filePathTemplate: '{{PRIMARY_ROOT}}/webeverything/.claude/agent-memory/example.md', expect: { decision: 'deny' }, basis: 'agent-memory NOT exempt (2026-07-09, supersedes #2266)' },
     { id: 'scratchpad-edit', filePathTemplate: '{{SCRATCHPAD_ROOT}}/example.md', expect: { decision: 'allow' }, basis: 'untracked scratch is exempt' },
   ];
 }
