@@ -1,7 +1,10 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-09"
+dateStarted: "2026-07-10"
+dateResolved: "2026-07-10"
+graduatedTo: "#2373 (fix landed): pr-land.mjs's applyReviewEscalationLabel now calls the shared computeNetDiffChangedFiles (scripts/merge-ai-prs.mjs), which fetches BASE with an explicit destination refspec and is also used by the drain backstop — one net-diff basis, no second place to drift"
 tags: [review, drain, gate-self, pr-land]
 relatedTo: ["1821", "2365"]
 ---

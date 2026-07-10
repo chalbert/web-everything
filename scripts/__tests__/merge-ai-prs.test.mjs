@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -388,6 +388,96 @@ describe('parseNumstat (#1821 — net two-dot diff for the review-escalation bac
     expect(parseNumstat('')).toEqual({ changedFiles: [], diffLines: 0 });
     expect(parseNumstat(null)).toEqual({ changedFiles: [], diffLines: 0 });
     expect(parseNumstat(undefined)).toEqual({ changedFiles: [], diffLines: 0 });
+  });
+});
+
+describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer + drain)', () => {
+  const fakeExec = (script = {}) => {
+    const calls = [];
+    const exec = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts, key: `${cmd} ${args.join(' ')}` });
+      const h = script[`${cmd} ${args.join(' ')}`];
+      if (h && h.throw) throw new Error(h.throw);
+      return h && 'stdout' in h ? h.stdout : '';
+    };
+    return { exec, calls };
+  };
+
+  it('fetches BASE with an EXPLICIT destination refspec (never a bare `git fetch <remote> <base>`, which relies on the opportunistic tracking-ref update)', () => {
+    const { exec, calls } = fakeExec({ 'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' } });
+    computeNetDiffChangedFiles({ exec, rev: 'deadbeef' });
+    expect(calls.some((c) => c.args[0] === 'fetch' && c.args[1] === 'origin' && c.args[2] === '+main:refs/remotes/origin/main')).toBe(true);
+  });
+
+  it('diffs `<remote>/<base>` against `rev` directly (a plain two-tree comparison, content-only) and parses via parseNumstat', () => {
+    const { exec } = fakeExec({ 'git diff --numstat origin/main deadbeef': { stdout: '3\t1\tscripts/pr-land.mjs\n' } });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef' });
+    expect(r).toEqual({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 4, scored: true });
+  });
+
+  it('a file already landed upstream (net-identical) never appears — the false-positive #2373 exists to prevent', () => {
+    // origin/main already carries the gate-fix commit, so its tree is identical to the PR head for that file:
+    // `git diff --numstat` naturally omits it, regardless of whether the commit is in the PR's ancestry.
+    const { exec } = fakeExec({ 'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tbacklog/2373-x.md\n' } });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef' });
+    expect(r.changedFiles).not.toContain('scripts/merge-ai-prs.mjs');
+    expect(r.changedFiles).not.toContain('scripts/lib/review-escalation.mjs');
+  });
+
+  it('the fetch failing degrades gracefully — still attempts the diff off whatever is locally cached', () => {
+    const { exec, calls } = fakeExec({
+      'git fetch origin +main:refs/remotes/origin/main --quiet': { throw: 'network unreachable' },
+      'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef' });
+    expect(r).toEqual({ changedFiles: ['README.md'], diffLines: 1, scored: true });
+    expect(calls.some((c) => c.args[0] === 'diff')).toBe(true);
+  });
+
+  it('falls back through the rev candidate chain (`rev` → `<remote>/rev` → `FETCH_HEAD`) for a foreign/sibling clone — FETCH_HEAD only offered when `fetchExtraRefs` actually fetched something into it', () => {
+    const { exec, calls } = fakeExec({
+      'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
+      'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
+      'git diff --numstat origin/main FETCH_HEAD': { stdout: '2\t2\tscripts/merge-ai-prs.mjs\n' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r).toEqual({ changedFiles: ['scripts/merge-ai-prs.mjs'], diffLines: 4, scored: true });
+    expect(calls.filter((c) => c.args[0] === 'diff').length).toBe(3);
+  });
+
+  it('every rev candidate fails → scored:false, empty result (caller degrades to no-escalate / its own fallback)', () => {
+    const { exec } = fakeExec({
+      'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
+      'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
+      'git diff --numstat origin/main FETCH_HEAD': { throw: 'unknown revision' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false });
+  });
+
+  it('#2373-review — with NO fetchExtraRefs (the producer\'s base-only fetch), FETCH_HEAD is NEVER tried: it would equal `<remote>/<base>` itself and "succeed" with a spurious empty diff before ever reaching the real `rev`', () => {
+    const { exec, calls } = fakeExec({
+      'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
+      'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
+      // FETCH_HEAD deliberately NOT stubbed to succeed — if the implementation tried it, this would return ''
+      // (the fakeExec default) and the assertion below on scored:false would catch the regression.
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x' }); // no fetchExtraRefs
+    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false });
+    expect(calls.some((c) => c.key === 'git diff --numstat origin/main FETCH_HEAD')).toBe(false);
+  });
+
+  it('no exec / no rev → scored:false without touching git at all', () => {
+    expect(computeNetDiffChangedFiles({})).toEqual({ changedFiles: [], diffLines: 0, scored: false });
+    const { exec, calls } = fakeExec();
+    expect(computeNetDiffChangedFiles({ exec })).toEqual({ changedFiles: [], diffLines: 0, scored: false });
+    expect(calls.length).toBe(0);
+  });
+
+  it('honors a custom remote/base and passes fetchExtraRefs through to the fetch call', () => {
+    const { exec, calls } = fakeExec({ 'git diff --numstat upstream/release deadbeef': { stdout: '1\t0\tREADME.md\n' } });
+    computeNetDiffChangedFiles({ exec, remote: 'upstream', base: 'release', rev: 'deadbeef', fetchExtraRefs: ['lane/x'] });
+    expect(calls[0]).toMatchObject({ args: ['fetch', 'upstream', '+release:refs/remotes/upstream/release', 'lane/x', '--quiet'] });
   });
 });
 
