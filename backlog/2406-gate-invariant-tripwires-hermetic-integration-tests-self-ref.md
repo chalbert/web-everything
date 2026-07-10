@@ -1,7 +1,7 @@
 ---
 kind: story
 size: 5
-parent: "x9iag7f"
+parent: "2405"
 status: open
 dateOpened: "2026-07-10"
 tags: []
