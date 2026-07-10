@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { numberPendingHashes } from '../lane-drain.mjs';
+import { numberPendingHashes, landedNumberFor } from '../lane-drain.mjs';
 
 const QUEUED_REL = '.claude/skills/batch-backlog-items/queued.json';
 const LEDGER_REL = '.claude/skills/batch-backlog-items/id-ledger.json';
@@ -144,6 +144,31 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     // The leftover's blockedBy edge to the couple is repaired to the couple's assigned number.
     expect(readFileSync(join(repo, 'backlog/2202-followup.md'), 'utf8')).toContain('blockedBy: ["2201"]');
     expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('stamps bornAs:<hash> into the numbered item as the durable proof-of-land (#2392)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nblockedBy: ["2100"]\n---\n# Alpha\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash01', nnn: '2201' }]);
+    const alpha = readFileSync(join(repo, 'backlog/2201-alpha.md'), 'utf8');
+    // The birth hash is stamped as the first frontmatter field and survives the numbering rewrite.
+    expect(alpha).toContain('bornAs: xhash01');
+    expect(alpha).not.toContain('bornAs: 2201');
+  });
+
+  it('landedNumberFor reads bornAs off origin/main: resolves a landed hash, null for an unlanded one (#2392)', () => {
+    write('backlog/2201-alpha.md', '---\nbornAs: xhash01\nkind: story\n---\n# Alpha\n');
+    git('add', 'backlog', '.gitignore'); git('commit', '-qm', 'seed');
+    // No real remote — point the origin/main ref at HEAD so `git grep origin/main` resolves.
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+
+    expect(landedNumberFor('xhash01', repo)).toBe('2201'); // landed → its assigned number
+    expect(landedNumberFor('xnope99', repo)).toBe(null);   // never landed → no bornAs record
+    expect(landedNumberFor('not-a-hash', repo)).toBe(null); // non-hash input → null, no git call
   });
 
   it('renames a relatedReport file whose stem embeds the hash + rewrites its internal refs (#2400, the #2387 regression)', () => {
