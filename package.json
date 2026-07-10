@@ -65,7 +65,8 @@
     "design-refs:frontier": "node scripts/design-refs/frontier.mjs",
     "gen:wrapper": "node scripts/gen-wrapper/cli.mjs",
     "gen:cem": "node scripts/gen-cem.mjs",
-    "mine:corpus": "node scripts/mine-golden-corpus.mjs"
+    "mine:corpus": "node scripts/mine-golden-corpus.mjs",
+    "replay:session": "node scripts/session-replay.mjs"
   },
   "devDependencies": {
     "@11ty/eleventy": "^2.0.1",
