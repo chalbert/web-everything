@@ -159,6 +159,45 @@ export function extractManifestFromBody(body) {
 
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+/**
+ * Tamper-evidence audit line (xnsk54v follow-up) — a STABLE one-line record of the escalation-sensitive
+ * manifest values the drain/merge automation ACTED ON when it made an escalation/land decision. Since the
+ * manifest now rides the PR BODY (editable by anyone with write access, NOT part of the reviewed commit-set),
+ * `dismissedFindings` (which feeds `scoreEscalation` — higher ⇒ MORE review scrutiny), `crossRepo`, and
+ * `blockedBy` can be edited AFTER review to suppress the drain's re-score backstop with no commit trace. The
+ * sibling commit-set-drift gate (#2409) does not catch a body-only edit (it doesn't advance HEAD). Recording
+ * this line into a DURABLE, timestamped `gh pr comment` (separate from the body) makes such a post-review edit
+ * DETECTABLE: diff the recorded acted-on values against the live body. Prevention is not the goal — evidence is.
+ *
+ * Pure and deterministic (stable key order, no `Date`/fs) so an unchanged decision yields byte-identical output
+ * — that stability is what lets the reason-comment dedupe skip a re-post, and a CHANGED value post a fresh,
+ * separately-timestamped comment (the tamper trail). Tolerant of missing/zero/empty inputs.
+ *
+ * Record FAITHFULLY — mirror what `scoreEscalation` actually acted on. The caller (merge-ai-prs.mjs ~line 891)
+ * sets `v.dismissedFindings` with an `isFinite` guard ONLY, NOT a clamp — so a body edited to a finite negative
+ * (e.g. `-4`, which scores LOWER = LESS scrutiny) is fed RAW to the escalation decision. Clamping it to 0 here
+ * would make the record diverge from the acted-on value in EXACTLY the tamper scenario this fix targets,
+ * silently defeating the record==acted-on invariant the whole fix rests on. So a finite value round-trips
+ * verbatim (negatives included); coercion guards only NON-finite/undefined so the line can't crash or inject.
+ *
+ * OUTPUT CONTRACT — always a SINGLE line, no embedded newline and no HTML-comment marker, regardless of input.
+ * The dedupe in `hasDrainReasonComment` relies on the line being one stable token (`body.includes(auditLine)`)
+ * that can't be split by a smuggled newline nor spoof a marker into a `startsWith(marker)` scan. In the real
+ * drain path `blockedBy` is `.map(Number)` upstream so entries are already numbers, but this exported helper is
+ * called with raw values elsewhere — so each `blockedBy` entry is stringified and reduced to a safe allowlist:
+ * only `[A-Za-z0-9_-]` survive. That is exactly the shape of a legitimate backlog id — numeric (`2151`) or slug
+ * (`x7k2q9a`) — so real values round-trip verbatim, while every structural / injection character (CR/LF, the
+ * line's own `, [ ]` delimiters, and the `< > !` a `<!-- … -->` marker needs) is dropped.
+ *
+ * @param {{dismissedFindings?:number, crossRepo?:boolean, blockedBy?:Array<number|string>}} [v]
+ */
+export function manifestAuditLine({ dismissedFindings, crossRepo, blockedBy } = {}) {
+  const n = Number.isFinite(Number(dismissedFindings)) ? Number(dismissedFindings) : 0;
+  const cross = !!crossRepo;
+  const blocked = (Array.isArray(blockedBy) ? blockedBy : []).map((x) => String(x).replace(/[^A-Za-z0-9_-]/g, ''));
+  return `manifest acted-on: dismissedFindings=${n} crossRepo=${cross} blockedBy=[${blocked.join(',')}]`;
+}
+
 /** Serialize a manifest to `.lane-manifest.json` text (with a self-documenting `_doc` header). */
 export function serializeManifest(m) {
   return JSON.stringify(

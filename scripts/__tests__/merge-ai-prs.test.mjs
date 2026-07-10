@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -852,6 +852,49 @@ describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, n
     const reason = 'escalated — awaiting an independent review (review:pending)';
     const comments = [{ body: buildDrainReasonComment('park', reason) }];
     expect(hasDrainReasonComment(comments, 'skip', reason)).toBe(false);
+  });
+
+  it('xnsk54v — an audit line is appended to the comment and threads through the dedupe (tamper-evidence)', () => {
+    const reason = 'escalated — awaiting an independent review (review:pending)';
+    const auditA = 'manifest acted-on: dismissedFindings=3 crossRepo=true blockedBy=[]';
+    const auditB = 'manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]'; // a post-review body edit
+    const body = buildDrainReasonComment('park', reason, auditA);
+    expect(body).toContain(reason);
+    expect(body).toContain(auditA);
+    // Same reason + same acted-on values → dedupe hit (idempotent; a --watch loop never reposts unchanged).
+    expect(hasDrainReasonComment([{ body }], 'park', reason, auditA)).toBe(true);
+    // Same reason but a CHANGED acted-on value → NO dedupe → a fresh, separately-timestamped comment posts.
+    expect(hasDrainReasonComment([{ body }], 'park', reason, auditB)).toBe(false);
+  });
+
+  it('xnsk54v — omitting the audit line is backward-compatible (orphan/impl PR comments are unchanged)', () => {
+    const reason = 'not mergeable (mergeable=CONFLICTING)';
+    const withNoAudit = buildDrainReasonComment('skip', reason);
+    expect(withNoAudit).toBe(buildDrainReasonComment('skip', reason, undefined));
+    expect(withNoAudit).not.toContain('manifest acted-on:');
+    // A no-audit prior post still dedupes a no-audit re-post.
+    expect(hasDrainReasonComment([{ body: withNoAudit }], 'skip', reason)).toBe(true);
+  });
+
+  it("xnsk54v land-path — the 'land' kind records the acted-on values BEFORE a merge (closes the attack-success gap)", () => {
+    // The park/skip paths only fire when the drain does NOT merge, so they record nothing in the attack's
+    // SUCCESS state (dismissedFindings edited DOWN so the PR LANDS). The 'land' comment fires just before the
+    // merge on a manifest-carrying PR, so a landed PR always carries a durable record of what the drain acted on.
+    const reason = LAND_REASON; // the exported const the land path posts — kept in one place, no drift
+    const auditActed = 'manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]'; // the tampered-down value the drain actually acted on
+    const body = buildDrainReasonComment('land', reason, auditActed);
+    expect(body).toContain('drain-land-reason'); // its own marker kind, distinct from park/skip
+    expect(body).toContain('Landed by the drain');
+    expect(body).toContain(reason);
+    expect(body).toContain(auditActed);
+    // Idempotent: a --watch re-pass over the same land value dedupes (no duplicate record).
+    expect(hasDrainReasonComment([{ body }], 'land', reason, auditActed)).toBe(true);
+    // A land marker never collides with a park/skip marker of the same text.
+    expect(hasDrainReasonComment([{ body }], 'park', reason, auditActed)).toBe(false);
+    expect(hasDrainReasonComment([{ body }], 'skip', reason, auditActed)).toBe(false);
+    // A CHANGED acted-on value posts a fresh, separately-timestamped land record (the tamper trail).
+    const auditOther = 'manifest acted-on: dismissedFindings=3 crossRepo=true blockedBy=[]';
+    expect(hasDrainReasonComment([{ body }], 'land', reason, auditOther)).toBe(false);
   });
 
   it('hasDrainReasonComment tolerates a missing/odd comments array', () => {

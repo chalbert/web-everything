@@ -105,7 +105,7 @@ import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, r
 import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs';
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
-import { extractManifestFromBody } from './readiness/lane-manifest.mjs';
+import { extractManifestFromBody, manifestAuditLine } from './readiness/lane-manifest.mjs';
 
 // #2262 — the local, machine-scoped park-age clock the review-escalation watch-window gate reads its
 // `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
@@ -414,11 +414,34 @@ export function shouldRepollForLabelLag({ label, found, expect, retried } = {}) 
  */
 export function drainReasonMarker(kind) { return `<!-- drain-${kind}-reason -->`; }
 
-/** Build the comment body for a park/skip reason. Pure. */
-export function buildDrainReasonComment(kind, reasonText) {
-  const heading = kind === 'park' ? '⏸ **Parked for review by the drain**' : '· **Skipped by the drain**';
-  return `${drainReasonMarker(kind)}\n${heading}\n\n${reasonText}`;
+/** Build the comment body for a park/skip/land reason. Pure.
+ *  `kind` — 'park' (review-escalation parked it), 'skip' (a real conflict / red check), or 'land' (xnsk54v
+ *  follow-up — the drain is about to MERGE a manifest-carrying PR; this records what it acted on BEFORE the
+ *  merge, so the attack's SUCCESS state — `dismissedFindings` edited DOWN so the PR lands — still leaves a
+ *  durable trail).
+ *  `auditLine` (xnsk54v follow-up) — the optional `manifestAuditLine` recording the escalation-sensitive
+ *  manifest values (`dismissedFindings`/`crossRepo`/`blockedBy`) this decision ACTED ON. Because the manifest
+ *  now lives in the editable, un-reviewed PR body, folding the acted-on values into this durable, timestamped
+ *  comment makes a later body edit tamper-evident (diff recorded-vs-live). Appended verbatim; omitted when
+ *  absent (an orphan/impl PR carrying no manifest is unchanged). */
+export function buildDrainReasonComment(kind, reasonText, auditLine) {
+  const heading = kind === 'park' ? '⏸ **Parked for review by the drain**'
+    : kind === 'land' ? '✅ **Landed by the drain**'
+    : '· **Skipped by the drain**';
+  const audit = auditLine ? `\n\n${auditLine}` : '';
+  return `${drainReasonMarker(kind)}\n${heading}\n\n${reasonText}${audit}`;
 }
+
+/** xnsk54v follow-up — the fixed reason text for the land-path audit record. Exported (and imported by the
+ *  test) so the string lives in ONE place: the record and its assertion can't silently drift apart. */
+export const LAND_REASON = 'landing — recording the acted-on manifest escalation values before merge';
+
+/** xnsk54v follow-up — the acted-on manifest audit line for a verdict/candidate `x`, or `undefined` when the
+ *  PR carries no manifest (an orphan/impl PR has nothing body-sourced to record — its comment stays
+ *  byte-identical to before). `manifestAuditLine` destructures exactly `dismissedFindings`/`crossRepo`/
+ *  `blockedBy`, so passing the whole verdict is safe — its extra keys are ignored. Collapses the identical
+ *  park/skip/land call sites into one. */
+const auditLineFor = (x) => x.hasManifest ? manifestAuditLine(x) : undefined;
 
 /**
  * #2333 — should a PARK stamp its escalation reason as a PR comment (#2313)? ONLY for a NON-human
@@ -430,14 +453,18 @@ export function shouldPostParkReasonComment({ humanRequired } = {}) {
   return !humanRequired;
 }
 
-/** Has this exact (kind, reasonText) already been stamped on the PR? Pure. `comments` is the raw
- *  `gh pr view --json comments` array (tolerant of a missing/odd shape). */
-export function hasDrainReasonComment(comments, kind, reasonText) {
+/** Has this exact (kind, reasonText, auditLine) already been stamped on the PR? Pure. `comments` is the raw
+ *  `gh pr view --json comments` array (tolerant of a missing/odd shape). `auditLine` (xnsk54v follow-up) is
+ *  matched too so a CHANGED acted-on manifest value posts a FRESH, separately-timestamped comment (the
+ *  tamper trail) rather than dedupe-hiding under the prior post; omitted/empty ⇒ `includes('')` ⇒ no-op
+ *  (backward compatible with a call that passes no audit line). */
+export function hasDrainReasonComment(comments, kind, reasonText, auditLine) {
   const marker = drainReasonMarker(kind);
   const text = String(reasonText || '');
+  const audit = String(auditLine || '');
   return (Array.isArray(comments) ? comments : []).some((c) => {
     const body = String(c?.body || '');
-    return body.startsWith(marker) && body.includes(text);
+    return body.startsWith(marker) && body.includes(text) && body.includes(audit);
   });
 }
 
@@ -771,15 +798,20 @@ function runCli() {
   // #2313 — post (or skip, if already posted) a drain reason comment on a PR. Best-effort: a `gh` miss never
   // fails the sweep. Reads the PR's existing comments once per call (only called for park/skip verdicts, not
   // every open PR) so a `--watch` loop dedupes on the SAME (kind, reason) with no extra state to maintain.
-  const postDrainReasonComment = (repo, num, kind, reasonText) => {
+  // `auditLine` (xnsk54v follow-up) — the optional `manifestAuditLine` recording the escalation-sensitive
+  // manifest values this verdict ACTED ON. Threaded into both the dedupe check and the posted body so an
+  // unchanged decision de-dupes (idempotent) while a body-edited manifest value posts a fresh, timestamped
+  // record — the tamper trail. It is ancillary to the reason (`reasonText` still gates posting), never the
+  // sole trigger for a comment.
+  const postDrainReasonComment = (repo, num, kind, reasonText, auditLine) => {
     if (DRY_RUN || !reasonText) return false;
     let comments = [];
     try {
       const data = JSON.parse(execFileSync('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json', 'comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
       comments = Array.isArray(data.comments) ? data.comments : [];
     } catch { /* best-effort read; fall through and attempt the post anyway */ }
-    if (hasDrainReasonComment(comments, kind, reasonText)) return false;
-    try { execFileSync('gh', ['pr', 'comment', String(num), ...repoFlag(repo), '--body', buildDrainReasonComment(kind, reasonText)], { stdio: ['ignore', 'ignore', 'pipe'] }); return true; }
+    if (hasDrainReasonComment(comments, kind, reasonText, auditLine)) return false;
+    try { execFileSync('gh', ['pr', 'comment', String(num), ...repoFlag(repo), '--body', buildDrainReasonComment(kind, reasonText, auditLine)], { stdio: ['ignore', 'ignore', 'pipe'] }); return true; }
     catch { return false; }
   };
 
@@ -1110,7 +1142,12 @@ function runCli() {
           // same reason in its PR body (#2324's block, written below), so a park comment there would duplicate
           // it. Fire the comment in the `else` of humanRequired.
           if (shouldPostParkReasonComment({ humanRequired: gate.humanRequired })) {
-            const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason);
+            // xnsk54v follow-up — record the escalation-sensitive manifest values THIS park acted on (the same
+            // `dismissedFindings`/`crossRepo`/`blockedBy` that fed `scoreEscalation` above) into the durable,
+            // timestamped comment. Only for a manifest-carrying PR (an orphan/impl PR has nothing body-sourced
+            // to record — its comment stays byte-identical to before). Does not change the verdict/label already
+            // decided above; it only records what was acted on, so a later body edit is tamper-evident.
+            const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} escalation reason stamped on PR\n`);
           }
         }
@@ -1174,7 +1211,9 @@ function runCli() {
     for (const v of skipped) {
       if (v.escalated === 'yes' || v.collisionHealed) continue;
       if (!(v.certifyLabel || v.aiGenerated)) continue;
-      const posted = postDrainReasonComment(v.repo, v.num, 'skip', v.reason);
+      // xnsk54v follow-up — mirror the park path: record the acted-on manifest values into the durable skip
+      // comment for a manifest-carrying PR (tamper-evidence), leaving orphan/impl skip comments unchanged.
+      const posted = postDrainReasonComment(v.repo, v.num, 'skip', v.reason, auditLineFor(v));
       if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} skip reason stamped on PR\n`);
     }
   }
@@ -1211,6 +1250,22 @@ function runCli() {
       let progressed = false;
       for (const c of plan.ready) {
         try {
+          // xnsk54v follow-up (land-path tamper-evidence) — the park/skip comment paths only fire when the drain
+          // does NOT merge, so they record NOTHING in the attack's SUCCESS state: `dismissedFindings` edited DOWN
+          // to suppress escalation so the PR LANDS. Close that gap by stamping the acted-on manifest values onto
+          // the PR as a durable, timestamped comment BEFORE the merge — a landed manifest PR then always carries
+          // a record of the escalation-sensitive values the drain acted on. Manifest-carrying PRs only (an
+          // orphan/impl PR has nothing body-sourced to record — its behaviour is byte-identical to before).
+          // Decision-preserving: `postDrainReasonComment` swallows every `gh` error internally (returns a bool,
+          // never throws), so it can neither block nor alter the merge below — it only records.
+          // NOTE (residual, tracked as a follow-up): this fires only under `c.hasManifest`, so it covers the
+          // edit-a-value-DOWN variant — NOT a full manifest STRIP (deleting the whole block flips `hasManifest`
+          // false, the PR degrades to no-manifest → always-ready, and NO land record is written). Fully closing
+          // that needs a reviewed BASELINE to diff a landed PR against (out of scope for this size-2 story).
+          if (c.hasManifest) {
+            const posted = postDrainReasonComment(c.repo, c.num, 'land', LAND_REASON, auditLineFor(c));
+            if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} acted-on manifest values stamped on PR before merge\n`);
+          }
           // #2290 — the drain is the SOLE writer to main: the one `gh pr merge` now routes through the shared
           // gate (caller 'drain' — the only caller the gate permits). Behaviour is identical to the prior
           // inline call (`gh pr merge <n> [--repo …] --merge --delete-branch`, throw on a non-zero gh exit).
