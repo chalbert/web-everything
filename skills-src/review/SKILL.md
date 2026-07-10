@@ -10,8 +10,15 @@ independent verdict before it may land (#2171/#2262/#2285). Two classes reach a 
 - **`review:pending`** — agent-reviewable but not yet cleared (or the drain's auto-review bounced it here);
 - **`review:human`** — a **gate-self** edit (the diff touches the auto-review trust chain,
   `we:scripts/lib/review-escalation.mjs` / `we:scripts/merge-ai-prs.mjs`), which an agent may **never**
-  self-clear (conflict of interest). The drain leaves an `🤖 advisory AI review (non-clearing)` comment to
-  inform you, but only a **human** clears it.
+  self-clear (conflict of interest). Two shapes reach you here, and `deriveReviewDisposition` (#2285) tells them
+  apart — read the drain's comment to see which:
+  - a **sensitivity** park (`gate-self`, `{ mode: converge, autoLand: false }`) — the drain **ran the panel↔editor
+    convergence and may have pushed an advisory FIX** to the PR branch, then posted an `🤖 advisory AI review /
+    fix (non-clearing)` comment. The diff you review may already carry agent-authored trust-chain edits — scrutinize
+    them, don't rubber-stamp.
+  - a **deadlock** park (`non-convergence` / `mandate-conflict`, `{ mode: human }`) — the loop ran and could not
+    agree, so no fix was pushed; the comment is the round history + verdict table. You break the tie.
+  Either way only a **human** clears it.
 
 `/review <PR>` is the one review flow with no skill until now (before, a human did it by hand — e.g. PR #206).
 It renders through the **same engine** as the drain's auto-review and `/code-review`: the judge-only core in

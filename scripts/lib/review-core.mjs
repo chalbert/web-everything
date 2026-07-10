@@ -213,6 +213,69 @@ export function deriveNegotiationOutcome({ verdict, round, roundCap = NEGOTIATIO
   return round < roundCap ? NEGOTIATION_OUTCOMES.CONTINUE : NEGOTIATION_OUTCOMES.ESCALATE;
 }
 
+/** The two things a review surface can DO about an escalated PR (#2285, sibling #2326). This is the ONE place
+ *  the "run the fix/review convergence" vs "hand straight to a human" branch lives — lifted out of the drain's
+ *  prose so every review consumer (drain, /review, /merge) shares it, keyed on WHY the PR needs attention. */
+export const REVIEW_DISPOSITIONS = Object.freeze({
+  CONVERGE: 'converge', // run the panel↔editor negotiation loop to fix the diff
+  HUMAN: 'human',       // hand straight to a human — no (further) convergence
+});
+
+/**
+ * The escalation-reason vocabulary the disposition is keyed on (#2285). Two families:
+ *   • SENSITIVITY reasons — a rule fired at classification time, BEFORE any review deadlock. An agent
+ *     reviewer/editor is still independent and useful, so these CONVERGE. `gate-self` is the trust-chain case:
+ *     it converges too, but as an ADVISORY fix that never auto-lands (a human gates the merge, #2285).
+ *   • DEADLOCK reasons — the panel↔editor loop ALREADY ran and could not agree. Re-converging just repeats the
+ *     deadlock, so these go straight to a HUMAN.
+ * Values match `scoreEscalation`'s fired signals (`we:scripts/lib/review-escalation.mjs`) and the two escalating
+ * negotiation outcomes (round-cap non-convergence, mandate conflict).
+ */
+export const REVIEW_REASONS = Object.freeze({
+  // sensitivity (pre-review) — converge
+  GATE_SELF: 'gate-self',
+  BLAST_RADIUS: 'blast-radius',
+  SIZE: 'size',
+  DISMISSED_FINDINGS: 'dismissed-findings',
+  CROSS_REPO: 'cross-repo',
+  SAMPLING: 'sampling',
+  // deadlock (post-review) — human
+  NON_CONVERGENCE: 'non-convergence',
+  MANDATE_CONFLICT: 'mandate-conflict',
+});
+
+const DEADLOCK_REASONS = Object.freeze([REVIEW_REASONS.NON_CONVERGENCE, REVIEW_REASONS.MANDATE_CONFLICT]);
+const SENSITIVITY_REASONS = Object.freeze([
+  REVIEW_REASONS.GATE_SELF, REVIEW_REASONS.BLAST_RADIUS, REVIEW_REASONS.SIZE,
+  REVIEW_REASONS.DISMISSED_FINDINGS, REVIEW_REASONS.CROSS_REPO, REVIEW_REASONS.SAMPLING,
+]);
+
+/**
+ * Derive what a review surface DOES about an escalated PR, from the reason(s) it escalated for (#2285). Pure,
+ * exhaustive over REVIEW_REASONS, strictest-reason-wins when several apply. Returns `{ mode, autoLand }`:
+ *   • mode: `converge` → run the panel↔editor negotiation loop; `human` → hand to a human, do not converge.
+ *   • autoLand: may an AGENT land the PR on an accept verdict? `false` = a human gates the merge regardless — the
+ *     single enforcement point for the #2285 conflict-of-interest invariant (a trust-chain edit is human-cleared
+ *     only; the panel may FIX it but never CLEAR it).
+ *
+ * Precedence (most restrictive first):
+ *   1. any DEADLOCK reason → `{ human, autoLand:false }` — the loop already failed to converge; a human decides.
+ *   2. `gate-self`         → `{ converge, autoLand:false }` — converge to fix (advisory), but a human gates merge.
+ *   3. any other sensitivity reason → `{ converge, autoLand:true }` — today's agent-reviewable path, unchanged.
+ *
+ * @param {{reason?: string, reasons?: string[]}} o - one reason, or several (several ⇒ strictest wins).
+ * @returns {{mode: 'converge'|'human', autoLand: boolean}}
+ */
+export function deriveReviewDisposition({ reason, reasons } = {}) {
+  const list = (Array.isArray(reasons) ? reasons : reason ? [reason] : []).filter(Boolean);
+  if (!list.length) throw new Error('deriveReviewDisposition: at least one reason is required');
+  const unknown = list.filter((r) => !SENSITIVITY_REASONS.includes(r) && !DEADLOCK_REASONS.includes(r));
+  if (unknown.length) throw new Error(`deriveReviewDisposition: unknown reason(s): ${unknown.join(', ')}`);
+  if (list.some((r) => DEADLOCK_REASONS.includes(r))) return { mode: REVIEW_DISPOSITIONS.HUMAN, autoLand: false };
+  if (list.includes(REVIEW_REASONS.GATE_SELF)) return { mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false };
+  return { mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true };
+}
+
 /**
  * #2310 (v3, under epic #2285) — the MULTI-MANDATE REVIEWER PANEL. v2's single reviewer fans out into distinct
  * mandated lenses (the `/code-review` dimensions), each judging the SAME diff independently via `buildMandate`

@@ -65,6 +65,12 @@ and **pulls local `main`** (`git pull --ff-only`, best-effort) so the checkout r
 
 - **Never `--admin`, never force-merge, never force-update a branch.** A blocked/behind PR is left for its
   author. A human commit in the PR ⇒ never merged (it needs review).
+- **Honor the shared review disposition (#2285).** The converge-vs-human policy is ONE derivation —
+  `deriveReviewDisposition({ reasons })` in `we:scripts/lib/review-core.mjs` — shared with `/drain` and
+  `/review`. `/merge` never converges (that is the drain's loop), but it must never MERGE past a disposition that
+  a human owns: an un-cleared `review:human` / `review:pending` / `review:changes` PR is refused by
+  `hasUnclearedReviewLabel` (#2366) — `autoLand: false` and `mode: human` are exactly those, so a gate-self or
+  deadlocked PR is left for the human, never swept through here.
 - **Read-safe first:** the default posture is `--dry-run`; a live sweep merges real PRs, so confirm scope
   (all vs `--pr=<N>`) with the user unless they asked for the sweep outright.
 - Local-main pull is **ff-only + best-effort** — a diverged / dirty tree aborts it (reported), never discards
