@@ -287,3 +287,15 @@ stranded legacy couple.
   never force-rebased by the sweep.
 - **Label-scoped:** with `--label=ready-to-merge` the sweep only touches PRs a producer certified (#2196).
   Bare (`/merge`, no label) it also sweeps orphan AI PRs on the every-commit-AI gate — see [`/merge`](../merge/SKILL.md).
+- **Rebase-drop can livelock on an overlapping batch — `--no-rebase-drop` breaks it.** When several
+  `ready-to-merge` PRs in the SAME batch overlap on the same files (e.g. multiple PRs each touching
+  `scripts/merge-ai-prs.mjs` / `scripts/readiness/lane-manifest.mjs`), every pass rebase-drops whichever tips
+  read as BEHIND/CONFLICTING, which pushes a NEW commit → resets each tip's `test` check to pending → the tip
+  is behind/pending again at the next merge attempt → rebuilt again. The check-reset outruns the poll, so no
+  tip stays green long enough to land. Observed 2026-07-10: **12 `--watch` passes, 0 merges, `main` never
+  advanced**, even though tips individually reached CLEAN+green between passes. **Remedy:** stop the churn and
+  run one pass with `--no-rebase-drop` — it skips the commit-fabricating rebuild and merges every PR GitHub
+  already reports CLEAN + green directly (GitHub's merge-commit strategy handles a not-behind mergeable PR).
+  This landed 3 of 4 overlapping PRs in a single pass. A genuinely BEHIND straggler is then left as a skip;
+  land it on a follow-up pass (a normal rebase-drop pass rebuilds the LAST one cleanly, no siblings left to
+  race). Relates to #2391 (drain dual-lock / whole-process critical section).
