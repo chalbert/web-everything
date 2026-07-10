@@ -2,8 +2,11 @@
 kind: story
 size: 3
 parent: "2405"
-status: active
+status: resolved
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-10"
+dateResolved: "2026-07-10"
+graduatedTo: none
 tags: [gate, review, drain, gate-self]
 ---
 
@@ -16,3 +19,13 @@ Fully closing this needs a persisted REVIEWED BASELINE of the manifest to diff a
 This upgrades 2415's best-effort tamper-EVIDENCE (a trail an honest observer diffs) toward tamper-EVIDENCE-that-gates (a deterministic land refusal), for the manifest specifically. It does not claim to defeat an actor who edits AND deletes the persisted baseline together — that residual matches the sibling gates.
 
 Sits alongside PR #375 / 2415 (the value-record it extends) and #2409 (the adjacent commit-set-drift gate — covers HEAD advancement, not body edits) under the gate-hardening epic (#2405).
+
+## Progress
+
+- **Status:** done (pending PR land)
+- **Branch:** `lane/2414-reviewed-manifest-baseline`
+- **Done:**
+  - New pure module [we:scripts/lib/review-baseline-state.mjs](../scripts/lib/review-baseline-state.mjs) — captures the escalation-sensitive manifest values (`hasManifest`/`dismissedFindings`/`crossRepo`/`blockedBy`) the drain FIRST saw (first-seen-wins), and `diffBaseline` flags only the escalation-WEAKENING direction (edit-down OR strip). Mirrors `we:scripts/lib/review-park-state.mjs` (tolerant parse, `_doc` header, safe-to-lose local cache → fails open).
+  - Wired into [we:scripts/merge-ai-prs.mjs](../scripts/merge-ai-prs.mjs): loads/persists a `we:.claude/skills/drain/review-baseline-state.json` cache next to the park-state; in the escalation loop captures each candidate's baseline on first sight and re-parks (HUMAN-required, durable comment) any landing PR whose LIVE manifest was weakened — catching the STRIP and the edit-DOWN uniformly, without depending on a prior park. Updated the land-path residual NOTE (the strip gap it flagged is now closed here).
+  - 25 unit tests in [we:scripts/lib/__tests__/review-baseline-state.test.mjs](../scripts/lib/__tests__/review-baseline-state.test.mjs). Full suite + `check:standards` green (0 errors).
+- **Next:** land via PR.
