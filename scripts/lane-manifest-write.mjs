@@ -26,6 +26,11 @@
  *   node scripts/lane-manifest-write.mjs --item=2174 --repos='[{"repo":"we","ref":"lane/slug-2174"}]'   # → scratch temp file
  *   node scripts/lane-manifest-write.mjs --item=2174 --repos='[…]' --blocked-by=2173,2170 --merge-risk='["src/_data/traits.json"]'
  *   node scripts/lane-manifest-write.mjs --item=2174 --repos='[…]' --batch-slug=slug --out=/tmp/lane-manifest-<key>.json
+ *   node scripts/lane-manifest-write.mjs --item=2174 --repos='[…]' --stack-parent=2151 --stack-parent=x7k2q9a --base=abc123f
+ *     # #2387 F3 — overlap-stacked batching: `--stack-parent` (repeatable) records the frontier-tip item(s)
+ *     # this lane was cut from / merged onto; `--base` records the commit SHA the lane was reset to, applied
+ *     # to every repo entry that doesn't already carry its own `base` in `--repos`. Both optional — omit
+ *     # either (or both) for a plain sibling lane, today's unchanged behavior.
  *   node scripts/lane-manifest-write.mjs … --json          # machine-readable result (its `path` is the scratch file for --manifest-file)
  *
  * Exit codes: 0 = written; 3 = bad input (no/invalid --item or --repos, or the built manifest fails validation
@@ -42,6 +47,12 @@ for (const a of argv) {
   const m = a.match(/^--([^=]+)(?:=(.*))?$/);
   if (m) flags[m[1]] = m[2] === undefined ? true : m[2];
 }
+// #2387 F3 — `--stack-parent` is REPEATABLE (one flag per parent), unlike every other flag above (last-wins);
+// collect every occurrence separately instead of letting the last one clobber the rest.
+const stackParents = argv
+  .map((a) => a.match(/^--stack-parent=(.*)$/))
+  .filter(Boolean)
+  .map((m) => m[1]);
 const expandHome = (p) => (p && p.startsWith('~') ? p.replace(/^~/, homedir()) : p);
 const AS_JSON = !!flags.json;
 
@@ -58,6 +69,13 @@ let repos;
 try { repos = JSON.parse(flags.repos); } catch { repos = null; }
 if (!Array.isArray(repos) || repos.length === 0) emit({ ok: false, detail: "pass --repos='[{\"repo\":\"we\",\"ref\":\"lane/<slug>-<num>\"}, …]' (a non-empty JSON array)" }, 3);
 
+// #2387 F3 — `--base` is a convenience default applied to every repo entry that doesn't already carry its
+// OWN `base` in `--repos` JSON (a per-entry `base` there always wins). Optional; absent ⇒ no repo gets a
+// `base` field (today's plain-sibling behavior, unchanged).
+if (typeof flags.base === 'string' && Array.isArray(repos)) {
+  repos = repos.map((r) => (r && r.base != null && r.base !== '' ? r : { ...r, base: flags.base }));
+}
+
 const blockedBy = typeof flags['blocked-by'] === 'string'
   ? flags['blocked-by'].split(',').map((s) => s.trim()).filter(Boolean).map(Number).filter(Number.isFinite)
   : [];
@@ -73,6 +91,7 @@ const manifest = buildManifest({
   item,
   ...(typeof flags['batch-slug'] === 'string' ? { batchSlug: flags['batch-slug'] } : {}),
   repos,
+  stackParents,
   blockedBy,
   mergeRiskFiles,
   // #2171 — count of pre-PR review findings the lane dismissed (the drain escalation rubric's strongest signal).
@@ -88,4 +107,4 @@ const out = typeof flags.out === 'string' ? resolve(expandHome(flags.out)) : joi
 try { writeFileSync(out, serializeManifest(manifest)); }
 catch (e) { emit({ ok: false, item, detail: `write failed: ${String(e.message || e).split('\n')[0]}` }, 3); }
 
-emit({ ok: true, item, path: out, repos: manifest.repos.map((r) => `${r.repo}:${r.ref}`), blockedBy: manifest.blockedBy, detail: `wrote lane manifest for #${item} to ${out} (${manifest.repos.map((r) => r.repo).join(' → ')}, impl-first/WE-last) — pass it to \`pr-land --manifest-file\`, do NOT commit it` }, 0);
+emit({ ok: true, item, path: out, repos: manifest.repos.map((r) => `${r.repo}:${r.ref}`), stackParents: manifest.stackParents, blockedBy: manifest.blockedBy, detail: `wrote lane manifest for #${item} to ${out} (${manifest.repos.map((r) => r.repo).join(' → ')}, impl-first/WE-last) — pass it to \`pr-land --manifest-file\`, do NOT commit it` }, 0);

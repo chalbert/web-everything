@@ -47,6 +47,36 @@ describe('lane-manifest-write (#2174 producer stop-at-push)', () => {
     expect(run(['--item=2174', '--repos=notjson', '--json']).code).toBe(3);
   });
 
+  it('#2387 F3 — --stack-parent is repeatable and --base defaults onto every repo lacking its own', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lmw-'));
+    const out = join(dir, '.lane-manifest.json');
+    const r = run([
+      '--item=2387',
+      '--repos=[{"repo":"we","ref":"lane/s-2387"},{"repo":"frontierui","ref":"lane/s-2387","base":"ownsha"}]',
+      '--stack-parent=2151', '--stack-parent=x7k2q9a',
+      '--base=deadbeef',
+      '--out=' + out, '--json',
+    ]);
+    expect(r.code).toBe(0);
+    const m = parseManifest(readFileSync(out, 'utf8'));
+    expect(validateManifest(m).ok).toBe(true);
+    expect(m.stackParents).toEqual([2151, 'x7k2q9a']);
+    expect(m.repos.find((x) => x.repo === 'we').base).toBe('deadbeef');        // gets the --base default
+    expect(m.repos.find((x) => x.repo === 'frontierui').base).toBe('ownsha'); // its own base wins
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('#2387 F3 — omitting --stack-parent/--base is backward compatible (today\'s sibling behavior)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lmw-'));
+    const out = join(dir, '.lane-manifest.json');
+    const r = run(['--item=2388', '--repos=[{"repo":"we","ref":"lane/s-2388"}]', '--out=' + out, '--json']);
+    expect(r.code).toBe(0);
+    const m = parseManifest(readFileSync(out, 'utf8'));
+    expect(m.stackParents).toEqual([]);
+    expect(m.repos[0]).not.toHaveProperty('base');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('xnsk54v — default --out is a SCRATCH temp path, never the tracked repo-root .lane-manifest.json', () => {
     const r = run(['--item=2174', '--repos=[{"repo":"we","ref":"lane/s-2174"}]', '--json']);
     expect(r.code).toBe(0);
