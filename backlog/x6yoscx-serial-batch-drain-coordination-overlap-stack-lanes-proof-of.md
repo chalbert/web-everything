@@ -3,6 +3,7 @@ kind: epic
 status: open
 dateOpened: "2026-07-10"
 tags: [batch, drain, lanes, coordination, merge-queue]
+relatedReport: reports/2026-07-10-backlog-split-analysis-x6yoscx.md
 ---
 
 # Serial-batch → drain coordination: overlap-stack lanes, proof-of-land gate, push the handoff
@@ -63,12 +64,13 @@ Stacking **cannot** ship first: producer stacking without the proof gate lets th
 
 | Size | Slug | blockedBy | Deliverable |
 |---|---|---|---|
-| 4 | `drain-dual-lock` | — | TTL'd numbering-critical-section mutex around number+publish at every land call site, **and** a distinct whole-process drain lease (`O_EXCL`+TTL) for push-at-close to check. Tests: concurrent lands serialize (no dup NNN); a 2nd drain launch no-ops on a held lease; a stale lease is reclaimable. |
+| 5 | `drain-dual-lock` | — | TTL'd numbering-critical-section mutex around number+publish at every land call site, **and** a distinct whole-process drain lease (`O_EXCL`+TTL) for push-at-close to check. Tests: concurrent lands serialize (no dup NNN); a 2nd drain launch no-ops on a held lease; a stale lease is reclaimable. |
 | 2 | `hash-aware-cascade` | — | Replace `Number()`/`.map(Number)` feeding plan-label-drain with `asItemId`; ready-set sort = numeric items by number, hash items by topology. Tests: a hash `blockedBy` defers then frees; two hashes aren't one NaN bucket. |
 | 2 | `manifest-stack-fields` | — | `stackParents` (asItemId) + per-repo `base` on the manifest; writer flags `--stack-parent`/`--base`; both optional. Round-trip + default + validation tests. |
+| 2 | `lane-pool-base` | — | Add `--base=<ref>` to lane-pool acquire (fetch + reset to a predecessor lane tip; still a pool clone, primary read-only). Independently testable building block for stacking. Peeled off `producer-overlap-stacking`. |
 | 3 | `bornas-proof-of-land` | drain-dual-lock | Stamp `bornAs:<hash>` at land; ledger guard never rewrites a `bornAs:` value; `landedNumberFor(hash)` reader; in-code single-source contract. Tests: the deadlock regression (bornAs intact while `blockedBy` rewrites); reader resolves landed / null for unlanded. |
 | 5 | `proof-gated-stacked-drain` | hash-aware-cascade, manifest-stack-fields, bornas-proof-of-land | impl-PR→WE-manifest `laneRef` join; gate a couple READY only if every `stackParent` is landed-this-pass or `bornAs`-proven, else DEFER (couple-granular, impl-first/WE-last); happy-path reuses the rebuild unchanged; **commit the capability marker**. Tests: chain lands in order; red/absent parent defers descendants incl. their impl PRs (no stowaway); disjoint sibling unaffected. |
-| 6 | `producer-overlap-stacking` | manifest-stack-fields, proof-gated-stacked-drain | `--base`; union-find on declared locus; push-time `actual⊆declared` + in-session rebase-on-violation; depth cap; stack only when the marker advertises support (default hard to siblings). E2e: 3-item batch, one shared file, zero conflict-rebases; disjoint item lands independently; under-declared item caught at push and rebased in-session. |
+| 5 | `producer-overlap-stacking` | manifest-stack-fields, proof-gated-stacked-drain, lane-pool-base | union-find on declared locus (bases via `lane-pool-base`); push-time `actual⊆declared` + in-session rebase-on-violation; depth cap; stack only when the marker advertises support (default hard to siblings). E2e: 3-item batch, one shared file, zero conflict-rebases; disjoint item lands independently; under-declared item caught at push and rebased in-session. |
 | 3 | `per-item-review-diff` | manifest-stack-fields | Score/review a stacked PR on `base...head`, not vs main — kills cumulative-diff blast-radius + spurious `review:human` inheritance. |
 | 3 | `push-at-close` | drain-dual-lock, producer-overlap-stacking | Fire one detached self-terminating drain at close only when the lease is free (else enqueue); bounded max lifetime + durable feed location; verify true detachment per platform. Correct with it off. |
 | 3 | `finish-stack-repair` | proof-gated-stacked-drain, producer-overlap-stacking | `/finish` reads `stackParents`/`base`, buckets descendants, rebuilds the tail onto the repaired tip (ff or one guided conflict), resolves land status via `bornAs`-on-main; never lands past an unlanded parent. |
