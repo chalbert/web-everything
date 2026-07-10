@@ -2715,7 +2715,7 @@ Report `we:reports/2026-07-02-deferred-merge-queue-substrate.md`.
 
 ### Agent fix/convergence: peer-agreement is not validation — independence rests on a distinct fresh validator, and the deterministic land-gate must be gaming-proofed {#agent-convergence-independent-validation}
 
-**Ratified 2026-07-10 (#2398, graduated to epic #2285).** When the drain converges an agent-authored fix
+**Ratified 2026-07-10 (#2398, graduated to epic #2410, successor to #2285).** When the drain converges an agent-authored fix
 in-process (the editor↔reviewer negotiation loop shipped by #2311/#2310, wired live by #2326), the loop is one
 **convergence bar**, not two paths: it lands only when *all* hold — **approach agreed · an independent validator
 accepts · `check:standards` green · required `test` (CI) green · no test-tampering.** "CI green" is the
@@ -2739,7 +2739,7 @@ core invariant — **a landed PR is accepted by an agent that did not author the
 Applies to any AI-review/convergence surface in the constellation, not just the drain. Non-convergence (round cap)
 or `needs-human` escalates to `review:human`, unchanged. Ship unattended auto-fix behind an off-by-default flag,
 scoped to small/non-security diffs first, graduating per-repo on a clean track record (staged autonomy). Grounded
-by `we:reports/2026-07-10-ai-code-review-best-practices.md`; the build lands under epic `xwfwuze` (successor to #2285).
+by `we:reports/2026-07-10-ai-code-review-best-practices.md`; the build lands under epic #2410 (successor to #2285).
 
 ---
 

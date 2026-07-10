@@ -28,7 +28,10 @@ invariant, *provided the third validator is genuinely independent and the CI gat
 2. **Independent hardened validator** — a distinct, fresh-context validator judges the final diff: adversarial
    "find the reason to reject" persona, rubric-anchored verdict, given diff+tests+rubric only (never the peers'
    self-assessment). Stronger form: a small diverse **panel/jury** (different model/provider) to dilute
-   self-preference/position/verbosity bias. This is where the whole invariant lives.
+   self-preference/position/verbosity bias. This is where the whole invariant lives. The validator's accept is
+   persisted as a deterministic acceptance label (e.g. `redteam:accepted`, per #2281's total label function) so
+   the merge gate can *require* it — the enforcement (no land on a high-value surface without that label, and no
+   merge-anyway timeout escape around it) is owned by the gate-integrity story, not this slice.
 3. **Anti-test-gaming gates on the CI-green clause** — tests read-only to the author peers (or diff-gate any test
    change); fail the land if coverage drops or tests are removed/skipped; require a test that fails on pre-change
    behavior for logic fixes; validator explicitly inspects for test tampering.
