@@ -46,4 +46,14 @@ describe('lane-manifest-write (#2174 producer stop-at-push)', () => {
     expect(run(['--item=2174', '--json']).code).toBe(3); // no --repos
     expect(run(['--item=2174', '--repos=notjson', '--json']).code).toBe(3);
   });
+
+  it('xnsk54v — default --out is a SCRATCH temp path, never the tracked repo-root .lane-manifest.json', () => {
+    const r = run(['--item=2174', '--repos=[{"repo":"we","ref":"lane/s-2174"}]', '--json']);
+    expect(r.code).toBe(0);
+    const { path } = JSON.parse(r.out);
+    expect(path.startsWith(tmpdir())).toBe(true);                 // under the OS temp dir
+    expect(path).not.toBe(resolve(process.cwd(), '.lane-manifest.json')); // NOT committed into the tree
+    expect(parseManifest(readFileSync(path, 'utf8')).item).toBe(2174);    // and it really wrote there
+    rmSync(path, { force: true });
+  });
 });

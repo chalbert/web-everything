@@ -85,6 +85,7 @@ import {
   scoreEscalation, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META,
   buildEscalationReasonBlock, bodyHasEscalationReason,
 } from './lib/review-escalation.mjs'; // #2307 — deterministic review-escalation label AT PR-OPEN
+import { parseManifest, embedManifestInBody } from './readiness/lane-manifest.mjs'; // xnsk54v — manifest rides the PR body, not a tracked file
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -116,6 +117,17 @@ const TITLE = typeof flags.title === 'string' ? flags.title : null;
 const BODY = typeof flags['body-file'] === 'string'
   ? readBodyFile(flags['body-file'])
   : (typeof flags.body === 'string' ? flags.body : null);
+// xnsk54v — the lane manifest (drain metadata: cross-repo `repos`, `blockedBy`, `mergeRiskFiles`,
+// `dismissedFindings`) is passed as a SCRATCH file (never committed into the tree) and ridden in the PR body
+// instead. Load it here; a missing/malformed file degrades to no manifest (the drain then finds none and the
+// escalation score loses the couple-shape signal — never a hard failure). Distinct from `--body`: this is the
+// machine payload the drain reads, appended to the human body as a delimited block at create.
+const LANE_MANIFEST = typeof flags['manifest-file'] === 'string'
+  ? (() => { try { return parseManifest(readFileSync(expandHome(flags['manifest-file']), 'utf8')); } catch { return null; } })()
+  : null;
+// The body actually shipped to `gh pr create` — the human body with the manifest block embedded. The
+// #2332/#2324 body guards still run on the HUMAN `BODY` (a manifest-only body must not pass as real content).
+const CREATE_BODY = LANE_MANIFEST ? embedManifestInBody(BODY, LANE_MANIFEST) : BODY;
 // Post-land id-collision self-heal (#2071, generalized to EVERY land route). After a clean merge, heal any
 // NEW-item backlog id collision the land created against `main` (two files claiming one NNN) — the exact
 // heal the parallel integrator runs at Phase 4b, now shared so `/pr`, `/drain` (which reuses this) AND a
@@ -442,7 +454,7 @@ function runCli() {
   // so the create never needs `--fill` and a `--body-file` (the #2170 dismissals) always ships. When the
   // source has multiple commits, its own HEAD subject is the natural PR title.
   const derivedTitle = TITLE ?? (tryGit(['log', '-1', '--format=%s', SRC]) || `land ${REF}`);
-  const createArgs = buildCreateArgs({ base: BASE, head: REF, title: derivedTitle, body: BODY });
+  const createArgs = buildCreateArgs({ base: BASE, head: REF, title: derivedTitle, body: CREATE_BODY });
 
   if (DRY_RUN) {
     emit({
@@ -497,6 +509,7 @@ function runCli() {
   // 3. Find an existing open PR for this head, else create a self-approved one.
   let prNum = null;
   try { prNum = JSON.parse(ghC(['pr', 'list', '--head', REF, '--state', 'open', '--json', 'number']))?.[0]?.number ?? null; } catch { /* gh may be absent */ }
+  const preExistingPr = prNum != null;
   if (prNum == null) {
     // #2332 — fail fast BEFORE creating: never open a bodyless PR (the #2324 drain gate would refuse to land
     // it, stalling the queue for a human to hand-fill the body). Create-path only — an existing PR is exempt.
@@ -504,6 +517,15 @@ function runCli() {
     if (!bodyGuard.ok) emit({ repo: REPO, merged: false, reason: 'empty-body', detail: `${bodyGuard.reason} (head ${REF})` }, 3);
     try { const out = ghC(createArgs); prNum = (out.match(/\/pull\/(\d+)/) || [])[1] ?? null; }
     catch (e) { return ghFailed(`gh pr create failed (${String(e.message || e).split('\n')[0]})`); }
+  } else if (LANE_MANIFEST) {
+    // xnsk54v — an existing PR (a re-run, or one opened before the manifest was ready) may lack the manifest
+    // block the drain reads. Best-effort embed it (idempotent — embedManifestInBody replaces in place); a gh
+    // hiccup never aborts a land, the drain's ref fallback still covers it.
+    try {
+      const liveBody = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'body'])).body || '';
+      const withManifest = embedManifestInBody(liveBody, LANE_MANIFEST);
+      if (withManifest !== liveBody) ghC(['pr', 'edit', String(prNum), '--body', withManifest]);
+    } catch { /* best-effort — drain ref fallback covers a miss */ }
   }
   if (prNum == null) return ghFailed('could not determine the PR number after create');
 
@@ -541,9 +563,13 @@ function runCli() {
     const net = computeNetDiffChangedFiles({ exec, remote: REMOTE, base: BASE, rev: refSha });
     const changedFiles = net.changedFiles;
     const diffLines = net.diffLines;
-    let manifest = null;
-    const manifestRaw = tryGit(['show', `${refSha}:.lane-manifest.json`]);
-    if (manifestRaw) { try { manifest = JSON.parse(manifestRaw); } catch { /* malformed — degrade to no manifest signal */ } }
+    // xnsk54v — prefer the SCRATCH manifest (--manifest-file, the new off-tree carrier); fall back to the
+    // legacy tree-committed `.lane-manifest.json` off the ref for a lane that still commits it.
+    let manifest = LANE_MANIFEST;
+    if (!manifest) {
+      const manifestRaw = tryGit(['show', `${refSha}:.lane-manifest.json`]);
+      if (manifestRaw) { try { manifest = JSON.parse(manifestRaw); } catch { /* malformed — degrade to no manifest signal */ } }
+    }
     const crossRepo = manifest && Array.isArray(manifest.repos) ? manifest.repos.length > 1 : false;
     const dismissedFindings = manifest && Number.isFinite(Number(manifest.dismissedFindings)) ? Number(manifest.dismissedFindings) : 0;
     let currentLabels = [];
