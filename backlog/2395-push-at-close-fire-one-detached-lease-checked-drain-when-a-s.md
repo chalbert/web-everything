@@ -1,9 +1,9 @@
 ---
 kind: story
 size: 3
-parent: "x6yoscx"
+parent: "2387"
 status: open
-blockedBy: ["xunndgr", "xegteiq"]
+blockedBy: ["2391", "2394"]
 dateOpened: "2026-07-10"
 tags: []
 ---

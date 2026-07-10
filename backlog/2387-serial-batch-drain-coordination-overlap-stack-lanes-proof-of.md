@@ -3,7 +3,7 @@ kind: epic
 status: open
 dateOpened: "2026-07-10"
 tags: [batch, drain, lanes, coordination, merge-queue]
-relatedReport: reports/2026-07-10-backlog-split-analysis-x6yoscx.md
+relatedReport: reports/2026-07-10-backlog-split-analysis-2387.md
 ---
 
 # Serial-batch → drain coordination: overlap-stack lanes, proof-of-land gate, push the handoff
