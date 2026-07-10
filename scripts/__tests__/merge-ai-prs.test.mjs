@@ -434,33 +434,33 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     expect(calls.some((c) => c.args[0] === 'diff')).toBe(true);
   });
 
-  it('falls back through the rev candidate chain (`rev` → `<remote>/rev` → `FETCH_HEAD`) for a foreign/sibling clone — FETCH_HEAD only offered when `fetchExtraRefs` actually fetched something into it', () => {
+  it('resolves a foreign/sibling clone\'s PR via `<remote>/<rev>` when `rev` is not a local branch (the head ref was fetched by `fetchExtraRefs`)', () => {
     const { exec, calls } = fakeExec({
       'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
-      'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
-      'git diff --numstat origin/main FETCH_HEAD': { stdout: '2\t2\tscripts/merge-ai-prs.mjs\n' },
+      'git diff --numstat origin/main origin/lane/x': { stdout: '2\t2\tscripts/merge-ai-prs.mjs\n' },
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
     expect(r).toEqual({ changedFiles: ['scripts/merge-ai-prs.mjs'], diffLines: 4, scored: true });
-    expect(calls.filter((c) => c.args[0] === 'diff').length).toBe(3);
+    expect(calls.filter((c) => c.args[0] === 'diff').length).toBe(2);
   });
 
-  it('every rev candidate fails → scored:false, empty result (caller degrades to no-escalate / its own fallback)', () => {
-    const { exec } = fakeExec({
-      'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
-      'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
-      'git diff --numstat origin/main FETCH_HEAD': { throw: 'unknown revision' },
-    });
-    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
-    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false });
-  });
-
-  it('#2373-review — with NO fetchExtraRefs (the producer\'s base-only fetch), FETCH_HEAD is NEVER tried: it would equal `<remote>/<base>` itself and "succeed" with a spurious empty diff before ever reaching the real `rev`', () => {
+  it('#2373-review — neither `rev` nor `<remote>/<rev>` resolves → scored:false (FETCH_HEAD is NOT a fallback candidate: it would resolve to `<remote>/<base>` — base is first in the fetch refspec — and "succeed" with a base-vs-base EMPTY diff, masking this real miss; scored:false lets the caller fall through to its GitHub files-list backstop)', () => {
     const { exec, calls } = fakeExec({
       'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
       'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
-      // FETCH_HEAD deliberately NOT stubbed to succeed — if the implementation tried it, this would return ''
-      // (the fakeExec default) and the assertion below on scored:false would catch the regression.
+      // A base-vs-base FETCH_HEAD diff would return '' (empty) and score true with zero changed files — the
+      // exact false-negative #2373-review removes. It must NEVER be attempted; assertion below proves it isn't.
+      'git diff --numstat origin/main FETCH_HEAD': { stdout: '' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false });
+    expect(calls.some((c) => c.key === 'git diff --numstat origin/main FETCH_HEAD')).toBe(false);
+  });
+
+  it('#2373-review — FETCH_HEAD is never a diff candidate, with OR without fetchExtraRefs (it always points at `<remote>/<base>` → a spurious empty base-vs-base diff)', () => {
+    const { exec, calls } = fakeExec({
+      'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
+      'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x' }); // no fetchExtraRefs
     expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false });

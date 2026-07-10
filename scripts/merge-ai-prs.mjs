@@ -518,14 +518,17 @@ export function parseNumstat(numstat) {
  * content-only and ancestry-independent, deliberately NOT a three-dot/merge-base diff — always scores off
  * the CURRENT upstream base, never one a concurrently-landed PR has since advanced past.
  *
- * Tries a short fallback chain for `rev` (`rev` itself, `<remote>/rev`, then — ONLY when `fetchExtraRefs` was
- * non-empty, i.e. something was actually fetched into it — `FETCH_HEAD`) since a foreign/sibling clone
- * scoring another repo's PR may not have `rev` as a local branch. `rev` is tried FIRST (not last): for the
- * producer path (`rev` is always an already-resolved local SHA) this succeeds immediately, and critically
- * `FETCH_HEAD` is excluded entirely when only `base` was fetched — otherwise, since that fetch leaves
- * `FETCH_HEAD` pointing at the SAME commit as `<remote>/<base>`, a `${remote}/rev`-miss would fall through to
- * a `FETCH_HEAD` candidate that "succeeds" with a spurious EMPTY diff (comparing `<remote>/<base>` to
- * itself) — reporting `scored:true` with zero changed files instead of ever reaching the real `rev`.
+ * Tries a short fallback chain for `rev` (`rev` itself, then `<remote>/rev`) since a foreign/sibling clone
+ * scoring another repo's PR may not have `rev` as a local branch. `rev` is tried FIRST: for the producer path
+ * (`rev` is always an already-resolved local SHA) this succeeds immediately; `<remote>/<rev>` covers the
+ * sibling-clone case where the head ref was fetched (`fetchExtraRefs` carries it). `FETCH_HEAD` is DELIBERATELY
+ * NOT a candidate (#2373-review): the base is listed FIRST in the fetch refspec and `git diff FETCH_HEAD` /
+ * `git rev-parse FETCH_HEAD` resolve to that first line, so `FETCH_HEAD` always points at `<remote>/<base>` —
+ * a `FETCH_HEAD` diff would therefore be base-vs-base (an EMPTY diff) and "succeed" with `scored:true` and zero
+ * changed files, MASKING a real `<remote>/<rev>` miss. Without it, when neither `rev` nor `<remote>/<rev>`
+ * resolves the function returns `scored:false` and the caller correctly falls through to its GitHub files-list
+ * backstop (the safe, over-scoring direction). `fetchExtraRefs` still fetches the head ref so `<remote>/<rev>`
+ * resolves in the normal sibling-clone case — it just never gets offered as a diff candidate via `FETCH_HEAD`.
  * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
  *   `exec(cmd, args, opts)` — inject `execFileSync`-shaped exec so this stays unit-testable with a fake.
  * @returns {{changedFiles:string[], diffLines:number, scored:boolean}}
@@ -535,7 +538,7 @@ export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'ma
   try {
     exec('git', ['fetch', remote, `+${base}:refs/remotes/${remote}/${base}`, ...fetchExtraRefs, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] });
   } catch { /* degrade to whatever is locally cached — the diff attempts below still run */ }
-  const candidates = fetchExtraRefs.length ? [rev, `${remote}/${rev}`, 'FETCH_HEAD'] : [rev, `${remote}/${rev}`];
+  const candidates = [rev, `${remote}/${rev}`];
   for (const candidate of candidates) {
     try {
       const out = exec('git', ['diff', '--numstat', `${remote}/${base}`, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
