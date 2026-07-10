@@ -152,6 +152,54 @@ kills. The closing ledger **tags every unworked item with its reason**; an untag
 context-check) is the failure this rule exists to kill. (The context-% question belongs at **close-out
 only**, for calibration — never as a continue/stop gate.)
 
+## Overlap-stacked serial batch (#2394 — serial `/batch` only)
+
+**Why:** N serial items used to become N siblings off one base, so the deferred drain re-resolved every
+overlap conflict blind, with no context. Now only items whose **declared** file-sets actually overlap
+stack — each based on its predecessor's **pushed tip** — while provably-disjoint items stay plain
+siblings off `origin/main`. The drain itself is unchanged; the safety comes entirely from the #2393
+proof-of-land gate, which is exactly why stacking is capability-gated rather than unconditionally on.
+
+**The seam wiring** — grafts onto the loop above, doesn't replace it:
+
+- **Pack (step 2, after the "go")** — once, in the **primary checkout**:
+  `node scripts/lane-stack.mjs init --plan=<scratch>.json` (see
+  [we:scripts/lane-stack.mjs](../../../scripts/lane-stack.mjs)). It reads the #2393 capability marker off
+  `origin/main` via `git show`; stacking is **ENABLED** only when the marker advertises `gateVersion >= 1`
+  — any read failure, missing marker, or version mismatch defaults **HARD to plain siblings** for every
+  item (the conservative default). This delegates to the pure planner
+  [we:scripts/readiness/overlap-chain.mjs](../../../scripts/readiness/overlap-chain.mjs) (union-find
+  overlap chains on declared repo-qualified file-sets; a bridge item records **both** tips as
+  `stackParents`; past the depth cap an item falls back to a sibling and re-roots the chain).
+- **Per item, before acquiring its lane (step 3)** — `node scripts/lane-stack.mjs plan-item --id=<NNN>
+  --files=<declared repo-qualified set, e.g. we:scripts/x.mjs,we:backlog/NNN-….md>`. Acquire per its
+  decision: `node scripts/lane-pool.mjs acquire --base=<acquireBase>`
+  ([we:scripts/lane-pool.mjs](../../../scripts/lane-pool.mjs), #2386) when stacked — starting the lane at
+  the predecessor's pushed tip instead of `origin/main`; a **bridge** decision additionally lists
+  `mergeParents` whose tips you `git merge` in-session, after acquiring.
+- **After the resolve commit, before `pr-land` (still step 3)** — `node scripts/lane-stack.mjs recheck
+  --plan=<scratch>.json --id=<NNN> --base=<the ref you acquired at>`: recomputes the item's ACTUAL touched
+  files (`git diff --name-only <base>...HEAD`) and asserts actual ⊆ declared. **Exit 4 = rebase-required**
+  — a hard stop, not a warning: rebase onto the printed frontier tip **in-session** (context hot), re-gate,
+  `apply-rebase`, then re-run `recheck` (must exit 0) before pushing. **Never push a mislabelled
+  certified-disjoint sibling to the deferred drain.**
+- **Manifest write (still step 3)** — pass `--stack-parent=<id>` (repeatable, one per `stackParents`) and
+  `--base=<parent tip sha>` to `lane-manifest-write.mjs`
+  ([we:scripts/lane-manifest-write.mjs](../../../scripts/lane-manifest-write.mjs), #2389) so the drain's
+  proof-of-land gate (#2393) can read the stack lineage off the PR.
+- **After the labelled PR** — `node scripts/lane-stack.mjs record --plan=<scratch>.json --id=<NNN>
+  --base=<ref> --tip-ref=lane/<batch-slug>-<NNN>` stores the pushed tip as the chain's new frontier for the
+  next item's `plan-item`. A carried item (no PR opened) calls `drop` instead — no frontier change.
+
+**Three invariants:** stack **only** when `init` reported `supported:true` — never hand-force stacking on
+an unsupported main. The `recheck` exit-4 verdict is a hard stop, by construction, not a suggestion — a
+post-hoc overlap must never reach the drain as a certified-disjoint sibling. Depth is capped (default 4);
+past it, items fall back to siblings by design and the drain pays a rebase, same as today.
+
+**Scope:** `/workflow` (parallel) is **not** wired to this — its lanes run concurrently, so there is no
+predecessor tip to stack on serially; this section is **serial `/batch` only**. Docs beyond this skill land
+in the later docs-stacked-batch slice.
+
 ## Cascade — linear & semi-linear chains (dependency-ordered batching)
 
 When the batchable pool isn't a set of independent items but a **dependency chain** (B `blockedBy` A,
