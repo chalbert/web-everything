@@ -102,6 +102,7 @@ import { rebaseDropContent } from './lib/rebase-drop-content.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel } from './lib/review-escalation.mjs';
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
+import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor } from './lane-drain.mjs';
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
@@ -113,6 +114,11 @@ import { extractManifestFromBody, manifestAuditLine, asItemId, repoKeyFromSlug, 
 // `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
 // against cwd (the drain always runs from the target repo's root).
 const REVIEW_PARK_STATE_PATH = resolve(process.cwd(), '.claude/skills/drain/review-park-state.json');
+
+// #2414 — the local, machine-scoped REVIEWED-MANIFEST BASELINE the land-time tamper gate diffs a landing PR
+// against (see review-baseline-state.mjs for why losing this file fails SAFE — the PR re-captures a fresh
+// baseline and the gate fails open). Co-located with the park-state cache; resolved against cwd.
+const REVIEW_BASELINE_STATE_PATH = resolve(process.cwd(), '.claude/skills/drain/review-baseline-state.json');
 
 const argv = process.argv.slice(2);
 const flags = {};
@@ -1270,6 +1276,12 @@ function runCli() {
     // permanently stranded. Best-effort, tolerant read — a missing/corrupt file just starts every PR's clock now.
     let parkState = emptyParkState();
     try { parkState = parseParkState(readFileSync(REVIEW_PARK_STATE_PATH, 'utf8')); } catch { /* no file yet — fresh clocks */ }
+    // #2414 — the reviewed-manifest baseline store: captured first-seen below, diffed at land to catch a
+    // post-review body edit that WEAKENS the manifest (edit-DOWN or full STRIP). Tolerant read — a
+    // missing/corrupt file just means every PR re-captures a fresh baseline (the gate fails open).
+    let baselineState = emptyBaselineState();
+    try { baselineState = parseBaselineState(readFileSync(REVIEW_BASELINE_STATE_PATH, 'utf8')); } catch { /* no file yet — fresh baselines */ }
+    let baselineStateChanged = false;
     const nowMs = Date.now();
     let parkStateChanged = false;
     for (const v of verdicts) {
@@ -1304,6 +1316,45 @@ function runCli() {
         } catch { /* signal-fetch miss → score on the manifest signals alone */ }
       }
       const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, prNum: Number(v.num), thresholds: SAMPLE_NTH ? { sampleNth: SAMPLE_NTH } : {} });
+      // #2414 — reviewed-manifest baseline gate. The manifest values (`v.hasManifest`/`dismissedFindings`/
+      // `crossRepo`/`blockedBy`) are re-read from the LIVE PR body every pass (readPrManifest), so we can
+      // capture what the drain FIRST saw and diff a later pass against it. #2415 records tamper-EVIDENCE into a
+      // durable comment, but its land stamp is gated on `c.hasManifest`, so a full manifest STRIP (block
+      // deleted → hasManifest false → "no manifest, always ready") slips through with NO record. Diffing the
+      // live manifest against the reviewed baseline GATES both the strip and the edit-DOWN uniformly, and —
+      // because the baseline is captured at review and checked at land regardless — without depending on a
+      // prior park having fired. First-seen-wins (recordBaseline keeps the honest first capture); the diff
+      // flags ONLY the escalation-WEAKENING direction, so an honest strengthening edit never blocks a land.
+      const liveManifestValues = { hasManifest: !!v.hasManifest, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, blockedBy: v.blockedBy };
+      const priorBaseline = getBaseline(baselineState, { repo: v.repo, num: v.num });
+      if (!priorBaseline && !DRY_RUN) {
+        const nextBaseline = recordBaseline(baselineState, { repo: v.repo, num: v.num }, liveManifestValues);
+        if (nextBaseline !== baselineState) { baselineState = nextBaseline; baselineStateChanged = true; }
+      }
+      const tamper = diffBaseline(priorBaseline, liveManifestValues);
+      if (tamper.tampered) {
+        // A post-review WEAKENING edit — refuse the auto-land and re-park for a HUMAN look (a manifest tamper
+        // is a trust-chain concern the agent panel must not clear for itself). `skip` keeps it out of the
+        // merge cascade AND keeps it blocking its dependents; the durable comment records WHAT changed vs the
+        // reviewed baseline (tamper-evidence that now GATES, not just informs).
+        v.decision = 'skip';
+        v.escalated = 'yes';
+        v.humanRequired = true;
+        v.escalateReasons = tamper.reasons;
+        v.reason = `manifest baseline mismatch — post-review tamper suspected: ${tamper.reasons.join('; ')}`;
+        if (!DRY_RUN) {
+          if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          }
+          const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
+          if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} manifest-tamper baseline mismatch stamped on PR\n`);
+          parkState = recordParked(parkState, { repo: v.repo, num: v.num }, nowMs);
+          parkStateChanged = true;
+        }
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: tamper.reasons });
+        if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} re-parked — manifest baseline mismatch (post-review tamper, HUMAN required): ${tamper.reasons.join('; ')}\n`);
+        continue;
+      }
       const parkedSinceMs = getParkedSinceMs(parkState, { repo: v.repo, num: v.num });
       const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, parkedSinceMs, nowMs, ...(REVIEW_WINDOW_MS ? { windowMs: REVIEW_WINDOW_MS } : {}) });
       v.escalated = score.escalate ? 'yes' : 'no';
@@ -1385,6 +1436,9 @@ function runCli() {
       }
     }
     if (parkStateChanged && !DRY_RUN) { try { writeFileSync(REVIEW_PARK_STATE_PATH, serializeParkState(parkState)); } catch { /* best-effort local cache — a write miss just re-parks fresh next pass */ } }
+    // #2414 — persist the reviewed-manifest baselines captured this pass. Best-effort local cache — a write
+    // miss just means each PR re-captures a fresh baseline next pass (the gate fails open, the accepted residual).
+    if (baselineStateChanged && !DRY_RUN) { try { writeFileSync(REVIEW_BASELINE_STATE_PATH, serializeBaselineState(baselineState)); } catch { /* best-effort local cache */ } }
   }
 
   const toMerge = verdicts.filter((v) => v.decision === 'merge');
@@ -1447,10 +1501,12 @@ function runCli() {
           // orphan/impl PR has nothing body-sourced to record — its behaviour is byte-identical to before).
           // Decision-preserving: `postDrainReasonComment` swallows every `gh` error internally (returns a bool,
           // never throws), so it can neither block nor alter the merge below — it only records.
-          // NOTE (residual, tracked as a follow-up): this fires only under `c.hasManifest`, so it covers the
-          // edit-a-value-DOWN variant — NOT a full manifest STRIP (deleting the whole block flips `hasManifest`
-          // false, the PR degrades to no-manifest → always-ready, and NO land record is written). Fully closing
-          // that needs a reviewed BASELINE to diff a landed PR against (out of scope for this size-2 story).
+          // NOTE: this land stamp fires only under `c.hasManifest`, so on its own it records the edit-a-value-DOWN
+          // variant but NOT a full manifest STRIP (deleting the whole block flips `hasManifest` false → no land
+          // record). #2414 closes that: the escalation loop above diffs each candidate's LIVE manifest against the
+          // reviewed BASELINE (captured first-seen) and RE-PARKS a landing PR whose manifest was weakened — a
+          // stripped manifest OR an edit-down — BEFORE it reaches this cascade. So a tampered PR is already `skip`
+          // here; this stamp remains the durable acted-on record for the honest manifest PRs that do land.
           if (c.hasManifest) {
             const posted = postDrainReasonComment(c.repo, c.num, 'land', LAND_REASON, auditLineFor(c));
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} acted-on manifest values stamped on PR before merge\n`);
