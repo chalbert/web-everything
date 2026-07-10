@@ -12,6 +12,7 @@ import {
   leaseBody,
   describeLease,
   leaseOwnedBy,
+  ancestryOverlaps,
 } from '../lane-lease.mjs';
 
 const T0 = Date.parse('2026-07-05T12:00:00.000Z');
@@ -91,7 +92,12 @@ describe('chooseFreeLane', () => {
 describe('leaseBody / describeLease / leaseOwnedBy', () => {
   it('leaseBody normalizes optional fields', () => {
     const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z' });
-    expect(b).toMatchObject({ session: 's', purpose: null, ttlMinutes: DEFAULT_LEASE_TTL_MINUTES, host: null, pid: null });
+    expect(b).toMatchObject({ session: 's', purpose: null, ttlMinutes: DEFAULT_LEASE_TTL_MINUTES, host: null, pid: null, ancestry: null });
+  });
+  it('leaseBody carries an explicit ancestry array through unchanged (#2367)', () => {
+    const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', pid: 111, ancestry: [111, 222, 333] });
+    expect(b.pid).toBe(111);
+    expect(b.ancestry).toEqual([111, 222, 333]);
   });
   it('describeLease renders who + purpose + when', () => {
     const s = describeLease(leaseBody({ session: 'drain-1', purpose: 'drain', acquiredAt: '2026-07-05T12:00:00.000Z' }));
@@ -103,5 +109,36 @@ describe('leaseBody / describeLease / leaseOwnedBy', () => {
     expect(leaseOwnedBy(lease, 'sess-a')).toBe(true);
     expect(leaseOwnedBy(lease, 'sess-b')).toBe(false);
     expect(leaseOwnedBy(null, 'sess-a')).toBe(false);
+  });
+});
+
+describe('ancestryOverlaps (#2367 — the leaseholder-identity decision, no session-id)', () => {
+  it('true when my ancestry shares ANY pid with the lease-recorded ancestry (the common session anchor)', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', pid: 501, ancestry: [501, 400, 100] });
+    expect(ancestryOverlaps([777, 400, 1], lease)).toBe(true); // 400 is the shared long-lived anchor
+  });
+  it('false when the chains never intersect (a genuinely different session)', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', pid: 501, ancestry: [501, 400, 100] });
+    expect(ancestryOverlaps([888, 999, 1], lease)).toBe(false);
+  });
+  it('a single captured pid does NOT survive as an ancestor of a LATER, unrelated call — this is exactly why the check is chain-overlap, not scalar match', () => {
+    // The acquiring process (pid 501) is a leaf that already exited by the time a LATER, separate Bash-tool
+    // call runs — a later call's OWN live ancestry never re-observes it. A "mine" chain built purely from
+    // pids unrelated to 501 (its own fresh wrapper + whatever it walks up through) has no overlap UNLESS it
+    // also passes through the shared upstream anchor (400) — which is exactly what makes ownership detectable.
+    const lease = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', pid: 501, ancestry: [501, 400, 100] });
+    expect(ancestryOverlaps([999], lease)).toBe(false);       // unrelated later chain, hasn't reached the anchor yet
+    expect(ancestryOverlaps([999, 400], lease)).toBe(true);   // …reaching the shared anchor is what makes it "mine"
+  });
+  it('falls back to a single-value lease.pid when ancestry was never recorded (an older lease, pre-#2367)', () => {
+    const lease = { session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', pid: 400, ancestry: null };
+    expect(ancestryOverlaps([777, 400, 1], lease)).toBe(true);
+    expect(ancestryOverlaps([777, 999, 1], lease)).toBe(false);
+  });
+  it('false on empty/missing inputs — never throws, never accidentally "mine"', () => {
+    expect(ancestryOverlaps([], leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', ancestry: [1, 2] }))).toBe(false);
+    expect(ancestryOverlaps([1, 2], null)).toBe(false);
+    expect(ancestryOverlaps(undefined, leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', ancestry: [1, 2] }))).toBe(false);
+    expect(ancestryOverlaps([1, 2], { session: 's', ancestry: [] , pid: null })).toBe(false);
   });
 });
