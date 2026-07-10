@@ -1,4 +1,5 @@
 ---
+bornAs: x1m25ov
 kind: story
 size: 3
 status: open
