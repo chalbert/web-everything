@@ -1,6 +1,6 @@
 ---
 name: closing-session
-description: Pre-close safety check — confirm nothing is lost before ending a session. Use when the user asks "can I close this session?", "is it safe to close?", "are we done?", "wrap up", "end of session", or runs /closing-session. Audits whether session context is durably captured, runs the repo health gate, and reports working state. A commit is never *required*, but it auto-commits this session's own work (tight pathspec, no push) when the state is clean. When the project has the lane machinery, substantive agent-memory improvements land automatically — each candidate is red-teamed, then the survivors ride a lane → PR (the one place the close opens a PR).
+description: Pre-close safety check — confirm nothing is lost before ending a session. Use when the user asks "can I close this session?", "is it safe to close?", "are we done?", "wrap up", "end of session", or runs /closing-session. Audits whether session context is durably captured, runs the repo health gate, and reports working state. A commit is never *required*, but it auto-commits this session's own work (tight pathspec, no push) when the state is clean. When the project has the lane machinery, substantive agent-memory improvements land automatically — each candidate is red-teamed, then the survivors ride a lane → PR (the one place the close opens a PR). On a session that touched the review/PR gate, it also surfaces concrete improvement candidates to that flow (advisory).
 ---
 
 # Closing-Session Check
@@ -291,6 +291,47 @@ node scripts/backlog.mjs cost <NNN> --usd="$usd"      # accrues costUsd + bumps 
 Attribute **once per close** (re-running would double-count). Report the accrual in the **Footprint** line
 (e.g. "cost $X → #NNN"). The card edit folds into the clean auto-commit like any other frontmatter splice.
 
+### 3d. Review/PR-flow improvement suggestion (advisory, never a blocker)
+The auto-review/merge gate (`scripts/lib/review-escalation.mjs`, `scripts/merge-ai-prs.mjs`,
+`scripts/pr-land.mjs`, `scripts/lib/pr-merge-gate.mjs`, the `drain`/`merge`/`review`/`pr`/`finish` skills)
+is meant to get **stronger over time from the sessions that exercise it** — and the close is the cheapest
+place to capture that, because it is the one moment that sees the whole session's experience with the flow.
+A lesson about how the gate *should* work that surfaces mid-session and is never offered is exactly the leak
+§1 guards against, one dimension narrower. So when this session **touched the flow**, surface what it taught.
+
+**Fire only on a relevant session — the deterministic half (rule #51).** Emit this step **only** when either
+holds; if neither, **omit it entirely** (no line, no verdict field — silence, like the model-usage line on a
+project with no routing doc):
+- **(a) The session edited a flow file.** Match the session's changed paths against the gate set:
+  `scripts/lib/review-escalation.mjs`, `scripts/merge-ai-prs.mjs`, `scripts/pr-land.mjs`,
+  `scripts/lib/pr-merge-gate.mjs`, `scripts/lib/review-core.mjs`, `scripts/lib/review-park-state.mjs`,
+  `scripts/lane-*.mjs`, the gate tests (`scripts/**/__tests__/` files matching `*review*` / `*gate*` /
+  `*merge-ai*` / `*pr-land*`), or the `drain`/`merge`/`review`/`pr`/`finish` **skill sources** — a
+  name-match, no judgment.
+- **(b) The session exercised or bumped against the flow.** A PR this session opened **parked / escalated /
+  went to `review:human`**, a review fired, a drain/merge ran, **or the user voiced friction** about the
+  review/PR path (too slow, too much manual review, a gate that couldn't run, a step that felt like theater).
+
+**When it fires — the judgment half: surface 1–3 CONCRETE, NAMED candidates**, not generic advice. What this
+session's experience says would make the flow *stronger or cheaper* next time. The recurring high-value shapes:
+- **A human review that a test could replace.** A gate step where the human adds little (can't evaluate it
+  statically, or rubber-stamps an agent's opinion) but pays real time — the profile where a deterministic
+  test is *strictly stronger* than a look (the `gate-invariants` tripwire pattern: assert the safety property
+  exhaustively, then self-reference the test file in `GATE_SELF_PATHS` so only a change to the invariant needs
+  a human).
+- **Gate logic living in skill *prose* that could be *code*.** Anything the flow relies on the agent
+  *following* rather than a script *enforcing* is invisible to CI — every bit moved prose→code is a bit that
+  goes from "a human reviews it" to "CI reviews it." Name the specific step.
+- **A check/gate the session couldn't run, or a friction point the user hit** — the same leak §1 catches, but
+  aimed squarely at the flow itself.
+
+**Route the candidates the normal way — do not invent a new channel** (this is §1's routing rule applied to
+the flow): a candidate with a **fix or an owner** → a **`backlog/` item** (propose it with the user's
+go-ahead, dedup first — file it under the open gate-hardening epic if there is one); a **reusable principle
+about how the flow should work** → **`memory/` via §1a** (red-team → lane → PR). It is purely advisory: it
+never blocks the close and never forces a change this turn. If the flow was touched but nothing stands out,
+say **"nothing to flag"**.
+
 ### 4. Verdict
 Emit the close audit in **exactly this template** — fixed field order, fixed labels, verdict last.
 Every close should look the same so the user can scan it without re-reading:
@@ -304,6 +345,7 @@ Every close should look the same so the user can scan it without re-reading:
 **Session cost:** <~$X.XX usage-equivalent (model, N turns) — from session-cost.mjs; + "→ #NNN" if accrued to a card (step 3c), or "not attributed (slice/resolve/no dominant item)">
 **Branch:** <branch name only — never list or count uncommitted files>
 **Model usage:** <one line — where the same work could cost fewer Opus tokens next time (name the #NNNs), or "nothing to flag"; omit if no model-routing doc>
+**Flow improvements:** <one line — concrete review/PR-flow improvement candidate(s) this session suggests + where each routed (backlog/memory), or "nothing to flag"; OMIT the line entirely if the session didn't touch the flow (step 3d)>
 **Follow-ups (open by design):** <items deliberately left open, e.g. a blockedBy chain — or "none">
 
 **Verdict:** ✅ Safe to close   |   ⚠️ Safe to close, with caveats — <only real caveats>
@@ -323,6 +365,9 @@ Rules for filling it:
 - **Model usage** — advisory only; name concrete `#NNN`s that were Sonnet-delegable or searches that
   could have fanned out, or "nothing to flag". Never a caveat in the verdict. Omit the line if the
   project has no *Model routing* doc.
+- **Flow improvements** — advisory only (step 3d). Present ONLY when the session touched the review/PR flow
+  (edited a gate file, or exercised/bumped against it); otherwise **omit the line entirely**. When present,
+  name the concrete candidate(s) and where each routed, or "nothing to flag". Never a caveat in the verdict.
 - **Follow-ups** — only work *intentionally* left open (e.g. a filed `blockedBy` chain); "none" if clean.
 - **Verdict** — one line. ⚠️ only for real caveats: uncaptured context (offer to capture) or a red gate
   (offer to fix). Nothing after the verdict line.
