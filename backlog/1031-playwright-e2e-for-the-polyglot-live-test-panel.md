@@ -1,9 +1,11 @@
 ---
 kind: task
 parent: "912"
-status: open
+status: resolved
 blockedBy: ["1030"]
 dateOpened: "2026-06-19"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-10"
 locus: frontierui
 relatedProject: webdocs
 tags: [webdocs, block-explorer, e2e, polyglot]
