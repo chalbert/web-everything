@@ -373,3 +373,80 @@ draws B/C's seams from the oracle now rather than deferring them. The divergence
 it was investigated against the oracle; **2356–2359 (Go/PHP/Rust/Python) warrant the same re-analysis** — the
 2360 blanket "applies identically to all six" no longer holds for the sliced case. (#2360 itself was left
 could-not-split by its own run and is not re-touched here.)
+
+## `/slice 2360` reconciliation — Native .NET SSR renderer contract (#2374 scoping pass, appended 2026-07-09)
+
+**#2374 — Scope the native .NET SSR renderer contract** (`kind: story`, `size: 3`, `parent: 2360`) is the
+one carvable slice the original `/slice 2360` run above filed: *"Pin the .NET project layout, authoring-
+template parser strategy, the `ServerRenderer` seam shape in .NET, harness invocation, and the resulting
+per-directive-family build-slice breakdown."* This run does that scoping pass and, per the JVM reconciliation
+above, re-applies the JVM-vs-2360 divergence to .NET specifically — 2360's own note flagged this as owed
+("2356–2359 … warrant the same re-analysis"; .NET is the sixth).
+
+### Work-investigation pass — the frozen oracle re-derived for .NET
+
+No `.cs`/`.csproj`/`.sln` exists anywhere in the constellation — a from-scratch build, same as JVM/Go/PHP.
+But the seams are fully knowable from the same frozen artifacts JVM's re-analysis cited:
+
+- **The oracle:** `frontierui:plugs/webdirectives/ssr/nodeReferenceRenderer.ts` (266 lines) — directives are
+  independent plugs on a dispatch map (`DIRECTIVE_MARKER_TOKEN` / `RENDERERS`, `:41-47` / `:198-204`), not a
+  monolithic chain: parse+dispatch loop (`:235-264`), marker-options rendering (`renderMarkerOptions`,
+  `:103-112`), shared helpers (`resolvePath` `:67-72`, `interpolate` `:74-84`, `djb2KeyHash` `:95-101`), and
+  five per-directive `DirectiveRenderer` plugs — `if`/`switch` (`:152-176`), `for-each` (`:114-150`, the only
+  one with `stateTokens`), `resource:loader`/`defer` (`:178-196`). Same fan-out shape JVM's re-analysis found
+  (a genuine `A → {B, C}` DAG), not the `parse → expand-all-7 → emit` rigid chain the original 2360 pass
+  assumed before either language sub-epic had a grounded reference read.
+- **The seam:** `frontierui:plugs/webdirectives/ssr/ServerRenderer.ts:33` — a pure `(source, data) => string`
+  function type. .NET analog: a `delegate string ServerRenderer(string source, RenderData data);` (or a
+  single-method `IServerRenderer` interface) — same purity contract, so the .NET renderer is a stable oracle
+  the way the Node one is.
+- **The graders:** the 7 WE golden vectors as language-neutral JSON
+  (`we:conformance-vectors/webdirectives-ssr.vectors.json`) + the grading contract
+  (`we:conformance-vectors/webdirectives-ssr-harness-contract.md`, #2354, resolved) — byte-for-byte UTF-8
+  equality, every vector graded independently, all failing ids reported. Identical to what JVM/Go/PHP/Python
+  consume; nothing .NET-specific about the contract itself.
+- **The .NET-specific build risk (the analog of Node's happy-dom / Python's hand-rolled-serializer axis):**
+  .NET has no built-in DOM/HTML-parsing API. The reference's byte-exact win comes from parsing+serializing
+  through a real HTML DOM (happy-dom) so attribute insertion order and quoting fall out for free. The .NET
+  ecosystem's closest analog is **AngleSharp** (a mature, HTML5-spec-compliant parser + DOM + serializer) —
+  reusing it would mirror Node's "reuse a real parser/serializer" strategy rather than Python's "hand-roll a
+  byte-exact serializer" path; whether its default serializer reproduces the goldens' exact attribute
+  ordering/quoting (or needs a custom `IMarkupFormatter`) is a build-time detail, not a design fork — per
+  #2030 every renderer's internal strategy (including which parsing library, if any) is a **conforming
+  black box**, not a ratifiable choice. Recorded here as a build note for slice A, not decided.
+- **Non-ASCII `key-hash` note:** C# `string` is natively UTF-16 code units (like JS), so `djb2KeyHash`'s
+  `for (int i = 0; i < s.Length; i++) h = ... ^ s[i]` ports **directly** — no explicit UTF-16 re-encoding step
+  is needed the way a UTF-8-native language (Go, Rust) would require. Lower risk than the general cross-
+  language footgun the harness contract calls out.
+
+### Could split — YES (foundation + per-directive fan-out, same shape as JVM)
+
+| Slice | kind | size | Scope | blockedBy | Ref lines (Node oracle) |
+|---|---|---|---|---|---|
+| **A. .NET renderer foundation + if/switch** | story | 5 | Greenfield .NET build subtree (`frontierui:plugs/webdirectives/ssr/net/`) — project layout (a class-library project + an xunit test project), authoring-source parse strategy (AngleSharp or equivalent real HTML parser/DOM, recorded as a build note above — not a fork), top-level `<template is>` dispatch loop, normative space-padded marker wrapping + `RenderMarkerOptions`, shared helpers (`ResolvePath`, mustache `Interpolate`) + the **.NET-side conformance harness runner** (an xunit test that loads `we:conformance-vectors/webdirectives-ssr.vectors.json`, invokes the renderer per vector, byte-compares per the #2354 contract, wired into `dotnet test` + repo CI) + the two branch-select directives `if`/`switch` to prove the pipeline end-to-end. Demo: passes `if/*`, `switch/*`, `state-tokens/*` vectors byte-for-byte. | — | dispatch 235-264, markers 103-112, helpers 67-84, if/switch 152-176 |
+| **B. for-each** | story | 3 | Item expansion + `data-key` (only key channel) + empty-list markers-only + `count`/`key-hash` state tokens, porting `djb2KeyHash` directly (C# `string` is already UTF-16 code units — no extra re-encoding step, see note above). Demo: passes `for-each/*`. | A | for-each 114-150, djb2 95-101 |
+| **C. resource:loader + defer** | task | 2 | Two passthrough directives (inner-branch emit; `defer` emits placeholder branch only). Demo: passes `resource-loader/*`, `defer/*`. | A | 178-196 |
+
+**DAG (clean fan-out, acyclic):** `A → {B, C}`; B ∥ C proceed fully independently once A lands. Same
+reconciliation as JVM: (4) is a fan-out on the dispatch-map shape, not a rigid linear chain; (5) grades
+per-vector, so `if`/`switch` passing is a valid demoable state, not a half-algorithm intermediate.
+
+**Rubric check (leaf story/task form):**
+- **(1)** No buried fork — #2030 already ruled per-language render strategy (incl. which parser/serializer
+  library, if any) a conforming black box. The AngleSharp-vs-alternatives call is a build note, not a
+  decision surface. ✓
+- **(2)** ≥2 nameable slices (3), each a real home (A/B stories, C a task under #2360). ✓
+- **(3)** Each re-estimates ≤5, grounded in the Node oracle's cited line ranges; leaf slices B/C are grounded
+  in the *oracle's* `file:line`s (the normal bar once a language's own surface doesn't exist yet — same as
+  JVM's B/C). ✓
+- **(4)** Clean acyclic fan-out; B ∥ C independent after A; incremental delivery. ✓
+- **(5)** Each slice passes a byte-for-byte vector subset — a valid demoable state, no half-algorithm
+  intermediate. ✓
+
+### On-disk result
+
+Filed as three new children of #2360 (siblings of the now-resolved #2374 scoping story): the foundation
+story (A), the for-each story (B, `blockedBy: [A]`), and the resource:loader+defer task (C,
+`blockedBy: [A]`). #2360's body is updated to a "Sliced" framing recording the DAG (mirrors #2355's shape).
+**2356–2358 (Go/PHP/Rust) still warrant the same re-analysis** the JVM section flagged — not done here
+(out of scope for #2374, which is .NET-only); each is its own future scoping/re-analysis pass.
