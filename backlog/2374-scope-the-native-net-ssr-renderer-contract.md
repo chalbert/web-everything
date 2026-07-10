@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-07-09"
 dateStarted: "2026-07-10"
 dateResolved: "2026-07-10"
-graduatedTo: "backlog/xs764ci-native-net-ssr-renderer-foundation-if-switch-directives.md + backlog/xt0pnxx-native-net-ssr-renderer-for-each-directive-keyed-empty-count.md + backlog/x99fk2i-native-net-ssr-renderer-resource-loader-defer-directives.md (#2374)"
+graduatedTo: "backlog/2383-native-net-ssr-renderer-foundation-if-switch-directives.md + backlog/2385-native-net-ssr-renderer-for-each-directive-keyed-empty-count.md + backlog/2384-native-net-ssr-renderer-resource-loader-defer-directives.md (#2374)"
 tags: []
 ---
 
@@ -33,8 +33,8 @@ Re-ran the `/slice 2360` investigation grounded in the Node oracle (`frontierui:
 - **`ServerRenderer` seam** — a pure `(source, data) => string` delegate/interface, mirroring `frontierui:plugs/webdirectives/ssr/ServerRenderer.ts:33`.
 - **Harness invocation** — an xunit test in the foundation slice that loads `we:conformance-vectors/webdirectives-ssr.vectors.json`, invokes the renderer per vector, and byte-compares per the #2354 contract, wired into `dotnet test` + CI.
 - **Build-slice breakdown, filed as #2360's children (siblings of this item):**
-  - foundation + if/switch — `we:backlog/xs764ci-native-net-ssr-renderer-foundation-if-switch-directives.md` (story·5)
-  - for-each — `we:backlog/xt0pnxx-native-net-ssr-renderer-for-each-directive-keyed-empty-count.md` (story·3, `blockedBy` foundation)
-  - resource:loader + defer — `we:backlog/x99fk2i-native-net-ssr-renderer-resource-loader-defer-directives.md` (task·2, `blockedBy` foundation)
+  - foundation + if/switch — `we:backlog/2383-native-net-ssr-renderer-foundation-if-switch-directives.md` (story·5)
+  - for-each — `we:backlog/2385-native-net-ssr-renderer-for-each-directive-keyed-empty-count.md` (story·3, `blockedBy` foundation)
+  - resource:loader + defer — `we:backlog/2384-native-net-ssr-renderer-resource-loader-defer-directives.md` (task·2, `blockedBy` foundation)
 
 #2360's body updated to a "Sliced" framing recording the DAG. The same re-analysis is still owed for #2356–2358 (Go/PHP/Rust) — flagged in the report, out of this item's .NET-only scope.
