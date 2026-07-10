@@ -14,6 +14,15 @@ couple to the normal drain transport.
 > the *landing* broke. A finisher clones the existing ref, rebases onto `main`, and fixes what's red — it does
 > NOT re-provision a fresh lane or redo the item.
 
+> **All 3 repos by DEFAULT (#2383 — parity with `/drain`'s #2287).** `discover` sweeps the whole constellation
+> — web-everything **+ frontierui + plateau-app** — reusing the SAME `resolveRepos` as the drain, so a stuck
+> plateau-app or frontierui lane is found without a per-repo copy of the skill. Every `gh` call is `--repo`-scoped;
+> a remote lane reads its manifest via the GitHub API and lands through that repo's **sibling clone** (deferred to
+> the drain, #2263). The backlog is WE-global, so a remote lane's `blockedBy` still resolves against the one WE
+> backlog. **Manifest-less repos degrade gracefully:** a lane with no `.lane-manifest.json` (e.g. plateau-app's
+> own batch branches) gets `item`/`blockedBy` null → unordered *within* its repo, exactly like the drain's
+> orphan-PR handling — never an error. Pass `--this-repo` (or `--repos=owner/a,owner/b`) to scope.
+
 ## Preconditions
 
 - Run the mechanical parts from an **isolated clean clone on `main`** — never the shared primary checkout
@@ -30,9 +39,12 @@ couple to the normal drain transport.
 ## Run it
 
 ```
-node scripts/lane-resume.mjs discover            # classify every stuck ready-to-merge lane + why, blockedBy-ordered
-node scripts/lane-resume.mjs discover --json     # same, machine-readable (the plan the skill iterates)
+node scripts/lane-resume.mjs discover            # classify every stuck lane across ALL 3 repos + why, blockedBy-ordered (#2383)
+node scripts/lane-resume.mjs discover --json     # same, machine-readable (the plan the skill iterates); each lane is tagged with its `repo`
+node scripts/lane-resume.mjs discover --this-repo        # scope to the cwd repo only (opt out of the constellation sweep)
+node scripts/lane-resume.mjs discover --repos=owner/a,owner/b   # an explicit repo set
 node scripts/lane-resume.mjs land <pr> --dry-run # plan the enqueue of ONE repaired lane PR (enqueue vs rebase-drop vs skip)
+node scripts/lane-resume.mjs land <pr> --repo=owner/name   # land a REMOTE constellation-repo PR (use discover's `repo` tag); omit for the cwd repo
 node scripts/lane-resume.mjs land <pr>           # #2290: rebase-drop the manifest if only it conflicts, then ENQUEUE (label + trigger a single-couple drain) — never merges directly
 ```
 
@@ -76,6 +88,24 @@ impl repo: **symlink `node_modules` from the primary** (`ln -s <primary>/node_mo
 the clone a **sibling of a `../frontierui`** checkout (cross-repo artifact builds resolve `../frontierui`). A
 missing either → the gate fails with a spurious "cannot find module" that looks like a code bug but is an env
 gap.
+
+**Per-repo gate + env (each repo differs; run THAT repo's gate, not WE's):**
+
+| Repo | Full gate the finisher must run | Env quirk beyond the symlink |
+|---|---|---|
+| **web-everything** | `npm run check:standards` | sibling `../frontierui` |
+| **frontierui** | that repo's `test` script | sibling `../webeverything` |
+| **plateau-app** | `node scripts/check-render-conformance.mjs` **+** `npx vitest run` | siblings `../frontierui` **and** `../webeverything`; **recreate the `@plateau/*` workspace links** |
+
+> **plateau-app workspace-link gap (#2383 — learned 2026-07-09).** plateau-app is an npm-**workspaces** monorepo
+> (`packages/*` = `@plateau/*`). A symlinked `node_modules` borrowed from a primary that predates a package
+> split has **no `@plateau` scope**, so vite/vitest can't resolve `@plateau/tooling/*` and you get a spurious
+> "Failed to resolve import" that looks like a lane bug but is an env gap (CI's fresh `npm install` links them).
+> Fix the clone WITHOUT touching the primary: rebuild `node_modules` as a real dir that symlinks every entry
+> from the primary's `node_modules`, then add `node_modules/@plateau/<pkg> → <clone>/packages/<pkg>` for each
+> workspace package. `@plateau/tooling` resolves via its `exports` map (`"./*": "./src/*.ts"`); `@plateau/saas`
+> /`core` have NO exports map and instead resolve through `vite.config.mts` aliases — so a NEW `@plateau/*` import
+> the lane adds needs EITHER an exports map on that package OR a vite alias, or it 500s at boot.
 
 **Conflict resolution table — resolve each conflicted path by its CLASS, never a blind hand-merge:**
 
