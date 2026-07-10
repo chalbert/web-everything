@@ -166,3 +166,36 @@ describe('lane-resume — land (#2202/#2290: enqueue + trigger the drain, never 
     expect(hasGhMerge(calls)).toBe(false);
   });
 });
+
+describe('lane-resume — land is repo-aware (#2383: /finish spans all constellation repos like /drain)', () => {
+  const labelEdit = (calls) => calls.find((c) => c.cmd === 'gh' && c.args[1] === 'edit' && c.args.includes('--add-label'));
+  const drainTrigger = (calls) => calls.find((c) => c.cmd === 'node' && c.args.some((a) => String(a).startsWith('--only=')));
+
+  it('a REMOTE repo → every gh call is `--repo`-scoped and the drain trigger targets that repo via `--repos=`', () => {
+    const { run, calls } = scriptedRun({ ...prView() });
+    const v = land({ prNum: 5, run, repo: 'chalbert/plateau-app', prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] } });
+    expect(v.action).toBe('enqueued');
+    const edit = labelEdit(calls);
+    expect(edit.args).toEqual(expect.arrayContaining(['--repo', 'chalbert/plateau-app']));
+    const trig = drainTrigger(calls);
+    expect(trig.args).toContain('--repos=chalbert/plateau-app'); // NOT --this-repo — that would sweep the cwd repo
+    expect(trig.args).not.toContain('--this-repo');
+  });
+
+  it('a REMOTE repo manifest-conflict DEFERS the rebuild to the drain (no local rebase-drop plumbing)', () => {
+    // No RESOLVE_PLUMBING scripted: a local rebaseDropManifest would call git write-tree/commit-tree/push and
+    // fail here — proving the remote path never runs it, just enqueues + lets the (sibling-clone-aware) drain rebuild.
+    const { run, calls } = scriptedRun({ ...prView() });
+    const v = land({ prNum: 5, run, repo: 'chalbert/frontierui', prInfo: { headRefName: 'lane/x-2202', mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] } });
+    expect(v).toMatchObject({ action: 'enqueued', rebased: false }); // deferred, not 'rebuilt-enqueued'
+    expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(false); // never touched local git
+    expect(drainTrigger(calls).args).toContain('--repos=chalbert/frontierui');
+  });
+
+  it('the LOCAL repo (no `repo`) keeps the established `--this-repo` trigger and un-scoped gh calls', () => {
+    const { run, calls } = scriptedRun({ ...prView() });
+    land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] } });
+    expect(labelEdit(calls).args).not.toContain('--repo');
+    expect(drainTrigger(calls).args).toContain('--this-repo');
+  });
+});
