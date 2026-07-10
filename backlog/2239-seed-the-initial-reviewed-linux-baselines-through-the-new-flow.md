@@ -1,6 +1,7 @@
 ---
 kind: task
 status: open
+humanGate: { kind: review, what: "Generating the first 'correct look = current look' baselines runs through #2238's PR-based refresh flow — a CI workflow_dispatch, not a local lane op — and gates on a human/AI approval that each visual target (home, detail-card, grid) renders correctly before landing. That perceptual sign-off is not something a batch can perform." }
 parent: "2232"
 blockedBy: [2235, 2236, 2237, 2238]
 dateOpened: "2026-07-04"
