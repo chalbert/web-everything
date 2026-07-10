@@ -7,7 +7,7 @@
  * case where a dependent references an already-numbered blocker by its old hash).
  */
 import { describe, it, expect } from 'vitest';
-import { HASH_RE, ID_TOKEN_RE, isHash, isNum, idFromName, slugFromName, normalizeId, nextHash, applyLedger } from '../id.mjs';
+import { HASH_RE, BORN_AS_RE, ID_TOKEN_RE, isHash, isNum, idFromName, slugFromName, normalizeId, nextHash, applyLedger, stampBornAs } from '../id.mjs';
 
 describe('id token parsing (#2288)', () => {
   it('idFromName reads a numeric NNN or an xNNNNNN hash off a stem/ref', () => {
@@ -81,8 +81,10 @@ describe('applyLedger — the drain numbering brain (#2288)', () => {
     const { renames, rewrites } = applyLedger(files, { x7k2q9a: '2314' });
     expect(renames).toEqual([{ from: 'x7k2q9a-alpha', to: '2314-alpha' }]);
     expect(rewrites).toHaveLength(1);
-    expect(rewrites[0].content).toContain('See 2314 for context and #2314 again.');
-    expect(rewrites[0].content).not.toContain('x7k2q9a');
+    expect(rewrites[0].content).toContain('See 2314 for context and #2314 again.'); // body refs rewritten
+    expect(rewrites[0].content).toContain('bornAs: x7k2q9a');                        // birth-hash proof-of-land stamped (#2392)
+    // The ONLY surviving x7k2q9a is the protected bornAs record — the body ref is fully rewritten.
+    expect(rewrites[0].content.replace('bornAs: x7k2q9a', '')).not.toContain('x7k2q9a');
   });
 
   it("repairs another item's blockedBy that points at the numbered hash (cross-lane edge)", () => {
@@ -111,20 +113,55 @@ describe('applyLedger — the drain numbering brain (#2288)', () => {
     expect(beta.content).toContain('blockedBy: ["2314"]');
   });
 
-  it('leaves numeric-only files and unrelated hashes untouched', () => {
+  it('leaves numeric-only files untouched but stamps bornAs on the item it numbers', () => {
     const files = [
       file('2200-legacy', '---\nkind: story\nblockedBy: ["2100"]\n---\n# Legacy\n'),
       file('xother1-gamma', '---\nkind: task\n---\n# Gamma references xnope01 which is not ledgered\n'),
     ];
     const { renames, rewrites } = applyLedger(files, { xother1: '2316' });
-    // gamma's hash is only in its FILENAME (renamed); its body carries no ledgered hash, so no rewrite.
     expect(renames).toEqual([{ from: 'xother1-gamma', to: '2316-gamma' }]);
     expect(rewrites.find((r) => r.name === '2200-legacy')).toBeUndefined();     // numeric-only file untouched
-    expect(rewrites.find((r) => r.name === 'xother1-gamma')).toBeUndefined();    // body had no ledgered hash → not rewritten (xnope01 not in ledger)
+    // gamma is the item being numbered → it gets its bornAs proof-of-land stamp (#2392); its unrelated
+    // body hash (xnope01, not ledgered) is left as-is.
+    const gamma = rewrites.find((r) => r.name === 'xother1-gamma');
+    expect(gamma.content).toContain('bornAs: xother1');
+    expect(gamma.content).toContain('xnope01'); // unledgered hash untouched
   });
 
   it('is a no-op with an empty ledger', () => {
     const files = [file('x7k2q9a-alpha', '# Alpha x7k2q9a\n')];
     expect(applyLedger(files, {})).toEqual({ renames: [], rewrites: [] });
+  });
+});
+
+describe('bornAs proof-of-land (#2392)', () => {
+  const file = (name, content) => ({ name, content });
+
+  it('stampBornAs inserts the birth hash as the first frontmatter field', () => {
+    const out = stampBornAs('---\nkind: story\nstatus: resolved\n---\n# Alpha\n', 'x7k2q9a');
+    expect(out).toBe('---\nbornAs: x7k2q9a\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    expect(BORN_AS_RE.test('bornAs: x7k2q9a')).toBe(true);
+  });
+
+  it('stampBornAs is idempotent — never double-stamps an already-recorded birth hash', () => {
+    const once = stampBornAs('---\nkind: story\n---\n# A\n', 'x7k2q9a');
+    expect(stampBornAs(once, 'x7k2q9a')).toBe(once);
+  });
+
+  it('stampBornAs leaves content with no frontmatter delimiter untouched', () => {
+    expect(stampBornAs('# no frontmatter\n', 'x7k2q9a')).toBe('# no frontmatter\n');
+  });
+
+  it('DEADLOCK REGRESSION: applyLedger keeps a bornAs value intact while rewriting a blockedBy hash→NNN', () => {
+    // The permanent-strand deadlock the adversary found: without the guard the blind hash→NNN rewrite
+    // clobbers the item's own bornAs record to its assigned number, erasing the sole cross-clone proof.
+    const stamped = stampBornAs('---\nkind: story\nblockedBy: ["xblk001"]\n---\n# Beta\n', 'x7k2q9a');
+    const files = [file('x7k2q9a-beta', stamped)];
+    const { renames, rewrites } = applyLedger(files, { x7k2q9a: '2314', xblk001: '2301' });
+    expect(renames).toEqual([{ from: 'x7k2q9a-beta', to: '2314-beta' }]);
+    const beta = rewrites.find((r) => r.name === 'x7k2q9a-beta').content;
+    expect(beta).toContain('bornAs: x7k2q9a');       // birth hash SURVIVES numbering (the fix)
+    expect(beta).not.toContain('bornAs: 2314');       // never clobbered to its assigned NNN
+    expect(beta).toContain('blockedBy: ["2301"]');    // every OTHER hash ref still rewritten
   });
 });
