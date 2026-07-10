@@ -1,10 +1,10 @@
 # Backlog split analysis — 2026-07-10
 
-Focused run: `/slice x6yoscx`.
+Focused run: `/slice 2387`.
 
 ## Candidate
 
-**#x6yoscx — Serial-batch → drain coordination: overlap-stack lanes, proof-of-land gate, push the handoff** (`kind: epic`, unsliced — no children). A red-team-converged design epic whose body already carries a migration-ordered slice plan. Condition (1) of the split-safety rubric ("size is volume not a fork") is settled at the parent level: every open fork (F1–F5) was decided during convergence, so the slices are **pure build**, not buried decisions.
+**#2387 — Serial-batch → drain coordination: overlap-stack lanes, proof-of-land gate, push the handoff** (`kind: epic`, unsliced — no children). A red-team-converged design epic whose body already carries a migration-ordered slice plan. Condition (1) of the split-safety rubric ("size is volume not a fork") is settled at the parent level: every open fork (F1–F5) was decided during convergence, so the slices are **pure build**, not buried decisions.
 
 ## Could split — 11 slices, clean DAG
 
@@ -35,4 +35,4 @@ Two slices land above the size-3 target. Splitting either would **cost quality /
 
 ## Verdict
 
-Safe to slice into **11 children** under `#x6yoscx`. Sum ≈ 35 pts. No fork is buried; the DAG is real (independent roots + incremental delivery); the two >3 slices are documented irreducible cores.
+Safe to slice into **11 children** under `#2387`. Sum ≈ 35 pts. No fork is buried; the DAG is real (independent roots + incremental delivery); the two >3 slices are documented irreducible cores.
