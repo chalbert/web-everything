@@ -7,7 +7,7 @@
  * case where a dependent references an already-numbered blocker by its old hash).
  */
 import { describe, it, expect } from 'vitest';
-import { HASH_RE, BORN_AS_RE, ID_TOKEN_RE, isHash, isNum, idFromName, slugFromName, normalizeId, nextHash, applyLedger, stampBornAs } from '../id.mjs';
+import { HASH_RE, BORN_AS_RE, ID_TOKEN_RE, isHash, isNum, idFromName, slugFromName, normalizeId, nextHash, applyLedger, stampBornAs, swapHashes } from '../id.mjs';
 
 describe('id token parsing (#2288)', () => {
   it('idFromName reads a numeric NNN or an xNNNNNN hash off a stem/ref', () => {
@@ -130,7 +130,77 @@ describe('applyLedger — the drain numbering brain (#2288)', () => {
 
   it('is a no-op with an empty ledger', () => {
     const files = [file('x7k2q9a-alpha', '# Alpha x7k2q9a\n')];
-    expect(applyLedger(files, {})).toEqual({ renames: [], rewrites: [] });
+    expect(applyLedger(files, {})).toEqual({ renames: [], rewrites: [], pathRenames: [] });
+  });
+});
+
+describe('applyLedger — on-disk path-value refs (#2400)', () => {
+  const file = (name, content) => ({ name, content });
+
+  it('flags a relatedReport whose report filename embeds the numbered hash for rename', () => {
+    // The #2387 regression: relatedReport stem IS the item's own birth hash → rewrite the ref AND rename the file.
+    const files = [
+      file('x6yoscx-epic', '---\nkind: epic\nrelatedReport: reports/2026-07-10-split-analysis-x6yoscx.md\n---\n# Epic\n'),
+    ];
+    const { renames, rewrites, pathRenames } = applyLedger(files, { x6yoscx: '2387' });
+    expect(renames).toEqual([{ from: 'x6yoscx-epic', to: '2387-epic' }]);
+    // The reference is rewritten in the item body…
+    expect(rewrites[0].content).toContain('relatedReport: reports/2026-07-10-split-analysis-2387.md');
+    // …and the referenced file is flagged for rename to the matching stem.
+    expect(pathRenames).toEqual([
+      { from: 'reports/2026-07-10-split-analysis-x6yoscx.md', to: 'reports/2026-07-10-split-analysis-2387.md' },
+    ]);
+  });
+
+  it('flags a body markdown link to a reports/…-<hash>.md file', () => {
+    const files = [
+      file('x6yoscx-epic', '---\nkind: epic\n---\n# Epic\n\nSee [the report](reports/x6yoscx-notes.md).\n'),
+    ];
+    const { pathRenames } = applyLedger(files, { x6yoscx: '2387' });
+    expect(pathRenames).toEqual([{ from: 'reports/x6yoscx-notes.md', to: 'reports/2387-notes.md' }]);
+  });
+
+  it('does NOT flag a /backlog/<hash>/ URL (no file to rename — the ref-rewrite is enough)', () => {
+    const files = [
+      file('x6yoscx-epic', '---\nkind: epic\n---\n# Epic\n\nBlocks /backlog/x6yoscx/ downstream.\n'),
+    ];
+    const { rewrites, pathRenames } = applyLedger(files, { x6yoscx: '2387' });
+    expect(pathRenames).toEqual([]);              // a directory URL has no extension → not a file rename
+    expect(rewrites[0].content).toContain('/backlog/2387/'); // but the URL still tracks the new number
+  });
+
+  it('excludes a literal backlog/*.md path (renamed via `renames`, not double-handled)', () => {
+    const files = [
+      file('x6yoscx-epic', '---\nkind: epic\n---\n# Epic\n\nsee backlog/x6yoscx-epic.md\n'),
+    ];
+    const { pathRenames } = applyLedger(files, { x6yoscx: '2387' });
+    expect(pathRenames).toEqual([]);
+  });
+
+  it('leaves an item with no path-value ref untouched (pathRenames empty)', () => {
+    const files = [file('x6yoscx-epic', '---\nkind: story\n---\n# Epic\n\nplain body, no report.\n')];
+    expect(applyLedger(files, { x6yoscx: '2387' }).pathRenames).toEqual([]);
+  });
+
+  it('rewrites ALL ledgered hashes in a report filename embedding TWO of them — rename target matches the body ref (#2400 double-hash)', () => {
+    // A single report filename can carry two co-numbered hashes. The body ref-rewrite swaps BOTH; the file
+    // rename target MUST swap both too, or the renamed file and the rewritten ref disagree → dangling ref /
+    // hidden report (the exact failure this path-rename exists to prevent). Emitted ONCE, fully rewritten.
+    const files = [
+      file('x6yoscx-epic', '---\nkind: epic\nrelatedReport: reports/x6yoscx-x7k2q9a-notes.md\n---\n# Epic\n'),
+    ];
+    const { rewrites, pathRenames } = applyLedger(files, { x6yoscx: '2387', x7k2q9a: '2388' });
+    // Body ref rewrites both hashes…
+    expect(rewrites[0].content).toContain('relatedReport: reports/2387-2388-notes.md');
+    // …and the rename target agrees exactly — one entry, not one-per-hash, both hashes swapped.
+    expect(pathRenames).toEqual([{ from: 'reports/x6yoscx-x7k2q9a-notes.md', to: 'reports/2387-2388-notes.md' }]);
+  });
+});
+
+describe('swapHashes — shared whole-ledger blind swap (#2400)', () => {
+  it('replaces every ledgered hash as a whole token, leaves unledgered hashes/prose alone', () => {
+    const out = swapHashes('a x6yoscx and x7k2q9a but not xnope01', [['x6yoscx', '2387'], ['x7k2q9a', '2388']]);
+    expect(out).toBe('a 2387 and 2388 but not xnope01');
   });
 });
 

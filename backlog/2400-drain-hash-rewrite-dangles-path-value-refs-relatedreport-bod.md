@@ -2,8 +2,10 @@
 kind: story
 size: 3
 parent: "2387"
-status: open
+status: resolved
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-10"
+dateResolved: "2026-07-10"
 tags: [drain, numbering, bug]
 ---
 
@@ -37,3 +39,13 @@ So the fix isn't a blanket "don't touch path values" — it must distinguish **a
 - Land a hash-keyed item whose `relatedReport` filename embeds its hash → the report is renamed to the `-<NNN>` stem, `relatedReport` resolves, no hidden-report error (the #2387 regression, locked).
 - A body `/backlog/<hash>/` link rewrites to `/backlog/<NNN>/`.
 - An item with no `relatedReport` is unaffected.
+
+## Progress
+
+- **Status:** resolved — Option A shipped.
+- **Done:**
+  - `applyLedger` (we:scripts/backlog/id.mjs) now returns `pathRenames` — every on-disk path value (a `relatedReport`, a body `reports/…-<hash>.md` link) that embeds a ledgered hash, as a `{from,to}` file rename. Pure/pattern-only; excludes `backlog/*` (renamed via `renames`) and `/backlog/<hash>/` URLs (no extension → ref-rewrite is enough).
+  - `numberPendingHashes` (we:scripts/lane-drain.mjs) filters `pathRenames` to files that exist on disk, then `git rm` old + write-new with the report's internal hash refs blind-rewritten, in the SAME land commit. `--dry-run` and `renamed` now report the path renames too.
+  - Tests: 5 unit cases in we:scripts/backlog/__tests__/id.test.mjs + 2 integration cases in we:scripts/__tests__/lane-drain-numbering.test.mjs (report renamed + internal refs rewritten = the #2387 regression locked; `/backlog/<hash>/` URL rewrite with no file). Verified against the exact #2387 repro — reproduces the #357 hotfix automatically.
+- **Note:** the "guard that `relatedReport` resolves post-rewrite" already exists in `check:standards` (dangling-ref + hidden-report errors — what reddened main). Option A fixes the root cause so those never fire at land; no duplicate in-drain guard (would risk stranding the queue on a false positive).
+- **Next:** none — resolve.

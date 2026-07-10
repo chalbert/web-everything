@@ -57,13 +57,13 @@
  * failed (couple stopped, main left as far as it got); 3 = bad input (no manifest, invalid, not queued).
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { readFileSync, writeFileSync, readdirSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { resolve, join, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
 import { parseQueued, isQueued, queuedNums } from './readiness/queued-state.mjs';
 import { parseManifest, validateManifest, orderedRepos, extractManifestFromBody, MANIFEST_FILENAME } from './readiness/lane-manifest.mjs';
-import { isHash, isNum, idFromName, applyLedger } from './backlog/id.mjs';
+import { isHash, isNum, idFromName, applyLedger, swapHashes } from './backlog/id.mjs';
 import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 dual-lock: numbering mutex + whole-process drain lease
 
 // ── flag parsing (mirrors pr-land.mjs / lane-review.mjs) ──────────────────────────────────────────────
@@ -497,10 +497,26 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   // applyLedger numbers each item AND stamps its bornAs:<hash> proof-of-land (#2392) — the durable,
   // cross-clone, renumber-immune landed record read back via landedNumberFor. Derived from the same
   // ledger that assigns the number, so the local id-ledger.json (numbering bookkeeping) and
-  // bornAs-on-main (the sole cross-clone landed proof) cannot diverge.
-  const { renames, rewrites } = applyLedger(files, ledger);
+  // bornAs-on-main (the sole cross-clone landed proof) cannot diverge. It also returns pathRenames
+  // (#2400) — co-referenced ON-DISK report files whose stem embeds a numbered hash.
+  const { renames, rewrites, pathRenames } = applyLedger(files, ledger);
+  // #2400 — path-value refs are derived from UNTRUSTED backlog content, so CONFINE them to inside the repo
+  // before acting: a crafted `relatedReport`/body token like `../../../outside/notes-<hash>.md` would
+  // otherwise make `writeFileSync(join(CWD, to))` + `git rm from` write outside the tree and delete an
+  // arbitrary file. Reject any absolute path or any token that escapes CWD after resolve (both `from` and
+  // `to`), then keep only those whose file actually exists on disk (a bare URL / prose mention resolves to
+  // no file and is a harmless no-op). Survivors get a `git rm` OLD + write-to-NEW + internal-ref rewrite below.
+  const repoRoot = resolve(CWD);
+  const inRepo = (p) => typeof p === 'string' && p !== '' && !isAbsolute(p) &&
+    (resolve(CWD, p) === repoRoot || resolve(CWD, p).startsWith(repoRoot + sep));
+  const livePathRenames = pathRenames.filter(({ from, to }) =>
+    inRepo(from) && inRepo(to) && existsSync(join(CWD, from)));
   // #2319 — `number-stranded --dry-run`: report the planned mapping + renames without touching the tree/index.
-  if (dryRun) return { assigned, committed: false, dryRun: true, renamed: renames.map((r) => r.to), wouldRename: renames.map((r) => ({ from: r.from, to: r.to })) };
+  if (dryRun) return {
+    assigned, committed: false, dryRun: true,
+    renamed: renames.map((r) => r.to),
+    wouldRename: [...renames, ...livePathRenames].map((r) => ({ from: r.from, to: r.to })),
+  };
   const rewriteByName = new Map(rewrites.map((r) => [r.name, r.content]));
   const renameFroms = new Set(renames.map((r) => r.from));
   // A rename is `git rm OLD` + write-to-NEW (NOT `git mv`): a scoped `git commit -- <paths>` is pathspec
@@ -523,6 +539,19 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
     toAdd.push(`backlog/${to}.md`);
     commitPaths.push(`backlog/${from}.md`, `backlog/${to}.md`);
   }
+  // #2400 — rename each co-referenced ON-DISK file (a `relatedReport`, a body link to `reports/…-<hash>.md`)
+  // whose stem embeds a numbered hash, and rewrite its internal self-refs (`/slice <hash>`, `#<hash>`) with
+  // the same whole-ledger blind swap. Without this the item's rewritten ref dangles + the report is hidden →
+  // the #2387 red-main regression. These paths live OUTSIDE `backlog/`, so `git rm` + write-to-new, not `git mv`.
+  const ledgerEntries = Object.entries(ledger).filter(([h]) => isHash(h));
+  for (const { from, to } of livePathRenames) {
+    const content = swapHashes(readFileSync(join(CWD, from), 'utf8'), ledgerEntries);
+    writeFileSync(join(CWD, to), content);
+    if (quietGit(CWD, ['rm', '--quiet', from]) == null)
+      return { assigned, committed: false, error: `git rm ${from} failed` };
+    toAdd.push(to);
+    commitPaths.push(from, to);
+  }
   // APPEND-ONLY — never reset. A lane can reference a hash while merely IN-FLIGHT (being worked), long
   // before it is queued, so resetting when the ready-to-merge queue drains would drop the mapping a
   // still-in-flight dependent needs → its edge would land as a dangling hash (PR #194 review, blocking).
@@ -534,7 +563,7 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   const paths = [...new Set(commitPaths)];
   const summary = assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ');
   const committed = quietGit(CWD, ['commit', '-m', `drain: JIT-number ${summary} at land (#2288)`, '--', ...paths]) != null;
-  return { assigned, committed, renamed: renames.map((r) => r.to), changedPaths: paths };
+  return { assigned, committed, renamed: [...renames, ...livePathRenames].map((r) => r.to), changedPaths: paths };
 }
 
 /**
