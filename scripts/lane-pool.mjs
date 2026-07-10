@@ -26,7 +26,7 @@
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
  *   node scripts/lane-pool.mjs list    [--json]                     # existing lane paths (for the orchestrator to dispatch into)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
- *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main; stdout = its path
+ *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path
  *   node scripts/lane-pool.mjs release (--lane=N | --all) [--session=<slug>] [--force]   # #2275 hand a leased lane back to the pool (own lease, or --force)
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s)
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
@@ -563,6 +563,14 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
 }
 
 function cmdAcquire(repo) {
+  // #2386 — `--base` and `--no-reset` are mutually exclusive: `--base=<ref>` means "reset this clone to <ref>",
+  // and `--no-reset` skips the reset entirely. Honoring both would skip the reset yet still report the base as
+  // applied (log line + JSON `base`), so an orchestrator stacking a serial batch would believe the lane sits on
+  // the predecessor tip when HEAD was never moved. Reject the combo BEFORE claiming any lane (touches nothing) —
+  // failing loud beats silently misreporting for a primitive other automation trusts.
+  if (flags.base && flags['no-reset']) {
+    fail(`--base=${flags.base} and --no-reset are mutually exclusive: --base resets the clone to that ref, which --no-reset would skip. Pass one or the other.`);
+  }
   const session = defaultSession();
   const nowMs = Date.now();
   const ttlMs = ttlMsFromFlags();
@@ -610,10 +618,15 @@ function cmdAcquire(repo) {
 
   // Ready the leased lane: land on origin/<branch> (item 2 — a lane may sit on main), regen env + deps so it
   // is immediately gate-able, exactly like a provisioned lane. `--no-reset` keeps HEAD.
+  // #2386 — `--base=<ref>` lands the clone at a PREDECESSOR LANE'S TIP instead, the building block for
+  // overlap-stacked serial batches (a later lane's work builds on an earlier lane's not-yet-merged commits).
+  // Still a pool clone — this never touches the primary checkout (#2219/#104): the ref is resolved and reset
+  // to INSIDE this lane's own clone, same as the origin/<branch> default path it replaces.
   const dir = laneDir(repo, chosen);
   if (!flags['no-reset']) {
     git(['fetch', 'origin', '--prune', '--quiet'], dir);
-    git(['reset', '--hard', `origin/${repo.branch}`, '--quiet'], dir);
+    const baseRef = flags.base ? resolveBaseRef(dir, flags.base, chosen) : `origin/${repo.branch}`;
+    git(['reset', '--hard', baseRef, '--quiet'], dir);
     git(['clean', '-fd', '--quiet'], dir);
     unmapLanes(repo, [chosen]); // a reset lane no longer renders its old item (#2139)
   }
@@ -623,9 +636,30 @@ function cmdAcquire(repo) {
   // checkout's parent — correct only when run from the primary; run from INSIDE a lane (a consumer's cwd) it
   // mis-points the shared pool-root sibling clones at itself. The pool-root siblings are a provision/refresh
   // concern; a leased lane borrows a pool those already set up. (Regressed a live acquire until caught — #2275.)
-  log(`acquired lane-${chosen} for ${session}${flags.purpose ? ` (${flags.purpose})` : ''} → ${dir}`);
-  if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, purpose: flags.purpose || null, branch: repo.branch }, null, 2) + '\n');
+  log(`acquired lane-${chosen} for ${session}${flags.purpose ? ` (${flags.purpose})` : ''}${flags.base ? ` @ base=${flags.base}` : ''} → ${dir}`);
+  if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, purpose: flags.purpose || null, branch: repo.branch, base: flags.base || null }, null, 2) + '\n');
   else process.stdout.write(dir + '\n'); // stdout = path only, so `LANE=$(… acquire)` captures it clean
+}
+
+// #2386 — resolve `--base=<ref>` inside a lane's own clone, AFTER its `fetch origin` so a predecessor lane's
+// pushed `lane/*` tip is visible as `origin/<ref>`. Tries `origin/<ref>` FIRST — this is the freshly-fetched,
+// authoritative source for "a predecessor lane's PUSHED tip" — falling back to the ref as literally given only
+// if that doesn't resolve (a raw SHA, or a ref the caller already fully qualified, e.g. `origin/lane/…`).
+// Order matters: trying the bare ref first would resolve `--base=main` to THIS LANE'S OWN stale local `main`
+// branch (wherever it was left by the last reset, e.g. a prior `--base` acquire) instead of the origin tip this
+// `fetch` just pulled — `fetch` only updates remote-tracking refs, never a checked-out local branch of the same
+// name, so a same-named local ref silently shadowing the fresh origin one would be a hard-to-notice stale-data
+// bug, not a loud failure. Caught live: acquiring with `--base=main` after origin/main advanced past the lane's
+// last reset returned the OLD content with no error until this ordering was flipped.
+function resolveBaseRef(dir, ref, laneNum) {
+  const withOrigin = `origin/${ref}`;
+  if (tryGit(['rev-parse', '--verify', '--quiet', withOrigin], dir)) return withOrigin;
+  if (tryGit(['rev-parse', '--verify', '--quiet', ref], dir)) return ref;
+  fail(
+    `--base=${ref} does not resolve in lane-${laneNum}'s clone (tried "${withOrigin}" and "${ref}") — ` +
+      `push it to origin first (a local-only ref on another checkout is not visible here), or pass a ref ` +
+      `that already exists on origin.`,
+  );
 }
 
 function cmdRelease(repo) {
