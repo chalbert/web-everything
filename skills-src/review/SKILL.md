@@ -45,6 +45,15 @@ applies a label).
      which routes the fix back to the **author lane** (the drain does no editing here — that convergence loop is
      v2, epic #2285). Summarize the required changes in a PR comment.
 
+5. **Post the human verdict as a PR comment** (both paths — so the verdict is a durable, readable record on
+   the PR, not just a label). Post via `gh pr comment <PR> --repo <repo> --body '<comment>'`, marked clearly as
+   the human decision so it is never mistaken for the drain's `🤖 advisory AI review (non-clearing)` take:
+   - Header line: `✅ human review — accepted` or `🔁 human review — changes requested`.
+   - Body: the core's findings + verdict that you presented, plus one line naming who accepted / requested
+     changes (the operator).
+   - On the **changes** path this **is** the "summarize the required changes" comment from step 4 — post one
+     comment, not two.
+
 ## Invariant
 
 A **`review:human` PR is never agent-cleared** — the core may render an *advisory* take (findings + verdict as a
