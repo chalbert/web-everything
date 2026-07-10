@@ -1,5 +1,5 @@
 {
   "term": "Slider",
-  "definition": "A control for choosing a numeric value by position along a track. The single-thumb case is the native <code>&lt;input type=\"range\"&gt;</code>; the block enhances only the gaps the native control can't express. Distinct from a numeric/stepper field — the slider is the continuous-along-a-track member.",
+  "definition": "A control for choosing a numeric value by position along a track. The single-thumb case is the native <code>&amp;lt;input type=\"range\"&amp;gt;</code>; the block enhances only the gaps the native control can't express. Distinct from a numeric/stepper field — the slider is the continuous-along-a-track member.",
   "usage": "Delivered by the <a href=\"/blocks/slider/\">Slider block</a>, realizing the <a href=\"/intents/selection/\">Selection Intent</a>'s <code>range</code> variant and composing the <a href=\"/intents/input/\">Input</a> and <a href=\"/intents/locale/\">Locale</a> intents."
 }

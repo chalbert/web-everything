@@ -1,5 +1,5 @@
 {
   "term": "Lowering",
-  "definition": "Compiling a higher-level render-strategy expression of control-flow into a lower-level declarative-static primitive — e.g. JS <code>items.map(…)</code> into <code>&lt;template is=\"for-each\"&gt;</code>, or a ternary into <code>&lt;template is=\"if\"&gt;</code>. The inverse of <a href=\"#lifting\">Lifting</a>. Structural control-flow lowers reversibly; the eager <code>{expr}</code> ⇄ reactive <code>{{ expr }}</code> boundary is lossy.",
+  "definition": "Compiling a higher-level render-strategy expression of control-flow into a lower-level declarative-static primitive — e.g. JS <code>items.map(…)</code> into <code>&amp;lt;template is=\"for-each\"&amp;gt;</code>, or a ternary into <code>&amp;lt;template is=\"if\"&amp;gt;</code>. The inverse of <a href=\"#lifting\">Lifting</a>. Structural control-flow lowers reversibly; the eager <code>{expr}</code> ⇄ reactive <code>{{ expr }}</code> boundary is lossy.",
   "usage": "Render Strategy Protocol cross-strategy compiler. Distinct from same-strategy spelling conversion (Axis-1), which is reversible by construction."
 }

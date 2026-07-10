@@ -1,5 +1,5 @@
 {
   "term": "Lifting",
-  "definition": "The inverse of <a href=\"#lowering\">Lowering</a> — recovering a higher-level render-strategy expression (JS <code>items.map(…)</code>) from a declarative-static directive (<code>&lt;template is=\"for-each\"&gt;</code>). Structural directives lift cleanly; lifting cannot recover whether a <code>{{ }}</code> path was authored as an eager value or a tracked binding, so that boundary is declared lossy.",
+  "definition": "The inverse of <a href=\"#lowering\">Lowering</a> — recovering a higher-level render-strategy expression (JS <code>items.map(…)</code>) from a declarative-static directive (<code>&amp;lt;template is=\"for-each\"&amp;gt;</code>). Structural directives lift cleanly; lifting cannot recover whether a <code>{{ }}</code> path was authored as an eager value or a tracked binding, so that boundary is declared lossy.",
   "usage": "Render Strategy Protocol cross-strategy compiler."
 }

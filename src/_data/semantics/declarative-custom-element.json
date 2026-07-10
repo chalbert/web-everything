@@ -1,5 +1,5 @@
 {
   "term": "Declarative Custom Element",
   "definition": "A custom element whose definition — tag name, template, and shadow options — is expressed entirely in HTML markup, requiring no authored JavaScript class.",
-  "usage": "The output of the <code>&lt;component&gt;</code> element in Web Components. Distinct from Declarative Shadow DOM, which declares an instance's shadow content but not a reusable element definition."
+  "usage": "The output of the <code>&amp;lt;component&amp;gt;</code> element in Web Components. Distinct from Declarative Shadow DOM, which declares an instance's shadow content but not a reusable element definition."
 }

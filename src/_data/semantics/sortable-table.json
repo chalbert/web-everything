@@ -1,5 +1,5 @@
 {
   "term": "sortable table",
-  "definition": "The WAI-ARIA APG recipe for a table whose columns can be reordered: a native <code>&lt;table&gt;</code> with <code>&lt;th scope=\"col\"&gt;</code> headers, each sortable header wrapping its label in a <code>&lt;button&gt;</code>, and the active column carrying <code>aria-sort</code>. Distinct from <code>role=\"grid\"</code>, which adds cell-level keyboard navigation.",
+  "definition": "The WAI-ARIA APG recipe for a table whose columns can be reordered: a native <code>&amp;lt;table&amp;gt;</code> with <code>&amp;lt;th scope=\"col\"&amp;gt;</code> headers, each sortable header wrapping its label in a <code>&amp;lt;button&amp;gt;</code>, and the active column carrying <code>aria-sort</code>. Distinct from <code>role=\"grid\"</code>, which adds cell-level keyboard navigation.",
   "usage": "The accessible-today pattern the <a href=\"/blocks/data-table/\">Data Table block</a> realizes for the sort stage of Collection Operations."
 }

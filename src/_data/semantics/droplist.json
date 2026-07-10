@@ -1,5 +1,5 @@
 {
   "term": "Droplist",
-  "definition": "The abstract family — the substrate that every list-based selection surface (Dropdown, Multi-dropdown, Autocomplete, Tree-select, native <code>&lt;select&gt;</code>) conforms to. Not itself a shippable widget. (A menu button is not a member — it invokes commands via a role=menu owned by the Menu block; only its trigger shape is shared.)",
+  "definition": "The abstract family — the substrate that every list-based selection surface (Dropdown, Multi-dropdown, Autocomplete, Tree-select, native <code>&amp;lt;select&amp;gt;</code>) conforms to. Not itself a shippable widget. (A menu button is not a member — it invokes commands via a role=menu owned by the Menu block; only its trigger shape is shared.)",
   "usage": "Standardized by the Droplist block. Documents the trait surface map, the two-channel resolution rule, and the preset table that each concrete member resolves into."
 }
