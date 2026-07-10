@@ -13,6 +13,7 @@ import {
   describeLease,
   leaseOwnedBy,
   ancestryOverlaps,
+  isForeignLease,
 } from '../lane-lease.mjs';
 
 const T0 = Date.parse('2026-07-05T12:00:00.000Z');
@@ -92,12 +93,13 @@ describe('chooseFreeLane', () => {
 describe('leaseBody / describeLease / leaseOwnedBy', () => {
   it('leaseBody normalizes optional fields', () => {
     const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z' });
-    expect(b).toMatchObject({ session: 's', purpose: null, ttlMinutes: DEFAULT_LEASE_TTL_MINUTES, host: null, pid: null, ancestry: null });
+    expect(b).toMatchObject({ session: 's', purpose: null, ttlMinutes: DEFAULT_LEASE_TTL_MINUTES, host: null, pid: null, ancestry: null, ownerSession: null });
   });
-  it('leaseBody carries an explicit ancestry array through unchanged (#2367)', () => {
-    const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', pid: 111, ancestry: [111, 222, 333] });
+  it('leaseBody carries an explicit ancestry array + ownerSession through unchanged (#2367)', () => {
+    const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', pid: 111, ancestry: [111, 222, 333], ownerSession: 'sess-uuid-A' });
     expect(b.pid).toBe(111);
     expect(b.ancestry).toEqual([111, 222, 333]);
+    expect(b.ownerSession).toBe('sess-uuid-A');
   });
   it('describeLease renders who + purpose + when', () => {
     const s = describeLease(leaseBody({ session: 'drain-1', purpose: 'drain', acquiredAt: '2026-07-05T12:00:00.000Z' }));
@@ -140,5 +142,33 @@ describe('ancestryOverlaps (#2367 — the leaseholder-identity decision, no sess
     expect(ancestryOverlaps([1, 2], null)).toBe(false);
     expect(ancestryOverlaps(undefined, leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', ancestry: [1, 2] }))).toBe(false);
     expect(ancestryOverlaps([1, 2], { session: 's', ancestry: [] , pid: null })).toBe(false);
+  });
+});
+
+describe('isForeignLease (#2367 — durable ownerSession is the PRIMARY ownership signal)', () => {
+  const at = '2026-07-05T12:00:00.000Z';
+  it('a live lease owned by a DIFFERENT session is FOREIGN — even when the ancestry OVERLAPS', () => {
+    // The exact fail-open the ancestry-only test had: two independent sessions share an upper anchor (400),
+    // so the ancestry heuristic would wrongly read "mine". The durable ownerSession must win → foreign.
+    const lease = leaseBody({ session: 's', acquiredAt: at, ownerSession: 'sess-A', ancestry: [501, 400, 100] });
+    expect(isForeignLease({ lease, mySessionId: 'sess-B', myAncestry: [777, 400, 1] })).toBe(true);
+  });
+  it('my own lease (matching ownerSession) is NOT foreign — even when the ancestry does NOT overlap', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: at, ownerSession: 'sess-A', ancestry: [501, 400, 100] });
+    expect(isForeignLease({ lease, mySessionId: 'sess-A', myAncestry: [888, 999, 1] })).toBe(false);
+  });
+  it('falls back to the ancestry heuristic ONLY for an older lease with no ownerSession', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: at, ancestry: [501, 400, 100] }); // ownerSession null
+    expect(isForeignLease({ lease, mySessionId: 'sess-B', myAncestry: [777, 400, 1] })).toBe(false); // shared anchor ⇒ mine
+    expect(isForeignLease({ lease, mySessionId: 'sess-B', myAncestry: [888, 999, 1] })).toBe(true);  // no overlap ⇒ foreign
+  });
+  it('falls back to ancestry when the CALLER has no session id, even though the lease carries one', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: at, ownerSession: 'sess-A', ancestry: [501, 400, 100] });
+    expect(isForeignLease({ lease, mySessionId: null, myAncestry: [777, 400, 1] })).toBe(false); // overlap ⇒ mine
+    expect(isForeignLease({ lease, mySessionId: null, myAncestry: [888, 999, 1] })).toBe(true);  // no overlap ⇒ foreign
+  });
+  it('no lease ⇒ never foreign', () => {
+    expect(isForeignLease({ lease: null, mySessionId: 'sess-A', myAncestry: [1] })).toBe(false);
+    expect(isForeignLease({})).toBe(false);
   });
 });
