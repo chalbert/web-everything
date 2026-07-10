@@ -83,20 +83,47 @@ export function nextHash(existingIds = []) {
  * catches the item's own frontmatter/body AND other items' `blockedBy`/`parent`/`#refs`, with no risk
  * of a spurious hit. Applying the WHOLE ledger at every land (not just the just-landed hash) is what
  * fixes a dependent that references an already-numbered blocker by its old hash (the cross-lane edge).
+ *
+ * `pathRenames` (#2400) — a hash also embeds in ON-DISK PATH VALUES: a `relatedReport` whose report
+ * filename stem IS the item's own birth hash, or a body markdown link to `reports/…-<hash>.md`. The
+ * blind swap above rewrites the *reference* correctly, but the referenced *file* is NOT one of `files`
+ * (it lives outside `backlog/`), so nothing renames it — the ref would dangle + the report would be
+ * hidden on main (the #2387 red-main regression). So we also collect every path-shaped token that
+ * embeds a ledgered hash and return the `{from, to}` file rename for the drain to `git mv` + rewrite in
+ * the same land commit. Tokens under `backlog/` are excluded (those files are renamed via `renames`);
+ * a `/backlog/<hash>/` URL has no extension so it isn't matched here — its ref-rewrite to
+ * `/backlog/<NNN>/` is correct and needs no file rename. PURE (pattern only): the drain verifies the
+ * file EXISTS before acting, so a path token with no on-disk file (a bare URL, a prose mention) is a
+ * harmless no-op.
+ *
  * PURE — no FS/git; the drain does the `git mv` / write at its boundary.
  *
  * @param {{name:string, content:string}[]} files
  * @param {Record<string,string>} ledger  { hash: nnn }
- * @returns {{ renames: {from:string,to:string}[], rewrites: {name:string,content:string}[] }}
+ * @returns {{ renames: {from:string,to:string}[], rewrites: {name:string,content:string}[], pathRenames: {from:string,to:string}[] }}
  */
 export function applyLedger(files, ledger) {
   const entries = Object.entries(ledger).filter(([h]) => isHash(h));
   const renames = [];
   const rewrites = [];
+  const pathRenames = [];
+  const pathSeen = new Set();
   for (const { name, content } of files) {
     let text = content;
     for (const [hash, nnn] of entries) {
       text = text.replace(new RegExp(`\\b${hash}\\b`, 'g'), String(nnn));
+      // Collect on-disk path values embedding this hash (see `pathRenames` in the doc above). Match a
+      // path-shaped run (dir/file chars) that carries the hash AND ends in a `.ext`; scan the ORIGINAL
+      // content (post-swap the hash is gone). Skip `backlog/*` — handled by `renames`.
+      const pathRe = new RegExp(`(?<![\\w./-])([\\w./-]*\\b${hash}\\b[\\w./-]*\\.[\\w]+)`, 'g');
+      for (const m of content.matchAll(pathRe)) {
+        const from = m[1];
+        if (from.startsWith('backlog/') || pathSeen.has(from)) continue;
+        const to = from.replace(new RegExp(`\\b${hash}\\b`, 'g'), String(nnn));
+        if (to === from) continue;
+        pathSeen.add(from);
+        pathRenames.push({ from, to });
+      }
     }
     const idTok = idFromName(name);
     if (idTok && ledger[idTok] !== undefined && isHash(idTok)) {
@@ -104,5 +131,5 @@ export function applyLedger(files, ledger) {
     }
     if (text !== content) rewrites.push({ name, content: text });
   }
-  return { renames, rewrites };
+  return { renames, rewrites, pathRenames };
 }
