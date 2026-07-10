@@ -70,6 +70,7 @@ import {
   describeLease,
   leaseOwnedBy,
 } from './lib/lane-lease.mjs';
+import { getAncestryPids } from './lib/pid-ancestry.mjs';
 
 // ── tiny arg parsing ──────────────────────────────────────────────────────────────────────────────
 const [, , cmd, ...rest] = process.argv;
@@ -531,8 +532,17 @@ function cmdRefresh(repo) {
 // override is `release --force` then re-acquire, per the ruling's "no new flag" contract). A stale marker ⇒
 // reclaimed (rm + retry, the small documented race). Own live lease ⇒ true (idempotent re-acquire).
 function tryClaimLane(dir, session, nowMs, ttlMs) {
+  // #2367 — a later guard needs to tell "my own lease" from "someone else's" WITHOUT a session-id, by
+  // testing whether ITS OWN live process ancestry overlaps what's recorded here. A single captured pid
+  // can't do that: this `acquire` call (and any single ancestor of it) is a LEAF that exits once this
+  // command returns — an interactive session runs each Bash-tool call through its OWN fresh shell wrapper
+  // process, so that leaf is never an ancestor of a LATER, separate command (verified empirically: two
+  // Bash-tool calls in one session get two different immediate-parent pids). What DOES persist across
+  // every call in the session is a common ancestor further up (the session's own long-lived process) — so
+  // `ancestry` captures the FULL live chain now, and ownership is decided by chain OVERLAP (see
+  // `ancestryOverlaps`, lane-lease.mjs), not a single-pid match.
   const body = JSON.stringify(
-    leaseBody({ session, purpose: flags.purpose, acquiredAt: new Date(nowMs).toISOString(), ttlMinutes: ttlMinutesFromFlags(), host: hostname(), pid: process.pid }),
+    leaseBody({ session, purpose: flags.purpose, acquiredAt: new Date(nowMs).toISOString(), ttlMinutes: ttlMinutesFromFlags(), host: hostname(), pid: process.pid, ancestry: getAncestryPids(process.pid) }),
     null, 2,
   ) + '\n';
   const file = LEASE_MARKER(dir);
