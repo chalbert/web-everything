@@ -1,7 +1,9 @@
 ---
 kind: epic
-status: open
+status: resolved
 dateOpened: "2026-07-04"
+dateResolved: "2026-07-10"
+graduatedTo: none
 tags: [agent-tooling, skills, memory, regression, testing]
 ---
 
