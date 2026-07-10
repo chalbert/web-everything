@@ -3,6 +3,7 @@ kind: story
 size: 2
 parent: "1104"
 status: open
+humanGate: { kind: deploy, what: "Taking the splash gate off is the genuinely-public launch — a credentialed, human-owned gated deploy under rollout epic #1104, not agent-executable. The claims-truth audit re-run (#2127's method against the then-current site) precedes it, but the deploy act itself stays human." }
 blockedBy: ["867"]
 dateOpened: "2026-07-02"
 tags: []
