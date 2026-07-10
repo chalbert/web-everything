@@ -31,7 +31,7 @@ import { readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyTransition, readField, setFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
+import { applyTransition, applySettle, readField, setFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { nextHash, normalizeId, idFromName, isHash, slugFromName } from './backlog/id.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize, sessionForNum } from './readiness/reservations.mjs';
@@ -514,14 +514,11 @@ function settle() {
   const file = files().find((f) => f.startsWith(`${padded}-`));
   if (!file) die(`settle: no backlog item #${padded}`);
   const abs = join(DIR, file);
-  let src = readFileSync(abs, 'utf8');
-  if (!/^scaffoldedBy:/m.test(src))
-    die(`settle: #${padded} is not a born-active scaffold (no scaffoldedBy) — a claimed item is closed by \`resolve\`, not \`settle\``);
+  const src = readFileSync(abs, 'utf8');
   // active → open, and drop the ownership stamps (settled = published, no longer session-owned).
-  src = src.replace(/^status: active$/m, 'status: open')
-           .replace(/^scaffoldedBy: .*\n/m, '')
-           .replace(/^dateScaffolded: .*\n/m, '');
-  writeBacklogMd(abs, `backlog/${file}`, src);
+  const res = applySettle(src);
+  if (res.error) die(`settle: ${res.error} (#${padded})`);
+  writeBacklogMd(abs, `backlog/${file}`, res.content);
   const rel = `backlog/${file}`;
   ok({ verb: 'settle', id: file.replace(/\.md$/, ''), file: rel, status: 'open' },
     `${GRN}✓ settled${RST} ${file.replace(/\.md$/, '')} ${DIM}→ open (published; ownership stamps cleared)${RST}`);
