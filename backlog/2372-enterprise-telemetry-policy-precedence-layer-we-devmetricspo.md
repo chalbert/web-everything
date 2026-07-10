@@ -2,8 +2,11 @@
 kind: story
 size: 3
 parent: "1848"
-status: open
+status: resolved
 dateOpened: "2026-07-09"
+dateStarted: "2026-07-10"
+dateResolved: "2026-07-10"
+graduatedTo: "analytics/dev-metrics.ts DevMetricsPolicy + fui:plugs/webanalytics/devMetrics.ts resolveDevMetricsPolicy"
 tags: []
 ---
 
