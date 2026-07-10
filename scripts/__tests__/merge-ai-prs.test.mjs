@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -880,7 +880,7 @@ describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, n
     // The park/skip paths only fire when the drain does NOT merge, so they record nothing in the attack's
     // SUCCESS state (dismissedFindings edited DOWN so the PR LANDS). The 'land' comment fires just before the
     // merge on a manifest-carrying PR, so a landed PR always carries a durable record of what the drain acted on.
-    const reason = 'landing — recording the acted-on manifest escalation values before merge';
+    const reason = LAND_REASON; // the exported const the land path posts — kept in one place, no drift
     const auditActed = 'manifest acted-on: dismissedFindings=0 crossRepo=false blockedBy=[]'; // the tampered-down value the drain actually acted on
     const body = buildDrainReasonComment('land', reason, auditActed);
     expect(body).toContain('drain-land-reason'); // its own marker kind, distinct from park/skip

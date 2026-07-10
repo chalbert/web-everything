@@ -432,6 +432,17 @@ export function buildDrainReasonComment(kind, reasonText, auditLine) {
   return `${drainReasonMarker(kind)}\n${heading}\n\n${reasonText}${audit}`;
 }
 
+/** xnsk54v follow-up — the fixed reason text for the land-path audit record. Exported (and imported by the
+ *  test) so the string lives in ONE place: the record and its assertion can't silently drift apart. */
+export const LAND_REASON = 'landing — recording the acted-on manifest escalation values before merge';
+
+/** xnsk54v follow-up — the acted-on manifest audit line for a verdict/candidate `x`, or `undefined` when the
+ *  PR carries no manifest (an orphan/impl PR has nothing body-sourced to record — its comment stays
+ *  byte-identical to before). `manifestAuditLine` destructures exactly `dismissedFindings`/`crossRepo`/
+ *  `blockedBy`, so passing the whole verdict is safe — its extra keys are ignored. Collapses the identical
+ *  park/skip/land call sites into one. */
+const auditLineFor = (x) => x.hasManifest ? manifestAuditLine(x) : undefined;
+
 /**
  * #2333 — should a PARK stamp its escalation reason as a PR comment (#2313)? ONLY for a NON-human
  * (agent-reviewable) park. A `review:human` park already states the SAME reason IN THE PR BODY via #2324's
@@ -1136,8 +1147,7 @@ function runCli() {
             // timestamped comment. Only for a manifest-carrying PR (an orphan/impl PR has nothing body-sourced
             // to record — its comment stays byte-identical to before). Does not change the verdict/label already
             // decided above; it only records what was acted on, so a later body edit is tamper-evident.
-            const auditLine = v.hasManifest ? manifestAuditLine({ dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, blockedBy: v.blockedBy }) : undefined;
-            const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLine);
+            const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} escalation reason stamped on PR\n`);
           }
         }
@@ -1203,8 +1213,7 @@ function runCli() {
       if (!(v.certifyLabel || v.aiGenerated)) continue;
       // xnsk54v follow-up — mirror the park path: record the acted-on manifest values into the durable skip
       // comment for a manifest-carrying PR (tamper-evidence), leaving orphan/impl skip comments unchanged.
-      const auditLine = v.hasManifest ? manifestAuditLine({ dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, blockedBy: v.blockedBy }) : undefined;
-      const posted = postDrainReasonComment(v.repo, v.num, 'skip', v.reason, auditLine);
+      const posted = postDrainReasonComment(v.repo, v.num, 'skip', v.reason, auditLineFor(v));
       if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} skip reason stamped on PR\n`);
     }
   }
@@ -1249,9 +1258,12 @@ function runCli() {
           // orphan/impl PR has nothing body-sourced to record — its behaviour is byte-identical to before).
           // Decision-preserving: `postDrainReasonComment` swallows every `gh` error internally (returns a bool,
           // never throws), so it can neither block nor alter the merge below — it only records.
+          // NOTE (residual, tracked as a follow-up): this fires only under `c.hasManifest`, so it covers the
+          // edit-a-value-DOWN variant — NOT a full manifest STRIP (deleting the whole block flips `hasManifest`
+          // false, the PR degrades to no-manifest → always-ready, and NO land record is written). Fully closing
+          // that needs a reviewed BASELINE to diff a landed PR against (out of scope for this size-2 story).
           if (c.hasManifest) {
-            const landAudit = manifestAuditLine({ dismissedFindings: c.dismissedFindings, crossRepo: c.crossRepo, blockedBy: c.blockedBy });
-            const posted = postDrainReasonComment(c.repo, c.num, 'land', 'landing — recording the acted-on manifest escalation values before merge', landAudit);
+            const posted = postDrainReasonComment(c.repo, c.num, 'land', LAND_REASON, auditLineFor(c));
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} acted-on manifest values stamped on PR before merge\n`);
           }
           // #2290 — the drain is the SOLE writer to main: the one `gh pr merge` now routes through the shared
