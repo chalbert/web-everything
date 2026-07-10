@@ -515,6 +515,55 @@ export function parseNumstat(numstat) {
 }
 
 /**
+ * #2373 — the SHARED net-diff basis for the review-escalation rubric, used by BOTH the producer
+ * (`pr-land.mjs`'s `applyReviewEscalationLabel`) and the drain backstop below — the ONE place this basis is
+ * computed, so the two paths can't independently drift (#1821 fixed the drain path's basis; #2373 found the
+ * producer path still mis-computed it via a bare `git fetch <remote> <base>`, which relies on git's
+ * "opportunistic" tracking-ref update and can leave a stale local `<remote>/<base>` even after a
+ * "successful" fetch — silently sweeping already-landed upstream commits into the score, e.g. a gate-fix
+ * commit another lane merged onto `main` between this lane's claim and its PR-open). Fetching with an
+ * EXPLICIT destination refspec (`+<base>:refs/remotes/<remote>/<base>`) force-updates the tracking ref
+ * unconditionally, so the subsequent `git diff --numstat <remote>/<base> <rev>` — a NET two-tree comparison,
+ * content-only and ancestry-independent, deliberately NOT a three-dot/merge-base diff — always scores off
+ * the CURRENT upstream base, never one a concurrently-landed PR has since advanced past.
+ *
+ * Tries a short fallback chain for `rev` (`<remote>/<rev>` first, then the bare `rev`) since a foreign/sibling
+ * clone scoring another repo's PR may not have `rev` as a local branch. `<remote>/<rev>` is tried FIRST, not the
+ * bare `rev` (#2373-review-r2): in the DRAIN path `rev` is a branch NAME (`v.headRef`), and the clone may hold a
+ * STALE local branch of that same name — a bare `git diff <remote>/<base> <headRef>` would then resolve against
+ * that stale local branch and return `scored:true` with wrong/partial `changedFiles`, under-scoring escalation
+ * (the UNSAFE direction: a gate-self PR whose gate-touching files are missing from the diff could slip past).
+ * `fetchExtraRefs` freshly fetched the head ref, so `<remote>/<rev>` is the just-fetched truth — consulting it
+ * before any local branch of the same name dodges that collision. The PRODUCER path is unaffected: there `rev`
+ * is an already-resolved local SHA, so `<remote>/<sha>` (e.g. `origin/abc123`) is an invalid ref that fails fast
+ * (one extra cheap failed git call), falling through to the bare `rev` SHA which resolves. `FETCH_HEAD` is DELIBERATELY
+ * NOT a candidate (#2373-review): the base is listed FIRST in the fetch refspec and `git diff FETCH_HEAD` /
+ * `git rev-parse FETCH_HEAD` resolve to that first line, so `FETCH_HEAD` always points at `<remote>/<base>` —
+ * a `FETCH_HEAD` diff would therefore be base-vs-base (an EMPTY diff) and "succeed" with `scored:true` and zero
+ * changed files, MASKING a real `<remote>/<rev>` miss. Without it, when neither `rev` nor `<remote>/<rev>`
+ * resolves the function returns `scored:false` and the caller correctly falls through to its GitHub files-list
+ * backstop (the safe, over-scoring direction). `fetchExtraRefs` still fetches the head ref so `<remote>/<rev>`
+ * resolves in the normal sibling-clone case — it just never gets offered as a diff candidate via `FETCH_HEAD`.
+ * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
+ *   `exec(cmd, args, opts)` — inject `execFileSync`-shaped exec so this stays unit-testable with a fake.
+ * @returns {{changedFiles:string[], diffLines:number, scored:boolean}}
+ */
+export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
+  if (typeof exec !== 'function' || !rev) return { changedFiles: [], diffLines: 0, scored: false };
+  try {
+    exec('git', ['fetch', remote, `+${base}:refs/remotes/${remote}/${base}`, ...fetchExtraRefs, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] });
+  } catch { /* degrade to whatever is locally cached — the diff attempts below still run */ }
+  const candidates = [`${remote}/${rev}`, rev];
+  for (const candidate of candidates) {
+    try {
+      const out = exec('git', ['diff', '--numstat', `${remote}/${base}`, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return { ...parseNumstat(out), scored: true };
+    } catch { /* try next candidate */ }
+  }
+  return { changedFiles: [], diffLines: 0, scored: false };
+}
+
+/**
  * #2290 — POST-LAND WE DERIVED-ARTIFACT REGEN, now owned by the drain (the sole writer to main). Under #2183
  * lanes never commit the derived artifacts (`gen:inventory` → the AGENTS.md inventory block; `gen:reference-index`
  * → src/_data/referenceIndex.json). pr-land used to regen+commit+push them after its own merge (#2182), but
@@ -1000,24 +1049,18 @@ function runCli() {
       if (v.decision !== 'merge') continue;
       let changedFiles = [];
       let diffLines = 0;
-      // #1821 — score off the NET two-dot diff vs current `main` (`git diff --numstat origin/main <head>`),
-      // NOT the GitHub PR `files` list: that list is a three-dot/merge-base diff, so a stacked-pipeline PR
-      // whose earlier stage already landed on `main` still lists that stage's files even though the PR's real
-      // (net) diff no longer touches them — spuriously tripping `isGateSelfPath`/blast-radius (observed live
-      // on PR #187). Best-effort local git read (needs the local clone or a provisioned sibling clone);
-      // falls back to the old GitHub files-list read if neither is available.
+      // #2373 — score off the SHARED net-diff basis (`computeNetDiffChangedFiles`, also used by the
+      // producer path in pr-land.mjs — the ONE place this basis is computed, #1821's original fix folded
+      // in). Best-effort local git read (needs the local clone or a provisioned sibling clone); falls back
+      // to the old GitHub files-list read if neither is available.
       const escCwd = isLocalRepo(v.repo) ? undefined : siblingCloneDir(v.repo);
       let netScored = false;
       if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
-        try { execFileSync('git', ['fetch', 'origin', 'main', v.headRef, '--quiet'], { cwd: escCwd, stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may already be local/up to date */ }
-        for (const rev of [`origin/${v.headRef}`, 'FETCH_HEAD', v.headRef]) {
-          try {
-            const out = execFileSync('git', ['diff', '--numstat', 'origin/main', rev], { cwd: escCwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-            ({ changedFiles, diffLines } = parseNumstat(out));
-            netScored = true;
-            break;
-          } catch { /* try next rev */ }
-        }
+        const exec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts });
+        const net = computeNetDiffChangedFiles({ exec, rev: v.headRef, fetchExtraRefs: [v.headRef] });
+        changedFiles = net.changedFiles;
+        diffLines = net.diffLines;
+        netScored = net.scored;
       }
       if (!netScored) {
         try {
