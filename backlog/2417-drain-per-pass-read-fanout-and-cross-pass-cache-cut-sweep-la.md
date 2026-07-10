@@ -4,7 +4,6 @@ status: open
 relatedTo: ["2257", "2287", "2194", "2262"]
 tags: [lane, drain, merge-queue, perf]
 dateOpened: "2026-07-10"
-size: 3
 ---
 
 # Drain per-pass read fan-out + cross-pass cache — cut sweep latency without touching the serial merge
