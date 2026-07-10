@@ -12,6 +12,7 @@ import {
   leaseBody,
   describeLease,
   leaseOwnedBy,
+  isForeignLease,
 } from '../lane-lease.mjs';
 
 const T0 = Date.parse('2026-07-05T12:00:00.000Z');
@@ -91,7 +92,16 @@ describe('chooseFreeLane', () => {
 describe('leaseBody / describeLease / leaseOwnedBy', () => {
   it('leaseBody normalizes optional fields', () => {
     const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z' });
-    expect(b).toMatchObject({ session: 's', purpose: null, ttlMinutes: DEFAULT_LEASE_TTL_MINUTES, host: null, pid: null });
+    expect(b).toMatchObject({ session: 's', purpose: null, ttlMinutes: DEFAULT_LEASE_TTL_MINUTES, host: null, pid: null, ownerSession: null });
+  });
+  it('leaseBody carries an explicit pid + ownerSession through unchanged (#2367)', () => {
+    const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', pid: 111, ownerSession: 'sess-uuid-A' });
+    expect(b.pid).toBe(111);
+    expect(b.ownerSession).toBe('sess-uuid-A');
+  });
+  it('leaseBody no longer carries an ancestry field (r2 — pid-ancestry removed)', () => {
+    const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', pid: 111, ownerSession: 'sess-uuid-A' });
+    expect('ancestry' in b).toBe(false);
   });
   it('describeLease renders who + purpose + when', () => {
     const s = describeLease(leaseBody({ session: 'drain-1', purpose: 'drain', acquiredAt: '2026-07-05T12:00:00.000Z' }));
@@ -103,5 +113,31 @@ describe('leaseBody / describeLease / leaseOwnedBy', () => {
     expect(leaseOwnedBy(lease, 'sess-a')).toBe(true);
     expect(leaseOwnedBy(lease, 'sess-b')).toBe(false);
     expect(leaseOwnedBy(null, 'sess-a')).toBe(false);
+  });
+});
+
+describe('isForeignLease (#2367 r2 — durable ownerSession is the SOLE ownership signal)', () => {
+  const at = '2026-07-05T12:00:00.000Z';
+  it('a live lease whose ownerSession differs from mine is FOREIGN (deny)', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: at, ownerSession: 'sess-A' });
+    expect(isForeignLease({ lease, mySessionId: 'sess-B' })).toBe(true);
+  });
+  it('my own lease (ownerSession === mySessionId) is NOT foreign (allow)', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: at, ownerSession: 'sess-A' });
+    expect(isForeignLease({ lease, mySessionId: 'sess-A' })).toBe(false);
+  });
+  it('DEGRADED — a lease with no ownerSession ⇒ fail-open (allow, not foreign)', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: at }); // ownerSession null (older lease / env unset at acquire)
+    expect(isForeignLease({ lease, mySessionId: 'sess-B' })).toBe(false);
+  });
+  it('DEGRADED — the caller has no mySessionId ⇒ fail-open (allow), even though the lease carries one', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: at, ownerSession: 'sess-A' });
+    expect(isForeignLease({ lease, mySessionId: null })).toBe(false);
+    expect(isForeignLease({ lease, mySessionId: '' })).toBe(false);
+  });
+  it('no lease ⇒ never foreign; empty args never throw', () => {
+    expect(isForeignLease({ lease: null, mySessionId: 'sess-A' })).toBe(false);
+    expect(isForeignLease({})).toBe(false);
+    expect(isForeignLease()).toBe(false);
   });
 });

@@ -117,6 +117,48 @@ export function parseManifest(text) {
   } catch { return null; }
 }
 
+/**
+ * PR-body carrier (xnsk54v) — the drain metadata belongs ON the PR, not committed into the tree. The lane
+ * manifest rode `.lane-manifest.json` at the repo root, but every lane wrote the SAME path, so every open lane
+ * PR conflicted with `main` there (#2198) — which forced the `rebase-drop-manifest` merge-fabrication step and
+ * its per-pass merge-commit bloat. Since the producer already opens a ready-to-merge PR and the drain is the
+ * ONLY consumer, the manifest lives in the PR body as a delimited fenced block instead: no tracked file, no
+ * shared-path conflict, no rebase-drop. These helpers are the pure block writer/reader (the CLI/drain own gh).
+ */
+export const MANIFEST_BODY_BEGIN = '<!-- lane-manifest:begin -->';
+export const MANIFEST_BODY_END = '<!-- lane-manifest:end -->';
+
+/** The delimited PR-body block for a manifest — a human-visible fenced `json` payload between HTML-comment
+ *  markers (the markers make extraction unambiguous even when a human edits the surrounding body). */
+export function manifestBodyBlock(m) {
+  const payload = JSON.stringify(m, null, 2);
+  return `${MANIFEST_BODY_BEGIN}\n<details><summary>Lane manifest (drain metadata)</summary>\n\n\`\`\`json\n${payload}\n\`\`\`\n</details>\n${MANIFEST_BODY_END}`;
+}
+
+/** Embed (or REPLACE, idempotently) a manifest block in a PR body. A null/empty body yields just the block.
+ *  Re-embedding on an already-carrying body swaps the block in place rather than appending a second one. */
+export function embedManifestInBody(body, m) {
+  const block = manifestBodyBlock(m);
+  const base = body == null ? '' : String(body);
+  const re = new RegExp(`${escapeRe(MANIFEST_BODY_BEGIN)}[\\s\\S]*?${escapeRe(MANIFEST_BODY_END)}`);
+  // Use a function replacement so `$`-special sequences in the manifest JSON (`$&`, `$1`, `$$`) are
+  // inserted literally rather than interpreted as String.prototype.replace substitution patterns.
+  if (re.test(base)) return base.replace(re, () => block);
+  return base.trim() ? `${base.replace(/\s*$/, '')}\n\n${block}\n` : `${block}\n`;
+}
+
+/** Extract a manifest from a PR body's delimited block → a parsed manifest, or null (no block / bad JSON). */
+export function extractManifestFromBody(body) {
+  if (!body) return null;
+  const re = new RegExp(`${escapeRe(MANIFEST_BODY_BEGIN)}([\\s\\S]*?)${escapeRe(MANIFEST_BODY_END)}`);
+  const m = String(body).match(re);
+  if (!m) return null;
+  const fenced = m[1].match(/```(?:json)?\s*([\s\S]*?)```/);
+  return parseManifest(fenced ? fenced[1] : m[1]);
+}
+
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
 /** Serialize a manifest to `.lane-manifest.json` text (with a self-documenting `_doc` header). */
 export function serializeManifest(m) {
   return JSON.stringify(
