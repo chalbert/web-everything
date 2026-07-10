@@ -675,9 +675,22 @@ function isStrictAncestor(exec, ancestor, descendant) {
  * "successful" fetch — silently sweeping already-landed upstream commits into the score, e.g. a gate-fix
  * commit another lane merged onto `main` between this lane's claim and its PR-open). Fetching with an
  * EXPLICIT destination refspec (`+<base>:refs/remotes/<remote>/<base>`) force-updates the tracking ref
- * unconditionally, so the subsequent `git diff --numstat <remote>/<base> <rev>` — a NET two-tree comparison,
- * content-only and ancestry-independent, deliberately NOT a three-dot/merge-base diff — always scores off
- * the CURRENT upstream base, never one a concurrently-landed PR has since advanced past.
+ * unconditionally, so the subsequent diff always scores off the CURRENT upstream base, never one a
+ * concurrently-landed PR has since advanced past.
+ *
+ * #2404 — twin of #2373 in the OTHER direction: #2373 fixed a STALE base under-reporting; a fresh base
+ * against an UN-REBASED head over-reports instead — a bare `<remote>/<base>..<rev>` two-tree diff then counts
+ * every file upstream has advanced since the lane forked as if the PR itself touched it (repro: PR #364, a
+ * 2-file docs change scored `changedFiles` in the dozens off upstream-only commits). The diff basis is
+ * therefore taken from `git merge-base <remote>/<base> <candidate>` — the commit the lane actually forked
+ * from — to `<candidate>`, not from the base tip directly. This is STILL a two-tree, content-only,
+ * ancestry-independent `git diff --numstat` (never a three-dot diff); only the LEFT side moves to the
+ * provable fork point. Unlike `baseRev` below, the merge-base is derived purely from the commit graph — never
+ * a self-declared/manifest value — so it can't be gamed the way #2390-review-fix guards `baseRev` against,
+ * and it degrades safely: a rebased head has `merge-base(base, head) == base`, so this is a no-op there, and
+ * an unresolvable/no-common-history merge-base falls back to the base tip itself (the prior, safe
+ * over-scoring behavior). This narrows BOTH `own` and the cumulative `humanBasisFiles`, so the #2404 fix
+ * benefits the human-gate signal too.
  *
  * Tries a short fallback chain for `rev` (`<remote>/<rev>` first, then the bare `rev`) since a foreign/sibling
  * clone scoring another repo's PR may not have `rev` as a local branch. `<remote>/<rev>` is tried FIRST, not the
@@ -728,10 +741,25 @@ export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'ma
   } catch { /* degrade to whatever is locally cached — the diff attempts below still run */ }
   const candidates = [`${remote}/${rev}`, rev];
   for (const candidate of candidates) {
-    // The cumulative `<remote>/<base>…head` diff is BOTH the human-gate basis AND the candidate-resolves probe.
+    // #2404 — narrow the LEFT side of the diff to the provable fork point (`merge-base(baseRef, candidate)`)
+    // when one exists, instead of diffing straight off the base tip: a head that's behind an advanced base
+    // would otherwise have every upstream-only commit swept in as if the PR touched it. A merge-base lookup
+    // failure (no common history / candidate unresolvable) is swallowed here and falls back to `baseRef`
+    // itself — the diff call right after is still the real candidate-resolves probe.
+    let diffBase = baseRef;
+    try {
+      // `git merge-base A B` can print MORE THAN ONE line (a criss-cross-merge history can have several
+      // equally-valid best common ancestors) — take only the first; `.trim()` alone would leave an embedded
+      // newline in a would-be single revision arg, making it an invalid `git diff` argument (a "continue" to
+      // the next candidate, or `scored:false` if both candidates hit it — always the safe over-scoring
+      // fallback, never wrong data, but avoidable).
+      const mb = String(exec('git', ['merge-base', baseRef, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').split('\n')[0].trim();
+      if (mb) diffBase = mb;
+    } catch { /* no common history, or candidate doesn't resolve yet — the diff below is the real probe */ }
+    // The cumulative `<mergeBase>…head` diff is BOTH the human-gate basis AND the candidate-resolves probe.
     let humanBasis;
     try {
-      humanBasis = parseNumstat(exec('git', ['diff', '--numstat', baseRef, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+      humanBasis = parseNumstat(exec('git', ['diff', '--numstat', diffBase, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
     } catch { continue; /* candidate doesn't resolve — try the next one */ }
     // SIZE / blast-radius de-inflate to the OWN delta (`baseRev…head`) ONLY when `baseRev` provably is a STRICT
     // ancestor of head; otherwise use the cumulative basis (the safe over-scoring direction).
