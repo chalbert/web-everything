@@ -196,7 +196,7 @@ check (impl-is-not-a-standard) — labels are the human+drain-visible contract, 
 all axes.
 
 **Codified:** `we:docs/agent/platform-decisions.md#ci-lifecycle-total-label-function`.
-**Successor build (agent-ready):** #xqd7m2u — generalize the reconcile transition table + mint labels + tests.
+**Successor build (agent-ready):** #2421 — generalize the reconcile transition table + mint labels + tests.
 
 Relates #2199 (the `ready-to-merge`-on-green precedent this generalizes), #2216 (the CI-truth reconcile pass
 that makes (b) cheap and (a) unsound), #2262 (the `review:*` mint step new labels join), #2171 (the review
