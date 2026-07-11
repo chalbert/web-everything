@@ -434,3 +434,95 @@ export function renderPanelVerdictTable({ lensVerdicts = {}, mandatoryLenses = M
   });
   return ['| lens | weight | verdict |', '| --- | --- | --- |', ...rows].join('\n');
 }
+
+/**
+ * #2433 — SESSION/NOTICE RENDERERS. Three recurrent OPERATOR-facing artifacts (chat/report text, not PR
+ * comments — `renderPanelVerdictTable` above and #2432's `renderPanelComment` cover the PR-comment body) that
+ * used to be hand-typed prose per caller each time (the #2418 epic's "template the renders, not the prose"
+ * lever): the drain's end-of-run pass summary, the escalation/clearance notice a session reports about ONE
+ * PR's outcome, and the `closing-session` "Flow improvements" recap line. Single-sourced here so a wording
+ * tweak lands once and `/drain`/`/review`/`closing-session` can't drift apart on how they say the same thing.
+ */
+
+/**
+ * Render the drain's end-of-run pass summary (#2433) — what `/drain` reports to the operator after a
+ * `merge-ai-prs.mjs` pass, instead of hand-composing it fresh from the raw `--json` result each time. Pure —
+ * consumes the (sub)shape of that JSON result the drain already computes (`merged`/`failed`/`deferred`/
+ * `parked`/`skipped`, each an array of `{num, repo?, ...}`-shaped entries); never re-derives any of it.
+ * @param {{merged?: Array<object>, failed?: Array<object>, deferred?: Array<object>, parked?: Array<object>,
+ *   skipped?: Array<object>, dryRun?: boolean}} [o]
+ * @returns {string}
+ */
+export function renderDrainRunSummary({ merged = [], failed = [], deferred = [], parked = [], skipped = [], dryRun = false } = {}) {
+  const idTag = (x) => `#${x.num ?? x.item ?? '?'}`;
+  if (dryRun) {
+    return `Dry run — plan only, nothing landed: ${merged.length} would merge, ${deferred.length} deferred (blockedBy), ${parked.length} parked for review, ${skipped.length} skipped.`;
+  }
+  const counts = [`merged ${merged.length}`];
+  if (failed.length) counts.push(`${failed.length} FAILED`);
+  if (parked.length) counts.push(`${parked.length} parked for review`);
+  if (deferred.length) counts.push(`${deferred.length} deferred (blockedBy)`);
+  if (skipped.length) counts.push(`${skipped.length} skipped`);
+  const lines = [`Drain pass: ${counts.join(', ')}.`];
+  if (merged.length) lines.push(`  merged: ${merged.map(idTag).join(', ')}`);
+  if (failed.length) lines.push(`  FAILED: ${failed.map(idTag).join(', ')}`);
+  if (parked.length) {
+    lines.push(`  parked: ${parked.map((p) => `${idTag(p)}${p.reasons?.length ? ` (${p.reasons.join('; ')})` : ''}`).join(', ')}`);
+  }
+  if (deferred.length) lines.push(`  deferred: ${deferred.map(idTag).join(', ')}`);
+  return lines.join('\n');
+}
+
+/** The two review-outcome moments `renderReviewNotice()` covers (#2433) — a PR PARKING/escalating (the
+ *  drain's advisory-fix-or-human-handoff moment) and a human CLEARING it (`/review`'s recorded verdict). One
+ *  renderer keyed on `event`, so both callers report the same outcome in the same words. */
+export const REVIEW_NOTICE_EVENTS = Object.freeze({
+  ESCALATED: 'escalated',
+  CLEARED: 'cleared',
+});
+
+/**
+ * Render the operator-facing escalation/clearance notice (#2433) — the short line `/drain` reports when a PR
+ * parks/escalates, and `/review` reports after recording a human verdict. Distinct from the PR-COMMENT body
+ * (`renderPanelVerdictTable` / #2432's `renderPanelComment`, posted to GitHub via `gh pr comment`) — this is
+ * what the SESSION itself tells the operator in-chat. Pure; never posts anything.
+ * @param {{event: 'escalated'|'cleared', pr: number|string, repo?: string, verdict?: string,
+ *   disposition?: {mode: 'converge'|'human', autoLand: boolean}, reasons?: string[],
+ *   outcome?: 'accept'|'changes', actor?: string}} o
+ * @returns {string}
+ */
+export function renderReviewNotice({ event, pr, repo, verdict, disposition, reasons = [], outcome, actor } = {}) {
+  const tag = repo ? `${repo}#${pr}` : `#${pr}`;
+  if (event === REVIEW_NOTICE_EVENTS.ESCALATED) {
+    const reasonText = reasons.length ? ` (${reasons.join('; ')})` : '';
+    const modeText = disposition?.mode === REVIEW_DISPOSITIONS.HUMAN
+      ? 'deadlocked — handed to a human, no further convergence'
+      : disposition?.autoLand === false
+        ? 'converged with an advisory fix — a human must still clear it (gate-self)'
+        : 'escalated for review';
+    return `PR ${tag} ${modeText}${reasonText}. Verdict: ${verdict ?? '(pending)'}.`;
+  }
+  if (event === REVIEW_NOTICE_EVENTS.CLEARED) {
+    const verb = outcome === 'changes' ? 'requested changes on' : 'accepted';
+    const by = actor ? ` by ${actor}` : '';
+    return `PR ${tag} — human review ${verb}${by}.`;
+  }
+  throw new Error(`renderReviewNotice: unknown event "${event}" — must be one of ${Object.values(REVIEW_NOTICE_EVENTS).join(', ')}`);
+}
+
+/**
+ * Render the `closing-session` "Flow improvements" line (#2433) — step 3d of
+ * `we:skills-src/closing-session/SKILL.md`: 1-3 concrete, named candidates for making the review/PR flow
+ * stronger or cheaper next time, or the fixed `"nothing to flag"` fallback. Pure — the session still does the
+ * JUDGMENT of which candidates qualify and where each routes (#51: judgment stays in context); this only
+ * renders the already-decided list into the one fixed line the close-audit template requires, so the wording
+ * (and the fallback) is never hand-retyped per close.
+ * @param {{candidates?: Array<{summary: string, route?: 'backlog'|'memory', target?: string}>}} [o]
+ * @returns {string}
+ */
+export function renderCloseSessionFlowLine({ candidates = [] } = {}) {
+  if (!candidates.length) return 'nothing to flag';
+  return candidates
+    .map((c) => `${c.summary}${c.target ? ` → ${c.route ?? 'backlog'} (${c.target})` : c.route ? ` → ${c.route}` : ''}`)
+    .join('; ');
+}
