@@ -43,6 +43,40 @@ authoring items.
   (between-turn). SaaS later = coordination plane only; execution stays local per-user
   (subscription ToS forbids pooling consumer auth server-side).
 
+## Phase 1 re-scoped (2026-07-11 red team — operator call)
+
+Phase 1 is now the **resident drain daemon only** ([#xb002dz](/backlog/xb002dz-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)):
+a resident process owning the merge queue — leases, ordering, review labels, sole-writer drain — and
+nothing else. Sessions keep building and reviewing exactly as today. Agent spawning, steering, UI, and
+the multi-project registry wait for the evidence the daemon produces; the runner decision (#2444) and
+the placement decision (#2446) are deferred until then (`priority: low`, pickable, out of auto-select —
+same discipline the triage rubric below applies to #2442/#2417). The daemon is hosted **provisionally in
+plateau-app** next to the dev-panel (the #1565/#1579 devtools-are-Plateau-owned priors) — a cheap-to-move
+start, explicitly without prejudice to #2446's eventual full-engine placement call.
+
+## Red-team risks (2026-07-11 — must be answered before scope grows past phase 1)
+
+- **Mixed mode is permanent.** Interactive sessions don't go away, so the session-choreography
+  conventions can't be "retired" wholesale — any grown scope must specify how outside sessions and the
+  coordinator co-exist, or it runs two coordination dialects at once. The DoD's "conventions retired"
+  line is qualified accordingly.
+- **Residency relocates fragility.** Crash recovery, persisted state, self-update-then-reload on a
+  laptop that sleeps and reboots — the supervisor layer can end up bigger than the conventions it
+  replaces. Sessions-by-convention are restartable by construction; a resident state machine must earn
+  that with code.
+- **The phase-1 runtime bets on unstable ground.** Subscription quota is a hard wall for a resident
+  spawner; `-p --output-format stream-json` / hook-gate steering / kill+`--resume` are observed CLI
+  behavior, not a stable API; steering only reaches an agent when it calls a tool. Captured on #2444.
+- **Gate-self un-anchors on extraction.** The trust-chain path checks are WE-path literals; moving the
+  engine silently disables the `review:human` invariant — now its own child task
+  ([#xa6i7k2](/backlog/xa6i7k2-re-anchor-the-gate-self-trust-chain-when-the-delivery-engine/)), owed on
+  every variant including the phase-1 daemon.
+- **Osborne effect on parked items.** Deferring cheap fixes because "the coordinator obsoletes them"
+  bets on this epic's timeline; the parked items (#2442, #2417) stay pickable and should be re-checked
+  if phase 1 slips.
+- **The coordinator doesn't remove git-level races.** Parallel *workers* still conflict over lanes and
+  files (#2427, #2077); centralizing lease bookkeeping narrows, not removes, that class.
+
 ## Extraction seams (what moves, what stays)
 
 The deterministic substrate is a self-contained node+git+`gh` engine: lane-pool + leases,
@@ -76,4 +110,6 @@ A locally-running Plateau Loop instance coordinates backlog→lane→PR→review
 least two projects of the constellation end-to-end (build sessions spawned, reviews judged,
 drain as sole writer), with gating/review/drain operable from its UI and its config in
 platform config — and the session-choreography conventions it replaces retired from
-docs/skills.
+docs/skills *for the flows the coordinator owns* (interactive sessions remain first-class:
+the conventions governing how an outside session co-exists with the coordinator are part of
+the deliverable, not retired — see the mixed-mode red-team risk above).
