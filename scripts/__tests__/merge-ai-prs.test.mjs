@@ -1082,6 +1082,60 @@ describe('resyncDetachedCwdForLand (#2348 — a lane clone\'s detached HEAD stra
     expect(r).toMatchObject({ resynced: false, skipped: 'exec-failed' });
     expect(r.detail).toMatch(/would overwrite/);
   });
+
+  // #2419 — a lane clone can ALSO be left ATTACHED to a stray `lane/*` branch (a leftover from an earlier
+  // rebase-drop / manual checkout), not only genuinely detached. `git pull --ff-only` has no upstream to
+  // follow there either, so this widened trigger needs the exact same rescue mechanics — mirrored 1:1 against
+  // the DETACHED cases above (#2348).
+  describe('#2419 — ATTACHED to a stale lane/* branch (mirrors the DETACHED cases above)', () => {
+    const staleLaneClean = { [SYMREF]: { stdout: 'refs/heads/lane/file-2417' }, [STATUS]: { stdout: '' } };
+
+    it('non-lane attached branch (e.g. a feature branch) stays on the existing warn-only path, never detached', () => {
+      const { exec, calls } = fakeExec({ [SYMREF]: { stdout: 'refs/heads/feature/foo' } });
+      const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+      expect(r).toMatchObject({ resynced: false, skipped: 'attached' });
+      expect(calls.some((c) => c.args[0] === 'checkout')).toBe(false);
+    });
+
+    it('ATTACHED to a stale lane/* branch + clean tracked tree + HEAD already an ancestor → fetch + is-ancestor + checkout --detach, resynced', () => {
+      const { exec, calls } = fakeExec(staleLaneClean);
+      const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+      expect(r).toMatchObject({ resynced: true });
+      expect(calls.some((c) => c.key === 'git fetch origin main --quiet')).toBe(true);
+      expect(calls.some((c) => c.key === ANCESTOR)).toBe(true);
+      expect(calls.some((c) => c.key === 'git checkout --detach origin/main --quiet')).toBe(true);
+    });
+
+    it('ATTACHED to a stale lane/* branch + TRACKED local changes → skipped dirty, never resets a dirty tree', () => {
+      const { exec, calls } = fakeExec({ [SYMREF]: { stdout: 'refs/heads/lane/file-2417' }, [STATUS]: { stdout: ' M scripts/x.mjs' } });
+      const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+      expect(r).toMatchObject({ resynced: false, skipped: 'dirty' });
+      expect(calls.some((c) => c.args[0] === 'checkout')).toBe(false);
+      expect(calls.some((c) => c.args[0] === 'fetch')).toBe(false);
+    });
+
+    it('ATTACHED to a stale lane/* branch but the fetch itself fails → reported, never thrown, never checks out', () => {
+      const { exec, calls } = fakeExec({ ...staleLaneClean, 'git fetch origin main --quiet': { throw: 'network unreachable' } });
+      const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+      expect(r).toMatchObject({ resynced: false, skipped: 'exec-failed' });
+      expect(r.detail).toMatch(/network unreachable/);
+      expect(calls.some((c) => c.args[0] === 'checkout')).toBe(false);
+    });
+
+    it('ATTACHED to a stale lane/* branch but HEAD is NOT an ancestor of origin/main (unpushed local commits) → skipped, never detaches', () => {
+      const { exec, calls } = fakeExec({ ...staleLaneClean, [ANCESTOR]: { throw: 'exit 1' } });
+      const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+      expect(r).toMatchObject({ resynced: false, skipped: 'unpublished-commits' });
+      expect(calls.some((c) => c.args[0] === 'checkout')).toBe(false);
+    });
+
+    it('ATTACHED to a stale lane/* branch, HEAD ancestor OK, but the checkout itself fails → reported, never thrown', () => {
+      const { exec } = fakeExec({ ...staleLaneClean, 'git checkout --detach origin/main --quiet': { throw: 'would overwrite local changes' } });
+      const r = resyncDetachedCwdForLand({ exec, landedLocal: true, localSynced: false });
+      expect(r).toMatchObject({ resynced: false, skipped: 'exec-failed' });
+      expect(r.detail).toMatch(/would overwrite/);
+    });
+  });
 });
 
 describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, not only the log)', () => {

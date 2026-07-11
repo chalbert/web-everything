@@ -2,8 +2,11 @@
 bornAs: x1m25ov
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-11"
+dateResolved: "2026-07-11"
+graduatedTo: lane-pool.mjs acquire (checkout -B, never leaves HEAD on a stray lane/* branch) + merge-ai-prs.mjs resyncDetachedCwdForLand (widened to rescue an attached stale lane/* branch too)
 tags: [drain, numbering, lane-pool, bug]
 ---
 
