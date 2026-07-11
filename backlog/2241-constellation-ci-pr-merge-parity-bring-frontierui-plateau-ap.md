@@ -1,5 +1,6 @@
 ---
 kind: epic
+parent: "xhmav8a"
 status: open
 dateOpened: "2026-07-04"
 tags: []

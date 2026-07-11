@@ -1,6 +1,7 @@
 ---
 bornAs: xq5aks4
 kind: epic
+parent: "xhmav8a"
 status: open
 dateOpened: "2026-07-10"
 relatedReport: reports/2026-07-11-backlog-split-analysis.md
