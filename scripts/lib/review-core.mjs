@@ -491,7 +491,8 @@ export const REVIEW_NOTICE_EVENTS = Object.freeze({
  * what the SESSION itself tells the operator in-chat. Pure; never posts anything.
  * @param {{event: 'escalated'|'cleared', pr: number|string, repo?: string, verdict?: string,
  *   disposition?: {mode: 'converge'|'human', autoLand: boolean}, reasons?: string[],
- *   outcome?: 'accept'|'changes', actor?: string}} o
+ *   outcome?: 'accept'|'changes', actor?: string}} o — `outcome` is required (and strictly validated) for
+ *   the `cleared` event; anything else throws rather than failing open to "accepted".
  * @returns {string}
  */
 export function renderReviewNotice({ event, pr, repo, verdict, disposition, reasons = [], outcome, actor } = {}) {
@@ -506,6 +507,9 @@ export function renderReviewNotice({ event, pr, repo, verdict, disposition, reas
     return `PR ${tag} ${modeText}${reasonText}. Verdict: ${verdict ?? '(pending)'}.`;
   }
   if (event === REVIEW_NOTICE_EVENTS.CLEARED) {
+    if (outcome !== 'accept' && outcome !== 'changes') {
+      throw new Error(`renderReviewNotice: unknown outcome "${outcome}" — must be one of accept, changes`);
+    }
     const verb = outcome === 'changes' ? 'requested changes' : 'accepted';
     const by = actor ? ` by ${actor}` : '';
     return `PR ${tag} — human review ${verb}${by}.`;

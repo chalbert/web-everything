@@ -459,6 +459,13 @@ describe('renderReviewNotice (#2433)', () => {
   it('throws on an unknown event', () => {
     expect(() => renderReviewNotice({ event: 'bogus', pr: 1 })).toThrow(/unknown event/);
   });
+
+  it('throws on an unknown or omitted outcome for a cleared event (never fails open to "accepted")', () => {
+    expect(() => renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.CLEARED, pr: 3, outcome: 'change' }))
+      .toThrow(/unknown outcome/);
+    expect(() => renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.CLEARED, pr: 3 }))
+      .toThrow(/unknown outcome/);
+  });
 });
 
 describe('renderCloseSessionFlowLine (#2433)', () => {
