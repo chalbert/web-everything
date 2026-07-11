@@ -26,7 +26,7 @@
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
  *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
- *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path
+ *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op.
  *   node scripts/lane-pool.mjs release (--lane=N | --all) [--session=<slug>] [--force]   # #2275 hand a leased lane back to the pool (own lease, or --force)
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s)
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
@@ -64,6 +64,7 @@ import { join, basename, resolve, dirname } from 'node:path';
 import {
   LEASE_FILENAME,
   DEFAULT_LEASE_TTL_MINUTES,
+  WORKFLOW_LANE_PURPOSE,
   isLeaseStale,
   isLaneAcquirable,
   chooseFreeLane,
@@ -591,6 +592,10 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
       session, purpose: flags.purpose, acquiredAt: new Date(nowMs).toISOString(), ttlMinutes: ttlMinutesFromFlags(),
       host: hostname(), pid: process.pid,
       ownerSession: process.env.CLAUDE_CODE_SESSION_ID || null,
+      // #2413 — `--purpose=workflow-lane` MARKS the lease: it stamps the dedicated `workflowLane: true` field
+      // (not free-text purpose) that switches the destructive-op guard fail-closed for this lane, requiring a
+      // sibling parallel lane to assert this lease's own minted `session` slug before it can clobber the clone.
+      workflowLane: flags.purpose === WORKFLOW_LANE_PURPOSE,
     }),
     null, 2,
   ) + '\n';

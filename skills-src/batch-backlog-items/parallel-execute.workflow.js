@@ -354,11 +354,23 @@ function laneDirsForItem(it) {
   return dirs;
 }
 
+// The lane NUMBER (`lane-N` → N) an item is coupled to in a repo, parsed from its clone dir. Needed for the
+// #2413 `acquire --lane=N` / `release --lane=N` the lane runs from the primary (a dir alone can't name a lane).
+function laneNumFromDir(dir) {
+  const m = String(dir || '').match(/lane-(\d+)\/?$/);
+  return m ? m[1] : '';
+}
+
 function laneItemPrompt(it, laneDirs) {
   const ref = laneRefFor(it);
   const repos = affectedReposOf(it); // impl-first, WE last
   const weDir = laneDirs.we || '';
   const implRepos = repos.filter((r) => r !== 'we');
+  // #2413 — the minted per-holder slug this item's lease is acquired/asserted/released under, the SAME across
+  // every repo of the item (`<batchSlug>-<laneKey>`). It marks the lease `workflowLane` so a sibling parallel
+  // lane's destructive git op is denied unless it re-asserts this exact slug (the guard's fail-closed check).
+  const laneSlug = `${batchSlug}-${laneKeyOf(it)}`;
+  const weNum = laneNumFromDir(weDir);
   const reposManifest = repos.map((r) => ({ repo: r, ref, carriesResolve: r === 'we' }));
   const seed = it.seed || null; // #2215 — a NEW item scaffolded IN-LANE (no NNN yet), vs an existing claimed item.
   // The token used to name the item in every step below: an existing item's NNN, or the literal placeholder
@@ -375,15 +387,21 @@ function laneItemPrompt(it, laneDirs) {
     `open a READY-TO-MERGE PR per repo and STOP — you NEVER merge, NEVER push main, NEVER commit to main, and`,
     `NEVER launch a drain. The only pushes you make are to lane/* refs (the #1934 carve-out).`,
     ``,
-    `1. PREP each clone — reset to its own origin/main (NOT a base ref; there is no central pre-claim now):`,
-    `   • WE clone (${weDir}): \`cd ${weDir} && git fetch origin --prune --quiet && git reset --hard`,
-    `     origin/main --quiet && git clean -fd --quiet\`.`,
+    `1. ACQUIRE each clone under this item's workflow-lane lease (#2413). This REPLACES the old manual`,
+    `   \`git reset --hard origin/main\` prep: \`acquire\` resets the clone to origin/main, installs deps, AND`,
+    `   stamps a MARKED ownership lease under the slug \`${laneSlug}\` — so a sibling parallel lane's destructive`,
+    `   git op in this clone is DENIED unless it re-asserts this exact slug (fail-closed; the double-coupling`,
+    `   guard). Run these from the PRIMARY WE checkout (your default cwd — do NOT cd into a lane first); the same`,
+    `   \`LANE_SESSION=${laneSlug}\` slug is used for EVERY repo of this item:`,
+    `   • WE lane-${weNum}: \`LANE_SESSION=${laneSlug} node scripts/lane-pool.mjs acquire --lane=${weNum} --purpose=workflow-lane --ttl-minutes=90 --json\`.`,
   ];
   for (const r of implRepos) {
-    lines.push(`   • ${r} clone (${laneDirs[r]}): \`cd ${laneDirs[r]} && git fetch origin --prune --quiet && git reset --hard origin/main --quiet && git clean -fd --quiet\`.`);
+    lines.push(`   • ${r} lane-${laneNumFromDir(laneDirs[r])}: \`LANE_SESSION=${laneSlug} node scripts/lane-pool.mjs acquire --lane=${laneNumFromDir(laneDirs[r])} --purpose=workflow-lane --ttl-minutes=90 --repo=${REPOS[r].path} --json\`.`);
   }
   lines.push(
-    `   Ensure deps in each clone (the pool installed them; if node_modules is missing run \`npm ci\` there).`,
+    `   If the WE acquire HARD-FAILS (the lane is held LIVE by another session — a coupling race), STOP: report`,
+    `   status:"carried" drop:"lane-taken", open NO PR, and do NOT --force. (Deps are installed by acquire; only`,
+    `   if a clone's node_modules is somehow missing run \`npm ci\` there.)`,
     ``,
     seed
       // #2215 (preferred fix) — SCAFFOLD-IN-LANE: a new item is born in THIS lane and rides THIS lane's PR, so
@@ -473,6 +491,14 @@ function laneItemPrompt(it, laneDirs) {
       : `   • (the ${READY_LABEL} label was not created — pr-land's apply is best-effort; report labelled:false if it could not.)`,
     `   If a repo's pr-land FAILS (push/gh error), report that repo WITHOUT a pr number (the item is carried for`,
     `   that repo; the others may still have opened). A WE PR that fails to open ⇒ status:"carried".`,
+    ``,
+    `9. RELEASE each lane you ACQUIRED in step 1 (close-out — hand it back to the pool; the work is durable on`,
+    `   its pushed lane/* ref, so releasing never loses it). Carry the SAME slug so release recognises you as the`,
+    `   owner (no --force). Do this for EVERY lane whose acquire succeeded, WHATEVER the outcome (pr-open OR`,
+    `   carried) — never leave a workflow-lane lease lingering (its 90-min TTL would eventually reclaim it, but an`,
+    `   explicit release frees the lane immediately). Run from the primary WE checkout:`,
+    `   • WE: \`LANE_SESSION=${laneSlug} node scripts/lane-pool.mjs release --lane=${weNum}\`.`,
+    ...implRepos.map((r) => `   • ${r}: \`LANE_SESSION=${laneSlug} node scripts/lane-pool.mjs release --lane=${laneNumFromDir(laneDirs[r])} --repo=${REPOS[r].path}\`.`),
     ``,
     `Report: num (${seed ? 'the NNN the in-lane scaffold ALLOCATED — the real number, not the placeholder' : `${it.num}`}), status ("pr-open" if the WE PR opened, else`,
     `"carried"/"dropped"), cost, prs (one {repo, ref, pr, url, labelled} per repo you opened a PR in),`,

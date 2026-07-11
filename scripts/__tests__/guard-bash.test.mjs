@@ -248,6 +248,60 @@ describe('guard-bash — foreign-live-lease destructive-op block (#2367)', () =>
   });
 });
 
+describe('guard-bash — marked (workflow-lane) lease slug-assertion block (#2413)', () => {
+  const SLUG = 'batch-x-2427';
+  const marked = (over = {}) => ({ primaryCwd: false, markedLeaseSlug: SLUG, ...over });
+
+  it('DENIES a destructive op that does NOT assert the lease slug (fail-closed absence)', () => {
+    expect(reason('git reset --hard origin/main', marked())).toMatch(/must ASSERT the lease's own slug/);
+    expect(reason('git clean -fd', marked())).toMatch(/LANE_SESSION=batch-x-2427/);
+    expect(reason('git checkout -- .', marked())).toMatch(/denied fail-closed/);
+  });
+
+  it('DENIES a destructive op that asserts the WRONG slug (fail-closed mismatch)', () => {
+    expect(reason('LANE_SESSION=batch-x-9999 git reset --hard origin/main', marked())).toMatch(/a MISMATCH/);
+  });
+
+  it('ALLOWS the owning lane\'s own op once it re-asserts the exact slug', () => {
+    expect(reason(`LANE_SESSION=${SLUG} git reset --hard origin/main`, marked())).toBeNull();
+    expect(reason(`LANE_SESSION=${SLUG} git clean -fd`, marked())).toBeNull();
+  });
+
+  it('the marked check SUPERSEDES the #2367 ownerSession fail-open (foreignLiveLease is ignored when marked)', () => {
+    // A marked lane with NO assertion is denied even though foreignLiveLease is false (own-lane in the #2367
+    // regime would have been ALLOWED) — fail-closed replaces fail-open for marked lanes.
+    expect(reason('git reset --hard', marked({ foreignLiveLease: false }))).toMatch(/workflow-lane lease/);
+    // And a matching assertion allows it even if foreignLiveLease were true — the marked branch wins first.
+    expect(reason(`LANE_SESSION=${SLUG} git reset --hard`, marked({ foreignLiveLease: true }))).toBeNull();
+  });
+
+  it('the LANE_CLOBBER_OK=1 escape passes a marked-lane destructive op through (mismatch or absence)', () => {
+    expect(reason('LANE_CLOBBER_OK=1 git reset --hard', marked())).toBeNull();
+    expect(reason('LANE_CLOBBER_OK=1 LANE_SESSION=wrong git clean -fd', marked())).toBeNull();
+  });
+
+  it('never fires on a non-destructive command, even under a marked lease', () => {
+    expect(reason('git status', marked())).toBeNull();
+    expect(reason('git push origin lane/foo', marked())).toBeNull();
+    expect(reason(`node scripts/lane-pool.mjs release --lane=3`, marked())).toBeNull();
+  });
+
+  it('never fires from a primary cwd (a lane-only concept)', () => {
+    expect(reason('git reset --hard', { primaryCwd: true, markedLeaseSlug: SLUG })).toBeNull();
+  });
+
+  it('no marked lease (markedLeaseSlug null) → falls back to the #2367 unmarked regime', () => {
+    expect(reason('git reset --hard', { primaryCwd: false, markedLeaseSlug: null, foreignLiveLease: true })).toMatch(/LIVE lease held by ANOTHER session/);
+    expect(reason('git reset --hard', { primaryCwd: false, markedLeaseSlug: null, foreignLiveLease: false })).toBeNull();
+  });
+
+  it('decide() surfaces the #2413 denial across a &&-chained command (the incident shape)', () => {
+    expect(decide('git fetch origin && git reset --hard origin/main', marked())).toMatch(/must ASSERT the lease's own slug/);
+    // the same chain, slug asserted on the destructive segment → allowed
+    expect(decide(`git fetch origin && LANE_SESSION=${SLUG} git reset --hard origin/main`, marked())).toBeNull();
+  });
+});
+
 describe('guard-bash — direct-push-to-main block (#2203)', () => {
   const blocked = (c) => expect(decide(c), c).toMatch(/direct push to `main` is blocked/);
   const allowed = (c) => expect(decide(c), c).toBeNull();
