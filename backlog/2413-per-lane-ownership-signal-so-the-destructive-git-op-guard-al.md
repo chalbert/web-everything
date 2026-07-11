@@ -4,6 +4,8 @@ size: 5
 status: open
 dateOpened: "2026-07-10"
 preparedDate: "2026-07-10"
+costUsd: 89.53
+costSessions: 1
 crossRef: { url: /backlog/2367/, label: "#2367 — destructive-git-op guard" }
 relatedReport: reports/2026-07-10-per-lane-ownership-signal-parallel-workflow-lanes.md
 tags: [lane-pool, guard, workflow, orchestrator]
