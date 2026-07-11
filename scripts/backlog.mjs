@@ -41,6 +41,7 @@ import { parseHolds, emptyHoldState, isHeld, heldBy, heldNums, addHold, removeHo
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
 import { numberPendingHashes } from './lane-drain.mjs';
+import { laneGuardDecision, resolveReal } from './guard-lane.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
@@ -78,6 +79,24 @@ function ok(payload, human) {
 // same message — shift-left at the source (#883 "enforce at write-time"). Exempt cases (fenced code, md
 // links, `@scope/pkg`, globs) are handled inside `scanRepoLocusPrefixes`, so only a genuine bare ref blocks.
 function writeBacklogMd(abs, rel, content) {
+  // Enforce the lane-isolation rule (#2302/#104/#2219/#2339) at the SOURCE, not only in the
+  // PreToolUse(Bash) hook (guard-bash). That hook fires ONLY for Bash-*tool* calls in a session that
+  // loads .claude/settings.json — a workflow/subagent/cron/headless caller that runs `backlog.mjs
+  // cost|resolve|…` bypasses it and stamps the card straight onto the primary tree (observed 2026-07-10:
+  // three `cost` stamps left uncommitted in primary). EVERY card-content mutation
+  // (cost/claim/resolve/release/scaffold/settle/retype/yield/prepare-stamp) funnels through this one
+  // writer; the drain's JIT-numbering + `number-stranded` use a SEPARATE writer (numberPendingHashes) and
+  // are intentionally unaffected. Reuse guard-lane's realpath classification so there is a single source of
+  // truth for "is this path a primary checkout"; ignore its message (that guard's LANE_GUARD_OFF escape does
+  // NOT apply here — #2219/#2339 ratified nothing ever splices to primary, so this denial has no override).
+  if (laneGuardDecision(resolveReal(abs), ROOT)) {
+    die(`backlog item-mutation BLOCKED — "${rel}" resolves under the shared PRIMARY checkout. Every card ` +
+        `mutation (cost/claim/resolve/release/scaffold/settle/retype/yield/prepare-stamp) must run in a LANE ` +
+        `clone, never the primary tree — running it here stamps the item on primary and bypasses lane ` +
+        `isolation (#2302/#104/#2219/#2339). Enforced at the source so non-Bash-tool channels ` +
+        `(workflow/subagent/cron/headless) are covered too, not just the PreToolUse(Bash) hook. cd into a ` +
+        `lane clone (~/workspace/.lanes/<repo>/lane-N) and run it there. There is no override.`);
+  }
   const findings = scanRepoLocusPrefixes([{ file: rel, content }]);
   if (findings.length) {
     const { count, sample } = findings[0];
