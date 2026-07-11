@@ -1,4 +1,5 @@
 ---
+bornAs: xuxiwge
 kind: story
 size: 3
 parent: "2387"
