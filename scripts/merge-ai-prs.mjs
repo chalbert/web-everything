@@ -948,6 +948,20 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.trunc(ms)));
 }
 
+/**
+ * Build the `gh api` argv that reads a remote repo's `.lane-manifest.json` off a head ref. Pure/exported so
+ * the `--method GET` is regression-guarded. `--method GET` is REQUIRED: `gh api` silently switches to POST the
+ * moment an `-f`/`--field` param is present with no explicit method, and a POST to the read-only contents
+ * endpoint 404s — which `readPrManifest`'s catch would swallow to null, so every remote lane would drop its
+ * item/blockedBy (the very cross-repo ordering this drain sweep exists for). GET keeps `-f ref=` as a query
+ * param. #2399 — port of the identical #2383 fix in lane-resume.mjs's `remoteManifestApiArgs`.
+ * @param {string} repo — "owner/name"
+ * @param {string} ref  — the PR head ref
+ */
+export function remoteManifestApiArgs(repo, ref) {
+  return ['api', '--method', 'GET', `repos/${repo}/contents/.lane-manifest.json`, '-f', `ref=${ref}`, '-q', '.content'];
+}
+
 // ── CLI boundary ───────────────────────────────────────────────────────────────────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) runCli();
@@ -1102,8 +1116,10 @@ function runCli() {
       // #2257 — a remote-repo PR has no local clone to `git show`; read the manifest off its head ref via the
       // GitHub API (`gh api …/contents/.lane-manifest.json?ref=<headRef>` → base64 `.content`). Best-effort:
       // an impl/orphan PR carries no manifest → null → always ready (the legacy unordered behaviour).
+      // #2399 — `remoteManifestApiArgs` (below) makes the `--method GET` explicit; ported from the identical
+      // #2383 fix in lane-resume.mjs.
       try {
-        const b64 = execFileSync('gh', ['api', `repos/${repo}/contents/.lane-manifest.json`, '-f', `ref=${headRef}`, '-q', '.content'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        const b64 = execFileSync('gh', remoteManifestApiArgs(repo, headRef), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
         if (b64) { const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); if (m && m.item != null) return m; }
       } catch { /* no manifest on this ref */ }
       return null;
