@@ -1,63 +1,52 @@
 # Backlog split analysis — 2026-07-11
 
-Focused run: `/slice 2410`.
+Focus: **#2418** — *Main loop as coordinator: delegate the review pipeline, script the glue, template the renders* (`kind: epic`, unsliced, no children).
 
 ## Candidate
 
-- **#2410** — *Unified drain convergence loop — peer co-negotiation + independent hardened validator (option B)*
-  · `kind: epic` · carries a stray `size: 13` (mis-converted — an epic holds no points; must drop on split) ·
-  no item references it as `parent` → **unsliced epic** (candidate kind **b**). Body ships a
-  "Slices (to cut when picked up)" section with 4 named slices. Graduated from decision **#2398** (resolved).
+#2418 is a genuinely unsliced epic: `kind: epic`, no `size`, and no item names it as `parent` (#2419 only *relates* to it). Condition (1) "size is volume not a fork" is already settled at the parent level — the epic is decided to decompose. Its body proposes 6 candidate slices; each was verified against the real code tree, not taken from the body.
 
-Because it's an unsliced epic, rubric condition (1) (*split-at-all?*) is settled at the parent level. Each
-slice is still verified against the real tree and against (1)-within-slice (no buried fork), (2)-(5).
+### Work-investigation notes (what's actually on disk)
 
-## Work-investigation pass — where the seams actually fall
-
-The loop is split across **pure reducers** (`we:scripts/lib/review-core.mjs`) and the **label/merge gate**
-(`we:scripts/lib/review-escalation.mjs`, `we:scripts/merge-ai-prs.mjs`, `we:scripts/lib/pr-merge-gate.mjs`).
-The JUDGEMENT half (spawning subagents) is driven by the drain skill, not a script. Grounding:
-
-- **Negotiation reducers** — `we:scripts/lib/review-core.mjs`: `deriveNegotiationOutcome`
-  (`we:scripts/lib/review-core.mjs:210`), `buildEditorMandate` (:170), `buildMandate` (:131),
-  `NEGOTIATION_ROUND_CAP` (:157).
-- **Panel machinery already exists** — `buildPanelMandate` (:358), `derivePanelVerdict` (:404),
-  `PANEL_LENSES` (:348), `MANDATORY_LENSES` (:341). Slice 2 extends this, doesn't build from scratch.
-- **Acceptance-label vocabulary** — `we:scripts/lib/review-escalation.mjs:20` (`review:accepted`); the merge
-  gate that consumes it lives at `we:scripts/merge-ai-prs.mjs:1243-1261`. Slice 2 adds a `redteam:accepted`
-  producer here; **enforcement** (require-the-label, kill the merge-anyway escape) is owned by the separate
-  gate-integrity story **#2412** (open) + delivered-by-removal in **#2425** (resolved) — *not* this epic.
-- **CI-green / test-red strand** — `we:scripts/lane-resume.mjs:81` (`disposition: 'test-red'`); slice 4 folds
-  the green check into `deriveNegotiationOutcome`'s land condition and retires this strand.
-- **Flag parsing pattern** — `we:scripts/lane-drain.mjs:69-76`; slice 4 adds the off-by-default convergence flag here.
-
-All four slices' named files are `file:line`-citable. Verdict: **could split** (all 4 carve).
+- `we:scripts/lib/review-core.mjs` (436 lines) already **exports every pure function** the slices need — `normalizeFindings`, `deriveVerdict`, `buildPanelMandate`, `derivePanelVerdict`, `buildEditorMandate`, `deriveNegotiationOutcome`, `deriveReviewDisposition`, `renderPanelVerdictTable` — but has **no CLI** (`grep` finds no `import.meta`/`process.argv`/shebang). So slices 2/3 are thin wrappers + one new renderer over an existing engine, not new logic.
+- Sibling libs `we:scripts/lib/review-escalation.mjs` and `we:scripts/lib/review-baseline-state.mjs` hold the escalation/gate and baseline-diff functions the "escalation/clearance notice" renderer draws on.
+- No `.claude/workflows/` dir yet — slice 1's Workflow script is greenfield (lands as a `scriptPath` script).
+- No `who-cleared` / `fetch-parked` / `wait-green` / `pr-state` scripts exist yet.
+- **#2416** (`Gate: honor review:accepted only when a human applied it`, `story` size 3, `status: open`, parent #2405) is the **same provenance gap** slice 5 names.
+- Scaffold CLI flag is `--kind` (not `--workitem`); 2418 already has no `size`, so no in-place conversion is needed — just scaffold children under it.
 
 ## Could split
 
-| # | Slice | kind / size | Scope (grounded) | blockedBy |
-|---|-------|-------------|------------------|-----------|
-| A | Approach handshake — plan-agree before diff | story / 3 | Add a pre-diff plan-handshake reducer + mandate alongside `buildEditorMandate`/`deriveNegotiationOutcome` in `we:scripts/lib/review-core.mjs`; the two peers agree the fix approach before any code, so rounds aren't burned on wrong-target fixes. Fixture-driven reducer test. | — (root) |
-| B | Independent hardened validator + `redteam:accepted` producer | story / 5 | Distinct fresh-context adversarial validator over the final diff (diff+tests+rubric only, never the peers' self-assessment); extends the existing panel reducers (`buildPanelMandate`/`derivePanelVerdict`) into a diverse jury; persists a deterministic `redteam:accepted` label (new vocab entry in `we:scripts/lib/review-escalation.mjs`, per #2281's total label fn). **Produces** the label; enforcement stays with #2412. This is where the non-author-accepts invariant lives. | — (root) |
-| C | Anti-test-gaming gates on the CI-green clause | story / 5 | Deterministic gates: fail the land if coverage drops or tests are removed/skipped; require a test that fails on pre-change behavior for logic fixes; diff-gate author-peer test edits; validator inspects for tampering. Lands in `we:scripts/lib/pr-merge-gate.mjs` + the `we:scripts/merge-ai-prs.mjs` gate + a validator-mandate clause in `we:scripts/lib/review-core.mjs`. | B |
-| D | CI-green land clause + off-by-default flag | story / 3 | Fold "required `test` green" into `deriveNegotiationOutcome`'s land condition and retire the `lane-resume` `test-red` strand (`we:scripts/lane-resume.mjs:81`); wire the whole loop behind an off-by-default flag (`we:scripts/lane-drain.mjs` flag parsing), scoped to small/non-security diffs first. The capstone that turns the loop on. | A, B, C |
+Seven files come out of six candidates (slice 3 splits in two to hold each ≤ 3). Slice 5 does not split (below).
 
-**DAG:** `A → D`, `B → C → D`. Two independent roots (**A** and **B**) → satisfies "≥2 proceed
-independently." D is the capstone gathering all three. Because the live loop only switches on at **D** (the
-flag), slices A/B/C each add a self-contained, fixture-tested unit while the drain's behavior on `main` stays
-unchanged (flag off) — no broken intermediate state.
+| # | Slice | kind / size | Home | blocked-by | Batchable? |
+|---|-------|-------------|------|-----------|-----------|
+| A | **review-core CLI: `reduce` + `mandate`** — command line over the pure fns; `reduce` (findings→verdict/outcome/disposition + table), `mandate` (`--lens`/`--editor`). Replaces 5× inline `node -e`. | story · 3 | `we:scripts/lib/review-core.mjs` | — | yes (serialize with B on same file) |
+| B | **PR review-comment renderer** — add `renderPanelComment({findings, verdict, disposition})` (extends existing `renderPanelVerdictTable`) + expose it as the `comment` CLI subcommand. | story · 3 | `we:scripts/lib/review-core.mjs` | — | yes (serialize with A on same file) |
+| C | **`review-parked-prs` Workflow** — `pipeline(parked, panelReview → reducePanelVerdict → editorRound → reReview)` calling review-core, returning `{pr, disposition, verdict, commentBody}`. Collapses ~24 hand-run steps into one launch. | story · 3 | new `we:scripts/workflows/review-parked-prs.mjs` | **A, B** | after A+B |
+| D | **Session/notice renderers** — render from structured data: drain end-of-run summary, close-session report, escalation/clearance notice. *Template the render, not the prose.* | task · 2 | `we:scripts/lib/review-core.mjs` + drain/close skills | — | yes |
+| E | **Fetch/state helpers** — `fetch-parked <nums…>` (`{diff,title,body,files,state,checks}` in one call), `wait-green <pr>`, `pr-state <nums…>`. | task · 3 | `we:scripts/` | — | yes |
+| F | **`closing-session` standing efficiency-introspection step** — every close, scan the transcript for (a) main-loop steps that should've been delegated and (b) ad-hoc sequences that should be scripted; emit a bounded, evidence-based proposals table. The meta that keeps surfacing A–E. | story · 3 | `we:skills-src/closing-session/` + `we:.claude/skills/closing-session/` | — | yes |
 
-**Batchable:** A and B immediately (both roots, size ≤ 5). C unblocks when B lands; D when A+B+C land.
+**DAG**
 
-**Note on slice B's "panel/jury (different model)":** framed in the body as a *stronger form* of the base
-distinct validator, not an unresolved fork — the base validator ships the slice, the jury is an enhancement
-depth. The build decision (#2398, option B) is already ratified, so no decision is buried here.
+```
+A ─┐
+   ├──► C          D   E   F   (independent roots)
+B ─┘
+```
+
+- **Independent roots:** A, B, D, E, F. C is the only dependent (needs the CLI from A and the comment renderer from B).
+- **File-collision note:** A and B both edit `we:scripts/lib/review-core.mjs` — fine serially under `/batch`, but they can't run as two parallel lanes. D also touches review-core (adds renderers) — sequence D after A/B if batched, or keep it in a separate lane on the skill files only.
+- Slice 3 was split into **B** (the PR-comment renderer that slice C needs) and **D** (the other three renderers). The epic's original slice-3 bundled four renderers across three homes → size ~5; splitting keeps each ≤ 3 and lets C depend only on the one renderer it uses.
+- The epic's original slice-2 `comment` subcommand was folded into **B** (it's the CLI face of the same renderer) to remove the 2↔3 overlap.
 
 ## Could not split
 
-None. All four body slices carve cleanly.
+| # | Slice | Failed condition | Unblocking action |
+|---|-------|-----------------|-------------------|
+| 5 | **`who-cleared <pr>` clearance-provenance checker** | *Real independence / no buried fork* — the epic itself says "That IS the #2416 gap." Whether `who-cleared` is a distinct diagnostic CLI or is **subsumed by #2416's in-gate enforcement** (`decideReviewGate` reading actor provenance) is an unresolved scope boundary. Scaffolding it now risks duplicating open #2416. | **Work #2416 first**, then decide: if #2416's enforcement exposes a reusable `clearanceProvenance()` fn, slice 5 collapses to a thin CLI over it (or drops); if not, file `who-cleared` as a standalone helper then. No new item needed — #2416 already tracks the provenance work. |
 
-## Net effect if approved
+## Net
 
-`#2410` stays an epic (kind b — no story→epic conversion), drops its stray `size: 13`, and gains 4 child
-slices (A, B, C, D) with the DAG above. `+4` items opened. Then `/batch` can burn down A + B.
+Approve → **+6 slices** (A, B, C, D, E, F) scaffolded under #2418 (already an epic; no conversion). Slice 5 stays in the epic body as a could-not-split, gated on #2416. Freshly batchable → chain A/B → D/E/F, then C, via `/batch`.

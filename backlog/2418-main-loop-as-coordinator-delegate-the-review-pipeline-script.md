@@ -3,6 +3,7 @@ bornAs: xq5aks4
 kind: epic
 status: open
 dateOpened: "2026-07-10"
+relatedReport: reports/2026-07-11-backlog-split-analysis.md
 tags: [drain, review, agent-meta, efficiency, tooling]
 ---
 
@@ -12,14 +13,20 @@ Move recurrent drain/review work off the main loop so the session **coordinates*
 
 Target shape for a drain/review session: `acquire → drain --json → launch review Workflow → apply its structured results → re-drain → release`, plus the few human-judgment forks. Three levers — **delegate** the pipeline, **script** the glue, **template the renders** — plus a standing check so this keeps getting found.
 
-## Candidate slices (`/slice` before batching)
+## Slices
 
-1. **`review-parked-prs` Workflow** — encode the panel↔editor↔re-review loop as a `Workflow` script: `pipeline(parked, panelReview → reducePanelVerdict → editorRound → reReview)`, calling `we:scripts/lib/review-core.mjs` inside, returning `{pr, disposition, verdict, commentBody}` per PR. Collapses ~24 hand-run steps into one launch. Matches the drain skill's "fanned out via the Workflow orchestrator." *(highest leverage; consumes slice 2)*
-2. **`review-core` CLI entrypoint** — `we:scripts/lib/review-core.mjs` exports the pure functions but has no command line. Add `reduce` (findings→verdict/outcome/disposition + table), `mandate` (`--lens` / `--editor`), `comment` (render the full PR comment) subcommands. Replaces 5× inline `node -e`; makes the reductions testable; unblocks slice 1.
-3. **Single-source the outbound renderers** — the recurrent artifacts should render from structured data, not be hand-typed: the PR **review comment** (`renderPanelVerdictTable` already exists — extend to the whole comment), the **escalation / clearance notice**, the **drain end-of-run summary**, the **close-session report**. Principle: *template the render, not the prose* — a renderer over `{findings, verdict, disposition}` can't lie; a prose mad-lib can. Single-sourced so `/drain` and `/review` can't drift.
-4. **Fetch/state helpers** — `fetch-parked <nums…>` (dump `{diff,title,body,files,state,checks}` per PR in one call, standardizing the paths reviewers read), `wait-green <pr>` (poll until required `test` is green/timeout), `pr-state <nums…>` (the one-line mergeable/state/checks view rerun ~6× by hand).
-5. **`who-cleared <pr>` clearance-provenance checker** — the drain's #387 "incident" check (label-event timeline + `/review` clearance marker) was ad-hoc. That IS the #2416 gap ("honor `review:accepted` only from a real human clearance"). Make it a deterministic guard, not a one-off. Coordinate with #2416 (do not duplicate).
-6. **`closing-session`: standing efficiency-introspection step (all session types)** — every close, after the safety/health audit, scan the session transcript for (a) main-loop steps that should have been delegated and (b) ad-hoc command sequences that should be scripted, and emit a bounded, evidence-based proposals table. Skips trivial sessions. This is the meta that keeps surfacing slices 1–5 for future session types.
+**Sliced 2026-07-11** (`/slice`; report `we:reports/2026-07-11-backlog-split-analysis.md`). Six child slices scaffolded; original candidate 3 split into two (the PR-comment renderer C needs, plus the rest), candidate 2's `comment` subcommand folded into that renderer to remove the overlap. Candidate 5 stays here as could-not-split (below).
+
+- **A — review-core CLI: `reduce` + `mandate`** (`#2435`, story·3) — command line over `we:scripts/lib/review-core.mjs`'s pure fns; `reduce` (findings→verdict/outcome/disposition + table), `mandate` (`--lens`/`--editor`). Replaces 5× inline `node -e`. *Foundational.*
+- **B — PR review-comment renderer** (`#2432`, story·3) — `renderPanelComment({findings, verdict, disposition})` (extends `renderPanelVerdictTable`) + the `comment` CLI subcommand. *Feeds C.*
+- **C — `review-parked-prs` Workflow** (`#2437`, story·3, blocked-by A+B) — `pipeline(parked, panelReview → reducePanelVerdict → editorRound → reReview)`; ~24 hand-run steps → one launch.
+- **D — Session/notice renderers** (`#2433`, task·2) — drain end-of-run summary, close-session report, escalation/clearance notice, all from structured data.
+- **E — Fetch/state helpers** (`#2434`, task·3) — `fetch-parked`, `wait-green`, `pr-state`.
+- **F — `closing-session` standing efficiency-introspection step** (`#2436`, story·3) — the meta that keeps surfacing A–E.
+
+### Could not split — `who-cleared <pr>` clearance-provenance checker
+
+The drain's #387 "incident" check (label-event timeline + `/review` clearance marker) was ad-hoc. That **IS the #2416 gap** ("honor `review:accepted` only from a real human clearance"). Whether `who-cleared` is a distinct diagnostic CLI or is subsumed by #2416's in-gate enforcement (`decideReviewGate` reading actor provenance) is an unresolved scope boundary — scaffolding it now risks duplicating open #2416. **Unblock:** work #2416 first, then decide (thin CLI over its provenance fn, or drop). Tracked by #2416; not scaffolded here to avoid the duplicate.
 
 ## Out of scope / notes
 

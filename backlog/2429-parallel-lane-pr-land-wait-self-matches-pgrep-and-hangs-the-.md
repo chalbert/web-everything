@@ -2,8 +2,11 @@
 bornAs: xe6ijdk
 kind: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-07-11"
+dateStarted: "2026-07-11"
+dateResolved: "2026-07-11"
+graduatedTo: none
 tags: [workflow, parallel-batch, lane-pool, pr-land, bug]
 ---
 
@@ -29,5 +32,17 @@ The wait template is emitted by the lane-work step in `we:.claude/skills/batch-b
 
 relatedTo #2199 (pr-land label-on-green — the step whose completion the lane waits on), #2189 (the PR-fan-out execute model this lane wait belongs to), #2183 (parallel batch = PR fan-out).
 
+## Resolution
+Root cause: nothing in the lane body **emitted** the `pgrep` wait — the lane agent *invented* a
+self-matching `kill -0 $(pgrep -f "pr-land …")` poll because step 8 told it to run a long-blocking
+`pr-land --label-on-green` but never said **how** to wait for it once the Bash timeout backgrounds it.
+
+Fix (DoD option 1 — no pr-land change needed): step 8 of the lane body in
+`we:skills-src/batch-backlog-items/parallel-execute.workflow.js` now prescribes launching pr-land as a
+**background task** (`run_in_background`) and resuming on the harness **completion notification**, and
+explicitly **bans** any wait that greps for its own process (pattern in the waiter's own argv → never
+exits). Regression guard added to `we:scripts/__tests__/parallel-execute-workflow.test.mjs`: asserts the
+source carries the background-notification guidance and never emits a `kill -0 $(pgrep …` self-match.
+
 ## Next
-- none — ready to build.
+- none — done.
