@@ -46,13 +46,16 @@ node scripts/lane-resume.mjs discover --repos=owner/a,owner/b   # an explicit re
 node scripts/lane-resume.mjs land <pr> --dry-run # plan the enqueue of ONE repaired lane PR (enqueue vs rebase-drop vs skip)
 node scripts/lane-resume.mjs land <pr> --repo=owner/name   # land a REMOTE constellation-repo PR (use discover's `repo` tag); omit for the cwd repo
 node scripts/lane-resume.mjs land <pr>           # #2290: rebase-drop the manifest if only it conflicts, then ENQUEUE (label + trigger a single-couple drain) — never merges directly
+node scripts/lane-resume.mjs rebuild-plan --spec=<file>|-    # #2396: after a broken stacked LINK is repaired, plan the descendant-tail rebuild; `landed` omitted → derived from bornAs-on-main
+node scripts/lane-resume.mjs rebuild <laneRef> --onto=<sha>  # #2396: execute ONE planned step — rebuild a descendant tip onto the repaired parent tip SHA
 ```
 
 **Always `discover` first.** It buckets the labelled PRs into `ready` (not stuck — `/drain` takes them),
-`conflict` (rebase + resolve), `test-red` (a real bug to fix), `blocked` (blocker not landed — defer), and
-`unknown` (recompute mergeability and re-run). It reads each lane's `.lane-manifest.json` for `item` / `repos`
-/ `blockedBy`, treats a blocker as landed when its backlog file is `status: resolved` on `main`, and orders
-lanes so none precedes one it is `blockedBy`.
+`conflict` (rebase + resolve), `test-red` (a real bug to fix), `review-changes` (a human bounced the diff —
+repair before any land, #2396), `blocked` (blocker not landed, OR poisoned by a broken stacked ancestor —
+defer), and `unknown` (recompute mergeability and re-run). It reads each lane's `.lane-manifest.json` for
+`item` / `repos` / `blockedBy` / `stackParents`, treats a blocker as landed when its backlog file is
+`status: resolved` on `main`, and orders lanes so none precedes one it is `blockedBy`.
 
 ## How the skill drives it (per pass)
 
@@ -73,6 +76,16 @@ lanes so none precedes one it is `blockedBy`.
    scripts/lane-resume.mjs land <pr>` (#2202), which **enqueues** it (labels `ready-to-merge` + triggers a
    single-couple drain) rather than merging directly — both share the ONE #2198 rebase-drop-manifest helper, so
    a lane that only conflicts on the manifest lands without a human. Impl-first/WE-last, `blockedBy` order.
+   (A `review:changes`-labelled PR is refused at this step too — repair + re-review first, #2396.)
+5. **Rebuild a repaired link's descendant tail (#2396).** When the repaired lane was a broken stacked LINK
+   (its descendants were bucketed `blocked` with "stacked ancestor #N is a broken link"), do NOT blind-rebase
+   the batch: feed `rebuild-plan` a spec — `{repaired: <item>, descendants: [{item, ref, stackParents,
+   fileset}], fixTouched: [<repo-qualified files the repair changed>]}` (descendant topology comes from
+   `discover --json`'s `stackParents`; omit `landed` — it derives from bornAs-on-main). Then, per ordered step,
+   `rebuild <ref> --onto=<repaired-tip-sha>`: exit 0 = fast-forwarded (push happened; land it normally);
+   `guided-conflict` = that ONE descendant overlaps the fix — resolve it in that descendant's clone WITH the
+   manifest topology, never force-resolve. `deferred` entries wait for a later pass (never past an unlanded
+   parent).
 
 ### The one knob — how autonomous on a red test
 
