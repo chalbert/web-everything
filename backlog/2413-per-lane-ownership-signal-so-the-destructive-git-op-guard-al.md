@@ -1,11 +1,15 @@
 ---
 kind: decision
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-11"
+dateResolved: "2026-07-11"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#lane-ownership-minted-slug-per-op"
 preparedDate: "2026-07-10"
-costUsd: 89.53
-costSessions: 1
+costUsd: 108.08
+costSessions: 2
 crossRef: { url: /backlog/2367/, label: "#2367 — destructive-git-op guard" }
 relatedReport: reports/2026-07-10-per-lane-ownership-signal-parallel-workflow-lanes.md
 tags: [lane-pool, guard, workflow, orchestrator]
@@ -245,6 +249,25 @@ deciding axis.
   we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js:202-208): deterministic, already
   minted, unique per lane within a batch and across concurrent batches (the batch slug embeds the date
   and run).
+
+## Ruling (ratified 2026-07-11)
+
+Both defaults ratified as prepared, all skeptic riders included:
+
+- **Fork 1 → (a) in-lane acquire.** Each parallel lane's step-1 prep becomes an explicit-lane
+  `acquire --lane=N` with the per-lane `LANE_SESSION=<batchSlug>-<laneKey>` slug, replacing the manual
+  destructive prep. Riders: short TTL (~60–90 min), explicit slug-carrying release in the close-out,
+  acquire per affected impl repo, invocation pinned to the primary (or explicit `--repo=`).
+- **Fork 2 → (b) per-op slug assertion, fail-closed in marked lanes.** The workflow acquire sets a
+  dedicated `workflowLane` lease field; for a live marked lease the guard requires the command string to
+  assert the lease's own slug and denies on mismatch or absence, with precedence over the degraded no-id
+  path (rescoping fail-open to unmarked leases) and a deny message that teaches the re-assert idiom.
+  Option (c) (hook-payload `agent_id`) stays excluded per the round-2 refutation.
+
+Pre-ratification red-team (this session) re-attacked both defaults — Fork 2 (a)'s "the observed incident
+was cross-session" fails against the by-construction modulo-wrap sibling collision; Fork 1 (b)'s
+"orchestrator stamp is one atomic writer" fails on duplicated coupling state + retained destructive
+prep. No new amendments. Successor build: #xua3eva.
 
 ## Acceptance
 
