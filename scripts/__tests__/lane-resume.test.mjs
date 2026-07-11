@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyLane, orderByBlockedBy, landDecision, land, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain } from '../lane-resume.mjs';
+import { classifyLane, orderByBlockedBy, landDecision, land, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain } from '../lane-resume.mjs';
 
 const resolved = new Set([2110, 2113]); // blockers already landed on main
 
@@ -301,6 +301,30 @@ describe('lane-resume — markStackDescendantsBlocked (#2396)', () => {
     const m = byItem(markStackDescendantsBlocked(clean));
     expect(Object.values(m).every((l) => l.disposition === 'conflict')).toBe(true);
   });
+
+  it('a number-vs-string id spelling mismatch still poisons — broken item 2396 (number) matches stackParents ["2396"] (quoted frontmatter string)', () => {
+    // The fail-OPEN bug this pins: a raw-keyed match across JSON-number / quoted-string spellings silently
+    // skips the poisoning, so a review:changes-bounced parent's descendant stays ready and lands.
+    const ls = [
+      { num: 1, item: 2396, stackParents: [], disposition: 'conflict', reviewChanges: true, reason: 'r' }, // broken, NUMBER
+      { num: 2, item: '2400', stackParents: ['2396'], disposition: 'conflict', reason: 'r' },              // child, STRING parent
+      { num: 3, item: 2401, stackParents: [2400], disposition: 'conflict', reason: 'r' },                  // grandchild, NUMBER parent of a STRING item
+    ];
+    const m = byItem(markStackDescendantsBlocked(ls));
+    expect(m['2400'].disposition).toBe('blocked');       // string-spelled parent edge still matched
+    expect(m['2400'].reason).toMatch(/#2396/);
+    expect(m[2401].disposition).toBe('blocked');         // transitive across the mixed-spelling hop too
+    expect(m[2401].reason).toMatch(/#2396/);
+  });
+
+  it('the reverse spelling (broken item "2396" string, child stackParents [2396] number) also poisons', () => {
+    const ls = [
+      { num: 1, item: '2396', stackParents: [], disposition: 'test-red', reason: 'r' },
+      { num: 2, item: 2400, stackParents: [2396], disposition: 'conflict', reason: 'r' },
+    ];
+    const m = byItem(markStackDescendantsBlocked(ls));
+    expect(m[2400].disposition).toBe('blocked');
+  });
 });
 
 describe('lane-resume — planStackRebuild (#2396)', () => {
@@ -361,6 +385,33 @@ describe('lane-resume — planStackRebuild (#2396)', () => {
     });
     expect(plan.order.map((s) => s.item)).toEqual([300, 400]); // C placed first, then D onto it
   });
+
+  it('normalizes caller-supplied spec.landed — landed [300] (number) matches a "300" (string) stackParent, and vice versa', () => {
+    // Before the entry-point normalization, the raw-keyed landedSet.has("300") missed 300 and wrongly deferred.
+    const num = planStackRebuild({
+      repaired: 200,
+      descendants: [{ item: '400', ref: 'lane/d', stackParents: ['300'], fileset: [] }], // quoted-string manifest
+      landed: new Set([300]), // caller-supplied numbers (e.g. hand-written spec JSON)
+    });
+    expect(num.order.map((s) => s.item)).toEqual([400]); // placed, not deferred; item emitted in canonical form
+    expect(num.deferred).toHaveLength(0);
+    const str = planStackRebuild({
+      repaired: 200,
+      descendants: [{ item: 400, ref: 'lane/d', stackParents: [300], fileset: [] }],
+      landed: ['300'], // array + string spelling
+    });
+    expect(str.order.map((s) => s.item)).toEqual([400]);
+    expect(str.deferred).toHaveLength(0);
+  });
+
+  it('normalizes the repaired id too — repaired "200" (string) is an available base for stackParents [200] (number)', () => {
+    const plan = planStackRebuild({
+      repaired: '200',
+      descendants: [{ item: 300, ref: 'lane/c', stackParents: [200], fileset: [] }],
+    });
+    expect(plan.order.map((s) => s.item)).toEqual([300]);
+    expect(plan.order[0].onto).toBe(200); // onto reported in canonical asItemId form
+  });
 });
 
 describe('lane-resume — rebuildDescendant (#2396: reuse the rebase-drop plumbing, base = repaired tip)', () => {
@@ -404,31 +455,59 @@ describe('lane-resume — rebuildDescendant (#2396: reuse the rebase-drop plumbi
   });
 });
 
-describe('lane-resume — deriveLandedFromMain (#2396: stackParent landed status via bornAs-on-main)', () => {
+describe('lane-resume — deriveLandedFromMain (#2396: stackParent landed status via positive on-main proof)', () => {
   const d = (item, stackParents) => ({ item, ref: `lane/${item}`, stackParents, fileset: [] });
 
-  it('a numeric NNN parent outside the rebuild set is proven landed (a number only exists post-land, #2288)', () => {
-    const landed = deriveLandedFromMain([d(400, [300])], { lookup: () => null });
-    expect(landed.has(300)).toBe(true);
+  it('a numeric NNN parent is proven landed ONLY by a positive status:resolved-on-main record — never by construction', () => {
+    const resolvedLookup = (n) => n === 300; // 300 resolved on main; anything else not
+    const landed = deriveLandedFromMain([d(400, [300]), d(500, [2399])], { lookup: () => null, resolvedLookup });
+    expect(landed.has(300)).toBe(true);   // positive proof → landed
+    expect(landed.has(2399)).toBe(false); // numbered-yet-UNLANDED (e.g. a sibling batch lane still queued) → NOT landed
+  });
+
+  it('a numeric parent with NO on-main resolve is not landed — absence/id-format never reads as landed (fails closed)', () => {
+    const landed = deriveLandedFromMain([d(400, [300])], { lookup: () => null, resolvedLookup: () => false });
+    expect(landed.size).toBe(0);
   });
 
   it('a hash parent is landed ONLY on a positive bornAs-on-main record — absence is never read as landed', () => {
     const lookup = (h) => (h === 'xaaaaaa' ? '312' : null);
-    const landed = deriveLandedFromMain([d(400, ['xaaaaaa']), d(500, ['xbbbbbb'])], { lookup });
+    const landed = deriveLandedFromMain([d(400, ['xaaaaaa']), d(500, ['xbbbbbb'])], { lookup, resolvedLookup: () => false });
     expect(landed.has('xaaaaaa')).toBe(true);  // bornAs record found → proven
     expect(landed.has('xbbbbbb')).toBe(false); // no record → NOT landed (the F5 stowaway guard)
   });
 
   it('a parent that is ITSELF in the rebuild set is never counted landed (it rebuilds this pass)', () => {
-    const landed = deriveLandedFromMain([d(300, [200]), d(400, [300])], { lookup: () => null });
+    const landed = deriveLandedFromMain([d(300, [200]), d(400, [300])], { lookup: () => null, resolvedLookup: () => true });
     expect(landed.has(300)).toBe(false); // 300 is a descendant being rebuilt, not a landed base
-    expect(landed.has(200)).toBe(true);  // 200 is outside the set → numeric → landed
+    expect(landed.has(200)).toBe(true);  // 200 is outside the set AND resolved on main → landed
+  });
+
+  it('a quoted-string numeric parent ("300") is normalized before proof and returned in canonical form', () => {
+    const seen = [];
+    const landed = deriveLandedFromMain([d(400, ['300'])], { lookup: () => null, resolvedLookup: (n) => { seen.push(n); return true; } });
+    expect(seen).toEqual([300]);      // proof queried with the normalized number
+    expect(landed.has(300)).toBe(true); // canonical form — planStackRebuild normalizes its side too
   });
 
   it('feeds planStackRebuild end-to-end: the derived set unblocks a descendant whose parent already landed', () => {
     const descendants = [d(400, [300])]; // 300 landed on main in a prior pass, absent from the rebuild set
-    const plan = planStackRebuild({ repaired: 200, descendants, fixTouched: [], landed: deriveLandedFromMain(descendants, { lookup: () => null }) });
+    const plan = planStackRebuild({ repaired: 200, descendants, fixTouched: [], landed: deriveLandedFromMain(descendants, { lookup: () => null, resolvedLookup: (n) => n === 300 }) });
     expect(plan.order.map((s) => s.item)).toEqual([400]); // NOT deferred with an empty default set
     expect(plan.deferred).toHaveLength(0);
+  });
+
+  it('end-to-end deferral: a numeric parent with NO on-main resolve leaves its descendant deferred, never placed', () => {
+    // The stowaway this pins: stackParents [2399] where #2399 is numbered but its lane is still queued —
+    // the old landed-by-construction path placed the descendant and let it land past the unlanded parent.
+    const descendants = [d(400, [2399])];
+    const plan = planStackRebuild({ repaired: 200, descendants, fixTouched: [], landed: deriveLandedFromMain(descendants, { lookup: () => null, resolvedLookup: () => false }) });
+    expect(plan.order).toHaveLength(0);
+    expect(plan.deferred.map((s) => s.item)).toEqual([400]);
+  });
+
+  it('resolvedOnMain rejects a non-numeric id without touching git (fails closed)', () => {
+    expect(resolvedOnMain('not-a-number')).toBe(false);
+    expect(resolvedOnMain(null)).toBe(false);
   });
 });

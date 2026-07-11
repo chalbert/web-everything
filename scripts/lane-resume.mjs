@@ -15,7 +15,7 @@
  *   node scripts/lane-resume.mjs discover --this-repo  # scope to the cwd repo only (default = all 3 repos)
  *   node scripts/lane-resume.mjs discover --repos=owner/a,owner/b   # an explicit repo set
  *   node scripts/lane-resume.mjs land <pr> [--repo=owner/name] [--dry-run] [--json]   # land ONE stuck lane PR (#2202)
- *   node scripts/lane-resume.mjs rebuild-plan [--spec=<file>|-]     # plan a repaired link's descendant-tail rebuild (#2396); `landed` derives from bornAs-on-main when not supplied
+ *   node scripts/lane-resume.mjs rebuild-plan [--spec=<file>|-]     # plan a repaired link's descendant-tail rebuild (#2396); `landed` derives from positive on-main proof (bornAs / status:resolved) when not supplied
  *   node scripts/lane-resume.mjs rebuild <laneRef> --onto=<sha>     # rebuild ONE descendant tip onto the repaired parent tip (#2396)
  *
  * MULTI-REPO (#2383 — parity with `/drain`'s #2287 constellation-default): `discover` sweeps ALL 3
@@ -159,31 +159,42 @@ export function markStackDescendantsBlocked(lanes) {
   // buckets 'review-changes' — either way the link is still broken and its descendants must be re-bucketed.
   const isBroken = (l) => l.disposition === 'test-red' || l.disposition === 'review-changes'
     || l.testRed === true || l.reviewChanges === true;
-  const brokenItems = new Set(lanes.filter(isBroken).map((l) => l.item).filter((i) => i != null));
+  // Normalize EVERY id through `asItemId` before any Set/Map lookup — manifests spell the same item as a JSON
+  // number (2396) and a quoted frontmatter string ("2396") interchangeably, and a raw-keyed match across that
+  // spelling mismatch silently skips the poisoning (fails OPEN: the bounced parent's descendant stays `ready`
+  // and lands). One normalizer on BOTH sides (broken items, adjacency keys, BFS lookups) makes it spelling-immune.
+  const nid = (v) => (v == null ? null : asItemId(v));
+  const brokenItems = new Set(lanes.filter(isBroken).map((l) => nid(l.item)).filter((i) => i != null));
   if (!brokenItems.size) return lanes.map((l) => ({ ...l }));
   // adjacency: a stackParent item → the child lanes stacked on it.
   const childrenOf = new Map();
   for (const l of lanes) for (const sp of l.stackParents || []) {
-    if (!childrenOf.has(sp)) childrenOf.set(sp, []);
-    childrenOf.get(sp).push(l);
+    const key = nid(sp);
+    if (key == null) continue;
+    if (!childrenOf.has(key)) childrenOf.set(key, []);
+    childrenOf.get(key).push(l);
   }
   // BFS from every broken item over the stackParent edges → each reachable descendant is poisoned by it.
   // The poison record carries the broken ROOT (the nearest broken ANCESTOR), never the BFS predecessor — a
   // depth-≥2 descendant's reason must name the lane that actually needs the repair, not its (merely poisoned)
   // immediate parent.
-  const poisonedBy = new Map(); // childItem → the nearest broken ancestor item that poisons it
+  const poisonedBy = new Map(); // childItem (normalized) → the nearest broken ancestor item that poisons it
   const queue = [...brokenItems].map((b) => ({ item: b, root: b }));
   while (queue.length) {
     const { item: parent, root } = queue.shift();
     for (const child of childrenOf.get(parent) || []) {
-      if (child.item == null || brokenItems.has(child.item) || poisonedBy.has(child.item)) continue;
-      poisonedBy.set(child.item, root);
-      queue.push({ item: child.item, root }); // transitively poison this descendant's own children too
+      const c = nid(child.item);
+      if (c == null || brokenItems.has(c) || poisonedBy.has(c)) continue;
+      poisonedBy.set(c, root);
+      queue.push({ item: c, root }); // transitively poison this descendant's own children too
     }
   }
-  return lanes.map((l) => (l.item != null && poisonedBy.has(l.item) && !brokenItems.has(l.item)
-    ? { ...l, disposition: 'blocked', reason: `stacked ancestor #${poisonedBy.get(l.item)} is a broken link — repair it, then rebuild this onto the repaired tip (#2396)` }
-    : { ...l }));
+  return lanes.map((l) => {
+    const c = nid(l.item);
+    return c != null && poisonedBy.has(c) && !brokenItems.has(c)
+      ? { ...l, disposition: 'blocked', reason: `stacked ancestor #${poisonedBy.get(c)} is a broken link — repair it, then rebuild this onto the repaired tip (#2396)` }
+      : { ...l };
+  });
 }
 
 /**
@@ -205,22 +216,29 @@ export function markStackDescendantsBlocked(lanes) {
  */
 export function planStackRebuild({ repaired, descendants = [], fixTouched = [], landed = new Set() } = {}) {
   const fix = new Set(fixTouched);
-  const landedSet = landed instanceof Set ? landed : new Set(landed);
-  const placed = new Set([repaired]); // the repaired tip is available as a base from the start
+  // Normalize every id ONCE at entry (`asItemId`) — manifests and caller-supplied `spec.landed` spell the same
+  // item as a JSON number (300) or a quoted string ("300") interchangeably, and the `placed`/`landedSet` Set
+  // lookups below use SameValueZero equality (300 ≠ "300"). Normalizing here makes every lookup spelling-immune
+  // and lets `deriveLandedFromMain` return one canonical form instead of dual-adding raw + normalized.
+  const repairedId = asItemId(repaired);
+  const landedSet = new Set([...(landed instanceof Set ? landed : new Set(landed))].map((v) => asItemId(v)));
+  const placed = new Set([repairedId]); // the repaired tip is available as a base from the start
   const order = [];
-  const pending = descendants.filter((d) => d && d.item != null);
+  const pending = descendants
+    .filter((d) => d && d.item != null)
+    .map((d) => ({ ...d, item: asItemId(d.item), stackParents: (d.stackParents || []).map((p) => asItemId(p)) }));
   // Fixed-point sweeps: place any descendant all of whose stackParents are available; repeat until no progress.
   let progressed = true;
   while (progressed) {
     progressed = false;
     for (const d of pending) {
       if (placed.has(d.item)) continue;
-      const parents = d.stackParents || [];
+      const parents = d.stackParents;
       const available = parents.every((p) => placed.has(p) || landedSet.has(p));
       if (!available) continue; // a parent isn't ready yet — a later sweep may place it, else it defers
       const files = new Set(d.fileset || []);
       const overlaps = [...fix].some((f) => files.has(f));
-      const onto = parents.find((p) => placed.has(p)) ?? repaired; // rebuild onto the (repaired) chain member
+      const onto = parents.find((p) => placed.has(p)) ?? repairedId; // rebuild onto the (repaired) chain member
       order.push({
         item: d.item, ref: d.ref, onto, action: overlaps ? 'guided-conflict' : 'ff',
         reason: overlaps
@@ -238,30 +256,59 @@ export function planStackRebuild({ repaired, descendants = [], fixTouched = [], 
 }
 
 /**
+ * Positive proof-of-land for a NUMERIC item id (#2396) — the numeric analogue of `landedNumberFor`'s
+ * bornAs-on-main proof: the item's `backlog/NNN-*.md` on origin/main carries `status: resolved`. A bare
+ * number is NEVER trusted as landed-by-construction: numbered-yet-unlanded items exist (pre-#2288 legacy
+ * numbering, and an in-flight batch's own numbered siblings whose lanes are still queued), so only this
+ * positive on-main record proves the land. Fails CLOSED — a missing file, an open/active status, or any
+ * git error all read NOT landed.
+ * @param {number|string} num  the numeric NNN
+ * @param {string} [cwd]
+ * @returns {boolean}
+ */
+export function resolvedOnMain(num, cwd = process.cwd()) {
+  if (!/^\d{1,5}$/.test(String(num))) return false; // the numeric NNN id form only (ID_TOKEN_RE's numeric arm) — never a rev/pathspec injection surface
+  const n = Number(num);
+  try {
+    // One scoped whole-line grep on origin/main (mirrors landedNumberFor's shape): the `NNN-*.md` pathspec
+    // pins the exact leading id (the `-` stops a longer number from partial-hitting), -l output non-empty ⇔
+    // the resolved record exists. `git grep` exits 1 on no match → the catch reads it as NOT landed.
+    const out = execFileSync('git', ['grep', '-l', '-E', '^status:[ \t]*resolved', 'origin/main', '--', `backlog/${n}-*.md`],
+      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return out.length > 0;
+  } catch { return false; }
+}
+
+/**
  * Derive `planStackRebuild`'s `landed` set from the durable proof-of-land on origin/main (#2396/#2392) — the
  * "resolving each stackParent landed status via bornAs-on-main" half of the item, wired as the CLI
  * `rebuild-plan` default so a caller never has to hand-assemble the proof. For every stackParent any
- * descendant references (excluding items IN the descendant set — those are rebuilt this pass, not "landed"):
- *   - a NUMERIC NNN is proven landed by construction — under JIT numbering (#2288) an item only receives a
- *     number at land, so a numbered parent absent from the rebuild set is on main.
+ * descendant references (excluding items IN the descendant set — those are rebuilt this pass, not "landed"),
+ * landed requires POSITIVE proof on origin/main — absence or id-format is NEVER read as landed (the F5
+ * stowaway guard), for BOTH id forms:
+ *   - a NUMERIC NNN is proven landed only by its backlog file on origin/main carrying `status: resolved`
+ *     (`resolvedOnMain`) — a number alone proves nothing (numbered-yet-unlanded items exist: legacy ids and
+ *     an in-flight batch's own numbered siblings).
  *   - a provisional HASH is proven landed only by a positive `bornAs:<hash>` record on origin/main
- *     (`landedNumberFor`, #2392) — absence is NEVER read as landed (the F5 stowaway guard).
- * The returned Set carries each proven parent in BOTH its raw and `asItemId` forms, so `planStackRebuild`'s
- * raw-keyed `landedSet.has(p)` matches regardless of number-vs-string manifest spelling. `lookup` is
- * injectable (unit-testable without a repo).
+ *     (`landedNumberFor`, #2392).
+ * Every returned id is in canonical `asItemId` form — `planStackRebuild` normalizes at entry, so one form
+ * suffices. `lookup`/`resolvedLookup` are injectable (unit-testable without a repo).
  * @param {Array<{item, stackParents?:Array}>} descendants  the poisoned tail about to be planned
- * @param {{lookup?:(hash:string, cwd?:string)=>string|null, cwd?:string}} [o]
+ * @param {{lookup?:(hash:string, cwd?:string)=>string|null, resolvedLookup?:(num:number, cwd?:string)=>boolean, cwd?:string}} [o]
  * @returns {Set} items proven landed on main
  */
-export function deriveLandedFromMain(descendants = [], { lookup = landedNumberFor, cwd = process.cwd() } = {}) {
+export function deriveLandedFromMain(descendants = [], { lookup = landedNumberFor, resolvedLookup = resolvedOnMain, cwd = process.cwd() } = {}) {
   const inSet = new Set(descendants.filter((d) => d && d.item != null).map((d) => asItemId(d.item)));
   const landed = new Set();
+  const checked = new Set();
   for (const d of descendants) for (const sp of (d && d.stackParents) || []) {
     const id = asItemId(sp);
-    if (inSet.has(id) || landed.has(id)) continue; // rebuilt this pass (or already proven) — not read from main
-    const proven = (typeof id === 'number' && Number.isFinite(id)) // numeric NNN exists only post-land (#2288)
-      || (isHash(String(id)) && lookup(String(id), cwd) != null);  // hash → positive bornAs-on-main proof (#2392)
-    if (proven) { landed.add(id); landed.add(sp); }
+    if (inSet.has(id) || checked.has(id)) continue; // rebuilt this pass (or already checked) — not re-proven
+    checked.add(id);
+    const proven = (typeof id === 'number' && Number.isFinite(id))
+      ? resolvedLookup(id, cwd) === true                          // numeric → positive resolved-on-main proof
+      : (isHash(String(id)) && lookup(String(id), cwd) != null);  // hash → positive bornAs-on-main proof (#2392)
+    if (proven) landed.add(id);
   }
   return landed;
 }
