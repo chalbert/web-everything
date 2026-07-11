@@ -2,8 +2,11 @@
 bornAs: xja00k1
 kind: task
 parent: "2418"
-status: open
+status: resolved
 dateOpened: "2026-07-11"
+dateStarted: "2026-07-11"
+dateResolved: "2026-07-11"
+graduatedTo: "scripts/lib/review-core.mjs: renderDrainRunSummary/renderReviewNotice/renderCloseSessionFlowLine (#2433)"
 tags: []
 ---
 
