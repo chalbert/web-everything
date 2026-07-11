@@ -31,7 +31,7 @@
  * (negatives included) so the baseline mirrors what `scoreEscalation` actually acted on — the same faithful-
  * record invariant `manifestAuditLine` rests on; clamping would hide the exact tamper this gate targets.
  *
- * PURE — no fs, no `Date` reads (mirrors review-park-state.mjs). The CLI (`merge-ai-prs.mjs`) owns the fs
+ * PURE — no fs, no `Date` reads. The CLI (`merge-ai-prs.mjs`) owns the fs
  * boundary: it reads the state file (tolerantly — a missing/corrupt file degrades to empty, never breaking the
  * drain), calls these functions, and writes the result back. Local, machine-scoped, best-effort.
  *
@@ -42,7 +42,7 @@
  * gate does not merely miss it for one pass: it re-baselines to the tampered values and TRUSTS them for every
  * future pass. This is a durable silent bypass, not a one-pass window. It is not cleanly closable here without a
  * durable per-PR signal: the same code path can't tell a cache-loss re-sighting apart from a genuine first
- * sighting (the sibling park-state cache is co-located and lost with it), and the only durable trace — #2415's
+ * sighting, and the only durable trace — #2415's
  * `gh pr comment` audit line — exists for just a subset of prior sightings (non-human parks, skips, land
  * stamps; absent for dependency/check-held candidates and for `review:human` parks). Gating on it would also
  * break the deliberate "safe to delete" property below (a legitimate cache wipe would mass-re-park every PR
@@ -58,8 +58,7 @@ export function emptyBaselineState() {
 }
 
 /** The stable key a (repo, PR#) pair is tracked under. `repo` is the `owner/name` slug, or `null`/`'cwd'`
- *  for the local repo the drain runs in — normalized so both spellings collide on the same entry (mirrors
- *  review-park-state.mjs's `parkKey`). */
+ *  for the local repo the drain runs in — normalized so both spellings collide on the same entry. */
 export function baselineKey(repo, num) {
   return `${repo || 'cwd'}#${num}`;
 }
