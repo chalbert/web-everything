@@ -329,8 +329,13 @@ session's experience says would make the flow *stronger or cheaper* next time. T
 the flow): a candidate with a **fix or an owner** → a **`backlog/` item** (propose it with the user's
 go-ahead, dedup first — file it under the open gate-hardening epic if there is one); a **reusable principle
 about how the flow should work** → **`memory/` via §1a** (red-team → lane → PR). It is purely advisory: it
-never blocks the close and never forces a change this turn. If the flow was touched but nothing stands out,
-say **"nothing to flag"**.
+never blocks the close and never forces a change this turn.
+
+**Render the line, don't hand-type it (#2433).** The judgment above (which candidates qualify, where each
+routes) stays yours; once decided, shape them as `{summary, route: 'backlog'|'memory', target}` (`target` the
+`#NNN`/slug you just filed or routed to) and pass the list to `renderCloseSessionFlowLine({ candidates })`
+(`we:scripts/lib/review-core.mjs`) for the **Flow improvements** line below — it also supplies the
+`"nothing to flag"` fallback when the array is empty, so that exact wording is never re-typed per close.
 
 ### 4. Verdict
 Emit the close audit in **exactly this template** — fixed field order, fixed labels, verdict last.
