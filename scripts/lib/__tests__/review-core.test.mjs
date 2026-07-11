@@ -405,6 +405,15 @@ describe('renderDrainRunSummary (#2433)', () => {
     expect(s).toContain('deferred: #6');
   });
 
+  it('lists skipped ids (with their reason) like every other bucket', () => {
+    const s = renderDrainRunSummary({
+      merged: [{ num: 1 }],
+      skipped: [{ num: 8, reason: 'not fully AI-co-authored' }, { num: 9 }],
+    });
+    expect(s).toContain('2 skipped');
+    expect(s).toContain('skipped: #8 (not fully AI-co-authored), #9');
+  });
+
   it('defaults to an all-clean pass with no args', () => {
     expect(renderDrainRunSummary()).toBe('Drain pass: merged 0.');
   });
@@ -444,7 +453,7 @@ describe('renderReviewNotice (#2433)', () => {
 
   it('renders a changes-requested clearance', () => {
     const n = renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.CLEARED, pr: 3, outcome: 'changes' });
-    expect(n).toBe('PR #3 — human review requested changes on.');
+    expect(n).toBe('PR #3 — human review requested changes.');
   });
 
   it('throws on an unknown event', () => {

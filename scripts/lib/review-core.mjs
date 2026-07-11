@@ -470,6 +470,9 @@ export function renderDrainRunSummary({ merged = [], failed = [], deferred = [],
     lines.push(`  parked: ${parked.map((p) => `${idTag(p)}${p.reasons?.length ? ` (${p.reasons.join('; ')})` : ''}`).join(', ')}`);
   }
   if (deferred.length) lines.push(`  deferred: ${deferred.map(idTag).join(', ')}`);
+  if (skipped.length) {
+    lines.push(`  skipped: ${skipped.map((s) => `${idTag(s)}${s.reason ? ` (${s.reason})` : ''}`).join(', ')}`);
+  }
   return lines.join('\n');
 }
 
@@ -503,7 +506,7 @@ export function renderReviewNotice({ event, pr, repo, verdict, disposition, reas
     return `PR ${tag} ${modeText}${reasonText}. Verdict: ${verdict ?? '(pending)'}.`;
   }
   if (event === REVIEW_NOTICE_EVENTS.CLEARED) {
-    const verb = outcome === 'changes' ? 'requested changes on' : 'accepted';
+    const verb = outcome === 'changes' ? 'requested changes' : 'accepted';
     const by = actor ? ` by ${actor}` : '';
     return `PR ${tag} — human review ${verb}${by}.`;
   }
