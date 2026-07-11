@@ -40,6 +40,10 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
+// #2396 — a broken stacked LINK is a lane the finisher must repair before its overlap-descendants can be
+// rebuilt onto the repaired tip. "Broken" = a red required `test` (a real bug) OR a `review:changes` label
+// (a human bounced the diff). Reuse the ratified verdict-label set + its tolerant reader, never re-parse names.
+import { REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
 // #2383 — reuse the SAME constellation repo-resolution as `/drain` (`merge-ai-prs.mjs`), so `/finish` sweeps
 // all 3 repos (WE + frontierui + plateau-app) by default instead of only the cwd repo. `merge-ai-prs.mjs` is
 // CLI-guarded (runs nothing on import), so this is a pure function import.
@@ -62,16 +66,20 @@ export function localSlug() {
  * Classify ONE lane's takeover disposition from its already-collected signals.
  * @param {{num:number, mergeable:string, mergeState:string, testConclusion:string|null,
  *          item:number|null, repos:Array<{repo:string,ref:string,carriesResolve?:boolean}>,
- *          blockedBy:number[]}} pr
+ *          blockedBy:number[], stackParents?:Array<number|string>, reviewChanges?:boolean}} pr
  * @param {Set<number>} resolvedItems — items whose backlog file is status:resolved on main (blocker landed)
- * @returns {{num, item, repos, blockedBy, crossRepo, disposition, reason}}
+ * @returns {{num, item, repos, blockedBy, stackParents, reviewChanges, crossRepo, disposition, reason}}
  *   disposition ∈ 'ready' | 'conflict' | 'test-red' | 'blocked' | 'unknown'
  */
 export function classifyLane(pr, resolvedItems) {
   const blockedBy = pr.blockedBy || [];
   const unlanded = blockedBy.filter((b) => !resolvedItems.has(b));
   const crossRepo = (pr.repos || []).some((r) => r.repo && r.repo !== 'we');
-  const base = { num: pr.num, item: pr.item ?? null, repos: pr.repos || [], blockedBy, crossRepo };
+  // #2396 — carry the stacked-chain signals through so `markStackDescendantsBlocked` can re-bucket a broken
+  // link's overlap-descendants. `reviewChanges` (a human bounced the diff) is, like a red `test`, a broken link.
+  const stackParents = pr.stackParents || [];
+  const reviewChanges = pr.reviewChanges === true;
+  const base = { num: pr.num, item: pr.item ?? null, repos: pr.repos || [], blockedBy, stackParents, reviewChanges, crossRepo };
 
   // BLOCKED wins: a finisher cannot land a lane whose blocker isn't on main yet (impl-first / dep-first).
   if (unlanded.length) return { ...base, disposition: 'blocked', reason: `blockedBy not landed: ${unlanded.join(',')}` };
@@ -110,6 +118,116 @@ export function orderByBlockedBy(lanes) {
   for (const l of lanes) visit(l, new Set());
   // stable partition: attemptable (ready/conflict/test-red/unknown) before blocked
   return [...out.filter((l) => l.disposition !== 'blocked'), ...out.filter((l) => l.disposition === 'blocked')];
+}
+
+/**
+ * Re-bucket a stacked chain's descendants behind a BROKEN link (#2396 / #2387 F5). A broken link is a lane the
+ * finisher must REPAIR before anything stacked below it can rebuild: its required `test` is red (disposition
+ * `test-red` — a real bug) OR it carries `review:changes` (a human bounced the diff). Any lane whose
+ * `stackParents` chain reaches a broken link is re-bucketed to `blocked` (blocked-on-broken-link) — it must NOT
+ * be attempted this pass: its tip literally contains the broken parent's code (CI red-poisons it anyway), and it
+ * will be rebuilt onto the REPAIRED tip once the link is fixed, NEVER blind-rebased as part of the whole batch.
+ * The broken link KEEPS its own disposition (the finisher fixes it in place). Transitive over the chain and
+ * stowaway-proof: a descendant is deferred behind its parent's ABSENCE, so the tail can never land past the
+ * unrepaired parent. Pure — no IO; returns a NEW array (inputs untouched).
+ * @param {Array<{num, item, stackParents?:Array, disposition, reviewChanges?:boolean, reason}>} lanes
+ * @returns {Array} the same lanes with poisoned descendants re-bucketed to `blocked`
+ */
+export function markStackDescendantsBlocked(lanes) {
+  const isBroken = (l) => l.disposition === 'test-red' || l.reviewChanges === true;
+  const brokenItems = new Set(lanes.filter(isBroken).map((l) => l.item).filter((i) => i != null));
+  if (!brokenItems.size) return lanes.map((l) => ({ ...l }));
+  // adjacency: a stackParent item → the child lanes stacked on it.
+  const childrenOf = new Map();
+  for (const l of lanes) for (const sp of l.stackParents || []) {
+    if (!childrenOf.has(sp)) childrenOf.set(sp, []);
+    childrenOf.get(sp).push(l);
+  }
+  // BFS from every broken item over the stackParent edges → each reachable descendant is poisoned by it.
+  const poisonedBy = new Map(); // childItem → the nearest broken ancestor item that poisons it
+  const queue = [...brokenItems];
+  while (queue.length) {
+    const parent = queue.shift();
+    for (const child of childrenOf.get(parent) || []) {
+      if (child.item == null || brokenItems.has(child.item) || poisonedBy.has(child.item)) continue;
+      poisonedBy.set(child.item, parent);
+      queue.push(child.item); // transitively poison this descendant's own children too
+    }
+  }
+  return lanes.map((l) => (l.item != null && poisonedBy.has(l.item) && !brokenItems.has(l.item)
+    ? { ...l, disposition: 'blocked', reason: `stackParent #${poisonedBy.get(l.item)} is a broken link — repair it, then rebuild this onto the repaired tip (#2396)` }
+    : { ...l }));
+}
+
+/**
+ * Plan rebuilding a broken link's descendant TAIL onto the REPAIRED tip (#2396 / #2387 F5) — after the finisher
+ * fixes the link, re-stack only the salvageable descendants, in `stackParents` topological order, NEVER past an
+ * unlanded parent. A descendant is placed only once every `stackParent` it stacks on is AVAILABLE — the repaired
+ * item itself, a descendant already placed earlier this pass, or an item proven `landed` (landedThisPass ∪
+ * `bornAs`-on-main). A descendant whose parent is none of those is DEFERRED (its base doesn't exist yet — the
+ * positive proof-of-land invariant: absence is never read as landed). Per placed descendant the action is:
+ *   `ff`              — the repair touched NONE of this descendant's files → a clean fast-forward rebuild.
+ *   `guided-conflict` — the repair touched a file this descendant also touches → exactly ONE guided conflict
+ *                       (resolved WITH the manifest topology), never a blind whole-batch rebase.
+ * Pure. Returns `{ order:[{item, ref, onto, action, reason}], deferred:[{item, reason}] }`.
+ * @param {object} o
+ * @param {number|string} o.repaired            the repaired link's item id (its tip is the new base)
+ * @param {Array<{item, ref, stackParents?:Array, fileset?:Iterable}>} o.descendants  the poisoned tail
+ * @param {Iterable} [o.fixTouched=[]]           repo-qualified files the repair changed (ff vs conflict)
+ * @param {Set} [o.landed=new Set()]             items proven landed (landedThisPass ∪ provenOnMain)
+ */
+export function planStackRebuild({ repaired, descendants = [], fixTouched = [], landed = new Set() } = {}) {
+  const fix = new Set(fixTouched);
+  const landedSet = landed instanceof Set ? landed : new Set(landed);
+  const placed = new Set([repaired]); // the repaired tip is available as a base from the start
+  const order = [];
+  const pending = descendants.filter((d) => d && d.item != null);
+  // Fixed-point sweeps: place any descendant all of whose stackParents are available; repeat until no progress.
+  let progressed = true;
+  while (progressed) {
+    progressed = false;
+    for (const d of pending) {
+      if (placed.has(d.item)) continue;
+      const parents = d.stackParents || [];
+      const available = parents.every((p) => placed.has(p) || landedSet.has(p));
+      if (!available) continue; // a parent isn't ready yet — a later sweep may place it, else it defers
+      const files = new Set(d.fileset || []);
+      const overlaps = [...fix].some((f) => files.has(f));
+      const onto = parents.find((p) => placed.has(p)) ?? repaired; // rebuild onto the (repaired) chain member
+      order.push({
+        item: d.item, ref: d.ref, onto, action: overlaps ? 'guided-conflict' : 'ff',
+        reason: overlaps
+          ? 'repair touched a shared file — one guided conflict, resolved with the manifest topology (#2396)'
+          : 'repair touched no shared file — fast-forward rebuild onto the repaired tip (#2396)',
+      });
+      placed.add(d.item);
+      progressed = true;
+    }
+  }
+  const deferred = pending
+    .filter((d) => !placed.has(d.item))
+    .map((d) => ({ item: d.item, reason: 'a stackParent is neither landed nor rebuilt this pass — never rebuilt past an unlanded parent (#2396)' }));
+  return { order, deferred };
+}
+
+/**
+ * Rebuild ONE descendant lane tip onto the REPAIRED parent tip (#2396). Reuses the proven #2198
+ * `rebaseDropManifest` plumbing UNCHANGED — but with `base` = the repaired parent SHA instead of `origin/main`,
+ * so the child's ancestry now contains the repaired code (the drain then lands the couple with the parent as an
+ * ancestor, impl-first/parent-first). A clean / manifest-only merge is the fast-forward rebuild; a REAL
+ * (non-manifest) conflict is the ONE guided conflict this descendant directly overlapping the fix must resolve —
+ * surfaced as `guided-conflict` (the finisher resolves it WITH the topology), never force-resolved here.
+ * @param {object} o
+ * @param {string} o.laneRef        the descendant lane ref
+ * @param {string} o.ontoSha        the repaired parent tip SHA to rebuild onto
+ * @param {(cmd,args,opts?)=>{status,stdout,stderr}} [o.run]  injected runner (unit-testable)
+ * @returns {{action:'rebased'|'guided-conflict'|'error', laneRef, ...}} `rebased` = ff; `guided-conflict` = one conflict
+ */
+export function rebuildDescendant({ laneRef, ontoSha, run = gitRunner, ...rest } = {}) {
+  if (!laneRef || !ontoSha) return { action: 'error', laneRef: laneRef ?? null, reason: 'rebuildDescendant needs both laneRef and ontoSha (the repaired parent tip)' };
+  const r = rebaseDropManifest({ laneRef, base: ontoSha, run, ...rest });
+  if (r.action === 'skip') return { action: 'guided-conflict', laneRef, ontoSha, conflictPaths: r.conflictPaths || [], reason: `${r.reason} — one guided conflict to resolve with the manifest topology (#2396)` };
+  return { ...r, ontoSha };
 }
 
 /**
@@ -204,26 +322,28 @@ export function remoteManifestApiArgs(repo, ref) {
 }
 
 /**
- * Read a lane's `.lane-manifest.json` off its head ref. Returns {item, repos, blockedBy} or null.
+ * Read a lane's `.lane-manifest.json` off its head ref. Returns {item, repos, blockedBy, stackParents} or null.
  * #2383 — repo-aware, mirroring `/drain`: for the LOCAL repo (`repo` null/self) read it from local git; for a
  * REMOTE constellation repo read it via the GitHub API (`gh api …/contents/.lane-manifest.json?ref=<headRef>`
  * → base64 `.content`) — never a local clone. Fail-soft to null: a manifest-less lane (e.g. plateau-app's own
  * batch branches carry none) degrades to item null / blockedBy [] — unordered within its repo, exactly like the
  * drain's orphan-PR handling, never a crash.
+ * #2396 — also surfaces `stackParents` (the frontier-tip item(s) this lane was cut from / merged onto, #2387 F3)
+ * and keeps each `repos[].base` intact, so `/finish` can bucket a stacked chain's descendants behind a broken
+ * link and rebuild the salvageable tail onto the repaired tip. Absent ⇒ `stackParents: []` (sibling behaviour).
  */
 function readManifest(ref, { repo = null } = {}) {
+  const shape = (m) => ({ item: m.item ?? null, repos: m.repos || [], blockedBy: m.blockedBy || [], stackParents: Array.isArray(m.stackParents) ? m.stackParents : [] });
   if (repo) {
     try {
       const b64 = execFileSync('gh', remoteManifestApiArgs(repo, ref), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       if (!b64) return null;
-      const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
-      return { item: m.item ?? null, repos: m.repos || [], blockedBy: m.blockedBy || [] };
+      return shape(JSON.parse(Buffer.from(b64, 'base64').toString('utf8')));
     } catch { return null; }
   }
   for (const rev of [`origin/${ref}`, ref]) {
     try {
-      const m = JSON.parse(execFileSync('git', ['show', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
-      return { item: m.item ?? null, repos: m.repos || [], blockedBy: m.blockedBy || [] };
+      return shape(JSON.parse(execFileSync('git', ['show', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })));
     } catch { /* try next rev */ }
   }
   return null;
@@ -258,26 +378,31 @@ function discover(asJson, { repos = null, singleRepo = false } = {}) {
   for (const repo of REPOS) {
     const isLocal = repo == null || repo === self;
     const repoFlag = repo ? ['--repo', repo] : [];
-    const prs = shJSON('gh', ['pr', 'list', ...repoFlag, '--label', READY_LABEL, '--state', 'open', '--json', 'number,mergeable,mergeStateStatus,headRefName,statusCheckRollup', '--limit', '200'], []);
+    // #2396 — `labels` too: a `review:changes` bounce is a broken stacked LINK (like a red `test`), so its
+    // overlap-descendants must be re-bucketed behind it, not attempted this pass.
+    const prs = shJSON('gh', ['pr', 'list', ...repoFlag, '--label', READY_LABEL, '--state', 'open', '--json', 'number,mergeable,mergeStateStatus,headRefName,statusCheckRollup,labels', '--limit', '200'], []);
     for (const p of prs) {
-      const man = readManifest(p.headRefName, { repo: isLocal ? null : repo }) || { item: null, repos: [], blockedBy: [] };
+      const man = readManifest(p.headRefName, { repo: isLocal ? null : repo }) || { item: null, repos: [], blockedBy: [], stackParents: [] };
       const test = (p.statusCheckRollup || []).find((c) => (c.name || c.context) === 'test');
       const lane = classifyLane({
         num: p.number, mergeable: p.mergeable, mergeState: p.mergeStateStatus,
         testConclusion: test ? (test.conclusion || test.state || null) : null,
         item: man.item, repos: man.repos, blockedBy: man.blockedBy,
+        stackParents: man.stackParents, reviewChanges: hasReviewLabel(p.labels, REVIEW_LABELS.changes),
       }, resolved);
       lane.repo = repo || self || null; // tag the owning repo so the skill lands each in the right place
       lanes.push(lane);
     }
   }
-  const ordered = orderByBlockedBy(lanes);
+  // #2396 — re-bucket every overlap-descendant of a broken link (red `test` OR `review:changes`) to `blocked`
+  // BEFORE ordering, so the salvageable tail waits for the repaired tip instead of a blind whole-batch rebase.
+  const ordered = orderByBlockedBy(markStackDescendantsBlocked(lanes));
   const bucket = (d) => ordered.filter((l) => l.disposition === d);
   const result = {
     ok: true,
     counts: { ready: bucket('ready').length, conflict: bucket('conflict').length, testRed: bucket('test-red').length, blocked: bucket('blocked').length, unknown: bucket('unknown').length },
     ready: bucket('ready'), conflict: bucket('conflict'), testRed: bucket('test-red'), blocked: bucket('blocked'), unknown: bucket('unknown'),
-    order: ordered.map((l) => ({ pr: l.num, repo: l.repo, item: l.item, disposition: l.disposition, crossRepo: l.crossRepo, blockedBy: l.blockedBy, reason: l.reason })),
+    order: ordered.map((l) => ({ pr: l.num, repo: l.repo, item: l.item, disposition: l.disposition, crossRepo: l.crossRepo, blockedBy: l.blockedBy, stackParents: l.stackParents || [], reviewChanges: l.reviewChanges === true, reason: l.reason })),
   };
   if (asJson) { process.stdout.write(JSON.stringify(result, null, 2) + '\n'); return; }
   const repoTag = (l) => (l.repo && l.repo !== self ? `${l.repo.split('/').pop()}#` : '#'); // short prefix per repo
