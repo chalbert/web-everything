@@ -11,7 +11,7 @@ crossRef: { url: /backlog/2413/, label: "#2413 — the ratified ruling (Fork 1 (
 
 # Workflow-lane ownership: in-lane acquire + slug-asserted guard denial (implements #2413 ruling)
 
-Implement the #2413 ruling: parallel /workflow lane prompts replace the manual destructive step-1 prep with LANE_SESSION=<batchSlug>-<laneKey> lane-pool acquire --lane=N (short TTL ~60-90min, explicit slug-carrying release at close-out, acquire per affected impl repo, invoked from the primary); the workflow acquire sets a dedicated workflowLane lease field; the destructive-git-op guard, for a live marked lease, requires the command string to assert the lease's own slug and denies on mismatch or absence (fail-closed, precedence over the degraded no-id path, deny message teaches the re-assert idiom). Unmarked leases keep today's semantics.
+Implement the statute `we:docs/agent/platform-decisions.md#lane-ownership-minted-slug-per-op` (the live rule; ratified by #2413, cited here as lineage): parallel /workflow lane prompts replace the manual destructive step-1 prep with LANE_SESSION=<batchSlug>-<laneKey> lane-pool acquire --lane=N (short TTL ~60-90min, explicit slug-carrying release at close-out, acquire per affected impl repo, invoked from the primary); the workflow acquire sets a dedicated workflowLane lease field; the destructive-git-op guard, for a live marked lease, requires the command string to assert the lease's own slug and denies on mismatch or absence (fail-closed, precedence over the degraded no-id path, deny message teaches the re-assert idiom). Unmarked leases keep today's semantics.
 
 ## Scope (from the #2413 ruling — Fork 1 (a) + Fork 2 (b), with all skeptic riders)
 
