@@ -1,9 +1,10 @@
 ---
+bornAs: xxzv5jw
 kind: story
 size: 3
 parent: "2418"
 status: open
-blockedBy: ["xjtogd2", "x5xxhr7"]
+blockedBy: ["2435", "2432"]
 dateOpened: "2026-07-11"
 tags: []
 ---

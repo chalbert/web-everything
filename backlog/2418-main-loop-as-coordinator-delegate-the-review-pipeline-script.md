@@ -17,12 +17,12 @@ Target shape for a drain/review session: `acquire → drain --json → launch re
 
 **Sliced 2026-07-11** (`/slice`; report `we:reports/2026-07-11-backlog-split-analysis.md`). Six child slices scaffolded; original candidate 3 split into two (the PR-comment renderer C needs, plus the rest), candidate 2's `comment` subcommand folded into that renderer to remove the overlap. Candidate 5 stays here as could-not-split (below).
 
-- **A — review-core CLI: `reduce` + `mandate`** (`#xjtogd2`, story·3) — command line over `we:scripts/lib/review-core.mjs`'s pure fns; `reduce` (findings→verdict/outcome/disposition + table), `mandate` (`--lens`/`--editor`). Replaces 5× inline `node -e`. *Foundational.*
-- **B — PR review-comment renderer** (`#x5xxhr7`, story·3) — `renderPanelComment({findings, verdict, disposition})` (extends `renderPanelVerdictTable`) + the `comment` CLI subcommand. *Feeds C.*
-- **C — `review-parked-prs` Workflow** (`#xxzv5jw`, story·3, blocked-by A+B) — `pipeline(parked, panelReview → reducePanelVerdict → editorRound → reReview)`; ~24 hand-run steps → one launch.
-- **D — Session/notice renderers** (`#xja00k1`, task·2) — drain end-of-run summary, close-session report, escalation/clearance notice, all from structured data.
-- **E — Fetch/state helpers** (`#xjmwxw5`, task·3) — `fetch-parked`, `wait-green`, `pr-state`.
-- **F — `closing-session` standing efficiency-introspection step** (`#xla8zta`, story·3) — the meta that keeps surfacing A–E.
+- **A — review-core CLI: `reduce` + `mandate`** (`#2435`, story·3) — command line over `we:scripts/lib/review-core.mjs`'s pure fns; `reduce` (findings→verdict/outcome/disposition + table), `mandate` (`--lens`/`--editor`). Replaces 5× inline `node -e`. *Foundational.*
+- **B — PR review-comment renderer** (`#2432`, story·3) — `renderPanelComment({findings, verdict, disposition})` (extends `renderPanelVerdictTable`) + the `comment` CLI subcommand. *Feeds C.*
+- **C — `review-parked-prs` Workflow** (`#2437`, story·3, blocked-by A+B) — `pipeline(parked, panelReview → reducePanelVerdict → editorRound → reReview)`; ~24 hand-run steps → one launch.
+- **D — Session/notice renderers** (`#2433`, task·2) — drain end-of-run summary, close-session report, escalation/clearance notice, all from structured data.
+- **E — Fetch/state helpers** (`#2434`, task·3) — `fetch-parked`, `wait-green`, `pr-state`.
+- **F — `closing-session` standing efficiency-introspection step** (`#2436`, story·3) — the meta that keeps surfacing A–E.
 
 ### Could not split — `who-cleared <pr>` clearance-provenance checker
 
