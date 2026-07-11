@@ -122,6 +122,19 @@ export default defineConfig({
       'tests/a11y/**/__tests__/**/*.test.ts', // pure a11y-gate helpers (e.g. sitemap scope-C derivation, #847) — Playwright owns the *.spec.ts lane
       'functions/**/__tests__/**/*.test.{ts,tsx}', // Cloudflare Pages Functions — phase-1 deploy gate (#1137)
     ],
+    // #2407: the hermetic gate-entrypoint integration test spawns two REAL `node` child processes (driving
+    // the actual merge-ai-prs.mjs CLI end-to-end, see that file's header). Alone it's ~3s; under full-suite
+    // CPU contention from OTHER concurrent worker threads/processes (e.g. the lane-pool subprocess tests)
+    // it measured ~51s. Routing just this one file to its own single `forks` process keeps its subprocess
+    // spawns off the shared `threads` worker pool the rest of the suite runs on, instead of contending with
+    // every other file for the same pool of worker threads. Scoped to this file only — no other test's pool
+    // assignment changes.
+    poolMatchGlobs: [['scripts/__tests__/gate-entrypoint-integration.test.mjs', 'forks']],
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
   },
   resolve: {
     alias: {
