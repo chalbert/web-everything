@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyLane, orderByBlockedBy, landDecision, land, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant } from '../lane-resume.mjs';
+import { classifyLane, orderByBlockedBy, landDecision, land, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain } from '../lane-resume.mjs';
 
 const resolved = new Set([2110, 2113]); // blockers already landed on main
 
@@ -36,6 +36,22 @@ describe('lane-resume — classifyLane (#2200)', () => {
 
   it('unknown mergeability → unknown (not a false ready/conflict)', () => {
     expect(classifyLane(lane({ mergeable: 'UNKNOWN', mergeState: 'UNKNOWN', testConclusion: null }), resolved).disposition).toBe('unknown');
+  });
+
+  it('a review:changes bounce NEVER classifies ready — green CI + mergeable is irrelevant, a human rejected the diff (#2396)', () => {
+    const v = classifyLane(lane({ reviewChanges: true }), resolved); // clean + green, but bounced
+    expect(v.disposition).toBe('review-changes');
+    expect(v.reason).toMatch(/review:changes/);
+  });
+
+  it('review:changes beats a conflict (repair the diff first; the rebase happens as part of the repair)', () => {
+    expect(classifyLane(lane({ reviewChanges: true, mergeable: 'CONFLICTING', mergeState: 'DIRTY' }), resolved).disposition).toBe('review-changes');
+  });
+
+  it('BLOCKED still wins over a red test, but the RAW testRed flag is carried so the breakage is not masked (#2396)', () => {
+    const v = classifyLane(lane({ blockedBy: [9999], testConclusion: 'FAILURE' }), resolved);
+    expect(v.disposition).toBe('blocked'); // blockedBy still owns the disposition …
+    expect(v.testRed).toBe(true);          // … but the broken-link signal survives for markStackDescendantsBlocked
   });
 });
 
@@ -139,6 +155,14 @@ describe('lane-resume — land (#2202/#2290: enqueue + trigger the drain, never 
     expect(v.merged).toBe(false);
     expect(hasGhMerge(calls)).toBe(false);
     expect(hasDrainTrigger(calls)).toBe(false); // repaired code first — nothing enqueued
+  });
+
+  it('a review:changes-labelled PR → never enqueues, even green + mergeable (a human bounced the diff, #2396)', () => {
+    const { run, calls } = scriptedRun({});
+    const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }], labels: [{ name: 'review:changes' }] } });
+    expect(v.action).toBe('review-changes');
+    expect(v.merged).toBe(false);
+    expect(calls.length).toBe(0); // no label edit, no drain trigger — nothing pushed toward main
   });
 
   it('a red `test` → never enqueues (no merge-tree, no label, no trigger)', () => {
@@ -248,6 +272,30 @@ describe('lane-resume — markStackDescendantsBlocked (#2396)', () => {
     expect(m[300].reason).toMatch(/#200/);
   });
 
+  it('a depth-≥2 descendant reason names the broken ROOT, never its (merely poisoned) immediate parent (#2396)', () => {
+    const m = byItem(markStackDescendantsBlocked(chain()));
+    expect(m[400].reason).toMatch(/#200/);     // the actual broken link
+    expect(m[400].reason).not.toMatch(/#300/); // NOT the BFS predecessor — #300 has nothing to repair
+  });
+
+  it('a blockedBy-masked red-test link (disposition blocked, raw testRed) still poisons its descendants (#2396)', () => {
+    // classifyLane's 'BLOCKED wins' overwrote B's disposition; the RAW testRed flag must still mark it broken,
+    // else C/D stay ready and land past the unrepaired parent.
+    const ls = chain({ reviewChanges: false, disposition: 'blocked', testRed: true });
+    const m = byItem(markStackDescendantsBlocked(ls));
+    expect(m[200].disposition).toBe('blocked'); // the link keeps its own (blockedBy) disposition
+    expect(m[300].disposition).toBe('blocked');
+    expect(m[300].reason).toMatch(/#200/);
+    expect(m[400].disposition).toBe('blocked');
+  });
+
+  it('a review-changes DISPOSITION (no raw flag) is also a broken link', () => {
+    const ls = chain({ reviewChanges: false, disposition: 'review-changes' });
+    const m = byItem(markStackDescendantsBlocked(ls));
+    expect(m[300].disposition).toBe('blocked');
+    expect(m[400].disposition).toBe('blocked');
+  });
+
   it('no broken link → every lane keeps its disposition (a clean chain is untouched)', () => {
     const clean = chain({ reviewChanges: false });
     const m = byItem(markStackDescendantsBlocked(clean));
@@ -338,5 +386,49 @@ describe('lane-resume — rebuildDescendant (#2396: reuse the rebase-drop plumbi
     const v = rebuildDescendant({ laneRef: 'lane/child', run });
     expect(v.action).toBe('error');
     expect(calls.length).toBe(0);
+  });
+
+  it('a non-SHA ontoSha (branch-controlled manifest content) is REFUSED before any git call — option-injection guard (#2396)', () => {
+    for (const bad of ['--upload-pack=touch /tmp/pwn', 'origin/main', 'HEAD~1', 'abc123', 'g'.repeat(40)]) {
+      const { run, calls } = scriptedRun({});
+      const v = rebuildDescendant({ laneRef: 'lane/child', ontoSha: bad, run });
+      expect(v.action).toBe('error');
+      expect(v.reason).toMatch(/not a commit SHA/);
+      expect(calls.length).toBe(0); // the crafted value never reaches git argv
+    }
+  });
+
+  it('accepts an abbreviated (7-40 hex) SHA, case-insensitive', () => {
+    const { run } = scriptedRun({ 'git merge-tree': { status: 0, stdout: 'tree'.padEnd(40, '0') }, ...RESOLVE_PLUMBING, 'gh pr': { status: 0 } });
+    expect(rebuildDescendant({ laneRef: 'lane/child', ontoSha: 'AbC1234', run }).action).toBe('rebased');
+  });
+});
+
+describe('lane-resume — deriveLandedFromMain (#2396: stackParent landed status via bornAs-on-main)', () => {
+  const d = (item, stackParents) => ({ item, ref: `lane/${item}`, stackParents, fileset: [] });
+
+  it('a numeric NNN parent outside the rebuild set is proven landed (a number only exists post-land, #2288)', () => {
+    const landed = deriveLandedFromMain([d(400, [300])], { lookup: () => null });
+    expect(landed.has(300)).toBe(true);
+  });
+
+  it('a hash parent is landed ONLY on a positive bornAs-on-main record — absence is never read as landed', () => {
+    const lookup = (h) => (h === 'xaaaaaa' ? '312' : null);
+    const landed = deriveLandedFromMain([d(400, ['xaaaaaa']), d(500, ['xbbbbbb'])], { lookup });
+    expect(landed.has('xaaaaaa')).toBe(true);  // bornAs record found → proven
+    expect(landed.has('xbbbbbb')).toBe(false); // no record → NOT landed (the F5 stowaway guard)
+  });
+
+  it('a parent that is ITSELF in the rebuild set is never counted landed (it rebuilds this pass)', () => {
+    const landed = deriveLandedFromMain([d(300, [200]), d(400, [300])], { lookup: () => null });
+    expect(landed.has(300)).toBe(false); // 300 is a descendant being rebuilt, not a landed base
+    expect(landed.has(200)).toBe(true);  // 200 is outside the set → numeric → landed
+  });
+
+  it('feeds planStackRebuild end-to-end: the derived set unblocks a descendant whose parent already landed', () => {
+    const descendants = [d(400, [300])]; // 300 landed on main in a prior pass, absent from the rebuild set
+    const plan = planStackRebuild({ repaired: 200, descendants, fixTouched: [], landed: deriveLandedFromMain(descendants, { lookup: () => null }) });
+    expect(plan.order.map((s) => s.item)).toEqual([400]); // NOT deferred with an empty default set
+    expect(plan.deferred).toHaveLength(0);
   });
 });
