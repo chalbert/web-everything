@@ -227,6 +227,68 @@ export function isRequiredCheckGreen(pr, requiredCheck = 'test') {
   return concl === 'SUCCESS';
 }
 
+/** Is the required `test` check DEFINITIVELY red (failed/cancelled/timed-out/errored) on this PR's rollup? The
+ *  twin of `isRequiredCheckGreen` (#2421). A MISSING check (not yet reported) is NOT failed — it reads as
+ *  in-flight (`checking`), never `ci:failed`; only a check GitHub has actually concluded red counts. */
+export function isRequiredCheckFailed(pr, requiredCheck = 'test') {
+  const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
+  const check = roll.find((c) => (c?.name || c?.context) === requiredCheck);
+  if (!check) return false;
+  const concl = String(check.conclusion || check.state || '').toUpperCase();
+  return ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(concl);
+}
+
+/**
+ * #2421 — the ratified ci-lifecycle label taxonomy (#2281 Fork 2: `ci:failed` opens a deterministic `ci:*`
+ * state family; `blocked` stays bare to match its bare sibling `ready-to-merge`). Keyed by the semantic state
+ * name so callers never hand-spell the label string. `ready` reuses the EXISTING `ready-to-merge` label
+ * (#2196/#2199) — this taxonomy does not mint a second label for the same state.
+ */
+export const CI_LIFECYCLE_LABELS = { checking: 'checking', failed: 'ci:failed', blocked: 'blocked', ready: 'ready-to-merge' };
+
+/** Provisioning metadata (#2279-style single source) for the two NEW ci-lifecycle labels this ruling mints —
+ *  `ready-to-merge` is minted elsewhere (pr-land.mjs, the first-applier) and deliberately NOT duplicated here. */
+export const CI_LIFECYCLE_LABEL_META = {
+  [CI_LIFECYCLE_LABELS.checking]: { color: 'BFD4F2', description: 'Required checks are still running — CI truth not yet known (#2281)' },
+  [CI_LIFECYCLE_LABELS.failed]: { color: 'D93F0B', description: 'Required check failed — the producer must fix and re-push (#2281)' },
+  [CI_LIFECYCLE_LABELS.blocked]: { color: 'D4C5F9', description: 'Waiting on a cross-item blockedBy dependency to land first (#2281)' },
+};
+
+/**
+ * #2421 — the #2281 ruling's TOTAL ci-lifecycle label function, generalizing #2216's green-only
+ * `reconcileGreenLabels` to every state an open, producer-owned AI PR can be in. Pure. Exactly ONE of the four
+ * `CI_LIFECYCLE_LABELS` values is "the" state for any input — no state is ever left to be inferred from a
+ * label's ABSENCE (the directive #2281 codifies). Precedence (checked in order, first match wins):
+ *   1. `blocked`        — a manifest `blockedBy` item is still open (cross-item ordering, independent of CI).
+ *   2. `ready-to-merge`  — the required check is green.
+ *   3. `ci:failed`      — the required check has definitively failed/cancelled/timed-out.
+ *   4. `checking`        — none of the above: checks are still in flight (the default/fallback state).
+ * @param {{blocked?:boolean, checkGreen?:boolean, checkFailed?:boolean}} o
+ * @returns {'blocked'|'ready-to-merge'|'ci:failed'|'checking'}
+ */
+export function lifecycleLabelFromCiTruth({ blocked = false, checkGreen = false, checkFailed = false } = {}) {
+  if (blocked) return CI_LIFECYCLE_LABELS.blocked;
+  if (checkGreen) return CI_LIFECYCLE_LABELS.ready;
+  if (checkFailed) return CI_LIFECYCLE_LABELS.failed;
+  return CI_LIFECYCLE_LABELS.checking;
+}
+
+/**
+ * #2421 — what label add/remove calls does a caller need to reach the `desired` ci-lifecycle state? Pure.
+ * Enforces "at most one of `owned` present" (the exactly-one invariant, scoped to the labels THIS caller is
+ * allowed to manage — `owned`). `desired` outside `owned` is a legal no-add (e.g. `ready-to-merge`, which the
+ * CLI wiring below deliberately excludes from `owned` — see the caller for why) but its `owned` siblings are
+ * still cleared, so a PR that reaches that state still sheds any stale `checking`/`ci:failed`/`blocked` label.
+ * @param {{currentLabels?:Array, desired:string, owned?:string[]}} o  `owned` defaults to all four states.
+ * @returns {{toAdd:string[], toRemove:string[]}}
+ */
+export function planCiLifecycleLabelUpdate({ currentLabels = [], desired, owned = Object.values(CI_LIFECYCLE_LABELS) } = {}) {
+  const has = (name) => hasLabel({ labels: currentLabels }, name);
+  const toAdd = desired && owned.includes(desired) && !has(desired) ? [desired] : [];
+  const toRemove = owned.filter((name) => name !== desired && has(name));
+  return { toAdd, toRemove };
+}
+
 /**
  * Classify one PR into a merge/skip verdict. Pure — no gh calls. Returns
  *   { num, title, decision: 'merge'|'skip', reason, aiGenerated, certifyLabel, testGreen, state, mergeable }.
@@ -919,10 +981,12 @@ function runCli() {
   // #2230 — re-poll the label-scoped one-shot once to absorb the `ready-to-merge` index-propagation lag.
   const EXPECT = flags.expect != null && Number.isFinite(Number(flags.expect)) ? Number(flags.expect) : null;
   const REPOLL_SEC = Number.isFinite(Number(flags['repoll-delay'])) && Number(flags['repoll-delay']) >= 0 ? Number(flags['repoll-delay']) : 4;
-  // #2216 — before a label-scoped sweep, LABEL any green-but-unlabelled producer PR (a `pr-land --label-on-green`
-  // that timed out left it stranded). ON by default for the label-scoped drain (it IS the reconcile point);
-  // `--no-reconcile-labels` disables. Under `--watch` this re-labels each interval — the label applies the
-  // moment CI goes green, with no human step.
+  // #2216/#2421 — before a label-scoped sweep, bring every open producer PR's ci-lifecycle label to CI truth:
+  // green-but-unlabelled → `ready-to-merge` (a `pr-land --label-on-green` that timed out left it stranded,
+  // #2216's original scope), PLUS the #2281-ratified total coverage — `checking`/`ci:failed`/`blocked` — so no
+  // ci-lifecycle state is ever left to be inferred from a label's absence. ON by default for the label-scoped
+  // drain (it IS the reconcile point); `--no-reconcile-labels` disables both. Under `--watch` this re-labels
+  // each interval — self-healing, with no human step and no per-check-tick `pr-land` write.
   const RECONCILE = label && !flags['no-reconcile-labels'];
   // #2171 — DETERMINISTIC review-escalation rubric: before merging a ready PR, score it (blast radius, size,
   // dismissed pre-PR findings, cross-repo couple, 1-in-N sampling); an escalated PR PARKS ALIVE (labelled
@@ -1029,26 +1093,107 @@ function runCli() {
     return null;
   };
 
-  // #2216 — POST-CI LABEL RECONCILE. Before the labelled sweep, label any green-but-unlabelled producer PR that
-  // a `pr-land --label-on-green` timeout left stranded. Lists open PRs unfiltered by label, filters to the cheap
-  // signals (unlabelled + required check green), confirms producer authorship per-candidate (commits), then adds
-  // the label. Best-effort — a gh miss never fails the drain. Returns the labelled PR numbers.
-  const reconcileGreenLabels = (repo) => {
+  // #2421 — ONE unfiltered per-repo PR listing + manifest read, shared by BOTH the cross-repo "is this backlog
+  // item still open" set the `blocked` branch of `lifecycleLabelFromCiTruth` needs, AND the reconcile below —
+  // instead of each independently re-listing + re-reading manifests for the SAME open-PR set (2x the `gh pr
+  // list` calls and 2x the per-PR manifest reads every drain pass / `--watch` interval). An item is "open" iff
+  // SOME open PR (any repo, any authorship — a blocker need not itself be an AI PR) carries a manifest naming
+  // it — the SAME openness question `planLabelDrain` answers for the merge cascade, computed here independently
+  // because this listing (like #2216's `reconcileGreenLabels` before it) is deliberately UNFILTERED-by-label,
+  // so it must not depend on the (possibly `--label`-scoped) `verdicts` collected later this pass. Best-effort
+  // throughout — a gh miss for one repo contributes nothing from that repo, never throws.
+  const collectOpenPrContext = () => {
+    const prsByRepo = new Map();
+    const openItems = new Set();
+    const manifestByPr = new Map();
+    for (const repo of REPOS) {
+      let open = [];
+      try { open = JSON.parse(execFileSync('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100', '--json', 'number,title,labels,statusCheckRollup,headRefName'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
+      catch { /* this repo's listing failed — the mint loop still runs (idempotent); its reconcile loop below sees no PRs */ }
+      prsByRepo.set(repo, open);
+      for (const p of open) {
+        const m = readPrManifest(repo, p.headRefName);
+        manifestByPr.set(`${repo || 'cwd'}::${p.number}`, m);
+        if (m && m.item != null) openItems.add(asItemId(m.item));
+      }
+    }
+    return { prsByRepo, openItems, manifestByPr };
+  };
+
+  // #2421 — POST-CI TOTAL CI-LIFECYCLE LABEL RECONCILE, generalizing #2216's green-only `reconcileGreenLabels`
+  // per the #2281 ruling. Every open, PRODUCER-OWNED (AI-generated) PR is brought to the state
+  // `lifecycleLabelFromCiTruth` says it should be in — self-healing (runs every drain pass + `--watch`
+  // interval), never a per-check-tick `pr-land` write. `ready-to-merge` keeps being applied by the EXISTING
+  // mechanism below (unchanged — the `label` var, `shouldLabelOnGreen`) and is deliberately EXCLUDED from the
+  // `owned` set this reconcile add/removes: stripping it here would drop a still-open, merely-reordered PR out
+  // of the SAME PASS's `--label`-scoped `verdicts` listing (built right after this returns), which derives
+  // `planLabelDrain`'s cross-item `openItems` set — a same-pass hazard that could let a PR blockedBy THIS one
+  // wrongly read it as landed. So `ready-to-merge`'s presence/absence — the landing-gate signal #2183 F1 /
+  // #2138 F4 depend on — is left to the pre-existing mechanic entirely; only `checking` / `ci:failed` /
+  // `blocked` are added/removed here. A PR can therefore legitimately carry BOTH `ready-to-merge` AND `blocked`
+  // at once (green, but still waiting on an item) — informative, not a merge-safety issue (the drain's
+  // `blockedBy` defer already gates on the manifest directly, never on this label). Best-effort throughout — a
+  // gh miss never fails the drain. Returns the reconciled PR numbers (for the pass summary), reported ONLY when
+  // every label mutation this pass attempted for that PR actually succeeded (never a false-positive "reconciled"
+  // on a silently-failed `gh pr edit`).
+  const CI_LIFECYCLE_OWNED = [CI_LIFECYCLE_LABELS.checking, CI_LIFECYCLE_LABELS.failed, CI_LIFECYCLE_LABELS.blocked];
+  const reconcileCiLifecycleLabels = (repo, ctx) => {
     if (!RECONCILE) return [];
-    let open;
-    try { open = JSON.parse(execFileSync('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100', '--json', 'number,title,labels,statusCheckRollup'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
-    catch { return []; } // reconcile is best-effort; the real sweep below still hard-fails on a bad env
-    const cheap = open.filter((p) => !hasLabel(p, label) && isRequiredCheckGreen(p, REQUIRED)); // green + unlabelled
-    const labelled = [];
-    for (const p of cheap) {
+    const open = ctx.prsByRepo.get(repo) || [];
+    // Mint the two NEW labels once per (repo, process) — `ready-to-merge` is minted by pr-land.mjs (the first
+    // applier); never re-minted here so its color/description keeps ONE single source. Mirrors the review-label
+    // mint below: the WHOLE ensure-loop (including the `ensuredLabels` memoization) is skipped under DRY_RUN, so
+    // a dry-run process never marks a label "ensured" without having actually minted it.
+    if (!DRY_RUN) {
+      for (const [name, meta] of Object.entries(CI_LIFECYCLE_LABEL_META)) {
+        const ensureKey = `${repo || 'cwd'}::${name}`;
+        if (ensuredLabels.has(ensureKey)) continue;
+        ensuredLabels.add(ensureKey);
+        try { execFileSync('gh', ['label', 'create', name, '--color', meta.color, '--description', meta.description, ...repoFlag(repo)], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* already exists — fine */ }
+      }
+    }
+    const reconciled = [];
+    for (const p of open) {
       let commits = [];
       try { commits = JSON.parse(execFileSync('gh', ['pr', 'view', String(p.number), ...repoFlag(repo), '--json', 'commits'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').commits || []; } catch { continue; }
-      if (!shouldLabelOnGreen({ ...p, commits }, { requiredCheck: REQUIRED, label })) continue;
-      if (DRY_RUN) { labelled.push(p.number); if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} would label "${label}" (required check green, was unlabelled)\n`); continue; }
-      try { execFileSync('gh', ['pr', 'edit', String(p.number), ...repoFlag(repo), '--add-label', label], { stdio: ['ignore', 'ignore', 'pipe'] }); labelled.push(p.number); if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} labelled "${label}" (post-CI reconcile — required check went green after a label-on-green timeout)\n`); }
-      catch { /* a label race/permission miss is non-fatal — the next pass retries */ }
+      const withCommits = { ...p, commits };
+      let touched = false;
+      // ── The legacy #2216 branch: green-but-unlabelled → ready-to-merge (label lander's collection signal),
+      //    UNCHANGED — see the `owned` note above for why this stays separate from the add/remove state below. ──
+      if (!hasLabel(p, label) && shouldLabelOnGreen(withCommits, { requiredCheck: REQUIRED, label })) {
+        if (DRY_RUN) { touched = true; if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} would label "${label}" (required check green, was unlabelled)\n`); }
+        else {
+          try { execFileSync('gh', ['pr', 'edit', String(p.number), ...repoFlag(repo), '--add-label', label], { stdio: ['ignore', 'ignore', 'pipe'] }); touched = true; if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} labelled "${label}" (post-CI reconcile — required check went green after a label-on-green timeout)\n`); }
+          catch { /* a label race/permission miss is non-fatal — the next pass retries */ }
+        }
+      }
+      // ── The #2421 TOTAL branch: every producer-owned open PR gets its checking/ci:failed/blocked state
+      //    reconciled (mutually exclusive among themselves, cleared once none applies — e.g. once green). ──
+      if (isAiGeneratedPr(withCommits)) { // only the producer's own AI PRs — never a human orphan (mirrors #2216)
+        const manifest = ctx.manifestByPr.get(`${repo || 'cwd'}::${p.number}`) ?? null;
+        const blockedBy = manifest && Array.isArray(manifest.blockedBy) ? manifest.blockedBy.map(asItemId) : [];
+        const blocked = blockedBy.some((b) => ctx.openItems.has(b));
+        const desired = lifecycleLabelFromCiTruth({
+          blocked,
+          checkGreen: isRequiredCheckGreen(p, REQUIRED),
+          checkFailed: isRequiredCheckFailed(p, REQUIRED),
+        });
+        const plan = planCiLifecycleLabelUpdate({ currentLabels: p.labels, desired, owned: CI_LIFECYCLE_OWNED });
+        if (plan.toAdd.length || plan.toRemove.length) {
+          if (DRY_RUN) {
+            touched = true;
+            if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} would reconcile ci-lifecycle → "${desired}"${plan.toRemove.length ? ` (drop ${plan.toRemove.join(', ')})` : ''}\n`);
+          } else {
+            let ok = true;
+            for (const rm of plan.toRemove) { try { execFileSync('gh', ['pr', 'edit', String(p.number), ...repoFlag(repo), '--remove-label', rm], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { ok = false; /* best-effort — the next pass retries */ } }
+            for (const add of plan.toAdd) { try { execFileSync('gh', ['pr', 'edit', String(p.number), ...repoFlag(repo), '--add-label', add], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { ok = false; /* a label race/permission miss is non-fatal — the next pass retries */ } }
+            if (ok) { touched = true; if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} ci-lifecycle → "${desired}" (reconcile)\n`); }
+          }
+        }
+      }
+      if (touched) reconciled.push(p.number);
     }
-    return labelled;
+    return reconciled;
   };
 
   // ── ONE sweep pass — reconcile labels → list → classify → cascade-merge → sync. Returns the pass result (no
@@ -1059,8 +1204,12 @@ function runCli() {
   // number-keyed cross-repo map. The single list is what lets the cascade honour cross-repo `blockedBy`.
   const reconciledLabels = [];
   const verdicts = [];
+  // #2421 — the shared open-PR listing + manifest reads + cross-repo item-openness set the reconcile below
+  // needs, computed ONCE for this pass (RECONCILE-gated — same cost profile as the reconcile it feeds: free on
+  // a bare, unlabelled sweep).
+  const openPrContext = RECONCILE ? collectOpenPrContext() : { prsByRepo: new Map(), openItems: new Set(), manifestByPr: new Map() };
   for (const repo of REPOS) {
-    reconciledLabels.push(...reconcileGreenLabels(repo)); // #2216 — label green-but-unlabelled producer PRs first
+    reconciledLabels.push(...reconcileCiLifecycleLabels(repo, openPrContext)); // #2421 (generalizes #2216) — total ci-lifecycle relabel first
     // List open PRs WITHOUT commits (commits×authors×limit overflows GitHub's GraphQL node cap), then fetch each
     // candidate's commits per-PR — the rollup + mergeable come from the list; commits (the AI gate) come per PR.
     const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100',

@@ -601,12 +601,17 @@ function runCli() {
     return verdict;
   };
 
-  // open-only (`--no-wait`, no `--label-on-green`): open WITHOUT the label (nothing has confirmed it green) and
-  // leave it. It stays UNLABELLED until CI is confirmed green — the label lander won't collect a red PR. A
-  // producer that wants the drain to land it must use `--label-on-green` (wait → label when green → hand off).
+  // open-only (`--no-wait`, no `--label-on-green`): open WITHOUT the `ready-to-merge` landing-gate label
+  // (nothing has confirmed it green) and leave it. #2421 — this is NOT an ambiguous bare state read from a
+  // label's absence: the drain's total ci-lifecycle reconcile (`lifecycleLabelFromCiTruth`,
+  // `merge-ai-prs.mjs`'s `reconcileCiLifecycleLabels`, every drain pass + `--watch` interval) picks up this PR
+  // on its next sweep and applies `checking`/`ci:failed`/`blocked` from CI truth — never per-check-tick writes
+  // from HERE. `ready-to-merge` itself keeps its unchanged landing-gate absence-semantics (#2183 F1/#2138 F4):
+  // its absence still means "not queued"; the label lander won't collect a red PR either way. A producer that
+  // wants the drain to land it must use `--label-on-green` (wait → label when green → hand off).
   if (PLAN.mode === 'open-only') {
-    if (!AS_JSON && LABEL) process.stderr.write(`pr-land [${REPO}] · #${prNum} opened UNLABELLED (--no-wait): use --label-on-green so the ${LABEL} label is applied only when required checks pass\n`);
-    emit({ repo: REPO, merged: false, reason: 'opened', pr: Number(prNum), ref: REF, label: null, labelApplied: false, detail: `opened self-approved PR #${prNum} for ${REF} (--no-wait, UNLABELLED — CI not confirmed green)` }, 0);
+    if (!AS_JSON && LABEL) process.stderr.write(`pr-land [${REPO}] · #${prNum} opened UNLABELLED (--no-wait): use --label-on-green so the ${LABEL} label is applied only when required checks pass; the drain's ci-lifecycle reconcile labels its checking/ci:failed/blocked state on its next sweep (#2421)\n`);
+    emit({ repo: REPO, merged: false, reason: 'opened', pr: Number(prNum), ref: REF, label: null, labelApplied: false, detail: `opened self-approved PR #${prNum} for ${REF} (--no-wait, no ready-to-merge label yet — CI not confirmed green; the drain's ci-lifecycle reconcile covers its checking/ci:failed/blocked state, #2421)` }, 0);
   }
 
   // 4. Wait until GitHub itself says the PR is ready, then merge. We gate on the AUTHORITATIVE
@@ -630,11 +635,17 @@ function runCli() {
 
     const verdict = pollVerdict({ state, checkStatus: reqVerdict.status, requiredCount: required.length, labelWhenGreen: !!PLAN.labelWhenGreen, conflicting: view.mergeable === 'CONFLICTING' });
     if (verdict === 'conflict') emit({ repo: REPO, merged: false, reason: 'conflict', pr: Number(prNum), detail: `PR #${prNum} has merge conflicts with ${BASE} — ${BASE} left untouched (rebase the ref + re-run, or --fallback-git)` }, 3);
-    if (verdict === 'red') emit({ repo: REPO, merged: false, reason: 'check-red', pr: Number(prNum), detail: `PR #${prNum} required check RED — ${reqVerdict.reason}; ${BASE} left untouched (fix + re-run)` }, 2);
+    // #2421 — this abort intentionally does NOT write a `ci:failed` label itself (never a per-check-tick
+    // pr-land write, per the #2281 ruling): the drain's `reconcileCiLifecycleLabels` reads the SAME required-
+    // check truth on its next sweep and applies `ci:failed`, so a PR left here is never a permanently-ambiguous
+    // bare state — just a producer-side exit the drain's self-healing reconcile corrects shortly after.
+    if (verdict === 'red') emit({ repo: REPO, merged: false, reason: 'check-red', pr: Number(prNum), detail: `PR #${prNum} required check RED — ${reqVerdict.reason}; ${BASE} left untouched (fix + re-run) — the drain's ci-lifecycle reconcile will label it ci:failed (#2421)` }, 2);
     if (verdict === 'behind') emit({ repo: REPO, merged: false, reason: 'behind', pr: Number(prNum), detail: `PR #${prNum} is behind ${BASE} (strict up-to-date) — rebase the ref onto ${BASE} + re-run` }, 3);
     if (verdict === 'label') break; // ready: green (for BEHIND, a NON-EMPTY green set) → apply the producer label
-    // verdict === 'wait' → not ready yet (checks pending / BLOCKED); keep polling until the timeout.
-    if (Date.now() > deadlineMs) emit({ repo: REPO, merged: false, reason: 'check-timeout', pr: Number(prNum), detail: `PR #${prNum} not ready past timeout (mergeStateStatus=${state}); leaving for a later drain pass` }, 3);
+    // verdict === 'wait' → not ready yet (checks pending / BLOCKED); keep polling until the timeout. A timeout
+    // below likewise leaves the PR for the drain's reconcile to label `checking`/`ci:failed` from CI truth —
+    // never inferred from this exit's absence of a label (#2421).
+    if (Date.now() > deadlineMs) emit({ repo: REPO, merged: false, reason: 'check-timeout', pr: Number(prNum), detail: `PR #${prNum} not ready past timeout (mergeStateStatus=${state}); leaving for a later drain pass — the drain's ci-lifecycle reconcile covers its labelling (#2421)` }, 3);
     execFileSync('sleep', ['20']);
   }
 

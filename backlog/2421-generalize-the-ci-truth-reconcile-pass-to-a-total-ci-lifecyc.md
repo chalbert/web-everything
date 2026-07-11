@@ -2,9 +2,12 @@
 bornAs: xqd7m2u
 kind: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["2281"]
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-11"
+dateResolved: "2026-07-11"
+codifiedIn: "docs/agent/platform-decisions.md#ci-lifecycle-total-label-function"
 tags: []
 ---
 
