@@ -1,8 +1,11 @@
 ---
 kind: task
 parent: "2405"
-status: open
+status: resolved
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-11"
+dateResolved: "2026-07-11"
+graduatedTo: "vitest.config.ts — poolMatchGlobs routes scripts/__tests__/gate-entrypoint-integration.test.mjs to its own singleFork forks-pool process, off the shared threads pool the rest of the suite runs on. Measured: solo time unchanged (~3.2s); under full-suite contention the file's own time dropped ~102s→~83s and total suite wall-clock ~112s→~95s (two full local `npm test -- run` runs, same machine, isolation change only)."
 tags: []
 ---
 
