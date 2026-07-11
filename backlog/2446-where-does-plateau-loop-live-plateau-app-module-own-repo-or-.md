@@ -1,6 +1,7 @@
 ---
+bornAs: xljqux3
 kind: decision
-parent: "xhmav8a"
+parent: "2445"
 size: 3
 status: open
 dateOpened: "2026-07-11"
@@ -13,7 +14,7 @@ Constellation placement for the coordinator: inside plateau-app (tools/ sibling 
 
 ## The question
 
-The parent epic ([#xhmav8a](/backlog/xhmav8a-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/))
+The parent epic ([#2445](/backlog/2445-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/))
 extracts the delivery machinery (lane pool, pr-land, drain, review contracts, backlog CLI —
 today all under `we:scripts/`) into a resident coordinator managing multiple projects. WE
 holds zero implementation by statute, so the engine must move out. Where to?

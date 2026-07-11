@@ -12,7 +12,7 @@ tags: []
 # Push-at-close drain: prompt exit when no batch feed (avoid full max-runtime idle poll)
 
 > **Priority note (2026-07-11, Plateau Loop triage).** Efficiency polish of session-choreography a
-> resident coordinator replaces wholesale ([#xhmav8a](/backlog/xhmav8a-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/)
+> resident coordinator replaces wholesale ([#2445](/backlog/2445-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/)
 > — a long-lived drain owner has no detached push-at-close watch to time-box). Correctness is
 > unaffected today (bounded by `--max-runtime-min`), so settled-but-low-value-now: pickable, out
 > of auto-select.

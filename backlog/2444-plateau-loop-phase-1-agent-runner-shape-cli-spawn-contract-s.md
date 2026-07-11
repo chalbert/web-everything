@@ -1,6 +1,7 @@
 ---
+bornAs: x1d4k2v
 kind: decision
-parent: "xhmav8a"
+parent: "2445"
 size: 3
 status: open
 dateOpened: "2026-07-11"

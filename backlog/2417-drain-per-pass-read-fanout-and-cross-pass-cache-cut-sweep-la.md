@@ -11,7 +11,7 @@ dateOpened: "2026-07-10"
 
 > **Priority note (2026-07-11, Plateau Loop triage).** Perf tuning of the sweep-from-scratch model a
 > resident coordinator replaces (its state is resident — no per-pass re-reads to cache;
-> [#xhmav8a](/backlog/xhmav8a-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/)).
+> [#2445](/backlog/2445-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/)).
 > Read-only latency, no correctness impact — settled-but-low-value-now: pickable, out of auto-select.
 
 Each `sweepOnce()` in `we:scripts/merge-ai-prs.mjs` gathers candidate data **fully serially** (the CLI is
