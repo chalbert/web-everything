@@ -1,0 +1,14 @@
+---
+name: ready-to-merge-label-is-not-proof-of-work
+description: "A parallel-lane PR's ready-to-merge label / resolved status is not proof the work was done — verify the diff touches the declared impl files, not just the backlog .md, before trusting or landing."
+metadata:
+  node_type: memory
+  type: feedback
+  originSessionId: bea5580d-32e9-4e65-af33-1614f58c1d39
+---
+
+A `/workflow` (parallel) lane self-reports success: it flips the item to `resolved` and opens a PR that `pr-land --label-on-green` stamps `ready-to-merge`. **None of those signals prove the implementation exists.** Before trusting a lane's PR — as the producer/close, or as the drain about to land it — **inspect the diff scope**: `gh pr view <PR> --json files`. For a story with declared impl files, a diff that touches **only** the backlog `.md` (the status/progress splice) is a **hollow resolve** — the lane marked it done without doing it. Strip the `ready-to-merge` label so the drain can't land a false `resolved`, and carry the item.
+
+Worked example (batch 2026-07-11, `/workflow`, 7 items): lane #2403 (story·5 — `deriveReviewDisposition` in `review-core.mjs` + route the drain/`/review`/`/merge` consumers) opened PR #421 **labelled `ready-to-merge`** with a diff of **25 add / 1 del on the backlog `.md` only** — zero implementation. Caught by hand via `gh pr view 421 --json files`; label stripped; the item correctly stayed `open` on main (the in-lane resolve rides the un-landed PR, never reaching main). Same session, lane #2428 shows the **inverse** trap: the orchestrator reported it `no-result` (the lane process died before returning its result), so the ledger marked it *carried* — yet the lane had **already done the work and opened PR #424** (real `lane-drain.mjs` impl + a numbering test, green CI), it just died before `pr-land` could stamp the label. A `carried`/`no-result` verdict is therefore **not proof of no-work** either — before re-batching a carried item, check for an already-open PR (`gh pr list --search <NNNN>`) and label it if it's green. Both directions collapse to one rule: **trust the PR's actual diff + checks, not the orchestrator's ledger status nor the lane's self-reported label.**
+
+**Why:** the drain lands on the `ready-to-merge` label as its go-signal, so a labelled-but-hollow PR is a silent false-resolved waiting to merge. This is the sharp, recurring axis of the [[index-verif]] "verify real state, don't trust the label" discipline — here the label is a *PR merge-readiness* signal and the real state is *whether the diff carries the work*. **How to apply:** at close/drain, diff-scope every lane PR before trusting its label; for a story, assert ≥1 non-backlog declared-impl file is touched, else strip the label and carry. See [[parallel-orchestrator-first-real-multilane-run]].

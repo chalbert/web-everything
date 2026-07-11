@@ -15,4 +15,5 @@ Verification & Proof cluster — open a leaf with `node scripts/memory-resolve.m
 - 53. Verify Grounding Claims Before Ratifying — trace a prepared default's claims to the real tree; #730
 - 127. Verify Bulk LLM Classification — bulk classification ~50-75% wrong; adversarial-verify before commit; #911
 - 129. Prove Before Claiming Fixed — never say 'fixed' without a runtime test on the REAL surface; #1207
+- [Ready-to-merge label ≠ proof of work](ready-to-merge-label-is-not-proof-of-work.md) — a lane's `ready-to-merge`/`resolved` ≠ impl exists; diff-scope the PR (touches declared impl files, not just backlog .md) before trusting/landing; #2403
 - [Verify "ratified #NNNN" against live status](verify-ratified-citation-against-live-status.md) — "per ratified #NNNN" can be false; check the cited item's status, encode blockedBy if active; #2027
