@@ -51,3 +51,21 @@ describe('parallel-execute workflow — #2215 in-lane new-item scaffold', () => 
     expect(SRC).not.toMatch(/scaffold[\s\S]{0,120}push\s+origin\s+(HEAD:)?(refs\/heads\/)?main\b/);
   });
 });
+
+describe('parallel-execute workflow — #2429 self-excluding pr-land wait', () => {
+  it('prescribes waiting on pr-land via the background-completion notification, not a hand-rolled poll', () => {
+    expect(SRC).toMatch(/#2429/);
+    // DoD option 1: the wait is the harness resuming the lane on the background task's completion.
+    expect(SRC).toMatch(/run_in_background/);
+    expect(SRC).toMatch(/completion notification/i);
+  });
+
+  it('bans a self-matching process-poll wait on pr-land (the #2429 hang)', () => {
+    // The banned construct: `kill -0 $(pgrep -f "pr-land …")` — pgrep matches the waiter's OWN shell (the ref
+    // string is in its argv), so `kill -0` never fails and the loop idles to the Monitor timeout. The lane body
+    // must never emit this. We match the command-substitution self-match form, which is absent from the prose
+    // that documents the ban.
+    expect(SRC).not.toMatch(/kill\s+-0\s+\$\(\s*pgrep/);
+    expect(SRC).not.toMatch(/pgrep\s+-f\s+["'][^"'\n]*pr-land/);
+  });
+});
