@@ -20,7 +20,7 @@ blast-radius, *not* gate-self — so a statute edit auto-merges un-reviewed afte
 racing that clock. Concretely: #371 parked 02:18, timed out and merged 02:51 at its round-2 head, stranding a
 round-3 review fix (main's statute cited a *resolved* epic until a follow-up PR).
 
-> **Gap 1 delivered by x30jq9n (2026-07-10, operator call): the merge-anyway timeout is REMOVED entirely** —
+> **Gap 1 delivered by 2425 (2026-07-10, operator call): the merge-anyway timeout is REMOVED entirely** —
 > a park now rests parked until a verdict label, with the operator's manual `/drain` /
 > `--no-review-escalation` as the stuck-park relief valve. The recurrence that motivated the removal: PR #396
 > repeated #371's pattern the same day (merged mid-negotiation at its round-1 head). Gap 2 and the
