@@ -1,12 +1,18 @@
 ---
 kind: task
 status: open
+priority: low
 relatedTo: ["2257", "2287", "2194", "2262"]
 tags: [lane, drain, merge-queue, perf]
 dateOpened: "2026-07-10"
 ---
 
 # Drain per-pass read fan-out + cross-pass cache — cut sweep latency without touching the serial merge
+
+> **Priority note (2026-07-11, Plateau Loop triage).** Perf tuning of the sweep-from-scratch model a
+> resident coordinator replaces (its state is resident — no per-pass re-reads to cache;
+> [#xhmav8a](/backlog/xhmav8a-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/)).
+> Read-only latency, no correctness impact — settled-but-low-value-now: pickable, out of auto-select.
 
 Each `sweepOnce()` in `we:scripts/merge-ai-prs.mjs` gathers candidate data **fully serially** (the CLI is
 `execFileSync` throughout): per repo it runs `gh pr list`, then per PR a separate `gh pr view --json commits`

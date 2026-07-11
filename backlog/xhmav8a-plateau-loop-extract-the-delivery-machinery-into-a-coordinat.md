@@ -1,0 +1,78 @@
+---
+kind: epic
+status: open
+dateOpened: "2026-07-11"
+tags: [delivery-machinery, coordinator, plateau]
+---
+
+# Plateau Loop — extract the delivery machinery into a coordinator product
+
+Long-lived coordinator owning the backlog→lane→PR→review→drain state machine across a registry of projects (WE, FUI, plateau-app), spawning Claude CLI agents as supervised children; phase 1 local + subscription auth.
+
+## Why (the reliability argument)
+
+Today's coordination lives in skill prompts, file locks, detached processes, and lease
+conventions that every session must correctly re-interpret — the model sits in the loop for
+pure state-machine work. The recent patch trail is the evidence: whole-process drain leases
+(#2391), push-at-close (#2395), stale-lane guards, workflow-lane ownership (#2427),
+self-modifying-item exclusion (#2077). Each hardens "sessions coordinating by convention."
+
+A resident coordinator inverts that: **one process owns the state machine** (queue, leases,
+lane pool, drain scheduling, review labels) and spawns agents as supervised children. Locks
+become in-process, retries/timeouts become code, crash recovery is one supervisor instead of
+N sessions guessing. Claude stays only where judgment lives: building, judging diffs,
+authoring items.
+
+## Strategy
+
+- **Multi-project registry.** The Loop instance manages a list of projects — WE, Frontier UI,
+  plateau-app — each with its own backlog, lane pool, and gate config. The machinery is
+  already keyed by repo name; the registry makes it first-class.
+- **Self-hosting boundary.** Plateau Loop's own improvements stay managed through Claude Code
+  until the Loop can improve itself in a lane and reload (coordinator drains its own PR,
+  restarts, resumes from persisted state). Needs #2077-style exclusion so it never
+  parallel-edits itself.
+- **Configuration over convention.** Gating, review escalation, drain policy, model choice
+  become platform config (like other development aspects), with a UI to inspect and operate
+  gating / review / drain / finish.
+- **Phase-1 runtime = spawn the local `claude` CLI** (`-p --output-format stream-json`) on the
+  user's subscription — the pattern the dev-panel / spec-explorer already proves. The Agent
+  SDK requires an API key, so it is a later backend behind the same runner interface.
+  Steering headless: PreToolUse hook-gate injection (mid-turn) + kill-and-`--resume`
+  (between-turn). SaaS later = coordination plane only; execution stays local per-user
+  (subscription ToS forbids pooling consumer auth server-side).
+
+## Extraction seams (what moves, what stays)
+
+The deterministic substrate is a self-contained node+git+`gh` engine: lane-pool + leases,
+pr-land, merge-ai-prs (drain), the three guards, review-escalation/review-core contracts,
+lane-partition, backlog CLI. AI enters at exactly three bounded points — lane workers, diff
+judging, item selection/authoring — each behind a stable contract (Finding shape, manifest
+schema, escalation rubric). WE keeps its *rules* (check-standards content, backlog content);
+the Loop ships the *harness* (gate runner, item format, labels, drain policy).
+
+The parallel orchestrator is the one Claude-Code-coupled piece (Workflow sandbox); it gets
+rewritten as plain Node fan-out over the runner interface — removing today's inline-mirror
+duplication of `we:scripts/readiness/lane-partition.mjs`.
+
+## Triage rubric applied to open machinery items
+
+- **Feeds the coordinator** → re-parented here (script-delegation and transport-parity work
+  carries straight into the Loop): [#2418](/backlog/2418-main-loop-as-coordinator-delegate-the-review-pipeline-script/),
+  [#2241](/backlog/2241-constellation-ci-pr-merge-parity-bring-frontierui-plateau-ap/).
+- **Efficiency polish of choreography the coordinator obsoletes** → `priority: low` with a
+  pointer here (stays pickable, out of auto-select — parking is not a prioritisation escape):
+  #2442 (push-at-close idle poll), #2417 (drain sweep read fan-out).
+- **Correctness fixes still owed while the machinery lives** → untouched: #2424 / #2443
+  (whole-process drain lease — an observed double-drain), plus drain/review *policy*
+  (merge-anyway timeout #2412, run-tooling-last #2422, escalation relief #2423, gate
+  hardening under #2405, convergence loop #2410); policy carries into the Loop regardless
+  of host.
+
+## Definition of Done
+
+A locally-running Plateau Loop instance coordinates backlog→lane→PR→review→drain for at
+least two projects of the constellation end-to-end (build sessions spawned, reviews judged,
+drain as sole writer), with gating/review/drain operable from its UI and its config in
+platform config — and the session-choreography conventions it replaces retired from
+docs/skills.
