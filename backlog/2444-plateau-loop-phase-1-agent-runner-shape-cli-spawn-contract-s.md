@@ -14,7 +14,7 @@ tags: [plateau-loop, agent-runner, claude-cli]
 Define the agent-runner interface (spawn/steer/stop/resume) with the claude CLI backend: -p stream-json spawning, hook-gate mid-turn steering, kill+resume redirects, subscription auth only; SDK/API-key backend deferred. Includes the setup-token/SDK spike outcome.
 
 > **Deferred (2026-07-11 red team — operator call).** Phase 1 is re-scoped to the resident drain
-> daemon only ([#xb002dz](/backlog/xb002dz-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)),
+> daemon only ([#2449](/backlog/2449-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)),
 > which spawns no agents — so this decision has no consumer yet. Prepare/ratify only once the daemon's
 > operating evidence says the extraction should grow. `priority: low`: pickable, out of auto-select.
 

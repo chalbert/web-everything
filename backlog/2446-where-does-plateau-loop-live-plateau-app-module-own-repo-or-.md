@@ -15,13 +15,13 @@ Constellation placement for the coordinator: inside plateau-app (tools/ sibling 
 
 > **Deferred (2026-07-11 red team — operator call).** Ratifying placement now would decide the biggest
 > question with the least information. The phase-1 resident drain daemon
-> ([#xb002dz](/backlog/xb002dz-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)) starts
+> ([#2449](/backlog/2449-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)) starts
 > **provisionally in plateau-app** next to the dev-panel (the #1565/#1579 devtools-are-Plateau-owned
 > priors) — cheap to move while small, and explicitly *without prejudice* to this call. Prepare/ratify
 > once the daemon's operating evidence shows whether the extraction wants to grow. Two red-team notes
 > for the eventual forks: weigh SaaS packaging lightly (speculative product framing shouldn't inflate an
 > internal-tooling decision), and every option must carry the gate-self re-anchoring cost
-> ([#xa6i7k2](/backlog/xa6i7k2-re-anchor-the-gate-self-trust-chain-when-the-delivery-engine/)).
+> ([#2448](/backlog/2448-re-anchor-the-gate-self-trust-chain-when-the-delivery-engine/)).
 > `priority: low`: pickable, out of auto-select.
 
 ## The question

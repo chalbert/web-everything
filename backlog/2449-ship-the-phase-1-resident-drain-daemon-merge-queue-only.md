@@ -1,4 +1,5 @@
 ---
+bornAs: xb002dz
 kind: story
 size: 8
 parent: "2445"

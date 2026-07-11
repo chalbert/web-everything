@@ -45,7 +45,7 @@ authoring items.
 
 ## Phase 1 re-scoped (2026-07-11 red team — operator call)
 
-Phase 1 is now the **resident drain daemon only** ([#xb002dz](/backlog/xb002dz-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)):
+Phase 1 is now the **resident drain daemon only** ([#2449](/backlog/2449-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)):
 a resident process owning the merge queue — leases, ordering, review labels, sole-writer drain — and
 nothing else. Sessions keep building and reviewing exactly as today. Agent spawning, steering, UI, and
 the multi-project registry wait for the evidence the daemon produces; the runner decision (#2444) and
@@ -69,7 +69,7 @@ start, explicitly without prejudice to #2446's eventual full-engine placement ca
   behavior, not a stable API; steering only reaches an agent when it calls a tool. Captured on #2444.
 - **Gate-self un-anchors on extraction.** The trust-chain path checks are WE-path literals; moving the
   engine silently disables the `review:human` invariant — now its own child task
-  ([#xa6i7k2](/backlog/xa6i7k2-re-anchor-the-gate-self-trust-chain-when-the-delivery-engine/)), owed on
+  ([#2448](/backlog/2448-re-anchor-the-gate-self-trust-chain-when-the-delivery-engine/)), owed on
   every variant including the phase-1 daemon.
 - **Osborne effect on parked items.** Deferring cheap fixes because "the coordinator obsoletes them"
   bets on this epic's timeline; the parked items (#2442, #2417) stay pickable and should be re-checked
