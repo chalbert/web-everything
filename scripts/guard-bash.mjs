@@ -31,6 +31,13 @@
  *     fail-open degraded mode — r2 removed the earlier pid-ancestry fallback, which over-matched two independent
  *     sessions sharing an upper process ancestor and so failed open while looking protective). Escape:
  *     `LANE_CLOBBER_OK=1`.
+ *   • the SAME destructive git op in a lane holding a LIVE MARKED (`workflowLane`) lease (#2413) — the
+ *     parallel-/workflow case where every sibling lane shares `ownerSession`, so the compare above fails OPEN
+ *     exactly where it matters. Fail-CLOSED instead: the op must ASSERT the lease's own minted slug inline
+ *     (`LANE_SESSION=<slug>`, stamped by the acquiring orchestrator); absence OR mismatch ⇒ deny. This
+ *     supersedes the `ownerSession` compare for marked lanes only; unmarked leases keep the fail-open behavior
+ *     above. The owning lane re-asserts the slug it acquired under and passes; a sibling never holds it and is
+ *     denied. Same escape: `LANE_CLOBBER_OK=1`.
  *
  * Input: PreToolUse JSON on stdin. Output: a deny decision (JSON) when blocked; nothing otherwise.
  * Fails open on unparseable input. The pure `reason`/`decide` are unit-tested (guard-bash.test.mjs).
@@ -39,7 +46,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname, join } from 'node:path';
-import { LEASE_FILENAME, isLeaseStale, isForeignLease } from './lib/lane-lease.mjs';
+import { LEASE_FILENAME, isLeaseStale, isForeignLease, laneMarkedSlug, assertedLaneSlug } from './lib/lane-lease.mjs';
 
 const BACKLOG_MD = /(?:^|[\s'"=(])(?:\.\/)?backlog\/(\d+)-[^\s'")]*\.md/;
 const CORPUS_MD = /(?:^|[\s'"=(])(?:\.\/)?(?:backlog|reports)\/[^\s'")]*\.md/;
@@ -213,10 +220,12 @@ export function resolveEffectiveCwd(command, reportedCwd, resolvePath = resolve)
  *  constellation primary checkout (computed by the CLI via isPrimaryCwd) — gates the #2302 backlog-mutation rule.
  *  `ctx.staleBehind` = how many commits the lane's HEAD sits behind its upstream (computed by the CLI via a git
  *  call — kept out of this pure function so it stays unit-testable with a plain number) — gates the #2323 rule.
- *  `ctx.foreignLiveLease` = this lane clone carries a LIVE lease held by a DIFFERENT session (computed by the
- *  CLI via a lease-file read + a durable session-id compare — kept out of this pure function for the same reason)
- *  — gates the #2367 destructive-op rule. */
-export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false } = {}) {
+ *  `ctx.foreignLiveLease` = this lane clone carries a LIVE UNMARKED lease held by a DIFFERENT session (computed
+ *  by the CLI via a lease-file read + a durable session-id compare — kept out of this pure function for the same
+ *  reason) — gates the #2367 destructive-op rule. `ctx.markedLeaseSlug` = this lane clone carries a LIVE MARKED
+ *  (workflowLane) lease whose minted slug is this string (computed by the CLI via the lease read) — gates the
+ *  #2413 fail-closed destructive-op rule, which SUPERSEDES the #2367 ownerSession compare for a marked lane. */
+export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null } = {}) {
   const s = segment.trim();
   if (!s) return null;
 
@@ -243,15 +252,28 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // message. `git commit -m "...pkill vite..."` has command `git`, so the pkill rule no longer fires.
   const cmd = s.replace(/^(?:\w+=\S+\s+)*(?:sudo\s+)?/, '');
 
-  // #2367 — a destructive git op (reset --hard / clean -f[d] / checkout/restore/switch discard / force-push)
-  // run with cwd inside a lane clone that carries a LIVE lease from ANOTHER session would clobber their
-  // in-flight work — the hole a 2026-07-09 incident opened (a concurrent `/slice`'s `;`-chained `reset --hard`
-  // ran anyway after its own `acquire` was correctly refused). `ctx.foreignLiveLease` is precomputed by the CLI
-  // (readLaneLease + `isForeignLease`: the durable `ownerSession` session id alone; a cost only paid when cwd
-  // is a lane AND the command looks destructive). Only fires for a segment that IS itself the destructive op
-  // (a lane's OWN session running one is unaffected — its `ownerSession` matches). Escape: `LANE_CLOBBER_OK=1`.
-  if (!primaryCwd && foreignLiveLease && isDestructiveLaneGitOp(s) && !/\bLANE_CLOBBER_OK=1\b/.test(s))
-    return 'This lane clone carries a LIVE lease held by ANOTHER session — a destructive git op here (reset --hard/clean -fd/checkout -- ./force-push) would clobber their in-flight work (#2367). If this really is your own lane, release it first (or re-acquire) rather than running this here; otherwise pick a different lane. Sanctioned override (rare): prefix `LANE_CLOBBER_OK=1`.';
+  // A destructive git op (reset --hard / clean -f[d] / checkout/restore/switch discard / force-push) run with
+  // cwd inside a leased lane clone can clobber in-flight work. Two lease regimes, checked in precedence order:
+  if (!primaryCwd && isDestructiveLaneGitOp(s)) {
+    const clobberOk = /\bLANE_CLOBBER_OK=1\b/.test(s);
+    // #2413 — a LIVE MARKED (workflowLane) lease: fail-CLOSED, and this SUPERSEDES the #2367 ownerSession
+    // compare below. In the parallel-/workflow topology every sibling lane shares `ownerSession`, so it can't
+    // tell a lane's OWN destructive op from a sibling's — a `reset --hard` in the wrong lane silently clobbers
+    // a peer. So the op must ASSERT this lease's own minted slug inline (`LANE_SESSION=<slug>`, the slug the
+    // acquiring orchestrator stamped into the lease); ABSENCE or MISMATCH ⇒ deny. The owning lane proves
+    // itself by re-asserting the slug it acquired under; a sibling (which never holds that slug) is denied.
+    if (markedLeaseSlug) {
+      if (clobberOk) return null; // the deliberate escape wins even for a marked lane
+      const asserted = assertedLaneSlug(s);
+      if (asserted !== markedLeaseSlug)
+        return `This lane clone holds a LIVE workflow-lane lease (#2413) — a destructive git op here must ASSERT the lease's own slug inline: prefix \`LANE_SESSION=${markedLeaseSlug}\` (e.g. \`LANE_SESSION=${markedLeaseSlug} git reset --hard origin/main\`). The slug was ${asserted ? `asserted as "${asserted}" — a MISMATCH` : 'ABSENT'}, so this is denied fail-closed: a sibling parallel lane cannot be told apart by ambient session identity, so only the minted slug proves ownership. If this really is your lane, re-assert its slug; otherwise pick another lane. Sanctioned override (rare): prefix \`LANE_CLOBBER_OK=1\`.`;
+      return null; // slug asserted and matches → this is the owning lane's own op → allow
+    }
+    // #2367 — a LIVE UNMARKED lease held by ANOTHER session (serial topology; the durable `ownerSession`
+    // compare, fail-OPEN with no id). Unchanged for unmarked leases. Escape: `LANE_CLOBBER_OK=1`.
+    if (foreignLiveLease && !clobberOk)
+      return 'This lane clone carries a LIVE lease held by ANOTHER session — a destructive git op here (reset --hard/clean -fd/checkout -- ./force-push) would clobber their in-flight work (#2367). If this really is your own lane, release it first (or re-acquire) rather than running this here; otherwise pick a different lane. Sanctioned override (rare): prefix `LANE_CLOBBER_OK=1`.';
+  }
 
   // Only an actual RUN of build:plugs (a runner invocation), not a mention (grep/echo/read).
   if (/\b(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b[^|;&]*\bbuild:plugs\b/.test(s) || (/\btsc\b[^|;&]*-p\s+\S*tsconfig\.plugs\.json/.test(s) && !/--noEmit/.test(s)))
@@ -330,19 +352,24 @@ function readLaneLease(laneRoot) {
   }
 }
 
-// #2367 — is `cwd` (a lane clone about to run what LOOKS like a destructive git op) leased LIVE by ANOTHER
-// session? Impure (fs + env); the CLI only calls this when both are already true (isLaneCwd +
-// hasDestructiveLaneOp) so the cost is paid on a tiny slice of Bash calls. Stale/absent lease ⇒ false (allow).
-// Ownership is decided by the pure `isForeignLease` from the durable `ownerSession`/`mySessionId` session ids
-// ALONE (r2 removed the pid-ancestry fallback — it over-matched independent sessions sharing an upper ancestor).
-// Degraded (no ownerSession on the lease, or no session id here) ⇒ isForeignLease returns false ⇒ allow, the
-// documented fail-open. Returns true only for a genuine foreign hold.
-function isForeignLiveLease(cwd, mySessionId) {
+// #2367/#2413 — the destructive-op lease context for `cwd` (a lane clone about to run what LOOKS like a
+// destructive git op). Impure (fs + env); the CLI only calls this when both are already true (isLaneCwd +
+// hasDestructiveLaneOp) so the cost is paid on a tiny slice of Bash calls. Reads the lease ONCE and returns
+// { markedLeaseSlug, foreignLiveLease }:
+//   • Stale / absent lease ⇒ { null, false } (allow — no live hold).
+//   • LIVE MARKED (workflowLane) lease ⇒ { <its minted slug>, false } — the #2413 fail-closed slug-assertion
+//     regime takes over; the ownerSession compare is NOT consulted (siblings share it, so it fails open in the
+//     one topology that matters — the whole reason marked lanes exist).
+//   • LIVE UNMARKED lease ⇒ { null, isForeignLease(ownerSession vs mine) } — the #2367 regime, unchanged (r2's
+//     durable-ownerSession-alone compare; degraded no-id ⇒ fail-open allow).
+function laneLeaseGuardCtx(cwd, mySessionId) {
   const laneRoot = laneRootFromCwd(cwd);
-  if (!laneRoot) return false;
+  if (!laneRoot) return { markedLeaseSlug: null, foreignLiveLease: false };
   const lease = readLaneLease(laneRoot);
-  if (!lease || isLeaseStale(lease, Date.now())) return false;
-  return isForeignLease({ lease, mySessionId });
+  if (!lease || isLeaseStale(lease, Date.now())) return { markedLeaseSlug: null, foreignLiveLease: false };
+  const marked = laneMarkedSlug(lease);
+  if (marked) return { markedLeaseSlug: marked, foreignLiveLease: false };
+  return { markedLeaseSlug: null, foreignLiveLease: isForeignLease({ lease, mySessionId }) };
 }
 
 // ── CLI: read the PreToolUse event, emit a deny decision when blocked ──────────────────────────────────
@@ -352,6 +379,7 @@ if (IS_CLI) {
   let primaryCwd = false;
   let staleBehind = 0;
   let foreignLiveLease = false;
+  let markedLeaseSlug = null;
   try {
     const ev = JSON.parse(readFileSync(0, 'utf8'));
     cmd = (ev.tool_input || {}).command || '';
@@ -374,11 +402,11 @@ if (IS_CLI) {
     // #2323 — only pay for the git call when it could possibly matter: a lane cwd about to run a
     // backlog-mutation command. Every other Bash call (the overwhelming majority) skips it entirely.
     if (!primaryCwd && isLaneCwd(cwd) && isBacklogMutation(cmd)) staleBehind = commitsBehindUpstream(cwd);
-    // #2367 — only pay for the lease read + session-id compare when it could possibly matter: a lane cwd about
-    // to run something that LOOKS like a destructive git op. Every other Bash call skips it entirely.
-    if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) foreignLiveLease = isForeignLiveLease(cwd, mySessionId);
+    // #2367/#2413 — only pay for the lease read when it could possibly matter: a lane cwd about to run
+    // something that LOOKS like a destructive git op. Every other Bash call skips it entirely.
+    if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) ({ markedLeaseSlug, foreignLiveLease } = laneLeaseGuardCtx(cwd, mySessionId));
   } catch { process.exit(0); }
-  const r = decide(cmd, { primaryCwd, staleBehind, foreignLiveLease });
+  const r = decide(cmd, { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug });
   if (r) {
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Blocked: ' + r },

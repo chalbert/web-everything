@@ -265,3 +265,31 @@ describe('lane-pool acquire --base=<ref> (#2386)', () => {
     expect(git(['status', '--porcelain'], lane)).toBe('');
   });
 });
+
+describe('lane-pool acquire --purpose=workflow-lane marks the lease (#2413)', () => {
+  const leaseOf = (lane) => JSON.parse(readFileSync(join(lane, '.git', '.lane-lease'), 'utf8'));
+
+  it('stamps workflowLane:true and the LANE_SESSION slug into the lease', () => {
+    provision(1);
+    const r = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install', '--lane=1', '--purpose=workflow-lane', '--ttl-minutes=90', '--json'],
+      { LANE_POOL_ROOT: poolRoot, LANE_SESSION: 'batch-x-2427' },
+    );
+    expect(r.code).toBe(0);
+    const lease = leaseOf(JSON.parse(r.out).path);
+    expect(lease.workflowLane).toBe(true);
+    expect(lease.session).toBe('batch-x-2427');   // the minted slug the guard requires an op to assert
+    expect(lease.purpose).toBe('workflow-lane');
+    expect(lease.ttlMinutes).toBe(90);
+  });
+
+  it('a normal (non-workflow) acquire leaves workflowLane false — unmarked, today\'s semantics', () => {
+    provision(1);
+    const r = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install', '--lane=1', '--purpose=drain', '--json'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(r.code).toBe(0);
+    expect(leaseOf(JSON.parse(r.out).path).workflowLane).toBe(false);
+  });
+});

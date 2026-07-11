@@ -2,9 +2,11 @@
 bornAs: xua3eva
 kind: story
 size: 5
-status: open
-blockedBy: ["2413"]
+status: resolved
+blockedBy: []
 dateOpened: "2026-07-11"
+dateStarted: "2026-07-11"
+dateResolved: "2026-07-11"
 tags: [lane-pool, guard, workflow, orchestrator]
 crossRef: { url: /backlog/2413/, label: "#2413 — the ratified ruling (Fork 1 (a) + Fork 2 (b))" }
 ---
@@ -40,3 +42,15 @@ Implement the statute `we:docs/agent/platform-decisions.md#lane-ownership-minted
 - The owning lane's own template-authored ops **pass**; the modulo-wrap double-coupling hard-fails the
   second acquire into a per-item carry instead of a mutual clobber.
 - Serial topology and degraded no-id fail-open are **unchanged for unmarked leases** (all of today's).
+
+## Progress
+
+- **Status:** done — gate green (0 errors, 3091 vitest pass), guard verified end-to-end; resolving + landing via PR.
+- **Branch:** lane-13 clone (rides its PR).
+- **Done:**
+  - we:scripts/lib/lane-lease.mjs — `WORKFLOW_LANE_PURPOSE` const, `workflowLane` field on `leaseBody`, pure `laneMarkedSlug(lease)` + `assertedLaneSlug(command)` helpers.
+  - we:scripts/lane-pool.mjs — `acquire` stamps `workflowLane: true` when `--purpose=workflow-lane` (dedicated field, not free-text purpose). No new verb.
+  - we:scripts/guard-bash.mjs — a LIVE MARKED lease makes a destructive git op fail-CLOSED: must assert `LANE_SESSION=<slug>` inline, deny on mismatch/absence; supersedes the #2367 `ownerSession` fail-open; unmarked leases unchanged; `LANE_CLOBBER_OK=1` still the escape.
+  - we:skills-src/batch-backlog-items/parallel-execute.workflow.js — step-1 prep is now the per-item `LANE_SESSION=<batchSlug>-<laneKey> lane-pool acquire --lane=N --purpose=workflow-lane --ttl-minutes=90` (replaces the manual `reset --hard`), one per affected repo, from the primary; new close-out step-9 `release --lane=N` carrying the same slug.
+  - Tests: lane-lease (helpers + field), guard-bash (marked deny/allow/supersede/escape), lane-pool-acquire (marked-lease stamping). All green (83 pass).
+- **Next:** full `check:standards` + vitest run, then resolve.

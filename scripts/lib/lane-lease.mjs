@@ -21,6 +21,14 @@
 
 export const LEASE_FILENAME = '.lane-lease';
 
+// #2413 — the sanctioned `--purpose` token a parallel-/workflow lane acquire passes. `acquire` normalizes it
+// into the dedicated `workflowLane: true` lease field (a contract field, NOT free-text `purpose`), so every
+// downstream reader keys on the field. A MARKED lease switches the destructive-op guard fail-CLOSED: the op
+// must assert this lease's own minted slug inline (`LANE_SESSION=<slug>`), because in the parallel-lane
+// topology sibling sessions share `ownerSession` and cannot otherwise be told apart. See `laneMarkedSlug` /
+// `assertedLaneSlug` and `we:scripts/guard-bash.mjs`.
+export const WORKFLOW_LANE_PURPOSE = 'workflow-lane';
+
 // A held lane is presumed abandoned after this long with no release — long enough to outlast a slow drain
 // cascade / batch, short enough that a crashed session's lane returns to the pool the same day. `acquire`
 // may reclaim a lease older than this; `--ttl-minutes` overrides per call.
@@ -68,10 +76,13 @@ export function chooseFreeLane(laneInfos, nowMs, ttlMs) {
  *  made the earlier pid-ancestry heuristic unsafe in this guard's target topology (r2: pid-ancestry removed).
  *  `pid` is informational only (human-readable `status`/debug; a leaf that exits right after `acquire`, never
  *  useful for ownership). */
-export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession }) {
+export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession, workflowLane }) {
   return {
     session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null,
     pid: pid ?? null, ownerSession: ownerSession ?? null,
+    // #2413 — a MARKED (parallel-/workflow) lease. A plain boolean contract field (never null) so a reader can
+    // key on it directly; older on-disk leases lack it (⇒ undefined ⇒ falsy ⇒ unmarked, today's semantics).
+    workflowLane: !!workflowLane,
   };
 }
 
@@ -110,4 +121,24 @@ export function describeLease(lease) {
 /** Does `session` own this lease? (Guards `release` from dropping another session's hold without --force.) */
 export function leaseOwnedBy(lease, session) {
   return !!lease && !!session && lease.session === session;
+}
+
+// #2413 — the minted-slug ownership channel for a MARKED (workflowLane) lease. In the parallel-/workflow
+// topology every sibling lane shares `ownerSession`, so ambient identity can't tell a lane's own destructive
+// op from a sibling's. Instead the guard keys on a MINTED slug (`<batchSlug>-<laneKey>`, stored in the lease's
+// `session`) that each op must ASSERT inline in its command string — the one per-op channel with both ends
+// in-repo (the orchestrator template mints + asserts it; the guard checks it here).
+
+/** The slug a LIVE MARKED lease requires an op to assert, or null if the lease is unmarked / slug-less. The
+ *  caller decides liveness (needs a clock); this is the pure marked-vs-unmarked + which-slug decision. */
+export function laneMarkedSlug(lease) {
+  return lease && lease.workflowLane && lease.session ? lease.session : null;
+}
+
+/** Parse an inline `LANE_SESSION=<slug>` assertion out of a command string (the per-op ownership channel a
+ *  marked lease requires), or null if absent. Mirrors the guard's `LANE_CLOBBER_OK=1` env-token parse; the
+ *  slug is a bare `<batchSlug>-<laneKey>` token, so match slug-shaped chars only (never a trailing operator). */
+export function assertedLaneSlug(command) {
+  const m = String(command || '').match(/\bLANE_SESSION=([A-Za-z0-9._/-]+)/);
+  return m ? m[1] : null;
 }

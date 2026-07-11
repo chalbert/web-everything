@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_LEASE_TTL_MINUTES,
+  WORKFLOW_LANE_PURPOSE,
   isLeaseStale,
   isLaneAcquirable,
   chooseFreeLane,
@@ -13,6 +14,8 @@ import {
   describeLease,
   leaseOwnedBy,
   isForeignLease,
+  laneMarkedSlug,
+  assertedLaneSlug,
 } from '../lane-lease.mjs';
 
 const T0 = Date.parse('2026-07-05T12:00:00.000Z');
@@ -103,6 +106,10 @@ describe('leaseBody / describeLease / leaseOwnedBy', () => {
     const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', pid: 111, ownerSession: 'sess-uuid-A' });
     expect('ancestry' in b).toBe(false);
   });
+  it('leaseBody defaults workflowLane to false and carries an explicit true through (#2413)', () => {
+    expect(leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z' }).workflowLane).toBe(false);
+    expect(leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', workflowLane: true }).workflowLane).toBe(true);
+  });
   it('describeLease renders who + purpose + when', () => {
     const s = describeLease(leaseBody({ session: 'drain-1', purpose: 'drain', acquiredAt: '2026-07-05T12:00:00.000Z' }));
     expect(s).toContain('drain-1');
@@ -139,5 +146,26 @@ describe('isForeignLease (#2367 r2 — durable ownerSession is the SOLE ownershi
     expect(isForeignLease({ lease: null, mySessionId: 'sess-A' })).toBe(false);
     expect(isForeignLease({})).toBe(false);
     expect(isForeignLease()).toBe(false);
+  });
+});
+
+describe('laneMarkedSlug / assertedLaneSlug (#2413 — the marked-lease per-op slug channel)', () => {
+  const at = '2026-07-05T12:00:00.000Z';
+  it('WORKFLOW_LANE_PURPOSE is the sanctioned purpose token', () => {
+    expect(WORKFLOW_LANE_PURPOSE).toBe('workflow-lane');
+  });
+  it('laneMarkedSlug returns the minted session slug ONLY for a marked lease', () => {
+    expect(laneMarkedSlug(leaseBody({ session: 'batch-x-2427', acquiredAt: at, workflowLane: true }))).toBe('batch-x-2427');
+    expect(laneMarkedSlug(leaseBody({ session: 'batch-x-2427', acquiredAt: at }))).toBeNull(); // unmarked
+    expect(laneMarkedSlug({ workflowLane: true })).toBeNull(); // marked but slug-less → nothing to assert
+    expect(laneMarkedSlug(null)).toBeNull();
+  });
+  it('assertedLaneSlug parses an inline LANE_SESSION=<slug>, stopping at whitespace / operators', () => {
+    expect(assertedLaneSlug('LANE_SESSION=batch-x-2427 git reset --hard origin/main')).toBe('batch-x-2427');
+    expect(assertedLaneSlug('git reset --hard')).toBeNull();                       // absent
+    expect(assertedLaneSlug('LANE_SESSION=new-my.slug/1 node scripts/x.mjs')).toBe('new-my.slug/1'); // slug chars
+    expect(assertedLaneSlug('FOO=1 LANE_SESSION=s2 git clean -fd')).toBe('s2');     // amid other assignments
+    expect(assertedLaneSlug('')).toBeNull();
+    expect(assertedLaneSlug(undefined)).toBeNull();
   });
 });
