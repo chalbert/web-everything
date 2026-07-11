@@ -24,7 +24,8 @@ independent verdict before it may land (#2171/#2262/#2285). Two classes reach a 
 It renders through the **same engine** as the drain's auto-review and `/code-review`: the judge-only core in
 **[scripts/lib/review-core.mjs](../../../scripts/lib/review-core.mjs)** (#2325). The core **judges**; you
 **decide what the verdict does** (the `decideReviewGate` policy stays in the drain — *review-core.mjs* never
-applies a label).
+applies a label). The same module also renders the operator-facing notice for your clearance (`renderReviewNotice`,
+#2433) — see step 6 below.
 
 ## Flow
 
@@ -60,6 +61,11 @@ applies a label).
      changes (the operator).
    - On the **changes** path this **is** the "summarize the required changes" comment from step 4 — post one
      comment, not two.
+
+6. **Report the clearance to the operator via `renderReviewNotice({ event: 'cleared', pr, repo, outcome, actor })`**
+   (`we:scripts/lib/review-core.mjs`, #2433) — the in-chat notice, distinct from the PR comment step 5 just
+   posted. Same renderer the drain uses for its `escalated` event, so both directions of a PR's review outcome
+   are reported in the same words, never hand-typed per call.
 
 ## Invariant
 
