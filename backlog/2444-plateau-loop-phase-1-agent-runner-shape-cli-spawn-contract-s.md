@@ -4,6 +4,7 @@ kind: decision
 parent: "2445"
 size: 3
 status: open
+priority: low
 dateOpened: "2026-07-11"
 tags: [plateau-loop, agent-runner, claude-cli]
 ---
@@ -11,6 +12,26 @@ tags: [plateau-loop, agent-runner, claude-cli]
 # Plateau Loop phase-1 agent-runner shape — CLI-spawn contract, steering, and auth
 
 Define the agent-runner interface (spawn/steer/stop/resume) with the claude CLI backend: -p stream-json spawning, hook-gate mid-turn steering, kill+resume redirects, subscription auth only; SDK/API-key backend deferred. Includes the setup-token/SDK spike outcome.
+
+> **Deferred (2026-07-11 red team — operator call).** Phase 1 is re-scoped to the resident drain
+> daemon only ([#xb002dz](/backlog/xb002dz-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)),
+> which spawns no agents — so this decision has no consumer yet. Prepare/ratify only once the daemon's
+> operating evidence says the extraction should grow. `priority: low`: pickable, out of auto-select.
+
+## Red-team risks to fold into the forks (2026-07-11)
+
+- **Subscription quota is a hard wall for a resident spawner.** A coordinator spawning agents
+  continuously hits weekly/session caps in ways interactive use doesn't, and the pipeline then stalls
+  on a rate limit. Any fork must state its quota-exhaustion behavior.
+- **The CLI contract is observed behavior, not an API.** `-p --output-format stream-json`, hook-gate
+  denial injection, and `--resume` semantics ship breaking changes without notice; the dev-panel proves
+  the pattern at toy scale, not as load-bearing infrastructure. The runner interface must budget for
+  contract drift (pin + smoke-test the CLI version).
+- **Steering only reaches an agent when it calls a tool.** An agent deep in reasoning or writing prose
+  is unreachable mid-turn; kill+`--resume` discards in-flight work. Present hook-gate steering as
+  partial, not solved.
+- **The setup-token spike leans on an unpromised auth path.** `CLAUDE_CODE_OAUTH_TOKEN` for SDK use is
+  not a supported contract; a fork built on it needs an exit plan.
 
 ## The question
 
