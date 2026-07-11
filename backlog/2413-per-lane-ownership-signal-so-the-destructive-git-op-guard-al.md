@@ -267,7 +267,7 @@ Both defaults ratified as prepared, all skeptic riders included:
 Pre-ratification red-team (this session) re-attacked both defaults — Fork 2 (a)'s "the observed incident
 was cross-session" fails against the by-construction modulo-wrap sibling collision; Fork 1 (b)'s
 "orchestrator stamp is one atomic writer" fails on duplicated coupling state + retained destructive
-prep. No new amendments. Successor build: #xua3eva.
+prep. No new amendments. Successor build: #2427.
 
 ## Acceptance
 
