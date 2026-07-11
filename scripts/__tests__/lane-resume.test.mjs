@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyLane, orderByBlockedBy, landDecision, land, remoteManifestApiArgs } from '../lane-resume.mjs';
+import { classifyLane, orderByBlockedBy, landDecision, land, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain } from '../lane-resume.mjs';
 
 const resolved = new Set([2110, 2113]); // blockers already landed on main
 
@@ -36,6 +36,22 @@ describe('lane-resume — classifyLane (#2200)', () => {
 
   it('unknown mergeability → unknown (not a false ready/conflict)', () => {
     expect(classifyLane(lane({ mergeable: 'UNKNOWN', mergeState: 'UNKNOWN', testConclusion: null }), resolved).disposition).toBe('unknown');
+  });
+
+  it('a review:changes bounce NEVER classifies ready — green CI + mergeable is irrelevant, a human rejected the diff (#2396)', () => {
+    const v = classifyLane(lane({ reviewChanges: true }), resolved); // clean + green, but bounced
+    expect(v.disposition).toBe('review-changes');
+    expect(v.reason).toMatch(/review:changes/);
+  });
+
+  it('review:changes beats a conflict (repair the diff first; the rebase happens as part of the repair)', () => {
+    expect(classifyLane(lane({ reviewChanges: true, mergeable: 'CONFLICTING', mergeState: 'DIRTY' }), resolved).disposition).toBe('review-changes');
+  });
+
+  it('BLOCKED still wins over a red test, but the RAW testRed flag is carried so the breakage is not masked (#2396)', () => {
+    const v = classifyLane(lane({ blockedBy: [9999], testConclusion: 'FAILURE' }), resolved);
+    expect(v.disposition).toBe('blocked'); // blockedBy still owns the disposition …
+    expect(v.testRed).toBe(true);          // … but the broken-link signal survives for markStackDescendantsBlocked
   });
 });
 
@@ -141,6 +157,14 @@ describe('lane-resume — land (#2202/#2290: enqueue + trigger the drain, never 
     expect(hasDrainTrigger(calls)).toBe(false); // repaired code first — nothing enqueued
   });
 
+  it('a review:changes-labelled PR → never enqueues, even green + mergeable (a human bounced the diff, #2396)', () => {
+    const { run, calls } = scriptedRun({});
+    const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }], labels: [{ name: 'review:changes' }] } });
+    expect(v.action).toBe('review-changes');
+    expect(v.merged).toBe(false);
+    expect(calls.length).toBe(0); // no label edit, no drain trigger — nothing pushed toward main
+  });
+
   it('a red `test` → never enqueues (no merge-tree, no label, no trigger)', () => {
     const { run, calls } = scriptedRun({});
     const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] } });
@@ -206,5 +230,205 @@ describe('lane-resume — land is repo-aware (#2383: /finish spans all constella
     expect(args[args.indexOf('--method') + 1]).toBe('GET');
     expect(args).toContain('repos/chalbert/plateau-app/contents/.lane-manifest.json');
     expect(args).toEqual(expect.arrayContaining(['-f', 'ref=lane/x-2343']));
+  });
+});
+
+// ─────────────────────────── finish stack-repair (#2396 / #2387 F5) ───────────────────────────
+
+describe('lane-resume — markStackDescendantsBlocked (#2396)', () => {
+  // A stacked chain A(100) → B(200) → C(300) → D(400); B is the broken link. Item S(500) is a disjoint sibling.
+  const chain = (over = {}) => [
+    { num: 1, item: 100, stackParents: [], disposition: 'conflict', reason: 'r' },
+    { num: 2, item: 200, stackParents: [100], disposition: 'conflict', reviewChanges: true, reason: 'r', ...over }, // broken link
+    { num: 3, item: 300, stackParents: [200], disposition: 'conflict', reason: 'r' },
+    { num: 4, item: 400, stackParents: [300], disposition: 'conflict', reason: 'r' },
+    { num: 5, item: 500, stackParents: [], disposition: 'conflict', reason: 'r' }, // disjoint sibling
+  ];
+  const byItem = (ls) => Object.fromEntries(ls.map((l) => [l.item, l]));
+
+  it('a review:changes link poisons ONLY its overlap-descendants (transitively) — not its ancestor or a sibling', () => {
+    const m = byItem(markStackDescendantsBlocked(chain()));
+    expect(m[300].disposition).toBe('blocked'); // direct descendant
+    expect(m[400].disposition).toBe('blocked'); // transitive descendant
+    expect(m[100].disposition).toBe('conflict'); // ANCESTOR — lands independently, never poisoned
+    expect(m[500].disposition).toBe('conflict'); // disjoint sibling — untouched
+  });
+
+  it('the broken link KEEPS its own disposition (the finisher repairs it in place)', () => {
+    const m = byItem(markStackDescendantsBlocked(chain()));
+    expect(m[200].disposition).toBe('conflict'); // not re-bucketed to blocked — it IS the link
+  });
+
+  it('a red required `test` is also a broken link (not just review:changes)', () => {
+    const ls = chain({ reviewChanges: false, disposition: 'test-red' }); // B red-CI instead of bounced
+    const m = byItem(markStackDescendantsBlocked(ls));
+    expect(m[200].disposition).toBe('test-red'); // kept
+    expect(m[300].disposition).toBe('blocked');
+    expect(m[400].disposition).toBe('blocked');
+  });
+
+  it('the poison reason names the broken stackParent so the finisher knows what to repair', () => {
+    const m = byItem(markStackDescendantsBlocked(chain()));
+    expect(m[300].reason).toMatch(/#200/);
+  });
+
+  it('a depth-≥2 descendant reason names the broken ROOT, never its (merely poisoned) immediate parent (#2396)', () => {
+    const m = byItem(markStackDescendantsBlocked(chain()));
+    expect(m[400].reason).toMatch(/#200/);     // the actual broken link
+    expect(m[400].reason).not.toMatch(/#300/); // NOT the BFS predecessor — #300 has nothing to repair
+  });
+
+  it('a blockedBy-masked red-test link (disposition blocked, raw testRed) still poisons its descendants (#2396)', () => {
+    // classifyLane's 'BLOCKED wins' overwrote B's disposition; the RAW testRed flag must still mark it broken,
+    // else C/D stay ready and land past the unrepaired parent.
+    const ls = chain({ reviewChanges: false, disposition: 'blocked', testRed: true });
+    const m = byItem(markStackDescendantsBlocked(ls));
+    expect(m[200].disposition).toBe('blocked'); // the link keeps its own (blockedBy) disposition
+    expect(m[300].disposition).toBe('blocked');
+    expect(m[300].reason).toMatch(/#200/);
+    expect(m[400].disposition).toBe('blocked');
+  });
+
+  it('a review-changes DISPOSITION (no raw flag) is also a broken link', () => {
+    const ls = chain({ reviewChanges: false, disposition: 'review-changes' });
+    const m = byItem(markStackDescendantsBlocked(ls));
+    expect(m[300].disposition).toBe('blocked');
+    expect(m[400].disposition).toBe('blocked');
+  });
+
+  it('no broken link → every lane keeps its disposition (a clean chain is untouched)', () => {
+    const clean = chain({ reviewChanges: false });
+    const m = byItem(markStackDescendantsBlocked(clean));
+    expect(Object.values(m).every((l) => l.disposition === 'conflict')).toBe(true);
+  });
+});
+
+describe('lane-resume — planStackRebuild (#2396)', () => {
+  it('rebuilds ONLY the salvageable tail onto the repaired tip — ff when the fix shares no file, one guided conflict when it does', () => {
+    // B(200) repaired; its fix touched `we:a.ts`. C(300) also touches a.ts (overlap → guided conflict);
+    // D(400) touches only b.ts (no overlap → fast-forward). A(100) and S(500) are NOT descendants → absent.
+    const plan = planStackRebuild({
+      repaired: 200,
+      descendants: [
+        { item: 300, ref: 'lane/c', stackParents: [200], fileset: ['we:a.ts'] },
+        { item: 400, ref: 'lane/d', stackParents: [300], fileset: ['we:b.ts'] },
+      ],
+      fixTouched: ['we:a.ts'],
+      landed: new Set([100]),
+    });
+    expect(plan.order.map((s) => s.item)).toEqual([300, 400]); // topological: parent before child
+    expect(plan.order.find((s) => s.item === 300).action).toBe('guided-conflict');
+    expect(plan.order.find((s) => s.item === 400).action).toBe('ff');
+    expect(plan.deferred).toHaveLength(0);
+    // the "no blind whole-batch rebase" guarantee: only the poisoned tail is in the plan, never A(100)/S(500).
+    expect(plan.order.map((s) => s.item)).not.toContain(100);
+    expect(plan.order.map((s) => s.item)).not.toContain(500);
+  });
+
+  it('NEVER rebuilds a descendant past an unlanded parent — a missing base defers it', () => {
+    // D(400) stacks on C(300), but C is neither landed nor in the descendant set → D cannot be placed.
+    const plan = planStackRebuild({
+      repaired: 200,
+      descendants: [{ item: 400, ref: 'lane/d', stackParents: [300], fileset: ['we:b.ts'] }],
+      fixTouched: ['we:a.ts'],
+      landed: new Set(),
+    });
+    expect(plan.order).toHaveLength(0);
+    expect(plan.deferred.map((d) => d.item)).toEqual([400]);
+    expect(plan.deferred[0].reason).toMatch(/unlanded parent/);
+  });
+
+  it('a bornAs-proven / landed-this-pass parent counts as available (positive proof-of-land, not absence)', () => {
+    // C(300) landed this pass; D(400) stacks on it → D IS placeable onto the repaired chain.
+    const plan = planStackRebuild({
+      repaired: 200,
+      descendants: [{ item: 400, ref: 'lane/d', stackParents: [300], fileset: ['we:b.ts'] }],
+      fixTouched: [],
+      landed: new Set([300]),
+    });
+    expect(plan.order.map((s) => s.item)).toEqual([400]);
+    expect(plan.order[0].action).toBe('ff'); // empty fix → nothing shared → fast-forward
+  });
+
+  it('places a two-level tail in topological order across sweeps (child after the parent it also rebuilds)', () => {
+    const plan = planStackRebuild({
+      repaired: 200,
+      descendants: [
+        { item: 400, ref: 'lane/d', stackParents: [300], fileset: [] }, // given out of order …
+        { item: 300, ref: 'lane/c', stackParents: [200], fileset: [] },
+      ],
+      fixTouched: [],
+    });
+    expect(plan.order.map((s) => s.item)).toEqual([300, 400]); // C placed first, then D onto it
+  });
+});
+
+describe('lane-resume — rebuildDescendant (#2396: reuse the rebase-drop plumbing, base = repaired tip)', () => {
+  const onto = 'a'.repeat(40);
+  it('a clean/manifest-only merge onto the repaired tip → a fast-forward rebuild (action rebased)', () => {
+    const { run, calls } = scriptedRun({ 'git merge-tree': { status: 0, stdout: 'tree'.padEnd(40, '0') }, ...RESOLVE_PLUMBING, 'gh pr': { status: 0 } });
+    const v = rebuildDescendant({ laneRef: 'lane/child', ontoSha: onto, run });
+    expect(v.action).toBe('rebased');
+    expect(v.ontoSha).toBe(onto);
+    // merge inputs are fed the REPAIRED tip as the base, not origin/main.
+    expect(calls.some((c) => c.args[0] === 'merge-tree' && c.args.includes(onto))).toBe(true);
+  });
+
+  it('a REAL (non-manifest) conflict → guided-conflict (the one conflict the finisher resolves with topology)', () => {
+    const { run } = scriptedRun({ 'git merge-tree': { status: 1, stdout: mergeTreeConflict(['src/app.ts']) } });
+    const v = rebuildDescendant({ laneRef: 'lane/child', ontoSha: onto, run });
+    expect(v.action).toBe('guided-conflict');
+    expect(v.conflictPaths).toContain('src/app.ts');
+  });
+
+  it('missing ontoSha (no repaired tip) → error, never touches git', () => {
+    const { run, calls } = scriptedRun({});
+    const v = rebuildDescendant({ laneRef: 'lane/child', run });
+    expect(v.action).toBe('error');
+    expect(calls.length).toBe(0);
+  });
+
+  it('a non-SHA ontoSha (branch-controlled manifest content) is REFUSED before any git call — option-injection guard (#2396)', () => {
+    for (const bad of ['--upload-pack=touch /tmp/pwn', 'origin/main', 'HEAD~1', 'abc123', 'g'.repeat(40)]) {
+      const { run, calls } = scriptedRun({});
+      const v = rebuildDescendant({ laneRef: 'lane/child', ontoSha: bad, run });
+      expect(v.action).toBe('error');
+      expect(v.reason).toMatch(/not a commit SHA/);
+      expect(calls.length).toBe(0); // the crafted value never reaches git argv
+    }
+  });
+
+  it('accepts an abbreviated (7-40 hex) SHA, case-insensitive', () => {
+    const { run } = scriptedRun({ 'git merge-tree': { status: 0, stdout: 'tree'.padEnd(40, '0') }, ...RESOLVE_PLUMBING, 'gh pr': { status: 0 } });
+    expect(rebuildDescendant({ laneRef: 'lane/child', ontoSha: 'AbC1234', run }).action).toBe('rebased');
+  });
+});
+
+describe('lane-resume — deriveLandedFromMain (#2396: stackParent landed status via bornAs-on-main)', () => {
+  const d = (item, stackParents) => ({ item, ref: `lane/${item}`, stackParents, fileset: [] });
+
+  it('a numeric NNN parent outside the rebuild set is proven landed (a number only exists post-land, #2288)', () => {
+    const landed = deriveLandedFromMain([d(400, [300])], { lookup: () => null });
+    expect(landed.has(300)).toBe(true);
+  });
+
+  it('a hash parent is landed ONLY on a positive bornAs-on-main record — absence is never read as landed', () => {
+    const lookup = (h) => (h === 'xaaaaaa' ? '312' : null);
+    const landed = deriveLandedFromMain([d(400, ['xaaaaaa']), d(500, ['xbbbbbb'])], { lookup });
+    expect(landed.has('xaaaaaa')).toBe(true);  // bornAs record found → proven
+    expect(landed.has('xbbbbbb')).toBe(false); // no record → NOT landed (the F5 stowaway guard)
+  });
+
+  it('a parent that is ITSELF in the rebuild set is never counted landed (it rebuilds this pass)', () => {
+    const landed = deriveLandedFromMain([d(300, [200]), d(400, [300])], { lookup: () => null });
+    expect(landed.has(300)).toBe(false); // 300 is a descendant being rebuilt, not a landed base
+    expect(landed.has(200)).toBe(true);  // 200 is outside the set → numeric → landed
+  });
+
+  it('feeds planStackRebuild end-to-end: the derived set unblocks a descendant whose parent already landed', () => {
+    const descendants = [d(400, [300])]; // 300 landed on main in a prior pass, absent from the rebuild set
+    const plan = planStackRebuild({ repaired: 200, descendants, fixTouched: [], landed: deriveLandedFromMain(descendants, { lookup: () => null }) });
+    expect(plan.order.map((s) => s.item)).toEqual([400]); // NOT deferred with an empty default set
+    expect(plan.deferred).toHaveLength(0);
   });
 });
