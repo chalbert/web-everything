@@ -30,6 +30,10 @@ import {
   buildPanelFindings,
   derivePanelVerdict,
   renderPanelVerdictTable,
+  REVIEW_NOTICE_EVENTS,
+  renderDrainRunSummary,
+  renderReviewNotice,
+  renderCloseSessionFlowLine,
 } from '../review-core.mjs';
 
 describe('normalizeFinding', () => {
@@ -368,5 +372,122 @@ describe('renderPanelVerdictTable (#2310)', () => {
   it('renders a placeholder for a lens with no verdict yet, instead of throwing', () => {
     const table = renderPanelVerdictTable({ lensVerdicts: {} });
     expect(table).toContain('| correctness | mandatory | (no verdict) |');
+  });
+});
+
+describe('renderDrainRunSummary (#2433)', () => {
+  it('renders a dry-run plan line and lands nothing', () => {
+    const s = renderDrainRunSummary({ merged: [{ num: 1 }], parked: [{ num: 2 }], dryRun: true });
+    expect(s).toMatch(/^Dry run/);
+    expect(s).toContain('1 would merge');
+    expect(s).toContain('1 parked for review');
+    expect(s).toContain('nothing landed');
+  });
+
+  it('renders counts + per-bucket id lists for a real pass, omitting empty buckets', () => {
+    const s = renderDrainRunSummary({
+      merged: [{ num: 401 }, { num: 402 }],
+      parked: [{ num: 403, reasons: ['blast-radius (a.mjs)'] }],
+    });
+    expect(s).toContain('merged 2');
+    expect(s).toContain('1 parked for review');
+    expect(s).not.toContain('FAILED');
+    expect(s).not.toContain('deferred');
+    expect(s).toContain('merged: #401, #402');
+    expect(s).toContain('parked: #403 (blast-radius (a.mjs))');
+  });
+
+  it('surfaces a failed merge distinctly from a parked/deferred one', () => {
+    const s = renderDrainRunSummary({ merged: [], failed: [{ num: 5 }], deferred: [{ num: 6 }] });
+    expect(s).toContain('merged 0');
+    expect(s).toContain('1 FAILED');
+    expect(s).toContain('FAILED: #5');
+    expect(s).toContain('deferred: #6');
+  });
+
+  it('lists skipped ids (with their reason) like every other bucket', () => {
+    const s = renderDrainRunSummary({
+      merged: [{ num: 1 }],
+      skipped: [{ num: 8, reason: 'not fully AI-co-authored' }, { num: 9 }],
+    });
+    expect(s).toContain('2 skipped');
+    expect(s).toContain('skipped: #8 (not fully AI-co-authored), #9');
+  });
+
+  it('defaults to an all-clean pass with no args', () => {
+    expect(renderDrainRunSummary()).toBe('Drain pass: merged 0.');
+  });
+});
+
+describe('renderReviewNotice (#2433)', () => {
+  it('renders a deadlock escalation (mode: human)', () => {
+    const n = renderReviewNotice({
+      event: REVIEW_NOTICE_EVENTS.ESCALATED, pr: 42, repo: 'we', verdict: VERDICTS.NEEDS_HUMAN,
+      disposition: { mode: REVIEW_DISPOSITIONS.HUMAN, autoLand: false }, reasons: ['non-convergence'],
+    });
+    expect(n).toContain('we#42');
+    expect(n).toContain('deadlocked');
+    expect(n).toContain('non-convergence');
+    expect(n).toContain('needs-human');
+  });
+
+  it('renders a gate-self advisory-converge (autoLand: false, mode: converge)', () => {
+    const n = renderReviewNotice({
+      event: REVIEW_NOTICE_EVENTS.ESCALATED, pr: 7,
+      disposition: { mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false }, reasons: ['gate-self'],
+    });
+    expect(n).toContain('#7');
+    expect(n).toContain('advisory fix');
+    expect(n).toContain('gate-self');
+  });
+
+  it('renders a plain sensitivity escalation (autoLand: true)', () => {
+    const n = renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.ESCALATED, pr: 9, reasons: ['size'] });
+    expect(n).toContain('escalated for review');
+  });
+
+  it('renders an accepted clearance, with actor', () => {
+    const n = renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.CLEARED, pr: 3, repo: 'we', outcome: 'accept', actor: 'the operator' });
+    expect(n).toBe('PR we#3 — human review accepted by the operator.');
+  });
+
+  it('renders a changes-requested clearance', () => {
+    const n = renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.CLEARED, pr: 3, outcome: 'changes' });
+    expect(n).toBe('PR #3 — human review requested changes.');
+  });
+
+  it('throws on an unknown event', () => {
+    expect(() => renderReviewNotice({ event: 'bogus', pr: 1 })).toThrow(/unknown event/);
+  });
+
+  it('throws on an unknown or omitted outcome for a cleared event (never fails open to "accepted")', () => {
+    expect(() => renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.CLEARED, pr: 3, outcome: 'change' }))
+      .toThrow(/unknown outcome/);
+    expect(() => renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.CLEARED, pr: 3 }))
+      .toThrow(/unknown outcome/);
+  });
+});
+
+describe('renderCloseSessionFlowLine (#2433)', () => {
+  it('falls back to "nothing to flag" with no candidates', () => {
+    expect(renderCloseSessionFlowLine()).toBe('nothing to flag');
+    expect(renderCloseSessionFlowLine({ candidates: [] })).toBe('nothing to flag');
+  });
+
+  it('renders one candidate with a named target', () => {
+    const line = renderCloseSessionFlowLine({
+      candidates: [{ summary: 'gate logic lives in skill prose', route: 'backlog', target: '#2433' }],
+    });
+    expect(line).toBe('gate logic lives in skill prose → backlog (#2433)');
+  });
+
+  it('joins several candidates with "; " and defaults an unrouted one to backlog when a target is given', () => {
+    const line = renderCloseSessionFlowLine({
+      candidates: [
+        { summary: 'first', target: '#100' },
+        { summary: 'second', route: 'memory' },
+      ],
+    });
+    expect(line).toBe('first → backlog (#100); second → memory');
   });
 });
