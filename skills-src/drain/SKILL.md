@@ -159,6 +159,12 @@ refinement should read the batch journals directly to drop that coupling; the ex
 5. After anything merged, fast-forwards **the clone's** local `main` to the advanced `origin/main`
    (`git pull --ff-only --autostash`, best-effort) — in the isolated clone, never the primary checkout.
 
+**Report the pass to the operator via `renderDrainRunSummary()` (#2433), not hand-composed prose.** Feed it the
+(sub)shape of the pass's own `--json` result (`{merged, failed, deferred, parked, skipped, dryRun}` — the exact
+fields `merge-ai-prs.mjs` already returns, see `## Run it` above) and post its output verbatim as the end-of-run
+line(s) — this is the ONE place that wording is templated, so a plain one-shot pass, a `--watch` loop's final
+pass, and a batch-closeout drain all report the same way.
+
 ## Auto-review the parked PRs (#2285 v1 + v2)
 
 The #2171/#2262 review-escalation gate **parks** a blast-radius PR (`review:pending`) and waits for an
@@ -179,7 +185,11 @@ author-bounce with a bounded editor↔reviewer negotiation loop** (below). The o
 > `MANDATE_LENSES`/`MANDATORY_LENSES`/`ADVISORY_LENSES` panel, `buildPanelMandate()` (seeds one reviewer per
 > lens), `derivePanelVerdict()` (reduces the panel's per-lens verdicts to the ONE combined verdict
 > `deriveNegotiationOutcome` already consumes — the round loop itself is unchanged) and
-> `renderPanelVerdictTable()` (the operator-facing split-verdict surface).
+> `renderPanelVerdictTable()` (the operator-facing split-verdict surface). **#2433** adds the SESSION/NOTICE
+> renderers (distinct from the PR-comment table above): `renderDrainRunSummary()` (the end-of-run pass
+> summary) and `renderReviewNotice()` (the in-chat escalation/clearance notice — used by both this skill and
+> [`/review`](../review/SKILL.md)) — same module, same discipline: template the render, never hand-type the
+> prose.
 
 The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isGateSelfPath`) and emits it
 in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`.
@@ -257,8 +267,9 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
        non-author reviewers accepted the FINAL diff. `autoLand: false` (`gate-self`) → **do NOT apply
        `review:accepted`**: the panel converged and fixed the diff, but a human must clear a trust-chain edit.
        Keep `review:human`, post the converged findings + `renderPanelVerdictTable(...)` as the `🤖 advisory AI
-       review / fix (non-clearing)` comment, and surface the PR to the operator — the fix rode the PR branch, the
-       clearance did not.
+       review / fix (non-clearing)` comment, and surface the PR to the operator via
+       `renderReviewNotice({ event: 'escalated', pr, repo, verdict, disposition, reasons })` (#2433) rather than
+       hand-typing the in-chat notice — the fix rode the PR branch, the clearance did not.
      - **`escalate`** (verdict `needs-human` — a genuine mandate `conflict` or the global `humanRequired`
        conflict-of-interest flag — OR `changes` with `round >= roundCap`) → this is the `deriveReviewDisposition`
        DEADLOCK case (`mandate-conflict` / `non-convergence` → `{ mode: human }`): the loop already ran and could
@@ -266,8 +277,10 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
        `review:changes`/author-bounce — that path is retired by v2) and post BOTH the round-by-round findings
        history AND `renderPanelVerdictTable({ lensVerdicts, mandatoryLenses })` (the per-lens
        mandatory/advisory/verdict breakdown) as a PR comment, so the human sees exactly which lens(es)
-       disagreed and whether via non-convergence or a genuine mandate conflict. This is the **only** escalation
-       shape agents produce; the operator clears it with [`/review <PR>`](../review/SKILL.md).
+       disagreed and whether via non-convergence or a genuine mandate conflict. Then report it the same way as
+       the gate-self case, via `renderReviewNotice({ event: 'escalated', pr, repo, verdict, disposition,
+       reasons })` (#2433). This is the **only** escalation shape agents produce; the operator clears it with
+       [`/review <PR>`](../review/SKILL.md).
      - **`continue`** (verdict `changes`, `round < roundCap`) → step 4.
   4. **Editor round.** Spawn a **fresh-context editor subagent** seeded with `buildEditorMandate({ findings,
      round, roundCap })`, where `findings` is `buildPanelFindings(lensFindings)` — the WHOLE panel's
