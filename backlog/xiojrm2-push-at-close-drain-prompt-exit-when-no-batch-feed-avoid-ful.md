@@ -1,0 +1,12 @@
+---
+kind: story
+size: 3
+parent: "2387"
+status: open
+dateOpened: "2026-07-11"
+tags: []
+---
+
+# Push-at-close drain: prompt exit when no batch feed (avoid full max-runtime idle poll)
+
+A serial /batch usually has NO dev active-progress-watch running, so the push-at-close drain's `--until-batches-idle` is INERT (#2330) and it idle-polls until the `--max-runtime-min` cap (default 60m), holding the lease the whole time. Correct + bounded, but wasteful. Make the no-feed case exit promptly after landing the queued chain WITHOUT reintroducing the mid-batch-exit bug that --until-batches-idle fixes: either the launcher writes a durable batch-feed marking THIS batch closed (so the watch's batch-idle exit fires immediately), or the drain detects feed-absence and falls back to a bounded --max-idle only when no feed is present. Feed present (concurrent batch) must still keep collecting.

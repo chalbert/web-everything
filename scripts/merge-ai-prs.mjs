@@ -73,6 +73,7 @@
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run # print the blockedBy-ordered merge plan, merge NOTHING
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --interval=30 # the /drain-watch monitor: poll + land as PRs go green (--max-idle=N bounds it)
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --until-batches-idle  # self-terminate when the active batch is fully delivered (#2330; reads the active-progress feed — --batch-feed=<path> to point at the primary's copy)
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --until-batches-idle --hold-drain-lease --max-runtime-min=60  # #2395 the push-at-close drain: hold the whole-process lease (at most one watch) + a wall-clock lifetime cap
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # #2257/#2287 — the ONE /drain sweeps ALL 3 constellation repos BY DEFAULT (WE+frontierui+plateau-app), one global blockedBy cascade
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --this-repo # #2287 — opt OUT: scope to the cwd repo only (a deliberately single-repo drain)
  *   node scripts/merge-ai-prs.mjs --repos=chalbert/frontierui,chalbert/plateau-app # sweep an explicit repo set (comma-separated owner/name slugs)
@@ -105,7 +106,7 @@ import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBase
 import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor } from './lane-drain.mjs';
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
-import { withNumberingLock } from './readiness/drain-lock.mjs'; // #2391 — the numbering-critical-section mutex (sole-serial-writer)
+import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
 import { extractManifestFromBody, manifestAuditLine, asItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
 
@@ -978,6 +979,17 @@ function runCli() {
   // safe — it keeps watching — but defeats the exit). The 30s default clears the 4s cadence with wide margin;
   // it is independent of `--interval` (they merely share a 30s default value).
   const BATCH_FEED_STALE_MS = (Number.isFinite(Number(flags['batch-feed-stale-sec'])) && Number(flags['batch-feed-stale-sec']) > 0 ? Number(flags['batch-feed-stale-sec']) : 30) * 1000;
+  // #2395 — `--hold-drain-lease`: a `--watch` monitor takes the WHOLE-PROCESS drain lease (#2391) for its full
+  // lifetime, so at most ONE watch drains at a time. A second watch launch that finds a LIVE lease NO-OPs (its
+  // work is already being done); a STALE lease (a crashed watch) is reclaimed via the TTL. push-at-close reads
+  // that same lease to decide fire-vs-enqueue — this is the flag that makes the lease HONEST (the fired drain
+  // actually holds it). Opt-in (only push-at-close passes it), so interactive `/drain`/`/merge` are unchanged.
+  const HOLD_DRAIN_LEASE = !!flags['hold-drain-lease'];
+  // #2395 — `--max-runtime-min=N`: a wall-clock lifetime cap on a `--watch` monitor. The bounded-max-lifetime
+  // backstop push-at-close needs: when its detached drain has no batch feed, `--until-batches-idle` is INERT
+  // and would poll forever, so this hard-stops the watch after N minutes regardless of idle/feed state. 0/unset
+  // ⇒ no cap (Ctrl-C / the idle bounds decide). Correctness holds if it fires: the deferred sweep is the backstop.
+  const MAX_RUNTIME_MS = (Number.isFinite(Number(flags['max-runtime-min'])) && Number(flags['max-runtime-min']) > 0) ? Number(flags['max-runtime-min']) * 60_000 : null;
   // #2198 — rebase-drop the shared `.lane-manifest.json` on land (ON by default; `--no-rebase-drop` disables).
   const REBASE_DROP = flags['no-rebase-drop'] ? false : true;
   // #2371 — safe-content rebase-drop: when the manifest-only resolver (#2198) finds a REAL (non-manifest)
@@ -1859,8 +1871,28 @@ function runCli() {
     process.exit((duplicateIdsOnMain && duplicateIdsOnMain.length) ? 3 : (failedMerges.length ? 2 : 0));
   }
 
+  // #2395 — WHOLE-PROCESS DRAIN LEASE: when `--hold-drain-lease`, this watch takes the exclusive lease (#2391)
+  // for its full lifetime — acquired here, heartbeated each pass, released on EVERY exit (normal, break, signal)
+  // via the `exit` handler below. A launch that finds a LIVE lease NO-OPs (a watch is already draining); a STALE
+  // lease (a crashed watch) is reclaimed via the TTL. Mirrors the retired lane-drain lease discipline exactly.
+  const leaseOwner = drainOwner();
+  if (HOLD_DRAIN_LEASE) {
+    const lease = acquireDrainLease(DRAIN_LOCK_ROOT, leaseOwner);
+    if (!lease.ok) {
+      const st = drainLeaseStatus(DRAIN_LOCK_ROOT);
+      if (AS_JSON) process.stdout.write(JSON.stringify({ ok: true, watch: true, skipped: 'drain-in-progress', heldBy: st.owner, detail: `another drain watch already holds the lease (${st.owner}) — no-op (#2395/#2391)` }) + '\n');
+      else process.stderr.write(`merge-ai-prs · another drain watch already running (lease held by ${st.owner || '?'}) — no-op (#2395)\n`);
+      process.exit(0);
+    }
+    // Release on ANY exit path (the watch loop has several `break`s + signal kills). Idempotent + owner-fenced:
+    // releaseDrainLease only frees a lease THIS owner still holds, so a reclaimer who seized it is never stomped.
+    process.on('exit', () => { releaseDrainLease(DRAIN_LOCK_ROOT, leaseOwner); });
+    for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0)); // → triggers the exit handler → frees the lease
+  }
+
   // WATCH: re-sweep on a fixed interval, landing PRs as they become eligible, until `--max-idle` consecutive
   // idle passes (merged nothing AND nothing deferred waiting) — or forever if `--max-idle` is unset (Ctrl-C).
+  const watchStartedAt = Date.now(); // #2395 — for the `--max-runtime-min` wall-clock cap
   const exitBound = MAX_IDLE != null ? `exit after ${MAX_IDLE} idle pass${MAX_IDLE === 1 ? '' : 'es'}`
     : UNTIL_BATCHES_IDLE ? `exit when the active batch is idle (debounce ${BATCH_DEBOUNCE})` : 'Ctrl-C to stop';
   if (!AS_JSON) process.stderr.write(`watch: polling ${label ? `label "${label}" ` : ''}every ${INTERVAL}s (${exitBound})…\n`);
@@ -1872,6 +1904,13 @@ function runCli() {
   let lastFailed = [];
   let lastDup = [];
   for (let pass = 1; ; pass++) {
+    if (HOLD_DRAIN_LEASE) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner); // #2395 — keep the whole-process lease alive across a long watch
+    // #2395 — wall-clock lifetime cap: hard-stop a `--max-runtime-min` watch so an inert `--until-batches-idle`
+    // (no batch feed present) can never poll forever. The deferred sweep is the backstop for anything unlanded.
+    if (MAX_RUNTIME_MS != null && Date.now() - watchStartedAt >= MAX_RUNTIME_MS) {
+      if (!AS_JSON) process.stderr.write(`watch: STOPPING — reached the --max-runtime-min cap (${MAX_RUNTIME_MS / 60_000}m); anything unlanded rides the deferred sweep.\n`);
+      break;
+    }
     if (!AS_JSON) process.stderr.write(`── pass ${pass} ──\n`);
     const { result, merged, failedMerges, pendingRebased, deferred, duplicateIdsOnMain } = sweepOnce();
     passes.push(result);
