@@ -440,13 +440,17 @@ const LEDGER_REL = '.claude/skills/batch-backlog-items/id-ledger.json';
  * topological (blockedBy) order — the drain is the sole SERIAL writer to main (#2290), so unlike scaffold's
  * randomized gap-fill (#2292, which only exists to stop PARALLEL births colliding) there is no collision to
  * avoid; max+1 keeps numbers contiguous (the #2288 "no burned gap numbers" goal). Records each `hash→NNN`
- * in the ledger, then blind-replaces EVERY ledgered hash across all `backlog/*.md` (filenames + contents) —
+ * in the ledger, then blind-replaces EVERY ledgered hash across all `backlog/*.md` (filenames + contents)
+ * AND `docs/agent/*.md` (#2428 — the cite-able STATUTE layer, e.g. platform-decisions.md, cites pending
+ * hashes too; the same blind rewrite scope must cover it or a citation like "Build carried by #x…" dangles
+ * permanently once the item lands with a real NNN, proven twice — repaired by hand in PR #408) —
  * numbering each item AND repairing any cross-lane `blockedBy`/`parent`/`#ref` that still points at an
  * already-numbered blocker by its old hash. Commits the rename+rewrites in ONE scoped commit; the caller
  * publishes. Best-effort like the rest of the reconcile: a failure is reported, the land stands.
  */
 export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   const BL = join(CWD, 'backlog');
+  const DOCS = join(CWD, 'docs', 'agent');
   let stems;
   try { stems = readdirSync(BL).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, '')); }
   catch { return { assigned: [], committed: false, error: 'cannot read backlog/' }; }
@@ -458,8 +462,28 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   const pending = stems.filter((s) => isHash(idFromName(s)) && trackedStems.has(s)); // tracked hash files = landed in-flight items to number
   if (pending.length === 0) return { assigned: [], committed: false };
 
-  const files = stems.map((name) => ({ name, content: readFileSync(join(BL, `${name}.md`), 'utf8') }));
+  // #2428 — extend the blind rewrite scope to the cite-able STATUTE layer (`docs/agent/*.md`): a doc like
+  // platform-decisions.md cites a pending hash ("Build carried by #x…") the same way a backlog `blockedBy`
+  // does, so it must get the same numbering pass or the citation dangles once the item lands numbered.
+  // `name` for a docs entry is the FULL repo-relative path (incl. `docs/agent/` + `.md`) — unlike a backlog
+  // stem (bare, no slash, no extension) — so the two can never collide; `pathFor` below tells them apart by
+  // presence of `/`. Only TRACKED docs files are read/rewritten, same landed-only guard as backlog.
+  let docsNames;
+  try { docsNames = readdirSync(DOCS).filter((f) => f.endsWith('.md')); }
+  catch { docsNames = []; } // docs/agent/ missing is not fatal — just nothing to sweep there
+  const trackedDocs = new Set((quietGit(CWD, ['ls-files', 'docs/agent/*.md']) || '').split('\n').filter(Boolean));
+  const docsFiles = docsNames
+    .map((f) => `docs/agent/${f}`)
+    .filter((rel) => trackedDocs.has(rel))
+    .map((rel) => ({ name: rel, content: readFileSync(join(CWD, rel), 'utf8') }));
+
+  const files = [...stems.map((name) => ({ name, content: readFileSync(join(BL, `${name}.md`), 'utf8') })), ...docsFiles];
   const contentByName = new Map(files.map((f) => [f.name, f.content]));
+  // Resolve a `files` entry's `name` to its on-disk absolute + commit-relative path — a backlog stem (bare,
+  // no `/`) lives under `backlog/`; a docs entry (`name` already a full repo-relative path) lives as-is.
+  const pathFor = (name) => name.includes('/')
+    ? { absPath: join(CWD, name), relPath: name }
+    : { absPath: join(BL, `${name}.md`), relPath: `backlog/${name}.md` };
 
   // Order the pending hashes TOPOLOGICALLY: a pending item whose blockedBy names ANOTHER pending hash is
   // numbered AFTER it (referenced item first, #2288). Cosmetic for correctness (applyLedger repairs every
@@ -528,8 +552,9 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   const commitPaths = [];
   for (const { name, content } of rewrites) {
     if (renameFroms.has(name)) continue; // a renamed file's content is written to its NEW path below
-    writeFileSync(join(BL, `${name}.md`), content);
-    toAdd.push(`backlog/${name}.md`); commitPaths.push(`backlog/${name}.md`);
+    const { absPath, relPath } = pathFor(name); // backlog stem → backlog/<name>.md; docs entry → its own full path (#2428)
+    writeFileSync(absPath, content);
+    toAdd.push(relPath); commitPaths.push(relPath);
   }
   for (const { from, to } of renames) {
     const content = rewriteByName.has(from) ? rewriteByName.get(from) : readFileSync(join(BL, `${from}.md`), 'utf8');
