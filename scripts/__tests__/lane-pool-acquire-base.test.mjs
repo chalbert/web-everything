@@ -197,4 +197,71 @@ describe('lane-pool acquire --base=<ref> (#2386)', () => {
     expect(JSON.parse(r.out).path).toBe(lane);
     expect(readFileSync(join(lane, 'file.txt'), 'utf8')).toBe('main-advanced\n'); // NOT the stale 'main-tip'
   });
+
+  // #2419 — a lane can be left ATTACHED to a stray `lane/*` local branch (a leftover from an earlier
+  // rebase-drop or a manual checkout in that clone) instead of its own `repo.branch` (`main`). A bare
+  // `reset --hard` moves whatever branch HEAD happens to be on without changing which branch that is, so a
+  // reset-only fix would leave the lane attached to the stray branch forever, just with fresher content —
+  // exactly the state that stranded JIT numbering downstream (the drain's post-land `pull --ff-only` needs
+  // an attached branch WITH an upstream, which a `lane/*` branch never has). `acquire` must always land HEAD
+  // back on `repo.branch` itself, regardless of what branch it started on.
+  it('recovers a lane left attached to a stray lane/* branch, landing HEAD back on repo.branch (main)', () => {
+    provision(1);
+    const lane = join(poolRoot, 'basetest', 'lane-1');
+    // Simulate the strand: check out a local `lane/*` branch inside the lane's own clone, as an earlier
+    // rebase-drop or manual recovery step might have left it.
+    git(['checkout', '--quiet', '-b', 'lane/file-2417'], lane);
+    expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], lane)).toBe('lane/file-2417');
+
+    const r = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install', '--json'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(r.code).toBe(0);
+    const info = JSON.parse(r.out);
+    expect(info.path).toBe(lane);
+    // HEAD is attached to the lane's own `main` again — never left on the stray branch.
+    expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], lane)).toBe('main');
+    expect(git(['rev-parse', 'main'], lane)).toBe(git(['rev-parse', 'origin/main'], lane));
+    expect(readFileSync(join(lane, 'file.txt'), 'utf8')).toBe('main-tip\n');
+  });
+
+  // #2419 pre-PR review catch — `checkout -B` (unlike `reset --hard`) runs the ordinary safe-checkout
+  // tree-merge and REFUSES on a dirty TRACKED-file conflict ("local changes would be overwritten by
+  // checkout") unless `--force` is also passed. `acquire --lane=N` (the EXPLICIT-lane path — e.g. a batch
+  // orchestrator re-acquiring its own known lane number, which skips the auto-pick `chooseFreeLane` dirty
+  // filter entirely, unlike the bare auto-pick path) has never gated its reset on tree cleanliness (a
+  // stray/crashed lane can carry uncommitted edits) — it must unconditionally reclaim the lane exactly like
+  // `reset --hard` always did. Without `--force` this acquire would THROW here (after the lease was already
+  // claimed), stranding the lane half-claimed and dirty.
+  it('acquire --lane=N unconditionally discards a dirty tracked-file conflict, never refuses (mirrors reset --hard)', () => {
+    provision(1);
+    const lane = join(poolRoot, 'basetest', 'lane-1');
+    // First acquire lands the lane on `main` at the current origin/main tip.
+    const first = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install', '--lane=1', '--json'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(first.code).toBe(0);
+    runPool(['release', '--lane=1', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main'], { LANE_POOL_ROOT: poolRoot });
+
+    // Advance origin/main past the lane's last-seen tip, so the acquire below has real incoming content to
+    // conflict against the lane's dirty uncommitted edit.
+    writeFileSync(join(referenceDir, 'file.txt'), 'main-advanced-2\n');
+    git(['add', 'file.txt'], referenceDir);
+    git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'main v3'], referenceDir);
+    git(['push', '--quiet', 'origin', 'main'], referenceDir);
+
+    // Dirty the lane's tracked file with an UNCOMMITTED edit that conflicts with the incoming content.
+    writeFileSync(join(lane, 'file.txt'), 'uncommitted dirty edit\n');
+    expect(git(['status', '--porcelain'], lane)).toContain('file.txt');
+
+    const r = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install', '--lane=1', '--json'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(r.code).toBe(0); // never refuses — succeeds exactly like reset --hard did
+    expect(readFileSync(join(lane, 'file.txt'), 'utf8')).toBe('main-advanced-2\n'); // dirty edit discarded
+    expect(git(['status', '--porcelain'], lane)).toBe('');
+  });
 });
