@@ -626,7 +626,22 @@ function cmdAcquire(repo) {
   if (!flags['no-reset']) {
     git(['fetch', 'origin', '--prune', '--quiet'], dir);
     const baseRef = flags.base ? resolveBaseRef(dir, flags.base, chosen) : `origin/${repo.branch}`;
-    git(['reset', '--hard', baseRef, '--quiet'], dir);
+    // #2419 — `checkout -B <branch> <baseRef>`, NOT `reset --hard <baseRef>`. A bare reset moves whatever
+    // branch HEAD happens to be attached to (it does not touch which branch that is), so a lane left
+    // attached to a STRAY `lane/*` tip (a leftover from an earlier rebase-drop or a manual checkout — #2419's
+    // primary cause) stayed attached to that stray branch forever after, just with fresher content. Every
+    // downstream reader that assumes a lane sits on `repo.branch` (e.g. the drain's post-land `pull --ff-only`,
+    // which needs an attached branch WITH an upstream) then silently no-ops or numbers off the wrong parent.
+    // `checkout -B` creates-or-resets `repo.branch` (e.g. `main`) to `baseRef` AND checks it out in the same
+    // atomic step, so every reset/acquire always leaves the lane on its own well-known local branch — never a
+    // stray one — closing the strand at its source rather than only papering over it downstream. `--force` is
+    // REQUIRED here (pre-PR review catch, #2419): unlike `reset --hard`, a bare `checkout -B` still runs the
+    // ordinary safe-checkout tree-merge and REFUSES ("local changes would be overwritten by checkout") on a
+    // dirty tracked-file conflict — reproduced live against a scratch repo. `acquire` has never gated this
+    // reset on tree cleanliness (unlike `refreshLane`'s explicit `laneDirtyOrAhead` guard) — it must
+    // unconditionally reclaim a lane regardless of stray edits left by a prior crashed/interrupted session, so
+    // `--force` restores that same never-refuses guarantee `reset --hard` always gave it.
+    git(['checkout', '-B', repo.branch, baseRef, '--quiet', '--force'], dir);
     git(['clean', '-fd', '--quiet'], dir);
     unmapLanes(repo, [chosen]); // a reset lane no longer renders its old item (#2139)
   }
