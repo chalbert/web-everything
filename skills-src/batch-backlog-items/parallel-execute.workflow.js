@@ -303,12 +303,16 @@ const setup = await agent(
     ``,
     `2. PROVISION a lane pool PER affected repo. we:scripts/lane-pool.mjs is repo-parameterized — run it from`,
     `   THIS WE checkout, passing --repo for non-WE repos. For each entry below run`,
-    `   \`node scripts/lane-pool.mjs provision --count=<count> [--repo=<path>]\` (omit --repo for WE) then`,
-    `   \`node scripts/lane-pool.mjs list --json [--repo=<path>]\`. Pools are PERSISTENT — a re-run reuses`,
-    `   existing clones. Provision plan (JSON): ${JSON.stringify(provisionPlan)}.`,
+    `   \`node scripts/lane-pool.mjs provision --count=<count> --acquirable [--repo=<path>]\` (omit --repo for WE)`,
+    `   then \`node scripts/lane-pool.mjs list --json --acquirable [--repo=<path>]\`. The \`--acquirable\` flag`,
+    `   (#2426) makes provision grow PAST any lane a sibling session already holds (a foreign lease) and makes`,
+    `   list return ONLY lanes safe to couple an item onto — so an item is NEVER assigned to a held lane and`,
+    `   carried with zero work. Pools are PERSISTENT — a re-run reuses existing clones. Provision plan (JSON):`,
+    `   ${JSON.stringify(provisionPlan)}.`,
     ``,
     `Report labelReady (boolean) and lanePools — an OBJECT keyed by repo ("we"/"frontierui"/"plateau-app")`,
-    `whose value is the ORDERED array of that repo's absolute lane-clone dirs (lane-1, lane-2, … as listed).`,
+    `whose value is the ORDERED array of that repo's absolute ACQUIRABLE lane-clone dirs, EXACTLY as`,
+    `\`list --json --acquirable\` printed them (foreign-leased lanes are already filtered out; do NOT re-add them).`,
     `Return ONLY the object.`,
   ].join(' '),
   {
@@ -341,7 +345,11 @@ function laneDirsForItem(it) {
   for (const repo of affectedReposOf(it)) {
     const idx = laneIndexOf(lanePlan, it, repo);
     const pool = lanePools[repo] || [];
-    dirs[repo] = pool[idx] || pool[idx % Math.max(pool.length, 1)] || '';
+    // #2426 — couple item→lane by position into the ACQUIRABLE pool. If the pool ran short (more items than
+    // acquirable lanes — sibling sessions hold too many), the overflow item gets NO lane ('') and is cleanly
+    // carried with a log below. NEVER wrap with `idx % pool.length`: that silently coupled two items onto ONE
+    // lane, so the second clobbered the first's work. Contention must carry-and-log, never double up.
+    dirs[repo] = pool[idx] || '';
   }
   return dirs;
 }
@@ -487,7 +495,9 @@ const results = await parallel(workItems.map((it) => () => {
   const disp = it.seed ? laneKeyOf(it) : `#${it.num}`;
   if (!laneDirs.we) {
     itemsDone++;
-    log(`  ✗ ${disp} (${itemsDone}/${workItems.length}): no WE lane clone available → skipped [${it.slug}]`);
+    // #2426 — no acquirable WE lane left for this item (more items than free lanes: sibling sessions hold too
+    // many). Carry it explicitly rather than double up onto a lane already coupled to another item.
+    log(`  ✗ ${disp} (${itemsDone}/${workItems.length}): no acquirable WE lane (pool exhausted by lease contention) → carried [${it.slug}]`);
     return Promise.resolve(null);
   }
   return agent(laneItemPrompt(it, laneDirs), { label: `lane:${disp}`, phase: 'Lanes', schema: ITEM_RESULT_SCHEMA, model: laneModelFor(it) })

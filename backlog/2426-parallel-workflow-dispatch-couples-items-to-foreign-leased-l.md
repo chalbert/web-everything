@@ -2,8 +2,11 @@
 bornAs: xz14x16
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-11"
+dateResolved: "2026-07-11"
+graduatedTo: none
 relatedTo: ["2413"]
 tags: [lane-pool, workflow, orchestrator, lease]
 ---
@@ -37,3 +40,28 @@ still drops the item — this item wants the coupling to *pick a different lane*
   reasons.
 - If fewer acquirable lanes than items exist, the orchestrator provisions extras (or queues), and `log`s the
   contention instead of silently carrying.
+
+## Resolution (2026-07-11)
+
+Lease-aware coupling, in two parts:
+
+- **`we:scripts/lane-pool.mjs`** — `list --acquirable` filters out any lane holding a LIVE lease or un-pushed
+  work (via the existing `isLaneAcquirable` decision core in `we:scripts/lib/lane-lease.mjs`); the batch holds
+  no leases of its own, so every live lease it sees is foreign. `provision --count=N --acquirable` grows the
+  pool PAST held lanes (bounded by a headroom cap) so N *acquirable* lanes result, instead of stopping at
+  `lane-N` where a low-index hold would occupy a coupling slot. Default (non-`--acquirable`) provision/list are
+  unchanged.
+- **`we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js`** — the PROVISION step now runs
+  `provision … --acquirable` + `list --json --acquirable`, so `lanePools[repo]` holds only acquirable dirs and
+  positional coupling can never land on a foreign-leased lane. Killed the `pool[idx % pool.length]` fallback in
+  `laneDirsForItem` (it silently coupled two items onto ONE lane on overflow — the second clobbered the first);
+  an overflow item now gets no lane and is carried with an explicit lease-contention `log`.
+
+Covered by `we:scripts/__tests__/lane-pool-acquirable.test.mjs` (leased lane dropped from `--acquirable` but
+kept in the bare list; dirty lane dropped; stale lease reclaimable; provision grows past a held low-index lane
+to reach N acquirable; non-`--acquirable` provision unchanged). Full suite green (3076 tests, 0 gate errors).
+
+Residual: a lane can still be acquired by a sibling in the window between `list --acquirable` and the lane's
+own `git reset --hard` — that TOCTOU safety is #2413's guard (the lane refuses to clobber), and a fuller
+acquire-at-dispatch design is tracked by #2413/#2427. This item's scope was throughput (never *couple* onto an
+unusable lane), which is delivered.

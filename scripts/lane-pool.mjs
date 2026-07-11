@@ -21,10 +21,10 @@
  * frontierui / plateau-app — the constellation) reuses this unchanged via `--repo=<checkout-path>`.
  *
  * Usage:
- *   node scripts/lane-pool.mjs provision --count=N [--no-install] [--force]   # ensure N lanes exist (clone missing) + refresh all + ensure deps + ensure the WE pool's FUI render-sibling (#2166)
+ *   node scripts/lane-pool.mjs provision --count=N [--acquirable] [--no-install] [--force]   # ensure N lanes exist (clone missing) + refresh all + ensure deps + ensure the WE pool's FUI render-sibling (#2166); --acquirable grows PAST foreign-leased lanes so N ACQUIRABLE ones result (#2426)
  *   node scripts/lane-pool.mjs refresh           [--no-install] [--force]     # fetch + hard-reset existing lanes to origin/main (no creation)
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
- *   node scripts/lane-pool.mjs list    [--json]                     # existing lane paths (for the orchestrator to dispatch into)
+ *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
  *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path
  *   node scripts/lane-pool.mjs release (--lane=N | --all) [--session=<slug>] [--force]   # #2275 hand a leased lane back to the pool (own lease, or --force)
@@ -65,6 +65,7 @@ import {
   LEASE_FILENAME,
   DEFAULT_LEASE_TTL_MINUTES,
   isLeaseStale,
+  isLaneAcquirable,
   chooseFreeLane,
   leaseBody,
   describeLease,
@@ -471,6 +472,16 @@ function laneStatus(repo, n) {
   };
 }
 
+// #2426 — the lease/dirty snapshot a lease-aware picker (`list --acquirable`, `provision --acquirable`) needs to
+// decide whether a lane is safe to couple an item onto. Shape matches `isLaneAcquirable(info, now, ttl)` in
+// lane-lease.mjs: `exists`, the raw `lease` marker, and `dirtyOrAhead` (someone's un-pushed work). It reads the
+// LOCAL `origin/<branch>` ref (no fetch — a cheap snapshot; a stale-looking "ahead" only fails safe by skipping).
+function laneAcquirableInfo(repo, n) {
+  const dir = laneDir(repo, n);
+  if (!existsSync(dir)) return { lane: n, exists: false };
+  return { lane: n, exists: true, lease: readLease(dir), dirtyOrAhead: laneDirtyOrAhead(dir, repo.branch) };
+}
+
 // ── output ──────────────────────────────────────────────────────────────────────────────────────────
 const log = (m) => process.stderr.write(m + '\n');
 function fail(m) {
@@ -479,20 +490,57 @@ function fail(m) {
 }
 
 // ── commands ──────────────────────────────────────────────────────────────────────────────────────
+// Provision one lane (clone if missing, refresh, write env, ensure deps). Returns refreshLane's result so the
+// caller can tell an actually-reset lane (safe to unmap its stale item mapping) from a skipped/leased one.
+function provisionLane(repo, n, force) {
+  if (!existsSync(laneDir(repo, n))) cloneLane(repo, n);
+  else log(`  lane-${n} exists`);
+  const result = refreshLane(repo, n, { force });
+  writeLaneEnv(repo, n);
+  if (!flags['no-install']) ensureDeps(laneDir(repo, n));
+  return result;
+}
+
+// #2426 — headroom past --count when growing to N ACQUIRABLE lanes, so a run with many foreign-leased lanes can
+// still cover N usable ones without cloning unboundedly (a corrupt lease that never reads acquirable would loop).
+const ACQUIRABLE_PROVISION_HEADROOM = 32;
+
 function cmdProvision(repo) {
   const count = Number(flags.count);
   if (!Number.isInteger(count) || count < 1) fail('provision needs --count=<positive integer>');
   mkdirSync(repo.poolDir, { recursive: true });
-  log(`provisioning ${count} lane(s) for "${repo.name}" under ${repo.poolDir} (branch ${repo.branch})`);
   const force = !!flags.force;
   const resetLanes = []; // only lanes actually reset lose their stale mapping — a skipped lane still serves it
-  for (let n = 1; n <= count; n++) {
-    if (!existsSync(laneDir(repo, n))) cloneLane(repo, n);
-    else log(`  lane-${n} exists`);
-    const result = refreshLane(repo, n, { force });
-    if (!result.skipped) resetLanes.push(n);
-    writeLaneEnv(repo, n);
-    if (!flags['no-install']) ensureDeps(laneDir(repo, n));
+
+  // #2426 — `--acquirable` provisions until `count` lanes are ACQUIRABLE (not foreign-leased / busy), growing the
+  // pool PAST held lanes rather than stopping at lane-<count>. This is what lets the parallel /workflow couple N
+  // items to N usable lanes even when a sibling session holds some of the low-index ones: without it, provision
+  // clones lane-1..N, a leased lane among them is skipped (correctly, never clobbered) but still occupies a
+  // coupling slot, so its item is carried with zero work.
+  if (flags.acquirable) {
+    const nowMs = Date.now();
+    const ttlMs = ttlMsFromFlags();
+    const cap = count + ACQUIRABLE_PROVISION_HEADROOM;
+    log(`provisioning up to ${count} ACQUIRABLE lane(s) for "${repo.name}" under ${repo.poolDir} (branch ${repo.branch}; cap lane-${cap})`);
+    let acquirable = 0;
+    let n = 0;
+    while (acquirable < count && n < cap) {
+      n++;
+      const result = provisionLane(repo, n, force);
+      if (!result.skipped) resetLanes.push(n);
+      if (isLaneAcquirable(laneAcquirableInfo(repo, n), nowMs, ttlMs)) acquirable++;
+    }
+    if (acquirable < count) {
+      log(`⚠ only ${acquirable}/${count} lane(s) acquirable after provisioning through lane-${n} (rest hold a foreign lease / un-pushed work) — the orchestrator will log the contention and carry the overflow, never double up a lane.`);
+    } else {
+      log(`ensured ${count} acquirable lane(s) (provisioned through lane-${n}; skipped foreign-leased/busy lanes)`);
+    }
+  } else {
+    log(`provisioning ${count} lane(s) for "${repo.name}" under ${repo.poolDir} (branch ${repo.branch})`);
+    for (let n = 1; n <= count; n++) {
+      const result = provisionLane(repo, n, force);
+      if (!result.skipped) resetLanes.push(n);
+    }
   }
   unmapLanes(repo, resetLanes); // refreshed lanes lose stale mappings (#2139); skipped lanes keep theirs
   ensureRepoSiblings(repo, { force }); // pushable+built constellation siblings at the pool root (#2166/#2282/#2349)
@@ -721,7 +769,18 @@ function printStatus(repo) {
 }
 
 function cmdList(repo) {
-  const paths = existingLanes(repo).map((n) => laneDir(repo, n));
+  let lanes = existingLanes(repo);
+  // #2426 — `--acquirable` drops any lane a picker must not couple an item onto: one holding a LIVE (foreign)
+  // lease or someone's un-pushed work. The parallel /workflow dispatch used the bare list and assigned items to
+  // held lanes by position, so a foreign-leased lane's item was carried with zero work. Filtering here (same
+  // decision core `acquire` uses) is the throughput fix — the batch holds no leases, so every live lease it sees
+  // is foreign; `isLaneAcquirable` excludes all live leases, which is exactly the set to skip.
+  if (flags.acquirable) {
+    const nowMs = Date.now();
+    const ttlMs = ttlMsFromFlags();
+    lanes = lanes.filter((n) => isLaneAcquirable(laneAcquirableInfo(repo, n), nowMs, ttlMs));
+  }
+  const paths = lanes.map((n) => laneDir(repo, n));
   if (flags.json) process.stdout.write(JSON.stringify(paths, null, 2) + '\n');
   else paths.forEach((p) => process.stdout.write(p + '\n'));
 }
