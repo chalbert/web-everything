@@ -2441,6 +2441,33 @@ In the same lane-to-central pipeline, a lane must **reserve (pre-lock) a file be
 
 **Amendment — the two root files split asymmetrically, and the ③ "build config" wording is corrected (#2149, ratified 2026-07-03).** A batch story to blacklist `we:package.json` + `we:.eleventy.js` was retyped to a decision because the edit appeared to reverse #1952's line-structured demotion. The prep found (a) *neither path was ever actually listed* — both were swept in only by the code header's generalized "BUILD CONFIG" parenthetical, and #1952's real removals were `we:tsconfig.json` + `we:vite.config.mts`; and (b) the statute's ③ literal ("build config → locked") already contradicted those ratified removals. Ruling: the two files are **not symmetric**. **Fork 1 — `we:package.json` stays optimistic** (a keyed manifest whose sole clean-but-wrong class, duplicate keys, is deterministically lintable) behind a new duplicate-key merge-gate lint (`validateNoDuplicateManifestKeys`, `we:scripts/check-standards-rules.mjs`, shipped in this ruling's changeset — no unguarded interim window); declaring it ③ was **rejected on merit** — its only edge over the lint is replay-*speed* (prioritization wearing merit's clothes, #1961), and the lint has broader coverage (every landing, not just orchestrator-packed lanes). **Fork 2 — `we:.eleventy.js` is declared ③ merge-risk now** (a registration monolith whose same-name/order-sensitive registrations clean-merge silently and are un-lintable), listed in both mirror homes (`we:scripts/readiness/lane-partition.mjs` + `we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js`); its future off-ramp is the **already-standing category-① split-and-exit** (delist iff a fragment split proves order-insensitivity — the split is an ordinary backlog story, *not* pre-blessed here). The ③ category line above is corrected in the same change (flat/keyed config → optimistic; registration monolith → ③). `we:tsconfig.json` / `we:vite.config.mts` stay optimistic under every branch. Report `we:reports/2026-07-02-merge-risk-blacklist-package-json-eleventy.md`.
 
+### Lane ownership is a minted per-holder slug, asserted per op, checked at the guard — never inferred from ambient process identity {#lane-ownership-minted-slug-per-op}
+
+In the parallel `/workflow` topology every sibling lane shares the top-level `CLAUDE_CODE_SESSION_ID` (a
+spawned subagent inherits the parent's id verbatim; shell exports don't survive an agent's separate Bash
+calls), so **no ambient env/process property can distinguish siblings** — a lease stamped from ambient
+identity makes every sibling read as owner in every lane. The ruling adopts the fencing-token pattern the
+prior art converges on (Kleppmann's fencing tokens; Kubernetes Lease `holderIdentity`): identity is a
+**minted string per logical holder** (`<batchSlug>-<laneKey>`, already minted deterministically by the
+orchestrator), carried **with each operation** (inline `LANE_SESSION=<slug>` in the command string — the
+one per-op channel with both ends in-repo), and checked **by the arbiter at the point of use**
+(`we:scripts/guard-bash.mjs`). Concretely: (1) each parallel lane's step-1 prep becomes an explicit-lane
+`acquire --lane=N` under its per-lane slug — replacing the manual `reset --hard`/`clean -fd` prep, with a
+short TTL (~60–90 min), an explicit slug-carrying release at close-out, an acquire per affected impl
+repo, and invocation pinned to the primary; (2) the workflow acquire sets a dedicated `workflowLane`
+lease field (a contract field, not `purpose` free text), and for a **live marked** lease the guard
+requires the command string to assert the lease's own slug, denying on mismatch **or absence** —
+fail-closed, with precedence over the degraded no-id fail-open (which is thereby rescoped to unmarked
+leases; all serial-topology semantics unchanged). The hook-payload `agent_id` channel (ambient,
+per-subagent, experimental) is **excluded on principle**: it is process identity — pid-shaped, ephemeral,
+third-party-owned — with an unbridgeable mint/check split and silent fail-open degradation; any repair
+routing it through the command string collapses into the minted-slug design with a worse token.
+
+**Lineage:** #2413 (ratified 2026-07-11 — Fork 1 (a) in-lane acquire; Fork 2 (b) per-op slug assertion
+fail-closed in marked lanes; two skeptic rounds incl. a refuted `agent_id` default-flip; report
+`we:reports/2026-07-10-per-lane-ownership-signal-parallel-workflow-lanes.md`). Extends the #2367 guard
+(cross-session protection) to sibling lanes. Build carried by #xua3eva.
+
 ### Automated closeout is non-destructive and changeset-scoped; the writer operating model targets PR-flow / multi-session {#non-destructive-closeout-prflow}
 
 Two rulings on *where* the constellation's work happens and what an automated closeout may touch.
