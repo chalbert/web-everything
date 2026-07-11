@@ -1,9 +1,12 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 relatedTo: ["2285", "2326"]
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-11"
+dateResolved: "2026-07-11"
+graduatedTo: 6b5874f7 (review-core deriveReviewDisposition)
 tags: [review, drain, skill, agent]
 ---
 
@@ -76,3 +79,24 @@ attributed fixes and re-panels to confirm, but the terminal state stays `review:
 - A `gate-self` parked PR now carries an advisory-fix convergence (fixes applied, panel re-run) yet still cannot be
   agent-cleared / auto-landed.
 - A deadlock-escalated PR is handed to the human with no re-convergence.
+
+## Resolution note
+
+This item was filed 2026-07-10, one day after the exact deliverable it describes had already landed on
+`main` in commit `6b5874f7` ("review-core: one reason→disposition derivation, shared by all reviews") plus
+follow-up `43782cab` ("review-core: accept decorated scoreEscalation reason strings"). Verified against every
+acceptance line:
+
+- `deriveReviewDisposition({ reason | reasons })`, `REVIEW_DISPOSITIONS`, and the frozen `REVIEW_REASONS`
+  vocabulary exist in `we:scripts/lib/review-core.mjs`, exhaustive over the reason set (plus `cross-repo`,
+  a superset of this item's table), with the exact precedence this item specifies (deadlock reasons beat
+  `gate-self` beats plain sensitivity reasons) and unit-tested in
+  `we:scripts/lib/__tests__/review-core.test.mjs` (`describe('deriveReviewDisposition …')`), including the
+  `gate-self ⇒ autoLand:false` case and the strictest-reason-wins case.
+- `we:skills-src/drain/SKILL.md`, `we:skills-src/review/SKILL.md`, and `we:skills-src/merge/SKILL.md` all
+  call `deriveReviewDisposition` rather than hand-rolling the `humanRequired` branch (grep confirms no
+  in-repo re-implementation).
+- The `#2285`/`#2326` invariant (`autoLand:false` is never agent-cleared) is unchanged and still the single
+  enforcement point.
+
+No further code change was needed; resolving as already-delivered by the prior commits.
