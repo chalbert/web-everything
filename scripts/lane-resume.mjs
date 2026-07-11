@@ -15,6 +15,8 @@
  *   node scripts/lane-resume.mjs discover --this-repo  # scope to the cwd repo only (default = all 3 repos)
  *   node scripts/lane-resume.mjs discover --repos=owner/a,owner/b   # an explicit repo set
  *   node scripts/lane-resume.mjs land <pr> [--repo=owner/name] [--dry-run] [--json]   # land ONE stuck lane PR (#2202)
+ *   node scripts/lane-resume.mjs rebuild-plan [--spec=<file>|-]     # plan a repaired link's descendant-tail rebuild (#2396); `landed` derives from positive on-main proof (bornAs / status:resolved) when not supplied
+ *   node scripts/lane-resume.mjs rebuild <laneRef> --onto=<sha>     # rebuild ONE descendant tip onto the repaired parent tip (#2396)
  *
  * MULTI-REPO (#2383 — parity with `/drain`'s #2287 constellation-default): `discover` sweeps ALL 3
  * constellation repos BY DEFAULT (WE + frontierui + plateau-app, self first), reusing the SAME `resolveRepos`
@@ -38,8 +40,20 @@
  * reported as `unknown`, never crashes the plan.
  */
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
+// #2396 — resolve a stackParent's landed status via the durable bornAs-on-main proof (#2392): `landedNumberFor`
+// greps origin/main's backlog for the birth-hash record, `isHash`/`asItemId` are the shared id semantics the
+// drain's own proof-of-land gate uses (numeric NNN = post-land by JIT numbering, #2288). All import-safe
+// (CLI-guarded modules already in this file's import graph via merge-ai-prs).
+import { landedNumberFor } from './lane-drain.mjs';
+import { isHash } from './backlog/id.mjs';
+import { asItemId } from './readiness/lane-manifest.mjs';
+// #2396 — a broken stacked LINK is a lane the finisher must repair before its overlap-descendants can be
+// rebuilt onto the repaired tip. "Broken" = a red required `test` (a real bug) OR a `review:changes` label
+// (a human bounced the diff). Reuse the ratified verdict-label set + its tolerant reader, never re-parse names.
+import { REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
 // #2383 — reuse the SAME constellation repo-resolution as `/drain` (`merge-ai-prs.mjs`), so `/finish` sweeps
 // all 3 repos (WE + frontierui + plateau-app) by default instead of only the cwd repo. `merge-ai-prs.mjs` is
 // CLI-guarded (runs nothing on import), so this is a pure function import.
@@ -62,23 +76,37 @@ export function localSlug() {
  * Classify ONE lane's takeover disposition from its already-collected signals.
  * @param {{num:number, mergeable:string, mergeState:string, testConclusion:string|null,
  *          item:number|null, repos:Array<{repo:string,ref:string,carriesResolve?:boolean}>,
- *          blockedBy:number[]}} pr
+ *          blockedBy:number[], stackParents?:Array<number|string>, reviewChanges?:boolean}} pr
  * @param {Set<number>} resolvedItems — items whose backlog file is status:resolved on main (blocker landed)
- * @returns {{num, item, repos, blockedBy, crossRepo, disposition, reason}}
- *   disposition ∈ 'ready' | 'conflict' | 'test-red' | 'blocked' | 'unknown'
+ * @returns {{num, item, repos, blockedBy, stackParents, reviewChanges, testRed, crossRepo, disposition, reason}}
+ *   disposition ∈ 'ready' | 'conflict' | 'test-red' | 'review-changes' | 'blocked' | 'unknown'
  */
 export function classifyLane(pr, resolvedItems) {
   const blockedBy = pr.blockedBy || [];
   const unlanded = blockedBy.filter((b) => !resolvedItems.has(b));
   const crossRepo = (pr.repos || []).some((r) => r.repo && r.repo !== 'we');
-  const base = { num: pr.num, item: pr.item ?? null, repos: pr.repos || [], blockedBy, crossRepo };
+  // #2396 — carry the stacked-chain signals through so `markStackDescendantsBlocked` can re-bucket a broken
+  // link's overlap-descendants. `reviewChanges` (a human bounced the diff) is, like a red `test`, a broken link.
+  // `testRed` is carried as a RAW flag (not just the disposition) so a lane whose disposition is overwritten by
+  // the 'BLOCKED wins' rule below still reads as a broken link — otherwise a blockedBy+red-test lane would mask
+  // its breakage and its stacked descendants would stay 'ready' and land past the unrepaired parent.
+  const stackParents = pr.stackParents || [];
+  const reviewChanges = pr.reviewChanges === true;
+  const testRed = Boolean(pr.testConclusion) && String(pr.testConclusion).toUpperCase() === 'FAILURE';
+  const base = { num: pr.num, item: pr.item ?? null, repos: pr.repos || [], blockedBy, stackParents, reviewChanges, testRed, crossRepo };
 
   // BLOCKED wins: a finisher cannot land a lane whose blocker isn't on main yet (impl-first / dep-first).
   if (unlanded.length) return { ...base, disposition: 'blocked', reason: `blockedBy not landed: ${unlanded.join(',')}` };
 
   // A red required check means the lane shipped a real bug — the finisher must FIX code, not just rebase.
-  if (pr.testConclusion && String(pr.testConclusion).toUpperCase() === 'FAILURE')
+  if (testRed)
     return { ...base, disposition: 'test-red', reason: 'required `test` check is red (lane bug to fix)' };
+
+  // #2396 — a `review:changes` bounce means a human rejected the diff: like a red test, the finisher must
+  // REPAIR the code first. It must NEVER bucket 'ready' (green CI + mergeable is irrelevant — the drain's
+  // #2366 hard refusal would park it anyway; here we keep it out of the auto-land list at the source).
+  if (reviewChanges)
+    return { ...base, disposition: 'review-changes', reason: 'review:changes — a human bounced the diff (repair before any land)' };
 
   // A conflict is repairable by rebase-onto-main + resolve (+ regen derived artifacts) — mechanical.
   if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY')
@@ -110,6 +138,205 @@ export function orderByBlockedBy(lanes) {
   for (const l of lanes) visit(l, new Set());
   // stable partition: attemptable (ready/conflict/test-red/unknown) before blocked
   return [...out.filter((l) => l.disposition !== 'blocked'), ...out.filter((l) => l.disposition === 'blocked')];
+}
+
+/**
+ * Re-bucket a stacked chain's descendants behind a BROKEN link (#2396 / #2387 F5). A broken link is a lane the
+ * finisher must REPAIR before anything stacked below it can rebuild: its required `test` is red (disposition
+ * `test-red` — a real bug) OR it carries `review:changes` (a human bounced the diff). Any lane whose
+ * `stackParents` chain reaches a broken link is re-bucketed to `blocked` (blocked-on-broken-link) — it must NOT
+ * be attempted this pass: its tip literally contains the broken parent's code (CI red-poisons it anyway), and it
+ * will be rebuilt onto the REPAIRED tip once the link is fixed, NEVER blind-rebased as part of the whole batch.
+ * The broken link KEEPS its own disposition (the finisher fixes it in place). Transitive over the chain and
+ * stowaway-proof: a descendant is deferred behind its parent's ABSENCE, so the tail can never land past the
+ * unrepaired parent. Pure — no IO; returns a NEW array (inputs untouched).
+ * @param {Array<{num, item, stackParents?:Array, disposition, reviewChanges?:boolean, reason}>} lanes
+ * @returns {Array} the same lanes with poisoned descendants re-bucketed to `blocked`
+ */
+export function markStackDescendantsBlocked(lanes) {
+  // Broken = the RAW breakage signals (`testRed` / `reviewChanges`), not just the disposition: classifyLane's
+  // 'BLOCKED wins' rule overwrites a blockedBy+red-test lane's disposition to 'blocked', and a bounced lane now
+  // buckets 'review-changes' — either way the link is still broken and its descendants must be re-bucketed.
+  const isBroken = (l) => l.disposition === 'test-red' || l.disposition === 'review-changes'
+    || l.testRed === true || l.reviewChanges === true;
+  // Normalize EVERY id through `asItemId` before any Set/Map lookup — manifests spell the same item as a JSON
+  // number (2396) and a quoted frontmatter string ("2396") interchangeably, and a raw-keyed match across that
+  // spelling mismatch silently skips the poisoning (fails OPEN: the bounced parent's descendant stays `ready`
+  // and lands). One normalizer on BOTH sides (broken items, adjacency keys, BFS lookups) makes it spelling-immune.
+  const nid = (v) => (v == null ? null : asItemId(v));
+  const brokenItems = new Set(lanes.filter(isBroken).map((l) => nid(l.item)).filter((i) => i != null));
+  if (!brokenItems.size) return lanes.map((l) => ({ ...l }));
+  // adjacency: a stackParent item → the child lanes stacked on it.
+  const childrenOf = new Map();
+  for (const l of lanes) for (const sp of l.stackParents || []) {
+    const key = nid(sp);
+    if (key == null) continue;
+    if (!childrenOf.has(key)) childrenOf.set(key, []);
+    childrenOf.get(key).push(l);
+  }
+  // BFS from every broken item over the stackParent edges → each reachable descendant is poisoned by it.
+  // The poison record carries the broken ROOT (the nearest broken ANCESTOR), never the BFS predecessor — a
+  // depth-≥2 descendant's reason must name the lane that actually needs the repair, not its (merely poisoned)
+  // immediate parent.
+  const poisonedBy = new Map(); // childItem (normalized) → the nearest broken ancestor item that poisons it
+  const queue = [...brokenItems].map((b) => ({ item: b, root: b }));
+  while (queue.length) {
+    const { item: parent, root } = queue.shift();
+    for (const child of childrenOf.get(parent) || []) {
+      const c = nid(child.item);
+      if (c == null || brokenItems.has(c) || poisonedBy.has(c)) continue;
+      poisonedBy.set(c, root);
+      queue.push({ item: c, root }); // transitively poison this descendant's own children too
+    }
+  }
+  return lanes.map((l) => {
+    const c = nid(l.item);
+    return c != null && poisonedBy.has(c) && !brokenItems.has(c)
+      ? { ...l, disposition: 'blocked', reason: `stacked ancestor #${poisonedBy.get(c)} is a broken link — repair it, then rebuild this onto the repaired tip (#2396)` }
+      : { ...l };
+  });
+}
+
+/**
+ * Plan rebuilding a broken link's descendant TAIL onto the REPAIRED tip (#2396 / #2387 F5) — after the finisher
+ * fixes the link, re-stack only the salvageable descendants, in `stackParents` topological order, NEVER past an
+ * unlanded parent. A descendant is placed only once every `stackParent` it stacks on is AVAILABLE — the repaired
+ * item itself, a descendant already placed earlier this pass, or an item proven `landed` (landedThisPass ∪
+ * `bornAs`-on-main). A descendant whose parent is none of those is DEFERRED (its base doesn't exist yet — the
+ * positive proof-of-land invariant: absence is never read as landed). Per placed descendant the action is:
+ *   `ff`              — the repair touched NONE of this descendant's files → a clean fast-forward rebuild.
+ *   `guided-conflict` — the repair touched a file this descendant also touches → exactly ONE guided conflict
+ *                       (resolved WITH the manifest topology), never a blind whole-batch rebase.
+ * Pure. Returns `{ order:[{item, ref, onto, action, reason}], deferred:[{item, reason}] }`.
+ * @param {object} o
+ * @param {number|string} o.repaired            the repaired link's item id (its tip is the new base)
+ * @param {Array<{item, ref, stackParents?:Array, fileset?:Iterable}>} o.descendants  the poisoned tail
+ * @param {Iterable} [o.fixTouched=[]]           repo-qualified files the repair changed (ff vs conflict)
+ * @param {Set} [o.landed=new Set()]             items proven landed (landedThisPass ∪ provenOnMain)
+ */
+export function planStackRebuild({ repaired, descendants = [], fixTouched = [], landed = new Set() } = {}) {
+  const fix = new Set(fixTouched);
+  // Normalize every id ONCE at entry (`asItemId`) — manifests and caller-supplied `spec.landed` spell the same
+  // item as a JSON number (300) or a quoted string ("300") interchangeably, and the `placed`/`landedSet` Set
+  // lookups below use SameValueZero equality (300 ≠ "300"). Normalizing here makes every lookup spelling-immune
+  // and lets `deriveLandedFromMain` return one canonical form instead of dual-adding raw + normalized.
+  const repairedId = asItemId(repaired);
+  const landedSet = new Set([...(landed instanceof Set ? landed : new Set(landed))].map((v) => asItemId(v)));
+  const placed = new Set([repairedId]); // the repaired tip is available as a base from the start
+  const order = [];
+  const pending = descendants
+    .filter((d) => d && d.item != null)
+    .map((d) => ({ ...d, item: asItemId(d.item), stackParents: (d.stackParents || []).map((p) => asItemId(p)) }));
+  // Fixed-point sweeps: place any descendant all of whose stackParents are available; repeat until no progress.
+  let progressed = true;
+  while (progressed) {
+    progressed = false;
+    for (const d of pending) {
+      if (placed.has(d.item)) continue;
+      const parents = d.stackParents;
+      const available = parents.every((p) => placed.has(p) || landedSet.has(p));
+      if (!available) continue; // a parent isn't ready yet — a later sweep may place it, else it defers
+      const files = new Set(d.fileset || []);
+      const overlaps = [...fix].some((f) => files.has(f));
+      const onto = parents.find((p) => placed.has(p)) ?? repairedId; // rebuild onto the (repaired) chain member
+      order.push({
+        item: d.item, ref: d.ref, onto, action: overlaps ? 'guided-conflict' : 'ff',
+        reason: overlaps
+          ? 'repair touched a shared file — one guided conflict, resolved with the manifest topology (#2396)'
+          : 'repair touched no shared file — fast-forward rebuild onto the repaired tip (#2396)',
+      });
+      placed.add(d.item);
+      progressed = true;
+    }
+  }
+  const deferred = pending
+    .filter((d) => !placed.has(d.item))
+    .map((d) => ({ item: d.item, reason: 'a stackParent is neither landed nor rebuilt this pass — never rebuilt past an unlanded parent (#2396)' }));
+  return { order, deferred };
+}
+
+/**
+ * Positive proof-of-land for a NUMERIC item id (#2396) — the numeric analogue of `landedNumberFor`'s
+ * bornAs-on-main proof: the item's `backlog/NNN-*.md` on origin/main carries `status: resolved`. A bare
+ * number is NEVER trusted as landed-by-construction: numbered-yet-unlanded items exist (pre-#2288 legacy
+ * numbering, and an in-flight batch's own numbered siblings whose lanes are still queued), so only this
+ * positive on-main record proves the land. Fails CLOSED — a missing file, an open/active status, or any
+ * git error all read NOT landed.
+ * @param {number|string} num  the numeric NNN
+ * @param {string} [cwd]
+ * @returns {boolean}
+ */
+export function resolvedOnMain(num, cwd = process.cwd()) {
+  if (!/^\d{1,5}$/.test(String(num))) return false; // the numeric NNN id form only (ID_TOKEN_RE's numeric arm) — never a rev/pathspec injection surface
+  const n = Number(num);
+  try {
+    // One scoped whole-line grep on origin/main (mirrors landedNumberFor's shape): the `NNN-*.md` pathspec
+    // pins the exact leading id (the `-` stops a longer number from partial-hitting), -l output non-empty ⇔
+    // the resolved record exists. `git grep` exits 1 on no match → the catch reads it as NOT landed.
+    const out = execFileSync('git', ['grep', '-l', '-E', '^status:[ \t]*resolved', 'origin/main', '--', `backlog/${n}-*.md`],
+      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return out.length > 0;
+  } catch { return false; }
+}
+
+/**
+ * Derive `planStackRebuild`'s `landed` set from the durable proof-of-land on origin/main (#2396/#2392) — the
+ * "resolving each stackParent landed status via bornAs-on-main" half of the item, wired as the CLI
+ * `rebuild-plan` default so a caller never has to hand-assemble the proof. For every stackParent any
+ * descendant references (excluding items IN the descendant set — those are rebuilt this pass, not "landed"),
+ * landed requires POSITIVE proof on origin/main — absence or id-format is NEVER read as landed (the F5
+ * stowaway guard), for BOTH id forms:
+ *   - a NUMERIC NNN is proven landed only by its backlog file on origin/main carrying `status: resolved`
+ *     (`resolvedOnMain`) — a number alone proves nothing (numbered-yet-unlanded items exist: legacy ids and
+ *     an in-flight batch's own numbered siblings).
+ *   - a provisional HASH is proven landed only by a positive `bornAs:<hash>` record on origin/main
+ *     (`landedNumberFor`, #2392).
+ * Every returned id is in canonical `asItemId` form — `planStackRebuild` normalizes at entry, so one form
+ * suffices. `lookup`/`resolvedLookup` are injectable (unit-testable without a repo).
+ * @param {Array<{item, stackParents?:Array}>} descendants  the poisoned tail about to be planned
+ * @param {{lookup?:(hash:string, cwd?:string)=>string|null, resolvedLookup?:(num:number, cwd?:string)=>boolean, cwd?:string}} [o]
+ * @returns {Set} items proven landed on main
+ */
+export function deriveLandedFromMain(descendants = [], { lookup = landedNumberFor, resolvedLookup = resolvedOnMain, cwd = process.cwd() } = {}) {
+  const inSet = new Set(descendants.filter((d) => d && d.item != null).map((d) => asItemId(d.item)));
+  const landed = new Set();
+  const checked = new Set();
+  for (const d of descendants) for (const sp of (d && d.stackParents) || []) {
+    const id = asItemId(sp);
+    if (inSet.has(id) || checked.has(id)) continue; // rebuilt this pass (or already checked) — not re-proven
+    checked.add(id);
+    const proven = (typeof id === 'number' && Number.isFinite(id))
+      ? resolvedLookup(id, cwd) === true                          // numeric → positive resolved-on-main proof
+      : (isHash(String(id)) && lookup(String(id), cwd) != null);  // hash → positive bornAs-on-main proof (#2392)
+    if (proven) landed.add(id);
+  }
+  return landed;
+}
+
+/**
+ * Rebuild ONE descendant lane tip onto the REPAIRED parent tip (#2396). Reuses the proven #2198
+ * `rebaseDropManifest` plumbing UNCHANGED — but with `base` = the repaired parent SHA instead of `origin/main`,
+ * so the child's ancestry now contains the repaired code (the drain then lands the couple with the parent as an
+ * ancestor, impl-first/parent-first). A clean / manifest-only merge is the fast-forward rebuild; a REAL
+ * (non-manifest) conflict is the ONE guided conflict this descendant directly overlapping the fix must resolve —
+ * surfaced as `guided-conflict` (the finisher resolves it WITH the topology), never force-resolved here.
+ * @param {object} o
+ * @param {string} o.laneRef        the descendant lane ref
+ * @param {string} o.ontoSha        the repaired parent tip SHA to rebuild onto
+ * @param {(cmd,args,opts?)=>{status,stdout,stderr}} [o.run]  injected runner (unit-testable)
+ * @returns {{action:'rebased'|'guided-conflict'|'error', laneRef, ...}} `rebased` = ff; `guided-conflict` = one conflict
+ */
+export function rebuildDescendant({ laneRef, ontoSha, run = gitRunner, ...rest } = {}) {
+  if (!laneRef || !ontoSha) return { action: 'error', laneRef: laneRef ?? null, reason: 'rebuildDescendant needs both laneRef and ontoSha (the repaired parent tip)' };
+  // SECURITY — `ontoSha` can originate from branch-controlled manifest content (`repos[].base`); it is fed to
+  // git plumbing as an argv token, so a crafted value starting with `-` (e.g. `--upload-pack=<cmd>`) would be
+  // parsed as a git OPTION, not a revision. Accept ONLY a plain abbreviated-or-full commit SHA — never a ref
+  // name, never anything that could carry an option or a rev-expression.
+  if (!/^[0-9a-f]{7,40}$/i.test(String(ontoSha)))
+    return { action: 'error', laneRef, reason: `ontoSha ${JSON.stringify(String(ontoSha))} is not a commit SHA (7-40 hex) — refusing to pass non-SHA (possibly branch-controlled) content to git (#2396)` };
+  const r = rebaseDropManifest({ laneRef, base: ontoSha, run, ...rest });
+  if (r.action === 'skip') return { action: 'guided-conflict', laneRef, ontoSha, conflictPaths: r.conflictPaths || [], reason: `${r.reason} — one guided conflict to resolve with the manifest topology (#2396)` };
+  return { ...r, ontoSha };
 }
 
 /**
@@ -149,9 +376,14 @@ export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/mai
   // a remote repo the rebuild is deferred to the drain (which is sibling-clone-aware, #2263).
   const repoFlag = repo ? ['--repo', repo] : [];
   if (!prInfo) {
-    const v = run('gh', ['pr', 'view', String(prNum), ...repoFlag, '--json', 'number,headRefName,mergeable,mergeStateStatus,statusCheckRollup']);
+    const v = run('gh', ['pr', 'view', String(prNum), ...repoFlag, '--json', 'number,headRefName,mergeable,mergeStateStatus,statusCheckRollup,labels']);
     try { prInfo = JSON.parse(v.stdout || '{}'); } catch { prInfo = {}; }
   }
+  // #2396 — a `review:changes` bounce is a broken link: NEVER enqueue it (green CI + mergeable is irrelevant —
+  // a human rejected the diff; the finisher repairs and the reviewer re-verdicts before any land). Mirrors the
+  // drain's #2366 hard refusal at this earlier layer so `land <pr>` can't push a bounced diff into the queue.
+  if (hasReviewLabel(prInfo.labels, REVIEW_LABELS.changes))
+    return { action: 'review-changes', pr: prNum, merged: false, reason: 'review:changes — a human bounced this diff; repair + re-review before any land (#2396)' };
   const laneRef = prInfo.headRefName;
   const testCheck = (prInfo.statusCheckRollup || []).find((c) => (c.name || c.context) === 'test');
   const decision = landDecision({ mergeable: prInfo.mergeable, mergeState: prInfo.mergeStateStatus, testConclusion: testCheck ? (testCheck.conclusion || testCheck.state || null) : null });
@@ -204,26 +436,28 @@ export function remoteManifestApiArgs(repo, ref) {
 }
 
 /**
- * Read a lane's `.lane-manifest.json` off its head ref. Returns {item, repos, blockedBy} or null.
+ * Read a lane's `.lane-manifest.json` off its head ref. Returns {item, repos, blockedBy, stackParents} or null.
  * #2383 — repo-aware, mirroring `/drain`: for the LOCAL repo (`repo` null/self) read it from local git; for a
  * REMOTE constellation repo read it via the GitHub API (`gh api …/contents/.lane-manifest.json?ref=<headRef>`
  * → base64 `.content`) — never a local clone. Fail-soft to null: a manifest-less lane (e.g. plateau-app's own
  * batch branches carry none) degrades to item null / blockedBy [] — unordered within its repo, exactly like the
  * drain's orphan-PR handling, never a crash.
+ * #2396 — also surfaces `stackParents` (the frontier-tip item(s) this lane was cut from / merged onto, #2387 F3)
+ * and keeps each `repos[].base` intact, so `/finish` can bucket a stacked chain's descendants behind a broken
+ * link and rebuild the salvageable tail onto the repaired tip. Absent ⇒ `stackParents: []` (sibling behaviour).
  */
 function readManifest(ref, { repo = null } = {}) {
+  const shape = (m) => ({ item: m.item ?? null, repos: m.repos || [], blockedBy: m.blockedBy || [], stackParents: Array.isArray(m.stackParents) ? m.stackParents : [] });
   if (repo) {
     try {
       const b64 = execFileSync('gh', remoteManifestApiArgs(repo, ref), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       if (!b64) return null;
-      const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
-      return { item: m.item ?? null, repos: m.repos || [], blockedBy: m.blockedBy || [] };
+      return shape(JSON.parse(Buffer.from(b64, 'base64').toString('utf8')));
     } catch { return null; }
   }
   for (const rev of [`origin/${ref}`, ref]) {
     try {
-      const m = JSON.parse(execFileSync('git', ['show', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
-      return { item: m.item ?? null, repos: m.repos || [], blockedBy: m.blockedBy || [] };
+      return shape(JSON.parse(execFileSync('git', ['show', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })));
     } catch { /* try next rev */ }
   }
   return null;
@@ -258,32 +492,37 @@ function discover(asJson, { repos = null, singleRepo = false } = {}) {
   for (const repo of REPOS) {
     const isLocal = repo == null || repo === self;
     const repoFlag = repo ? ['--repo', repo] : [];
-    const prs = shJSON('gh', ['pr', 'list', ...repoFlag, '--label', READY_LABEL, '--state', 'open', '--json', 'number,mergeable,mergeStateStatus,headRefName,statusCheckRollup', '--limit', '200'], []);
+    // #2396 — `labels` too: a `review:changes` bounce is a broken stacked LINK (like a red `test`), so its
+    // overlap-descendants must be re-bucketed behind it, not attempted this pass.
+    const prs = shJSON('gh', ['pr', 'list', ...repoFlag, '--label', READY_LABEL, '--state', 'open', '--json', 'number,mergeable,mergeStateStatus,headRefName,statusCheckRollup,labels', '--limit', '200'], []);
     for (const p of prs) {
-      const man = readManifest(p.headRefName, { repo: isLocal ? null : repo }) || { item: null, repos: [], blockedBy: [] };
+      const man = readManifest(p.headRefName, { repo: isLocal ? null : repo }) || { item: null, repos: [], blockedBy: [], stackParents: [] };
       const test = (p.statusCheckRollup || []).find((c) => (c.name || c.context) === 'test');
       const lane = classifyLane({
         num: p.number, mergeable: p.mergeable, mergeState: p.mergeStateStatus,
         testConclusion: test ? (test.conclusion || test.state || null) : null,
         item: man.item, repos: man.repos, blockedBy: man.blockedBy,
+        stackParents: man.stackParents, reviewChanges: hasReviewLabel(p.labels, REVIEW_LABELS.changes),
       }, resolved);
       lane.repo = repo || self || null; // tag the owning repo so the skill lands each in the right place
       lanes.push(lane);
     }
   }
-  const ordered = orderByBlockedBy(lanes);
+  // #2396 — re-bucket every overlap-descendant of a broken link (red `test` OR `review:changes`) to `blocked`
+  // BEFORE ordering, so the salvageable tail waits for the repaired tip instead of a blind whole-batch rebase.
+  const ordered = orderByBlockedBy(markStackDescendantsBlocked(lanes));
   const bucket = (d) => ordered.filter((l) => l.disposition === d);
   const result = {
     ok: true,
-    counts: { ready: bucket('ready').length, conflict: bucket('conflict').length, testRed: bucket('test-red').length, blocked: bucket('blocked').length, unknown: bucket('unknown').length },
-    ready: bucket('ready'), conflict: bucket('conflict'), testRed: bucket('test-red'), blocked: bucket('blocked'), unknown: bucket('unknown'),
-    order: ordered.map((l) => ({ pr: l.num, repo: l.repo, item: l.item, disposition: l.disposition, crossRepo: l.crossRepo, blockedBy: l.blockedBy, reason: l.reason })),
+    counts: { ready: bucket('ready').length, conflict: bucket('conflict').length, testRed: bucket('test-red').length, reviewChanges: bucket('review-changes').length, blocked: bucket('blocked').length, unknown: bucket('unknown').length },
+    ready: bucket('ready'), conflict: bucket('conflict'), testRed: bucket('test-red'), reviewChanges: bucket('review-changes'), blocked: bucket('blocked'), unknown: bucket('unknown'),
+    order: ordered.map((l) => ({ pr: l.num, repo: l.repo, item: l.item, disposition: l.disposition, crossRepo: l.crossRepo, blockedBy: l.blockedBy, stackParents: l.stackParents || [], reviewChanges: l.reviewChanges === true, reason: l.reason })),
   };
   if (asJson) { process.stdout.write(JSON.stringify(result, null, 2) + '\n'); return; }
   const repoTag = (l) => (l.repo && l.repo !== self ? `${l.repo.split('/').pop()}#` : '#'); // short prefix per repo
   const line = (l) => `  ${l.disposition === 'ready' ? '✓' : l.disposition === 'blocked' ? '⊘' : '→'} ${repoTag(l)}${l.num}${l.item ? ` (#${l.item})` : ''}${l.crossRepo ? ' [cross-repo]' : ''} — ${l.reason}`;
   process.stderr.write(`lane-resume · ${lanes.length} labelled PR(s) across ${REPOS.length} repo(s): ${JSON.stringify(result.counts)}\n`);
-  for (const d of ['ready', 'conflict', 'test-red', 'blocked', 'unknown']) {
+  for (const d of ['ready', 'conflict', 'test-red', 'review-changes', 'blocked', 'unknown']) {
     const b = bucket(d); if (!b.length) continue;
     process.stderr.write(`\n${d.toUpperCase()} (${b.length}):\n${b.map(line).join('\n')}\n`);
   }
@@ -317,5 +556,36 @@ if (IS_CLI) {
     const soft = ['enqueued', 'rebuilt-enqueued', 'clean', 'rebuild', 'rebuilt-awaiting-ci', 'not-green'];
     process.exit(verdict.merged || soft.includes(verdict.action) ? 0 : 2);
   }
-  else { process.stderr.write(`unknown subcommand: ${cmd}\nusage: lane-resume.mjs discover [--json] [--this-repo|--repos=a,b] | land <pr> [--repo=<owner/name>] [--dry-run] [--json]\n`); process.exit(2); }
+  // #2396 — the repair-then-rebuild entry points `/finish` drives after fixing a broken stacked link:
+  //   rebuild-plan  — plan the salvageable descendant tail (`planStackRebuild`), reading the spec JSON from
+  //                   `--spec=<file>` or stdin: {repaired, descendants:[{item,ref,stackParents,fileset}],
+  //                   fixTouched?, landed?}. When `landed` is omitted it is DERIVED from the durable
+  //                   bornAs-on-main proof (`deriveLandedFromMain`) — never from ref-absence.
+  //   rebuild       — execute ONE planned step (`rebuildDescendant`): rebuild <laneRef> onto the repaired
+  //                   parent tip SHA. Exit 0 = rebased (ff); exit 2 = guided-conflict (the finisher resolves
+  //                   it WITH the manifest topology) or error.
+  else if (cmd === 'rebuild-plan') {
+    const specPath = flagVal('spec');
+    let spec;
+    try {
+      spec = JSON.parse(readFileSync(specPath && specPath !== '-' ? specPath : 0, 'utf8'));
+    } catch (e) {
+      process.stderr.write(`rebuild-plan: cannot read spec (${e.message})\nusage: lane-resume.mjs rebuild-plan [--spec=<file>|-] [--json]  # spec = {repaired, descendants:[{item,ref,stackParents,fileset}], fixTouched?, landed?}\n`);
+      process.exit(2);
+    }
+    try { execFileSync('git', ['fetch', 'origin', '--quiet'], { stdio: 'ignore' }); } catch { /* bornAs proof degrades to the local origin/main */ }
+    const landed = Array.isArray(spec.landed) ? new Set(spec.landed) : deriveLandedFromMain(spec.descendants || []);
+    const plan = planStackRebuild({ repaired: spec.repaired, descendants: spec.descendants || [], fixTouched: spec.fixTouched || [], landed });
+    process.stdout.write(JSON.stringify({ ok: true, repaired: spec.repaired ?? null, landed: [...landed], ...plan }, null, 2) + '\n');
+  }
+  else if (cmd === 'rebuild') {
+    const laneRef = positional[1];
+    const ontoSha = flagVal('onto');
+    if (!laneRef || !ontoSha) { process.stderr.write('usage: lane-resume.mjs rebuild <laneRef> --onto=<repaired-tip-sha> [--json]\n'); process.exit(2); }
+    const verdict = rebuildDescendant({ laneRef, ontoSha });
+    if (asJson) process.stdout.write(JSON.stringify(verdict, null, 2) + '\n');
+    else process.stderr.write(`lane-resume rebuild ${laneRef} onto ${ontoSha}: ${verdict.action}${verdict.reason ? ` — ${verdict.reason}` : ''}\n`);
+    process.exit(verdict.action === 'rebased' ? 0 : 2);
+  }
+  else { process.stderr.write(`unknown subcommand: ${cmd}\nusage: lane-resume.mjs discover [--json] [--this-repo|--repos=a,b] | land <pr> [--repo=<owner/name>] [--dry-run] [--json] | rebuild-plan [--spec=<file>|-] [--json] | rebuild <laneRef> --onto=<sha> [--json]\n`); process.exit(2); }
 }
