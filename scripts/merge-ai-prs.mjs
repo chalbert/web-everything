@@ -826,26 +826,40 @@ export function regenDerivedOnLand({ exec, cwd = process.cwd(), landed = false, 
  * ANCESTOR of the real tip, never a descendant). That is exactly how #2347 stranded a hash on main via this
  * NORMAL route (distinct from the `--fallback-git` gap #2322 closed) — repro: this session's PR #262.
  *
- * ONLY resyncs when cwd is genuinely DETACHED (an attached branch — e.g. the primary's own possibly-diverged
- * `main` — is left untouched; its existing warn-only behaviour in `runCli` stands), carries no TRACKED local
- * edits (never reset a dirty tree), AND HEAD is already an ANCESTOR of `origin/${base}` (#2348 review) — a
- * lane clone can carry MORE local commits than the one couple this pass just landed (e.g. a session already
- * committed a SECOND item's work in the same clone before pushing it); `git checkout --detach` would
- * silently ORPHAN those unpushed commits (reachable only via reflog) the instant HEAD moves off them.
- * Requiring HEAD to already BE reachable from the real merged tip means the detach is always a true no-op
- * rebase-in-place — never a discard. Mirrors pr-land's runHeal/runRegen dirty-probe + detach pattern
- * (#2225), sharing the same `isPostLandTreeDirty` (single source, never a fork), plus the extra ancestor
- * guard runHeal doesn't need (it always runs against a freshly-pushed, single-purpose lane). `exec` is
- * injectable (default the real `execFileSync`) so this is unit-testable without shelling.
+ * ONLY resyncs when cwd is genuinely DETACHED, OR attached to a STALE `lane/*` branch (#2419 — see below);
+ * an attached branch that is `${base}` itself — e.g. the primary's own possibly-diverged `main` — or any
+ * other non-`lane/*` branch is left untouched (its existing warn-only behaviour in `runCli` stands). It also
+ * carries no TRACKED local edits (never reset a dirty tree), AND HEAD is already an ANCESTOR of
+ * `origin/${base}` (#2348 review) — a lane clone can carry MORE local commits than the one couple this pass
+ * just landed (e.g. a session already committed a SECOND item's work in the same clone before pushing it);
+ * `git checkout --detach` would silently ORPHAN those unpushed commits (reachable only via reflog) the
+ * instant HEAD moves off them. Requiring HEAD to already BE reachable from the real merged tip means the
+ * detach is always a true no-op rebase-in-place — never a discard. Mirrors pr-land's runHeal/runRegen
+ * dirty-probe + detach pattern (#2225), sharing the same `isPostLandTreeDirty` (single source, never a
+ * fork), plus the extra ancestor guard runHeal doesn't need (it always runs against a freshly-pushed,
+ * single-purpose lane). `exec` is injectable (default the real `execFileSync`) so this is unit-testable
+ * without shelling.
+ *
+ * #2419 — widened beyond the original DETACHED-only trigger: a lane clone can also be left ATTACHED to a
+ * STALE `lane/*` branch (a leftover from an earlier rebase-drop or a manual checkout, #2419's root cause —
+ * `lane-pool.mjs`'s `acquire` now fixes this at the source with `checkout -B`, but this is the backstop for
+ * a lane that is ALREADY stray, or a future regression upstream). `git pull --ff-only` needs an attached
+ * branch WITH an upstream; a lane's local `lane/*` branch has none, so the pull silently no-ops and the
+ * original detached-only check (`skipped: 'attached'`) let that stale tree through unresynced — the strand
+ * this item exists to close. Same dirty/ancestor/detach mechanics either way; only the trigger condition
+ * widens.
  * @param {{exec:Function, landedLocal:boolean, localSynced:boolean, remote?:string, base?:string}} o
  * @returns {{resynced:boolean, skipped?:string, detail?:string}}
  */
 export function resyncDetachedCwdForLand({ exec, landedLocal, localSynced, remote = 'origin', base = 'main' }) {
   if (!landedLocal || localSynced || typeof exec !== 'function') return { resynced: false, skipped: 'not-applicable' };
-  let detached = false;
-  try { exec('git', ['symbolic-ref', '-q', 'HEAD'], { stdio: ['ignore', 'ignore', 'ignore'] }); }
-  catch { detached = true; }
-  if (!detached) return { resynced: false, skipped: 'attached' };
+  let ref = null;
+  try { ref = exec('git', ['symbolic-ref', '-q', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
+  catch { ref = null; } // throws → HEAD is genuinely detached
+  const detached = ref == null;
+  const attachedBranch = detached ? null : String(ref).trim().replace(/^refs\/heads\//, '');
+  const staleLaneBranch = !detached && /^lane\//.test(attachedBranch); // #2419 — the widened trigger
+  if (!detached && !staleLaneBranch) return { resynced: false, skipped: 'attached' };
   let dirty = true;
   try { dirty = isPostLandTreeDirty(exec('git', ['status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })); }
   catch { dirty = true; } // status unreadable → treat as dirty, never reset blind
@@ -1562,22 +1576,23 @@ function runCli() {
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
-  // #2348 — a LANE CLONE's `/pr` fast drain runs THIS process with a DETACHED HEAD (the #2183 clone model),
-  // so the branch-pull above always errors there and left the JIT-numbering + derived-regen steps below
-  // operating on a stale, lineage-disconnected tree (see `resyncDetachedCwdForLand`'s doc for the full story
-  // — this is how #2347 stranded a hash on main). Best-effort, non-fatal — a skip/failure is reported and
-  // the numbering/regen steps below simply see whatever tree cwd already has (their existing best-effort
-  // contract, unchanged).
+  // #2348/#2419 — a LANE CLONE's `/pr` fast drain runs THIS process with a DETACHED HEAD (the #2183 clone
+  // model), or occasionally ATTACHED to a STALE `lane/*` branch (#2419 — a leftover from an earlier
+  // rebase-drop/manual checkout), so the branch-pull above always errors there and left the JIT-numbering +
+  // derived-regen steps below operating on a stale, lineage-disconnected tree (see `resyncDetachedCwdForLand`'s
+  // doc for the full story — this is how #2347/#2418 stranded a hash on main). Best-effort, non-fatal — a
+  // skip/failure is reported and the numbering/regen steps below simply see whatever tree cwd already has
+  // (their existing best-effort contract, unchanged).
   const detachedResync = resyncDetachedCwdForLand({ exec: execFileSync, landedLocal, localSynced });
   if (detachedResync.resynced) {
     localSynced = true;
-    if (!AS_JSON) process.stderr.write(`  ✓ detached cwd resynced to origin/main for JIT numbering + derived regen (#2348)\n`);
+    if (!AS_JSON) process.stderr.write(`  ✓ cwd resynced to origin/main for JIT numbering + derived regen (#2348/#2419)\n`);
   } else if (detachedResync.skipped === 'exec-failed' && !AS_JSON) {
-    process.stderr.write(`  ⚠ could not resync detached cwd to origin/main (${detachedResync.detail}) — JIT numbering/derived regen below may see a stale tree\n`);
+    process.stderr.write(`  ⚠ could not resync cwd to origin/main (${detachedResync.detail}) — JIT numbering/derived regen below may see a stale tree\n`);
   } else if (detachedResync.skipped === 'dirty' && !AS_JSON) {
-    process.stderr.write(`  ⚠ detached cwd has TRACKED local changes — skipped the resync (won't reset a dirty tree); JIT numbering/derived regen below may see a stale tree\n`);
+    process.stderr.write(`  ⚠ cwd has TRACKED local changes — skipped the resync (won't reset a dirty tree); JIT numbering/derived regen below may see a stale tree\n`);
   } else if (detachedResync.skipped === 'unpublished-commits' && !AS_JSON) {
-    process.stderr.write(`  ⚠ detached cwd's HEAD carries commit(s) not yet on origin/main — skipped the resync (won't orphan unpushed work); JIT numbering/derived regen below may see a stale tree\n`);
+    process.stderr.write(`  ⚠ cwd's HEAD carries commit(s) not yet on origin/main — skipped the resync (won't orphan unpushed work); JIT numbering/derived regen below may see a stale tree\n`);
   }
 
   // #2284 residual (2) / #xwokc1n — the pull above ff-syncs the drain's OWN cwd. But when the drain runs from a
