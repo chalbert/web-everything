@@ -245,20 +245,39 @@ sha(s)** here. Otherwise state the branch only — **do not list or count the re
 rule already made the commit decision; if it didn't fire, the state wasn't clean and that's reported, not
 re-asked).
 
-### 3a. Model-usage suggestion (advisory, never a blocker)
+### 3a. Efficiency-introspection (advisory, never a blocker — standing step, all session types)
 The close is the one moment that sees the session's **whole** execution, so it's the cheapest place to
-spot where the same outcome could have cost **fewer Opus tokens next time** — per the project's
-`docs/agent/backlog-workflow.md` → **"Model routing"** (the Opus-orchestrates / Sonnet-executes split,
-if the project documents it). Surface it in one or two **concrete, named** lines, not generic advice:
-- **Execution that ran inline on the Opus loop but was mechanically clear + bounded** (single locus, no
-  contract / shared-gate, already prepared) — exactly the items that qualify for a **Sonnet sub-agent**.
-  Name them (`#NNN`) so the next claim routes them down.
-- **Repeated full-file reads / broad searches done on the main loop** that a fan-out `Explore`/sub-agent
-  could have absorbed, keeping the expensive context lean.
-- **A skill/pattern that always runs heavy** when its judgment half is small — a candidate to split
-  Opus-judgment from Sonnet-execution.
-It is purely advisory: it never blocks the close and never forces a change this turn. If nothing stands
-out, say "nothing to flag". (Omit this line entirely if the project has no model-routing doc.)
+spot recurring overhead the session itself just paid — regardless of what kind of session it was (build,
+drain, review, decide, batch, …). **Skip this step entirely on a trivial session** — a quick read-only
+check, a single small edit, a short Q&A with no multi-step execution to look back on — say nothing, don't
+emit an empty table for it.
+
+On a non-trivial session, scan the transcript for two evidence-based shapes of avoidable overhead (cite
+the actual turn/command; never a plausible-sounding guess backfilled after the fact):
+- **(a) Main-loop steps that should have been delegated** — execution that ran inline on the primary loop
+  but was mechanically clear + bounded (single locus, no contract/shared-gate decision, already prepared)
+  — exactly what a `Task`/sub-agent call would have kept off the expensive main-loop context. Where the
+  project documents a routing split (`docs/agent/backlog-workflow.md` → **"Model routing"**, the
+  Opus-orchestrates/Sonnet-executes pattern), name the concrete `#NNN`s so the next claim routes them
+  down — but this half fires on **any** project: it's a general main-loop-vs-delegate check, not
+  contingent on that doc existing.
+- **(b) Ad-hoc command sequences that should be scripted** — the same shell/`node -e` incantation (or a
+  close variant) hand-run more than once this session, or a multi-step manual sequence a script/CLI
+  subcommand could wrap in one call. Name the repeated command and where a script/CLI addition would
+  collapse it (e.g. "5× inline `node -e` reductions → a `review-core.mjs reduce` subcommand").
+
+Emit findings as a **bounded table** (max 5 rows; if more genuine candidates exist, keep the 5
+highest-value and add "+N more, same shape" below it — never an unbounded dump):
+
+| Type | What | Evidence | Suggested fix |
+|------|------|----------|----------------|
+| delegate \| script | <one-line description> | <the turn/command cited> | <e.g. "sub-agent", "scripts/foo.mjs subcommand"> |
+
+Route candidates the same way §1's routing rule does: a fix with a concrete owner → propose it as a
+`backlog/` item (dedup first, per §1's backlog-dedup step); a reusable working-pattern that generalizes
+beyond this one session → `memory/` via §1a. It is purely advisory — it never blocks the close and never
+forces a change this turn. If the session is non-trivial but the scan turns up nothing, say "nothing to
+flag" (not an empty table).
 
 ### 3b. Session cost (advisory, never a blocker)
 Report the session's **usage-equivalent** dollar cost — what it would cost if billed per-token on the API
@@ -300,8 +319,8 @@ A lesson about how the gate *should* work that surfaces mid-session and is never
 §1 guards against, one dimension narrower. So when this session **touched the flow**, surface what it taught.
 
 **Fire only on a relevant session — the deterministic half (rule #51).** Emit this step **only** when either
-holds; if neither, **omit it entirely** (no line, no verdict field — silence, like the model-usage line on a
-project with no routing doc):
+holds; if neither, **omit it entirely** (no line, no verdict field — silence, like the efficiency line on a
+trivial session, step 3a):
 - **(a) The session edited a flow file.** Match the session's changed paths against the gate set:
   `scripts/lib/review-escalation.mjs`, `scripts/merge-ai-prs.mjs`, `scripts/pr-land.mjs`,
   `scripts/lib/pr-merge-gate.mjs`, `scripts/lib/review-core.mjs`,
@@ -344,7 +363,7 @@ Every close should look the same so the user can scan it without re-reading:
 **Repo gate:** <✅ N errors=0, M warnings (pre-existing/unrelated) | ❌ red — what failed>
 **Session cost:** <~$X.XX usage-equivalent (model, N turns) — from session-cost.mjs; + "→ #NNN" if accrued to a card (step 3c), or "not attributed (slice/resolve/no dominant item)">
 **Branch:** <branch name only — never list or count uncommitted files>
-**Model usage:** <one line — where the same work could cost fewer Opus tokens next time (name the #NNNs), or "nothing to flag"; omit if no model-routing doc>
+**Efficiency:** <one line — N delegate/script candidates flagged this session (table above), or "nothing to flag", or omit entirely on a trivial session>
 **Flow improvements:** <one line — concrete review/PR-flow improvement candidate(s) this session suggests + where each routed (backlog/memory), or "nothing to flag"; OMIT the line entirely if the session didn't touch the flow (step 3d)>
 **Follow-ups (open by design):** <items deliberately left open, e.g. a blockedBy chain — or "none">
 
@@ -362,9 +381,9 @@ Rules for filling it:
 - **Session cost** — the one-line total from `session-cost.mjs` (usage-equivalent $; subscription isn't
   billed this). Advisory context-awareness only; never a caveat in the verdict.
 - **Branch** — name only. Uncommitted work is **never** a caveat and is **not** reported here.
-- **Model usage** — advisory only; name concrete `#NNN`s that were Sonnet-delegable or searches that
-  could have fanned out, or "nothing to flag". Never a caveat in the verdict. Omit the line if the
-  project has no *Model routing* doc.
+- **Efficiency** — advisory only (step 3a); the one-line summary of the delegate/script table (or
+  "nothing to flag" on a non-trivial session with no findings). Never a caveat in the verdict. Omit the
+  line entirely on a trivial session (step 3a's skip).
 - **Flow improvements** — advisory only (step 3d). Present ONLY when the session touched the review/PR flow
   (edited a gate file, or exercised/bumped against it); otherwise **omit the line entirely**. When present,
   name the concrete candidate(s) and where each routed, or "nothing to flag". Never a caveat in the verdict.
