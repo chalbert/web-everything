@@ -1,8 +1,9 @@
 ---
 kind: decision
 size: 5
-status: open
+status: active
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-11"
 preparedDate: "2026-07-10"
 costUsd: 89.53
 costSessions: 1
