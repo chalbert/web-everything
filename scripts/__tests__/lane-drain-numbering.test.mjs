@@ -4,7 +4,8 @@
  * a throwaway git repo mimicking the post-WE-land main state (a PROVISIONAL hash item + a referrer that
  * blockedBy's it, and the queued token), then drives the numberer and asserts it: mints the next NNN from
  * `max+1`, renames the file, rewrites cross-refs via the ledger, and commits — the sole-writer id
- * assignment the whole scheme hinges on. The pure decider (`applyLedger`) is unit-tested in
+ * assignment the whole scheme hinges on. Also covers the #2428 extension of the same blind rewrite to
+ * `docs/agent/*.md` (the cite-able statute layer). The pure decider (`applyLedger`) is unit-tested in
  * scripts/backlog/__tests__/id.test.mjs; this proves the FS/git boundary.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -235,6 +236,33 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
       try { rmSync(victimPath, { force: true }); } catch { /* best-effort */ }
       try { rmSync(numberedSibling, { force: true }); } catch { /* best-effort */ }
     }
+  });
+
+  it('rewrites a pending-hash citation in docs/agent/*.md — the statute layer (#2428)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write('docs/agent/platform-decisions.md', '# Platform decisions\n\nBuild carried by #xhash01.\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'docs', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash01', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+    // The statute doc's citation is rewritten to the landed number, in the SAME commit as the numbering.
+    expect(readFileSync(join(repo, 'docs/agent/platform-decisions.md'), 'utf8')).toContain('Build carried by #2201.');
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('leaves an untracked/absent docs/agent/*.md alone — never fatal when the dir has no match (#2428)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash02-beta.md', '---\nkind: story\nstatus: resolved\n---\n# Beta\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+    // No docs/agent/ directory exists at all in this throwaway repo.
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash02', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
   });
 
   it('skips an UNTRACKED hash file (local cruft) instead of aborting the tracked couple (PR #194)', () => {
