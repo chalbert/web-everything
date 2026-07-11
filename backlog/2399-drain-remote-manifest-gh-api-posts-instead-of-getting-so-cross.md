@@ -1,9 +1,16 @@
 ---
 kind: task
-status: open
+status: resolved
 relatedTo: ["2383", "2287", "2263"]
 tags: [lane, drain, merge-queue, cross-repo, bug]
 dateOpened: "2026-07-09"
+dateStarted: "2026-07-11"
+dateResolved: "2026-07-11"
+graduatedTo: none
+summary: >-
+  Fixed in place (produced no new entity). Ported the #2383 `remoteManifestApiArgs()` pattern into
+  `we:scripts/merge-ai-prs.mjs`: the gh api call now passes `--method GET` explicitly, plus a regression
+  test (`we:scripts/__tests__/merge-ai-prs.test.mjs`) asserting the argv carries it.
 ---
 
 # Drain's remote-manifest `gh api` read POSTs instead of GETs — cross-repo `blockedBy` ordering silently broken
