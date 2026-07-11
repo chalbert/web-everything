@@ -5,8 +5,8 @@
  * independent review before it merges. This module is that decision, as pure functions the drain (and its
  * tests) call: a rubric SCORER (which signals fire → escalate?), the ratified LABEL convention the reviewer
  * verdict rides on, the COUPLE rule (impl+WE couples inherit the strictest member), and the non-blocking
- * WATCH-WINDOW gate (park-alive vs merge vs merge-anyway-on-timeout). No git/gh here — the caller supplies the
- * signals (diff, dismissed-findings count, cross-repo shape) and the observed PR labels + park age.
+ * REVIEW gate (park-alive vs merge). No git/gh here — the caller supplies the signals (diff,
+ * dismissed-findings count, cross-repo shape) and the observed PR labels.
  *
  * WHY deterministic: a rubric a script evaluates keeps the merge session free of judgment (which lane needs a
  * second look is decided by rule, not by the merging agent eyeballing the diff). Thresholds are TUNING KNOBS
@@ -40,7 +40,6 @@ export const REVIEW_LABEL_META = {
 export const DEFAULT_THRESHOLDS = {
   diffLines: 400,   // a PR changing ≥ this many lines escalates on size alone
   sampleNth: 10,    // 1-in-N sampling floor: every Nth PR escalates regardless (keeps lane self-review honest)
-  windowMinutes: 30, // the watch window before a stalled review times out to merge-anyway
 };
 
 /** High-blast-radius path patterns (#2171). A diff touching any of these is escalation-worthy on its own —
@@ -151,10 +150,11 @@ export function scoreEscalation({
  * #2307 — the deterministic review label the PRODUCER (`pr-land.mjs`) applies at PR-OPEN, from the SAME
  * `scoreEscalation` verdict the drain scores later — so a PR that will need review carries `review:human` /
  * `review:pending` from the start, never only after a drain happens to sweep it (#2281's rule applied to the
- * review dimension). Pure — a producer-time simplification of `decideReviewGate`: at open there is no prior
- * park state / reviewer verdict / timeout to weigh yet (nothing has been parked), so the outcome collapses to
- * the rubric's own escalate/humanRequired verdict. `null` means no review label to apply (a plain `merge`
- * PR — `ready-to-merge` alone is enough).
+ * review dimension). Pure — a producer-time simplification of `decideReviewGate`: besides the fresh rubric
+ * score, the ONLY other input that gate weighs is the PR's observed `review:*` labels (a reviewer verdict, or
+ * the sticky `review:human` gate), and at open none exist yet — so the outcome collapses to the rubric's own
+ * escalate/humanRequired verdict. `null` means no review label to apply (a plain `merge` PR —
+ * `ready-to-merge` alone is enough).
  * @param {{escalate:boolean, humanRequired?:boolean}} score
  * @returns {string|null}
  */
@@ -194,11 +194,14 @@ export function hasReviewLabel(labels, label) {
  * web-everything#290 shipped 2 bugs the review panel had already caught but never got to act on. `review:accepted`
  * always clears it (the reviewer's verdict wins over everything else). Pure.
  *
- * A caller that DOES run `decideReviewGate` this pass (the label-scoped `/drain` role) must NOT also apply this
- * check — `decideReviewGate` already re-derives the correct verdict from a FRESH rubric score, including the
- * merge-anyway timeout override (an escalated PR whose watch window expired with no reviewer verdict merges
- * anyway rather than being permanently stranded, #2262) — a path this blunt label-presence check does not know
- * about and would wrongly block forever.
+ * A caller that DOES run `decideReviewGate` this pass (the label-scoped `/drain` role, escalation ON) must NOT
+ * also apply this check — `decideReviewGate` already re-derives the correct verdict from a FRESH rubric score,
+ * so double-gating on raw label presence here would fight the richer verdict. Note `decideReviewGate` never
+ * sees the `--no-review-escalation` flag: under that override the CLI SKIPS `decideReviewGate` entirely
+ * (`REVIEW_ESCALATION` is false in `merge-ai-prs.mjs`), and the override is honored HERE — the CLI's
+ * `!REVIEW_ESCALATION` branch calls this check with `allowPending: true`, which is the ONLY place the
+ * override's `review:human`/`review:changes` refusals are enforced. Do not route the override through
+ * `decideReviewGate` (it has no such input) or prune this check as redundant on that path.
  *
  * `allowPending` (#2366 fix-up) — the ONE knob that separates the two `!REVIEW_ESCALATION` callers. The BARE
  * `/merge` orphan sweep (no `--label`) has no owner for the review verdict, so it refuses ALL un-cleared labels
@@ -207,9 +210,10 @@ export function hasReviewLabel(labels, label) {
  * `review:pending` PR through (backlog #2262's documented manual override for a sampled PR with no reviewer
  * daemon) — that path passes `allowPending: true` so it honors the operator on `review:pending`, yet STILL
  * refuses `review:human` (a gate-self edit is human-only, never waivable by this flag — #2285) and
- * `review:changes` (the reviewer actively rejected the diff; the author lane must re-push). Without this split a
- * blunt `!REVIEW_ESCALATION` gate either strands a timed-out `review:pending` forever OR (if relaxed wholesale)
- * lets an un-reviewed `review:human`/`review:changes` PR merge under the override — both wrong.
+ * `review:changes` (the reviewer actively rejected the diff; the author lane must re-push). With no review
+ * timeout (x30jq9n) this override is the ONE relief valve for a parked `review:pending` PR whose review never
+ * arrives — and without this split a blunt `!REVIEW_ESCALATION` gate either strands that PR forever OR (if
+ * relaxed wholesale) lets an un-reviewed `review:human`/`review:changes` PR merge under the override — both wrong.
  * @param {Array} labels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
  * @param {{allowPending?: boolean}} [opts] - `allowPending: true` on the explicit `--no-review-escalation`
  *   operator override — refuse only `review:human`/`review:changes`, not `review:pending`.
@@ -261,21 +265,23 @@ export function bodyHasEscalationReason(body) {
 }
 
 /**
- * The NON-BLOCKING watch-window gate (#2171). Given a PR's escalation verdict, its observed review labels, and
- * how long it has been parked, decide what the drain does THIS pass. Pure — the drain never blocks: an escalated
- * PR is SKIPPED (parked alive) and re-evaluated next pass, so other PRs keep flowing.
+ * The NON-BLOCKING review gate (#2171). Given a PR's escalation verdict and its observed review labels, decide
+ * what the drain does THIS pass. Pure — the drain never blocks: an escalated PR is SKIPPED (parked alive) and
+ * re-evaluated next pass, so other PRs keep flowing.
  *   'merge'        — not escalated, OR reviewer accepted → land it now.
  *   'wait-author'  — reviewer asked for changes → the author lane fixes hot-context + re-pushes; skip for now.
  *   'park'         — escalated, no verdict yet → apply a park label, skip (parked alive). For an agent-reviewable
- *                    PR that label is review:pending and the window can time out; for a HUMAN-gated PR
- *                    (#2285 v1) it is review:human and there is NO timeout (only a human may clear it). The
- *                    human gate is STICKY on the LABEL (#2362): a PR ALREADY carrying review:human parks even
- *                    if this pass's fresh score de-escalated it (e.g. the gate-self file dropped out on rebase).
- *   'merge-anyway' — agent-reviewable, no verdict, window EXPIRED → merge + auto-file the unfinished review
- *                    (never hang on a stalled agent-review). NEVER reached for a PR carrying/scoring review:human.
- * @param {{escalate:boolean, humanRequired?:boolean, labels?:Array, parkedSinceMs?:number|null, nowMs?:number, windowMs?:number}} o
+ *                    PR that label is review:pending; for a HUMAN-gated PR (#2285 v1) it is review:human (only a
+ *                    human may clear it). The human gate is STICKY on the LABEL (#2362): a PR ALREADY carrying
+ *                    review:human parks even if this pass's fresh score de-escalated it (e.g. the gate-self file
+ *                    dropped out on rebase).
+ * A park NEVER times out (x30jq9n, resolving #2412 Gap 1 — the old 30-min merge-anyway window raced the very
+ * review it was waiting for; observed: #396 merged mid-negotiation, stranding mandatory-lens fixes). A parked
+ * PR rests parked until a verdict label arrives; a genuinely stuck park is the operator's call — a manual
+ * `/drain` with `--no-review-escalation` (see `hasUnclearedReviewLabel`'s `allowPending`) — never an auto-land.
+ * @param {{escalate:boolean, humanRequired?:boolean, labels?:Array}} o
  */
-export function decideReviewGate({ escalate, humanRequired = false, labels = [], parkedSinceMs = null, nowMs = 0, windowMs = DEFAULT_THRESHOLDS.windowMinutes * 60_000 } = {}) {
+export function decideReviewGate({ escalate, humanRequired = false, labels = [] } = {}) {
   // A reviewer verdict (whoever applied it — for a human-gated PR only a human can) always wins, and is checked
   // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
   // merge; review:changes → the author lane fixes + re-pushes.
@@ -288,18 +294,16 @@ export function decideReviewGate({ escalate, humanRequired = false, labels = [],
   // #2285 v1 + #2362 — the human gate is STICKY on the LABEL, not only this pass's fresh score. Park under
   // review:human and NEVER time out. Honour humanRequired (fresh gate-self score) OR an already-applied
   // review:human label: the fresh score can flip to false if the diff NARROWED after the label was stamped
-  // (e.g. a gate-self file dropped out on rebase — exactly how #289 rode the merge-anyway window to land while
-  // still carrying review:human). The sticky label vetoes regardless, so once any pass gates a PR to a human,
-  // only a human clearing it (→ review:accepted, handled above) may merge. Checked BEFORE the !escalate-merge
-  // and timeout branches so a human-gated PR can never merge without a human — even if it later de-escalates.
+  // (e.g. a gate-self file dropped out on rebase — exactly how #289 rode the since-removed merge-anyway window
+  // to land while still carrying review:human). The sticky label vetoes regardless, so once any pass gates a PR
+  // to a human, only a human clearing it (→ review:accepted, handled above) may merge. Checked BEFORE the
+  // !escalate-merge branch so a human-gated PR can never merge without a human — even if it later de-escalates.
   if (humanRequired || hasReviewLabel(labels, REVIEW_LABELS.human)) {
-    return { action: 'park', reason: 'human-gated (review:human) — only a human may clear it, no timeout', applyLabel: REVIEW_LABELS.human, humanRequired: true };
+    return { action: 'park', reason: 'human-gated (review:human) — only a human may clear it', applyLabel: REVIEW_LABELS.human, humanRequired: true };
   }
   if (!escalate) return { action: 'merge', reason: 'no escalation signal — merge immediately' };
-  // Agent-reviewable escalation, no verdict yet. Time out to merge-anyway once the window elapses so a stalled
-  // agent-review never wedges the queue; otherwise park alive and wait.
-  if (parkedSinceMs != null && Number(nowMs) - Number(parkedSinceMs) >= Number(windowMs)) {
-    return { action: 'merge-anyway', reason: `review window (${Math.round(Number(windowMs) / 60000)}m) expired — merge + auto-file the unfinished review`, autoFile: true };
-  }
+  // Agent-reviewable escalation, no verdict yet → park alive and wait for the verdict label. No timeout
+  // (x30jq9n): landing unreviewed code on a clock is never the right failure mode; a stuck park is handled by
+  // the operator, not by the drain.
   return { action: 'park', reason: 'escalated — awaiting an independent review (review:pending)', applyLabel: REVIEW_LABELS.pending, humanRequired: false };
 }

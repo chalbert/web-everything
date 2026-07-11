@@ -330,7 +330,7 @@
       "id": "tier-b.review-human-never-auto-cleared",
       "tier": "B",
       "subject": "drain (auto-review of parked PRs)",
-      "statement": "a PR labelled review:human for a conflict-of-interest case (the drain edited the gate itself) is never auto-resolved by the drain — it never times out to merge-anyway and the drain never applies any review:* label to it itself; only a human clears it.",
+      "statement": "a PR labelled review:human for a conflict-of-interest case (the drain edited the gate itself) is never auto-resolved by the drain — no park of any kind times out to an auto-merge (x30jq9n) and the drain never applies any review:* label to it itself; only a human clears it.",
       "howChecked": "stated in .claude/skills/drain/SKILL.md 'Auto-review the parked PRs'",
       "status": "judgment-only"
     },

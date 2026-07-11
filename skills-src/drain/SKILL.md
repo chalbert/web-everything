@@ -193,6 +193,19 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
 > dismissed-findings / cross-repo / sampling) are the sensitivity reasons; a negotiation that hits the round cap
 > or a mandate conflict (below) is `non-convergence` / `mandate-conflict`.
 
+> **No park ever times out (x30jq9n, resolving #2412 Gap 1).** The old 30-minute merge-anyway window
+> (`--review-window-minutes`, #2262) is REMOVED: it raced the very review it was waiting for — observed
+> 2026-07-10, PR #396 merged mid-negotiation at its round-1 head while mandatory-lens fixes were still being
+> written. A parked PR now rests parked until a verdict label (`review:accepted`/`review:changes`) arrives. A
+> genuinely stuck park is the OPERATOR's call: run a manual `/drain`, or use the documented
+> `--no-review-escalation` override to push a green-but-parked `review:pending` PR through (it still refuses
+> `review:human`/`review:changes`). **Careful — the override is PASS-WIDE, not per-PR:** it turns the
+> escalation rubric off for EVERY candidate in that pass, so a fresh PR with no `review:*` label yet (even a
+> gate-self diff) would merge unscored. Only run it when the stuck `review:pending` PR is the ONLY unlabelled
+> candidate: scope the pass (`--this-repo`, a narrow `--label`) and confirm with `--dry-run` that the plan is
+> that one PR first. A per-PR override is tracked as backlog item #x2u9e9d. Landing unreviewed code on a clock is never the
+> drain's failure mode.
+
 - **`gate-self` (`humanRequired: true`) → `{ mode: converge, autoLand: false }`.** The diff edits the **auto-review
   trust chain itself** (`we:scripts/lib/review-escalation.mjs` or `we:scripts/merge-ai-prs.mjs`) — the code that
   decides whether the gate fires and what clears it. This is a **sensitivity** park, not a deadlock, so an agent
@@ -202,9 +215,9 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
   posts the converged diff's findings + verdict table as a PR comment clearly marked `🤖 advisory AI review /
   fix (non-clearing)` **and flags that the diff now carries agent-authored trust-chain edits the human must
   scrutinize**, and surfaces the PR to the operator, who clears it with [`/review <PR>`](../review/SKILL.md). This
-  PR **never times out** to `merge-anyway` and is **never agent-clearable** — an agent policing a change to its
-  own leash is the conflict of interest the gate exists for; the panel may improve the diff but only a human
-  merges it (the #2285 invariant, enforced by `autoLand: false`).
+  PR is **never agent-clearable** — an agent policing a change to its own leash is the conflict of interest the
+  gate exists for; the panel may improve the diff but only a human merges it (the #2285 invariant, enforced by
+  `autoLand: false`).
 
   > **Single PAT ⇒ you cannot verify a gate-self clearance by actor (#2416).** The whole constellation runs on
   > ONE personal access token, so EVERY `review:accepted` label + `"cleared by the operator"` comment is

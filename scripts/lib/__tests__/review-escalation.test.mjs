@@ -1,7 +1,7 @@
 /**
  * @file review-escalation.test.mjs — proof of the #2171 deterministic drain review-escalation rubric: the
- *   SCORER (which signals escalate), the COUPLE rule (strictest member wins), and the non-blocking WATCH-WINDOW
- *   gate (park / merge / merge-anyway). All pure — the drain supplies signals + observed labels + park age.
+ *   SCORER (which signals escalate), the COUPLE rule (strictest member wins), and the non-blocking REVIEW
+ *   gate (park / merge / wait-author — no timeout, x30jq9n). All pure — the drain supplies signals + labels.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -120,7 +120,7 @@ describe('coupleEscalation — the strictest member wins', () => {
   });
 });
 
-describe('decideReviewGate — the non-blocking watch window', () => {
+describe('decideReviewGate — the non-blocking review gate', () => {
   it('not escalated → merge immediately', () => {
     expect(decideReviewGate({ escalate: false }).action).toBe('merge');
   });
@@ -142,31 +142,25 @@ describe('decideReviewGate — the non-blocking watch window', () => {
     // a plain (non-gate-self) review:changes stays agent-routable — humanRequired falsy
     expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.changes] }).humanRequired).toBeFalsy();
   });
-  it('escalated, no verdict, window not expired → park alive (apply review:pending), never block', () => {
-    const g = decideReviewGate({ escalate: true, parkedSinceMs: 1000, nowMs: 1000 + 60_000, windowMs: 30 * 60_000 });
+  it('escalated, no verdict → park alive (apply review:pending), never block', () => {
+    const g = decideReviewGate({ escalate: true });
     expect(g.action).toBe('park');
     expect(g.applyLabel).toBe(REVIEW_LABELS.pending);
   });
-  it('escalated, no verdict, window EXPIRED → merge-anyway + auto-file (never hang on a dead reviewer)', () => {
-    const g = decideReviewGate({ escalate: true, parkedSinceMs: 0, nowMs: 31 * 60_000, windowMs: 30 * 60_000 });
-    expect(g.action).toBe('merge-anyway');
-    expect(g.autoFile).toBe(true);
-  });
-  it('a just-escalated PR with no park timestamp parks (does not instantly time out)', () => {
-    expect(decideReviewGate({ escalate: true, parkedSinceMs: null }).action).toBe('park');
+  // x30jq9n (resolving #2412 Gap 1) — the 30-min merge-anyway window is REMOVED: a park never times out to an
+  // auto-merge, and stale park-age inputs (a caller still passing the retired params) must not resurrect it.
+  it('a park NEVER times out — legacy park-age params are ignored, the action stays park', () => {
+    const g = decideReviewGate({ escalate: true, parkedSinceMs: 0, nowMs: 999 * 60_000, windowMs: 60_000 });
+    expect(g.action).toBe('park');
+    expect(g.applyLabel).toBe(REVIEW_LABELS.pending);
   });
 
   // #2285 v1 — the human-required conflict-of-interest gate.
   it('humanRequired → parks under review:human (an agent may not clear a gate-self edit)', () => {
-    const g = decideReviewGate({ escalate: true, humanRequired: true, parkedSinceMs: null });
+    const g = decideReviewGate({ escalate: true, humanRequired: true });
     expect(g.action).toBe('park');
     expect(g.applyLabel).toBe(REVIEW_LABELS.human);
     expect(g.humanRequired).toBe(true);
-  });
-  it('humanRequired NEVER times out to merge-anyway — even past the window (the essential safety property)', () => {
-    const g = decideReviewGate({ escalate: true, humanRequired: true, parkedSinceMs: 0, nowMs: 999 * 60_000, windowMs: 30 * 60_000 });
-    expect(g.action).toBe('park');
-    expect(g.applyLabel).toBe(REVIEW_LABELS.human);
   });
   it('humanRequired + review:accepted → merge (a human verdict still wins)', () => {
     expect(decideReviewGate({ escalate: true, humanRequired: true, labels: [REVIEW_LABELS.accepted] }).action).toBe('merge');
@@ -174,16 +168,13 @@ describe('decideReviewGate — the non-blocking watch window', () => {
 
   // #2362 — the review:human LABEL is a STICKY veto: a PR ALREADY carrying it must never merge even when this
   // pass's fresh score no longer classifies it human-required (the #289 regression: a gate-self file dropped
-  // out of the diff on rebase, so the re-score returned humanRequired:false and it rode the window to land).
+  // out of the diff on rebase, so the re-score returned humanRequired:false and it rode the since-removed
+  // merge-anyway window to land).
   it('review:human LABEL vetoes merge even when the fresh score is humanRequired:false', () => {
-    const g = decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human], parkedSinceMs: null });
+    const g = decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human] });
     expect(g.action).toBe('park');
     expect(g.applyLabel).toBe(REVIEW_LABELS.human);
     expect(g.humanRequired).toBe(true);
-  });
-  it('review:human LABEL NEVER times out to merge-anyway even past the window (the #289 hole, closed)', () => {
-    const g = decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human], parkedSinceMs: 0, nowMs: 999 * 60_000, windowMs: 30 * 60_000 });
-    expect(g.action).toBe('park');
   });
   it('review:human LABEL vetoes even a DE-ESCALATED PR (escalate:false, no gate-self signal left)', () => {
     // diff narrowed so far it no longer escalates — the sticky label must still block the !escalate fast-merge.
@@ -241,7 +232,7 @@ describe('shouldApplyReviewLabel — #2307 the shared no-double-apply gate (prod
     // The producer already applied review:pending at open; a later drain pass re-scores fresh (the idempotent
     // backstop) and decideReviewGate STILL parks it (the verdict doesn't change just because it's labelled) —
     // but shouldApplyReviewLabel says there is nothing new to DO about it.
-    const gate = decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.pending], parkedSinceMs: null });
+    const gate = decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.pending] });
     expect(gate.action).toBe('park');
     expect(gate.applyLabel).toBe(REVIEW_LABELS.pending);
     expect(shouldApplyReviewLabel(gate.applyLabel, [REVIEW_LABELS.pending])).toBe(false);
