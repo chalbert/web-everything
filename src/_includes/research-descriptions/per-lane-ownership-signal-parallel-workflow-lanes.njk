@@ -1,0 +1,133 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/2413-per-lane-ownership-signal-so-the-destructive-git-op-guard-al/">#2413</a> —
+  how should the parallel <code>/workflow</code> dispatch stamp a per-lane lease with a per-lane identity,
+  so the <a href="/backlog/2367/">#2367</a> destructive-git-op guard stops failing open on parallel lanes?
+  The guard denies <code>reset --hard</code> / <code>clean -fd</code> / discard-checkout / force-push in a
+  lane clone whose live lease belongs to another session — but parallel lanes are provisioned by position
+  and never <code>acquire</code>, so they carry no lease at all, and the guard has nothing to check.
+</p>
+
+<h2>The two verified constraints</h2>
+<ul>
+  <li>
+    <strong>No lease is ever stamped in the parallel topology.</strong> The orchestrator
+    (<code>parallel-execute.workflow.js</code>) couples item&harr;lane by position and has zero
+    <code>acquire</code> call sites; <code>provision</code>/<code>refresh</code> write no marker. The
+    guard's <code>isForeignLease</code> reads the absent lease as <code>null</code> and allows.
+  </li>
+  <li>
+    <strong>No ambient signal distinguishes sibling lane agents</strong> (re-verified empirically
+    2026-07-10): a subagent inherits the parent's <code>CLAUDE_CODE_SESSION_ID</code> verbatim;
+    <code>CLAUDE_CODE_CHILD_SESSION</code> is the constant <code>"1"</code>; process ancestry over-matches
+    (all siblings share the orchestrator ancestor — the exact fail-open the #2367 r2 removed); shell
+    exports do not survive across an agent's separate Bash calls. So even a stamped lease whose
+    <code>ownerSession</code> is the shared session id makes <em>every sibling</em> read as owner in
+    <em>every</em> lane of the batch.
+  </li>
+</ul>
+<p>
+  Consequence: the <strong>command string</strong> is the only per-operation channel carrying holder
+  (lane-coupling) identity with both ends in-repo — which only the guard reads (it already parses
+  <code>LANE_CLOBBER_OK=1</code> and <code>STALE_LANE_OK=1</code> assertions out of it). Sibling-level
+  denial therefore requires a small guard-side comparison extension; the item's original &ldquo;not a
+  change to the guard&rdquo; claim holds only for the weaker cross-session scope. The prepared forks make
+  exactly that trade explicit. (One ambient per-<em>subagent process</em> channel also exists at the
+  guard — the hooks payload's experimental <code>agent_id</code>; it is named and <strong>excluded</strong>
+  as Fork 2 (c) in the item: the acquire-side owner stamp cannot see the payload-only field, the hook
+  fires before acquire's outcome exists, and absence degrades silently to shared-session scope.)
+</p>
+
+<h2>Prior art</h2>
+<table>
+  <thead>
+    <tr><th>System</th><th>Mechanism</th><th>Lesson for #2413</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html">Fencing
+        tokens (Kleppmann)</a></td>
+      <td>A token issued at acquire time must be presented with every operation and checked by the
+        resource at the point of use; a lock service alone cannot stop a stale/indistinguishable holder.</td>
+      <td>Identity must ride the operation, not the ambient context.</td>
+    </tr>
+    <tr>
+      <td><a href="https://kubernetes.io/docs/concepts/architecture/leases/">Kubernetes Lease
+        <code>holderIdentity</code></a></td>
+      <td>Leader election CAS-writes a <em>self-minted</em> identity string (pod name + UID — unique per
+        replica even when replicas are otherwise identical); the API server checks it at the write.</td>
+      <td>Mint the identity per logical holder; check at the arbiter.</td>
+    </tr>
+    <tr>
+      <td><a href="https://git-scm.com/docs/git-worktree">git worktree lock</a></td>
+      <td>A lock file with a free-text reason and <em>no identity check on unlock</em> — any process can
+        remove it.</td>
+      <td>The negative case: an advisory annotation without an enforced check is not a guard.</td>
+    </tr>
+    <tr>
+      <td><a href="https://apenwarr.ca/log/20101213">pid-files / flock</a></td>
+      <td>Pid-based ownership fails across process trees (reuse, shared ancestry); robust practice ties
+        liveness to a held <code>flock</code> fd unique to the literal process.</td>
+      <td>The shared <code>CLAUDE_CODE_SESSION_ID</code> is this failure mode wearing an env var.</td>
+    </tr>
+    <tr>
+      <td><a href="https://docs.github.com/en/actions/concepts/workflows-and-actions/concurrency">GitHub
+        Actions <code>concurrency</code> groups</a></td>
+      <td>Mutual exclusion keyed by an author-composed string naming the logical unit of exclusion, never
+        derived from the runner's ambient properties.</td>
+      <td>The direct analogy to a minted per-lane slug (<code>&lt;batchSlug&gt;-&lt;laneKey&gt;</code>).</td>
+    </tr>
+    <tr>
+      <td><a href="https://www.gnu.org/software/make/manual/html_node/POSIX-Jobserver.html">GNU Make
+        jobserver</a></td>
+      <td>Authorization travels explicitly with each child invocation (<code>--jobserver-auth</code> on
+        every sub-make's command line), not through generic inherited environment.</td>
+      <td>The &ldquo;token in the command&rdquo; pattern is established, decades-old practice.</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  <strong>Synthesis:</strong> every mature system pushes identity to the finest distinguishable
+  granularity — a minted string per logical holder — carried with the operation and checked by the
+  arbiter at the moment of use. None trust an inherited ambient property once multiple holders can share
+  it.
+</p>
+
+<h2>The forks (see the item for options + defaults)</h2>
+<ul>
+  <li>
+    <strong>Fork 1 — where the lease-stamp lives.</strong> Recommended: each lane agent's step-1 prep
+    becomes <code>LANE_SESSION=&lt;batchSlug&gt;-&lt;laneKey&gt; node scripts/lane-pool.mjs acquire
+    --lane=&lt;idx&gt;</code> — <code>acquire</code> already performs the entire prep (fetch, reset,
+    clean, lane-env, deps), fails loudly on a held lane, and stamps the lease at exactly the moment the
+    lane starts. The alternative (an orchestrator-side stamp at provision/coupling) needs new lane-pool
+    surface, duplicates the coupling state, and strands leases for lanes whose agent never dispatches.
+  </li>
+  <li>
+    <strong>Fork 2 — what the guard compares when <code>ownerSession</code> cannot distinguish
+    siblings.</strong> Recommended: the fencing-token posture — a lease minted by the parallel dispatch
+    marks itself, and a destructive git op in such a lane is denied unless the command string asserts the
+    lease's own <code>LANE_SESSION</code> slug (parsed exactly like <code>LANE_CLOBBER_OK=1</code>),
+    fail-closed. The alternative keeps the guard untouched (session-level ownership only): it closes the
+    cross-session hole (the actual 2026-07-09 incident class) but leaves sibling-vs-sibling clobber to
+    prompt discipline — and fails the item's own acceptance.
+  </li>
+</ul>
+
+<h2>Dissolved (supported by default)</h2>
+<ul>
+  <li>Release lifecycle — release at lane end; the shipped TTL/stale-reclaim backstops crashes.</li>
+  <li>Serial topology and the degraded no-id fail-open — unchanged by construction under both forks.</li>
+  <li>Identity spelling — <code>&lt;batchSlug&gt;-&lt;laneKey&gt;</code>; both halves already exist in
+    the workflow (<code>laneKeyOf</code>/<code>laneRefFor</code>).</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Full grounding: <code>reports/2026-07-10-per-lane-ownership-signal-parallel-workflow-lanes.md</code></li>
+  <li>#2367 — the guard this extends (PR #342, r2 removed pid-ancestry); #2275 — the lease allocator;
+    #2183 — the parallel PR-fan-out model; #2337 (b) — live leases are not force-overridable.</li>
+</ul>
+{% endraw %}

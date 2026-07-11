@@ -304,7 +304,7 @@ holds; if neither, **omit it entirely** (no line, no verdict field — silence, 
 project with no routing doc):
 - **(a) The session edited a flow file.** Match the session's changed paths against the gate set:
   `scripts/lib/review-escalation.mjs`, `scripts/merge-ai-prs.mjs`, `scripts/pr-land.mjs`,
-  `scripts/lib/pr-merge-gate.mjs`, `scripts/lib/review-core.mjs`, `scripts/lib/review-park-state.mjs`,
+  `scripts/lib/pr-merge-gate.mjs`, `scripts/lib/review-core.mjs`,
   `scripts/lane-*.mjs`, the gate tests (`scripts/**/__tests__/` files matching `*review*` / `*gate*` /
   `*merge-ai*` / `*pr-land*`), or the `drain`/`merge`/`review`/`pr`/`finish` **skill sources** — a
   name-match, no judgment.
