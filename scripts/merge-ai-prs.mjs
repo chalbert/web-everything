@@ -101,7 +101,6 @@ import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { rebaseDropContent } from './lib/rebase-drop-content.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel } from './lib/review-escalation.mjs';
-import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor } from './lane-drain.mjs';
@@ -109,11 +108,6 @@ import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bor
 import { withNumberingLock } from './readiness/drain-lock.mjs'; // #2391 — the numbering-critical-section mutex (sole-serial-writer)
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
 import { extractManifestFromBody, manifestAuditLine, asItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
-
-// #2262 — the local, machine-scoped park-age clock the review-escalation watch-window gate reads its
-// `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
-// against cwd (the drain always runs from the target repo's root).
-const REVIEW_PARK_STATE_PATH = resolve(process.cwd(), '.claude/skills/drain/review-park-state.json');
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
 // landing PR against. Covers "edits after the drain first sees the ready-to-merge PR" (post-queue), NOT
@@ -908,13 +902,6 @@ function runCli() {
   // ON by default for a label-scoped drain; `--no-review-escalation` disables. `--sample-nth=N` tunes the floor.
   const REVIEW_ESCALATION = label && !flags['no-review-escalation'];
   const SAMPLE_NTH = Number.isFinite(Number(flags['sample-nth'])) && Number(flags['sample-nth']) > 0 ? Number(flags['sample-nth']) : undefined;
-  // #2262 — `--review-window-minutes=N` tunes the park timeout (default from review-escalation.mjs); the park
-  // AGE itself is tracked in REVIEW_PARK_STATE_PATH (see import above) so a sampled PR times out to
-  // merge-anyway instead of re-parking forever with no reviewer daemon to accept it.
-  const REVIEW_WINDOW_MS = Number.isFinite(Number(flags['review-window-minutes'])) && Number(flags['review-window-minutes']) > 0
-    ? Number(flags['review-window-minutes']) * 60_000
-    : undefined;
-
   // #2257 — the ONE /drain lander sweeps all 3 constellation repos. Derive the local repo slug from origin
   // (used to keep git-side ops — manifest read, rebase-drop, local-main sync — scoped to the local clone), then
   // resolve the repo set: `--repos=a,b` (explicit) / `--this-repo` (scoped single-repo) / neither → the
@@ -1217,8 +1204,8 @@ function runCli() {
   // below (that pass is `--label`-gated), so without this it would happily merge a PR a label-scoped `/drain`
   // pass already parked under `review:pending`/`review:human`, or bounced under `review:changes` — the race
   // that shipped plateau#11 and web-everything#290 before their review panels' verdicts landed. Only fires when
-  // this pass ISN'T already running the full rubric (`decideReviewGate` re-derives the correct verdict itself,
-  // incl. the merge-anyway timeout override — double-gating here would wrongly strand a timed-out PR forever).
+  // this pass ISN'T already running the full rubric (`decideReviewGate` re-derives the correct verdict itself —
+  // double-gating here on raw label presence would fight that richer verdict).
   //
   // The `!REVIEW_ESCALATION` gate catches TWO invocations, and they get DIFFERENT refusals (see
   // `hasUnclearedReviewLabel`'s `allowPending`): the truly-bare sweep (no `--label`) has no verdict owner, so it
@@ -1272,13 +1259,6 @@ function runCli() {
         }
       }
     }
-    // #2262 fix (2/2) — a deterministically-sampled PR (1-in-N floor, keyed on PR number) re-scores `escalate`
-    // on EVERY pass; with no reviewer daemon to apply `review:accepted`, it must not park forever. Read the
-    // durable park-age clock (review-park-state.mjs) so `decideReviewGate`'s already-tested timeout branch can
-    // actually fire: once a PR has sat parked (no verdict) past the window, it merges anyway rather than being
-    // permanently stranded. Best-effort, tolerant read — a missing/corrupt file just starts every PR's clock now.
-    let parkState = emptyParkState();
-    try { parkState = parseParkState(readFileSync(REVIEW_PARK_STATE_PATH, 'utf8')); } catch { /* no file yet — fresh clocks */ }
     // #2414 — the first-drain-sighting manifest baseline store: captured first-seen below, diffed at land to
     // catch a post-queue body edit that WEAKENS the manifest (edit-DOWN or full STRIP). Tolerant read — a
     // missing/corrupt file makes every PR re-capture from its CURRENT body; if that current body is already
@@ -1287,8 +1267,6 @@ function runCli() {
     let baselineState = emptyBaselineState();
     try { baselineState = parseBaselineState(readFileSync(REVIEW_BASELINE_STATE_PATH, 'utf8')); } catch { /* no file yet — fresh baselines */ }
     let baselineStateChanged = false;
-    const nowMs = Date.now();
-    let parkStateChanged = false;
     for (const v of verdicts) {
       if (v.decision !== 'merge') continue;
       let changedFiles = [];
@@ -1360,15 +1338,12 @@ function runCli() {
           }
           const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
           if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} manifest-tamper baseline mismatch stamped on PR\n`);
-          parkState = recordParked(parkState, { repo: v.repo, num: v.num }, nowMs);
-          parkStateChanged = true;
         }
         parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: tamper.reasons });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} re-parked — manifest baseline mismatch (post-review tamper, HUMAN required): ${tamper.reasons.join('; ')}\n`);
         continue;
       }
-      const parkedSinceMs = getParkedSinceMs(parkState, { repo: v.repo, num: v.num });
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, parkedSinceMs, nowMs, ...(REVIEW_WINDOW_MS ? { windowMs: REVIEW_WINDOW_MS } : {}) });
+      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels });
       v.escalated = score.escalate ? 'yes' : 'no';
       // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
       // makes an already-applied review:human label win even when a rebase narrows the diff back to
@@ -1420,34 +1395,14 @@ function runCli() {
             if (!verified && !AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} review:human body still missing the escalation reason after the write (#2324) — verify by hand: ${score.reasons.join('; ')}\n`);
           }
         }
-        // #2262 — track the park age so the watch-window can time out; a review:changes verdict ends the clock.
-        if (gate.action === 'park') { if (!DRY_RUN) { parkState = recordParked(parkState, { repo: v.repo, num: v.num }, nowMs); parkStateChanged = true; } }
-        else if (!DRY_RUN) { const cleared = clearParked(parkState, { repo: v.repo, num: v.num }); if (cleared !== parkState) { parkState = cleared; parkStateChanged = true; } }
         // #2285 v1 — the skill's auto-review step consumes this: humanRequired PRs are left for the operator,
         // the rest are eligible for a fresh-context adversarial review subagent.
         parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: score.reasons });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}${gate.humanRequired ? ', HUMAN required' : ', agent-reviewable'}): ${score.reasons.join('; ')}\n`);
-      } else if (gate.action === 'merge-anyway') {
-        // #2262 — the review window expired with no reviewer verdict: merge NOW (decision stays 'merge', its
-        // default) rather than re-park forever, but never SILENTLY drop the owed review — auto-file it as a
-        // durable PR comment (best-effort) so the obligation stays visible after the PR closes.
-        v.escalated = 'yes';
-        v.escalateReasons = score.reasons;
-        v.reviewTimedOut = true;
-        if (!DRY_RUN) {
-          const cleared = clearParked(parkState, { repo: v.repo, num: v.num });
-          if (cleared !== parkState) { parkState = cleared; parkStateChanged = true; }
-          // Note: this comment fires BEFORE the merge attempt below (same pass) — the merge can still bounce
-          // (e.g. a check regressed since scoring) and retry next pass, so the wording describes the DECISION
-          // (proceeding to merge), not a confirmed outcome.
-          try { execFileSync('gh', ['pr', 'comment', String(v.num), ...repoFlag(v.repo), '--body', `⏱ review-escalation window expired with no reviewer verdict — proceeding to merge per the #2171 rubric (never permanently stranding an escalated PR). The review is still owed: ${score.reasons.join('; ')}.`], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* auto-file best-effort */ }
-        }
-        if (!AS_JSON) process.stderr.write(`  ⏱ ${repoTag(v.repo)}${v.num} review window expired — merging anyway (unfinished review auto-filed): ${score.reasons.join('; ')}\n`);
       } else if (score.escalate && !AS_JSON) {
         process.stderr.write(`  ✓ ${repoTag(v.repo)}${v.num} escalation cleared (${gate.reason})\n`);
       }
     }
-    if (parkStateChanged && !DRY_RUN) { try { writeFileSync(REVIEW_PARK_STATE_PATH, serializeParkState(parkState)); } catch { /* best-effort local cache — a write miss just re-parks fresh next pass */ } }
     // #2414 — persist the first-drain-sighting baselines captured this pass. Best-effort local cache — but a
     // write miss is NOT a benign "re-capture fresh next pass": if the miss drops an honest baseline while a
     // tamper is live, next pass re-captures the tampered body as the trusted baseline AND the gate fails open
