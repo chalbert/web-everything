@@ -115,6 +115,17 @@ the per-item chat-rename — a batch labels the session **once**.
    clone (step 3). So the close-out just reports those PRs — land them anytime with `/merge` (or `/drain`); the
    batch neither pushes `main` nor waits on a drain. (Superseded: the old close-out `push-if-green` main-publish
    — under #2183 the producer is no longer a publish site; the drain is the sole one.)
+   **Push the handoff (#2395) — fire ONE detached drain, don't wait on it.** After the enqueue (the
+   `pr-land --label-on-green` in step 3 already labelled every worked item), run
+   **`node scripts/drain-push-at-close.mjs`** from the primary checkout. It reads the whole-process drain lease
+   (#2391): a drain already in flight ⇒ **no-op** (the running watch collects the just-enqueued PR); the lease
+   free ⇒ it fires ONE **detached, self-terminating** drain watch
+   (`merge-ai-prs --label=ready-to-merge --watch --until-batches-idle --hold-drain-lease --max-runtime-min=…`)
+   that lands the chain and exits on its own — **exactly one drain regardless of how many sessions close** (the
+   fired child owns the lease, so a concurrent close only enqueues). It does **not** block the close: the launch
+   is detached (`setsid`+`unref`) and the close returns immediately. **Correct with it OFF** — it never touches
+   the enqueued PRs, so an interrupted or skipped close just leaves a drainable queue the deferred `/drain` sweep
+   lands. (`--dry-run` reports the fire/no-op decision without spawning.)
 
 **The stop rule (solid by construction)** — the **points budget is the sole driver**; stop the batch at a
 seam if (and ONLY if) ANY of these **four** holds (full text in *Running a batch* → *The stop rule*):
