@@ -448,6 +448,13 @@ function laneItemPrompt(it, laneDirs) {
     `     (publishes your HEAD → the lane ref, opens the PR, waits for required checks, labels when green — no merge).`,
     `     Parse the PR number (\`pr\`) and \`labelApplied\` from its JSON. reason:"labelled-on-green" = labelled OK;`,
     `     reason:"check-red"/"check-timeout" = PR open but UNLABELLED (carried for labelling — the lane's CI wasn't green).`,
+    `   • HOW TO WAIT ON pr-land (#2429): it BLOCKS until its required checks resolve — often minutes, past the Bash`,
+    `     timeout — so launch it as a BACKGROUND task (the Bash tool's run_in_background) and let the harness RESUME`,
+    `     you with the task's completion notification, then read the finished task output for the JSON. Do NOT wrap it`,
+    `     in a poll loop that greps for its own process: a wait whose match pattern (the ref, the slug, the tool name)`,
+    `     also appears in the WAITER'S own argv self-matches, so the liveness check never fails and the loop idles the`,
+    `     lane to a Monitor timeout even though pr-land already finished green. The completion notification is the ONLY`,
+    `     wait you need — never build a self-matching process poll.`,
   );
   for (const r of implRepos) {
     lines.push(`   • ${r} PR (from ${laneDirs[r]}): \`node scripts/pr-land.mjs --repo=${laneDirs[r]} --ref=${ref} --label-on-green --json\` (from the WE clone, or cd into ${laneDirs[r]}). Parse \`pr\` + \`labelApplied\`.`);
