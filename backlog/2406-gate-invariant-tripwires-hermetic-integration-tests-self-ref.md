@@ -2,8 +2,11 @@
 kind: story
 size: 5
 parent: "2405"
-status: open
+status: resolved
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-10"
+dateResolved: "2026-07-10"
+graduatedTo: "scripts/lib/__tests__/gate-invariants.test.mjs + scripts/__tests__/gate-entrypoint-integration.test.mjs, self-ref already in GATE_SELF_PATHS (scripts/lib/review-escalation.mjs) — the work landed on main under this item's pre-numbering x-code (xc89cml, commit fa1fb4a9) before JIT-numbering created this backlog file; this resolve backfills the status"
 tags: []
 ---
 
