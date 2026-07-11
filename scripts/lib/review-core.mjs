@@ -18,7 +18,7 @@
  * action. `#2326` wires the drain auto-review + the new `/review` skill to this contract; this item (`#2325`)
  * lands the contract itself.
  *
- * The core JUDGES ONLY. It never knows about labels, the merge-anyway window, `review:human`, or who is
+ * The core JUDGES ONLY. It never knows about labels, `review:human`, or who is
  * allowed to clear what — that policy stays with each caller (the drain owns its leash; see
  * `we:scripts/lib/review-escalation.mjs`'s `decideReviewGate`, which is unaffected by this module).
  *
