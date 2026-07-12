@@ -7,6 +7,7 @@ blockedBy: ["2393", "2394"]
 dateOpened: "2026-07-10"
 dateStarted: "2026-07-11"
 dateResolved: "2026-07-11"
+graduatedTo: none
 tags: []
 ---
 
@@ -28,4 +29,8 @@ we:scripts/lane-resume.mjs discover reads stackParents/base; a broken link (red 
   - `markStackDescendantsBlocked` poison reasons name the broken ROOT ancestor (not the BFS predecessor) at every depth.
   - `rebuildDescendant` guards `ontoSha` with `/^[0-9a-f]{7,40}$/i` — branch-controlled manifest content can never inject git options.
   - CLI wiring: `rebuild-plan --spec=<file>|-` (plans via `planStackRebuild`; `landed` omitted → DERIVED from bornAs-on-main via the new `deriveLandedFromMain`; numeric NNN = post-land by JIT numbering #2288) and `rebuild <laneRef> --onto=<sha>` (executes `rebuildDescendant`); both documented in the `/finish` skill — the rebuild half is reachable and the bornAs-on-main landed resolution is implemented, not just documented.
+- **Review round 2 (PR #427 panel) — fixes:**
+  - `resolvedOnMain` verifies `status: resolved` INSIDE the frontmatter block (`readField` on the located file), never anywhere in the file — an open item whose body carries a fenced `status: resolved` example can no longer spoof proof-of-land (regression test added).
+  - `graduatedTo: none` stamped here (resolved story, produced no entity).
+  - `remoteManifestApiArgs` hoisted to the shared `we:scripts/lib/remote-manifest.mjs` (one argv for the drain and `/finish`; both former homes re-export it, tests' import sites unchanged).
 - **Next:** land via the drain.

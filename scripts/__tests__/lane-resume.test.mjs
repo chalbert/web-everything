@@ -1,4 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { classifyLane, orderByBlockedBy, landDecision, land, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain } from '../lane-resume.mjs';
 
 const resolved = new Set([2110, 2113]); // blockers already landed on main
@@ -509,5 +513,29 @@ describe('lane-resume — deriveLandedFromMain (#2396: stackParent landed status
   it('resolvedOnMain rejects a non-numeric id without touching git (fails closed)', () => {
     expect(resolvedOnMain('not-a-number')).toBe(false);
     expect(resolvedOnMain(null)).toBe(false);
+  });
+
+  it('resolvedOnMain reads status from the FRONTMATTER only — a body carrying a fenced `status: resolved` example never spoofs proof-of-land', () => {
+    // The stowaway this pins: an OPEN item whose prose quotes a frontmatter example at column 0. A
+    // whole-file grep reads it as landed → deriveLandedFromMain marks the unlanded stackParent landed →
+    // planStackRebuild places its descendant past an unlanded parent. Real git repo, origin/main ref
+    // pointed at HEAD (same fixture shape as lane-drain-numbering's landedNumberFor proof).
+    const repo = mkdtempSync(join(tmpdir(), 'lane-resume-rom-'));
+    const git = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      git('init', '-q');
+      git('config', 'user.email', 'test@test'); git('config', 'user.name', 'Test');
+      git('config', 'commit.gpgsign', 'false');
+      mkdirSync(join(repo, 'backlog'));
+      writeFileSync(join(repo, 'backlog/777-open-spoof.md'),
+        '---\nkind: story\nstatus: open\n---\n# Open item\n\nExample frontmatter:\n\n```yaml\nstatus: resolved\n```\n');
+      writeFileSync(join(repo, 'backlog/778-really-resolved.md'),
+        '---\nkind: story\nstatus: resolved\n---\n# Landed item\n');
+      git('add', 'backlog'); git('commit', '-qm', 'seed');
+      git('update-ref', 'refs/remotes/origin/main', 'HEAD'); // no real remote — point origin/main at HEAD
+      expect(resolvedOnMain(777, repo)).toBe(false); // open + spoofed body → NOT landed (the F5 stowaway guard)
+      expect(resolvedOnMain(778, repo)).toBe(true);  // genuinely resolved in frontmatter → landed
+      expect(resolvedOnMain(999, repo)).toBe(false); // no file at all → fails closed
+    } finally { rmSync(repo, { recursive: true, force: true }); }
   });
 });

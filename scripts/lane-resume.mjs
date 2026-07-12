@@ -58,6 +58,14 @@ import { REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
 // all 3 repos (WE + frontierui + plateau-app) by default instead of only the cwd repo. `merge-ai-prs.mjs` is
 // CLI-guarded (runs nothing on import), so this is a pure function import.
 import { resolveRepos } from './merge-ai-prs.mjs';
+// #2399 — the ONE remote-manifest `gh api` argv, shared with the drain so the two readers never drift.
+// Re-exported to keep this file's public surface (and its tests' import site) stable.
+import { remoteManifestApiArgs } from './lib/remote-manifest.mjs';
+export { remoteManifestApiArgs };
+// #2396 — `resolvedOnMain` must read `status:` INSIDE the frontmatter block, never anywhere in the file:
+// a body can carry a column-0 `status: resolved` (e.g. a fenced frontmatter example). `readField` parses
+// only the first `---`…`---` block — the same splice-scoped reader the backlog status verbs use.
+import { readField } from './backlog/frontmatter.mjs';
 
 const READY_LABEL = 'ready-to-merge';
 
@@ -257,7 +265,8 @@ export function planStackRebuild({ repaired, descendants = [], fixTouched = [], 
 
 /**
  * Positive proof-of-land for a NUMERIC item id (#2396) — the numeric analogue of `landedNumberFor`'s
- * bornAs-on-main proof: the item's `backlog/NNN-*.md` on origin/main carries `status: resolved`. A bare
+ * bornAs-on-main proof: the item's `backlog/NNN-*.md` on origin/main carries `status: resolved` in its
+ * FRONTMATTER (body text never counts — a fenced example in prose must not spoof the proof). A bare
  * number is NEVER trusted as landed-by-construction: numbered-yet-unlanded items exist (pre-#2288 legacy
  * numbering, and an in-flight batch's own numbered siblings whose lanes are still queued), so only this
  * positive on-main record proves the land. Fails CLOSED — a missing file, an open/active status, or any
@@ -270,12 +279,21 @@ export function resolvedOnMain(num, cwd = process.cwd()) {
   if (!/^\d{1,5}$/.test(String(num))) return false; // the numeric NNN id form only (ID_TOKEN_RE's numeric arm) — never a rev/pathspec injection surface
   const n = Number(num);
   try {
-    // One scoped whole-line grep on origin/main (mirrors landedNumberFor's shape): the `NNN-*.md` pathspec
-    // pins the exact leading id (the `-` stops a longer number from partial-hitting), -l output non-empty ⇔
-    // the resolved record exists. `git grep` exits 1 on no match → the catch reads it as NOT landed.
+    // One scoped whole-line grep on origin/main (mirrors landedNumberFor's shape) LOCATES the candidate
+    // file(s): the `NNN-*.md` pathspec pins the exact leading id (the `-` stops a longer number from
+    // partial-hitting). The grep hit alone is NOT proof — it matches anywhere in the file, and an OPEN
+    // item's body can carry a column-0 `status: resolved` (a fenced frontmatter example) — so each hit is
+    // re-read and the status verified INSIDE the frontmatter block (`readField` parses only the first
+    // `---`…`---`). `git grep` exits 1 on no match → the catch reads it as NOT landed.
     const out = execFileSync('git', ['grep', '-l', '-E', '^status:[ \t]*resolved', 'origin/main', '--', `backlog/${n}-*.md`],
       { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return out.length > 0;
+    for (const hit of out.split('\n')) {
+      const path = hit.replace(/^origin\/main:/, '');
+      if (!path) continue;
+      const doc = execFileSync('git', ['show', `origin/main:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      if (readField(doc, 'status') === 'resolved') return true;
+    }
+    return false;
   } catch { return false; }
 }
 
@@ -421,19 +439,6 @@ export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/mai
 
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 const shJSON = (cmd, args, dflt) => { try { return JSON.parse(sh(cmd, args) || 'null') ?? dflt; } catch { return dflt; } };
-
-/**
- * Build the `gh api` argv that reads a remote repo's `.lane-manifest.json` off a head ref. Pure/exported so
- * the `--method GET` is regression-guarded. `--method GET` is REQUIRED: `gh api` silently switches to POST the
- * moment an `-f`/`--field` param is present with no explicit method, and a POST to the read-only contents
- * endpoint 404s — which `readManifest`'s catch would swallow to null, so every remote lane would drop its
- * item/blockedBy (the very ordering this constellation sweep exists for). GET keeps `-f ref=` as a query param.
- * @param {string} repo — "owner/name"
- * @param {string} ref  — the PR head ref
- */
-export function remoteManifestApiArgs(repo, ref) {
-  return ['api', '--method', 'GET', `repos/${repo}/contents/.lane-manifest.json`, '-f', `ref=${ref}`, '-q', '.content'];
-}
 
 /**
  * Read a lane's `.lane-manifest.json` off its head ref. Returns {item, repos, blockedBy, stackParents} or null.
