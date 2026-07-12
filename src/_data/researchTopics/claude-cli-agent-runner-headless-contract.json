@@ -1,0 +1,24 @@
+{
+  "id": "claude-cli-agent-runner-headless-contract",
+  "title": "Spawning Claude Code headless as a supervised child — the documented CLI contract, steering channels, and auth boundaries",
+  "status": "open",
+  "summary": "Documents the verified facts a coordinator needs to spawn Claude Code CLI agents as supervised children, grounding #2444 (Plateau Loop phase-1 agent-runner shape). Headless contract: claude -p --output-format stream-json emits typed events (system/init with session metadata, streamed text deltas, tool events, result); --resume <session-id> continues a prior session (works after a crash or kill, scoped to the starting directory); --model accepts alias names per spawn; --allowedTools and --permission-mode set the static permission baseline. Hard constraint: -p is strictly non-interactive — a tool call whose permission is unresolved aborts the session, so every spawn must carry a closed permission profile (static flags + PreToolUse hook gates). Steering — two documented channels that compose: (1) boundary delivery via --input-format stream-json — a documented CLI mode where (since v2.1.205) a user message sent while Claude is working stays QUEUED and runs as its own turn when the current one ends: a non-destructive, same-process boundary steering channel (spawn must keep stdin open); (2) an earlier best-effort signal via a PreToolUse hook deny whose permissionDecisionReason reaches the model mid-turn — but delivery is contingent on the agent's next tool call, repeated blocks abort a headless session (a steer gate must deny exactly once and pass the retry), and the channel is documented as permission feedback, not steering, so fitness for operator steering needs a spike. Kill + --resume is the hard-redirect op, not a steer channel (resume-after-kill truncation semantics are undocumented). Auth: claude setup-token mints a one-year OAuth token (CLAUDE_CODE_OAUTH_TOKEN) the CLI honors on a Pro/Max subscription, but the Agent SDK documents API-key auth only, and Anthropic's terms state third-party developers may not offer claude.ai login/rate limits for products built on the Agent SDK — so a subscription-funded phase 1 must spawn the CLI, and the SDK (native interrupt(), canUseTool callback, setModel()) is a later API-key backend behind the same runner interface. All claims cite the official docs pages; verified 2026-07-12.",
+  "dateOpened": "2026-07-12",
+  "lastReviewed": "2026-07-12",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "claude-cli",
+    "headless",
+    "stream-json",
+    "agent-runner",
+    "hooks",
+    "permissions",
+    "subscription-auth",
+    "agent-sdk",
+    "plateau-loop",
+    "supervised-agents"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

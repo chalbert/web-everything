@@ -1,0 +1,89 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  A resident coordinator (<a href="/backlog/2445-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/">#2445</a>,
+  Plateau Loop) spawns Claude agents as supervised children on the user's subscription. What does the
+  Claude Code CLI actually guarantee headless — event stream, resume, steering, permissions, auth — and
+  where does the Agent SDK boundary sit? This grounds
+  <a href="/backlog/2444-plateau-loop-phase-1-agent-runner-shape-cli-spawn-contract-s/">#2444</a>
+  (the phase-1 agent-runner contract). All claims below are from the official docs
+  (code.claude.com/docs), verified 2026-07-12; the in-repo precedent is the dev-panel Vite plugin.
+</p>
+
+<h2>The headless contract</h2>
+<table>
+  <thead>
+    <tr><th>Facet</th><th>Documented behavior</th><th>Source</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Event stream</td>
+      <td><code>claude -p --output-format stream-json</code> emits typed NDJSON: <code>system/init</code>
+        (session id, model, tools), streamed text deltas, tool events, a final <code>result</code>.</td>
+      <td><a href="https://code.claude.com/docs/en/headless.md">headless</a></td>
+    </tr>
+    <tr>
+      <td>Resume</td>
+      <td><code>--resume &lt;session-id&gt;</code> continues a prior session, including <code>-p</code>/SDK
+        sessions after a crash or force-exit; lookup is scoped to the starting directory. Transcripts are
+        saved continuously; mid-turn truncation semantics after a hard kill are <em>not</em> documented.</td>
+      <td><a href="https://code.claude.com/docs/en/sessions.md">sessions</a></td>
+    </tr>
+    <tr>
+      <td>Permissions</td>
+      <td><code>-p</code> is strictly non-interactive: a tool call needing a prompt <strong>aborts the
+        session</strong>. Baselines: <code>--allowedTools</code> patterns + <code>--permission-mode</code>
+        (default, acceptEdits, plan, auto, dontAsk, bypassPermissions). Dynamic per-call gating:
+        <code>PreToolUse</code> hooks returning allow/deny.</td>
+      <td><a href="https://code.claude.com/docs/en/permission-modes.md">permission-modes</a></td>
+    </tr>
+    <tr>
+      <td>Queued input (boundary steering)</td>
+      <td><code>--input-format stream-json</code> is a documented print-mode input format; since
+        v2.1.205 a user message sent while Claude is working <strong>stays queued and runs as its own
+        turn</strong> when the current one ends — a non-destructive, same-process boundary delivery
+        channel (spawn must keep stdin open).</td>
+      <td><a href="https://code.claude.com/docs/en/cli-reference.md">cli-reference</a></td>
+    </tr>
+    <tr>
+      <td>Mid-turn signal</td>
+      <td>The one earlier-than-boundary signal: a <code>PreToolUse</code> deny whose
+        <code>permissionDecisionReason</code> reaches the model, which re-plans on it. Delivery is
+        contingent on the agent's next tool call; repeated blocks abort a headless session, so a
+        steer gate must deny exactly once and pass the retry. Documented as permission feedback, not
+        steering — fitness for operator steering needs a spike.</td>
+      <td><a href="https://code.claude.com/docs/en/agent-sdk/hooks.md">hooks</a></td>
+    </tr>
+    <tr>
+      <td>Model per spawn</td>
+      <td><code>--model</code> accepts alias names (sonnet / opus / haiku / fable) per invocation.</td>
+      <td><a href="https://code.claude.com/docs/en/cli-reference.md">cli-reference</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>The auth boundary</h2>
+<p>
+  <code>claude setup-token</code> mints a one-year OAuth token (<code>CLAUDE_CODE_OAUTH_TOKEN</code>)
+  the <strong>CLI</strong> honors on a Pro/Max subscription. The <strong>Agent SDK</strong> documents
+  API-key auth only, and Anthropic's terms state third-party developers may not offer claude.ai
+  login/rate limits for products built on the Agent SDK. Consequence for #2444: a subscription-funded
+  phase 1 must spawn the CLI; the SDK — with native <code>interrupt()</code>, the
+  <code>canUseTool</code> permission callback, and <code>setModel()</code> — is a later, API-key-funded
+  backend slotted behind the same runner interface. (Queued streamed input is <em>not</em> SDK-only:
+  the CLI's <code>--input-format stream-json</code> provides it, see the table above.)
+</p>
+
+<h2>In-repo precedent</h2>
+<p>
+  The dev-panel Vite plugin (Plateau-owned, consumed by the WE and FUI dev servers) already proves the
+  spawn half: <code>spawn(binary, ['-p', prompt, '--output-format', 'stream-json', '--verbose'])</code>
+  with <code>--resume</code> for continuity, stdin closed, ambient subscription auth, SIGTERM as stop.
+  The WE guard hooks prove the deny-with-reason <em>wire shape</em> in production: the Bash guard emits
+  <code>{ hookSpecificOutput: { permissionDecision: 'deny', permissionDecisionReason } }</code> — but
+  only for policy blocks on Bash/Edit matchers; whether operator text delivered through a catch-all
+  deny gate steers a run productively is unproven and needs a spike. The #2444 runner contract is the
+  unification of these halves behind <code>spawn / steer / stop / resume / observe</code>, with queued
+  stdin as the documented boundary channel.
+</p>
+{% endraw %}
