@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs } from '../merge-ai-prs.mjs';
 import { scoreEscalation } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -308,6 +308,55 @@ describe('merge-ai-prs — parseWatchOpts (#2194 /drain watch)', () => {
   it('max-idle=0 is honoured (exit on the first idle pass), a bad value → unbounded', () => {
     expect(parseWatchOpts({ watch: true, maxIdle: '0' }).maxIdle).toBe(0);
     expect(parseWatchOpts({ watch: true, maxIdle: 'x' }).maxIdle).toBe(null);
+  });
+});
+
+describe('merge-ai-prs — decideDrainLeaseGate (#2449 always-on whole-process lease; #2391/#2424/#2443)', () => {
+  const free = { held: false, stale: false, owner: null };
+  const heldBy = (owner) => ({ held: true, stale: false, owner, heartbeatAt: 'now' });
+  const staleOf = (owner) => ({ held: false, stale: true, owner, heartbeatAt: 'old' });
+
+  it('a free lease → acquire, for one-shot and watch alike (no mode input — the gate is mode-agnostic)', () => {
+    expect(decideDrainLeaseGate({ status: free }).action).toBe('acquire');
+  });
+
+  it('a STALE lease → acquire (the atomic reserve reclaims it — a crashed drain never wedges the queue)', () => {
+    expect(decideDrainLeaseGate({ status: staleOf('mac:1:drain') }).action).toBe('acquire');
+  });
+
+  it('a LIVE foreign holder → noop surfacing the holder (#2424: the second full drain no-ops, never races)', () => {
+    const g = decideDrainLeaseGate({ status: heldBy('mac:99:drain') });
+    expect(g.action).toBe('noop');
+    expect(g.heldBy).toBe('mac:99:drain');
+  });
+
+  it('--only single-PR fast drain BYPASSES the lease (numbering mutex suffices — /pr and /finish stay instant next to a resident daemon)', () => {
+    expect(decideDrainLeaseGate({ onlyPr: '12', status: heldBy('mac:99:drain') }).action).toBe('bypass');
+  });
+
+  it('--dry-run BYPASSES (merges nothing; a resident daemon must never block a plan read)', () => {
+    expect(decideDrainLeaseGate({ dryRun: true, status: heldBy('mac:99:drain') }).action).toBe('bypass');
+  });
+
+  it('--no-drain-lease escape hatch BYPASSES', () => {
+    expect(decideDrainLeaseGate({ noLease: true, status: heldBy('mac:99:drain') }).action).toBe('bypass');
+  });
+
+  it('--under-lease matching the LIVE holder → under-lease (a daemon child pass runs without acquiring)', () => {
+    const g = decideDrainLeaseGate({ underLease: 'mac:7:daemon', status: heldBy('mac:7:daemon') });
+    expect(g.action).toBe('under-lease');
+  });
+
+  it('--under-lease whose declared holder is GONE (free/stale/other) → noop, fail-safe (#2449: an orphaned child never drains unleased)', () => {
+    expect(decideDrainLeaseGate({ underLease: 'mac:7:daemon', status: free }).action).toBe('noop');
+    expect(decideDrainLeaseGate({ underLease: 'mac:7:daemon', status: staleOf('mac:7:daemon') }).action).toBe('noop');
+    expect(decideDrainLeaseGate({ underLease: 'mac:7:daemon', status: heldBy('mac:99:drain') }).action).toBe('noop');
+  });
+
+  it('bypass precedence: dry-run > only > no-lease reasons are distinct (operator-visible why)', () => {
+    expect(decideDrainLeaseGate({ dryRun: true, onlyPr: '3', status: free }).reason).toBe('dry-run');
+    expect(decideDrainLeaseGate({ onlyPr: '3', noLease: true, status: free }).reason).toBe('single-pr-fast-drain');
+    expect(decideDrainLeaseGate({ noLease: true, status: free }).reason).toBe('no-drain-lease');
   });
 });
 
