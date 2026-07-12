@@ -109,6 +109,10 @@ import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bor
 import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
 import { extractManifestFromBody, manifestAuditLine, asItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
+// #2399 — the ONE remote-manifest `gh api` argv, shared with `/finish` (lane-resume) so the two readers never
+// drift. Re-exported to keep this file's public surface (and its tests' import site) stable.
+import { remoteManifestApiArgs } from './lib/remote-manifest.mjs';
+export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
 // landing PR against. Covers "edits after the drain first sees the ready-to-merge PR" (post-queue), NOT
@@ -948,20 +952,6 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.trunc(ms)));
 }
 
-/**
- * Build the `gh api` argv that reads a remote repo's `.lane-manifest.json` off a head ref. Pure/exported so
- * the `--method GET` is regression-guarded. `--method GET` is REQUIRED: `gh api` silently switches to POST the
- * moment an `-f`/`--field` param is present with no explicit method, and a POST to the read-only contents
- * endpoint 404s — which `readPrManifest`'s catch would swallow to null, so every remote lane would drop its
- * item/blockedBy (the very cross-repo ordering this drain sweep exists for). GET keeps `-f ref=` as a query
- * param. #2399 — port of the identical #2383 fix in lane-resume.mjs's `remoteManifestApiArgs`.
- * @param {string} repo — "owner/name"
- * @param {string} ref  — the PR head ref
- */
-export function remoteManifestApiArgs(repo, ref) {
-  return ['api', '--method', 'GET', `repos/${repo}/contents/.lane-manifest.json`, '-f', `ref=${ref}`, '-q', '.content'];
-}
-
 // ── CLI boundary ───────────────────────────────────────────────────────────────────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) runCli();
@@ -1116,8 +1106,8 @@ function runCli() {
       // #2257 — a remote-repo PR has no local clone to `git show`; read the manifest off its head ref via the
       // GitHub API (`gh api …/contents/.lane-manifest.json?ref=<headRef>` → base64 `.content`). Best-effort:
       // an impl/orphan PR carries no manifest → null → always ready (the legacy unordered behaviour).
-      // #2399 — `remoteManifestApiArgs` (below) makes the `--method GET` explicit; ported from the identical
-      // #2383 fix in lane-resume.mjs.
+      // #2399 — `remoteManifestApiArgs` (shared, `scripts/lib/remote-manifest.mjs`) makes the `--method GET`
+      // explicit; one argv for both the drain and lane-resume so the readers never drift.
       try {
         const b64 = execFileSync('gh', remoteManifestApiArgs(repo, headRef), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
         if (b64) { const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); if (m && m.item != null) return m; }
