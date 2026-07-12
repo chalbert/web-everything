@@ -1,6 +1,6 @@
 ---
 kind: task
-parent: "2285"
+relatedTo: ["2285"]
 status: open
 dateOpened: "2026-07-12"
 tags: []
