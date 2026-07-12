@@ -6,6 +6,8 @@ size: 3
 status: open
 priority: low
 dateOpened: "2026-07-11"
+costUsd: 7.58
+costSessions: 1
 researchTopic: claude-cli-agent-runner-headless-contract
 relatedReport: reports/2026-07-12-claude-cli-agent-runner-headless-contract.md
 tags: [plateau-loop, agent-runner, claude-cli]
