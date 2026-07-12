@@ -23,7 +23,6 @@ Agent Meta · Memory · Model Routing cluster — open a leaf with `node scripts
 - 134. Opus Orchestrates, Sonnet Executes — exec→Sonnet subagent; judgment stays Opus
 - 135. Model Recurring Cost, Don't Gate It — recurring overhead MODELED (affine fit); every sample counts; #1505
 - 144. Session Cost-On-Card Accrual — close accrues session $ to the card(s) worked; decision/prepare accumulate, workflow even-splits, slice/resolve skip
-- 145. Lane Model: Sonnet Default, Never Fable — /workflow lane exec runs Sonnet by default, Opus for rare complex (probe decides per-item), NEVER Fable; explicit model always passed so no Fable inherit; #2189/session
 - [Parallel /workflow lane model](workflow-lane-model-policy.md) — Sonnet default, Opus for rare complex items, NEVER Fable for execution; orchestrator decides per-item
 - [Autonomous loops are non-blocking — red-team gates, not prompts](autonomous-loops-non-blocking-red-team-not-prompts.md) — replace per-iteration human approval with a machine-adversarial gate + auto-landed lane→PR + retrospective revert; the user runs loops heavily so prompts kill throughput
 - [Scoped approval beats global bypass](scoped-approval-beats-global-bypass.md) — for autonomous loops, auto-approve the narrow protected category (memory/skills path prefix), not `--dangerously-skip-permissions` globally; #2265
