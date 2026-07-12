@@ -148,11 +148,12 @@ describe('runPushAtClose — proof 3: the launcher is purely additive (#2395)', 
   });
 });
 
-describe('merge-ai-prs `--hold-drain-lease` wiring (#2395) — the fired drain OWNS its lease', () => {
+describe('merge-ai-prs whole-process lease wiring (#2395 → #2449 always-on) — the fired drain OWNS its lease', () => {
   const src = read('scripts/merge-ai-prs.mjs');
-  it('acquires the whole-process lease on a --hold-drain-lease watch, no-ops on a live lease', () => {
+  it('acquires the whole-process lease by DEFAULT (#2449 — no opt-in flag left in the gate), no-ops on a live lease', () => {
     expect(src).toContain('acquireDrainLease');
-    expect(src).toContain("flags['hold-drain-lease']");
+    expect(src).toContain('decideDrainLeaseGate'); // the #2449 always-on routing (replaces the #2395 opt-in flag)
+    expect(src).toContain("flags['under-lease']"); // the resident daemon's child-pass declaration
     expect(src).toContain('drain-in-progress'); // the second-launch no-op signal
   });
   it('heartbeats each pass and releases on EVERY exit (normal / break / signal)', () => {
