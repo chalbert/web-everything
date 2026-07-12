@@ -73,7 +73,9 @@
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run # print the blockedBy-ordered merge plan, merge NOTHING
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --interval=30 # the /drain-watch monitor: poll + land as PRs go green (--max-idle=N bounds it)
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --until-batches-idle  # self-terminate when the active batch is fully delivered (#2330; reads the active-progress feed — --batch-feed=<path> to point at the primary's copy)
- *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --until-batches-idle --hold-drain-lease --max-runtime-min=60  # #2395 the push-at-close drain: hold the whole-process lease (at most one watch) + a wall-clock lifetime cap
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --until-batches-idle --max-runtime-min=60  # the push-at-close drain: a wall-clock lifetime cap (#2395); the whole-process lease is held automatically (#2449)
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --under-lease=<owner>  # #2449 a resident-daemon child pass: run WITHOUT acquiring — the declared live holder (the daemon) owns the lease + heartbeat
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --no-drain-lease  # escape hatch: skip the whole-process lease entirely (tests / break-glass)
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # #2257/#2287 — the ONE /drain sweeps ALL 3 constellation repos BY DEFAULT (WE+frontierui+plateau-app), one global blockedBy cascade
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --this-repo # #2287 — opt OUT: scope to the cwd repo only (a deliberately single-repo drain)
  *   node scripts/merge-ai-prs.mjs --repos=chalbert/frontierui,chalbert/plateau-app # sweep an explicit repo set (comma-separated owner/name slugs)
@@ -504,6 +506,34 @@ export function parseWatchOpts({ watch, interval, maxIdle, untilBatchesIdle, bat
   const untilBatches = !!untilBatchesIdle;
   const debounce = Number.isFinite(Number(batchIdleDebounce)) && Number(batchIdleDebounce) >= 1 ? Number(batchIdleDebounce) : 2;
   return { watch: on, intervalSec: iv, maxIdle: mi, untilBatchesIdle: untilBatches, batchIdleDebounce: debounce };
+}
+
+/** #2449 — route a run through the WHOLE-PROCESS drain lease (#2391), now ALWAYS-ON for full/label sweeps and
+ *  watches (closes #2424's opt-in gap and ratifies #2443's "hold by default"): at most ONE full drain runs on
+ *  the machine regardless of who launched it — a resident daemon, push-at-close, or an interactive `/drain`.
+ *  Pure ROUTING only — the atomic acquire itself can still lose a race (the caller treats a failed acquire as
+ *  `noop`). Actions:
+ *    • `bypass`      — run WITHOUT the lease: a `--dry-run` (merges nothing, must never be blocked by a
+ *      resident drain), a `--only=<pr>` single-PR fast drain (scoped; the numbering mutex already serializes
+ *      the land — this is what keeps `/pr`/`/finish` instant next to a resident daemon), or the explicit
+ *      `--no-drain-lease` escape hatch.
+ *    • `under-lease` — the caller declared it runs UNDER a live holder (`--under-lease=<owner>`, a resident
+ *      daemon's child pass): run without acquiring; the parent owns the lease + heartbeat.
+ *    • `noop`        — a LIVE lease is held by someone else, or the declared under-lease holder is gone (a
+ *      daemon that died between spawn and child start — fail SAFE, the queue rides the next drain): exit 0
+ *      surfacing the holder; that drain's next pass already covers this work.
+ *    • `acquire`     — the lease is free (or stale → reclaimable): take it for this run's FULL lifetime,
+ *      one-shot and watch alike. */
+export function decideDrainLeaseGate({ dryRun = false, onlyPr = null, noLease = false, underLease = null, status = { held: false, stale: false, owner: null } } = {}) {
+  if (dryRun) return { action: 'bypass', reason: 'dry-run' };
+  if (onlyPr != null) return { action: 'bypass', reason: 'single-pr-fast-drain' };
+  if (noLease) return { action: 'bypass', reason: 'no-drain-lease' };
+  if (underLease) {
+    if (status.held && status.owner === underLease) return { action: 'under-lease', heldBy: status.owner };
+    return { action: 'noop', heldBy: status.held ? status.owner : null, reason: status.held ? 'lease-held-by-other' : 'declared-holder-gone' };
+  }
+  if (status.held) return { action: 'noop', heldBy: status.owner, reason: 'lease-held' };
+  return { action: 'acquire' };
 }
 
 /** #2330 — the running-batch entries in an active-progress feed object. Pure (takes the parsed JSON). A batch
@@ -983,12 +1013,13 @@ function runCli() {
   // safe — it keeps watching — but defeats the exit). The 30s default clears the 4s cadence with wide margin;
   // it is independent of `--interval` (they merely share a 30s default value).
   const BATCH_FEED_STALE_MS = (Number.isFinite(Number(flags['batch-feed-stale-sec'])) && Number(flags['batch-feed-stale-sec']) > 0 ? Number(flags['batch-feed-stale-sec']) : 30) * 1000;
-  // #2395 — `--hold-drain-lease`: a `--watch` monitor takes the WHOLE-PROCESS drain lease (#2391) for its full
-  // lifetime, so at most ONE watch drains at a time. A second watch launch that finds a LIVE lease NO-OPs (its
-  // work is already being done); a STALE lease (a crashed watch) is reclaimed via the TTL. push-at-close reads
-  // that same lease to decide fire-vs-enqueue — this is the flag that makes the lease HONEST (the fired drain
-  // actually holds it). Opt-in (only push-at-close passes it), so interactive `/drain`/`/merge` are unchanged.
-  const HOLD_DRAIN_LEASE = !!flags['hold-drain-lease'];
+  // #2449 — the WHOLE-PROCESS drain lease (#2391) is ALWAYS-ON for full/label sweeps and watches (see
+  // decideDrainLeaseGate — closes #2424, ratifies #2443). `--hold-drain-lease` (#2395) is accepted as a
+  // legacy no-op alias (holding is the default now); `--no-drain-lease` is the explicit escape hatch; and
+  // `--under-lease=<owner>` (or the DRAIN_UNDER_LEASE env) declares this run a CHILD of the resident drain
+  // daemon that already holds the lease (#2449) — run without acquiring, the parent owns the heartbeat.
+  const NO_DRAIN_LEASE = !!flags['no-drain-lease'];
+  const UNDER_LEASE = (typeof flags['under-lease'] === 'string' && flags['under-lease']) ? flags['under-lease'] : (process.env.DRAIN_UNDER_LEASE || null);
   // #2395 — `--max-runtime-min=N`: a wall-clock lifetime cap on a `--watch` monitor. The bounded-max-lifetime
   // backstop push-at-close needs: when its detached drain has no batch feed, `--until-batches-idle` is INERT
   // and would poll forever, so this hard-stops the watch after N minutes regardless of idle/feed state. 0/unset
@@ -1860,6 +1891,33 @@ function runCli() {
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 
+  // ── Whole-process drain lease — ALWAYS-ON for full/label sweeps + watches (#2449; #2391/#2424/#2443) ──────
+  // Route through the pure gate, then perform the atomic acquire. A live foreign holder (or a lost acquire
+  // race) means this run's work is already being done — no-op exit 0 surfacing the holder. An acquired lease
+  // covers the run's FULL lifetime (one-shot AND watch) and is released on EVERY exit path (normal, break,
+  // signal) via the `exit` handler. `--only` fast drains, `--dry-run`, and `--no-drain-lease` bypass;
+  // a daemon child pass runs `under-lease` without acquiring (the parent heartbeats).
+  const leaseOwner = drainOwner();
+  const leaseGate = decideDrainLeaseGate({ dryRun: DRY_RUN, onlyPr, noLease: NO_DRAIN_LEASE, underLease: UNDER_LEASE, status: drainLeaseStatus(DRAIN_LOCK_ROOT) });
+  let leaseHeld = false;
+  if (leaseGate.action === 'acquire') leaseHeld = acquireDrainLease(DRAIN_LOCK_ROOT, leaseOwner).ok === true;
+  if (leaseGate.action === 'noop' || (leaseGate.action === 'acquire' && !leaseHeld)) {
+    const st = drainLeaseStatus(DRAIN_LOCK_ROOT);
+    const heldBy = st.owner || leaseGate.heldBy || null;
+    const detail = leaseGate.reason === 'declared-holder-gone'
+      ? `--under-lease holder ${UNDER_LEASE} no longer holds a live lease — no-op; the queue rides the next drain (#2449)`
+      : `another drain already holds the whole-process lease (${heldBy || '?'}) — no-op; its next pass covers this work (#2449/#2391)`;
+    if (AS_JSON) process.stdout.write(JSON.stringify({ ok: true, ...(WATCH ? { watch: true } : {}), skipped: 'drain-in-progress', heldBy, detail }) + '\n');
+    else process.stderr.write(`merge-ai-prs · ${detail}\n`);
+    process.exit(0);
+  }
+  if (leaseHeld) {
+    // Release on ANY exit path (the watch loop has several `break`s + signal kills). Idempotent + owner-fenced:
+    // releaseDrainLease only frees a lease THIS owner still holds, so a reclaimer who seized it is never stomped.
+    process.on('exit', () => { releaseDrainLease(DRAIN_LOCK_ROOT, leaseOwner); });
+    for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0)); // → triggers the exit handler → frees the lease
+  }
+
   // ── Driver — one sweep (the /drain one-shot + /merge bare), or the `--watch` monitor (`/drain watch`) ──────
   if (!WATCH) {
     let { result, failedMerges, duplicateIdsOnMain } = sweepOnce();
@@ -1877,25 +1935,6 @@ function runCli() {
     process.exit((duplicateIdsOnMain && duplicateIdsOnMain.length) ? 3 : (failedMerges.length ? 2 : 0));
   }
 
-  // #2395 — WHOLE-PROCESS DRAIN LEASE: when `--hold-drain-lease`, this watch takes the exclusive lease (#2391)
-  // for its full lifetime — acquired here, heartbeated each pass, released on EVERY exit (normal, break, signal)
-  // via the `exit` handler below. A launch that finds a LIVE lease NO-OPs (a watch is already draining); a STALE
-  // lease (a crashed watch) is reclaimed via the TTL. Mirrors the retired lane-drain lease discipline exactly.
-  const leaseOwner = drainOwner();
-  if (HOLD_DRAIN_LEASE) {
-    const lease = acquireDrainLease(DRAIN_LOCK_ROOT, leaseOwner);
-    if (!lease.ok) {
-      const st = drainLeaseStatus(DRAIN_LOCK_ROOT);
-      if (AS_JSON) process.stdout.write(JSON.stringify({ ok: true, watch: true, skipped: 'drain-in-progress', heldBy: st.owner, detail: `another drain watch already holds the lease (${st.owner}) — no-op (#2395/#2391)` }) + '\n');
-      else process.stderr.write(`merge-ai-prs · another drain watch already running (lease held by ${st.owner || '?'}) — no-op (#2395)\n`);
-      process.exit(0);
-    }
-    // Release on ANY exit path (the watch loop has several `break`s + signal kills). Idempotent + owner-fenced:
-    // releaseDrainLease only frees a lease THIS owner still holds, so a reclaimer who seized it is never stomped.
-    process.on('exit', () => { releaseDrainLease(DRAIN_LOCK_ROOT, leaseOwner); });
-    for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0)); // → triggers the exit handler → frees the lease
-  }
-
   // WATCH: re-sweep on a fixed interval, landing PRs as they become eligible, until `--max-idle` consecutive
   // idle passes (merged nothing AND nothing deferred waiting) — or forever if `--max-idle` is unset (Ctrl-C).
   const watchStartedAt = Date.now(); // #2395 — for the `--max-runtime-min` wall-clock cap
@@ -1910,7 +1949,7 @@ function runCli() {
   let lastFailed = [];
   let lastDup = [];
   for (let pass = 1; ; pass++) {
-    if (HOLD_DRAIN_LEASE) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner); // #2395 — keep the whole-process lease alive across a long watch
+    if (leaseHeld) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner); // #2395 — keep the whole-process lease alive across a long watch (an `under-lease` child never heartbeats — its parent daemon owns that)
     // #2395 — wall-clock lifetime cap: hard-stop a `--max-runtime-min` watch so an inert `--until-batches-idle`
     // (no batch feed present) can never poll forever. The deferred sweep is the backstop for anything unlanded.
     if (MAX_RUNTIME_MS != null && Date.now() - watchStartedAt >= MAX_RUNTIME_MS) {
