@@ -453,6 +453,16 @@ describe('lane-resume — rebuildDescendant (#2396: reuse the rebase-drop plumbi
     }
   });
 
+  it('a non-lane laneRef (branch-controlled manifest content) is REFUSED before any git call — protected-branch / refspec-injection guard (#2396)', () => {
+    for (const bad of ['main', 'refs/heads/main', '--upload-pack=touch /tmp/pwn', '+refs/heads/x:refs/heads/main', 'lane/x:refs/heads/main', 'lane/../main', 'lane/', 'lane/a b', 'origin/lane/child']) {
+      const { run, calls } = scriptedRun({});
+      const v = rebuildDescendant({ laneRef: bad, ontoSha: onto, run });
+      expect(v.action).toBe('error');
+      expect(v.reason).toMatch(/not a lane\/\* ref/);
+      expect(calls.length).toBe(0); // the crafted value never reaches git argv
+    }
+  });
+
   it('accepts an abbreviated (7-40 hex) SHA, case-insensitive', () => {
     const { run } = scriptedRun({ 'git merge-tree': { status: 0, stdout: 'tree'.padEnd(40, '0') }, ...RESOLVE_PLUMBING, 'gh pr': { status: 0 } });
     expect(rebuildDescendant({ laneRef: 'lane/child', ontoSha: 'AbC1234', run }).action).toBe('rebased');

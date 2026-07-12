@@ -352,6 +352,15 @@ export function rebuildDescendant({ laneRef, ontoSha, run = gitRunner, ...rest }
   // name, never anything that could carry an option or a rev-expression.
   if (!/^[0-9a-f]{7,40}$/i.test(String(ontoSha)))
     return { action: 'error', laneRef, reason: `ontoSha ${JSON.stringify(String(ontoSha))} is not a commit SHA (7-40 hex) — refusing to pass non-SHA (possibly branch-controlled) content to git (#2396)` };
+  // SECURITY — `laneRef` rides the SAME branch-controlled path (manifest `repos[].ref` → discover →
+  // rebuild-plan → `rebuild <laneRef>`) and is fed to `git fetch` argv AND the push refspec. A crafted value
+  // could name a PROTECTED branch (`main` — the rebuilt merge commit would fast-forward straight onto main,
+  // bypassing the PR transport and the required `test` check) or smuggle an option/refspec token
+  // (`--upload-pack=…`, `x:refs/heads/main`, `+refs/…`). Accept ONLY the vocabulary the lane transport mints:
+  // a `lane/…` ref in the plain ref charset (no `-` lead, no `:`/`+`/whitespace, no `..`) — every legitimate
+  // caller satisfies this, and `main` never does.
+  if (!/^lane\/[\w.-]+(?:\/[\w.-]+)*$/.test(String(laneRef)) || String(laneRef).includes('..'))
+    return { action: 'error', laneRef, reason: `laneRef ${JSON.stringify(String(laneRef))} is not a lane/* ref — refusing to pass non-lane (possibly branch-controlled) content to git (#2396)` };
   const r = rebaseDropManifest({ laneRef, base: ontoSha, run, ...rest });
   if (r.action === 'skip') return { action: 'guided-conflict', laneRef, ontoSha, conflictPaths: r.conflictPaths || [], reason: `${r.reason} — one guided conflict to resolve with the manifest topology (#2396)` };
   return { ...r, ontoSha };
