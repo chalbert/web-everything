@@ -90,7 +90,7 @@ win (→ shrink the parent epic).
 - **Next (operator):** `node plateau:tools/drain-daemon/cli.mjs install` (run from the plateau-app
   checkout) — provisions the dedicated `we-drain-daemon` WE clone and bootstraps the LaunchAgent
   (installing a launchd agent is deliberately left to the operator). Evidence review scaffolded as
-  #xg39p9t.
+  #2456.
 - **Notes:** `--only` lease-bypass is deliberate (scoped land, numbering mutex keeps it safe);
   daemon child passes inherit label-lag repoll (#2230) from the one-shot path; gate-self stays
   anchored because ALL sweep logic stays in `we:scripts/` (#2448 remains open and owed).
