@@ -5,6 +5,19 @@ description: Launch the deferred merge-queue drain — land the queued `lane/*` 
 
 # Drain the deferred merge queue (#2162)
 
+> **A resident daemon normally owns this now (#2449).** The phase-1 drain daemon
+> (`plateau:tools/drain-daemon/`, hosted in plateau-app next to the dev-panel) holds the whole-process
+> drain lease (#2391) for its entire residency and runs the sweep below as one-shot passes on an
+> interval — *who runs `/drain`* is the one session convention it retires. The lease is now ALWAYS-ON
+> for full/label sweeps and watches (#2449 closed #2424's opt-in gap and ratified #2443's "hold by
+> default"): while the daemon (or any other drain) holds it, a manual full `/drain`/`/merge` **no-ops
+> exit 0 surfacing the holder** — correct behavior, not a failure; the resident's next pass covers the
+> work. `--only=<pr>` fast drains (what `/pr`/`/finish` shell) **bypass** the lease and stay instant
+> (the numbering mutex serializes lands); `--dry-run` also bypasses, so the plan read below always
+> works. Daemon stopped/absent ⇒ everything degrades to exactly this skill's manual flow — it remains
+> the fallback and the single source for how a sweep works. Operate the daemon from the plateau-app
+> checkout: `node tools/drain-daemon/cli.mjs status|once|logs|install|stop`.
+
 The whole mechanism lives in **[scripts/merge-ai-prs.mjs](../../../scripts/merge-ai-prs.mjs)** — this skill is
 the trigger + the ceremony around one invocation, so there is nothing to keep in sync here. The drain is the
 consumer side of the #2183 PR fan-out: producing sessions (parallel `/workflow` lanes, solo `#2123` lanes, and
