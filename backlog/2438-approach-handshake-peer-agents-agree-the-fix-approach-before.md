@@ -3,8 +3,11 @@ bornAs: xcey4lq
 kind: story
 size: 3
 parent: "2410"
-status: open
+status: resolved
 dateOpened: "2026-07-11"
+dateStarted: "2026-07-11"
+dateResolved: "2026-07-11"
+graduatedTo: scripts/lib/review-core.mjs (buildPlanMandate, buildPlanCritiqueMandate, derivePlanOutcome, PLAN_ROUND_CAP, PLAN_OUTCOMES)
 relatedReport: reports/2026-07-11-backlog-split-analysis-2410.md
 tags: []
 ---
