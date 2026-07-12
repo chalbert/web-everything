@@ -6,6 +6,8 @@ size: 3
 status: open
 priority: low
 dateOpened: "2026-07-11"
+researchTopic: delivery-coordinator-placement
+relatedReport: reports/2026-07-12-delivery-coordinator-placement.md
 tags: [plateau-loop, constellation, placement]
 ---
 
@@ -23,6 +25,21 @@ Constellation placement for the coordinator: inside plateau-app (tools/ sibling 
 > internal-tooling decision), and every option must carry the gate-self re-anchoring cost
 > ([#2448](/backlog/2448-re-anchor-the-gate-self-trust-chain-when-the-delivery-engine/)).
 > `priority: low`: pickable, out of auto-select.
+
+> **Prep assessment (2026-07-12, `/prepare all`):** the operator defer above is honored — not prepared,
+> no `preparedDate`. The prior-art half that does *not* depend on daemon evidence is banked at
+> [/research/delivery-coordinator-placement/](/research/delivery-coordinator-placement/) (bors/homu,
+> Prow, Zuul, productized merge queues, AI-fleet coordinators, and the self-hosting
+> deployed-instance/source split), so the eventual prep starts warm. Three red-team findings the
+> eventual forks must carry: (1) the survey supports **staged placement** at least as strongly as
+> own-repo-now — read as dynamics, Prow ran ~8 years inside a coordinated infra repo and split only on
+> external adoption, which matches the provisional plateau-app start above; (2) an eventual own-repo
+> ratification must carry explicit amendments to `#devtools-placement`, `#constellation-placement`, and
+> `#pool-siblings-real-built-clones` (`we:docs/agent/platform-decisions.md` — all three currently speak
+> plateau-app / three-member vocabulary); (3) [#1747](/backlog/1747-decide-the-plateau-explorer-product-surface-to-fui-explorer-/)
+> (the whole explorer engine relocated *into* plateau-app) is the nearest in-kind precedent and belongs
+> in any reconciliation alongside #1565/#1579. Un-defer trigger: [#2449](/backlog/2449-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)'s
+> operating evidence.
 
 ## The question
 

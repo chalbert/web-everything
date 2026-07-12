@@ -1,0 +1,24 @@
+{
+  "id": "delivery-coordinator-placement",
+  "title": "Where a multi-repo delivery coordinator lives — module of a coordinated repo, own repo, or standalone product",
+  "status": "open",
+  "summary": "Surveys where real delivery/merge-queue/CI coordinators live relative to the repos they manage, to ground #2446 (Plateau Loop placement). Merge-queue lineage (Rust's bors → homu → rust-lang/bors; bors-ng): always own repos run as deployed services, never modules of the coordinated repo — separateness enables serving many repos and decouples deploy cadence. Kubernetes Prow: born in the dedicated kubernetes/test-infra tooling monorepo (never the product repo), split to its own kubernetes-sigs/prow repo in April 2024 driven by external adoption, import paths, and release management. Zuul: OpenStack's gating system spun out as an independent project in 2018 when outside orgs wanted it. Productized coordinators (GitHub merge queue, Mergify, Graphite; vibe-kanban and other AI-fleet tools) show coordinator-as-product is a real branch, but every example was born standalone — none grew out of a module of some other product — and the homu.io hosted-service death shows the product bet needs a committed operator. AI-agent fleet coordinators (Devin, OpenHands, dagger/container-use, claude-squad, vibe-kanban) are uniformly separate tools/products with state held outside the target repos; zero examples live inside a repo they coordinate. Self-hosting circularity is a solved non-problem: bors-ng, Prow/Tide, and Zuul all land PRs into their own source repos because the deployed instance is decoupled from the source tree — breakage surfaces at redeploy, not at land. Observable pattern: repo-local tools dirs are for glue that version-locks with one repo; a coordinator spanning N repos structurally cannot. Migrations run one direction only: module → own repo → (optionally) product. Two defensible readings of the corpus: the END-STATE reading (every mature multi-repo coordinator sits in its own repo; a three-repo constellation already crosses the more-than-one-consumer line) favors own-repo-now, while the DYNAMICS reading (Prow ran ~8 years inside kubernetes/test-infra — itself a repo Prow/Tide coordinated and merged into — and split only when external orgs adopted it; Zuul likewise split on outside demand) favors staged placement: start inside the constellation's existing devtool locus, graduate to an own repo on a concrete external-adoption or product trigger. The survey grounds both; the discriminator is the graduation trigger, matching the 2026-07-11 operator call that hosts the phase-1 daemon provisionally in plateau-app without prejudice to #2446.",
+  "dateOpened": "2026-07-12",
+  "lastReviewed": "2026-07-12",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "delivery-coordinator",
+    "merge-queue",
+    "constellation",
+    "placement",
+    "self-hosting",
+    "bors",
+    "prow",
+    "zuul",
+    "agent-fleet",
+    "plateau-loop"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

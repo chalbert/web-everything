@@ -1,0 +1,114 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  A long-lived <strong>delivery coordinator</strong> (lane/worktree pool, merge-queue drain, PR landing,
+  backlog CLI, supervised AI coding agents) manages a small constellation of repos — a standards repo, an
+  implementation repo, a product app. Where does the coordinator itself live? This grounds
+  <a href="/backlog/2446-where-does-plateau-loop-live-plateau-app-module-own-repo-or-/">#2446</a>
+  (Plateau Loop placement, under epic
+  <a href="/backlog/2445-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/">#2445</a>).
+  Three candidates:
+</p>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>(a) Module of a coordinated repo</strong> — e.g. a tools/ directory inside the product app.</li>
+  <li><strong>(b) Own repo</strong> — a fourth constellation member.</li>
+  <li><strong>(c) Standalone product</strong> — the coordinator <em>is</em> the product's delivery surface.</li>
+</ul>
+
+<h2>What the prior art does</h2>
+<table>
+  <thead>
+    <tr><th>Coordinator</th><th>Where it lives</th><th>Migration story / driver</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>bors → homu → rust-lang/bors (Rust merge queue)</td>
+      <td>Own repo from birth, run as a deployed service (bors-prod.rust-lang.net); one instance queues
+        PRs for rust, cargo, and more</td>
+      <td>A service with its own lifecycle (deploys, secrets, GitHub App identity) serving many repos —
+        placing it in the compiler repo would tie its deploy cadence to the compiler's. The hosted
+        homu.io variant died when its operator left; Rust survived on its own fork.</td>
+    </tr>
+    <tr>
+      <td>bors-ng</td>
+      <td>Own repo, standalone GitHub App</td>
+      <td>Dogfoods itself: its repo carries a bors.toml and merges its own PRs through its own public
+        instance — the standard answer to self-hosting circularity.</td>
+    </tr>
+    <tr>
+      <td>Kubernetes Prow / Tide</td>
+      <td>Born in kubernetes/test-infra — a <em>dedicated tooling monorepo</em>, never the product repo</td>
+      <td>Moved to its own repo (kubernetes-sigs/prow) in April 2024: external adopters (Istio,
+        OpenShift), painful Go import paths and release management inside the monorepo.</td>
+    </tr>
+    <tr>
+      <td>Zuul (OpenStack gating)</td>
+      <td>Started inside openstack-infra; independent top-level project since May 2018 (v3)</td>
+      <td>Outside orgs wanted it but were put off by OpenStack-specific framing; independence made
+        adoption credible. Gates its own repos on OpenDev.</td>
+    </tr>
+    <tr>
+      <td>GitHub merge queue · Mergify · Graphite</td>
+      <td>Standalone products/platforms</td>
+      <td>The coordinator-as-product branch realized — but every example was <em>born</em> standalone;
+        none grew out of a module of some other product.</td>
+    </tr>
+    <tr>
+      <td>AI-agent fleet coordinators (Devin, OpenHands, dagger/container-use, claude-squad, vibe-kanban)</td>
+      <td>Uniformly separate tools/products; state (worktree pools, DBs) held <em>outside</em> the target
+        repos</td>
+      <td>Zero examples of an agent-fleet coordinator living inside a repo it coordinates;
+        container-use even keeps its worktrees under the user's config dir.</td>
+    </tr>
+    <tr>
+      <td>Nx · Turborepo vs repo-local tools dirs</td>
+      <td>Generic build coordinators: own repos/products. Repo-local glue (Kubernetes hack/, Chromium
+        tools/, LLVM utils/): in-repo</td>
+      <td>The dividing line: does the tool need to <strong>version-lock</strong> with the code it operates
+        on? Repo-specific glue does; a coordinator spanning repos structurally cannot.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Synthesis — the observable pattern</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>Nobody puts a multi-repo delivery coordinator inside a product repo.</strong> The closest
+    analog to (a) — Prow in test-infra — was a dedicated infra repo, not the product, and still split out
+    once adoption grew.</li>
+  <li><strong>The trigger for "own repo" is serving more than one consumer</strong> — more repos (bors,
+    Prow from day one) or more organizations (Prow 2024, Zuul 2018). A three-repo constellation already
+    crosses that line.</li>
+  <li><strong>Self-hosting is a solved non-problem:</strong> bors-ng, Prow/Tide, and Zuul all land PRs
+    into their own source repos. The deployed instance is decoupled from the source tree, so merging into
+    the coordinator's own repo is just another merge; breakage surfaces at redeploy and is rolled back
+    like any service.</li>
+  <li><strong>Coordinator-as-product is a real branch but a business commitment</strong> — every example
+    was born standalone, and homu.io shows it dies without a sustained operator. Placement (b) never
+    blocks a later product graduation; that is the Zuul/Prow path.</li>
+  <li><strong>Migrations run one direction only:</strong> module → own repo (→ product). No surveyed case
+    of a coordinator moving <em>into</em> a coordinated repo.</li>
+</ul>
+
+<h2>Constellation application</h2>
+<p>
+  The engine is ~5,300 lines of already repo-parameterized Node under WE's scripts dir; the operative
+  registry is a hardcoded three-name list (<code>CONSTELLATION_REPO_NAMES</code>). WE zero-implementation
+  (<a href="/backlog/1282-should-we-go-fully-zero-implementation-withdraw-the-1078-ref/">#1282</a>)
+  forces the engine out of WE under every branch. Two defensible readings of the corpus: the
+  <strong>end-state</strong> reading (every mature multi-repo coordinator sits in its own repo) favors
+  own-repo-now; the <strong>dynamics</strong> reading (Prow ran ~8 years inside a coordinated infra repo
+  and split only on external adoption) favors <strong>staged placement</strong> — start in the
+  constellation's existing devtool locus, graduate on a concrete trigger. The 2026-07-11 operator call
+  (phase-1 daemon provisionally in plateau-app, without prejudice to
+  <a href="/backlog/2446-where-does-plateau-loop-live-plateau-app-module-own-repo-or-/">#2446</a>)
+  matches the dynamics reading. Note for the eventual ratification: an own-repo ruling needs explicit
+  amendments to the devtools-placement, constellation-placement, and pool-siblings statutes (all
+  currently speak plateau-app / three-member vocabulary), and the nearest in-kind precedent —
+  <a href="/backlog/1747-decide-the-plateau-explorer-product-surface-to-fui-explorer-/">#1747</a>, the
+  whole explorer engine relocated <em>into</em> plateau-app — belongs in that reconciliation. The
+  product-line framing defers to the parked hosted-suite trigger
+  (<a href="/backlog/554-plateau-hosted-saas-product-suite-shell-multi-product-accoun/">#554</a>).
+  See also <a href="/research/cross-repo-tool-engine-product-boundary/">the tool-engine/product-boundary
+  topic</a> for the engine-vs-surface split this placement composes with.
+</p>
+{% endraw %}
