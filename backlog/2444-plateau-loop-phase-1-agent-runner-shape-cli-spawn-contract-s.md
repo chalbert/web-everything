@@ -6,6 +6,8 @@ size: 3
 status: open
 priority: low
 dateOpened: "2026-07-11"
+researchTopic: claude-cli-agent-runner-headless-contract
+relatedReport: reports/2026-07-12-claude-cli-agent-runner-headless-contract.md
 tags: [plateau-loop, agent-runner, claude-cli]
 ---
 
@@ -17,6 +19,23 @@ Define the agent-runner interface (spawn/steer/stop/resume) with the claude CLI 
 > daemon only ([#2449](/backlog/2449-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)),
 > which spawns no agents — so this decision has no consumer yet. Prepare/ratify only once the daemon's
 > operating evidence says the extraction should grow. `priority: low`: pickable, out of auto-select.
+
+> **Prep assessment (2026-07-12, `/prepare all`):** the operator defer above is honored — not prepared,
+> no `preparedDate`. The docs survey that does *not* depend on daemon evidence is banked at
+> [/research/claude-cli-agent-runner-headless-contract/](/research/claude-cli-agent-runner-headless-contract/)
+> (facts verified 2026-07-12 against the official docs). Findings that reshape the eventual forks:
+> (1) **the setup-token spike is resolved** — `claude setup-token` is a CLI credential; Agent-SDK
+> subscription use is undocumented and terms-restricted, so a subscription-funded runner spawns the CLI
+> and the SDK is a later API-key backend; (2) `--input-format stream-json` is a **documented CLI
+> channel** (since v2.1.205 a message sent mid-turn stays queued and runs as its own turn) — a
+> non-destructive, same-process boundary steering channel, so the steering option space is hook-gate
+> early delivery vs queued-stdin boundary delivery and the two likely **compose**; kill+`--resume`
+> remains the hard-redirect op, not the steer channel; (3) headless `-p` **aborts** on an unresolved
+> permission (no prompt path), so every spawn needs a *closed* permission resolution — and repeated
+> blocks abort the session, so a steer-via-deny gate must deny exactly once and pass the retry;
+> (4) `we:scripts/guard-bash.mjs:410-414` proves the deny-with-reason wire shape in production
+> (Bash/Edit matchers, policy framing) — fitness of that channel for *operator steering* is unproven
+> and needs a spike with a catch-all matcher and operator-text framing.
 
 ## Red-team risks to fold into the forks (2026-07-11)
 
