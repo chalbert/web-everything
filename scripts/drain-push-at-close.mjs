@@ -15,7 +15,10 @@
  *      next poll. This is the fast, common no-spawn path.
  *   2. FREE (or a stale/reclaimable lease) ⇒ fire ONE **detached, self-terminating** drain watch:
  *      `merge-ai-prs --label=ready-to-merge --watch --until-batches-idle --hold-drain-lease --max-runtime-min=N`.
- *      The `--hold-drain-lease` child ACQUIRES the lease itself (the atomic O_EXCL race winner), so if two
+ *      (Since #2449 the lease is ALWAYS-ON for watches — `--hold-drain-lease` is a kept-for-clarity no-op
+ *      alias. With the #2449 resident drain daemon installed, step 1 sees ITS lease held and this launcher
+ *      no-ops permanently — retired by construction, kept as the daemon-absent fallback.)
+ *      The child ACQUIRES the lease itself (the atomic O_EXCL race winner), so if two
  *      closes both saw FREE and both fired, exactly one child wins the lease and drains — the other no-ops.
  *      The lease is thus the honest "a drain is running" signal a later close reads at step 1.
  *
