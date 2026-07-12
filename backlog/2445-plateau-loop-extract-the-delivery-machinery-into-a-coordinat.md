@@ -3,8 +3,8 @@ bornAs: xhmav8a
 kind: epic
 status: open
 dateOpened: "2026-07-11"
-costUsd: 39.95
-costSessions: 1
+costUsd: 41.57
+costSessions: 2
 tags: [delivery-machinery, coordinator, plateau]
 ---
 
