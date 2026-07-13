@@ -215,8 +215,8 @@ describe('hasReviewLabel + REVIEW_LABELS', () => {
     expect(hasReviewLabel([{ name: 'review:pending' }], REVIEW_LABELS.pending)).toBe(true);
     expect(hasReviewLabel([], REVIEW_LABELS.accepted)).toBe(false);
   });
-  it('exposes the ratified verdict labels (+ the #2285 human gate) + tuning knobs', () => {
-    expect(REVIEW_LABELS).toEqual({ pending: 'review:pending', accepted: 'review:accepted', changes: 'review:changes', human: 'review:human' });
+  it('exposes the ratified verdict labels (+ the #2285 human gate, #2439 validator) + tuning knobs', () => {
+    expect(REVIEW_LABELS).toEqual({ pending: 'review:pending', accepted: 'review:accepted', changes: 'review:changes', human: 'review:human', redteamAccepted: 'redteam:accepted' });
     expect(DEFAULT_THRESHOLDS.diffLines).toBeGreaterThan(0);
   });
 });

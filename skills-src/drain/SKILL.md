@@ -275,9 +275,18 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
   3. **Decide what's next** — `deriveNegotiationOutcome({ verdict, round, roundCap })` on the REDUCED panel
      verdict from step 2 (pure; the round-cap decision is deterministic, not a judgment call):
      - **`land`** (verdict `accept` — every mandatory lens unanimously accepted) → **gate on the disposition's
-       `autoLand`.** `autoLand: true` (a plain sensitivity park) → apply `review:accepted` (`gh pr edit <num>
-       --repo <repo> --add-label review:accepted`) and **re-run the drain** (a bare pass) — the invariant holds:
-       non-author reviewers accepted the FINAL diff. `autoLand: false` (`gate-self`) → **do NOT apply
+       `autoLand`.** `autoLand: true` (a plain sensitivity park, incl. the engine-tier lander) → **run the
+       INDEPENDENT HARDENED VALIDATOR (#2439) before landing.** Spawn a fresh-context validator JURY — one
+       subagent per `PANEL_LENSES` lens seeded with `buildValidatorMandate({ lens })`. The jury took NO part in
+       the negotiation and is NEVER shown the peers' findings, dismissals, or reasoning — only the FINAL diff and
+       the tests it touches. Reduce its per-lens verdicts with `derivePanelVerdict(...)` → `validatorVerdict`,
+       then `combineValidatedVerdict({ panelVerdict, validatorVerdict })` and re-run `deriveNegotiationOutcome`
+       on the combined verdict: **combined `land`** (BOTH the panel and the independent validator accepted) →
+       apply `redteam:accepted` THEN `review:accepted` (`gh pr edit <num> --repo <repo> --add-label
+       redteam:accepted --add-label review:accepted`) and **re-run the drain** — the non-author-accepts invariant
+       now holds INDEPENDENTLY; **combined `continue`** (the validator wants changes the panel missed) → step 4,
+       another editor round; **combined `escalate`** (validator `needs-human`) → the `escalate` path below.
+       `autoLand: false` (`gate-self`) → **do NOT apply
        `review:accepted`**: the panel converged and fixed the diff, but a human must clear a trust-chain edit.
        Keep `review:human`, post the converged findings + `renderPanelVerdictTable(...)` as the `🤖 advisory AI
        review / fix (non-clearing)` comment, and surface the PR to the operator via
