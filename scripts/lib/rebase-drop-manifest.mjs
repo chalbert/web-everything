@@ -87,6 +87,8 @@ export function gitRunner(cmd, args, { env, cwd } = {}) {
  * Rebuild a lane PR's tip onto `<base>` with the manifest dropped, via pure plumbing. Does NOT merge (the
  * caller does). Returns one of:
  *   { action:'rebased', newCommit, dropped, base, laneRef } — pushed a manifest-free, up-to-date tip.
+ *   { action:'current', newCommit, reason, base, laneRef }  — tip already on base AND manifest-free; no rebuild
+ *                                                             (idempotency — nothing minted, nothing pushed).
  *   { action:'skip',  reason, conflictPaths }               — a real (non-manifest) conflict; untouched.
  *   { action:'error', reason }                              — a plumbing step failed.
  *
@@ -162,6 +164,26 @@ export function rebaseDropManifest({
   const wt = run('git', ['write-tree'], { env, cwd });
   const resolvedTree = String(wt.stdout || '').trim();
   if (wt.status !== 0 || !resolvedTree) return { action: 'error', reason: `write-tree failed (${(wt.stderr || '').split('\n')[0]})` };
+
+  // IDEMPOTENCY SHORT-CIRCUIT (drain re-push churn bug). `rebaseDropManifest` used to ALWAYS `commit-tree` (minting a fresh SHA)
+  // and force-push the rebuilt tip — even when the tip is ALREADY rebased on `base` AND already manifest-free.
+  // The drain reads `hasManifest` from the PR *body* and fires this every pass, so a green, on-main,
+  // manifest-free PR got its head SHA churned every pass → CI restarts → it never stays green long enough to
+  // merge (a batch never converged). Skip the rebuild ONLY when BOTH hold: (a) `base` is already an ancestor of
+  // the tip (the tip is NOT behind base — a genuinely BEHIND tip has `isAncestor === false` and still gets the
+  // real rebase), AND (b) the tip's CURRENT tree already equals the manifest-free `resolvedTree` (a tip still
+  // carrying a committed manifest has `curTreeOid !== resolvedTree` — the manifest was removed from resolvedTree
+  // — so it still gets rebuilt to drop it). Over-conservative direction: when uncertain, rebuild.
+  const curTreeOid = String(run('git', ['rev-parse', `${mergeRef}^{tree}`], { cwd }).stdout || '').trim();
+  const isAncestor = run('git', ['merge-base', '--is-ancestor', base, mergeRef], { cwd }).status === 0;
+  if (isAncestor && curTreeOid && curTreeOid === resolvedTree) {
+    const curCommit = String(run('git', ['rev-parse', mergeRef], { cwd }).stdout || '').trim();
+    // Guard: only claim 'current' if we can actually resolve the tip's commit sha; otherwise fall through to
+    // the normal rebuild rather than return a bogus result.
+    if (curCommit) {
+      return { action: 'current', reason: 'tip already up-to-date on base and manifest-free — no rebuild needed', base, laneRef, newCommit: curCommit };
+    }
+  }
 
   const healTag = healed.length ? `, renumber ${healed.map((r) => `#${r.oldNum}→#${r.newNum}`).join('/')}` : '';
   const msg = message || `drain: rebase ${laneRef} onto ${base}, drop transient ${manifest}${healTag}`;
