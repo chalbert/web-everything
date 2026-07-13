@@ -12,6 +12,7 @@
  * second look is decided by rule, not by the merging agent eyeballing the diff). Thresholds are TUNING KNOBS
  * — start loose, tighten from data; they live here so a change is one edit + a test, never scattered.
  */
+import { isTrustChainPath } from './gate-config.mjs';
 
 /** The ratified reviewer-verdict labels (#2171). The reviewer's disposition is a LABEL, never comment-parsing:
  *  independent *disposition* (reviewer accepts/rejects) is split from hot-context *fixing* (the author lane). */
@@ -60,27 +61,17 @@ export function isBlastRadiusPath(path) {
   return BLAST_RADIUS.some((re) => re.test(p));
 }
 
-/** The AUTO-REVIEW TRUST CHAIN (#2285 v1). A diff touching one of these files edits the very machinery that
- *  decides whether the review gate fires and what clears it — so an *agent* reviewing such a change would be
- *  policing an edit to its own leash (a genuine conflict of interest). These, and ONLY these, force a HUMAN
- *  review (`review:human`). Every other blast-radius path is agent-reviewable: a fresh-context adversarial
- *  reviewer is independent of the *producer* there, with no self-gate conflict. Keep this list MINIMAL — human
- *  gate = judgment essential, not merely "important" (a wider net just re-strands the queue on humans). */
-const GATE_SELF_PATHS = [
-  /(^|\/)scripts\/lib\/review-escalation\.mjs$/, // the escalation rubric itself (this file)
-  /(^|\/)scripts\/merge-ai-prs\.mjs$/,           // the lander that reads the verdict labels + decides to merge
-  // The tripwire suite that PROVES the safety invariants of the two files above (gate-self ⇒ human, no
-  // auto-merge under review:human, red never mergeable, drain sole-writer, …). It is in this list on purpose:
-  // weakening an invariant is the one gate change an agent must not clear, so editing it forces review:human —
-  // shrinking human review of gate changes down to "changes to what the invariants assert". See the file header.
-  /(^|\/)scripts\/lib\/__tests__\/gate-invariants\.test\.mjs$/,
-];
-
-/** Does this repo-relative path edit the auto-review trust chain (→ a human review is essential)? Pure. */
-export function isGateSelfPath(path) {
-  const p = String(path || '');
-  return GATE_SELF_PATHS.some((re) => re.test(p));
-}
+/** The AUTO-REVIEW TRUST CHAIN (#2285 v1, re-anchored #2448). A diff touching one of these files edits the
+ *  very machinery that decides whether the review gate fires and what clears it — so an *agent* reviewing such
+ *  a change would be policing an edit to its own leash (a genuine conflict of interest). These, and ONLY these,
+ *  force a HUMAN review (`review:human`). Every other blast-radius path is agent-reviewable: a fresh-context
+ *  adversarial reviewer is independent of the *producer* there, with no self-gate conflict.
+ *
+ *  #2448 — the roster (and the basename-based matcher that lets it TRAVEL when the engine is extracted out of
+ *  `we:scripts/`, per the #2445 coordinator epic) now lives in explicit, versioned config: ./gate-config.mjs.
+ *  `isGateSelfPath` is that config's `isTrustChainPath` under its historical name, so every existing caller and
+ *  test is unchanged. See gate-config.mjs for the extraction contract and the self-hosting design. */
+export const isGateSelfPath = isTrustChainPath;
 
 /**
  * Score ONE ready PR against the escalation rubric. Pure. Returns `{ escalate, reasons, signals }` — `escalate`

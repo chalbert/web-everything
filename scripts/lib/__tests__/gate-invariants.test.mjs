@@ -17,8 +17,8 @@
  * a refactor that has to change an assertion HERE is, by definition, changing what "safe" means — and that
  * is exactly the diff a human should look at.
  *
- * SELF-REFERENCE (the load-bearing bit). This file's path is in `GATE_SELF_PATHS` (see
- * `../review-escalation.mjs`), so editing it forces `review:human` on its own PR — the one class of change
+ * SELF-REFERENCE (the load-bearing bit). This file's basename is in the `TRUST_CHAIN` roster (see
+ * `../gate-config.mjs`, #2448), so editing it forces `review:human` on its own PR — the one class of change
  * that an agent reviewer may not clear. That closes the loop: the invariants review every future change to
  * the gate for free (in CI, via the required `test` check), and the ONLY gate change that still needs a
  * human is one that edits an invariant. Do not weaken an assertion here to make a diff pass; if an
@@ -53,8 +53,18 @@ function product(...arrays) {
 const GATE_SELF_FILES = [
   'scripts/lib/review-escalation.mjs',
   'scripts/merge-ai-prs.mjs',
+  'scripts/lib/gate-config.mjs',              // #2448 — the trust-chain roster; editing it is gate-self (the closure)
   'frontierui/scripts/merge-ai-prs.mjs',      // a repo-prefixed clone path still counts
   'scripts/lib/__tests__/gate-invariants.test.mjs', // THIS file — self-referenced (see header)
+];
+// #2448 — the delivery engine, RELOCATED out of we:scripts/ (the #2445 coordinator: a plateau-app module,
+// a new package dir, or its own repo). Basename-matched, so it stays gate-self across the move — the exact
+// property the parent epic's red team flagged as silently lost. These are also the self-hosting boundary
+// (#2285 one level up): a PR editing the relocated coordinator can never be agent-cleared.
+const RELOCATED_ENGINE_FILES = [
+  'plateau-app/tools/loop/review-escalation.mjs',   // extracted into plateau-app next to the dev-panel
+  'packages/plateau-loop/src/merge-ai-prs.mjs',     // extracted into a package dir
+  'plateau-loop/gate/gate-config.mjs',              // extracted into its own repo
 ];
 const LEAF_FILES = ['backlog/123-x.md', 'demos/spa.html', 'src/_data/other.json', 'reports/2026-07-09-x.md'];
 // x30jq9n — the merge-anyway timeout is REMOVED; decideReviewGate no longer reads park age. These legacy
@@ -88,6 +98,19 @@ describe('INVARIANT 1 — gate-self diff ⇒ humanRequired, universally', () => 
           expect(r.humanRequired).toBe(true); // the whole point — never falls to agent-reviewable
           expect(r.escalate).toBe(true);       // a gate-self file is always blast-radius too
         }
+      }
+    }
+  });
+  it('#2448 — the RELOCATED engine (extracted out of we:scripts/) is STILL humanRequired, across noise', () => {
+    // The parent-epic red-team gap: once the engine leaves we:scripts/, the old path-literal regexes stop
+    // matching and a trust-chain edit silently becomes agent-clearable. Basename matching closes that — a
+    // member keeps tripping gate-self wherever it lands (a plateau-app module, a package dir, its own repo).
+    for (const moved of RELOCATED_ENGINE_FILES) {
+      expect(isGateSelfPath(moved)).toBe(true);
+      for (const noise of powerset(LEAF_FILES)) {
+        const r = scoreEscalation({ changedFiles: [...noise, moved], diffLines: 0, prNum: 3 });
+        expect(r.humanRequired).toBe(true); // the coordinator can never auto-clear a change to itself
+        expect(r.escalate).toBe(true);
       }
     }
   });
