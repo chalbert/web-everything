@@ -3,8 +3,10 @@ bornAs: xt1lxaj
 kind: story
 size: 5
 parent: "2410"
-status: open
+status: resolved
 dateOpened: "2026-07-11"
+dateResolved: "2026-07-13"
+graduatedTo: none
 tags: []
 ---
 
