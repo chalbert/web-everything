@@ -750,6 +750,13 @@ function runWatch({ follow }) {
     if (DRY_RUN) { log(`dry-run: would drain ${toDrain.map((n) => '#' + n).join(', ') || 'nothing'} (impl-first/WE-last per couple)`); return 0; }
     let landedThisPass = 0;
     for (const num of toDrain) {
+      // #2453 — heartbeat PER COUPLE, not just at the top of the pass: a one-shot sweep with several queued
+      // couples can run well past the lease TTL before its single pass even finishes (each couple lands via
+      // pr-land, which itself waits on GitHub's required checks), so refreshing the lease only between passes
+      // lets it go stale mid-sweep — a concurrent drain would then reclaim it, reopening the #2424
+      // double-drain window for any sweep longer than the TTL. Heartbeating before each couple keeps a live,
+      // still-running sweep's lease fresh no matter how long the pass takes.
+      if (!DRY_RUN) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner);
       attempted.add(num);
       const mpath = join(tmpDir, `${num}.lane-manifest.json`);
       writeFileSync(mpath, JSON.stringify(manifestByNum[num], null, 2));
