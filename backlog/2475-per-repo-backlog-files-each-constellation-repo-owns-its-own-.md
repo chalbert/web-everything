@@ -1,7 +1,8 @@
 ---
+bornAs: xxk0h1r
 kind: story
 size: 8
-parent: "xsde084"
+parent: "2472"
 status: open
 priority: low
 dateOpened: "2026-07-13"

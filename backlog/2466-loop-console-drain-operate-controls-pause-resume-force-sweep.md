@@ -1,7 +1,8 @@
 ---
+bornAs: x9amggn
 kind: story
 size: 5
-parent: "xwqsfbu"
+parent: "2474"
 status: open
 dateOpened: "2026-07-12"
 tags: []

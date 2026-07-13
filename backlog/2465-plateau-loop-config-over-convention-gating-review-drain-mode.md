@@ -1,4 +1,5 @@
 ---
+bornAs: x8wagm6
 kind: story
 size: 8
 parent: "2445"
