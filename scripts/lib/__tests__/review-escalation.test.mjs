@@ -36,26 +36,26 @@ describe('isBlastRadiusPath', () => {
   });
 });
 
-describe('isGateSelfPath — the auto-review trust chain (#2285 v1, re-anchored #2448)', () => {
-  it('flags the gate rubric, the lander, the roster config, and the invariants suite', () => {
+describe('isGateSelfPath — the POLICY tier of the trust chain (#2285 v1, #2448, #2445 two-tier flip)', () => {
+  it('flags the POLICY-CORE files (rubric, router, roster, invariants) — human-required', () => {
     expect(isGateSelfPath('scripts/lib/review-escalation.mjs')).toBe(true);
-    expect(isGateSelfPath('scripts/merge-ai-prs.mjs')).toBe(true);
+    expect(isGateSelfPath('scripts/lib/review-core.mjs')).toBe(true);
     expect(isGateSelfPath('scripts/lib/gate-config.mjs')).toBe(true);           // #2448 — the roster (the closure)
     expect(isGateSelfPath('scripts/lib/__tests__/gate-invariants.test.mjs')).toBe(true);
-    // a repo-prefixed / nested clone path still matches (the drain reads paths off head refs)
-    expect(isGateSelfPath('frontierui/scripts/merge-ai-prs.mjs')).toBe(true);
   });
-  it('#2448 — a member RELOCATED out of we:scripts/ still matches (basename travels with the extraction)', () => {
-    // The #2445 coordinator moves the engine into plateau-app / a package / its own repo; the old path
-    // literals would stop matching there. Basename matching keeps it gate-self wherever it lands.
-    for (const p of ['plateau-app/tools/loop/review-escalation.mjs', 'packages/plateau-loop/src/merge-ai-prs.mjs',
-                     'plateau-loop/gate/gate-config.mjs']) {
-      expect(isGateSelfPath(p)).toBe(true);
+  it('#2445 flip — does NOT flag the ENGINE tier (the lander): it obeys the gate, so it is agent-reviewable', () => {
+    expect(isGateSelfPath('scripts/merge-ai-prs.mjs')).toBe(false);
+    expect(isGateSelfPath('frontierui/scripts/merge-ai-prs.mjs')).toBe(false);
+  });
+  it('#2448/#2445 — the TIER travels with the basename: a relocated POLICY file still matches, a relocated ENGINE file does not', () => {
+    for (const p of ['plateau-app/tools/loop/review-escalation.mjs', 'plateau-loop/gate/gate-config.mjs']) {
+      expect(isGateSelfPath(p)).toBe(true);   // policy tier stays human wherever it lands
     }
+    expect(isGateSelfPath('packages/plateau-loop/src/merge-ai-prs.mjs')).toBe(false); // engine stays agent-reviewable
   });
   it('does NOT flag other blast-radius code — those stay agent-reviewable', () => {
     for (const p of ['scripts/pr-land.mjs', 'scripts/lane-pool.mjs', '.claude/skills/drain/SKILL.md',
-                     'docs/agent/platform-decisions.md', 'src/_data/blocks.json', 'scripts/lib/rebase-drop-manifest.mjs']) {
+                     'src/_data/blocks.json', 'scripts/lib/rebase-drop-manifest.mjs']) {
       expect(isGateSelfPath(p)).toBe(false);
     }
   });
@@ -95,12 +95,21 @@ describe('scoreEscalation', () => {
     const r = scoreEscalation({ changedFiles: ['scripts/x.mjs'], diffLines: 500, dismissedFindings: 2, crossRepo: true, prNum: 10 });
     expect(r.reasons.length).toBe(5);
   });
-  it('humanRequired only when the diff edits the gate\'s own code (#2285 v1)', () => {
-    // a gate-self file → escalate AND humanRequired
-    const gate = scoreEscalation({ changedFiles: ['scripts/merge-ai-prs.mjs'], prNum: 3 });
-    expect(gate.escalate).toBe(true);
-    expect(gate.humanRequired).toBe(true);
-    expect(gate.reasons.join(' ')).toMatch(/gate-self/);
+  it('humanRequired for POLICY-CORE or STATUTE, but NOT for the ENGINE lander (#2445 two-tier flip)', () => {
+    // a policy-core file → escalate AND humanRequired
+    const policy = scoreEscalation({ changedFiles: ['scripts/lib/review-core.mjs'], prNum: 3 });
+    expect(policy.escalate).toBe(true);
+    expect(policy.humanRequired).toBe(true);
+    expect(policy.reasons.join(' ')).toMatch(/gate-self/);
+    // the statute layer → escalate AND humanRequired (#2412)
+    const statute = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'], prNum: 3 });
+    expect(statute.escalate).toBe(true);
+    expect(statute.humanRequired).toBe(true);
+    expect(statute.reasons.join(' ')).toMatch(/statute/);
+    // the ENGINE lander → escalates but agent-reviewable (NOT humanRequired) — the flip
+    const lander = scoreEscalation({ changedFiles: ['scripts/merge-ai-prs.mjs'], prNum: 3 });
+    expect(lander.escalate).toBe(true);
+    expect(lander.humanRequired).toBe(false);
     // other blast-radius → escalates but agent-reviewable (NOT humanRequired)
     const other = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], prNum: 3 });
     expect(other.escalate).toBe(true);

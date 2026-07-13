@@ -310,8 +310,10 @@ describe('derivePlanOutcome (#2438 — plan-handshake round-cap decision)', () =
 });
 
 describe('deriveReviewDisposition (#2285 — one reason→disposition derivation, all reviews)', () => {
-  it('gate-self converges to fix but NEVER auto-lands — a human gates the trust-chain edit', () => {
+  it('gate-self and statute converge to fix but NEVER auto-land — a human gates the merge (#2445 two-tier flip)', () => {
     expect(deriveReviewDisposition({ reason: REVIEW_REASONS.GATE_SELF }))
+      .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
+    expect(deriveReviewDisposition({ reason: REVIEW_REASONS.STATUTE }))
       .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
   });
 
@@ -350,8 +352,10 @@ describe('deriveReviewDisposition (#2285 — one reason→disposition derivation
   // `scripts/lib/review-escalation.mjs` — if that file's format drifts, this test is the tripwire that catches
   // the two files silently disagreeing (the parked-PR branch would otherwise wedge on an `unknown reason(s)` throw).
   describe('canonicalizes the DECORATED scoreEscalation reason strings the drain actually carries', () => {
-    it('a decorated gate-self reason converges but never auto-lands (the exact scoreEscalation format)', () => {
+    it('a decorated gate-self or statute reason converges but never auto-lands (the exact scoreEscalation format)', () => {
       expect(deriveReviewDisposition({ reason: 'gate-self (scripts/lib/review-escalation.mjs) — human review required' }))
+        .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
+      expect(deriveReviewDisposition({ reason: 'statute (docs/agent/platform-decisions.md) — human review required' }))
         .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
     });
 
@@ -373,7 +377,7 @@ describe('deriveReviewDisposition (#2285 — one reason→disposition derivation
       const parkedReasons = [
         'blast-radius (scripts/lib/review-core.mjs)',
         'size (1080 ≥ 400 changed lines)',
-        'gate-self (scripts/merge-ai-prs.mjs) — human review required',
+        'gate-self (scripts/lib/review-escalation.mjs) — human review required',
         'sampling floor (1-in-10)',
       ];
       expect(() => deriveReviewDisposition({ reasons: parkedReasons })).not.toThrow();

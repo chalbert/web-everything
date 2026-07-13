@@ -11,8 +11,8 @@ import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, bu
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
-  it('a gate-self diff (edits the auto-review trust chain) → review:human, applied', () => {
-    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/merge-ai-prs.mjs'], diffLines: 10, prNum: 3 });
+  it('a policy-core diff (edits the leash-defining trust chain) → review:human, applied', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/lib/review-escalation.mjs'], diffLines: 10, prNum: 3 });
     expect(v.label).toBe(REVIEW_LABELS.human);
     expect(v.apply).toBe(true);
     expect(v.humanRequired).toBe(true);
