@@ -22,3 +22,5 @@ lands within ~60s on its own. Scoped `--only=<pr>` fast drains (via `/pr`) still
 lease and are fine. This is machine-local operational state that can change (the operator
 can `cli.mjs uninstall`), so VERIFY before relying on it: `node
 plateau-app/tools/drain-daemon/cli.mjs status`. Related: [[backlog-is-the-tracker]].
+
+**It lands, it doesn't run the review panel:** the daemon merges `ready-to-merge` PRs but does NOT run review — escalation/convergence is agent/skill-driven, not part of its `merge-ai-prs` pass. So a PR parked `review:pending` (e.g. by the 1-in-10 sampling floor) or `review:human` STAYS parked until an agent panel or human applies `review:accepted`; the daemon won't auto-land it. Live proof: this session PR #460 was tagged `review:pending` by the sampling floor and did NOT auto-land until a fresh-context review agent applied `review:accepted`.
