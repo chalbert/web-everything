@@ -129,3 +129,33 @@ the deliverable, not retired — see the mixed-mode red-team risk above).
   light (internal-incompleteness dominated). Report:
   [we:reports/2026-07-12-program-plateau-loop.md](../reports/2026-07-12-program-plateau-loop.md).
   **Next run:** re-check after a UI slice lands; prepare #2444 + #2446 once #2456's daemon evidence exists.
+
+## Closed-world design refinement + delivery-machinery session (2026-07-13)
+
+A working session refined the operating vision and shipped the first autonomy increments.
+
+### The closed-world model (the operating vision)
+
+- The Loop is a resident process that OWNS the lanes it launches, so its coordination is in-process (Node), not choreographed via GitHub labels. Labels remain ONLY as the seam with outside interactive sessions the Loop did not spawn.
+- The LANE is the unit of serialization. Review happens in-lane (author + reviewer agents); a human is asked ONLY on genuine agent disagreement (deadlock), or when a change touches the gate's own policy or the statute layer.
+- Delivery = a wait-for-ready queue + one sole-writer-to-main lock. Interactive sessions are a separate world; that lock is the only thing the two worlds share.
+- Same-lane co-allocation of conflicting items was investigated and judged largely redundant with the shipped #2387 overlap-stacking — not pursued.
+
+### Shipped this session (all merged to main)
+
+- #455 — negotiation round cap 3→5 (more iteration before a human handoff).
+- #456 — two-tier trust chain: the lander (engine tier) is agent-reviewable and auto-lands on a converged verdict; only the leash-defining POLICY tier (rubric, disposition router, roster, invariants) + the STATUTE layer stay `review:human`.
+- #2439 (PR #457) — independent hardened validator + `redteam:accepted`: a fresh-context adversary jury re-judges the final diff (never the peers' self-assessment) and gates every engine-tier auto-land.
+- The phase-1 resident drain daemon (#2449) was INSTALLED and STARTED (launchd, 60s interval) — it now lands `ready-to-merge` PRs autonomously and is the sole full-sweep drain owner. See agent-memory `drain-is-a-resident-daemon`.
+
+### Guardrails (must hold as the Loop grows)
+
+- INVARIANT 2 (a human-gated PR never auto-merges without a human accept) is sacred: relaxations may only narrow CLASSIFICATION (which files are policy-tier), never enforcement.
+- The gate cannot be relaxed by an agent approving its own gate change — every edit to the policy tier self-gates to `review:human`. That bootstrap is not skippable.
+- Respect the epic's sequencing: the agent runner (#2444 → #2464) stays deferred until the daemon produces real operating evidence (#2456). Running the daemon IS the work that unblocks it; do not force the decision early.
+
+### Next-slice framework
+
+1. Once daemon evidence exists (#2456): prepare/ratify #2444, then build the runner (#2464) — the step from "the drain runs itself" to "the building runs itself."
+2. Until then: the operable console (#2474, dev-panel seed at `plateau:plateau-app/tools/dev-panel/drain-daemon.html`) is buildable now — makes the running daemon observable/operable.
+3. Favor the smallest bounded slice that advances the north star; plan epics before building.
