@@ -6,6 +6,8 @@ status: resolved
 dateOpened: "2026-07-11"
 dateStarted: "2026-07-13"
 dateResolved: "2026-07-13"
+costUsd: 0.86
+costSessions: 1
 graduatedTo: none
 tags: [plateau-loop, review-gate, trust-chain]
 ---
