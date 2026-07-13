@@ -36,12 +36,22 @@ describe('isBlastRadiusPath', () => {
   });
 });
 
-describe('isGateSelfPath — the auto-review trust chain (#2285 v1)', () => {
-  it('flags ONLY the gate rubric + the lander (the code that decides the gate)', () => {
+describe('isGateSelfPath — the auto-review trust chain (#2285 v1, re-anchored #2448)', () => {
+  it('flags the gate rubric, the lander, the roster config, and the invariants suite', () => {
     expect(isGateSelfPath('scripts/lib/review-escalation.mjs')).toBe(true);
     expect(isGateSelfPath('scripts/merge-ai-prs.mjs')).toBe(true);
+    expect(isGateSelfPath('scripts/lib/gate-config.mjs')).toBe(true);           // #2448 — the roster (the closure)
+    expect(isGateSelfPath('scripts/lib/__tests__/gate-invariants.test.mjs')).toBe(true);
     // a repo-prefixed / nested clone path still matches (the drain reads paths off head refs)
     expect(isGateSelfPath('frontierui/scripts/merge-ai-prs.mjs')).toBe(true);
+  });
+  it('#2448 — a member RELOCATED out of we:scripts/ still matches (basename travels with the extraction)', () => {
+    // The #2445 coordinator moves the engine into plateau-app / a package / its own repo; the old path
+    // literals would stop matching there. Basename matching keeps it gate-self wherever it lands.
+    for (const p of ['plateau-app/tools/loop/review-escalation.mjs', 'packages/plateau-loop/src/merge-ai-prs.mjs',
+                     'plateau-loop/gate/gate-config.mjs']) {
+      expect(isGateSelfPath(p)).toBe(true);
+    }
   });
   it('does NOT flag other blast-radius code — those stay agent-reviewable', () => {
     for (const p of ['scripts/pr-land.mjs', 'scripts/lane-pool.mjs', '.claude/skills/drain/SKILL.md',
