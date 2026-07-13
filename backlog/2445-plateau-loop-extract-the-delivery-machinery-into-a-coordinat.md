@@ -5,6 +5,7 @@ status: open
 dateOpened: "2026-07-11"
 costUsd: 41.57
 costSessions: 2
+relatedReport: "reports/2026-07-12-program-plateau-loop.md"
 tags: [delivery-machinery, coordinator, plateau]
 ---
 
@@ -115,3 +116,16 @@ platform config — and the session-choreography conventions it replaces retired
 docs/skills *for the flows the coordinator owns* (interactive sessions remain first-class:
 the conventions governing how an outside session co-exists with the coordinator are part of
 the deliverable, not retired — see the mixed-mode red-team risk above).
+
+## Review log
+
+- **2026-07-12 — first run (completeness pass).** Front A: the phase-1 daemon (#2449) + dev-panel seed
+  (#2454) shipped and are live in code, but the DoD's whole second half was unfiled. Goal-set coverage
+  went 9/17 filed → **17/17** this run. Filed 17 children — the operable-console sub-epic (#xwqsfbu) + 6
+  UI slices (daemon-lifecycle-first), multi-project registry (#xsde084) + per-repo-backlog (#xxk0h1r),
+  config-over-convention (#x8wagm6), supervisor (#xgfj975), orchestrator-as-Node-fanout (#xpqrhnk),
+  ≥2-project milestone (#x05fzfp), runner-build (#x46a4zo) + steering (#x16hn7n) under #2444, and the
+  plateau-app product-separation decision (#xy4kshz). Deferred residuals set `priority: low`. Front B
+  light (internal-incompleteness dominated). Report:
+  [we:reports/2026-07-12-program-plateau-loop.md](../reports/2026-07-12-program-plateau-loop.md).
+  **Next run:** re-check after a UI slice lands; prepare #2444 + #2446 once #2456's daemon evidence exists.
