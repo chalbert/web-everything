@@ -149,12 +149,14 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
 }
 
 /**
- * The negotiation round cap (#2311, v2 under epic #2285) — settled at spec: 3 rounds. Bounded so a
- * non-converging editor↔reviewer cycle costs at most 3 review passes before it escalates to `review:human`,
- * not an unbounded loop. A tuning knob (exported, not hardcoded per caller) — raise it if 3 proves too tight
- * in practice, but any caller that needs a DIFFERENT cap should say so explicitly, not silently drift.
+ * The negotiation round cap (#2311, v2 under epic #2285) — raised to 5 (operator call, 2026-07-13) from the
+ * original spec of 3. Bounded so a non-converging editor↔reviewer cycle costs at most this many review passes
+ * before it escalates to `review:human`, not an unbounded loop — but the operator's aim is fewer hand-offs to a
+ * human, so the panel gets more room to converge on its own before a deadlock is declared. A tuning knob
+ * (exported, not hardcoded per caller) — any caller that needs a DIFFERENT cap should say so explicitly, not
+ * silently drift.
  */
-export const NEGOTIATION_ROUND_CAP = 3;
+export const NEGOTIATION_ROUND_CAP = 5;
 
 /**
  * Build the canonical mandate handed to the EDITOR subagent in the v2 negotiation loop (#2311) — the

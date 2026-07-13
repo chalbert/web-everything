@@ -142,7 +142,7 @@ describe('buildEditorMandate (#2311)', () => {
       findings: [{ file: 'a.mjs', summary: 'off-by-one', failure_scenario: 'index 0 skipped' }],
     });
     expect(text).toContain('a.mjs: off-by-one — index 0 skipped');
-    expect(text).toMatch(/round 1\/3/);
+    expect(text).toMatch(new RegExp(`round 1/${NEGOTIATION_ROUND_CAP}`));
   });
 
   it('defaults the round cap to NEGOTIATION_ROUND_CAP and reflects a custom one', () => {

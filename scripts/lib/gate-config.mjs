@@ -62,6 +62,12 @@ export const TRUST_CHAIN = [
     homes: ['scripts/lib/review-escalation.mjs'],
   },
   {
+    role: 'disposition-router',
+    file: 'review-core.mjs',
+    desc: 'the converge-vs-human router (deriveReviewDisposition) + the negotiation round caps — decides whether an agent may clear an escalated PR or a human must; editing it changes what the gate does with an escalation',
+    homes: ['scripts/lib/review-core.mjs'],
+  },
+  {
     role: 'lander',
     file: 'merge-ai-prs.mjs',
     desc: 'the lander that reads the verdict labels and decides to merge',

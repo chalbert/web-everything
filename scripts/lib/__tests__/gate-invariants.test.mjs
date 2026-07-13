@@ -52,6 +52,7 @@ function product(...arrays) {
 
 const GATE_SELF_FILES = [
   'scripts/lib/review-escalation.mjs',
+  'scripts/lib/review-core.mjs',              // the converge-vs-human disposition router + round caps (trust-source)
   'scripts/merge-ai-prs.mjs',
   'scripts/lib/gate-config.mjs',              // #2448 — the trust-chain roster; editing it is gate-self (the closure)
   'frontierui/scripts/merge-ai-prs.mjs',      // a repo-prefixed clone path still counts
