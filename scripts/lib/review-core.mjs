@@ -222,7 +222,7 @@ export function deriveNegotiationOutcome({ verdict, round, roundCap = NEGOTIATIO
  * at the wrong target. This is the plan-phase counterpart to `buildEditorMandate`/`deriveNegotiationOutcome`
  * — same diff-only-round-cap shape, but judging a PROSE APPROACH instead of a diff, and with its own (tighter)
  * round cap: agreeing on an approach is cheaper than converging a diff, so non-convergence should surface to a
- * human sooner rather than burning the same 3-round budget the diff loop gets.
+ * human sooner rather than burning the full `NEGOTIATION_ROUND_CAP` budget the diff loop gets.
  */
 export const PLAN_ROUND_CAP = 2;
 
