@@ -12,7 +12,7 @@
  * second look is decided by rule, not by the merging agent eyeballing the diff). Thresholds are TUNING KNOBS
  * — start loose, tighten from data; they live here so a change is one edit + a test, never scattered.
  */
-import { isTrustChainPath } from './gate-config.mjs';
+import { isTrustChainPath, isPolicyCorePath } from './gate-config.mjs';
 
 /** The ratified reviewer-verdict labels (#2171). The reviewer's disposition is a LABEL, never comment-parsing:
  *  independent *disposition* (reviewer accepts/rejects) is split from hot-context *fixing* (the author lane). */
@@ -20,7 +20,7 @@ export const REVIEW_LABELS = {
   pending: 'review:pending',   // the drain parked this PR — an independent review is owed before merge
   accepted: 'review:accepted', // reviewer accepted → the drain may merge
   changes: 'review:changes',   // reviewer wants changes → the author lane fixes hot-context + re-pushes
-  human: 'review:human',       // #2285 v1 — conflict of interest: the diff edits the auto-review trust chain; only a HUMAN may clear it (an agent must not auto-accept)
+  human: 'review:human',       // #2285 v1 — the diff edits the gate's POLICY tier (an agent policing its own leash) or the STATUTE layer; only a HUMAN may clear it. The engine tier (the lander) is agent-reviewable (#2445 two-tier flip)
 };
 
 /**
@@ -34,7 +34,7 @@ export const REVIEW_LABEL_META = {
   [REVIEW_LABELS.pending]:  { color: 'FBCA04', description: 'Drain parked this PR — an independent review is owed before it merges (#2171)' },
   [REVIEW_LABELS.accepted]: { color: '0E8A16', description: 'Reviewer accepted — the drain may merge (#2171)' },
   [REVIEW_LABELS.changes]:  { color: 'D93F0B', description: 'Reviewer wants changes — the author lane fixes hot-context and re-pushes (#2171)' },
-  [REVIEW_LABELS.human]:    { color: 'B60205', description: 'Conflict of interest: the diff edits the auto-review trust chain — only a human may clear it (#2285)' },
+  [REVIEW_LABELS.human]:    { color: 'B60205', description: 'The diff edits the gate policy or the statute layer — only a human may clear it (#2285, #2445 two-tier flip)' },
 };
 
 /** Default rubric thresholds (tuning knobs — loose to start). */
@@ -43,15 +43,29 @@ export const DEFAULT_THRESHOLDS = {
   sampleNth: 10,    // 1-in-N sampling floor: every Nth PR escalates regardless (keeps lane self-review honest)
 };
 
+/** The STATUTE layer (#2412) — `platform-decisions.md` and any statute doc. Editing the cite-able cluster
+ *  rules is a governance change a human must ratify, so (like the policy-tier trust chain) it forces
+ *  `review:human`, not just an agent panel. Kept as its own set so it drives BOTH escalation (blast-radius,
+ *  below) AND the human gate (scoreEscalation). */
+const STATUTE_PATHS = [
+  /^docs\/agent\/platform-decisions\.md$/,   // the statute layer (cite-able cluster rules)
+  /^docs\/agent\/.*statute/i,                // any statute doc
+];
+
+/** Does this repo-relative path edit the statute layer (→ a human must ratify)? Pure. (#2412) */
+export function isStatutePath(path) {
+  const p = String(path || '');
+  return STATUTE_PATHS.some((re) => re.test(p));
+}
+
 /** High-blast-radius path patterns (#2171). A diff touching any of these is escalation-worthy on its own —
  *  these files change how the system itself behaves, so a bad merge there is far costlier than a leaf edit. */
 const BLAST_RADIUS = [
-  /^scripts\//,                              // build/CI/merge tooling (this very lander included)
+  /^scripts\//,                              // build/CI/merge tooling (the lander included — escalates, agent-reviewable)
   /(^|\/)\.claude\/skills\//,                // agent skills (the operating procedures)
   /(^|\/)\.githooks\//,                       // git hooks (the guards)
   /(^|\/)\.github\//,                         // CI config / workflows
-  /^docs\/agent\/platform-decisions\.md$/,   // the statute layer (cite-able cluster rules)
-  /^docs\/agent\/.*statute/i,                // any statute doc
+  ...STATUTE_PATHS,                          // the statute layer (also forces a human — see scoreEscalation)
   /^src\/_data\/(blocks|plugs|intents|protocols|semantics)\.json$/, // standards definitions
 ];
 
@@ -61,17 +75,19 @@ export function isBlastRadiusPath(path) {
   return BLAST_RADIUS.some((re) => re.test(p));
 }
 
-/** The AUTO-REVIEW TRUST CHAIN (#2285 v1, re-anchored #2448). A diff touching one of these files edits the
- *  very machinery that decides whether the review gate fires and what clears it — so an *agent* reviewing such
- *  a change would be policing an edit to its own leash (a genuine conflict of interest). These, and ONLY these,
- *  force a HUMAN review (`review:human`). Every other blast-radius path is agent-reviewable: a fresh-context
- *  adversarial reviewer is independent of the *producer* there, with no self-gate conflict.
+/** The POLICY-CORE trust chain (#2285 v1, re-anchored #2448, narrowed by the #2445 two-tier flip). A diff
+ *  touching one of these files edits the very machinery that DECIDES whether the review gate fires and what
+ *  clears it — so an *agent* reviewing such a change would be policing an edit to its own leash (a genuine
+ *  conflict of interest). These, and ONLY these (plus the statute layer, `isStatutePath`), force a HUMAN
+ *  review (`review:human`). The ENGINE tier — the lander, which obeys the gate rather than defining it — is
+ *  NOT here: a change there still escalates and runs the full adversarial panel, but a converged agent verdict
+ *  may clear it. Every other blast-radius path is agent-reviewable too.
  *
  *  #2448 — the roster (and the basename-based matcher that lets it TRAVEL when the engine is extracted out of
- *  `we:scripts/`, per the #2445 coordinator epic) now lives in explicit, versioned config: ./gate-config.mjs.
- *  `isGateSelfPath` is that config's `isTrustChainPath` under its historical name, so every existing caller and
- *  test is unchanged. See gate-config.mjs for the extraction contract and the self-hosting design. */
-export const isGateSelfPath = isTrustChainPath;
+ *  `we:scripts/`, per the #2445 coordinator epic) lives in explicit, versioned config: ./gate-config.mjs.
+ *  `isGateSelfPath` is that config's `isPolicyCorePath` under its historical name. See gate-config.mjs for the
+ *  two tiers, the extraction contract, and the self-hosting design. */
+export const isGateSelfPath = isPolicyCorePath;
 
 /**
  * Score ONE ready PR against the escalation rubric. Pure. Returns `{ escalate, reasons, signals }` — `escalate`
@@ -84,10 +100,11 @@ export const isGateSelfPath = isTrustChainPath;
  *   • cross-repo   — an impl+WE couple spanning >1 repo (a coordinated multi-repo change).
  *   • sampling     — the 1-in-N floor (prNum % sampleNth === 0): keeps "no dismissals" from being a gameable exit.
  *
- * Also returns `humanRequired` (#2285 v1): true iff the diff touches the auto-review trust chain
- * (`isGateSelfPath`) — the one class where an agent reviewer has a conflict of interest, so a human review is
- * essential. It's a *classification* of an already-escalating PR (a gate-self file is always blast-radius too),
- * never a fresh escalation trigger.
+ * Also returns `humanRequired` (#2285 v1, narrowed by the #2445 two-tier flip): true iff the diff touches the
+ * POLICY tier of the trust chain (`isGateSelfPath`) or the STATUTE layer (`isStatutePath`) — the classes where
+ * a human is essential (an agent policing its own leash, or a governance rule a human must ratify). The ENGINE
+ * tier (the lander) escalates but is agent-reviewable, so it does NOT set humanRequired. A *classification* of
+ * an already-escalating PR (a policy/statute file is always blast-radius too), never a fresh escalation trigger.
  *
  * #2390-review-fix — the gate-self / `humanRequired` trigger reads `humanBasisFiles` (the CUMULATIVE
  * `origin/main…head` file set), NOT the possibly-de-inflated own-delta `changedFiles`. A stacked lane may
@@ -115,15 +132,22 @@ export function scoreEscalation({
   const reasons = [];
   const signals = {};
 
-  const blastFiles = (Array.isArray(changedFiles) ? changedFiles : []).filter(isBlastRadiusPath);
+  // A trust-chain path ALWAYS escalates (even a relocated engine file that no longer matches `^scripts/`) —
+  // isTrustChainPath covers both tiers, so the lander always gets an independent review whether or not it also
+  // matches a blast-radius pattern.
+  const blastFiles = (Array.isArray(changedFiles) ? changedFiles : []).filter((f) => isBlastRadiusPath(f) || isTrustChainPath(f));
   if (blastFiles.length) { signals.blastRadius = blastFiles; reasons.push(`blast-radius (${blastFiles.slice(0, 3).join(', ')}${blastFiles.length > 3 ? ', …' : ''})`); }
 
-  // #2390-review-fix — gate-self over the cumulative basis (a self-declared/mis-set stacked `base` can never
-  // shrink it), falling back to `changedFiles` when no separate basis is supplied.
+  // #2390-review-fix — the human gate scores over the cumulative basis (a self-declared/mis-set stacked `base`
+  // can never shrink it), falling back to `changedFiles` when no separate basis is supplied.
+  // #2445 two-tier flip — ONLY the POLICY tier (isGateSelfPath) and the STATUTE layer force a human; the ENGINE
+  // tier (the lander) escalated via blast-radius above but is agent-reviewable, so it is NOT counted here.
   const gateBasis = Array.isArray(humanBasisFiles) ? humanBasisFiles : (Array.isArray(changedFiles) ? changedFiles : []);
   const gateSelfFiles = gateBasis.filter(isGateSelfPath);
-  const humanRequired = gateSelfFiles.length > 0;
-  if (humanRequired) { signals.gateSelf = gateSelfFiles; reasons.push(`gate-self (${gateSelfFiles.join(', ')}) — human review required`); }
+  const statuteFiles = gateBasis.filter(isStatutePath);
+  const humanRequired = gateSelfFiles.length > 0 || statuteFiles.length > 0;
+  if (gateSelfFiles.length) { signals.gateSelf = gateSelfFiles; reasons.push(`gate-self (${gateSelfFiles.join(', ')}) — human review required`); }
+  if (statuteFiles.length) { signals.statute = statuteFiles; reasons.push(`statute (${statuteFiles.join(', ')}) — human review required`); }
 
   if (Number(diffLines) >= t.diffLines) { signals.size = Number(diffLines); reasons.push(`size (${diffLines} ≥ ${t.diffLines} changed lines)`); }
 

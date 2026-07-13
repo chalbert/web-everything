@@ -30,6 +30,7 @@ import { describe, it, expect } from 'vitest';
 import {
   REVIEW_LABELS,
   isGateSelfPath,
+  isStatutePath,
   scoreEscalation,
   coupleEscalation,
   decideReviewGate,
@@ -50,22 +51,30 @@ function product(...arrays) {
   return arrays.reduce((acc, arr) => acc.flatMap((a) => arr.map((b) => [...a, b])), [[]]);
 }
 
-const GATE_SELF_FILES = [
+// #2445 two-tier flip — the trust chain has two tiers. POLICY-CORE files (the leash-defining code) force
+// review:human; ENGINE files (the lander, which obeys the gate) escalate + run the panel but a converged agent
+// verdict may clear them.
+const POLICY_CORE_FILES = [
   'scripts/lib/review-escalation.mjs',
-  'scripts/lib/review-core.mjs',              // the converge-vs-human disposition router + round caps (trust-source)
-  'scripts/merge-ai-prs.mjs',
+  'scripts/lib/review-core.mjs',              // the converge-vs-human disposition router + round caps
   'scripts/lib/gate-config.mjs',              // #2448 — the trust-chain roster; editing it is gate-self (the closure)
-  'frontierui/scripts/merge-ai-prs.mjs',      // a repo-prefixed clone path still counts
   'scripts/lib/__tests__/gate-invariants.test.mjs', // THIS file — self-referenced (see header)
 ];
-// #2448 — the delivery engine, RELOCATED out of we:scripts/ (the #2445 coordinator: a plateau-app module,
-// a new package dir, or its own repo). Basename-matched, so it stays gate-self across the move — the exact
-// property the parent epic's red team flagged as silently lost. These are also the self-hosting boundary
-// (#2285 one level up): a PR editing the relocated coordinator can never be agent-cleared.
+const ENGINE_FILES = [
+  'scripts/merge-ai-prs.mjs',                 // the lander — obeys the gate, so agent-reviewable (#2445 flip)
+  'frontierui/scripts/merge-ai-prs.mjs',      // a repo-prefixed clone path still counts
+];
+// The STATUTE layer (#2412) — governance rules a human must ratify; forces review:human like the policy tier.
+const STATUTE_FILES = ['docs/agent/platform-decisions.md', 'docs/agent/2026-06-example-statute.md'];
+// #2448 — a trust-chain member RELOCATED out of we:scripts/ (the #2445 coordinator: a plateau-app module, a
+// package dir, or its own repo). Basename-matched, so the TIER travels: a relocated POLICY file stays human, a
+// relocated ENGINE file still escalates (it can never silently drop out of review) but stays agent-reviewable.
+const RELOCATED_POLICY_FILES = [
+  'plateau-app/tools/loop/review-escalation.mjs',   // policy, extracted next to the dev-panel → still human
+  'plateau-loop/gate/gate-config.mjs',              // policy, its own repo → still human
+];
 const RELOCATED_ENGINE_FILES = [
-  'plateau-app/tools/loop/review-escalation.mjs',   // extracted into plateau-app next to the dev-panel
-  'packages/plateau-loop/src/merge-ai-prs.mjs',     // extracted into a package dir
-  'plateau-loop/gate/gate-config.mjs',              // extracted into its own repo
+  'packages/plateau-loop/src/merge-ai-prs.mjs',     // engine, extracted into a package dir → escalates, agent-reviewable
 ];
 const LEAF_FILES = ['backlog/123-x.md', 'demos/spa.html', 'src/_data/other.json', 'reports/2026-07-09-x.md'];
 // x30jq9n — the merge-anyway timeout is REMOVED; decideReviewGate no longer reads park age. These legacy
@@ -78,44 +87,72 @@ const PARK_AGES = [
 const AUTO_MERGE_ACTIONS = ['merge']; // the ONE action that puts a PR onto main without a human (merge-anyway removed, x30jq9n)
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-// INVARIANT 1 — a diff that touches the gate's own trust chain is ALWAYS human-required (and escalates).
-// A gate-self path can never be scored as agent-reviewable, whatever the other signals say.
+// INVARIANT 1 — the two-tier trust chain (#2445 flip). POLICY-CORE and STATUTE paths are ALWAYS human-required
+// (and escalate). ENGINE paths (the lander) ALWAYS escalate but are NEVER human-required — a converged agent
+// verdict may clear them. The tier travels with a relocated file's basename.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-describe('INVARIANT 1 — gate-self diff ⇒ humanRequired, universally', () => {
-  it('every gate-self path is classified gate-self', () => {
-    for (const f of GATE_SELF_FILES) expect(isGateSelfPath(f)).toBe(true);
+describe('INVARIANT 1 — policy/statute ⇒ human; engine ⇒ escalate-but-agent-reviewable', () => {
+  const noiseSignals = product(
+    [0, 500],        // diffLines: below and above the size threshold
+    [0, 3],          // dismissedFindings
+    [false, true],   // crossRepo
+    [3, 10],         // prNum: non-sampled and sampled
+  );
+  it('every POLICY-CORE path is classified gate-self (human); every ENGINE path is NOT', () => {
+    for (const f of POLICY_CORE_FILES) expect(isGateSelfPath(f)).toBe(true);
+    for (const f of ENGINE_FILES) expect(isGateSelfPath(f)).toBe(false);
   });
-  it('holds across arbitrary other signals (size, dismissed, cross-repo, PR#, noise files)', () => {
-    const noiseSignals = product(
-      [0, 500],        // diffLines: below and above the size threshold
-      [0, 3],          // dismissedFindings
-      [false, true],   // crossRepo
-      [3, 10],         // prNum: non-sampled and sampled
-    );
-    for (const gateFile of GATE_SELF_FILES) {
+  it('POLICY-CORE ⇒ humanRequired across arbitrary other signals + noise', () => {
+    for (const gateFile of POLICY_CORE_FILES) {
       for (const noise of powerset(LEAF_FILES)) {
         for (const [diffLines, dismissedFindings, crossRepo, prNum] of noiseSignals) {
           const r = scoreEscalation({ changedFiles: [...noise, gateFile], diffLines, dismissedFindings, crossRepo, prNum });
-          expect(r.humanRequired).toBe(true); // the whole point — never falls to agent-reviewable
-          expect(r.escalate).toBe(true);       // a gate-self file is always blast-radius too
+          expect(r.humanRequired).toBe(true); // leash-defining code — never falls to agent-reviewable
+          expect(r.escalate).toBe(true);
         }
       }
     }
   });
-  it('#2448 — the RELOCATED engine (extracted out of we:scripts/) is STILL humanRequired, across noise', () => {
-    // The parent-epic red-team gap: once the engine leaves we:scripts/, the old path-literal regexes stop
-    // matching and a trust-chain edit silently becomes agent-clearable. Basename matching closes that — a
-    // member keeps tripping gate-self wherever it lands (a plateau-app module, a package dir, its own repo).
-    for (const moved of RELOCATED_ENGINE_FILES) {
-      expect(isGateSelfPath(moved)).toBe(true);
+  it('the STATUTE layer ⇒ humanRequired (a governance rule a human must ratify, #2412)', () => {
+    for (const s of STATUTE_FILES) {
+      expect(isStatutePath(s)).toBe(true);
       for (const noise of powerset(LEAF_FILES)) {
-        const r = scoreEscalation({ changedFiles: [...noise, moved], diffLines: 0, prNum: 3 });
-        expect(r.humanRequired).toBe(true); // the coordinator can never auto-clear a change to itself
+        const r = scoreEscalation({ changedFiles: [...noise, s], prNum: 3 });
+        expect(r.humanRequired).toBe(true);
         expect(r.escalate).toBe(true);
       }
     }
   });
-  it('a diff with NO gate-self path is never humanRequired (the converse — no false human-gating)', () => {
+  it('#2445 flip — an ENGINE (lander) edit ESCALATES but is NOT humanRequired (agent-reviewable)', () => {
+    for (const engineFile of ENGINE_FILES) {
+      for (const noise of powerset(LEAF_FILES)) {
+        for (const [diffLines, dismissedFindings, crossRepo, prNum] of noiseSignals) {
+          const r = scoreEscalation({ changedFiles: [...noise, engineFile], diffLines, dismissedFindings, crossRepo, prNum });
+          expect(r.escalate).toBe(true);        // the lander always gets an independent review
+          expect(r.humanRequired).toBe(false);  // but a converged agent verdict may clear it — the flip
+        }
+      }
+    }
+  });
+  it('#2448/#2445 — the tier TRAVELS: a relocated POLICY file stays human; a relocated ENGINE file escalates but stays agent-reviewable', () => {
+    for (const moved of RELOCATED_POLICY_FILES) {
+      expect(isGateSelfPath(moved)).toBe(true);
+      for (const noise of powerset(LEAF_FILES)) {
+        const r = scoreEscalation({ changedFiles: [...noise, moved], diffLines: 0, prNum: 3 });
+        expect(r.humanRequired).toBe(true); // the coordinator can never auto-clear a change to its own leash
+        expect(r.escalate).toBe(true);
+      }
+    }
+    for (const moved of RELOCATED_ENGINE_FILES) {
+      expect(isGateSelfPath(moved)).toBe(false);
+      for (const noise of powerset(LEAF_FILES)) {
+        const r = scoreEscalation({ changedFiles: [...noise, moved], diffLines: 0, prNum: 3 });
+        expect(r.humanRequired).toBe(false);
+        expect(r.escalate).toBe(true); // still escalates even though a package path no longer matches ^scripts/
+      }
+    }
+  });
+  it('a diff with NO policy/statute path is never humanRequired (the converse — no false human-gating)', () => {
     for (const files of powerset(LEAF_FILES)) {
       for (const prNum of [1, 3, 10]) {
         expect(scoreEscalation({ changedFiles: files, diffLines: 999, dismissedFindings: 9, crossRepo: true, prNum }).humanRequired).toBe(false);
@@ -255,16 +292,23 @@ describe('INVARIANT 5 — hasUnclearedReviewLabel refuses un-cleared labels', ()
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-// INVARIANT 6 — the producer's PR-open label is consistent with the score: a gate-self open is ALWAYS
-// review:human (never pending, never null), so a human-gated PR is human-gated from birth, not only once a
-// drain sweeps it.
+// INVARIANT 6 — the producer's PR-open label is consistent with the score: a POLICY-CORE or STATUTE open is
+// ALWAYS review:human (never pending, never null), so a human-gated PR is human-gated from birth, not only once
+// a drain sweeps it. An ENGINE (lander) open is review:pending (escalated, agent-reviewable — the #2445 flip).
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-describe('INVARIANT 6 — producerReviewLabel matches the score, gate-self ⇒ review:human at open', () => {
-  it('any gate-self diff ⇒ producer label review:human, across noise', () => {
-    for (const gateFile of GATE_SELF_FILES) {
+describe('INVARIANT 6 — producerReviewLabel matches the score across both tiers', () => {
+  it('any POLICY-CORE or STATUTE diff ⇒ producer label review:human, across noise', () => {
+    for (const gateFile of [...POLICY_CORE_FILES, ...STATUTE_FILES]) {
       for (const noise of powerset(LEAF_FILES)) {
         const score = scoreEscalation({ changedFiles: [...noise, gateFile], prNum: 3 });
         expect(producerReviewLabel(score)).toBe(REVIEW_LABELS.human);
+      }
+    }
+  });
+  it('#2445 flip — an ENGINE (lander) diff ⇒ review:pending (escalated, agent-reviewable), never review:human', () => {
+    for (const engineFile of ENGINE_FILES) {
+      for (const noise of powerset(LEAF_FILES)) {
+        expect(producerReviewLabel(scoreEscalation({ changedFiles: [...noise, engineFile], prNum: 3 }))).toBe(REVIEW_LABELS.pending);
       }
     }
   });

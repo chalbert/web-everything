@@ -360,8 +360,10 @@ export const REVIEW_DISPOSITIONS = Object.freeze({
 /**
  * The escalation-reason vocabulary the disposition is keyed on (#2285). Two families:
  *   • SENSITIVITY reasons — a rule fired at classification time, BEFORE any review deadlock. An agent
- *     reviewer/editor is still independent and useful, so these CONVERGE. `gate-self` is the trust-chain case:
- *     it converges too, but as an ADVISORY fix that never auto-lands (a human gates the merge, #2285).
+ *     reviewer/editor is still independent and useful, so these CONVERGE. `gate-self` (the policy-tier trust
+ *     chain, #2285) and `statute` (a governance rule, #2412) converge too, but as an ADVISORY fix that never
+ *     auto-lands — a human gates the merge. Every other sensitivity reason (incl. the engine-tier lander via
+ *     `blast-radius`) auto-lands on a converged verdict (the #2445 two-tier flip).
  *   • DEADLOCK reasons — the panel↔editor loop ALREADY ran and could not agree. Re-converging just repeats the
  *     deadlock, so these go straight to a HUMAN.
  * These are the BARE (canonical) tokens; they are the un-decorated form of `scoreEscalation`'s fired signals
@@ -372,6 +374,7 @@ export const REVIEW_DISPOSITIONS = Object.freeze({
 export const REVIEW_REASONS = Object.freeze({
   // sensitivity (pre-review) — converge
   GATE_SELF: 'gate-self',
+  STATUTE: 'statute',
   BLAST_RADIUS: 'blast-radius',
   SIZE: 'size',
   DISMISSED_FINDINGS: 'dismissed-findings',
@@ -383,8 +386,12 @@ export const REVIEW_REASONS = Object.freeze({
 });
 
 const DEADLOCK_REASONS = Object.freeze([REVIEW_REASONS.NON_CONVERGENCE, REVIEW_REASONS.MANDATE_CONFLICT]);
+/** The sensitivity reasons that STILL require a human to clear (the panel may advise/fix, but never auto-lands):
+ *  `gate-self` (an agent policing its own leash — #2285) and `statute` (a governance rule a human must ratify —
+ *  #2412). The #2445 two-tier flip keeps these two human while the lander (engine tier) becomes agent-clearable. */
+const HUMAN_SENSITIVITY_REASONS = Object.freeze([REVIEW_REASONS.GATE_SELF, REVIEW_REASONS.STATUTE]);
 const SENSITIVITY_REASONS = Object.freeze([
-  REVIEW_REASONS.GATE_SELF, REVIEW_REASONS.BLAST_RADIUS, REVIEW_REASONS.SIZE,
+  REVIEW_REASONS.GATE_SELF, REVIEW_REASONS.STATUTE, REVIEW_REASONS.BLAST_RADIUS, REVIEW_REASONS.SIZE,
   REVIEW_REASONS.DISMISSED_FINDINGS, REVIEW_REASONS.CROSS_REPO, REVIEW_REASONS.SAMPLING,
 ]);
 
@@ -421,8 +428,10 @@ function canonicalizeReason(raw) {
  *
  * Precedence (most restrictive first):
  *   1. any DEADLOCK reason → `{ human, autoLand:false }` — the loop already failed to converge; a human decides.
- *   2. `gate-self`         → `{ converge, autoLand:false }` — converge to fix (advisory), but a human gates merge.
- *   3. any other sensitivity reason → `{ converge, autoLand:true }` — today's agent-reviewable path, unchanged.
+ *   2. `gate-self` or `statute` → `{ converge, autoLand:false }` — converge to fix (advisory), but a human gates
+ *      merge (an agent policing its own leash, or a governance rule a human must ratify — the #2445 two-tier flip
+ *      keeps ONLY these two sensitivity classes human; the lander, engine tier, falls to case 3).
+ *   3. any other sensitivity reason → `{ converge, autoLand:true }` — agent-reviewable: a converged verdict lands.
  *
  * Accepts EITHER bare `REVIEW_REASONS` tokens (`'gate-self'`, `'blast-radius'`, …) OR the DECORATED reason
  * strings `scoreEscalation` (`we:scripts/lib/review-escalation.mjs`) actually emits and the drain carries in its
@@ -444,7 +453,7 @@ export function deriveReviewDisposition({ reason, reasons } = {}) {
   if (unknown.length) throw new Error(`deriveReviewDisposition: unknown reason(s): ${unknown.join(', ')}`);
   const list = canon.map((c) => c.token);
   if (list.some((r) => DEADLOCK_REASONS.includes(r))) return { mode: REVIEW_DISPOSITIONS.HUMAN, autoLand: false };
-  if (list.includes(REVIEW_REASONS.GATE_SELF)) return { mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false };
+  if (list.some((r) => HUMAN_SENSITIVITY_REASONS.includes(r))) return { mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false };
   return { mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true };
 }
 
