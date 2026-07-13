@@ -581,6 +581,63 @@ export function renderPanelVerdictTable({ lensVerdicts = {}, mandatoryLenses = M
 }
 
 /**
+ * #2439 (slice B of epic #2410) — the INDEPENDENT HARDENED VALIDATOR. After the editor↔reviewer panel loop
+ * (#2311/#2310) CONVERGES on an accept, a distinct fresh-context adversary re-judges the FINAL diff before it
+ * lands — the "non-author accepts" invariant made independent. It is a diverse JURY (one validator per lens,
+ * the same `PANEL_LENSES`, reduced by the same `derivePanelVerdict` — that is what "extends the panel reducers
+ * into a jury" means), but with two hard differences from a panel reviewer: it took NO part in the negotiation,
+ * and it is NEVER shown the peers' self-assessment, dismissals, or reasoning — only the final diff, the tests it
+ * touches, and the mandate. A converged negotiation can still land a plausible-but-wrong result; the validator's
+ * value is that it never saw why the peers thought it was right. `combineValidatedVerdict` then gates the panel's
+ * accept on this independent verdict, and only a JOINT accept earns `redteam:accepted` (the label lives in
+ * `review-escalation.mjs`; this module stays label-free — it JUDGES ONLY).
+ * @param {{lens: string, contextIsolation?: string}} o
+ * @returns {string}
+ */
+export function buildValidatorMandate({ lens, contextIsolation = 'diff-only' } = {}) {
+  if (!PANEL_LENSES.includes(lens)) {
+    throw new Error(`buildValidatorMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
+  }
+  const base = buildMandate({ contextIsolation, mandate: lens });
+  return [
+    base,
+    `You are the INDEPENDENT FINAL VALIDATOR for the ${lens} lens (#2439) — a fresh adversary who took NO part`,
+    'in the editor↔reviewer negotiation that produced this diff. Judge the FINAL diff and the tests it adds or',
+    'changes on their own merits ONLY. You are NOT shown, and must not ask for, the editor\'s or the reviewers\'',
+    'self-assessment, dismissals, or reasoning — a converged negotiation can still land a plausible-but-wrong',
+    'result, and your value is that you never saw why they thought it was right. Assume nothing has been',
+    'validated. Report any concrete reason this should NOT land (a real bug, an unhandled case, a missing or',
+    'gamed test that would pass while the behaviour is wrong), or accept ONLY if you independently would — never',
+    'defer to the fact that a panel already accepted it.',
+  ].join(' ');
+}
+
+/**
+ * #2439 — gate the panel's accept on the INDEPENDENT validator's verdict, returning the single verdict the
+ * existing `deriveNegotiationOutcome` round loop consumes unchanged (so the validator adds a final gate without
+ * a new loop). Pure. The validator can only ever TIGHTEN an accept — it is a final adversarial check, never a
+ * way to overturn a panel that already wants changes:
+ *   - the panel did NOT accept → its own verdict stands (there is nothing to gate yet; the validator only runs
+ *     on a panel accept).
+ *   - panel accept + validator `needs-human` → `needs-human` (the validator flags a call it will not make alone).
+ *   - panel accept + validator `accept` → `accept` — BOTH independently agree; this is the joint accept that
+ *     earns `redteam:accepted`.
+ *   - panel accept + validator `changes` → `changes` (the validator found something the panel missed → another
+ *     editor↔reviewer round, not a land).
+ * @param {{panelVerdict: 'accept'|'changes'|'needs-human', validatorVerdict: 'accept'|'changes'|'needs-human'}} o
+ * @returns {'accept'|'changes'|'needs-human'}
+ */
+export function combineValidatedVerdict({ panelVerdict, validatorVerdict } = {}) {
+  const known = new Set(Object.values(VERDICTS));
+  if (!known.has(panelVerdict)) throw new Error(`combineValidatedVerdict: unknown panelVerdict "${panelVerdict}"`);
+  if (panelVerdict !== VERDICTS.ACCEPT) return panelVerdict;
+  if (!known.has(validatorVerdict)) throw new Error(`combineValidatedVerdict: unknown validatorVerdict "${validatorVerdict}"`);
+  if (validatorVerdict === VERDICTS.NEEDS_HUMAN) return VERDICTS.NEEDS_HUMAN;
+  if (validatorVerdict === VERDICTS.ACCEPT) return VERDICTS.ACCEPT;
+  return VERDICTS.CHANGES;
+}
+
+/**
  * #2433 — SESSION/NOTICE RENDERERS. Three recurrent OPERATOR-facing artifacts (chat/report text, not PR
  * comments — `renderPanelVerdictTable` above and #2432's `renderPanelComment` cover the PR-comment body) that
  * used to be hand-typed prose per caller each time (the #2418 epic's "template the renders, not the prose"

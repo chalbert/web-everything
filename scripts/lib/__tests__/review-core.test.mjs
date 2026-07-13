@@ -37,6 +37,8 @@ import {
   buildPanelFindings,
   derivePanelVerdict,
   renderPanelVerdictTable,
+  buildValidatorMandate,
+  combineValidatedVerdict,
   REVIEW_NOTICE_EVENTS,
   renderDrainRunSummary,
   renderReviewNotice,
@@ -505,6 +507,66 @@ describe('renderPanelVerdictTable (#2310)', () => {
   it('renders a placeholder for a lens with no verdict yet, instead of throwing', () => {
     const table = renderPanelVerdictTable({ lensVerdicts: {} });
     expect(table).toContain('| correctness | mandatory | (no verdict) |');
+  });
+});
+
+describe('buildValidatorMandate (#2439 — the independent hardened validator)', () => {
+  it('wraps the lens mandate with the independent-final-validator framing', () => {
+    const text = buildValidatorMandate({ lens: 'correctness' });
+    expect(text).toContain('INDEPENDENT FINAL VALIDATOR for the correctness lens');
+    expect(text).toContain('took NO part');
+    expect(text).toMatch(/never saw why they thought it was right/);
+    // it must FORBID seeing the peers' self-assessment (the core #2439 property)
+    expect(text).toMatch(/NOT shown, and must not ask for, the editor's or the reviewers' self-assessment/);
+    // and it reuses the diff-only, no-checkout reviewer isolation
+    expect(text).toContain('ONLY the diff');
+    expect(text).toMatch(/do NOT `git checkout`/);
+  });
+
+  it('rejects a lens outside the panel set (same discipline as buildPanelMandate)', () => {
+    expect(() => buildValidatorMandate({ lens: 'made-up-lens' })).toThrow(/unknown lens/);
+  });
+
+  it('builds a distinct mandate for every panel lens', () => {
+    for (const lens of PANEL_LENSES) {
+      expect(buildValidatorMandate({ lens })).toContain(`INDEPENDENT FINAL VALIDATOR for the ${lens} lens`);
+    }
+  });
+});
+
+describe('combineValidatedVerdict (#2439 — gate a panel accept on the independent validator)', () => {
+  it('only a JOINT accept (panel AND validator) yields accept — the redteam:accepted case', () => {
+    expect(combineValidatedVerdict({ panelVerdict: VERDICTS.ACCEPT, validatorVerdict: VERDICTS.ACCEPT }))
+      .toBe(VERDICTS.ACCEPT);
+  });
+
+  it('a validator that wants changes DOWNGRADES a panel accept to changes (another round, not a land)', () => {
+    expect(combineValidatedVerdict({ panelVerdict: VERDICTS.ACCEPT, validatorVerdict: VERDICTS.CHANGES }))
+      .toBe(VERDICTS.CHANGES);
+  });
+
+  it('a validator needs-human escalates a panel accept', () => {
+    expect(combineValidatedVerdict({ panelVerdict: VERDICTS.ACCEPT, validatorVerdict: VERDICTS.NEEDS_HUMAN }))
+      .toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('the validator can only TIGHTEN — a non-accept panel verdict stands regardless of the validator', () => {
+    for (const validatorVerdict of [VERDICTS.ACCEPT, VERDICTS.CHANGES, VERDICTS.NEEDS_HUMAN]) {
+      expect(combineValidatedVerdict({ panelVerdict: VERDICTS.CHANGES, validatorVerdict })).toBe(VERDICTS.CHANGES);
+      expect(combineValidatedVerdict({ panelVerdict: VERDICTS.NEEDS_HUMAN, validatorVerdict })).toBe(VERDICTS.NEEDS_HUMAN);
+    }
+  });
+
+  it('throws on an unknown panel or validator verdict (exhaustive discipline)', () => {
+    expect(() => combineValidatedVerdict({ panelVerdict: 'bogus', validatorVerdict: VERDICTS.ACCEPT })).toThrow(/unknown panelVerdict/);
+    expect(() => combineValidatedVerdict({ panelVerdict: VERDICTS.ACCEPT, validatorVerdict: 'bogus' })).toThrow(/unknown validatorVerdict/);
+  });
+
+  it('feeds deriveNegotiationOutcome unchanged — a joint accept lands, a validator-changes continues under the cap', () => {
+    const joint = combineValidatedVerdict({ panelVerdict: VERDICTS.ACCEPT, validatorVerdict: VERDICTS.ACCEPT });
+    expect(deriveNegotiationOutcome({ verdict: joint, round: 1 })).toBe(NEGOTIATION_OUTCOMES.LAND);
+    const missed = combineValidatedVerdict({ panelVerdict: VERDICTS.ACCEPT, validatorVerdict: VERDICTS.CHANGES });
+    expect(deriveNegotiationOutcome({ verdict: missed, round: 1 })).toBe(NEGOTIATION_OUTCOMES.CONTINUE);
   });
 });
 
