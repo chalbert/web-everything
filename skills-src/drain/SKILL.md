@@ -255,7 +255,7 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
   but independent of the producer. **v3 (#2310) runs a bounded MULTI-MANDATE PANEL↔editor NEGOTIATION LOOP** —
   v2's single reviewer fans out into a panel of distinct mandated reviewers (`PANEL_LENSES`: `correctness` /
   `security` / `simplicity` / `standards-conformance`, the `/code-review` lenses), driven up to
-  `NEGOTIATION_ROUND_CAP` (3) rounds of propose → critique → revise, in-session, before escalating:
+  `NEGOTIATION_ROUND_CAP` (5) rounds of propose → critique → revise, in-session, before escalating:
   1. **Round 1 panel review.** Get the diff (`gh pr diff <num> --repo <repo>`, `gh pr view <num> --repo <repo>
      --json title,body,files`). Spawn ONE **fresh-context adversarial review subagent per lens** (the `Agent`
      tool, fanned out in parallel via the Workflow orchestrator), each seeded with `buildPanelMandate({ lens
