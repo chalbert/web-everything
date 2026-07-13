@@ -62,14 +62,28 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
   }
 
   // we:scripts/review-set-label.mjs#decideSetLabel — changes: a bounce is always allowed (regardless of
-  // human/pending). It adds review:changes and drops review:pending, but NEVER removes review:human — a bounce
-  // lands nothing, so the human gate stays until a human clears it.
+  // human/pending). It adds review:changes and drops BOTH review:pending AND a stale review:accepted (a bounce
+  // must never leave the PR looking accepted), but NEVER removes review:human — a bounce lands nothing, so the
+  // human gate stays until a human clears it.
   return {
     allowed: true,
     addLabel: REVIEW_LABELS.changes,
-    removeLabels: [REVIEW_LABELS.pending],
+    removeLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.accepted],
     reason: 'changes — author lane fixes hot-context and re-pushes',
   };
+}
+
+/**
+ * we:scripts/review-set-label.mjs#presentRemoveLabels — narrow a decision's `removeLabels` to only those the PR
+ * ACTUALLY carries, so `gh pr edit --remove-label` is never handed an absent label (which errors). Pure — the
+ * CLI intersects the decider's superset of removals against the observed labels before shelling out. Order and
+ * de-dup follow `removeLabels`.
+ * @param {string[]} removeLabels - the decision's requested removals
+ * @param {Array} currentLabels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
+ * @returns {string[]}
+ */
+export function presentRemoveLabels(removeLabels, currentLabels) {
+  return (Array.isArray(removeLabels) ? removeLabels : []).filter((l) => hasReviewLabel(currentLabels, l));
 }
 
 // we:scripts/review-set-label.mjs — allow importing the pure decider without running the CLI (the test file
@@ -116,9 +130,11 @@ function runCli() {
   }
 
   // we:scripts/review-set-label.mjs#runCli — apply the swap: add the verdict label, remove the stale ones
-  // (argv array, no shell).
+  // (argv array, no shell). Intersect the decision's removals with the labels the PR ACTUALLY carries so
+  // `gh pr edit --remove-label` is never handed an absent label (which errors).
+  const removals = presentRemoveLabels(decision.removeLabels, currentLabels);
   const editArgs = ['pr', 'edit', pr, '--repo', repo, '--add-label', decision.addLabel];
-  for (const rm of decision.removeLabels) { editArgs.push('--remove-label', rm); }
+  for (const rm of removals) { editArgs.push('--remove-label', rm); }
   try {
     execFileSync('gh', editArgs, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
   } catch (e) {
@@ -156,7 +172,7 @@ function runCli() {
   } catch {
     const names = (Array.isArray(currentLabels) ? currentLabels : [])
       .map((l) => (typeof l === 'string' ? l : l && l.name)).filter(Boolean)
-      .filter((n) => !decision.removeLabels.includes(n));
+      .filter((n) => !removals.includes(n));
     newLabels = [...new Set([...names, decision.addLabel])];
   }
 
