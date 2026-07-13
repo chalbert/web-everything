@@ -2,8 +2,10 @@
 bornAs: xwqsfbu
 kind: epic
 parent: "2445"
-status: open
+status: resolved
 dateOpened: "2026-07-12"
+dateStarted: "2026-07-13"
+dateResolved: "2026-07-13"
 tags: [plateau-loop, ui, console]
 ---
 
@@ -48,3 +50,16 @@ Ordered so you operate the daemon **process** before the queue it drains:
 Surfaced 2026-07-12 in the first [#2445](/backlog/2445-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/)
 watch run (front-A completeness pass — the DoD's operable-UI surface had zero build items). The
 multi-repo / morph framing is the operator's direction from that session.
+
+## Resolution (2026-07-13) — all 7 slices shipped
+
+The resident drain daemon is now observable + operable from the `plateau:tools/dev-panel/drain-daemon.html` surface. Slices delivered:
+- **Daemon lifecycle** ([#2467](/backlog/2467-loop-console-daemon-lifecycle-start-stop-restart-health-and-/)) — residency / lease / counters + start/stop/restart/once.
+- **Review console** ([#2470](/backlog/2470-loop-console-review-console-parked-escalated-prs-with-findin/)) — parked-PR expand + browser accept / request-changes, INVARIANT-2-guarded.
+- **Queue & lease board** ([#2471](/backlog/2471-loop-console-queue-lease-board-live-merge-queue-blockedby-ed/)) — the drain's dry-run plan (ordered toMerge, blockedBy edges, parked/skipped) + lease holder / TTL / sole-writer.
+- **Incident timeline** ([#2473](/backlog/2473-loop-console-incident-timeline-drain-class-incidents-restart/)) — drain-fail / dup-NNN / lease-contention + restarts.
+- **Operate controls v1** ([#2466](/backlog/2466-loop-console-drain-operate-controls-pause-resume-force-sweep/)) — pause / resume (lease-held freeze) + a read-only policy & config surface.
+- **Finish surface** ([#2477](/backlog/2477-loop-console-finish-surface-stuck-lanes-and-take-over-finish/)) — stuck lanes classified via the WE finish flow.
+- **Structured incident markers** ([#2481](/backlog/2481-loop-console-structured-restart-recovery-lease-loss-incident/)) — restart / lease-loss emitted as structured `incidents.jsonl` records into the timeline.
+
+Each impl is single-sourced in WE (review core / drain / lane-resume) and shelled through the dev-panel bridge, so the surface moves cleanly to whatever home [#2446](/backlog/2446-where-does-plateau-loop-live-plateau-app-module-own-repo-or-/) (placement) later picks. The longer-term **morph over the WE `/backlog/` UI into a multi-repo backlog + orchestration console** (the epic's end-state direction) remains future work, tracked under [#2472](/backlog/2472-plateau-loop-multi-project-registry-manage-we-frontier-ui-and/).
