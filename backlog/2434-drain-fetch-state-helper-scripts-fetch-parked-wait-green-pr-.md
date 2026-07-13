@@ -2,8 +2,10 @@
 bornAs: xjmwxw5
 kind: task
 parent: "2418"
-status: open
+status: resolved
 dateOpened: "2026-07-11"
+dateStarted: "2026-07-13"
+dateResolved: "2026-07-13"
 tags: []
 ---
 
