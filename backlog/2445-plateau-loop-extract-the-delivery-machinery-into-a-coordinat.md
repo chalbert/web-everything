@@ -3,8 +3,8 @@ bornAs: xhmav8a
 kind: epic
 status: open
 dateOpened: "2026-07-11"
-costUsd: 41.57
-costSessions: 2
+costUsd: 58.93
+costSessions: 3
 relatedReport: "reports/2026-07-12-program-plateau-loop.md"
 tags: [delivery-machinery, coordinator, plateau]
 ---
