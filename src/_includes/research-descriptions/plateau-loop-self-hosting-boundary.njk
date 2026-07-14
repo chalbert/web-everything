@@ -1,0 +1,73 @@
+<h3>The Question</h3>
+<p>
+    The phase-1 <strong>resident drain daemon</strong> (<a href="/backlog/2449-ship-the-phase-1-resident-drain-daemon-merge-queue-only/">#2449</a>)
+    runs itself under launchd for weeks and self-updates the <em>drain</em> code every pass — but it never
+    self-updates its <strong>own</strong> source, which runs out of the user's <em>primary</em> plateau-app
+    checkout. So every daemon change needs a manual <code>git pull</code> + <code>restart</code>, defeating
+    "runs itself unattended." Closing that (the supervisor slice
+    <a href="/backlog/2468-plateau-loop-supervisor-crash-recovery-persisted-state-self-/">#2468</a> under epic
+    <a href="/backlog/2445-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/">#2445</a>) is gated on
+    three coupled design calls. This survey grounds them in the real daemon code and outside prior art so the
+    call in <a href="/backlog/xeccleu-plateau-loop-self-hosting-boundary-supervisor-clone-location/">decision&nbsp;xeccleu</a>
+    is a fast ratification.
+</p>
+
+<h3>Grounding (verified against source)</h3>
+<ul>
+    <li>The daemon's own source runs from <code>PLATEAU_ROOT</code> (the user's primary tree); the WE
+        <em>merge sweep</em> already runs from a dedicated, isolated <code>we-drain-daemon</code> clone that
+        <code>refreshClone()</code> <code>git reset --hard origin/main</code>s every pass — the exact pattern
+        Fork&nbsp;A extends to the daemon's own source.</li>
+    <li>A clean shutdown path already exists: <code>releaseAndExit()</code> SIGTERMs the in-flight child
+        <em>before</em> releasing the drain lease, and the plist carries <code>RunAtLoad&nbsp;+&nbsp;KeepAlive</code>.</li>
+    <li>The operator <code>restart</code> is <code>launchctl bootout</code>&nbsp;+&nbsp;<code>bootstrap</code> — two
+        <em>external</em> steps; a job cannot run both against itself (the first unloads it).</li>
+    <li><strong>Code-verified correction for Fork&nbsp;C:</strong>
+        <a href="/backlog/2480-register-the-resident-drain-daemon-s-own-source-in-the-trust/">#2480</a> registered the
+        daemon's three files in the trust chain as <strong>engine</strong> tier, not policy — so a self-source PR
+        <em>escalates</em> to an independent adversarial panel but does <strong>not</strong> force
+        <code>review:human</code> (engine tier is agent-clearable). The epic's premise was stronger than the code —
+        and the <code>redteam:accepted</code> label is <em>earned</em> but not yet enforced as a land-gate
+        (deferred to #2412).</li>
+</ul>
+
+<h3>Prior art — self-updating resident daemons</h3>
+<ul>
+    <li><strong>launchd/systemd/pm2 all treat supervised exit-and-relaunch as the reload contract</strong> — a
+        managed job that exits cleanly is restarted from its (now-updated) on-disk program.
+        <code>kickstart&nbsp;-k</code> is the <em>operator</em>'s force-restart; issuing it from inside the job
+        races its own teardown. In-process <code>exec</code> keeps the pid but re-inherits fds, a held lease, and a
+        live child while sidestepping the supervisor — the fragile option.</li>
+    <li><strong>Blue-green / atomic-swap deploy:</strong> stage the new version in isolation, health-check, then cut
+        over — never mutate the live working copy in place. A dedicated clone (Fork&nbsp;A) is the "stage in
+        isolation" half; <code>exit&nbsp;+&nbsp;supervised relaunch</code> (Fork&nbsp;B) is the atomic cut-over.</li>
+    <li><strong>Never mutate the executing pipeline mid-run:</strong> GitHub Actions pins a run's workflow
+        definition at start, Jenkins pins shared-library versions per run, bors-lineage bots land from outside the
+        tree they merge. Tooling changes ride the normal queue and take effect next run — the same instinct behind
+        the constellation's self-modifying-tooling exclusion (#2422/#2077) and the trust chain (#2285/#2448/#2480).</li>
+</ul>
+
+<h3>Recommendation (forks for xeccleu)</h3>
+<ol>
+    <li><strong>Fork&nbsp;A — a dedicated single-lane plateau-app clone</strong> (mirror <code>we-drain-daemon</code>).
+        Forced invariant: safe self-update must <code>reset&nbsp;--hard</code> the checkout the daemon runs from,
+        which can't be the user's primary tree.</li>
+    <li><strong>Fork&nbsp;B — <code>process.exit(0)</code> + launchd <code>KeepAlive</code>.</strong> The "reuse the
+        proven <code>restart</code>" instinct fails (restart is external-only); <code>exit(0)</code> reuses the
+        proven clean-release path and launchd relaunches on the new code.</li>
+    <li><strong>Fork&nbsp;C — rely on #2480's engine-tier escalation + a light in-daemon guard.</strong> #2480 gives
+        an independent adversary + no daemon self-clear, but not a human (and does not today gate on
+        <code>redteam:accepted</code>); add a light <code>isSelfSourceChange</code> deferral keyed on the daemon's
+        source <em>directory</em> (a basename guard would share the rename-fragility it backstops), with promotion
+        to policy tier (human-gated) as the ratifier's override. The concurrent-self-lane-edit exclusion defers to
+        the runner/fanout (#2444/#2418) — the phase-1 daemon lane-edits nothing.</li>
+</ol>
+
+<h3>Out of scope</h3>
+<p>
+    Durable agent/lane-queue persistence and "the coordinator resumes <em>with</em> its agents after a reload" are
+    entangled with the agent-runner (<a href="/backlog/2444-plateau-loop-agent-runner-decision/">#2444</a>) and the
+    orchestrator-as-Node-fanout (<a href="/backlog/2418-main-loop-as-coordinator-delegate-the-review-pipeline-script/">#2418</a>);
+    they stay deferred to phase-2 until the daemon's operating evidence (#2456) lands. This decision covers only the
+    drain-daemon self-update subset.
+</p>

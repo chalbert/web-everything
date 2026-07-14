@@ -1,0 +1,22 @@
+{
+  "id": "plateau-loop-self-hosting-boundary",
+  "title": "Plateau Loop self-hosting boundary — supervisor clone, reload primitive, self-source exclusion",
+  "status": "open",
+  "summary": "Prep research for decision xeccleu (under epic #2445, supervisor slice #2468; report we:reports/2026-07-14-plateau-loop-self-hosting-boundary.md). The phase-1 resident drain daemon (#2449) self-updates the WE DRAIN code every pass (refreshClone git-reset --hard of its dedicated we-drain-daemon clone) but never its OWN source, which runs from the user's PRIMARY plateau-app checkout — so every daemon change needs a manual git pull + restart, defeating unattended-for-weeks residency. Three coupled forks define the self-hosting boundary. Fork A (supervisor clone): the daemon's own source must run from a DEDICATED single-lane plateau-app clone mirroring we-drain-daemon, because safe self-update must git reset --hard the checkout it runs from and that can't be the user's tree (forced invariant). Fork B (reload primitive): process.exit(0) + launchd KeepAlive relaunch — the 'reuse the operator restart' instinct fails because restart=bootout+bootstrap is external-only (a self-issued bootout kills the daemon before bootstrap runs); exit(0) reuses the proven releaseAndExit clean-release path (lease released, in-flight child SIGTERM'd) and launchd relaunches on the new code; kickstart -k is redundant with KeepAlive and races teardown, exec-in-place discards supervision. Fork C (self-source exclusion): CODE-VERIFIED CORRECTION — #2480 registered the daemon files (daemon.mjs/cli.mjs/lib.mjs) in the WE TRUST_CHAIN as ENGINE tier, NOT policy; humanRequired keys only on the policy tier + statute, so a self-source PR ESCALATES to an independent adversarial panel but does NOT force review:human (engine tier is agent-clearable), and the daemon never self-clears its own parked review — so #2480 guarantees no-silent-self-merge + an independent adversary, but NOT a human. Code-verified caveat: the redteam:accepted label is earned in review-core.mjs but NOT checked as a merge precondition today (enforcement deferred to #2412) — do not treat it as a land-gate. A review gate also says nothing about concurrent self-lane-editing. Default: rely on #2480 for the auto-land guarantee + a LIGHT in-daemon isSelfSourceChange deferral keyed on the daemon's SOURCE DIRECTORY (a basename guard would share the exact rename-fragility it backstops) as an escalation tripwire, with promotion to policy tier (human-gated) left as the ratifier's override; the #2077-style concurrent self-lane-edit exclusion is premature (the phase-1 daemon lane-edits nothing) and defers to runner/fanout #2444/#2418. External prior art: launchd/systemd/pm2 all treat supervised exit-and-relaunch (not in-process exec) as the reload contract; blue-green/atomic-swap stages new code in isolation then cuts over; GitHub Actions/Jenkins/bors never mutate the executing pipeline definition mid-run — tooling changes ride the normal queue and take effect next run. Out of scope: durable agent/lane-queue persistence and coordinator-resumes-with-agents (entangled with runner #2444 / orchestrator #2418), deferred to phase-2 pending daemon evidence #2456. Layer: agent-workflow / plateau-loop machinery — nothing crosses the WE<->FUI standard boundary.",
+  "dateOpened": "2026-07-14",
+  "tags": [
+    "plateau-loop",
+    "drain-daemon",
+    "self-hosting",
+    "supervisor",
+    "self-update",
+    "launchd",
+    "trust-chain",
+    "self-modification",
+    "merge-queue",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": null
+}
