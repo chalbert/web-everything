@@ -3,12 +3,22 @@ bornAs: xlm5zcg
 kind: story
 size: 3
 parent: "2445"
-status: open
+status: resolved
 dateOpened: "2026-07-14"
+dateResolved: "2026-07-14"
+graduatedTo: none
 tags: []
 ---
 
 # Loop console: health/anomaly detection + alerting — turn the mirror into a smoke detector
+
+> **Superseded by [#2489](/backlog/2489-loop-console-health-anomaly-detection-turn-the-mirror-into-a/)** (2026-07-14).
+> Filed hours apart the same day as a near-identical duplicate; #2489 is the epic that decomposes this
+> exact scope into value-first slices A–E (its slice list covers every detector below — stall/zero-merge = A,
+> considered-never-merged/head-churn = B, rising-failures = C, console band = D, alerting = E), and its
+> keystone [#2488](/backlog/2488-loop-console-detectanomalies-core-stall-zero-merge-with-read/)
+> (`detectAnomalies`) is already built. Closed for trace rather than deleted — the grounding below is the same
+> #477 evidence #2489 rests on.
 
 The operable console (`plateau:tools/dev-panel/drain-daemon.html`, served at the `plateau:/demos/drain-daemon.html` route) shows state, not trouble. Add anomaly detection that scans the daemon journal and raises alerts when the loop is stuck: queue made no progress for N passes while ready-count > 0; a PR considered-but-never-merged across N passes; merge rate 0 while ready work waits; a PR's head SHA churning across passes; rising `failedPasses`. Surface these as an alert band on the console so an unattended loop self-reports. This turns the console from a mirror into a smoke detector.
 
