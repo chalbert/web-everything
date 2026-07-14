@@ -2,8 +2,10 @@
 bornAs: xckahwf
 kind: task
 parent: "2445"
-status: open
+status: resolved
 dateOpened: "2026-07-14"
+dateStarted: "2026-07-14"
+dateResolved: "2026-07-14"
 tags: []
 ---
 
@@ -60,3 +62,5 @@ In `we:scripts/lane-manifest-write.mjs`, validate `flags.item` with
 `buildManifest` already accepts. Keep rejecting a truly-absent or empty `--item` (guard on
 presence, not on numeric-ness). Also thread the `--blocked-by` edges through `asItemId`
 rather than `Number` so hash edges survive the same way.
+
+**Delivered by** WE PR #495 (merged 2026-07-14).
