@@ -29,3 +29,4 @@ Backlog Workflow & Item State cluster — open a leaf with `node scripts/memory-
 - 108. Close-out: Resolve, Don't Delete — done→status:resolved (keep file); gate warns if resolved lacks graduatedTo
 - 109. Resolve Epic By Parent Edges — list children by `parent:` (grep), not body's "N children"; #658
 - 137. Migration Carve: Recoverable vs Lossy — additive cap + blockedBy child=sequencing; flatten=loss; #1866
+- 145. Search Backlog Before Filing — grep backlog/ before `scaffold`; the watch pre-files gap cards, so it may already exist (dup'd #2485/#2484); #2489/#2495
