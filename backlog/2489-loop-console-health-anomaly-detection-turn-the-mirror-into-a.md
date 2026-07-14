@@ -87,3 +87,7 @@ a human grepping logs.
 Surfaced 2026-07-14 (handoff analysis, top recommended-next gap) after the we #477 batch-loop fix
 prod-validated. The console (#2474) is observational but not diagnostic — the daemon ran deadlocked
 70+ min while the console looked healthy. Sibling to #2474 under the Plateau Loop epic (#2445).
+
+Supersedes [#2485](/backlog/2485-loop-console-health-anomaly-detection-alerting-turn-the-mirr/) — a
+near-identical single-story duplicate filed hours earlier the same day (same #477 grounding, same
+detector set); folded in here as slices A–E and resolved for trace.
