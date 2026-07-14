@@ -9,7 +9,7 @@
  *   themselves are proved in `scripts/lib/__tests__/review-core.test.mjs`; we only pin that the CLI wires them.
  */
 import { describe, it, expect } from 'vitest';
-import { parseFlags, reduceReview, buildMandateText } from '../review-core-cli.mjs';
+import { parseFlags, reduceReview, buildMandateText, buildComment } from '../review-core-cli.mjs';
 import {
   VERDICTS,
   NEGOTIATION_OUTCOMES,
@@ -184,5 +184,36 @@ describe('buildMandateText', () => {
 
   it('an unknown kind throws', () => {
     expect(() => buildMandateText({ kind: 'nope' })).toThrow(/unknown mandate kind/);
+  });
+});
+
+describe('buildComment — the comment subcommand glue (renders via renderPanelComment)', () => {
+  it('renders the supplied verdict + disposition + findings', () => {
+    const md = buildComment({
+      verdict: VERDICTS.CHANGES,
+      disposition: { mode: 'converge', autoLand: true },
+      findings: [{ summary: 'off-by-one', category: 'correctness' }],
+    });
+    expect(md).toContain('## PR review');
+    expect(md).toContain('changes requested');
+    expect(md).toContain('off-by-one');
+  });
+
+  it('DERIVES the verdict from findings when none is supplied (matches reduce)', () => {
+    const clean = buildComment({ findings: [] });
+    expect(clean).toContain('✅ pass');
+    const dirty = buildComment({ findings: [{ summary: 'a real bug' }] });
+    expect(dirty).toContain('changes requested');
+  });
+
+  it('DERIVES the disposition from a reason set when none is supplied', () => {
+    const md = buildComment({ findings: [{ summary: 'x' }], reasons: ['gate-self'] });
+    // gate-self → converge, autoLand:false → "a human must still clear it"
+    expect(md).toContain('a human must still clear it');
+  });
+
+  it('leaves the disposition line off when neither disposition nor reasons are supplied', () => {
+    const md = buildComment({ findings: [] });
+    expect(md).not.toContain('**Disposition:**');
   });
 });
