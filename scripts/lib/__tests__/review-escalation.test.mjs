@@ -34,6 +34,31 @@ describe('isBlastRadiusPath', () => {
       expect(isBlastRadiusPath(p)).toBe(false);
     }
   });
+
+  // #2479 (sibling to #2448/#2480) — the blast-radius surface TRAVELS with the delivery engine on extraction.
+  describe('#2479 — relocatable engine files trip blast-radius by BASENAME wherever they land', () => {
+    it('a RELOCATED engine file still trips (basename travels out of we:scripts/), an unrelated file does not', () => {
+      // pr-land / lane-drain / lane-pool extracted into the #2445 coordinator (plateau-app or a package) still escalate
+      for (const p of ['plateau-app/tools/loop/pr-land.mjs', 'packages/plateau-loop/src/lane-drain.mjs',
+                       'plateau-app/tools/loop/lane-pool.mjs', 'packages/plateau-loop/src/review-set-label.mjs']) {
+        expect(isBlastRadiusPath(p)).toBe(true);
+      }
+      // an UNRELATED relocated file (a feature module, an unregistered lib) must NOT trip — the basename is the boundary
+      for (const p of ['plateau-app/src/some-feature.mjs', 'packages/plateau-loop/src/unrelated-helper.mjs']) {
+        expect(isBlastRadiusPath(p)).toBe(false);
+      }
+    });
+    it('a WE-ONLY script does NOT travel (it stays `^scripts/`-matched only) — the precise which-travels boundary', () => {
+      // in WE, a WE-only script escalates via the `^scripts/` literal…
+      expect(isBlastRadiusPath('scripts/check-standards.mjs')).toBe(true);
+      // …but it is NOT registered to travel: relocated, it correctly stops tripping (WE is its permanent home).
+      expect(isBlastRadiusPath('plateau-app/tools/check-standards.mjs')).toBe(false);
+    });
+    it('scoreEscalation escalates end-to-end for a relocated engine file, and not for an unrelated relocated file', () => {
+      expect(scoreEscalation({ changedFiles: ['plateau-app/tools/loop/pr-land.mjs'], prNum: 3 }).escalate).toBe(true);
+      expect(scoreEscalation({ changedFiles: ['plateau-app/src/some-feature.mjs'], prNum: 3 }).escalate).toBe(false);
+    });
+  });
 });
 
 describe('isGateSelfPath — the POLICY tier of the trust chain (#2285 v1, #2448, #2445 two-tier flip)', () => {

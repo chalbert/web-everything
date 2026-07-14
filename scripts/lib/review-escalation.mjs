@@ -12,7 +12,7 @@
  * second look is decided by rule, not by the merging agent eyeballing the diff). Thresholds are TUNING KNOBS
  * — start loose, tighten from data; they live here so a change is one edit + a test, never scattered.
  */
-import { isTrustChainPath, isPolicyCorePath } from './gate-config.mjs';
+import { isTrustChainPath, isPolicyCorePath, basenameOf } from './gate-config.mjs';
 
 /** The ratified reviewer-verdict labels (#2171). The reviewer's disposition is a LABEL, never comment-parsing:
  *  independent *disposition* (reviewer accepts/rejects) is split from hot-context *fixing* (the author lane). */
@@ -61,20 +61,78 @@ export function isStatutePath(path) {
 }
 
 /** High-blast-radius path patterns (#2171). A diff touching any of these is escalation-worthy on its own —
- *  these files change how the system itself behaves, so a bad merge there is far costlier than a leaf edit. */
+ *  these files change how the system itself behaves, so a bad merge there is far costlier than a leaf edit.
+ *
+ *  TWO KINDS OF PATTERN, by whether the surface TRAVELS on extraction (#2479, sibling to #2448/#2480):
+ *   • CROSS-REPO surfaces (skills, hooks, CI, statute) already anchor with `(^|\/)`, so they match a relocated
+ *     copy for free — `plateau-app/.claude/skills/drain/SKILL.md` still trips, just like `.claude/skills/…` does
+ *     today. No travel work is needed for these.
+ *   • WE-PERMANENT surfaces stay `^`-anchored on purpose: the standards defs (`src/_data/…json`) live in WE
+ *     forever (WE holds the standard), and `^scripts\/` escalates every WE script WHILE it is in WE. The
+ *     RELOCATABLE delivery-engine scripts (pr-land, lane-drain, …) also match `^scripts\/` while here, but that
+ *     match is lost the moment #2445 extracts them out of we:scripts/ — so those, and only those, ALSO travel by
+ *     basename via `BLAST_RADIUS_ENGINE` below. WE-only scripts (standards/backlog/memory/conformance/generators)
+ *     are deliberately NOT registered there: WE is their permanent home, `^scripts\/` is the correct matcher for
+ *     them, and there is nowhere for them to travel to. */
 const BLAST_RADIUS = [
-  /^scripts\//,                              // build/CI/merge tooling (the lander included — escalates, agent-reviewable)
-  /(^|\/)\.claude\/skills\//,                // agent skills (the operating procedures)
-  /(^|\/)\.githooks\//,                       // git hooks (the guards)
-  /(^|\/)\.github\//,                         // CI config / workflows
+  /^scripts\//,                              // build/CI/merge tooling (WHILE in WE; relocatable engine files also travel by basename — see BLAST_RADIUS_ENGINE)
+  /(^|\/)\.claude\/skills\//,                // agent skills (the operating procedures) — already travels cross-repo via (^|\/)
+  /(^|\/)\.githooks\//,                       // git hooks (the guards) — already travels cross-repo
+  /(^|\/)\.github\//,                         // CI config / workflows — already travels cross-repo
   ...STATUTE_PATHS,                          // the statute layer (also forces a human — see scoreEscalation)
-  /^src\/_data\/(blocks|plugs|intents|protocols|semantics)\.json$/, // standards definitions
+  /^src\/_data\/(blocks|plugs|intents|protocols|semantics)\.json$/, // standards definitions — WE-permanent, never relocates
 ];
 
-/** Does this repo-relative path hit a high-blast-radius surface? Pure. */
+/**
+ * The RELOCATABLE delivery-ENGINE blast-radius members (#2479, sibling to #2448/#2480). These are the
+ * lane→PR→drain→merge transport scripts: escalation-worthy (a bad merge there breaks how the system DELIVERS
+ * changes) but NOT the gate-self trust chain (they neither define the gate nor land the merge — that set already
+ * travels via `isTrustChainPath`). Mirroring the #2448/#2480 mechanism in gate-config.mjs, each is matched by its
+ * BASENAME, so blast-radius TRAVELS with the code when the #2445 coordinator extracts these out of we:scripts/
+ * into plateau-app or a package. WITHOUT this, a relocated `pr-land.mjs` / `lane-drain.mjs` would stop matching
+ * `^scripts\/` above and an escalation-worthy change would no longer force even an AGENT review.
+ *
+ * Basename match is strictly MORE inclusive than the anchored `^scripts\/` regex, so it can only ever
+ * over-escalate (force a review that wasn't strictly needed) — the safe direction, by policy. Like the trust
+ * chain it cannot follow a RENAME: relocate-and-rename a member and you must re-register `file` here.
+ *
+ * `role`/`desc` document; `homes` records the current known location(s) for auditability only (the matcher does
+ * NOT read `homes`). RATIFICATION NOTE (the #2480 generic-basename lesson): every basename below was checked for
+ * collisions across the constellation and is UNIQUE — none is generic like `cli.mjs`/`lib.mjs`, so registering it
+ * over-escalates NO unrelated file. Keep it that way: only register specific, non-generic engine basenames.
+ */
+export const BLAST_RADIUS_ENGINE = [
+  // ── the lane→PR→land producer side ──────────────────────────────────────────────────────────────────────
+  { file: 'pr-land.mjs',            role: 'producer',      desc: 'opens the self-approved PR — the producer half of the lane→PR→drain transport', homes: ['scripts/pr-land.mjs'] },
+  { file: 'lane-pool.mjs',          role: 'lane-pool',     desc: 'allocates/recycles the lane clones the transport runs in', homes: ['scripts/lane-pool.mjs'] },
+  { file: 'lane-manifest-write.mjs',role: 'lane-manifest', desc: 'writes the lane manifest the drain reads to couple + order PRs', homes: ['scripts/lane-manifest-write.mjs'] },
+  { file: 'lane-resume.mjs',        role: 'lane-resume',   desc: 'resumes a partially-run lane (re-enters the transport mid-flight)', homes: ['scripts/lane-resume.mjs'] },
+  { file: 'lane-stack.mjs',         role: 'lane-stack',    desc: 'stacks dependent lanes (the base…head chain the escalation basis reads)', homes: ['scripts/lane-stack.mjs'] },
+  // ── the drain / merge side (the #2445 coordinator carries these) ─────────────────────────────────────────
+  { file: 'lane-drain.mjs',         role: 'drain',         desc: 'numbers + lands the queued lane couples — the drain transport', homes: ['scripts/lane-drain.mjs'] },
+  { file: 'drain-push-at-close.mjs',role: 'drain-push',    desc: 'pushes the drained couples at session close', homes: ['scripts/drain-push-at-close.mjs'] },
+  { file: 'prune-landed-lanes.mjs', role: 'drain-cleanup', desc: 'prunes landed lane clones after the drain merges them', homes: ['scripts/prune-landed-lanes.mjs'] },
+  { file: 'fetch-parked.mjs',       role: 'drain-fetch',   desc: 'fetches the parked PRs the drain re-evaluates each pass', homes: ['scripts/fetch-parked.mjs'] },
+  { file: 'pr-state.mjs',           role: 'pr-state',      desc: 'reads PR/label/check state the producer + drain gate on', homes: ['scripts/pr-state.mjs'] },
+  { file: 'push-if-green.mjs',      role: 'green-push',    desc: 'the green-gated push the transport uses to advance a lane', homes: ['scripts/push-if-green.mjs'] },
+  { file: 'wait-green.mjs',         role: 'green-wait',    desc: 'blocks the transport until the required check is green', homes: ['scripts/wait-green.mjs'] },
+  // ── the review transport (CLIs around the policy-tier review-core; the router itself is trust-chain) ──────
+  { file: 'review-core-cli.mjs',    role: 'review-cli',    desc: 'CLI wrapper that runs the shared review core in the transport', homes: ['scripts/review-core-cli.mjs'] },
+  { file: 'review-detail.mjs',      role: 'review-detail', desc: 'renders the review detail the drain stamps on a parked PR', homes: ['scripts/review-detail.mjs'] },
+  { file: 'review-set-label.mjs',   role: 'review-clear',  desc: 'swaps a parked review label (…→accepted) so the drain may merge — the review-clear transport (the WE invariant-2 backstop)', homes: ['scripts/review-set-label.mjs'] },
+  { file: 'lane-review.mjs',        role: 'lane-review',   desc: 'runs the lane\'s pre-PR review pass in the transport', homes: ['scripts/lane-review.mjs'] },
+];
+
+/** The set of ALL relocatable-engine basenames — the derived matcher input. Frozen. (#2479) */
+export const BLAST_RADIUS_ENGINE_BASENAMES = Object.freeze(new Set(BLAST_RADIUS_ENGINE.map((m) => m.file)));
+
+/** Does this repo-relative path hit a high-blast-radius surface? Pure. Matches either a blast-radius PATTERN
+ *  (WE-permanent / cross-repo surfaces above) OR a relocatable ENGINE basename (#2479) — the latter so the
+ *  surface TRAVELS when the delivery engine is extracted out of we:scripts/, exactly as `isTrustChainPath` does
+ *  for the gate-self set. */
 export function isBlastRadiusPath(path) {
   const p = String(path || '');
-  return BLAST_RADIUS.some((re) => re.test(p));
+  return BLAST_RADIUS.some((re) => re.test(p)) || BLAST_RADIUS_ENGINE_BASENAMES.has(basenameOf(p));
 }
 
 /** The POLICY-CORE trust chain (#2285 v1, re-anchored #2448, narrowed by the #2445 two-tier flip). A diff
