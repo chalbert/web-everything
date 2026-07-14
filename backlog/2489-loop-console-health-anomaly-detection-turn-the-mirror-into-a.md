@@ -2,8 +2,10 @@
 bornAs: xhakcai
 kind: epic
 parent: "2445"
-status: open
+status: resolved
 dateOpened: "2026-07-14"
+dateResolved: "2026-07-14"
+graduatedTo: none
 tags: [plateau-loop, ui, console, observability]
 ---
 
@@ -91,3 +93,21 @@ prod-validated. The console (#2474) is observational but not diagnostic — the 
 Supersedes [#2485](/backlog/2485-loop-console-health-anomaly-detection-alerting-turn-the-mirr/) — a
 near-identical single-story duplicate filed hours earlier the same day (same #477 grounding, same
 detector set); folded in here as slices A–E and resolved for trace.
+
+## Resolution (2026-07-14) — all slices delivered, live in production
+
+The daemon self-reports a `stuck` / `degraded` verdict on the CLI and in the console, and the 70-min
+deadlock class is now detected without a human grepping logs. All children shipped and are live
+(the daemon was restarted so slice B's per-pass recording and slice E2's alert step are active):
+
+- **A — detector core** ([#2488](/backlog/2488-loop-console-detectanomalies-core-stall-zero-merge-with-read/)) — pure `detectAnomalies` with the STALL and ZERO-MERGE-WITH-READY signals + the rolled-up `health` verdict in `buildStatusReport`.
+- **C — degradation signals** ([#2491](/backlog/2491-loop-console-degradation-signals-failure-rate-timeouts-parke/)) — elevated-failure-rate, repeated-timeouts, parked-staleness (agent-clearable parks only).
+- **D — console health surface** ([#2490](/backlog/2490-loop-console-health-badge-anomalies-band-surface-the-verdict/)) — the green/amber/red badge + anomalies band.
+- **E1 — CLI health line + wider window** ([#2492](/backlog/2492-loop-console-cli-health-line-wider-detection-window-self-rep/)) — `status` self-reports; the STALL signal can reach `critical`.
+- **B — considered-never-merged + per-pass PR identity** ([#2496](/backlog/2496-loop-console-considered-never-merged-detector-per-pass-pr-id/)) — names the specific wedged PR; records `consideredPrs`/`deferredPrs` (also unblocks time-to-land).
+- **E2 — out-of-console launchd alert** ([#2493](/backlog/2493-loop-console-out-of-console-launchd-alert-when-an-anomaly-pe/)) — a persistent degraded/stuck loop fires a de-duped desktop notification.
+- **Operating-evidence view** ([#2495](/backlog/2495-loop-console-operating-evidence-view-summarizeevidence-cli-e/)) + **browser panel** ([#2494](/backlog/2494-loop-console-evidence-panel-in-the-browser-render-the-operat/)) — `summarizeEvidence` + `cli evidence` + the console panel; turns the journal into the #2456 evidence (a single command instead of hand-grepping).
+
+Slices B and E2 each rode a fresh-context 2-lens adversarial review panel (both required daemon-adjacent
+changes); the panels caught + fixed a real false-positive (parked/deferred PRs reading as wedged) and two
+robustness should-fixes (an unbounded per-pass journal read; notification spam under a flapping anomaly set).
