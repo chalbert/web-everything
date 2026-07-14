@@ -1434,6 +1434,14 @@ function runCli() {
         if (contentResolved) v.contentRebaseDrop = r.mergedPaths;
         rebased.push(v.num);
         if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} rebased onto main${r.dropped || r.droppedManifest ? ' (manifest dropped)' : ''}${healTag}${contentTag}${cloneDir ? ` (via ${cloneDir})` : ''} → ${r.newCommit.slice(0, 9)}\n`);
+      } else if (r.action === 'current') {
+        // IDEMPOTENCY (drain re-push churn bug) — the tip is ALREADY on main and manifest-free; rebaseDropManifest minted/pushed NOTHING. Treat
+        // it as landable (proceed to merge) but do NOT count it as churn — no head SHA changed, so it must NOT
+        // join the `rebased` list (that list is the "we just repushed, CI will restart" set). This is the whole
+        // fix: a green, on-main, manifest-free PR stops getting its head rewritten every drain pass.
+        v.decision = 'merge';
+        v.reason = `already up-to-date on main (manifest-free), required check green — landable`;
+        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} already current on main (manifest-free) — no rebuild needed\n`);
       } else if (!AS_JSON) {
         process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} left skipped: ${r.reason}\n`);
       }

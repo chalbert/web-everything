@@ -236,4 +236,64 @@ describe('rebaseDropManifest', () => {
     expect(calls.some((c) => c.args[0] === 'ls-tree')).toBe(false);
     expect(calls.some((c) => c.args[0] === 'cat-file')).toBe(false);
   });
+
+  // IDEMPOTENCY (drain re-push churn bug). When the tip is ALREADY rebased on `base` AND already manifest-free, the rebuild is a
+  // semantic no-op; minting a fresh commit + force-push churns the head SHA, restarts CI, and a green PR never
+  // stays green long enough to merge. Short-circuit to `action:'current'` — commit-tree/push NOT invoked.
+  const RESOLVED_TREE_OID = 'resolvedTree'.padEnd(40, '0');
+  const TIP_COMMIT_OID = 'tipCommitSha'.padEnd(40, '0');
+  // A rev-parse handler: `<ref>^{tree}` returns the given tree oid; the bare `<ref>` returns the tip commit oid.
+  const revParse = (treeOid) => (args) =>
+    String(args[1]).endsWith('^{tree}')
+      ? { status: 0, stdout: treeOid + '\n' }
+      : { status: 0, stdout: TIP_COMMIT_OID + '\n' };
+
+  it('an already-rebased, manifest-free tip → action:current, NO commit-tree/push (no head churn)', () => {
+    const { run, calls } = scriptedRun({
+      ...MERGE_TREE_CLEAN,
+      ...RESOLVED_PLUMBING,
+      'merge-base': { status: 0 }, // base IS an ancestor of the tip → not behind
+      'rev-parse': revParse(RESOLVED_TREE_OID), // tip's current tree already == the manifest-free resolvedTree
+    });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-current', run });
+    expect(r.action).toBe('current');
+    expect(r.newCommit).toBe(TIP_COMMIT_OID);
+    expect(r.base).toBe('origin/main');
+    expect(r.laneRef).toBe('lane/x-current');
+    // the ancestry probe must ask "is BASE an ancestor of the TIP" — arg order is `base` then `mergeRef`. A
+    // flipped direction (`mergeRef base`) would answer the opposite question and mis-classify a behind tip as
+    // current; the mock ignores args, so pin the order explicitly to catch that regression.
+    const mb = calls.find((c) => c.args[0] === 'merge-base');
+    expect(mb.args).toEqual(['merge-base', '--is-ancestor', 'origin/main', 'origin/lane/x-current']);
+    // the whole point: nothing was minted and nothing was pushed.
+    expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(false);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+
+  it('a BEHIND tip (base is NOT an ancestor) still rebuilds + pushes → action:rebased', () => {
+    const { run, calls } = scriptedRun({
+      ...MERGE_TREE_CLEAN,
+      ...RESOLVED_PLUMBING,
+      'merge-base': { status: 1 }, // base is NOT an ancestor of the tip → the tip is behind
+      'rev-parse': revParse(RESOLVED_TREE_OID), // even a matching tree must NOT short-circuit a behind tip
+    });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-behind', run });
+    expect(r.action).toBe('rebased');
+    expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(true);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(true);
+  });
+
+  it('a tip whose tree still carries the manifest (curTree ≠ resolvedTree) still rebuilds to drop it', () => {
+    const { run, calls } = scriptedRun({
+      'merge-tree': { status: 1, stdout: conflictOut([LANE_MANIFEST]) }, // manifest-only conflict
+      ...RESOLVED_PLUMBING,
+      'merge-base': { status: 0 }, // on base…
+      'rev-parse': revParse('staleTreeHasManifest'.padEnd(40, '0')), // …but the tip's tree still has the manifest
+    });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-hasmanifest', run });
+    expect(r.action).toBe('rebased');
+    expect(r.dropped).toBe(true);
+    expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(true);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(true);
+  });
 });
