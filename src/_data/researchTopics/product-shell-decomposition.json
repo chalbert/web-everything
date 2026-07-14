@@ -1,0 +1,24 @@
+{
+  "id": "product-shell-decomposition",
+  "title": "How a multi-tool app decomposes into a thin product shell — app-shell hosting distinct products vs one flat menu",
+  "status": "open",
+  "summary": "Surveys how mature multi-tool suites solve 'one app, menu got too big', to ground #2476 (plateau-app product separation). The recurring answer is a two-level shell: a small top-level chooser picks a product, each product owns its own second-level menu — never one flat list. VS Code: Activity Bar → View Containers → Views; an extension registers a view container (id+title+icon) that holds many related views, so one icon replaces a flat run of entries. Backstage (Spotify): a single 'App' shell orchestrates plugins that each contribute routes/APIs/UI; in the new frontend system a plugin that provides a page auto-registers its sidebar item, and the explicit design choice is standalone-plugin-with-its-own-nav vs a tab/card inside an existing surface (e.g. a card in the Catalog Overview). Micro-frontend app shell (single-spa root config, Module Federation): the shell owns the page frame + routing/registration; each hosted app supplies name+load+activity and knows how to bootstrap/mount/unmount itself, and is independently deployable/loadable — extraction-readiness is designed in, not retrofitted. Atlassian: an app switcher (top-left) plus a rolling-out unified left nav shared across Jira/Confluence/Home. Figma: distinct named products (Figma Design, FigJam, Slides, Draw, Make) under one brand — but Dev Mode ships as a 'mode/workspace' over the SAME file, showing the escape hatch: same underlying object → a mode/lens, not a new product. Synthesis criterion: the shell owns the frame (chrome, top-level nav/switcher, routing, shared auth/theme) and never a product's internals; a surface is a distinct product when it is self-contained, separately route-addressable, and could be extracted — it is only a tool/view/tab when it makes sense solely inside another surface; same-data-different-lens ships as a mode, not a product. Naming prior art for an autonomous-UI-testing 'Explorer' product: real names cluster on behavior (Applitools Autonomous, Appvance 'Bug Hunter', TestSprite, Virtuoso, Momentic) or an agent/persona metaphor (Explorbot); 'explore/exploratory' is a heavily-used category descriptor and 'Explorer' is not a taken flagship among them. Ungrounded-flag: Figma's concrete switcher control and Atlassian's shared-shell claim appear only in blog/marketing framing, not the primary docs fetched.",
+  "dateOpened": "2026-07-14",
+  "lastReviewed": "2026-07-14",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "product-shell",
+    "app-shell",
+    "micro-frontend",
+    "information-architecture",
+    "navigation",
+    "plateau-app",
+    "vscode",
+    "backstage",
+    "single-spa",
+    "product-separation"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}
