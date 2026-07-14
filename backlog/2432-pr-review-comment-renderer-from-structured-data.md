@@ -3,8 +3,10 @@ bornAs: x5xxhr7
 kind: story
 size: 3
 parent: "2418"
-status: open
+status: resolved
 dateOpened: "2026-07-11"
+dateStarted: "2026-07-14"
+dateResolved: "2026-07-14"
 tags: []
 ---
 

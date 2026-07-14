@@ -22,9 +22,10 @@
  * (spawning a subagent, reading a diff, deciding `conflict`/`humanRequired`) stays with the caller, exactly as
  * the lib documents; this is the mechanical half.
  *
- * SCOPE (#2435): `reduce` + `mandate` ONLY. The `comment`/`renderPanelComment` PR-comment surface is sibling
- * item #2432, landing in a separate lane that edits this same file — the dispatch below is deliberately left
- * easy to extend so the two don't collide.
+ * SCOPE (#2435): `reduce` + `mandate`. #2432 adds the `comment` subcommand — the full PR-comment body rendered
+ * from a panel's structured result via `renderPanelComment` (`we:scripts/lib/review-render.mjs`, a SEPARATE
+ * engine-tier module so the pure renderer stays off the policy-tier `review-core.mjs` and agent-clearable). The
+ * dispatch below stays easy to extend.
  *
  * Usage:
  *   node scripts/review-core-cli.mjs reduce --file=findings.json          # human: verdict/disposition/outcome + table
@@ -34,10 +35,18 @@
  *   node scripts/review-core-cli.mjs mandate --lens=correctness           # a panel reviewer mandate for one lens
  *   node scripts/review-core-cli.mjs mandate --validator --lens=security  # the independent-validator mandate
  *   cat findings.json | node scripts/review-core-cli.mjs mandate --editor --round=2   # the editor-round mandate
+ *   cat result.json | node scripts/review-core-cli.mjs comment            # the full PR-comment markdown body
+ *   node scripts/review-core-cli.mjs comment --file=result.json --json     # { markdown } on stdout
  *
  * `reduce` input (JSON, from --file or stdin) is the option bag `reduceReview` consumes — any subset of:
  *   { findings, humanRequired, lensVerdicts, mandatoryLenses, conflict, reason, reasons, round, roundCap, phase }
  * Flags `--round` / `--roundCap` / `--phase` / `--reason` / `--reasons` (comma-sep) override the JSON's fields.
+ *
+ * `comment` input (JSON, from --file or stdin) is `{ findings, verdict, disposition }` (plus optional
+ * `lensVerdicts` / `mandatoryLenses` / `lenses` / `heading` for the embedded verdict table). When `verdict` or
+ * `disposition` is absent it is DERIVED from the findings (`deriveVerdict` / `deriveReviewDisposition` when a
+ * `reason`/`reasons` set is supplied) — matching how `reduce` reads its input. Flags `--reason` / `--reasons`
+ * (comma-sep) override the JSON's fields, same as `reduce`.
  *
  * Exit codes: 0 = ok; 2 = usage error (unknown subcommand / bad flags / no input); 1 = a derivation threw
  * (e.g. an unknown escalation reason, a missing mandatory-lens verdict) — the message is printed as `{error}`.
@@ -56,6 +65,7 @@ import {
   buildEditorMandate,
   buildValidatorMandate,
 } from './lib/review-core.mjs';
+import { renderPanelComment } from './lib/review-render.mjs';
 
 // ── tiny flags parser (matches push-if-green.mjs) ─────────────────────────────────────────────────────
 /**
@@ -154,6 +164,55 @@ export function buildMandateText({ kind, lens, findings, round, roundCap } = {})
   }
 }
 
+/**
+ * Build the full PR-comment markdown from a panel's structured result (the pure half of the `comment`
+ * subcommand, #2432). Pure — no I/O, no dates. `verdict` and `disposition` are used as supplied; when either is
+ * absent it is DERIVED from the same core fns `reduceReview` uses (so a raw findings dump renders a complete
+ * comment): `verdict` from `deriveVerdict({findings, humanRequired})`, and `disposition` from
+ * `deriveReviewDisposition` ONLY when a `reason`/`reasons` escalation set is supplied (there is no disposition
+ * without one — it is left absent and the comment simply omits that line). Delegates the markdown to the pure
+ * `renderPanelComment` (`./lib/review-render.mjs`).
+ * @param {{findings?: Array<object>, verdict?: string, disposition?: object|string, humanRequired?: boolean,
+ *   reason?: string, reasons?: string[], lensVerdicts?: Object<string,string>, mandatoryLenses?: string[],
+ *   lenses?: string[], heading?: string}} [input]
+ * @returns {string} the markdown PR-comment body.
+ */
+export function buildComment(input = {}) {
+  const {
+    findings,
+    verdict,
+    disposition,
+    humanRequired = false,
+    reason,
+    reasons,
+    lensVerdicts,
+    mandatoryLenses,
+    lenses,
+    heading,
+  } = input || {};
+
+  const normalized = normalizeFindings(findings);
+  const resolvedVerdict = verdict != null && verdict !== ''
+    ? verdict
+    : deriveVerdict({ findings: normalized, humanRequired });
+
+  let resolvedDisposition = disposition;
+  if (resolvedDisposition == null) {
+    const hasReasons = reason != null || (Array.isArray(reasons) && reasons.length > 0);
+    if (hasReasons) resolvedDisposition = deriveReviewDisposition({ reason, reasons });
+  }
+
+  return renderPanelComment({
+    findings: normalized,
+    verdict: resolvedVerdict,
+    disposition: resolvedDisposition,
+    lensVerdicts,
+    mandatoryLenses,
+    lenses,
+    heading,
+  });
+}
+
 // ── thin impure CLI ───────────────────────────────────────────────────────────────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) main(process.argv.slice(2));
@@ -181,8 +240,9 @@ function main(argv) {
 
   if (subcommand === 'reduce') return runReduce(flags, asJson);
   if (subcommand === 'mandate') return runMandate(flags, asJson);
+  if (subcommand === 'comment') return runComment(flags, asJson);
   return fail(
-    'usage: review-core-cli.mjs <reduce|mandate> [flags] — see the header for options',
+    'usage: review-core-cli.mjs <reduce|mandate|comment> [flags] — see the header for options',
     2,
   );
 }
@@ -223,6 +283,36 @@ function runReduce(flags, asJson) {
   const lines = [summary.join('   ')];
   if (result.verdictTable) lines.push('', result.verdictTable);
   process.stdout.write(`${lines.join('\n')}\n`);
+  return process.exit(0);
+}
+
+function runComment(flags, asJson) {
+  let json;
+  try {
+    json = readJsonInput(flags);
+  } catch (e) {
+    return fail(`could not read/parse result JSON: ${String(e && e.message || e)}`, 2);
+  }
+  if (json == null) return fail('comment: no input — pass --file=<path> or pipe JSON on stdin', 2);
+
+  // Flag overrides on top of the JSON option bag (reason/reasons mirror `reduce`, for the derived disposition).
+  const input = { ...json };
+  if (typeof flags.reason === 'string') input.reason = flags.reason;
+  if (typeof flags.reasons === 'string') input.reasons = flags.reasons.split(',').map((s) => s.trim()).filter(Boolean);
+  if (typeof flags.heading === 'string') input.heading = flags.heading;
+
+  let markdown;
+  try {
+    markdown = buildComment(input);
+  } catch (e) {
+    return fail(String(e && e.message || e), 1);
+  }
+
+  if (asJson) {
+    process.stdout.write(`${JSON.stringify({ markdown })}\n`);
+    return process.exit(0);
+  }
+  process.stdout.write(`${markdown}\n`);
   return process.exit(0);
 }
 
