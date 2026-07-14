@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Interaction fixture · Backlog per-item build-state badge (#2472)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    .backlog-badges { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+    we-badge { display: inline-flex; align-items: center; padding: 0.05rem 0.4rem; border-radius: 9999px; font-size: 0.72em; }
+  </style>
+</head>
+<body>
+  <!--
+    The rendered BUILD-STATE contract for the /backlog/ tracker (#2474 → #2472). backlog.js `deriveBuildState`
+    joins the batch skill's local loop-state files (claims.json / queued.json) onto each item; the
+    `buildStateBadge` macro (src/_includes/backlog-badges.njk) renders it ONLY for `claimed` / `queued` —
+    resolved + the plain statuses defer to statusBadge, so the badge is purely additive. This fixture mirrors
+    exactly what the macro emits for four items, so the spec can assert the observable contract without a
+    live Eleventy build: the two loop states render (claimed carries its session), and resolved / no-state
+    fall back cleanly to their status badge with NO build-state badge.
+  -->
+
+  <!-- CLAIMED — a live session holds it; the badge carries the owning session slug. -->
+  <div class="backlog-card" data-testid="card-claimed">
+    <div class="backlog-badges">
+      <we-tag set="kind" value="story">story</we-tag>
+      <we-badge tone="info">Active</we-badge>
+      <we-badge tone="info" data-build-state="claimed" icon="&#9881;" title="Build state: claimed">claimed &middot; batch-2026-07-14-a</we-badge>
+    </div>
+  </div>
+
+  <!-- QUEUED — a lane pushed it, ready-to-merge, awaiting the drain. -->
+  <div class="backlog-card" data-testid="card-queued">
+    <div class="backlog-badges">
+      <we-tag set="kind" value="task">task</we-tag>
+      <we-badge tone="info">Active</we-badge>
+      <we-badge tone="success" data-build-state="queued" icon="&#10003;" title="Build state: queued">queued</we-badge>
+    </div>
+  </div>
+
+  <!-- RESOLVED — resolved wins the precedence; NO build-state badge (statusBadge already shows it). -->
+  <div class="backlog-card" data-testid="card-resolved">
+    <div class="backlog-badges">
+      <we-tag set="kind" value="story">story</we-tag>
+      <we-badge tone="success">Resolved</we-badge>
+    </div>
+  </div>
+
+  <!-- NO LOCAL STATE — falls back cleanly to its status; NO build-state badge. -->
+  <div class="backlog-card" data-testid="card-plain">
+    <div class="backlog-badges">
+      <we-tag set="kind" value="story">story</we-tag>
+      <we-badge tone="warning">Open</we-badge>
+    </div>
+  </div>
+</body>
+</html>
