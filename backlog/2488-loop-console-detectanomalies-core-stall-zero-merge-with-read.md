@@ -1,7 +1,8 @@
 ---
+bornAs: xc0x4ec
 kind: story
 size: 3
-parent: "xhakcai"
+parent: "2489"
 status: open
 dateOpened: "2026-07-14"
 tags: [plateau-loop, console, observability]
