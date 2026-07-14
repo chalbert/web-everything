@@ -163,6 +163,28 @@ function deriveTier(item) {
   return 'C';
 }
 
+// BUILD STATE (#2472) — where an item sits in the LOCAL loop pipeline, the first "backlog-driven console"
+// increment (#2474 → #2472): the `/backlog/` tracker joining the batch skill's offline loop-state files it
+// didn't read before, so a card can show live-ish pipeline position, not just its static `status`. This is
+// the PURE derivation (mirrors `deriveTier` — extracted so it can be unit-pinned over synthetic items,
+// independent of a loader run). Given an item and the two lookups the loader builds from `claims.json` /
+// `queued.json`, it picks the highest-precedence state:
+//   resolved  — frontmatter `status: resolved` (a done item never mislabels as a stale claim; top wins).
+//   queued    — the item's num is marked ready-to-merge in queued.json (a lane pushed, awaiting the drain).
+//   claimed   — a live session holds the item in claims.json (the status:open→active lock); carries `session`.
+//   <status>  — otherwise the item's own status (open/active/preparing/parked) — the additive fallback.
+// PURELY ADDITIVE: called with no lookups (or when both files are absent) it returns `{ state: item.status }`
+// for every item, so nothing new renders (the badge draws only for `claimed`/`queued`). `claimedBy` is a
+// Map keyed by BOTH the full item id and its leading num-token → owning session; `queuedNums` is a Set of
+// ready-to-merge nums (padded to width-3, matching queued-state.mjs).
+function deriveBuildState(item, { claimedBy, queuedNums } = {}) {
+  if (item.status === 'resolved') return { state: 'resolved' };
+  if (queuedNums && queuedNums.has(String(item.num).padStart(3, '0'))) return { state: 'queued' };
+  const session = claimedBy && (claimedBy.get(item.id) || claimedBy.get(String(item.num)));
+  if (session) return { state: 'claimed', session };
+  return { state: item.status };
+}
+
 // Valid `humanGate.kind` values (the pill + held-section vocabulary live in backlogMeta.js). A gate is
 // `{ kind, what, short? }`: `kind` classifies the human action; `what` is the full prose instruction (a
 // runbook pointer / the feedback asked for, shown in the badge tooltip); optional `short` is a concise
@@ -719,6 +741,58 @@ module.exports = function backlog() {
     }
   } catch { /* advisory only — never break the build over reservation state */ }
 
+  // BUILD STATE (#2474 → #2472) — the first "backlog-driven console" increment: attach each item's position
+  // in the LOCAL loop pipeline, joined from the batch skill's offline loop-state files the tracker didn't
+  // read before. Two files, BOTH read DEFENSIVELY (missing / garbled → treated as empty, never throws) —
+  // exactly the reservations soft-hold pattern above:
+  //   • claims.json  — `{ ttlMinutes, sessions: [{ session, ids: [<full-slug>], at }] }` — which items a
+  //                    live session hard-claimed (the status:open→active lock). TTL-pruned (default 120 min)
+  //                    so a crashed session can't pin a phantom claim forever, mirroring the reservation TTL.
+  //   • queued.json  — `{ queued: [{ num, lane?, batchSlug? }] }` — items a lane pushed + marked
+  //                    ready-to-merge, waiting for the drain. No TTL (a durable ready-to-merge signal).
+  // The join is via the pure `deriveBuildState` (precedence resolved > queued > claimed > status), so it's
+  // unit-pinnable independent of the fs read here. PURELY ADDITIVE: if both files are absent, every item's
+  // buildState just equals its status and nothing new renders (the badge draws only for claimed/queued).
+  // Fixture builds (#2236) never read the dev-only, gitignored files, same guard as reservations above —
+  // the fixture output stays a pure function of the checked-in fixture set.
+  const claimedBy = new Map();
+  const queuedNums = new Set();
+  try {
+    const claimsPath = process.env.WE_VISUAL_FIXTURES
+      ? null
+      : join(ROOT, '.claude/skills/batch-backlog-items/claims.json');
+    if (claimsPath && existsSync(claimsPath)) {
+      const raw = JSON.parse(readFileSync(claimsPath, 'utf8'));
+      const ttlMs = (typeof raw.ttlMinutes === 'number' ? raw.ttlMinutes : 120) * 60_000;
+      const now = Date.now();
+      for (const s of Array.isArray(raw.sessions) ? raw.sessions : []) {
+        if (!s || !s.session || !s.at) continue;
+        const t = Date.parse(s.at);
+        if (Number.isNaN(t) || now - t > ttlMs) continue; // TTL-prune a stale/crashed session's claims
+        for (const cid of Array.isArray(s.ids) ? s.ids : []) {
+          const claimId = String(cid);
+          claimedBy.set(claimId, s.session); // full slug (`964-check-…`, how `claim` stamps it)
+          const numTok = (claimId.match(new RegExp(`^(${ID_TOKEN})`)) || [])[1];
+          if (numTok) claimedBy.set(numTok, s.session); // …and the leading num token, for robustness
+        }
+      }
+    }
+  } catch { /* advisory only — a corrupt claims file just means "nothing claimed" */ }
+  try {
+    const queuedPath = process.env.WE_VISUAL_FIXTURES
+      ? null
+      : join(ROOT, '.claude/skills/batch-backlog-items/queued.json');
+    if (queuedPath && existsSync(queuedPath)) {
+      const raw = JSON.parse(readFileSync(queuedPath, 'utf8'));
+      for (const q of Array.isArray(raw.queued) ? raw.queued : []) {
+        if (q && q.num != null) queuedNums.add(String(q.num).padStart(3, '0')); // match queued-state.mjs padding
+      }
+    }
+  } catch { /* advisory only — a corrupt queued file just means "nothing queued" */ }
+  for (const item of items) {
+    item.buildState = deriveBuildState(item, { claimedBy, queuedNums });
+  }
+
   // Active work (#1854 v2) — a COMMAND CENTER for everything in flight at once, grouped into
   // OPERATION-TYPE LANES so someone juggling many concurrent runs can coordinate them. Lanes are derived
   // here from structured fields only (status + kind + reservation membership) — the deterministic, build-
@@ -783,6 +857,9 @@ module.exports.deriveProjectReadiness = deriveProjectReadiness;
 // Named export of the pure tier rubric for direct regression testing (the decision-with-open-blocker
 // demotion); inert to the Eleventy build, which only invokes the default function export.
 module.exports.deriveTier = deriveTier;
+// Named export of the pure build-state precedence (#2472) for direct regression testing — inert to the
+// Eleventy build, which only invokes the default function export.
+module.exports.deriveBuildState = deriveBuildState;
 module.exports.HUMAN_GATE_KINDS = HUMAN_GATE_KINDS;
 // Named export of the title/summary/details derivation (#745) for direct regression testing — Eleventy
 // only ever invokes the default function export, so attaching this property is inert to the build.

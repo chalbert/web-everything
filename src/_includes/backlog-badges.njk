@@ -41,6 +41,23 @@
 {% macro statusBadge(status, scale='sm') %}{% set tone = 'warning' if status == 'open' else ('info' if (status == 'active' or status == 'preparing') else ('success' if status == 'resolved' else 'neutral')) %}<we-badge tone="{{ tone }}">{% if status == 'preparing' %}Prepping{% else %}{{ status | title }}{% endif %}</we-badge>
 {% endmacro %}
 
+{# BUILD STATE badge (#2474 → #2472) — the first "backlog-driven console" increment: where the item sits in
+   the LOCAL loop pipeline, joined from the batch skill's offline loop-state files (claims.json / queued.json)
+   by src/_data/backlog.js `deriveBuildState`. `bs` is that item's `buildState` object `{ state, session? }`.
+   PURELY ADDITIVE — it renders ONLY for the two states that come FROM those files: `claimed` (a live session
+   holds the item) and `queued` (a lane pushed it, ready-to-merge). `resolved` and the plain statuses (open/
+   active/preparing/parked) render nothing here — statusBadge already shows them — so when the local files are
+   absent (buildState === status for every item) this badge draws nothing and the tracker is visually
+   unchanged. Same FUI `<we-badge>` idiom as statusBadge; tone claimed→info (in flight), queued→success
+   (ready to land). The stable `data-build-state` attr is the tile/detail + interaction-test hook. #}
+{% macro buildStateBadge(bs, scale='sm') %}
+{%- if bs and bs.state == 'claimed' -%}
+<we-badge tone="info" data-build-state="claimed" icon="&#9881;" title="Build state: claimed — a live session has this item (the status:open→active lock) and is working it{% if bs.session %} · {{ bs.session }}{% endif %}. Joined from the batch skill's local claims.json.">claimed{% if bs.session %} &middot; {{ bs.session }}{% endif %}</we-badge>
+{%- elif bs and bs.state == 'queued' -%}
+<we-badge tone="success" data-build-state="queued" icon="&#10003;" title="Build state: queued — a lane pushed this item and marked it ready-to-merge; it lands when the drain runs. Joined from the batch skill's local queued.json.">queued</we-badge>
+{%- endif -%}
+{% endmacro %}
+
 {% macro sizeBadge(size, scale='sm') %}{# #1208: size taxonomy → FUI `<we-tag>` (`set="size"` keys the neutral + tabular-nums rule in style.css). #}
 <we-tag set="size" value="{{ size }}" title="Estimate: {{ size }} agile point{% if size != 1 %}s{% endif %}">{{ size }} pt{% if size != 1 %}s{% endif %}</we-tag>
 {% endmacro %}
