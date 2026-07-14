@@ -41,3 +41,8 @@ skills-src/batch-backlog-items/id-ledger.json
 # Both the built skill dir and the skills-src/ source dir the drain writes from (the source path leaked to the primary).
 .claude/skills/drain/review-park-state.json
 skills-src/drain/review-park-state.json
+# First-drain-sighting manifest baseline (#2414) — same machine-scoped, safe-to-lose cache as the park-age
+# clock above, and same skills-src/ source-path leak. Untracked → dirtied the daemon clone every pass, firing a
+# false "recovering from interrupted pass" reset; ignoring it also lets the tamper baseline persist cross-pass.
+.claude/skills/drain/review-baseline-state.json
+skills-src/drain/review-baseline-state.json
