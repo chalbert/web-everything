@@ -421,6 +421,7 @@ export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/mai
   if (dryRun) return { action: decision.action, pr: prNum, merged: false, laneRef, reason: `dry-run: would ${decision.action === 'rebuild' ? (repo ? 'defer the rebase-drop to the drain then ' : 'rebase-drop the manifest then ') : ''}enqueue #${prNum} (${laneRef}) — label ${label} + trigger a single-couple drain${repo ? ` in ${repo}` : ''}` };
 
   let rebased = false;
+  let alreadyCurrent = false;
   if (decision.action === 'rebuild') {
     if (repo) {
       // #2383 — a REMOTE repo tip can't be rebuilt by the LOCAL rebase-drop plumbing; enqueue and let the drain
@@ -430,7 +431,11 @@ export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/mai
       const r = rebaseDropManifest({ laneRef, base, run });
       if (r.action === 'skip') return { action: 'skip', pr: prNum, merged: false, reason: r.reason, conflictPaths: r.conflictPaths };
       if (r.action === 'error') return { action: 'error', pr: prNum, merged: false, reason: r.reason };
-      rebased = true;
+      // `current` = the idempotency short-circuit ran: the tip is ALREADY on base and manifest-free, so NOTHING
+      // was minted or pushed. Still landable (enqueue below), but it is NOT a rebuild — don't set `rebased` or
+      // claim a manifest was dropped in the reason.
+      if (r.action === 'current') alreadyCurrent = true;
+      else rebased = true;
     }
   }
   // #2290 — ENQUEUE instead of merging: ensure the ready-to-merge label, then trigger a single-couple drain (the
@@ -441,7 +446,12 @@ export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/mai
   const drainScope = repo ? [`--repos=${repo}`] : ['--this-repo'];
   run('gh', ['pr', 'edit', String(prNum), ...repoFlag, '--add-label', label]);
   if (triggerDrain) run('node', [drainScript, `--only=${prNum}`, '--label', label, ...drainScope]);
-  return { action: rebased ? 'rebuilt-enqueued' : 'enqueued', pr: prNum, merged: false, rebased, reason: rebased ? 'rebased onto main (manifest dropped), labelled + single-couple drain triggered' : `labelled ready-to-merge + single-couple drain triggered${repo ? ` (${repo})` : ''}` };
+  const reason = rebased
+    ? 'rebased onto main (manifest dropped), labelled + single-couple drain triggered'
+    : alreadyCurrent
+      ? `already current on main (manifest-free) — labelled + single-couple drain triggered${repo ? ` (${repo})` : ''}`
+      : `labelled ready-to-merge + single-couple drain triggered${repo ? ` (${repo})` : ''}`;
+  return { action: rebased ? 'rebuilt-enqueued' : 'enqueued', pr: prNum, merged: false, rebased, reason };
 }
 
 // ─────────────────────────────────── IO helpers ───────────────────────────────────
@@ -599,7 +609,10 @@ if (IS_CLI) {
     const verdict = rebuildDescendant({ laneRef, ontoSha });
     if (asJson) process.stdout.write(JSON.stringify(verdict, null, 2) + '\n');
     else process.stderr.write(`lane-resume rebuild ${laneRef} onto ${ontoSha}: ${verdict.action}${verdict.reason ? ` — ${verdict.reason}` : ''}\n`);
-    process.exit(verdict.action === 'rebased' ? 0 : 2);
+    // `current` (idempotency short-circuit) is SUCCESS, not a guided-conflict/error: a re-run of `rebuild` on an
+    // already-rebuilt-but-unlanded descendant (tip already on ontoSha, manifest-free) returns `current` with
+    // nothing to do — `/finish` must read exit 0, not 2 (2 reads as a guided conflict and derails the finisher).
+    process.exit(['rebased', 'current'].includes(verdict.action) ? 0 : 2);
   }
   else { process.stderr.write(`unknown subcommand: ${cmd}\nusage: lane-resume.mjs discover [--json] [--this-repo|--repos=a,b] | land <pr> [--repo=<owner/name>] [--dry-run] [--json] | rebuild-plan [--spec=<file>|-] [--json] | rebuild <laneRef> --onto=<sha> [--json]\n`); process.exit(2); }
 }

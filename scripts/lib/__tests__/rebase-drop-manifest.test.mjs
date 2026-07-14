@@ -260,6 +260,11 @@ describe('rebaseDropManifest', () => {
     expect(r.newCommit).toBe(TIP_COMMIT_OID);
     expect(r.base).toBe('origin/main');
     expect(r.laneRef).toBe('lane/x-current');
+    // the ancestry probe must ask "is BASE an ancestor of the TIP" — arg order is `base` then `mergeRef`. A
+    // flipped direction (`mergeRef base`) would answer the opposite question and mis-classify a behind tip as
+    // current; the mock ignores args, so pin the order explicitly to catch that regression.
+    const mb = calls.find((c) => c.args[0] === 'merge-base');
+    expect(mb.args).toEqual(['merge-base', '--is-ancestor', 'origin/main', 'origin/lane/x-current']);
     // the whole point: nothing was minted and nothing was pushed.
     expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(false);
     expect(calls.some((c) => c.args[0] === 'push')).toBe(false);

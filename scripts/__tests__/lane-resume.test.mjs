@@ -467,6 +467,57 @@ describe('lane-resume — rebuildDescendant (#2396: reuse the rebase-drop plumbi
     const { run } = scriptedRun({ 'git merge-tree': { status: 0, stdout: 'tree'.padEnd(40, '0') }, ...RESOLVE_PLUMBING, 'gh pr': { status: 0 } });
     expect(rebuildDescendant({ laneRef: 'lane/child', ontoSha: 'AbC1234', run }).action).toBe('rebased');
   });
+
+  // IDEMPOTENCY (drain re-push churn bug) — a re-run of `rebuild` on an already-rebuilt-but-unlanded descendant
+  // (tip already on the repaired tip, manifest-free) makes rebaseDropManifest short-circuit to `current`: nothing
+  // minted, nothing pushed. rebuildDescendant must surface that verbatim (it is NOT a guided-conflict or error).
+  it('an already-rebuilt, manifest-free descendant tip → action:current, no commit-tree/push', () => {
+    const { run, calls } = scriptedRun({
+      'git merge-tree': { status: 0, stdout: 'merged'.padEnd(40, '0') }, // clean merge onto the repaired tip
+      ...RESOLVE_PLUMBING,                                               // write-tree → 'resolved'.padEnd(40,'0')
+      'git merge-base': { status: 0 },                                  // the repaired tip IS an ancestor of the tip
+      'git rev-parse': (args) => String(args[1]).endsWith('^{tree}')
+        ? { status: 0, stdout: 'resolved'.padEnd(40, '0') }             // tip's tree already == the resolved tree
+        : { status: 0, stdout: 'tipcommit'.padEnd(40, '0') },           // the tip's current commit sha
+    });
+    const v = rebuildDescendant({ laneRef: 'lane/child', ontoSha: onto, run });
+    expect(v.action).toBe('current');
+    expect(v.ontoSha).toBe(onto);
+    expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(false);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+
+  // The real bug the panel caught: the CLI `rebuild` subcommand mapped ONLY `rebased`→exit 0, so a `current`
+  // verdict exited 2, which `/finish` reads as a guided-conflict/error and derails. Drive the actual CLI against
+  // a real repo whose lane tip is genuinely already on `--onto` and manifest-free → rebaseDropManifest returns
+  // `current` for real → assert exit 0. (Pre-fix this exited 2.) No branch/checkout — plumbing only, so the
+  // global single-branch guard never fires.
+  it('the `rebuild` CLI subcommand exits 0 (SUCCESS) on a `current` no-op, not 2', () => {
+    const LR = join(process.cwd(), 'scripts', 'lane-resume.mjs');
+    const repo = mkdtempSync(join(tmpdir(), 'lane-resume-current-'));
+    const git = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      git('init', '-q');
+      git('config', 'user.email', 'test@test'); git('config', 'user.name', 'Test');
+      git('config', 'commit.gpgsign', 'false');
+      writeFileSync(join(repo, 'a'), 'x\n');
+      git('add', 'a'); git('commit', '-qm', 'seed');
+      const onto = git('rev-parse', 'HEAD').trim();
+      // Build a descendant lane tip (commit2, a child of onto, no manifest) via plumbing — NO branch/checkout.
+      writeFileSync(join(repo, 'b'), 'y\n');
+      git('add', 'b');
+      const tree2 = git('write-tree').trim();
+      const commit2 = git('commit-tree', tree2, '-p', onto, '-m', 'child').trim();
+      git('update-ref', 'refs/heads/lane/child', commit2);
+      git('restore', '--staged', 'b'); rmSync(join(repo, 'b'));
+      git('remote', 'add', 'origin', repo); // self-remote so `git fetch origin lane/child` resolves
+      let exit = 0, out = '';
+      try { out = execFileSync('node', [LR, 'rebuild', 'lane/child', `--onto=${onto}`, '--json'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+      catch (e) { exit = e.status ?? 1; out = e.stdout || ''; }
+      expect(exit).toBe(0);
+      expect(JSON.parse(out).action).toBe('current'); // and it took the no-op path, not a real rebuild
+    } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
 });
 
 describe('lane-resume — deriveLandedFromMain (#2396: stackParent landed status via positive on-main proof)', () => {
