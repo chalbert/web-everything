@@ -3,8 +3,11 @@ bornAs: xomhf8a
 kind: story
 size: 2
 parent: "2489"
-status: open
+status: resolved
 dateOpened: "2026-07-14"
+dateStarted: "2026-07-14"
+dateResolved: "2026-07-14"
+graduatedTo: none
 tags: [plateau-loop, console, observability, evidence]
 ---
 
