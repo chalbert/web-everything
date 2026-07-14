@@ -47,6 +47,37 @@ describe('lane-manifest-write (#2174 producer stop-at-push)', () => {
     expect(run(['--item=2174', '--repos=notjson', '--json']).code).toBe(3);
   });
 
+  it('#2483 — a HASH-id --item is ACCEPTED and the manifest is keyed by that hash (JIT-numbering)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lmw-'));
+    const out = join(dir, '.lane-manifest.json');
+    const r = run(['--item=xqwdyl8', '--repos=[{"repo":"we","ref":"lane/s-xqwdyl8"}]', '--out=' + out, '--json']);
+    expect(r.code).toBe(0);
+    const m = parseManifest(readFileSync(out, 'utf8'));
+    expect(validateManifest(m).ok).toBe(true);
+    expect(m.item).toBe('xqwdyl8'); // kept AS-IS as its hash string, not coerced to NaN
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('#2483 — an absent OR empty --item is still rejected (exit 3, ok:false)', () => {
+    const r1 = run(['--repos=[{"repo":"we","ref":"x"}]', '--json']);          // absent
+    expect(r1.code).toBe(3);
+    expect(JSON.parse(r1.out).ok).toBe(false);
+    const r2 = run(['--item=', '--repos=[{"repo":"we","ref":"x"}]', '--json']); // empty
+    expect(r2.code).toBe(3);
+    expect(JSON.parse(r2.out).ok).toBe(false);
+  });
+
+  it('#2483 — a HASH-id --blocked-by edge survives into the manifest (not dropped as NaN)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lmw-'));
+    const out = join(dir, '.lane-manifest.json');
+    const r = run(['--item=xqwdyl8', '--repos=[{"repo":"we","ref":"lane/s-xqwdyl8"}]', '--blocked-by=x5lail9,2173', '--out=' + out, '--json']);
+    expect(r.code).toBe(0);
+    const m = parseManifest(readFileSync(out, 'utf8'));
+    expect(validateManifest(m).ok).toBe(true);
+    expect(m.blockedBy).toEqual(['x5lail9', 2173]); // hash edge survives alongside a numeric one
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('#2387 F3 — --stack-parent is repeatable and --base defaults onto every repo lacking its own', () => {
     const dir = mkdtempSync(join(tmpdir(), 'lmw-'));
     const out = join(dir, '.lane-manifest.json');

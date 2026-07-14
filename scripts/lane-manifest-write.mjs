@@ -39,7 +39,7 @@
 import { writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { buildManifest, validateManifest, serializeManifest } from './readiness/lane-manifest.mjs';
+import { buildManifest, validateManifest, serializeManifest, asItemId, isItemId } from './readiness/lane-manifest.mjs';
 
 const argv = process.argv.slice(2);
 const flags = {};
@@ -66,8 +66,15 @@ function emit(result, code) {
   process.exit(code);
 }
 
-const item = Number(flags.item);
-if (!Number.isFinite(item)) emit({ ok: false, detail: 'pass --item=<NNN> (a finite item number)' }, 3);
+// #2483 — validate on PRESENCE + item-id shape, NOT numeric-ness. Under JIT-numbering (#2288) a brand-new
+// item carries a provisional `xNNNNNN` HASH id until the drain assigns its NNN at land, so a `Number()` /
+// `Number.isFinite` gate would reject it (→ NaN) even though the manifest schema (`isItemId` / `asItemId`)
+// accepts a hash. Reject only a truly-absent/empty `--item`; accept any valid item id (hash OR number) and
+// thread it AS-IS through `asItemId` — the exact value `buildManifest` already normalizes.
+const itemFlag = typeof flags.item === 'string' ? flags.item.trim() : flags.item;
+if (itemFlag == null || itemFlag === true || itemFlag === '') emit({ ok: false, detail: 'pass --item=<NNN-or-hash> (an item id — a numeric NNN or an xNNNNNN hash)' }, 3);
+if (!isItemId(itemFlag)) emit({ ok: false, detail: `--item must be an item id (a numeric NNN or an xNNNNNN hash), got "${itemFlag}"` }, 3);
+const item = asItemId(itemFlag);
 
 let repos;
 try { repos = JSON.parse(flags.repos); } catch { repos = null; }
@@ -80,8 +87,10 @@ if (typeof flags.base === 'string' && Array.isArray(repos)) {
   repos = repos.map((r) => (r && r.base != null && r.base !== '' ? r : { ...r, base: flags.base }));
 }
 
+// #2483 — thread `--blocked-by` edges through `asItemId` (not `Number`) so HASH-id edges survive: a
+// `Number()` here would collapse `x5lail9` → NaN and drop the edge. Keep only well-formed ids (hash OR number).
 const blockedBy = typeof flags['blocked-by'] === 'string'
-  ? flags['blocked-by'].split(',').map((s) => s.trim()).filter(Boolean).map(Number).filter(Number.isFinite)
+  ? flags['blocked-by'].split(',').map((s) => s.trim()).filter(Boolean).filter(isItemId).map(asItemId)
   : [];
 let mergeRiskFiles = [];
 if (typeof flags['merge-risk'] === 'string') {
