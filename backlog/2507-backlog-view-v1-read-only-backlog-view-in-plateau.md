@@ -1,9 +1,10 @@
 ---
+bornAs: xjaj8e8
 kind: story
 size: 5
-parent: "x0xjkr7"
+parent: "2505"
 status: open
-blockedBy: ["xg8fwbk"]
+blockedBy: ["2506"]
 dateOpened: "2026-07-14"
 tags: [plateau-loop, console, backlog-ui]
 ---
@@ -22,7 +23,7 @@ Load a single target repo's `backlog/*.md` and render one row per item, each sho
 
 Clicking a row opens the item's **full rendered markdown detail**.
 
-The durable state read here is only what's **authored in each file** — the live pipeline state (claimed / PR / CI / merged) is a separate, deferred slice ([live build-state overlay](/backlog/xryxyhp-backlog-view-live-build-state-overlay-per-item-lane-pr-ci-me/)).
+The durable state read here is only what's **authored in each file** — the live pipeline state (claimed / PR / CI / merged) is a separate, deferred slice ([live build-state overlay](/backlog/2509-backlog-view-live-build-state-overlay-per-item-lane-pr-ci-me/)).
 
 ## Constraints
 
@@ -32,7 +33,7 @@ The durable state read here is only what's **authored in each file** — the liv
 - **Repo is one configurable seam — not hardcoded.** The target repo is a single configurable input, so multi-repo later ([#2472](/backlog/2472-plateau-loop-multi-project-registry-manage-we-frontier-ui-an/) / [#2475](/backlog/2475-per-repo-backlog-files-each-constellation-repo-owns-its-own-/)) is a config change, not a rewrite.
 - **Built fresh on Plateau's FUI stack** — the route-view router plus the `mount<Name>` pattern — dogfooding FUI. No WE templates imported. Web Everything is the reference model only; impl lives in plateau-app.
 
-Blocked by the data-path decision ([D1](/backlog/xg8fwbk-plateau-loop-how-the-backlog-console-reads-a-repo-s-backlog-/)) — how the files reach the view (served endpoint vs build-time snapshot vs remote) fixes the seam this story reads through.
+Blocked by the data-path decision ([D1](/backlog/2506-plateau-loop-how-the-backlog-console-reads-a-repo-s-backlog-/)) — how the files reach the view (served endpoint vs build-time snapshot vs remote) fixes the seam this story reads through.
 
 ## Acceptance
 

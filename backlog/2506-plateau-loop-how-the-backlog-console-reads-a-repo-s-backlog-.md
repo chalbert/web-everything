@@ -1,6 +1,7 @@
 ---
+bornAs: xg8fwbk
 kind: decision
-parent: "x0xjkr7"
+parent: "2505"
 status: open
 preparedDate: "2026-07-14"
 dateOpened: "2026-07-14"
@@ -23,6 +24,6 @@ How does the console get a repo's parsed `backlog/*.md` to the rendered view?
 
 **Bold default: (a) served endpoint.** The console is a **live**, eventually **multi-repo**, **operable** tool. A build-time snapshot (b) can't reflect current state — or many repos — without a rebuild, so it fails the "live" and "multi-repo" requirements the epic exists to meet. A remote/git fetch (c) is heavier than needed for local dev tooling and adds an auth/host dependency the local case doesn't want. A served endpoint is the pattern the app already runs for its mock data, extends cleanly to the operable (write) actions later, and is the seam the multi-repo registry ([#2472](/backlog/2472-plateau-loop-multi-project-registry-manage-we-frontier-ui-an/) / [#2475](/backlog/2475-per-repo-backlog-files-each-constellation-repo-owns-its-own-/)) grows on.
 
-This ties into the broader static-vs-served question for Plateau surfaces and sets the seam the read story ([the v1 read foundation](/backlog/xjaj8e8-backlog-view-v1-read-only-backlog-view-in-plateau/)) builds against — hence that story's `blockedBy` on this card.
+This ties into the broader static-vs-served question for Plateau surfaces and sets the seam the read story ([the v1 read foundation](/backlog/2507-backlog-view-v1-read-only-backlog-view-in-plateau/)) builds against — hence that story's `blockedBy` on this card.
 
 Do not set `codifiedIn` here — that is stamped on resolve.
