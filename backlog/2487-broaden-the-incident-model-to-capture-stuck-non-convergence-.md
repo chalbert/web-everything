@@ -2,8 +2,10 @@
 bornAs: xvxbuw1
 kind: task
 parent: "2445"
-status: open
+status: resolved
 dateOpened: "2026-07-14"
+dateStarted: "2026-07-14"
+dateResolved: "2026-07-14"
 tags: []
 ---
 
@@ -18,3 +20,5 @@ On 2026-07-13/14 the daemon deadlocked for 70+ minutes in a batch-landing loop (
 ## Scope
 
 Extend `deriveIncidents` with a stuck/non-convergence class: no `merged` progress for N passes while ready-count > 0, or a PR head SHA churning > K times. Derived from the existing journal (`plateau:.drain-daemon/history.jsonl` + `plateau:.drain-daemon/state.json`) — no daemon change. Pairs with the anomaly-detection story so a stuck loop both alerts live AND lands a durable incident record. Impl lives in plateau-app; WE holds zero impl (this card is the tracker).
+
+**Delivered by** plateau-app PR #41 (merged 2026-07-14).
