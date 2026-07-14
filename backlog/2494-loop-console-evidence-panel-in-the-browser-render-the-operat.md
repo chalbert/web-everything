@@ -1,4 +1,5 @@
 ---
+bornAs: xomhf8a
 kind: story
 size: 2
 parent: "2489"
@@ -9,7 +10,7 @@ tags: [plateau-loop, console, observability, evidence]
 
 # Loop console — evidence panel in the browser (render the operating-evidence view on-demand)
 
-Follow-up to the operating-evidence view (xtr4j8i, which shipped the pure `summarizeEvidence` reducer + the
+Follow-up to the operating-evidence view (2495, which shipped the pure `summarizeEvidence` reducer + the
 `evidence` CLI). Render that same evidence in the drain-daemon console: an ON-DEMAND panel (a button, like the
 merge-queue board — it is a heavier full-journal read, not part of the 5s poll) showing the throughput
 sparkline over time, the merge / park / fail / noop / idle rates, pass-duration, restarts, and the

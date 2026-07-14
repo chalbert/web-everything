@@ -1,4 +1,5 @@
 ---
+bornAs: xtr4j8i
 kind: story
 size: 3
 parent: "2489"
@@ -21,5 +22,5 @@ park / fail / noop / idle rates, pass-duration avg/p95, distinct `review:human` 
 incidents. Plus a `plateau:tools/drain-daemon/cli.mjs` `evidence [--json]` command that reads the whole
 journal on-demand (not the 5s poll) and prints it with a throughput sparkline. Deterministic, never throws,
 fresh-process (no daemon restart). Precise time-to-land needs slice B's per-pass PR ids (out of scope; merge
-throughput is the proxy). Browser panel is the follow-up (xomhf8a). Impl in plateau-app; WE holds zero impl.
+throughput is the proxy). Browser panel is the follow-up (2494). Impl in plateau-app; WE holds zero impl.
 
