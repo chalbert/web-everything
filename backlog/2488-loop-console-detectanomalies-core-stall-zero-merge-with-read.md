@@ -3,8 +3,11 @@ bornAs: xc0x4ec
 kind: story
 size: 3
 parent: "2489"
-status: open
+status: resolved
 dateOpened: "2026-07-14"
+dateStarted: "2026-07-14"
+dateResolved: "2026-07-14"
+graduatedTo: none
 tags: [plateau-loop, console, observability]
 ---
 
