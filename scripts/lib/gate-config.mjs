@@ -85,6 +85,40 @@ export const TRUST_CHAIN = [
     desc: 'the lander that reads the verdict labels and decides to merge — it OBEYS the gate (it does not define whether the gate fires or what clears it), so it stays agent-reviewable; a change here still escalates and runs the full adversarial panel, and the policy-tier invariant suite (human-only) is the backstop that catches a lander edit that tries to bypass a verdict',
     homes: ['scripts/merge-ai-prs.mjs'],
   },
+  // ── the phase-1 RESIDENT DRAIN DAEMON (WE #2480, under #2449/#2445) ───────────────────────────────────────
+  // The self-hosting coordinator shipped in plateau-app under NEW basenames (tools/drain-daemon/). Its files
+  // that INVOKE the merge or CLEAR a review are gate-deciding — a malicious/buggy change to any of them could
+  // let the daemon merge (or self-clear a review) unattended, with the operator's gh/git credentials, without a
+  // human. They are ENGINE tier, exactly like the lander above: they OBEY the gate (all rubric/disposition/land
+  // logic stays single-sourced in the WE child scripts — review-escalation.mjs / review-core.mjs / merge-ai-prs.mjs),
+  // so a converged agent panel may clear them; they are NOT policy (they define neither whether the gate fires nor
+  // what clears it). Registering the basename forces every PR touching it to ESCALATE (never silently self-clear).
+  // NOTE (ratification): these basenames are GENERIC. `cli.mjs` already collides with other WE source CLIs
+  // (scripts/gen-wrapper/cli.mjs, scripts/ingest-adapter/cli.mjs) and FUI dist build outputs, and `lib.mjs` is a
+  // latent collision; registering them over-escalates those unrelated files. That is the deliberately-accepted
+  // safe direction (over-escalate, engine tier ⇒ still agent-clearable, no human stranded) — but the durable fix
+  // is to RENAME the daemon files to unique basenames in plateau-app, then narrow these entries.
+  {
+    role: 'coordinator-loop',
+    file: 'daemon.mjs',
+    tier: 'engine',
+    desc: 'the resident drain daemon\'s loop (WE #2480) — runPass() SPAWNS the WE merge sweep on an interval, unattended, with the operator\'s gh/git credentials; a change here could spawn a bypassing sweep, alter the invocation, or merge outside the lease. Gate-deciding (it is the process that invokes the merge) but engine tier — it obeys the gate defined in the WE child',
+    homes: ['plateau-app/tools/drain-daemon/daemon.mjs'],
+  },
+  {
+    role: 'coordinator-cli',
+    file: 'cli.mjs',
+    tier: 'engine',
+    desc: 'the drain-daemon operator CLI (WE #2480) — `once` SPAWNS a REAL (non-dry-run) merge sweep and `review-set-label` shells the review-clear that swaps a parked review to accepted (clearing the parked gate so the drain may merge); both can merge / clear a review, so a change here is gate-deciding. Engine tier — the WE review-set-label CLI remains the INVARIANT-2 (never accept review:human) backstop. NB: generic basename — collides with other WE cli.mjs files (accepted over-escalation, see note above)',
+    homes: ['plateau-app/tools/drain-daemon/cli.mjs'],
+  },
+  {
+    role: 'coordinator-lib',
+    file: 'lib.mjs',
+    tier: 'engine',
+    desc: 'the drain-daemon pure logic (WE #2480) — buildPassArgs() constructs the merge-sweep argv (label + --under-lease) and buildSetLabelArgs() constructs the review-clear argv (--to=accepted clears the parked gate so the drain may merge); a change to either invocation builder is gate-deciding. Engine tier — the WE child scripts stay the rubric/disposition authority. NB: generic basename (see note above)',
+    homes: ['plateau-app/tools/drain-daemon/lib.mjs'],
+  },
   {
     role: 'roster-config',
     file: 'gate-config.mjs',
