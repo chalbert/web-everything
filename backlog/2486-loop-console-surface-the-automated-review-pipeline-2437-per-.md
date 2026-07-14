@@ -4,7 +4,7 @@ kind: story
 size: 3
 parent: "2445"
 status: open
-blockedBy: ["xpat265"]
+blockedBy: ["2500"]
 dateOpened: "2026-07-14"
 tags: []
 ---
