@@ -1,0 +1,98 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  A single web app (<strong>plateau-app</strong>) has a sidebar menu that grew too big — ~26 nav items
+  across 6 sections, with one <em>Tools</em> section holding 17 flat entries. Does the app restructure into
+  a <strong>thin product shell</strong> hosting several separately-addressable products (each with its own
+  route/menu home, extractable later), or just regroup the flat menu into sections? And how coarse should
+  the carve be? This grounds
+  <a href="/backlog/2476-plateau-app-product-separation-the-menu-is-too-big-carve-it-/">#2476</a>
+  (plateau-app product separation) and its sibling
+  <a href="/backlog/2446-where-does-plateau-loop-live-plateau-app-module-own-repo-or-/">#2446</a>
+  (where the Plateau Loop's code lives).
+</p>
+
+<h2>What the prior art does</h2>
+<table>
+  <thead>
+    <tr><th>Suite</th><th>Shell ↔ product structure</th><th>What it teaches</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>VS Code</strong></td>
+      <td>Three-level taxonomy: <em>Activity Bar → View Containers → Views</em>. An extension registers a
+        view container via <code>contributes.viewsContainers</code> (id + title + icon); it holds many
+        related views (<code>contributes.views</code>) instead of a flat list.</td>
+      <td>The cleanest statement of two-level nav: one top-level icon replaces a whole run of flat entries;
+        the product owns its own second level.</td>
+    </tr>
+    <tr>
+      <td><strong>Backstage</strong> (Spotify)</td>
+      <td>A single <em>App</em> shell orchestrates plugins; each plugin contributes routes, APIs, UI. In the
+        new frontend system a plugin that provides a page <em>auto-registers</em> its sidebar item;
+        primitives are hierarchical (<code>SidebarGroup</code>/<code>SidebarItem</code>/<code>SidebarSubmenu</code>).</td>
+      <td>Explicit design choice: a standalone plugin with its own nav entry <em>vs</em> a tab/card
+        <em>inside</em> an existing surface (e.g. a card in the Catalog Overview). That is exactly the
+        product-vs-tool cut line.</td>
+    </tr>
+    <tr>
+      <td><strong>Micro-frontend app shell</strong> (single-spa, Module Federation)</td>
+      <td>The <em>root config = the shell</em>: it renders the page frame and registers applications; each
+        app supplies name + load + activity and knows how to bootstrap/mount/unmount itself. Module
+        Federation hosts load independently-deployable remotes at runtime.</td>
+      <td>The shell owns the frame + routing/registration; products own their own lifecycle and are
+        independently deployable. Extraction-readiness is <em>designed in, not retrofitted</em>.</td>
+    </tr>
+    <tr>
+      <td><strong>Atlassian</strong></td>
+      <td>An <em>app switcher</em> (top-left) lists the apps you can reach; a rolling-out unified left nav is
+        shared across Jira, Confluence, Home, Focus.</td>
+      <td>A small top-level chooser picks the product; the product then owns its own nav. Org selection
+        filters the switcher so unrelated apps don't clutter it.</td>
+    </tr>
+    <tr>
+      <td><strong>Figma</strong></td>
+      <td>Distinct named products under one brand — Figma Design, FigJam, Slides, Draw, Make — but
+        <em>Dev Mode</em> ships as a "workspace/mode" over the <strong>same file</strong>, not a separate
+        editor.</td>
+      <td>The escape hatch: when a surface acts on the <em>same underlying object</em> as an existing
+        product, ship it as a <strong>mode/lens</strong>, not a new product. Distinct data/route → product;
+        same data, different lens → mode.</td>
+    </tr>
+    <tr>
+      <td><strong>Naming</strong> — autonomous UI-testing tools</td>
+      <td>Real names cluster on <em>behavior</em> (Applitools <em>Autonomous</em>, Appvance
+        <em>Bug&nbsp;Hunter</em>, TestSprite, Virtuoso, Momentic) or an <em>agent/persona</em> metaphor
+        (Explorbot). "Explore/exploratory" is a heavy category descriptor.</td>
+      <td>"Explorer" fits the persona cluster and is not a taken flagship product name among these — usable
+        naming prior art for promoting the internal Explorer tool to a shell surface.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Synthesis — the recurring pattern</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>The shell owns the frame, not the content</strong> — page chrome, top-level nav/switcher,
+    routing/registration, shared cross-cutting services (auth, theme). Never a product's internals.</li>
+  <li><strong>A product owns a self-contained surface + its own lifecycle</strong> — its own route(s),
+    its own second-level menu, mount/unmount.</li>
+  <li><strong>Two-level nav beats one flat list</strong> — a small top-level chooser picks a product;
+    the product owns its own second level. This is the universal answer to menu bloat.</li>
+  <li><strong>The distinct-product boundary is "self-contained + separately addressable + extractable"</strong>
+    — a product if it has its own route home and a coherent standalone surface; a tool/view/tab if it only
+    makes sense inside another surface.</li>
+  <li><strong>Same content → a mode, not a new product</strong> (Figma Dev Mode). Distinct data/route →
+    product; same data, different lens → mode.</li>
+  <li><strong>Extraction-readiness is designed in</strong> — mature shells make products
+    independently loadable from day one, which is exactly the "extractable later without a rewrite"
+    property a thin shell reaches for.</li>
+</ul>
+
+<h2>Flags</h2>
+<p class="text-sm text-gray-600">
+  Figma's concrete switcher control and Atlassian's shared-shell claim appear in blog/marketing framing,
+  not the primary docs fetched; treated as directional, not load-bearing. Module Federation host/remote
+  definitions are operational rather than crisp verbatim quotes. JetBrains Toolbox/Gateway was not
+  fetched — Atlassian fills that slot.
+</p>
+{% endraw %}
