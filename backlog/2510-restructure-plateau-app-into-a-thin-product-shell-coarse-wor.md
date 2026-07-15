@@ -24,7 +24,7 @@ only; the route-prefix rename is quarantined to a follow-up.
   `nav:menubar` makes them a sibling-exclusive accordion; `plateau-app:src/main.ts` opens the product
   owning the active route. **Route paths stay flat** (`/intent-configurator`, …) — no broken links.
   Contained to `plateau-app:index.html` + `plateau-app:src/main.ts` + `plateau-app:src/styles/layout.css`.
-- **Follow-up (`xs1i22b`, JIT-numbered at land) — route-prefix migration.** Rename routes into
+- **Follow-up (`2512`, JIT-numbered at land) — route-prefix migration.** Rename routes into
   per-product subtrees (`/studio/intent-configurator`, …) for the extraction-ready property (#2446).
   Higher blast radius (~22 files + the e2e spec + every internal cross-link), so it lands on its own.
 
@@ -40,7 +40,7 @@ surface is built.
   route→product sync in `plateau-app:src/main.ts`, disclosure CSS in `plateau-app:src/styles/layout.css`.
   Verified against a lane dev server (auto-open on route, accordion collapse, active-item sync, 0 console
   errors); 903 unit tests pass.
-- **Next:** merge plateau-app PR #46; resolve this story; the route-prefix migration is `xs1i22b`.
+- **Next:** merge plateau-app PR #46; resolve this story; the route-prefix migration is `2512`.
 - **Notes:** `nav:section` collapses via the `hidden` attribute (ViewEngine `display` mode), not inline
   `display:none` — needs `.nav-section-panel[hidden]{display:none}` since the author `display:flex`
   outranks the UA `[hidden]` rule.

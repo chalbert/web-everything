@@ -1,4 +1,5 @@
 ---
+bornAs: xs1i22b
 kind: story
 size: 8
 status: open
