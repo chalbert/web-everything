@@ -1,9 +1,10 @@
 ---
+bornAs: xv46vdw
 kind: story
 size: 3
 parent: "2508"
 status: open
-blockedBy: ["x7zaejl"]
+blockedBy: ["2514"]
 dateOpened: "2026-07-15"
 tags: [plateau-loop, console, backlog-ui]
 ---

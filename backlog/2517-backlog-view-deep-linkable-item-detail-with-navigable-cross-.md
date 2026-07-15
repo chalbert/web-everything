@@ -1,4 +1,5 @@
 ---
+bornAs: xjurp17
 kind: story
 size: 5
 parent: "2505"
