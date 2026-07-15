@@ -2,9 +2,12 @@
 bornAs: xg8fwbk
 kind: decision
 parent: "2505"
-status: open
+status: resolved
 preparedDate: "2026-07-14"
 dateOpened: "2026-07-14"
+dateStarted: "2026-07-14"
+dateResolved: "2026-07-14"
+codifiedIn: one-off
 tags: [plateau-loop, console, backlog-ui]
 ---
 
@@ -26,4 +29,10 @@ How does the console get a repo's parsed `backlog/*.md` to the rendered view?
 
 This ties into the broader static-vs-served question for Plateau surfaces and sets the seam the read story ([the v1 read foundation](/backlog/2507-backlog-view-v1-read-only-backlog-view-in-plateau/)) builds against — hence that story's `blockedBy` on this card.
 
-Do not set `codifiedIn` here — that is stamped on resolve.
+## Resolution (2026-07-14)
+
+**Ratified: option (a) — served endpoint.** A Plateau dev/app endpoint (extending the app's existing `/api` mock-server pattern) parses each `backlog/*.md` (frontmatter + body) and serves item records to the live view, which fetches current state at runtime. Not a build-time snapshot (b); not a remote/git fetch (c).
+
+Chosen because the console is a **live**, eventually **multi-repo**, **operable** tool: a build-time snapshot can't reflect current state — or many repos — without a rebuild, and a remote/git fetch is heavier than local dev tooling needs (it adds an auth/host dependency the local case doesn't want). The served endpoint is the pattern the app already runs for its mock data and is the seam the multi-repo registry grows on.
+
+The parser/loader homes in **Plateau/FUI** — **Web Everything holds zero implementation**. This decision fixes only the data path; it does not move ownership. This is a self-contained design decision local to the plateau console (not a cluster-wide platform statute), so it codifies as a `one-off` rather than a we:platform-decisions.md rule.
