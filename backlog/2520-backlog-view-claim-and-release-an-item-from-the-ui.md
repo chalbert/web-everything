@@ -3,9 +3,11 @@ bornAs: xrwpef0
 kind: story
 size: 3
 parent: "2508"
-status: open
+status: resolved
 blockedBy: ["2514"]
 dateOpened: "2026-07-15"
+dateResolved: "2026-07-15"
+graduatedTo: none
 tags: [plateau-loop, console, backlog-ui]
 ---
 
