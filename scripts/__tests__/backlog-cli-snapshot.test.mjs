@@ -143,6 +143,35 @@ describe('backlog.mjs CLI — ephemeral-clone integration smoke (#2273/#2274)', 
     expect(read('9009-h.md')).toBe(before);
   });
 
+  it('prioritize --to=low: sets the priority field, exit 0, status/body untouched', () => {
+    write('9010-i.md', item({ kind: 'story', size: 3, status: 'open', dateOpened: '"2026-07-01"' }));
+    const res = run(['prioritize', '9010', '--to=low']);
+    expect(res.code).toBe(0);
+    expect(res.json.ok).toBe(true);
+    const after = read('9010-i.md');
+    expect(after).toContain('priority: low');
+    expect(after).toContain('status: open'); // status untouched
+    expect(after).toContain('# Title'); // body untouched
+  });
+
+  it('prioritize --clear: removes the priority field, returning to the default', () => {
+    write('9011-j.md', item({ kind: 'story', size: 3, status: 'open', priority: 'low', dateOpened: '"2026-07-01"' }));
+    const res = run(['prioritize', '9011', '--clear']);
+    expect(res.code).toBe(0);
+    const after = read('9011-j.md');
+    expect(after).not.toMatch(/^priority:/m);
+    expect(after).toContain('status: open');
+  });
+
+  it('prioritize: refuses a bad token / a resolved item, exit 1, file untouched', () => {
+    write('9012-k.md', item({ kind: 'story', status: 'open', dateOpened: '"2026-07-01"' }));
+    const before = read('9012-k.md');
+    expect(run(['prioritize', '9012', '--to=HIGH!']).code).toBe(1); // not a simple lowercase token
+    expect(read('9012-k.md')).toBe(before);
+    write('9013-l.md', item({ kind: 'story', status: 'resolved', dateResolved: '"2026-07-01"', dateOpened: '"2026-07-01"' }));
+    expect(run(['prioritize', '9013', '--to=low']).code).toBe(1); // resolved refused without --force
+  });
+
   it('an unknown item reference exits 1 without touching the tree', () => {
     const res = run(['claim', '9999']);
     expect(res.code).toBe(1);
