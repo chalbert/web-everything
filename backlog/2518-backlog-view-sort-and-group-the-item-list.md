@@ -3,8 +3,10 @@ bornAs: xmtm7zc
 kind: story
 size: 3
 parent: "2505"
-status: open
+status: resolved
 dateOpened: "2026-07-15"
+dateResolved: "2026-07-15"
+graduatedTo: none
 tags: [plateau-loop, console, backlog-ui]
 ---
 
