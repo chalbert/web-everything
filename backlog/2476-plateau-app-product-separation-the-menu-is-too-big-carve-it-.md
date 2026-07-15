@@ -1,8 +1,12 @@
 ---
 bornAs: xy4kshz
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-07-13"
+dateStarted: "2026-07-14"
+dateResolved: "2026-07-15"
+graduatedTo: xfklh0m-restructure-plateau-app-into-a-thin-product-shell-coarse-wor
+codifiedIn: one-off
 preparedDate: "2026-07-14"
 researchTopic: product-shell-decomposition
 relatedReport: reports/2026-07-14-product-shell-decomposition.md
@@ -10,6 +14,19 @@ tags: [product-shell, plateau-app, information-architecture, product-separation,
 ---
 
 # Plateau-app product separation — the menu is too big; carve it into distinct products
+
+> **Ruled 2026-07-14 (ratified).** **Fork 1 → thin product shell:** plateau-app becomes a shell; each
+> product gets its own route prefix + second-level menu under the existing FUI nav blocks, extractable
+> later without a rewrite. Derived rulings inherited: **carve granularity → coarse** (membership falls out
+> of the product-vs-tool criterion; mode-not-product escape hatch for same-object surfaces), and
+> **Explorer surface name → keep "Explorer"** (internal label, no brand — an external brand stays a
+> separate call under `#brand-on-distinctness`). Red-team confirmed at ratification (pass-4 skeptic
+> SURVIVES, pass-5 screen clear; nothing new surfaced). Product-IA ruling, not a standard-layer change —
+> `codifiedIn: one-off` (no reusable constellation statute; the thin-shell pattern is established prior
+> art, applied to plateau-app). Graduates to the build story
+> [`xfklh0m`](xfklh0m-restructure-plateau-app-into-a-thin-product-shell-coarse-wor.md) (restructure into
+> the thin shell). Orthogonal to [#2446](/backlog/2446-where-does-plateau-loop-live-plateau-app-module-own-repo-or-/)
+> (Loop code home, still deferred).
 
 plateau-app's sidebar has grown to **~26 nav items across 6 sections**, with one *Tools* section holding
 **17 flat entries** ([`plateau-app:index.html:63-81`](../../../plateau-app/index.html)) — the concrete
