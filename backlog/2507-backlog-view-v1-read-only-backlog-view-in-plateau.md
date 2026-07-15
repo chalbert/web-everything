@@ -3,9 +3,11 @@ bornAs: xjaj8e8
 kind: story
 size: 5
 parent: "2505"
-status: open
+status: resolved
 blockedBy: ["2506"]
 dateOpened: "2026-07-14"
+dateResolved: "2026-07-15"
+graduatedTo: none
 tags: [plateau-loop, console, backlog-ui]
 ---
 
