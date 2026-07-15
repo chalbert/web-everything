@@ -1,4 +1,5 @@
 ---
+bornAs: xvllugj
 kind: story
 size: 8
 status: open
