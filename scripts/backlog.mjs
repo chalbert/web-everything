@@ -653,6 +653,39 @@ function retype() {
 }
 
 /**
+ * prioritize <NNN> [--to=<value>|--clear] — set or clear the item's `priority` frontmatter (the same field
+ * the readiness/batch machinery reads when it ranks work). Frontmatter-only, like {@link retype}. `--to`
+ * takes a simple lowercase token (e.g. `low`); `--clear` (or an empty `--to`) removes the field, returning
+ * the item to the default (unprioritised). A resolved item is refused without `--force`.
+ */
+function prioritize() {
+  const file = resolveFile(positional[0]);
+  const rel = `backlog/${file}`;
+  const abs = join(DIR, file);
+  let src = readFileSync(abs, 'utf8');
+  const to = flag('to');
+  const clear = argv.includes('--clear') || to === '';
+  if (!to && !clear) die('prioritize needs --to=<value> (e.g. low) or --clear');
+  if (to && !clear && !/^[a-z]+$/.test(to)) die(`--to must be a simple lowercase token (e.g. low), got "${to}"`);
+  const curStatus = readField(src, 'status') || 'open';
+  if (curStatus === 'resolved' && !argv.includes('--force')) die(`#${idFromName(file)} is resolved — reprioritising a closed item is almost certainly a mistake; pass --force if deliberate`);
+  let change;
+  if (clear) {
+    // Remove the `priority:` line from the frontmatter block ONLY (scoped between the two fences).
+    const m = src.match(/^(---\n)([\s\S]*?)(\n---)/);
+    if (m) src = m[1] + m[2].replace(/^priority:[^\n]*\n?/m, '') + m[3] + src.slice(m[0].length);
+    change = 'priority cleared';
+  } else {
+    src = setFrontmatterField(src, 'priority', to, { after: ['size', 'kind'] });
+    change = `priority→${to}`;
+  }
+  writeBacklogMd(abs, rel, src);
+  const id = file.replace(/\.md$/, '');
+  ok({ verb: 'prioritize', id, file: rel, change },
+    `${GRN}✓ prioritized${RST} ${BLD}#${idFromName(file)}${RST} ${DIM}${change}${RST}`);
+}
+
+/**
  * yield <NNN-slug> — resolve an NNN COLLISION by moving a LOCAL-ONLY item to the next free number (the guard's
  * own prescription: "a new item takes the next free number; yield this one"). Renumbering a *committed* item is
  * forbidden — NNN is immutable — so this REFUSES a git-tracked file and only ever moves an untracked/local one.
@@ -727,6 +760,7 @@ switch (verb) {
   case 'claim': case 'resolve': case 'release': transition(verb); break;
   case 'number-stranded': numberStranded(); break;
   case 'retype': retype(); break;
+  case 'prioritize': prioritize(); break;
   case 'yield': yieldNum(); break;
   case 'scaffold': scaffold(); break;
   case 'settle': settle(); break;
@@ -745,6 +779,7 @@ switch (verb) {
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X] [--codified-to=Y] [--force]   active → resolved + dateResolved (decision REQUIRES --codified-to=<doc#anchor|one-off>; an epic with open children is refused unless --force)\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
       `  ${GRN}retype${RST} <NNN> [--to=story|epic|task|decision] [--size=N] [--status=parked]   sanctioned pack-phase flag-fix (no LANE_GUARD_OFF); frontmatter-only\n` +
+      `  ${GRN}prioritize${RST} <NNN> [--to=low|--clear]   set or clear the item's \`priority\` frontmatter (the field readiness/batch ranks by); frontmatter-only\n` +
       `  ${GRN}yield${RST} <NNN-slug>            move a LOCAL-ONLY NNN collision to the next free number (refuses a git-tracked item; NNN is immutable)\n` +
       `  ${GRN}number-stranded${RST} [--dry-run]      number every TRACKED hash-id backlog file in this checkout (a hash that reached main via a numbering-bypassing land; #2319/#2288)\n` +
       `  ${GRN}scaffold${RST} --kind=story|epic|task|decision --size= --title= [--digest=] [--blocked-by=] [--parent=] [--session=<slug>]   --session ⇒ born active+owned (#670), publish with settle\n` +
