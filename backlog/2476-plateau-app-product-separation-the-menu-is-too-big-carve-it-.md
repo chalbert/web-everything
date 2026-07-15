@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-07-13"
 dateStarted: "2026-07-14"
 dateResolved: "2026-07-15"
-graduatedTo: xfklh0m-restructure-plateau-app-into-a-thin-product-shell-coarse-wor
+graduatedTo: 2510-restructure-plateau-app-into-a-thin-product-shell-coarse-wor
 codifiedIn: one-off
 preparedDate: "2026-07-14"
 researchTopic: product-shell-decomposition
@@ -24,7 +24,7 @@ tags: [product-shell, plateau-app, information-architecture, product-separation,
 > SURVIVES, pass-5 screen clear; nothing new surfaced). Product-IA ruling, not a standard-layer change —
 > `codifiedIn: one-off` (no reusable constellation statute; the thin-shell pattern is established prior
 > art, applied to plateau-app). Graduates to the build story
-> [`xfklh0m`](xfklh0m-restructure-plateau-app-into-a-thin-product-shell-coarse-wor.md) (restructure into
+> [`2510`](2510-restructure-plateau-app-into-a-thin-product-shell-coarse-wor.md) (restructure into
 > the thin shell). Orthogonal to [#2446](/backlog/2446-where-does-plateau-loop-live-plateau-app-module-own-repo-or-/)
 > (Loop code home, still deferred).
 
