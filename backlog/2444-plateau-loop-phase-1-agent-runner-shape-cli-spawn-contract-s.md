@@ -3,9 +3,12 @@ bornAs: x1d4k2v
 kind: decision
 parent: "2445"
 size: 3
-status: open
+status: resolved
 priority: low
 dateOpened: "2026-07-11"
+dateResolved: "2026-07-16"
+graduatedTo: 2530
+codifiedIn: "docs/agent/platform-decisions.md#agent-runner-cli-backend"
 preparedDate: "2026-07-16"
 costUsd: 7.58
 costSessions: 1
@@ -19,6 +22,23 @@ tags: [plateau-loop, agent-runner, claude-cli]
 Define the agent-runner interface (spawn/steer/stop/resume/observe) with the claude CLI backend: `-p`
 stream-json spawning, mid-turn steering, kill+resume redirects, subscription auth only; SDK/API-key
 backend deferred behind the same interface.
+
+## Ruling (ratified 2026-07-16)
+
+All three forks ratified **at their recommended defaults** — each survived an independent skeptic + a
+fresh-context two-confusion screen (two were strengthened by the attack, none overturned):
+
+- **Fork 1 → (a)** `steer(text)` promises **boundary-delivery, queued, non-dropping** (stdin impl); hook-gate
+  mid-turn delivery is a deferred enhancement behind the same op.
+- **Fork 2 → (a)** headless permissions = a static per-task-type `--allowedTools` baseline **+ the repo's
+  existing non-blocking write-time deny gates** (composes with #883, does not replace it); the human-blocking
+  UI-approval branch is excluded.
+- **Fork 3 → (a)** stop = **graceful-boundary-first, escalate to `SIGTERM` on timeout**; `--resume` continues a
+  clean pause, a redirect fresh-spawns.
+
+Plus the two research-settled invariants: CLI-spawn on subscription (SDK is a later API-key backend), and a
+backend-agnostic interface. **Codified in** `we:docs/agent/platform-decisions.md#agent-runner-cli-backend`;
+the runner interface itself is built by **#2530** (Slice C).
 
 > **Un-deferred + prepared (2026-07-16, operator call).** The 2026-07-11 defer ("no consumer yet — wait
 > for daemon operating evidence") is lifted: epic [#2527](/backlog/2527-plateau-loop-autonomous-ai-build-queue/)
