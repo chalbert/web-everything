@@ -132,6 +132,13 @@ if (item.blockedBy !== undefined) {
     const r = unquote(rankM[1]);
     if (!/^[0-9a-z]+$/.test(r)) errors.push(`Backlog item "${id}" rank "${r}" must be a base-36 key ([0-9a-z]+)`);
   }
+  // buildQueued (#2530 manual clear-for-build gate): a boolean; `remove` drops the line entirely, so only
+  // `true`/`false` are ever valid when present. Anything else is a hand-edit mistake.
+  const bqM = fm.match(/^buildQueued:\s*(.+)$/m);
+  if (bqM) {
+    const b = unquote(bqM[1]);
+    if (b !== 'true' && b !== 'false') errors.push(`Backlog item "${id}" buildQueued "${b}" must be true or false`);
+  }
 }
 
 // ── Report ──────────────────────────────────────────────────────────────────────

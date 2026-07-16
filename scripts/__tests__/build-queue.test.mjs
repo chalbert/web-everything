@@ -8,6 +8,7 @@ import {
   orderQueue,
   orderQueueDetailed,
   nextToBuild,
+  isBuildQueued,
   rankBetween,
   initialRanks,
   TIERS,
@@ -59,22 +60,23 @@ describe('#2528 readiness gate (hard, read-only)', () => {
 });
 
 describe('#2528 ordering — tier first, then score, then rank', () => {
+  // These test the ORDER (orderQueue), independent of the #2530 clear-for-build gate that nextToBuild adds.
   it('tier is the primary key: a pinned item outranks a higher-scoring normal item', () => {
     const pinned = item(1, { tier: 'pinned', value: 1 });
     const normal = item(2, { tier: 'normal', value: 5 }); // higher score, lower tier
-    expect(nextToBuild([normal, pinned], DEFAULT_CONFIG, NOW).num).toBe('1');
+    expect(orderQueue([normal, pinned], DEFAULT_CONFIG, NOW)[0].num).toBe('1');
   });
 
   it('within a tier, higher score wins', () => {
     const lo = item(1, { value: 1 });
     const hi = item(2, { value: 5 });
-    expect(nextToBuild([lo, hi], DEFAULT_CONFIG, NOW).num).toBe('2');
+    expect(orderQueue([lo, hi], DEFAULT_CONFIG, NOW)[0].num).toBe('2');
   });
 
   it('rank breaks a score tie (manual override within a tier)', () => {
     const a = item(1, { value: 3, rank: 'm' });
     const b = item(2, { value: 3, rank: 'c' }); // earlier rank
-    expect(nextToBuild([a, b], DEFAULT_CONFIG, NOW).num).toBe('2');
+    expect(orderQueue([a, b], DEFAULT_CONFIG, NOW)[0].num).toBe('2');
   });
 
   it('the queue excludes blocked and won\'t items entirely', () => {
@@ -100,6 +102,38 @@ describe('#2528 ordering — tier first, then score, then rank', () => {
 
   it('empty ready set → nextToBuild is null', () => {
     expect(nextToBuild([item(1, { status: 'active' })], DEFAULT_CONFIG, NOW)).toBeNull();
+  });
+
+  describe('#2530 nextToBuild — the clear-for-build gate (only human-cleared items are pulled)', () => {
+    it('a ready, top-of-order item is NOT built until it is buildQueued', () => {
+      const top = item(1, { tier: 'pinned', value: 5 }); // would be #1 in the order, but not cleared
+      expect(nextToBuild([top], DEFAULT_CONFIG, NOW)).toBeNull();
+    });
+
+    it('a ready + buildQueued item is pulled', () => {
+      const cleared = item(1, { value: 3, buildQueued: true });
+      expect(nextToBuild([cleared], DEFAULT_CONFIG, NOW).num).toBe('1');
+    });
+
+    it('the top-ordered CLEARED item wins — a higher-ordered but uncleared item is skipped', () => {
+      const higher = item(1, { tier: 'pinned', value: 5 }); // orders first, NOT cleared
+      const clearedLower = item(2, { tier: 'normal', value: 1, buildQueued: true }); // orders lower, cleared
+      expect(nextToBuild([higher, clearedLower], DEFAULT_CONFIG, NOW).num).toBe('2');
+    });
+
+    it('a cleared but BLOCKED item is still not pulled (clearance never overrides readiness)', () => {
+      const blocker = item(9, { status: 'open' });
+      const blockedCleared = item(1, { blockedBy: ['9'], buildQueued: true });
+      expect(nextToBuild([blockedCleared, blocker], DEFAULT_CONFIG, NOW)).toBeNull();
+    });
+
+    it('orderQueueDetailed exposes buildQueued per row; isBuildQueued reads the flag', () => {
+      const items = [item(1, { buildQueued: true }), item(2)];
+      const byNum = Object.fromEntries(orderQueueDetailed(items, DEFAULT_CONFIG, NOW).map((r) => [r.item.num, r.buildQueued]));
+      expect(byNum).toEqual({ '1': true, '2': false });
+      expect(isBuildQueued(item(1, { buildQueued: true }))).toBe(true);
+      expect(isBuildQueued(item(1))).toBe(false);
+    });
   });
 
   it('fully-tied items break by num ascending regardless of input order (total order)', () => {
@@ -143,7 +177,7 @@ describe('#2528 unblocks — computed from the blockedBy graph', () => {
     const foundation = item(1, { value: 2 });
     const leaf = item(2, { value: 2 });
     const dependents = [item(3, { blockedBy: ['1'] }), item(4, { blockedBy: ['1'] })];
-    const next = nextToBuild([leaf, foundation, ...dependents], DEFAULT_CONFIG, NOW);
+    const next = orderQueue([leaf, foundation, ...dependents], DEFAULT_CONFIG, NOW)[0];
     expect(next.num).toBe('1'); // foundation unblocks 2 items → higher CoD
   });
 });
@@ -152,13 +186,13 @@ describe('#2528 aging prevents within-tier starvation', () => {
   it('a long-waiting low-value item eventually out-scores a fresh higher-value one in the same tier', () => {
     const fresh = item(1, { value: 3, dateOpened: iso(NOW) });
     const old = item(2, { value: 1, dateOpened: iso(NOW - 60 * DAY) }); // 60 days old
-    expect(nextToBuild([fresh, old], DEFAULT_CONFIG, NOW).num).toBe('2');
+    expect(orderQueue([fresh, old], DEFAULT_CONFIG, NOW)[0].num).toBe('2');
   });
 
   it('aging never crosses tiers (a pinned fresh item still beats an aged normal one)', () => {
     const pinnedFresh = item(1, { tier: 'pinned', value: 1, dateOpened: iso(NOW) });
     const normalOld = item(2, { tier: 'normal', value: 5, dateOpened: iso(NOW - 999 * DAY) });
-    expect(nextToBuild([normalOld, pinnedFresh], DEFAULT_CONFIG, NOW).num).toBe('1');
+    expect(orderQueue([normalOld, pinnedFresh], DEFAULT_CONFIG, NOW)[0].num).toBe('1');
   });
 
   it('aging is capped', () => {

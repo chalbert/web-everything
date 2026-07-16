@@ -75,6 +75,22 @@ export function setFrontmatterField(content, key, rendered, { after = [] } = {})
   return content.slice(0, fm.start) + newBlock + content.slice(fm.end);
 }
 
+/**
+ * Remove a top-level scalar frontmatter field's whole line (the counterpart to {@link setFrontmatterField},
+ * for the CLI's `--clear`/`remove` forms — e.g. `build-queue remove`, #2530). CRLF-safe: it reuses
+ * `locateFrontmatter` (unlike a hand-rolled `---\n` regex, which silently no-ops on a CRLF file and would
+ * leave a safety flag set). Scoped to the frontmatter block, never the body. A no-op (returns `content`
+ * unchanged) when the field is absent or there is no frontmatter.
+ * @param {string} content @param {string} key @returns {string}
+ */
+export function removeFrontmatterField(content, key) {
+  const fm = locateFrontmatter(content);
+  if (!fm) return content;
+  // Drop the `key: …` line INCLUDING its line-ending (CRLF or LF), leaving no blank line. No-op if absent.
+  const newBlock = fm.block.replace(new RegExp(`^${key}:.*(?:\\r?\\n|$)`, 'm'), '');
+  return content.slice(0, fm.start) + newBlock + content.slice(fm.end);
+}
+
 /** Today's date as a quoted `"YYYY-MM-DD"` string, ready to drop into frontmatter. The CLI passes the value. */
 export const quoteDate = (ymd) => `"${ymd}"`;
 
