@@ -2784,6 +2784,41 @@ Decided **per surface** (separators track what each namespace permits, not unifo
 
 **Lineage:** #1987 (ratified 2026-06-30 — Fork 2 then Fork 1; report `we:reports/2026-06-30-we-naming-convention.md`). Fork 1 skeptic **landed** a propose-in-platform-shape hit, **absorbed by amendment not overturn** (the framing above; `:672` cites `nav:list` not only `xml:lang`; the skeptic itself concluded defer-don't-migrate). Fork 2 skeptic **flipped** the default colon→hyphen. Rests on [registry-name-guard](#registry-name-guard-namespace) (`:672`) + [#1913 ownership-not-status](#custom-intents-namespace-by-ownership) (`:1516`, principle only — its colon is scoped to intent IDs); #1983 carved value-namespacing here (`block-standard.md:382-401`). Triggers conformance cleanup #1991. **#1991 (ratified 2026-07-01) amended Fork 1:** colon is **family-only**; family-less behaviours stay bare single-hyphen — grounded in native's smash-not-hyphenate word-joining, so the singleton colon (`list:type-ahead`) was DevX cost for no collision benefit (`type-ahead` stays `type-ahead`). Sibling marker-grammar question = #1989.
 
+### Subscription-funded headless agent-spawning uses the CLI backend behind a backend-agnostic runner interface, composing with the write-time deny gates {#agent-runner-cli-backend}
+
+The Plateau Loop's supervised builder (#2530) spawns Claude agents as supervised children. Two forced
+invariants + three ratified fork calls (#2444, ratified 2026-07-16):
+
+- **Auth/backend (settled by research) — spawn the `claude` CLI on the user's subscription; the Agent SDK is a
+  later API-key backend, never the phase-1 path.** `claude setup-token` mints a CLI credential the CLI honors
+  on Pro/Max; SDK subscription use is undocumented + terms-restricted, so SDK-on-subscription is *broken*, not
+  merely worse.
+- **The interface is backend-agnostic** — `spawn/steer/stop/resume/observe` are backend-neutral ops, so an
+  SDK/API-key backend slots in later with no UI or orchestration change.
+- **(Fork 1) `steer(text)` rules on the delivery GUARANTEE, not the channel: boundary-delivery, queued,
+  non-dropping** (impl: a queued `{"type":"user",…}` message on the child's open `--input-format stream-json`
+  stdin). Earliest-possible mid-turn delivery (a PreToolUse deny-with-reason) is a deferred enhancement *behind
+  the same op*, never the guarantee — it silently misses pure-reasoning stretches and a repeat-deny aborts a
+  headless session.
+- **(Fork 2) The headless permission model = a static per-task-type `--allowedTools` baseline PLUS the
+  constellation's existing non-blocking write-time deny hooks** (`we:scripts/guard-bash.mjs`, lane-guard,
+  locus-prefix). A deny *is* a resolution (it reaches the model, which routes around it), so nothing goes
+  unresolved and a headless `-p` session cannot abort on a permission — strictly more abort-resistant than a
+  bare allowlist. **This COMPOSES WITH the write-time shared gate (#883) — the runner inherits those gates, it
+  does not define a rival mid-run policy nor move all gating to launch.** A *human-blocking* per-tool UI
+  approval is excluded (a slow/absent click aborts the session).
+- **(Fork 3) Stop = graceful-boundary-first, escalate to `SIGTERM` on a timeout; `--resume` continues a clean
+  pause, a redirect FRESH-SPAWNS.** Never `--resume` a turn killed for looping (it re-injects the poisoned
+  context). Discarding a killed turn is cheap only because edit-work lands in a throwaway lane clone
+  ([PR-flow rollout](#pr-flow-rollout-mechanism)), so nothing durable is lost.
+
+**Lineage:** #2444 (ratified 2026-07-16; report `we:reports/2026-07-12-claude-cli-agent-runner-headless-contract.md`;
+research `/research/claude-cli-agent-runner-headless-contract/`). Each fork survived an independent skeptic +
+a fresh-context two-confusion screen: Fork 1 re-cast channel→guarantee (screen fix); Fork 2's default flipped
+bare-allowlist→allowlist+inherited-write-time-gates (skeptic REFUTED the bare allowlist as
+under-provision-aborts / over-provision-theater); Fork 3 amended to graceful→SIGTERM + fresh-spawn-on-redirect
++ the lane-clone citation (skeptic). Consumed by the runner interface built in #2530.
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
