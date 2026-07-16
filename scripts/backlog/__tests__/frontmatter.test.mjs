@@ -4,8 +4,9 @@
  * never touched, illegal transitions are refused, and stamps land next to their anchors.
  */
 import { describe, it, expect } from 'vitest';
-import { setFrontmatterField, readField, applyTransition, quoteScalar, validateCodifiedIn } from '../frontmatter.mjs';
+import { setFrontmatterField, removeFrontmatterField, readField, applyTransition, quoteScalar, validateCodifiedIn } from '../frontmatter.mjs';
 import { nextNum, slugify, renderItem } from '../scaffold.mjs';
+import matter from 'gray-matter';
 
 const ITEM = [
   '---',
@@ -222,5 +223,36 @@ describe('scaffold helpers', () => {
   it('a task carries no size', () => {
     const out = renderItem({ kind: 'task', slug: 'x', title: 'Fix it', today: '2026-06-10' });
     expect(out).not.toContain('size:');
+  });
+});
+
+describe('#2530 buildQueued splice — set writes a real boolean, remove is CRLF-safe', () => {
+  const base = ['---', 'kind: story', 'tier: pinned', 'status: open', '---', '', '# Title', 'body'].join('\n');
+
+  it('set writes an UNQUOTED boolean the YAML loader reads back as `true` (not the string "true")', () => {
+    const withFlag = setFrontmatterField(base, 'buildQueued', 'true', { after: ['tier', 'priority', 'size', 'kind'] });
+    expect(withFlag).toContain('buildQueued: true');
+    expect(matter(withFlag).data.buildQueued).toBe(true); // the round-trip the whole gate depends on
+  });
+
+  it('remove deletes the line, leaves no blank line, and is a no-op when the field is absent', () => {
+    const withFlag = setFrontmatterField(base, 'buildQueued', 'true', { after: ['tier'] });
+    const cleared = removeFrontmatterField(withFlag, 'buildQueued');
+    expect(cleared).not.toContain('buildQueued');
+    expect(matter(cleared).data.buildQueued).toBeUndefined();
+    expect(cleared).not.toMatch(/\n\n---/); // no blank line left before the closing fence
+    expect(removeFrontmatterField(base, 'buildQueued')).toBe(base); // absent → exact no-op
+  });
+
+  it('remove is CRLF-safe (a hand-rolled `---\\n` regex would silently no-op and leave the flag set)', () => {
+    const crlf = ['---', 'status: open', 'buildQueued: true', 'tier: pinned', '---', '', '# T'].join('\r\n');
+    const cleared = removeFrontmatterField(crlf, 'buildQueued');
+    expect(cleared).not.toContain('buildQueued');
+    expect(cleared).toContain('tier: pinned'); // the adjacent CRLF line survives
+  });
+
+  it('remove never touches a `buildQueued:` line in the BODY (frontmatter-scoped)', () => {
+    const bodyKeyword = ['---', 'status: open', '---', '', '# T', 'buildQueued: not-frontmatter'].join('\n');
+    expect(removeFrontmatterField(bodyKeyword, 'buildQueued')).toBe(bodyKeyword);
   });
 });

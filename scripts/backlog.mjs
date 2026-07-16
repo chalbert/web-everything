@@ -25,7 +25,8 @@
  *   node scripts/backlog.mjs unreserve [--session=<slug>] [<NNN...>] # release soft holds (whole session, or specific items)
  *   node scripts/backlog.mjs queue     <NNN...> [--lane=<ref>] [--session=<slug>]  # mark ready-to-merge (#2138 Fork 4) — claim/release refuse a queued item until the drain lands it
  *   node scripts/backlog.mjs unqueue   <NNN...>                     # clear the ready-to-merge mark (the drain's single clear point at landing)
- *   node scripts/backlog.mjs build-queue [--next] [--config=<path>]  # READ-ONLY (#2527): the ordered build queue — ready items in the exact next-to-build order (tier→score→rank), each row annotated with its tier + score; --next prints just the head; --config previews the order under a hypothetical config WITHOUT persisting (the console live weights preview). Distinct from the drain `queue` verb above
+ *   node scripts/backlog.mjs build-queue [--next] [--config=<path>]  # READ-ONLY (#2527): the ordered build queue — ready items in next-to-build order (tier→score→rank), each row annotated with its tier + score + buildQueued; --next prints the top CLEARED item (what the builder pulls); --config previews under a hypothetical config WITHOUT persisting. Distinct from the drain `queue` verb above
+ *   node scripts/backlog.mjs build-queue add|remove <NNN>            # MANUAL CLEAR-FOR-BUILD gate (#2530): `add` sets buildQueued:true (the supervised builder may pull it); `remove` clears it. Frontmatter-only, lane-gated; never touches blockedBy/readiness. The builder pulls ONLY cleared items, so re-prioritizing never arms a build
  *   add --json to any verb for machine-readable output.
  */
 import { readdirSync, readFileSync, writeFileSync, writeSync, unlinkSync } from 'node:fs';
@@ -33,7 +34,7 @@ import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { applyTransition, applySettle, readField, setFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
+import { applyTransition, applySettle, readField, setFrontmatterField, removeFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { nextHash, normalizeId, idFromName, isHash, slugFromName } from './backlog/id.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize, sessionForNum } from './readiness/reservations.mjs';
@@ -876,17 +877,45 @@ function buildQueue() {
     rank: r.rank || null,
     size: r.item.size ?? null,
     dateOpened: r.item.dateOpened ?? null,
+    buildQueued: r.buildQueued, // the human's clear-for-build gate (#2530)
   }));
   if (argv.includes('--next')) {
-    const head = rows[0] ?? null;
+    // The builder's ACTUAL next = the top-ordered item the human has CLEARED for build (#2530), not merely the
+    // top ready one. A ready, high-tier item that hasn't been cleared is never auto-built.
+    const head = rows.find((r) => r.buildQueued) ?? null;
     return ok({ verb: 'build-queue', next: head, config },
       head ? `${GRN}next → #${head.num}${RST} ${DIM}[${head.tier} · ${head.score.toFixed(2)}] ${head.title}${RST}`
-           : `${DIM}build queue empty (no ready items)${RST}`);
+           : `${DIM}build queue empty (no items cleared for build)${RST}`);
   }
-  return ok({ verb: 'build-queue', count: rows.length, queue: rows, config },
-    `${BLD}build queue${RST} ${DIM}(${rows.length} ready · next-to-build order)${RST}\n` +
-    rows.slice(0, 25).map((r, i) => `  ${String(i + 1).padStart(2)}. ${BLD}#${r.num}${RST} ${DIM}[${r.tier} · ${r.score.toFixed(2)}]${RST} ${r.title}`).join('\n') +
+  const clearedCount = rows.filter((r) => r.buildQueued).length;
+  return ok({ verb: 'build-queue', count: rows.length, cleared: clearedCount, queue: rows, config },
+    `${BLD}build queue${RST} ${DIM}(${rows.length} ready · ${clearedCount} cleared for build · next-to-build order)${RST}\n` +
+    rows.slice(0, 25).map((r, i) => `  ${String(i + 1).padStart(2)}. ${r.buildQueued ? `${GRN}✓${RST}` : ' '} ${BLD}#${r.num}${RST} ${DIM}[${r.tier} · ${r.score.toFixed(2)}]${RST} ${r.title}`).join('\n') +
     (rows.length > 25 ? `\n  ${DIM}… +${rows.length - 25} more${RST}` : ''));
+}
+
+/**
+ * build-queue add|remove <NNN> — the human's manual CLEAR-FOR-BUILD gate (#2530). `add` sets `buildQueued:
+ * true` (the supervised builder may then pull it); `remove` clears the flag. Frontmatter-only + lane-gated,
+ * like {@link tier}/{@link rank} — and like them it NEVER touches blockedBy/readiness. The builder pulls ONLY
+ * cleared items, so re-prioritizing (tier/rank) never arms an autonomous build; only an explicit `add` does.
+ */
+function buildQueueMark(action) {
+  const file = resolveFile(positional[1]); // positional[0] is the sub-verb ('add'/'remove')
+  const rel = `backlog/${file}`;
+  const abs = join(DIR, file);
+  let src = readFileSync(abs, 'utf8');
+  if (action === 'add' && (readField(src, 'status') || 'open') !== 'open') {
+    die(`#${idFromName(file)} is not open — only an open item can be cleared for build`);
+  }
+  if (action === 'add') {
+    src = setFrontmatterField(src, 'buildQueued', 'true', { after: ['tier', 'priority', 'size', 'kind'] });
+  } else {
+    src = removeFrontmatterField(src, 'buildQueued'); // CRLF-safe shared helper (not a hand-rolled regex)
+  }
+  writeBacklogMd(abs, rel, src);
+  ok({ verb: 'build-queue', action, id: file.replace(/\.md$/, ''), file: rel, buildQueued: action === 'add' },
+    `${GRN}✓ ${action === 'add' ? 'cleared for build' : 'removed from build queue'}${RST} ${BLD}#${idFromName(file)}${RST}`);
 }
 
 /**
@@ -968,7 +997,9 @@ switch (verb) {
   case 'tier': tier(); break;
   case 'rank': rank(); break;
   case 'weights': weights(); break;
-  case 'build-queue': buildQueue(); break;
+  case 'build-queue':
+    (positional[0] === 'add' || positional[0] === 'remove') ? buildQueueMark(positional[0]) : buildQueue();
+    break;
   case 'yield': yieldNum(); break;
   case 'scaffold': scaffold(); break;
   case 'settle': settle(); break;
