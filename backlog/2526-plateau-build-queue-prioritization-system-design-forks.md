@@ -2,8 +2,10 @@
 bornAs: xuzne08
 kind: decision
 parent: "2445"
-status: open
+status: resolved
 dateOpened: "2026-07-16"
+dateResolved: "2026-07-16"
+codifiedIn: one-off
 relatedReport: reports/2026-07-16-build-queue-prioritization.md
 tags: [plateau-loop, build-queue, prioritization, console]
 ---
@@ -59,7 +61,14 @@ next = ready.sort(by(effectiveScore, 'desc'), then(rank))[0]
 
 **Default: (a) hard gate.** Readiness is a fixed primitive, not a tunable weight — the queue's whole point is "what can be built *now*." (b) only makes sense if a human, not an agent, consumes the ordering (they'd judge the unready item themselves); since the consumer here is autonomous, the gate is the safe invariant. If a human-facing "what's important regardless of readiness" view is wanted, that is a *saved view*, not the builder's queue.
 
-## Open / deferred
+## Ruling (ratified 2026-07-16)
 
-- **Skeptic + two-confusion screen not yet run** — this card is authored open for review, not stamped `preparedDate`. Once reviewed, run `/prepare 2526` to attack the two defaults and stamp it ready-to-ratify.
-- **Program go/no-go is separate.** Whether we build the build-queue program at all is the priority call in the reframed #2525; these design forks only bind if that is greenlit.
+Ratified by the human decider after review of the rendered card — both defaults adopted, plus a scoping invariant.
+
+- **Fork 1 → (a)** — a separate `tier` field + two-key sort. The manual override is a field, never folded into the score; order = `(tier, computedScore, rank)`, so the override stays legible and reversible.
+- **Fork 2 → (a)** — a hard readiness eligibility gate. Only ready items (open, `blockedBy` all resolved, not parked) are pullable; readiness is a fixed primitive, never a weight.
+- **Ratified invariant — prioritization is strictly downstream of readiness.** The prioritization system **orders the build queue only**; it **must never mutate an item's `blockedBy` edges or its readiness state**. Those are upstream primitives the queue *filters by*, not knobs prioritization can turn. Concretely: changing tier / rank / score / weights re-orders the *ready set* and can never make a blocked item pullable, nor block a ready one. Readiness/`blockedBy` are set only by the backlog's own edges and resolution — the queue reads them, one-way.
+
+Codified as `one-off` — a Plateau-coordinator design rule, not a WE platform standard (WE holds zero implementation), cite-able as #2526.
+
+**Note:** the skeptic + two-confusion screen (normally run at `/prepare`) were not run; the human ratified directly on the research-grounded defaults, which the added invariant reinforces. **Program go/no-go is separate** — whether the build-queue program is built at all is the priority call in the reframed #2525; this ruling binds that build if greenlit.
