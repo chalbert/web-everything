@@ -2,9 +2,9 @@
 bornAs: xxw8ri1
 kind: story
 size: 5
-parent: "2508"
+parent: "xk0eti5"
 status: open
-blockedBy: ["2525"]
+blockedBy: ["xr1vhog"]
 dateOpened: "2026-07-15"
 tags: [plateau-loop, console, backlog-ui]
 ---
@@ -15,4 +15,4 @@ Launch work on an item from the UI, on the write seam. Kick off building an agen
 
 **Acceptance:** a Launch control on an agent-ready item starts work through the sanctioned lane / build entry point; the row reflects launching → in-flight; launching an ineligible (blocked / claimed) item is refused with the reason.
 
-> **Gated on a semantics decision.** "Starts work" is undefined — there is no headless build entry point in the repo. What Launch *means* (claim + lane handoff vs a headless `claude -p` build vs enqueue) is an open fork in [Backlog-view Launch control — claim+handoff vs headless build vs enqueue](/backlog/2525-backlog-view-launch-control-claim-handoff-vs-headless-build-/). The headless-build branch is itself downstream of the deferred agent-runner decision [#2444](/backlog/2444-plateau-loop-phase-1-agent-runner-shape-cli-spawn-contract-s/). Ratify the semantics fork before building; the acceptance's "in-flight" wording assumes the headless branch and will be re-worded to match whichever branch is chosen.
+> **Resolved into the build-queue program.** #2525 ratified the **build** semantics (a real headless build), so this is now the console's **build-now / add-to-queue control** under the [autonomous AI build queue](/backlog/xk0eti5-plateau-loop-autonomous-ai-build-queue/) program — no longer a standalone "launch" fork. It rides on the build endpoint + supervised builder (`we:backlog/xr1vhog-build-endpoint-supervised-builder-post-api-backlog-build-dra.md`, this item's `blockedBy`), which in turn needs the runner (#2444). The row reflects the real in-flight → PR the endpoint drives, and eligibility uses the queue's hard readiness gate.

@@ -2,10 +2,12 @@
 bornAs: xgb0p8o
 kind: decision
 parent: "2508"
-status: open
-blockedBy: ["2444"]
+status: resolved
 relatedReport: reports/2026-07-16-launch-control-semantics.md
 dateOpened: "2026-07-15"
+dateResolved: "2026-07-16"
+graduatedTo: xk0eti5
+codifiedIn: one-off
 preparedDate: "2026-07-16"
 tags: [plateau-loop, console, backlog-ui, launch]
 ---
@@ -53,7 +55,17 @@ POST /api/backlog/build   { id: "2530-..." }
 **Skeptic:** SURVIVES-WITH-AMENDMENT; the *original* three-way framing with "(a)" as the confident default was **REFUTED** and reworked. A fresh-context skeptic (four axes) landed three amendments, all folded in: (0) **classification** — #2520 already ships Claim, so the real call is sequencing/redundancy and the omitted option "**park #2522**" is live and now the default; (1) **merit** — "Launch" mislabels a spawn-nothing control and provisioning-then-dangling a lane breaks the seam's acquire-and-release invariant, so (a) is reduced to *claim-only + surfaced command, renamed*; (3) **citation-scope** — #2444's `priority: low` deferral was over-cited as "cannot build"; reworded as a *chosen* deferral #2522 could justify un-parking. (2) **statute-overlap**: none — this sets no `codifiedIn` (impl lives in plateau-app); a latent tension with "claim ignores git state" (ownership is `status:active`, not the working tree) is noted as a warning against ever *codifying* (a), not a present conflict.
 **Screen:** clear (fresh-context two-confusion screen, #2091). Q1 — a legitimate product-behavior call a console user directly observes (row shows "claimed · lane ready" vs a true "in-flight → PR"), on the product side, not an impl detail across the WE↔product boundary. Q2 — a merit difference survives at zero cost: a spawn-nothing affordance vs an autonomous builder behave differently and a user cares which fires — not prioritization.
 
-## Residual to fold into whichever build ships (not part of the ruling)
+## Ruling (ratified 2026-07-16) — BUILD (override of the park default)
 
-- **Lane-leak.** If (a) is chosen, it must be **claim-only + surface the command**, never provision-and-dangle a lane — the write seam is acquire-and-release inside one job.
-- **Eligibility.** "Refuse a blocked / claimed item with the reason" is orthogonal to the fork — every option needs it. `claim` refuses a claimed item; `blockedBy`-based refusal is not in the seam's `canApply` today and must be added regardless.
+The human decider **greenlit the program** — overriding the prepared `(d) park` default. The reframe was honest that park-vs-build is a *priority* call, not merit; on merit the capability wanted (manage AI builds from the UI) is **(b) the real headless build**. The decider chose to build it now.
+
+- **Ruling: (b) headless build**, as a program — not the thin (a) wrapper, not park. The priority call is made: build the autonomous builder.
+- **Graduates to the [Plateau Loop — autonomous AI build queue](/backlog/xk0eti5-plateau-loop-autonomous-ai-build-queue/) program epic**, built on the ratified prioritization design (#2526). The "in-flight" acceptance is now real, delivered by that program's build endpoint.
+- **Un-parks [#2444](/backlog/2444-plateau-loop-phase-1-agent-runner-shape-cli-spawn-contract-s/)** — greenlighting the program supplies the consumer #2444's deferral was waiting for; #2444 is to be prepared + ratified as slice 3 of the program.
+- #2522 becomes the program's build-now / add-to-queue control (re-parented under the program).
+
+Codified `one-off` (a Plateau-coordinator sequencing decision, cite-able as #2525).
+
+## Residual to fold into the build (not part of the ruling)
+
+- **Eligibility.** "Refuse a blocked / claimed item with the reason" — the build uses the queue's hard **readiness gate** (#2526): only ready items are pullable. `blockedBy`-based ineligibility becomes the gate, not an ad-hoc check.
