@@ -90,6 +90,16 @@ export function isReady(item, byId) {
   return true;
 }
 
+/**
+ * Whether the human has explicitly CLEARED this item for the autonomous builder (#2530 manual gate). Distinct
+ * from readiness (is it buildable at all) and tier (how it's prioritized): `buildQueued` is the deliberate
+ * human authorization — the builder pulls ONLY cleared items, so re-prioritizing never arms an autonomous
+ * build. Set/cleared via `backlog.mjs build-queue add|remove`. Frontmatter `buildQueued: true`.
+ */
+export function isBuildQueued(item) {
+  return item?.buildQueued === true;
+}
+
 /** Index items by their `num` and `id` so blockedBy edges resolve regardless of which form was used. */
 export function indexItems(items) {
   const byId = new Map();
@@ -182,6 +192,7 @@ export function orderQueueDetailed(items, config = DEFAULT_CONFIG, now = Date.no
         tierOrder: tierRank(it),
         score: effectiveScore(it, config, now, { unblocks }),
         unblocks,
+        buildQueued: isBuildQueued(it), // the human's explicit clear-for-build (the manual gate #2530)
         rank: it.rank ?? '',
         opened: item_dateKey(it),
         // `num` is a string on disk — coerce to a number so the tie-break is a real total order
@@ -208,9 +219,16 @@ export function orderQueue(items, config = DEFAULT_CONFIG, now = Date.now()) {
   return orderQueueDetailed(items, config, now).map((r) => r.item);
 }
 
-/** The single next item the builder should build, or `null` if the ready set is empty. Deterministic. */
+/**
+ * The single next item the SUPERVISED BUILDER should build, or `null` if nothing is eligible. The builder's
+ * pick is gated by the human's manual clear-for-build (#2530): only a `buildQueued` item is ever pulled, and
+ * among the cleared+ready set the top of the deterministic order wins. This is the safety gate — a ready,
+ * high-tier item is NOT auto-built until the human explicitly clears it. (The queue VIEW still shows every
+ * ready item via {@link orderQueueDetailed}; only the builder's pick is clearance-gated.)
+ */
 export function nextToBuild(items, config = DEFAULT_CONFIG, now = Date.now()) {
-  return orderQueue(items, config, now)[0] ?? null;
+  const cleared = orderQueueDetailed(items, config, now).filter((r) => r.buildQueued);
+  return cleared.length ? cleared[0].item : null;
 }
 
 // ── LexoRank (fractional string ranking; O(1) drag-reorder) ──────────────────────────────────────────
