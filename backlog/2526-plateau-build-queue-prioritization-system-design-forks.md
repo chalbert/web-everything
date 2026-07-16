@@ -1,4 +1,5 @@
 ---
+bornAs: xuzne08
 kind: decision
 parent: "2445"
 status: open
@@ -60,5 +61,5 @@ next = ready.sort(by(effectiveScore, 'desc'), then(rank))[0]
 
 ## Open / deferred
 
-- **Skeptic + two-confusion screen not yet run** — this card is authored open for review, not stamped `preparedDate`. Once reviewed, run `/prepare xuzne08` to attack the two defaults and stamp it ready-to-ratify.
+- **Skeptic + two-confusion screen not yet run** — this card is authored open for review, not stamped `preparedDate`. Once reviewed, run `/prepare 2526` to attack the two defaults and stamp it ready-to-ratify.
 - **Program go/no-go is separate.** Whether we build the build-queue program at all is the priority call in the reframed #2525; these design forks only bind if that is greenlit.
