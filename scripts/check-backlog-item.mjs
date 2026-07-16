@@ -23,6 +23,7 @@ import { createRequire } from 'node:module';
 import {
   lintBacklogItemRendering, findUnquotedColonScalars, DIGEST_MAX_WORDS,
 } from './check-standards-rules.mjs';
+import { TIERS } from './lib/build-queue.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -111,6 +112,25 @@ if (item.blockedBy !== undefined) {
       if (t === num) errors.push(`Backlog item "${id}" lists itself in blockedBy — an item cannot block itself`);
       else if (!knownNums.has(t)) errors.push(`Backlog item "${id}" blockedBy "#${t}" does not resolve to an existing item`);
     }
+  }
+}
+
+// Build-queue prioritization fields (#2528) — validate `tier`/`rank` shape when present. Read straight
+// from the frontmatter block so a value the loader dropped is still caught. These fields only ORDER the
+// queue; they never affect readiness, so a bad value is a lint error, not a blocker-DAG concern.
+{
+  const fm = (content.match(/^---\n([\s\S]*?)\n---/) || [, ''])[1];
+  // Strip only a MATCHED surrounding quote pair (a half-quoted value stays as-is so it's flagged).
+  const unquote = (v) => v.trim().replace(/^"(.*)"$/s, '$1').replace(/^'(.*)'$/s, '$1');
+  const tierM = fm.match(/^tier:\s*(.+)$/m);
+  if (tierM) {
+    const t = unquote(tierM[1]);
+    if (!TIERS.includes(t)) errors.push(`Backlog item "${id}" tier "${t}" is not one of ${TIERS.join(', ')}`);
+  }
+  const rankM = fm.match(/^rank:\s*(.+)$/m);
+  if (rankM) {
+    const r = unquote(rankM[1]);
+    if (!/^[0-9a-z]+$/.test(r)) errors.push(`Backlog item "${id}" rank "${r}" must be a base-36 key ([0-9a-z]+)`);
   }
 }
 

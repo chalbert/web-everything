@@ -42,9 +42,11 @@ import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
 import { numberPendingHashes } from './lane-drain.mjs';
 import { laneGuardDecision, resolveReal } from './guard-lane.mjs';
+import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig } from './lib/build-queue.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
+const BUILD_QUEUE_CONFIG_PATH = join(ROOT, 'scripts', 'build-queue-config.json');
 const CAPACITY_PATH = join(ROOT, '.claude/skills/batch-backlog-items/capacity.json');
 const RESERVATIONS_PATH = join(ROOT, '.claude/skills/batch-backlog-items/reservations.json');
 const CLAIMS_PATH = join(ROOT, '.claude/skills/batch-backlog-items/claims.json');
@@ -685,6 +687,125 @@ function prioritize() {
     `${GRN}✓ prioritized${RST} ${BLD}#${idFromName(file)}${RST} ${DIM}${change}${RST}`);
 }
 
+// ── Build-queue prioritization verbs (#2528) — tier / rank / weights ─────────────────────────────────
+// These set the autonomous build queue's ordering fields (epic #2527), per the ratified design #2526. All
+// three are FRONTMATTER-ONLY splices, like {@link prioritize}, and NONE touches `blockedBy` or readiness —
+// the ratified invariant: prioritization is strictly DOWNSTREAM of readiness (it only orders the ready set).
+
+/** Read a sibling item's `rank` field (for the relative --after/--before rank computation). */
+function rankOf(ref) {
+  const f = resolveFile(ref);
+  return readField(readFileSync(join(DIR, f), 'utf8'), 'rank') || '';
+}
+
+/**
+ * tier <NNN> --to=<pinned|normal|someday|won't> | --clear — set the coarse build-queue TIER (the primary
+ * sort key + the human override). Frontmatter-only. Refuses a resolved item without --force.
+ */
+function tier() {
+  const file = resolveFile(positional[0]);
+  const rel = `backlog/${file}`;
+  const abs = join(DIR, file);
+  let src = readFileSync(abs, 'utf8');
+  const to = flag('to');
+  const clear = argv.includes('--clear') || to === '';
+  if (!to && !clear) die(`tier needs --to=<${TIERS.join('|')}> or --clear`);
+  if (to && !clear && !TIERS.includes(to)) die(`--to must be one of ${TIERS.join(', ')} (got "${to}")`);
+  if ((readField(src, 'status') || 'open') === 'resolved' && !argv.includes('--force')) {
+    die(`#${idFromName(file)} is resolved — re-tiering a closed item is almost certainly a mistake; pass --force if deliberate`);
+  }
+  let change;
+  if (clear) {
+    const m = src.match(/^(---\n)([\s\S]*?)(\n---)/);
+    if (m) src = m[1] + m[2].replace(/^tier:[^\n]*\n?/m, '') + m[3] + src.slice(m[0].length);
+    change = 'tier cleared';
+  } else {
+    src = setFrontmatterField(src, 'tier', to, { after: ['priority', 'size', 'kind'] });
+    change = `tier→${to}`;
+  }
+  writeBacklogMd(abs, rel, src);
+  ok({ verb: 'tier', id: file.replace(/\.md$/, ''), file: rel, change },
+    `${GRN}✓ tiered${RST} ${BLD}#${idFromName(file)}${RST} ${DIM}${change}${RST}`);
+}
+
+/**
+ * rank <NNN> --to=<key> | --after=<NNN> [--before=<NNN>] | --before=<NNN> — set the between-able LexoRank
+ * key for manual drag-ordering within a tier. `--after`/`--before` compute the key between the named
+ * neighbours' ranks (via the engine's `rankBetween`); `--to` persists an explicit base-36 key.
+ */
+function rank() {
+  const file = resolveFile(positional[0]);
+  const rel = `backlog/${file}`;
+  const abs = join(DIR, file);
+  let src = readFileSync(abs, 'utf8');
+  const to = flag('to');
+  const after = flag('after');
+  const before = flag('before');
+  let key;
+  if (to) {
+    if (!/^[0-9a-z]+$/.test(to)) die(`--to must be a base-36 rank key ([0-9a-z]+), got "${to}"`);
+    key = to;
+  } else if (after != null || before != null) {
+    const lo = after != null ? rankOf(after) : '';
+    const hi = before != null ? rankOf(before) : '';
+    try { key = rankBetween(lo, hi); }
+    catch (e) { die(`cannot rank between ${after != null ? '#' + after : 'start'} and ${before != null ? '#' + before : 'end'}: ${e.message}`); }
+  } else {
+    die('rank needs --to=<key>, or --after=<NNN> and/or --before=<NNN>');
+  }
+  if ((readField(src, 'status') || 'open') === 'resolved' && !argv.includes('--force')) {
+    die(`#${idFromName(file)} is resolved — re-ranking a closed item is almost certainly a mistake; pass --force if deliberate`);
+  }
+  src = setFrontmatterField(src, 'rank', key, { after: ['tier', 'priority', 'size', 'kind'] });
+  writeBacklogMd(abs, rel, src);
+  ok({ verb: 'rank', id: file.replace(/\.md$/, ''), file: rel, change: `rank→${key}`, key },
+    `${GRN}✓ ranked${RST} ${BLD}#${idFromName(file)}${RST} ${DIM}rank→${key}${RST}`);
+}
+
+/** Load the build-queue scoring config (or the engine's default if none is committed / it's malformed). */
+function loadBuildQueueConfig() {
+  try {
+    const cfg = JSON.parse(readFileSync(BUILD_QUEUE_CONFIG_PATH, 'utf8'));
+    // A valid-JSON-but-shapeless file (e.g. a hand-edit missing `criteria`) falls back to the default
+    // rather than crashing `--show`'s `criteria.map` (#2528 review).
+    return cfg && Array.isArray(cfg.criteria) ? cfg : structuredClone(DEFAULT_CONFIG);
+  } catch { return structuredClone(DEFAULT_CONFIG); }
+}
+
+/**
+ * weights [--show] | --set=<key>=<n> [--set=…] — read or edit the build-queue scoring CONFIG (the criterion
+ * weights the WSJF-shaped engine ranks by). Validated on write (sum 100, ≤5 criteria, none >50%); an invalid
+ * edit is refused, never persisted. Config is data, separate from items — editing it re-ranks everything.
+ */
+function weights() {
+  const cfg = loadBuildQueueConfig();
+  const sets = argv.filter((a) => a.startsWith('--set=')).map((a) => a.slice('--set='.length));
+  if (argv.includes('--show') || sets.length === 0) {
+    return ok({ verb: 'weights', config: cfg },
+      `${BLD}build-queue config${RST}\n${cfg.criteria.map((c) => `  ${c.key}: ${c.weight}`).join('\n')}\n  ${DIM}aging.ratePerDay: ${cfg.aging?.ratePerDay ?? 0}${RST}`);
+  }
+  for (const s of sets) {
+    const eq = s.indexOf('=');
+    const rawVal = eq >= 0 ? s.slice(eq + 1) : '';
+    const key = eq >= 0 ? s.slice(0, eq) : s;
+    const n = Number(rawVal);
+    if (eq < 0 || rawVal === '' || Number.isNaN(n)) die(`--set expects <key>=<number>, got "${s}"`);
+    const crit = cfg.criteria.find((c) => c.key === key);
+    if (!crit) die(`unknown criterion "${key}" (have: ${cfg.criteria.map((c) => c.key).join(', ')})`);
+    crit.weight = n;
+  }
+  const v = validateConfig(cfg);
+  if (!v.ok) die(`refused — the config would be invalid: ${v.errors.join('; ')}`);
+  // Lane-gate the config write too (#2528 review): like writeBacklogMd, refuse a write that resolves under
+  // the shared PRIMARY checkout so this tracked config is never spliced onto the primary tree (#2302/#2339).
+  if (laneGuardDecision(resolveReal(dirname(BUILD_QUEUE_CONFIG_PATH)), ROOT)) {
+    die(`build-queue config mutation BLOCKED — "${BUILD_QUEUE_CONFIG_PATH}" resolves under the shared PRIMARY checkout; run it in a lane clone, never primary (#2302/#2339). No override.`);
+  }
+  writeFileSync(BUILD_QUEUE_CONFIG_PATH, `${JSON.stringify(cfg, null, 2)}\n`);
+  ok({ verb: 'weights', config: cfg },
+    `${GRN}✓ weights updated${RST} ${DIM}${cfg.criteria.map((c) => `${c.key}=${c.weight}`).join(' ')}${RST}`);
+}
+
 /**
  * yield <NNN-slug> — resolve an NNN COLLISION by moving a LOCAL-ONLY item to the next free number (the guard's
  * own prescription: "a new item takes the next free number; yield this one"). Renumbering a *committed* item is
@@ -761,6 +882,9 @@ switch (verb) {
   case 'number-stranded': numberStranded(); break;
   case 'retype': retype(); break;
   case 'prioritize': prioritize(); break;
+  case 'tier': tier(); break;
+  case 'rank': rank(); break;
+  case 'weights': weights(); break;
   case 'yield': yieldNum(); break;
   case 'scaffold': scaffold(); break;
   case 'settle': settle(); break;
@@ -780,6 +904,9 @@ switch (verb) {
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
       `  ${GRN}retype${RST} <NNN> [--to=story|epic|task|decision] [--size=N] [--status=parked]   sanctioned pack-phase flag-fix (no LANE_GUARD_OFF); frontmatter-only\n` +
       `  ${GRN}prioritize${RST} <NNN> [--to=low|--clear]   set or clear the item's \`priority\` frontmatter (the field readiness/batch ranks by); frontmatter-only\n` +
+      `  ${GRN}tier${RST} <NNN> --to=pinned|normal|someday|won't [--clear]   set the build-queue TIER (#2528, the coarse ordering bucket); frontmatter-only\n` +
+      `  ${GRN}rank${RST} <NNN> --to=<key> | --after=<NNN> [--before=<NNN>]   set the build-queue LexoRank (#2528, manual drag-order within a tier)\n` +
+      `  ${GRN}weights${RST} [--show] | --set=<key>=<n>   read/edit the build-queue scoring config (#2528; validated: sum 100, ≤5, none >50%)\n` +
       `  ${GRN}yield${RST} <NNN-slug>            move a LOCAL-ONLY NNN collision to the next free number (refuses a git-tracked item; NNN is immutable)\n` +
       `  ${GRN}number-stranded${RST} [--dry-run]      number every TRACKED hash-id backlog file in this checkout (a hash that reached main via a numbering-bypassing land; #2319/#2288)\n` +
       `  ${GRN}scaffold${RST} --kind=story|epic|task|decision --size= --title= [--digest=] [--blocked-by=] [--parent=] [--session=<slug>]   --session ⇒ born active+owned (#670), publish with settle\n` +
