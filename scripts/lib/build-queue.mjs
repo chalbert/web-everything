@@ -160,33 +160,52 @@ function tierRank(item) {
 }
 
 /**
- * The full ordered build queue: every READY item, in the deterministic order the builder would pull them.
- * Sort keys, in order: tier (pinned first) → effectiveScore (desc) → rank (asc, the manual override) →
- * dateOpened (asc, FIFO tie-break) → num (asc, total-order guarantee).
+ * The full ordered build queue AS ENRICHED RECORDS — every READY item plus the sort inputs used to place it:
+ * `tier` (the build-queue tier STRING, e.g. 'pinned'), `tierOrder` (its numeric priority), `score` (the
+ * effective WSJF score, aging folded in), `unblocks` (dependents freed), and `rank` (the LexoRank override).
+ * Exposed so a display surface (the console queue view #2529) and the builder (#2530) can show/act on WHY an
+ * item ranks where it does WITHOUT recomputing the engine's math (one source of truth). {@link orderQueue}
+ * is this mapped back to bare items. Sort keys, in order: tier (pinned first) → effectiveScore (desc) →
+ * rank (asc, the manual override) → dateOpened (asc, FIFO tie-break) → num (asc, total-order guarantee).
  */
-export function orderQueue(items, config = DEFAULT_CONFIG, now = Date.now()) {
+export function orderQueueDetailed(items, config = DEFAULT_CONFIG, now = Date.now()) {
   const byId = indexItems(items);
   const ready = items
     .filter((it) => isReady(it, byId))
-    .map((it) => ({
-      item: it,
-      tier: tierRank(it),
-      score: effectiveScore(it, config, now, { unblocks: unblocksCount(it, items) }),
-      rank: it.rank ?? '',
-      opened: item_dateKey(it),
-      // `num` is a string on disk — coerce to a number so the tie-break is a real total order
-      // (NaN/undefined → Infinity, sorted last). Bug caught in review: numOr(string) fell through to Infinity.
-      num: numOr(Number(it.num), Infinity),
-    }));
+    .map((it) => {
+      const unblocks = unblocksCount(it, items);
+      return {
+        item: it,
+        // the build-queue tier STRING (the "why"), not the numeric order key. Normalize an unknown/typo'd
+        // value to the default so the DISPLAYED tier matches how `tierOrder` (below) actually sorts it.
+        tier: TIERS.includes(it.tier) ? it.tier : DEFAULT_TIER,
+        tierOrder: tierRank(it),
+        score: effectiveScore(it, config, now, { unblocks }),
+        unblocks,
+        rank: it.rank ?? '',
+        opened: item_dateKey(it),
+        // `num` is a string on disk — coerce to a number so the tie-break is a real total order
+        // (NaN/undefined → Infinity, sorted last). Bug caught in review: numOr(string) fell through to Infinity.
+        num: numOr(Number(it.num), Infinity),
+      };
+    });
   ready.sort(
     (a, b) =>
-      a.tier - b.tier ||
+      a.tierOrder - b.tierOrder ||
       b.score - a.score ||
       cmp(a.rank, b.rank) ||
       cmp(a.opened, b.opened) ||
       a.num - b.num,
   );
-  return ready.map((r) => r.item);
+  return ready;
+}
+
+/**
+ * The full ordered build queue: every READY item, in the deterministic order the builder would pull them.
+ * Bare-item projection of {@link orderQueueDetailed} (same sort keys).
+ */
+export function orderQueue(items, config = DEFAULT_CONFIG, now = Date.now()) {
+  return orderQueueDetailed(items, config, now).map((r) => r.item);
 }
 
 /** The single next item the builder should build, or `null` if the ready set is empty. Deterministic. */

@@ -25,12 +25,14 @@
  *   node scripts/backlog.mjs unreserve [--session=<slug>] [<NNN...>] # release soft holds (whole session, or specific items)
  *   node scripts/backlog.mjs queue     <NNN...> [--lane=<ref>] [--session=<slug>]  # mark ready-to-merge (#2138 Fork 4) — claim/release refuse a queued item until the drain lands it
  *   node scripts/backlog.mjs unqueue   <NNN...>                     # clear the ready-to-merge mark (the drain's single clear point at landing)
+ *   node scripts/backlog.mjs build-queue [--next] [--config=<path>]  # READ-ONLY (#2527): the ordered build queue — ready items in the exact next-to-build order (tier→score→rank), each row annotated with its tier + score; --next prints just the head; --config previews the order under a hypothetical config WITHOUT persisting (the console live weights preview). Distinct from the drain `queue` verb above
  *   add --json to any verb for machine-readable output.
  */
 import { readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { applyTransition, applySettle, readField, setFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { nextHash, normalizeId, idFromName, isHash, slugFromName } from './backlog/id.mjs';
@@ -42,10 +44,11 @@ import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
 import { numberPendingHashes } from './lane-drain.mjs';
 import { laneGuardDecision, resolveReal } from './guard-lane.mjs';
-import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig } from './lib/build-queue.mjs';
+import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig, orderQueueDetailed } from './lib/build-queue.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
+const requireCjs = createRequire(import.meta.url);
 const BUILD_QUEUE_CONFIG_PATH = join(ROOT, 'scripts', 'build-queue-config.json');
 const CAPACITY_PATH = join(ROOT, '.claude/skills/batch-backlog-items/capacity.json');
 const RESERVATIONS_PATH = join(ROOT, '.claude/skills/batch-backlog-items/reservations.json');
@@ -807,6 +810,68 @@ function weights() {
 }
 
 /**
+ * build-queue [--json] [--next] — READ the ordered build queue (epic #2527): every READY item in the exact
+ * order the autonomous builder would pull them (tier → effectiveScore → rank → dateOpened → num), each row
+ * annotated with WHY it ranks there (build-queue tier + score). PURE READ — nothing on disk changes; the
+ * console queue view (#2529) shells this and the builder (#2530) will too, so a user sees exactly what gets
+ * built next (one engine, no re-implementation → no drift). `--next` emits just the head (or null when empty).
+ *
+ * TIER RECOVERY: the single loader overwrites `item.tier` with the derived A/B/C *leverage* tier (#249),
+ * which collides in NAME with the build-queue tier (pinned/normal/someday/won't). We RE-READ the raw
+ * frontmatter tier for the open set the engine orders, so it sorts on the human's pin, never the readiness
+ * rubric. All other engine inputs (status, blockedBy, size, dateOpened, value/timeCriticality/confidence,
+ * rank) come straight off the loader (`...data`), which is authoritative for them.
+ */
+function buildQueue() {
+  // `--config=<path>` previews the order under a HYPOTHETICAL config (the console's live weights preview,
+  // #2529) WITHOUT persisting it — validated, never written. Absent → the committed/default config.
+  const configPath = flag('config');
+  let config;
+  if (configPath) {
+    let parsed;
+    try { parsed = JSON.parse(readFileSync(configPath, 'utf8')); }
+    catch (e) { die(`--config: cannot read/parse "${configPath}": ${e.message}`); }
+    const v = validateConfig(parsed);
+    if (!v.ok) die(`--config is invalid: ${v.errors.join('; ')}`);
+    config = parsed;
+  } else {
+    config = loadBuildQueueConfig();
+  }
+  const loaded = requireCjs(join(ROOT, 'src/_data/backlog.js'))();
+  const items = loaded.map((it) => {
+    if (it.status !== 'open') return it; // only the open set is ordered; skip the re-read for the rest
+    // Recover the raw build-queue tier (the loader clobbers `tier` with the A/B/C leverage tier). A missing
+    // file (e.g. fixture-mode dir divergence) falls back to undefined → the engine treats it as `normal`.
+    let rawTier;
+    try { rawTier = readField(readFileSync(join(DIR, `${it.id}.md`), 'utf8'), 'tier') || undefined; }
+    catch { rawTier = undefined; }
+    return { ...it, tier: rawTier };
+  });
+  const detailed = orderQueueDetailed(items, config);
+  const rows = detailed.map((r) => ({
+    num: r.item.num,
+    id: r.item.id,
+    title: r.item.title,
+    tier: r.tier,
+    score: Number(r.score.toFixed(6)),
+    unblocks: r.unblocks,
+    rank: r.rank || null,
+    size: r.item.size ?? null,
+    dateOpened: r.item.dateOpened ?? null,
+  }));
+  if (argv.includes('--next')) {
+    const head = rows[0] ?? null;
+    return ok({ verb: 'build-queue', next: head, config },
+      head ? `${GRN}next → #${head.num}${RST} ${DIM}[${head.tier} · ${head.score.toFixed(2)}] ${head.title}${RST}`
+           : `${DIM}build queue empty (no ready items)${RST}`);
+  }
+  return ok({ verb: 'build-queue', count: rows.length, queue: rows, config },
+    `${BLD}build queue${RST} ${DIM}(${rows.length} ready · next-to-build order)${RST}\n` +
+    rows.slice(0, 25).map((r, i) => `  ${String(i + 1).padStart(2)}. ${BLD}#${r.num}${RST} ${DIM}[${r.tier} · ${r.score.toFixed(2)}]${RST} ${r.title}`).join('\n') +
+    (rows.length > 25 ? `\n  ${DIM}… +${rows.length - 25} more${RST}` : ''));
+}
+
+/**
  * yield <NNN-slug> — resolve an NNN COLLISION by moving a LOCAL-ONLY item to the next free number (the guard's
  * own prescription: "a new item takes the next free number; yield this one"). Renumbering a *committed* item is
  * forbidden — NNN is immutable — so this REFUSES a git-tracked file and only ever moves an untracked/local one.
@@ -885,6 +950,7 @@ switch (verb) {
   case 'tier': tier(); break;
   case 'rank': rank(); break;
   case 'weights': weights(); break;
+  case 'build-queue': buildQueue(); break;
   case 'yield': yieldNum(); break;
   case 'scaffold': scaffold(); break;
   case 'settle': settle(); break;

@@ -6,6 +6,7 @@ import {
   computeScore,
   effectiveScore,
   orderQueue,
+  orderQueueDetailed,
   nextToBuild,
   rankBetween,
   initialRanks,
@@ -106,6 +107,34 @@ describe('#2528 ordering — tier first, then score, then rank', () => {
     const a = item(2, { value: 3, rank: 'm' });
     const b = item(1, { value: 3, rank: 'm' });
     expect(orderQueue([a, b], DEFAULT_CONFIG, NOW).map((i) => i.num)).toEqual(['1', '2']);
+  });
+});
+
+describe('#2529 orderQueueDetailed — enriched records (the "why" the console + builder read)', () => {
+  it('records carry the tier STRING, effective score, unblocks, and rank; same order as orderQueue', () => {
+    const foundation = item(1, { value: 2 }); // ready, and unblocks the dependent below
+    const dependent = item(2, { blockedBy: ['1'], value: 2 }); // blocked by the open foundation → excluded
+    const pinned = item(3, { tier: 'pinned', value: 1 });
+    const items = [foundation, dependent, pinned];
+    const detailed = orderQueueDetailed(items, DEFAULT_CONFIG, NOW);
+    // Bare-item projection must match orderQueue exactly (one source of truth).
+    expect(detailed.map((r) => r.item.num)).toEqual(orderQueue(items, DEFAULT_CONFIG, NOW).map((i) => i.num));
+    // Pinned leads on tier despite the lowest score.
+    expect(detailed[0].item.num).toBe('3');
+    expect(detailed[0].tier).toBe('pinned');
+    // Every record exposes the display fields; a tier-less item defaults to 'normal'.
+    const rec1 = detailed.find((r) => r.item.num === '1');
+    expect(rec1.tier).toBe('normal');
+    expect(typeof rec1.score).toBe('number');
+    expect(rec1.unblocks).toBe(1); // foundation unblocks the (blocked, still-pending) dependent
+    // The excluded blocked item never appears.
+    expect(detailed.some((r) => r.item.num === '2')).toBe(false);
+  });
+
+  it('score matches effectiveScore for the same unblocks context (no recompute drift)', () => {
+    const it = item(1, { value: 4, timeCriticality: 2 });
+    const [rec] = orderQueueDetailed([it], DEFAULT_CONFIG, NOW);
+    expect(rec.score).toBe(effectiveScore(it, DEFAULT_CONFIG, NOW, { unblocks: 0 }));
   });
 });
 
