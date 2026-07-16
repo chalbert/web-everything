@@ -3,8 +3,10 @@ bornAs: xwms7q8
 kind: story
 size: 8
 parent: "2527"
-status: open
+status: resolved
 dateOpened: "2026-07-16"
+dateResolved: "2026-07-16"
+graduatedTo: none
 tags: [plateau-loop, build-queue, prioritization]
 ---
 
