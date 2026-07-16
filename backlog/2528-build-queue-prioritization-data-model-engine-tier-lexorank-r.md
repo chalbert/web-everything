@@ -1,7 +1,8 @@
 ---
+bornAs: xwms7q8
 kind: story
 size: 8
-parent: "xk0eti5"
+parent: "2527"
 status: open
 dateOpened: "2026-07-16"
 tags: [plateau-loop, build-queue, prioritization]

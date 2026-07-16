@@ -6,7 +6,7 @@ status: resolved
 relatedReport: reports/2026-07-16-launch-control-semantics.md
 dateOpened: "2026-07-15"
 dateResolved: "2026-07-16"
-graduatedTo: xk0eti5
+graduatedTo: 2527
 codifiedIn: one-off
 preparedDate: "2026-07-16"
 tags: [plateau-loop, console, backlog-ui, launch]
@@ -60,7 +60,7 @@ POST /api/backlog/build   { id: "2530-..." }
 The human decider **greenlit the program** — overriding the prepared `(d) park` default. The reframe was honest that park-vs-build is a *priority* call, not merit; on merit the capability wanted (manage AI builds from the UI) is **(b) the real headless build**. The decider chose to build it now.
 
 - **Ruling: (b) headless build**, as a program — not the thin (a) wrapper, not park. The priority call is made: build the autonomous builder.
-- **Graduates to the [Plateau Loop — autonomous AI build queue](/backlog/xk0eti5-plateau-loop-autonomous-ai-build-queue/) program epic**, built on the ratified prioritization design (#2526). The "in-flight" acceptance is now real, delivered by that program's build endpoint.
+- **Graduates to the [Plateau Loop — autonomous AI build queue](/backlog/2527-plateau-loop-autonomous-ai-build-queue/) program epic**, built on the ratified prioritization design (#2526). The "in-flight" acceptance is now real, delivered by that program's build endpoint.
 - **Un-parks [#2444](/backlog/2444-plateau-loop-phase-1-agent-runner-shape-cli-spawn-contract-s/)** — greenlighting the program supplies the consumer #2444's deferral was waiting for; #2444 is to be prepared + ratified as slice 3 of the program.
 - #2522 becomes the program's build-now / add-to-queue control (re-parented under the program).
 

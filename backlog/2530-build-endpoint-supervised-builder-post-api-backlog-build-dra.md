@@ -1,9 +1,10 @@
 ---
+bornAs: xr1vhog
 kind: story
 size: 8
-parent: "xk0eti5"
+parent: "2527"
 status: open
-blockedBy: ["2444", "xwms7q8"]
+blockedBy: ["2444", "2528"]
 dateOpened: "2026-07-16"
 tags: [plateau-loop, build-queue, builder, console]
 ---
