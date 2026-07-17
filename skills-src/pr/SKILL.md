@@ -14,6 +14,24 @@ and **triggers a single-couple fast drain** (`merge-ai-prs.mjs --only=<pr>`) tha
 feels instant while a single serialized writer owns every merge (the prerequisite for JIT NNN numbering).
 GitHub's native merge queue stays OFF.
 
+## One producer, every repo — never hand-roll `gh pr create`
+
+`pr-land` is the canonical producer for **all three constellation repos** (web-everything, frontierui,
+plateau-app), not just WE. It is repo-agnostic: it resolves the target GitHub repo from the clone's `origin`
+slug, so you run it **from that repo's lane clone** (`--repo=<lane-path>` or just `cwd`) and it opens the PR
+against the right repo. Because it always scores the SAME deterministic rubric
+(`scoreEscalation` → `producerReviewLabel`, #2307) it applies the correct **`review:human` / `review:pending`
+label at PR-open** — identically in every repo.
+
+**Do NOT open agent PRs with a hand-rolled `gh pr create` + a manual `gh pr edit --add-label ready-to-merge`.**
+That path SKIPS the #2307 producer review-labeling, so a PR that the rubric would gate goes out unlabelled and
+you rely entirely on the drain's re-score backstop — and, as importantly, you will mis-expect the review
+outcome (a plain PR the rubric passes lands in ~60s; you cannot "hold it for review" after the fact by
+starting a review — it must carry `review:pending` from open). Route every constellation-repo PR through
+`pr-land`. The plateau-app resident drain and the WE drain both re-score on sweep, so the rubric is uniform
+across repos either way; producer-time labeling via `pr-land` is how you get it applied at open, not on the
+first sweep.
+
 ## Preconditions
 
 - The work is **committed** (on the checked-out branch — commit-on-current-branch, #104). `pr-land`

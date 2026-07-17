@@ -73,3 +73,13 @@ A **`review:human` PR is never agent-cleared** — the core may render an *advis
 non-clearing comment), but the `review:accepted` label on a gate-self edit is applied **only** by a human via
 this skill. The conflict-of-interest rule in `we:scripts/lib/review-escalation.mjs` (`isGateSelfPath` →
 `humanRequired`) is unchanged; this skill is the sanctioned place the human acts on it.
+
+## Non-author-accepts (#2439) — you never clear your OWN PR
+
+Whoever authored the diff must **not** be the one who flips it to `review:accepted`. If you opened a PR (or ran
+its build) and it carries `review:pending`, running a review over it yourself and clearing your own label is
+author-self-accept — exactly the seam #2439's `review:redteamAccepted` (an INDEPENDENT hardened validator signs
+the final diff) exists to close. Spawning your own review subagents does not make you independent: the acceptor
+must be a party that did not produce the diff (the human via this skill, or an independent validator lane). So:
+review your own working diff before you open the PR (that is `/code-review`), but the **clearing verdict** on a
+parked PR is someone else's to give — never relabel a `review:*` PR you authored to `review:accepted` yourself.
