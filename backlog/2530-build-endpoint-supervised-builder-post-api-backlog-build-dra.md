@@ -3,9 +3,11 @@ bornAs: xr1vhog
 kind: story
 size: 8
 parent: "2527"
-status: open
+status: resolved
 blockedBy: ["2444", "2528"]
 dateOpened: "2026-07-16"
+dateResolved: "2026-07-16"
+graduatedTo: none
 tags: [plateau-loop, build-queue, builder, console]
 ---
 
