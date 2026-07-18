@@ -12,6 +12,8 @@ The surface: **two renders of the same subject** (a baseline vs a new capture; a
 
 The nearest existing WE standard is **`audit-timeline`** — but it is a *chronological text/event feed* of `AuditEvent`s for one entity ("who did what, when, before→after"), and it "owns the display, not the record." It is **temporal and linear**; the visual-diff surface is **spatial and two-pane**, and its unit is a *region of divergence between two renders*, not an event in a stream. audit-timeline cannot express "these two rendered states differ **here**, and the difference is **this kind**." The gap is real and audit-timeline is confirmed as the nearest-but-non-covering neighbor.
 
+**One adjacent data model to distinguish (not to conflate):** Web States' `ChangeRecord` (the before→after pairs that audit-timeline itself renders in `expanded` detail) is the closest *data-model* neighbor — but it is a scalar/field-level change pair, not a *spatial region on a rendered surface*. The visual-diff surface's unit is a **located region of visual divergence between two renders**, with an anchor (pixel or structural) and a per-region disposition — a review surface, not a change-log entry. So `ChangeRecord` models "field X went A→B"; visual-diff models "this region of the render drifted, here is where and what kind." The mint does not subsume `ChangeRecord`; it sits beside it.
+
 ## 2. Prior-art survey — the shipped models
 
 | Tool | Diff unit | Anchor | Review verdict per unit | Baseline effect of "accept" |
@@ -19,13 +21,14 @@ The nearest existing WE standard is **`audit-timeline`** — but it is a *chrono
 | **Percy** (BrowserStack) | Per-snapshot visual change | Pixel overlay on the rendered image | Approve / request-changes at the build/snapshot level | Approving promotes the new render to baseline |
 | **Chromatic** (Storybook) | Per-story change; highlighted diff regions | Pixel regions on the captured story | **Accept / Deny** per snapshot (and per-region highlight) | Accepting updates the story's baseline |
 | **reg-suit / reg-cli** | Per-item, categorized **new / passed / changed(failed) / deleted** | Pixel; UI offers 2-up / swipe / blend / diff-mask | No in-tool accept — you commit updated expected images | Committing the new expected image is the "accept" |
-| **Playwright** `toHaveScreenshot` | Per-screenshot pixel delta | Pixel diff-mask image (highlighted changed pixels); `maxDiffPixelRatio` tolerance | `--update-snapshots` accepts | Re-writing the committed `-expected.png` |
-| **GitHub / GitLab PR diff** | Per-hunk (text) | **Structural**: file + line range | Comment / approve at the review level; per-hunk "viewed" | N/A (merge, not baseline-promote) |
-| **Figma** version-compare / inspect | Per-layer change | **Structural**: layer / node id | N/A (informational) | N/A |
+| **Playwright** `toHaveScreenshot` | Per-screenshot pixel delta | Pixel diff-mask image (highlighted changed pixels); `maxDiffPixelRatio` tolerance | `--update-snapshots` accepts | Re-writing the committed baseline snapshot |
+| **GitHub / GitLab PR diff** | Per-hunk (text) | **Structural**: file + line range | Comment / approve at the review level; per-**file** "viewed" | N/A (merge, not baseline-promote) |
+| **Abstract** (Sketch version control) | Per-layer visual change | **Structural**: layer id | Review + comment per change | N/A (branch merge) |
+| **Figma** branch-merge review / inspect | Per-frame change (branch review) | **Structural**: frame / node id | Review side-by-side of changed frames | N/A |
 
 **Two structural findings fall straight out of the table:**
 
-1. **Delta *type* and delta *disposition* are orthogonal.** reg-suit's `new / changed / deleted` is a **structural type** (what changed about the item's existence); Chromatic/Percy's `accept / deny` is a **review disposition** (the verdict on the change). Every tool that has both keeps them on separate axes. Folding them into one flat enum reproduces the exact orthogonality break WE already ruled against for `action.level` (#1318/#1324) and `progress` (#2533 Fork 2 — provenance kept off completion). This is the load-bearing shape decision.
+1. **Delta *type* and delta *disposition* are orthogonal.** reg-suit's `new / changed / deleted` is a **structural type** (what changed about the item's existence); Chromatic/Percy's `accept / deny` is a **review disposition** (the verdict on the change). No single incumbent first-classes *both* — reg-suit has the type but no in-tool disposition, Chromatic/Percy have the disposition but no added/removed/changed typing, GitHub has the type per-hunk but approval only at the PR level. So the two-axis model is a **synthesis across** the tools, not a per-tool observation — but it is the shape that lets the surface express what each tool expresses separately, and folding the two into one flat enum reproduces the exact orthogonality break WE already ruled against for `action.level` (#1318/#1324) and `progress` (#2533 Fork 2 — provenance kept off completion). This is the load-bearing shape decision.
 
 2. **Anchoring splits pixel vs structural, along the "are the two panes pixel-aligned?" line.** Visual-regression tools (baseline vs new capture of the *same* view) are pixel-aligned, so a **pixel bounding box** locates a region. Design-vs-built and Figma/PR-diff panes are **not** pixel-aligned (different renderers, layouts, sizes), so they anchor **structurally** (a DOM selector / layer node-id / line range). The board's "design → built" case is the structural kind. A contract that serves the whole pattern must carry **both**, tagged by anchor type — a pixel box degrades to noise under a layout shift, and a structural anchor needs a correspondence the two renders may not share.
 
@@ -36,6 +39,8 @@ The nearest existing WE standard is **`audit-timeline`** — but it is a *chrono
 - **Review `disposition`** (the verdict, orthogonal to type): `unreviewed` (default) · `accepted` (intended — promote to baseline) · `rejected` (a real regression) · `expected` (known drift, **not reached yet** — the board's third state, the one no incumbent has first-classed). Keeping `expected` as a first-class disposition — distinct from accept and reject — is the novel contribution the board surfaced.
 
 Modeling these as **two axes** is the recommendation. A single flat enum (`added | removed | changed | accepted | rejected | expected`) is rejected on the #1318/#1324 precedent: it makes "an accepted `added` region" vs "a rejected `added` region" inexpressible.
+
+> **Open shaping question the ratifier must carry in (⚠).** `expected` may itself belong on a *third* axis, not as a fourth `disposition` value. `unreviewed | accepted | rejected` are **review-workflow verdicts** (has a human signed off?); `expected` classifies the **nature of the divergence** (planned/known drift vs unplanned) — and a region can be `expected` *and* `unreviewed`, or `expected` then later `accepted`. Folding `expected` beside accept/reject is a *milder instance of the very fold* this section argues against (#1318/#1324). The honest options for the mint: (i) a third `nature` axis (`unplanned | expected`) orthogonal to `disposition`, or (ii) keep `expected` on `disposition` and accept that a known-pending region is simply not-yet-in-the-review-workflow. **Recommend (i)**; either way the `disposition` axis needs one more shaping pass before the contract is frozen. This does not block the mint — it scopes the remaining design.
 
 ### 3b. Anchor payload — a tagged union over pixel and structural
 - `anchorType: 'pixel-region' | 'dom-selector' | 'node-id' | 'line-range'`, carrying `box?: {x,y,w,h}` for the pixel case and `ref?: string` for the structural cases, plus the two pane references being compared.
@@ -59,6 +64,7 @@ The visual-regression tools have a clean **producer/consumer split**: a **differ
 ## Open Points Register
 - 🔶 **DECIDE (#2538 Fork A):** mint the intent now vs defer — recommend **mint**.
 - 🔶 **DECIDE (#2538 Fork B):** two orthogonal delta axes vs one flat enum — recommend **two axes**.
+- ⚠ **RECONCILE (#2538 Fork B, sub-question):** does `expected` belong on `disposition`, or on its own `nature` axis (planned/known vs unplanned)? — recommend a **third axis**; needs one shaping pass before the contract freezes (does not block the mint).
 - 🔶 **DECIDE (#2538 Fork C):** anchor payload = both pixel + structural (tagged) vs pixel-only — recommend **both, tagged**.
-- 🔶 **DECIDE (#2538 Fork D):** accept = per-region disposition (with first-class `expected`) vs surface-level only — recommend **per-region**.
+- 🔶 **DECIDE (#2538 Fork D):** accept = per-region disposition (with a first-class known-pending state) vs surface-level only — recommend **per-region**.
 - 🔶 **DECIDE (#2538 Fork E):** scope = intent now + differ-protocol as follow-on vs bundle both — recommend **intent now, name the seam**.

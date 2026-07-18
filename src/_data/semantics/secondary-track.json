@@ -1,0 +1,5 @@
+{
+  "term": "Secondary Track",
+  "definition": "An optional second fill on the same Progress track, alongside the primary completion fill — the native <video> buffered-vs-currentTime pattern (a lighter secondary fill under the played fill; the YouTube/Netflix scrubber). Scoped to GENERIC completion (buffered-vs-played, downloaded-vs-verified, estimated-vs-actual); it is never a trust or data-provenance signal — claimed-vs-verified provenance is a separate axis, an app binding, never a term baked into the Progress contract.",
+  "usage": "The optional `secondaryTrack` dimension of the Progress Intent (added #2533 Fork 2). A presentation dimension the intent owns, not a re-typing of progress into a provenance intent."
+}
