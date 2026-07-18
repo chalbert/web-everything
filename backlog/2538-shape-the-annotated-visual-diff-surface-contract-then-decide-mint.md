@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-07-18"
 dateStarted: "2026-07-18"
 dateResolved: "2026-07-18"
-graduatedTo: "two builds — mint the visual-diff intent (#xpoqw0q) + design the visual-differ protocol (#xh4htpb, Fork E follow-on)"
+graduatedTo: "two builds — mint the visual-diff intent (#2545) + design the visual-differ protocol (#2544, Fork E follow-on)"
 codifiedIn: one-off
 preparedDate: "2026-07-18"
 tags:
@@ -45,7 +45,7 @@ Nicolas ratified the column: **MINT a `visual-diff` intent** on the shaped contr
 | **D · accept model** | ✓ **PER-REGION disposition** — `accepted` promotes built → baseline; an `expected` region parks as known-pending; whole-surface approve composes *above* it |
 | **E · scope** | ✓ **MINT the intent now**; the differ seam is a separable follow-on standard |
 
-**Graduates to** two agent-ready builds: [#xpoqw0q](/backlog/xpoqw0q-mint-the-visual-diff-intent-author-the-three-axis-review-sur/) — author the three-axis `visual-diff` intent; and the follow-on decision [#xh4htpb](/backlog/xh4htpb-design-the-visual-differ-protocol-two-renders-to-typed-delta/) — design the `visual-differ` protocol (Fork E seam). No `codifiedIn` statute — the ruling *is* the intent's own definition (`one-off`). The interactive mockup (Worked example, below) reflects the ratified three-axis shape.
+**Graduates to** two agent-ready builds: [#2545](/backlog/2545-mint-the-visual-diff-intent-author-the-three-axis-review-sur/) — author the three-axis `visual-diff` intent; and the follow-on decision [#2544](/backlog/2544-design-the-visual-differ-protocol-two-renders-to-typed-delta/) — design the `visual-differ` protocol (Fork E seam). No `codifiedIn` statute — the ruling *is* the intent's own definition (`one-off`). The interactive mockup (Worked example, below) reflects the ratified three-axis shape.
 
 ## Prepared (2026-07-18) — research published, forks ready to ratify
 
