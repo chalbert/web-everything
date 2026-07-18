@@ -1,0 +1,22 @@
+{
+  "id": "provider-agnostic-backlog-adapter-seam",
+  "title": "Provider-agnostic backlog adapter seam — the read/write ports + interlingua the console codes against",
+  "status": "open",
+  "summary": "Grounds decision #2558 (under the Plateau Loop program #2527): name and enforce the read port, the write port, and the domain interlingua the backlog console depends on, so the north-star (support multiple backlog systems + bridge between them — Jira/Linear/GitHub alongside the WE backlog) becomes 'add an adapter,' not 'rewrite the console.' It does NOT build a second provider. The seam already exists in embryo: the console is a two-layer split (browser views that only fetch('/api/backlog/*'), and a Node dev-middleware that alone touches disk / shells the WE CLI / calls gh), the `?repo=`/REPOS registry already selects a data source, and every write already rides the lane→PR seam (acquire a lane → run the lane's CLI verb → check:standards → open a ready-to-merge PR the drain merges). What is missing is (a) a repo-registry entry richer than a bare path string and (b) a single named provider interface behind the four ad-hoc read/write implementations. Prior art: the ratified SSR-external-I/O anchor (#2030) is a near-exact statute analog — the externally-observable wire format is the WE standard, the renderer is a swappable impl behind the seam; this decision is that same black-box-conformance pattern applied to backlog data access. After the standing test + adversarial passes, no multi-branch fork survived — both candidate forks resolved by classification into rulings. Ruling A (seam form, high confidence): the console-facing seam is the HTTP/DTO wire contract (BacklogItemDTO over /api/backlog/*), language-agnostic like the SSR renderer rule; this is support-both (the in-process BacklogProvider TS interface composes as a fetch() facade over the wire contract), with the wire contract ratified as primary and the TS interface supported behind it — NOT a JS-coupled interface as THE seam. Ruling B (interlingua, med-high): the interlingua IS the WE-backlog schema (statuses open/active/resolved, kinds epic/story/task/decision, edges parent/blockedBy, lineage graduatedTo/codifiedIn, provenance bornAs), and the core @webeverything/contracts/backlog package is minted NOW + an open providerExt extension slot — a spin-off build blockedBy this decision. The governing anchor is the interchange-schema temporal-rule clarification (platform-decisions.md:435, #1437): for an interchange schema a 'second independent impl' is met by external convergent prior art, so N≥2 incumbents (Jira/Linear/GitHub/WE-backlog all emit the core shape) fire the mint-core-now-plus-extension-slot warrant — the prep's initial 'defer until the first foreign adapter' default was refuted as the struck wait-for-a-WE-internal-2nd-impl mis-read (Jira/Linear/GitHub schemas are public and surveyable today; #2533 Fork 5 = pattern-real-shape-unshaped → research-then-mint, not park), and constellation-placement rule 3 already names @webeverything/contracts as the end-state with plateau's BacklogItemDTO already a cross-repo byte-replica, so minting reduces drift rather than adding it. Statute guardrail for resolve: cite the existing anchors, do NOT mint a new one. Ratified invariants (not forks): writes ride lane→PR (#primary-read-only-lanes-only); views code only against the seam, never a bare CLI/disk source (the acceptance lint); the seam is a black-box conformance contract, the backlog-data-access instance of #ssr-external-io-standard-renderers-conform, with contract/types on the standard side and adapter impl on plateau-app per #constellation-placement. Cross-refs: #2561 F3 (the item spec must be expressible through this read port), #2555 (the board slices are the first consumer that codes against the seam).",
+  "dateOpened": "2026-07-18",
+  "lastReviewed": "2026-07-18",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "plateau-loop",
+    "console",
+    "adapter-seam",
+    "provider-agnostic",
+    "architecture",
+    "interlingua",
+    "black-box-conformance",
+    "lane-pr-write-seam",
+    "constellation-placement"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}
