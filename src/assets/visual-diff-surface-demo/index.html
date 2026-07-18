@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visual-diff review surface</title>
+<style>
+  :root {
+    --ground: #f4f6f8;
+    --panel: #ffffff;
+    --panel-2: #eef1f5;
+    --ink: #14181f;
+    --ink-2: #566072;
+    --ink-3: #8b95a6;
+    --line: #dce1e9;
+    --line-strong: #c3cad6;
+    --accent: #0d9aa8;            /* teal — UI chrome only, not a disposition */
+    --accent-ink: #06636d;
+    /* semantic dispositions (review verdict) — distinct from the accent */
+    --rejected: #e5484d;
+    --rejected-bg: #fdecec;
+    --accepted: #2fa36b;
+    --accepted-bg: #e7f6ee;
+    --unreviewed: #8b95a6;
+    --unreviewed-bg: #eceff3;
+    /* nature axis (planned/known vs unplanned) — orthogonal to disposition */
+    --expected: #d9820a;
+    --expected-bg: #fbf0dd;
+    --radius: 10px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0e1116;
+      --panel: #171b22;
+      --panel-2: #1e242d;
+      --ink: #e8ecf2;
+      --ink-2: #9aa4b4;
+      --ink-3: #6b7688;
+      --line: #262d38;
+      --line-strong: #333c49;
+      --accent: #2fc2d0;
+      --accent-ink: #7fe0e9;
+      --rejected: #f0595e;
+      --rejected-bg: #2c1618;
+      --accepted: #46b982;
+      --accepted-bg: #132419;
+      --unreviewed: #7c8698;
+      --unreviewed-bg: #1c222b;
+      --expected: #eaa233;
+      --expected-bg: #2a1f0e;
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f4f6f8; --panel: #ffffff; --panel-2: #eef1f5; --ink: #14181f;
+    --ink-2: #566072; --ink-3: #8b95a6; --line: #dce1e9; --line-strong: #c3cad6;
+    --accent: #0d9aa8; --accent-ink: #06636d;
+    --rejected: #e5484d; --rejected-bg: #fdecec; --accepted: #2fa36b; --accepted-bg: #e7f6ee;
+    --unreviewed: #8b95a6; --unreviewed-bg: #eceff3; --expected: #d9820a; --expected-bg: #fbf0dd;
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e1116; --panel: #171b22; --panel-2: #1e242d; --ink: #e8ecf2;
+    --ink-2: #9aa4b4; --ink-3: #6b7688; --line: #262d38; --line-strong: #333c49;
+    --accent: #2fc2d0; --accent-ink: #7fe0e9;
+    --rejected: #f0595e; --rejected-bg: #2c1618; --accepted: #46b982; --accepted-bg: #132419;
+    --unreviewed: #7c8698; --unreviewed-bg: #1c222b; --expected: #eaa233; --expected-bg: #2a1f0e;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .app {
+    font-family: var(--sans);
+    background: var(--ground);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: clamp(16px, 3vw, 32px);
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1140px; margin: 0 auto; }
+
+  header.head { margin-bottom: 20px; }
+  .eyebrow {
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent-ink); font-weight: 650; margin: 0 0 6px;
+  }
+  h1.title { font-size: clamp(20px, 3vw, 27px); margin: 0 0 6px; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--ink-2); margin: 0; max-width: 66ch; font-size: 14px; }
+  .sub code { font-family: var(--mono); font-size: .9em; }
+
+  /* summary */
+  .summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 14px; align-items: center; }
+  .summary .grouplabel { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); font-weight: 650; margin-right: 2px; }
+  .summary .sep { width: 1px; align-self: stretch; background: var(--line-strong); margin: 2px 6px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 11px 5px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+    border: 1px solid var(--line-strong); background: var(--panel);
+    font-variant-numeric: tabular-nums;
+  }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .chip.total { color: var(--ink-2); font-weight: 550; }
+  .dot.rejected { background: var(--rejected); }
+  .dot.accepted { background: var(--accepted); }
+  .dot.unreviewed { background: var(--unreviewed); }
+  .dot.expected { background: var(--expected); }
+
+  /* layout */
+  .board { display: grid; grid-template-columns: 1fr 348px; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .board { grid-template-columns: 1fr; } }
+
+  .stage {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 14px;
+  }
+  @media (max-width: 560px) { .stage { grid-template-columns: 1fr; } }
+
+  .pane { min-width: 0; }
+  .pane-tab {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+    font-weight: 650; margin-bottom: 8px;
+  }
+  .pane-tab .side { color: var(--ink-2); }
+  .render {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 20px 18px; position: relative;
+  }
+
+  /* mock login form */
+  .form { display: flex; flex-direction: column; gap: 13px; }
+  .form h3 { margin: 0 0 2px; font-size: 17px; letter-spacing: -.01em; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: 11px; color: var(--ink-2); font-weight: 600; }
+  .field .box {
+    height: 30px; border-radius: 6px; border: 1px solid var(--line-strong);
+    background: var(--panel);
+  }
+  .remember { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+  .remember .cb { width: 15px; height: 15px; border-radius: 4px; border: 1.5px solid var(--accent); background: var(--accent); position: relative; }
+  .remember .cb::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(40deg); }
+  .remember.ghost { color: var(--ink-3); font-style: italic; }
+  .remember.ghost .cb { background: transparent; border-style: dashed; border-color: var(--line-strong); }
+  .remember.ghost .cb::after { display: none; }
+  .btn-submit {
+    margin-top: 4px; border: none; border-radius: 7px; color: #fff;
+    font: inherit; font-weight: 650; font-size: 14px; cursor: default;
+  }
+  .btn-submit.teal { background: #0d9aa8; padding: 11px 16px; }
+  .btn-submit.blue { background: #3b6fe0; padding: 11px 16px; }
+
+  /* diff zones + markers — marker colour = disposition (review verdict) */
+  .dz { position: relative; border-radius: 7px; outline: 2px solid transparent; outline-offset: 3px; transition: outline-color .12s, background .12s; cursor: pointer; }
+  .dz .marker {
+    position: absolute; top: -9px; left: -9px; z-index: 3;
+    width: 20px; height: 20px; border-radius: 50%;
+    color: #fff; font-size: 11.5px; font-weight: 700; font-family: var(--mono);
+    display: grid; place-items: center; box-shadow: 0 1px 3px rgba(0,0,0,.28);
+    border: 2px solid var(--panel-2);
+  }
+  /* an "expected" (nature) region wears an amber ring on its marker, whatever its disposition */
+  .dz[data-nature="expected"] .marker { border-color: var(--expected); }
+  .dz[data-disp="rejected"] .marker { background: var(--rejected); }
+  .dz[data-disp="accepted"] .marker { background: var(--accepted); }
+  .dz[data-disp="unreviewed"] .marker { background: var(--unreviewed); }
+  .dz.sel[data-disp="rejected"] { outline-color: var(--rejected); background: var(--rejected-bg); }
+  .dz.sel[data-disp="accepted"] { outline-color: var(--accepted); background: var(--accepted-bg); }
+  .dz.sel[data-disp="unreviewed"] { outline-color: var(--unreviewed); background: var(--unreviewed-bg); }
+
+  /* inspector */
+  .inspector { display: flex; flex-direction: column; gap: 10px; }
+  .insp-title { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); font-weight: 650; margin: 2px 0 0; }
+  .region {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 12px 13px; cursor: pointer; transition: border-color .12s, box-shadow .12s;
+  }
+  .region:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .region.sel { border-color: var(--line-strong); box-shadow: 0 0 0 1px var(--line-strong), 0 6px 18px -10px rgba(0,0,0,.4); }
+  .region-top { display: flex; align-items: center; gap: 8px; }
+  .rnum { width: 18px; height: 18px; border-radius: 50%; flex: none; color: #fff; font: 700 11px/1 var(--mono); display: grid; place-items: center; }
+  .region[data-disp="rejected"] .rnum { background: var(--rejected); }
+  .region[data-disp="accepted"] .rnum { background: var(--accepted); }
+  .region[data-disp="unreviewed"] .rnum { background: var(--unreviewed); }
+  .rlabel { font-weight: 640; font-size: 13.5px; }
+  .badges { margin-left: auto; display: inline-flex; gap: 5px; }
+  .badge {
+    font: 600 10.5px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase;
+    border-radius: 5px; padding: 4px 6px; white-space: nowrap;
+  }
+  .badge.type { color: var(--ink-2); border: 1px solid var(--line-strong); }
+  .badge.nature-expected { color: var(--expected); border: 1px solid var(--expected); background: var(--expected-bg); }
+  .badge.nature-unplanned { color: var(--ink-3); border: 1px solid var(--line-strong); }
+  .anchor { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin: 8px 0 10px; word-break: break-all; }
+  .anchor b { color: var(--ink-2); font-weight: 600; }
+  .note { font-size: 12px; color: var(--ink-2); margin: 0 0 10px; }
+
+  .disp-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 650; margin: 0 0 5px; }
+  .disp-row { display: flex; gap: 4px; }
+  .disp-row button {
+    flex: 1; font: 600 11px/1 var(--sans); padding: 7px 4px; cursor: pointer;
+    border: 1px solid var(--line-strong); background: var(--panel-2); color: var(--ink-2);
+    border-radius: 6px; transition: all .1s;
+  }
+  .disp-row button:hover { color: var(--ink); border-color: var(--ink-3); }
+  .disp-row button.on[data-d="rejected"] { background: var(--rejected-bg); border-color: var(--rejected); color: var(--rejected); }
+  .disp-row button.on[data-d="accepted"] { background: var(--accepted-bg); border-color: var(--accepted); color: var(--accepted); }
+  .disp-row button.on[data-d="unreviewed"] { background: var(--unreviewed-bg); border-color: var(--unreviewed); color: var(--ink); }
+
+  /* payload */
+  .payload { margin-top: 4px; }
+  .payload summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); font-weight: 650; padding: 6px 0; }
+  .payload pre {
+    margin: 4px 0 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 13px; overflow-x: auto; font-family: var(--mono); font-size: 11.5px; line-height: 1.6; color: var(--ink);
+  }
+  .payload .k { color: var(--accent-ink); }
+  .payload .s { color: var(--accepted); }
+  .payload .c { color: var(--ink-3); font-style: italic; }
+
+  .foot { margin-top: 16px; font-size: 12px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .foot b { color: var(--ink-2); font-weight: 600; }
+</style>
+
+<div class="app">
+  <div class="wrap">
+    <header class="head">
+      <p class="eyebrow">visual-diff · candidate intent</p>
+      <h1 class="title">Annotated visual-diff review surface</h1>
+      <p class="sub">Two panes — the design and what was built — with numbered delta regions. Each region carries <b>three orthogonal axes</b>: a structural <code>type</code>, a <code>nature</code> (planned/known vs unplanned), and a review <code>disposition</code> — and is dispositioned one region at a time. Click a marker or card; change any disposition and watch the summary + payload react.</p>
+    </header>
+
+    <div class="summary" id="summary"></div>
+
+    <div class="board">
+      <div class="stage">
+        <div class="pane">
+          <div class="pane-tab"><span>Design</span><span class="side">reference</span></div>
+          <div class="render">
+            <div class="form">
+              <h3 class="dz" data-region="3"><span class="marker">3</span>Welcome back</h3>
+              <div class="field"><label>Email</label><div class="box"></div></div>
+              <div class="field"><label>Password</label><div class="box"></div></div>
+              <div class="dz remember" data-region="1"><span class="marker">1</span><span class="cb"></span> Remember me</div>
+              <button class="dz btn-submit teal" data-region="2"><span class="marker">2</span>Sign in</button>
+            </div>
+          </div>
+        </div>
+        <div class="pane">
+          <div class="pane-tab"><span>Built</span><span class="side">current render</span></div>
+          <div class="render">
+            <div class="form">
+              <h3 class="dz" data-region="3"><span class="marker">3</span>Sign in</h3>
+              <div class="field"><label>Email</label><div class="box"></div></div>
+              <div class="field"><label>Password</label><div class="box"></div></div>
+              <div class="dz remember ghost" data-region="1"><span class="marker">1</span><span class="cb"></span> not built yet</div>
+              <button class="dz btn-submit blue" data-region="2"><span class="marker">2</span>Sign in</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="inspector">
+        <p class="insp-title">Regions · 3</p>
+        <div id="regions"></div>
+        <details class="payload" open>
+          <summary>Selected region · contract payload</summary>
+          <pre id="payload"></pre>
+        </details>
+      </aside>
+    </div>
+
+    <div class="foot">
+      <span><b>type</b> — structural: added · removed · changed</span>
+      <span><b>nature</b> — planned/known: unplanned · <b>expected</b></span>
+      <span><b>disposition</b> — review verdict: unreviewed · accepted · rejected</span>
+      <span><b>accepted</b> promotes built → baseline · an <b>expected</b> region parks as known-pending</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  const DISPS = ["unreviewed", "accepted", "rejected"];
+  const DISP_LABEL = { unreviewed: "Unreviewed", accepted: "Accept", rejected: "Reject" };
+  const regions = [
+    { id: 3, label: "Heading copy", type: "changed", nature: "unplanned", disposition: "accepted",
+      anchor: { anchorType: "dom-selector", designRef: "form > h3", builtRef: "form > h3" },
+      note: "“Welcome back” came through as “Sign in”. Unplanned, but a fine change — accept it into the baseline." },
+    { id: 2, label: "Submit button colour", type: "changed", nature: "unplanned", disposition: "rejected",
+      anchor: { anchorType: "dom-selector", designRef: "button.submit", builtRef: "button.submit" },
+      note: "Brand teal in the design; rendered a generic blue. Unplanned drift — must fix." },
+    { id: 1, label: "Remember-me checkbox", type: "removed", nature: "expected", disposition: "unreviewed",
+      anchor: { anchorType: "dom-selector", designRef: "form > .field--remember", builtRef: null },
+      note: "Planned but not built yet — an expected divergence. It sits outside the accept/reject workflow (known-pending): neither fail nor promote." },
+  ];
+  let selected = 2;
+
+  const byId = (id) => regions.find((r) => r.id === id);
+  const dzEls = (id) => document.querySelectorAll('.dz[data-region="' + id + '"]');
+
+  function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+  function payloadHTML(r) {
+    const j = { id: r.id, label: r.label, type: r.type, nature: r.nature, disposition: r.disposition, anchor: r.anchor };
+    const comments = {
+      type: "structural axis",
+      nature: "nature axis — planned/known, orthogonal to disposition",
+      disposition: "review axis — the verdict",
+      anchor: "tagged union (Fork C)",
+    };
+    const lines = [];
+    lines.push("{");
+    const entries = Object.entries(j);
+    entries.forEach(([k, v], i) => {
+      const comma = i < entries.length - 1 ? "," : "";
+      const cm = comments[k] ? '  <span class="c">// ' + comments[k] + "</span>" : "";
+      if (k === "anchor") {
+        lines.push('  <span class="k">"anchor"</span>: {' + cm);
+        const ae = Object.entries(v);
+        ae.forEach(([ak, av], ai) => {
+          const ac = ai < ae.length - 1 ? "," : "";
+          const val = av === null ? '<span class="c">null</span>' : '<span class="s">"' + esc(av) + '"</span>';
+          lines.push('    <span class="k">"' + ak + '"</span>: ' + val + ac);
+        });
+        lines.push("  }" + comma);
+      } else {
+        const val = typeof v === "number" ? String(v) : '<span class="s">"' + esc(v) + '"</span>';
+        lines.push('  <span class="k">"' + k + '"</span>: ' + val + comma + cm);
+      }
+    });
+    lines.push("}");
+    return lines.join("\n");
+  }
+
+  function renderSummary() {
+    const disp = { unreviewed: 0, accepted: 0, rejected: 0 };
+    let expected = 0;
+    regions.forEach((r) => { disp[r.disposition]++; if (r.nature === "expected") expected++; });
+    const dispOrder = ["rejected", "accepted", "unreviewed"];
+    const label = { rejected: "Rejected", accepted: "Accepted", unreviewed: "Unreviewed" };
+    let html = '<span class="chip total">' + regions.length + " regions</span>";
+    html += '<span class="grouplabel">disposition</span>';
+    dispOrder.forEach((d) => {
+      html += '<span class="chip"><span class="dot ' + d + '"></span>' + label[d] + " " + disp[d] + "</span>";
+    });
+    html += '<span class="sep"></span><span class="grouplabel">nature</span>';
+    html += '<span class="chip"><span class="dot expected"></span>Expected ' + expected + "</span>";
+    document.getElementById("summary").innerHTML = html;
+  }
+
+  function renderRegions() {
+    const host = document.getElementById("regions");
+    host.innerHTML = "";
+    regions.forEach((r) => {
+      const el = document.createElement("div");
+      el.className = "region" + (r.id === selected ? " sel" : "");
+      el.tabIndex = 0;
+      el.dataset.disp = r.disposition;
+      el.dataset.nature = r.nature;
+      el.dataset.region = r.id;
+      const anchorBuilt = r.anchor.builtRef === null ? "—" : r.anchor.builtRef;
+      const natureBadge = '<span class="badge nature-' + r.nature + '">' + r.nature + "</span>";
+      el.innerHTML =
+        '<div class="region-top"><span class="rnum">' + r.id + '</span>' +
+        '<span class="rlabel">' + esc(r.label) + "</span>" +
+        '<span class="badges"><span class="badge type">' + r.type + "</span>" + natureBadge + "</span></div>" +
+        '<div class="anchor"><b>' + r.anchor.anchorType + "</b> · design <code>" + esc(r.anchor.designRef) + "</code> · built <code>" + esc(anchorBuilt) + "</code></div>" +
+        '<p class="note">' + esc(r.note) + "</p>" +
+        '<p class="disp-label">disposition</p>' +
+        '<div class="disp-row">' +
+          DISPS.map((d) => '<button data-d="' + d + '" class="' + (r.disposition === d ? "on" : "") + '">' + DISP_LABEL[d] + "</button>").join("") +
+        "</div>";
+      el.addEventListener("click", (e) => { if (!e.target.closest(".disp-row")) select(r.id); });
+      el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(r.id); } });
+      el.querySelectorAll(".disp-row button").forEach((b) => {
+        b.addEventListener("click", () => setDisp(r.id, b.dataset.d));
+      });
+      host.appendChild(el);
+    });
+  }
+
+  function renderStage() {
+    regions.forEach((r) => {
+      dzEls(r.id).forEach((el) => {
+        el.dataset.disp = r.disposition;
+        el.dataset.nature = r.nature;
+        el.classList.toggle("sel", r.id === selected);
+      });
+    });
+  }
+
+  function renderPayload() {
+    document.getElementById("payload").innerHTML = payloadHTML(byId(selected));
+  }
+
+  function select(id) { selected = id; renderRegions(); renderStage(); renderPayload(); }
+  function setDisp(id, d) { byId(id).disposition = d; selected = id; renderAll(); }
+  function renderAll() { renderSummary(); renderRegions(); renderStage(); renderPayload(); }
+
+  document.querySelectorAll(".dz").forEach((el) => {
+    el.addEventListener("click", () => select(Number(el.dataset.region)));
+  });
+
+  renderAll();
+</script>

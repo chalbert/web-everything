@@ -1,8 +1,12 @@
 ---
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-18"
+dateResolved: "2026-07-18"
+graduatedTo: "two builds — mint the visual-diff intent (#xpoqw0q) + design the visual-differ protocol (#xh4htpb, Fork E follow-on)"
+codifiedIn: one-off
 preparedDate: "2026-07-18"
 tags:
   - standards
@@ -28,6 +32,21 @@ Mint (or not) is decided **on that result** — do NOT mint blind now (ratifying
 
 **Acceptance:** a `/research/` topic is commissioned and published shaping the three contract questions above (delta-type taxonomy · anchor payload · accept/typed-region model), measured against `we:src/_data/intents/audit-timeline.json`; the decision is then prepared (`preparedDate` set) with a mint/no-mint recommendation grounded in that research.
 
+## Decision (2026-07-18) — RATIFIED
+
+Nicolas ratified the column: **MINT a `visual-diff` intent** on the shaped contract, scoped to the intent with the differ protocol named as a follow-on. All five forks **and** the Fork B ⚠ sub-question resolved:
+
+| Fork | Ruling |
+|------|--------|
+| **A · mint** | ✓ **MINT** a `visual-diff` intent — dispositive prior art (Percy / Chromatic / reg-suit), contract now shaped |
+| **B · taxonomy** | ✓ **TWO orthogonal axes** — structural `type` (`added \| removed \| changed`) × review `disposition` (`unreviewed \| accepted \| rejected`) |
+| **B ⚠ · `expected`** | ✓ **THIRD `nature` axis** (`unplanned \| expected`), orthogonal to `disposition` — `expected` is the *nature* of a divergence, not a verdict (a region is `expected` **and** `unreviewed`); folding it into `disposition` would repeat the #1318/#1324 fold this fork rejects |
+| **C · anchor** | ✓ **TAGGED union** — `pixel-region \| dom-selector \| node-id \| line-range` (`box?` for pixel, `ref?` for structural) |
+| **D · accept model** | ✓ **PER-REGION disposition** — `accepted` promotes built → baseline; an `expected` region parks as known-pending; whole-surface approve composes *above* it |
+| **E · scope** | ✓ **MINT the intent now**; the differ seam is a separable follow-on standard |
+
+**Graduates to** two agent-ready builds: [#xpoqw0q](/backlog/xpoqw0q-mint-the-visual-diff-intent-author-the-three-axis-review-sur/) — author the three-axis `visual-diff` intent; and the follow-on decision [#xh4htpb](/backlog/xh4htpb-design-the-visual-differ-protocol-two-renders-to-typed-delta/) — design the `visual-differ` protocol (Fork E seam). No `codifiedIn` statute — the ruling *is* the intent's own definition (`one-off`). The interactive mockup (Worked example, below) reflects the ratified three-axis shape.
+
 ## Prepared (2026-07-18) — research published, forks ready to ratify
 
 **Research:** [/research/annotated-visual-diff-surface/](/research/annotated-visual-diff-surface/) (grounding in `we:reports/2026-07-18-annotated-visual-diff-surface.md`). Surveyed the shipped models — Percy (approve / request-changes, promotes baseline), Chromatic (accept/deny per story + region highlights), reg-suit/reg-cli (categorizes items new/passed/changed/deleted; 2-up/swipe/blend/diff-mask UI), Playwright `toHaveScreenshot` (pixel diff-mask + `maxDiffPixelRatio`, rewrites the committed baseline), GitHub/GitLab PR diff (structural file+line hunks; per-**file** "viewed"), Abstract (Sketch version-control, per-layer structural visual diff) and Figma branch-merge review (per-frame side-by-side) — all measured against `we:src/_data/intents/audit-timeline.json`.
@@ -37,7 +56,52 @@ Mint (or not) is decided **on that result** — do NOT mint blind now (ratifying
 **Grounding digest (two load-bearing findings):**
 - **Delta *type* and delta *disposition* are orthogonal.** reg-suit's `new/changed/deleted` is a *structural type* (what changed about a region's existence); Chromatic/Percy's `accept/deny` is a *review disposition* (the verdict). Every tool with both keeps them on separate axes — folding them into one flat enum reproduces the orthogonality break WE already ruled against for `action.level` (#1318/#1324) and `progress` (#2533 Fork 2).
 - **Anchoring splits pixel vs structural** along the "are the two panes pixel-aligned?" line. Visual-regression (same view, re-captured) is pixel-aligned → a bounding box locates a region; design-vs-built / Figma / PR-diff panes are *not* pixel-aligned → structural anchors (dom-selector / node-id / line-range). The board's design→built case is the structural kind; the contract must carry both.
-- The board also surfaced a **third disposition no incumbent first-classes** — `expected` ("known drift, not reached yet") — the novel contribution.
+- The board also surfaced a **state no incumbent first-classes** — `expected` ("known drift, not reached yet") — the novel contribution. The ratified contract places it on its own **`nature` axis**, orthogonal to `disposition` (see the Decision section above).
+
+### Worked example — one surface, three typed regions
+
+An interactive mockup of what the review surface could look like: a login form reviewed
+**design vs built**. The two panes are *not* pixel-aligned, so regions anchor structurally
+(Fork C). Each region carries **three orthogonal axes** — a structural `type`, a `nature`
+(planned/known vs unplanned), and a review `disposition` (Fork B, resolved to the third
+`nature` axis) — and is dispositioned per-region (Fork D). Click a marker or card; change any
+disposition and watch the summary + payload react.
+
+<iframe src="/assets/visual-diff-surface-demo/" title="Annotated visual-diff review surface — interactive mockup" style="width:100%; height:640px; border:1px solid var(--we-border, #d5dae2); border-radius:12px; background:#fff;" loading="lazy"></iframe>
+
+*(Open standalone: [/assets/visual-diff-surface-demo/](/assets/visual-diff-surface-demo/) — self-contained, no build. Source: `we:src/assets/visual-diff-surface-demo/index.html`.)*
+
+The three regions, and why the three-axis shape is load-bearing:
+
+- **①  Remember-me checkbox** — `type: removed` · `nature: expected` · `disposition: unreviewed`
+  → planned but not built yet. `expected` is the **nature** of the divergence, *not* a verdict:
+  the region sits outside the accept/reject workflow (known-pending), so it neither fails the
+  review nor promotes to baseline — and its `disposition` is independently `unreviewed`.
+- **②  Submit button colour** — `type: changed` · `nature: unplanned` · `disposition: rejected`
+  → real drift (brand teal rendered as a generic blue), must fix.
+- **③  Heading copy** — `type: changed` · `nature: unplanned` · `disposition: accepted` → an
+  unplanned change that's actually fine — promote the built state into the baseline.
+
+Regions ② and ③ are **both** `unplanned` `changed`, yet one is rejected and the other accepted —
+`nature` and `disposition` vary independently (why they are separate axes, Fork B). And region ①
+shows why `expected` can't be a disposition value: it is `expected` *and* `unreviewed` at once.
+
+One region as a payload (illustrating the Fork B axes + Fork C tagged-union anchor):
+
+```json
+{
+  "id": 1,
+  "label": "Remember-me checkbox",
+  "type": "removed",               // structural axis
+  "nature": "expected",            // nature axis — planned/known, orthogonal to disposition (Fork B ⚠ → third axis)
+  "disposition": "unreviewed",     // review axis — the verdict
+  "anchor": {                      // tagged union (Fork C)
+    "anchorType": "dom-selector",  // design↔built is not pixel-aligned → structural anchor
+    "designRef": "form > .field--remember",
+    "builtRef": null               // absent in the built pane
+  }
+}
+```
 
 ### Fork A — mint the intent, or not?
 - **(a — recommended) MINT a `visual-diff` intent.** The pattern is dispositive prior art and the contract is now shaped (Forks B–D). The corrected bar's honest verdict is mint.
