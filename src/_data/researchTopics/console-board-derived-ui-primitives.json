@@ -1,0 +1,24 @@
+{
+  "id": "console-board-derived-ui-primitives",
+  "title": "Prior art for the console-board-derived UI primitives — shared quantitative axis, dual-track progress, semantic zoom, and threshold-region overlay",
+  "status": "open",
+  "summary": "Prep research for decision #2533: which low-level UI primitives surfaced by the plateau console board (lane build-status board, mock v68) earn a Web Everything standard versus fold into an existing one, park, or stay app-custom. Surveys the four live primitives against real prior art. (1) SHARED QUANTITATIVE AXIS / scale-ruler — a scalar mapped to length/position on one labeled axis with an aggregate. Prior art: d3-scale's scaleLinear (domain→range with .ticks()/.tickFormat() — the reusable axis kernel behind d3-axis), Vega-Lite's size and x/y positional encodings (a scalar mapped to a channel over a shared scale), CSS <progress value max> and aspect-ratio (native length-from-value), Gantt/treemap size encodings (duration→bar-width, quantity→area), and CSS scroll-driven-animations (scroll position ↔ a normalized 0–1 progress). The recurring kernel is scale + ticks + aggregate; the residue WE lacks is a BARE labeled axis without a full chart grammar. (2) DUAL / MULTI-TRACK PROGRESS — two fractions on one bar (agent-claimed vs spec-proven). Prior art: CI/build UIs routinely render a planned-vs-actual or estimated-vs-real bar (buildkite/GitHub Actions step progress, download managers' buffered-vs-played track, the HTML <progress> 'buffered' pattern from <video>). The reusable delta over the native <progress> single-value contract is a SECOND comparison value on the same track/scale, degrading to the primary when absent. (3) SEMANTIC ZOOM / LEVEL-OF-DETAIL — zoom levels that swap REPRESENTATION rather than scale one view (constellation tiles → lane board → gate checklist → build inspector). Prior art: Pad++/Jazz and Microsoft DeepZoom/Seadragon (continuous multiscale with representation swaps), data-viz 'semantic zoom' (Elastic/Kibana, Datashader LOD), and IDE minimaps/code-folding (a compressed representation of the same document). Distinct from geometric pan/zoom (viewport-transform) and tree traversal (hierarchy): the axis is a discrete level that changes WHAT is drawn, with a floor of signals (alerts/attention) that must survive every level. (4) THRESHOLD-REGION OVERLAY — one datum line across a multi-column surface plus a region treatment. Prior art: the Gantt 'today' line, burndown target/ideal lines, and kanban WIP limit lines — a single reference datum drawn across all columns, with one side treated as 'past/over-limit'. The reusable primitive is a cross-column datum + a region mask, separable from the axis-position math. Classification per primitive (mint / extend / park / app-custom) plus each fork's grounding file:line refs and skeptic verdict live in the decision item #2533; this topic is the prior-art survey the forks rest on.",
+  "dateOpened": "2026-07-18",
+  "lastReviewed": "2026-07-18",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "ui-primitives",
+    "data-visualization",
+    "scale-ruler",
+    "quantitative-axis",
+    "progress",
+    "semantic-zoom",
+    "level-of-detail",
+    "threshold-overlay",
+    "plateau-console-board",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcharts"
+}
