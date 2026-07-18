@@ -9,14 +9,14 @@
     "intents"
   ],
   "summary": {
-    "uniqueUrls": 1246,
-    "totalOccurrences": 1569,
+    "uniqueUrls": 1252,
+    "totalOccurrences": 1576,
     "byHome": {
       "corpus": 51,
       "references": 34,
       "blocks": 185,
       "capability": 1266,
-      "intents": 33
+      "intents": 40
     }
   },
   "references": [
@@ -3042,12 +3042,32 @@
       "occurrences": 1
     },
     {
+      "url": "https://d3js.org/d3-axis",
+      "home": "intents",
+      "sourceId": "scale-ruler",
+      "label": "Scale Ruler Intent",
+      "homes": [
+        "intents"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://d3js.org/d3-force",
       "home": "references",
       "sourceId": "UI & Interaction",
       "label": "D3-force",
       "homes": [
         "references"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://d3js.org/d3-scale",
+      "home": "intents",
+      "sourceId": "scale-ruler",
+      "label": "Scale Ruler Intent",
+      "homes": [
+        "intents"
       ],
       "occurrences": 1
     },
@@ -4138,6 +4158,16 @@
       "occurrences": 2
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/buffered",
+      "home": "intents",
+      "sourceId": "progress",
+      "label": "Progress Intent",
+      "homes": [
+        "intents"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API",
       "home": "blocks",
       "sourceId": "draft-persistence",
@@ -4462,6 +4492,16 @@
       "occurrences": 1
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/aspect-ratio",
+      "home": "intents",
+      "sourceId": "scale-ruler",
+      "label": "Scale Ruler Intent",
+      "homes": [
+        "intents"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/contain",
       "home": "blocks",
       "sourceId": "action-button",
@@ -4640,7 +4680,7 @@
         "blocks",
         "intents"
       ],
-      "occurrences": 2
+      "occurrences": 3
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/select",
@@ -5502,6 +5542,16 @@
       "label": "js-framework-benchmark",
       "homes": [
         "references"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/windows/apps/design/controls/semantic-zoom",
+      "home": "intents",
+      "sourceId": "semantic-zoom",
+      "label": "Semantic Zoom Intent",
+      "homes": [
+        "intents"
       ],
       "occurrences": 1
     },
@@ -11717,6 +11767,16 @@
       "label": "Localization",
       "homes": [
         "capability"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://vega.github.io/vega-lite/docs/encoding.html",
+      "home": "intents",
+      "sourceId": "scale-ruler",
+      "label": "Scale Ruler Intent",
+      "homes": [
+        "intents"
       ],
       "occurrences": 1
     },
