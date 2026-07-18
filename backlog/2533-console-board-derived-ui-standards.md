@@ -1,9 +1,12 @@
 ---
 kind: decision
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-18"
 preparedDate: "2026-07-18"
+dateResolved: "2026-07-18"
+graduatedTo: "multiple — mints (scale-ruler · progress secondary-track · semantic-zoom/LOD · webgraph swimlane-layout), a visual-diff shaping-research topic, and dry-run held (see Decision section)"
 tags:
   - design-decision
   - standards
@@ -19,6 +22,24 @@ Building the plateau console board (#2505 lane board) surfaced seven candidate l
 **Grounding digest.** The board's card cell, badge, verb, and progress bar already dogfood ratified FUI blocks (`we-section-card`/`we-badge`/`we-button`/`we-progress`); the curved dependency connectors are already the ratified **Web Graph** standard (`@webeverything/contracts/graph` = `we:contracts/graph.ts`, #1289/#1352 — only the DOM-anchored board overlay #1289 remains, and that is *integration*, not a new standard). Each fork below is measured against the **exact** existing standard that already owns its turf, cited as a `we:` locus ref.
 
 **Corrected bar (supersedes the prep's through-line).** The prep concluded ~~mint nothing on one board's evidence~~ → **corrected**: **prior-art research establishing a fundamental, recurring, web-platform-aligned pattern is sufficient to justify a standard.** The prep's ~~"WE's bar for minting is a second consumer beyond this board"~~ → **corrected**: **"no second in-house consumer yet" is NOT a valid rejection reason.** A standard exists to be reused across independent parties, and that reuse case is established by *prior art* — native primitives, d3/Vega grammar, coined-and-studied algorithms — not by waiting for a second in-house board to appear. Every fork default below is re-ruled on this bar; the old second-consumer defaults are struck and replaced. Two forks (4, 6) still resolve to "not a standard," but on **merit** (clean decomposition / no fundamental contract), never on the struck second-consumer reason.
+
+## Decision (2026-07-18) — RATIFIED, all seven forks
+
+Nicolas ratified all seven forks under the corrected bar, fork-by-fork, on the grounded prior art (each fork carries its `RATIFIED` banner + `Skeptic:`/`Screen:` verdicts). The rulings:
+
+| Fork | Ruling | Graduates to |
+|---|---|---|
+| **1 · scale-ruler** | **MINT** a foundational scale primitive (scalar→position/length + aggregate) | a new mint item (a WE `scale`/`scale-ruler` intent) — *absorbs Fork 4* |
+| **2 · progress multi-track** | **EXTEND** `progress` with an optional generic secondary/comparison track (provenance stays out of the contract) | a `progress` extension item |
+| **3 · semantic-zoom / LOD** | **MINT** a representational-zoom intent, distinct from geometric `viewport-transform` | a new mint item (`semantic-zoom`/LOD intent) |
+| **4 · threshold-region** | **FOLD into Fork 1** — a reference-line/tick on the scale + a CSS/FUI mask; not a separate standard | folded into Fork 1's item (a reference-line feature) |
+| **5 · visual-diff surface** | **COMMISSION SHAPING RESEARCH** — pattern is real (Percy/Chromatic/reg-suit); mint decided on the result | a `/research/` topic (delta-type taxonomy · anchor payload · accept model) |
+| **6 · dry-run mode** | **HOLD** — app/runtime behavior (state+guard+diff), no fundamental UI contract | nothing (captured as app pattern, not a WE standard) |
+| **7 · swimlane / span-layout** | **MINT** as a Web Graph `swimlane` **layout mode** (lane-assignment + fork/fan-in) | a Web Graph layout-mode item on `we:contracts/graph.ts` |
+
+**Meta-ruling (codify separately):** the **corrected minting bar** — *research establishing a fundamental recurring pattern is sufficient; "no second in-house consumer" is not a rejection* — supersedes the prep's second-consumer thesis and should be codified in the prepare doctrine so it stops recurring (tracked as a follow-on; the prep skeptic resurrected an already-rejected thesis).
+
+**Graduation (follow-on items):** mint items for Forks 1(+4)/2/3/7, a shaping-research topic for Fork 5, and the doctrine-codification of the corrected bar. Fork 6 spins nothing.
 
 ### Triage context
 
@@ -46,10 +67,10 @@ Ratify the column, or override just the forks you'd change. **Confidence** shows
 | **Fork 1 · scale-ruler** | ✓ **owner call: MINT** a `scale-ruler` primitive — the foundational scalar→position/length axis (+ aggregate) that Web Charts composes above | keep app-custom / fold into Web Charts | **yes** — `d3-scale` + design-tool rulers/guides (Photoshop/Figma) | **High** |
 | **Fork 2 · progress multi-track** | ✓ **RATIFIED: EXTEND `progress`** with an optional secondary/comparison track (provenance kept OUT of the contract) | compose two readouts + FUI overlay | **yes** — native `<video>` `buffered` vs `currentTime` (media players render dual-track) | **Med-high** |
 | **Fork 3 · semantic-zoom / LOD** | ✓ **RATIFIED: MINT** a representational-zoom intent (distinct from geometric `viewport-transform`) | keep app-custom (compose nav + `hierarchy` + `density`) | **yes** — shipped as a named control (MS `SemanticZoom`); Maps LOD; Figma/Miro; Photos Years→Days; Calendar views; Shneiderman's mantra | **Med-high** |
-| **Fork 4 · threshold-region overlay** | **NOT a separate standard — fold into Fork 1** (reference-line/tick on the scale + a CSS/FUI mask) | mint a standalone overlay primitive | n/a — a *feature* of Fork 1's scale, not a distinct pattern (merit decomposition) | **High** |
-| **Fork 5 · annotated visual-diff surface** | **CANDIDATE — commission the shaping research, then mint** (contract is unshaped, not the pattern) | mint blind now | **yes (pattern)** — Percy/Chromatic/reg-suit *are* this surface; GitHub PR diff; Figma compare — only the contract shape is missing | **Med** |
-| **Fork 6 · simulation / dry-run mode** | **HOLD — app/runtime behavior, not a UI primitive** (composition of state + guard + diff) | mint a `sandbox-mode` intent | **no** — a *mode*, no fundamental UI contract even with research (merit hold, survives the correction) | **Med-high** |
-| **Fork 7 · swimlane / span-layout** | **MINT as a Web Graph LAYOUT MODE** ("swimlane layout" — a lane-constrained variant on the ratified graph standard) | keep app-custom over CSS Grid + Web Graph | **yes** — BPMN pools/lanes, git-graph lane assignment, subway-map layout (studied algorithm) | **High** |
+| **Fork 4 · threshold-region overlay** | ✓ **RATIFIED: fold into Fork 1** (reference-line/tick on the scale + a CSS/FUI mask — not a separate standard) | mint a standalone overlay primitive | n/a — a *feature* of Fork 1's scale, not a distinct pattern (merit decomposition) | **High** |
+| **Fork 5 · annotated visual-diff surface** | ✓ **RATIFIED: commission the shaping research** — mint decided on the result (pattern real; contract unshaped) | mint blind now | **yes (pattern)** — Percy/Chromatic/reg-suit *are* this surface; GitHub PR diff; Figma compare — only the contract shape is missing | **Med** |
+| **Fork 6 · simulation / dry-run mode** | ✓ **RATIFIED: HOLD** — app/runtime behavior, not a UI primitive (state + guard + diff) | mint a `sandbox-mode` intent | **no** — a *mode*, no fundamental UI contract even with research (merit hold, survives the correction) | **Med-high** |
+| **Fork 7 · swimlane / span-layout** | ✓ **RATIFIED: MINT** as a Web Graph LAYOUT MODE ("swimlane layout" on the ratified graph standard) | keep app-custom over CSS Grid + Web Graph | **yes** — BPMN pools/lanes, git-graph lane assignment, subway-map layout (studied algorithm) | **High** |
 
 ## Fork 1 — scale-ruler (the shared quantitative axis)
 
@@ -172,6 +193,8 @@ The board's L0→L3 (constellation tiles → lane board → gate checklist → b
 
 ## Fork 4 — threshold-region overlay (the horizon mask)
 
+> **RATIFIED (2026-07-18) — NOT a separate standard; FOLD into Fork 1** as a reference-line/tick on the scale (+ a CSS/FUI mask). Nicolas's call — a merit decomposition (the datum is Fork 1's guide; every "known occurrence" is a reference line on an axis), not the struck second-consumer reason.
+
 <figure>
 <figcaption class="text-sm">A datum line on the shared scale, with the region above it desaturated as "past" &#8212; a tick (Fork 1) plus a CSS mask, not a standard.</figcaption>
 <svg role="img" viewBox="0 0 520 140" width="520" height="140" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">
@@ -202,6 +225,8 @@ The board draws **one dashed datum line across all columns** and a `backdrop-fil
 **Screen:** flagged(impl) → fixed. The desaturation *mask* was an impl (visual-treatment) leak onto the WE side — ceded to FUI; only the semantic "past/crossed-threshold" marking is WE-shaped, and it rides Fork 1's scale as a reference-line feature rather than minting a primitive.
 
 ## Fork 5 — annotated visual-diff surface
+
+> **RATIFIED (2026-07-18) — COMMISSION THE SHAPING RESEARCH; mint decided on the result.** Nicolas's call: the pattern is real (Percy/Chromatic/reg-suit *are* this surface), so open a `/research/` topic to shape the contract (delta-type taxonomy · anchor payload · accept/typed-region model); whether it mints is determined by that research, not now. Graduates to a research item, not a standard yet.
 
 <figure>
 <figcaption class="text-sm">Two panes, design vs built, with one region outlined as a numbered typed delta &#8212; a real pattern whose contract is still unshaped.</figcaption>
@@ -237,6 +262,8 @@ The L3 inspector's "design → built" two-pane compare with numbered, clickable,
 
 ## Fork 6 — simulation / dry-run surface mode
 
+> **RATIFIED (2026-07-18) — HOLD.** Not a WE UI standard: a no-writes preview *mode* is composition (state + guard + diff). The "known occurrences" (terraform plan, kubectl `--dry-run`, git `--dry-run`) are ubiquitous CLI/runtime *behaviors*, not UI primitives — they confirm the hold. Nicolas's call.
+
 <figure>
 <figcaption class="text-sm">A whole-surface "no writes" mode &#8212; composed from state + guard + diff, not a UI primitive.</figcaption>
 <svg role="img" viewBox="0 0 520 122" width="520" height="122" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">
@@ -267,6 +294,8 @@ A whole-surface mode that freezes live data, disables writes, and diffs on exit 
 **Screen:** flagged(impl) → fixed. The dry-run *mode* is runtime behavior (impl/FUI); the verdict holds as keep-app-custom, and the only WE-worthy residue is named as a provisional-state data-semantic (Fork 2's provenance axis), not a mode.
 
 ## Fork 7 — swimlane / span-layout
+
+> **RATIFIED (2026-07-18) — MINT** as a Web Graph `swimlane` **layout mode** (lane-assignment + fork/fan-in on the ratified graph standard), not app-custom. Grounding: BPMN names them "swimlanes," git-graph lane assignment, subway-map layout — a studied algorithm. Nicolas's call.
 
 <figure>
 <figcaption class="text-sm">Lanes as columns; the middle lane forks into two sub-columns that re-join at a fan-in node &#8212; lane assignment + fork/fan-in.</figcaption>
