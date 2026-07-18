@@ -21,7 +21,8 @@ classes the *scored* signals as agent-clearable: `deriveReviewDisposition` retur
 autoLand: true}` for blast-radius (`we:scripts/lib/review-core.mjs:456-457`). So a blast-radius PR is, by the
 model's own logic, meant to be fixed-and-landed by the convergence loop with **no human** — yet in practice it
 bounces to the operator, because (1) the blocking `review:pending` label refuses the land until a verdict
-clears it (`we:scripts/merge-ai-prs.mjs:1467-1474`), and (2) the convergence loop that would clear it is a
+clears it (`we:scripts/merge-ai-prs.mjs:1479-1485` — "an escalated PR PARKS ALIVE … SKIPPED … until a
+reviewer applies review:accepted"), and (2) the convergence loop that would clear it is a
 `/drain` **skill ceremony**, and the always-on daemon that actually sweeps the queue is de-scoped to *"no
 agent spawning"* (`plateau-app:tools/drain-daemon/daemon.mjs:9`). The loop never runs; the park strands; the
 human is reached by neglect, not by design.
