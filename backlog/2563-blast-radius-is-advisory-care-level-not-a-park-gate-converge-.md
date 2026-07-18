@@ -62,7 +62,7 @@ does not alter — the convergence bar or the non-author invariant codified at
 
 | # | Fork | Options | Default |
 |---|------|---------|---------|
-| 1 | Clear-step for `gate-self`/`statute` — may a *converged* fix substitute for the human? | (a) auto-clear on convergence · (b) human always clears | **(b) human always clears** — invariant-forced |
+| 1 | Which trust-chain changes force a human — the *spec*, not the whole path | (a) any path touch · (b) gate the *spec* (schema, not prose) | **✅ RATIFIED (b)** — 2026-07-18 |
 | 2 | High-blast backstop — who is the independent axis? | (a) diversity-aware AI panel (scale) **+** an active sampled human check · (b) AI panel alone | **(a) panel + non-zero active human sample** — the human is the only proven decorrelated axis |
 
 *Not forks:* per-signal advisory→gate override, thresholds, human-sample rate, convergence enable/scope are
@@ -127,6 +127,12 @@ in Web Everything** (extend `DEFAULT_THRESHOLDS` into a review-config shape in t
 not a decision.
 
 ## Fork 1 — Which trust-chain changes force a human: the *spec*, not the whole path
+
+> **✅ RATIFIED 2026-07-18 (Nicolas Gilbert) — option (b).** A human gates a change to the trust-chain **spec**;
+> implementation changes under a fixed spec are agent-clearable on conformance-green + independent review. The
+> spec is a **schema/executable contract, not prose** (settled sub-fork). Prerequisite build: extract the
+> escalation policy into an explicit contract artifact + conformance suite; until it exists, fail safe to the
+> status-quo path test. (Fork 2 still open → #2563 not yet resolved.)
 
 *Fork-existence: the human-clear rule is forced (auto-clearing a trust-chain **spec** change lets an agent
 ratify a change to its own review leash — the non-author invariant forbids it), but **what counts as a
