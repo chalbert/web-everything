@@ -33,6 +33,14 @@ export interface GraphSpec {
   directed?: boolean;
   /** a SEMANTIC hint (which algorithm FAMILY), never coordinates. */
   layout?: LayoutStrategy;
+  /**
+   * The ordered lane axis for the `swimlane` layout mode (#2533 Fork 7) — a SEMANTIC ordering of
+   * `GraphNodeSpec.lane` values, never coordinates. Lanes render as columns (or rows) in list order;
+   * the layout assigns each node to its declared lane and routes fork/fan-in wires to honor lane
+   * boundaries. Ignored by non-lane-constrained layouts (`layered`/`force`/`tree`/`radial`). BPMN names
+   * these "swimlanes" (pools/lanes); git-graph and subway-map layouts assign nodes to lanes the same way.
+   */
+  lanes?: string[];
 }
 
 export interface GraphNodeSpec {
@@ -44,6 +52,13 @@ export interface GraphNodeSpec {
   kind?: string;
   /** optional cluster/partition membership (a semantic grouping). */
   group?: string;
+  /**
+   * Lane/track assignment for the `swimlane` layout mode (#2533 Fork 7) — a SEMANTIC key matching a
+   * `GraphSpec.lanes` entry (BPMN pool/lane, git branch, subway line). The swimlane layout constrains the
+   * node's position to this lane's column/row; every other layout ignores it. Distinct from `group`
+   * (an unordered cluster): a lane is an ORDERED partition the layout renders as a swimlane.
+   */
+  lane?: string;
 }
 
 export interface GraphEdgeSpec {
@@ -64,8 +79,18 @@ export interface GraphEdgeSpec {
  * The native-first default layout family. Position is INVENTED by the algorithm, so the family is a
  * swappable dimension: the deterministic `layered` DAG is the conformance-assertable default; `force`
  * (non-deterministic) ships as an adapter behind CustomGraphLayout, never as the default.
+ *
+ * `swimlane` (#2533 Fork 7, minted as a LAYOUT MODE — not a sibling intent) is a lane-constrained
+ * variant: nodes are assigned to lanes (`GraphNodeSpec.lane`, ordered by `GraphSpec.lanes`) that render
+ * as columns/rows, and fork/fan-in wires are routed to honor lane boundaries. This is the studied
+ * residue once CSS Grid (`grid-column` for contiguous lanes/spans) and the existing graph wires are
+ * subtracted: a genuine lane-assignment + fork/rejoin-routing algorithm — BPMN pools/lanes, git commit
+ * graphs (GitKraken / `git log --graph` / GitHub network), subway/metro-map line layout, kanban
+ * swimlanes, DAW track lanes. It belongs ON Web Graph (which already owns the fork/fan-in topology), so
+ * it is deterministic and conformance-assertable like `layered`; a standalone swimlane intent would
+ * re-derive graph layout and is rejected.
  */
-export type LayoutStrategy = 'layered' | 'force' | 'tree' | 'radial';
+export type LayoutStrategy = 'layered' | 'force' | 'tree' | 'radial' | 'swimlane';
 
 /**
  * The intermediate the two seams hand off — COORDINATES, never semantics. A GraphSpec becomes a

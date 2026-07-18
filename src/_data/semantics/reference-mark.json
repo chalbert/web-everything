@@ -1,0 +1,5 @@
+{
+  "term": "Reference Mark",
+  "definition": "A datum/threshold marked on a Scale Ruler's axis — a tick at a single reference value (a today line, a target, a WIP limit) or a region spanning two values (a crossed-threshold band). A guide belongs to the ruler, exactly as a Photoshop/Figma guide belongs to its ruler, not to a separate tool; this is what d3-axis reference rules and Vega's rule mark draw. WE owns the semantic marking of the value/span; the visual region-mask treatment (desaturating the crossed side) is FUI presentation.",
+  "usage": "A feature of the Scale Ruler Intent (Fork 4 of #2533, folded into Fork 1 rather than minted as a standalone standard)."
+}

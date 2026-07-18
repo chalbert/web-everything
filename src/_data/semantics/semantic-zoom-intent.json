@@ -1,0 +1,5 @@
+{
+  "term": "Semantic Zoom Intent",
+  "definition": "Representational (level-of-detail) zoom: a zoom where each level is a different REPRESENTATION of the same data — a chip → a card-with-bar → an expanded panel — not a scaled view of one representation. The level axis selects which representation renders. A coined, studied, shipped pattern (Microsoft's named SemanticZoom control, Pad++ which coined 'semantic zooming', Maps LOD, Photos Years→Days, Shneiderman's mantra). Distinct from geometric viewport-transform (scale/translate of one representation), hierarchy (tree traversal), and density (detail-tier of one layout).",
+  "usage": "Standardized by the Semantic Zoom Intent (minted from #2533 Fork 3). Composes viewport-transform, gesture, and density; does NOT extend viewport-transform (that conflates geometric scale with representational swap)."
+}

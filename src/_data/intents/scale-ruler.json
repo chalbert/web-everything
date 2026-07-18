@@ -1,0 +1,45 @@
+{
+  "id": "scale-ruler",
+  "name": "Scale Ruler Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "summary": "The foundational scale primitive — map a scalar to a length or a position on one shared, labeled axis in real units, and aggregate a stack of scalars (stacked card heights → a lane ETA). The layer that sits BELOW charts, layout, and animation, exactly as d3-scale is a standalone package because scales are reused everywhere; Web Charts (we:src/_data/projects/webcharts.json, #105) composes its marks on top. Adopts native-first: `<progress>` renders a scalar as a length, CSS `aspect-ratio` maps a ratio to a box. Reference marks (a datum/threshold line = a guide on the ruler, Fork 4 folded in) are part of the contract; the region-mask visual treatment (desaturating the crossed side) is FUI presentation, NOT the WE contract. Grounded in d3-scale, design-tool rulers+guides (Photoshop/Illustrator/Figma/Sketch/CAD), and Vega-Lite positional/size encodings. Minted from #2533 Fork 1 (+Fork 4).",
+  "dimensions": {
+    "type": {
+      "description": "The mapping family — the d3-scale vocabulary adopted verbatim. `linear` (default) maps a continuous domain to a continuous range proportionally; `log` maps a log-scaled domain (orders of magnitude); `time` maps a temporal domain (the board's minute-ruler); `band` maps an ordinal/categorical domain to evenly-divided positions. The family is the scale's identity, never a presentation choice.",
+      "values": [
+        "linear",
+        "log",
+        "time",
+        "band"
+      ]
+    },
+    "orientation": {
+      "description": "Which way the labeled axis runs. `horizontal` (default) is the native `<progress>` shape — a scalar rendered left-to-right as a length. `vertical` runs bottom-to-top (the board's time ruler). Orientation is the axis's direction, decoupled from the mapping family above.",
+      "values": [
+        "horizontal",
+        "vertical"
+      ]
+    },
+    "aggregate": {
+      "description": "How a stack of scalars on the same axis reduces to one readout. `none` (default) is a single scalar → a single length/position. `sum` stacks scalars and reports the total (stacked card heights → a lane ETA — the board case). `extent` reports the min–max span the stack occupies. Aggregation is a property of the shared axis, so every stacked value reads in the same units.",
+      "values": [
+        "none",
+        "sum",
+        "extent"
+      ]
+    },
+    "reference": {
+      "description": "Reference marks on the scale (Fork 4 folded in — a guide belongs to the ruler, as in Photoshop/Figma). `none` (default) draws a bare axis. `tick` marks a single reference value — a datum/threshold/`today` line, exactly what d3-axis reference rules and Vega's `rule` mark draw. `region` marks a span between two values (a crossed-threshold band). WE owns the SEMANTIC marking of the value/span; the visual region-MASK treatment (e.g. `backdrop-filter: grayscale` on the crossed side) is FUI presentation, outside this contract.",
+      "values": [
+        "none",
+        "tick",
+        "region"
+      ]
+    }
+  },
+  "events": [
+    "rescale"
+  ],
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>The foundational scale primitive</strong> — the map from a <strong>scalar value</strong> to a <strong>length or a position on one shared, labeled axis</strong>, in real units. It is the layer that sits <em>below</em> charts, layout, and animation: <a href=\"https://d3js.org/d3-scale\"><code>d3-scale</code></a> is a standalone package precisely because a scale is reused everywhere — the same domain→range mapping drives a bar's length, a mark's position, an animation's easing, and a color ramp. Minted from <a href=\"/backlog/2533-console-board-derived-ui-standards/\">#2533</a> Fork 1 (with Fork 4 folded in).</p><h3>The core map</h3><p class=\"text-sm text-gray-600 mb-2\">A binding names the shared axis and the value: <code>{ scalar, unit, pxPer, cap?, axisRef }</code>. <code>pxPer</code> is the scalar→length factor (pixels per one domain unit — the board's <code>1pt ≈ 9min ≈ 17px</code>); <code>unit</code> keeps the axis labeled in real units; <code>cap</code> optionally clamps the mapped length/position; <code>axisRef</code> ties every value that shares one ruler to the same domain→range mapping, so a lane's stacked heights read in one coordinate system. The map produces a <strong>length</strong> (a magnitude, the native <code>&lt;progress&gt;</code> case) or a <strong>position</strong> (a coordinate on the axis).</p><h3>Aggregate — a stack reads as a total</h3><p class=\"text-sm text-gray-600 mb-2\">Because every value on a shared axis is in the same units, a <em>stack</em> of scalars reduces to one readout: <code>sum</code> stacks card heights into a lane ETA, <code>extent</code> reports the span the stack occupies. This is the residue once <a href=\"/projects/webcharts/\">Web Charts</a>' marks (<a href=\"https://vega.github.io/vega-lite/docs/encoding.html\">Vega-Lite</a> positional/<code>size</code> encodings) are subtracted — the bare scale is exactly what Charts composes above.</p><h3>Reference marks — a guide on the ruler (Fork 4)</h3><p class=\"text-sm text-gray-600 mb-2\">A datum/threshold line is a <strong>reference mark on the scale</strong>, not a separate primitive — a guide belongs to the ruler exactly as a Photoshop/Figma guide belongs to its ruler, never to a separate tool. <code>tick</code> marks one reference value (a <code>today</code> line, a target, a WIP-limit — what <a href=\"https://d3js.org/d3-axis\">d3-axis</a> reference rules and Vega's <code>rule</code> mark draw); <code>region</code> marks a span between two values (a crossed-threshold band). <strong>WE owns the semantic marking</strong> (this value/this span is marked); the <strong>visual region-mask</strong> treatment — desaturating the crossed side with <code>backdrop-filter</code> — is <a href=\"/projects/frontier-ui/\">FUI presentation</a>, outside this contract.</p><h3>Native-first baseline</h3><p class=\"text-sm text-gray-600 mb-2\">The thin native primitives this leans on: <a href=\"https://developer.mozilla.org/en-US/docs/Web/HTML/Element/progress\"><code>&lt;progress&gt;</code></a> renders a scalar as a length (a <code>linear</code>/<code>horizontal</code> scale with no marks), and CSS <a href=\"https://developer.mozilla.org/en-US/docs/Web/CSS/aspect-ratio\"><code>aspect-ratio</code></a> maps a ratio to a box. Extend from those; do not reinvent below the platform floor.</p><h3>Distinct from Web Charts</h3><p class=\"text-sm text-gray-600 mb-2\">\"It's Web Charts minus the marks\" argues <em>for</em> extracting the scale as the foundational layer, not against a mint: <a href=\"/projects/webcharts/\">Web Charts</a> (#105) <strong>composes</strong> this scale and adds marks (bars, points, lines) on top. The scale is the reused substrate; a chart is one consumer of it, alongside layout and animation. Prior art the recurring-pattern grounding rests on: <code>d3-scale</code> as a standalone foundational package, and design-tool <strong>rulers + guides</strong> (Photoshop, Illustrator, Figma, Sketch, CAD — a persistent labeled axis mapping document position to screen position in units, with guides as snapped reference marks).</p><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Composes <a href=\"/projects/webtheme/\">Web Theme</a> (axis/tick/guide colors resolve from tokens, never author hex). <a href=\"/projects/webcharts/\">Web Charts</a> composes this scale as its positional substrate. WE owns this intent contract; FUI ships the rendered ruler block and the region-mask presentation.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type ScaleType = 'linear' | 'log' | 'time' | 'band';type ScaleOrientation = 'horizontal' | 'vertical';type ScaleAggregate = 'none' | 'sum' | 'extent';type ScaleReference = 'none' | 'tick' | 'region';interface ScaleBinding {    // the scalar domain value to map    scalar: number;    // real-world unit of the domain (e.g. 'min', 'px', 'MB')    unit: string;    // pixels per one domain unit — the scalar→length factor    pxPer: number;    // optional clamp on the mapped length/position    cap?: number;    // shared-axis key: values sharing an axisRef share one domain→range mapping    axisRef: string;}interface ScaleRulerIntent {    // the mapping family (d3-scale)    type: ScaleType;    // which way the labeled axis runs    orientation: ScaleOrientation;    // how a stack of scalars on the shared axis reduces to one readout    aggregate: ScaleAggregate;    // reference marks on the axis (a datum tick or a crossed-threshold region)    reference: ScaleReference;    // scalar → length | position on the axis, in real units    map(binding: ScaleBinding): number;}</code></pre>"
+}

@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 8
-status: open
+status: resolved
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-18"
+dateResolved: "2026-07-18"
+graduatedTo: "we:src/_data/intents/semantic-zoom.json (Semantic Zoom Intent)"
 tags:
   - standards
   - ui-primitives
