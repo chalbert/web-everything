@@ -224,6 +224,27 @@ The human's role is scoped by the evidence — **intent/spec authority + a decor
 never line-by-line re-review** — and the sample is **active and non-trivial** (passive monitoring backfires),
 graduated on track record, **never to zero** (the panel can't cover blind spots it shares).
 
+**The human surface — point-level, not blanket (operator, 2026-07-18).** A blanket "escalate the whole PR to a
+human" is the passive monitoring the evidence says *subtracts* value. Instead the human check is delivered as
+**specific, concrete rulings in a codified decision UI** (the ruling console, #2494/#2555) — four touchpoints:
+
+1. **Point-level escalation (AI-flagged).** The AI review surfaces a specific line or, better, a *semantic
+   point*, **summarized in plain language with a concrete example**, and the human acts via **ratify / fork
+   (choose an option) / challenge** — an *active* decision, not an approve button. This is where the AI's
+   *known* uncertainty and any intent/spec question goes.
+2. **Always-review blacklist.** A configured set of files (the spec/constitution/trust-chain tier) is
+   **hard-gated** — full human review regardless, independent of the sample.
+3. **Full diff on demand.** The human can always open the whole diff if they want it.
+4. **A thin sampled decorrelated check on AI-*cleared* content.** Point-level escalation only covers what the
+   AI *knows* it's unsure about; the panel's danger is what it is **confidently wrong** about and never flags.
+   So a small sampled fraction of AI-*cleared* high-blast content is surfaced too (same plain-language way) —
+   this is the "never-zero" decorrelated + accountability sample, the only way a *shared* blind spot reaches a
+   human. Rate = a config knob, graduated on track record, floor > 0.
+
+The **policy** (1–4) is what Fork 2 ratifies; the UI is a build under the console. This makes the human load
+proportional to genuine judgment points, not PR count — and keeps the human *active* (each touch is a concrete
+ratify/fork/challenge), which is exactly the automation-bias mitigation the research demands.
+
 ```js
 // scoreEscalation — a sampled high-blast auto-land escalates to a HUMAN (active check), not review:pending.
 // Rate is a config knob; that the sample is > 0 is fixed — the human is the only proven decorrelated axis.
