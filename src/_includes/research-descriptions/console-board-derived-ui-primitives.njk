@@ -1,0 +1,137 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    Building the <a href="/backlog/2505-/">plateau console board</a> (#2505 — the lane build-status board) surfaced a
+    set of candidate low-level UI primitives. <a href="/backlog/2533-console-board-derived-ui-standards/">#2533</a>
+    decides, per candidate, whether it earns a <strong>Web Everything standard</strong> (mint), <strong>extends</strong>
+    an existing one, <strong>parks</strong>, or stays <strong>app-custom</strong>. The bar for minting is a
+    <strong>second consumer beyond this one board</strong> — a standard exists to be reused across independent parties,
+    so a helper reused three ways <em>inside one board</em> is app architecture, not a standard. This topic surveys the
+    four live primitives against real prior art so each fork rests on grounding, not assertion.
+</p>
+
+<h2>1 — Shared quantitative axis (the <code>scale-ruler</code>)</h2>
+<p>
+    The board maps a scalar to a <strong>length or position on one labeled axis</strong>, with an aggregate: a card's
+    height encodes its size, its horizon-crossing encodes its proven fraction, and a lane's stacked heights read as its
+    ETA (<code>1pt &approx; 9min &approx; 17px</code>). The recurring kernel across the prior art is
+    <strong>scale + ticks + aggregate</strong>:
+</p>
+<ul>
+    <li><strong>d3-scale</strong> — <code>scaleLinear().domain([…]).range([…])</code> with <code>.ticks()</code> /
+        <code>.tickFormat()</code> is the reusable value&rarr;pixel kernel behind <code>d3-axis</code>; d3 deliberately
+        ships the <em>scale</em> as a standalone module separate from the axis <em>rendering</em>.</li>
+    <li><strong>Vega-Lite encodings</strong> — a scalar bound to the <code>size</code>, <code>x</code>, or <code>y</code>
+        channel over a shared scale is exactly "a value on a labeled axis"; the board's residue is Vega-Lite's encoding
+        <em>minus the marks / chart grammar</em>.</li>
+    <li><strong>Native CSS</strong> — <code>&lt;progress value max&gt;</code> and <code>aspect-ratio</code> both derive a
+        length directly from a value with no library.</li>
+    <li><strong>Gantt / treemap size encodings</strong> — duration&rarr;bar-width, quantity&rarr;area: the same
+        scalar-to-extent mapping in scheduling and hierarchy visualisations.</li>
+    <li><strong>CSS scroll-driven animations</strong> — scroll position &harr; a normalised 0&ndash;1 progress
+        (<code>animation-timeline: scroll()</code>): the platform's own "position is a value on an axis" primitive.</li>
+</ul>
+<p>
+    <strong>Delta vs WE today:</strong> <a href="/projects/webcharts/">Web Charts</a> (#105) already owns the Vega-Lite
+    L1 grammar and its <code>size</code>/positional encodings; the only residue is a <em>bare labeled axis without a
+    chart</em>. That residue graduates to a Web Charts extension when a genuine off-board consumer appears — not a new
+    standalone primitive on one board's evidence.
+</p>
+
+<h2>2 — Dual / multi-track progress (claimed vs proven)</h2>
+<p>
+    Board cards show <strong>two</strong> fractions on one bar: the agent's plan claim and the spec-proven amount. Prior
+    art for two values on one track:
+</p>
+<ul>
+    <li><strong>CI / build UIs</strong> — planned-vs-actual and estimated-vs-real step bars (GitHub Actions, Buildkite)
+        routinely overlay a target on the live fill.</li>
+    <li><strong>Media buffering</strong> — the native <code>&lt;video&gt;</code> / download-manager pattern of a
+        <em>buffered</em> track behind the <em>played</em> track is the canonical "second value on the same scale."</li>
+</ul>
+<p>
+    <strong>Delta vs WE today:</strong> the <a href="/intents/progress/">progress</a> intent is deliberately
+    <strong>thin</strong> (ratified <a href="/backlog/1469-/">#1469</a>): it adopts the native <code>&lt;progress&gt;</code>
+    contract verbatim and names <code>loader.progress</code> and <a href="/intents/flow-progress/">flow-progress</a> as
+    <em>consumers that compose it</em>, not sub-types. Two completion magnitudes are therefore <strong>two composed
+    progress readouts</strong>, and rendering them as one overlaid track is a <em>presentation</em> concern (presentation
+    is a dimension, not a home — <a href="/docs/agent/platform-decisions.md#readout-placement-by-value-type">readout-placement-by-value-type</a>).
+    "Claimed vs verified" is moreover a <strong>data-provenance / trust</strong> distinction, not a completion magnitude —
+    if it needs a standard home that home is provenance/audit, never a second track bolted onto <code>progress</code>.
+</p>
+
+<h2>3 — Semantic zoom / level-of-detail</h2>
+<p>
+    The board's L0&rarr;L3 (constellation tiles &rarr; lane board &rarr; gate checklist &rarr; build inspector) is a zoom
+    where <strong>each level swaps representation</strong> rather than scaling one view. Prior art:
+</p>
+<ul>
+    <li><strong>Pad++ / Jazz</strong> and <strong>Microsoft DeepZoom / Seadragon</strong> — continuous multiscale
+        surfaces where the drawn content changes with scale (semantic zoom, not just geometric).</li>
+    <li><strong>Data-viz semantic zoom</strong> — Kibana/Elastic and Datashader swap aggregation/representation by zoom
+        level.</li>
+    <li><strong>IDE minimaps / code folding</strong> — a compressed representation of the same document at low detail.</li>
+</ul>
+<p>
+    <strong>Delta vs WE today:</strong> <a href="/intents/viewport-transform/">viewport-transform</a> owns
+    <em>geometric</em> pan/zoom and explicitly disclaims representation; <a href="/intents/hierarchy/">hierarchy</a> owns
+    tree traversal. Neither owns representational LOD. But "each level is a different view" is <strong>routing +
+    density/responsive rendering</strong> the platform already provides (navigation + <a href="/intents/density/">density</a>);
+    the only non-trivial residue is a "floor of signals that must survive every level," and one board wanting it is not a
+    second consumer. App-custom is the un-beaten null hypothesis.
+</p>
+
+<h2>4 — Threshold-region overlay (the horizon mask)</h2>
+<p>
+    The board draws <strong>one datum line across all columns</strong> plus a region treatment
+    (<code>backdrop-filter: grayscale</code>) rendering the "past" side as history. Prior art is a single reference datum
+    drawn across a multi-column surface:
+</p>
+<ul>
+    <li><strong>Gantt "today" line</strong> — a vertical now-marker across every task row.</li>
+    <li><strong>Burndown target / ideal line</strong> — a reference trajectory drawn over the actual.</li>
+    <li><strong>Kanban WIP-limit lines</strong> — a per-column threshold marker.</li>
+</ul>
+<p>
+    <strong>Delta vs WE today:</strong> the datum line <em>is a tick on the axis</em> of primitive&nbsp;1, and the
+    grayscale-past is region <strong>styling</strong> (app CSS / theming), not a contract. It is not separable from the
+    axis into a standard of its own, and it too has no off-board second consumer.
+</p>
+
+<h2>Classification summary (grounding for #2533)</h2>
+<we-data-table>
+<table class="data-table">
+    <thead>
+        <tr><th>Primitive</th><th>Nearest WE owner</th><th>Verdict</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Shared quantitative axis (scale-ruler)</td><td>Web Charts (Vega-Lite encodings)</td><td>App-custom now; axis-without-marks residue = a Web Charts extension when a 2nd consumer appears.</td></tr>
+        <tr><td>Dual-track progress</td><td>progress intent (thin, #1469)</td><td>Compose two <code>progress</code> readouts + FUI overlay presentation; don't extend. Provenance is a separate home.</td></tr>
+        <tr><td>Semantic zoom / LOD</td><td>viewport-transform / navigation / density</td><td>App-custom (routing + density); no intent, no 2nd consumer.</td></tr>
+        <tr><td>Threshold-region overlay</td><td>the axis + CSS</td><td>App-custom; datum = an axis tick, mask = CSS. Not a separable standard.</td></tr>
+        <tr><td>Swimlane / span-layout</td><td>Web Graph + CSS Grid</td><td>App-custom; name the lane-assignment/docking residue as a future Web Graph extension.</td></tr>
+    </tbody>
+</table>
+</we-data-table>
+<p>
+    The through-line: <strong>mint nothing on one board's evidence.</strong> Every candidate either composes an existing
+    standard or is app architecture; three residues (a Web Charts axis extension, a Web Graph lane-docking constraint, a
+    provenance home for claimed-vs-verified) become graduation candidates when a genuine second consumer surfaces.
+</p>
+
+<h2>Sources</h2>
+<ul>
+    <li><a href="https://d3js.org/d3-scale">d3-scale — continuous scales (<code>scaleLinear</code>, <code>.ticks()</code>)</a> · <a href="https://d3js.org/d3-axis">d3-axis</a></li>
+    <li><a href="https://vega.github.io/vega-lite/docs/encoding.html">Vega-Lite — encoding channels (<code>size</code>, <code>x</code>, <code>y</code>)</a></li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_scroll-driven_animations">MDN — CSS scroll-driven animations</a> · <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/progress">MDN — <code>&lt;progress&gt;</code></a></li>
+    <li><a href="https://en.wikipedia.org/wiki/Pad%2B%2B">Pad++ (zoomable UI)</a> · <a href="https://openseadragon.github.io/">OpenSeadragon / DeepZoom</a></li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/backdrop-filter">MDN — <code>backdrop-filter</code></a></li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+    <li>Decision: <a href="/backlog/2533-console-board-derived-ui-standards/">#2533 — which console-board-derived primitives become WE standards</a> (this prep).</li>
+    <li>Source build: <a href="/backlog/2505-/">#2505 — plateau console board</a>; Web Graph connectors <a href="/backlog/1289-/">#1289</a>/<a href="/backlog/1352-/">#1352</a>.</li>
+    <li>Owning standards: <a href="/projects/webcharts/">Web Charts</a> (#105), <a href="/intents/progress/">progress</a> (#1469), <a href="/intents/viewport-transform/">viewport-transform</a>.</li>
+</ul>
+{% endraw %}
