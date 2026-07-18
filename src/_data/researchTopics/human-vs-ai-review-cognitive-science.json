@@ -1,0 +1,21 @@
+{
+  "id": "human-vs-ai-review-cognitive-science",
+  "title": "The human's role in AI-driven code review — cognitive science, human factors, error decorrelation",
+  "status": "open",
+  "summary": "Grounds #2563 Fork 2 (the high-blast review backstop): what value does a HUMAN add to review relative to AI, so we can scope the human's role when most implementation review is done by AI? Deep-research pass (107 agents, adversarially verified, 22 confirmed / 2 refuted). Corrects an earlier design lean. Findings: (1) Humans review LARGE changes WORSE — 'humans review big PRs better' is FALSE for defect-finding (Cisco/SmartBear: defect density peaks under 200 LOC, collapses past ~400 or after 60 min); this is where an LLM holding the whole diff at constant attention has a structural edge. (2) The vigilance decrement is robust and worsens under working-memory load. (3) THE CORRECTION: a diverse AI panel does NOT provide the independent error distribution N-version theory assumes — LLMs make substantially correlated errors (pairs agree ~60% when both wrong vs 33% chance; correlation RISES with capability even across vendors), 3-5-model ensembles realize only ~0.43 of the independence reliability gain, majority voting barely helps (0.88->0.91 with five). This is the LLM analogue of Knight & Leveson 1986. So an AI panel is a WEAK backstop against blind spots it shares. (4) LLM-as-judge inherits the correlation via self-preference/family bias (can manufacture false confidence). (5) Complementarity is real but only with the right aggregation: naive majority voting hits a 'popularity trap'; a DIVERSITY-based SELECTION strategy captures up to 95% of the oracle ceiling even with 2 models. (6) Automation bias: a PASSIVE human monitor over a good-but-imperfect AI catches FEWER defects than an unaided human (measured, affects experts, not trainable away) - a rubber-stamp human-over-the-loop subtracts value. The human's irreducible role is NOT out-inspecting the AI on correctness; it is (a) validation-vs-verification (intent/spec authority), (b) a genuinely DECORRELATED check on the error class LLMs share (the only proven-independent axis), (c) accountability/answerability (distinct from competence). RECOMMENDATION for Fork 2: back the high-blast path with BOTH a diversity-aware AI panel (aggregated by diversity-SELECTION not majority vote) AND a human scoped to intent authority + an ACTIVE independent judgment + accountability (never line-by-line re-review; design the task to avoid passive monitoring); keep the human sample active and non-trivial (it is the only proven decorrelated axis), graduate the rate on track record, never to zero. Open questions: whether LLMs have their own large-context ('lost-in-the-middle') decrement (asserted by analogy, not measured); how decorrelated HUMAN vs LLM reviewers actually are (the key unmeasured unknown); minimal active human-task design to escape the complacency trap; whether accountability needs review capability or only answerability (moral-crumple-zone risk). Full grounding in reports/2026-07-18-human-vs-ai-review-cognitive-science.md.",
+  "dateOpened": "2026-07-18",
+  "lastReviewed": "2026-07-18",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "review",
+    "human-factors",
+    "cognitive-science",
+    "error-decorrelation",
+    "automation-bias",
+    "ai-review",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}
