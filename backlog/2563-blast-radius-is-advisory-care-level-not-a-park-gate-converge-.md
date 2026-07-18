@@ -63,7 +63,7 @@ does not alter — the convergence bar or the non-author invariant codified at
 | # | Fork | Options | Default |
 |---|------|---------|---------|
 | 1 | Clear-step for `gate-self`/`statute` — may a *converged* fix substitute for the human? | (a) auto-clear on convergence · (b) human always clears | **(b) human always clears** — invariant-forced |
-| 2 | Human backstop on high-blast *advisory* auto-lands | (a) deterministic sampled `review:human` spot-check · (b) rely on the agent validator alone | **(a) keep a non-zero human sample** |
+| 2 | High-blast backstop — who is the independent axis? | (a) diversity-aware AI panel (scale) **+** an active sampled human check · (b) AI panel alone | **(a) panel + non-zero active human sample** — the human is the only proven decorrelated axis |
 
 *Not forks:* per-signal advisory→gate override, thresholds, human-sample rate, convergence enable/scope are
 **config dimensions** (below); the console re-round action and the settings panel are **support-both builds**;
@@ -182,43 +182,63 @@ stops firing on cosmetic trust-chain edits.
 detail; a stark merit gap survives "both free to build" (over-escalate-everything vs gate-the-spec). The
 schema-vs-prose sub-fork is a config/mechanism call, resolved to schema for determinism.
 
-## Fork 2 — Human backstop on high-blast *advisory* auto-lands
+## Fork 2 — The high-blast backstop: care-level scales AI-review *rigor*, plus an *active* human check
 
-*Fork-existence: two coherent branches that genuinely cannot coexist — either a deterministic human sees a
-sampled fraction of high-blast agent-only lands, or none is guaranteed to. Both are buildable; they differ on
-the safety/throughput merit, not on sequencing.* This is the genuinely-open call the red-team surfaced.
-Demoting blast-radius to advisory means a change matching `isBlastRadiusPath` (but not
-`isGateSelfPath`/`isStatutePath`) converges → an agent validator accepts → CI green → **auto-lands with no
-human in the loop at all** (`scoreEscalation` `:198-199` → `deriveReviewDisposition` auto-land `:457`). Every
-"flag-don't-gate" prior-art system still terminates its high-risk bucket at a human desk (more scrutiny), not
-at more agents — so the pure-agent path bets the entire wide-impact surface on the validator having no
-systematic blind spot (same model family, diff-borne prompt injection, an un-probed bug class).
+*Fork-existence: two coherent branches that cannot coexist — either high-blast agent-only lands get a
+deterministic independent backstop, or they don't. Both buildable; they differ on the safety merit, not
+sequencing.* Grounded by `we:reports/2026-07-18-human-vs-ai-review-cognitive-science.md` (deep research,
+adversarially verified) — which **corrected an earlier lean** in this fork. Care-level (blast/size) scales
+**how** the review runs, never the *route* and never a cap on the work (operator, 2026-07-18): high-blast →
+more rigorous **AI** review, not a smaller change and not "hand it to a human to re-read."
 
-- **(a) Deterministic sampled `review:human` spot-check.** A **non-zero** fraction of high-blast auto-lands
-  (rate = a config knob) routes to `review:human` instead of `review:pending`, so a small, fixed share of
-  wide-impact agent-only lands always gets human eyes. Preserves the thesis ("don't route *every* blast-radius
-  PR to a human") while restoring the one human touchpoint the cited prior art keeps. **Chosen.**
-- **(b) Rely on the agent validator alone.** No human ever guaranteed on the high-blast path; maximum
-  throughput, zero deterministic backstop. Rejected — it over-claims the prior-art support (which always keeps
-  a human desk) and has no recovery if the validator has a systematic blind spot.
+What the evidence settles:
+- **Humans review large changes WORSE** (Cisco/SmartBear: defect density collapses past ~400 LOC / 60 min;
+  vigilance decrement). So the human is **not** a line-by-line re-reviewer of big diffs — the AI, at constant
+  attention over the whole diff, is better at that. The earlier "human desk catches the wide change" framing
+  was wrong.
+- **But a diverse AI panel does NOT decorrelate.** LLMs share failure modes (pairs agree ~60% when both
+  wrong; correlation *rises* with capability, across vendors; ensembles realize ~0.43 of the independence
+  gain; LLM-as-judge inflates same-family models). An AI panel is a **weak backstop against blind spots it
+  shares** — the LLM analogue of Knight & Leveson (1986). So the panel scales review but cannot self-certify.
+- **A passive human monitor is worse than useless** (automation bias: aided monitors catch *fewer* defects
+  than unaided; not trainable away). So a human "approve?" rubber-stamp subtracts value.
+
+- **(a) Diversity-aware AI panel for scale + an *active* human check.** High-blast auto-lands run a diverse
+  panel (multiple models/providers, more lenses/rounds — the `MANDATE_LENSES`/`buildPanelMandate` path
+  dialed up by care-level) **aggregated by diversity-*selection*, not majority vote** (majority voting hits a
+  "popularity trap" that amplifies shared-wrong outputs). *Plus* a **non-zero sampled `review:human`** that is
+  an **active** task — an independent intent/spec judgment + a fresh adversarial look, never a passive
+  re-read. The human is the **only proven decorrelated axis** against the panel's shared blind spots, and
+  carries intent authority + accountability. **Chosen.**
+- **(b) Rely on the AI panel alone.** Max throughput, but the evidence says the panel shares blind spots and
+  can manufacture false confidence — no independent axis. Rejected: not "humans review better," but "the panel
+  is not independent of itself."
+
+The human's role is scoped by the evidence — **intent/spec authority + a decorrelated check + accountability,
+never line-by-line re-review** — and the sample is **active and non-trivial** (passive monitoring backfires),
+graduated on track record, **never to zero** (the panel can't cover blind spots it shares).
 
 ```js
-// scoreEscalation — a sampled high-blast auto-land is escalated to a HUMAN, not just review:pending.
-// The rate is a config knob; that the sample is > 0 is a fixed invariant (the human backstop).
+// scoreEscalation — a sampled high-blast auto-land escalates to a HUMAN (active check), not review:pending.
+// Rate is a config knob; that the sample is > 0 is fixed — the human is the only proven decorrelated axis.
 if (signals.blastRadius && sampledForHumanSpotCheck(prNum, cfg.highBlastHumanSampleRate)) {
-  humanRequired = true;                        // routes to review:human, not the agent-clearable review:pending
-  reasons.push('high-blast human spot-check (deterministic sample)');
+  humanRequired = true;                        // active independent judgment, NOT a passive re-read
+  reasons.push('high-blast human spot-check (deterministic sample — decorrelated axis)');
 }
+// non-sampled high-blast: a diversity-SELECTION-aggregated panel (care-level dials panel size/lenses/rounds),
+// never a naive majority vote (popularity trap amplifies shared-wrong outputs).
 ```
 
-*Skeptic:* SURVIVES-WITH-AMENDMENT (amendment adopted) — the red-team showed the original "care-level → extra
-rounds" mitigation solved the wrong risk (for scored signals there is *no human to fatigue*; extra rounds just
-add agent passes). The real hole — high-blast auto-lands with zero human eyes — is closed by this fork's `(a)`
-default; the deterministic human sample is the fix.
-*Screen:* clear — a standard-level human-review-coverage policy (like the segregation-of-duties call), not
-orchestration; a real safety-vs-throughput merit difference survives "both free to build." *(Replaces the
-earlier trigger-placement framing, which the fresh-context screen flagged as an impl/build detail — now moved
-to "Settled" above.)*
+*Skeptic:* SURVIVES-WITH-AMENDMENT (2026-07-18, evidence-driven) — the original default was right (keep a
+human backstop) but for the *wrong reason* ("prior art keeps a human desk / humans review wide changes"). The
+cognitive-science pass refuted "humans review big PRs better" **and** the fallback "a diverse AI panel is a
+sufficient decorrelated backstop." Corrected default: the human stays because it is the **only proven axis
+independent of the AI panel's shared blind spots** — plus intent authority + accountability — and must be an
+*active* task, not passive monitoring (which measurably backfires). Residual risk (flagged, not blocking):
+human-vs-LLM error overlap is unmeasured, and LLM large-context reliability on big diffs is asserted by
+analogy — so keep the human sample non-trivial until those are measured.
+*Screen:* clear — a standard-level human-review-coverage policy (who is the independent axis on wide-impact
+auto-lands), not orchestration; a real safety merit difference survives "both free to build."
 
 ## Supported by default (builds, not forks)
 

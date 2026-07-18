@@ -1,0 +1,47 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds <a href="/backlog/2563-blast-radius-is-advisory-care-level-not-a-park-gate-converge-/">#2563</a>
+  Fork 2 — the high-blast review backstop. The question: what value does a <strong>human</strong> add to
+  review relative to AI, so we can scope the human's role when most implementation review is done by AI? A
+  deep-research pass (107 agents, adversarially verified) that <strong>corrects an earlier design lean</strong>.
+</p>
+
+<h2>Humans review large changes worse — and a diverse AI panel does not decorrelate</h2>
+<ul>
+  <li><strong>"Humans review big PRs better" is false for defect-finding.</strong> Cisco/SmartBear: defect
+    density peaks under 200 LOC and collapses past ~400 LOC, faster than 450 LOC/hr, or after 60 min. This is
+    where an LLM holding the whole diff at constant attention has a structural edge. The vigilance decrement
+    (worse under working-memory load) compounds it.</li>
+  <li><strong>The correction:</strong> a diverse AI panel does <em>not</em> supply the independent error
+    distribution its scale suggests. LLMs make substantially correlated errors (pairs agree ~60% when both
+    wrong vs 33% chance; correlation <em>rises</em> with capability, even across vendors); ensembles realize
+    only ~0.43 of the independence reliability gain; majority voting barely helps. This is the LLM analogue of
+    Knight &amp; Leveson (1986). <strong>An AI panel is a weak backstop against blind spots it shares</strong>,
+    and LLM-as-judge inflates same-family models (false confidence).</li>
+  <li><strong>Complementarity is real with the right aggregation:</strong> naive majority voting hits a
+    "popularity trap"; a <em>diversity-based selection</em> strategy captures up to 95% of the oracle ceiling,
+    even with two models.</li>
+  <li><strong>Automation bias:</strong> a <em>passive</em> human monitor over a good-but-imperfect AI catches
+    <em>fewer</em> defects than an unaided human — measured, affects experts, not trainable away. A
+    rubber-stamp human-over-the-loop subtracts value.</li>
+</ul>
+
+<h2>The human's irreducible role</h2>
+<p>
+  Not out-inspecting the AI on correctness. It is <strong>(a)</strong> validation vs verification — "is this
+  what we intended," the spec/intent authority the AI cannot self-supply; <strong>(b)</strong> a genuinely
+  <strong>decorrelated check</strong> on the error class LLMs <em>share</em> (the only proven-independent
+  axis); <strong>(c)</strong> accountability, distinct from competence.
+</p>
+
+<h2>Recommendation for Fork 2</h2>
+<p>
+  Back the high-blast path with <strong>both</strong> a diversity-aware AI panel (for scale, aggregated by
+  diversity-<em>selection</em> not majority vote) <strong>and</strong> a human — but scope the human to intent
+  authority + an <em>active</em> independent judgment + accountability, never line-by-line re-review, and
+  design the task to avoid passive monitoring. The human sample is not accountability theater: because the
+  panel cannot catch its own shared blind spots, the human is the only proven decorrelated axis — keep it
+  active and non-trivial, graduate the rate on track record, never to zero.
+</p>
+{% endraw %}

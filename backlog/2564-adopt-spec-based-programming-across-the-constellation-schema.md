@@ -33,6 +33,36 @@ agent-clearable" is that boundary applied to the review gate — not a foreign m
 review gate (#2563); the broad win is a programming discipline where the human's attention is spent on the
 few spec artifacts, not on every diff.
 
+## Layered governance — constitution → spec/law → implementation (2026-07-18)
+
+The model is a **three-tier amendability hierarchy**, borrowed from jurisprudence — each tier derived from
+the one above, each with its own gate:
+
+- **Constitution** — the core principles that must *never* be breached (e.g. the non-author invariant; WE
+  holds zero implementation; segregation of duties over the review leash). It is **not directly applicable to
+  a diff** — too abstract to check code against; it is the *source* from which laws are derived. Amending it
+  is the highest-stakes act: a **constitutional-amendment gate** — rare, deliberate, the strongest human
+  ratification (potentially more than one human).
+- **Spec = law / statute** — machine-checkable contracts **derived from** the constitution and **directly
+  applicable** to code (the schema + conformance layer). A spec change is human-gated (#2563 Fork 1) and
+  carries a second obligation: at authoring/amendment time it is checked for **constitutional consistency** —
+  *that* is where the constitution is applied, not at code review.
+- **Implementation** — derived from a fixed spec; agent-clearable on conformance-green + independent
+  (AI-panel) review.
+
+**The load-bearing rule: the constitution is never applied to a case directly.** You never gate a diff against
+the constitution — only against the derived spec/law. Constitutional consistency is verified when a *law/spec*
+is written or amended, never when code is reviewed (a court applies the statute; it tests the statute against
+the constitution only when the statute itself is challenged).
+
+Maps onto what we already have: `we:docs/agent/platform-decisions.md` is the statute/law layer (the "Platform
+Decisions = Statute Layer" rule); the FOUNDATIONAL core invariants are a proto-constitution; GitHub Spec Kit's
+`constitution` file and Anthropic's Constitutional AI are precedents for a named principle layer — though
+Constitutional AI applies its constitution more *directly* (as critique principles), whereas this model is
+stricter: constitution → derived law → application. **Open:** the exact constitutional-amendment gate (how
+many humans, what ceremony), and whether constitutional-consistency of a new spec/law can be even partly
+machine-assisted or is wholly a human judgment.
+
 ## Deep research — landed 2026-07-18
 
 Adversarially-verified (22 sources → 25 claims → 22 confirmed, 3 refuted; 104 agents). Full report:
