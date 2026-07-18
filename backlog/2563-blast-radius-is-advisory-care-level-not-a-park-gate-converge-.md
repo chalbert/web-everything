@@ -137,7 +137,7 @@ blast-radius over-escalates on the scored side — the human is fatigued on typo
 that matters.
 
 Narrow it via the **spec-vs-implementation** line (spec-based programming — see the broader direction filed
-this session, `x0n1nax`, and report
+this session, `2564`, and report
 `we:reports/2026-07-18-spec-based-programming-spec-formats.md`): **the spec always needs a human; the
 implementation under a fixed spec is agent-clearable when an independent review agrees the spec is preserved.**
 
@@ -161,7 +161,7 @@ big diff but pure impl → agent-clearable.
 **Prerequisite (a build):** extract the escalation policy into an explicit contract artifact (the
 `DEFAULT_THRESHOLDS` + reason sets + `deriveReviewDisposition` branches are already nearly one) + a conformance
 suite. Until the spec is explicit, **fail safe to human** (the status-quo path test). This is the first
-concrete instance of `x0n1nax` (spec-based programming across the constellation).
+concrete instance of `2564` (spec-based programming across the constellation).
 
 ```js
 // deriveReviewDisposition — the carve-out (we:scripts/lib/review-core.mjs:455-457). Fork 1 (b) narrows WHICH
