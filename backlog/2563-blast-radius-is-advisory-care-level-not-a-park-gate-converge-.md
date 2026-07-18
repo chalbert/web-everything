@@ -2,11 +2,14 @@
 bornAs: cvg2563r
 kind: decision
 size: 8
-status: active
+status: resolved
 dateOpened: "2026-07-18"
 dateStarted: "2026-07-18"
+dateResolved: "2026-07-18"
+graduatedTo: none
 preparedDate: "2026-07-18"
 relatedReport: reports/2026-07-18-blast-radius-advisory-review-gating.md
+codifiedIn: "docs/agent/platform-decisions.md#blast-radius-advisory-care-not-a-gate"
 tags: [drain, review, convergence, escalation, console, config]
 ---
 
@@ -63,7 +66,7 @@ does not alter — the convergence bar or the non-author invariant codified at
 | # | Fork | Options | Default |
 |---|------|---------|---------|
 | 1 | Which trust-chain changes force a human — the *spec*, not the whole path | (a) any path touch · (b) gate the *spec* (schema, not prose) | **✅ RATIFIED (b)** — 2026-07-18 |
-| 2 | High-blast backstop — who is the independent axis? | (a) diversity-aware AI panel (scale) **+** an active sampled human check · (b) AI panel alone | **(a) panel + non-zero active human sample** — the human is the only proven decorrelated axis |
+| 2 | High-blast backstop — who is the independent axis? | (a) diversity-selection AI panel **+** point-level human check · (b) AI panel alone | **✅ RATIFIED (a)** — 2026-07-18; cleared-content sample = option, default off (operator oversight is the axis now) |
 
 *Not forks:* per-signal advisory→gate override, thresholds, human-sample rate, convergence enable/scope are
 **config dimensions** (below); the console re-round action and the settings panel are **support-both builds**;
@@ -78,10 +81,13 @@ the runner-converges-daemon-lands split and the separate-runner placement are **
 - **The trust-chain / statute hard gate stays hard.** `gate-self` (`isGateSelfPath`) and `statute`
   (`isStatutePath`) keep setting `humanRequired` (`we:scripts/lib/review-escalation.mjs:206-210`) — the one
   place ownership-based hard gating is correct. No config demotes these.
-- **A deterministic human spot-check on high-blast auto-lands.** Because an advisory high-blast change can
-  otherwise converge and auto-land with **zero** human eyes, a **non-zero** sampled fraction of high-blast
-  (`isBlastRadiusPath`) auto-lands routes to `review:human` (the rate is a knob; that it is `> 0` is fixed).
-  This is the human backstop the "flag-don't-gate" prior art keeps — see Fork 2.
+- **A non-zero decorrelated human axis on high-blast auto-lands** — but *how* it is provided is a knob.
+  Because an advisory high-blast change can otherwise converge and auto-land with **zero** human eyes, and the
+  cognitive-science pass showed the AI panel shares blind spots (so it can't self-cover), **some** human
+  decorrelated oversight must exist. That axis can be **(i)** the operator's direct oversight of what is built
+  (the ratified choice *now* — #2563 Fork 2 touchpoint 4, sample OFF), or **(ii)** the automated post-land
+  audit sample (the option, enabled when direct oversight stops scaling). What is fixed is that the axis is
+  **not nothing**; the *mechanism* (manual vs sampled) and the sample rate are config. See Fork 2.
 - **The conflict-of-interest invariant is absolute.** A landed PR is accepted by an actor that did not author
   the fix (`#agent-convergence-independent-validation`, #2439). No knob relaxes it.
 - **Non-convergence hard-escalates to a human.** Round-cap / mandate-conflict → `review:human`, unchanged
@@ -190,6 +196,13 @@ schema-vs-prose sub-fork is a config/mechanism call, resolved to schema for dete
 
 ## Fork 2 — The high-blast backstop: care-level scales AI-review *rigor*, plus an *active* human check
 
+> **✅ RATIFIED 2026-07-18 (Nicolas Gilbert) — option (a).** High-blast auto-lands run a diversity-aware AI
+> panel (aggregated by diversity-*selection*, not majority vote). The human check is delivered **point-level**
+> through the codified ruling console — (1) AI-flagged points, plain-language + example, ratify/fork/challenge;
+> (2) always-review file blacklist; (3) full diff on demand. Touchpoint (4), the sampled decorrelated check on
+> AI-*cleared* content, ships as a **config option, default OFF** — the operator's direct oversight is the
+> decorrelated axis at current scale; enable the post-land audit sample when throughput outgrows manual watch.
+
 *Fork-existence: two coherent branches that cannot coexist — either high-blast agent-only lands get a
 deterministic independent backstop, or they don't. Both buildable; they differ on the safety merit, not
 sequencing.* Grounded by `we:reports/2026-07-18-human-vs-ai-review-cognitive-science.md` (deep research,
@@ -235,11 +248,17 @@ human" is the passive monitoring the evidence says *subtracts* value. Instead th
 2. **Always-review blacklist.** A configured set of files (the spec/constitution/trust-chain tier) is
    **hard-gated** — full human review regardless, independent of the sample.
 3. **Full diff on demand.** The human can always open the whole diff if they want it.
-4. **A thin sampled decorrelated check on AI-*cleared* content.** Point-level escalation only covers what the
-   AI *knows* it's unsure about; the panel's danger is what it is **confidently wrong** about and never flags.
-   So a small sampled fraction of AI-*cleared* high-blast content is surfaced too (same plain-language way) —
-   this is the "never-zero" decorrelated + accountability sample, the only way a *shared* blind spot reaches a
-   human. Rate = a config knob, graduated on track record, floor > 0.
+4. **A decorrelated check on AI-*cleared* content — a config OPTION, default OFF (ratified 2026-07-18).**
+   Point-level escalation only covers what the AI *knows* it's unsure about; the panel's danger is what it is
+   **confidently wrong** about and never flags — the only way a *shared* blind spot reaches a human is to look
+   at some of what the panel confidently cleared. **Operator ruling: not needed now — the operator keeps close
+   direct oversight of what is built, which *is* the non-zero decorrelated axis at current scale.** So the
+   automated sample ships as an **available option, default off**, in its low-friction form: a **post-land
+   audit** (the AI-cleared change lands; a small, care-weighted sample is surfaced afterward, plain-language;
+   a human flag → rollback + fix + learning-loop signal), *not* a blocking random-PR gate. **Re-enable
+   trigger:** when parallel throughput exceeds what one operator can directly watch (manual oversight stops
+   covering the AI-cleared surface), turn the sample on — otherwise the decorrelated axis silently decays
+   toward zero.
 
 The **policy** (1–4) is what Fork 2 ratifies; the UI is a build under the console. This makes the human load
 proportional to genuine judgment points, not PR count — and keeps the human *active* (each touch is a concrete
