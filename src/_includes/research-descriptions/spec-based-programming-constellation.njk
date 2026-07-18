@@ -1,0 +1,129 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    <a href="/backlog/2564-adopt-spec-based-programming-across-the-constellation-schema/">#2564</a> proposes a
+    strategic direction: move the constellation toward <strong>spec-based (spec-driven) programming</strong> —
+    the <strong>spec is a human-owned artifact</strong>, and the <strong>implementation under it is
+    agent-clearable</strong> when a conformance suite stays green and an independent review agrees the spec is
+    preserved. Two things were already ratified in discussion: the spec is a <strong>schema / executable
+    contract, not prose</strong> (only that makes "did the spec change?" a deterministic yes/no), and the model
+    is <strong>human-gates-spec / agent-implements</strong>. This survey grounds the four open forks in how the
+    wider ecosystem actually does spec-driven development for AI agents. Full adversarially-verified report:
+    <code>reports/2026-07-18-spec-based-programming-deep-research.md</code>.
+</p>
+
+<h2>Verdict</h2>
+<p>
+    Spec-driven development for AI agents is <strong>real but immature</strong> — the field is
+    <strong>&lt; 18 months old</strong> and essentially all current tooling sits at Fowler's
+    <em>spec-first</em> rung (spec written, then discarded). A durable gate needs at least
+    <em>spec-anchored</em> (kept + evolved), which no tool delivers out of the box. So adopting this means
+    <strong>assembling</strong> the discipline — schema spec + contract tests + CI gate + authority tiers — not
+    buying one mature tool. The binding constraint on AI-assisted dependability is
+    <strong>specification discipline, not model capability</strong>: investing in the contract gate beats
+    chasing a better generator.
+</p>
+
+<h2>The survey — load-bearing findings</h2>
+<we-data-table>
+<table class="data-table">
+    <thead>
+        <tr><th>Finding</th><th>Evidence</th><th>Implies for the constellation</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Prose SDD tools are not machine-diffable</strong></td>
+            <td>GitHub Spec Kit, Amazon Kiro (EARS), Tessl are markdown generators; a prose diff cannot give a
+                clean yes/no on "did the spec change?"</td>
+            <td>Confirms schema-not-prose — do NOT adopt a prose formalism as the gate</td>
+        </tr>
+        <tr>
+            <td><strong>Schema-as-spec IS deterministically diffable</strong></td>
+            <td>TypeSpec compiles one source to OpenAPI&nbsp;3.0 / JSON&nbsp;Schema&nbsp;2020-12 / Protobuf via
+                reproducible emitters</td>
+            <td>The formalism class the plan needs — and WE's intent/protocol JSON is already this shape</td>
+        </tr>
+        <tr>
+            <td><strong>LLMs cannot author formal specs</strong></td>
+            <td>TLA+ across 30 models / 2,730 runs: ≤26.6% syntactic, <strong>8.6% semantic</strong> correctness;
+                a valid-parsing spec can still be behaviourally wrong</td>
+            <td>Human-authors-spec / agent-implements is well-founded; don't force executable form on invariants
+                that resist faithful formalization</td>
+        </tr>
+        <tr>
+            <td><strong>A green suite proves "code matches spec", never "spec is right"</strong></td>
+            <td>Specmatic fails the build on any deviation — but a wrong spec yields faithfully-wrong code</td>
+            <td>Human on every SPEC change + an independent review agent are non-negotiable</td>
+        </tr>
+        <tr>
+            <td><strong>Drift is empirically widespread</strong></td>
+            <td>55% of Node-RED nodes exceed their declared spec</td>
+            <td>A <em>mechanical</em> drift gate beats trusting discipline</td>
+        </tr>
+        <tr>
+            <td><strong>Specmatic's central-contract-repository ≈ the constellation, 1:1</strong></td>
+            <td>Contracts live in ONE repo (single source of truth); downstream repos REFERENCE and never OWN
+                them; cross-boundary changes gate on a human PR + backward-compat check, plus a conformance
+                suite in the consumer repos</td>
+            <td>Maps WE&nbsp;(owns spec) → FUI/plateau&nbsp;(reference + implement); answers <em>where specs
+                live</em> and <em>how to gate cross-boundary changes</em></td>
+        </tr>
+        <tr>
+            <td><strong>The "Spec Growth Engine" already unifies #2563 + #2564</strong></td>
+            <td>arXiv&nbsp;2606.27045 splits merge authority BY BLAST RADIUS (boundary/contract → HARD human;
+                internal refactor → AUTO) and makes drift a blocking merge condition via a deterministic
+                Intent-Graph-vs-Evidence-Graph diff — <em>but a single-author, unimplemented preprint</em></td>
+            <td>Blueprint to adapt (not proof): #2563 Fork 1 + blast-radius, fused</td>
+        </tr>
+        <tr>
+            <td><strong>The Productivity-Reliability Paradox</strong></td>
+            <td>The most rigorous RCT (METR 2025) shows a <strong>19% slowdown</strong> for experienced devs on
+                mature codebases; org telemetry shows a 98% PR jump alongside a 91% rise in review time, flat
+                delivery</td>
+            <td>Raw agent throughput inflates review cost without improving delivery — invest in the contract
+                gate + a keep-changes-small nudge, not a faster generator</td>
+        </tr>
+    </tbody>
+</table>
+</we-data-table>
+
+<h2>Refuted (excluded — failed adversarial verification)</h2>
+<ul>
+    <li>CodeQL static analysis giving a clean machine yes/no on "does the implementation exceed the spec".</li>
+    <li>Invariant specs mechanically catching violations pre-production.</li>
+    <li>The TDAD pipeline's 86–100% mutation-score claim.</li>
+</ul>
+
+<h2>What it grounds — the four forks</h2>
+<p>
+    The constellation is <em>already</em> a spec-vs-impl split: WE holds the standard (intents, protocols,
+    platform decisions), FUI/plateau hold the implementation, and
+    <code>scripts/check-standards.mjs</code> already calls <code>src/_data/*.json</code> "the spec" and
+    verifies it stays in sync with impl. So the survey reshapes #2564 into four prepared forks:
+</p>
+<ol>
+    <li><strong>Which WE-owned artifact IS the central contract</strong> — the existing intent/protocol
+        definitions <em>become</em> the machine-diffable spec (default), vs authoring a TypeSpec → JSON&nbsp;Schema
+        layer <em>above</em> them (a second source of truth that drifts).</li>
+    <li><strong>Contract granularity + the mechanical contract-line</strong> — one contract per standard entity
+        (default, so blast-radius localizes to the changed entity) vs one aggregate per WE↔FUI boundary; the
+        "this is a spec change → human" line is a <em>path/artifact test</em>, forced by
+        <a href="/backlog/2563-blast-radius-is-advisory-care-level-not-a-park-gate-converge-/">#2563</a> Fork&nbsp;1.</li>
+    <li><strong>The independent-review agent's unmeasured false-clear rate</strong> — ship the auto-clear path
+        behind a deterministic human sample that <em>doubles as the measurement instrument</em> (default,
+        because no offline benchmark exists), vs block-until-measured.</li>
+    <li><strong>The non-executable slice</strong> — prose intent / semantic invariants that leave a governance
+        gap: allow prose behind a fail-safe human gate + an opportunistic formalization nudge (default), vs
+        require every invariant in executable form (excludes invariants that can't be faithfully formalized).</li>
+</ol>
+
+<h2>Caveats</h2>
+<p>
+    The two papers that match the target design most precisely (Spec Growth Engine 2606.27045;
+    Productivity-Reliability Paradox 2605.01160) are <strong>single-author, non-peer-reviewed 2026
+    preprints</strong> — blueprints, not proof. "Machine-diffable" is a gradient: schema-as-spec + contract
+    tests are genuinely mechanical; TLA+ is mechanical for syntax only; prose markdown is not mechanical at
+    all. The Node-RED 55% and TLA+ 8.6% figures are exact but scoped. This is a 2026-07 snapshot of a
+    fast-moving space.
+</p>
+{% endraw %}
