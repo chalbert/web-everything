@@ -1,7 +1,8 @@
 ---
+bornAs: xmrqlpp
 kind: story
 size: 5
-parent: "xpex0n8"
+parent: "2541"
 status: open
 locus: frontierui
 dateOpened: "2026-07-18"

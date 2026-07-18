@@ -1,7 +1,8 @@
 ---
+bornAs: xdn96bp
 kind: story
 size: 3
-parent: "xpex0n8"
+parent: "2541"
 status: open
 locus: frontierui
 dateOpened: "2026-07-18"
