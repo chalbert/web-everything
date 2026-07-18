@@ -1,4 +1,5 @@
 ---
+bornAs: xj495sr
 kind: decision
 size: 3
 parent: "2527"
@@ -26,5 +27,5 @@ it does not build a second provider.
   mapping layer, not a re-architecture.
 
 ## Acceptance
-The adapter interface is named + documented; a lint/constraint keeps board slices ([#xaz4dcn]) coding against the
+The adapter interface is named + documented; a lint/constraint keeps board slices ([#2555]) coding against the
 seam (no bare WE-CLI in views); the north-star bridging work becomes "add an adapter," not "rewrite the console."

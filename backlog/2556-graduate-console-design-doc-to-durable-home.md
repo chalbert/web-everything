@@ -1,4 +1,5 @@
 ---
+bornAs: xe10z1b
 kind: story
 size: 2
 parent: "2505"
@@ -12,13 +13,13 @@ dateOpened: "2026-07-18"
 `plateau:backlog-console-design.md` — the full design record for the launch-review console (the role×lifecycle
 matrix, the scope-lease model, the decisions log with every ratified rule, the north-star) — is currently an
 **uncommitted working doc inside a plateau-app lane clone**. One lane-pool cleanup and the entire design +
-decision history is gone. This graduates it to a durable, cite-able home. Serves G5 and unblocks [#x9vc5xq] (the
+decision history is gone. This graduates it to a durable, cite-able home. Serves G5 and unblocks [#2554] (the
 visual-grammar decision cites the ratified grammar, which lives only in this doc).
 
 ## Scope
-- Move the design doc into a tracked location (the console's spec home, or alongside the taxonomy spec [#x5nrrw0]).
+- Move the design doc into a tracked location (the console's spec home, or alongside the taxonomy spec [#2553]).
 - Preserve the decisions log (ratified rules) as the cite-able record the build references.
 
 ## Acceptance
-The design doc + decisions log live in a durable, tracked location; [#x9vc5xq]/[#x5nrrw0]/[#xaz4dcn] cite it; a lane
+The design doc + decisions log live in a durable, tracked location; [#2554]/[#2553]/[#2555] cite it; a lane
 cleanup can no longer lose it.

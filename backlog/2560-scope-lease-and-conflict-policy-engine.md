@@ -1,7 +1,8 @@
 ---
+bornAs: xrp2ta9
 kind: epic
 size: 8
-parent: "xaz4dcn"
+parent: "2555"
 status: open
 tags: [plateau-loop, console, scope-lease, conflict-policy, lanes, epic]
 dateOpened: "2026-07-18"
@@ -26,5 +27,5 @@ scope, do not reinvent leasing.
 ## Acceptance
 A launch acquires a scope lease; overlapping work is held per the overlap policy; a mid-build write outside the
 lease is detected and handled per the breach policy; policies are program-configurable; built on
-`we:scripts/lane-lease.mjs`, not a parallel leasing system. The board ([#xaz4dcn]) renders the breach/overlap/force
+`we:scripts/lane-lease.mjs`, not a parallel leasing system. The board ([#2555]) renders the breach/overlap/force
 states.

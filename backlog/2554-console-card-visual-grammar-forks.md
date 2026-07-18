@@ -1,4 +1,5 @@
 ---
+bornAs: x9vc5xq
 kind: decision
 size: 3
 parent: "2505"
@@ -16,7 +17,7 @@ The residual visual-language rulings for the launch-review console board, left o
 + SVG sprite · attention cards: one signal + one primary + calm secondaries · say-it-once · disclosure levels).
 These forks refine *within* that grammar — none reopens a ratified rule. Prepared via the design-explainer
 artifacts; ready to ratify in one pass. Serves G4 (attention-first, legible at a glance). Blocked-soft on
-[#xe10z1b] (grammar lives only in the uncommitted design doc — graduate it first).
+[#2556] (grammar lives only in the uncommitted design doc — graduate it first).
 
 ## Forks to ratify
 1. **Verb vocabulary** — merge the Prepare / Re-prepare / Revive family (three near-synonyms for "make it
@@ -40,4 +41,4 @@ artifacts; ready to ratify in one pass. Serves G4 (attention-first, legible at a
 
 ## Acceptance
 Each fork ruled (or explicitly deferred with a reason); the resolved rules fold into the taxonomy conformance
-spec ([#x5nrrw0]) so the real board build ([#xaz4dcn]) cites them, and the mock is not re-litigated.
+spec ([#2553]) so the real board build ([#2555]) cites them, and the mock is not re-litigated.

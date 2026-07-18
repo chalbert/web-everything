@@ -1,4 +1,5 @@
 ---
+bornAs: xfk2sol
 kind: decision
 size: 3
 parent: "2505"
@@ -10,7 +11,7 @@ tags: [plateau-loop, console, console-board, queue, ordering, design-forks]
 # Console queue scale & ordering forks
 
 Ordering/scale rulings the mock deferred (design doc §3f/§3g "decisions needed before build"). They shape how
-the board renders and launches at real WE throughput, so they gate the board slices [#xaz4dcn]. Serves G1 (at
+the board renders and launches at real WE throughput, so they gate the board slices [#2555]. Serves G1 (at
 scale) and G3 (parallel-safe launch). NOT prepared.
 
 ## Forks
@@ -19,7 +20,7 @@ scale) and G3 (parallel-safe launch). NOT prepared.
 - **Cleared-set ordering** — once a set is cleared for build, is the order FIFO, by score, or operator-pinned?
   (Distinct from prioritization #2526, which orders the *ready* set; this is the *cleared-to-run* order.)
 - **Wave vs whole-cluster launch** (T1/R9) — launch a cluster as one wave, or item-by-item as lanes free?
-  Changes lease acquisition and the conflict engine ([#xrp2ta9]).
+  Changes lease acquisition and the conflict engine ([#2560]).
 - **Repo / program dimension on lanes** — are lanes scoped per-program, or global across the constellation?
   (The L2 "all programs" claim vs the single-program board — resolve the namespace.)
 

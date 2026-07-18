@@ -1,4 +1,5 @@
 ---
+bornAs: x0xy5mj
 kind: story
 size: 3
 parent: "2527"
@@ -21,4 +22,4 @@ and expensive to retrofit. Serves G1 (attention-first legibility) and G4.
 
 ## Acceptance
 The schema carries `shortTitle`; existing items are backfilled; the board/inbox render the short title with a
-title fallback. Provider-agnostic — the field maps through the adapter seam ([#xj495sr]).
+title fallback. Provider-agnostic — the field maps through the adapter seam ([#2558]).

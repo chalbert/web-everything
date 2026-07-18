@@ -1,7 +1,8 @@
 ---
+bornAs: x48d7sp
 kind: story
 size: 5
-parent: "xaz4dcn"
+parent: "2555"
 status: open
 tags: [plateau-loop, console, console-board, read-model, state-machine]
 dateOpened: "2026-07-18"
@@ -20,8 +21,8 @@ already shipped/codified). Serves G1/G4. Consumes, does not rebuild:
 - A pure mapping `{ lane, lease, drain-position, PR-label, progress } → card-state (UC-id)` covering all 37
   states — the single place "what state is this item in?" is decided for the board.
 - Derive the chips (bounced ×N, held-Nh age, waiting-on-#X, built-under-ruling) from the same real signals.
-- Provider-agnostic per [#xj495sr] — reads through the adapter seam, no bare CLI in the mapping.
+- Provider-agnostic per [#2558] — reads through the adapter seam, no bare CLI in the mapping.
 
 ## Acceptance
 Given real lane + drain + label + progress, the read-model returns the correct card-state + chips for each of
-the 37; [#xaz4dcn]'s card-state rendering consumes it; the mapping is unit-tested against fixtures for every state.
+the 37; [#2555]'s card-state rendering consumes it; the mapping is unit-tested against fixtures for every state.

@@ -1,4 +1,5 @@
 ---
+bornAs: x5nrrw0
 kind: story
 size: 5
 parent: "2505"
@@ -20,12 +21,12 @@ cases live in plateau-app** (the webcases + the /console-cases viewer, already s
 
 ## Scope
 - The 37 states + the ratified visual grammar (color · icon · attention-card · say-it-once · disclosure ·
-  progress=crossing) as the definitional spec; the residual forks resolve via [#x9vc5xq].
+  progress=crossing) as the definitional spec; the residual forks resolve via [#2554].
 - A **validation/coverage** check: every state has a case; every you-act case carries the amber edge + one
   primary verb; the 6 `rendered=pending` states are tracked to `yes` as the board renders them.
 - Document the card-state grammar in **webdocs** (design doc §314a).
 
 ## Acceptance
 The taxonomy is a WE-tracked spec with a validate script; plateau's cases conform to it; the webdocs page
-renders the grammar; a board slice ([#xaz4dcn] C2) can cite a state's spec by UC-id. Distinct from [#x13aeqe]
-(the viewer registry plumbing) and [#x48d7sp] (the real→card-state read-model).
+renders the grammar; a board slice ([#2555] C2) can cite a state's spec by UC-id. Distinct from [#2550]
+(the viewer registry plumbing) and [#2552] (the real→card-state read-model).
