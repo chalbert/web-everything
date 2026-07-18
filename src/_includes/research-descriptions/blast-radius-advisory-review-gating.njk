@@ -1,0 +1,64 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/2563-blast-radius-is-advisory-care-level-not-a-park-gate-converge-/">#2563</a> —
+  should the drain's deterministic review rubric treat <em>scored</em> signals (blast-radius, size,
+  dismissed-findings, cross-repo, 1-in-N sampling) as a <strong>blocking <code>review:pending</code>
+  park</strong>, or demote them to an <strong>advisory care-level</strong> annotation that raises scrutiny
+  inside an automated convergence loop, reaching a human <em>only</em> when the loop fails to converge?
+  Composes with, and does not alter,
+  <a href="/docs/agent/platform-decisions/#agent-convergence-independent-validation">the agent-convergence
+  independent-validation rule</a> (#2398/#2410).
+</p>
+
+<h2>The gate-vs-advisory split tracks what the signal measures</h2>
+<p>
+  The survey's decisive finding: <strong>ownership / path-sensitivity is almost always a hard gate; a computed
+  risk <em>score</em> trends advisory</strong> — and practitioners warn against gating on a score alone.
+</p>
+<ul>
+  <li><strong>Hard gate (path/ownership):</strong> GitHub CODEOWNERS + branch protection; SonarQube quality
+    gates fail the pipeline on new-code conditions.</li>
+  <li><strong>Advisory (score):</strong> risk-based IaC review — <em>"don't gate on low scores alone; treat
+    it as advisory,"</em> start advisory, enforce one narrow high-confidence case later; Google Cloud Change
+    Risk recommendations flag + recommend, never block; classic risk-based testing prioritizes depth of
+    scrutiny, not a hard-stop.</li>
+  <li>This backs demoting scored blast-radius to advisory while keeping a hard gate only for the trust /
+    governance layer — which Web Everything already does via <code>humanRequired</code>
+    (<code>gate-self</code> / <code>statute</code>).</li>
+</ul>
+
+<h2>Auto-fix triggers sit in a separate bot, not the queue daemon</h2>
+<p>
+  CodeRabbit Autofix (webhook → task-queue), GitHub merge queue (only awaits required checks, delegates the
+  fixing to triggered workflows), and Graphite (reviewer + merge as cooperating-but-separate stages) all put
+  the fixer in a <strong>separate event/label-triggered actor</strong>, not the always-on merge daemon. This
+  backs a separate scheduled convergence runner over teaching the drain daemon to spawn agents (its charter is
+  explicitly "no agent spawning").
+</p>
+
+<h2>Independence survives; the fatigue risk is real</h2>
+<ul>
+  <li><strong>Independence:</strong> author-cannot-approve = SOC 2 segregation of duties; a model reviewing its
+    own output has a documented self-correction blind spot. Preserved as long as fixer ≠ final approver —
+    exactly what the convergence bar already guarantees.</li>
+  <li><strong>Graduated autonomy</strong> (AWS Well-Architected Agentic AI Lens AGENTSEC04-BP02; arXiv
+    2606.22484) supports risk-tiered human-in-the-loop, but <em>no named production system</em> does exactly
+    "high-risk → automated review-with-advisory → human only on non-convergence." The least-attested piece.</li>
+  <li><strong>Caution — alert fatigue:</strong> demoting a gate to advisory risks the warning being ignored
+    (Sonar's own guidance). Mitigation: the care-level must drive <em>concrete extra rounds/criteria</em>, not
+    a passive label, and non-convergence must hard-escalate.</li>
+</ul>
+
+<h2>Config angle — staged autonomy is the argument for a settings panel</h2>
+<p>
+  Because "start advisory, enforce later, graduate per-repo" is the attested pattern, per-signal
+  gate-vs-advisory mode, thresholds, and convergence enable/scope are <strong>config dimensions</strong> (a
+  plateau-app-driven settings panel, most-permissive default), not ratifiable forks. What stays
+  <strong>fixed and un-configurable</strong>: the trust-chain hard gate and the conflict-of-interest invariant
+  (<code>gate-self</code>/<code>statute</code> always human-cleared, even after convergence). The settings
+  panel is a plateau-app product surface built on the <em>same</em> shared review core — the config schema and
+  defaults live in Web Everything, the panel renders them.
+</p>
+{% endraw %}
