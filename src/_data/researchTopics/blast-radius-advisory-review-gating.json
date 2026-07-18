@@ -1,0 +1,23 @@
+{
+  "id": "blast-radius-advisory-review-gating",
+  "title": "Risk/blast-radius as advisory care-level vs a park-gate in an AI merge queue",
+  "status": "open",
+  "summary": "Grounds decision #2563: should the drain's deterministic review rubric (scoreEscalation, we:scripts/lib/review-escalation.mjs) treat scored signals — blast-radius, size, dismissed-findings, cross-repo, 1-in-N sampling — as a BLOCKING review:pending park, or demote them to an advisory care-level annotation that raises scrutiny inside an automated convergence loop, with a human reached only when the loop fails to converge? Prior-art survey (web, 2026-07-18) is decisive on three points and cautionary on a fourth. (1) The gate-vs-advisory split tracks WHAT the signal measures: ownership/path-sensitivity is almost always a HARD gate (GitHub CODEOWNERS + branch protection; SonarQube quality gates fail the pipeline), while a computed risk SCORE trends advisory and practitioners explicitly warn against gating on a score alone (risk-based IaC review: start advisory for a month, then enforce one narrow high-confidence case; Google Cloud Change Risk recommendations flag+recommend, never block; classic risk-based testing prioritizes depth of scrutiny, not a hard-stop). This backs demoting scored blast-radius to advisory while keeping a hard gate only for the trust/governance layer — which WE already does via humanRequired (gate-self/statute). (2) Auto-fix triggers sit in a SEPARATE bot invoked on event/label, not the always-on queue daemon — CodeRabbit Autofix (webhook→task-queue), GitHub merge queue (only awaits required checks, delegates fixing to triggered workflows), Graphite (reviewer + merge as cooperating-separate stages). This backs a separate scheduled convergence runner over teaching the drain daemon to spawn agents (its charter is explicitly 'no agent spawning'). (3) The author-cannot-approve independence invariant (SOC 2 segregation of duties; self-correction blind spot) survives as long as fixer != final approver; graduated/tiered human-in-the-loop (AWS Well-Architected Agentic AI Lens AGENTSEC04-BP02; arXiv 2606.22484) supports risk-tiered autonomy, though NO named production system does exactly 'high-risk gets automated review-with-advisory, then human only on non-convergence' — the least-attested piece. (4) CAUTION: demoting a gate to advisory risks alert fatigue (Sonar's own guidance: advisory warnings get ignored/suppressed; advisory noise dilutes attention unless tiered) — mitigated by making the care-level drive concrete extra review rounds/criteria, not a passive label, and hard-escalating non-convergence. Config angle (per the #2563 steer): staged autonomy (advisory-first, enforce-later, per-repo graduation) is itself the argument that per-signal gate-vs-advisory mode, thresholds, and convergence enable/scope are CONFIG DIMENSIONS (a settings panel, most-permissive default), NOT ratifiable forks (Q4 both-legitimate-end-states → #config-extends-platform-default). What stays FIXED and un-configurable: the trust-chain hard gate and the conflict-of-interest invariant (gate-self/statute always human-cleared even after convergence). Composes with #agent-convergence-independent-validation (#2398/#2410) — the care signal routes INTO the convergence bar that anchor governs; it does not change the bar or the non-author invariant. Full grounding in reports/2026-07-18-blast-radius-advisory-review-gating.md.",
+  "dateOpened": "2026-07-18",
+  "lastReviewed": "2026-07-18",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "drain",
+    "review",
+    "convergence",
+    "escalation",
+    "blast-radius",
+    "risk-based",
+    "staged-autonomy",
+    "config",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}
