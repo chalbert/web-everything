@@ -1,8 +1,9 @@
 ---
 kind: decision
 size: 3
-status: open
+status: active
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-18"
 preparedDate: "2026-07-18"
 tags:
   - standards
@@ -38,6 +39,47 @@ Mint (or not) is decided **on that result** — do NOT mint blind now (ratifying
 - **Delta *type* and delta *disposition* are orthogonal.** reg-suit's `new/changed/deleted` is a *structural type* (what changed about a region's existence); Chromatic/Percy's `accept/deny` is a *review disposition* (the verdict). Every tool with both keeps them on separate axes — folding them into one flat enum reproduces the orthogonality break WE already ruled against for `action.level` (#1318/#1324) and `progress` (#2533 Fork 2).
 - **Anchoring splits pixel vs structural** along the "are the two panes pixel-aligned?" line. Visual-regression (same view, re-captured) is pixel-aligned → a bounding box locates a region; design-vs-built / Figma / PR-diff panes are *not* pixel-aligned → structural anchors (dom-selector / node-id / line-range). The board's design→built case is the structural kind; the contract must carry both.
 - The board also surfaced a **third disposition no incumbent first-classes** — `expected` ("known drift, not reached yet") — the novel contribution.
+
+### Worked example — one surface, three typed regions
+
+An interactive mockup of what the review surface could look like: a login form reviewed
+**design vs built**. The two panes are *not* pixel-aligned, so regions anchor structurally
+(Fork C). Each region carries a structural `type` **and** a review `disposition` on separate
+axes (Fork B), accepted per-region (Fork D). Click a marker or card; change any disposition
+and watch the summary + payload react.
+
+<iframe src="/assets/visual-diff-surface-demo/" title="Annotated visual-diff review surface — interactive mockup" style="width:100%; height:640px; border:1px solid var(--we-border, #d5dae2); border-radius:12px; background:#fff;" loading="lazy"></iframe>
+
+*(Open standalone: [/assets/visual-diff-surface-demo/](/assets/visual-diff-surface-demo/) — self-contained, no build. Source: `we:src/assets/visual-diff-surface-demo/index.html`.)*
+
+The three regions, and why the two-axis shape is load-bearing:
+
+- **①  Remember-me checkbox** — `type: removed` · `disposition: expected` → known drift, in the
+  design but not built yet. The novel `expected` disposition no incumbent first-classes: real,
+  but *deliberately not yet closed*, so it neither fails the review nor promotes to baseline.
+- **②  Submit button colour** — `type: changed` · `disposition: rejected` → real drift (brand
+  teal rendered as a generic blue), must fix.
+- **③  Heading copy** — `type: changed` · `disposition: accepted` → intentional rewrite, promote
+  the built state into the baseline.
+
+Regions ② and ③ are **both** `changed`, yet one is rejected drift and the other an accepted
+intentional change — a single flat enum could not tell them apart (why Fork B (b) is rejected).
+
+One region as a payload (illustrating the Fork B axes + Fork C tagged-union anchor):
+
+```json
+{
+  "id": 1,
+  "label": "Remember-me checkbox",
+  "type": "removed",               // structural axis  (Fork B)
+  "disposition": "expected",       // review axis      (Fork B) — the novel disposition
+  "anchor": {                      // tagged union     (Fork C)
+    "anchorType": "dom-selector",  // design↔built is not pixel-aligned → structural anchor
+    "designRef": "form > .field--remember",
+    "builtRef": null               // absent in the built pane
+  }
+}
+```
 
 ### Fork A — mint the intent, or not?
 - **(a — recommended) MINT a `visual-diff` intent.** The pattern is dispositive prior art and the contract is now shaped (Forks B–D). The corrected bar's honest verdict is mint.

@@ -112,6 +112,21 @@ output is the rewritten body, not a message:
    only for forks with no code surface (pure naming/ownership/scope/timing calls) — there a snippet adds
    nothing. The example is part of the fork's prepared shape, not chat-only (#1621 — examples go in the
    item).
+   - **Make the call tangible with a real-life example** (*backlog-workflow.md → The prepared-fork shape
+     → Make the call tangible*). Two forms, by decision kind. **Occurrences — always:** name the shipped
+     systems the pattern already appears in (the "Known occurrences" — e.g. #2533's YouTube-scrubber /
+     Percy citations); for a mint this *is* the corrected-bar justification. **A rendered mockup — when
+     the fork is about what a *visual/UI surface* looks like:** don't stop at an ASCII sketch — build a
+     small self-contained, operable mockup and embed it so the decider can *see and click* it. Mechanics:
+     write the standalone HTML (its own `<style>`/`<script>`, no build) to `we:src/assets/<slug>/index.html`
+     and embed it with `<iframe src="/assets/<slug>/" …>` in the item body — the backlog markdown renderer
+     runs with `html: true`, so the iframe renders inline. **Two gotchas:** (1) *iframe* it, don't inline the
+     markup — the mockup's generic classes (`.form`, `.chip`, `.note`) would otherwise collide with the
+     backlog page's own CSS; the iframe is the isolation boundary. (2) Reference the **directory** URL
+     `/assets/<slug>/`, **not** `…/index.html` — the locus-prefix write-hook (`we:scripts/lint-locus-prefix.mjs`)
+     flags any bare `.html`/`.ts`/… path as an un-prefixed code-path ref, and a `we:` prefix would break the
+     live URL; an extensionless directory URL sidesteps it cleanly (and resolves to `index.html` on the 11ty
+     dev server). Worked example: [#2538](/backlog/2538-shape-the-annotated-visual-diff-surface-contract-then-decide-mint/).
 4. **Run the skeptic pass *now*, in prep — don't defer the attack to the decision turn** (*backlog-workflow.md
    → Red-team the default*: prep is the primary skeptic seat). Prep that only *asserts* a default and tags
    "flag for the skeptic" leaves the attack to land at ratify time — the exact failure #1437 hit (prep
