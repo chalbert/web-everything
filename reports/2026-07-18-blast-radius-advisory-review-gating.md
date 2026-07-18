@@ -10,7 +10,7 @@ any deterministic signal fires: **blast-radius** (diff touches critical/widely-d
 (edits the review trust chain) and **statute** (governance layer). Today every signal sets `escalate=true`,
 which stamps a *blocking* `review:pending` (or `review:human`) label and parks the PR. The convergence loop
 that would auto-clear an agent-reviewable park (`deriveReviewDisposition` already classes blast-radius as
-`{mode: converge, autoLand: true}` — `we:scripts/lib/review-core.mjs:456`) only runs as a `/drain` **skill
+`{mode: converge, autoLand: true}` — `we:scripts/lib/review-core.mjs:456-457`) only runs as a `/drain` **skill
 ceremony**; the always-on daemon (`plateau-app:tools/drain-daemon/daemon.mjs`) is de-scoped to "no agent
 spawning", so blast-radius parks strand until a human hand-runs the loop or clears them.
 
@@ -77,6 +77,10 @@ where "human judgment actually changes the outcome" to avoid rubber-stamping.
    least-attested piece — mitigate by making the care-level drive *concrete extra review rounds/criteria*, not
    a passive label, and cap non-convergence with a hard human escalation.
 
-Findings 1–3 shape #2563's Fork 1 (demote to care-level), Fork 2 (hard-gate land rule), and Fork 3 (trigger
-placement) defaults; finding 4 is the skeptic's primary attack, folded into Fork 1's default (care-level must
-drive real extra rounds, not a passive label; non-convergence hard-escalates).
+Findings 1–3 back #2563's now-**fixed invariant** — *scored* signals (blast-radius / size / dismissed-findings /
+cross-repo / sampling) annotate an advisory care-level rather than gate — and shape its two live forks: Fork 1
+(clear-step for `gate-self`/`statute` — a human always clears a converged fix) and Fork 2 (human backstop on
+high-blast *advisory* auto-lands — a deterministic sampled `review:human` spot-check). Trigger placement is
+**settled** (forced by the daemon charter), not a fork. Finding 4 (advisory-annotation fatigue) is the skeptic's
+primary attack, and it is what produced Fork 2's human-backstop default — a non-zero deterministic human sample,
+not a passive care-level label.
