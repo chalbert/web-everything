@@ -3,9 +3,12 @@ bornAs: xe10z1b
 kind: story
 size: 2
 parent: "2505"
-status: open
+status: resolved
 tags: [plateau-loop, console, design-doc, hygiene, spec]
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-18"
+dateResolved: "2026-07-18"
+graduatedTo: docs/design/backlog-console-design.md
 ---
 
 # Graduate the console design doc to a durable home
