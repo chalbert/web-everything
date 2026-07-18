@@ -43,8 +43,8 @@ Ratify the column, or override just the forks you'd change. **Confidence** shows
 
 | Fork | Corrected default | Main alternative (override) | Recurring web-platform pattern? (the corrected bar) | Confidence |
 |---|---|---|---|---|
-| **Fork 1 · scale-ruler** | **MINT a `scale-ruler` primitive** — the foundational scalar→position/length axis (+ aggregate) that Web Charts composes above | keep app-custom / fold into Web Charts | **yes** — `d3-scale` is a standalone, foundational package precisely because scales sit *below* charts | **High** |
-| **Fork 2 · progress multi-track** | **EXTEND `progress`** with an optional secondary/comparison track (keep provenance OUT of the contract) | compose two readouts + FUI overlay | **yes** — native `<video>` `buffered` vs `currentTime` (media players render dual-track) | **Med-high** |
+| **Fork 1 · scale-ruler** | ✓ **owner call: MINT** a `scale-ruler` primitive — the foundational scalar→position/length axis (+ aggregate) that Web Charts composes above | keep app-custom / fold into Web Charts | **yes** — `d3-scale` + design-tool rulers/guides (Photoshop/Figma) | **High** |
+| **Fork 2 · progress multi-track** | ✓ **RATIFIED: EXTEND `progress`** with an optional secondary/comparison track (provenance kept OUT of the contract) | compose two readouts + FUI overlay | **yes** — native `<video>` `buffered` vs `currentTime` (media players render dual-track) | **Med-high** |
 | **Fork 3 · semantic-zoom / LOD** | **MINT a representational-zoom intent** (distinct from geometric `viewport-transform`) | keep app-custom (compose nav + `hierarchy` + `density`) | **yes** — Pad++ (coined "semantic zoom"), DeepZoom/Seadragon, map LOD, IDE minimaps | **Med-high** |
 | **Fork 4 · threshold-region overlay** | **NOT a separate standard — fold into Fork 1** (reference-line/tick on the scale + a CSS/FUI mask) | mint a standalone overlay primitive | n/a — a *feature* of Fork 1's scale, not a distinct pattern (merit decomposition) | **High** |
 | **Fork 5 · annotated visual-diff surface** | **CANDIDATE — commission the shaping research, then mint** (contract is unshaped, not the pattern) | mint blind now | **yes (pattern)** — diff viewers, code review, Figma review/inspect; only the contract shape is missing | **Med** |
@@ -52,6 +52,8 @@ Ratify the column, or override just the forks you'd change. **Confidence** shows
 | **Fork 7 · swimlane / span-layout** | **MINT as a Web Graph LAYOUT MODE** ("swimlane layout" — a lane-constrained variant on the ratified graph standard) | keep app-custom over CSS Grid + Web Graph | **yes** — BPMN pools/lanes, git-graph lane assignment, subway-map layout (studied algorithm) | **High** |
 
 ## Fork 1 — scale-ruler (the shared quantitative axis)
+
+> **Owner call (2026-07-18) — MINT.** Nicolas affirmed the default; grounding strengthened with design-tool rulers/guides (Photoshop · Illustrator · Figma · Sketch · CAD). Held pending the whole-item resolve.
 
 <figure>
 <figcaption class="text-sm">A scalar maps to position + length on one shared labeled axis; the stack aggregates to an ETA.</figcaption>
@@ -80,7 +82,7 @@ Ratify the column, or override just the forks you'd change. **Confidence** shows
 
 The board renders two things against one time ruler (`1pt ≈ 9min ≈ 17px`): a card's **height** encodes its size, and its **horizon-crossing** encodes its proven fraction; a lane's stacked heights read as its **ETA**. "Extent/position = a scalar on a shared labeled axis, with an aggregate" is the residue once Web Charts (`we:src/_data/projects/webcharts.json`, #105, Vega-Lite `size` encoding) is subtracted — and that residue is exactly the *scale*, the foundational layer charts sit on top of.
 
-- **(a — recommended) MINT a `scale-ruler` primitive** — `{ scalar, unit, pxPer, cap?, axisRef } → length|position + aggregate`. A foundational scale primitive: map a scalar to a position/length on a labeled axis, and aggregate the stack. Grounding: `d3-scale` is a standalone, foundational package precisely because scales sit BELOW charts (the same scale is reused in layout, animation, and color); Vega-Lite treats encodings as the base grammar. "It's Web Charts minus the marks" argues *for* extracting the scale as the foundational layer Web Charts composes — not against a mint. Cite `we:src/_data/projects/webcharts.json`.
+- **(a — recommended) MINT a `scale-ruler` primitive** — `{ scalar, unit, pxPer, cap?, axisRef } → length|position + aggregate`. A foundational scale primitive: map a scalar to a position/length on a labeled axis, and aggregate the stack. Grounding: `d3-scale` is a standalone, foundational package precisely because scales sit BELOW charts (the same scale is reused in layout, animation, and color); Vega-Lite treats encodings as the base grammar. The pattern is **ubiquitous beyond data-viz**: every design/CAD tool — Photoshop, Illustrator, Figma, Sketch, AutoCAD — ships a **ruler** (a persistent labeled axis mapping a scalar document position to screen position in units) with **guides** as reference marks snapped onto it. That the same ruler primitive recurs across charting *and* design tooling is exactly the recurring-web-platform-pattern evidence the corrected bar asks for. "It's Web Charts minus the marks" argues *for* extracting the scale as the foundational layer Web Charts composes — not against a mint. Cite `we:src/_data/projects/webcharts.json`.
 - **(b) Keep app-custom now; defer to a Web Charts extension.** ~~*Recommended default (prep)*~~ → **superseded**. The prep leaned on "the three claimed consumers are all features of the same board — one consumer wearing three hats, not the second the mint bar requires." That bar is rejected. Retained only as the override for a decider who wants the scale to live *inside* Web Charts rather than as a standalone primitive.
 
 **Classification (per-fork pass):** Q1 layer = an Intent/encoding primitive (a scale). Q2/reuse = established by prior art (d3-scale is a standalone foundational package; scales sit below charts and are reused across layout/animation/color). Q6 most-permissive default = extract the foundational scale Web Charts composes. No protocol (no swappable-vendor story).
@@ -88,6 +90,8 @@ The board renders two things against one time ruler (`1pt ≈ 9min ≈ 17px`): a
 **Screen:** clear — the merit the mint-case always saw (a bare labeled axis + aggregate is Web Charts' `size`/positional encoding minus the marks) is now the reason to mint the scale as the foundational layer, not to defer it.
 
 ## Fork 2 — progress multi-track (plan-claimed vs proven)
+
+> **RATIFIED (2026-07-18) — EXTEND `progress`** with an optional generic secondary/comparison track; the app's claimed-vs-verified *provenance* stays out of the contract. Nicolas's call.
 
 <figure>
 <figcaption class="text-sm">One track, two overlaid fills: a wider "plan" fill under a narrower "proven" fill (the native buffered-vs-played pattern).</figcaption>
@@ -177,7 +181,7 @@ The board's L0→L3 (constellation tiles → lane board → gate checklist → b
 
 The board draws **one dashed datum line across all columns** and a `backdrop-filter: grayscale` mask that renders the "past" side as history. `we:src/_data/intents/meter.json` only owns a single scalar-bar tick.
 
-- **(a — recommended) NOT a separate standard — fold into Fork 1.** The datum line **is a reference-line/tick on Fork 1's scale** (a reference value on the shared axis — exactly what `d3-axis` reference rules and Vega's `rule` mark draw). The "past" desaturation is a **CSS/FUI presentation** mask (`backdrop-filter`), not a WE contract. This is an honest decomposition: every separable part already belongs to Fork 1's scale or to FUI. Fold the "mark this region as past/crossed-threshold" semantic into Fork 1 as a reference-line feature.
+- **(a — recommended) NOT a separate standard — fold into Fork 1.** The datum line **is a reference-line/tick on Fork 1's scale** (a reference value on the shared axis — exactly what `d3-axis` reference rules and Vega's `rule` mark draw). The "past" desaturation is a **CSS/FUI presentation** mask (`backdrop-filter`), not a WE contract. This is an honest decomposition: every separable part already belongs to Fork 1's scale or to FUI. Fold the "mark this region as past/crossed-threshold" semantic into Fork 1 as a reference-line feature. (This mirrors design tools exactly: a **guide** in Photoshop/Figma is a draggable reference line that belongs to the **ruler**, not a separate tool — so the datum/horizon line is Fork 1's guide, which is *why* it folds in rather than minting on its own.)
 - **(b) Mint a standalone `threshold-region` primitive.** *Rejected on merit* — bundles a Fork-1 axis tick with a CSS treatment (FUI's turf); nothing separable remains. Note: this rejection stands **independent of the corrected bar** — it is not "no second consumer," it is "decomposes into things that already have owners."
 
 **Classification (per-fork pass):** Q1 = the datum is encoding (Fork 1's scale), the mask is presentation (FUI). Not a distinct layer of its own. Q7 seam: the "past/crossed" semantic sits on the axis, gated to a threshold value.
