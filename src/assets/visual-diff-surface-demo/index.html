@@ -14,15 +14,16 @@
     --line-strong: #c3cad6;
     --accent: #0d9aa8;            /* teal — UI chrome only, not a disposition */
     --accent-ink: #06636d;
-    /* semantic dispositions — distinct from the accent */
+    /* semantic dispositions (review verdict) — distinct from the accent */
     --rejected: #e5484d;
     --rejected-bg: #fdecec;
     --accepted: #2fa36b;
     --accepted-bg: #e7f6ee;
-    --expected: #d9820a;
-    --expected-bg: #fbf0dd;
     --unreviewed: #8b95a6;
     --unreviewed-bg: #eceff3;
+    /* nature axis (planned/known vs unplanned) — orthogonal to disposition */
+    --expected: #d9820a;
+    --expected-bg: #fbf0dd;
     --radius: 10px;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
     --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -43,10 +44,10 @@
       --rejected-bg: #2c1618;
       --accepted: #46b982;
       --accepted-bg: #132419;
-      --expected: #eaa233;
-      --expected-bg: #2a1f0e;
       --unreviewed: #7c8698;
       --unreviewed-bg: #1c222b;
+      --expected: #eaa233;
+      --expected-bg: #2a1f0e;
     }
   }
   :root[data-theme="light"] {
@@ -54,14 +55,14 @@
     --ink-2: #566072; --ink-3: #8b95a6; --line: #dce1e9; --line-strong: #c3cad6;
     --accent: #0d9aa8; --accent-ink: #06636d;
     --rejected: #e5484d; --rejected-bg: #fdecec; --accepted: #2fa36b; --accepted-bg: #e7f6ee;
-    --expected: #d9820a; --expected-bg: #fbf0dd; --unreviewed: #8b95a6; --unreviewed-bg: #eceff3;
+    --unreviewed: #8b95a6; --unreviewed-bg: #eceff3; --expected: #d9820a; --expected-bg: #fbf0dd;
   }
   :root[data-theme="dark"] {
     --ground: #0e1116; --panel: #171b22; --panel-2: #1e242d; --ink: #e8ecf2;
     --ink-2: #9aa4b4; --ink-3: #6b7688; --line: #262d38; --line-strong: #333c49;
     --accent: #2fc2d0; --accent-ink: #7fe0e9;
     --rejected: #f0595e; --rejected-bg: #2c1618; --accepted: #46b982; --accepted-bg: #132419;
-    --expected: #eaa233; --expected-bg: #2a1f0e; --unreviewed: #7c8698; --unreviewed-bg: #1c222b;
+    --unreviewed: #7c8698; --unreviewed-bg: #1c222b; --expected: #eaa233; --expected-bg: #2a1f0e;
   }
 
   * { box-sizing: border-box; }
@@ -83,10 +84,13 @@
     color: var(--accent-ink); font-weight: 650; margin: 0 0 6px;
   }
   h1.title { font-size: clamp(20px, 3vw, 27px); margin: 0 0 6px; letter-spacing: -.01em; text-wrap: balance; }
-  .sub { color: var(--ink-2); margin: 0; max-width: 62ch; font-size: 14px; }
+  .sub { color: var(--ink-2); margin: 0; max-width: 66ch; font-size: 14px; }
+  .sub code { font-family: var(--mono); font-size: .9em; }
 
   /* summary */
   .summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 14px; align-items: center; }
+  .summary .grouplabel { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); font-weight: 650; margin-right: 2px; }
+  .summary .sep { width: 1px; align-self: stretch; background: var(--line-strong); margin: 2px 6px; }
   .chip {
     display: inline-flex; align-items: center; gap: 7px;
     padding: 5px 11px 5px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
@@ -97,11 +101,11 @@
   .chip.total { color: var(--ink-2); font-weight: 550; }
   .dot.rejected { background: var(--rejected); }
   .dot.accepted { background: var(--accepted); }
-  .dot.expected { background: var(--expected); }
   .dot.unreviewed { background: var(--unreviewed); }
+  .dot.expected { background: var(--expected); }
 
   /* layout */
-  .board { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
+  .board { display: grid; grid-template-columns: 1fr 348px; gap: 16px; align-items: start; }
   @media (max-width: 860px) { .board { grid-template-columns: 1fr; } }
 
   .stage {
@@ -145,7 +149,7 @@
   .btn-submit.teal { background: #0d9aa8; padding: 11px 16px; }
   .btn-submit.blue { background: #3b6fe0; padding: 11px 16px; }
 
-  /* diff zones + markers */
+  /* diff zones + markers — marker colour = disposition (review verdict) */
   .dz { position: relative; border-radius: 7px; outline: 2px solid transparent; outline-offset: 3px; transition: outline-color .12s, background .12s; cursor: pointer; }
   .dz .marker {
     position: absolute; top: -9px; left: -9px; z-index: 3;
@@ -154,13 +158,13 @@
     display: grid; place-items: center; box-shadow: 0 1px 3px rgba(0,0,0,.28);
     border: 2px solid var(--panel-2);
   }
+  /* an "expected" (nature) region wears an amber ring on its marker, whatever its disposition */
+  .dz[data-nature="expected"] .marker { border-color: var(--expected); }
   .dz[data-disp="rejected"] .marker { background: var(--rejected); }
   .dz[data-disp="accepted"] .marker { background: var(--accepted); }
-  .dz[data-disp="expected"] .marker { background: var(--expected); }
   .dz[data-disp="unreviewed"] .marker { background: var(--unreviewed); }
   .dz.sel[data-disp="rejected"] { outline-color: var(--rejected); background: var(--rejected-bg); }
   .dz.sel[data-disp="accepted"] { outline-color: var(--accepted); background: var(--accepted-bg); }
-  .dz.sel[data-disp="expected"] { outline-color: var(--expected); background: var(--expected-bg); }
   .dz.sel[data-disp="unreviewed"] { outline-color: var(--unreviewed); background: var(--unreviewed-bg); }
 
   /* inspector */
@@ -176,17 +180,21 @@
   .rnum { width: 18px; height: 18px; border-radius: 50%; flex: none; color: #fff; font: 700 11px/1 var(--mono); display: grid; place-items: center; }
   .region[data-disp="rejected"] .rnum { background: var(--rejected); }
   .region[data-disp="accepted"] .rnum { background: var(--accepted); }
-  .region[data-disp="expected"] .rnum { background: var(--expected); }
   .region[data-disp="unreviewed"] .rnum { background: var(--unreviewed); }
   .rlabel { font-weight: 640; font-size: 13.5px; }
-  .type-badge {
-    margin-left: auto; font: 600 10.5px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase;
-    color: var(--ink-2); border: 1px solid var(--line-strong); border-radius: 5px; padding: 4px 6px;
+  .badges { margin-left: auto; display: inline-flex; gap: 5px; }
+  .badge {
+    font: 600 10.5px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase;
+    border-radius: 5px; padding: 4px 6px; white-space: nowrap;
   }
+  .badge.type { color: var(--ink-2); border: 1px solid var(--line-strong); }
+  .badge.nature-expected { color: var(--expected); border: 1px solid var(--expected); background: var(--expected-bg); }
+  .badge.nature-unplanned { color: var(--ink-3); border: 1px solid var(--line-strong); }
   .anchor { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin: 8px 0 10px; word-break: break-all; }
   .anchor b { color: var(--ink-2); font-weight: 600; }
   .note { font-size: 12px; color: var(--ink-2); margin: 0 0 10px; }
 
+  .disp-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 650; margin: 0 0 5px; }
   .disp-row { display: flex; gap: 4px; }
   .disp-row button {
     flex: 1; font: 600 11px/1 var(--sans); padding: 7px 4px; cursor: pointer;
@@ -196,7 +204,6 @@
   .disp-row button:hover { color: var(--ink); border-color: var(--ink-3); }
   .disp-row button.on[data-d="rejected"] { background: var(--rejected-bg); border-color: var(--rejected); color: var(--rejected); }
   .disp-row button.on[data-d="accepted"] { background: var(--accepted-bg); border-color: var(--accepted); color: var(--accepted); }
-  .disp-row button.on[data-d="expected"] { background: var(--expected-bg); border-color: var(--expected); color: var(--expected); }
   .disp-row button.on[data-d="unreviewed"] { background: var(--unreviewed-bg); border-color: var(--unreviewed); color: var(--ink); }
 
   /* payload */
@@ -219,7 +226,7 @@
     <header class="head">
       <p class="eyebrow">visual-diff · candidate intent</p>
       <h1 class="title">Annotated visual-diff review surface</h1>
-      <p class="sub">Two panes — the design and what was built — with numbered delta regions. Each region carries a structural <b>type</b> and a review <b>disposition</b> on separate axes, and is accepted one at a time. Click a marker or a card; change any disposition.</p>
+      <p class="sub">Two panes — the design and what was built — with numbered delta regions. Each region carries <b>three orthogonal axes</b>: a structural <code>type</code>, a <code>nature</code> (planned/known vs unplanned), and a review <code>disposition</code> — and is dispositioned one region at a time. Click a marker or card; change any disposition and watch the summary + payload react.</p>
     </header>
 
     <div class="summary" id="summary"></div>
@@ -264,25 +271,26 @@
 
     <div class="foot">
       <span><b>type</b> — structural: added · removed · changed</span>
-      <span><b>disposition</b> — review: unreviewed · accepted · rejected · <b>expected</b></span>
-      <span><b>accepted</b> promotes built → baseline · <b>expected</b> parks as known-pending</span>
+      <span><b>nature</b> — planned/known: unplanned · <b>expected</b></span>
+      <span><b>disposition</b> — review verdict: unreviewed · accepted · rejected</span>
+      <span><b>accepted</b> promotes built → baseline · an <b>expected</b> region parks as known-pending</span>
     </div>
   </div>
 </div>
 
 <script>
-  const DISPS = ["unreviewed", "accepted", "rejected", "expected"];
-  const DISP_LABEL = { unreviewed: "Unreviewed", accepted: "Accept", rejected: "Reject", expected: "Expected" };
+  const DISPS = ["unreviewed", "accepted", "rejected"];
+  const DISP_LABEL = { unreviewed: "Unreviewed", accepted: "Accept", rejected: "Reject" };
   const regions = [
-    { id: 3, label: "Heading copy", type: "changed", disposition: "accepted",
+    { id: 3, label: "Heading copy", type: "changed", nature: "unplanned", disposition: "accepted",
       anchor: { anchorType: "dom-selector", designRef: "form > h3", builtRef: "form > h3" },
-      note: "Intentional rewrite — “Welcome back” shortened to “Sign in”." },
-    { id: 2, label: "Submit button colour", type: "changed", disposition: "rejected",
+      note: "“Welcome back” came through as “Sign in”. Unplanned, but a fine change — accept it into the baseline." },
+    { id: 2, label: "Submit button colour", type: "changed", nature: "unplanned", disposition: "rejected",
       anchor: { anchorType: "dom-selector", designRef: "button.submit", builtRef: "button.submit" },
-      note: "Brand teal in the design; rendered a generic blue. Real drift — must fix." },
-    { id: 1, label: "Remember-me checkbox", type: "removed", disposition: "expected",
+      note: "Brand teal in the design; rendered a generic blue. Unplanned drift — must fix." },
+    { id: 1, label: "Remember-me checkbox", type: "removed", nature: "expected", disposition: "unreviewed",
       anchor: { anchorType: "dom-selector", designRef: "form > .field--remember", builtRef: null },
-      note: "Planned but not built yet — known drift, neither fail nor promote." },
+      note: "Planned but not built yet — an expected divergence. It sits outside the accept/reject workflow (known-pending): neither fail nor promote." },
   ];
   let selected = 2;
 
@@ -292,14 +300,12 @@
   function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
 
   function payloadHTML(r) {
-    const j = {
-      id: r.id, label: r.label, type: r.type, disposition: r.disposition,
-      anchor: r.anchor,
-    };
+    const j = { id: r.id, label: r.label, type: r.type, nature: r.nature, disposition: r.disposition, anchor: r.anchor };
     const comments = {
-      type: "structural axis  (Fork B)",
-      disposition: "review axis  (Fork B)",
-      anchor: "tagged union  (Fork C)",
+      type: "structural axis",
+      nature: "nature axis — planned/known, orthogonal to disposition",
+      disposition: "review axis — the verdict",
+      anchor: "tagged union (Fork C)",
     };
     const lines = [];
     lines.push("{");
@@ -326,14 +332,18 @@
   }
 
   function renderSummary() {
-    const counts = { rejected: 0, expected: 0, accepted: 0, unreviewed: 0 };
-    regions.forEach((r) => counts[r.disposition]++);
-    const order = ["rejected", "expected", "accepted", "unreviewed"];
-    const label = { rejected: "Rejected", expected: "Expected", accepted: "Accepted", unreviewed: "Unreviewed" };
-    let html = '<span class="chip total">' + regions.length + ' regions</span>';
-    order.forEach((d) => {
-      html += '<span class="chip"><span class="dot ' + d + '"></span>' + label[d] + ' ' + counts[d] + "</span>";
+    const disp = { unreviewed: 0, accepted: 0, rejected: 0 };
+    let expected = 0;
+    regions.forEach((r) => { disp[r.disposition]++; if (r.nature === "expected") expected++; });
+    const dispOrder = ["rejected", "accepted", "unreviewed"];
+    const label = { rejected: "Rejected", accepted: "Accepted", unreviewed: "Unreviewed" };
+    let html = '<span class="chip total">' + regions.length + " regions</span>";
+    html += '<span class="grouplabel">disposition</span>';
+    dispOrder.forEach((d) => {
+      html += '<span class="chip"><span class="dot ' + d + '"></span>' + label[d] + " " + disp[d] + "</span>";
     });
+    html += '<span class="sep"></span><span class="grouplabel">nature</span>';
+    html += '<span class="chip"><span class="dot expected"></span>Expected ' + expected + "</span>";
     document.getElementById("summary").innerHTML = html;
   }
 
@@ -345,14 +355,17 @@
       el.className = "region" + (r.id === selected ? " sel" : "");
       el.tabIndex = 0;
       el.dataset.disp = r.disposition;
+      el.dataset.nature = r.nature;
       el.dataset.region = r.id;
       const anchorBuilt = r.anchor.builtRef === null ? "—" : r.anchor.builtRef;
+      const natureBadge = '<span class="badge nature-' + r.nature + '">' + r.nature + "</span>";
       el.innerHTML =
         '<div class="region-top"><span class="rnum">' + r.id + '</span>' +
-        '<span class="rlabel">' + esc(r.label) + '</span>' +
-        '<span class="type-badge">' + r.type + '</span></div>' +
-        '<div class="anchor"><b>' + r.anchor.anchorType + '</b> · design <code>' + esc(r.anchor.designRef) + '</code> · built <code>' + esc(anchorBuilt) + '</code></div>' +
-        '<p class="note">' + esc(r.note) + '</p>' +
+        '<span class="rlabel">' + esc(r.label) + "</span>" +
+        '<span class="badges"><span class="badge type">' + r.type + "</span>" + natureBadge + "</span></div>" +
+        '<div class="anchor"><b>' + r.anchor.anchorType + "</b> · design <code>" + esc(r.anchor.designRef) + "</code> · built <code>" + esc(anchorBuilt) + "</code></div>" +
+        '<p class="note">' + esc(r.note) + "</p>" +
+        '<p class="disp-label">disposition</p>' +
         '<div class="disp-row">' +
           DISPS.map((d) => '<button data-d="' + d + '" class="' + (r.disposition === d ? "on" : "") + '">' + DISP_LABEL[d] + "</button>").join("") +
         "</div>";
@@ -369,6 +382,7 @@
     regions.forEach((r) => {
       dzEls(r.id).forEach((el) => {
         el.dataset.disp = r.disposition;
+        el.dataset.nature = r.nature;
         el.classList.toggle("sel", r.id === selected);
       });
     });
