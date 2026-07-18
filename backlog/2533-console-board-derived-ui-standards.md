@@ -14,20 +14,22 @@ tags:
 
 # Decide which console-board-derived primitives become WE standards
 
-Building the plateau console board (#2505 lane board) surfaced seven candidate low-level UI primitives. This decision ratifies, per candidate, whether to **mint** a standard, **extend** an existing one, **park** it, or **keep it app-custom**. The forks are grounded in a prior-art survey published as [/research/console-board-derived-ui-primitives/](/research/console-board-derived-ui-primitives/) (d3-scale, Vega-Lite encodings, native `<progress>`/`<meter>`, Pad++/DeepZoom, Gantt/burndown datum lines) and each carries a recommended default in **bold**. A prep skeptic pass attacked every default and a fresh-context two-confusion screen re-checked every framing; the net is recorded in the `Skeptic:`/`Screen:` line under each fork.
+Building the plateau console board (#2505 lane board) surfaced seven candidate low-level UI primitives. This decision ratifies, per candidate, whether to **mint** a standard, **extend** an existing one, **park** it, or **keep it app-custom**. The forks are grounded in a prior-art survey published as [/research/console-board-derived-ui-primitives/](/research/console-board-derived-ui-primitives/) (d3-scale, Vega-Lite encodings, native `<progress>`/`<meter>`, Pad++/DeepZoom, Gantt datum lines), each carrying a **bold** default — now **re-ruled under the corrected bar below**, so the defaults you see are the merit re-review, not the superseded prep.
 
-**Grounding digest.** The board's card cell, badge, verb, and progress bar already dogfood ratified FUI blocks (`we-section-card`/`we-badge`/`we-button`/`we-progress`); the curved dependency connectors are already the ratified **Web Graph** standard (`@webeverything/contracts/graph` = `we:contracts/graph.ts`, #1289/#1352 — only the DOM-anchored board overlay #1289 remains, and that is *integration*, not a new standard). Each fork below is measured against the **exact** existing standard that already owns its turf, cited as a `we:` locus ref. The through-line the survey + skeptic produced: **mint nothing on one board's evidence.** WE's bar for minting is a *second consumer beyond this board* (memory: WE holds zero impl; a standard exists to be reused across independent parties), and every candidate here either composes an existing standard or is app architecture. Three residues are named as graduation candidates for when a genuine second consumer appears.
+**Grounding digest.** The board's card cell, badge, verb, and progress bar already dogfood ratified FUI blocks (`we-section-card`/`we-badge`/`we-button`/`we-progress`); the curved dependency connectors are already the ratified **Web Graph** standard (`@webeverything/contracts/graph` = `we:contracts/graph.ts`, #1289/#1352 — only the DOM-anchored board overlay #1289 remains, and that is *integration*, not a new standard). Each fork below is measured against the **exact** existing standard that already owns its turf, cited as a `we:` locus ref.
+
+**Corrected bar (supersedes the prep's through-line).** The prep concluded ~~mint nothing on one board's evidence~~ → **corrected**: **prior-art research establishing a fundamental, recurring, web-platform-aligned pattern is sufficient to justify a standard.** The prep's ~~"WE's bar for minting is a second consumer beyond this board"~~ → **corrected**: **"no second in-house consumer yet" is NOT a valid rejection reason.** A standard exists to be reused across independent parties, and that reuse case is established by *prior art* — native primitives, d3/Vega grammar, coined-and-studied algorithms — not by waiting for a second in-house board to appear. Every fork default below is re-ruled on this bar; the old second-consumer defaults are struck and replaced. Two forks (4, 6) still resolve to "not a standard," but on **merit** (clean decomposition / no fundamental contract), never on the struck second-consumer reason.
 
 ### Triage context
 
 - **Kind**: Intent(s) and/or a small visual-encoding primitive · **Native grounding**: `<progress>`/`<meter>`, CSS Grid, SVG, `backdrop-filter`, scroll-driven-animations
-- **Native-first**: ▽ mostly thin extensions of native primitives · **Gap**: ◇ collapsed to ~zero on re-attack · **Effort**: ◆ low–medium · **Source**: board mock v68 + attention-card taxonomy
+- **Native-first**: ▽ mostly thin extensions of native primitives · **Gap**: ◆ real residues confirmed by prior art (not "collapsed to zero") · **Effort**: ◆ low–medium · **Source**: board mock v68 + attention-card taxonomy + prior-art survey
 
 ### Axis-framing — each fork's standard-of-record
 
 Each candidate is classified against the one existing standard that already owns its turf, pinned to a `we:` locus ref (verified to exist):
 
-- **Fork 1 · scale-ruler** — measured against `we:src/_data/projects/webcharts.json` (Web Charts, #105 — Vega-Lite L1 `size`/positional encodings) and native `<progress>`/`aspect-ratio`.
+- **Fork 1 · scale-ruler** — measured against `we:src/_data/projects/webcharts.json` (Web Charts, #105 — Vega-Lite L1 `size`/positional encodings) and native `<progress>`/`aspect-ratio`. Under the corrected bar the scale is the *foundational layer Web Charts composes*, so it extracts as its own primitive.
 - **Fork 2 · progress multi-track** — measured against `we:src/_data/intents/progress.json` (thin, #1469; names `loader.progress`/`flow-progress` as *consumers that compose it*), `we:src/_data/intents/flow-progress.json` (already has a `board` register value), `we:src/_data/intents/meter.json`, and `we:docs/agent/platform-decisions.md#readout-placement-by-value-type` (presentation is a dimension, not a home; re-typing forbidden).
 - **Fork 3 · semantic-zoom / LOD** — measured against `we:src/_data/intents/viewport-transform.json` (geometric pan/zoom, disclaims representation), `we:src/_data/intents/hierarchy.json` (tree traversal), and `we:src/_data/intents/density.json`.
 - **Fork 4 · threshold-region overlay** — measured against Fork 1's axis and `we:src/_data/intents/meter.json` (a single scalar-bar tick).
@@ -37,121 +39,266 @@ Each candidate is classified against the one existing standard that already owns
 
 ### Recommended path at a glance
 
-Ratify the column, or override just the forks you'd change. **Confidence** shows where judgment is actually needed. "Second consumer?" flags whether a reusable-standard case exists **beyond this one board** (the bar for minting) — and the honest answer is *no* for all seven, which is what collapsed the mint/extend defaults.
+Ratify the column, or override just the forks you'd change. **Confidence** shows where judgment is actually needed. The final column is the **corrected bar**: *is this a fundamental, recurring, web-platform-aligned pattern?* — answered from prior art, NOT from "is there a second in-house consumer?" (that question is struck). Five candidates clear the bar (mint/extend); two are still "not a standard," but on merit.
 
-| Fork | Recommended default | Main alternative (override) | 2nd consumer beyond the board? | Confidence |
+| Fork | Corrected default | Main alternative (override) | Recurring web-platform pattern? (the corrected bar) | Confidence |
 |---|---|---|---|---|
-| **Fork 1 · scale-ruler** | **keep app-custom now** — compose Web Charts' scale; the axis-without-marks residue graduates to a Web Charts extension when a 2nd consumer appears | mint a standalone primitive now | no (three features of *one* board) | **Med-high** |
-| **Fork 2 · progress multi-track** | **compose two `progress` readouts** + FUI overlay presentation; don't extend the intent | extend `progress` with a generic secondary-track presentation dimension | no | **Med** |
-| **Fork 3 · semantic-zoom / LOD** | **keep app-custom** — compose navigation + `hierarchy` + `density`; no intent | mint a representational-zoom intent | no | **Med** *(genuine taxonomy question)* |
-| **Fork 4 · threshold-region overlay** | **keep app-custom** — datum line is a tick on Fork 1's axis; the desaturation mask is FUI CSS | mint a standalone overlay primitive | no | **Med** |
-| **Fork 5 · annotated visual-diff surface** | **keep app-custom now** — the contract is unshaped; graduation trigger = a 2nd diff surface that names the delta-type taxonomy | mint an intent now · a not-yet validation-gate | not yet | **Low-med** |
-| **Fork 6 · simulation / dry-run mode** | **keep app-custom** — a no-writes preview *mode* is runtime behavior (impl-not-a-standard); the only WE-shaped residue is a provisional-state data-semantic | mint a `sandbox-mode` intent | no | **Med-high** |
-| **Fork 7 · swimlane / span-layout** | **keep app-custom** — lanes = CSS Grid, fork/fan-in/connectors = Web Graph; name the lane-docking residue as a future Web Graph extension | mint a swimlane intent | no | **High** |
+| **Fork 1 · scale-ruler** | **MINT a `scale-ruler` primitive** — the foundational scalar→position/length axis (+ aggregate) that Web Charts composes above | keep app-custom / fold into Web Charts | **yes** — `d3-scale` is a standalone, foundational package precisely because scales sit *below* charts | **High** |
+| **Fork 2 · progress multi-track** | **EXTEND `progress`** with an optional secondary/comparison track (keep provenance OUT of the contract) | compose two readouts + FUI overlay | **yes** — native `<video>` `buffered` vs `currentTime` (media players render dual-track) | **Med-high** |
+| **Fork 3 · semantic-zoom / LOD** | **MINT a representational-zoom intent** (distinct from geometric `viewport-transform`) | keep app-custom (compose nav + `hierarchy` + `density`) | **yes** — Pad++ (coined "semantic zoom"), DeepZoom/Seadragon, map LOD, IDE minimaps | **Med-high** |
+| **Fork 4 · threshold-region overlay** | **NOT a separate standard — fold into Fork 1** (reference-line/tick on the scale + a CSS/FUI mask) | mint a standalone overlay primitive | n/a — a *feature* of Fork 1's scale, not a distinct pattern (merit decomposition) | **High** |
+| **Fork 5 · annotated visual-diff surface** | **CANDIDATE — commission the shaping research, then mint** (contract is unshaped, not the pattern) | mint blind now | **yes (pattern)** — diff viewers, code review, Figma review/inspect; only the contract shape is missing | **Med** |
+| **Fork 6 · simulation / dry-run mode** | **HOLD — app/runtime behavior, not a UI primitive** (composition of state + guard + diff) | mint a `sandbox-mode` intent | **no** — a *mode*, no fundamental UI contract even with research (merit hold, survives the correction) | **Med-high** |
+| **Fork 7 · swimlane / span-layout** | **MINT as a Web Graph LAYOUT MODE** ("swimlane layout" — a lane-constrained variant on the ratified graph standard) | keep app-custom over CSS Grid + Web Graph | **yes** — BPMN pools/lanes, git-graph lane assignment, subway-map layout (studied algorithm) | **High** |
 
 ## Fork 1 — scale-ruler (the shared quantitative axis)
 
-**Fork-existence:** genuine either/or — *mint a WE primitive* and *keep it app-custom* cannot coexist (you either add the contract to WE or you don't); the excluded branch is "mint now," flawed because there is no second consumer to warrant a standard.
+<figure>
+<figcaption class="text-sm">A scalar maps to position + length on one shared labeled axis; the stack aggregates to an ETA.</figcaption>
+<svg role="img" viewBox="0 0 520 150" width="520" height="150" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">
+<title>Fork 1 scale-ruler: a vertical labeled time axis with ticks at 0, 30m, 60m and 90m; two cards sit at heights encoding a value, and an aggregate lane ETA of about two hours reads at the bottom.</title>
+<line x1="70" y1="15" x2="70" y2="115" stroke="var(--color-border, #cbd0d6)" stroke-width="1.5"/>
+<g font-size="10" fill="var(--color-text-muted, #6b7280)" text-anchor="end">
+<line x1="66" y1="15" x2="74" y2="15" stroke="var(--color-border, #cbd0d6)"/><text x="60" y="18">90m</text>
+<line x1="66" y1="48" x2="74" y2="48" stroke="var(--color-border, #cbd0d6)"/><text x="60" y="51">60m</text>
+<line x1="66" y1="82" x2="74" y2="82" stroke="var(--color-border, #cbd0d6)"/><text x="60" y="85">30m</text>
+<line x1="66" y1="115" x2="74" y2="115" stroke="var(--color-border, #cbd0d6)"/><text x="60" y="118">0</text>
+</g>
+<rect x="120" y="48" width="70" height="67" rx="4" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-primary, #3b6cff)" stroke-width="1.5"/>
+<text x="155" y="86" font-size="10" fill="var(--color-text, #1a1d21)" text-anchor="middle">card A</text>
+<rect x="230" y="82" width="70" height="33" rx="4" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-primary, #3b6cff)" stroke-width="1.5"/>
+<text x="265" y="102" font-size="10" fill="var(--color-text, #1a1d21)" text-anchor="middle">card B</text>
+<line x1="120" y1="126" x2="300" y2="126" stroke="var(--color-border, #cbd0d6)" stroke-dasharray="3 3"/>
+<text x="120" y="141" font-size="11" fill="var(--color-text, #1a1d21)">&#931; lane ETA &#8776; 2h</text>
+<text x="370" y="58" font-size="10" fill="var(--color-text-muted, #6b7280)">height = scalar</text>
+<text x="370" y="74" font-size="10" fill="var(--color-text-muted, #6b7280)">position = on axis</text>
+<text x="370" y="90" font-size="10" fill="var(--color-text-muted, #6b7280)">stack = aggregate</text>
+</svg>
+</figure>
 
-The board renders two things against one time ruler (`1pt ≈ 9min ≈ 17px`): a card's **height** encodes its size, and its **horizon-crossing** encodes its proven fraction; a lane's stacked heights read as its **ETA**. "Extent/position = a scalar on a shared labeled axis, with an aggregate" is the residue once Web Charts (`we:src/_data/projects/webcharts.json`, #105, Vega-Lite `size` encoding) is subtracted.
+**Fork-existence:** genuine either/or — *mint a WE primitive* and *keep it app-custom* cannot coexist (you either add the contract to WE or you don't); under the corrected bar the excluded branch is **"keep app-custom,"** because prior art (d3-scale as a standalone, foundational package) establishes the scale as a recurring web-platform pattern that warrants extraction now.
 
-- **(a — recommended) Keep app-custom now; the axis-without-marks residue is a Web Charts extension.** The board composes an existing scale (Web Charts' Vega-Lite scale / d3-scale's `scaleLinear`); the "bare labeled axis + aggregate" is Vega-Lite's encoding *minus the marks*, so its home — if it ever needs one — is a Web Charts extension, not a fresh primitive. Graduation trigger: a genuine off-board second consumer.
-- **(b) Mint a standalone `scale-ruler` primitive now** — `{ scalar, unit, pxPer, cap?, axisRef } → length|position + aggregate`. *Rejected as the default* — the three claimed consumers (sized cards, progress-position, lane-ETA) are all features of the *same* board; that is one consumer wearing three hats, not the second, independent consumer the mint bar requires. Overridable if the decider reads the three reuses as sufficient.
+The board renders two things against one time ruler (`1pt ≈ 9min ≈ 17px`): a card's **height** encodes its size, and its **horizon-crossing** encodes its proven fraction; a lane's stacked heights read as its **ETA**. "Extent/position = a scalar on a shared labeled axis, with an aggregate" is the residue once Web Charts (`we:src/_data/projects/webcharts.json`, #105, Vega-Lite `size` encoding) is subtracted — and that residue is exactly the *scale*, the foundational layer charts sit on top of.
 
-**Classification (per-fork pass):** Q1 layer = would be an Intent/encoding dimension, but Q2/reuse = it is *residue of an existing standard* (Web Charts owns the encoding grammar). Q6 most-permissive default = compose the existing scale. No protocol (no swappable-vendor story).
-**Skeptic:** REFUTED → flipped mint→app-custom. Three board features are not a second consumer, and "a bare labeled axis + aggregate" is exactly Web Charts' `size`/positional encoding minus the marks — residue of an existing standard, not a new primitive.
-**Screen:** clear — the merit the mint-case saw is preserved (named as a Web Charts extension residue + a concrete graduation trigger), so nothing is discarded; the ruling is on merit (it's Web Charts' turf), timing is a trigger.
+- **(a — recommended) MINT a `scale-ruler` primitive** — `{ scalar, unit, pxPer, cap?, axisRef } → length|position + aggregate`. A foundational scale primitive: map a scalar to a position/length on a labeled axis, and aggregate the stack. Grounding: `d3-scale` is a standalone, foundational package precisely because scales sit BELOW charts (the same scale is reused in layout, animation, and color); Vega-Lite treats encodings as the base grammar. "It's Web Charts minus the marks" argues *for* extracting the scale as the foundational layer Web Charts composes — not against a mint. Cite `we:src/_data/projects/webcharts.json`.
+- **(b) Keep app-custom now; defer to a Web Charts extension.** ~~*Recommended default (prep)*~~ → **superseded**. The prep leaned on "the three claimed consumers are all features of the same board — one consumer wearing three hats, not the second the mint bar requires." That bar is rejected. Retained only as the override for a decider who wants the scale to live *inside* Web Charts rather than as a standalone primitive.
+
+**Classification (per-fork pass):** Q1 layer = an Intent/encoding primitive (a scale). Q2/reuse = established by prior art (d3-scale is a standalone foundational package; scales sit below charts and are reused across layout/animation/color). Q6 most-permissive default = extract the foundational scale Web Charts composes. No protocol (no swappable-vendor story).
+**Skeptic:** REVERSED (platform-owner correction) → app-custom → **MINT**. The "three board features aren't a second consumer" argument is rejected: a scale is a foundational, recurring, web-platform-aligned pattern, and d3-scale being standalone *because scales sit below charts* is the reuse case. "No second in-house consumer yet" is not a rejection reason.
+**Screen:** clear — the merit the mint-case always saw (a bare labeled axis + aggregate is Web Charts' `size`/positional encoding minus the marks) is now the reason to mint the scale as the foundational layer, not to defer it.
 
 ## Fork 2 — progress multi-track (plan-claimed vs proven)
 
-**Fork-existence:** genuine either/or — *extend the `progress` contract* vs *don't* cannot coexist; the excluded branch is "extend progress (or mint a new intent)," flawed because it re-types provenance as completion and bakes presentation into a deliberately-thin contract.
+<figure>
+<figcaption class="text-sm">One track, two overlaid fills: a wider "plan" fill under a narrower "proven" fill (the native buffered-vs-played pattern).</figcaption>
+<svg role="img" viewBox="0 0 520 92" width="520" height="92" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">
+<title>Fork 2 progress multi-track: a single progress track carrying two overlaid fills, a lighter wider planned fill and a darker narrower proven fill.</title>
+<rect x="20" y="34" width="420" height="24" rx="12" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-border, #cbd0d6)"/>
+<rect x="20" y="34" width="300" height="24" rx="12" fill="var(--color-primary, #3b6cff)" opacity="0.32"/>
+<rect x="20" y="34" width="175" height="24" rx="12" fill="var(--color-primary, #3b6cff)"/>
+<line x1="195" y1="26" x2="195" y2="34" stroke="var(--color-text-muted, #6b7280)"/>
+<text x="195" y="22" font-size="10" fill="var(--color-text, #1a1d21)" text-anchor="middle">proven</text>
+<line x1="320" y1="58" x2="320" y2="70" stroke="var(--color-text-muted, #6b7280)"/>
+<text x="320" y="82" font-size="10" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">plan</text>
+<text x="452" y="49" font-size="10" fill="var(--color-text-muted, #6b7280)">one track</text>
+</svg>
+</figure>
+
+**Fork-existence:** genuine either/or — *extend the `progress` contract* vs *don't* cannot coexist; the excluded branch is **"don't extend,"** flawed because a generic secondary/comparison track is a NATIVE pattern the intent can own — provided the app's provenance semantic is kept out of the contract.
 
 Board cards show **two** fractions: the agent's plan claim and the spec-proven amount. Everything else in the first "progress family" sketch maps to ratified homes — bar = `we:src/_data/intents/progress.json`, gauge = `we:src/_data/intents/meter.json`, checklist ≈ `we:src/_data/intents/flow-progress.json` (which already has a `board` register — a config dimension, "never a fork"), position = Fork 1's ruler. Unifying bar+gauge under one "render dimension" is **illegal** — it re-opens the ratified `progress ≠ meter ≠ status` decision (`we:docs/agent/platform-decisions.md#readout-placement-by-value-type`, #1469/#1410).
 
-- **(a — recommended) Compose two `progress` readouts; don't extend the intent.** `progress` is thin by ratification (#1469) and names its consumers as things that *compose* it, so two completion magnitudes are two composed readouts, and rendering them as one overlaid track (the buffered-vs-played pattern) is a *presentation* concern FUI owns (presentation is a dimension, not a home). The board's specific "claimed vs verified" is a **data-provenance / trust** distinction — if it needs a standard home that home is provenance/audit, never a second track on `progress`.
-- **(b) Extend `progress` with a generic secondary-track presentation dimension.** *Main alternative (overridable)* — defensible because intents own their presentation dimensions; but it re-adds to a deliberately-thin contract what a composing consumer + FUI presentation already cover, and it risks smuggling the provenance semantic onto a completion intent.
+- **(a — recommended) EXTEND `progress` with an optional secondary/comparison track.** Dual-track progress is a NATIVE pattern — `<video>`'s `buffered` vs `currentTime`, which every media player renders as a lighter buffered fill under the played fill. So a generic secondary/comparison track is a *presentation dimension the intent can legitimately own*, and prior art establishes it as recurring and web-aligned. **CAVEAT (state in the contract):** the board's specific "claimed vs verified" is a **data-provenance / trust** distinction — a separate axis. Extend the *generic* secondary track; do **not** bake the app's provenance semantic onto a completion intent. Cite `we:src/_data/intents/progress.json`.
+- **(b) Compose two `progress` readouts + FUI overlay presentation.** ~~*Recommended default (prep)*~~ → **superseded**. Defensible (presentation is a dimension), but it pushes a native, recurring dual-track pattern out of the contract that already owns progress presentation; retained as the override.
 - **(c) Mint a new "progress-family" intent.** *Rejected* — re-litigates a ratified typing decision; the family already exists as separate intents.
 
-**Classification (per-fork pass):** Q1 = Intent dimension; Q2 no protocol; Q3/Q4 the "second track" is a *presentation* value, and presentation is already a dimension the intent owns (readout-placement) → not a new contract. Provenance is a *seam to another concern* (Q7), not a progress dimension.
-**Skeptic:** REFUTED → flipped extend→compose. Progress names consumers that compose it; "claimed vs verified" is provenance, not a completion magnitude, so extending the base intent mis-types it and bakes presentation into the contract.
-**Screen:** clear — keep the two-track notion generic (claimed-vs-proven is the app's binding, not a backlog-domain term baked into WE); the surviving judgment (compose vs extend) is preserved as the override in (b).
+**Classification (per-fork pass):** Q1 = Intent dimension; Q2 no protocol; Q3/Q4 the "second track" is a *presentation* value native to progress (buffered-vs-played), so it is a dimension the intent owns — extend, don't re-type. Provenance is a *seam to another concern* (Q7), kept OUT of the contract.
+**Skeptic:** REVERSED → compose → **EXTEND** (generic secondary track). Dual-track progress is native (`buffered` vs `currentTime`); pushing it out to "compose + FUI" under-serves a recurring web pattern. The prep's real catch survives as the caveat: keep "claimed vs verified" (provenance) out of the contract.
+**Screen:** clear — the two-track notion stays generic (claimed-vs-proven is the app's *binding*, not a backlog term baked into WE); the surviving judgment (how much presentation belongs in the intent vs FUI) is preserved as the (b) override.
 
 ## Fork 3 — semantic-zoom / level-of-detail navigation
 
-**Fork-existence:** genuine either/or — *mint a representational-zoom intent* vs *keep app-custom* cannot coexist; the excluded branch is "mint," flawed because drill-down navigation already composes from existing standards and no second consumer warrants a new one.
+<figure>
+<figcaption class="text-sm">Three representations of the same item across zoom levels: chip &#8594; card-with-bar &#8594; expanded-with-checklist.</figcaption>
+<svg role="img" viewBox="0 0 520 150" width="520" height="150" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">
+<title>Fork 3 semantic zoom: the same item shown at three levels of detail, a one-line chip, then a card with a progress bar, then an expanded panel with a mini checklist, with zoom cues between them.</title>
+<text x="70" y="30" font-size="9" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">L1</text>
+<rect x="10" y="62" width="120" height="26" rx="13" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-border, #cbd0d6)"/>
+<text x="70" y="79" font-size="10" fill="var(--color-text, #1a1d21)" text-anchor="middle">&#9656; pay-off 45%</text>
+<text x="150" y="79" font-size="17" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">&#8594;</text>
+<text x="245" y="30" font-size="9" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">L2</text>
+<rect x="170" y="46" width="150" height="60" rx="6" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-border, #cbd0d6)"/>
+<text x="182" y="66" font-size="10" fill="var(--color-text, #1a1d21)">Pay-off</text>
+<rect x="182" y="78" width="126" height="10" rx="5" fill="var(--color-border, #cbd0d6)"/>
+<rect x="182" y="78" width="57" height="10" rx="5" fill="var(--color-primary, #3b6cff)"/>
+<text x="342" y="79" font-size="17" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">&#8594;</text>
+<text x="435" y="30" font-size="9" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">L3</text>
+<rect x="360" y="40" width="150" height="100" rx="6" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-border, #cbd0d6)"/>
+<text x="372" y="58" font-size="10" fill="var(--color-text, #1a1d21)">Pay-off</text>
+<g font-size="9" fill="var(--color-text-muted, #6b7280)">
+<rect x="372" y="68" width="9" height="9" rx="2" fill="var(--color-primary, #3b6cff)"/><text x="388" y="76">spec drafted</text>
+<rect x="372" y="86" width="9" height="9" rx="2" fill="var(--color-primary, #3b6cff)"/><text x="388" y="94">tests green</text>
+<rect x="372" y="104" width="9" height="9" rx="2" fill="none" stroke="var(--color-border, #cbd0d6)"/><text x="388" y="112">deployed</text>
+</g>
+</svg>
+</figure>
 
-The board's L0→L3 (constellation tiles → lane board → gate checklist → build inspector) is a zoom where **each level is a different representation**, not a scaled view. `we:src/_data/intents/viewport-transform.json` owns geometric pan/zoom (and explicitly disclaims representation); `we:src/_data/intents/hierarchy.json` owns tree traversal; `we:src/_data/intents/density.json` owns detail-tier.
+**Fork-existence:** genuine either/or — *mint a representational-zoom intent* vs *keep app-custom* cannot coexist; the excluded branch is **"keep app-custom,"** flawed because semantic zoom (each level a different *representation*, not a scaled view) is a coined, studied pattern distinct from geometric zoom, which prior art shows is fundamental and recurring.
 
-- **(a — recommended) Keep app-custom — compose navigation + `hierarchy` + `density`.** "Each level is a different view" is drill-down routing + density/responsive rendering the platform already provides; the only non-trivial residue is a "floor of signals that must survive every level," and one board wanting it is not a second consumer.
-- **(b) Mint a `semantic-zoom` / LOD intent.** *Main alternative (overridable)* — representational LOD is genuinely distinct from geometric zoom, so *naming* it is a real taxonomy call (the screen kept this open); but the mint bar needs a second, non-board consumer first.
+The board's L0→L3 (constellation tiles → lane board → gate checklist → build inspector) is a zoom where **each level is a different representation**. `we:src/_data/intents/viewport-transform.json` owns geometric pan/zoom (and explicitly disclaims representation); `we:src/_data/intents/hierarchy.json` owns tree traversal; `we:src/_data/intents/density.json` owns detail-tier.
+
+- **(a — recommended) MINT a representational-zoom (semantic-zoom / LOD) intent**, distinct from geometric `viewport-transform`. Grounding: Pad++ coined "semantic zoom"; Microsoft DeepZoom/Seadragon; map zoom that *changes representation* (roads → labels → buildings), not just scale; IDE minimaps. Representational LOD is a fundamental, recurring, studied pattern — its home is a new intent, not a geometric-zoom extension (that conflates the two) and not app navigation policy. Cite `we:src/_data/intents/viewport-transform.json`, `we:src/_data/intents/density.json`.
+- **(b) Keep app-custom — compose navigation + `hierarchy` + `density`.** ~~*Recommended default (prep)*~~ → **superseded**. The prep held the mint only for want of a second, non-board consumer — a struck reason. Retained as the override for a decider who reads representational LOD as fully covered by drill-down routing + density rendering.
 - **(c) Extend `viewport-transform`.** *Rejected* — conflates geometric zoom with representational swap.
 
-**Classification (per-fork pass):** Q1 = candidate Intent, but Q2/reuse fails (no protocol, no 2nd consumer); Q4 the level axis could be a dimension, but its owner is navigation/`density` composed, not a new home. Genuine taxonomy question → Confidence Med.
-**Skeptic:** REFUTED → flipped mint→app-custom. "Each level a different page" is routing + density rendering (navigation already exists); the absence of an owner doesn't mint an intent when app navigation policy is the un-beaten null hypothesis and there's no off-board consumer.
-**Screen:** clear — representational LOD *is* genuinely distinct from geometric zoom (kept as the (b) override with Confidence Med, the one fork where skeptic and screen legitimately diverge); the mint is held only by the second-consumer bar, not by a framing flaw.
+**Classification (per-fork pass):** Q1 = a candidate Intent; representational LOD is genuinely distinct from geometric zoom (prior art: Pad++/DeepZoom/map LOD/minimaps) → mint. Not a `viewport-transform` extension (that is geometric). The level axis is the intent's own dimension.
+**Skeptic:** REVERSED → app-custom → **MINT**. "Each level a different page = routing + density" understated a coined, studied pattern; the absence of an in-house second consumer was the only thing holding the mint, and that reason is struck.
+**Screen:** clear — representational LOD *is* genuinely distinct from geometric zoom (the prep already conceded this as the real taxonomy call); the correction promotes that concession from "override" to the default.
 
 ## Fork 4 — threshold-region overlay (the horizon mask)
 
-**Fork-existence:** genuine either/or — *mint a standalone overlay* vs *keep app-custom* cannot coexist; the excluded branch is "mint standalone," flawed because it is not separable from Fork 1's axis and its visual half is FUI CSS.
+<figure>
+<figcaption class="text-sm">A datum line on the shared scale, with the region above it desaturated as "past" &#8212; a tick (Fork 1) plus a CSS mask, not a standard.</figcaption>
+<svg role="img" viewBox="0 0 520 140" width="520" height="140" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">
+<title>Fork 4 threshold region: a single column with a dashed horizontal datum line labelled delivery horizon; the region above the line is greyed out as the past.</title>
+<rect x="50" y="15" width="130" height="110" rx="4" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-border, #cbd0d6)"/>
+<rect x="50" y="15" width="130" height="40" rx="4" fill="var(--color-text-muted, #6b7280)" opacity="0.22"/>
+<text x="115" y="40" font-size="9" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">past (desaturated)</text>
+<line x1="40" y1="55" x2="480" y2="55" stroke="var(--color-text, #1a1d21)" stroke-width="1.3" stroke-dasharray="5 4"/>
+<text x="200" y="51" font-size="10" fill="var(--color-text, #1a1d21)">delivery horizon</text>
+<rect x="70" y="70" width="90" height="16" rx="3" fill="var(--color-primary, #3b6cff)" opacity="0.8"/>
+<rect x="70" y="94" width="60" height="16" rx="3" fill="var(--color-primary, #3b6cff)" opacity="0.8"/>
+<text x="200" y="86" font-size="10" fill="var(--color-text-muted, #6b7280)">= a tick on the scale (Fork 1)</text>
+<text x="200" y="102" font-size="10" fill="var(--color-text-muted, #6b7280)">+ a CSS mask (FUI presentation)</text>
+</svg>
+</figure>
+
+**Fork-existence:** genuine either/or — *a separate threshold-region standard* vs *a feature of Fork 1's scale* cannot coexist; the excluded branch is **"separate standard,"** flawed on **merit** (not demand): it decomposes cleanly into a Fork-1 tick + a CSS mask, so nothing separable remains to mint.
 
 The board draws **one dashed datum line across all columns** and a `backdrop-filter: grayscale` mask that renders the "past" side as history. `we:src/_data/intents/meter.json` only owns a single scalar-bar tick.
 
-- **(a — recommended) Keep app-custom.** The datum line **is a tick on Fork 1's axis** (a reference value on the shared scale), so it is not a separable primitive; the "past" desaturation mask is region **styling** FUI owns (`backdrop-filter`), not a WE contract. The only conceivably-WE-shaped part is the *semantic* "mark this region as past/crossed-threshold," and that rides the axis rather than standing alone.
-- **(b) Mint a standalone `threshold-region` primitive.** *Rejected as the default* — bundles an axis tick (Fork 1's turf) with a CSS treatment (FUI's turf); nothing separable remains, and no second consumer wants a past/future split.
+- **(a — recommended) NOT a separate standard — fold into Fork 1.** The datum line **is a reference-line/tick on Fork 1's scale** (a reference value on the shared axis — exactly what `d3-axis` reference rules and Vega's `rule` mark draw). The "past" desaturation is a **CSS/FUI presentation** mask (`backdrop-filter`), not a WE contract. This is an honest decomposition: every separable part already belongs to Fork 1's scale or to FUI. Fold the "mark this region as past/crossed-threshold" semantic into Fork 1 as a reference-line feature.
+- **(b) Mint a standalone `threshold-region` primitive.** *Rejected on merit* — bundles a Fork-1 axis tick with a CSS treatment (FUI's turf); nothing separable remains. Note: this rejection stands **independent of the corrected bar** — it is not "no second consumer," it is "decomposes into things that already have owners."
 
-**Classification (per-fork pass):** Q1 = the datum is encoding (Fork 1), the mask is presentation (FUI). Not a distinct layer of its own. Q7 seam: the "past/crossed" semantic sits on the axis, gated to a threshold value.
-**Skeptic:** REFUTED → flipped mint→app-custom. The datum line is a tick on the axis Fork 1 defines and the grayscale-past is pure CSS; there is no standard here distinct from the axis, and no second consumer.
-**Screen:** flagged(impl) → fixed. The desaturation *mask* was an impl (visual-treatment) leak onto the WE side — ceded to FUI; only the semantic "past/crossed-threshold" marking is WE-shaped, and it rides the axis rather than minting a primitive.
+**Classification (per-fork pass):** Q1 = the datum is encoding (Fork 1's scale), the mask is presentation (FUI). Not a distinct layer of its own. Q7 seam: the "past/crossed" semantic sits on the axis, gated to a threshold value.
+**Skeptic:** HOLD-as-not-separate (merit; survives the correction) → **NOT a standalone standard**. The datum line is a reference tick on Fork 1's scale and the grayscale-past is pure CSS. This never depended on the second-consumer bar — it is a clean decomposition, so the corrected principle doesn't move it.
+**Screen:** flagged(impl) → fixed. The desaturation *mask* was an impl (visual-treatment) leak onto the WE side — ceded to FUI; only the semantic "past/crossed-threshold" marking is WE-shaped, and it rides Fork 1's scale as a reference-line feature rather than minting a primitive.
 
 ## Fork 5 — annotated visual-diff surface
 
-**Fork-existence:** genuine either/or — *mint a diff-surface intent* vs *keep app-custom* cannot coexist; the excluded branch is "mint now," flawed because the contract is unshaped (no delta-type taxonomy or anchor payload defined).
+<figure>
+<figcaption class="text-sm">Two panes, design vs built, with one region outlined as a numbered typed delta &#8212; a real pattern whose contract is still unshaped.</figcaption>
+<svg role="img" viewBox="0 0 520 140" width="520" height="140" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">
+<title>Fork 5 annotated visual diff: two side-by-side panes labelled design and built, with one region in the built pane outlined as a delta and tagged with a numbered marker.</title>
+<text x="125" y="22" font-size="10" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">design</text>
+<rect x="30" y="28" width="190" height="95" rx="6" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-border, #cbd0d6)"/>
+<rect x="46" y="44" width="120" height="12" rx="3" fill="var(--color-border, #cbd0d6)"/>
+<rect x="46" y="64" width="158" height="40" rx="4" fill="var(--color-border, #cbd0d6)" opacity="0.5"/>
+<text x="365" y="22" font-size="10" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">built</text>
+<rect x="270" y="28" width="190" height="95" rx="6" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-border, #cbd0d6)"/>
+<rect x="286" y="44" width="120" height="12" rx="3" fill="var(--color-border, #cbd0d6)"/>
+<rect x="286" y="64" width="158" height="40" rx="4" fill="var(--color-primary, #3b6cff)" stroke="var(--color-primary, #3b6cff)" stroke-dasharray="4 3" stroke-width="1.5" opacity="0.35"/>
+<rect x="286" y="64" width="158" height="40" rx="4" fill="none" stroke="var(--color-primary, #3b6cff)" stroke-dasharray="4 3" stroke-width="1.5"/>
+<circle cx="286" cy="64" r="9" fill="var(--color-primary, #3b6cff)"/>
+<text x="286" y="68" font-size="10" fill="var(--color-surface-card, #ffffff)" text-anchor="middle">1</text>
+</svg>
+</figure>
+
+**Fork-existence:** genuine either/or — *mint now* vs *shape-then-mint* cannot coexist; the excluded branch is **"mint now (blind),"** flawed because the pattern warrants a standard but the *contract* (delta-type taxonomy, anchor payload, accept model) is genuinely unshaped, so the honest path is to commission shaping research first.
 
 The L3 inspector's "design → built" two-pane compare with numbered, clickable, **typed** delta regions (real drift vs "expected, not reached yet"). No standard owns side-by-side visual comparison (`we:src/_data/intents/audit-timeline.json` is a text feed).
 
-- **(a — recommended) Keep app-custom now; the contract is unshaped.** An annotated-diff-surface intent is a *plausible* candidate on merit, but its contract (the delta-type taxonomy, the anchor payload, the accept/typed-region model) is not yet shaped, so there is nothing to ratify. Graduation trigger: a **second** review/diff surface that names the delta-type taxonomy — at which point mint (or a not-yet validation-gate) becomes the call.
-- **(b) Mint an intent now** *(or file a not-yet validation-gate)*. *Rejected as the default* — premature: shape the contract once a second diff surface exists; a validation-gate beats a park-for-cost if a placeholder is wanted.
+- **(a — recommended) CANDIDATE — commission the shaping research, then mint.** Before/after annotated diff is a real, recurring pattern (diff viewers, code review, Figma review/inspect). The pattern *justifies* a standard under the corrected bar; what is missing is the **contract shape** — the delta-type taxonomy, the anchor payload, the accept/typed-region model. So the corrected action is to commission the shaping research (a `/research/` topic) and **then mint** — NOT reject, and NOT "wait for a second in-house diff surface." Cite `we:src/_data/intents/audit-timeline.json`.
+- **(b) Mint an intent now (blind).** *Rejected as premature* — the pattern is real but the contract is unshaped; ratifying a shape nobody has designed bakes in guesses. Shape first.
+- **(c) Reject / park for cost.** *Rejected* — the pattern is established prior art; cost/demand are forbidden fork reasons and the corrected bar removes the "no second consumer" excuse.
 
-**Classification (per-fork pass):** Q1 = candidate Intent, but the contract is under-specified (which-layer test can't run cleanly over an unshaped contract — Contract-first: don't narrow it to force a verdict). No protocol.
-**Skeptic:** REFUTED → flipped park→app-custom. "Park (heavier; no second consumer yet)" cited cost and demand — both forbidden fork reasons; stripped of them, the merit-honest verdict is that the contract is simply unshaped, so app-custom now with a concrete trigger.
-**Screen:** flagged(prio) → fixed. "No second consumer yet" was prioritization wearing a fork's clothes; re-ruled on merit (the contract is unshaped) and the demand signal demoted to a concrete graduation trigger, not the verdict.
+**Classification (per-fork pass):** Q1 = a candidate Intent whose contract is under-specified (Contract-first: don't narrow it to force a verdict) → shape via research, then mint. No protocol.
+**Skeptic:** CORRECTED → not "reject/park", but **CANDIDATE → commission shaping research → mint**. The prep already saw "no second consumer" was prioritization in a fork's clothes; the correction goes further — the pattern is real prior art, so the only open work is shaping the contract, not justifying the standard.
+**Screen:** flagged(prio) → fixed. "No second consumer yet" was prioritization; re-ruled — the merit-honest verdict is that the pattern is established and the *contract* is what's unshaped, so the action is research-then-mint, not a park.
 
 ## Fork 6 — simulation / dry-run surface mode
 
-**Fork-existence:** genuine either/or — *mint a `sandbox-mode` intent* vs *keep app-custom* cannot coexist; the excluded branch is "mint," flawed because a whole-surface no-writes *mode* is runtime behavior (impl), not a definitions-layer contract.
+<figure>
+<figcaption class="text-sm">A whole-surface "no writes" mode &#8212; composed from state + guard + diff, not a UI primitive.</figcaption>
+<svg role="img" viewBox="0 0 520 122" width="520" height="122" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">
+<title>Fork 6 dry-run mode: a surface with a simulation, no-writes banner across the top and two greyed-out inert buttons below it.</title>
+<rect x="70" y="15" width="380" height="95" rx="6" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-border, #cbd0d6)"/>
+<rect x="70" y="15" width="380" height="26" rx="6" fill="var(--warn-text, #b47a00)" opacity="0.2"/>
+<rect x="70" y="30" width="380" height="11" fill="var(--warn-text, #b47a00)" opacity="0.2"/>
+<text x="260" y="32" font-size="11" fill="var(--warn-text, #b47a00)" text-anchor="middle" font-weight="bold">SIMULATION &#183; no writes</text>
+<rect x="94" y="62" width="90" height="28" rx="5" fill="var(--color-text-muted, #6b7280)" opacity="0.25" stroke="var(--color-border, #cbd0d6)"/>
+<text x="139" y="80" font-size="10" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">Save</text>
+<rect x="200" y="62" width="90" height="28" rx="5" fill="var(--color-text-muted, #6b7280)" opacity="0.25" stroke="var(--color-border, #cbd0d6)"/>
+<text x="245" y="80" font-size="10" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">Apply</text>
+<text x="316" y="80" font-size="10" fill="var(--color-text-muted, #6b7280)">(inert)</text>
+</svg>
+</figure>
+
+**Fork-existence:** genuine either/or — *mint a `sandbox-mode` intent* vs *hold (keep app-custom)* cannot coexist; the excluded branch is **"mint,"** flawed because a whole-surface no-writes *mode* is composition (state + guard + diff), with no fundamental UI *contract* even under the corrected bar.
 
 A whole-surface mode that freezes live data, disables writes, and diffs on exit ("no writes" banner, inert verbs). `we:src/_data/intents/experiment.json` owns declarative variant *assignment* (who sees what) — a different thing from write-suppression.
 
-- **(a — recommended) Keep app-custom (impl-not-a-standard).** A "safe preview / no-writes" *mode* is runtime behavior that lives in FUI/app; WE holds zero impl, so there is no definitions-layer contract to hold. The only conceivably-WE-shaped residue is a **provisional / uncommitted state** *data-semantic* (a value's "not yet committed" flag), not a mode — and that has no second consumer yet.
-- **(b) Mint a `sandbox-mode` intent.** *Rejected* — mis-frames an impl behavior as a standard-in-waiting; a mode is not a declarative UX contract.
+- **(a — recommended) HOLD — app/runtime behavior, not a UI primitive.** A whole-surface "safe preview / no-writes" *mode* is composed from pieces that already exist: a provisional/uncommitted **state** flag + a write **guard** + a **diff** on exit. Even *with* prior-art research there is no fundamental UI *contract* to ratify here — only composition of standards. This hold **survives the corrected principle**: it is a **merit** hold (nothing to mint), not a struck second-consumer/demand hold. The only WE-shaped residue is the provisional-state data-semantic, which rides Fork 2's provenance seam, not a mode. Cite `we:src/_data/intents/experiment.json`.
+- **(b) Mint a `sandbox-mode` intent.** *Rejected* — a mode is runtime behavior, not a declarative UX contract; WE holds zero impl, so there is no definitions-layer artifact to hold.
 
-**Classification (per-fork pass):** Q1 = neither Block/Intent/Protocol/Capability on the WE side — it is impl (a runtime mode). The `experiment` seam is adjacent but distinct (assignment ≠ write-suppression).
-**Skeptic:** REFUTED → flipped park→keep-app-custom. A whole-surface freeze-writes mode is a running behavior = impl-not-a-standard; "park" implied it might later mint, mis-labeling impl as a standard-in-waiting.
-**Screen:** flagged(impl) → fixed. The dry-run *mode* is a runtime behavior (impl/FUI); the verdict was re-cast from "park" to keep-app-custom, and the only WE-worthy residue named as a provisional-state data-semantic, not a mode.
+**Classification (per-fork pass):** Q1 = neither Block/Intent/Protocol/Capability on the WE side — it is impl (a runtime mode composed from state + guard + diff). The `experiment` seam is adjacent but distinct (assignment ≠ write-suppression).
+**Skeptic:** HOLD (survives the corrected principle) → **keep app-custom**. A whole-surface freeze-writes mode is a running behavior = impl-not-a-standard; it does not become a primitive under the corrected bar, because the bar mints *fundamental contracts*, and here there is only composition. Distinct from Forks 1/3/7, which are genuine contracts.
+**Screen:** flagged(impl) → fixed. The dry-run *mode* is runtime behavior (impl/FUI); the verdict holds as keep-app-custom, and the only WE-worthy residue is named as a provisional-state data-semantic (Fork 2's provenance axis), not a mode.
 
 ## Fork 7 — swimlane / span-layout
 
-**Fork-existence:** genuine either/or — *mint a swimlane intent* vs *keep app-custom* cannot coexist; the excluded branch is "mint," flawed because lanes + fork/fan-in decompose cleanly into existing standards (CSS Grid + Web Graph), leaving no generic residue with a second consumer.
+<figure>
+<figcaption class="text-sm">Lanes as columns; the middle lane forks into two sub-columns that re-join at a fan-in node &#8212; lane assignment + fork/fan-in.</figcaption>
+<svg role="img" viewBox="0 0 520 150" width="520" height="150" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">
+<title>Fork 7 swimlane layout: three lane columns, where the middle lane forks into two sub-columns that re-join at a fan-in node below via dashed connectors.</title>
+<rect x="15" y="15" width="145" height="125" rx="5" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-border, #cbd0d6)"/>
+<rect x="177" y="15" width="166" height="125" rx="5" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-primary, #3b6cff)" stroke-dasharray="3 3"/>
+<rect x="360" y="15" width="145" height="125" rx="5" fill="var(--color-surface-card, #f6f7f9)" stroke="var(--color-border, #cbd0d6)"/>
+<g font-size="9" fill="var(--color-text-muted, #6b7280)" text-anchor="middle">
+<text x="87" y="30">lane A</text><text x="260" y="30">lane B (fork)</text><text x="432" y="30">lane C</text>
+</g>
+<circle cx="87" cy="70" r="9" fill="var(--color-primary, #3b6cff)"/>
+<circle cx="432" cy="70" r="9" fill="var(--color-primary, #3b6cff)"/>
+<circle cx="260" cy="52" r="8" fill="var(--color-primary, #3b6cff)"/>
+<line x1="253" y1="58" x2="222" y2="80" stroke="var(--color-text-muted, #6b7280)"/>
+<line x1="267" y1="58" x2="298" y2="80" stroke="var(--color-text-muted, #6b7280)"/>
+<circle cx="217" cy="86" r="8" fill="var(--color-primary, #3b6cff)" opacity="0.8"/>
+<circle cx="303" cy="86" r="8" fill="var(--color-primary, #3b6cff)" opacity="0.8"/>
+<line x1="217" y1="94" x2="255" y2="116" stroke="var(--color-text-muted, #6b7280)" stroke-dasharray="4 3"/>
+<line x1="303" y1="94" x2="265" y2="116" stroke="var(--color-text-muted, #6b7280)" stroke-dasharray="4 3"/>
+<circle cx="260" cy="122" r="9" fill="none" stroke="var(--color-primary, #3b6cff)" stroke-width="1.5"/>
+<text x="260" y="125" font-size="8" fill="var(--color-text, #1a1d21)" text-anchor="middle">&#8916;</text>
+<text x="330" y="122" font-size="9" fill="var(--color-text-muted, #6b7280)">fan-in</text>
+</svg>
+</figure>
 
-Lanes-as-columns, forkable sub-columns re-joining at a fan-in, multi-lane span docking. Subtract what exists — contiguous lanes+spans = CSS Grid `grid-column`, fork/fan-in/cross-lane wires = **Web Graph** (`we:contracts/graph.ts`, already standard) — and there is no generic residue with a second consumer.
+**Fork-existence:** genuine either/or — *mint a swimlane layout mode on Web Graph* vs *keep app-custom* cannot coexist; the excluded branch is **"keep app-custom,"** flawed because lane-assignment + fork/rejoin is a studied algorithm (BPMN pools/lanes, git-graph lane assignment, subway-map layout) — a genuine residue beyond CSS Grid AND beyond general layered-DAG layout.
 
-- **(a — recommended) Keep app-custom** — board choreography, composed over CSS Grid + Web Graph. The one thing neither owns is the **lane-assignment / docking semantics** (which track a node belongs to, how it docks); name that as a candidate **Web Graph extension** (a `lane`/`track` layout constraint) so a genuine second consumer later extends the existing graph standard rather than re-deriving it.
-- **(b) Mint a swimlane intent.** *Rejected* — no reuse case beyond this board; would be policy dressed as a standard.
+Lanes-as-columns, forkable sub-columns re-joining at a fan-in, multi-lane span docking. Subtract what exists — contiguous lanes+spans = CSS Grid `grid-column`, fork/fan-in/cross-lane wires = **Web Graph** (`we:contracts/graph.ts`, already standard) — and what remains is a **lane-constrained layout**: the assignment of nodes to lanes and the fork/rejoin routing that honors them.
 
-**Classification (per-fork pass):** Q1 = decomposes into CSS Grid (layout) + Web Graph (`we:contracts/graph.ts`, nodes/edges). The lane-docking residue is a *layout constraint* on the existing graph standard, not a new intent (separate-and-decouple: extend the owner, don't spawn a sibling).
-**Skeptic:** SURVIVES-WITH-AMENDMENT → app-custom holds; the lane-assignment/docking residue (which Web Graph's nodes/edges don't yet express) is named as a future Web Graph extension so a second consumer extends the existing standard.
-**Screen:** clear — a genuine composability "no" (swimlane decomposes into existing standards), not a timing call; revisit only if a swimlane use appears that Grid + Web Graph provably cannot compose.
+- **(a — recommended) MINT as a Web Graph LAYOUT MODE ("swimlane layout").** Lane-assignment + fork/rejoin is a studied, recurring layout algorithm: BPMN pools/lanes, git-graph lane assignment, subway-map (metro) layout. That is a genuine residue **beyond CSS Grid** (which can't route fork/fan-in wires) **and beyond general layered-DAG layout** (which has no lane constraint). It belongs as a **layout variant on the ratified Web Graph standard** (`we:contracts/graph.ts`, which already owns nodes/edges/fork/fan-in) — a `swimlane` layout mode with a `lane`/`track` constraint — not app-custom choreography and not a new sibling intent. Cite `we:contracts/graph.ts`.
+- **(b) Keep app-custom over CSS Grid + Web Graph.** ~~*Recommended default (prep)*~~ → **superseded**. The prep named the lane-docking residue as a *future* Web Graph extension "when a second consumer appears" — a struck deferral. Retained as the override for a decider who reads the lane-assignment residue as too thin to standardize yet.
+- **(c) Mint a standalone swimlane intent.** *Rejected* — it belongs *on* Web Graph (which already owns the fork/fan-in topology), not as a sibling that re-derives graph layout.
+
+**Classification (per-fork pass):** Q1 = a layout mode on Web Graph (nodes/edges + a lane constraint), not a new sibling intent. The lane-assignment/docking residue is a *layout constraint* on the existing graph standard (separate-and-decouple: extend the owner). Mint as a graph layout variant.
+**Skeptic:** REVERSED-to-MINT (as a layout mode) → **MINT a "swimlane layout" on Web Graph**. The prep's "name it as a future extension" deferred on the struck second-consumer bar; lane assignment + fork/fan-in is a studied algorithm (BPMN/git-graph/subway), a real residue beyond Grid and general DAG layout, so it graduates now — onto the standard that already owns the topology.
+**Screen:** clear — this is a composability *residue* (lanes decompose into Grid + Web Graph, but the lane-assignment/fork-routing is neither's), so the mint lands *on* Web Graph as a layout mode rather than as a fresh sibling standard.
 
 ## Context
 
 ### Out of scope — capture, don't mint (partial gaps; an adjacent standard exists)
 
-Flagged from the mock-mining, each is a capability a nearby standard *almost* owns; note them, don't decide here: **data-liveness/freshness** indicator (beyond `reliability`/`query` stale semantics) · **receding-history / fade-scrollback** region (beyond `audit-timeline`'s flat feed) · **overflow-collapse-to-rail** (priority-plus columns → strips, beyond `sidebar`/`reel`) · **adaptive-detail-tier per item** (LOD orthogonal to status, beyond `density`+`disclosure`) · **collaborative claim / presence-lock** (beyond single-writer `mutation`) · **roving focus over a computed attention set** (beyond ARIA roving-tabindex).
+Flagged from the mock-mining, each is a capability a nearby standard *almost* owns; note them, don't decide here (this decision's scope is the seven forks, not a fresh mint pass over these): **data-liveness/freshness** indicator (beyond `reliability`/`query` stale semantics) · **receding-history / fade-scrollback** region (beyond `audit-timeline`'s flat feed) · **overflow-collapse-to-rail** (priority-plus columns → strips, beyond `sidebar`/`reel`) · **adaptive-detail-tier per item** (LOD orthogonal to status, beyond `density`+`disclosure`) · **collaborative claim / presence-lock** (beyond single-writer `mutation`) · **roving focus over a computed attention set** (beyond ARIA roving-tabindex). Any of these can open its own prepared decision under the corrected bar.
 
-### Named graduation residues (mint when a 2nd consumer appears)
+### Named residues (re-ruled under the corrected bar)
 
-The three things worth *not* losing, each parked against its owning standard with a concrete trigger: (1) a **Web Charts axis extension** (the bare labeled-axis-without-marks, Fork 1); (2) a **Web Graph lane/track layout constraint** (lane-assignment/docking, Fork 7); (3) a **provenance / uncommitted-state data-semantic** (claimed-vs-verified, Fork 2; provisional-state, Fork 6). None mints now; each graduates to an extension of its *existing* owner on a genuine second, off-board consumer.
+~~The three things worth *not* losing, each parked against its owning standard with a concrete trigger (mint when a 2nd consumer appears).~~ → **superseded**: the corrected bar re-rules them now, not "on a second consumer":
+- (1) the **bare labeled-axis-without-marks** (Fork 1) → **minted** as the `scale-ruler` primitive Web Charts composes.
+- (2) the **lane-assignment / docking** residue (Fork 7) → **minted** as a Web Graph `swimlane` layout mode.
+- (3) the **provenance / uncommitted-state data-semantic** (claimed-vs-verified, Fork 2; provisional-state, Fork 6) → held as a *seam*: kept OUT of `progress`'s contract (Fork 2 caveat) and named as the only WE-shaped residue of Fork 6's held mode — a candidate provenance/audit intent, not a second track on completion.
 
 ## Progress
 
-Prepared 2026-07-18 from the board build (#2505). This pass: a prior-art survey published as [/research/console-board-derived-ui-primitives/](/research/console-board-derived-ui-primitives/), a per-fork classification pass grounded on `we:` locus refs, a skeptic sub-agent that **flipped six of seven defaults** (mint/extend → app-custom/compose) on the second-consumer bar + impl-not-a-standard, and a fresh-context two-confusion screen that fixed the Fork 4 impl leak (desaturation → FUI) and the Fork 5/6 prioritization framings. Fork 7 survived with an amendment. Awaiting ratification; override any fork.
+Prepared 2026-07-18 from the board build (#2505). Prep pass: a prior-art survey published as [/research/console-board-derived-ui-primitives/](/research/console-board-derived-ui-primitives/), a per-fork classification grounded on `we:` locus refs, a skeptic sub-agent, and a fresh-context screen.
+
+**Merit re-review — 2026-07-18.** The prep's through-line — *mint nothing on one board's evidence*, gated on a *second-consumer-beyond-this-board* bar — was **rejected by the platform owner**. Corrected bar recorded across the whole item: **prior-art research establishing a fundamental, recurring, web-platform-aligned pattern is sufficient to justify a standard; "no second in-house consumer yet" is not a valid rejection reason.** Per-fork re-rulings under the corrected bar: **F1 → MINT** a `scale-ruler` primitive (the foundational scale Web Charts composes; d3-scale is standalone for exactly this reason); **F2 → EXTEND `progress`** with a generic optional secondary/comparison track (native buffered-vs-played), keeping the app's provenance semantic OUT of the contract; **F3 → MINT** a representational-zoom/LOD intent, distinct from geometric `viewport-transform` (Pad++/DeepZoom/map LOD/minimaps); **F4 → NOT a separate standard**, folded into F1 as a reference-line/tick + a CSS/FUI mask (merit decomposition, survives the correction); **F5 → CANDIDATE**, commission the shaping research then mint (the pattern is real; only the contract is unshaped — not a reject/park); **F6 → HOLD** (app/runtime mode composed from state+guard+diff — a merit hold that survives the correction, no fundamental contract); **F7 → MINT** as a Web Graph `swimlane` layout mode (lane assignment + fork/fan-in is a studied algorithm — BPMN/git-graph/subway). Added an inline, theme-aware SVG illustration under each of the seven forks (site CSS custom props, `role="img"` + `<title>`, well-formed/closed). `status` stays **open** and `preparedDate` unchanged — this is a merit re-ruling of an open prepared decision, still awaiting ratification. Override any fork.
