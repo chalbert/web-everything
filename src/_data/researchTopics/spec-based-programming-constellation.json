@@ -1,0 +1,26 @@
+{
+  "id": "spec-based-programming-constellation",
+  "title": "Spec-based programming for AI agents — schema-as-contract, human-gates-spec / agent-implements, applied to the constellation",
+  "status": "open",
+  "summary": "Grounds decision #2564 (adopt spec-based programming across the constellation) and its first instance #2563 Fork 1 (narrow the trust-chain human gate to the review-policy *spec*). Deep-research survey (adversarially verified: 22 sources → 25 claims → 22 confirmed, 3 refuted; 104 agents; full report reports/2026-07-18-spec-based-programming-deep-research.md). Verdict: spec-driven development (SDD) for AI agents is REAL but < 18 months old and mostly 'spec-first' maturity — adopting it means ASSEMBLING the discipline (schema spec + contract tests + CI gate + authority tiers), not buying one tool. Load-bearing findings: (1) the flagship SDD tools (GitHub Spec Kit, Amazon Kiro, Tessl) are prose-markdown generators — a prose diff cannot give a clean yes/no on 'did the spec change?', so they are NOT a mechanical gate; (2) schema-as-spec is the deterministically machine-diffable option (TypeSpec → OpenAPI/JSON Schema/Protobuf via reproducible emitters), confirming the schema-not-prose ruling; (3) formal methods (TLA+) are machine-checkable for syntax only, and LLMs author them badly (8.6% semantic across 2,730 runs) — reinforcing human-authors-spec / agent-implements; (4) executable specs make drift a test failure (Specmatic fails the build on deviation), but a green suite only proves code MATCHES the spec, never that the spec is RIGHT — so a human on every spec change + an independent review agent are non-negotiable; (5) drift is empirically widespread (55% of Node-RED nodes exceed their declared spec) — justifying a mechanical gate over trusting discipline; (6) Specmatic's central-contract-repository pattern maps to the constellation almost one-to-one — contracts live in ONE repo (WE), downstream repos reference and never own them (FUI/plateau), cross-boundary changes gate on a human-reviewed PR + backward-compat check, plus a conformance suite in the consumer repos; (7) the 'Spec Growth Engine' preprint (arXiv 2606.27045) already unifies #2563 + #2564 — it splits merge authority BY BLAST RADIUS (boundary/contract → HARD human; internal refactor → AUTO) and makes drift a blocking merge condition via a deterministic Intent-Graph-vs-Evidence-Graph diff (blueprint only — single-author, unimplemented preprint); (8) the Productivity-Reliability Paradox — the most rigorous RCT (METR 2025) shows a 19% slowdown for experienced devs on mature codebases, so raw agent throughput inflates review cost without improving delivery — the case for the contract gate + keep-changes-small nudge over a better generator. Constellation grounding: WE ALREADY treats src/_data/*.json (intents/protocols) as 'the spec' and check-standards.mjs verifies it stays in sync with impl — so the intent/protocol JSON is already the machine-diffable contract, and #surface-contract-not-computation already mandates the observable contract over the computation. The four prepared forks: (1) which WE-owned artifact IS the central contract (existing definitions become the spec, vs a TypeSpec layer above); (2) contract granularity + the mechanical contract-line (per-standard-entity vs per-boundary; path/artifact test forced by #2563); (3) the independent-review agent's unmeasured false-clear rate (ship behind a deterministic human sample that doubles as the measurement instrument, vs block-until-measured); (4) the non-executable slice (prose intent / semantic invariants that leave a governance gap — allow prose behind a fail-safe human gate, vs require executable form).",
+  "dateOpened": "2026-07-18",
+  "lastReviewed": "2026-07-18",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "spec-driven",
+    "spec-based-programming",
+    "schema-as-spec",
+    "typespec",
+    "specmatic",
+    "conformance",
+    "human-gates-spec",
+    "agent-implements",
+    "standard-vs-impl",
+    "constellation",
+    "review-gate",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "frontierui"
+}
