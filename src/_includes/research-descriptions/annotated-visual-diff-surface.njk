@@ -1,0 +1,103 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The <strong>before/after annotated visual-diff surface</strong> shows <strong>two renders of one
+  subject</strong> — a baseline vs a new capture, or a design vs a built screen — side-by-side, with the
+  regions that differ called out as <strong>numbered, clickable, typed regions</strong>, each carrying a
+  <strong>per-region review verdict</strong> (accept the change, reject it as a regression, or mark it
+  <em>expected but not reached yet</em>). It cleared the corrected minting bar as a <strong>candidate</strong>
+  in <a href="/backlog/2533-console-board-derived-ui-standards/">#2533</a> Fork 5; what was missing was the
+  <strong>contract shape</strong>, not the justification. This topic shapes the three open questions — the
+  <strong>delta-type taxonomy</strong>, the <strong>anchor payload</strong>, and the
+  <strong>accept / typed-region model</strong> — measured against the nearest existing standard,
+  <a href="/intents/audit-timeline/">Audit Timeline</a>, and recommends <strong>MINT a <code>visual-diff</code>
+  intent</strong>. Prepares decision <a href="/backlog/2538-shape-the-annotated-visual-diff-surface-contract-then-decide-mint/">#2538</a>.
+</p>
+
+<h2>Why audit-timeline does not cover it</h2>
+<p>
+  <a href="/intents/audit-timeline/">Audit Timeline</a> is a <strong>chronological text/event feed</strong> of
+  <code>AuditEvent</code>s for one entity — it is temporal and linear, and it "owns the display, not the
+  record." The visual-diff surface is <strong>spatial and two-pane</strong>, and its unit is a <em>region of
+  divergence between two renders</em>, not an event in a stream. audit-timeline cannot express
+  <em>"these two rendered states differ <strong>here</strong>, and the difference is <strong>this kind</strong>."</em>
+  The gap is real; audit-timeline is the nearest-but-non-covering neighbor.
+</p>
+
+<h2>Prior art — the shipped models</h2>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Tool</th><th>Diff unit</th><th>Anchor</th><th>Per-unit verdict</th><th>"Accept" effect</th></tr></thead>
+  <tbody>
+    <tr><td>Percy</td><td>Per-snapshot change</td><td>Pixel overlay</td><td>Approve / request-changes (build/snapshot)</td><td>Promotes the new render to baseline</td></tr>
+    <tr><td>Chromatic</td><td>Per-story change; highlighted regions</td><td>Pixel regions</td><td><strong>Accept / Deny</strong> per snapshot</td><td>Updates the story baseline</td></tr>
+    <tr><td>reg-suit / reg-cli</td><td>Categorized <strong>new / passed / changed / deleted</strong></td><td>Pixel; 2-up / swipe / blend / diff-mask</td><td>No in-tool accept</td><td>Commit the updated expected image</td></tr>
+    <tr><td>Playwright <code>toHaveScreenshot</code></td><td>Per-screenshot pixel delta</td><td>Pixel diff-mask; <code>maxDiffPixelRatio</code></td><td><code>--update-snapshots</code></td><td>Rewrites the committed <code>-expected.png</code></td></tr>
+    <tr><td>GitHub / GitLab PR diff</td><td>Per-hunk (text)</td><td><strong>Structural</strong>: file + line range</td><td>Comment / approve; per-hunk "viewed"</td><td>N/A (merge, not promote)</td></tr>
+    <tr><td>Figma version-compare</td><td>Per-layer change</td><td><strong>Structural</strong>: layer / node id</td><td>N/A (informational)</td><td>N/A</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<h2>Finding 1 — delta <em>type</em> and delta <em>disposition</em> are orthogonal (load-bearing)</h2>
+<p>
+  reg-suit's <code>new / changed / deleted</code> is a <strong>structural type</strong> (what changed about the
+  region's existence); Chromatic/Percy's <code>accept / deny</code> is a <strong>review disposition</strong>
+  (the verdict on the change). Every tool that has both keeps them on <strong>separate axes</strong>. Folding
+  them into one flat enum reproduces the orthogonality break WE already ruled against for <code>action.level</code>
+  (<a href="/backlog/1318-action-intent-emphasis-style-axis-fill-outline-ghost-link-or/">#1318</a>/<a href="/backlog/1324-revisit-whether-action-level-models-outcome-role-continue-ca/">#1324</a>)
+  and for <a href="/intents/progress/">progress</a> (<a href="/backlog/2533-console-board-derived-ui-standards/">#2533</a> Fork 2 — provenance kept off completion).
+</p>
+
+<h2>Finding 2 — anchoring splits pixel vs structural</h2>
+<p>
+  Along the <em>"are the two panes pixel-aligned?"</em> line. Visual-regression (baseline vs a new capture of
+  the <em>same</em> view) is pixel-aligned, so a <strong>bounding box</strong> locates a region. Design-vs-built,
+  Figma, and PR-diff panes are <strong>not</strong> pixel-aligned (different renderers, layouts, sizes), so they
+  anchor <strong>structurally</strong> (a DOM selector / layer node-id / line range). The board's
+  <em>design → built</em> case is the structural kind; a whole-pattern contract must carry <strong>both</strong>,
+  tagged — a pixel box degrades to noise under a layout shift, and a structural anchor needs a correspondence the
+  two renders may not share.
+</p>
+
+<h2>Finding 3 — the board surfaced a third disposition no incumbent first-classes</h2>
+<p>
+  <strong><em>"expected, not reached yet"</em></strong> — known drift that is neither an accept nor a reject.
+  First-classing it as a distinct disposition (alongside accepted/rejected/unreviewed) is the novel contribution
+  the console board surfaced.
+</p>
+
+<h2>Finding 4 — a producer/consumer split mirrors Web Graph's two seams</h2>
+<p>
+  The tools split cleanly into a <strong>differ</strong> (turns two renders into typed delta regions —
+  pixelmatch, odiff, reg-cli) and a <strong>review surface</strong> (renders + dispositions them), just as
+  <a href="/projects/webgraph/">Web Graph</a> splits <code>CustomGraphLayout</code> (invents positions) from
+  <code>CustomGraphRenderer</code> (draws). The likely end-state is a <code>visual-diff</code> <strong>intent</strong>
+  (the review-surface UX contract) plus a swappable <strong>differ protocol</strong> — but <strong>this decision
+  should mint the intent and only <em>name</em> the differ seam as a follow-on</strong>, since shaping the
+  review-surface contract is what Fork 5 asked for.
+</p>
+
+<h2>The shaped contract</h2>
+<ul>
+  <li><strong>Delta-type taxonomy (two orthogonal axes):</strong> a structural <code>type</code>
+    (<code>added | removed | changed</code>) × a review <code>disposition</code>
+    (<code>unreviewed | accepted | rejected | expected</code>).</li>
+  <li><strong>Anchor payload (tagged union):</strong> <code>anchorType: 'pixel-region' | 'dom-selector' |
+    'node-id' | 'line-range'</code>, carrying <code>box?</code> for the pixel case and <code>ref?</code> for the
+    structural cases, plus the two pane references being compared.</li>
+  <li><strong>Accept / typed-region model:</strong> a <strong>per-region disposition</strong> that promotes the
+    built state into the baseline on <code>accepted</code>, first-classes <code>expected</code>, may be scoped by
+    type, with the whole-surface approve composed <em>above</em> it (never a substitute for it).</li>
+</ul>
+
+<h2>Recommendation</h2>
+<p>
+  <strong>MINT a <code>visual-diff</code> intent</strong> on the shaped contract — distinct from
+  <a href="/intents/audit-timeline/">audit-timeline</a> (temporal feed), composing Web Graph's two-seam precedent
+  for the eventual differ protocol. The pattern is dispositive prior art; the contract is now shaped; the honest
+  verdict is <strong>mint</strong> (not park, not mint-blind). The remaining judgment for the ratification turn is
+  scoped to the five forks recorded in <a href="/backlog/2538-shape-the-annotated-visual-diff-surface-contract-then-decide-mint/">#2538</a>.
+  Full grounding: <code>we:reports/2026-07-18-annotated-visual-diff-surface.md</code>.
+</p>
+{% endraw %}

@@ -1,0 +1,22 @@
+{
+  "id": "annotated-visual-diff-surface",
+  "title": "Annotated visual-diff surface — shaping the contract (delta-type taxonomy · anchor payload · accept/typed-region model)",
+  "summary": "Prep research for decision #2538 (graduated from #2533 Fork 5). The before/after annotated visual-diff surface — two renders of one subject (baseline vs new, or design vs built) with the divergent regions called out as numbered, typed, clickable regions carrying a per-region review verdict — is established, recurring prior art: Percy (approve/reject snapshots, promotes baseline), Chromatic (accept/deny per story + region highlights), reg-suit/reg-cli (categorizes items new/passed/changed/deleted; 2-up/swipe/blend/diff-mask UI), Playwright toHaveScreenshot (pixel diff-mask + maxDiffPixelRatio), GitHub/GitLab PR diff (structural file+line hunks), Figma version-compare (structural layer/node-id). Measured against the nearest existing standard, we:src/_data/intents/audit-timeline.json — which is a TEMPORAL text/event feed of AuditEvents for one entity and CANNOT express 'these two rendered states differ HERE, and the difference is THIS kind'; the gap is real and audit-timeline is the nearest-but-non-covering neighbor. FINDING 1 (load-bearing) — delta TYPE and delta DISPOSITION are orthogonal: reg-suit's new/changed/deleted is a STRUCTURAL type (what changed about the region's existence); Chromatic/Percy's accept/deny is a REVIEW disposition (the verdict). Every tool with both keeps them on separate axes; folding them into one flat enum reproduces the orthogonality break WE already ruled against for action.level (#1318/#1324) and progress (#2533 Fork 2). FINDING 2 — anchoring splits pixel vs structural along the 'are the two panes pixel-aligned?' line: visual-regression (baseline vs new capture of the same view) is pixel-aligned so a bounding box locates a region; design-vs-built / Figma / PR-diff panes are NOT pixel-aligned so they anchor structurally (dom-selector / node-id / line-range). The board's design→built case is the structural kind; a whole-pattern contract must carry BOTH, tagged. FINDING 3 — the board surfaced a THIRD disposition no incumbent first-classes: 'expected, not reached yet' (known drift, neither accept nor reject) — the novel contribution. FINDING 4 — the tools have a clean producer/consumer split (a DIFFER turns two renders into typed regions; a REVIEW SURFACE renders + dispositions them), mirroring Web Graph's two-seam split (CustomGraphLayout invents positions, CustomGraphRenderer draws) — so the end-state is likely a visual-diff INTENT (review surface) + a swappable differ PROTOCOL (pixelmatch/odiff/reg-cli), but THIS decision should mint the intent and only NAME the differ seam as a follow-on. SHAPED CONTRACT: (3a) delta-type taxonomy = two orthogonal axes — structural type {added|removed|changed} × review disposition {unreviewed|accepted|rejected|expected}; (3b) anchor payload = a tagged union anchorType {pixel-region|dom-selector|node-id|line-range} with box? for pixel and ref? for structural, plus the two pane refs; (3c) accept model = a per-region disposition that promotes built→baseline on accept, first-classes 'expected', and may be scoped by type, with the whole-surface approve composed ABOVE it. RECOMMENDATION: MINT a visual-diff intent on the shaped contract (not park, not mint-blind). Full grounding in we:reports/2026-07-18-annotated-visual-diff-surface.md.",
+  "status": "open",
+  "dateOpened": "2026-07-18",
+  "lastReviewed": "2026-07-18",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "webintents",
+    "visual-diff",
+    "visual-regression",
+    "delta-taxonomy",
+    "anchor-payload",
+    "accept-model",
+    "console-board",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}
