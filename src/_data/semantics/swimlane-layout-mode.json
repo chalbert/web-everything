@@ -1,0 +1,5 @@
+{
+  "term": "Swimlane Layout Mode",
+  "definition": "A lane-constrained layout variant of the Web Graph standard: nodes are assigned to ordered lanes (rendered as columns or rows) and fork/fan-in wires are routed to honor lane boundaries. The studied residue once CSS Grid (contiguous lanes/spans) and the existing graph wires are subtracted — a genuine lane-assignment + fork/rejoin-routing algorithm (BPMN pools/lanes, git commit graphs, subway/metro-map line layout, kanban swimlanes, DAW track lanes). A layout mode ON Web Graph, not a sibling intent — a standalone swimlane intent would re-derive graph layout.",
+  "usage": "Standardized as the `swimlane` LayoutStrategy of the Web Graph contract (we:contracts/graph.ts; minted from #2533 Fork 7). Consumes GraphNodeSpec.lane and the ordered GraphSpec.lanes axis."
+}

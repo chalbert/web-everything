@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 8
-status: open
+status: resolved
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-18"
+dateResolved: "2026-07-18"
+graduatedTo: "we:src/_data/intents/scale-ruler.json (Scale Ruler Intent, +reference-mark)"
 tags:
   - standards
   - ui-primitives

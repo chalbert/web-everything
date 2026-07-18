@@ -1,0 +1,5 @@
+{
+  "term": "Scale Ruler Intent",
+  "definition": "The foundational scale primitive: the map from a scalar value to a length or a position on one shared, labeled axis in real units, plus an aggregate over a stack of scalars (stacked heights → a total). Sits below charts, layout, and animation the way d3-scale is a standalone package; Web Charts composes its marks on top. Includes reference marks (a datum/threshold tick or region) as a guide on the ruler — the semantic marking is WE's, the region-mask visual treatment is FUI's.",
+  "usage": "Standardized by the Scale Ruler Intent (minted from #2533 Fork 1, with Fork 4 folded in). Native-first over <code>&lt;progress&gt;</code> (scalar→length) and CSS <code>aspect-ratio</code> (ratio→box)."
+}

@@ -21,7 +21,7 @@
     <p>
         What sets a graph apart from a chart is a positioning <strong>degree of freedom</strong>: a chart
         <em>derives</em> a mark's position from its datum via scales (<code>x = f(field)</code>), but a graph
-        <em>invents</em> position via a layout algorithm (layered / force / tree / radial). That extra axis is
+        <em>invents</em> position via a layout algorithm (layered / force / tree / radial / swimlane). That extra axis is
         why graph earns its <strong>own project</strong> rather than riding as a webcharts sub-profile, and why
         its renderer seam <strong>splits in two</strong>. The shape is settled &mdash; ratified in
         <a href="/backlog/1352-webgraph-standard-shape-own-project-protocol-seam-count-a11y/">#1352</a>
@@ -101,6 +101,7 @@ interface GraphSpec {
   edges: GraphEdgeSpec[];
   directed?: boolean;          // default true — the layered-DAG default assumes edge direction
   layout?: LayoutStrategy;     // a SEMANTIC hint (which algorithm FAMILY), never coordinates
+  lanes?: string[];            // ordered lane axis for the `swimlane` mode (#2533 F7) — semantic order, never coordinates
 }
 
 interface GraphNodeSpec {
@@ -108,6 +109,7 @@ interface GraphNodeSpec {
   label?: string;              // the accessible/displayed name — a11y-derivable
   kind?: string;               // semantic category; drives grouping/encoding, resolved style = theme
   group?: string;              // optional cluster/partition membership (a semantic grouping)
+  lane?: string;               // lane/track assignment for `swimlane` mode (#2533 F7) — an ORDERED partition (matches GraphSpec.lanes)
 }
 
 interface GraphEdgeSpec {
@@ -122,7 +124,10 @@ interface GraphEdgeSpec {
 // The native-first default layout family. Position is INVENTED by the algorithm, so the family is a
 // swappable dimension: the deterministic `layered` DAG is the conformance-assertable default; `force`
 // (non-deterministic) ships as an adapter behind CustomGraphLayout, never as the default.
-type LayoutStrategy = 'layered' | 'force' | 'tree' | 'radial';
+// `swimlane` (#2533 F7) is a lane-constrained mode: assign nodes to ordered lanes (columns/rows) and
+// route fork/fan-in wires to honor lane boundaries — the residue beyond CSS Grid + general DAG layout
+// (BPMN pools/lanes, git-graph lanes, subway-map layout). Deterministic + assertable, like `layered`.
+type LayoutStrategy = 'layered' | 'force' | 'tree' | 'radial' | 'swimlane';
     {% endhighlight %}
     <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
         <li><strong>Semantic plane, kept separate:</strong> the spec carries meaning (node/edge <code>kind</code>,
@@ -191,6 +196,33 @@ interface CustomGraphLayout {
             (non-deterministic, hard to test) is an adapter behind this contract, never the baseline.</li>
         <li><strong>Spec is the only lock:</strong> swapping the layered default for an ELK / dagre / D3-force
             adapter leaves the <a href="#graphspec"><code>GraphSpec</code></a> untouched.</li>
+    </ul>
+{{ pc.endStandardSection() }}
+
+{{ pc.standardSection('id="layout-swimlane"') }}
+    <h3 id="swimlane-layout-mode">Swimlane Layout Mode</h3>
+    <p>
+        <code>swimlane</code> is a <strong>lane-constrained layout variant</strong> of the
+        <code>LayoutStrategy</code> family (minted from
+        <a href="/backlog/2533-console-board-derived-ui-standards/">#2533</a> Fork 7 as a <em>layout mode</em>,
+        not a sibling intent). Nodes carry a <code>lane</code> (an <strong>ordered</strong> partition, keyed to
+        <code>GraphSpec.lanes</code>) that the layout renders as columns or rows; fork/fan-in wires are routed
+        to honor lane boundaries. It is deterministic and conformance-assertable exactly like the layered
+        default — same spec in, same coordinates out.
+    </p>
+    <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+        <li><strong>The residue it adds:</strong> subtract CSS Grid (<code>grid-column</code> handles contiguous
+            lanes/spans) and the graph's existing fork/fan-in wires, and what remains is a genuine
+            <strong>lane-assignment + fork/rejoin-routing algorithm</strong> — beyond Grid (which can't route
+            fork/fan-in wires) and beyond general layered-DAG layout (which has no lane constraint).</li>
+        <li><strong>A studied, named algorithm:</strong> BPMN literally names these
+            <em>swimlanes</em> (pools/lanes); git commit graphs (GitKraken, <code>git log --graph</code>, GitHub
+            network) assign branches to lanes; subway/metro-map line layout, kanban swimlanes (Jira, Trello,
+            Azure Boards), and DAW track lanes are the same lane-constrained layout.</li>
+        <li><strong>On Web Graph, not beside it:</strong> it belongs <em>on</em> the standard that already owns
+            the fork/fan-in topology. A standalone swimlane intent would re-derive graph layout — rejected. The
+            <code>GraphSpec</code> stays semantic (lanes are an ordering hint, never coordinates); a
+            <code>CustomGraphLayout</code> with <code>strategy: 'swimlane'</code> invents the positions.</li>
     </ul>
 {{ pc.endStandardSection() }}
 
