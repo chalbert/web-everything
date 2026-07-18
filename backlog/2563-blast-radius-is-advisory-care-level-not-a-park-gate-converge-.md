@@ -2,8 +2,9 @@
 bornAs: cvg2563r
 kind: decision
 size: 8
-status: open
+status: active
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-18"
 preparedDate: "2026-07-18"
 relatedReport: reports/2026-07-18-blast-radius-advisory-review-gating.md
 tags: [drain, review, convergence, escalation, console, config]
@@ -125,38 +126,61 @@ in Web Everything** (extend `DEFAULT_THRESHOLDS` into a review-config shape in t
 **settings panel is a plateau-app product surface** rendering them over the same core. WE holds zero UI. Build,
 not a decision.
 
-## Fork 1 — Clear-step for `gate-self`/`statute`: may a *converged* fix substitute for the human?
+## Fork 1 — Which trust-chain changes force a human: the *spec*, not the whole path
 
-*Fork-existence: a forced invariant excludes one branch — auto-clearing a trust-chain edit lets an agent
-ratify a change to its own review leash, which the non-author invariant forbids. Exactly one branch is
-correct.* This is near-degenerate but genuinely new: under the new regime the loop now *runs* on a gate-self
-PR (`autoLand: false`, `we:scripts/lib/review-core.mjs:456`), so "does convergence-success reach the **clear**
-step, or only the score step?" is a ruling the existing invariant did not make.
+*Fork-existence: the human-clear rule is forced (auto-clearing a trust-chain **spec** change lets an agent
+ratify a change to its own review leash — the non-author invariant forbids it), but **what counts as a
+trust-chain change** is a genuine call: the status quo over-escalates.* Today `gate-self` is a pure **path
+test** (`isGateSelfPath`) — *any* edit to `we:scripts/lib/review-escalation.mjs` forces a human, whether it
+rewrites the escalation rubric or fixes a comment. That over-escalates on the trust-chain side exactly as
+blast-radius over-escalates on the scored side — the human is fatigued on typos and waves through the edit
+that matters.
 
-- **(a) Auto-clear on convergence** — dead-on-arrival, listed for the contrast: a converged `gate-self` fix
-  lands with no human. Maximally consistent with "human only on non-convergence", **but** it lets agents
-  ratify edits to their own review leash / the statute layer — the segregation-of-duties invariant the gate
-  exists to protect.
-- **(b) Human always clears `gate-self`/`statute`.** The loop still runs (fixes, advises, posts the converged
-  diff's verdict as a non-clearing comment — current `autoLand: false`), but the `review:human` label is
-  cleared only by a human. **Chosen.** #2563 ratifies that convergence-success ≠ clearance *here*, even as the
-  scored signals are demoted around it. Low-volume by construction (`isGateSelfPath`/`isStatutePath` hits are
-  rare, high-stakes edits to the review machinery), so no throughput bottleneck.
+Narrow it via the **spec-vs-implementation** line (spec-based programming — see the broader direction filed
+this session, `x0n1nax`, and report
+`we:reports/2026-07-18-spec-based-programming-spec-formats.md`): **the spec always needs a human; the
+implementation under a fixed spec is agent-clearable when an independent review agrees the spec is preserved.**
+
+- **(a) Status quo — any trust-chain *path* touch forces a human.** Simple, but over-escalates every
+  cosmetic/impl edit; fatigues the human on the changes that don't matter (the anti-pattern this whole item
+  fights, now on the trust-chain side).
+- **(b) A human gates a change to the trust-chain *spec*; impl changes are agent-clearable on
+  conformance-green + independent review.** **Chosen.** The human-clear invariant is preserved for the thing
+  that matters (the spec); behaviour-preserving impl tweaks stop stranding on a human. Convergence-success
+  still ≠ clearance for a *spec* change (that stays `autoLand: false` → human).
+
+**Settled sub-fork — the spec is a SCHEMA, not prose (ratified 2026-07-18).** For the gate to be
+*deterministic*, the trust-chain spec must be a typed/executable **contract** (a schema for the thresholds +
+reason sets + disposition, plus a conformance suite), so *"did the spec change?"* = a mechanical diff of the
+contract file → **human**, and *"did the impl preserve the spec?"* = **run the conformance suite** →
+agent-clearable. NOT prose (Kiro/Spec-Kit style), which forces the reviewer to interpret and kills
+determinism (no tool auto-detects prose-spec drift). **Size is the wrong metric**: a 1-char threshold flip
+(`400`→`40`) is an impl-sized diff but a *spec* change → human; a 200-line behaviour-preserving refactor is a
+big diff but pure impl → agent-clearable.
+
+**Prerequisite (a build):** extract the escalation policy into an explicit contract artifact (the
+`DEFAULT_THRESHOLDS` + reason sets + `deriveReviewDisposition` branches are already nearly one) + a conformance
+suite. Until the spec is explicit, **fail safe to human** (the status-quo path test). This is the first
+concrete instance of `x0n1nax` (spec-based programming across the constellation).
 
 ```js
-// deriveReviewDisposition — the fixed carve-out #2563 ratifies (we:scripts/lib/review-core.mjs:455-457)
+// deriveReviewDisposition — the carve-out (we:scripts/lib/review-core.mjs:455-457). Fork 1 (b) narrows WHICH
+// gate-self diffs hit line 456: a SPEC change (contract-file diff) → human; a conformance-green IMPL change → 457.
 if (list.some((r) => DEADLOCK_REASONS.includes(r)))          return { mode: HUMAN,    autoLand: false }; // non-convergence → human
-if (list.some((r) => HUMAN_SENSITIVITY_REASONS.includes(r))) return { mode: CONVERGE, autoLand: false }; // gate-self/statute: loop MAY fix, human CLEARS  ← Fork 1 (b)
-return { mode: CONVERGE, autoLand: true };                                                               // scored signals: converge + auto-land
+if (list.some((r) => HUMAN_SENSITIVITY_REASONS.includes(r))) return { mode: CONVERGE, autoLand: false }; // trust-chain SPEC change → human CLEARS ← Fork 1 (b)
+return { mode: CONVERGE, autoLand: true };                                                               // scored signals + spec-preserving impl → converge + auto-land
 ```
 
-*Skeptic:* SURVIVES — beat the strongest attack ("the sibling anchor already blesses an independent
-different-provider validator, so gate-self could auto-clear the same way"): independence of the *reviewer* is
-not authority to *amend the leash* — who may ratify a change to the review constitution is a
-segregation-of-duties question, not a code-correctness one. Amendment folded: `(a)` is now labelled
-dead-on-arrival (not a live 50/50 half), and the ruling is framed as reaching the clear-step.
-*Screen:* clear — genuine standard-level governance contract (who may clear a trust-chain review), not an impl
-detail; a stark merit gap survives "both free to build" (segregation of duties broken vs preserved).
+*Skeptic:* SURVIVES-WITH-AMENDMENT (amendment adopted, 2026-07-18) — original attack ("independence of the
+validator could let gate-self auto-clear") still refuted: independence of the *reviewer* is not authority to
+*amend the leash*. New attack the refinement invites: *"narrowing to spec-changes lets a real policy change
+slip through disguised as impl if the conformance suite is incomplete."* Answer: any diff touching the
+**contract file itself** is always human (never conformance-gated), and the suite's completeness is itself
+part of the spec (gate-self); ambiguous / can't-prove-impl-only → human. The invariant holds; the gate just
+stops firing on cosmetic trust-chain edits.
+*Screen:* clear — a standard-level governance contract (which trust-chain changes need a human), not an impl
+detail; a stark merit gap survives "both free to build" (over-escalate-everything vs gate-the-spec). The
+schema-vs-prose sub-fork is a config/mechanism call, resolved to schema for determinism.
 
 ## Fork 2 — Human backstop on high-blast *advisory* auto-lands
 
