@@ -136,10 +136,10 @@ rewrites the escalation rubric or fixes a comment. That over-escalates on the tr
 blast-radius over-escalates on the scored side — the human is fatigued on typos and waves through the edit
 that matters.
 
-Narrow it via the **spec-vs-implementation** line (spec-based programming — see the broader direction filed
-this session, `2564`, and report
-`we:reports/2026-07-18-spec-based-programming-spec-formats.md`): **the spec always needs a human; the
-implementation under a fixed spec is agent-clearable when an independent review agrees the spec is preserved.**
+Narrow it via the **spec-vs-implementation** line (spec-based programming — see the broader direction #2564 and
+report `we:reports/2026-07-18-spec-based-programming-deep-research.md`, whose "Spec Growth Engine" finding
+splits merge authority by blast radius exactly this way): **the spec always needs a human; the implementation
+under a fixed spec is agent-clearable when an independent review agrees the spec is preserved.**
 
 - **(a) Status quo — any trust-chain *path* touch forces a human.** Simple, but over-escalates every
   cosmetic/impl edit; fatigues the human on the changes that don't matter (the anti-pattern this whole item
