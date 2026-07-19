@@ -400,7 +400,6 @@ const DEADLOCK_REASONS = POLICY_REASONS_BY_FAMILY.deadlock;
  *  #2412). The #2445 two-tier flip keeps these two human while the lander (engine tier) becomes agent-clearable.
  *  Derived from the contract (clearance:human ∧ family:sensitivity). */
 const HUMAN_SENSITIVITY_REASONS = POLICY_HUMAN_SENSITIVITY_REASONS;
-const SENSITIVITY_REASONS = POLICY_REASONS_BY_FAMILY.sensitivity;
 
 /** Every known reason token (both families) — the canonical vocabulary a decorated reason string is matched against. */
 const ALL_REASON_TOKENS = POLICY_REASON_TOKENS;
