@@ -3,10 +3,13 @@ bornAs: x5nrrw0
 kind: story
 size: 5
 parent: "2505"
-status: open
+status: resolved
 locus: plateau-app
 tags: [plateau-loop, console, console-board, taxonomy, webcases, conformance]
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-19"
+dateResolved: "2026-07-19"
+graduatedTo: "plateau-app:src/backlog-view/card-taxonomy.webcases.ts"
 ---
 
 # Card-state taxonomy as the maintained conformance spec (plateau-app)
@@ -21,9 +24,9 @@ off-lane pool · D terminal · E failure axis) lives as code in
 (lanes, leases, drain, scope-breach, policies) — WE holds only reviewed shared primitives, never a single
 app's business logic. So the spec + validate + web-docs page harden the **existing plateau-app** artifacts
 (the webcases + the `plateau-app:src/backlog-view/card-taxonomy.webcases.test.ts` conformance test + the
-`/console-cases` docs renderer). WE holds **no** taxonomy spec; the design record in
-`we:docs/design/backlog-console-design.md` stays the reference. (See memory: WE standards need a reviewed
-decision.)
+`/console-cases` docs renderer). WE holds **no** taxonomy spec; the design record now lives at
+`plateau-app:docs/backlog-console-design.md` (moved from `we:docs/design/` this session) and stays the
+reference. (See memory: WE standards need a reviewed decision.)
 
 ## Scope (all in plateau-app)
 - The 37 states + the ratified visual grammar (color · icon · attention-card · say-it-once · disclosure ·
