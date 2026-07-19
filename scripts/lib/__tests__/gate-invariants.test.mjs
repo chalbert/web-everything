@@ -57,6 +57,9 @@ function product(...arrays) {
 const POLICY_CORE_FILES = [
   'scripts/lib/review-escalation.mjs',
   'scripts/lib/review-core.mjs',              // the converge-vs-human disposition router + round caps
+  'scripts/lib/review-policy.contract.json',  // #2566 — the review-escalation policy SPEC; a diff here is a policy change
+  'scripts/lib/review-policy.mjs',            // #2566 — the spec loader + executable oracle
+  'scripts/lib/__tests__/review-policy.conformance.test.mjs', // #2566 — the conformance bridge (weakening it is a spec change)
   'scripts/lib/gate-config.mjs',              // #2448 — the trust-chain roster; editing it is gate-self (the closure)
   'scripts/lib/__tests__/gate-invariants.test.mjs', // THIS file — self-referenced (see header)
 ];
