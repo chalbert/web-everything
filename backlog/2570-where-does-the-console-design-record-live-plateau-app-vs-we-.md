@@ -3,9 +3,11 @@ bornAs: xy0722q
 kind: decision
 size: 2
 parent: "2505"
-status: open
+status: resolved
 preparedDate: "2026-07-19"
 dateOpened: "2026-07-19"
+dateResolved: "2026-07-19"
+codifiedIn: one-off
 tags: [plateau-loop, console, placement, design-doc, constellation, design-forks]
 ---
 
@@ -49,3 +51,11 @@ prioritization.
 The doc's home is ruled; if (a), a follow-up moves the doc + mock to plateau-app and repoints the live refs
 (#2553/#2555); if (b), the app-owned-doc exception is recorded so it is not a general loophole. Either way the
 Phase-0 placement is on the record, not a unilateral call.
+
+## Ruling (2026-07-19)
+Ratified (a): the design record is app-owned → moved to plateau-app
+(`plateau-app:docs/backlog-console-design.md` + `plateau-app:docs/mocks/console-ruling-surface.html`). WE holds
+none of it. The two WE copies (`we:docs/design/backlog-console-design.md` and
+`we:docs/design/mocks/console-ruling-surface.html`) are removed in this same lane; the moved `.md` carries a
+one-line provenance note pointing back to this decision. Live `we:docs/design/…` cites in the resolved
+decisions (#2554/#2556/#2557/#2558/#2561) now resolve as cross-repo pointers to the plateau-app home.
