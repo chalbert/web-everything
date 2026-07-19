@@ -31,4 +31,5 @@ Constellation & Placement cluster — open a leaf with `node scripts/memory-reso
 - 97. Reusable Home Rule — reusable→plateau; impl-specific→its impl; #1788
 - 139. Component Substrate Boundary — per-component Q = a placement: WE contract / FUI primitive / product component; deliver a composed web component NEVER a classname; title/footer=product; #1886
 - ["WE" = standard AND website-app](we-standard-vs-website-app-confusion.md) — name conflates the zero-impl standard with the 11ty app that renders it; disambiguate which WE per fork; #2006
+- [WE standards need a reviewed decision](we-standard-needs-reviewed-decision.md) — WE = only reviewed shared primitives; NO single-app business logic; a new WE mint or app-vs-WE placement routes through a human-reviewed decision (opening one is free) — never mint on the side or assume WE placement; the 37-state console taxonomy is plateau business logic; #2553/console-program
 - [Impl details are not forks](impl-details-are-not-forks.md) — a fork is only what's observable across the impl boundary; how it's built is a black-box default; wire format = swap seam; #2030
