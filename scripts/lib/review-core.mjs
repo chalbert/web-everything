@@ -38,6 +38,11 @@
  *
  * Pure, unit-tested in `we:scripts/lib/__tests__/review-core.test.mjs`.
  */
+import {
+  POLICY_REASON_TOKENS,
+  POLICY_REASONS_BY_FAMILY,
+  POLICY_HUMAN_SENSITIVITY_REASONS,
+} from './review-policy.mjs';
 
 /**
  * @typedef {Object} Finding
@@ -385,18 +390,20 @@ export const REVIEW_REASONS = Object.freeze({
   MANDATE_CONFLICT: 'mandate-conflict',
 });
 
-const DEADLOCK_REASONS = Object.freeze([REVIEW_REASONS.NON_CONVERGENCE, REVIEW_REASONS.MANDATE_CONFLICT]);
+// The reason FAMILIES + which sensitivity reasons need a human are DATA — they live in the machine-diffable
+// contract (`./review-policy.contract.json`, #2566) and are imported here so the classification exists exactly
+// once. `REVIEW_REASONS` above stays the code-level token VOCABULARY (the identifiers other files import by
+// name); the conformance suite (`__tests__/review-policy.conformance.test.mjs`) proves the two never drift.
+const DEADLOCK_REASONS = POLICY_REASONS_BY_FAMILY.deadlock;
 /** The sensitivity reasons that STILL require a human to clear (the panel may advise/fix, but never auto-lands):
  *  `gate-self` (an agent policing its own leash — #2285) and `statute` (a governance rule a human must ratify —
- *  #2412). The #2445 two-tier flip keeps these two human while the lander (engine tier) becomes agent-clearable. */
-const HUMAN_SENSITIVITY_REASONS = Object.freeze([REVIEW_REASONS.GATE_SELF, REVIEW_REASONS.STATUTE]);
-const SENSITIVITY_REASONS = Object.freeze([
-  REVIEW_REASONS.GATE_SELF, REVIEW_REASONS.STATUTE, REVIEW_REASONS.BLAST_RADIUS, REVIEW_REASONS.SIZE,
-  REVIEW_REASONS.DISMISSED_FINDINGS, REVIEW_REASONS.CROSS_REPO, REVIEW_REASONS.SAMPLING,
-]);
+ *  #2412). The #2445 two-tier flip keeps these two human while the lander (engine tier) becomes agent-clearable.
+ *  Derived from the contract (clearance:human ∧ family:sensitivity). */
+const HUMAN_SENSITIVITY_REASONS = POLICY_HUMAN_SENSITIVITY_REASONS;
+const SENSITIVITY_REASONS = POLICY_REASONS_BY_FAMILY.sensitivity;
 
 /** Every known reason token (both families) — the canonical vocabulary a decorated reason string is matched against. */
-const ALL_REASON_TOKENS = Object.freeze([...SENSITIVITY_REASONS, ...DEADLOCK_REASONS]);
+const ALL_REASON_TOKENS = POLICY_REASON_TOKENS;
 
 /**
  * Canonicalize ONE raw reason string to its bare `REVIEW_REASONS` token, or `null` if unrecognized. Pure.

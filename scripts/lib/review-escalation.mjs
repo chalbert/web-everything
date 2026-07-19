@@ -13,6 +13,7 @@
  * — start loose, tighten from data; they live here so a change is one edit + a test, never scattered.
  */
 import { isTrustChainPath, isPolicyCorePath, basenameOf } from './gate-config.mjs';
+import { POLICY_THRESHOLDS } from './review-policy.mjs';
 
 /** The ratified reviewer-verdict labels (#2171). The reviewer's disposition is a LABEL, never comment-parsing:
  *  independent *disposition* (reviewer accepts/rejects) is split from hot-context *fixing* (the author lane). */
@@ -39,11 +40,11 @@ export const REVIEW_LABEL_META = {
   [REVIEW_LABELS.redteamAccepted]: { color: '5319E7', description: 'An independent hardened validator signed off on the final diff — the non-author-accepts invariant (#2439)' },
 };
 
-/** Default rubric thresholds (tuning knobs — loose to start). */
-export const DEFAULT_THRESHOLDS = {
-  diffLines: 400,   // a PR changing ≥ this many lines escalates on size alone
-  sampleNth: 10,    // 1-in-N sampling floor: every Nth PR escalates regardless (keeps lane self-review honest)
-};
+/** Default rubric thresholds (tuning knobs — loose to start). The VALUES live in the machine-diffable contract
+ *  (`./review-policy.contract.json`, #2566) and are imported here so a threshold flip is necessarily a diff to
+ *  the contract → a human-gated spec change (not an edit buried in this file). The names/shape stay for every
+ *  existing caller; only the source of the numbers moved. */
+export const DEFAULT_THRESHOLDS = POLICY_THRESHOLDS;
 
 /** The STATUTE layer (#2412) — `platform-decisions.md` and any statute doc. Editing the cite-able cluster
  *  rules is a governance change a human must ratify, so (like the policy-tier trust chain) it forces
