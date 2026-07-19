@@ -1,0 +1,24 @@
+{
+  "id": "schema-prose-expressibility-audit",
+  "title": "How much of a spec is schema-expressible? — the empirical audit that reframed #2564",
+  "status": "open",
+  "summary": "Grounds the 2026-07-19 reframe of decision #2564's ratified 'the spec is a SCHEMA, not prose' invariant. Four parallel audits — three internal over our own tree (intents, protocols+plugs, statute anchors), one external over prose-spec traditions (Spec Kit, Kiro/EARS, Tessl, WHATWG, IETF RFC 2119, WAI-ARIA APG, Gherkin) — each classifying real spec content as schema-expressible / partly / irreducibly prose. Headline: pure-schema is ~0% of real specs. Intents ~0% fully-schema / ~65% partly / ~35% prose; protocols+plugs 0% / ~87% / ~13% (protocols are MORE prose-bound — they encode behavior over time, which schema can't express); our own statute anchors ~24% hookable / ~36% partly / ~40% irreducibly prose, and weighted by citation frequency the prose rules dominate (the most-cited rule, #constellation-placement, is judgment, cited 43×). The machine-checkable skeleton is the axis/enum/shape vocabulary; the contract's meaning — semantics, defaults, orthogonality, cross-field gating, a11y/behavioral obligations, ordered composition, trust boundaries — lives in prose, INSIDE the same JSON artifact, and is the larger half by contract-weight. Externally, every spec tradition is a mix: when written as atomic trigger/response normative statements, ~60-70% converts to a machine check, ~30-40% is a nameable residue that resists (scope/context conditions, semantic intent, perceptual/a11y judgment, SHOULD-level norms, open-ended quality bars). Projects that DID make prose checkable (Web Platform Tests, Gherkin step-glue, Specmatic, Tessl @test) all bound a human-authored check to each faithful statement and left the rest as reviewed prose — never proved the prose away. Key qualifier (operator): prose ambiguity is mitigable, not a fatality — controlled/defined vocabulary, glossary-anchored terms, EARS trigger→response phrasing, and one-fact-per-statement push each statement toward the checkable end of a rigor spectrum. Implication: reframe the invariant to 'a spec is a schema SKELETON + a first-class, permanent PROSE layer, in one artifact — schema where faithfully expressible, disciplined prose for the rest' (the deterministic 'did the spec change?' diff survives via the path test); and flip #2564 Fork 4 from an executable-by-default ratchet (prose as exception) to per-statement check-binding (attach a check where faithful; prose is the norm). Full report: we:reports/2026-07-19-schema-prose-expressibility-audit.md.",
+  "dateOpened": "2026-07-19",
+  "lastReviewed": "2026-07-19",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "spec-driven",
+    "schema-as-spec",
+    "prose-specs",
+    "expressibility",
+    "ears",
+    "tessl",
+    "web-platform-tests",
+    "conformance",
+    "audit",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "frontierui"
+}

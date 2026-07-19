@@ -1,0 +1,60 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    Decision <a href="/backlog/2564-adopt-spec-based-programming-across-the-constellation-schema/">#2564</a>
+    ratified "the spec is a machine-checkable <strong>schema</strong>, not prose" because only a schema makes
+    "did the spec change?" a deterministic diff. The open worry: <strong>schema has expressive limits</strong>
+    — so the honest test is empirical. Sample enough real specs and measure what fraction schema can actually
+    carry. Four parallel audits ran it: three internal (our intents, protocols + plugs, and statute anchors)
+    and one external (prose-spec traditions in the wild). Full report:
+    <code>reports/2026-07-19-schema-prose-expressibility-audit.md</code>.
+</p>
+
+<h2>Finding — pure-schema is ~0%; prose is a permanent, load-bearing layer</h2>
+<we-data-table>
+<table class="data-table">
+    <thead>
+        <tr><th>Corpus</th><th>fully schema</th><th>partly (skeleton + prose)</th><th>irreducibly prose</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Intents</td><td>~0%</td><td>~65%</td><td>~35%</td></tr>
+        <tr><td>Protocols + plugs</td><td>0%</td><td>~87%</td><td>~13%</td></tr>
+        <tr><td>Statute anchors (our decisions)</td><td>~24%</td><td>~36%</td><td>~40%</td></tr>
+        <tr><td>External spec traditions</td><td>—</td><td>~60–70% of atomic-normative content converts</td><td>~30–40% residue</td></tr>
+    </tbody>
+</table>
+</we-data-table>
+<p>
+    Not one sampled spec is fully schema-expressible. The structured skeleton (axis names, enumerated
+    <code>values</code>, capabilities, events) is real and checkable — but the <em>contract an implementer
+    must satisfy</em> lives in the prose <code>summary</code>/<code>description</code>, <strong>inside the same
+    JSON artifact</strong>, and is the larger half by contract-weight. Protocols are <em>more</em> prose-bound
+    than intents: intents encode a vocabulary (enumerable → schema-friendly), protocols encode behavior over
+    time (negotiation, ordering, "never mutates", cross-impl substitutability) — exactly what schema can't
+    express. And our own repo <strong>already practices the right split</strong>: the schema-decidable rules
+    are already hooked; what stays in the statute is disproportionately the irreducible-prose core.
+</p>
+
+<h2>Prose ambiguity is mitigable — the rigor spectrum</h2>
+<p>
+    Prose is not a binary "flaky vs schema." Its interpretation gap shrinks with discipline: controlled/defined
+    vocabulary, glossary-anchored terms, EARS trigger→response phrasing, one-fact-per-statement, and a
+    <code>[@test]</code> binding wherever a statement admits one. Spec content sits on a spectrum —
+    machine-checked schema · disciplined controlled-prose · raw prose — and the rule is to push each statement
+    as far toward the checkable end as it <em>faithfully</em> goes, never past where faithfulness breaks.
+    Every project that made prose machine-checkable (Web Platform Tests, Gherkin step-glue, Specmatic, Tessl
+    <code>@test</code>) did it by binding a human-authored check to each faithful statement and leaving the
+    rest as reviewed prose.
+</p>
+
+<h2>What it changed in #2564</h2>
+<ol>
+    <li><strong>Reframed the invariant</strong> — "the spec is a schema, not prose" → "a spec is a schema
+        <em>skeleton</em> + a first-class, permanent <em>prose</em> layer, in one artifact; schema where
+        faithfully expressible, disciplined prose for the rest." The deterministic "did the spec change?" diff
+        survives (any contract-file change trips the path test → human).</li>
+    <li><strong>Flipped Fork 4</strong> — from an executable-by-default ratchet (prose as the exception) to
+        <em>per-statement check-binding</em> (attach a check where faithful; prose is the norm, held to the
+        rigor discipline).</li>
+</ol>
+{% endraw %}
