@@ -564,5 +564,6 @@ constellation placement model (WE = standard/spec, FUI/plateau = impl) and
 `#agent-convergence-independent-validation`. Research:
 `we:reports/2026-07-18-spec-based-programming-deep-research.md`,
 `we:reports/2026-07-19-schema-prose-expressibility-audit.md` (the audit that reframed the schema-not-prose
-invariant + flipped Fork 4), + `/research/spec-based-programming-constellation/`. In active discussion toward
-ratification (federated-scope + schema-vs-prose reframe folded in) — the call is `/next decision`'s.
+invariant + flipped Fork 4), + `/research/spec-based-programming-constellation/`. Ratified 2026-07-19
+(federated-scope + schema-vs-prose reframe folded in) and codified at
+[`#spec-is-schema-human-gates-spec`](../docs/agent/platform-decisions.md#spec-is-schema-human-gates-spec).
