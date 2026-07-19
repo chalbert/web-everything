@@ -3,9 +3,12 @@ bornAs: x48d7sp
 kind: story
 size: 5
 parent: "2555"
-status: open
+status: resolved
 tags: [plateau-loop, console, console-board, read-model, state-machine]
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-19"
+dateResolved: "2026-07-19"
+graduatedTo: "plateau-app:src/backlog-view/card-state-read-model.ts"
 ---
 
 # Board read-model: real lane + drain + PR-label state → the 37 card-states
