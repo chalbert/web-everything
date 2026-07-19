@@ -336,6 +336,43 @@ The functionality matrix is their intersection; the **(status + flags) precondit
 Working method (now): iterate UI in a self-contained HTML mockup (artifact), seeded with real data shapes, before touching the app. Becomes a **skill** (captured in skill-learnings).
 **Productize later:** in the §3b contract, the mockup IS the spec's "UI design" input — so the console's *Shape* step hosts a mockup per UI item (generate → iterate → attach), and the builder consumes it as spec input. The method we're using on ourselves becomes a product capability.
 
+## 6d. Refinements surfaced during the 2026-07-18 ruling session (apply at spec/port time)
+
+These came out of ruling the substrate/scale/adapter/visual decisions ([#2561]/[#2557]/[#2558]/[#2554]).
+**None is a new fork** — each is a refinement *within* an already-ratified rule, to **review against the
+rendered board** (per "review the pixels" + the empirical "refine once visual" stance the rulings took). Owners
+noted for where they land.
+
+1. **Fan-out / "forked" is a logical overlay, not literal sub-lanes** (owner: [#2553] taxonomy · [#2554] F6).
+   Disjoint (`∥`) siblings run **across different fungible lanes**, not nested sub-lanes of the blocker's lane —
+   there is no containment. "Forked ×N" is a **grouping/leverage overlay** ("these N cards, in N lanes, were
+   released by A and reconverge at the fan-in"), consistent with the design's own logical-map-vs-physical-board
+   two-projections split (§3i). The two states (fan-out = *prediction*, forked = *in-flight*) still hold; only
+   the **"sub-lanes" wording is wrong** — reword UC-B4/UC-B5 to "across lanes / a tracked fan."
+
+2. **The "purgatory" lane-zone** (owner: [#2553] card-state · [#2555] board). A lane stacks four zones
+   top→bottom: **running** (`status: active`) · **ready queue** (`buildQueued && openBlockers = 0`, waiting a
+   free lane) · **purgatory** (`buildQueued && openBlockers > 0` — *approved by the human but a dependency
+   isn't done*; auto-fires when it lands — the same mechanism as #2557 F3 `readyAfter` / "merge-when-ready") ·
+   **next-sprint** (`!buildQueued`, needs a manual upgrade). Today "queued (waiting a lane)" and "queued but
+   dependency-blocked" both fall under one state — **splitting purgatory out is a candidate distinct card-state**
+   for the taxonomy.
+
+3. **Overtake / work-conserving dispatch** (owner: [#2557] F1 render · [#2555] board). **One shared rank**
+   (the #2557 F2 ruling — no separate cleared-only order), but **dispatch is work-conserving**: the launcher
+   pulls the top *ready* approved item, so a blocked-but-higher-ranked item **keeps its rank slot yet does not
+   stall the lane** — ready lower-ranked cards **overpass** it (already how `nextToBuild` behaves). Render the
+   **"overtaken · waiting on #X · passed by N"** affordance so it's obvious why the top card isn't running.
+
+4. **Leverage is the real prioritization signal — use the right field** (owner: [#2555] spans+leverage · [#2553]).
+   Three distinct, deterministic, zero-cost CLI numbers (`we:src/_data/backlog.js`): `directUnblocks` (raw fan) ≠
+   **`unblocksToReady`** (frees-now = items whose *last* open blocker is this one) ≠ **`transitiveUnblocks`**
+   (the gated downstream weight). **Use `unblocksToReady` for "frees now"** — `directUnblocks` inflates leverage
+   with dependents that stay blocked by others. The ⚡ chip carries frees-now + gates (teal, per the ratified
+   color grammar). **Click → the downstream-closure graph** (§2d dependency view, teal cascade across lanes).
+   **Semantic-zoom disclosure (Nicolas):** at coarse zoom show only a **teal color-corner**; reveal the
+   **count/weight** numbers as you zoom in (progressive disclosure, matching L0→L3).
+
 ## 7. Open questions
 
 - Is "one item's journey" the right primary frame, or is the **cross-item** view (queue, program, drain) equally first-class?
