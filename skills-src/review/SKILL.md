@@ -74,12 +74,21 @@ non-clearing comment), but the `review:accepted` label on a gate-self edit is ap
 this skill. The conflict-of-interest rule in `we:scripts/lib/review-escalation.mjs` (`isGateSelfPath` →
 `humanRequired`) is unchanged; this skill is the sanctioned place the human acts on it.
 
-## Non-author-accepts (#2439) — you never clear your OWN PR
+## Non-author-accepts (#2439) — independence is about the ACTOR, not the git login
 
-Whoever authored the diff must **not** be the one who flips it to `review:accepted`. If you opened a PR (or ran
-its build) and it carries `review:pending`, running a review over it yourself and clearing your own label is
-author-self-accept — exactly the seam #2439's `review:redteamAccepted` (an INDEPENDENT hardened validator signs
-the final diff) exists to close. Spawning your own review subagents does not make you independent: the acceptor
-must be a party that did not produce the diff (the human via this skill, or an independent validator lane). So:
-review your own working diff before you open the PR (that is `/code-review`), but the **clearing verdict** on a
-parked PR is someone else's to give — never relabel a `review:*` PR you authored to `review:accepted` yourself.
+The independence #2439 wants is between the **actor that produced the diff** and the actor that clears it — **not**
+between GitHub identities. In a solo constellation every PR's git author / login is the same person's PAT (a human
+commit and an AI-lane commit both show up as the same account), so login identity is a **useless** independence
+signal — do NOT gate on it, and do NOT warn the operator that "this is your own PR" merely because the author login
+matches. It always will.
+
+What actually matters:
+- **An agent must not clear a diff it produced.** If *you* (the agent running this skill) wrote the diff, or ran the
+  lane that wrote it, then reviewing it with your own subagents and flipping `review:accepted` yourself is the
+  author-self-accept seam #2439's `redteam:accepted` (an INDEPENDENT hardened validator) exists to close. Spawning
+  your own review subagents does not make you independent. So: review your own working diff before you open the PR
+  (that is `/code-review`), but never relabel a `review:*` PR **you** authored to `review:accepted` yourself.
+- **A human clearing an AI-lane PR is exactly the independence — clear it without hesitation.** A parked PR produced
+  by a `lane/*` clone (an AI actor) and cleared by the human via this skill has a diff-producer distinct from its
+  clearer. That holds *regardless* of the shared git login. This is the sanctioned path — present the verdict and,
+  on the operator's OK, swap the label. Raise no author-self-accept caveat.
