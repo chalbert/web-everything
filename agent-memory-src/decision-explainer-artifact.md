@@ -5,7 +5,14 @@ metadata:
   type: feedback
 ---
 
-When a design decision needs Nicolas's ruling, present it as a **small separate
+**ALWAYS present a decision as this preview — automatically, for EVERY decision, not only when
+asked** (Nicolas, 2026-07-19: "always present decision as a preview please"). The moment a decision
+is prepared or surfaced for his ruling — design, placement, or mint — build the preview and hand over
+its URL; do not wait for a "launch the decision preview" request, and do not surface a decision as a
+wall of prose. (Lightweight execution-sequencing choices like "sequence i vs ii" are not decisions in
+this sense.)
+
+When a decision needs Nicolas's ruling, present it as a **small separate
 artifact** that shows the options side by side: mini replicas of the affected surface
 (same design tokens), the difference isolated between panes, a before/after table when
 it's a system rule (color grammar, spacing, verbs), the honest counter-argument for the
