@@ -16,6 +16,9 @@ import {
   decideReviewGate,
   producerReviewLabel,
   shouldApplyReviewLabel,
+  CARE_LEVELS,
+  CARE_LEVEL_ORDER,
+  deriveCareLevel,
 } from '../review-escalation.mjs';
 
 describe('isBlastRadiusPath', () => {
@@ -294,5 +297,74 @@ describe('REVIEW_LABEL_META — single source of truth for provisioning (#2279)'
       expect(typeof meta.description).toBe('string');
       expect(meta.description.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('deriveCareLevel — the advisory care-level (#2567)', () => {
+  it('no scored signal → none', () => {
+    expect(deriveCareLevel({ signals: {} })).toBe(CARE_LEVELS.NONE);
+    expect(deriveCareLevel({})).toBe(CARE_LEVELS.NONE);
+  });
+  it('sampling alone is the honesty FLOOR → low (weakest signal)', () => {
+    expect(deriveCareLevel({ signals: { sampled: 10 } })).toBe(CARE_LEVELS.LOW);
+  });
+  it('size alone → low', () => {
+    expect(deriveCareLevel({ signals: { size: 500 } })).toBe(CARE_LEVELS.LOW);
+  });
+  it('blast-radius alone → elevated (system machinery)', () => {
+    expect(deriveCareLevel({ signals: { blastRadius: ['scripts/x.mjs'] } })).toBe(CARE_LEVELS.ELEVATED);
+  });
+  it('one dismissed finding → elevated (the strongest scored signal)', () => {
+    expect(deriveCareLevel({ signals: { dismissedFindings: 1 } })).toBe(CARE_LEVELS.ELEVATED);
+  });
+  it('MULTIPLE dismissed findings → high (a pattern, not a one-off)', () => {
+    expect(deriveCareLevel({ signals: { dismissedFindings: 3 } })).toBe(CARE_LEVELS.HIGH);
+  });
+  it('stacked scored signals climb the bands → high', () => {
+    expect(deriveCareLevel({ signals: { blastRadius: ['scripts/x.mjs'], size: 500 } })).toBe(CARE_LEVELS.HIGH);
+  });
+  it('cross-repo + size → elevated', () => {
+    expect(deriveCareLevel({ signals: { crossRepo: true, size: 500 } })).toBe(CARE_LEVELS.ELEVATED);
+  });
+  it('humanRequired (gate-self / statute) is MAXIMUM care → high, regardless of scored signals', () => {
+    expect(deriveCareLevel({ signals: {}, humanRequired: true })).toBe(CARE_LEVELS.HIGH);
+    expect(deriveCareLevel({ signals: { sampled: 10 }, humanRequired: true })).toBe(CARE_LEVELS.HIGH);
+  });
+  it('is total — every output is a known ordered CARE_LEVELS value', () => {
+    for (const sig of [{}, { sampled: 10 }, { size: 500 }, { blastRadius: ['a'] }, { dismissedFindings: 2 }]) {
+      expect(CARE_LEVEL_ORDER).toContain(deriveCareLevel({ signals: sig }));
+    }
+  });
+});
+
+describe('scoreEscalation carries the advisory careLevel (#2567 — additive)', () => {
+  it('a plain non-escalating PR → none', () => {
+    expect(scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20, prNum: 3 }).careLevel).toBe(CARE_LEVELS.NONE);
+  });
+  it('a blast-radius PR → elevated', () => {
+    expect(scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], prNum: 3 }).careLevel).toBe(CARE_LEVELS.ELEVATED);
+  });
+  it('a gate-self (humanRequired) PR → high', () => {
+    expect(scoreEscalation({ changedFiles: ['scripts/lib/review-core.mjs'], prNum: 3 }).careLevel).toBe(CARE_LEVELS.HIGH);
+  });
+  it('is ADDITIVE — the existing escalate/humanRequired/reasons/signals fields are unchanged', () => {
+    const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], prNum: 3 });
+    expect(r.escalate).toBe(true);
+    expect(r.humanRequired).toBe(false);
+    expect(Array.isArray(r.reasons)).toBe(true);
+    expect(r.signals.blastRadius).toBeTruthy();
+  });
+});
+
+describe('coupleEscalation inherits the STRICTEST care-level (#2567)', () => {
+  it('the couple takes the highest member care-level', () => {
+    const r = coupleEscalation([
+      { escalate: true, careLevel: CARE_LEVELS.LOW, reasons: ['sampling floor (1-in-10)'] },
+      { escalate: true, careLevel: CARE_LEVELS.HIGH, reasons: ['blast-radius (scripts/x)'] },
+    ]);
+    expect(r.careLevel).toBe(CARE_LEVELS.HIGH);
+  });
+  it('defaults a member with no careLevel to none', () => {
+    expect(coupleEscalation([{ escalate: false }, { escalate: false }]).careLevel).toBe(CARE_LEVELS.NONE);
   });
 });

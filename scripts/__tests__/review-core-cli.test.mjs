@@ -125,6 +125,19 @@ describe('reduceReview — disposition (escalation reasons)', () => {
   it('propagates an unknown-reason error from the pure derivation', () => {
     expect(() => reduceReview({ reason: 'not-a-real-reason' })).toThrow(/unknown reason/);
   });
+
+  it('#2567 — also carries the advisory careLevel + rigor from the reason set', () => {
+    const r = reduceReview({ reasons: ['blast-radius (a.mjs, b.mjs)'] });
+    expect(r.careLevel).toBe('elevated');
+    expect(r.rigor.rounds).toBe(2);
+    expect(r.rigor.aggregation).toBe('diversity-selection');
+  });
+
+  it('#2567 — omits careLevel/rigor entirely when no reason is supplied', () => {
+    const r = reduceReview({ findings: [] });
+    expect(r.careLevel).toBeUndefined();
+    expect(r.rigor).toBeUndefined();
+  });
 });
 
 describe('reduceReview — negotiation / plan outcome', () => {

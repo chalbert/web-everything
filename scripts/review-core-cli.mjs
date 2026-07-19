@@ -37,6 +37,7 @@
  *   cat findings.json | node scripts/review-core-cli.mjs mandate --editor --round=2   # the editor-round mandate
  *   cat result.json | node scripts/review-core-cli.mjs comment            # the full PR-comment markdown body
  *   node scripts/review-core-cli.mjs comment --file=result.json --json     # { markdown } on stdout
+ *   node scripts/review-core-cli.mjs rigor --reasons='blast-radius (x),size (500 …)'  # care-level + panel rigor (#2567)
  *
  * `reduce` input (JSON, from --file or stdin) is the option bag `reduceReview` consumes — any subset of:
  *   { findings, humanRequired, lensVerdicts, mandatoryLenses, conflict, reason, reasons, round, roundCap, phase }
@@ -64,6 +65,8 @@ import {
   buildPanelMandate,
   buildEditorMandate,
   buildValidatorMandate,
+  careLevelFromReasons,
+  panelRigorFromReasons,
 } from './lib/review-core.mjs';
 import { renderPanelComment } from './lib/review-render.mjs';
 
@@ -97,6 +100,8 @@ export function parseFlags(argv) {
  *     else `deriveVerdict` over the findings (+ `humanRequired`, which always wins).
  *   - `verdictTable` — the per-lens markdown table, only when `lensVerdicts` are supplied.
  *   - `disposition` — `deriveReviewDisposition` when a `reason`/`reasons` escalation set is supplied.
+ *   - `careLevel` / `rigor` — the advisory care-level and the panel rigor it dials (#2567), also only when a
+ *     `reason`/`reasons` set is supplied (same trigger as `disposition`).
  *   - `outcome` — the next negotiation step (`deriveNegotiationOutcome`) or, when `phase: 'plan'`, the
  *     plan-handshake step (`derivePlanOutcome`), only when a `round` is supplied — derived from `verdict`.
  *
@@ -133,7 +138,13 @@ export function reduceReview(input = {}) {
   }
 
   const hasReasons = reason != null || (Array.isArray(reasons) && reasons.length > 0);
-  if (hasReasons) out.disposition = deriveReviewDisposition({ reason, reasons });
+  if (hasReasons) {
+    out.disposition = deriveReviewDisposition({ reason, reasons });
+    // #2567 — the advisory care-level + the panel rigor it dials, from the SAME reason set (lenient: never throws).
+    const reasonList = Array.isArray(reasons) ? reasons : (reason != null ? [reason] : []);
+    out.careLevel = careLevelFromReasons(reasonList);
+    out.rigor = panelRigorFromReasons(reasonList);
+  }
 
   if (round != null) {
     const args = { verdict: out.verdict, round: Number(round), roundCap };
@@ -241,8 +252,9 @@ function main(argv) {
   if (subcommand === 'reduce') return runReduce(flags, asJson);
   if (subcommand === 'mandate') return runMandate(flags, asJson);
   if (subcommand === 'comment') return runComment(flags, asJson);
+  if (subcommand === 'rigor') return runRigor(flags, asJson);
   return fail(
-    'usage: review-core-cli.mjs <reduce|mandate|comment> [flags] — see the header for options',
+    'usage: review-core-cli.mjs <reduce|mandate|comment|rigor> [flags] — see the header for options',
     2,
   );
 }
@@ -313,6 +325,39 @@ function runComment(flags, asJson) {
     return process.exit(0);
   }
   process.stdout.write(`${markdown}\n`);
+  return process.exit(0);
+}
+
+/**
+ * #2567 — the `rigor` subcommand: given the escalation reasons, print the advisory care-level and the panel rigor
+ * it dials (rounds / lenses / jurorsPerLens / aggregation). The review-parked-prs workflow (and the future
+ * scheduled runner) call this BEFORE fanning out the panel — they hold the parked PR's reasons but no findings
+ * yet, so they cannot use `reduce`. Reasons come from `--reasons` (comma-separated) or `--reason`, or a JSON
+ * `{reasons}` / `{reason}` on --file/stdin. Never throws on an unknown reason (the dial is lenient/advisory).
+ */
+function runRigor(flags, asJson) {
+  let reasons = [];
+  if (typeof flags.reasons === 'string') reasons = flags.reasons.split(',').map((s) => s.trim()).filter(Boolean);
+  else if (typeof flags.reason === 'string') reasons = [flags.reason];
+  else {
+    let json = null;
+    try { json = readJsonInput(flags); } catch { json = null; }
+    if (json && Array.isArray(json.reasons)) reasons = json.reasons;
+    else if (json && typeof json.reason === 'string') reasons = [json.reason];
+    else if (Array.isArray(json)) reasons = json;
+  }
+
+  const careLevel = careLevelFromReasons(reasons);
+  const rigor = panelRigorFromReasons(reasons);
+
+  if (asJson) {
+    process.stdout.write(`${JSON.stringify({ careLevel, rigor })}\n`);
+    return process.exit(0);
+  }
+  process.stdout.write(
+    `care-level: ${careLevel}   rounds: ${rigor.rounds}   jurorsPerLens: ${rigor.jurorsPerLens}   `
+    + `lenses: ${rigor.lenses.join(', ') || '(none)'}   aggregation: ${rigor.aggregation}\n`,
+  );
   return process.exit(0);
 }
 
