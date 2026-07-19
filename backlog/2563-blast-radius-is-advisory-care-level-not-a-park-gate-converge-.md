@@ -120,8 +120,10 @@ forks** — staged autonomy (*start advisory, enforce later, graduate per-repo*)
   recreates the exact strand this item removes). Platform default: **advisory**.
 - **Thresholds.** `diffLines` (400), `sampleNth` (10) already live in `DEFAULT_THRESHOLDS`
   (`we:scripts/lib/review-escalation.mjs:43-46`); the panel exposes them.
-- **The high-blast human-sample rate.** The fraction of high-blast auto-lands routed to `review:human` (fixed
-  invariant: `> 0`; the value is the knob).
+- **The high-blast human-sample rate.** The automated decorrelated sample on AI-cleared content is a config
+  **option, default OFF** (Fork 2 point 4); *when enabled*, the fraction of high-blast auto-lands routed to
+  `review:human` is the knob. The fixed invariant is **not** this rate — it is that the decorrelated human axis
+  stays **not nothing**, satisfied by the operator's direct oversight now.
 - **Convergence enable / scope / round-cap.** Governed by the **staged-autonomy clause of
   [`#agent-convergence-independent-validation`](../docs/agent/platform-decisions.md#agent-convergence-independent-validation)**
   (`we:docs/agent/platform-decisions.md:2775-2776` — off-by-default, small/non-security first, graduating
@@ -225,17 +227,21 @@ What the evidence settles:
 - **(a) Diversity-aware AI panel for scale + an *active* human check.** High-blast auto-lands run a diverse
   panel (multiple models/providers, more lenses/rounds — the `MANDATE_LENSES`/`buildPanelMandate` path
   dialed up by care-level) **aggregated by diversity-*selection*, not majority vote** (majority voting hits a
-  "popularity trap" that amplifies shared-wrong outputs). *Plus* a **non-zero sampled `review:human`** that is
-  an **active** task — an independent intent/spec judgment + a fresh adversarial look, never a passive
-  re-read. The human is the **only proven decorrelated axis** against the panel's shared blind spots, and
+  "popularity trap" that amplifies shared-wrong outputs). *Plus* a **decorrelated human check** — delivered now
+  as point-level `review:human` rulings on what the panel flags, with the automated sample on AI-cleared
+  content available as a config option (default OFF; Fork 2 point 4) — that is an **active** task: an
+  independent intent/spec judgment + a fresh adversarial look, never a passive re-read. The human is the **only proven decorrelated axis** against the panel's shared blind spots, and
   carries intent authority + accountability. **Chosen.**
 - **(b) Rely on the AI panel alone.** Max throughput, but the evidence says the panel shares blind spots and
   can manufacture false confidence — no independent axis. Rejected: not "humans review better," but "the panel
   is not independent of itself."
 
 The human's role is scoped by the evidence — **intent/spec authority + a decorrelated check + accountability,
-never line-by-line re-review** — and the sample is **active and non-trivial** (passive monitoring backfires),
-graduated on track record, **never to zero** (the panel can't cover blind spots it shares).
+never line-by-line re-review** — and every human touch is **active and non-trivial** (passive monitoring
+backfires), graduated on track record. What is **never to zero** is the *decorrelated human axis* (the panel
+can't cover blind spots it shares) — satisfied by the operator's direct oversight at current scale; the
+automated sample is a config option, default OFF (Fork 2 point 4), re-enabled when parallel throughput
+outgrows manual oversight.
 
 **The human surface — point-level, not blanket (operator, 2026-07-18).** A blanket "escalate the whole PR to a
 human" is the passive monitoring the evidence says *subtracts* value. Instead the human check is delivered as
@@ -266,7 +272,8 @@ ratify/fork/challenge), which is exactly the automation-bias mitigation the rese
 
 ```js
 // scoreEscalation — a sampled high-blast auto-land escalates to a HUMAN (active check), not review:pending.
-// Rate is a config knob; that the sample is > 0 is fixed — the human is the only proven decorrelated axis.
+// Rate is a config knob; the automated sample is a config OPTION, default OFF (Fork 2 point 4). What is fixed
+// is that the decorrelated human axis is not nothing — the operator's direct oversight satisfies it now.
 if (signals.blastRadius && sampledForHumanSpotCheck(prNum, cfg.highBlastHumanSampleRate)) {
   humanRequired = true;                        // active independent judgment, NOT a passive re-read
   reasons.push('high-blast human spot-check (deterministic sample — decorrelated axis)');
