@@ -8,6 +8,8 @@ dateStarted: "2026-07-18"
 dateResolved: "2026-07-18"
 graduatedTo: none
 preparedDate: "2026-07-18"
+costUsd: 443.88
+costSessions: 1
 relatedReport: reports/2026-07-18-blast-radius-advisory-review-gating.md
 codifiedIn: "docs/agent/platform-decisions.md#blast-radius-advisory-care-not-a-gate"
 tags: [drain, review, convergence, escalation, console, config]
