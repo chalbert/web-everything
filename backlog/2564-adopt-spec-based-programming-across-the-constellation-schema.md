@@ -1,8 +1,12 @@
 ---
 bornAs: x0n1nax
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-19"
+dateResolved: "2026-07-19"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#spec-is-schema-human-gates-spec"
 preparedDate: "2026-07-18"
 relatedReport: reports/2026-07-18-spec-based-programming-deep-research.md
 tags: [spec-driven, standards, review, architecture, strategy]
@@ -15,6 +19,33 @@ Spec-Kit style, where the **spec is a human-owned artifact** and the **implement
 agent-clearable** when a conformance suite stays green and an independent review agrees the spec is
 preserved. #2563 Fork 1 (a human gates a change to the review-policy *spec*, not the whole trust-chain path)
 is the **first concrete instance**; this item is the general direction it previews.
+
+## Ratified (2026-07-19)
+
+All forks ratified as their defaults; the discussion-phase reframes are ratified too. In full:
+
+- **The spec = a schema *skeleton* + a first-class, permanent *prose* layer, in one artifact** — schema where
+  faithfully expressible, disciplined prose for the rest (reframed from "schema, not prose" after the
+  expressibility audit, `we:reports/2026-07-19-schema-prose-expressibility-audit.md`; pure-schema is ~0% of
+  real specs). Prose ambiguity is **mitigable** (the rigor spectrum), not a fatality.
+- **Human-gates-spec / agent-implements**, nested in a **federated three-tier hierarchy** — constitution →
+  law/spec → impl, at **platform scope (supreme)** and **per-project scope (subordinate)**; the constitution
+  is never applied to a diff directly.
+- **Fork 1:** the existing `we:src/_data/*.json` definitions *are* the spec; WE holds the meta-schema + static
+  conformance, the behavioral suite is Plateau/FUI.
+- **Fork 2:** per-standard-entity granularity; the spec-change→human line is #2563's path/artifact test.
+- **Fork 3:** a purpose-built false-clear-rate instrument (stratified sample + a **shadow-harness** seeded-defect
+  audit that never enters the merge path); the permanent human sample is #2563's backstop.
+- **Fork 4:** the prose layer is governed by **per-statement check-binding + a prose-rigor discipline** (attach
+  a check where faithful; prose is the norm, not a ratcheted exception).
+- **Fork 5:** the constitutional-amendment gate is **substantive entrenchment** (exempt from #911 supersede +
+  cooling-in-days + a committed external artifact); headcount quorum adopted when the polity grows.
+- **Consistency check (dissolved Fork 6):** human-*decided*, never machine-decided, with an advisory
+  per-principle critique as a support-both build.
+
+Final confirmation red-team: no fork's default fell; the one disclosed residual (solo, the constitution's
+author still ratifies it — the non-author invariant can't be fully met until a second human exists) is
+accepted as "entrenchment now, headcount later." Codified below; successor builds filed as their own items.
 
 ## Grounding digest
 
@@ -38,10 +69,13 @@ art**, but the space is **< 18 months old** and mostly "spec-first" maturity —
 **assembling** the discipline (schema spec + contract tests + CI gate + authority tiers), not buying one tool.
 Load-bearing findings, in one line each:
 
-- **Prose specs (Spec-Kit / Kiro / Tessl) are not machine-diffable; schema-as-spec is.** TypeSpec →
-  OpenAPI / JSON Schema / Protobuf gives a mechanical "did the contract change?" — confirming the
-  schema-not-prose ruling. LLMs author *formal* specs badly (TLA+: 8.6% semantic across 2,730 runs),
-  reinforcing human-authors-spec / agent-implements.
+- **The machine-diffable *skeleton* is schema; the rest is prose — the split is empirical.** TypeSpec →
+  OpenAPI / JSON Schema gives a mechanical "did the contract change?" for the structured part; but the
+  2026-07-19 expressibility audit (`we:reports/2026-07-19-schema-prose-expressibility-audit.md`) found
+  pure-schema is **~0%** of real specs — the contract's meaning is prose. So "schema, not prose" was reframed
+  (Fixed invariants) to "schema *skeleton* + a first-class prose layer." LLMs author *formal* specs badly
+  (TLA+: 8.6% semantic across 2,730 runs), reinforcing human-authors-spec / agent-implements — and confirming
+  prose can't just be forced into schema.
 - **Specmatic's central-contract-repository ≈ the constellation, one-to-one.** Contracts live in ONE repo
   (WE); downstream repos **reference and never own** them (FUI/plateau); cross-boundary changes gate on a
   human PR + backward-compat check, plus a conformance suite in the consumer repos.
@@ -84,11 +118,33 @@ Open items this framing raised — the amendment ceremony and whether constituti
 machine-assisted — are worked below: the ceremony is **Fork 5**; the consistency check **dissolved** (screen
 + skeptic agreed it is not a real fork) into a ruling + a support-both build.
 
+**The hierarchy is federated, not flat — it repeats at two scopes (ratified in discussion 2026-07-19).** The
+three tiers exist at **constellation/platform scope** (supreme) and **per-project scope** (subordinate):
+
+- *Platform scope:* the platform **constitution** (the FOUNDATIONAL invariants) → platform **law**
+  (`we:docs/agent/platform-decisions.md`, #911) → impl.
+- *Project scope:* every project (they already carry `ownedByProject` — e.g. `webrealtime` on
+  `we:src/_data/protocols/transport-negotiation.json`) has its own **specs** always (its intents/protocols),
+  and **optionally its own constitution** — project-specific core principles that go *beyond* the platform
+  ones (e.g. webrealtime's "closed-app push is non-fungible, it lives elsewhere"). A project constitution
+  **derives from and may not contradict** the platform constitution (it may only add *stricter* principles —
+  the federal/state-constitution relation); its specs derive from it.
+
+Two consequences: **(i)** the amendment gate (Fork 5) and the consistency check **scale with scope** — a
+*platform*-constitution change is the heaviest entrenchment (constellation-wide blast radius); a
+*project*-constitution change is heavier than that project's specs but scoped to one project. This is Fork 2's
+blast-radius, applied to governance. **(ii)** the consistency check is **two-level**: a project spec is
+checked against its project constitution *and* the platform constitution; a project constitution against the
+platform constitution. *Open sub-question (not blocking):* whether a project needs an explicit constitution
+artifact at all, or only gets one when it asserts principles beyond the platform's (most projects → specs
+only, deriving straight from the platform constitution).
+
 ## The axis
 
-Two things are **already ratified** and are not forks: the spec is a **SCHEMA / executable contract, not
-prose**, and the model is **human-gates-spec / agent-implements** (below, *Fixed invariants*) — now nested in
-the three-tier hierarchy above. Much of the rest is **already statute** — the mechanical spec-vs-impl line,
+Two things are **already ratified** and are not forks: a spec is a **schema skeleton + a first-class prose
+layer in one artifact** (schema where faithfully expressible, disciplined prose for the rest — reframed
+2026-07-19 after the expressibility audit), and the model is **human-gates-spec / agent-implements** (below,
+*Fixed invariants*) — now nested in the three-tier hierarchy above. Much of the rest is **already statute** — the mechanical spec-vs-impl line,
 the human sample, and staged autonomy were settled by #2563 and
 [`#agent-convergence-independent-validation`](../docs/agent/platform-decisions.md#agent-convergence-independent-validation).
 So this item's genuinely-*new* content is thin and precise, and each fork below carries it, pinned to a real
@@ -121,17 +177,29 @@ See below.)*
 | 1 | Which WE artifact IS the central contract | (a) existing intent/protocol JSON *become* the spec (WE holds meta-schema + static conformance; behavioral suite → Plateau/FUI) · (b) author a TypeSpec→JSON-Schema layer above | **(a) definitions become the spec** — one source of truth |
 | 2 | Contract granularity | (a) per-standard-entity, blast-radius = transitive closure over the cross-ref graph · (b) one per-boundary aggregate | **(a) per-entity** — finer independent-review units; spec-line cited to #2563 |
 | 3 | Getting a real false-clear rate | (a) stratified sample across blast levels + periodic seeded-defect audit · (b) treat the #2563 backstop sample as sufficient measurement | **(a) purpose-built instrument** — the random sample is underpowered |
-| 4 | Governing the non-executable slice | (a) allow prose behind a fail-safe human gate, **ratcheted** (executable-by-default, prose-only-with-warrant) · (b) require every invariant executable | **(a) ratcheted prose** — can't force faithful formalization |
+| 4 | Governing the prose layer (the norm, not the exception) | (a) **per-statement check-binding** (attach a check where faithful; hold the rest to prose-rigor discipline) · (b) executable-by-default, prose-only-with-warrant · (c) require every invariant executable | **(a) per-statement binding + prose-rigor** — prose is first-class; attach checks where faithful (flipped 2026-07-19 after the audit) |
 | 5 | The constitutional-amendment gate | (a) **substantive entrenchment** (#911-irreversible + cooling-in-days + committed external artifact) · (b) headcount quorum (≥2 humans, on polity growth) · (c) same as a spec change | **(a) entrenchment now, (b) on growth** — ceremony alone isn't a tier boundary |
 | — | Constitutional-consistency check on a new spec | *dissolved (screen: prio · skeptic: settled)* → **ruling:** human-decided, never machine-decided · **+ support-both build:** an advisory per-principle critique | *not a fork* |
 
 ## Fixed invariants (the ratified core — never a config knob)
 
-- **The spec is a SCHEMA / executable CONTRACT, not prose.** Only contract-as-spec (JSON Schema / TypeSpec /
-  Gherkin / property tests) makes *"did the spec change?"* a **deterministic** yes/no and *"did the impl
-  preserve the spec?"* a machine-run conformance check. Prose specs (Kiro, Spec-Kit, Tessl) are validated by a
-  human eyeballing a text-diff — no tool auto-detects semantic drift — which is exactly the non-deterministic
-  part we must not inherit. (Ratified 2026-07-18.)
+- **A spec is a schema *skeleton* + a first-class, permanent *prose* layer — in one artifact.** *(Reframed
+  2026-07-19; supersedes the original "the spec is a SCHEMA, not prose," which an empirical audit showed
+  over-claimed — `we:reports/2026-07-19-schema-prose-expressibility-audit.md`: pure-schema is ~0% of real
+  specs; the machine-checkable skeleton is the axis/enum/shape vocabulary, the contract's meaning — semantics,
+  defaults, behavior, a11y, judgment — is prose, and prose is the larger half by contract-weight.)* Use schema
+  **wherever it can faithfully express** (vocabulary, shapes, enums, events); the rest is **disciplined,
+  human-gated prose**. The property this originally bought us **survives intact**: *"did the spec change?"* is
+  still deterministic — **any diff to a contract artifact, prose fields included, trips the path test → human**
+  (Fork 2). What changed is only the honest scope of *"did the impl preserve the spec?"*: mechanically
+  checkable for the schema part, human/behavioral (Plateau/FUI + a human) for the prose part.
+- **Prose ambiguity is mitigable, not a fatality — the rigor spectrum.** The interpretation gap that made us
+  favour schema is *reducible by discipline*: controlled/defined vocabulary, glossary-anchored terms so a word
+  means one thing, EARS-style trigger→response phrasing, one-fact-per-statement, and an `[@test]` binding
+  wherever a statement admits one. Spec content sits on a spectrum — machine-checked schema · disciplined
+  controlled-prose · raw prose — and the discipline is to push each statement as far toward the checkable end
+  as it *faithfully* goes, never past where faithfulness breaks (the TLA+ 8.6%-semantic failure). (Ratified
+  2026-07-19.)
 - **Constitutional-consistency is human-*decided*, never machine-decided.** The "does this new/amended law
   honour the constitution?" check at spec-authoring time is the *is-the-spec-right?* question a green suite
   cannot answer and a correlated AI panel cannot certify — so the ruling is always a human act. A machine may
@@ -274,7 +342,11 @@ cannot cover a blind spot it shares), with autonomy graduation the staged-autono
   spec-violating change and confirm the independent reviewer catches it). The seeded-defect audit is the
   instrument for the *confidently-wrong-and-never-flagged* class — the same danger #2563 Fork 2's touchpoint 4
   routes to a human ("the only way a *shared* blind spot reaches a human"); here it is *measured*, not just
-  sampled. This closes the open question the research flagged as unmeasured.
+  sampled. This closes the open question the research flagged as unmeasured. **Safety guarantee (ratified):**
+  the seeded defect is a **drill, not a real change** — it runs in a **shadow harness** (the reviewer AI is
+  given the known-bad diff in a controlled, throwaway setup, its verdict recorded, the diff discarded) and
+  **never enters the real merge path**, so a planted bug can *never* land by construction. It is a fire drill
+  in a simulator, not a real fire in the pipeline.
 - **(b) Treat the #2563 backstop sample as sufficient measurement.** Rejected — it conflates a safety tripwire
   with an instrument; a random high-blast sample under-measures the population and is underpowered on the
   correlated blind spot, so a "clean" reading would be a false reassurance. (Block-until-measured out-of-band
@@ -312,53 +384,67 @@ block-until-measured" framing as timing-in-costume. The skeptic-driven recast mo
 correctness/coverage gap that survives "both free to build," independent of when it's built. A fresh-context
 **re-screen of the recast** confirmed both questions clear.
 
-## Fork 4 — Governing the non-executable slice
+## Fork 4 — Governing the prose layer (the norm, not the exception)
 
-*Fork-existence: two branches that cannot coexist as the authoring rule — either a prose-only invariant is
-**allowed** (behind a human gate) or it is **forbidden** (every invariant must be executable). The excluded
-"require executable" branch is broken: forcing formalization on invariants that resist it yields
-faithfully-wrong formal specs (the TLA+ 8.6%-semantic finding) — a worse artifact than honest prose.* Drift
-is mechanically detectable only for the executable part; the prose fields of a contract artifact
-(`summary`/`description` in every intent JSON; the prose rules in `we:docs/agent/platform-decisions.md`) carry
-meaning no diff can prove preserved. The prose→human gate itself is #2563's settled rule (any prose-field diff
-= spec change = human; can't-prove-impl-only → human) — **cited, not re-declared**.
+*Fork-existence: given prose is ~35–87% of real contract-weight (the audit,
+`we:reports/2026-07-19-schema-prose-expressibility-audit.md`), the authoring rule is either **per-statement**
+("attach a check to each statement that admits one; the rest is disciplined prose") or **per-spec**
+("executable-by-default; a prose invariant needs a warrant"). They cannot coexist as the default unit. The
+per-spec/ratchet branch (b) is broken by the data: pure-schema specs are ~0%, so "executable-by-default,
+prose-with-warrant" taxes the **normal** case and implies a shrinking prose slice that the evidence says is
+**permanent and load-bearing** — the ratchet points the wrong way. And "require executable" (c) is broken
+outright — forcing formalization on invariants that resist it yields faithfully-wrong specs (TLA+
+8.6%-semantic).*
 
-- **(a) Allow prose invariants, fail-safe human-gated, but *ratcheted*.** **Chosen.** Prose is admitted — but
-  not as a free escape hatch. **New invariants default to executable form; a prose invariant is admitted only
-  with a stated warrant that it genuinely resists faithful formalization** (the TLA+ finding is the
-  exception's justification, not a general license). Without the ratchet, "prose is allowed + every prose diff
-  → human" quietly re-admits the exact prose-diff eyeballing the schema-not-prose premise set out to kill:
-  the low-friction path becomes "write it as prose, get a human gate, dodge machine drift-detection," and the
-  deterministic core erodes. The ratchet keeps the prose slice bounded and shrinking.
-- **(b) Require every invariant in executable / machine-checkable form.** Rejected — some semantic invariants
-  genuinely cannot be faithfully formalized, and forcing them produces valid-parsing, behaviourally-wrong
-  specs (TLA+ 8.6% semantic); it also blocks authoring a legitimate invariant until someone can encode it.
+The prose lives *inside* the contract artifact (`summary`/`description` in every intent JSON; protocol
+`summary`; the prose rules in `we:docs/agent/platform-decisions.md`). "Did it change?" stays deterministic —
+any diff to a contract artifact, prose included, trips Fork 2's path test → human; #2563's settled rule
+(cited, not re-declared). The open call is only how the prose layer is *governed at authoring time*.
+
+- **(a) Per-statement check-binding + a prose-rigor discipline.** **Chosen.** Prose is a **first-class,
+  permanent layer**, not a slice to shrink. The rule: (i) **attach a machine check to each spec statement that
+  admits one** — the Tessl `[@test]` / Web-Platform-Tests / Gherkin-glue model (bind a human-authored check to
+  each faithful statement, leave the rest as reviewed prose); (ii) **hold the remaining prose to the rigor
+  discipline** (controlled/defined vocabulary, glossary-anchored terms, EARS trigger→response phrasing,
+  one-fact-per-statement) so its interpretation gap shrinks even without a check. The nudge is "*bind a check +
+  tighten the definition where faithful*," never "*justify each prose statement*." Matches what the repo
+  already does — hook the schema-decidable, keep the orientation as disciplined cited prose (the decisions
+  audit).
+- **(b) Executable-by-default, prose-only-with-warrant (the earlier draft's ratchet).** Rejected by the audit
+  — it treats prose as the exception when it is the norm (~0% pure-schema), so it taxes the normal case and
+  chases a "shrinking prose slice" that is actually permanent. Its valid kernel — *don't let people dodge a
+  faithful check by writing prose* — is kept as (a)'s "attach a check where faithful," without the
+  backwards default.
+- **(c) Require every invariant in executable form.** Rejected — forcing formalization on what resists it
+  yields valid-parsing, behaviourally-wrong specs (TLA+ 8.6% semantic) and blocks authoring a legitimate
+  invariant until someone can encode it.
 
 ```jsonc
-// (a) One intent artifact carries BOTH a mechanical contract and a prose slice — governed differently, ratcheted.
+// (a) One intent artifact = schema skeleton + a prose layer; bind a check to each statement that admits one.
 // we:src/_data/intents/action.json
 {
-  "dimensions": { "level": { "values": ["primary", "secondary"] } },  // EXECUTABLE — default form; machine-diffable gate
-  "requiresCapabilities": ["invokers"],                               // EXECUTABLE
-  "summary": "Semantic hierarchy of interactive elements to establish visual priority."  // PROSE — human-gated; admitted only with a resists-formalization warrant
+  "dimensions": { "level": { "values": ["primary", "secondary"] } },  // SCHEMA — machine-diffable + conformance-checkable
+  "requiresCapabilities": ["invokers"],                               // SCHEMA
+  "summary": "Keyboard parity is part of the contract, not an enhancement.",  // PROSE — but bindable:
+  "assertions": [ { "text": "pointer-only reorder is non-conforming", "test": "we:webcases/reorder-keyboard.spec.ts" } ]
+  //            ↑ per-statement check-binding (Tessl @test model); statements with no faithful check stay disciplined prose
 }
-// Ratchet: a NEW invariant must be executable unless a warrant states it can't be faithfully formalized.
+// Rule: attach a check where faithful + tighten the definition; NOT "executable-by-default, justify prose."
 ```
 
-**Known occurrences:** TLA+ 8.6%-semantic (why executable form can't be forced); Node-RED 55% drift (why the
-*executable* part still needs a mechanical gate); Kiro's EARS requirements (the prose form in the wild).
+**Known occurrences:** Tessl `[@test]` (each NL capability line bound to a test); Web Platform Tests (one
+hand-written test per WHATWG normative assertion); Gherkin step-glue (business-readable prose made runnable);
+EARS (controlled trigger→response prose that reduces ambiguity); RFC 2119 MUST/SHOULD (controlled vocabulary).
 
-*Skeptic:* SURVIVES-WITH-AMENDMENT — allowing prose survives (TLA+ finding); (b) correctly excluded. Two
-amendments folded: (1) **dropped** the `#configurability-partition` mapping — verified wrong turf (that anchor
-splits *author-facing config* by data-vs-code **serializability**, and its escape hatch is *executable* code
-*outside* the contract; prose semantic invariants are non-executable and *inside* the contract — the opposite
-on both axes); (2) added the **ratchet** (executable-by-default, prose-only-with-warrant) to close the
-loophole where the prose slice silently grows and erodes the schema-not-prose thesis. The prose→human gate is
-cited to #2563, not re-declared.
-*Screen:* clear — Q1: decides what authoring is allowed vs what falls to a human gate (standard-side
-governance). Q2: merit survives zero cost — some semantic invariants are inherently non-executable, so
-require-executable trades coverage for determinism regardless of effort (a real correctness/coverage tradeoff,
-not prioritization).
+*Skeptic:* the earlier default (executable-by-default, prose-with-warrant) **survived its own skeptic pass but
+was then refuted by the expressibility audit** (`…2026-07-19…`): with ~0% pure-schema specs, the ratchet taxes
+the normal case and assumes a shrinking prose slice the evidence shows is permanent. Flipped to per-statement
+binding + prose-rigor; the ratchet's valid kernel (don't dodge a faithful check with prose) is preserved. The
+earlier skeptic amendment still holds — the `#configurability-partition` mapping stays dropped (wrong turf),
+and the prose→human gate is #2563's, cited not re-declared.
+*Screen:* clear — Q1: decides how the prose layer is authored/governed (standard-side). Q2: per-statement vs
+per-spec-ratchet is a real correctness/coverage difference at zero cost (binding checks to faithful statements
+captures more mechanically while not taxing irreducible prose) — not prioritization.
 
 ## Fork 5 — The constitutional-amendment gate
 
@@ -433,9 +519,11 @@ control model is *forced* by settled invariants). So it splits into a ruling and
 
 At ratification this decision sets `codifiedIn` to a **thin new anchor** — proposed
 `#spec-is-schema-human-gates-spec` — carrying only its genuinely-new content: **(1)** the existing
-`we:src/_data/*.json` definitions **are** the machine-diffable spec, and **WE holds only the meta-schema +
-static contract-conformance** (the behavioral suite is Plateau/FUI); **(2)** the non-executable slice is
-**prose-permitted-but-ratcheted** (executable-by-default, prose-only-with-warrant); **(3)** the **three-tier
+`we:src/_data/*.json` definitions **are** the spec — a **schema skeleton + a first-class prose layer in one
+artifact** (~0% is pure-schema; reframed 2026-07-19) — and **WE holds only the meta-schema + static
+contract-conformance** (the behavioral suite is Plateau/FUI); **(2)** the prose layer is governed by
+**per-statement check-binding + a prose-rigor discipline** (attach a check where faithful; controlled
+definitions reduce ambiguity — *not* an executable-by-default ratchet); **(3)** the **three-tier
 amendability hierarchy** (constitution → law → impl), with the constitution never applied to a diff directly,
 a **substantively-entrenched constitutional-amendment gate** (Fork 5: #911-irreversible + cooling-in-days +
 committed external artifact — headcount when the polity grows), and **constitutional-consistency
@@ -474,6 +562,7 @@ the Spec Growth Engine shows these are one design; #2563 Fork 2's **cognitive-sc
 premise (AI panels don't decorrelate; the human is the only proven independent axis). Composes with the
 constellation placement model (WE = standard/spec, FUI/plateau = impl) and
 `#agent-convergence-independent-validation`. Research:
-`we:reports/2026-07-18-spec-based-programming-deep-research.md` +
-`/research/spec-based-programming-constellation/`. Ready to ratify once `/prepare` stamps it — the call is
-`/next decision`'s.
+`we:reports/2026-07-18-spec-based-programming-deep-research.md`,
+`we:reports/2026-07-19-schema-prose-expressibility-audit.md` (the audit that reframed the schema-not-prose
+invariant + flipped Fork 4), + `/research/spec-based-programming-constellation/`. In active discussion toward
+ratification (federated-scope + schema-vs-prose reframe folded in) — the call is `/next decision`'s.

@@ -2835,6 +2835,52 @@ under-provision-aborts / over-provision-theater); Fork 3 amended to graceful→S
 
 ---
 
+### Spec-based programming: the spec is a schema-skeleton + a prose layer; human-gates-spec / agent-implements, in a federated constitution→law→impl hierarchy {#spec-is-schema-human-gates-spec}
+
+**Ratified 2026-07-19 (#2564).** The constellation adopts spec-based programming: the human's attention is
+spent on the few **spec** artifacts, and an **implementation** under a fixed spec is agent-clearable on
+conformance-green + independent review. Load-bearing rules:
+
+- **A spec is a schema *skeleton* + a first-class, permanent *prose* layer, in one artifact.** An empirical
+  audit (`we:reports/2026-07-19-schema-prose-expressibility-audit.md`) found pure-schema is ~0% of real specs:
+  the machine-checkable part is the axis/enum/shape vocabulary; the contract's meaning (semantics, defaults,
+  behavior, a11y, judgment) is prose, inside the same artifact (`we:src/_data/*.json` `summary`/`description`).
+  So "schema, not prose" is **reframed** to *schema where faithfully expressible, disciplined prose for the
+  rest*. **"Did the spec change?" stays deterministic** — any diff to a contract artifact (prose included)
+  trips the path/artifact test → human (composes with [#blast-radius-advisory-care-not-a-gate](#blast-radius-advisory-care-not-a-gate)).
+  Prose ambiguity is **mitigable** (controlled vocabulary, glossary-anchored terms, EARS phrasing,
+  one-fact-per-statement, a per-statement `[@test]` binding) — a rigor spectrum, not a fatality.
+- **Human-gates-spec / agent-implements, in a *federated* three-tier hierarchy: constitution → law/spec →
+  implementation.** The **constitution** (core principles — non-author invariant, WE-holds-zero-impl,
+  segregation of duties) is **never applied to a diff directly**; only the derived law is. Tiers exist at
+  **platform scope (supreme)** and **per-project scope (subordinate — a project constitution derives from and
+  may not contradict the platform one)**; the amendment gate and consistency check scale with scope.
+- **WE holds the spec + the meta-schema + static conformance; the behavioral conformance suite is Plateau/FUI**
+  (composes with [#intent-conformance-is-block-compliance](#intent-conformance-is-block-compliance) and
+  [#surface-contract-not-computation](#surface-contract-not-computation)). The prose layer is governed by
+  **per-statement check-binding** (attach a machine check to each statement that admits one; hold the rest to
+  the rigor discipline) — not an executable-by-default ratchet.
+- **The auto-clear path is measured, not trusted.** The independent AI reviewer's false-clear rate is obtained
+  by a purpose-built instrument (stratified sample + a **shadow-harness** seeded-defect audit that never enters
+  the merge path); a **permanent non-zero human sample** stays as the backstop (the human is the only
+  decorrelated axis — [#agent-convergence-independent-validation](#agent-convergence-independent-validation)'s
+  staged-autonomy clause governs graduation; not re-declared here).
+- **Constitutional amendment is substantively entrenched** — exempt from the ordinary supersede-with-lineage of
+  the statute layer (the *Platform Decisions = Statute Layer* rule, #911), plus a cooling period in days and a
+  committed external record; a headcount quorum is adopted when the polity grows. **Constitutional-consistency
+  of a new spec is human-decided, never machine-decided** (an advisory per-principle critique may assist).
+
+**Lineage:** #2564 (ratified 2026-07-19; first concrete instance #2563 Fork 1). Reports
+`we:reports/2026-07-18-spec-based-programming-deep-research.md` + `we:reports/2026-07-19-schema-prose-expressibility-audit.md`;
+research `/research/spec-based-programming-constellation/` + `/research/schema-prose-expressibility-audit/`.
+Every fork survived an independent skeptic + a fresh-context two-confusion screen; the reframe + Fork-4 flip
+came from the expressibility audit during ratification discussion. Composes with (does not re-declare)
+[#agent-convergence-independent-validation](#agent-convergence-independent-validation),
+[#blast-radius-advisory-care-not-a-gate](#blast-radius-advisory-care-not-a-gate),
+[#intent-conformance-is-block-compliance](#intent-conformance-is-block-compliance), and #911.
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
