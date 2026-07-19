@@ -1,0 +1,82 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  The backlog console's north-star is to support <em>multiple</em> backlog systems (Jira, Linear, GitHub
+  Issues) alongside the WE backlog, and to bridge between them
+  (<a href="/backlog/2558-provider-agnostic-backlog-adapter-seam/">#2558</a>, under the Plateau Loop program
+  <a href="/backlog/2527-plateau-loop-autonomous-ai-build-queue/">#2527</a>). The directive is explicit: <strong>do not build
+  multi-provider now</strong> — but "hold the constraint" is unenforceable without a <em>named boundary</em>,
+  or every board slice hardcodes WE-CLI calls and the retrofit gets expensive. So the question is not "which
+  provider" but: <strong>what read port, write port, and domain interlingua does the console code against,
+  such that a later Jira/Linear/GitHub adapter is a mapping layer, not a re-architecture?</strong>
+</p>
+
+<h2>The seam already exists in embryo</h2>
+<p>
+  This is a decision that <em>ratifies shipped code</em>, not a greenfield design. The console is already a
+  two-layer split: browser views that only <code>fetch('/api/backlog/*')</code>, and a Node dev-middleware
+  that is the <em>only</em> code touching disk, shelling the WE CLI, or calling <code>gh</code>. The
+  <code>?repo=</code> / REPOS registry already selects a data source (one entry today); every write already
+  rides the lane&rarr;PR seam (acquire a lane &rarr; run the lane's CLI verb &rarr; <code>check:standards</code>
+  &rarr; open a ready-to-merge PR the drain merges). The client view code is <strong>already clean</strong> —
+  no view imports the CLI or the disk loader. What is missing is only (a) a repo-registry entry richer than a
+  bare path string, and (b) a single named provider interface behind the four ad-hoc read/write
+  implementations.
+</p>
+
+<h2>Prior art — the near-exact statute analog</h2>
+<p>
+  WE has already ratified this <em>exact pattern</em> for another surface. The
+  <strong>SSR-external-I/O</strong> anchor (<code>#ssr-external-io-standard-renderers-conform</code>, #2030)
+  rules that a rendering surface's <em>externally-observable I/O</em> (its wire format) is a WE standard, while
+  the <em>renderer</em> that produces it is a conforming, swappable implementation behind the seam — one client
+  hydrates any server's output because all servers emit the identical wire format. This decision is that same
+  <strong>black-box-conformance</strong> principle applied to backlog data access: the observable I/O (the DTO
+  wire shape + the write contract) is the standard; the <em>adapter</em> (WE-CLI now, Jira/Linear/GitHub later)
+  is a conforming, swappable impl. The write-transport half composes with
+  <code>#primary-read-only-lanes-only</code> (every mutation rides lane&rarr;PR); placement follows
+  <code>#constellation-placement</code> (contract/types on the standard side, adapter impl on plateau-app).
+</p>
+
+<h2>Recommendation (at a glance)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>Ruling A &mdash; the console-facing seam is the HTTP/DTO wire contract</strong> (the
+    <code>/api/backlog/*</code> endpoints + the <code>BacklogItemDTO</code>), not a JS-coupled in-process TS
+    interface. The standing test makes this <strong>support-both</strong>: the TS interface composes as a
+    <code>fetch()</code> facade over the wire contract, so the only call is which is <em>primary</em>. The wire
+    contract wins — language-agnostic like the SSR renderer rule (a foreign adapter is an endpoint in any
+    language), provider-agnostic by construction, and the zero-cost incumbent. A server-side
+    <code>BacklogProvider</code> TS interface is <em>supported behind</em> it. <em>(Confidence: high.)</em></li>
+  <li><strong>Ruling B &mdash; the interlingua IS the WE-backlog schema; mint the core
+    <code>@webeverything/contracts/backlog</code> package NOW + an open extension slot.</strong> Not a fork
+    (dissolves per #2092). The governing anchor is the <strong>interchange-schema temporal-rule
+    clarification</strong> (<code>platform-decisions.md:435</code>, #1437): for an interchange schema, "a second
+    independent impl" is met by <em>external convergent prior art</em> — N&ge;2 incumbents emitting the same
+    shape ⇒ mint the core now + an extension slot, don't wait for WE to ship two impls. Jira/Linear/GitHub/WE-backlog
+    are N&ge;4 convergent incumbents on the core (status lifecycle, epic/story ladder, <code>parent</code>,
+    blocking-link). Deferring "until the first foreign adapter" was the struck <em>wait-for-a-WE-internal-2nd-impl</em>
+    mis-read. Per-provider divergences ride a <code>providerExt</code> slot; the mint is a spin-off build
+    <code>blockedBy</code> this decision. <em>(Confidence: med-high.)</em></li>
+  <li><strong>Ratified invariants (not forks):</strong> writes ride lane&rarr;PR; views code only against the
+    seam (the acceptance lint); the seam is a black-box conformance contract — the backlog-data-access instance
+    of the SSR-I/O anchor.</li>
+</ul>
+
+<h2>Why mint the core now, not defer</h2>
+<p>
+  The prep first defended a <em>defer</em> default: the neutral contract can't be designed honestly without a
+  real foreign mapping to test it against, so wait for the first adapter. A refute-only skeptic pass defeated
+  that on the statute the prep had missed. The <strong>interchange-schema temporal-rule clarification</strong>
+  (<code>platform-decisions.md:435</code>) governs an interchange schema exactly: validation comes from
+  <em>convergent prior art in the world</em>, and when N&ge;2 incumbents already emit the shape the "second impl
+  + stabilised contract" precondition is <strong>already met</strong> — mint the core now + an open extension
+  slot for the parts that still diverge. The "divergences unknowable until a mapping" premise is also false:
+  Jira/Linear/GitHub schemas are public and surveyable today.
+  <a href="/backlog/2533-console-board-derived-ui-standards/">#2533</a> Fork 5 is the on-point precedent for
+  "pattern real, shape unshaped" — commission shaping research then mint, not park. And
+  <code>#constellation-placement</code> rule 3 already names <code>@webeverything/contracts</code>
+  (byte-replication interim) as the end-state, with plateau's <code>BacklogItemDTO</code> already a cross-repo
+  byte-replica — so minting the package <em>reduces</em> drift rather than adding a second schema to keep in
+  sync. Guardrail for resolve: cite the existing anchors, do not mint a new one.
+</p>
+{% endraw %}
