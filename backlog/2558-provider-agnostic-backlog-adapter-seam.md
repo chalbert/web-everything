@@ -3,8 +3,10 @@ bornAs: xj495sr
 kind: decision
 size: 3
 parent: "2527"
-status: open
+status: resolved
 dateOpened: "2026-07-18"
+dateResolved: "2026-07-19"
+codifiedIn: one-off
 preparedDate: "2026-07-18"
 tags: [plateau-loop, console, adapter-seam, provider-agnostic, architecture]
 relatedReport: reports/2026-07-18-provider-agnostic-backlog-adapter-seam.md
@@ -87,6 +89,21 @@ No multi-branch fork survived the standing test. Ratify the frame, or override a
 | **Seam form** | The **HTTP/DTO wire contract** (`/api/backlog/*` + `BacklogItemDTO`) is the ratified console-facing seam; a server-side `BacklogProvider` TS interface is **supported behind** it | **Support-both** — the composability probe passes (the TS interface is a facade over the wire contract), so they coexist; the only call is which is *primary*, and R3 + the already-clean client settle that | **High** |
 | **Interlingua home** | The interlingua **is** the WE-backlog schema; **mint the core `@webeverything/contracts/backlog` package now** (WE type-only) + an **open extension slot** for per-provider divergences — a spin-off build | **Accept-on-merit** — the interchange-schema temporal rule fires *now* on N≥2 convergent public incumbents; not a ratifiable either/or (dissolves per #2092) | **Med-high** |
 | **Invariants R1–R3** | writes ride lane→PR · views code only against the seam · the seam is black-box conformance | Forced by statute (cited below) | **High** |
+
+## Ruling (2026-07-18)
+
+Ruled by the human on 2026-07-18. This is a define+ratify decision — no multi-branch fork survived prep — so the ruling ratifies the frame: the two named rulings + the three invariants.
+
+- **Ruling A — seam form → RATIFIED.** The HTTP/DTO wire contract is the **primary** console-facing seam: the read surface `/api/backlog/*` plus the write surface `POST /api/backlog/write { id, verb, value }`. The in-process TypeScript `BacklogProvider` interface is **supported behind it as a facade** — never the primary contract. A foreign adapter is an endpoint in any language; the client only ever sees DTOs.
+
+- **Ruling B — interlingua home → RATIFIED (mint-now).** Mint the core `@webeverything/contracts/backlog` package **now** (type-only, from the vocabulary the WE backlog schema already fixes) plus an open `providerExt` extension slot for per-provider divergences. Mint-now is warranted by the interchange-schema temporal rule (`we:docs/agent/platform-decisions.md#constellation-placement`, the clarification at `:435`, `#1437`): for an interchange schema, "a second independent impl" is satisfied by external convergent prior art (Jira · Linear · GitHub Issues · WE backlog are N≥2 convergent incumbents on the core), so the core is minted now rather than deferred to a first foreign adapter. The spin-off package build is filed this session as a separate item (`blockedBy #2558`), slug `mint-webeverything-contracts-backlog` (a hash-id item the drain will number).
+
+- **R1–R3 invariants → CONFIRMED (cite existing anchors; mint NO new one).**
+  - **R1 — writes ride lane→PR; the primary tree is read-only.** Cite `we:docs/agent/platform-decisions.md#primary-read-only-lanes-only`.
+  - **R2 — view/client code depends only on the seam (DTO/HTTP), never a bare CLI/disk/`gh` source.** The acceptance lint; already true client-side, kept true and extended to the Node-side view-adjacent code.
+  - **R3 — the seam is a black-box conformance contract; adapters are swappable impls behind it.** Cite `we:docs/agent/platform-decisions.md#ssr-external-io-standard-renderers-conform`; placement follows `we:docs/agent/platform-decisions.md#constellation-placement` (contract/types → standard side, adapter impl → plateau-app).
+
+No new anchor is minted — the ruling cites the existing governors above (`codifiedIn = one-off`).
 
 ## Definition — the three named seams (the deliverable)
 
