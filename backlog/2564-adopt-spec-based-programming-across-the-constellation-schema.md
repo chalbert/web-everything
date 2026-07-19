@@ -1,9 +1,12 @@
 ---
 bornAs: x0n1nax
 kind: decision
-status: active
+status: resolved
 dateOpened: "2026-07-18"
 dateStarted: "2026-07-19"
+dateResolved: "2026-07-19"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#spec-is-schema-human-gates-spec"
 preparedDate: "2026-07-18"
 relatedReport: reports/2026-07-18-spec-based-programming-deep-research.md
 tags: [spec-driven, standards, review, architecture, strategy]
