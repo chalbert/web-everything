@@ -3,8 +3,11 @@ bornAs: xs62gnh
 kind: decision
 size: 5
 parent: "2527"
-status: open
+status: resolved
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-19"
+dateResolved: "2026-07-19"
+codifiedIn: one-off
 preparedDate: "2026-07-18"
 tags: [plateau-loop, console, substrate, spec, constitution, design-forks]
 ---
@@ -19,6 +22,37 @@ broken excluded branch), F2 a representation either/or, F3 aligns the item's req
 same-day spec-based-programming direction ([#2564]). Ruling them unblocks the proof backend ([#2562]) and the
 board ([#2555]). **Seams (not ruled here):** F1's launch *scheduling* stays [#2557]'s; F2/F3's schemas ride
 [#2558]'s provider-agnostic seam; F3 realizes [#2564]'s *schema-not-prose* contract at the item layer.
+
+## Ruling (2026-07-18)
+
+Ruled by the human on 2026-07-18. All four forks resolved; the recommended default was ratified on each
+(F3 with an amendment, F4 as a principle with its form delegated). The prepared analysis below stands as the
+record of *why*; this section is the settled outcome.
+
+- **F1 — review-unit vs build-unit → RATIFIED (a).** Decouple: the review/launch unit is the **cluster** (a
+  derived view over the item set), the build unit is the **item** (one item per agent-run, WIP=1). "Launch a
+  cluster" decomposes into ordered per-item builds. **Lane packaging + wave scheduling are NOT ruled here** —
+  they stay `we:backlog/2557-*.md` / `we:backlog/2560-*.md`.
+
+- **F2 — where `confidence` comes from → RATIFIED (a).** A stored, provenance-tagged `confidence` field
+  (agent-seeded at prep → human-overridable → proof-refined) with **nearest-wins precedence** `human > derived
+  > agent`. A proof recompute never silently overwrites a human override — it surfaces a disagreement flag
+  instead.
+
+- **F3 — structured spec vs prose → RATIFIED (a) + AMENDMENT.** Frozen, human-reviewed **structured
+  requirement rows** are the machine-checkable contract, seeded from prose. **AMENDED:** the authoring FORMAT is
+  **adapter-pluggable** — any spec language that DETERMINISTICALLY converts to the fields (e.g. Gherkin/BDD
+  "Given-When-Then", if strictly codifiable) is valid input; a non-LLM round-trippable converter qualifies,
+  while free-form prose stays a lossy seed. The format→fields converter is itself an **adapter** (a sibling of
+  `we:backlog/2558-*.md`). The EXACT format is NOT locked — it is reviewed empirically as specs are written;
+  tracks `we:backlog/2564-*.md`.
+
+- **F4 — constitution: artifact vs index → PRINCIPLE RATIFIED, FORM DEFERRED.** RATIFIED **principle:** the
+  constitution is the FEW big **core principles**; the specifics become **specs** (the §3b split), with **NO
+  duplication**. The **FORM** (a — derived index vs b — standalone artifact; note (b) is now viable because the
+  non-duplicating split defuses its drift objection) AND the **membership curation** are **DELEGATED** to a
+  follow-up decision filed this session: the **`constitution-curation-form`** item (a hash-id decision,
+  `blockedBy #2561`; the drain will assign its number). Reference it by that slug.
 
 ## Axis framing (the four contracts, pinned to the tree)
 
