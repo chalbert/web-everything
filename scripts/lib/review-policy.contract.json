@@ -1,0 +1,95 @@
+{
+  "contract": "review-escalation-policy",
+  "version": 1,
+  "summary": "The deterministic review-escalation policy as an explicit, machine-diffable CONTRACT (#2566, first concrete instance of spec-based programming #2564, under #2563 Fork 1). It declares — as DATA, not code — the three policy VALUES that used to live only as literals inside the derivation code: the rubric thresholds, the escalation-reason vocabulary with each reason's family + clearance, and the strictest-wins disposition decision table. The DERIVATION LOGIC (scoreEscalation, deriveReviewDisposition) stays in code and is proven to realize this table by the conformance suite (review-policy.conformance.test.mjs). Because every VALUE lives here and nowhere else, 'did the policy change?' collapses to 'did this file change?' — a deterministic yes/no. A diff to this file trips the trust-chain policy-tier path test and forces review:human; an implementation change that keeps the conformance suite green is agent-clearable (a 1-char threshold flip is a SPEC change here → human; a behaviour-preserving refactor of the branches is IMPL → agent). Per #2564 a spec is a schema skeleton + a first-class prose layer in one artifact: the machine-checkable shape is the fields below, the contract's MEANING is the 'description' prose on each entry.",
+  "thresholds": {
+    "description": "The rubric tuning knobs — loose to start, tightened from data. These are the ONLY home for the numbers; the code (scripts/lib/review-escalation.mjs DEFAULT_THRESHOLDS) imports them from here, so flipping one is necessarily a diff to THIS file → a human-gated spec change.",
+    "diffLines": {
+      "value": 400,
+      "description": "A PR changing at least this many total lines escalates on size alone. Size is a care-level signal (raises the convergence loop's scrutiny), not a hard block (#2563)."
+    },
+    "sampleNth": {
+      "value": 10,
+      "description": "The deterministic 1-in-N sampling floor: every Nth PR (by PR number, never Math.random) escalates regardless, so 'no dismissed findings' can never be a gameable exit from review."
+    }
+  },
+  "reasons": [
+    {
+      "token": "gate-self",
+      "family": "sensitivity",
+      "clearance": "human",
+      "description": "The diff edits the POLICY tier of the auto-review trust chain — the code that decides whether the gate fires and what clears it. An agent reviewing such a change would be policing an edit to its own leash (a conflict of interest), so a human is essential (#2285). Fires at classification time (before any review deadlock), so the panel may CONVERGE an advisory fix — but it never auto-lands."
+    },
+    {
+      "token": "statute",
+      "family": "sensitivity",
+      "clearance": "human",
+      "description": "The diff edits the statute layer (platform-decisions.md / any statute doc) — a governance rule a human must ratify (#2412). Same disposition as gate-self: converge an advisory fix, never auto-land."
+    },
+    {
+      "token": "blast-radius",
+      "family": "sensitivity",
+      "clearance": "agent",
+      "description": "The diff touches a high-blast-radius surface (scripts, skills, hooks, CI, standards defs) OR the engine tier of the trust chain (the lander). Escalation-worthy — a bad merge here is costlier than a leaf edit — but agent-reviewable: a converged verdict lands (#2445 two-tier flip)."
+    },
+    {
+      "token": "size",
+      "family": "sensitivity",
+      "clearance": "agent",
+      "description": "Total changed lines reached thresholds.diffLines. A care-level signal, agent-clearable on a converged verdict."
+    },
+    {
+      "token": "dismissed-findings",
+      "family": "sensitivity",
+      "clearance": "agent",
+      "description": "The lane's pre-PR review dismissed one or more findings — the strongest scored signal (it targets author anchoring: the lane judged its own reviewer's findings away). Agent-clearable on a converged verdict."
+    },
+    {
+      "token": "cross-repo",
+      "family": "sensitivity",
+      "clearance": "agent",
+      "description": "An impl+WE couple spanning more than one repo — a coordinated multi-repo change. Agent-clearable on a converged verdict."
+    },
+    {
+      "token": "sampling",
+      "family": "sensitivity",
+      "clearance": "agent",
+      "description": "The 1-in-N sampling floor fired (thresholds.sampleNth). Keeps lane self-review honest; agent-clearable on a converged verdict."
+    },
+    {
+      "token": "non-convergence",
+      "family": "deadlock",
+      "clearance": "human",
+      "description": "The panel-editor negotiation loop already ran and could not agree within its round cap. Re-converging just repeats the deadlock, so this hands straight to a human — no further convergence."
+    },
+    {
+      "token": "mandate-conflict",
+      "family": "deadlock",
+      "clearance": "human",
+      "description": "The review panel surfaced a genuine mutually-exclusive tradeoff between mandatory lenses (e.g. security wants X, simplicity wants not-X) — human judgment by definition. Hands straight to a human."
+    }
+  ],
+  "disposition": {
+    "description": "The strictest-reason-wins decision table deriveReviewDisposition realizes: given the reason(s) a PR escalated for, what does a review surface DO about it — { mode: converge | human, autoLand }. Rules are evaluated in order (strictest first); the FIRST rule whose predicate matches ANY of the PR's reasons wins. 'match' is a predicate over a reason's declared family/clearance above. autoLand=false is the single enforcement point for the #2285 conflict-of-interest invariant: a human gates the merge regardless of how clean the findings look.",
+    "precedence": [
+      {
+        "match": { "family": "deadlock" },
+        "mode": "human",
+        "autoLand": false,
+        "description": "Any deadlock reason: the convergence loop already failed, so a human decides — no (re-)convergence. Evaluated first, so a deadlock reason beats every sensitivity reason in the same set."
+      },
+      {
+        "match": { "clearance": "human" },
+        "mode": "converge",
+        "autoLand": false,
+        "description": "A human-clearance SENSITIVITY reason (gate-self or statute — deadlock is already caught above): converge an ADVISORY fix, but a human must still clear the merge. The #2445 two-tier flip keeps ONLY these two sensitivity classes human; the lander (engine tier) falls through to the next rule."
+      },
+      {
+        "match": { "family": "sensitivity" },
+        "mode": "converge",
+        "autoLand": true,
+        "description": "Any other sensitivity reason: agent-reviewable — a converged verdict lands. This is the catch-all for the remaining scored signals."
+      }
+    ]
+  }
+}

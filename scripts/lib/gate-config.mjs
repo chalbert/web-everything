@@ -79,6 +79,27 @@ export const TRUST_CHAIN = [
     homes: ['scripts/lib/review-core.mjs'],
   },
   {
+    role: 'policy-spec',
+    file: 'review-policy.contract.json',
+    tier: 'policy',
+    desc: 'the review-escalation policy CONTRACT (#2566) — the machine-diffable spec that OWNS the rubric thresholds, the reason families/clearance, and the disposition decision table. A diff here IS a policy change (the #2563 Fork 1 spec-based gate: "did the spec change?" is deterministic), so it forces review:human',
+    homes: ['scripts/lib/review-policy.contract.json'],
+  },
+  {
+    role: 'policy-spec-loader',
+    file: 'review-policy.mjs',
+    tier: 'policy',
+    desc: 'the loader + executable form of the policy contract (#2566) — validates the contract shape and exposes derivePolicyDisposition (the oracle the conformance suite holds the impl to); editing it can change how the spec is interpreted, so it is policy tier',
+    homes: ['scripts/lib/review-policy.mjs'],
+  },
+  {
+    role: 'policy-conformance',
+    file: 'review-policy.conformance.test.mjs',
+    tier: 'policy',
+    desc: 'the conformance suite (#2566) proving the derivation code realizes the contract table over the full input space — the bridge that makes an impl refactor agent-clearable (green) and a behaviour change human-gated (red forces a contract edit); weakening an assertion here is itself a spec change (the closure)',
+    homes: ['scripts/lib/__tests__/review-policy.conformance.test.mjs'],
+  },
+  {
     role: 'lander',
     file: 'merge-ai-prs.mjs',
     tier: 'engine',
