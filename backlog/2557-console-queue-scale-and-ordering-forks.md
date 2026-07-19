@@ -3,8 +3,10 @@ bornAs: xfk2sol
 kind: decision
 size: 3
 parent: "2505"
-status: open
+status: resolved
 dateOpened: "2026-07-18"
+dateResolved: "2026-07-19"
+codifiedIn: one-off
 preparedDate: "2026-07-18"
 relatedReport: reports/2026-07-18-console-queue-scale-ordering-prep.md
 tags: [plateau-loop, console, console-board, queue, ordering, design-forks]
@@ -19,6 +21,25 @@ wave or item-by-item**, and whether lanes are **per-program or one global fleet*
 the board slices [#2555] so C1/C5/C6 don't hardcode an unratified choice. No greenfield survey: the prior
 art is the console design record ([we:docs/design/backlog-console-design.md](docs/design/backlog-console-design.md),
 landed #567); each fork is re-grounded against the **real shipped CLI** and carries a **bold default**.
+
+## Ruling (2026-07-18)
+
+All four forks **ratified as the prepared default**. Product-console design calls; no new statute anchor
+(`codifiedIn: one-off`, mirroring #2526).
+
+- **F1 — DAG frontier render rule → RATIFIED (a): state-based frontier.** Render expanded = active ∪
+  next-cleared ∪ open gates + 1-hop; deeper chains fold to summary bands with an explicit "+N". To be
+  refined once reviewable visually. The build must ship the **corrected (non-dead-code) predicate** — a gate
+  is `tier === 'B'` OR a blocked decision, **never** the unsatisfiable `tier === 'B' && openBlockers > 0`.
+- **F2 — cleared-set ordering → RATIFIED (a): inherit #2526.** The cleared set runs in the ratified #2526
+  composite order (tier → score → rank → FIFO → num) filtered to `buildQueued`; **no** separate cleared-only
+  order field. "Reorder the cleared view" = edit `tier`/`rank`.
+- **F3 — wave vs whole-cluster launch → RATIFIED (a): whole-cluster launch.** One action clears the cluster
+  and pours its ready frontier (wave 0) off the derived, **editable** wave plan; WIP = policy `lanes ≤ N`.
+  Later-wave auto-vs-confirm = #2561 F1's per-item consent (not ruled here).
+- **F4 — repo/program dimension → RATIFIED (a): one global fleet.** A program is a projection (chip +
+  per-program share), not a partition; scope leases are **global** (feeds #2560); a per-program board is a
+  filter over the global fleet.
 
 ## Axis framing
 
