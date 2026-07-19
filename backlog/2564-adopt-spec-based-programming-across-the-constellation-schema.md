@@ -17,6 +17,33 @@ agent-clearable** when a conformance suite stays green and an independent review
 preserved. #2563 Fork 1 (a human gates a change to the review-policy *spec*, not the whole trust-chain path)
 is the **first concrete instance**; this item is the general direction it previews.
 
+## Ratified (2026-07-19)
+
+All forks ratified as their defaults; the discussion-phase reframes are ratified too. In full:
+
+- **The spec = a schema *skeleton* + a first-class, permanent *prose* layer, in one artifact** — schema where
+  faithfully expressible, disciplined prose for the rest (reframed from "schema, not prose" after the
+  expressibility audit, `we:reports/2026-07-19-schema-prose-expressibility-audit.md`; pure-schema is ~0% of
+  real specs). Prose ambiguity is **mitigable** (the rigor spectrum), not a fatality.
+- **Human-gates-spec / agent-implements**, nested in a **federated three-tier hierarchy** — constitution →
+  law/spec → impl, at **platform scope (supreme)** and **per-project scope (subordinate)**; the constitution
+  is never applied to a diff directly.
+- **Fork 1:** the existing `we:src/_data/*.json` definitions *are* the spec; WE holds the meta-schema + static
+  conformance, the behavioral suite is Plateau/FUI.
+- **Fork 2:** per-standard-entity granularity; the spec-change→human line is #2563's path/artifact test.
+- **Fork 3:** a purpose-built false-clear-rate instrument (stratified sample + a **shadow-harness** seeded-defect
+  audit that never enters the merge path); the permanent human sample is #2563's backstop.
+- **Fork 4:** the prose layer is governed by **per-statement check-binding + a prose-rigor discipline** (attach
+  a check where faithful; prose is the norm, not a ratcheted exception).
+- **Fork 5:** the constitutional-amendment gate is **substantive entrenchment** (exempt from #911 supersede +
+  cooling-in-days + a committed external artifact); headcount quorum adopted when the polity grows.
+- **Consistency check (dissolved Fork 6):** human-*decided*, never machine-decided, with an advisory
+  per-principle critique as a support-both build.
+
+Final confirmation red-team: no fork's default fell; the one disclosed residual (solo, the constitution's
+author still ratifies it — the non-author invariant can't be fully met until a second human exists) is
+accepted as "entrenchment now, headcount later." Codified below; successor builds filed as their own items.
+
 ## Grounding digest
 
 The constellation is *already* a spec-vs-impl split, and the machinery to run it as one is *already on disk*.
@@ -312,7 +339,11 @@ cannot cover a blind spot it shares), with autonomy graduation the staged-autono
   spec-violating change and confirm the independent reviewer catches it). The seeded-defect audit is the
   instrument for the *confidently-wrong-and-never-flagged* class — the same danger #2563 Fork 2's touchpoint 4
   routes to a human ("the only way a *shared* blind spot reaches a human"); here it is *measured*, not just
-  sampled. This closes the open question the research flagged as unmeasured.
+  sampled. This closes the open question the research flagged as unmeasured. **Safety guarantee (ratified):**
+  the seeded defect is a **drill, not a real change** — it runs in a **shadow harness** (the reviewer AI is
+  given the known-bad diff in a controlled, throwaway setup, its verdict recorded, the diff discarded) and
+  **never enters the real merge path**, so a planted bug can *never* land by construction. It is a fire drill
+  in a simulator, not a real fire in the pipeline.
 - **(b) Treat the #2563 backstop sample as sufficient measurement.** Rejected — it conflates a safety tripwire
   with an instrument; a random high-blast sample under-measures the population and is underpowered on the
   correlated blind spot, so a "clean" reading would be a false reassurance. (Block-until-measured out-of-band
