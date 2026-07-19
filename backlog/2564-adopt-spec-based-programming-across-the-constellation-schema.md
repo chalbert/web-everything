@@ -1,8 +1,9 @@
 ---
 bornAs: x0n1nax
 kind: decision
-status: open
+status: active
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-19"
 preparedDate: "2026-07-18"
 relatedReport: reports/2026-07-18-spec-based-programming-deep-research.md
 tags: [spec-driven, standards, review, architecture, strategy]
