@@ -3,7 +3,7 @@ bornAs: xpfousp
 kind: story
 size: 8
 status: open
-blockedBy: ["2567"]
+blockedBy: []
 dateOpened: "2026-07-19"
 tags: []
 ---

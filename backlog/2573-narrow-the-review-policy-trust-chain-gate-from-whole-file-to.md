@@ -2,9 +2,10 @@
 bornAs: xzcdvz7
 kind: story
 size: 5
-status: open
-blockedBy: ["2566"]
+status: active
+blockedBy: []
 dateOpened: "2026-07-19"
+dateStarted: "2026-07-19"
 tags: []
 ---
 
