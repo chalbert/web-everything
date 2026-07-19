@@ -2,10 +2,12 @@
 bornAs: xcbcsft
 kind: story
 size: 8
-status: active
+status: resolved
 blockedBy: ["2563"]
 dateOpened: "2026-07-18"
 dateStarted: "2026-07-19"
+dateResolved: "2026-07-19"
+graduatedTo: none
 tags: []
 ---
 
