@@ -39,6 +39,13 @@
  * Pure, unit-tested in `we:scripts/lib/__tests__/review-core.test.mjs`.
  */
 
+// #2567 — the advisory CARE-LEVEL enum is single-sourced in review-escalation.mjs (where it is derived from the
+// escalation signals). This is a ONE-WAY import of a pure frozen enum: review-escalation is a leaf (it imports
+// only gate-config), so review-core → review-escalation is acyclic. review-core stays label-free / leash-free —
+// a care-level is advisory review-RIGOR information (the panel's own concern: how hard to look), not a
+// route/land policy (that stays with review-escalation's decideReviewGate).
+import { CARE_LEVELS, deriveCareLevel } from './review-escalation.mjs';
+
 /**
  * @typedef {Object} Finding
  * @property {string} [file] - repo-relative path the finding is anchored to.
@@ -458,6 +465,57 @@ export function deriveReviewDisposition({ reason, reasons } = {}) {
 }
 
 /**
+ * #2567 — the BRIDGE from the drain's escalation REASONS to the advisory care-level. A parked PR carries only its
+ * DECORATED reason strings (the `## Escalation reason` body block, `scoreEscalation`'s reasons) — not the raw
+ * `signals` object `deriveCareLevel` reads — so a consumer that has reasons (the review-parked-prs workflow, the
+ * future scheduled runner) needs this to recover the care-level deterministically. Pure. Canonicalizes each
+ * reason (same `canonicalizeReason` the disposition uses), maps the recognized tokens back to a signals-presence
+ * object (magnitude parsed where the decorated string carries it — the dismissed-findings count), and runs the
+ * single-sourced `deriveCareLevel`. LENIENT by design: an unrecognized reason contributes nothing rather than
+ * throwing (the care-level is an advisory dial — it must never crash the panel). A deadlock or a human-sensitivity
+ * reason (gate-self / statute) maps to `humanRequired` → maximum care.
+ * @param {string[]} reasons - the decorated escalation reason strings (or bare tokens).
+ * @returns {'none'|'low'|'elevated'|'high'}
+ */
+export function careLevelFromReasons(reasons) {
+  const raw = (Array.isArray(reasons) ? reasons : reasons ? [reasons] : []).filter(Boolean);
+  const signals = {};
+  let humanRequired = false;
+  for (const r of raw) {
+    const token = canonicalizeReason(r);
+    switch (token) {
+      case REVIEW_REASONS.BLAST_RADIUS: signals.blastRadius = true; break;
+      case REVIEW_REASONS.SIZE: signals.size = 1; break;
+      case REVIEW_REASONS.DISMISSED_FINDINGS: {
+        const m = /\((\d+)/.exec(String(r));           // "dismissed-findings (3 …)" → 3; unparseable → 1
+        signals.dismissedFindings = m ? Number(m[1]) : 1;
+        break;
+      }
+      case REVIEW_REASONS.CROSS_REPO: signals.crossRepo = true; break;
+      case REVIEW_REASONS.SAMPLING: signals.sampled = 1; break;
+      case REVIEW_REASONS.GATE_SELF:
+      case REVIEW_REASONS.STATUTE:
+      case REVIEW_REASONS.NON_CONVERGENCE:
+      case REVIEW_REASONS.MANDATE_CONFLICT:
+        humanRequired = true; break;                    // human-gated or deadlocked → maximum care
+      default: break;                                   // unrecognized → contributes nothing (lenient)
+    }
+  }
+  return deriveCareLevel({ signals, humanRequired });
+}
+
+/**
+ * #2567 — the panel RIGOR for a set of escalation reasons: `careLevelFromReasons` → `panelRigorForCareLevel`, in
+ * one call for the reasons-holding consumer. Pure. (`panelRigorForCareLevel` is defined below in the panel
+ * section; both are hoisted, so the forward reference resolves at call time.)
+ * @param {string[]} reasons
+ * @returns {{careLevel: string, rounds: number, lenses: string[], jurorsPerLens: number, aggregation: string}}
+ */
+export function panelRigorFromReasons(reasons) {
+  return panelRigorForCareLevel(careLevelFromReasons(reasons));
+}
+
+/**
  * #2310 (v3, under epic #2285) — the MULTI-MANDATE REVIEWER PANEL. v2's single reviewer fans out into distinct
  * mandated lenses (the `/code-review` dimensions), each judging the SAME diff independently via `buildMandate`
  * (one subagent per lens, seeded with `buildPanelMandate`). The panel's combined verdict then drives the SAME
@@ -491,6 +549,54 @@ export const ADVISORY_LENSES = Object.freeze([MANDATE_LENSES.SIMPLICITY, MANDATE
 
 /** Every panel lens, mandatory first — the full fan-out set a v3 panel round spawns one reviewer per. */
 export const PANEL_LENSES = Object.freeze([...MANDATORY_LENSES, ...ADVISORY_LENSES]);
+
+/**
+ * How the panel's per-lens/per-juror verdicts are AGGREGATED (#2567 / #2563 Fork 2). The panel is aggregated by
+ * diversity-SELECTION, **never** by naive majority vote: the most critical (strictest) verdict wins — one lens or
+ * juror wanting `changes`/`needs-human` carries the whole panel there. Majority voting hits the "popularity trap"
+ * — LLMs share failure modes, so a vote amplifies the shared-WRONG output that most models happen to agree on
+ * (`we:reports/2026-07-18-human-vs-ai-review-cognitive-science.md`). `derivePanelVerdict` ALREADY implements this
+ * (strictest-reason-wins, not a count), so this constant only NAMES the contract the care-level rigor dial scales
+ * up; it does not introduce a second reducer. A single label so every consumer says "diversity-selection" the
+ * same way and no caller quietly re-derives a majority vote.
+ */
+export const AGGREGATION = Object.freeze({ DIVERSITY_SELECTION: 'diversity-selection' });
+
+/**
+ * The panel RIGOR each advisory care-level dials (#2567, codified `#blast-radius-advisory-care-not-a-gate`). Pure,
+ * total over `CARE_LEVELS`. Care-level scales HOW HARD the AI panel looks — `rounds` (editor↔reviewer negotiation
+ * passes), `lenses` (which `PANEL_LENSES` fan out), and `jurorsPerLens` (independent reviewers per lens; >1 is the
+ * diverse JURY that a high-care change earns) — never the ROUTE (a high-care change still gets an agent review, it
+ * is not handed to a human) and never a cap on the WORK. Aggregation is ALWAYS diversity-selection, never a vote.
+ *   • `none`     → no panel (the PR did not escalate; nothing to review).
+ *   • `low`      → 1 round, full lens set, 1 juror per lens — the baseline panel a routine spot-check earns.
+ *   • `elevated` → 2 rounds — a system-machinery / dismissed-finding change gets a second negotiation pass.
+ *   • `high`     → 3 rounds + 2 jurors per lens — the maximum scrutiny (a gate-self/statute change, or several
+ *                  stacked scored signals); the extra jurors are the diverse jury against shared blind spots.
+ * `rounds` never exceeds `NEGOTIATION_ROUND_CAP` (the loop's own hard budget). Tuning knobs — loose to start,
+ * tighten from data; kept here so a re-dial is one edit + a test.
+ * @param {'none'|'low'|'elevated'|'high'} careLevel
+ * @returns {{careLevel: string, rounds: number, lenses: string[], jurorsPerLens: number, aggregation: string}}
+ */
+export function panelRigorForCareLevel(careLevel) {
+  const rigorByLevel = {
+    [CARE_LEVELS.NONE]:     { rounds: 0, lenses: [],           jurorsPerLens: 0 },
+    [CARE_LEVELS.LOW]:      { rounds: 1, lenses: PANEL_LENSES, jurorsPerLens: 1 },
+    [CARE_LEVELS.ELEVATED]: { rounds: 2, lenses: PANEL_LENSES, jurorsPerLens: 1 },
+    [CARE_LEVELS.HIGH]:     { rounds: 3, lenses: PANEL_LENSES, jurorsPerLens: 2 },
+  };
+  const r = rigorByLevel[careLevel];
+  if (!r) {
+    throw new Error(`panelRigorForCareLevel: unknown care-level "${careLevel}" — must be one of ${Object.values(CARE_LEVELS).join(', ')}`);
+  }
+  return {
+    careLevel,
+    rounds: Math.min(r.rounds, NEGOTIATION_ROUND_CAP),
+    lenses: [...r.lenses],
+    jurorsPerLens: r.jurorsPerLens,
+    aggregation: AGGREGATION.DIVERSITY_SELECTION,
+  };
+}
 
 /**
  * Build the mandate handed to ONE lens reviewer in the v3 panel (#2310) — wraps `buildMandate({ mandate: lens

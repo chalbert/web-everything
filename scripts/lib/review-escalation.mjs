@@ -150,8 +150,74 @@ export function isBlastRadiusPath(path) {
 export const isGateSelfPath = isPolicyCorePath;
 
 /**
- * Score ONE ready PR against the escalation rubric. Pure. Returns `{ escalate, reasons, signals }` — `escalate`
- * is true iff ANY rubric signal fired; `reasons` is the human-readable rule outcome the drain STAMPS
+ * The advisory CARE-LEVEL an escalated PR carries (#2567, codified `#blast-radius-advisory-care-not-a-gate`,
+ * #2563). The reframe: a scored escalation signal (blast-radius / size / dismissed / cross-repo / sampling) is
+ * NOT a park-gate that routes to a human — it is *care-level information* that tells the reviewer (the AI panel)
+ * HOW HARD to look. Care-level dials panel rigor (`panelRigorForCareLevel` in review-core.mjs — rounds / lenses /
+ * jurors), never the *route*: a high-care change still gets an agent review, it does not get handed to a human
+ * (only gate-self/statute and a non-convergence deadlock do that). Ordered least→most; `none` = no scored signal.
+ */
+export const CARE_LEVELS = Object.freeze({
+  NONE: 'none',
+  LOW: 'low',
+  ELEVATED: 'elevated',
+  HIGH: 'high',
+});
+
+/** Care-levels ordered least→most, so a caller can compare / clamp deterministically. Frozen. (#2567) */
+export const CARE_LEVEL_ORDER = Object.freeze([CARE_LEVELS.NONE, CARE_LEVELS.LOW, CARE_LEVELS.ELEVATED, CARE_LEVELS.HIGH]);
+
+/**
+ * The per-signal CARE WEIGHTS (#2567) — how much each scored escalation signal contributes to the care score,
+ * mirroring the strength ordering the rubric already documents (`scoreEscalation` below):
+ *   • dismissed-findings — the STRONGEST scored signal (the lane judged its own reviewer's findings away — direct
+ *     author-anchoring), and it scales with the count.
+ *   • blast-radius — touches system machinery, so a bad merge is far costlier than a leaf edit → elevated alone.
+ *   • size / cross-repo — real but weaker scored signals.
+ *   • sampling — the 1-in-N honesty FLOOR, the weakest: a sampled-only PR is `low` care, a routine spot-check.
+ * Tuning knobs (loose to start), kept here so a re-weight is one edit + a test — never scattered.
+ */
+export const CARE_WEIGHTS = Object.freeze({
+  dismissedBase: 3,   // any dismissed finding — the strongest scored signal
+  dismissedExtra: 2,  // added when MORE than one finding was dismissed (a pattern, not a one-off)
+  blastRadius: 3,     // system-machinery surface — elevated on its own
+  size: 2,            // a large diff — humans review these worse, so the panel looks harder
+  crossRepo: 2,       // a coordinated multi-repo couple
+  sampled: 1,         // the honesty floor — lowest care (a routine spot-check)
+});
+
+/** Care-score band edges (#2567): score → level. `< low` ⇒ none; `< elevated` ⇒ low; `< high` ⇒ elevated;
+ *  `>=` the top edge ⇒ high. Frozen tuning knobs. */
+export const CARE_BANDS = Object.freeze({ low: 1, elevated: 3, high: 5 });
+
+/**
+ * Derive the advisory CARE-LEVEL for an escalated PR from its `scoreEscalation` signals (#2567). Pure, total.
+ * A human-gated change (gate-self / statute — `humanRequired`) is MAXIMUM care (`high`): a human clears it, and
+ * the panel that advises the fix should look as hard as it can. Otherwise the scored signals sum by `CARE_WEIGHTS`
+ * and fall into a `CARE_BANDS` band. No scored signal at all → `none`. This is advisory ONLY — it dials panel
+ * rigor, it never decides route or land (that stays with `decideReviewGate` / `deriveReviewDisposition`).
+ * @param {{signals?: object, humanRequired?: boolean}} o - `signals` is the `scoreEscalation` signals object.
+ * @returns {'none'|'low'|'elevated'|'high'}
+ */
+export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
+  if (humanRequired) return CARE_LEVELS.HIGH;
+  const s = signals || {};
+  let score = 0;
+  if (s.dismissedFindings) score += CARE_WEIGHTS.dismissedBase + (Number(s.dismissedFindings) > 1 ? CARE_WEIGHTS.dismissedExtra : 0);
+  if (s.blastRadius) score += CARE_WEIGHTS.blastRadius;
+  if (s.size) score += CARE_WEIGHTS.size;
+  if (s.crossRepo) score += CARE_WEIGHTS.crossRepo;
+  if (s.sampled) score += CARE_WEIGHTS.sampled;
+  if (score >= CARE_BANDS.high) return CARE_LEVELS.HIGH;
+  if (score >= CARE_BANDS.elevated) return CARE_LEVELS.ELEVATED;
+  if (score >= CARE_BANDS.low) return CARE_LEVELS.LOW;
+  return CARE_LEVELS.NONE;
+}
+
+/**
+ * Score ONE ready PR against the escalation rubric. Pure. Returns `{ escalate, humanRequired, careLevel, reasons,
+ * signals }` — `escalate` is true iff ANY rubric signal fired; `careLevel` (#2567) is the advisory dial derived
+ * from the same signals (`deriveCareLevel`); `reasons` is the human-readable rule outcome the drain STAMPS
  * (`escalated: yes/no` + why). Signals (each independent):
  *   • blast-radius — the diff touches a high-blast-radius surface (scripts/, skills, hooks, CI, statute, defs).
  *   • size         — total changed lines ≥ thresholds.diffLines.
@@ -218,7 +284,12 @@ export function scoreEscalation({
   // Deterministic 1-in-N sampling floor: keyed on the PR number so it's reproducible (never Math.random).
   if (Number(prNum) > 0 && t.sampleNth > 0 && Number(prNum) % t.sampleNth === 0) { signals.sampled = t.sampleNth; reasons.push(`sampling floor (1-in-${t.sampleNth})`); }
 
-  return { escalate: reasons.length > 0, humanRequired, reasons, signals };
+  // #2567 — the advisory CARE-LEVEL, derived from the same signals. ADDITIVE: existing callers that only read
+  // escalate/humanRequired/reasons/signals are unchanged; the care-level is the new advisory dial (it tells the
+  // AI panel how hard to look — `panelRigorForCareLevel` — and never changes route or land).
+  const careLevel = deriveCareLevel({ signals, humanRequired });
+
+  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals };
 }
 
 /**
@@ -250,7 +321,13 @@ export function coupleEscalation(memberScores) {
   const escalate = members.some((m) => m && m.escalate);
   const humanRequired = members.some((m) => m && m.humanRequired);
   const reasons = escalate ? [...new Set(members.flatMap((m) => (m && m.reasons) || []))] : [];
-  return { escalate, humanRequired, reasons };
+  // #2567 — the couple's advisory care-level is the STRICTEST (highest) member's, same inherit-the-strictest rule
+  // as escalate/humanRequired: an impl+WE couple looks as hard as its most care-worthy half demands.
+  const careLevel = members.reduce((max, m) => {
+    const lvl = (m && m.careLevel) || CARE_LEVELS.NONE;
+    return CARE_LEVEL_ORDER.indexOf(lvl) > CARE_LEVEL_ORDER.indexOf(max) ? lvl : max;
+  }, CARE_LEVELS.NONE);
+  return { escalate, humanRequired, careLevel, reasons };
 }
 
 /** Does this PR (or couple) carry a given review label? `labels` is the observed label-name array. Pure. */

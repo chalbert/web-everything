@@ -24,6 +24,10 @@ import {
   MANDATORY_LENSES,
   ADVISORY_LENSES,
   PANEL_LENSES,
+  AGGREGATION,
+  panelRigorForCareLevel,
+  careLevelFromReasons,
+  panelRigorFromReasons,
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
@@ -684,5 +688,75 @@ describe('renderCloseSessionFlowLine (#2433)', () => {
       ],
     });
     expect(line).toBe('first → backlog (#100); second → memory');
+  });
+});
+
+describe('panelRigorForCareLevel — care-level dials panel rigor (#2567)', () => {
+  it('none → no panel (the PR did not escalate)', () => {
+    const r = panelRigorForCareLevel('none');
+    expect(r.rounds).toBe(0);
+    expect(r.lenses).toEqual([]);
+    expect(r.jurorsPerLens).toBe(0);
+  });
+  it('low → the baseline panel: 1 round, full lens set, 1 juror per lens', () => {
+    const r = panelRigorForCareLevel('low');
+    expect(r.rounds).toBe(1);
+    expect(r.lenses).toEqual([...PANEL_LENSES]);
+    expect(r.jurorsPerLens).toBe(1);
+  });
+  it('elevated → a second negotiation round', () => {
+    expect(panelRigorForCareLevel('elevated').rounds).toBe(2);
+  });
+  it('high → maximum scrutiny: 3 rounds + a diverse jury (2 jurors per lens)', () => {
+    const r = panelRigorForCareLevel('high');
+    expect(r.rounds).toBe(3);
+    expect(r.jurorsPerLens).toBe(2);
+  });
+  it('rigor is MONOTONE in care-level — rounds never decrease as care rises', () => {
+    const rounds = ['none', 'low', 'elevated', 'high'].map((l) => panelRigorForCareLevel(l).rounds);
+    for (let i = 1; i < rounds.length; i++) expect(rounds[i]).toBeGreaterThanOrEqual(rounds[i - 1]);
+  });
+  it('rounds never exceed the negotiation round cap', () => {
+    for (const l of ['none', 'low', 'elevated', 'high']) {
+      expect(panelRigorForCareLevel(l).rounds).toBeLessThanOrEqual(NEGOTIATION_ROUND_CAP);
+    }
+  });
+  it('aggregation is ALWAYS diversity-selection, never a majority vote', () => {
+    for (const l of ['low', 'elevated', 'high']) {
+      expect(panelRigorForCareLevel(l).aggregation).toBe(AGGREGATION.DIVERSITY_SELECTION);
+    }
+  });
+  it('throws on an unknown care-level (never silently returns a default panel)', () => {
+    expect(() => panelRigorForCareLevel('critical')).toThrow(/unknown care-level/);
+  });
+});
+
+describe('careLevelFromReasons — recover the care-level from decorated escalation reasons (#2567)', () => {
+  it('no reasons → none', () => {
+    expect(careLevelFromReasons([])).toBe('none');
+    expect(careLevelFromReasons(null)).toBe('none');
+  });
+  it('a decorated blast-radius reason → elevated', () => {
+    expect(careLevelFromReasons(['blast-radius (scripts/x.mjs, scripts/y.mjs)'])).toBe('elevated');
+  });
+  it('the sampling floor alone → low', () => {
+    expect(careLevelFromReasons(['sampling floor (1-in-10)'])).toBe('low');
+  });
+  it('parses the dismissed-findings COUNT — one → elevated, many → high', () => {
+    expect(careLevelFromReasons(['dismissed-findings (1 pre-PR review finding(s) the lane dismissed)'])).toBe('elevated');
+    expect(careLevelFromReasons(['dismissed-findings (3 pre-PR review finding(s) the lane dismissed)'])).toBe('high');
+  });
+  it('a gate-self / statute reason → high (human-gated is maximum care)', () => {
+    expect(careLevelFromReasons(['gate-self (scripts/lib/review-core.mjs) — human review required'])).toBe('high');
+    expect(careLevelFromReasons(['statute (docs/agent/platform-decisions.md) — human review required'])).toBe('high');
+  });
+  it('is LENIENT — an unrecognized reason contributes nothing instead of throwing', () => {
+    expect(careLevelFromReasons(['some-future-signal (whatever)'])).toBe('none');
+    expect(careLevelFromReasons(['blast-radius (x)', 'totally-unknown'])).toBe('elevated');
+  });
+  it('panelRigorFromReasons composes the bridge with the rigor dial', () => {
+    expect(panelRigorFromReasons(['blast-radius (x)']).rounds).toBe(2);       // elevated → 2 rounds
+    expect(panelRigorFromReasons(['gate-self (x) — human review required']).jurorsPerLens).toBe(2); // high → jury
+    expect(panelRigorFromReasons([]).lenses).toEqual([]);                     // none → no panel
   });
 });

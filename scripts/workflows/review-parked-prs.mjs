@@ -59,7 +59,7 @@ export const meta = {
     + 'produces verdicts for the operator to act on; it never lands or labels anything itself.',
   phases: [
     { title: 'Discover', detail: 'collect the review:pending parked PRs (from args, or `gh pr list --label review:pending` across the constellation repos), re-fetch each candidate\'s CURRENT labels, and DROP any review:human / label-unverifiable PR (fail-closed, INVARIANT 2)' },
-    { title: 'Panel', detail: 'per PR: fetch the diff + escalation reason ONCE, then fan out one fresh-context reviewer per lens (correctness/security/simplicity/standards-conformance) over that single shared snapshot' },
+    { title: 'Panel', detail: 'per PR: fetch the diff + escalation reason ONCE, read the advisory care-level (review-core-cli rigor) to dial the jury size, then fan out jurorsPerLens fresh-context reviewer(s) per lens (correctness/security/simplicity/standards-conformance) over that single shared snapshot — reduced by diversity-selection (#2567)' },
     { title: 'Reduce', detail: 'per PR: an agent shells review-core-cli (reduce + comment) to reduce the panel to one verdict + disposition + rendered comment body; a failed mandatory lens / unfetchable diff degrades to needs-human' },
     { title: 'Deferred (#2285)', detail: 'the editorRound + reReview panel↔editor convergence loop is NOT built in this MVP — it is v2, epic #2285' },
   ],
@@ -262,10 +262,41 @@ const VERDICT_SCHEMA = {
   },
 };
 
+// What the RIGOR agent returns (#2567) — the advisory care-level + the panel rigor it dials, from the shared core.
+const RIGOR_SCHEMA = {
+  type: 'object',
+  required: ['careLevel', 'jurorsPerLens'],
+  additionalProperties: true,
+  properties: {
+    careLevel: { type: 'string', description: 'none | low | elevated | high (from review-core-cli rigor)' },
+    jurorsPerLens: { type: 'number', description: 'independent reviewers per lens the care-level dials (>=1)' },
+    rounds: { type: 'number' },
+    aggregation: { type: 'string', description: 'always diversity-selection — never a majority vote' },
+    notes: { type: 'string' },
+  },
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Prompt builders + pipeline stages (top-level functions; they call the injected `agent`/`parallel` primitives
 // at run time — never at load time).
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** The RIGOR prompt (#2567) — shell the shared review core to turn this PR's escalation reasons into the advisory
+ *  care-level + the panel rigor it dials (jurors per lens). Single-sourced: the workflow never re-derives the dial. */
+function rigorPrompt(item, escalationReason) {
+  const flag = repoPathFlag(item.repo);
+  const where = flag ? `the checkout at ${REPOS[item.repo].path}` : 'this checkout (your cwd)';
+  return [
+    RETURN_HYGIENE,
+    '',
+    `Compute the advisory panel RIGOR for drain-parked PR #${item.pr} (repo id: ${item.repo}) from its escalation`,
+    'reasons, using ONLY the shared review core (hand-roll NO judgement). Run, in ' + where + ':',
+    `  node scripts/review-core-cli.mjs rigor --reasons=${JSON.stringify(escalationReason.join(', '))} --json`,
+    'It prints { careLevel, rigor: { rounds, lenses, jurorsPerLens, aggregation } }.',
+    'Return { careLevel: <that careLevel>, jurorsPerLens: <rigor.jurorsPerLens>, rounds: <rigor.rounds>,',
+    'aggregation: <rigor.aggregation> }. Return ONLY the structured object.',
+  ].join('\n');
+}
 
 /** The DISCOVER prompt — enumerate the review:pending parked PRs across the constellation repos, with labels. */
 function discoverPrompt() {
@@ -330,12 +361,18 @@ function fetchPrompt(pr, repo) {
   ].join('\n');
 }
 
-/** ONE lens reviewer's prompt — judges the SHARED diff snapshot (no fetch); gets its mandate from the CLI. */
-function lensPrompt(pr, repo, lens, diff, escalationReason, title) {
+/** ONE lens reviewer's prompt — judges the SHARED diff snapshot (no fetch); gets its mandate from the CLI. When
+ *  the care-level dialed a JURY (jurorsPerLens > 1), each juror is told it is one independent member judging the
+ *  lens on its own — the diversity that a high-care change earns (#2567). */
+function lensPrompt(pr, repo, lens, diff, escalationReason, title, juror = 0, jurorsPerLens = 1) {
+  const juryFraming = jurorsPerLens > 1
+    ? `You are juror ${juror + 1} of ${jurorsPerLens} INDEPENDENT ${lens} reviewers on this high-care PR — judge the diff entirely on your own, do NOT try to agree with the other jurors; the panel keeps any concern ANY juror raises (diversity-selection, never a majority vote).`
+    : '';
   return [
     RETURN_HYGIENE,
     '',
     `You are the ${lens} reviewer on the review panel for drain-parked PR #${pr} (repo ${repo})${title ? ` — ${title}` : ''}.`,
+    juryFraming,
     `Get your lens mandate and follow it: run  node scripts/review-core-cli.mjs mandate --lens=${lens}`,
     escalationReason.length ? `The drain escalated this PR for: ${escalationReason.join('; ')}.` : 'No escalation reason block was present on the PR body.',
     'You review ONLY the diff below + the PR description + the escalation reason. NEVER `git checkout`/`switch`',
@@ -387,8 +424,34 @@ function reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, humanR
   ].join('\n');
 }
 
-/** Pipeline STAGE 1 — one shared fetch, then the fresh-context multi-lens panel over that single snapshot.
- *  Each lens is tagged ok/failed: a failed MANDATORY lens (or a failed fetch) must degrade to needs-human. */
+/**
+ * #2567 — the panel RIGOR for this PR, dialed by its advisory CARE-LEVEL. An agent shells the shared review core
+ * (`review-core-cli rigor --reasons=…`) so the dial is single-sourced (never re-derived here). Returns
+ * `{ careLevel, jurorsPerLens, aggregation }` — `jurorsPerLens` is how many INDEPENDENT reviewers judge each lens
+ * (a high-care change earns a diverse jury), and the panel is aggregated by diversity-SELECTION (the strictest
+ * verdict wins — never a majority vote). Fails safe to the baseline (1 juror) if the dial can't be read.
+ */
+async function careRigorFor(item, escalationReason) {
+  if (!escalationReason.length) return { careLevel: 'low', jurorsPerLens: 1, aggregation: 'diversity-selection' };
+  const r = await agent(rigorPrompt(item, escalationReason), { label: `rigor:${prTag(item)}`, phase: 'Panel', schema: RIGOR_SCHEMA }).catch(() => null);
+  const jurorsPerLens = (r && Number.isFinite(Number(r.jurorsPerLens)) && Number(r.jurorsPerLens) >= 1) ? Math.floor(Number(r.jurorsPerLens)) : 1;
+  const careLevel = (r && typeof r.careLevel === 'string') ? r.careLevel : 'low';
+  const aggregation = (r && typeof r.aggregation === 'string') ? r.aggregation : 'diversity-selection';
+  return { careLevel, jurorsPerLens, aggregation };
+}
+
+/** Reduce ONE lens's JURY (jurorsPerLens independent reviewers) to that lens's findings by diversity-SELECTION:
+ *  the UNION of every juror's findings (any juror's concern carries — the strictest read wins, never a vote).
+ *  A lens counts as run (`ok:true`) iff AT LEAST ONE juror ran; it fails only if the whole jury failed. */
+function reduceLensJury(lens, jurorResults) {
+  const ran = jurorResults.filter((j) => j.ok);
+  if (!ran.length) return { lens, ok: false, findings: [] };
+  return { lens, ok: true, findings: ran.flatMap((j) => j.findings) };
+}
+
+/** Pipeline STAGE 1 — one shared fetch, then the fresh-context multi-lens panel over that single snapshot, with
+ *  panel rigor (jurors per lens) dialed by the PR's advisory care-level (#2567). Each lens is tagged ok/failed:
+ *  a failed MANDATORY lens (or a failed fetch) must degrade to needs-human. */
 async function panelReview(item) {
   const { pr, repo } = item;
   const fetched = await agent(fetchPrompt(pr, repo), { label: `fetch:${prTag(item)}`, phase: 'Panel', schema: FETCH_SCHEMA }).catch(() => null);
@@ -400,18 +463,24 @@ async function panelReview(item) {
     log(`  ${prTag(item)}: FETCH failed${fetched && fetched.error ? ` (${fetched.error})` : ''} — the panel has no diff to judge; this PR will degrade to needs-human.`);
   }
 
+  // #2567 — care-level dials the jury size; the reviewer set (LENSES) is constant, jurorsPerLens scales.
+  const { careLevel, jurorsPerLens, aggregation } = await careRigorFor(item, escalationReason);
+
+  // Each lens is judged by jurorsPerLens INDEPENDENT reviewers, then reduced by diversity-selection (union).
   const lensResults = await parallel(LENSES.map((lens) => () =>
-    agent(lensPrompt(pr, repo, lens, diff, escalationReason, title), { label: `panel:${prTag(item)}:${lens}`, phase: 'Panel', schema: LENS_SCHEMA })
-      .then((r) => ({ lens, ok: true, findings: (r && Array.isArray(r.findings)) ? r.findings : [] }))
-      .catch(() => {
-        log(`  ${prTag(item)}: the ${lens} reviewer FAILED to run.`);
-        return { lens, ok: false, findings: [] };
-      }),
+    parallel(Array.from({ length: jurorsPerLens }, (_unused, juror) => () =>
+      agent(lensPrompt(pr, repo, lens, diff, escalationReason, title, juror, jurorsPerLens), { label: `panel:${prTag(item)}:${lens}${jurorsPerLens > 1 ? `#${juror + 1}` : ''}`, phase: 'Panel', schema: LENS_SCHEMA })
+        .then((r) => ({ ok: true, findings: (r && Array.isArray(r.findings)) ? r.findings : [] }))
+        .catch(() => {
+          log(`  ${prTag(item)}: the ${lens} reviewer${jurorsPerLens > 1 ? ` (juror ${juror + 1}/${jurorsPerLens})` : ''} FAILED to run.`);
+          return { ok: false, findings: [] };
+        }),
+    )).then((jurors) => reduceLensJury(lens, jurors)),
   ));
   const ran = lensResults.filter((r) => r.ok).map((r) => `${r.lens}:${r.findings.length}`).join(', ');
   const failed = lensResults.filter((r) => !r.ok).map((r) => r.lens);
-  log(`  ${prTag(item)}: panel done — ran [${ran || 'none'}]${failed.length ? `; FAILED [${failed.join(', ')}]` : ''}${escalationReason.length ? `; escalated for ${escalationReason.join('; ')}` : ''}.`);
-  return { pr, repo, lensResults, escalationReason, fetchOk };
+  log(`  ${prTag(item)}: panel done (care=${careLevel}, ${jurorsPerLens} juror(s)/lens, ${aggregation}) — ran [${ran || 'none'}]${failed.length ? `; FAILED [${failed.join(', ')}]` : ''}${escalationReason.length ? `; escalated for ${escalationReason.join('; ')}` : ''}.`);
+  return { pr, repo, lensResults, escalationReason, fetchOk, careLevel };
 }
 
 /** Pipeline STAGE 2 — reduce the panel to a verdict + disposition + comment via the review-core CLI (agent).
