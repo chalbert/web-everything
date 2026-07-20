@@ -56,6 +56,7 @@
 | Picking the next item to work on (dev-ready first) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "Selecting the next item to work on" (Claude: `/next-backlog-item` triggers it; `/next decision` surfaces the one call to make) |
 | Preparing an open decision *ahead* of the call — research + author its forks to "ready to ratify" (no human judgment yet; sets `preparedDate`) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "The prepared-fork shape" (Claude: `/prepare` triggers it) |
 | Building or changing a runtime demo under `demos/` | [docs/agent/demo-workflow.md](docs/agent/demo-workflow.md) |
+| Building a new UI surface (console/board/panel/screen) — the sighted mock → review-pixels → rule-the-forks → webcases method | [docs/agent/build-ui.md](docs/agent/build-ui.md) (Claude: the build-ui skill) |
 | Building/continuing a flagship **exercise app** (#314) — the platform-first loop (WE is primary, the app is a forcing function) | [docs/agent/exercise-app-workflow.md](docs/agent/exercise-app-workflow.md) (Claude: `/exercise-app`) |
 | Marking an external reference dead/replaced, or adding a structured reference home | [docs/agent/reference-retirement.md](docs/agent/reference-retirement.md) |
 | Adding or editing a Claude **skill** (`.claude/skills/*/SKILL.md`) — keep it a trigger+pointer, not a copy of the rubric | [docs/agent/skill-authoring.md](docs/agent/skill-authoring.md) |
