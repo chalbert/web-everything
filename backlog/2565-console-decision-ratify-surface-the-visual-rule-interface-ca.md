@@ -57,13 +57,13 @@ This candidate is now shaped — it is a **sliced epic**, no longer a size-8 sto
 map onto three independently-deliverable stories (read-half stands alone; write-half builds on it; governance
 gates the write):
 
-- **[#xntcdet] Render the ruling surface from the live read port** (size 8) — kills the hardcoded mock;
+- **[#2580] Render the ruling surface from the live read port** (size 8) — kills the hardcoded mock;
   renders live prepared decisions + forks through the [#2558] read port; evidence deep-links per fork. The
   read-only half.
-- **[#xcg9jr9] Rule a fork through the write port with first-class override** (size 5, after `#xntcdet`) —
+- **[#2581] Rule a fork through the write port with first-class override** (size 5, after `#2580`) —
   accept-default / override / defer, written via the [#2558] write port (`resolve --codified-to` on a
   lane→PR); override captures the operator's alternative.
-- **[#xzlknku] Governance guardrails (§3g-T2)** (size 3, after `#xcg9jr9`) — open-not-ratify-inline,
+- **[#2582] Governance guardrails (§3g-T2)** (size 3, after `#2581`) — open-not-ratify-inline,
   statute-touching → policy menu, scoped/logged/auto-expiring per-launch waivers.
 
 Rationale + what was deliberately *not* split: [we:reports/2026-07-20-slice-2565-console-ruling-surface.md](reports/2026-07-20-slice-2565-console-ruling-surface.md) (exposed via `relatedReport`).

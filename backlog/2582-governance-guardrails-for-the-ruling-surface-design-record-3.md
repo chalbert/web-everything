@@ -1,11 +1,12 @@
 ---
+bornAs: xzlknku
 kind: story
 size: 3
 parent: "2565"
 status: active
 scaffoldedBy: "slice-2565"
 dateScaffolded: "2026-07-20"
-blockedBy: ["xcg9jr9"]
+blockedBy: ["2581"]
 dateOpened: "2026-07-20"
 tags: [plateau-loop, console, decision-surface, governance, guardrails, slice-2565]
 ---
@@ -15,14 +16,14 @@ tags: [plateau-loop, console, decision-surface, governance, guardrails, slice-25
 Fence where and whether a decision may be ruled from the ruling surface, per design-record §3g-T2. Three
 guards: a decision only **opens** here and is never ratified inline in a biased launch frame; a
 **statute-touching** decision cannot be ruled from a launch context and routes to the policy menu; and any
-**per-launch waiver** is scoped, logged, and auto-expiring. This gates the write path from [#xcg9jr9] so a
+**per-launch waiver** is scoped, logged, and auto-expiring. This gates the write path from [#2581] so a
 ruling can only be *recorded* where governance allows — the guard sits between the operator's verdict and the
 `#2558` write port.
 
 ## Scope
 - **Open, don't ratify inline (§3g-T2).** From a launch-review context the surface **opens** a decision for
   ruling — it never lets the operator ratify inline inside the biased launch frame. Ruling happens on the
-  dedicated ruling surface ([#xntcdet]/[#xcg9jr9]), reached by an explicit open action, mirroring `#2555`'s
+  dedicated ruling surface ([#2580]/[#2581]), reached by an explicit open action, mirroring `#2555`'s
   Operator-actions rule ("open from a lane, never ratify inline").
 - **Statute-touching → policy menu.** A decision that touches statute (mints or amends a rule in
   [we:docs/agent/platform-decisions.md](docs/agent/platform-decisions.md) or a `docs/agent/*.md` governor)
@@ -32,11 +33,11 @@ ruling can only be *recorded* where governance allows — the guard sits between
   offered — **not** the ruling-time `codifiedIn` output (that anchor is the operator's choice made *at*
   ruling, so keying off it is circular: the gate would need the very output it is supposed to gate). The
   concrete pre-ruling source is the decision item's **own declared statute scope**: the fork's proposed
-  codification target as authored on the rendered fork card ([#xntcdet]) — a fork whose recommended rule
+  codification target as authored on the rendered fork card ([#2580]) — a fork whose recommended rule
   names a `we:docs/agent/platform-decisions.md` / `docs/agent/*.md` anchor is statute-touching; a fork that
   proposes a narrow `one-off` call is not. **This declared target is net-new to author, not a free read** — no
   existing `we:`-side frontmatter field classifies an open decision as statute-touching (`codifiedIn` appears
-  only on *resolved* items). If the fork cards from [#xntcdet] do not already surface a machine-readable
+  only on *resolved* items). If the fork cards from [#2580] do not already surface a machine-readable
   proposed target, adding that field to the decision/fork model is in scope for this slice.
 - **Per-launch waivers — scoped, logged, auto-expiring.** Where a waiver lets a ruling proceed from a
   constrained context, it is (a) **scoped** to that one launch, (b) **logged** (an auditable record of who
@@ -45,11 +46,11 @@ ruling can only be *recorded* where governance allows — the guard sits between
 
 ## Where the code goes (locus)
 - The guard is a gate in the plateau-app ruling flow, between the verdict control and the write call:
-  `plateau-app:src/backlog-view/`. It wraps the write action added in [#xcg9jr9]
+  `plateau-app:src/backlog-view/`. It wraps the write action added in [#2581]
   (`plateau-app:src/backlog-view/write-action.ts`) — a blocked ruling never reaches
   `POST /api/backlog/write`.
 - Statute-touching detection reads the decision item's **declared** codification target (the fork's proposed
-  anchor, from [#xntcdet]), evaluated *before* the verdict control is offered. It does **not** key off the
+  anchor, from [#2580]), evaluated *before* the verdict control is offered. It does **not** key off the
   resolve-time `codifiedIn` gate in [we:scripts/backlog.mjs](scripts/backlog.mjs) /
   [we:scripts/backlog/frontmatter.mjs](scripts/backlog/frontmatter.mjs): that gate only *requires* a
   `--codified-to` value at ruling time on the `resolve` branch (`validateCodifiedIn`) — it is a ruling-time
@@ -58,8 +59,8 @@ ruling can only be *recorded* where governance allows — the guard sits between
   ruling output. No new statute anchor is minted by this slice.
 
 ## Depends on / out of scope
-- **Depends on** [#xcg9jr9] — there must be a write path to guard.
-- Rendering and evidence links are [#xntcdet]; the verdict/override mechanics are [#xcg9jr9]. This slice adds
+- **Depends on** [#2581] — there must be a write path to guard.
+- Rendering and evidence links are [#2580]; the verdict/override mechanics are [#2581]. This slice adds
   only the *may-I-rule-here* gate around them.
 
 ## Acceptance

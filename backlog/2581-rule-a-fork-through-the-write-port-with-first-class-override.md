@@ -1,11 +1,12 @@
 ---
+bornAs: xcg9jr9
 kind: story
 size: 5
 parent: "2565"
 status: active
 scaffoldedBy: "slice-2565"
 dateScaffolded: "2026-07-20"
-blockedBy: ["2558", "xntcdet"]
+blockedBy: ["2558", "2580"]
 dateOpened: "2026-07-20"
 tags: [plateau-loop, console, decision-surface, rule-interface, write-port, override, slice-2565]
 ---
@@ -16,10 +17,10 @@ Record a per-fork operator verdict — accept-default / override-with-X / defer 
 [#2558] write port: on ratify, a lane-to-PR `resolve --codified-to` carries the human's call. **Override is a
 first-class path** that captures the operator's alternative, not just an accept/reject of the recommendation.
 This is the **write half** that makes the surface a real rule interface rather than an explainer; it builds on
-the live-rendered forks from [#xntcdet].
+the live-rendered forks from [#2580].
 
 ## Scope
-- **The verdict control.** Each fork card ([#xntcdet]) gains a ruling control with three outcomes:
+- **The verdict control.** Each fork card ([#2580]) gains a ruling control with three outcomes:
   **accept-default** (ratify the recommended option), **override** (choose a different option, or enter an
   alternative the operator authors), and **defer** (leave the fork open, no write). One verdict per fork; a
   decision with multiple forks records each independently.
@@ -63,9 +64,9 @@ the live-rendered forks from [#xntcdet].
   `one-off`), the write is gate-clean.
 
 ## Depends on / out of scope
-- **Depends on** [#xntcdet] — the live fork cards are what the ruling control attaches to.
+- **Depends on** [#2580] — the live fork cards are what the ruling control attaches to.
 - **Governance fencing** (whether a given decision may be ruled from this launch frame, statute routing,
-  waivers) is [#xzlknku] — this slice writes the verdict; that slice gates *whether the write is allowed*.
+  waivers) is [#2582] — this slice writes the verdict; that slice gates *whether the write is allowed*.
 
 ## Acceptance
 - A fork card offers accept-default / override / defer; submitting **accept-default** ratifies via the

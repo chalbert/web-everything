@@ -1,4 +1,5 @@
 ---
+bornAs: xntcdet
 kind: story
 size: 8
 parent: "2565"
@@ -15,7 +16,7 @@ Replace the hardcoded ruling-console mock ([#2565]'s seed) with a surface render
 decisions and their forks, pulled through the [#2558] read port; each fork's evidence (prep PR, research
 topic, prepared item, skeptic/screen verdicts) is a one-click deep-link. This is the **read-only half** of
 turning the mock into a real rule interface — it stands alone (the surface becomes live and honest) even
-before the ruling action ([#xcg9jr9]) lands.
+before the ruling action ([#2581]) lands.
 
 ## Scope
 - **Data source.** The surface fetches prepared decisions + their forks/defaults/`Skeptic:`/`Screen:` lines
@@ -68,11 +69,11 @@ agent-ready and batchable — not in the `> 8` should-split band. The 8 is held 
 natural cut (server-side fork projection vs view render) would leave a value-less backend half and a render
 half that can't ship without it — the value-preserving-split failure the rubric guards against. Full rationale
 in the slicing report ([we:reports/2026-07-20-slice-2565-console-ruling-surface.md](../reports/2026-07-20-slice-2565-console-ruling-surface.md),
-"Explicit size-8 exception on #xntcdet").
+"Explicit size-8 exception on #2580").
 
 ## Out of scope (other slices)
-- Recording a verdict / writing anything → [#xcg9jr9] (the write half).
-- Governance fencing of *whether* a decision may be ruled here → [#xzlknku].
+- Recording a verdict / writing anything → [#2581] (the write half).
+- Governance fencing of *whether* a decision may be ruled here → [#2582].
 
 ## Acceptance
 - The `#2558` read port emits a **structured decision-fork DTO** for each prepared decision — per fork:
