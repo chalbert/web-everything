@@ -8,8 +8,6 @@ dateResolved: "2026-07-11"
 graduatedTo: none
 codifiedIn: "docs/agent/platform-decisions.md#lane-ownership-minted-slug-per-op"
 preparedDate: "2026-07-10"
-costUsd: 108.08
-costSessions: 2
 crossRef: { url: /backlog/2367/, label: "#2367 — destructive-git-op guard" }
 relatedReport: reports/2026-07-10-per-lane-ownership-signal-parallel-workflow-lanes.md
 tags: [lane-pool, guard, workflow, orchestrator]

@@ -6,8 +6,6 @@ status: resolved
 dateOpened: "2026-07-12"
 dateStarted: "2026-07-13"
 dateResolved: "2026-07-13"
-costUsd: 228.55
-costSessions: 1
 tags: [plateau-loop, ui, console]
 ---
 

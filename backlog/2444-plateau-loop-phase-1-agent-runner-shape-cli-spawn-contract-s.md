@@ -10,8 +10,6 @@ dateResolved: "2026-07-16"
 graduatedTo: 2530
 codifiedIn: "docs/agent/platform-decisions.md#agent-runner-cli-backend"
 preparedDate: "2026-07-16"
-costUsd: 7.58
-costSessions: 1
 researchTopic: claude-cli-agent-runner-headless-contract
 relatedReport: reports/2026-07-12-claude-cli-agent-runner-headless-contract.md
 tags: [plateau-loop, agent-runner, claude-cli]

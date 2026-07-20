@@ -1,18 +1,27 @@
 ---
 name: session_cost_on_card_accrual
-description: "The close accrues a session's usage-equivalent $ onto the backlog card(s) it advanced — decision/prepare accumulate on one card, workflow even-splits across N, slice/resolve attribute nothing."
+description: "The close accrues a session's token usage onto the backlog card(s) it advanced — costTokens is durable, costUsd is derived from it via one shared rate table; decision/prepare accumulate on one card, workflow even-splits across N, slice/resolve attribute nothing."
 metadata:
   node_type: memory
   type: reference
   originSessionId: 5cc06fdd-a973-4d54-a56d-e538a066e48d
 ---
 
-Backlog cards carry their **cumulative** usage-equivalent cost: `costUsd` + `costSessions` frontmatter,
-accrued at **close** by `node scripts/backlog.mjs cost <NNN> --usd=<n>` (pure splice via `accrueCost` in
-`scripts/backlog/frontmatter.mjs`; accumulates, so re-running adds). The `$` figure comes from
-`~/.claude/skills/closing-session/session-cost.mjs --usd-only` (sums the transcript's per-turn usage at
-model rates; window defaults to 1M since all sessions are `[1m]`). The closing-session SKILL step 3c does the
-attribution.
+Backlog cards carry their **cumulative** usage cost. The **durable** field is the token breakdown
+`costTokens: "in:.. cw:.. cr:.. out:.."` (raw integers, cumulative); `costUsd` is **strictly DERIVED** from
+those tokens through the ONE shared rate table (`scripts/backlog/cost-rates.mjs`) at every accrual — so it
+re-prices itself when rates change and can never again drift from a stale hardcoded rate (the old bug: the
+estimator hardcoded Opus-3 `$15/$75`, ~3x high, and the card stored only the derived dollars so nothing was
+recomputable). Accrued at **close** by `node scripts/backlog.mjs cost <NNN> --tokens="in:.. cw:.. cr:.. out:.."`
+(pure splice via `accrueCost` in `scripts/backlog/frontmatter.mjs`; accumulates the tokens, so re-running
+adds; `--usd=` is accepted but ignored). The token breakdown comes from
+`~/.claude/skills/closing-session/session-cost.mjs --tokens-only` (sums the transcript's per-turn usage;
+window defaults to 1M since all sessions are `[1m]`). Correct Opus 4.8 rates: `$5` in / `$25` out / `$0.5`
+cache-read per Mtok, cache-writes tiered (5m 1.25x, 1h 2x — this user's tier is 1h); NO long-context premium.
+The estimator **fails loud** on an unknown model — warns to stderr and EXCLUDES it from both the total and
+the forwarded tokens, never silently pricing it as opus. The closing-session SKILL step 3c does the
+attribution. (`cost-rates.mjs` is canonical; `session-cost.mjs` carries a labelled duplicate of the table
+because it is copied standalone into `~/.claude/skills/` and can't import a repo path.)
 
 **Which card, and whether to attribute at all (the judgment half):**
 - **decision / prepare / focused single-item build** → full session `$` on that one card. `/prepare` then

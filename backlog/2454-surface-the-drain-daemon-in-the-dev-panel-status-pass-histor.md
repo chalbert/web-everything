@@ -7,8 +7,6 @@ status: resolved
 dateOpened: "2026-07-12"
 dateStarted: "2026-07-12"
 dateResolved: "2026-07-12"
-costUsd: 32.93
-costSessions: 1
 tags: []
 ---
 

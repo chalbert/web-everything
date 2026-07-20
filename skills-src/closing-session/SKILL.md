@@ -286,23 +286,27 @@ Report the session's **usage-equivalent** dollar cost — what it would cost if 
 node ~/.claude/skills/closing-session/session-cost.mjs
 ```
 It sums the current session's transcript (input / cache-write / cache-read / output, per model, at that
-model's rates) and prints a one-line total plus a token breakdown. Put the total on the **Session cost**
-line of the verdict template; the breakdown can sit under it if useful. Never a blocker.
+model's **current** rates — cache-writes priced by tier, unknown models warned + excluded, never priced as
+opus) and prints a one-line total plus a token breakdown. Put the total on the **Session cost** line of the
+verdict template; the breakdown can sit under it if useful. Never a blocker.
 
 ### 3c. Cost-on-card attribution (accrue the session cost to the item worked)
-Fold the session's usage-equivalent cost (the `--usd-only` figure from step 3b) into the backlog item(s)
-this session actually advanced, so a card carries its true cumulative cost over its whole life (e.g.
-/prepare then /decide sum into one running total). The writer is mechanical:
+Fold the session's usage into the backlog item(s) this session actually advanced, so a card carries its
+true cumulative cost over its whole life (e.g. /prepare then /decide sum into one running total). What's
+**durable on the card is the token breakdown** (`costTokens`); `costUsd` is **derived** from it at each
+accrual through the one shared rate table, so it re-prices itself when rates change and can never drift.
+Forward the estimator's `--tokens-only` line straight to the `cost` verb — tokens, not a raw dollar figure:
 ```bash
-usd=$(node ~/.claude/skills/closing-session/session-cost.mjs --usd-only)
-node scripts/backlog.mjs cost <NNN> --usd="$usd"      # accrues costUsd + bumps costSessions
+tokens=$(node ~/.claude/skills/closing-session/session-cost.mjs --tokens-only)   # e.g. "in=54 cw=93964 cr=1939233 out=24453"
+node scripts/backlog.mjs cost <NNN> --tokens="$tokens"   # accrues costTokens (cumulative) + derives costUsd + bumps costSessions
 ```
 **Which card(s), and whether to attribute at all — the judgment half:**
 - **A single dominant item** (a `/decision`, `/prepare`, or focused build session that mostly worked one
-  card) → attribute the **full** `usd` to that one `<NNN>`.
-- **A `/workflow` (parallel) session** → the orchestrator is light; **even-split** the `usd` across the N
-  items the workflow resolved (from its ledger) and accrue `usd/N` to **each** card:
-  `for n in <NNN...>; do node scripts/backlog.mjs cost "$n" --usd="$(echo "$usd/$N" | bc -l)"; done`.
+  card) → attribute the **full** token breakdown to that one `<NNN>`.
+- **A `/workflow` (parallel) session** → the orchestrator is light; **even-split** the tokens across the N
+  items the workflow resolved (from its ledger) and accrue an `1/N` share to **each** card. Divide each
+  token count by N and pass the split breakdown:
+  `for n in <NNN...>; do node scripts/backlog.mjs cost "$n" --in=$((IN/N)) --cw=$((CW/N)) --cr=$((CR/N)) --out=$((OUT/N)); done`.
   (If the items landed via lane PRs still mid-drain, this frontmatter-only bump is low-conflict — accrue
   on the primary copy as normal; it rides the next commit.)
 - **A `/slice` or `/resolve` session, or any session with no clear item worked** → **attribute nothing**

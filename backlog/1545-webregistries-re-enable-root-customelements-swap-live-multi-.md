@@ -6,8 +6,6 @@ status: resolved
 locus: frontierui
 dateOpened: "2026-06-22"
 dateResolved: "2026-07-09"
-costUsd: 6.45
-costSessions: 1
 graduatedTo: "fui:plugs/webregistries/index.ts (root swap re-enabled)"
 tags: []
 ---

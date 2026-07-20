@@ -7,8 +7,6 @@ blockedBy: ["2341"]
 dateOpened: "2026-07-09"
 dateStarted: "2026-07-09"
 dateResolved: "2026-07-09"
-costUsd: 7.79
-costSessions: 1
 graduatedTo: "plateau:packages/extensions/"
 tags: []
 ---

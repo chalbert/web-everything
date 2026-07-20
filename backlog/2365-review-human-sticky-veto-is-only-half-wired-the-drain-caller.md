@@ -2,8 +2,6 @@
 kind: task
 status: resolved
 dateOpened: "2026-07-09"
-costUsd: 7.79
-costSessions: 1
 dateStarted: "2026-07-09"
 dateResolved: "2026-07-09"
 tags: []

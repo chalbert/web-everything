@@ -5,8 +5,6 @@ status: open
 relatedTo: ["2396"]
 tags: [lane, finish, proof-of-land, bug]
 dateOpened: "2026-07-12"
-costUsd: 32.93
-costSessions: 1
 ---
 
 # Unify the resolved-on-main readers in we:scripts/lane-resume.mjs (loose resolvedItemSet vs frontmatter-strict resolvedOnMain)

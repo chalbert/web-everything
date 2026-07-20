@@ -7,8 +7,6 @@ blockedBy: ["1545"]
 dateOpened: "2026-06-27"
 dateStarted: "2026-07-09"
 dateResolved: "2026-07-09"
-costUsd: 7.79
-costSessions: 1
 graduatedTo: "none"
 tags: []
 ---

@@ -35,6 +35,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { applyTransition, applySettle, readField, setFrontmatterField, removeFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
+import { parseCostTokens, formatCostTokens } from './backlog/cost-rates.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { nextHash, normalizeId, idFromName, isHash, slugFromName } from './backlog/id.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize, sessionForNum } from './readiness/reservations.mjs';
@@ -951,27 +952,42 @@ function yieldNum() {
     `${GRN}✓ yielded${RST} ${DIM}${file} →${RST} ${BLD}#${newNum}${RST} ${DIM}backlog/${newName}${RST}`);
 }
 
-// `cost <NNN> --usd=<n>` — fold a session's usage-equivalent $ cost into a card's cumulative accounting
-// (#close cost-on-card). A pure frontmatter splice via `accrueCost`: adds to `costUsd`, bumps
-// `costSessions`. The close skill decides WHICH card(s) and how much (a single dominant decision/prepare
-// session → full cost on one card; a workflow → its cost even-split across the N items it worked;
-// slice/resolve sessions attribute nothing). This verb is the mechanical writer — no judgment, just the
-// accumulate — so the same command serves both paths. `--sessions=<n>` overrides the +1 session-share.
+// `cost <NNN> --tokens="in:.. cw:.. cr:.. out:.."` (or --in= --cw= --cr= --out=) — fold a session's usage
+// into a card's cumulative accounting (#close cost-on-card). The DURABLE record is the cumulative token
+// breakdown `costTokens`; `costUsd` is DERIVED from it through the one shared rate table (cost-rates.mjs)
+// at every accrual, so it can never drift from a stale rate and is always regenerable. A pure frontmatter
+// splice via `accrueCost`. The close skill decides WHICH card(s) and how much (a single dominant
+// decision/prepare session → full cost on one card; a workflow → even-split across the N items it worked;
+// slice/resolve attribute nothing). `--sessions=<n>` overrides the +1 session-share. `--usd=` is accepted
+// for back-compat but IGNORED — usd is no longer a source of truth, only the tokens are.
 function cost() {
   const file = resolveFile(positional[0]);
-  const usd = Number(flag('usd'));
-  if (!Number.isFinite(usd) || usd < 0) die('cost needs --usd=<non-negative number> (the session\'s usage-equivalent $)');
+  // Tokens are the source of truth: a single --tokens="in:.. cw:.. cr:.. out:.." (colon or = separator,
+  // e.g. the estimator's `--tokens-only` line) OR the four individual flags. Individual flags override.
+  const tokens = parseCostTokens(flag('tokens'));
+  for (const k of ['in', 'cw', 'cr', 'out']) {
+    const v = flag(k);
+    if (v !== undefined) {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0) die(`cost --${k}=<non-negative integer token count>, got "${v}"`);
+      tokens[k] = n;
+    }
+  }
+  const anyTokens = tokens.in || tokens.cw || tokens.cr || tokens.out;
+  if (!anyTokens) die('cost needs the token breakdown — --tokens="in:.. cw:.. cr:.. out:.." (the estimator\'s --tokens-only line) or --in= --cw= --cr= --out=. (usd is now DERIVED from tokens; --usd= is ignored.)');
+  if (flag('usd') !== undefined) console.error(`${YEL}note:${RST} ${DIM}--usd is ignored — costUsd is derived from the token breakdown (cost-rates.mjs).${RST}`);
   const sessions = Number(flag('sessions'));
   const rel = `backlog/${file}`;
   const abs = join(DIR, file);
   const before = readFileSync(abs, 'utf8');
-  const after = accrueCost(before, usd, Number.isFinite(sessions) ? { sessions } : {});
+  const after = accrueCost(before, tokens, Number.isFinite(sessions) ? { sessions } : {});
   if (after == null) die(`#${idFromName(file)} — could not splice frontmatter (no frontmatter block?)`);
   writeBacklogMd(abs, rel, after);
   const total = readField(after, 'costUsd');
+  const toks = readField(after, 'costTokens');
   const n = readField(after, 'costSessions');
-  ok({ verb: 'cost', num: idFromName(file), added: usd, costUsd: Number(total), costSessions: Number(n) },
-    `${GRN}✓ cost${RST} ${DIM}— +$${usd.toFixed(2)} → $${total} over ${n} session(s) on #${idFromName(file)}${RST}`);
+  ok({ verb: 'cost', num: idFromName(file), added: tokens, costTokens: toks, costUsd: Number(total), costSessions: Number(n) },
+    `${GRN}✓ cost${RST} ${DIM}— +[${formatCostTokens(tokens)}] → $${total} (derived) over ${n} session(s) on #${idFromName(file)}${RST}`);
 }
 
 // #2319 — a one-shot repair: number every TRACKED hash-id backlog file in this checkout (a hash that reached
@@ -1027,7 +1043,7 @@ switch (verb) {
       `  ${GRN}scaffold${RST} --kind=story|epic|task|decision --size= --title= [--digest=] [--blocked-by=] [--parent=] [--session=<slug>]   --session ⇒ born active+owned (#670), publish with settle\n` +
       `  ${GRN}settle${RST} <NNN>               born-active scaffold (--session) → open (publish once authored)\n` +
       `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate|outgrew|manual|abort]   fold a session into the batch point-budget estimate\n` +
-      `  ${GRN}cost${RST} <NNN> --usd=<n> [--sessions=<n>]   accrue a session's usage-equivalent $ into the card's cumulative costUsd/costSessions (close cost-on-card)\n` +
+      `  ${GRN}cost${RST} <NNN> --tokens="in:.. cw:.. cr:.. out:.." (or --in= --cw= --cr= --out=) [--sessions=<n>]   accrue a session's token usage into the card's cumulative costTokens; costUsd is DERIVED from it (close cost-on-card)\n` +
       `  ${GRN}reserve${RST} <NNN...> --session=<slug>    soft-hold planned items (deprioritize for other sessions)\n` +
       `  ${GRN}unreserve${RST} [--session=<slug>] [<NNN...>]  release soft holds (clear a session, or specific items)\n` +
       `  ${GRN}queue${RST} <NNN...> [--lane=<ref>] [--session=<slug>]   mark ready-to-merge (#2138 Fork 4); claim/release refuse a queued item until the drain lands it\n` +

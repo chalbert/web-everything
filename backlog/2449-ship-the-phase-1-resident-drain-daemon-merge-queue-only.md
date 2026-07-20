@@ -7,8 +7,6 @@ status: resolved
 dateOpened: "2026-07-11"
 dateStarted: "2026-07-12"
 dateResolved: "2026-07-12"
-costUsd: 32.93
-costSessions: 1
 graduatedTo: none
 tags: [plateau-loop, drain, merge-queue, coordinator]
 ---
