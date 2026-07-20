@@ -1,15 +1,14 @@
 ---
 bornAs: xodf5cq
-kind: story
-size: 8
+kind: epic
 parent: "2505"
 status: open
-blockedBy: ["2554", "2558"]
 dateOpened: "2026-07-18"
-tags: [plateau-loop, console, decision-surface, rule-interface, mock-before-build, candidate]
+relatedReport: reports/2026-07-20-slice-2565-console-ruling-surface.md
+tags: [plateau-loop, console, decision-surface, rule-interface, mock-before-build, sliced]
 ---
 
-# Console decision-ratify surface — the visual rule interface (candidate)
+# Console decision-ratify surface — the visual rule interface
 
 A dedicated in-console surface for **ruling prepared decisions** — the fuller realization of the "open the
 decision from a lane, never ratify inline" affordance listed under [#2555]'s Operator-actions slice. Captured
@@ -53,7 +52,24 @@ build.**
 - Renders per the visual grammar ([#2554]) and writes via the adapter seam ([#2558]) — hence `blockedBy` both.
 - Whatever [#2554] rules folds into the taxonomy/grammar the surface renders; the spec home is [#2553].
 
-## Acceptance (to refine)
-The rule interface is shaped into buildable slice(s) (or folded into [#2555]'s Operator-actions), the mock is
-its cited UI-design input, and a real ruling writes a verdict through the [#2558] write port under the §3g-T2
-governance guardrails. First: refine this candidate (shape + size + split) — do not build unshaped.
+## Sliced into (2026-07-20)
+This candidate is now shaped — it is a **sliced epic**, no longer a size-8 story. The "gaps to build" above
+map onto three independently-deliverable stories (read-half stands alone; write-half builds on it; governance
+gates the write):
+
+- **[#xntcdet] Render the ruling surface from the live read port** (size 8) — kills the hardcoded mock;
+  renders live prepared decisions + forks through the [#2558] read port; evidence deep-links per fork. The
+  read-only half.
+- **[#xcg9jr9] Rule a fork through the write port with first-class override** (size 5, after `#xntcdet`) —
+  accept-default / override / defer, written via the [#2558] write port (`resolve --codified-to` on a
+  lane→PR); override captures the operator's alternative.
+- **[#xzlknku] Governance guardrails (§3g-T2)** (size 3, after `#xcg9jr9`) — open-not-ratify-inline,
+  statute-touching → policy menu, scoped/logged/auto-expiring per-launch waivers.
+
+Rationale + what was deliberately *not* split: [we:reports/2026-07-20-slice-2565-console-ruling-surface.md](reports/2026-07-20-slice-2565-console-ruling-surface.md) (exposed via `relatedReport`).
+
+## Acceptance (epic)
+All three child stories resolve: the surface renders live decisions from the [#2558] read port with evidence
+deep-links, a real ruling writes a verdict (incl. a first-class override) through the [#2558] write port, and
+the §3g-T2 governance guardrails fence where/whether a decision may be ruled. The seed mock remains the cited
+UI-design input (design-record §6c).
