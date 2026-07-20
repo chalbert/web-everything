@@ -39,7 +39,7 @@ fan-out:
 | Slice | Size | What it delivers | blockedBy |
 |---|---|---|---|
 | [#xo9wnlp] Board shell + lane windowing **(ALREADY DELIVERED — graduating)** | 5 | lane columns, sticky-header NOW line, no-horizontal-scroll windowing, dock frames, data-driven renderer — landed in `plateau-app:src/backlog-view/lane-board.ts`, owed a resolve-as-graduated | — |
-| [#xq8fvck] Card renderer — 37-state taxonomy + glyph/motion | 8 | all 37 states rendered, glyph/motion cited by UC-id from the webcases spec, board-parity `rendered` flip | [#xo9wnlp], [#2578] |
+| [#xq8fvck] Card renderer — 37-state taxonomy + glyph/motion | 8 | all 37 states rendered, glyph/motion cited by UC-id from the webcases spec, board-parity `rendered` flip | [#2578] |
 | [#xc3ofgt] Delivery-horizon + size-scaled conveyor | 5 | cards rise by progress + cross at delivery, past-mask + day-folded history, `▤` size mode + lane ETA; **owns the lane vertical axis** (`plateau-app:src/backlog-view/conveyor.ts`) | [#xq8fvck] |
 | [#xzsx09z] Scope-lease board zone | 5 | four lane zones (running/ready/purgatory/next-sprint), lease chip + overlap/forced/breach cells + overtake; lays bands **along #xc3ofgt's axis** (`plateau-app:src/backlog-view/lease-zone.ts`) | [#xq8fvck], [#xc3ofgt] |
 | [#x2kpohd] Cross-lane spans + leverage graph | 5 | waits-on-multiple-leases spans, forked/fan-in across-lanes overlay, `⚡` frees-now/gates + teal cascade (`plateau-app:src/backlog-view/cross-lane-spans.ts`) | [#xq8fvck] |
