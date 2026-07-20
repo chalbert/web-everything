@@ -6,8 +6,6 @@ status: resolved
 dateOpened: "2026-07-09"
 dateStarted: "2026-07-09"
 dateResolved: "2026-07-09"
-costUsd: 7.79
-costSessions: 1
 tags: [legal, privacy, gdpr, license, trademark, deployment, solo-founder]
 crossRef: { url: /backlog/186-legal-business-protection-review/, label: "Pre-sale professional review — the paid-sale half (#186)" }
 ---

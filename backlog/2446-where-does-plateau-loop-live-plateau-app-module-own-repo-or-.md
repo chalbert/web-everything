@@ -6,8 +6,6 @@ size: 3
 status: open
 priority: low
 dateOpened: "2026-07-11"
-costUsd: 7.58
-costSessions: 1
 researchTopic: delivery-coordinator-placement
 relatedReport: reports/2026-07-12-delivery-coordinator-placement.md
 tags: [plateau-loop, constellation, placement]

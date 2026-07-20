@@ -15,6 +15,8 @@
  * runs against the live backlog or an in-memory fixture in tests.
  */
 
+import { usdFromTokens, parseCostTokens, formatCostTokens } from './cost-rates.mjs';
+
 /** Match a top-level `key:` line inside the frontmatter (not indented list items). */
 const keyLineRe = (key) => new RegExp(`^${key}:.*$`, 'm');
 
@@ -95,25 +97,41 @@ export function removeFrontmatterField(content, key) {
 export const quoteDate = (ymd) => `"${ymd}"`;
 
 /**
- * Fold a session's usage-equivalent dollar cost into a card's cumulative `costUsd` + `costSessions`
- * frontmatter — the close-time cost-on-card accounting. PURE (caller reads the file, supplies the amount).
+ * Fold a session's usage into a card's cumulative cost accounting — the close-time cost-on-card record.
+ * PURE (caller reads the file, supplies the token counts).
+ *
+ * The DURABLE field is the cumulative token breakdown `costTokens` (`in:.. cw:.. cr:.. out:..`, raw
+ * integers). `costUsd` is strictly DERIVED: recomputed from the cumulative tokens through the one shared
+ * rate table (`cost-rates.mjs`) at every accrual, so it can never again drift from a stale hardcoded rate
+ * and is always regenerable from what's stored. `costSessions` is the cumulative contributing-share count.
+ *
  * Accumulates: a decision worked across /prepare then /decide sums into one running total, and a
- * workflow's even-split share lands on each item it touched. Rounds to whole cents to keep the field
- * diff-quiet. `sessions` defaults to 1 (one contributing session-share). Returns the new content, or
- * `null` if there's no frontmatter to edit.
+ * workflow's even-split share lands on each item it touched. USD rounds to whole cents (diff-quiet).
+ * `sessions` defaults to 1. Returns the new content, or `null` if there's no frontmatter to edit.
+ *
+ * The card's aggregate tokens carry no per-model or per-cache-tier split, so `costUsd` is derived at the
+ * default (opus) rates with cache-writes priced at the 1-hour tier — this user's regime. That is a
+ * deliberate, documented approximation; the raw tokens are what's authoritative and re-priceable.
  * @param {string} content
- * @param {number} usd  a non-negative dollar amount to ADD to the running total
+ * @param {{in?:number,cw?:number,cr?:number,out?:number}} tokens  token counts to ADD to the running total
  * @param {{ sessions?: number }} [opts]
  * @returns {string|null}
  */
-export function accrueCost(content, usd, { sessions = 1 } = {}) {
-  const prevUsd = Number(readField(content, 'costUsd')) || 0;
+export function accrueCost(content, tokens = {}, { sessions = 1 } = {}) {
+  const prev = parseCostTokens(readField(content, 'costTokens'));
   const prevN = Number(readField(content, 'costSessions')) || 0;
-  const nextUsd = Math.round((prevUsd + Number(usd)) * 100) / 100;
-  const AFTER = ['costUsd', 'dateResolved', 'dateStarted', 'dateOpened', 'preparedDate', 'status', 'size', 'kind'];
-  let next = setFrontmatterField(content, 'costUsd', String(nextUsd), { after: AFTER });
+  const cum = {
+    in:  prev.in  + (Number(tokens.in)  || 0),
+    cw:  prev.cw  + (Number(tokens.cw)  || 0),
+    cr:  prev.cr  + (Number(tokens.cr)  || 0),
+    out: prev.out + (Number(tokens.out) || 0),
+  };
+  const nextUsd = Math.round(usdFromTokens(cum) * 100) / 100;
+  const AFTER = ['costTokens', 'costUsd', 'dateResolved', 'dateStarted', 'dateOpened', 'preparedDate', 'status', 'size', 'kind'];
+  let next = setFrontmatterField(content, 'costTokens', quoteScalar(formatCostTokens(cum)), { after: AFTER });
   if (next == null) return null;
-  next = setFrontmatterField(next, 'costSessions', String(prevN + sessions), { after: ['costUsd', ...AFTER] });
+  next = setFrontmatterField(next, 'costUsd', String(nextUsd), { after: ['costTokens', ...AFTER] });
+  next = setFrontmatterField(next, 'costSessions', String(prevN + sessions), { after: ['costUsd', 'costTokens', ...AFTER] });
   return next;
 }
 
