@@ -1,0 +1,23 @@
+{
+  "id": "scope-breach-recovery-transition-table",
+  "title": "Scope-Breach Recovery Transition Table",
+  "status": "open",
+  "summary": "Prior-art survey grounding backlog #2574 — the transition table for the console's A4 'paused — scope breach' card state (UC-A4 in the ratified plateau card-taxonomy webcases). Detection already exists (the write-time PreToolUse Edit|Write gate; the design-doc §3i breach detector = predicted module-scope minus observed file-scope). The gap is what happens after the auto-pause, plus the two sibling questions the 37-state taxonomy lists but never defines: how fine-grained an item's scope is, and who may place a hold. Four forks. (a) Scope granularity — today's implemented primitive is a WHOLE-CLONE exclusive lease (we:scripts/lane-pool.mjs acquire/release over an entire lane clone), NOT the file-grained scope the §3i model describes. The concurrency-control canon (SQL Server lock escalation, Gray et al. multi-granularity intention locks, flock whole-file vs fcntl byte-range) and the 2025-26 parallel-AI-agent consensus (whole-worktree isolation to turn silent corruption into visible merge conflicts — Augment/MindStudio/Claude Code; CodeCRDT's O(N×L) contention result) both point to keeping the coarse whole-clone lease as the enforcement unit and treating predicted file-scope as an advisory breach signal, with git as ground-truth at drain — not building a per-file lease manager. (b) A4's exits map onto four named recovery archetypes: retry-in-place/re-plan-within-scope (Erlang/OTP supervisor restart — the recommended default), widen the lease (lock escalation, into free scope only), hand off to the cross-lane family B2/B3/B8 (Kubernetes reschedule/evict — when the wanted files belong to another lease), and bounce/drop if mis-scoped (CI flaky-test quarantine). A4 stays cat:run; only policy=ask promotes it to an amber you-card. (c) A12 'merge held' hold-source — the Kubernetes voluntary-vs-involuntary-disruption + PodDisruptionBudget trichotomy fits exactly: A4 is the involuntary-fault hold, A6 the policy hold, A12 the voluntary hold; recommend one hold mechanism with an explicit holdSource (user | policy | sibling-lane), not user-only. (d) 'Remove B8 Swap-order?' is framed as a settled-spec governance question, not a merit fork: B8 is one of the 17 ruled you-act verbs in the ratified §6e manifest (2026-07-20), so dropping it to 16 requires re-opening the ratified count with lineage — DEFAULT keep-17, out of scope for A4's transition table. Full grounding in we:reports/2026-07-20-scope-breach-recovery-transition-table.md.",
+  "dateOpened": "2026-07-20",
+  "lastReviewed": "2026-07-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "scope-lease",
+    "lease-granularity",
+    "scope-breach",
+    "auto-recovery",
+    "quarantine",
+    "supervision",
+    "card-taxonomy",
+    "plateau",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}
