@@ -2,9 +2,12 @@
 bornAs: x8dkcqt
 kind: decision
 size: 3
-status: open
+status: resolved
 locus: plateau-app
 dateOpened: "2026-07-19"
+dateStarted: "2026-07-20"
+dateResolved: "2026-07-20"
+codifiedIn: "docs/backlog-console-design.md#3i-a4"
 preparedDate: "2026-07-20"
 relatedReport: reports/2026-07-20-scope-breach-recovery-transition-table.md
 tags: [console, card-taxonomy, scope-lease, scope-breach, auto-recovery, plateau, decision]
@@ -220,3 +223,30 @@ honored, so it is a one-line ratify, not a research residue.
 - **Downstream:** ratifying these defaults gives #2553/#2555's board build the A4 transition table to render
   (the breach-paused cell's exits + hover verbs) and pins A12's hold-source and the scope-granularity model
   the board's lease chips depend on.
+
+## Ruling (2026-07-20)
+
+All four forks RATIFIED to their recommended defaults. A three-lens jury (systems/correctness · parallel-agent
+ops · governance/spec-integrity) rated each default and **unanimously concurred** (jury-lines 5/4/4/5 · 5/4/4/5
+· 4/5/4/5); no lens dissented and none flagged an improper spec/constitution touch. Codified into the design
+record: `plateau:docs/backlog-console-design.md` §3i-A4 (the A4 transition table + the hold-source model); §6e
+is untouched.
+
+- **F1 · scope granularity → (a) whole-clone lease** is the enforcement unit; predicted file-scope is an
+  advisory breach signal; git is ground-truth at drain. Per-file leasing is a later escalation only if measured
+  collisions justify it.
+- **F2 · A4 exits → (a) retry-in-place / re-plan within scope**, then the §3i escalation ladder (widen if free ·
+  hand off to B2/B3/B8 if another lease owns the files · bounce/quarantine if uncontainable). A4 stays
+  `cat:run`; only `policy = ask` promotes it to an amber you-card.
+- **F3 · A12 hold-source → (a) explicit `holdSource ∈ {user, policy, sibling-lane}`** over one hold mechanism
+  shared by A4/A6/A12; sibling-lane is the lowest-confidence source (collapsible to `blockedBy`).
+- **F4 · remove B8? → (a) keep the 17 verbs** — §6e is settled; B8 stays; any count change is a separate
+  lineage'd decision, never folded here.
+
+**Two jury build-amendments carried into the ruling (implementation notes, not new forks):**
+1. **F2 retry bound is a *total attempt counter*, not "same-scope-twice."** Both the systems and ops jurors
+   showed that a re-plan breaching a *different* out-of-scope file each attempt evades a same-scope bound and
+   livelocks. Retry-once-then-escalate on a total counter.
+2. **F3 `holdSource=policy` must be reconciled against UC-A12's ratified triple** (`actor=you · primary=Unhold
+   merge`). A policy/sibling hold renders the same card with a different source chip + unhold authority; the
+   board build decides whether one UC-A12 covers all sources or splits. The taxonomy pins A12's user form today.
