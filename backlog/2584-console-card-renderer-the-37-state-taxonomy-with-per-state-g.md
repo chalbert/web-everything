@@ -1,4 +1,5 @@
 ---
+bornAs: xq8fvck
 kind: story
 size: 8
 parent: "2555"
@@ -23,7 +24,7 @@ state; the live detectors and cross-lane geometry ride other slices.
   the maintained spec** — `plateau-app:src/backlog-view/card-taxonomy.webcases.ts`. The design-record §6e
   visual-grammar manifest (per-state Lucide glyph + the 7 color/style forks + the you-act action-button
   glyphs + per-state motion) is **filed, not yet landed** — [#2578] is the port that adds the
-  `glyph`/`color`/`motion` fields to that spec, and **xq8fvck is `blockedBy` it**. Once [#2578] lands, **cite
+  `glyph`/`color`/`motion` fields to that spec, and **2584 is `blockedBy` it**. Once [#2578] lands, **cite
   that file per state; do NOT re-port the manifest here** — it is the single source, and this renderer
   consumes it. (Today the `assert:` lines carry only `actor · edge · primary · rendered · uc`, so this slice
   cannot start until [#2578] populates them.)
@@ -43,9 +44,9 @@ state; the live detectors and cross-lane geometry ride other slices.
 
 ## Where the code goes (locus)
 - The cell renderer is plateau-app view code under `plateau-app:src/backlog-view/`, rendering into the shell
-  from [#xo9wnlp] — **already delivered** as `plateau-app:src/backlog-view/lane-board.ts`, so its `blockedBy`
-  edge is dropped here (the shell exists in code; the edge would otherwise stay unclearable until xo9wnlp is
-  graduated, leaving this renderer and the whole fan-out under it inert). [#xo9wnlp] is still owed a
+  from [#2583] — **already delivered** as `plateau-app:src/backlog-view/lane-board.ts`, so its `blockedBy`
+  edge is dropped here (the shell exists in code; the edge would otherwise stay unclearable until 2583 is
+  graduated, leaving this renderer and the whole fan-out under it inert). [#2583] is still owed a
   resolve-as-graduated — that is its own status splice, not a build gate on this slice. It reads state from
   the resolved read-model
   `plateau-app:src/backlog-view/card-state-read-model.ts` ([#2552], resolved — the

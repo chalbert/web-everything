@@ -1,4 +1,5 @@
 ---
+bornAs: xprj9ov
 kind: story
 size: 5
 parent: "2555"
@@ -6,7 +7,7 @@ status: active
 scaffoldedBy: "slice-2555"
 dateScaffolded: "2026-07-20"
 dateOpened: "2026-07-20"
-blockedBy: ["xq8fvck"]
+blockedBy: ["2584"]
 tags: [plateau-loop, console, console-board, composer, decision-surface, write-seam, slice-2555]
 ---
 
@@ -15,7 +16,7 @@ tags: [plateau-loop, console, console-board, composer, decision-surface, write-s
 The board's create/decide affordances (design-record §3i v25–v27 + §3f-D): open a prepared decision from the
 lane that is blocked on it, and file new work from a docked composer — both through the lane→PR write seam,
 never a direct write to `main`. This is the "capture + decide" write family, sibling of the review/queue
-action slice [#xuff4b8].
+action slice [#2588].
 
 ## Scope
 - **Open-decision-from-a-lane (design-record §3d-2 + §3f-A, ratified — never ratify inline).** A
@@ -35,7 +36,7 @@ action slice [#xuff4b8].
 - The composer dock, the open-decision affordance, and the candidate loop land in this slice's own module
   `plateau-app:src/backlog-view/write-affordances.ts` (disjoint file from the sibling downstream slices),
   extending the board view under `plateau-app:src/backlog-view/` (the composer mounts into the shell's dock
-  slot from [#xo9wnlp] without editing the shell module; open-decision acts on a cell from [#xq8fvck]). All three write through the read port's write side (`POST /api/backlog/write`,
+  slot from [#2583] without editing the shell module; open-decision acts on a cell from [#2584]). All three write through the read port's write side (`POST /api/backlog/write`,
   lane→PR — the [#2558] write port), which runs the sanctioned CLI ([we:scripts/backlog.mjs](scripts/backlog.mjs)
   `scaffold` / decision items) behind the seam; the view issues intents only — no bare CLI / `gh` / `main`
   write from a rendering path ([#2558] R2 boundary).
@@ -44,7 +45,7 @@ action slice [#xuff4b8].
 
 ## Out of scope (other slices)
 - The full decision-ratify surface (fork cards, evidence, the ruling write) → [#2565] and its children; this
-  slice only opens it from a lane. Review / merge / bounce / drag-to-queue → [#xuff4b8].
+  slice only opens it from a lane. Review / merge / bounce / drag-to-queue → [#2588].
 
 ## Acceptance
 - A decision-awaiting lane cell offers **Open decision** that navigates to [#2565]'s surface (never ratifies

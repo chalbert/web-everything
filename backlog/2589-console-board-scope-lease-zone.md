@@ -1,4 +1,5 @@
 ---
+bornAs: xzsx09z
 kind: story
 size: 5
 parent: "2555"
@@ -6,7 +7,7 @@ status: active
 scaffoldedBy: "slice-2555"
 dateScaffolded: "2026-07-20"
 dateOpened: "2026-07-20"
-blockedBy: ["xq8fvck", "xc3ofgt"]
+blockedBy: ["2584", "2586"]
 tags: [plateau-loop, console, console-board, scope-lease, lane-zones, slice-2555]
 ---
 
@@ -16,16 +17,16 @@ The physical-execution projection inside a lane (design-record §3i + §6d-2): a
 bottom, and a running lane's file-scope lease is drawn as a chip that keeps conflicting work visible and out.
 This renders the scope-lease + conflict-policy state onto the board; the underlying engine is [#2560].
 
-**Shared axis — this builds on [#xc3ofgt], it does not define a second one.** The four zones are bands along
-the *same* lane vertical axis the delivery-horizon slice [#xc3ofgt] owns (time-as-height). The top **running**
-band **is** [#xc3ofgt]'s live conveyor region (cards rising to the horizon); this slice adds the **ready ·
-purgatory · next-sprint** bands below it plus the lease/conflict cells. So it `blockedBy` [#xc3ofgt] (consumes
+**Shared axis — this builds on [#2586], it does not define a second one.** The four zones are bands along
+the *same* lane vertical axis the delivery-horizon slice [#2586] owns (time-as-height). The top **running**
+band **is** [#2586]'s live conveyor region (cards rising to the horizon); this slice adds the **ready ·
+purgatory · next-sprint** bands below it plus the lease/conflict cells. So it `blockedBy` [#2586] (consumes
 its vertical-axis layout), not just the renderer — the two slices are ordered, not competing layouts of the
 same column.
 
 ## Scope
 - **The four lane zones (design-record §6d-2, the "purgatory" refinement).** Each lane stacks — as bands
-  along [#xc3ofgt]'s vertical axis — **running** (`status: active`; this band **is** [#xc3ofgt]'s conveyor
+  along [#2586]'s vertical axis — **running** (`status: active`; this band **is** [#2586]'s conveyor
   region, not a re-layout of it) · **ready queue** (`buildQueued && openBlockers = 0`, waiting a free lane) ·
   **purgatory** (`buildQueued && openBlockers > 0` — approved but a dependency isn't done; fires when it
   lands) · **next-sprint** (`!buildQueued`, needs a manual upgrade). Splitting purgatory out from "queued"
@@ -44,8 +45,8 @@ same column.
 ## Where the code goes (locus)
 - Zone stacking + lease/conflict cells land in this slice's own module
   `plateau-app:src/backlog-view/lease-zone.ts` (disjoint file from the sibling downstream slices), extending
-  the board view under `plateau-app:src/backlog-view/` on the cells [#xq8fvck] renders, and laying the zone
-  bands along the vertical-axis layout [#xc3ofgt] exports (a hard `blockedBy`). **Soft-consumes** the
+  the board view under `plateau-app:src/backlog-view/` on the cells [#2584] renders, and laying the zone
+  bands along the vertical-axis layout [#2586] exports (a hard `blockedBy`). **Soft-consumes** the
   scope-lease + conflict-policy engine [#2560] (built on
   `we:scripts/lane-lease.mjs`) via the read-model `plateau-app:src/backlog-view/card-state-read-model.ts`
   ([#2552], resolved), which already maps lease / breach / stuck state → card-state; not a hard `blockedBy`
@@ -54,7 +55,7 @@ same column.
 
 ## Out of scope (other slices)
 - The lease/conflict/policy **engine** itself → [#2560] (its own child epic). Cross-lane spans that cross
-  *other* lanes (waits-on-multiple-leases, forked/fan-in) → [#x2kpohd].
+  *other* lanes (waits-on-multiple-leases, forked/fan-in) → [#2585].
 
 ## Acceptance
 - A lane renders the four zones (running · ready queue · purgatory · next-sprint) with purgatory visibly

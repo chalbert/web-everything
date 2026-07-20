@@ -56,37 +56,37 @@ the console) — in this console's scope, or a separate surface? Rule before bui
 The board build was sliced into seven stories (slicing rationale:
 [we:reports/2026-07-20-slice-2555-console-board.md](../reports/2026-07-20-slice-2555-console-board.md)),
 on top of the two children that already existed — [#2552] board read-model (resolved) and [#2560]
-scope-lease + conflict-policy engine. **One of the seven — the shell [#xo9wnlp] — has since been delivered**
+scope-lease + conflict-policy engine. **One of the seven — the shell [#2583] — has since been delivered**
 (it already landed in `plateau-app:src/backlog-view/lane-board.ts`; see its banner), so it is not remaining
 work: it is owed a resolve-as-graduated. That leaves **six independently-deliverable to-build slices** plus
 the graduating shell. With the shell delivered, the effective root is `{ #2578 } → renderer → {horizon,
 spans/leverage, write-affordances}` in parallel, then `horizon → lease-zone` (the zones lay bands along the
 horizon's vertical axis) and `review-actions` additionally waits on the still-open [#2522]:
 
-- **[#xo9wnlp] Board shell + lane windowing** (5) — **ALREADY DELIVERED, graduating** (landed in
+- **[#2583] Board shell + lane windowing** (5) — **ALREADY DELIVERED, graduating** (landed in
   `plateau-app:src/backlog-view/lane-board.ts`, wired at `/console-board`; owed a resolve-as-graduated, not a
   build). The container: lane columns, sticky-header NOW line, collapse-to-strips + no-horizontal-scroll
   windowing, dock frames, data-driven renderer. `blockedBy`: —.
-- **[#xq8fvck] Card renderer — the 37-state taxonomy with per-state glyph + motion** (8) — renders all 37
+- **[#2584] Card renderer — the 37-state taxonomy with per-state glyph + motion** (8) — renders all 37
   states citing the glyph/motion by UC-id from `plateau-app:src/backlog-view/card-taxonomy.webcases.ts`
   (the §6e glyph/color/motion fields are ported by [#2578] — filed, not yet landed, a hard prerequisite);
-  flips each webcase `rendered=pending→yes`. `blockedBy`: [#2578] (the shell [#xo9wnlp] is **delivered**, so
-  its edge is dropped — not a build gate; xo9wnlp is still owed a resolve-as-graduated).
-- **[#xc3ofgt] Delivery-horizon + size-scaled conveyor** (5) — cards rise by progress + cross at delivery,
+  flips each webcase `rendered=pending→yes`. `blockedBy`: [#2578] (the shell [#2583] is **delivered**, so
+  its edge is dropped — not a build gate; 2583 is still owed a resolve-as-graduated).
+- **[#2586] Delivery-horizon + size-scaled conveyor** (5) — cards rise by progress + cross at delivery,
   gray past-mask + day-folded history, `▤` size-scaled height=Σ mode + lane ETA. **Owns the lane column's
-  vertical axis** (time-as-height), which [#xzsx09z] lays its zone bands along. `blockedBy`: [#xq8fvck].
-- **[#xzsx09z] Scope-lease board zone** (5) — the four lane zones (running/ready/purgatory/next-sprint),
+  vertical axis** (time-as-height), which [#2589] lays its zone bands along. `blockedBy`: [#2584].
+- **[#2589] Scope-lease board zone** (5) — the four lane zones (running/ready/purgatory/next-sprint),
   lease chip + overlap/forced/breach cells + overtake affordance; soft-consumes [#2560]. Its **running** band
-  *is* [#xc3ofgt]'s conveyor region and the other three bands sit below it on the same axis, so it builds on
-  [#xc3ofgt]. `blockedBy`: [#xq8fvck], [#xc3ofgt].
-- **[#x2kpohd] Cross-lane spans + leverage graph** (5) — waits-on-multiple-leases spans, forked/fan-in
-  across-lanes overlay, `⚡` frees-now/gates chips + teal cascade. `blockedBy`: [#xq8fvck].
-- **[#xuff4b8] Review + queue operator actions** (5) — drag-to-queue (extends [#2522]) + review modal over
-  the board (merge/bounce/take-over). `blockedBy`: [#xq8fvck], [#2522] (**#2522 is still open** — this slice
+  *is* [#2586]'s conveyor region and the other three bands sit below it on the same axis, so it builds on
+  [#2586]. `blockedBy`: [#2584], [#2586].
+- **[#2585] Cross-lane spans + leverage graph** (5) — waits-on-multiple-leases spans, forked/fan-in
+  across-lanes overlay, `⚡` frees-now/gates chips + teal cascade. `blockedBy`: [#2584].
+- **[#2588] Review + queue operator actions** (5) — drag-to-queue (extends [#2522]) + review modal over
+  the board (merge/bounce/take-over). `blockedBy`: [#2584], [#2522] (**#2522 is still open** — this slice
   is not parallel-eligible with the others until it lands).
-- **[#xprj9ov] Write affordances — open-decision-from-a-lane + new-work composer** (5) — open [#2565]'s
+- **[#2587] Write affordances — open-decision-from-a-lane + new-work composer** (5) — open [#2565]'s
   ratify surface from a lane (never inline), composer via lane→PR, new-spec→constitution loop. `blockedBy`:
-  [#xq8fvck].
+  [#2584].
 
 Not split in this pass (kept as future children under this epic): the glossary/attention/accessibility/
 concurrency hardening, the failure-axis live detectors + chips-not-states (backends [#2551]/[#2562]), the

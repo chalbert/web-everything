@@ -1,4 +1,5 @@
 ---
+bornAs: xo9wnlp
 kind: story
 size: 5
 parent: "2555"
@@ -19,7 +20,7 @@ tags: [plateau-loop, console, console-board, board-shell, lane-windowing, slice-
 > (`mountLaneBoard`, lines 57/407/723). It delivers every bullet below — data-driven `BOARD` fixture, pure
 > resize-driven windowing maths, collapse-to-strips (state icon + rotated name + count), `‹ ›` swap, both
 > themes, a11y. **Action owed:** resolve/graduate this item to that path and **re-root the DAG at
-> [#xq8fvck]** (its `blockedBy` on this already-built shell is satisfied). This note is a correction only —
+> [#2584]** (its `blockedBy` on this already-built shell is satisfied). This note is a correction only —
 > the status splice is out of scope for this edit pass.
 
 The container every other board slice renders into: the bare-on-the-page workbench shell (design-record
@@ -53,9 +54,9 @@ the sibling slices.
   §6 (the ratified icon/color grammar). The v68 mock is the UI-design input, not code to port verbatim.
 
 ## Out of scope (other slices)
-- Rendering the card states → [#xq8fvck]. The delivery-horizon geometry → [#xc3ofgt]. Scope-lease zones →
-  [#xzsx09z]. Cross-lane spans + leverage → [#x2kpohd]. Operator actions → [#xuff4b8]. Write affordances →
-  [#xprj9ov].
+- Rendering the card states → [#2584]. The delivery-horizon geometry → [#2586]. Scope-lease zones →
+  [#2589]. Cross-lane spans + leverage → [#2585]. Operator actions → [#2588]. Write affordances →
+  [#2587].
 
 ## Acceptance
 - The board renders lane columns from a fixture, with sticky headers forming a single NOW line and left +

@@ -1,4 +1,5 @@
 ---
+bornAs: x2kpohd
 kind: story
 size: 5
 parent: "2555"
@@ -6,7 +7,7 @@ status: active
 scaffoldedBy: "slice-2555"
 dateScaffolded: "2026-07-20"
 dateOpened: "2026-07-20"
-blockedBy: ["xq8fvck"]
+blockedBy: ["2584"]
 tags: [plateau-loop, console, console-board, cross-lane, spans, leverage, slice-2555]
 ---
 
@@ -14,7 +15,7 @@ tags: [plateau-loop, console, console-board, cross-lane, spans, leverage, slice-
 
 The two views that cross lane boundaries (design-record §3i + §6d-1/§6d-4): work that waits on or fans
 across multiple lanes, and the leverage graph that shows what a card *frees*. This renders the family-B
-cross-lane card states + the ⚡ leverage overlay onto the cells from [#xq8fvck].
+cross-lane card states + the ⚡ leverage overlay onto the cells from [#2584].
 
 ## Scope
 - **Cross-lane spans (design-record §3i v19+ · taxonomy family B).** The waits-on-multiple-leases card
@@ -37,15 +38,15 @@ cross-lane card states + the ⚡ leverage overlay onto the cells from [#xq8fvck]
 ## Where the code goes (locus)
 - Span docking + the leverage overlay land in this slice's own module
   `plateau-app:src/backlog-view/cross-lane-spans.ts` (disjoint file from the sibling downstream slices),
-  extending the board view under `plateau-app:src/backlog-view/` on the cells [#xq8fvck] renders. The three leverage numbers are the deterministic, zero-cost CLI values from
+  extending the board view under `plateau-app:src/backlog-view/` on the cells [#2584] renders. The three leverage numbers are the deterministic, zero-cost CLI values from
   [we:src/_data/backlog.js](src/_data/backlog.js) (`directUnblocks` ≠ `unblocksToReady` ≠
   `transitiveUnblocks`) read through the read port ([#2558] R2 boundary — no bare CLI from the view).
 - Consumes the graduated swimlane mint [#2537] / FUI [#2543] (`fui:` span/lane primitive) rather than
   hand-rolling the cross-lane geometry.
 
 ## Out of scope (other slices)
-- Within-lane lease zones (running/queue/purgatory + breach/forced *in one lane*) → [#xzsx09z]. The
-  delivery-horizon geometry → [#xc3ofgt].
+- Within-lane lease zones (running/queue/purgatory + breach/forced *in one lane*) → [#2589]. The
+  delivery-horizon geometry → [#2586].
 
 ## Acceptance
 - A waits-on-multiple-leases card docks span-only with `⌃` tacks and a dashed wire for a non-adjacent span;
