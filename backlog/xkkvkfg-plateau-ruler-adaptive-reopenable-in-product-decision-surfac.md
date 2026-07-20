@@ -1,6 +1,5 @@
 ---
 kind: epic
-size: 8
 status: open
 dateOpened: "2026-07-20"
 tags: []
