@@ -3,10 +3,11 @@ bornAs: xo9wnlp
 kind: story
 size: 5
 parent: "2555"
-status: active
+status: resolved
 scaffoldedBy: "slice-2555"
 dateScaffolded: "2026-07-20"
 dateOpened: "2026-07-20"
+dateResolved: "2026-07-20"
 tags: [plateau-loop, console, console-board, board-shell, lane-windowing, slice-2555]
 ---
 
