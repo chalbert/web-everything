@@ -426,6 +426,33 @@ describe('buildPanelMandate (#2310)', () => {
   it('throws on an unknown lens rather than silently building a bogus mandate', () => {
     expect(() => buildPanelMandate({ lens: 'vibes' })).toThrow(/unknown lens/);
   });
+
+  describe('#2450 — optional netChangedFiles ground-truth block', () => {
+    it('appends the GROUND TRUTH net changed-file set and the do-not-flag-scope-creep instruction', () => {
+      const text = buildPanelMandate({
+        lens: MANDATE_LENSES.CORRECTNESS,
+        netChangedFiles: ['scripts/merge-ai-prs.mjs', 'scripts/lib/review-core.mjs'],
+      });
+      expect(text).toContain('GROUND TRUTH');
+      expect(text).toContain('scripts/merge-ai-prs.mjs, scripts/lib/review-core.mjs');
+      expect(text).toMatch(/do NOT report such a file/);
+      expect(text).toMatch(/scope creep/);
+      expect(text).toMatch(/sibling lane/);
+    });
+
+    it('leaves the mandate BYTE-FOR-BYTE unchanged when netChangedFiles is omitted (existing callers unaffected)', () => {
+      const withParam = buildPanelMandate({ lens: MANDATE_LENSES.SECURITY, netChangedFiles: null });
+      const withoutParam = buildPanelMandate({ lens: MANDATE_LENSES.SECURITY });
+      expect(withParam).toBe(withoutParam);
+      expect(withoutParam).not.toContain('GROUND TRUTH');
+    });
+
+    it('an EMPTY (or all-falsy) net set is treated as omitted — no ground-truth block, byte-for-byte the base mandate', () => {
+      const base = buildPanelMandate({ lens: MANDATE_LENSES.SIMPLICITY });
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.SIMPLICITY, netChangedFiles: [] })).toBe(base);
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.SIMPLICITY, netChangedFiles: [null, ''] })).toBe(base);
+    });
+  });
 });
 
 describe('buildPanelFindings (#2310)', () => {

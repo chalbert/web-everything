@@ -609,15 +609,22 @@ export function panelRigorForCareLevel(careLevel) {
  * })` (same diff-only, no-checkout #2336 isolation every reviewer shares) with the panel framing: this
  * reviewer judges its OWN lens only and must not soften its verdict to pre-empt another lens's concern — a
  * genuine cross-mandate tradeoff is for a human to resolve, never for one reviewer to compromise away.
- * @param {{lens: string, contextIsolation?: string}} o
+ *
+ * #2450 — the OPTIONAL `netChangedFiles` param appends a GROUND TRUTH block naming the PR's NET changed-file set
+ * vs current main (the drain already computes it via `computeNetDiffChangedFiles`, `we:scripts/merge-ai-prs.mjs`)
+ * and tells the reviewer NOT to report a diff-side file OUTSIDE that set as scope creep — such a file already
+ * landed on main via a sibling lane and only shows in the three-dot diff, so a phantom scope-creep finding on it
+ * burns a negotiation round for nothing. OMITTING the param (or passing an empty list) leaves the mandate
+ * BYTE-FOR-BYTE unchanged, so every existing caller/test is unaffected — the block is purely additive.
+ * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null}} o
  * @returns {string}
  */
-export function buildPanelMandate({ lens, contextIsolation = 'diff-only' } = {}) {
+export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netChangedFiles = null } = {}) {
   if (!PANEL_LENSES.includes(lens)) {
     throw new Error(`buildPanelMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
   }
   const base = buildMandate({ contextIsolation, mandate: lens });
-  return [
+  const parts = [
     base,
     `You are ONE of several independent mandate reviewers on this diff, each judging a single lens`,
     `(the full panel: ${PANEL_LENSES.join(', ')}).`,
@@ -625,7 +632,17 @@ export function buildPanelMandate({ lens, contextIsolation = 'diff-only' } = {})
     'verdict to accommodate what you guess another lens\'s reviewer might want. A genuine tradeoff BETWEEN',
     'mandates (e.g. security wants X, simplicity wants not-X) is human judgment by definition — surface your',
     'honest verdict for your own lens and let the panel reduction detect the conflict; do not resolve it yourself.',
-  ].join(' ');
+  ];
+  const netFiles = (Array.isArray(netChangedFiles) ? netChangedFiles : []).filter(Boolean).map(String);
+  if (netFiles.length) {
+    parts.push(
+      `GROUND TRUTH — the NET changed-file set of this PR vs CURRENT main is exactly: ${netFiles.join(', ')}.`,
+      'A file that appears in the diff but is NOT in that set is content that ALREADY landed on main via a',
+      'sibling lane (the three-dot diff still shows it), NOT something this PR adds — do NOT report such a file',
+      'as scope creep, an undeclared payload, or an extra change. Judge only changes to the files in this net set.',
+    );
+  }
+  return parts.join(' ');
 }
 
 /**

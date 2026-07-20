@@ -892,9 +892,23 @@ function isStrictAncestor(exec, ancestor, descendant) {
  *   `exec(cmd, args, opts)` — inject `execFileSync`-shaped exec so this stays unit-testable with a fake.
  * @returns {{changedFiles:string[], diffLines:number, scored:boolean, humanBasisFiles:string[]}}
  */
-export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'main', baseRev = null, rev, fetchExtraRefs = [] } = {}) {
-  if (typeof exec !== 'function' || !rev) return { changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] };
-  const baseRevOk = typeof baseRev === 'string' && /^[0-9a-f]{7,64}$/i.test(baseRev);
+/**
+ * #2450 — the SHARED base-RESOLUTION half of the net diff, factored out of `computeNetDiffChangedFiles` so the
+ * escalation classifier's changed-file SET and the reviewer-facing diff TEXT (`computeNetDiffText`) resolve the
+ * base ONCE, the SAME way, and can never drift onto different bases. It runs the #2373 explicit-refspec base
+ * fetch (force-updates the `<remote>/<base>` tracking ref unconditionally — never the opportunistic bare fetch),
+ * then per candidate narrows the LEFT side of the diff to the #2404 provable fork point
+ * (`merge-base(<remote>/<base>, candidate)`) and probes candidate resolution with a cheap `git diff --numstat`
+ * (which doubles as the human-gate basis). Returns the resolved `{ baseRef, diffBase, candidate, humanBasis }`
+ * for the FIRST candidate (`<remote>/<rev>` first, then bare `rev` — the #2373-review-r2 order) that resolves,
+ * or `null` when neither does (the caller degrades to the safe over-scoring / `gh pr diff` fallback). NEVER
+ * checks out the PR branch (#2336): it only fetches tracking refs and diffs two trees in place. Pure aside from
+ * the injected `exec`.
+ * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
+ * @returns {{baseRef:string, diffBase:string, candidate:string, humanBasis:{changedFiles:string[],diffLines:number}}|null}
+ */
+function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
+  if (typeof exec !== 'function' || !rev) return null;
   const baseRef = `${remote}/${base}`;
   try {
     // ALWAYS force-update the base tracking-ref (#2373 opportunistic-fetch fix): the cumulative human-gate basis
@@ -913,7 +927,7 @@ export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'ma
       // `git merge-base A B` can print MORE THAN ONE line (a criss-cross-merge history can have several
       // equally-valid best common ancestors) — take only the first; `.trim()` alone would leave an embedded
       // newline in a would-be single revision arg, making it an invalid `git diff` argument (a "continue" to
-      // the next candidate, or `scored:false` if both candidates hit it — always the safe over-scoring
+      // the next candidate, or a `null` resolve if both candidates hit it — always the safe over-scoring
       // fallback, never wrong data, but avoidable).
       const mb = String(exec('git', ['merge-base', baseRef, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').split('\n')[0].trim();
       if (mb) diffBase = mb;
@@ -923,16 +937,53 @@ export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'ma
     try {
       humanBasis = parseNumstat(exec('git', ['diff', '--numstat', diffBase, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
     } catch { continue; /* candidate doesn't resolve — try the next one */ }
-    // SIZE / blast-radius de-inflate to the OWN delta (`baseRev…head`) ONLY when `baseRev` provably is a STRICT
-    // ancestor of head; otherwise use the cumulative basis (the safe over-scoring direction).
-    let own = humanBasis;
-    if (baseRevOk && isStrictAncestor(exec, baseRev, candidate)) {
-      try { own = parseNumstat(exec('git', ['diff', '--numstat', baseRev, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })); }
-      catch { own = humanBasis; /* own-delta diff failed → fall back to the cumulative basis */ }
-    }
-    return { changedFiles: own.changedFiles, diffLines: own.diffLines, scored: true, humanBasisFiles: humanBasis.changedFiles };
+    return { baseRef, diffBase, candidate, humanBasis };
   }
-  return { changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] };
+  return null;
+}
+
+export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'main', baseRev = null, rev, fetchExtraRefs = [] } = {}) {
+  const empty = { changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] };
+  if (typeof exec !== 'function' || !rev) return empty;
+  const baseRevOk = typeof baseRev === 'string' && /^[0-9a-f]{7,64}$/i.test(baseRev);
+  const basis = resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
+  if (!basis) return empty; // neither candidate resolves → the safe over-scoring fallback
+  const { candidate, humanBasis } = basis;
+  // SIZE / blast-radius de-inflate to the OWN delta (`baseRev…head`) ONLY when `baseRev` provably is a STRICT
+  // ancestor of head; otherwise use the cumulative basis (the safe over-scoring direction).
+  let own = humanBasis;
+  if (baseRevOk && isStrictAncestor(exec, baseRev, candidate)) {
+    try { own = parseNumstat(exec('git', ['diff', '--numstat', baseRev, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })); }
+    catch { own = humanBasis; /* own-delta diff failed → fall back to the cumulative basis */ }
+  }
+  return { changedFiles: own.changedFiles, diffLines: own.diffLines, scored: true, humanBasisFiles: humanBasis.changedFiles };
+}
+
+/**
+ * #2450 — the reviewer-facing NET DIFF TEXT vs CURRENT main, resolved off the SAME #2373/#2404 basis
+ * `computeNetDiffChangedFiles` uses (both go through `resolveNetDiffBasis`), so the diff the drain's panel
+ * reviews and the escalation SCORE share ONE basis and cannot drift. Returns the two-tree
+ * `git diff <forkpoint> <head>` TEXT — content-only, ancestry-independent — NOT `gh pr diff`'s three-dot
+ * merge-base diff, which still lists a sibling-lane file that has since landed on main as if THIS PR added it
+ * (the phantom scope-creep that burns negotiation rounds, #2450). Degrades to `{ scored:false, text:'' }` when
+ * the basis can't be resolved OR the text diff itself fails — the caller then falls back to `gh pr diff`. Like
+ * `computeNetDiffChangedFiles`, it NEVER checks out the PR branch (#2336): it only fetches tracking refs and
+ * diffs two trees in place. `exec(cmd,args,opts)` is injected so this stays unit-testable with a fake.
+ * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
+ * @returns {{text:string, base:string|null, rev:string|null, scored:boolean}}
+ */
+export function computeNetDiffText({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
+  const unscored = { text: '', base: null, rev: null, scored: false };
+  if (typeof exec !== 'function' || !rev) return unscored;
+  const basis = resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
+  if (!basis) return unscored; // neither candidate resolves → caller falls back to `gh pr diff`
+  const { diffBase, candidate } = basis;
+  try {
+    const text = String(exec('git', ['diff', diffBase, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '');
+    return { text, base: diffBase, rev: candidate, scored: true };
+  } catch {
+    return unscored; // the text diff failed even though the basis resolved → caller falls back to `gh pr diff`
+  }
 }
 
 /**

@@ -264,11 +264,20 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
   v2's single reviewer fans out into a panel of distinct mandated reviewers (`PANEL_LENSES`: `correctness` /
   `security` / `simplicity` / `standards-conformance`, the `/code-review` lenses), driven up to
   `NEGOTIATION_ROUND_CAP` (5) rounds of propose → critique → revise, in-session, before escalating:
-  1. **Round 1 panel review.** Get the diff (`gh pr diff <num> --repo <repo>`, `gh pr view <num> --repo <repo>
-     --json title,body,files`). Spawn ONE **fresh-context adversarial review subagent per lens** (the `Agent`
-     tool, fanned out in parallel via the Workflow orchestrator), each seeded with `buildPanelMandate({ lens
-     })` — same diff-only, no-checkout isolation as v2 (#2336), but judging only its own lens and blind to the
-     other lenses' reviewers. Shape each reply with `normalizeFindings()`, reduce each to its own verdict with
+  1. **Round 1 panel review.** Get the diff on the NET basis vs CURRENT main — `computeNetDiffText({ exec, rev:
+     v.headRef, fetchExtraRefs: [v.headRef] })` (`we:scripts/merge-ai-prs.mjs`, #2450): the two-tree
+     `git diff <forkpoint> <head>` TEXT resolved off the SAME #2373/#2404 basis the escalation SCORE uses, so the
+     diff the panel reviews and the score can't drift. This is **not** `gh pr diff <num>`'s three-dot merge-base
+     diff, which still lists a sibling-lane file that has since landed on main as if this PR added it — the
+     phantom scope-creep that burns rounds (#2450). If it returns `scored:false` (a foreign clone without the
+     head ref, a diff failure), fall back to `gh pr diff <num> --repo <repo>`. Also `gh pr view <num> --repo
+     <repo> --json title,body,files`, and take the NET changed-file list from `computeNetDiffChangedFiles(...)`
+     (the drain already computes it for scoring). Spawn ONE **fresh-context adversarial review subagent per
+     lens** (the `Agent` tool, fanned out in parallel via the Workflow orchestrator), each seeded with
+     `buildPanelMandate({ lens, netChangedFiles })` — the net changed-file list is passed as GROUND TRUTH so a
+     reviewer will NOT flag a diff-side file outside that set as scope creep (#2450) — same diff-only,
+     no-checkout isolation as v2 (#2336), but judging only its own lens and blind to the other lenses'
+     reviewers. Shape each reply with `normalizeFindings()`, reduce each to its own verdict with
      `deriveVerdict()` — you now have one `{ lens: verdict }` map (`lensVerdicts`) and, via
      `buildPanelFindings()`, one lens-tagged findings list.
   2. **Reduce the panel to one verdict** — `derivePanelVerdict({ lensVerdicts, humanRequired, conflict,
