@@ -3,9 +3,11 @@ bornAs: xt99aii
 kind: story
 size: 5
 parent: "2505"
-status: open
+status: resolved
 locus: plateau-app
 dateOpened: "2026-07-20"
+dateStarted: "2026-07-20"
+dateResolved: "2026-07-20"
 tags: [plateau-loop, console, console-board, taxonomy, visual-grammar, glyph, conformance]
 ---
 
