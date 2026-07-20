@@ -1,4 +1,5 @@
 ---
+bornAs: xt99aii
 kind: story
 size: 5
 parent: "2505"
