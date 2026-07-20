@@ -3,11 +3,12 @@ bornAs: xc3ofgt
 kind: story
 size: 5
 parent: "2555"
-status: active
+status: resolved
 scaffoldedBy: "slice-2555"
 dateScaffolded: "2026-07-20"
 dateOpened: "2026-07-20"
 blockedBy: ["2584"]
+dateResolved: "2026-07-20"
 tags: [plateau-loop, console, console-board, delivery-horizon, conveyor, size-scaled, slice-2555]
 ---
 
