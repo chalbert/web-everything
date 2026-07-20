@@ -220,14 +220,22 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
 > (`--review-window-minutes`, #2262) is REMOVED: it raced the very review it was waiting for — observed
 > 2026-07-10, PR #396 merged mid-negotiation at its round-1 head while mandatory-lens fixes were still being
 > written. A parked PR now rests parked until a verdict label (`review:accepted`/`review:changes`) arrives. A
-> genuinely stuck park is the OPERATOR's call: run a manual `/drain`, or use the documented
-> `--no-review-escalation` override to push a green-but-parked `review:pending` PR through (it still refuses
-> `review:human`/`review:changes`). **Careful — the override is PASS-WIDE, not per-PR:** it turns the
-> escalation rubric off for EVERY candidate in that pass, so a fresh PR with no `review:*` label yet (even a
-> gate-self diff) would merge unscored. Only run it when the stuck `review:pending` PR is the ONLY unlabelled
-> candidate: scope the pass (`--this-repo`, a narrow `--label`) and confirm with `--dry-run` that the plan is
-> that one PR first. A per-PR override is tracked as backlog item #x2u9e9d. Landing unreviewed code on a clock is never the
-> drain's failure mode.
+> genuinely stuck park is the OPERATOR's call: run a manual `/drain`, then use the **per-PR** relief valve
+> (#2423) to push just the stuck PR through.
+>
+> **PREFERRED — the per-PR form `--no-review-escalation=<pr#>`** (repeatable, comma-separated:
+> `--no-review-escalation=396,401`). It waives ONLY the named PR's agent-reviewable `review:pending` park to a
+> merge; the escalation rubric stays **LIVE for every other candidate in the pass**, so a fresh PR with no
+> `review:*` label yet — even a gate-self diff — is still scored and parked normally. The named PR is scored too:
+> the override still **refuses `review:human`** (a gate-self/statute edit — human-only, #2285) and
+> **`review:changes`** (the reviewer actively rejected the diff). This is the relief valve to reach for.
+>
+> **DEPRECATED — the bare, PASS-WIDE form `--no-review-escalation`** (no `=<pr#>`). It turns the escalation
+> rubric off for **EVERY candidate in that pass**, so a fresh PR with no `review:*` label yet (even a gate-self
+> diff) would merge unscored — a strictly wider unreviewed-merge window than the per-PR form. It still works and
+> still refuses `review:human`/`review:changes`, but the drain now prints a loud deprecation warning pointing at
+> the per-PR form. If you must use it, scope the pass (`--this-repo`, a narrow `--label`) and confirm with
+> `--dry-run` that the plan is only the stuck PR first. Landing unreviewed code is never the drain's failure mode.
 
 - **`gate-self` (`humanRequired: true`) → `{ mode: converge, autoLand: false }`.** The diff edits the **auto-review
   trust chain itself** (`we:scripts/lib/review-escalation.mjs` or `we:scripts/merge-ai-prs.mjs`) — the code that
