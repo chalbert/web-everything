@@ -37,7 +37,7 @@ Lives in **plateau-app** (the 37 states are plateau business logic; WE holds no 
 
 ## Manifest to port (from design-record §6e — do not re-litigate)
 20 glyph changes from the mock defaults incl. `D1` loader→sync; color forks A=blue · B=lighten-light-only ·
-C=drop-chip · D=undo/configurable · F=per-state · G=red-edge · P=ghost; 16 action-button glyphs; motion
+C=drop-chip · D=undo/configurable · F=per-state · G=red-edge · P=ghost; 17 action-button glyphs; motion
 overrides A5=pulse · A8=nudge · E2=shake · C3/A11=breathe (loop cadence, reduced-motion respected).
 
 ## Acceptance
