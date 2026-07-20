@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -893,6 +893,76 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef' });
     expect(r).toEqual({ changedFiles: ['README.md'], diffLines: 1, scored: true, humanBasisFiles: ['README.md'] });
+  });
+});
+
+describe('computeNetDiffText (#2450 — reviewer-facing NET diff TEXT, SAME basis as the score)', () => {
+  const fakeExec = (script = {}) => {
+    const calls = [];
+    const exec = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts, key: `${cmd} ${args.join(' ')}` });
+      const h = script[`${cmd} ${args.join(' ')}`];
+      if (h && h.throw) throw new Error(h.throw);
+      if (h && 'stdout' in h) return h.stdout;
+      if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      return '';
+    };
+    return { exec, calls };
+  };
+
+  it('shares the #2373/#2404 base resolution: force-fetches the base with an EXPLICIT refspec, then diffs two trees (never checks out the PR branch)', () => {
+    const { exec, calls } = fakeExec({
+      'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' }, // the shared basis probe
+      'git diff origin/main deadbeef': { stdout: 'diff --git a/README.md b/README.md\n@@ text @@\n' },
+    });
+    const r = computeNetDiffText({ exec, rev: 'deadbeef' });
+    expect(r.scored).toBe(true);
+    expect(r.text).toContain('diff --git a/README.md');
+    expect(r.base).toBe('origin/main');
+    expect(r.rev).toBe('deadbeef');
+    // exact same fetch refspec computeNetDiffChangedFiles uses — proving ONE shared basis, no drift.
+    expect(calls.some((c) => c.args[0] === 'fetch' && c.args[2] === '+main:refs/remotes/origin/main')).toBe(true);
+    // #2336 — no checkout/switch of the PR branch, ever.
+    expect(calls.some((c) => ['checkout', 'switch'].includes(c.args[0]))).toBe(false);
+  });
+
+  it('narrows the LEFT side to the #2404 fork point (merge-base) exactly as the score does, then returns that two-tree diff text', () => {
+    const { exec, calls } = fakeExec({
+      'git merge-base origin/main origin/lane/x': { stdout: 'forkpoint1234\n' },
+      'git diff --numstat forkpoint1234 origin/lane/x': { stdout: '2\t0\tbacklog/2450-x.md\n' },
+      'git diff forkpoint1234 origin/lane/x': { stdout: 'diff --git a/backlog/2450-x.md b/backlog/2450-x.md\n' },
+    });
+    const r = computeNetDiffText({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r).toMatchObject({ base: 'forkpoint1234', rev: 'origin/lane/x', scored: true });
+    expect(r.text).toContain('backlog/2450-x.md');
+    // the phantom sibling-lane file only in the three-dot diff is NOT swept in — the tip-basis text is never diffed.
+    expect(calls.some((c) => c.key === 'git diff origin/main origin/lane/x')).toBe(false);
+  });
+
+  it('degrades to scored:false (no checkout) when neither `<remote>/<rev>` nor the bare `rev` resolves — caller falls back to `gh pr diff`', () => {
+    const { exec, calls } = fakeExec({
+      'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
+      'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
+    });
+    const r = computeNetDiffText({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r).toEqual({ text: '', base: null, rev: null, scored: false });
+    expect(calls.some((c) => ['checkout', 'switch'].includes(c.args[0]))).toBe(false);
+  });
+
+  it('degrades to scored:false when the basis resolves but the TEXT diff itself fails (safe fallback, no checkout)', () => {
+    const { exec } = fakeExec({
+      'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' }, // basis resolves
+      'git diff origin/main deadbeef': { throw: 'diff exploded' }, // but the text diff fails
+    });
+    const r = computeNetDiffText({ exec, rev: 'deadbeef' });
+    expect(r).toEqual({ text: '', base: null, rev: null, scored: false });
+  });
+
+  it('no exec / no rev → scored:false without touching git at all', () => {
+    expect(computeNetDiffText({})).toEqual({ text: '', base: null, rev: null, scored: false });
+    const { exec, calls } = fakeExec();
+    expect(computeNetDiffText({ exec })).toEqual({ text: '', base: null, rev: null, scored: false });
+    expect(calls.length).toBe(0);
   });
 });
 
