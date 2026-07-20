@@ -1,7 +1,6 @@
 ---
 bornAs: xrp2ta9
 kind: epic
-size: 8
 parent: "2555"
 status: open
 tags: [plateau-loop, console, scope-lease, conflict-policy, lanes, epic]
