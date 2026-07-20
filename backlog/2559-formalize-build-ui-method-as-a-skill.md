@@ -3,9 +3,11 @@ bornAs: xpirk11
 kind: story
 size: 3
 parent: "2505"
-status: open
+status: resolved
 tags: [plateau-loop, method, skill, agent-meta]
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-20"
+dateResolved: "2026-07-20"
 ---
 
 # Formalize the build-UI method as a reusable skill
