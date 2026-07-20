@@ -1,0 +1,72 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    The backlog build-queue console's <strong>A4 "paused — scope breach"</strong> card state (UC-A4 in the
+    ratified <code>card-taxonomy.webcases.ts</code>) is a designed state whose <em>post-pause behaviour is
+    unspecified</em>. Detection already exists: the write-time <code>PreToolUse(Edit|Write)</code> gate denies
+    out-of-scope writes, and the design record's §3i breach detector is the set difference between a lane's
+    <em>predicted</em> module-scope and its <em>observed</em> file-scope. What is missing is the
+    <strong>transition table</strong> — where A4 goes once it auto-pauses — plus the two sibling questions the
+    37-state taxonomy lists but never defines: <em>how fine-grained is an item's scope</em>, and
+    <em>who may place a hold</em>. A4 is tagged <code>cat:run</code> (auto/system handling), so its exits are
+    intended to be automatic, not amber "needs-you" prompts.
+</p>
+<p>
+    This survey grounds four forks (settled on
+    <a href="/backlog/2574-refine-the-scope-breach-card-state-a4-define-its-transition-/">#2574</a>) in
+    established concurrency-control and fault-recovery prior art, so the answer reuses named vocabulary rather
+    than coining mechanics. It extends the earlier
+    <a href="/research/agent-file-lock-coordination/">agent file-lock coordination</a> survey with the
+    recovery/quarantine and voluntary-vs-involuntary-disruption literature the transition table needs.
+</p>
+
+<h2>The four forks</h2>
+<ol>
+    <li>
+        <strong>Scope granularity — whole-clone lease (today) vs finer per-file scope.</strong> The §3i model
+        is <em>conceptually</em> file-grained, but the <em>implemented</em> primitive is coarser: the lane
+        pool hands out a <strong>whole-clone exclusive lease</strong> (<code>acquire</code>/<code>release</code>
+        over an entire lane clone), and enforcement is the write-time gate, not the lease. Database lock
+        escalation (SQL Server row→page→table), Gray et al.'s multi-granularity intention locks, and
+        <code>flock</code> whole-file vs <code>fcntl</code> byte-range frame the classic granularity trade;
+        the 2025–26 parallel-AI-agent consensus (whole-worktree isolation — Augment, MindStudio, Claude Code
+        — plus CodeCRDT's O(N×L) contention result) points to keeping the coarse lease as the enforcement unit
+        and treating predicted file-scope as an <em>advisory breach signal</em>, with git as ground-truth at
+        drain. <strong>Recommended default: keep the whole-clone lease</strong>; per-file leasing is a later
+        escalation justified only by observed cross-lane collisions.
+    </li>
+    <li>
+        <strong>A4's exits after the auto-pause.</strong> Four named recovery archetypes map onto the §3i
+        breach-mid-build policy routes: <em>retry-in-place / re-plan within scope</em> (Erlang/OTP supervisor
+        restart), <em>widen the lease</em> (lock escalation, into free scope only), <em>hand off to the
+        cross-lane family B2/B3/B8</em> (Kubernetes reschedule/evict — when the wanted files belong to another
+        lane's lease), and <em>bounce/drop if mis-scoped</em> (CI flaky-test quarantine).
+        <strong>Recommended default: retry-in-place / re-plan within scope</strong>; A4 stays
+        <code>cat:run</code> and only <code>policy = ask</code> promotes it to an amber you-card with the full
+        route menu.
+    </li>
+    <li>
+        <strong>A12 "merge held" hold-source.</strong> Kubernetes's voluntary-vs-involuntary-disruption split
+        plus PodDisruptionBudget names the exact trichotomy: A4 is the <em>involuntary-fault</em> hold, A6 the
+        <em>policy</em> hold, A12 the <em>voluntary</em> hold. <strong>Recommended default: not user-only</strong>
+        — one hold mechanism with an explicit <code>holdSource ∈ {user, policy, sibling-lane}</code>, so the
+        <em>Unhold merge</em> authority is legible.
+    </li>
+    <li>
+        <strong>"Remove B8 Swap-order?"</strong> B8 is one of the <strong>17 ruled you-act verbs</strong> in
+        the settled §6e visual-grammar manifest (ratified 2026-07-20). Dropping it to 16 is not a design-merit
+        call available at prep — it would re-open the ratified verb count the webcase conformance test and the
+        glyph columns cite. <strong>Default: keep the 17 verbs</strong>; any removal is a fresh decision that
+        supersedes §6e with lineage, out of scope for A4's transition table.
+    </li>
+</ol>
+
+<h2>Grounding</h2>
+<p>
+    Full survey, citations, and the recommendation table in
+    <code>we:reports/2026-07-20-scope-breach-recovery-transition-table.md</code>. The forks and their bold
+    defaults are authored on
+    <a href="/backlog/2574-refine-the-scope-breach-card-state-a4-define-its-transition-/">#2574</a>, a
+    <code>kind: decision</code> in prepared-fork shape; the human ratifies the defaults there.
+</p>
+{% endraw %}
