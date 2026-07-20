@@ -2,8 +2,10 @@
 bornAs: xyyk7i8
 kind: task
 parent: "2505"
-status: open
+status: resolved
 dateOpened: "2026-07-15"
+dateStarted: "2026-07-20"
+dateResolved: "2026-07-20"
 tags: [plateau-loop, console, backlog-ui]
 ---
 
