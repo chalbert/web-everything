@@ -5,8 +5,8 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs } from '../merge-ai-prs.mjs';
-import { scoreEscalation } from '../lib/review-escalation.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief } from '../merge-ai-prs.mjs';
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -1352,5 +1352,120 @@ describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, n
     expect(args[args.indexOf('--method') + 1]).toBe('GET');
     expect(args).toContain('repos/chalbert/plateau-app/contents/.lane-manifest.json');
     expect(args).toEqual(expect.arrayContaining(['-f', 'ref=lane/x-2343']));
+  });
+});
+
+describe('#2423 per-PR --no-review-escalation relief valve', () => {
+  describe('collectFlagOccurrences — reads a REPEATABLE flag the last-write-wins flags object would drop', () => {
+    it('collects every valued occurrence in order (not just the last)', () => {
+      expect(collectFlagOccurrences(['--no-review-escalation=12', '--no-review-escalation=34'], 'no-review-escalation'))
+        .toEqual(['12', '34']);
+    });
+    it('a BARE occurrence is recorded as true; a valued one as its raw string', () => {
+      expect(collectFlagOccurrences(['--no-review-escalation', '--no-review-escalation=5'], 'no-review-escalation'))
+        .toEqual([true, '5']);
+    });
+    it('ignores unrelated flags and a prefix that is not an exact match', () => {
+      expect(collectFlagOccurrences(['--label=x', '--no-review-escalation-else=9'], 'no-review-escalation')).toEqual([]);
+      expect(collectFlagOccurrences([], 'no-review-escalation')).toEqual([]);
+      expect(collectFlagOccurrences(undefined, 'no-review-escalation')).toEqual([]);
+    });
+  });
+
+  describe('parseNoReviewEscalation — repeatable + comma-separated; bare → passWide', () => {
+    it('parses repeatable occurrences into { passWide:false, prs:[...] }', () => {
+      expect(parseNoReviewEscalation(['--no-review-escalation=12', '--no-review-escalation=34']))
+        .toEqual({ passWide: false, prs: [12, 34] });
+    });
+    it('parses a comma-separated value (and a mix of repeatable + comma)', () => {
+      expect(parseNoReviewEscalation(['--no-review-escalation=12,34']))
+        .toEqual({ passWide: false, prs: [12, 34] });
+      expect(parseNoReviewEscalation(['--no-review-escalation=12,34', '--no-review-escalation=56']))
+        .toEqual({ passWide: false, prs: [12, 34, 56] });
+    });
+    it('a BARE --no-review-escalation → passWide (the legacy pass-wide waiver), no prs', () => {
+      expect(parseNoReviewEscalation(['--no-review-escalation'])).toEqual({ passWide: true, prs: [] });
+      expect(parseNoReviewEscalation(['--no-review-escalation='])).toEqual({ passWide: true, prs: [] }); // empty value → bare
+    });
+    it('tolerates #-prefixed and padded numbers; drops non-numeric/≤0; de-dupes', () => {
+      expect(parseNoReviewEscalation(['--no-review-escalation= #12 , 34 ,x, 0 ,12']))
+        .toEqual({ passWide: false, prs: [12, 34] });
+    });
+    it('no flag at all → neither pass-wide nor any relieved PR', () => {
+      expect(parseNoReviewEscalation(['--label=ready-to-merge'])).toEqual({ passWide: false, prs: [] });
+    });
+  });
+
+  describe('applyEscalationRelief — waives ONLY an agent-reviewable review:pending park', () => {
+    // The FRESH gate verdicts a candidate can carry this pass (from decideReviewGate).
+    const pendingPark = decideReviewGate({ escalate: true, humanRequired: false, labels: [] });   // review:pending
+    const humanPark = decideReviewGate({ escalate: true, humanRequired: true, labels: [] });      // review:human
+    const changes = decideReviewGate({ escalate: true, labels: [{ name: REVIEW_LABELS.changes }] }); // wait-author
+
+    it('relieved + agent-reviewable review:pending park → WAIVED to a merge', () => {
+      expect(pendingPark.applyLabel).toBe(REVIEW_LABELS.pending);
+      expect(applyEscalationRelief(pendingPark, { relieved: true }).waive).toBe(true);
+    });
+    it('the override REFUSES review:human (human-only, never waivable — #2285)', () => {
+      expect(humanPark.applyLabel).toBe(REVIEW_LABELS.human);
+      expect(applyEscalationRelief(humanPark, { relieved: true }).waive).toBe(false);
+    });
+    it('the override REFUSES review:changes (reviewer rejected → wait-author)', () => {
+      expect(changes.action).toBe('wait-author');
+      expect(applyEscalationRelief(changes, { relieved: true }).waive).toBe(false);
+    });
+    it('a NON-relieved review:pending park is untouched (still parks)', () => {
+      expect(applyEscalationRelief(pendingPark, { relieved: false }).waive).toBe(false);
+    });
+    it('a gate that already says merge is never touched (nothing to waive)', () => {
+      const mergeGate = decideReviewGate({ escalate: false, labels: [] });
+      expect(applyEscalationRelief(mergeGate, { relieved: true }).waive).toBe(false);
+    });
+  });
+
+  describe('a scoped =<pr#> relieves ONE PR while the rest of the pass stays gated', () => {
+    // Faithful mini of runCli's per-candidate escalation loop (merge-ai-prs.mjs, the `if (REVIEW_ESCALATION)`
+    // block): score → decideReviewGate → applyEscalationRelief. A waived candidate stays 'merge'; an unrelieved
+    // park/wait-author skips. REVIEW_ESCALATION is ON here (a scoped =<pr#> keeps `passWide` false).
+    const runPass = (candidates, argv) => {
+      const { passWide, prs } = parseNoReviewEscalation(argv);
+      expect(passWide).toBe(false); // a scoped run must NOT turn the rubric off pass-wide
+      return candidates.map((c) => {
+        const gate = decideReviewGate({ escalate: c.escalate, humanRequired: c.humanRequired, labels: c.labels || [] });
+        const relief = applyEscalationRelief(gate, { relieved: prs.includes(c.num) });
+        const decision = relief.waive ? 'merge' : (gate.action === 'park' || gate.action === 'wait-author' ? 'skip' : 'merge');
+        return { num: c.num, decision, applyLabel: gate.applyLabel, humanRequired: gate.humanRequired, waived: relief.waive };
+      });
+    };
+
+    it('the relieved review:pending PR merges while a fresh gate-self PR IN THE SAME PASS still parks review:human', () => {
+      // #396 is a stuck agent-reviewable review:pending park; #401 is a fresh gate-self diff (humanRequired).
+      const out = runPass(
+        [
+          { num: 396, escalate: true, humanRequired: false },  // agent-reviewable → review:pending
+          { num: 401, escalate: true, humanRequired: true },   // gate-self → review:human
+        ],
+        ['--label=ready-to-merge', '--no-review-escalation=396'],
+      );
+      const p396 = out.find((o) => o.num === 396);
+      const p401 = out.find((o) => o.num === 401);
+      // the named PR is relieved → merges on allowPending semantics…
+      expect(p396.decision).toBe('merge');
+      expect(p396.waived).toBe(true);
+      // …but the OTHER candidate's rubric stayed LIVE — the fresh gate-self PR still parks review:human.
+      expect(p401.decision).toBe('skip');
+      expect(p401.waived).toBe(false);
+      expect(p401.applyLabel).toBe(REVIEW_LABELS.human);
+    });
+
+    it('naming a gate-self PR does NOT relieve it — review:human is never waivable', () => {
+      const out = runPass(
+        [{ num: 401, escalate: true, humanRequired: true }],
+        ['--label=ready-to-merge', '--no-review-escalation=401'],
+      );
+      expect(out[0].decision).toBe('skip');
+      expect(out[0].waived).toBe(false);
+      expect(out[0].applyLabel).toBe(REVIEW_LABELS.human);
+    });
   });
 });
