@@ -54,6 +54,17 @@ is ruled from a lane against the explainer, never ratified inline (*backlog-work
 unprepared decision*), and the ruling is recorded in the design doc so it is cite-able (the console's live at
 `plateau-app:docs/backlog-console-design.md`).
 
+**How you rule a high-leverage fork — the jury method.** The explainer artifact is the *channel*. For a fork
+that is long-lived and high-fan-out (a whole icon grammar, a colour system), the *technique* for ruling it is
+the **jury-refinement loop** (#2576, born on the §6e icon grammar). Run a panel of fresh single-lens jurors
+(usability · visual · a11y · design-systems, plus IA/ops for structure calls). Keep every fork the panel splits
+on — develop each side through an advocate, never average the disagreement away. Rate each option **1–5**, not
+just "pick one"; when the best option scores below threshold, **flag it weak and search for new candidates**
+rather than settling. Truth-check the live surface each round (collision / duplicate detection, state-vs-action
+distinctness). The jury *proposes*; the human *disposes* — no self-ruling. Gate the full machinery by
+blast-radius: the heavy jury for a durable high-fan-out call, a light pass for a one-off. This method owns its
+own home (#2576, under the Plateau-Ruler epic #2577) — link to it here, don't duplicate its operational detail.
+
 ### 5. Graduate to webcases — durable, cite-able, machine-checkable
 
 A ruling recorded only as prose rots. Port each ruled state into **webcases**: durable fixture files whose
@@ -107,4 +118,7 @@ The build-UI work is edit-action work, so it obeys the standard delivery discipl
   graduate-to-webcases port #2578; design record `plateau-app:docs/backlog-console-design.md`.
 - Rubric the pixel review scores against: *vision-tiers.md → Design-critique rubric* (#1034), driven by
   `skills-src/review-design`.
+- The fork-ruling technique (plugs into phase 4): the jury-refinement method (#2576, parent epic #2577
+  "Plateau Ruler") — multi-lens jury, per-option 1–5 ratings, weak-flag→candidate-search, human-gate; how the
+  §6e icon grammar was ruled.
 - Delivery discipline: *backlog-workflow.md → Working an item* (lane→PR, the arc, the write-seam).
