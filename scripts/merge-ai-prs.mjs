@@ -130,6 +130,77 @@ for (const a of argv) { const m = a.match(/^--([^=]+)(?:=(.*))?$/); if (m) flags
 
 // ── PURE helpers (unit-tested in scripts/__tests__/merge-ai-prs.test.mjs) ──────────────────────────────
 
+/**
+ * #2423 — read EVERY occurrence of a REPEATABLE `--<name>` flag off the raw argv. The last-write-wins `flags`
+ * object above (`flags[name] = …` in a loop) keeps ONLY the final occurrence, so a flag a caller may legitimately
+ * pass more than once (`--no-review-escalation=12 --no-review-escalation=34`) would silently drop all but the
+ * last. This collects them in order. A BARE occurrence (`--<name>` with no `=value`) is recorded as `true`; a
+ * valued one (`--<name>=v`) as its raw string `v`. Pure.
+ * @param {string[]} argv - the raw `process.argv.slice(2)` (or a test's stand-in)
+ * @param {string} name - the flag name WITHOUT the leading `--`
+ * @returns {Array<true|string>}
+ */
+export function collectFlagOccurrences(argv, name) {
+  const out = [];
+  const prefix = `--${name}`;
+  for (const a of Array.isArray(argv) ? argv : []) {
+    if (a === prefix) { out.push(true); continue; }
+    if (typeof a === 'string' && a.startsWith(`${prefix}=`)) out.push(a.slice(prefix.length + 1));
+  }
+  return out;
+}
+
+/**
+ * #2423 — parse the `--no-review-escalation` flag into a per-PR relief plan. The flag is REPEATABLE and each
+ * value is comma-separated, so `--no-review-escalation=12,34 --no-review-escalation=56` scopes relief to PRs
+ * 12/34/56. A BARE `--no-review-escalation` (no value, or an empty value) still means the LEGACY pass-wide
+ * waiver (`passWide: true`) — the whole escalation rubric off for the pass. Pure.
+ *   - `passWide` — true iff any BARE occurrence is present (the deprecated pass-wide form).
+ *   - `prs`      — the de-duplicated positive PR numbers named across every valued occurrence.
+ * A `#`-prefixed or whitespace-padded number is tolerated; a non-numeric/≤0 token is dropped.
+ * @param {string[]} argv
+ * @param {string} [name='no-review-escalation']
+ * @returns {{passWide: boolean, prs: number[]}}
+ */
+export function parseNoReviewEscalation(argv, name = 'no-review-escalation') {
+  let passWide = false;
+  const prs = [];
+  for (const occ of collectFlagOccurrences(argv, name)) {
+    if (occ === true || String(occ).trim() === '') { passWide = true; continue; } // a BARE flag → legacy pass-wide waiver
+    for (const part of String(occ).split(',')) {
+      const t = part.trim().replace(/^#/, '');
+      if (!t) continue;
+      const n = Number(t);
+      if (Number.isInteger(n) && n > 0) prs.push(n);
+    }
+  }
+  return { passWide, prs: [...new Set(prs)] };
+}
+
+/**
+ * #2423 — the per-PR relief decision. Given a candidate's FRESH `decideReviewGate` verdict and whether this PR
+ * was named in `--no-review-escalation=<pr#>`, decide whether to WAIVE its park to a merge. Pure. Relief is
+ * DELIBERATELY narrow: it waives ONLY an agent-reviewable `review:pending` park (`action:'park'`,
+ * `applyLabel:review:pending`, `humanRequired:false`). It NEVER waives:
+ *   - `review:human` (a gate-self/statute edit — human-only, never waivable by an operator flag, #2285), nor
+ *   - `review:changes` (`action:'wait-author'` — the reviewer actively rejected the diff).
+ * A non-relieved PR, or a gate that already says `merge`, is never touched. Because runCli keeps the escalation
+ * rubric LIVE for a scoped `=<pr#>` (only a BARE flag turns it off pass-wide), a fresh gate-self verdict on the
+ * named PR still surfaces here as `humanRequired` and is correctly refused.
+ * @param {{action?:string, applyLabel?:string, humanRequired?:boolean}} gate - a `decideReviewGate` verdict
+ * @param {{relieved?:boolean}} [o]
+ * @returns {{waive:boolean, reason?:string}}
+ */
+export function applyEscalationRelief(gate, { relieved = false } = {}) {
+  if (!relieved || !gate) return { waive: false };
+  if (gate.action !== 'park') return { waive: false }; // merge / wait-author (review:changes) — nothing waivable
+  if (gate.humanRequired || gate.applyLabel === REVIEW_LABELS.human) {
+    return { waive: false, reason: 'review:human is human-only — never waivable by a per-PR relief valve (#2285)' };
+  }
+  if (gate.applyLabel !== REVIEW_LABELS.pending) return { waive: false };
+  return { waive: true, reason: 'per-PR --no-review-escalation relief — agent-reviewable review:pending waived to a merge (#2423)' };
+}
+
 /** An anthropic/Claude identity on a commit author (the `Co-Authored-By: Claude …` trailer gh surfaces as an
  *  author). Matches the name "Claude" or an anthropic email — the stamp every commit in an AI session carries. */
 export function isAiAuthor(author) {
@@ -1052,8 +1123,18 @@ function runCli() {
   // #2171 — DETERMINISTIC review-escalation rubric: before merging a ready PR, score it (blast radius, size,
   // dismissed pre-PR findings, cross-repo couple, 1-in-N sampling); an escalated PR PARKS ALIVE (labelled
   // review:pending, SKIPPED — non-blocking, the queue keeps flowing) until a reviewer applies review:accepted.
-  // ON by default for a label-scoped drain; `--no-review-escalation` disables. `--sample-nth=N` tunes the floor.
-  const REVIEW_ESCALATION = label && !flags['no-review-escalation'];
+  // ON by default for a label-scoped drain. `--sample-nth=N` tunes the floor.
+  // #2423 — the RELIEF VALVE. `--no-review-escalation=<pr#>` (repeatable + comma-separated) is the PER-PR form:
+  // it waives ONLY the named PR's agent-reviewable review:pending park (via `applyEscalationRelief` below), and
+  // the rubric stays LIVE for every OTHER candidate — so REVIEW_ESCALATION is driven off `!passWide`, NOT flag
+  // presence, and a scoped run keeps fresh gate-self/human-required detection firing for the rest of the pass.
+  // A BARE `--no-review-escalation` is the legacy PASS-WIDE waiver (`passWide` → escalation off, whole pass);
+  // it still works but is DEPRECATED — warned loudly below, pointing at the per-PR form.
+  const escalationRelief = parseNoReviewEscalation(argv);
+  const REVIEW_ESCALATION = label && !escalationRelief.passWide;
+  if (escalationRelief.passWide && !AS_JSON) {
+    process.stderr.write('  ⚠ --no-review-escalation (bare) is DEPRECATED: it waives the escalation rubric PASS-WIDE — EVERY candidate this pass merges unscored, incl. a fresh gate-self diff. Prefer the per-PR form --no-review-escalation=<pr#> (repeatable, comma-separated) to relieve just the stuck PR while the rubric stays live for the rest (#2423).\n');
+  }
   const SAMPLE_NTH = Number.isFinite(Number(flags['sample-nth'])) && Number(flags['sample-nth']) > 0 ? Number(flags['sample-nth']) : undefined;
   // #2257 — the ONE /drain lander sweeps all 3 constellation repos. Derive the local repo slug from origin
   // (used to keep git-side ops — manifest read, rebase-drop, local-main sync — scoped to the local clone), then
@@ -1599,7 +1680,16 @@ function runCli() {
       // label-only human park gets reported as agent-reviewable and an agent panel can clear its own gate change.
       v.humanRequired = !!gate.humanRequired; // #2285 v1 — gate-self conflict of interest: an agent may NOT auto-review this; a human must
       v.escalateReasons = score.reasons;
-      if (gate.action === 'park' || gate.action === 'wait-author') {
+      // #2423 — the per-PR relief valve. If THIS PR was named in `--no-review-escalation=<pr#>`, waive an
+      // agent-reviewable review:pending park to a merge (NEVER review:human/review:changes — see
+      // applyEscalationRelief). The rubric still RAN for it (the fresh gate-self/human score above fired), and it
+      // still ran for every OTHER candidate this pass — relief is scoped to this one PR, not the whole pass.
+      const relief = applyEscalationRelief(gate, { relieved: escalationRelief.prs.includes(Number(v.num)) });
+      if (relief.waive) {
+        v.reliefWaived = true;
+        if (!AS_JSON) process.stderr.write(`  🔓 ${repoTag(v.repo)}${v.num} relieved — ${relief.reason}: ${score.reasons.join('; ') || 'agent-reviewable'}\n`);
+        // leave v.decision === 'merge' → falls through to the land cascade below.
+      } else if (gate.action === 'park' || gate.action === 'wait-author') {
         v.decision = 'skip';
         v.reason = gate.reason + (score.reasons.length ? ` [${score.reasons.join('; ')}]` : '');
         // #2307 — a PR the PRODUCER already labelled at PR-open (or a prior drain pass already caught) is
