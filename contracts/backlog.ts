@@ -20,8 +20,8 @@ export type Kind = 'program' | 'epic' | 'story' | 'task' | 'decision';
 /** The kinds a NEW item may be scaffolded as through the write port (#2587) — a subset of {@link Kind}. */
 export type ScaffoldKind = 'story' | 'epic' | 'decision';
 
-/** The build-queue priority tiers an item may be pinned to (#2521). */
-export type Tier = 'now' | 'next' | 'soon' | 'later';
+/** The build-queue tier vocabulary an item may be pinned to (#2528). Order = priority (pinned first). */
+export type Tier = 'pinned' | 'normal' | 'someday' | "won't";
 
 // ── the domain item + the `GET /api/backlog` read port ───────────────────────────────────────────────────
 
