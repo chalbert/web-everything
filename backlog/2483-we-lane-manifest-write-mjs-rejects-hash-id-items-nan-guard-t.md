@@ -28,7 +28,7 @@ const item = Number(flags.item);
 if (!Number.isFinite(item)) emit({ ok: false, detail: 'pass --item=<NNN> (a finite item number)' }, 3);
 ```
 
-So a hash id — e.g. `xqwdyl8` — gives `Number('xqwdyl8')` = `NaN`, and the CLI refuses
+So a hash id — e.g. `2482` — gives `Number('2482')` = `NaN`, and the CLI refuses
 with exit 3.
 
 But JIT-numbering (#2288) means a NEW item created via `we:scripts/backlog.mjs scaffold`
@@ -50,7 +50,7 @@ check is an unnecessary NaN guard that rejects an id the rest of the pipeline ha
 
 ## Observed
 
-Filing item `xqwdyl8` (which later landed as #2482) hit this exact refusal. As a
+Filing item `2482` (which later landed as #2482) hit this exact refusal. As a
 workaround the manifest had to be hand-built inline via `buildManifest` + `validateManifest`
 rather than through the CLI. This item's own filing hit it again.
 
