@@ -3,8 +3,9 @@ bornAs: xscr9v2
 kind: story
 size: 2
 parent: "2505"
-status: open
+status: resolved
 dateOpened: "2026-07-21"
+dateResolved: "2026-07-21"
 tags: [plateau-loop, console, decision-surface, ruling-surface, bug]
 ---
 
@@ -27,12 +28,19 @@ computed scroll delta clamps to `0` (a sticky `.rs-nav` at ~167px compounds it).
 issue, not a race: the position holds after the surface settles. Neither native hash-anchor scrolling nor
 `scrollIntoView` moves the scroller.
 
-## Fix direction (to investigate)
-Give the ruling surface a proper inner scroll container (mirror the backlog rail's #2524 pattern in
-`plateau-app:src/backlog-view/backlog-view.ts`, where `rail.scrollTop` + `scrollIntoView({block:'nearest'})`
-work because `.rail` is the direct scroller), OR correct the `main.app-main` ↔ surface height/overflow so
-`scroll-margin-top` anchors resolve. Once fixed, both the sticky-nav anchors and the #2587 deep-link focus
-scroll correctly with no caller change (the #2587 `scrollIntoView` call is already in place, best-effort).
+## Delivered (plateau-app PR #94)
+The precise root cause was narrower than first observed: `.app-shell.logged-off .app-main`
+(`plateau-app:src/styles/layout.css`) is a **centered grid** (`place-items: center`). When content
+overflows, `center` centers it *symmetrically*, so half a tall page (the ruling surface's ~17 decisions)
+spills **above `scrollTop 0`** where it can't be scrolled to. It reproduced ONLY on the logged-off shell;
+the logged-in shell is a plain block scroller that already worked (which is why it hid).
+
+Fix — one line: `place-items: center` → **`place-items: safe center`** (centers content that fits, falls
+back to start-alignment when it overflows, keeping the top reachable). No caller change — the #2587
+`scrollIntoView` and the native `#rs-d-*` hash anchors both land once the target sits at a reachable offset
+(the `.rs-decision` `scroll-margin-top` clears the sticky nav). Sighted in both themes: a deep-link to a
+far-down decision scrolls it into view + highlights; a sticky-nav pill scrolls its section under the nav;
+the short auth card still centers; an overflowing marketing page top-aligns and still reads correctly.
 
 ## Acceptance
 - Clicking a sticky-nav pill scrolls that decision to the top of the surface (under the sticky nav).
