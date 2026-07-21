@@ -3,9 +3,9 @@ bornAs: xjcvsh3
 kind: story
 size: 5
 parent: "2527"
-status: open
-blockedBy: ["2558"]
+status: resolved
 dateOpened: "2026-07-19"
+dateResolved: "2026-07-21"
 tags: [plateau-loop, console, adapter-seam, contracts, interlingua, mint]
 ---
 
@@ -29,3 +29,24 @@ console read/write ports and every future provider adapter map into — the inte
 ## Acceptance
 The package exists as the cite-able interlingua; the [#2558] read/write ports type against it; a later foreign
 provider is a `providerExt` mapping, not a rewrite. Distinct from building a second provider (out of scope).
+
+## Delivered
+The `./backlog` subpath is minted on the existing `@webeverything/contracts` type-only package
+(`we:contracts/backlog.ts`, WE PR #638 + the `Tier`-vocabulary correction #639), and the plateau console's
+read/write ports **type against it** (`plateau-app:src/backlog-view/types.ts` + `plateau-app:src/backlog-view/write.ts`
+re-export the core types from the contract; plateau-app PR #97):
+
+- **The cite-able interlingua** — `BacklogItemDTO` + the read port (`BacklogResponse`/`MalformedItemDTO`/
+  `BacklogDetailDTO` + the overlay shapes `OverlayState`/`OverlayMap`/`CiVerdict`), the write port
+  (`WriteVerb`/`WriteRequest`/`WriteJobDTO`/`WriteStatus`/`WeightEdit`), and the vocabulary unions
+  (`Status`/`Kind`/`ScaffoldKind`/`Tier`).
+- **The `providerExt` slot** — `providerExt?: Record<string, unknown>` on `BacklogItemDTO`: a foreign
+  Jira/Linear/GitHub adapter maps INTO the core and parks its divergences there, never forking the core (the
+  north-star is "add an adapter", not a rewrite).
+- **WE holds zero impl** (#1282) — type-only, no runtime emit; plateau consumes via a tsconfig path + the
+  runtime `SCAFFOLD_KINDS`/`TIERS` arrays `satisfies` the contract's unions (so the vocabulary can't drift),
+  no vite/vitest alias needed (`import type` is erased). Verified: plateau `tsc`/CI typechecks against
+  WE-main's contract; `check:standards` 0 errors; 1449 plateau tests green.
+
+A full migration of every direct `BacklogItemDTO` importer is unnecessary — they transitively bind to the
+contract through `./types`/`./write`. Building a second (foreign) provider stays out of scope.
