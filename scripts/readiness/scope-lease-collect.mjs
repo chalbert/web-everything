@@ -32,21 +32,32 @@
  *   This is the conservative, correct default: surface the signal that is trustworthy now (overlap), and never
  *   fabricate a breach from the absence of a plan.
  *
- * NO PERSISTED ATTEMPT COUNTER: the collector omits `breachAttempt` on every lease. §3i-A4's total-attempt
- *   counter has no live persistence today, and the observer defaults a missing `breachAttempt` to 1 (first
- *   observation ⇒ retry-in-place). So an omitted count reads as "first attempt", the correct live default.
+ * DURABLE PER-LANE BREACH-ATTEMPT COUNTER (WE #2598 — the last slice of #2560): §3i-A4 Fork 2's total-attempt
+ *   counter now has live persistence. It CANNOT live in the lease marker (that is deleted at release), so it is a
+ *   per-lane SIDECAR at `<laneDir>/.git/.lane-breach-count`. An "attempt" = a distinct breach EPISODE, advanced on
+ *   a breach TRANSITION (a NEW or CHANGED breach file-set), NOT per poll — the honestly-detectable retry proxy
+ *   from observations alone (no orchestrator hook exists). Rules ({@link advanceBreachCount}): a stable ongoing
+ *   breach stays ONE attempt (rising edge only); a CHANGED breach file-set is a new attempt (+1); a clean
+ *   observation resets to 0; a new lease occupant (session changed) resets. The counter is ADVISORY (§3i-A4
+ *   Fork 1 — never gates). Writes happen ONLY on a state transition, so steady-state polls stay READ-ONLY. The
+ *   `--no-track-attempts` flag forces a pure read (no sidecar writes, `breachAttempt` omitted). The observer
+ *   consumes `breachAttempt` in its `breachOutcome` to ESCALATE once the count exceeds `retryBound`.
+ *   LIMITATION (proxy, not a literal total): a STATIC unchanged breach sits at attempt 1 forever, and a
+ *   breach that drops to clean and re-appears on a DIFFERENT file resets — both diverge from §3i-A4's literal
+ *   total-attempt counter. Faithful per-retry counting needs an orchestrator build-iteration signal (none yet);
+ *   this is the honest edge-driven approximation until that hook exists.
  *
  * COMPOSES, NEVER REINVENTS: `normScope` (dedupe/normalize repo-qualified paths) and `porcelainFiles` (parse
  *   `git status --porcelain`, rename-aware) and `repoKeyFromSlug` (origin slug → repo key) and `liveScopePicture`
  *   (the observer itself) are all IMPORTED. This module adds only the pool-walk + git-read IO and the pure glue.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { normScope } from './scope-lease.mjs';
+import { normScope, breachOf } from './scope-lease.mjs';
 import { porcelainFiles } from './claimScope.mjs';
 import { repoKeyFromSlug } from './lane-manifest.mjs';
 import { liveScopePicture } from './scope-lease-live.mjs';
@@ -108,6 +119,66 @@ export function resolvePredictedScope({ observed, plan, declared } = {}) {
 }
 
 /**
+ * A stable, order-INDEPENDENT signature of a breach file-set (WE #2598). Two observations of the SAME breach
+ * files in a different order produce the SAME signature, so a mere reorder is NOT read as a changed episode. An
+ * empty / na breach signs to `''` (the "clean" sentinel {@link advanceBreachCount} treats as no breach).
+ * @param {string[]} breach  a breach file array (repo-qualified).
+ * @returns {string} the sorted, newline-joined normalized set (`''` when empty).
+ */
+export function breachSig(breach) {
+  return [...normScope(breach)].sort().join('\n');
+}
+
+/**
+ * Advance the durable per-lane breach-attempt counter by ONE observation (WE #2598, §3i-A4 Fork 2). PURE — the
+ * IO shell reads `prev` from the sidecar, calls this, and writes `next` back only when it changed.
+ *
+ * SEMANTICS — an "attempt" = a distinct breach EPISODE, advanced on a breach TRANSITION (the rising edge of a new
+ * or CHANGED breach set), NOT per poll:
+ *   • A stable ongoing breach (same file-set) stays ONE attempt — `attempts`/`sig` unchanged.
+ *   • A NEW or CHANGED breach set (signature differs from prev) is a new attempt → `attempts + 1`.
+ *   • A CLEAN observation (empty breach) resets → `attempts: 0`, `sig: ''`.
+ *   • A NEW lease occupant (session changed vs prev.session, both non-null) resets prev to fresh first — the
+ *     previous holder's episode does not carry into a different session.
+ * ADVISORY (§3i-A4 Fork 1) — this count never gates; the observer consumes it to escalate past `retryBound`.
+ *
+ * @param {{attempts?:number, sig?:string, session?:string|null}|null|undefined} prev  the prior sidecar state.
+ * @param {string[]} breach  this observation's breach file-set (repo-qualified).
+ * @param {string|null} [session]  the current lease occupant's session (drives the new-occupant reset).
+ * @returns {{attempts:number, sig:string, session:(string|null)}} the next sidecar state.
+ */
+export function advanceBreachCount(prev, breach, session = null) {
+  // Normalize prev → a well-formed state (attempts a non-negative integer, sig a string, session a value|null).
+  let base =
+    prev && typeof prev === 'object'
+      ? {
+          attempts: Number.isInteger(prev.attempts) && prev.attempts >= 0 ? prev.attempts : 0,
+          sig: typeof prev.sig === 'string' ? prev.sig : '',
+          session: prev.session ?? null,
+        }
+      : { attempts: 0, sig: '', session: null };
+
+  // New-occupant reset: a different session than the one the prior state was recorded under starts fresh.
+  if (session != null && base.session != null && session !== base.session) {
+    base = { attempts: 0, sig: '', session: null };
+  }
+
+  const carrySession = session ?? base.session ?? null;
+  const sig = breachSig(breach);
+
+  if (sig === '') {
+    // Clean observation → reset the episode.
+    return { attempts: 0, sig: '', session: carrySession };
+  }
+  if (sig !== base.sig) {
+    // New or changed breach set → a new episode (rising edge).
+    return { attempts: base.attempts + 1, sig, session: carrySession };
+  }
+  // Same breach persists → hold the attempt (no rising edge).
+  return { attempts: base.attempts, sig: base.sig, session: carrySession };
+}
+
+/**
  * Assemble the observer's `leases` array from a `lane-pool status --json` object, over INJECTED collector fns.
  * PURE orchestration — no git/fs of its own; the shell supplies the reads.
  *
@@ -115,32 +186,44 @@ export function resolvePredictedScope({ observed, plan, declared } = {}) {
  *   poolStatus: {lanes?: Array<object>},
  *   observedForLane: (lane:object) => string[],   // already-repo-qualified observed scope for a lane
  *   planForLane?: ((lane:object) => string[]|null) | null,  // optional per-lane predicted plan
+ *   breachAttemptForLane?: ((lease:object) => number) | null,  // optional per-lease breach-attempt counter
  * }} input
  *   The IO shell repo-qualifies each lane's paths inside `observedForLane`, so the pure shape needs no separate
  *   repo key — observed scope arrives already qualified, exactly as the observer expects.
- * @returns {Array<{lane, session, predictedScope:string[], observedScope:string[]}>}
- *   The observer's lease-input shape. `breachAttempt` is intentionally OMITTED (no persisted counter — the
- *   observer defaults it to 1, "first observation ⇒ retry-in-place").
+ * @returns {Array<{lane, session, predictedScope:string[], observedScope:string[], breachAttempt?:number}>}
+ *   The observer's lease-input shape. `breachAttempt` is stamped ONLY when `breachAttemptForLane` is supplied AND
+ *   returns an integer ≥ 1 (WE #2598); when the param is absent it is OMITTED and the observer defaults it to 1
+ *   ("first observation ⇒ retry-in-place") — exact back-compat with the pre-#2598 collector.
  *
  * PREDICTED SCOPE SOURCE (#2560 final slice): each lease's `predictedScope` now flows from the lane's OWN lease
  * marker (`lane.lease.predictedScope`, declared at acquire via `we:scripts/lane-pool.mjs acquire --scope=`) when
  * present — the real predicted-scope producer the collector previously lacked. It takes priority over `--plan`,
  * which takes priority over observed (see {@link resolvePredictedScope}).
+ *
+ * BREACH-ATTEMPT COUNTER (WE #2598): `breachAttemptForLane(lease)` is the INJECTED counter — the IO shell's fn
+ * reads/advances/writes the per-lane sidecar and returns the current attempt count for the just-built lease. Kept
+ * OUT of the pure core (it does fs) — this pure fn only stamps the integer it returns onto `lease.breachAttempt`.
  */
-export function collectSnapshot({ poolStatus, observedForLane, planForLane = null } = {}) {
+export function collectSnapshot({ poolStatus, observedForLane, planForLane = null, breachAttemptForLane = null } = {}) {
   const lanes = Array.isArray(poolStatus?.lanes) ? poolStatus.lanes : [];
   // Keep only LIVE-held lanes — `leased === true` marks an active work stream (a stale marker reads as free).
   const held = lanes.filter((l) => l && typeof l === 'object' && l.leased === true);
   return held.map((lane) => {
     const observed = normScope(observedForLane(lane));
     const plan = typeof planForLane === 'function' ? planForLane(lane) : null;
-    return {
+    const lease = {
       lane: lane.lane,
       session: lane.lease?.session ?? null,
       // #2560 — marker-declared scope (from `acquire --scope=`) wins over --plan wins over observed.
       predictedScope: resolvePredictedScope({ observed, plan, declared: lane.lease?.predictedScope }),
       observedScope: observed,
     };
+    // WE #2598 — stamp the durable breach-attempt count when the injected counter yields a valid one (≥ 1).
+    if (typeof breachAttemptForLane === 'function') {
+      const a = breachAttemptForLane(lease);
+      if (Number.isInteger(a) && a >= 1) lease.breachAttempt = a;
+    }
+    return lease;
   });
 }
 
@@ -174,6 +257,32 @@ function tryGit(args, cwd) {
     return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   } catch {
     return null;
+  }
+}
+
+// ── WE #2598 — the durable per-lane breach-attempt sidecar (IO: read/write `<laneDir>/.git/.lane-breach-count`) ─
+
+/** The per-lane sidecar path — under `.git/` so it never shows in the lane's diff / porcelain (never observed). */
+const breachCountPath = (laneDir) => join(laneDir, '.git', '.lane-breach-count');
+
+/** Read a lane's breach-count sidecar → its state, or the fresh default on any error (missing/corrupt/unreadable). */
+function readBreachCount(laneDir) {
+  try {
+    const obj = JSON.parse(readFileSync(breachCountPath(laneDir), 'utf8'));
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
+  } catch {
+    /* missing or corrupt sidecar → fresh default below */
+  }
+  return { attempts: 0, sig: '', session: null };
+}
+
+/** Write a lane's breach-count sidecar (2-space JSON). GUARDED — a write failure logs and is swallowed, never
+ *  throws: the advisory counter must never break a read-only collection run (§3i-A4 Fork 1). */
+function writeBreachCount(laneDir, state) {
+  try {
+    writeFileSync(breachCountPath(laneDir), JSON.stringify(state, null, 2) + '\n');
+  } catch (e) {
+    log(`  ⚠ lane sidecar write failed (${breachCountPath(laneDir)}): ${String(e.message || e).split('\n')[0]}`);
   }
 }
 
@@ -276,7 +385,33 @@ function main(argv) {
       }
     : null;
 
-  const leases = collectSnapshot({ poolStatus, observedForLane, planForLane, repoKeyForLane });
+  // WE #2598 — the durable per-lane breach-attempt counter. lane id → lane clone dir (for the sidecar path).
+  const pathByLane = new Map(
+    (Array.isArray(poolStatus?.lanes) ? poolStatus.lanes : [])
+      .filter((l) => l && typeof l === 'object')
+      .map((l) => [l.lane, l.path]),
+  );
+  // Injected counter: reads the sidecar, advances it on a breach TRANSITION, writes back ONLY when it changed
+  // (steady-state polls stay read-only), and returns the current attempt count for the built lease.
+  const breachAttemptForLane = (lease) => {
+    const laneDir = pathByLane.get(lease.lane);
+    if (!laneDir) return 0;
+    // Both scopes are already normalized in the lease; breachOf yields this observation's breach file-set.
+    const breach = breachOf(lease.predictedScope, lease.observedScope);
+    const prev = readBreachCount(laneDir);
+    const next = advanceBreachCount(prev, breach, lease.session);
+    if (JSON.stringify(next) !== JSON.stringify(prev)) writeBreachCount(laneDir, next);
+    return next.attempts;
+  };
+  // `--no-track-attempts` forces a PURE read: no sidecar writes, no breachAttempt stamped.
+  const trackAttempts = !flags['no-track-attempts'];
+
+  const leases = collectSnapshot({
+    poolStatus,
+    observedForLane,
+    planForLane,
+    breachAttemptForLane: trackAttempts ? breachAttemptForLane : null,
+  });
   const picture = liveScopePicture({ leases, policy });
 
   if (flags.json) {

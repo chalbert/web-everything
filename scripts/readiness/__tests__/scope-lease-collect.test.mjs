@@ -13,6 +13,8 @@ import {
   parseObservedFiles,
   resolvePredictedScope,
   collectSnapshot,
+  breachSig,
+  advanceBreachCount,
 } from '../scope-lease-collect.mjs';
 import { liveScopePicture } from '../scope-lease-live.mjs';
 
@@ -170,6 +172,48 @@ describe('collectSnapshot — pool rows → the observer lease shape', () => {
     expect('breachAttempt' in leases[0]).toBe(false);
   });
 
+  it('stamps breachAttempt when the injected counter returns ≥ 1 (WE #2598)', () => {
+    const poolStatus = { lanes: [laneRow(1)] };
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => ['we:src/a.ts'],
+      breachAttemptForLane: () => 2,
+    });
+    expect(leases[0].breachAttempt).toBe(2);
+  });
+
+  it('OMITS breachAttempt when the injected counter returns 0 (clean / no episode)', () => {
+    const poolStatus = { lanes: [laneRow(1)] };
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => ['we:src/a.ts'],
+      breachAttemptForLane: () => 0,
+    });
+    expect('breachAttempt' in leases[0]).toBe(false);
+  });
+
+  it('passes the built lease (with scopes/session) to the injected counter', () => {
+    const poolStatus = { lanes: [laneRow(1, { session: 'sess-x' })] };
+    let seen = null;
+    collectSnapshot({
+      poolStatus,
+      observedForLane: () => ['we:src/a.ts'],
+      breachAttemptForLane: (lease) => {
+        seen = lease;
+        return 1;
+      },
+    });
+    expect(seen.lane).toBe(1);
+    expect(seen.session).toBe('sess-x');
+    expect(seen.observedScope).toEqual(['we:src/a.ts']);
+  });
+
+  it('back-compat: NO lease has breachAttempt when breachAttemptForLane is not passed', () => {
+    const poolStatus = { lanes: [laneRow(1), laneRow(2)] };
+    const leases = collectSnapshot({ poolStatus, observedForLane: () => ['we:src/a.ts'] });
+    expect(leases.every((l) => !('breachAttempt' in l))).toBe(true);
+  });
+
   it('tolerates a pool status with no lanes', () => {
     expect(collectSnapshot({ poolStatus: {}, observedForLane: () => [] })).toEqual([]);
   });
@@ -202,5 +246,87 @@ describe('END-TO-END (pure) — collectSnapshot → liveScopePicture', () => {
     const picture = liveScopePicture({ leases });
     expect(picture.overlaps).toEqual([]);
     expect(picture.clean).toBe(true);
+  });
+});
+
+describe('breachSig — order-independent breach-set signature (WE #2598)', () => {
+  it('is order-independent (same sig regardless of input order)', () => {
+    expect(breachSig(['we:b', 'we:a'])).toBe(breachSig(['we:a', 'we:b']));
+  });
+  it('signs an empty breach to the "" clean sentinel', () => {
+    expect(breachSig([])).toBe('');
+  });
+  it('a different file-set signs differently', () => {
+    expect(breachSig(['we:a', 'we:b'])).not.toBe(breachSig(['we:a', 'we:c']));
+  });
+});
+
+describe('advanceBreachCount — episode = rising edge of a new/changed breach (WE #2598)', () => {
+  it('FIRST breach (prev undefined) → attempts 1, sig set', () => {
+    const next = advanceBreachCount(undefined, ['we:a'], 'sess-1');
+    expect(next.attempts).toBe(1);
+    expect(next.sig).toBe(breachSig(['we:a']));
+    expect(next.session).toBe('sess-1');
+  });
+
+  it('the SAME breach again → attempts UNCHANGED (no new rising edge)', () => {
+    const first = advanceBreachCount(undefined, ['we:a'], 'sess-1');
+    const again = advanceBreachCount(first, ['we:a'], 'sess-1');
+    expect(again.attempts).toBe(1);
+    expect(again.sig).toBe(first.sig);
+    expect(again.session).toBe('sess-1');
+  });
+
+  it('a CHANGED breach set → attempts 2 (a new episode)', () => {
+    const first = advanceBreachCount(undefined, ['we:a'], 'sess-1');
+    const changed = advanceBreachCount(first, ['we:a', 'we:b'], 'sess-1');
+    expect(changed.attempts).toBe(2);
+    expect(changed.sig).toBe(breachSig(['we:a', 'we:b']));
+  });
+
+  it('a CLEAN observation ([]) → attempts 0, sig ""', () => {
+    const first = advanceBreachCount(undefined, ['we:a'], 'sess-1');
+    const clean = advanceBreachCount(first, [], 'sess-1');
+    expect(clean.attempts).toBe(0);
+    expect(clean.sig).toBe('');
+    expect(clean.session).toBe('sess-1');
+  });
+
+  it('a NEW occupant (session changed) RESETS → attempts 1 on breach', () => {
+    const first = advanceBreachCount(undefined, ['we:a'], 'sess-1'); // attempts 1 under sess-1
+    const bumped = advanceBreachCount(first, ['we:a', 'we:b'], 'sess-1'); // attempts 2 under sess-1
+    expect(bumped.attempts).toBe(2);
+    const newHolder = advanceBreachCount(bumped, ['we:a'], 'sess-2'); // different session → reset
+    expect(newHolder.attempts).toBe(1);
+    expect(newHolder.sig).toBe(breachSig(['we:a']));
+    expect(newHolder.session).toBe('sess-2');
+  });
+
+  it('coerces a corrupt prev (non-object / bad attempts) to a fresh start', () => {
+    expect(advanceBreachCount(null, ['we:a'], 'sess-1').attempts).toBe(1);
+    expect(advanceBreachCount({ attempts: -5, sig: 42 }, ['we:a'], 'sess-1').attempts).toBe(1);
+  });
+});
+
+describe('END-TO-END escalation through the REAL observer (WE #2598)', () => {
+  // A lane whose predicted ≠ observed → a REAL breach the observer's breachOutcome acts on.
+  const breachedPool = { lanes: [laneRow(1, { predictedScope: ['we:src/planned.ts'] })] };
+  const observedForLane = () => ['we:src/OUT-of-scope.ts']; // outside the planned scope ⇒ breach
+  const policy = { breachMidBuild: 'pause', overlapAtLaunch: 'wait', retryBound: 1 };
+
+  it('attempt 2 > retryBound 1 ⇒ outcome.escalated === true', () => {
+    const leases = collectSnapshot({ poolStatus: breachedPool, observedForLane, breachAttemptForLane: () => 2 });
+    const picture = liveScopePicture({ leases, policy });
+    const breachedLease = picture.leases.find((s) => !s.clean);
+    expect(breachedLease.breach).toEqual(['we:src/OUT-of-scope.ts']); // a real breach was collected
+    expect(breachedLease.outcome.escalated).toBe(true);
+  });
+
+  it('CONTROL: attempt 1 (≤ retryBound) ⇒ outcome.escalated === false', () => {
+    const leases = collectSnapshot({ poolStatus: breachedPool, observedForLane, breachAttemptForLane: () => 1 });
+    const picture = liveScopePicture({ leases, policy });
+    const breachedLease = picture.leases.find((s) => !s.clean);
+    expect(breachedLease.outcome.escalated).toBe(false);
+    expect(breachedLease.outcome.action).toBe('retry-in-place');
   });
 });

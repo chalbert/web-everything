@@ -3,8 +3,9 @@ bornAs: xk7m2nq
 kind: story
 size: 2
 parent: "2560"
-status: open
+status: resolved
 dateOpened: "2026-07-20"
+dateResolved: "2026-07-21"
 tags: [plateau-loop, console, scope-lease, conflict-policy, lanes, readiness]
 ---
 
@@ -36,3 +37,16 @@ repeatedly escalates through `breachOutcome`; a clean observation resets the cou
 
 ## Depends on
 - Slice 5 (acquire declares predicted scope) — provides the declared predicted scope a breach is measured against.
+
+## Delivered
+- `we:scripts/readiness/scope-lease-collect.mjs` — per-lane sidecar `<laneDir>/.git/.lane-breach-count`
+  (`{attempts, sig, session}`, cleared on lane teardown since it lives in the clone's `.git`). Pure
+  `breachSig` + `advanceBreachCount(prev, breach, session)`: an "attempt" advances on a breach TRANSITION
+  (rising edge / changed file-set), a stable breach holds, a clean observation resets, a new lease occupant
+  resets. `collectSnapshot` stamps `breachAttempt` via an injected counter; the IO shell reads/advances/writes
+  the sidecar, writing ONLY on a state change (steady-state polls stay read-only). `--no-track-attempts` forces
+  a pure read. The observer's `breachOutcome` now escalates once the count exceeds `retryBound`.
+- Advisory throughout (§3i-A4 Fork 1 — never gates). Proxy limitation documented: a static unchanged breach
+  sits at attempt 1, and a re-breach on a different file resets; faithful per-retry counting needs an
+  orchestrator build-iteration signal (a later hook). 39 collector tests incl. end-to-end escalation through the
+  real observer; full `we:scripts/readiness/` suite green (360).
