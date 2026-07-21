@@ -3,8 +3,9 @@ bornAs: xzsx09z
 kind: story
 size: 2
 parent: "2555"
-status: open
+status: resolved
 dateOpened: "2026-07-20"
+dateResolved: "2026-07-21"
 tags: [plateau-loop, console, console-board, scope-lease, lane-zones, slice-2555]
 ---
 
@@ -22,13 +23,24 @@ ON the actual lane cards, not only as the summary section.
   / forced cell (`fast-forward`, UC-B3) when its scope overlaps a rival lane. The card glyphs already exist in
   the taxonomy + read-model (#2552/#2584); this wires the LIVE picture onto them.
 
-## Blocked on — a lane↔card identity map (the real gap)
-The live picture (`GET /api/scope-lease`) keys each lease by its **lane-pool** lane + `.lane-lease` marker
-session; the board groups cards by the **backlog claim** session (from `we:claims.json`). Those two session
-identities are NOT the same, so today a breach on pool-lane N can't be attributed to a specific board card. This
-slice needs a durable pool-lane → building-item map (e.g. via `we:scripts/lane-pool.mjs` `map` /
-`plateau-app:.claude/lane-ports.json`) before the per-card wiring is meaningful. Until then the below-board section is the
-honest surface.
+## Delivered (plateau-app PR #95)
+The lane↔card identity join was solved via the existing lane-ports registry (`plateau-app:.claude/lane-ports.json`,
+written by `we:scripts/lane-pool.mjs` `map`, mapping item→`{lane}`):
+- **Server** (`plateau-app:vite.config.mts`) reads the registry tolerantly, inverts it to lane→item-nums, and
+  STAMPS each `/api/scope-lease` lease with `items[]` / each overlap with `aItems[]`/`bItems[]`.
+- **Client** (`plateau-app:src/backlog-view/lane-board-data.ts`) reads the stamps in `buildBoard` and feeds the
+  three read-model signal fields the taxonomy already maps — `build.pausedReason='scope-breach'` → **UC-A4**
+  (breach, `octagon-alert`), `forcedPastOverlap` → **UC-B3** (forced, `fast-forward`), `overlapsLane` → **UC-B2**
+  (overlap, `layers`). Pure wiring — no new render code; `deriveCardState` precedence picks the state.
+
+Breach and forced are gated on the card actually building (both are mid-build states), so a stale / co-mapped
+registry entry can't mis-render a parked/queued card as a build-interrupt. Overlap (UC-B2) is a queued state and
+stays masked below building. Back-compat: the common case (empty/absent registry, clean or 502 picture) stamps
+nothing and the board is byte-identical. Sighted all three cells in light + dark; regression tests cover the
+flips, the non-building gate, no-conflict byte-identical, empty stamps, and numeric-normalized matching.
+
+The `blend` overlap glyph remains a separate glyph-ruling follow-up (below); `layers` is the current taxonomy
+glyph and is used as-is.
 
 ## Dropped as superseded (was in the original #2589)
 - The four per-lane vertical bands (running · ready · purgatory · next-sprint) and the overtake affordance —
