@@ -3,10 +3,10 @@ bornAs: xzlknku
 kind: story
 size: 3
 parent: "2565"
-status: active
+status: open
 scaffoldedBy: "slice-2565"
 dateScaffolded: "2026-07-20"
-blockedBy: ["2581"]
+blockedBy: ["2587"]
 dateOpened: "2026-07-20"
 tags: [plateau-loop, console, decision-surface, governance, guardrails, slice-2565]
 ---
@@ -62,6 +62,22 @@ ruling can only be *recorded* where governance allows — the guard sits between
 - **Depends on** [#2581] — there must be a write path to guard.
 - Rendering and evidence links are [#2580]; the verdict/override mechanics are [#2581]. This slice adds
   only the *may-I-rule-here* gate around them.
+
+## Delivered so far (the pre-ruling classifier)
+The one genuinely-buildable guard now — the statute-touching CLASSIFIER + its marker — landed:
+`plateau-app:src/backlog-view/decision-forks.ts` `classifyStatuteTouching(body)` reads the decision's declared
+codification prose (a `docs/agent/*.md` governor ref on a codif/amend/statute line — the pre-ruling signal, NOT
+the ruling-time `codifiedIn`) and surfaces `statuteTouching` + `statuteTargets` on the DTO; the ruling surface
+(`plateau-app:src/backlog-view/ruling-surface.ts`) shows an amber "amends the governor — <targets>" badge (it
+MARKS, it never blocks). Conservative + low-false-positive; flags 6 of 17 live prepared decisions.
+
+## Remaining (why this stays open — re-`blockedBy` #2587)
+The three §3g-T2 guards all fence ruling **from a launch context** (open-not-ratify-inline, statute-touching →
+policy menu *from a launch frame*, per-*launch* waivers). The dedicated ruling surface (#2580/#2581) is the
+**sanctioned** ratify channel — §3g-T2 does not fence it — so there is nothing here to route/waive yet. The
+launch-context ratify path is **[#2587]'s open-decision-from-a-lane** (currently deferred). When that lands, this
+slice wires the classifier's `statuteTouching` flag into the launch-context routing + the scoped/logged/
+auto-expiring waiver. Re-pointed `blockedBy` from [#2581] (done) to [#2587] (the real remaining dependency).
 
 ## Acceptance
 - From a launch-review context the surface only **opens** a decision (no inline ratify); the verdict control
