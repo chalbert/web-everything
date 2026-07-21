@@ -3,11 +3,10 @@ bornAs: xcg9jr9
 kind: story
 size: 5
 parent: "2565"
-status: active
-scaffoldedBy: "slice-2565"
+status: resolved
 dateScaffolded: "2026-07-20"
-blockedBy: ["2558", "2580"]
 dateOpened: "2026-07-20"
+dateResolved: "2026-07-21"
 tags: [plateau-loop, console, decision-surface, rule-interface, write-port, override, slice-2565]
 ---
 
@@ -67,6 +66,22 @@ the live-rendered forks from [#2580].
 - **Depends on** [#2580] — the live fork cards are what the ruling control attaches to.
 - **Governance fencing** (whether a given decision may be ruled from this launch frame, statute routing,
   waivers) is [#2582] — this slice writes the verdict; that slice gates *whether the write is allowed*.
+
+## Delivered
+- **Write-port extension** (`plateau-app:src/backlog-view/write.ts` · `plateau-app:vite.config.mts` ·
+  `plateau-app:src/backlog-view/write-action.ts`): a `kind:decision` now resolves through the write port —
+  `canApply` allows a decision from its prepared OPEN state (and never offers a codified-to-less Resolve on the
+  board); the endpoint requires a valid `codifiedTo` (`one-off` or `docs/*.md#anchor`, the #911 gate) fail-closed
+  BEFORE the lane opens; `cliArgsAfterVerb` emits `--codified-to`, and the override reason folds into the PR/commit.
+- **Ruling controls** (`plateau-app:src/backlog-view/ruling-surface.ts`, at `/console-ruling`): per rule-able
+  decision a codified-in chooser (one-off | statute + anchor), an optional reason, and **Ratify** / **Defer**.
+  Ratify POSTs `{ id, verb:'resolve', codifiedTo, note }` → a lane→PR that resolves the decision + writes the
+  `codifiedIn` cite; Defer writes nothing. Per-decision in-flight lock (no double-ratify); client anchor
+  validation mirrors #911. The **override = the operator's chosen codified-to target** (first-class cite choice).
+- Documented limits: the ruling RECORD is the `codifiedIn` cite only — the `## Ruling` prose + per-fork
+  `RATIFIED` lines stay hand-authored; the reason rides the PR, not item frontmatter (codifiedIn can't hold free
+  text); ruling is item-level, not per-fork. §3g-T2 governance fencing stays in [#2582].
+- Sighted both themes; 440 tests (all submit tests stub `fetch`); `plateau-app` `backlog-view` suite green.
 
 ## Acceptance
 - A fork card offers accept-default / override / defer; submitting **accept-default** ratifies via the
