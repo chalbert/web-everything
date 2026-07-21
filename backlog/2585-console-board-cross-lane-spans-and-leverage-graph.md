@@ -3,11 +3,12 @@ bornAs: x2kpohd
 kind: story
 size: 5
 parent: "2555"
-status: active
+status: resolved
 scaffoldedBy: "slice-2555"
 dateScaffolded: "2026-07-20"
 dateOpened: "2026-07-20"
 blockedBy: ["2584"]
+dateResolved: "2026-07-21"
 tags: [plateau-loop, console, console-board, cross-lane, spans, leverage, slice-2555]
 ---
 
