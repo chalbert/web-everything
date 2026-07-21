@@ -17,10 +17,13 @@
  *     `git merge-base`, `git diff --name-only`, `git status --porcelain`. It provides those as the injected
  *     functions the pure core orchestrates over.
  *
- * THE predicted = observed DEFAULT — the central design call of #2560's collector (documented deliberately):
- *   The observer keys breach detection on PREDICTED (planned) file-scope vs OBSERVED (live diff) scope. But the
- *   live orchestrator emits NO predicted file-scope today — there is no live producer of a lane's planned file
- *   set. So {@link resolvePredictedScope} defaults `predicted := observed` when no plan is supplied. The effect:
+ * PREDICTED SCOPE SOURCE + the predicted = observed DEFAULT — the central design call of #2560's collector:
+ *   The observer keys breach detection on PREDICTED (planned) file-scope vs OBSERVED (live diff) scope. As of
+ *   #2560's final slice there IS a live producer: a lane declares its predicted file-scope at acquire via
+ *   `we:scripts/lane-pool.mjs acquire --scope=<repo:path,...>`, which persists it into the lease marker
+ *   (`lease.predictedScope`). So {@link resolvePredictedScope} takes predicted from the marker-declared scope
+ *   when present, else `--plan`, else defaults `predicted := observed`. The default still holds when nothing
+ *   declared a scope (a plain acquire with no `--scope`). The effect of that default:
  *     • With NO plan, predicted ≡ observed ⇒ breachOf(predicted, observed) is empty ⇒ ZERO false breach. The
  *       observer then reports only the REAL cross-lane OVERLAPS between live leases' effective scopes — which
  *       need no plan to be meaningful (two lanes sitting on the same file is contention regardless of intent).
@@ -88,13 +91,17 @@ export function parseObservedFiles({ diffOut = '', porcelainOut = '', repoKey = 
 }
 
 /**
- * Resolve a lane's PREDICTED scope. THE #2560 DEFAULT (see the file header): with a non-empty `plan`, predicted
- * is the normalized plan (breach detection is ON); with no plan, predicted := observed unchanged (predicted ≡
- * observed ⇒ zero false breach — the observer then reports only real cross-lane overlaps).
- * @param {{observed:string[], plan?:string[]|null}} input
+ * Resolve a lane's PREDICTED scope. PRIORITY (#2560 final slice): marker-`declared` (the lane's own
+ * `acquire --scope=` file-scope, persisted in its lease marker — the REAL predicted-scope producer #2596 noted
+ * was missing) → `--plan` → observed. With a non-empty `declared`, predicted is that normalized declared scope
+ * (breach detection is ON, keyed on what the lane itself promised). Else with a non-empty `plan`, predicted is
+ * the normalized plan. Else predicted := observed unchanged (predicted ≡ observed ⇒ zero false breach — the
+ * observer then reports only real cross-lane overlaps). The default still holds when nothing declared a scope.
+ * @param {{observed:string[], plan?:string[]|null, declared?:string[]|null}} input
  * @returns {string[]}
  */
-export function resolvePredictedScope({ observed, plan } = {}) {
+export function resolvePredictedScope({ observed, plan, declared } = {}) {
+  if (Array.isArray(declared) && declared.length > 0) return normScope(declared);
   const obs = Array.isArray(observed) ? observed : [];
   if (Array.isArray(plan) && plan.length > 0) return normScope(plan);
   return [...obs]; // a fresh array — predicted and observed must not alias (no in-place mutation footgun)
@@ -114,6 +121,11 @@ export function resolvePredictedScope({ observed, plan } = {}) {
  * @returns {Array<{lane, session, predictedScope:string[], observedScope:string[]}>}
  *   The observer's lease-input shape. `breachAttempt` is intentionally OMITTED (no persisted counter — the
  *   observer defaults it to 1, "first observation ⇒ retry-in-place").
+ *
+ * PREDICTED SCOPE SOURCE (#2560 final slice): each lease's `predictedScope` now flows from the lane's OWN lease
+ * marker (`lane.lease.predictedScope`, declared at acquire via `we:scripts/lane-pool.mjs acquire --scope=`) when
+ * present — the real predicted-scope producer the collector previously lacked. It takes priority over `--plan`,
+ * which takes priority over observed (see {@link resolvePredictedScope}).
  */
 export function collectSnapshot({ poolStatus, observedForLane, planForLane = null } = {}) {
   const lanes = Array.isArray(poolStatus?.lanes) ? poolStatus.lanes : [];
@@ -125,7 +137,8 @@ export function collectSnapshot({ poolStatus, observedForLane, planForLane = nul
     return {
       lane: lane.lane,
       session: lane.lease?.session ?? null,
-      predictedScope: resolvePredictedScope({ observed, plan }),
+      // #2560 — marker-declared scope (from `acquire --scope=`) wins over --plan wins over observed.
+      predictedScope: resolvePredictedScope({ observed, plan, declared: lane.lease?.predictedScope }),
       observedScope: observed,
     };
   });

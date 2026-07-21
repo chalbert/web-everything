@@ -83,10 +83,22 @@ describe('resolvePredictedScope — the #2560 predicted=observed default', () =>
     expect(predicted).toEqual(observed);
     expect(predicted).not.toBe(observed);
   });
+  it('a non-empty declared scope WINS over both plan and observed (#2560 marker-declared source)', () => {
+    expect(resolvePredictedScope({
+      observed: ['we:src/obs.ts'],
+      plan: ['we:src/plan'],
+      declared: ['we:src/dec', 'we:src/dec'], // normScope dedupes
+    })).toEqual(['we:src/dec']);
+  });
+  it('an empty declared scope falls through to plan (then observed)', () => {
+    expect(resolvePredictedScope({ observed: ['we:src/obs.ts'], plan: ['we:src/plan'], declared: [] }))
+      .toEqual(['we:src/plan']);
+  });
 });
 
 // A tiny lane-status factory matching lane-pool's `status --json` row shape.
-const laneRow = (lane, { leased = true, session = `sess-${lane}`, path = `/pool/lane-${lane}` } = {}) => ({
+// `predictedScope` (#2560) → the lease marker's advisory declared scope (from `acquire --scope=`), when set.
+const laneRow = (lane, { leased = true, session = `sess-${lane}`, path = `/pool/lane-${lane}`, predictedScope } = {}) => ({
   lane,
   path,
   exists: true,
@@ -95,7 +107,7 @@ const laneRow = (lane, { leased = true, session = `sess-${lane}`, path = `/pool/
   clean: true,
   behind: 0,
   deps: 'ok',
-  lease: leased ? { session } : null,
+  lease: leased ? { session, ...(predictedScope ? { predictedScope } : {}) } : null,
   leased,
 });
 
@@ -138,6 +150,17 @@ describe('collectSnapshot — pool rows → the observer lease shape', () => {
     });
     expect(leases[0].predictedScope).toEqual(['we:src/a']);
     expect(leases[0].observedScope).toEqual(['we:src/a/x.ts']);
+  });
+
+  it('marker predictedScope (from acquire --scope=) WINS over both observed and any plan (#2560)', () => {
+    const poolStatus = { lanes: [laneRow(1, { predictedScope: ['we:src/declared.ts'] })] };
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => ['we:src/observed.ts'],
+      planForLane: () => ['we:src/planned'],
+    });
+    expect(leases[0].predictedScope).toEqual(['we:src/declared.ts']); // marker scope, not observed/plan
+    expect(leases[0].observedScope).toEqual(['we:src/observed.ts']);
   });
 
   it('produces the exact observer lease shape (no breachAttempt)', () => {

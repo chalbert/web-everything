@@ -110,6 +110,19 @@ describe('leaseBody / describeLease / leaseOwnedBy', () => {
     expect(leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z' }).workflowLane).toBe(false);
     expect(leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', workflowLane: true }).workflowLane).toBe(true);
   });
+  it('leaseBody OMITS predictedScope when no scope is declared — byte-identical marker to today (#2560)', () => {
+    const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z' });
+    expect('predictedScope' in b).toBe(false);
+    expect(b.predictedScope).toBeUndefined();
+  });
+  it('leaseBody carries a non-empty predictedScope array through (#2560)', () => {
+    const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', predictedScope: ['we:a', 'we:b'] });
+    expect(b.predictedScope).toEqual(['we:a', 'we:b']);
+  });
+  it('leaseBody OMITS an empty predictedScope array (omit-when-empty, #2560)', () => {
+    const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', predictedScope: [] });
+    expect('predictedScope' in b).toBe(false);
+  });
   it('describeLease renders who + purpose + when', () => {
     const s = describeLease(leaseBody({ session: 'drain-1', purpose: 'drain', acquiredAt: '2026-07-05T12:00:00.000Z' }));
     expect(s).toContain('drain-1');

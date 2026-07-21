@@ -26,7 +26,7 @@
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
  *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
- *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op.
+ *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--scope=<repo:path,...>] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock).
  *   node scripts/lane-pool.mjs release (--lane=N | --all) [--session=<slug>] [--force]   # #2275 hand a leased lane back to the pool (own lease, or --force)
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s)
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
@@ -72,6 +72,13 @@ import {
   describeLease,
   leaseOwnedBy,
 } from './lib/lane-lease.mjs';
+// #2560 — lane-pool may freely import readiness (confirmed no circular import): the advisory scope-lease check
+// at acquire. normScope normalizes the declared `--scope`; candidateLaunch is the pure overlap-at-launch query.
+import { normScope } from './readiness/scope-lease.mjs';
+import { candidateLaunch } from './readiness/scope-lease-live.mjs';
+
+// #2560 — `--scope=a,b,c` → a normalized, repo-qualified array (empty when the flag is absent/blank).
+const parseScopeFlag = (v) => (typeof v === 'string' && v ? normScope(v.split(',')) : []);
 
 // ── tiny arg parsing ──────────────────────────────────────────────────────────────────────────────
 const [, , cmd, ...rest] = process.argv;
@@ -596,6 +603,10 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
       // (not free-text purpose) that switches the destructive-op guard fail-closed for this lane, requiring a
       // sibling parallel lane to assert this lease's own minted `session` slug before it can clobber the clone.
       workflowLane: flags.purpose === WORKFLOW_LANE_PURPOSE,
+      // #2560 — persist the ADVISORY predicted file-scope declared via `acquire --scope=` (omitted when empty,
+      // so a scope-less acquire's marker is unchanged). This is the real predicted-scope source the live
+      // scope-lease collector/observer reads; it NEVER gates the claim (the O_EXCL marker below is the lock).
+      predictedScope: parseScopeFlag(flags.scope),
     }),
     null, 2,
   ) + '\n';
@@ -627,6 +638,9 @@ function cmdAcquire(repo) {
   const session = defaultSession();
   const nowMs = Date.now();
   const ttlMs = ttlMsFromFlags();
+  // #2560 — the ADVISORY predicted file-scope this acquire declares (empty when no `--scope`). Persisted into the
+  // marker (via tryClaimLane) AND used for the strictly-non-blocking overlap warning below. It NEVER gates.
+  const declaredScope = parseScopeFlag(flags.scope);
   const lanes = existingLanes(repo);
   if (lanes.length === 0) fail(`no lanes provisioned for "${repo.name}" — run \`provision --count=N\` first`);
 
@@ -667,6 +681,24 @@ function cmdAcquire(repo) {
       if (tryClaimLane(laneDir(repo, pick), session, nowMs, ttlMs)) chosen = pick;
       else excluded.add(pick); // a concurrent acquire won this one — try the next
     }
+  }
+
+  // #2560 (§3i-A4 Fork 1) — ADVISORY, STRICTLY NON-BLOCKING scope-overlap check. Runs AFTER the atomic O_EXCL
+  // claim above (the whole-clone lease is the REAL lock): this only WARNS to stderr if the declared scope
+  // overlaps a sibling lane's predicted scope. It does NOT gate, block, delay, or change which lane won — the
+  // lane is already claimed. Wrapped so a scope-check failure can NEVER throw into the acquire path.
+  if (declaredScope.length) {
+    const others = existingLanes(repo)
+      .filter((n) => n !== chosen)
+      .map((n) => ({ n, lease: liveLease(laneDir(repo, n), nowMs, ttlMs) }))
+      .filter((x) => x.lease)
+      .map((x) => ({ lane: x.n, predictedScope: x.lease.predictedScope ?? [], observedScope: [] }));
+    try {
+      const res = candidateLaunch({ candidateScope: declaredScope, leases: others });
+      if (res.outcome !== 'launch') {
+        log(`  ⚠ advisory (non-blocking): lane-${chosen} declared scope overlaps lane(s) ${res.waitOn?.length ? res.waitOn.join(', ') : '(see picture)'} — the whole-clone lease is the real lock; proceeding.`);
+      }
+    } catch { /* advisory only — never let a scope-check failure affect the acquire */ }
   }
 
   // Ready the leased lane: land on origin/<branch> (item 2 — a lane may sit on main), regen env + deps so it
@@ -867,7 +899,7 @@ if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
     'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|release|remove|map|unmap> [--count=N] [--lane=N] [--all] ' +
-      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--ttl-minutes=N] [--no-reset] [--repo=<path>] [--origin=<url>] ' +
+      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--scope=<repo:path,...>] [--ttl-minutes=N] [--no-reset] [--repo=<path>] [--origin=<url>] ' +
       '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json]\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);

@@ -75,14 +75,22 @@ export function chooseFreeLane(laneInfos, nowMs, ttlMs) {
  *  that merely share an upper process ancestor (terminal, a parallel-lane orchestrator) — the over-match that
  *  made the earlier pid-ancestry heuristic unsafe in this guard's target topology (r2: pid-ancestry removed).
  *  `pid` is informational only (human-readable `status`/debug; a leaf that exits right after `acquire`, never
- *  useful for ownership). */
-export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession, workflowLane }) {
+ *  useful for ownership).
+ *  `predictedScope` (#2560 final slice) is the OPTIONAL, ADVISORY repo-qualified `"<repo>:<path>"` file-scope
+ *  list a lane declares at acquire (`acquire --scope=`). It is the real predicted-scope source the live
+ *  scope-lease observer/collector consumes — but it NEVER gates the acquire (the whole-clone lease is the real
+ *  lock; §3i-A4 Fork 1). OMITTED from the marker when empty/absent, so a scope-less acquire produces a
+ *  byte-identical marker to today (back-compat). Normalization is the CALLER's job — this stays zero-import. */
+export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession, workflowLane, predictedScope }) {
   return {
     session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null,
     pid: pid ?? null, ownerSession: ownerSession ?? null,
     // #2413 — a MARKED (parallel-/workflow) lease. A plain boolean contract field (never null) so a reader can
     // key on it directly; older on-disk leases lack it (⇒ undefined ⇒ falsy ⇒ unmarked, today's semantics).
     workflowLane: !!workflowLane,
+    // #2560 — advisory predicted file-scope, included ONLY when a non-empty array (omit-when-empty keeps a
+    // scope-less acquire's marker byte-identical to today). A defensive copy so the caller can't alias in.
+    ...(Array.isArray(predictedScope) && predictedScope.length ? { predictedScope: [...predictedScope] } : {}),
   };
 }
 
