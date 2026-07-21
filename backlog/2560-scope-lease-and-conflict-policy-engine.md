@@ -2,9 +2,10 @@
 bornAs: xrp2ta9
 kind: epic
 parent: "2555"
-status: open
+status: resolved
 tags: [plateau-loop, console, scope-lease, conflict-policy, lanes, epic]
 dateOpened: "2026-07-18"
+dateResolved: "2026-07-21"
 ---
 
 # Scope-lease + conflict-policy engine
@@ -28,3 +29,18 @@ A launch acquires a scope lease; overlapping work is held per the overlap policy
 lease is detected and handled per the breach policy; policies are program-configurable; built on
 `we:scripts/lane-lease.mjs`, not a parallel leasing system. The board ([#2555]) renders the breach/overlap/force
 states.
+
+## Delivered (all slices resolved 2026-07-21)
+- Data model + breach detection (slice 1, #2592) and per-program policy config (slice 2, #2593) —
+  `we:scripts/readiness/scope-lease.mjs` (`breachOf` · `breachOutcome` · `overlapAtLaunch`) +
+  `we:scripts/readiness/scope-policy-config.mjs` (`resolveScopePolicy`).
+- Pure live observer (slice 3, #2594) — `we:scripts/readiness/scope-lease-live.mjs` (`liveScopePicture` ·
+  `candidateLaunch`).
+- Live snapshot collector (slice 4, #2596) — `we:scripts/readiness/scope-lease-collect.mjs` (IO boundary:
+  pool-walk + git diff → the observer's lease shape).
+- Acquire declares predicted scope + advisory overlap check (slice 5, #2597) — `we:scripts/lane-pool.mjs`
+  `acquire --scope=` persists the advisory predicted scope into the lease marker; the collector consumes it.
+- Durable breach-attempt counter (slice 6, #2598) — per-lane sidecar advancing on breach transitions; the
+  observer escalates past `retryBound`.
+- The board surfacing (⚙ policy control + breach/overlap cells) shipped under [#2555] (the live lease-zone).
+Whole-clone lease stays the real lock; the scope layer is advisory throughout (§3i-A4 Fork 1).
