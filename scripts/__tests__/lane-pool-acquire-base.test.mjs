@@ -293,3 +293,49 @@ describe('lane-pool acquire --purpose=workflow-lane marks the lease (#2413)', ()
     expect(leaseOf(JSON.parse(r.out).path).workflowLane).toBe(false);
   });
 });
+
+describe('lane-pool acquire --scope= persists advisory predicted scope (#2560)', () => {
+  const leaseOf = (lane) => JSON.parse(readFileSync(join(lane, '.git', '.lane-lease'), 'utf8'));
+
+  it('stamps predictedScope into the marker AND keeps stdout the clean lane path (LANE= contract)', () => {
+    provision(1);
+    // No --json: stdout must be ONLY the lane path (the `LANE=$(… acquire)` capture must stay clean).
+    const r = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install', '--lane=1', '--scope=we:src/a.ts,we:src/b.ts'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(r.code).toBe(0);
+    const lanePath = r.out.trim();
+    // stdout is the lane path and NOTHING else (no advisory text, no JSON leaked onto stdout).
+    expect(r.out).toBe(lanePath + '\n');
+    const lease = leaseOf(lanePath);
+    expect(lease.predictedScope).toEqual(['we:src/a.ts', 'we:src/b.ts']);
+  });
+
+  it('a plain acquire (no --scope) OMITS predictedScope from the marker (back-compat)', () => {
+    provision(1);
+    const r = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install', '--lane=1'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(r.code).toBe(0);
+    expect('predictedScope' in leaseOf(r.out.trim())).toBe(false);
+  });
+
+  it('an overlapping second acquire WARNS to stderr but still succeeds (advisory, never gates)', () => {
+    provision(2);
+    const common = [`--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install'];
+    // Lane 1 declares a scope; lane 2 declares an OVERLAPPING scope (shares we:src/shared.ts).
+    const first = runPool(['acquire', ...common, '--lane=1', '--scope=we:src/shared.ts,we:src/a.ts'], { LANE_POOL_ROOT: poolRoot });
+    expect(first.code).toBe(0);
+    const second = runPool(['acquire', ...common, '--lane=2', '--scope=we:src/shared.ts,we:src/b.ts'], { LANE_POOL_ROOT: poolRoot });
+    // The acquire STILL succeeds (advisory never gates) — lane 2 is claimed …
+    expect(second.code).toBe(0);
+    const lane2 = second.out.trim();
+    expect(leaseOf(lane2).predictedScope).toEqual(['we:src/shared.ts', 'we:src/b.ts']);
+    // … stdout stays the clean lane path (the advisory rides stderr) …
+    expect(second.out).toBe(lane2 + '\n');
+    // … and the advisory warning names the overlap on stderr.
+    expect(second.err).toMatch(/advisory \(non-blocking\).*overlaps/);
+  });
+});
