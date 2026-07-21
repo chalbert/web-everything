@@ -3,10 +3,10 @@ bornAs: xntcdet
 kind: story
 size: 8
 parent: "2565"
-status: active
-scaffoldedBy: "slice-2565"
+status: resolved
 dateScaffolded: "2026-07-20"
 dateOpened: "2026-07-20"
+dateResolved: "2026-07-21"
 tags: [plateau-loop, console, decision-surface, rule-interface, read-port, slice-2565]
 ---
 
@@ -74,6 +74,21 @@ in the slicing report ([we:reports/2026-07-20-slice-2565-console-ruling-surface.
 ## Out of scope (other slices)
 - Recording a verdict / writing anything → [#2581] (the write half).
 - Governance fencing of *whether* a decision may be ruled here → [#2582].
+
+## Delivered
+- **Server projection** — `plateau-app:src/backlog-view/decision-forks.ts` (pure, tolerant) `projectForks` /
+  `projectDecision` parse a decision's markdown into a structured `DecisionForkDTO` (question · why-fork ·
+  Option (a)/(b) · recommended default · `Skeptic:` / `Screen:` verdicts · item-level evidence links). Every
+  field past `question` is OPTIONAL — the fork/Skeptic/Screen convention lives only in the newest decisions, so
+  a heading-only fork still projects and nothing hard-fails. `plateau-app:src/backlog-view/parse.ts` carries
+  `preparedDate` + `relatedReport`; `plateau-app:src/backlog-view/loader.ts` `loadDecisionForks` filters
+  `kind:decision` + `open` + `preparedDate`; `GET /api/backlog/decision-forks` → `DecisionRulingResponse`.
+- **View** — `plateau-app:src/backlog-view/ruling-surface.ts` `renderRulingSurface` + `mountRulingSurface` at
+  route `/console-ruling`: summary strip, sticky per-decision nav, one fork card per fork (question → Option A/B
+  → teal Recommended badge → skeptic/screen rows → why-fork), evidence chips (present-only, scheme-guarded
+  hrefs). Consumes ONLY the DTO (the `#2558` R2 boundary holds). Honest empty/error states.
+- Sighted both themes on live data (17 rule-able decisions, 25 forks), no horizontal scroll; 64 tests;
+  `plateau-app` `backlog-view` suite green (426); render-conformance clean. The ruling ACTION stays in [#2581].
 
 ## Acceptance
 - The `#2558` read port emits a **structured decision-fork DTO** for each prepared decision — per fork:
