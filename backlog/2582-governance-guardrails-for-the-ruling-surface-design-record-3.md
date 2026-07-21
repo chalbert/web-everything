@@ -3,11 +3,11 @@ bornAs: xzlknku
 kind: story
 size: 3
 parent: "2565"
-status: open
+status: resolved
 scaffoldedBy: "slice-2565"
 dateScaffolded: "2026-07-20"
-blockedBy: ["2587"]
 dateOpened: "2026-07-20"
+dateResolved: "2026-07-21"
 tags: [plateau-loop, console, decision-surface, governance, guardrails, slice-2565]
 ---
 
@@ -63,21 +63,34 @@ ruling can only be *recorded* where governance allows — the guard sits between
 - Rendering and evidence links are [#2580]; the verdict/override mechanics are [#2581]. This slice adds
   only the *may-I-rule-here* gate around them.
 
-## Delivered so far (the pre-ruling classifier)
-The one genuinely-buildable guard now — the statute-touching CLASSIFIER + its marker — landed:
+## Delivered (all three §3g-T2 guards)
+The launch-context path (#2587's open-decision-from-a-lane) landed, unblocking the remaining two guards.
+All three §3g-T2 fences are now built in `plateau-app:src/backlog-view/`:
+
+- **Guard 1 — open, don't ratify inline.** The board's UC-A9 cell only *navigates* to `/console-ruling`
+  (the sanctioned channel); it never offers a decision `resolve`/ratify. Delivered by #2587's navigation +
+  the structural absence of a board ratify verb. No inline ratify from the biased launch frame.
+- **Guard 2 — statute-touching → policy menu.** The list read port classifies each decision
+  (`plateau-app:src/backlog-view/loader.ts` reusing `classifyStatuteTouching`) and carries
+  `statuteTouching`/`statuteTargets` onto the board card; a statute-touching UC-A9 cell forks to a
+  **policy-menu gate** (a full-viewport modal on the board) instead of quick-opening — it names what's
+  blocked / why / the sanctioned path, and never writes. A non-statute cell opens directly. (plateau-app PR #92.)
+- **Guard 3 — per-launch waiver.** From the gate, a **scoped, logged, auto-expiring** waiver
+  (`plateau-app:src/backlog-view/write-action.ts` `LaunchWaiver` + `grantLaunchWaiver`; a `waiver` write verb;
+  `GET /api/backlog/waivers`) lets one decision skip the gate for a 30-min TTL — logged (who/what/when/why),
+  server-stamped TTL (no client-forged long-lived waiver), persisted to a git-ignored server-held JSON (NEVER
+  lane→PR). A re-check after expiry gates again. The board drops the flag for a waived num so the cell routes
+  direct until lapse. (plateau-app PR #93.)
+
+The earlier-landed pre-ruling CLASSIFIER + its ruling-surface marker (below) is the read-side half that
+Guard 2 keys off.
+
+## Delivered earlier (the pre-ruling classifier)
 `plateau-app:src/backlog-view/decision-forks.ts` `classifyStatuteTouching(body)` reads the decision's declared
 codification prose (a `docs/agent/*.md` governor ref on a codif/amend/statute line — the pre-ruling signal, NOT
 the ruling-time `codifiedIn`) and surfaces `statuteTouching` + `statuteTargets` on the DTO; the ruling surface
-(`plateau-app:src/backlog-view/ruling-surface.ts`) shows an amber "amends the governor — <targets>" badge (it
-MARKS, it never blocks). Conservative + low-false-positive; flags 6 of 17 live prepared decisions.
-
-## Remaining (why this stays open — re-`blockedBy` #2587)
-The three §3g-T2 guards all fence ruling **from a launch context** (open-not-ratify-inline, statute-touching →
-policy menu *from a launch frame*, per-*launch* waivers). The dedicated ruling surface (#2580/#2581) is the
-**sanctioned** ratify channel — §3g-T2 does not fence it — so there is nothing here to route/waive yet. The
-launch-context ratify path is **[#2587]'s open-decision-from-a-lane** (currently deferred). When that lands, this
-slice wires the classifier's `statuteTouching` flag into the launch-context routing + the scoped/logged/
-auto-expiring waiver. Re-pointed `blockedBy` from [#2581] (done) to [#2587] (the real remaining dependency).
+shows an amber "amends the governor — <targets>" badge (it MARKS, it never blocks). Conservative +
+low-false-positive.
 
 ## Acceptance
 - From a launch-review context the surface only **opens** a decision (no inline ratify); the verdict control

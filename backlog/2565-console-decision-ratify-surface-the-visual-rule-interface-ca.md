@@ -2,8 +2,9 @@
 bornAs: xodf5cq
 kind: epic
 parent: "2505"
-status: open
+status: resolved
 dateOpened: "2026-07-18"
+dateResolved: "2026-07-21"
 relatedReport: reports/2026-07-20-slice-2565-console-ruling-surface.md
 tags: [plateau-loop, console, decision-surface, rule-interface, mock-before-build, sliced]
 ---
