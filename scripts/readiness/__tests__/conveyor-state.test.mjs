@@ -86,7 +86,7 @@ describe('deriveClearedNotReady — cleared ids with no ready build-queue row (#
   });
 });
 
-describe('deriveUnshaped — armed rows with no predicted scope (the serial-floor surface, #2613)', () => {
+describe('deriveUnshaped — armed rows with no predicted scope (the auto-prepare surface, #2613)', () => {
   it('returns ARMED rows whose scope is absent / empty / all-blank; scoped armed rows are excluded', () => {
     const buildQueue = {
       queue: [
@@ -322,7 +322,7 @@ describe('assembleConveyorState — the whole tick picture', () => {
 
   it('UNSHAPED tick — armed rows with no scope surface in state.unshaped; a scoped armed row does not (#2613)', () => {
     const inputs = baseInputs();
-    // 2611 is scope-enriched (would parallelize); 2612 is armed but has no scope → the serial-floor surface.
+    // 2611 is scope-enriched (would parallelize); 2612 is armed but has no scope → the auto-prepare surface.
     inputs.buildQueue = { queue: [{ num: '2611', rank: 1, scope: ['we:scripts/readiness/conveyor-state.mjs'] }, { num: '2612', rank: 2 }] };
     inputs.clearedNums = ['2611', '2612'];
     const s = assembleConveyorState(inputs);

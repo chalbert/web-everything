@@ -26,18 +26,23 @@ The three scripts this skill shells (do not reimplement any of them):
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
 | `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR. Its process EXIT is the wake signal; the exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
 
-> **The serial floor for unscoped items (#2613, ruled 2026-07-22).** Predicted `scope:` is authored UPSTREAM at
-> readiness (prepare/shape time); the dispatcher only READS it — it never probes for scope at dispatch. An item
-> that reaches dispatch with **no** `scope:` is a readiness gap, and the dispatcher handles it two ways at once:
-> it **never permanently stalls** (an unscoped item runs **SERIALLY** — one at a time, and only into an
-> otherwise-idle pool, because with no scope it might touch any file and so can't run beside anything), and it is
-> **surfaced loudly** so scope gets authored. Such held items carry the reason **`unshaped-no-scope`** ("no
-> predicted scope — author it to parallelize") in the dispatch plan, and appear in `state.unshaped` in the tick
-> read. **To get PARALLELISM, an item needs a predicted `scope:`** — so each tick, surface the `unshaped` items
-> (and any `held: unshaped-no-scope`) to the operator so they get scoped upstream. Do **not** add a runtime probe
-> here (ruled against — scope is authored at readiness, not by the dispatcher).
+> **Auto-prepare for unscoped items (#2613, corrected design — Nicolas, 2026-07-22).** Predicted `scope:` is
+> authored UPSTREAM at readiness; the dispatcher only READS it — it never probes for scope at dispatch and
+> **never launches an unscoped item to build.** An item that reaches dispatch with **no** `scope:` is held
+> **`unshaped-no-scope`** ("no predicted scope — author it to parallelize") — **always**, even in a fully-idle
+> pool with free lanes (building blind is exactly the hazard; there is **no** "serial floor" that runs it alone).
+> Instead, the conveyor **auto-prepares** it: each tick, for every `unshaped-no-scope` held item (from the plan /
+> `state.unshaped`), spawn ONE background **prepare-scope agent** (§3b) that predicts the item's touch-set and
+> writes its `scope:` frontmatter as a one-file `ready-to-merge` PR. When that PR lands the item is scoped, and
+> the dispatcher launches it to **BUILD** on a later tick. **So the flow is: unscoped cleared item → auto-prepare
+> (add scope) → then build. The conveyor never builds without scope and never dispatches blind.** Scope is
+> authored at readiness (here, just-in-time), not by the dispatcher
+> ([we:docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates](../../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)
+> — being codified in a sibling statute PR).
 
-The delivery-agent template it instantiates: [`delivery-agent-brief.md`](delivery-agent-brief.md) (#2608).
+The two agent templates it instantiates: [`delivery-agent-brief.md`](delivery-agent-brief.md) (build a scoped
+item, #2608) and [`prepare-scope-agent-brief.md`](prepare-scope-agent-brief.md) (author an unscoped item's
+`scope:`, #2613).
 
 ---
 
@@ -130,6 +135,38 @@ one that works for a completed background task), so it re-invokes this loop reli
    - **Record a guard entry** for this spawn: `{ num, lane, spawnedTick: <this tick's count or timestamp> }`
      (see the guard below).
 
+3b. **Auto-prepare every unscoped held item — spawn ONE background prepare-scope agent per `unshaped-no-scope`.**
+   The dispatcher NEVER launches an unscoped item to build; it holds it `unshaped-no-scope` (in `plan.held`) and
+   surfaces it in `state.unshaped`. For each such held item — **deciding to prepare vs to build is entirely the
+   dispatch plan's classification: a scoped item appears in `plan.launch` (step 3, build); an unscoped one appears
+   as `held: unshaped-no-scope` / `state.unshaped` (here, prepare)** — spawn ONE background prepare-scope agent,
+   **UNLESS a prepare for that `num` is already in flight** by the *prepare in-flight test* (the union rule — see
+   the prepare guard below): **skip** re-dispatch when EITHER a live prepare-guard entry exists for `num`, OR
+   `state.prs` already has an **OPEN PR for that `num`**. The second clause is what makes this safe: while the item
+   is still `unshaped-no-scope` it has **no** build PR (it was never built), so **any open PR for its `num` can only
+   be its in-flight prepare** — that alone blocks a second prepare even if the guard entry were somehow lost. Only
+   when NEITHER holds do you spawn:
+   - Resolve the item's spec path by **globbing `backlog/<num>-*.md`** (this is the ONLY file the prepare edits).
+   - **Pick a prepare lane that no build or guard already owns this tick.** Take it from `freeSlots` / the free-lane
+     set MINUS the lanes this tick's `plan.launch` consumed (step 3's builds) MINUS every guard-held lane — mirror
+     the build-guard's lane exclusion, so a build and a prepare never race the same lane id this tick (atomic
+     `acquire` would fail one loud anyway — this just avoids the churn). A prepare's lane is its OWN, and it is
+     **parallel-safe** with every build and every other prepare, because each prepare's `--scope` is a single,
+     distinct backlog file (`we:backlog/<num>-<slug>.md`), disjoint by construction from any builder's code scope
+     and from every other prepare's file.
+   - Instantiate [`prepare-scope-agent-brief.md`](prepare-scope-agent-brief.md) by substituting its four
+     placeholders: `{{ITEM_NUM}}`=`num`, `{{ITEM_SPEC_PATH}}`=the globbed `backlog/<num>-<slug>.md`, `{{LANE}}`=the
+     picked lane, `{{SESSION_SLUG}}`=`prepare-<num>`. Those four `{{DOUBLE_BRACE}}` tokens are the whole fill — do
+     not rewrite the brief's prose.
+   - Spawn it as **one background `Agent`** with the filled brief as the prompt. It acquires its lane, predicts the
+     item's touch-set, writes `scope:` into the one backlog file, gets the gate green, and opens a one-file
+     `ready-to-merge` PR (auto-lands — no review escalation unless the item is statute-touching), then **exits
+     without merging**. When that PR lands the item is scoped and dispatches to **build** on a later tick.
+   - **Record a prepare-guard entry** `{ num, kind: 'prepare', spawnedTick }` — keyed by `num` (a prepare's lane is
+     incidental; the contended resource is the item's scope authorship). Its retirement is DIFFERENT from a build
+     guard's — see the prepare guard below. **Critically: a prepare Agent RETURNING does NOT retire its guard** (it
+     returns at PR-open, mid-flight — several ticks before the PR merges).
+
 4. **Spawn a merge watcher per newly-opened PR — but ONLY for items THIS conveyor launched.** `state.prs` (each
    row `{ num, prNumber, state, ci, labels }`) is built from `gh pr list` **repo-wide**, so it also carries PRs
    from other sessions / humans. Filter it to rows whose `num` is one the conveyor dispatched this session
@@ -142,13 +179,20 @@ one that works for a completed background task), so it re-invokes this loop reli
    under *State*). The board (`state.prs`) is the source of truth for which PRs exist; the watcher just wakes you
    the instant one reaches a terminal state. Scoping to conveyor-launched nums keeps an unrelated PR's stray
    `review:*` label from waking the loop with a spurious "PR #N needs review".
+   - **Prepare-scope PRs are watched the same way** (their `num` was dispatched this session too). When a prepare
+     PR **merges** (watcher exit `0`), the item now carries committed `scope:`, so the very next tick's
+     `dispatch-plan` sees it as scoped and launches it to **BUILD** — the auto-prepare → build handoff. The prepare
+     PR reaching a terminal state (merged / closed / failed) is a prepare-guard RETIREMENT trigger (see the prepare
+     guard below) — but the prepare **Agent returning is NOT**, because it returns at PR-open, several ticks before
+     the PR lands.
 
 5. **Post ONE terse status line, then start the next tick.** Per the operator's progress-tracking preference the
    checklist is the channel and prose stays quiet — one line per tick, e.g.:
-   > `conveyor · N building · N queued · N parked · health ok` (add `⚠` + the flagged lanes when
-   > `state.health.verdict === 'warn'`; add `⚠ N unshaped — author scope: #A #B` when `state.unshaped` is
-   > non-empty, so the operator knows those cleared items are running SERIALLY until scope is authored — see the
-   > serial-floor callout above).
+   > `conveyor · N building · N preparing · N queued · N parked · health ok` — where **`N preparing`** is the
+   > count of prepare-scope agents in flight (auto-preparing unscoped items' scope). Add `⚠` + the flagged lanes
+   > when `state.health.verdict === 'warn'`; add `⚠ N auto-preparing scope: #A #B` when `state.unshaped` is
+   > non-empty, so the operator sees those cleared items are being scoped now (a prepare agent per item) and will
+   > build once their scope lands — see the auto-prepare callout above.
    Then arm the next tick — this is the heartbeat:
    ```
    Bash({ command: "sleep 120", run_in_background: true })
@@ -163,7 +207,34 @@ assigned `lane` matches a live guard entry — the contended resource is the LAN
 be excluded (else tick N launches `{num:100, lane:4}`, 100 is slow to acquire, and tick N+1 re-assigns lane 4 to
 a different top-of-queue `num` while agent A is still starting — two agents targeting lane 4).
 
-**Retire a guard entry three ways:**
+**The prepare guard is DIFFERENT bookkeeping — do not copy the build guard's retirement.** A prepare-scope agent
+(§3b) gets a `{ num, kind: 'prepare', spawnedTick }` entry, keyed by `num` (the contended resource is the item's
+scope authorship, not the incidental lane). But a prepare is fundamentally unlike a build: **a build claims and
+leaves the queue within a tick or two; a prepare NEVER claims and leaves the queue only at MERGE** — its item
+stays `unshaped-no-scope` / in `state.unshaped` for every tick from spawn until its scope PR lands (CI + drain
+latency, several ticks). And its Agent returns at **PR-open**, well before merge. So the build guard's "retire on
+Agent-return" rule is a **double-dispatch bug** for a prepare (it would clear the guard while the item is still
+unscoped, and step 3b would spawn a second, third, … prepare each tick until merge — competing same-file PRs on
+burned lanes). The prepare guard therefore has its OWN rules:
+
+- **Re-dispatch gate (the union, restated).** Skip spawning a prepare for `num` when EITHER a live prepare-guard
+  entry exists for it OR `state.prs` has an OPEN PR for that `num` (which, while the item is still unscoped, can
+  only be its prepare — it has no build PR). The open-PR clause is the backstop if the guard is ever lost.
+- **Retire a prepare-guard entry ONLY on one of these — NEVER on mere Agent-return:**
+  1. **Scope committed** — the item has left `state.unshaped` (the dispatch plan no longer holds it
+     `unshaped-no-scope`, i.e. it now carries committed `scope:`). This is the success path; the item will build.
+  2. **Prepare PR terminal** — the prepare PR for that `num` reached a terminal state (merged / closed / failed),
+     surfaced by its watcher exit or by leaving the OPEN set in `state.prs`.
+- **TTL is spawn-to-FIRST-PR only, not spawn-to-merge.** Do NOT inherit the build guard's 3-tick TTL — a healthy
+  prepare's spawn→merge span is longer than that, and re-dispatching a slow-but-live prepare is the very bug this
+  fixes. The prepare TTL fires for ONE purpose: to catch a prepare Agent that **died before opening its PR**. So:
+  if NO open PR for `num` has appeared in `state.prs` within **N ticks (default 5)** of the spawn, assume the
+  agent died pre-PR → drop the guard and allow re-dispatch (surface a one-line note). **Once an open prepare PR
+  exists for the `num`, the TTL is void** — retirement is PR-terminal (rule 2) and a second prepare is already
+  blocked by the open-PR clause, so a slow-landing but healthy prepare is never re-dispatched.
+
+**Retire a BUILD/delivery guard entry three ways** (these are the delivery-guard's rules — a prepare guard uses
+its own, above, and in particular does NOT retire on Agent-return):
 
 1. **Claimed → the agent got going.** When the item shows as claimed in `conveyor-state` — its lane appears in
    `state.lanes` (leased) or it has left `state.queue` — drop the entry. This is the normal path.
@@ -275,6 +346,9 @@ Per #deterministic-core-thin-judgment, the line is:
 - **Scripts (deterministic, tested — this skill only shells them):** the tick state read, the dispatch plan,
   the merge-watcher verdict, the idle-clock inputs, the health/stall scan. Same inputs → same output, always.
 - **Judgment (stays with the operator + the agents — this skill's real content):** the readiness discussion,
-  clearing items for build, supervising a build, **each delivery agent's adversarial review of its own diff**,
-  the **escalate-or-auto-land call**, reviewing an escalation (`/review`), and investigating an anomaly. Never
-  spend model context re-deriving a computable plan — read the script's answer and act on it.
+  clearing items for build, supervising a build, **each prepare-scope agent's touch-set prediction** and **each
+  delivery agent's adversarial review of its own diff**, the **escalate-or-auto-land call**, reviewing an
+  escalation (`/review`), and investigating an anomaly. Never spend model context re-deriving a computable plan —
+  read the script's answer and act on it. **Prepare-vs-build is NOT a judgment call here — it is the dispatch
+  plan's classification:** `plan.launch` → build (scoped); `held: unshaped-no-scope` / `state.unshaped` → prepare
+  (unscoped). The skill just spawns the matching agent.
