@@ -50,15 +50,16 @@ time (spawn a probe, compute `scope`, then plan) instead of requiring it authore
 
 ## The serial floor for an unscoped item
 
-Refining #663: an item with no `scope:` is `needs-probe` / unshaped — **not a permanent hold**. The dispatcher
-runs it **serially** (alone, into an idle pool only — the safe assume-it-overlaps-everything worst case, never
-the unsafe "launch it free" that #663 rejected) as a floor, and surfaces it so its `scope` gets authored
-upstream in the readiness flow. Absent scope means *unknown* overlap, and unknown overlap is treated as
-*total* overlap — hence serial-alone.
+Refining the empty-scope contract of PR #663 (durable home #2609): an item with no `scope:` is `needs-probe` /
+unshaped — **not a permanent hold**. The dispatcher runs it **serially** (implemented in #2613 — alone, into
+an idle pool only — the safe assume-it-overlaps-everything worst case, never the unsafe "launch it free" that
+PR #663 rejected) as a floor, and surfaces it so its `scope` gets authored upstream in the readiness flow.
+Absent scope means *unknown* overlap, and unknown overlap is treated as *total* overlap — hence serial-alone.
 
 ## Lineage / links
 
 Codified in [we:docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates).
 Sibling ruling from the same 2026-07-22 statute session: #2615 (buildQueued → session-local sidecar; born
-`xf757h3`). Refines #663 (empty-scope hold → serial floor), applies the card-mutation guard #2302, governs the
-`scope:` field built in #2609, and is read by the conveyor skill #2613. Parent: the conveyor epic #2612.
+`xf757h3`). Refines the empty-scope contract of PR #663 (durable home #2609: empty-scope hold → serial floor,
+built in #2613), applies the card-mutation guard #2302, governs the `scope:` field built in #2609, and is read
+by the conveyor skill #2613. Parent: the conveyor epic #2612.

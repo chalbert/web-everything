@@ -19,7 +19,7 @@ shaped* (the dispatcher can only run it on the serial floor).
   missing its predicted touch-set when `scope:` is absent/empty — the same `needs-probe` condition
   `we:scripts/readiness/dispatch-plan.mjs` (#2609) holds on.
 - It is a *surfacing* lens, not a hard gate: an unscoped item is `needs-probe` / unshaped, not blocked (per the
-  #663 refinement in [state lives where its nature dictates](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)).
+  PR #663 empty-scope refinement in [state lives where its nature dictates](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)).
 
 **Optional / may fold into #xbzk108** if the readiness-flow authoring already surfaces the missing-scope signal
 cleanly — file separately only if the lens is a distinct surface.
