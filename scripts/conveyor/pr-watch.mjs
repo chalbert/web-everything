@@ -23,14 +23,24 @@
  *
  * THE EXIT CONTRACT (the conveyor skill reads process.exitCode as the outcome — keep these stable):
  *   • {@link EXIT_MERGED} (0)   — the PR MERGED. The lane it was on is now free; the skill re-dispatches into it.
- *   • {@link EXIT_PARKED} (2)   — the PR PARKED: it carries `review:human` / `review:pending`, OR it was CLOSED
- *                                 without merging (an anomaly). Terminal for the watcher — the main session must
- *                                 handle it (run /review on a parked PR; investigate an anomalous close).
+ *   • {@link EXIT_PARKED} (2)   — the PR PARKED for review: it carries `review:human` / `review:pending` /
+ *                                 `review:changes`. Terminal for the watcher — the main session handles it by
+ *                                 running /review on the (still-OPEN) parked PR.
  *   • {@link EXIT_TIMEOUT} (3)  — the wall-clock deadline elapsed while the PR was still PENDING (never reached
  *                                 a terminal state). The skill re-arms a watcher or investigates a stuck lane.
+ *   • {@link EXIT_CLOSED} (4)   — the PR was CLOSED without merging (a human abandoned it). Terminal, and kept
+ *                                 DISTINCT from a review park (exit 2) precisely so the skill can branch: on 4 it
+ *                                 investigates the abandoned lane; it does NOT run /review (a review-label swap
+ *                                 cannot land a closed PR). One integer per action — exit 2 and exit 4 never mix.
  *   • {@link EXIT_ERROR} (1)    — bad arguments (no PR number). A per-poll `gh` failure is NOT this: it is logged
  *                                 and retried until the deadline (a transient gh hiccup must not kill the watch),
  *                                 so a permanently-unreadable PR surfaces as EXIT_TIMEOUT, not a crash.
+ *
+ * NOT WATCHER-VISIBLE — RED CI / GATE-RED. The classifier reads ONLY `state,mergedAt,labels`; it cannot see a
+ * red `test` check. A gate-red / red-CI escalation leaves the PR OPEN + UNLABELLED, which classifies as
+ * `pending` (correct — CI may still be running, and the drain's ci-lifecycle reconcile owns the red-CI label).
+ * Red-CI escalation is surfaced by the DELIVERY AGENT's one-line escalation RETURN (the #2608 brief, step 7 /
+ * Escalations), NOT by this watcher — never assume the watcher catches red CI.
  *
  * UPGRADE SEAM (#2605 — a CONSUMER upgrade, not a blocker). The gh-poll loop in {@link watchPr} is deliberately
  * isolated behind the injected `pollOnce`, so once #2605 lands the daemon's nudge/SSE push seam this internal
@@ -42,14 +52,18 @@
 
 // ── PURE CORE (no gh / child_process / clock — the gh PR object is passed IN) ─────────────────────────────────
 
-/** The review labels that mark a PR as PARKED for human review (the drain daemon applies these on escalation). */
-export const PARK_LABELS = Object.freeze(['review:human', 'review:pending']);
+/** The review labels that mark an OPEN PR as PARKED for human review — the main session runs /review to clear
+ *  them. The drain daemon applies `review:human`/`review:pending` on escalation; `review:changes` is included
+ *  because a human bounced a prior diff and (on the re-dispatch path) pr-land can update a `lane/<num>` PR that
+ *  still carries a stale `review:changes` — it must surface as parked at once, not poll to timeout. */
+export const PARK_LABELS = Object.freeze(['review:human', 'review:pending', 'review:changes']);
 
 /** The exit-code contract (see the file header). Exported so a test / the conveyor skill can reference them by
  *  name rather than a magic number. */
 export const EXIT_MERGED = 0;
 export const EXIT_PARKED = 2;
 export const EXIT_TIMEOUT = 3;
+export const EXIT_CLOSED = 4;
 export const EXIT_ERROR = 1;
 
 /** Normalize a gh `labels` array to a plain lowercased name list. gh emits `[{name}]`; tolerate a bare-string
@@ -66,25 +80,28 @@ function labelNames(labels) {
  *
  * Precedence (terminal states win over pending; MERGED wins over a stray park label):
  *   1. MERGED  — `state === 'MERGED'` OR `mergedAt` is set. The drain landed it; the lane is free.
- *   2. PARKED  — an OPEN PR carrying a park label (`review:human` / `review:pending`), OR a CLOSED-unmerged PR.
- *                Both are terminal for the watcher and need the main session: a review to clear, or an
- *                anomalous close to investigate. (The verdict vocabulary is three-valued, so a closed-unmerged
- *                PR maps to `parked` — the "stop and wake the session, it did NOT merge" outcome — never
- *                `pending`, which would poll a terminally-closed PR forever.)
- *   3. PENDING — none of the above: an open PR still in flight (green-and-queued, CI running, or a plain open
- *                PR the drain hasn't reached). Keep polling.
+ *   2. CLOSED  — `state === 'CLOSED'` with no `mergedAt`: a human abandoned the PR without merging. Terminal,
+ *                and DISTINCT from a review park — checked BEFORE the park label so a closed PR that still
+ *                carries a stale `review:*` label reads as `closed` (the skill investigates the abandoned lane),
+ *                never `parked` (running /review on a closed PR is meaningless — the label swap can't land it).
+ *   3. PARKED  — an OPEN PR carrying a park label (`review:human` / `review:pending` / `review:changes`). The
+ *                main session runs /review to clear it. Terminal for the watcher.
+ *   4. PENDING — none of the above: an open PR still in flight (green-and-queued, CI running, or a plain open
+ *                PR the drain hasn't reached — note a red `test` check is UNLABELLED and lands here, correctly;
+ *                red-CI escalation is the delivery agent's return, not the watcher — see the file header). Keep
+ *                polling.
  *
  * @param {{state?:string, mergedAt?:string|null, labels?:Array<{name?:string}|string>}|null|undefined} pr
  *   the parsed `gh pr view --json state,mergedAt,labels` object.
- * @returns {'merged'|'parked'|'pending'}
+ * @returns {'merged'|'closed'|'parked'|'pending'}
  */
 export function classifyPr(pr) {
   if (!pr || typeof pr !== 'object') return 'pending'; // no data parsed yet → keep waiting (never a false exit)
   const state = String(pr.state || '').toUpperCase();
   if (state === 'MERGED' || pr.mergedAt) return 'merged';
+  if (state === 'CLOSED') return 'closed'; // abandoned unmerged — terminal & DISTINCT from a review park
   const labels = labelNames(pr.labels);
   if (labels.some((l) => PARK_LABELS.includes(l))) return 'parked';
-  if (state === 'CLOSED') return 'parked'; // closed WITHOUT merging — terminal, wake the session
   return 'pending';
 }
 
@@ -92,6 +109,7 @@ export function classifyPr(pr) {
 export function exitCodeForVerdict(verdict) {
   if (verdict === 'merged') return EXIT_MERGED;
   if (verdict === 'parked') return EXIT_PARKED;
+  if (verdict === 'closed') return EXIT_CLOSED;
   return null;
 }
 
@@ -174,7 +192,11 @@ async function main(argv) {
   const code = await watchPr({ pollOnce, sleep, now: Date.now, intervalMs, deadlineMs, log });
 
   if (flags.json) {
-    const outcome = code === EXIT_MERGED ? 'merged' : code === EXIT_PARKED ? 'parked' : 'timeout';
+    const outcome =
+      code === EXIT_MERGED ? 'merged'
+      : code === EXIT_PARKED ? 'parked'
+      : code === EXIT_CLOSED ? 'closed'
+      : 'timeout';
     process.stdout.write(JSON.stringify({ pr: Number(prNumber), outcome, exit: code }, null, 2) + '\n');
   }
   process.exit(code);

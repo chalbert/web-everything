@@ -18,6 +18,11 @@
 | `{{SESSION_SLUG}}` | a stable per-item session slug, e.g. `conveyor-{{ITEM_NUM}}` (ties `acquire`↔`release`, `claim`↔`resolve`) |
 | `{{SCOPE}}` | the item's predicted `scope:` frontmatter, repo-qualified & comma-joined — e.g. `we:scripts/conveyor,we:.claude/skills/conveyor` |
 
+> **Two kinds of placeholder.** `{{LIKE_THIS}}` are **conveyor-injected** — the skill substitutes them from the
+> launch entry before spawning you (the table above). `<like-this>` are **agent-runtime values** you produce as
+> you work — the `<slug>` you pick for the lane ref, the `<pr-body>` file you write, the `<n>`/PR number
+> `pr-land` reports back. Do not expect the conveyor to fill a `<...>`; that's your job at the moment it's used.
+
 ---
 
 ## Your job (one sentence)
@@ -108,9 +113,12 @@ Distributed capture (every agent, cheaply, in the moment); the `/closing-session
 ### 7. EXIT — do not merge, do not release, do not wait
 
 **Stop here.** Do NOT run `gh pr merge`. Do NOT run a drain. Do NOT `release` the lane — the resident drain
-daemon lands the PR, and the conveyor's **merge watcher** (`scripts/conveyor/pr-watch.mjs {{ITEM_NUM}}-PR`)
-detects the merge/park and re-dispatches the freed lane. Your process EXIT is the signal you are done. Return a
-one-line result to the conveyor: `#{{ITEM_NUM}} → PR #<n> (ready-to-merge | escalated <label>)`.
+daemon lands the PR. The **merge watcher** (`scripts/conveyor/pr-watch.mjs <pr-number>`) is spawned by the
+**conveyor skill, not by you**, on the PR number `pr-land` reported for this item in step 5; its process exit
+(merged / parked / closed) wakes the main session and re-dispatches the freed lane. Your OWN process EXIT is the
+signal you are done. Return a one-line result to the conveyor: `#{{ITEM_NUM}} → PR #<n> (ready-to-merge |
+escalated <label> | gate-red)`. **A red gate / red CI is NOT watcher-visible** (it reads only state/labels) —
+your one-line RETURN is the only signal that surfaces it, so always report it explicitly.
 
 ---
 
