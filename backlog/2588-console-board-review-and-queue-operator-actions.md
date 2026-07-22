@@ -2,13 +2,12 @@
 bornAs: xuff4b8
 shortTitle: "Board review + queue actions"
 kind: story
-size: 5
+size: 3
 parent: "2555"
-status: active
+status: open
 scaffoldedBy: "slice-2555"
 dateScaffolded: "2026-07-20"
 dateOpened: "2026-07-20"
-blockedBy: ["2584", "2522"]
 tags: [plateau-loop, console, console-board, operator-actions, review, drag-to-queue, slice-2555]
 ---
 
@@ -41,6 +40,26 @@ finished work — reviewing never leaves the board. The create/decide write affo
   (`POST /api/backlog/write`, lane→PR — the [#2558] write port); the view issues intents, it never writes
   `main` and never reaches a bare CLI / `gh` ([#2558] R2 boundary). The build-queue verb it extends is
   [#2522].
+
+## Delivered so far (the ready-item foundation)
+The prerequisite the drag-to-queue concern needs — the board actually *surfacing* ready-to-launch work — shipped
+(plateau-app PR #99). `plateau-app:src/backlog-view/lane-board-data.ts` `buildBoard` now collects a **ready set**
+(status:open, non-decision, unblocked items no live lane owns), ranked by ⚡ leverage then num and capped, rendered
+as **UC-C1 "⠿ ready to queue"** cards in a new `.lb-ready` "Ready to queue" board section
+(`plateau-app:src/backlog-view/lane-board.ts`) with each card's ⚡ frees/gates count — the design-record §3i v20-v21
+"Ready to queue" surface. Before this, open items never appeared on the board, so there was nothing to drag; the
+drag-to-queue concern is now buildable on top.
+
+## Remaining (why this stays open)
+- **Drag-to-queue** — now unblocked (the ready set exists): the drag machinery + green-fits/amber-overlap lane
+  highlight (from the scope-lease picture) + drop→`build-queue` dispatch + drain-lane refusal, in the slice's own
+  `plateau-app:src/backlog-view/operator-actions.ts`.
+- **Review modal + merge/bounce/take-over verbs** — still gated on UNBUILT infrastructure: the finished-build
+  review DATA (spec-proven rows, evidence deep-links, findings, the visual diff) is not produced by any endpoint
+  today, and `merge`/`bounce`/`take-over` are not in the write-verb set (no console review/label write path). Needs
+  a build-review collector/DTO + new write verbs first.
+- **Hover verbs** — the per-cell hover-verb overlay (the full verb set needs a machine-readable per-UC verb list
+  in the taxonomy; and it reworks the existing always-visible verb button #2587/#2582 depend on).
 
 ## Out of scope (other slices)
 - Opening a decision from a lane, the new-work composer, and the new-spec→constitution loop → [#2587]
