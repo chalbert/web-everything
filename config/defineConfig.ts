@@ -81,6 +81,7 @@ export type ThemeFlavorName = string; // owned by the theme dimension (#404/them
 export type AutoDefineFlavorName = string; // owned by #227 registry (impl in FUI #1779); open at this layer.
 export type RenderStrategyFlavorName = string; // owned by #080 (JSX render-strategy axis).
 export type CodegenSoTFlavorName = string; // owned by #798 (codegen source-of-truth mode).
+export type WindowedCollectionFlavorName = string; // owned by #2523 (list-virtualization strategy axis).
 
 /**
  * The root author surface. One key per dimension; the four known dimensions are typed to their own
@@ -96,6 +97,15 @@ export interface WebEverythingConfig {
   renderStrategy?: DimensionEntry<RenderStrategyFlavorName>;
   /** Codegen source-of-truth mode dimension (#798). */
   codegenSoT?: DimensionEntry<CodegenSoTFlavorName>;
+  /**
+   * List-virtualization strategy dimension (#2523) — how a large scrolling collection renders off-screen rows.
+   * Native-first default `content-visibility` (rows stay real DOM nodes; selection / whole-list count / in-page
+   * find / keyboard focus behave as if the whole list were present, #2513); the opt-in `js-windowing` strategy
+   * renders only the visible slice + a sized spacer for lists in the tens of thousands, re-implementing those
+   * behaviors (FUI impl, #1282). The a11y contract it conforms to is the `windowed-collection` intent
+   * (`we:src/_data/intents/windowed-collection.json`). Resolved per project via `config-extends-platform-default`.
+   */
+  windowedCollection?: DimensionEntry<WindowedCollectionFlavorName>;
   /** Open-set: any further dimension keyed by name. */
   [dimension: string]: DimensionEntry | undefined;
 }
