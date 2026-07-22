@@ -146,6 +146,25 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
   return { launch, held };
 }
 
+/**
+ * Select the CLEARED build-queue rows, in the engine's rank order, by SESSION-LOCAL sidecar MEMBERSHIP (#2613).
+ * The conveyor's cleared set is `.conveyor/queue.json` (session-local operator intent), NOT committed
+ * `buildQueued` frontmatter — so a row is kept IFF its num is in `clearedKeys` (a set of NORMALIZED ids). The
+ * ranked ORDER still comes from the build-queue engine (the rows are already ranked); only membership moved to
+ * the sidecar. A committed `buildQueued:true` row that is NOT in the sidecar is dropped; a sidecar item that is
+ * ranked is kept. `norm` is injected (queue-store's `normNum`) so this stays import-clean (no node built-ins in
+ * the pure core) and directly unit-testable. Pure.
+ * @param {Array<{num:*}>} rows  the ranked build-queue rows (`backlog.mjs build-queue --json` `.queue`)
+ * @param {Set<string>|Iterable<string>} clearedKeys  the sidecar's ids, normalized via `norm`
+ * @param {(n:*)=>string} norm  the id normalizer (queue-store `normNum`)
+ * @returns {Array<{num:*}>} the cleared rows, rank order preserved
+ */
+export function selectClearedRows(rows, clearedKeys, norm) {
+  const cleared = clearedKeys instanceof Set ? clearedKeys : new Set(clearedKeys);
+  const key = typeof norm === 'function' ? norm : (x) => String(x);
+  return (Array.isArray(rows) ? rows : []).filter((r) => r && cleared.has(key(r.num)));
+}
+
 // ── IO SHELL (runs only as a CLI — owns all child_process; keeps the pure core import-clean) ──────────────────
 
 // Lazily required so importing the pure core pulls in NO node built-ins beyond scope-lease.mjs.
@@ -188,11 +207,18 @@ async function main(argv) {
   const toRepoRelative = (list) =>
     (Array.isArray(list) ? list : []).map((p) => String(p).replace(/^[^/:]+:/, ''));
 
-  // 1. THE BUILD QUEUE — reuse the ranking engine wholesale (backlog.mjs build-queue --json), keep only the
-  //    items the human CLEARED for build (`buildQueued`), in the engine's exact next-to-build order. Enrich
-  //    each with its predicted `scope` + `openBlockers` from the backlog loader (build-queue doesn't emit them).
+  // 1. THE BUILD QUEUE — reuse the ranking engine wholesale (backlog.mjs build-queue --json) for the exact
+  //    next-to-build ORDER + tier/score enrichment, but MEMBERSHIP of the cleared set now comes from the
+  //    SESSION-LOCAL conveyor sidecar (`.conveyor/queue.json`, #2613), NOT committed `buildQueued` frontmatter.
+  //    Clearing an item for build is session-local operator INTENT, so it rides a gitignored sidecar the lane
+  //    guard does not police (the operator clears work from the MAIN session, which the frontmatter path
+  //    blocks). An item is in the conveyor queue IFF its num is in the sidecar; committed `buildQueued` no
+  //    longer arms a conveyor build. Enrich each with its predicted `scope` + `openBlockers` from the backlog
+  //    loader (build-queue doesn't emit them). Dynamic-import keeps the pure core import-clean.
+  const { readQueueFile, queuePath, normNum } = await import('../conveyor/queue-store.mjs');
+  const cleared = new Set(readQueueFile(queuePath(join(HERE, '..', '..'))).map((e) => normNum(e.num)));
   const bq = runJson('node', [BACKLOG_CLI, 'build-queue', '--json'], 'backlog build-queue');
-  const rows = (Array.isArray(bq?.queue) ? bq.queue : []).filter((r) => r && r.buildQueued === true);
+  const rows = selectClearedRows(Array.isArray(bq?.queue) ? bq.queue : [], cleared, normNum);
   let byNum = new Map();
   try {
     const { createRequire } = await import('node:module');
