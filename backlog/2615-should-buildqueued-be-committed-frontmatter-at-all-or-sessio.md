@@ -2,8 +2,10 @@
 bornAs: xf757h3
 kind: decision
 parent: "2612"
-status: open
+status: resolved
 dateOpened: "2026-07-22"
+dateResolved: "2026-07-22"
+codifiedIn: "docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates"
 tags: [plateau-loop, conveyor, backlog, build-queue]
 ---
 
@@ -62,3 +64,22 @@ before ratifying.
 Links: #2528 / #2529 (the build-queue view that reads committed `buildQueued`) · #2527 (the future product
 board) · #2612 (the conveyor epic) · #2302 (the guard that gates committed card mutations) · #2613 (this PR's
 session-local sidecar).
+
+## Ruling (2026-07-22)
+
+**Ruled Fork B — session-local (Nicolas, merit-based).** "Cleared for build right now" is **transient
+operator / session intent**, not durable spec — so it does not belong in committed frontmatter for *any*
+consumer. It lives in a session-local sidecar (`we:.conveyor/queue.json`, and its server-backed successor when
+the product board goes multi-tenant); committed frontmatter carries no clear-for-build flag. Nothing about
+"is this cleared right now" is committed to `main`.
+
+**This is an instance of the general rule, not a one-off.** The call is the first clause of the new statute
+rule [state lives where its nature dictates](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates):
+transient operator intent → a session-local sidecar the lane guard does not police; durable readiness (`scope`,
+`size`, `blockedBy`, `status`) → committed, upstream-authored, human-reviewable frontmatter. `buildQueued` is
+the type case of the transient clause, which is *why* #2613 had to move it out of the guarded frontmatter path
+(#2302 blocks the main session from clearing work) — that move is now ratified as correct, not an interim
+divergence to reconcile up (Fork A rejected). The build-queue view (#2528/#2529) and the product board (#2527)
+read the same session/operational store; a team-visible board is served by that shared store, never by a
+committed git flag.
+
