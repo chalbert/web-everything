@@ -76,14 +76,25 @@ export function shapeQueue(buildQueue) {
 
 /**
  * Extract a backlog item id from a lane `headRefName` like `lane/2611-conveyor-state` or `lane/xe2fmix-slug`.
- * Returns the numeric run (`2611`) or a JIT slug (`xe2fmix`), or null when the ref carries no recognizable id.
+ * Returns the numeric run (`2611`) or a JIT slug (`xe2fmix` — the drain's pre-number `x`+base36 id). A ref whose
+ * first segment is a plain word (`lane/hotfix-2611`) does NOT return the word — it falls back to a trailing
+ * `-<digits>` (→ `2611`), and a ref with no recognizable id at all returns null (never a silent wrong id).
  * @param {string|null|undefined} ref
  * @returns {string|null}
  */
 export function itemNumFromRef(ref) {
   if (!ref) return null;
-  const m = String(ref).match(/lane\/([0-9]+|[a-z0-9]{5,})/i);
-  return m ? m[1] : null;
+  const s = String(ref);
+  // Normal lane ref: the first segment after `lane/` is the numeric item number …
+  let m = s.match(/lane\/(\d+)(?:-|$)/i);
+  if (m) return m[1];
+  // … or a JIT slug (the drain's pre-number id: `x` + 5-7 base36 chars — anchored so a plain word never matches).
+  m = s.match(/lane\/(x[a-z0-9]{5,7})(?:-|$)/i);
+  if (m) return m[1];
+  // Fallback: a non-standard word-first ref (`lane/hotfix-2611`) → the TRAILING digits, not the leading word.
+  m = s.match(/-(\d+)$/);
+  if (m) return m[1];
+  return null;
 }
 
 /**
@@ -241,6 +252,21 @@ export function deriveIdle({ daemonReport, queuedState, now } = {}) {
 }
 
 /**
+ * Does a transcript's text mention item `num` as a DISTINCT id? ANCHORED — the `#<num>` match must NOT be
+ * followed by another alphanumeric, so `#26` never matches `#2611` / `#261x`, and a JIT slug never matches a
+ * longer one. Without this anchor an unrelated recent session (`#2611`) masks a real stall on `#26` — the exact
+ * failure the health verdict exists to catch. Mirrors workflow-progress.mjs's anchored item-id scrape.
+ * @param {string} text  a transcript tail.
+ * @param {string|number} num  the item id (numeric run or JIT slug).
+ * @returns {boolean}
+ */
+export function transcriptMentionsItem(text, num) {
+  if (!text || num == null) return false;
+  const esc = String(num).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('#' + esc + '(?![0-9A-Za-z])').test(String(text));
+}
+
+/**
  * The health verdict — stalled-lane detection via delivery-agent transcript mtimes (reusing the approach in
  * workflow-progress.mjs). A lane is STALLED when its transcript's last activity (`lastActivity`, epoch ms) is
  * older than `stallMs`. A lane with `lastActivity == null` (no transcript located) is NOT flagged — a missing
@@ -382,11 +408,22 @@ function laneItemMap() {
 
 // ── best-effort delivery-agent transcript scan (health) — the IO half of the stall check ─────────────────────
 // Reuses workflow-progress.mjs's approach: a transcript's mtime IS its last-activity clock, and an item's number
-// is written distinctively in a worker's prompt (`#NNNN`). For each active lane we find the newest RECENT session
-// transcript whose tail references the lane's item number and take its mtime. Best-effort by design: no reliable
-// lane→session-uuid map exists, so an unmatched lane yields null (→ never a false stall). Fully guarded.
+// is written distinctively in a worker's prompt (`#NNNN`). For each active lane we find the newest transcript
+// whose tail references the lane's item number (ANCHORED, via transcriptMentionsItem) and take its mtime.
+//
+// LIMITS (best-effort by design — the PURE assessHealth verdict is the tested contract; this shell scan only
+// supplies its `lastActivity` inputs, and a miss degrades to the conservative "no transcript ⇒ never a stall"):
+//   • MAP: no reliable lane→session-uuid map exists, so a lane is matched by its item `#num` scraped from the
+//     transcript. That number comes from `.claude/lane-ports.json` (`{ "<num>": { lane } }`). That registry is
+//     `{}` today, so NO lane carries a num and the whole scan is INERT until it is populated — the health verdict
+//     then simply reports `ok` (nothing to flag), never a false warn.
+//   • TAIL: only the last TAIL_BYTES of each transcript is read, so an item id stated ONLY in a session's opening
+//     prompt (never restated) can be missed. Acceptable — a live delivery agent restates its item id as it works.
+//   • WINDOW: ACTIVITY_WINDOW_MS is kept FAR PAST the stall threshold on purpose. A lane silent LONGER than the
+//     window is precisely the stall we want to catch, so the window must never drop that lane's (old-mtime)
+//     transcript — it caps scan COST only, never the stall reach.
 const PROJECTS = join(homedir(), '.claude', 'projects');
-const ACTIVITY_WINDOW_MS = 6 * 60 * 60 * 1000; // only sessions touched in the last 6h are plausibly a live agent
+const ACTIVITY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000; // 14d — far past any stall threshold, so a long-silent (stalled) lane's transcript is still found, not dropped
 const TAIL_BYTES = 16 * 1024; // bounded tail read — a session transcript can be large
 
 /** Read the last ≤ `TAIL_BYTES` of a file as utf8, or '' on any error. */
@@ -437,7 +474,7 @@ function collectLaneActivity(lanes, nowMs) {
     if (!tail) continue;
     for (const num of nums) {
       if (numToMtime.has(num)) continue; // transcripts are newest-first — first hit is the freshest
-      if (tail.includes(`#${num}`)) numToMtime.set(num, t.mtime);
+      if (transcriptMentionsItem(tail, num)) numToMtime.set(num, t.mtime);
     }
     if (numToMtime.size === nums.length) break;
   }
@@ -483,9 +520,13 @@ function main(argv) {
   let daemonReport = null;
   const daemonCli = findDaemonCli();
   if (daemonCli) {
-    daemonReport = runJson('node', [daemonCli, 'status', '--json'], { cwd: dirname(daemonCli), errors, label: 'drain-daemon status' }) ?? null;
+    // The daemon is explicitly best-effort + cross-repo, so a present-but-THROWING daemon must degrade IDENTICALLY
+    // to an absent one: NO `errors` sink is passed here, so a failed read returns undefined → null → shapeDaemon
+    // "unavailable", and a cross-repo daemon hiccup never flips the whole tick's health verdict to warn.
+    daemonReport = runJson('node', [daemonCli, 'status', '--json'], { cwd: dirname(daemonCli), label: 'drain-daemon status' }) ?? null;
   }
-  // A null report (absent CLI or a failed read) shapes to "unavailable" — expected degradation, NOT an error row.
+  // A null report (absent CLI OR a failed/throwing read) shapes to "unavailable" — expected degradation, never an
+  // `errors[]` row (the contract: the daemon section can vanish without warning the whole tick).
 
   // 5. Idle-clock inputs: queued.json for last queue-add (last merge comes from the daemon report).
   const queuedState = readJsonFile(QUEUED_PATH, { queued: [] });

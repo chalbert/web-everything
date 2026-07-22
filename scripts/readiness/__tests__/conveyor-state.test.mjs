@@ -18,6 +18,7 @@ import {
   lastMergeFromDaemon,
   lastQueueAddFromQueued,
   deriveIdle,
+  transcriptMentionsItem,
   assessHealth,
   assembleConveyorState,
   DEFAULT_STALL_MS,
@@ -48,7 +49,15 @@ describe('shapeQueue — ready/queued build-queue rows → the tick queue shape'
 
 describe('itemNumFromRef — item id out of a lane headRef', () => {
   it('extracts a numeric id', () => expect(itemNumFromRef('lane/2611-conveyor-state')).toBe('2611'));
+  it('extracts a numeric id with no slug', () => expect(itemNumFromRef('lane/2611')).toBe('2611'));
   it('extracts a JIT slug id', () => expect(itemNumFromRef('lane/xe2fmix-slug')).toBe('xe2fmix'));
+  it('a word-first ref falls back to the TRAILING digits (never the leading word)', () => {
+    expect(itemNumFromRef('lane/hotfix-2611')).toBe('2611'); // not 'hotfix'
+  });
+  it('a word-only ref (no id anywhere) → null, never a silent wrong id', () => {
+    expect(itemNumFromRef('lane/hotfix')).toBe(null);
+    expect(itemNumFromRef('lane/conveyor-work')).toBe(null);
+  });
   it('is null for a non-lane / empty ref', () => {
     expect(itemNumFromRef('main')).toBe(null);
     expect(itemNumFromRef(null)).toBe(null);
@@ -65,6 +74,41 @@ describe('ciRollup — statusCheckRollup → one CI token', () => {
   });
   it('pending when a check is still running and none failed', () => {
     expect(ciRollup([{ status: 'COMPLETED', conclusion: 'SUCCESS' }, { status: 'IN_PROGRESS' }])).toBe('pending');
+  });
+  it('SKIPPED / NEUTRAL conclusions count as complete-green (→ pass)', () => {
+    expect(ciRollup([{ status: 'COMPLETED', conclusion: 'SKIPPED' }, { status: 'COMPLETED', conclusion: 'NEUTRAL' }])).toBe('pass');
+  });
+  it('a legacy commit StatusContext state:PENDING → pending', () => {
+    expect(ciRollup([{ state: 'SUCCESS' }, { state: 'PENDING' }])).toBe('pending');
+  });
+  it('a legacy commit StatusContext state:ERROR → fail', () => {
+    expect(ciRollup([{ state: 'SUCCESS' }, { state: 'ERROR' }])).toBe('fail');
+  });
+  it('a COMPLETED run with a null/absent conclusion → pending (not silently green)', () => {
+    expect(ciRollup([{ status: 'COMPLETED' }])).toBe('pending');
+    expect(ciRollup([{ status: 'COMPLETED', conclusion: null }])).toBe('pending');
+  });
+});
+
+describe('transcriptMentionsItem — ANCHORED item-id match (no #26-masks-#2611 false hit)', () => {
+  it('matches the exact id followed by a non-alphanumeric', () => {
+    expect(transcriptMentionsItem('working on #2611 ("conveyor")', '2611')).toBe(true);
+    expect(transcriptMentionsItem('done #2611.', '2611')).toBe(true);
+  });
+  it('#26 does NOT match a longer #2611 / #260 (the stall-masking false hit)', () => {
+    expect(transcriptMentionsItem('working on #2611', '26')).toBe(false);
+    expect(transcriptMentionsItem('working on #260', '26')).toBe(false);
+  });
+  it('#261 does NOT match the #261x family', () => {
+    expect(transcriptMentionsItem('see #2613 and #2614', '261')).toBe(false);
+  });
+  it('a JIT slug matches exactly, not a longer slug', () => {
+    expect(transcriptMentionsItem('item #xe2fmix here', 'xe2fmix')).toBe(true);
+    expect(transcriptMentionsItem('item #xe2fmixy here', 'xe2fmix')).toBe(false);
+  });
+  it('empty text / null num → false', () => {
+    expect(transcriptMentionsItem('', '2611')).toBe(false);
+    expect(transcriptMentionsItem('#2611', null)).toBe(false);
   });
 });
 
@@ -200,18 +244,29 @@ describe('assembleConveyorState — the whole tick picture', () => {
     expect('lastActivity' in s.lanes[0]).toBe(false);
   });
 
-  it('DAEMON-UNAVAILABLE tick — a null report degrades to "unavailable", lastMerge null, no crash', () => {
+  it('DAEMON-UNAVAILABLE tick — a null report degrades to "unavailable" with NO health impact (real absent path)', () => {
     const inputs = baseInputs();
-    inputs.daemonReport = null; // plateau sibling / daemon CLI absent
-    inputs.errors = ['drain-daemon status: cli not found'];
+    // The REAL absent/errored daemon path: the shell routes a missing OR throwing daemon read to null WITHOUT
+    // pushing an errors[] row (the daemon is best-effort/cross-repo), so no error is injected here.
+    inputs.daemonReport = null;
     const s = assembleConveyorState(inputs);
     expect(s.daemon).toBe('unavailable');
     expect(s.idle.lastMerge).toBe(null); // no daemon ⇒ no merge clock
     expect(s.idle.lastQueueAdd).toBe('2026-07-22T14:30:00Z'); // queue-add still comes from queued.json
-    expect(s.health.verdict).toBe('warn'); // the collector error surfaces
-    expect(s.health.errors).toEqual(['drain-daemon status: cli not found']);
+    expect(s.health.verdict).toBe('ok'); // a vanished daemon must NOT flip the tick to warn
+    expect(s.health.errors).toEqual([]);
     // the rest of the tick is intact
     expect(s.queue).toHaveLength(2);
     expect(s.lanes).toHaveLength(1);
+  });
+
+  it('a genuine COLLECTOR error (e.g. lane-pool status failed) DOES flip the verdict to warn', () => {
+    // Distinct from the best-effort daemon: a core collector failing IS surfaced as a warn (the shell passes its
+    // errors[] through). This pins that the daemon is the ONLY read exempted from the health verdict.
+    const inputs = baseInputs();
+    inputs.errors = ['lane-pool status: spawn failed'];
+    const s = assembleConveyorState(inputs);
+    expect(s.health.verdict).toBe('warn');
+    expect(s.health.errors).toEqual(['lane-pool status: spawn failed']);
   });
 });
