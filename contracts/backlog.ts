@@ -107,8 +107,11 @@ export interface OverlayState {
   claimed?: { session: string };
   /** A lane pushed the work + marked it ready-to-merge; carries the lane branch. */
   queued?: { lane: string };
-  /** The item's pull request, joined by lane branch. */
-  pr?: { repo: string; number: number; url: string; state: 'open' | 'merged' | 'closed'; ci: CiVerdict };
+  /** The item's pull request, joined by lane branch. `headRefName` is the PR's head branch (`lane/<num>-…`);
+   *  the board reads it to tell a terminal *resolve* lane (`lane/<num>-resolve`) — genuinely "resolving"
+   *  (UC-D1) — from a merged slice/note/fix PR that is landed history, so an open item is never stuck
+   *  "resolving". Optional so older overlay data / fixtures without it degrade to non-resolve (fail safe). */
+  pr?: { repo: string; number: number; url: string; state: 'open' | 'merged' | 'closed'; ci: CiVerdict; headRefName?: string };
 }
 
 /** num → live state. Keyed by the item's leading num token, matching the list rows' `num`. */
