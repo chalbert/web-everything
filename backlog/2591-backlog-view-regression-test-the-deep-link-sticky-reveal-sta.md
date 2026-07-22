@@ -3,8 +3,9 @@ bornAs: xza531q
 shortTitle: "Deep-link reveal regression tests"
 kind: task
 parent: "2505"
-status: open
+status: resolved
 dateOpened: "2026-07-20"
+dateResolved: "2026-07-21"
 locus: plateau-app
 tags: [plateau-loop, console, backlog-ui, test-coverage]
 ---
@@ -37,3 +38,18 @@ and fails if the #2524 fix is reverted; the suite stays green. No behaviour chan
 ## Not in scope
 - No new scroll/reveal behaviour — this is coverage for the shipped #2524 fix only.
 - No virtualization work (#2513) — the reveal is independent of it.
+
+## Delivered (plateau-app PR #102)
+Took the extraction path the acceptance sanctions. The reveal state machine moved verbatim out of
+`mountBacklogView`'s closure into a pure `plateau:src/backlog-view/backlog-view-reveal.ts` (class
+`StickyReveal`) — behaviour-identical, including the `!revealSelected || !revealActiveRow()` short-circuit
+(no programmatic scroll when the reveal isn't armed) and the requestAnimationFrame guard-release ordering.
+`plateau:src/backlog-view/backlog-view-reveal.test.ts` (9 cases) exercises the three required behaviours:
+re-reveal across background re-renders, release on a reader scroll AND on a new selection (later re-render
+preserves position), and the self-scroll guard.
+
+Adversarially reviewed **SHIP**: each behaviour's test was mutation-verified to fail on revert. The review
+also surfaced that a pre-existing `plateau:src/backlog-view/mount.test.ts` #2524 suite already covers the
+mount WIRING end-to-end and still passes — so the extraction is wiring-faithful and the two suites are
+complementary (module contract + edge cases vs. end-to-end wiring). Full plateau-app suite green (535 tests);
+`tsc --noEmit` clean for the touched files. No behaviour change to the shipped #2524 fix.
