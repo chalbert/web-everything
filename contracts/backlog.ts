@@ -122,12 +122,25 @@ export type OverlayMap = Record<string, OverlayState>;
 /** The closed set of mutations the write port accepts (each rides a lane → PR, never a direct write to main). */
 export type WriteVerb =
   | 'claim' | 'release' | 'resolve' | 'prioritize' | 'tier' | 'rank'
-  | 'weights' | 'build-queue' | 'scaffold' | 'waiver';
+  | 'weights' | 'build-queue' | 'scaffold' | 'waiver' | 'webcase-review';
 
 /** One criterion weight edit (the `weights` verb). */
 export interface WeightEdit {
   key: string;
   weight: number;
+}
+
+/** The verbs a reviewer applies to one webcase (#2550). Mirrors the plateau-side `ReviewVerb` runtime union,
+ *  which is `satisfies`-checked against this so the two can't drift. `annotate` sets a note without a verdict;
+ *  `clear` removes the record. */
+export type ReviewVerdictVerb = 'accept' | 'mark-drifted' | 'annotate' | 'clear';
+
+/** One per-case verdict inside a coalesced `webcase-review` batch (#2550): the case coordinates + the verb. */
+export interface ReviewVerdictEdit {
+  block: string;
+  caseId: string;
+  verb: ReviewVerdictVerb;
+  note?: string;
 }
 
 /** The `POST /api/backlog/write` request body. Fields are per-verb (see each write handler); a foreign write
@@ -150,6 +163,10 @@ export interface WriteRequest {
   parent?: string;
   blockedBy?: string;
   digest?: string;
+  /** For `webcase-review` (#2550): the source id + the coalesced batch of pending verdicts flushed as ONE
+   *  lane → PR that rewrites the committed review ledger (never a PR per verdict). */
+  source?: string;
+  verdicts?: ReviewVerdictEdit[];
 }
 
 /** Terminal + in-flight states of a write job (the mutation transport = a lane → PR). */
