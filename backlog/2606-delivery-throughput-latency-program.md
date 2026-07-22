@@ -16,6 +16,7 @@ A standing program whose north star is to **minimize queue→merged latency and 
 
 - **Front A — conformance (internal):** is the loop currently as fast and as parallel as its known-good targets? Metric: end-to-end cycle time (queue pickup → merged) and its per-stage breakdown, measured from the evidence base below. Green = no stage's wait has regressed past its accepted floor (e.g. the drain interval, the gate's runtime).
 - **Front B — currency (external):** the delivery machinery itself keeps moving — new seams (a new dispatcher, a new daemon, a new review stage) add new latency sources, and infrastructure changes (push seams, faster gates) make old floors obsolete. Discovery method: the `/review-program` watch periodically **re-surveys EVERY latency source** — dispatch tick interval, label-pickup delay, drain pass cadence, review parks, lane idle time between merge and next dispatch, serial human waits — and files improvement items for each wait that can shrink or parallelize without touching safety.
+- **Front B also reviews ADHERENCE to the deterministic-core rule** ([we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](docs/agent/platform-decisions.md#deterministic-core-thin-judgment), #xoh7arv): the watch surfaces judgment-work in the loop that has become script-decidable — a latency *and* drift source (model re-derivation is slower than a script and non-reproducible between ticks) — and files conversion items (move the rule into a tested `we:scripts` script; skills and UIs shell it).
 
 ## Evidence base — measured, not felt
 
