@@ -35,9 +35,14 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { readQueueFile, resolveQueuePath, normNum } from '../conveyor/queue-store.mjs';
+// #2613 — the SAME empty-scope test the dispatcher uses (normScope([]) === [] ⇒ no usable scope), so the tick
+// picture's `unshaped` set and the dispatch plan's `unshaped-no-scope` holds can never disagree on what counts
+// as "no predicted scope". scope-lease.mjs is import-clean (no node built-ins), safe for the pure core.
+import { normScope } from './scope-lease.mjs';
 
 // ── PURE CORE (no fs / git / Date / child_process / gh — every input is passed IN) ───────────────────────────
 
@@ -327,6 +332,26 @@ export function deriveClearedNotReady(buildQueue, clearedNums) {
 }
 
 /**
+ * The UNSHAPED set (#2613 serial-floor, ruled 2026-07-22): the ARMED (cleared-for-build) queue rows with NO
+ * usable predicted `scope`. These are exactly the items the dispatcher treats as "assume-overlaps-everything" —
+ * it runs them SERIALLY (one alone in an otherwise-idle pool), never in parallel, and holds the rest
+ * `unshaped-no-scope`. Surfacing them here lets the conveyor skill tell the operator "these cleared items have no
+ * scope — author it (at prepare/shape time) so they can parallelize." An item counts as unshaped when its scope
+ * is absent / non-array / empty / all-blank (the SAME `normScope`-emptiness test the dispatcher keys on), so the
+ * two surfaces never disagree. Reads `buildQueued` from the session-local sidecar when `clearedNums` is injected
+ * (else the committed frontmatter flag), so `unshaped` tracks exactly what the operator cleared this session.
+ * Pure — shapes the queue via {@link shapeQueue} and filters; no fs / clock.
+ * @param {{queue?:object[]}|object[]|null|undefined} buildQueue  the build-queue rows (scope-enriched by the shell)
+ * @param {Array<string|number>|null|undefined} clearedNums  the sidecar's cleared ids, or null to use frontmatter
+ * @returns {Array<{num:(string|null), scope:*}>} the armed, no-usable-scope rows (stored spelling of num kept)
+ */
+export function deriveUnshaped(buildQueue, clearedNums = null) {
+  return shapeQueue(buildQueue, clearedNums)
+    .filter((r) => r.buildQueued && normScope(r.scope).length === 0)
+    .map((r) => ({ num: r.num, scope: r.scope }));
+}
+
+/**
  * The top-level PURE composer: raw collector outputs (+ an injected clock) → the whole conveyor tick picture. The
  * IO shell gathers the raw inputs and calls this; a test drives it directly with fixtures. `laneActivity` is a
  * `{ [lane]: epochMs }` map of each active lane's last transcript activity (the shell's best-effort transcript
@@ -337,7 +362,7 @@ export function deriveClearedNotReady(buildQueue, clearedNums) {
  *   laneActivity?:Record<string,number>|null, clearedNums?:Array<string|number>|null, now?:number,
  *   stallMs?:number, errors?:string[],
  * }} input
- * @returns {{queue:object[], clearedNotReady:Array<string|number>, lanes:object[], freeSlots:number, prs:object[], daemon:*, idle:object, health:object}}
+ * @returns {{queue:object[], clearedNotReady:Array<string|number>, unshaped:object[], lanes:object[], freeSlots:number, prs:object[], daemon:*, idle:object, health:object}}
  */
 export function assembleConveyorState({
   buildQueue,
@@ -363,6 +388,9 @@ export function assembleConveyorState({
     queue: shapeQueue(buildQueue, clearedNums),
     // Cleared ids with no ready build-queue row — surfaced so a clear never silently vanishes (#2613 review, 2b).
     clearedNotReady: deriveClearedNotReady(buildQueue, clearedNums),
+    // Armed rows with NO predicted scope — the dispatcher runs these SERIALLY (one alone in an idle pool), so
+    // surface them for the operator to author scope and earn parallelism (#2613 serial floor).
+    unshaped: deriveUnshaped(buildQueue, clearedNums),
     lanes,
     freeSlots: computeFreeSlots(poolStatus),
     prs: shapePrs(prList),
@@ -530,6 +558,24 @@ function main(argv) {
 
   // 1. Build queue (ready + queued items, ranked) — READ-ONLY.
   const buildQueue = runJson('node', [BACKLOG_CLI, 'build-queue', '--json'], { errors, label: 'build-queue' });
+
+  // 1b. Enrich the build-queue rows with each item's predicted `scope` (the `build-queue` view omits it) so the
+  //     tick picture can flag UNSHAPED armed items — cleared-for-build rows with no predicted scope, which the
+  //     dispatcher runs SERIALLY rather than in parallel (#2613 serial floor). Best-effort + guarded: a load
+  //     failure leaves scope absent (every armed row then reads as unshaped — a SAFE over-surface: "author scope",
+  //     never a false parallel claim) and is logged to stderr ONLY, NOT pushed to errors[] (a cosmetic enrichment
+  //     miss must not flip the tick's health verdict to warn). Mirrors dispatch-plan.mjs's own scope enrichment.
+  if (buildQueue && Array.isArray(buildQueue.queue) && buildQueue.queue.length) {
+    try {
+      const require = createRequire(import.meta.url);
+      const loadBacklog = require(join(ROOT, 'src', '_data', 'backlog.js'));
+      const items = typeof loadBacklog === 'function' ? loadBacklog() : [];
+      const scopeByNum = new Map(items.map((it) => [String(it.num), it.scope]));
+      buildQueue.queue = buildQueue.queue.map((r) => ({ ...r, scope: r?.scope ?? scopeByNum.get(String(r?.num)) ?? null }));
+    } catch (e) {
+      log(`  ⚠ could not load backlog for scope enrichment (${String(e.message || e).split('\n')[0]}) — armed items read as unshaped`);
+    }
+  }
 
   // 2. Lane pool status + the live scope-lease picture (leases / overlaps / breach).
   const poolArgs = ['status', '--json'];

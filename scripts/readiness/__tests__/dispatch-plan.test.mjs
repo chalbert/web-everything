@@ -3,7 +3,8 @@
  * @description Unit proof of the conveyor DISPATCHER's PURE core (WE #x53zzf9). Drives {@link dispatchPlan}
  *   directly with plain objects (NO git/network) and pins every branch of the dispatch rules:
  *   the disjoint happy path (free lanes fill in rank order), overlap-with-an-active-lease, the rival pair
- *   (higher rank wins), no-free-lane, blocked, and needs-probe — plus the precedence between them.
+ *   (higher rank wins), no-free-lane, blocked, and the UNSCOPED SERIAL FLOOR (#2613, ruled 2026-07-22 — an
+ *   unscoped item runs ALONE in an idle pool, else holds `unshaped-no-scope`) — plus the precedence between them.
  */
 import { describe, it, expect } from 'vitest';
 import { dispatchPlan, selectClearedRows, clearedNotReady } from '../dispatch-plan.mjs';
@@ -162,46 +163,88 @@ describe('dispatchPlan — blocked', () => {
   });
 });
 
-describe('dispatchPlan — needs-probe (no scope field)', () => {
-  it('holds an item that declares no scope as "needs-probe"', () => {
+describe('dispatchPlan — the UNSCOPED SERIAL FLOOR (#2613, ruled 2026-07-22)', () => {
+  // An unscoped item is "assume-overlaps-everything": it may launch ONLY if it can run COMPLETELY ALONE this
+  // tick (no active leases AND nothing else launched), at most one at a time; otherwise it holds
+  // `unshaped-no-scope` — surfaced so scope gets authored upstream, never permanently stalled.
+
+  it('an unscoped item launches ALONE into an otherwise-idle pool (the never-stall floor)', () => {
+    const plan = dispatchPlan({ queue: [{ num: 1 }], leases: [], freeLanes: [2, 3] });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2 }]); // runs serially on the first free lane
+    expect(plan.held).toEqual([]);
+  });
+
+  it('an EMPTY scope array is treated identically to absent → same serial floor', () => {
+    // The #663 empty-scope contract, REFINED: [] is still NOT a "touches nothing" launch — it is undeclared,
+    // so it reads as unscoped. In an idle pool that now means "run alone" (not a permanent stall). Keeps the
+    // pure core aligned with the loader (normalizeScope [] → undefined) and check:standards (errors on []).
+    const plan = dispatchPlan({ queue: [{ num: 1, scope: [] }], leases: [], freeLanes: [2] });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2 }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('an unscoped item is HELD "unshaped-no-scope" when ANY lease is active (can\'t run alone)', () => {
     const plan = dispatchPlan({
-      queue: [{ num: 1 }], // undefined scope
-      leases: [],
-      freeLanes: [2],
+      queue: [{ num: 1 }], // unscoped
+      leases: [{ lane: 9, scope: ['src/anything/'] }], // a lane is running → pool not idle
+      freeLanes: [2, 3],
     });
     expect(plan.launch).toEqual([]);
-    expect(plan.held).toEqual([{ num: 1, reason: 'needs-probe' }]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'unshaped-no-scope' }]);
   });
 
-  it('an EMPTY scope array reads as undeclared → needs-probe (identical to an absent scope)', () => {
-    // The ratified empty-scope contract (#663 review): [] is NOT a "touches nothing" launch — it is the
-    // un-safe declaration, so the core treats it exactly like an absent scope. This keeps the pure core
-    // aligned with the loader (normalizeScope [] → undefined) and check:standards (errors on []).
-    const plan = dispatchPlan({ queue: [{ num: 1, scope: [] }], leases: [], freeLanes: [2] });
-    expect(plan.launch).toEqual([]);
-    expect(plan.held).toEqual([{ num: 1, reason: 'needs-probe' }]);
+  it('two unscoped items → only ONE launches (alone); the other holds "unshaped-no-scope"', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1 }, { num: 2 }],
+      leases: [],
+      freeLanes: [5, 6], // two free lanes, but a second unscoped item can NEVER run concurrently
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 5 }]);
+    expect(plan.held).toEqual([{ num: 2, reason: 'unshaped-no-scope' }]);
   });
 
-  it('needs-probe holds even when a free lane is available; a scoped sibling still launches', () => {
+  it('rank order is respected among unscoped items — the higher-ranked one takes the serial slot', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 10 }, { num: 20 }, { num: 30 }], // 10 is highest rank
+      leases: [],
+      freeLanes: [1, 2, 3],
+    });
+    expect(plan.launch).toEqual([{ num: 10, lane: 1 }]);
+    expect(plan.held).toEqual([
+      { num: 20, reason: 'unshaped-no-scope' },
+      { num: 30, reason: 'unshaped-no-scope' },
+    ]);
+  });
+
+  it('a scoped + an unscoped item → the SCOPED launches, the unscoped holds (can\'t run beside a launch)', () => {
+    // Scoped items are preferred and assigned first; because a scoped item launched this tick, the pool is no
+    // longer idle, so the unscoped item cannot run alongside it — it holds even though a free lane remains and
+    // even though it is HIGHER-ranked (rank does not let an unscoped item pre-empt the serial-floor rule).
     const plan = dispatchPlan({
       queue: [
-        { num: 1 }, // needs-probe
-        { num: 2, scope: ['src/b/'] }, // launches
+        { num: 1 }, // unscoped, higher rank
+        { num: 2, scope: ['src/b/'] }, // scoped → launches
       ],
       leases: [],
       freeLanes: [3, 4],
     });
     expect(plan.launch).toEqual([{ num: 2, lane: 3 }]);
-    expect(plan.held).toEqual([{ num: 1, reason: 'needs-probe' }]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'unshaped-no-scope' }]);
+  });
+
+  it('an unscoped item in an idle pool with NO free lane holds "unshaped-no-scope" (nowhere to run alone)', () => {
+    const plan = dispatchPlan({ queue: [{ num: 1 }], leases: [], freeLanes: [] });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'unshaped-no-scope' }]);
   });
 });
 
 describe('dispatchPlan — mixed tick pins the full precedence + ordering', () => {
-  it('resolves blocked / needs-probe / lease-overlap / rival / launch / no-free-lane together', () => {
+  it('resolves blocked / unscoped / lease-overlap / rival / launch / no-free-lane together', () => {
     const plan = dispatchPlan({
       queue: [
         { num: 1, scope: ['src/a/'], openBlockers: ['5'] }, // blocked
-        { num: 2 }, // needs-probe
+        { num: 2 }, // unscoped → deferred to the pass-2 serial floor; pool not idle (lease active) → held
         { num: 3, scope: ['src/leased/'] }, // overlaps active lease lane-9
         { num: 4, scope: ['src/feature/'] }, // launches → lane-10
         { num: 5, scope: ['src/feature/sub/'] }, // rival of #4 → overlaps lane-10
@@ -215,12 +258,14 @@ describe('dispatchPlan — mixed tick pins the full precedence + ordering', () =
       { num: 4, lane: 10 },
       { num: 6, lane: 11 },
     ]);
+    // Scoped holds come first (pass 1, rank order); the unscoped hold is appended by pass 2 (the serial floor),
+    // so #2 sorts LAST even though it is second in the queue.
     expect(plan.held).toEqual([
       { num: 1, reason: 'blocked' },
-      { num: 2, reason: 'needs-probe' },
       { num: 3, reason: 'overlaps lane-9' },
       { num: 5, reason: 'overlaps lane-10' },
       { num: 7, reason: 'no free lane' },
+      { num: 2, reason: 'unshaped-no-scope' },
     ]);
   });
 });

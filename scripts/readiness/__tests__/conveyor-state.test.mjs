@@ -22,6 +22,7 @@ import {
   assessHealth,
   assembleConveyorState,
   deriveClearedNotReady,
+  deriveUnshaped,
   DEFAULT_STALL_MS,
 } from '../conveyor-state.mjs';
 
@@ -82,6 +83,41 @@ describe('deriveClearedNotReady — cleared ids with no ready build-queue row (#
   it('all-ready → [], and null clearedNums → []', () => {
     expect(deriveClearedNotReady(buildQueue, ['200', 300])).toEqual([]);
     expect(deriveClearedNotReady(buildQueue, null)).toEqual([]);
+  });
+});
+
+describe('deriveUnshaped — armed rows with no predicted scope (the serial-floor surface, #2613)', () => {
+  it('returns ARMED rows whose scope is absent / empty / all-blank; scoped armed rows are excluded', () => {
+    const buildQueue = {
+      queue: [
+        { num: '10', scope: ['we:src/a.ts'] }, // armed + scoped → NOT unshaped
+        { num: '20', scope: [] }, // armed + empty scope → unshaped
+        { num: '30' }, // armed + absent scope → unshaped
+        { num: '40', scope: ['', null] }, // armed + only empty/blank entries (normScope → []) → unshaped
+      ],
+    };
+    // Sidecar clears everything so all four are armed; only the scope-less three are unshaped.
+    expect(deriveUnshaped(buildQueue, ['10', '20', '30', '40'])).toEqual([
+      { num: '20', scope: [] },
+      { num: '30', scope: null },
+      { num: '40', scope: ['', null] },
+    ]);
+  });
+
+  it('excludes UN-armed rows even when they have no scope (only CLEARED items are surfaced)', () => {
+    const buildQueue = { queue: [{ num: '10' }, { num: '20' }] };
+    // Only 10 is cleared this session; 20 is not armed, so it is not an unshaped surface even with no scope.
+    expect(deriveUnshaped(buildQueue, ['10'])).toEqual([{ num: '10', scope: null }]);
+  });
+
+  it('with clearedNums = null, falls back to the committed buildQueued flag', () => {
+    const buildQueue = { queue: [{ num: '10', buildQueued: true }, { num: '20', buildQueued: false }] };
+    expect(deriveUnshaped(buildQueue, null)).toEqual([{ num: '10', scope: null }]);
+  });
+
+  it('empty / null build queue → []', () => {
+    expect(deriveUnshaped(null, ['1'])).toEqual([]);
+    expect(deriveUnshaped({ queue: [] }, ['1'])).toEqual([]);
   });
 });
 
@@ -281,6 +317,16 @@ describe('assembleConveyorState — the whole tick picture', () => {
       ['2611', false], // committed buildQueued:true but NOT in the sidecar → not armed
       ['2612', true], // in the sidecar → armed, despite committed buildQueued:false
     ]);
+    expect(s.clearedNotReady).toEqual([]); // both are ready rows
+  });
+
+  it('UNSHAPED tick — armed rows with no scope surface in state.unshaped; a scoped armed row does not (#2613)', () => {
+    const inputs = baseInputs();
+    // 2611 is scope-enriched (would parallelize); 2612 is armed but has no scope → the serial-floor surface.
+    inputs.buildQueue = { queue: [{ num: '2611', rank: 1, scope: ['we:scripts/readiness/conveyor-state.mjs'] }, { num: '2612', rank: 2 }] };
+    inputs.clearedNums = ['2611', '2612'];
+    const s = assembleConveyorState(inputs);
+    expect(s.unshaped).toEqual([{ num: '2612', scope: null }]); // only the scope-less armed row
     expect(s.clearedNotReady).toEqual([]); // both are ready rows
   });
 

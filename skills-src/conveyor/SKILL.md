@@ -22,9 +22,20 @@ The three scripts this skill shells (do not reimplement any of them):
 
 | Script | What it decides (deterministically) |
 |---|---|
-| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, lanes, freeSlots, prs, daemon, idle, health }`. Every tick STARTS here. |
+| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, lanes, freeSlots, prs, daemon, idle, health }`. Every tick STARTS here. |
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
 | `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR. Its process EXIT is the wake signal; the exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
+
+> **The serial floor for unscoped items (#2613, ruled 2026-07-22).** Predicted `scope:` is authored UPSTREAM at
+> readiness (prepare/shape time); the dispatcher only READS it — it never probes for scope at dispatch. An item
+> that reaches dispatch with **no** `scope:` is a readiness gap, and the dispatcher handles it two ways at once:
+> it **never permanently stalls** (an unscoped item runs **SERIALLY** — one at a time, and only into an
+> otherwise-idle pool, because with no scope it might touch any file and so can't run beside anything), and it is
+> **surfaced loudly** so scope gets authored. Such held items carry the reason **`unshaped-no-scope`** ("no
+> predicted scope — author it to parallelize") in the dispatch plan, and appear in `state.unshaped` in the tick
+> read. **To get PARALLELISM, an item needs a predicted `scope:`** — so each tick, surface the `unshaped` items
+> (and any `held: unshaped-no-scope`) to the operator so they get scoped upstream. Do **not** add a runtime probe
+> here (ruled against — scope is authored at readiness, not by the dispatcher).
 
 The delivery-agent template it instantiates: [`delivery-agent-brief.md`](delivery-agent-brief.md) (#2608).
 
@@ -135,7 +146,9 @@ one that works for a completed background task), so it re-invokes this loop reli
 5. **Post ONE terse status line, then start the next tick.** Per the operator's progress-tracking preference the
    checklist is the channel and prose stays quiet — one line per tick, e.g.:
    > `conveyor · N building · N queued · N parked · health ok` (add `⚠` + the flagged lanes when
-   > `state.health.verdict === 'warn'`).
+   > `state.health.verdict === 'warn'`; add `⚠ N unshaped — author scope: #A #B` when `state.unshaped` is
+   > non-empty, so the operator knows those cleared items are running SERIALLY until scope is authored — see the
+   > serial-floor callout above).
    Then arm the next tick — this is the heartbeat:
    ```
    Bash({ command: "sleep 120", run_in_background: true })
