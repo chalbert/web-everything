@@ -92,8 +92,12 @@ one that works for a completed background task), so it re-invokes this loop reli
      the whole fill — the brief already names the real learnings drop-box command (`learnings-drop.mjs`) and
      every other step verbatim; do not rewrite its prose.
    - Spawn it as **one background `Agent`** with the filled brief as the prompt (default `run_in_background`).
-     One agent = one item = one lane = one PR. The agent acquires its lane, claims the item, builds it, opens a
-     `ready-to-merge` PR, and **exits without merging**.
+     One agent = one item = one lane = one PR. The agent acquires its lane, claims the item, builds it, gets the
+     gate green, then **runs an adversarial code-review subagent on its own diff and addresses the findings to
+     convergence BEFORE opening the PR** (a green gate is not a review — #deterministic-core-thin-judgment: the
+     gate is the deterministic core, the review is the judgment). Only then does it open the PR —
+     `ready-to-merge` for a clean, reviewed, non-statute change, or parked `review:human` **only for good
+     reason** (below) — and **exits without merging**.
    - **Record a guard entry** for this spawn: `{ num, lane, spawnedTick: <this tick's count or timestamp> }`
      (see the guard below).
 
@@ -174,12 +178,24 @@ contract — do not re-derive the verdict; the watcher already classified the PR
 
 ## 4. Landing is the drain daemon's job — the conveyor NEVER merges
 
-Delivery agents stop at `ready-to-merge` (after their gate is green and `pr-land --label-on-green` confirms the
-`test` check). The **resident drain daemon** (`plateau:tools/drain-daemon/`) is the single landing serializer:
-it auto-lands green couples and parks escalations (statute-touching / gate-red / `review:changes`) `review:human`
-for review in this main session. This skill **never runs `gh pr merge` and never runs a drain.** `state.daemon`
-reports the daemon's residency; if it reads `"unavailable"`, tell the operator the resident drain is absent
-(escalations still park, but nothing auto-lands until it — or a manual `/drain` — runs).
+Delivery agents stop at `ready-to-merge` — but only **after** each has reviewed its own diff to convergence
+(step above) and `pr-land --label-on-green` confirms the `test` check. The **resident drain daemon**
+(`plateau:tools/drain-daemon/`) is the single landing serializer: it auto-lands green couples and parks
+escalations `review:human` for review in this main session. This skill **never runs `gh pr merge` and never
+runs a drain.** `state.daemon` reports the daemon's residency; if it reads `"unavailable"`, tell the operator
+the resident drain is absent (escalations still park, but nothing auto-lands until it — or a manual `/drain` —
+runs).
+
+**Escalation discipline — `review:human` is a good-reason hold, not a default.** Because every delivery agent
+runs the adversarial review before opening its PR, a **clean, reviewed, non-statute PR with a green `test`
+auto-lands via the daemon with no human in the loop** — that is the norm. Agents escalate `review:human` ONLY
+for good reason — a **statute-touching** change, a **gate-red** PR, a **review finding that needs human
+judgment**, or **genuine uncertainty** — and **never blanket-park** a clean PR "so a human can see it"
+(over-parking makes the human the bottleneck the conveyor exists to remove and dilutes the label). Whether to
+escalate is **judgment**, kept with the agent rather than a script
+([we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
+A parked PR waking this loop (watcher exit `2`) is handled exactly as in §3 — surface it for `/review`, never
+auto-land it.
 
 ## 5. State is the board's channels only — no parallel store
 
@@ -224,5 +240,6 @@ Per #deterministic-core-thin-judgment, the line is:
 - **Scripts (deterministic, tested — this skill only shells them):** the tick state read, the dispatch plan,
   the merge-watcher verdict, the idle-clock inputs, the health/stall scan. Same inputs → same output, always.
 - **Judgment (stays with the operator + the agents — this skill's real content):** the readiness discussion,
-  clearing items for build, supervising a build, reviewing an escalation (`/review`), and investigating an
-  anomaly. Never spend model context re-deriving a computable plan — read the script's answer and act on it.
+  clearing items for build, supervising a build, **each delivery agent's adversarial review of its own diff**,
+  the **escalate-or-auto-land call**, reviewing an escalation (`/review`), and investigating an anomaly. Never
+  spend model context re-deriving a computable plan — read the script's answer and act on it.
