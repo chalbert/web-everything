@@ -30,6 +30,10 @@ error-summary/**/*.d.ts
 commitment-policy/**/*.js
 commitment-policy/**/*.d.ts
 .claude/lane-ports.json
+# Delivery-agent learnings drop-box (#2614) — transient per-session capture (like claims.json). Agents
+# append generalized-lesson entries during a session; the /closing-session sweep consumes it at close. Never
+# committed — it holds pre-vetting, pre-dedup entries that the sweep + red-team curate before anything lands.
+.conveyor/learnings/
 # Per-session runtime bookkeeping (TTL'd, machine-local) — tooling recreates on demand (#952).
 # SoT relocated to skills-src/ (#2266), so ignore the real path; capacity.json is durable calibration → stays tracked.
 skills-src/batch-backlog-items/claims.json
