@@ -1,7 +1,8 @@
 ---
+bornAs: x0sx61e
 kind: story
 size: 5
-parent: "x4ges6p"
+parent: "2606"
 status: open
 dateOpened: "2026-07-22"
 tags: [plateau-loop, drain-daemon, drain, notifications, push]
