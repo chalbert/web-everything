@@ -27,7 +27,7 @@ dropped its spoofable 400-char loose regex). `resolvedItemSet` keeps discover's 
 cross-check that `resolvedItemSet` and `resolvedOnMain` agree for every fixture item. 63 tests green;
 adversarially reviewed SHIP (mutation-verified: reverting to the loose reader makes the new test fail).
 
-Follow-up filed (#x7xs42w): a THIRD loose reader of the same predicate lives in `we:scripts/lane-drain.mjs`
+Follow-up filed (#2603): a THIRD loose reader of the same predicate lives in `we:scripts/lane-drain.mjs`
 (~line 307, `resolveReachable` — a full-body `/^status:\s*resolved/m` test on the merge path), same spoof
 class, out of this item's two-reader scope — tracked separately so the drain change gets its own test +
 review.
