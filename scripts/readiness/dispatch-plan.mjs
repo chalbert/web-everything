@@ -21,41 +21,38 @@
  *     core and emits its plan. REUSE, never reinvent: the ordering engine, the scope collector, and the pool
  *     picker are each single-sourced; this shell only glues them.
  *
- * THE DISPATCH RULES (§ conveyor dispatcher). SCOPED items are assigned FIRST, in rank order; UNSCOPED items are
- * deferred to a second pass (the serial floor below). Each queued item resolves to exactly ONE outcome:
+ * THE DISPATCH RULES (§ conveyor dispatcher). ONE pass over the queue in rank order (highest-priority first).
+ * Each queued item resolves to exactly ONE outcome:
  *
- * PASS 1 — SCOPED items, rank order (highest-priority first), UNCHANGED from the original design:
- *   • openBlockers > 0                              → held "blocked"          (an unready item can't launch).
+ *   • openBlockers > 0                              → held "blocked"           (an unready item can't launch).
+ *   • no usable scope (absent / non-array / [])     → held "unshaped-no-scope" (NEVER launched to build — see below).
  *   • scope intersects an ACTIVE lease's scope      → held "overlaps lane-<n>" (a running lane owns those paths).
  *   • scope intersects a HIGHER-RANKED item WE JUST  → held "overlaps lane-<n>" (the rival pair: the higher-ranked
  *     LAUNCHED this same tick (a rival pair)           of two mutually-overlapping queued items launches; the
  *                                                       lower-ranked one holds on the lane it was assigned).
- *   • otherwise (disjoint) — assign the next free   → launch { num, lane }    (rank order fills free lanes until
+ *   • otherwise (disjoint) — assign the next free   → launch { num, lane }     (rank order fills free lanes until
  *     lane; once the free lanes run out              the slots run out).
- *                                                    → held "no free lane"     (disjoint but nowhere to run).
+ *                                                    → held "no free lane"      (disjoint but nowhere to run).
  *
- * PASS 2 — the SERIAL FLOOR for UNSCOPED items (scope ABSENT or EMPTY `[]`), ruled 2026-07-22 (Nicolas,
- * merit-based) as a REFINEMENT of the #663 empty-scope=needs-probe rule (NOT a reversal). An unscoped item is
- * "assume-overlaps-everything": it might touch ANY file, so it can never run concurrently with anything. The
- * refinement: running it ALONE in an idle pool IS the protection the old rule demanded (it can't conflict with
- * nothing), so it need not stall forever. An EMPTY scope reads identically to absent (see below).
- *   • blocked (openBlockers > 0)                    → held "blocked"           (checked in pass 1 for all items).
- *   • can run COMPLETELY ALONE this tick — i.e. NO  → launch { num, lane }     (the serial floor: at most ONE
- *     active leases AND nothing else launched this                             unscoped item launches, and only
- *     tick (no scoped launch, no other unscoped)                               into an otherwise-idle pool).
- *     AND a free lane remains
- *   • otherwise                                     → held "unshaped-no-scope" (surfaced, never silently dropped;
- *                                                     the operator gloss is UNSHAPED_HINT — "no predicted scope —
- *                                                     author it to parallelize"). An EMPTY scope is treated
- *                                                     identically to absent: it is NOT a meaningful "touches
- *                                                     nothing" build (every built item produces a lane diff), and
- *                                                     the pure core stays aligned with the loader (normalizeScope
- *                                                     collapses [] → undefined) and check:standards (which ERRORS
- *                                                     on an empty scope).
- * Net effect: the loop NEVER stalls (an unscoped item runs serially when the pool is idle) but also can't
- * double-book (it runs alone), and unscoped items are visibly flagged so scope gets authored upstream to earn
- * parallelism. Precedence within pass 1 is exactly its listed order; a blocked item is blocked even with no
- * scope; a lease/rival overlap holds a scoped item even when a free lane exists.
+ * AUTO-PREPARE, NOT A SERIAL FLOOR (the corrected design, ruled 2026-07-22 — Nicolas). An UNSCOPED item (scope
+ * ABSENT or EMPTY `[]`) is NEVER dispatched to build — not even alone into an idle pool. Building blind is exactly
+ * the hazard the old "serial floor" reintroduced: the conveyor would build an item at the same moment it needed
+ * scope authored for it, and an unscoped build is "assume-overlaps-everything" (it might touch ANY file). So the
+ * dispatcher HOLDS every unscoped item `unshaped-no-scope` — always, even when the pool is fully idle and lanes
+ * are free. That is the point: the /conveyor SKILL sees the held item (here and in `state.unshaped`) and dispatches
+ * a lightweight PREPARE-SCOPE task that authors the item's `scope:` frontmatter; once that lands the item is scoped
+ * and dispatches to BUILD on a later tick. Net effect: unscoped cleared item → auto-prepare (add scope) → then
+ * build. The conveyor never builds without scope and never dispatches blind. An EMPTY scope reads identically to
+ * absent — it is NOT a meaningful "touches nothing" build (every built item produces a lane diff), and this keeps
+ * the pure core aligned with the loader (normalizeScope collapses [] → undefined) and check:standards (which ERRORS
+ * on an empty scope). The operator gloss is UNSHAPED_HINT — "no predicted scope — author it to parallelize".
+ * Precedence is exactly the listed order: a blocked item is blocked even with no scope; an unscoped item holds even
+ * when a free lane exists; a lease/rival overlap holds a scoped item even when a free lane exists.
+ *
+ * Predicted `scope:` is authored UPSTREAM at readiness (prepare/shape time or the auto-prepare task above); the
+ * dispatcher only READS it — it never probes for scope at dispatch and never launches an unscoped item to build
+ * (scope authored at readiness; we:docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates — being
+ * codified in a sibling statute PR).
  */
 
 import { scopesOverlap, normScope } from './scope-lease.mjs';
@@ -67,18 +64,18 @@ import { scopesOverlap, normScope } from './scope-lease.mjs';
  *  entry so a clear never silently vanishes. The pure {@link dispatchPlan} itself never emits it (those items are
  *  not in its `queue` input); the IO shell appends them via {@link clearedNotReady}.
  *
- *  `unshaped-no-scope` (#2613 serial-floor, ruled 2026-07-22) REPLACES the old `needs-probe`: an item with no
- *  predicted `scope` no longer stalls forever — it is treated as "assume-overlaps-everything" and runs SERIALLY
- *  (alone, into an otherwise-idle pool) as a floor, else it is HELD `unshaped-no-scope` and surfaced so scope
- *  gets authored upstream. The operator gloss is fixed — "no predicted scope — author it to parallelize"
- *  ({@link UNSHAPED_HINT}); the reason TOKEN stays short for stable matching, exactly like the others. */
+ *  `unshaped-no-scope` (#2613 auto-prepare, ruled 2026-07-22): an item with no predicted `scope` is treated as
+ *  "assume-overlaps-everything" and is NEVER launched to build — it is ALWAYS HELD `unshaped-no-scope` (even in a
+ *  fully-idle pool with free lanes) and surfaced so the /conveyor skill auto-prepares its `scope:` upstream; once
+ *  that lands the item is scoped and dispatches to BUILD. The operator gloss is fixed — "no predicted scope —
+ *  author it to parallelize" ({@link UNSHAPED_HINT}); the reason TOKEN stays short for stable matching. */
 export const HELD_REASONS = Object.freeze([
   'blocked', 'unshaped-no-scope', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
  *  conveyor skill so a held unshaped item always tells the operator WHAT to do: author the item's predicted
- *  `scope:` (at prepare/shape time) so the dispatcher can parallelize it instead of running it serially. */
+ *  `scope:` (the /conveyor skill auto-prepares it) so the dispatcher can BUILD and parallelize it. */
 export const UNSHAPED_HINT = 'no predicted scope — author it to parallelize';
 
 /** True when an item's `openBlockers` signals it is not ready to build. Tolerant of either the loader's array
@@ -109,9 +106,8 @@ function hasOpenBlockers(item) {
  *                   launch carry the concrete `lane` it lands on. (Ids, not a bare count, because the plan's
  *                   `launch` must name a real lane — the same lane ids the "overlaps lane-<n>" holds reference.)
  * @returns {{ launch: Array<{num, lane}>, held: Array<{num, reason:string}> }}
- *   `launch` — the items to start now, each on the free lane it was assigned (scoped items in rank order, then at
- *              most ONE unscoped item via the serial floor — the two never mix in one tick, since an unscoped item
- *              launches ONLY when nothing scoped did).
+ *   `launch` — the SCOPED items to start now, each on the free lane it was assigned, in rank order. An UNSCOPED
+ *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
  *   `held`   — every other queued item with its single reason ∈
  *              "blocked" | "overlaps lane-<n>" | "no free lane" | "unshaped-no-scope".
  */
@@ -125,9 +121,9 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
   const launch = [];
   const held = [];
   const launched = []; // { num, lane, scope } — SCOPED items launched THIS tick, for the rival-pair check
-  const unshaped = []; // { num } — items with NO usable scope, deferred to the pass-2 serial floor
 
-  // ── PASS 1 — SCOPED items, rank order (unchanged). Unscoped items are set aside for the serial floor. ──
+  // ── ONE pass over the queue in rank order. An unscoped item is NEVER launched (auto-prepare, not a serial
+  //    floor): it is held `unshaped-no-scope` for the /conveyor skill to prepare its scope upstream. ──
   for (const item of items) {
     const num = item.num;
 
@@ -140,15 +136,16 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
       held.push({ num, reason: 'blocked' });
       continue;
     }
-    // 2. No predicted scope — DEFER to the pass-2 serial floor (the #663 refinement, ruled 2026-07-22). An
-    //    ABSENT, non-array, OR EMPTY scope all read as undeclared (see the file header): [] is not a
-    //    meaningful "touches nothing" build, so it is treated identically to absent. Keying on the NORMALIZED
-    //    scope's emptiness catches all four (undefined / non-array / [] / all-blank) in one. Such an item is
-    //    "assume-overlaps-everything" — it cannot be reasoned about against leases/rivals, so it never joins the
-    //    scoped disjoint-parallel set; it can only ever run ALONE (pass 2).
+    // 2. No predicted scope — HOLD `unshaped-no-scope`, ALWAYS. An unscoped item is NEVER launched to build, not
+    //    even alone into an idle pool (auto-prepare, ruled 2026-07-22): building blind is the hazard, and an
+    //    unscoped build is "assume-overlaps-everything". The skill sees this hold (and `state.unshaped`) and
+    //    dispatches a prepare-scope task that authors the item's `scope:`; once that lands the item is scoped and
+    //    dispatches to BUILD on a later tick. An ABSENT, non-array, OR EMPTY scope all read as undeclared (see the
+    //    file header): [] is not a meaningful "touches nothing" build, so it is treated identically to absent.
+    //    Keying on the NORMALIZED scope's emptiness catches all four (undefined / non-array / [] / all-blank).
     const scope = normScope(item.scope);
     if (scope.length === 0) {
-      unshaped.push({ num });
+      held.push({ num, reason: 'unshaped-no-scope' });
       continue;
     }
 
@@ -175,22 +172,6 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
     const lane = free.shift();
     launch.push({ num, lane });
     launched.push({ num, lane, scope });
-  }
-
-  // ── PASS 2 — the SERIAL FLOOR for UNSCOPED items. An unscoped item is "assume-overlaps-everything", so it can
-  //    run ONLY when it is COMPLETELY ALONE this tick: no active leases (nothing running) AND nothing else was
-  //    launched this tick (`launched` empty ⇒ no scoped item started). Under those conditions AT MOST ONE
-  //    unscoped item takes a free lane; every other unscoped item — and every unscoped item when the pool is NOT
-  //    idle — is HELD `unshaped-no-scope` (surfaced, so scope gets authored upstream to earn parallelism). ──
-  const poolIdle = activeLeases.length === 0 && launched.length === 0;
-  let unshapedLaunched = false;
-  for (const u of unshaped) {
-    if (poolIdle && !unshapedLaunched && free.length > 0) {
-      launch.push({ num: u.num, lane: free.shift() });
-      unshapedLaunched = true; // only ONE unscoped item may run — it must run alone
-    } else {
-      held.push({ num: u.num, reason: 'unshaped-no-scope' });
-    }
   }
 
   return { launch, held };
@@ -302,7 +283,7 @@ async function main(argv) {
     const items = typeof loadBacklog === 'function' ? loadBacklog() : [];
     byNum = new Map(items.map((it) => [String(it.num), it]));
   } catch (e) {
-    log(`  ⚠ could not load backlog for scope/openBlockers enrichment (${String(e.message || e).split('\n')[0]}) — items read as unshaped (no scope → serial floor)`);
+    log(`  ⚠ could not load backlog for scope/openBlockers enrichment (${String(e.message || e).split('\n')[0]}) — items read as unshaped (no scope → held unshaped-no-scope, auto-prepared)`);
   }
   const queue = rows.map((r) => {
     const it = byNum.get(String(r.num));

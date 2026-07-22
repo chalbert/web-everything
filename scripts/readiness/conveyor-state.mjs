@@ -332,12 +332,13 @@ export function deriveClearedNotReady(buildQueue, clearedNums) {
 }
 
 /**
- * The UNSHAPED set (#2613 serial-floor, ruled 2026-07-22): the ARMED (cleared-for-build) queue rows with NO
- * usable predicted `scope`. These are exactly the items the dispatcher treats as "assume-overlaps-everything" —
- * it runs them SERIALLY (one alone in an otherwise-idle pool), never in parallel, and holds the rest
- * `unshaped-no-scope`. Surfacing them here lets the conveyor skill tell the operator "these cleared items have no
- * scope — author it (at prepare/shape time) so they can parallelize." An item counts as unshaped when its scope
- * is absent / non-array / empty / all-blank (the SAME `normScope`-emptiness test the dispatcher keys on), so the
+ * The UNSHAPED set (#2613 auto-prepare, ruled 2026-07-22): the ARMED (cleared-for-build) queue rows with NO
+ * usable predicted `scope`. These are exactly the items the dispatcher NEVER launches to build — it holds every
+ * one `unshaped-no-scope` (never runs it blind), and the /conveyor skill reads THIS set to dispatch a prepare-scope
+ * task that authors each item's `scope:` upstream; once that lands the item is scoped and dispatches to BUILD.
+ * Surfacing them here is how the skill decides to AUTO-PREPARE: "these cleared items have no scope — prepare it so
+ * they can build and parallelize." An item counts as unshaped when its scope is absent / non-array / empty /
+ * all-blank (the SAME `normScope`-emptiness test the dispatcher keys on), so the
  * two surfaces never disagree. Reads `buildQueued` from the session-local sidecar when `clearedNums` is injected
  * (else the committed frontmatter flag), so `unshaped` tracks exactly what the operator cleared this session.
  * Pure — shapes the queue via {@link shapeQueue} and filters; no fs / clock.
@@ -388,8 +389,8 @@ export function assembleConveyorState({
     queue: shapeQueue(buildQueue, clearedNums),
     // Cleared ids with no ready build-queue row — surfaced so a clear never silently vanishes (#2613 review, 2b).
     clearedNotReady: deriveClearedNotReady(buildQueue, clearedNums),
-    // Armed rows with NO predicted scope — the dispatcher runs these SERIALLY (one alone in an idle pool), so
-    // surface them for the operator to author scope and earn parallelism (#2613 serial floor).
+    // Armed rows with NO predicted scope — the dispatcher NEVER builds these; the /conveyor skill reads this set
+    // to AUTO-PREPARE each item's scope upstream, after which it dispatches to build (#2613 auto-prepare).
     unshaped: deriveUnshaped(buildQueue, clearedNums),
     lanes,
     freeSlots: computeFreeSlots(poolStatus),
@@ -561,8 +562,9 @@ function main(argv) {
 
   // 1b. Enrich the build-queue rows with each item's predicted `scope` (the `build-queue` view omits it) so the
   //     tick picture can flag UNSHAPED armed items — cleared-for-build rows with no predicted scope, which the
-  //     dispatcher runs SERIALLY rather than in parallel (#2613 serial floor). Best-effort + guarded: a load
-  //     failure leaves scope absent (every armed row then reads as unshaped — a SAFE over-surface: "author scope",
+  //     dispatcher NEVER builds; the skill AUTO-PREPARES their scope instead (#2613 auto-prepare). Best-effort +
+  //     guarded: a load failure leaves scope absent (every armed row then reads as unshaped — a SAFE over-surface:
+  //     "prepare scope",
   //     never a false parallel claim) and is logged to stderr ONLY, NOT pushed to errors[] (a cosmetic enrichment
   //     miss must not flip the tick's health verdict to warn). Mirrors dispatch-plan.mjs's own scope enrichment.
   if (buildQueue && Array.isArray(buildQueue.queue) && buildQueue.queue.length) {

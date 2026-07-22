@@ -26,18 +26,23 @@ The three scripts this skill shells (do not reimplement any of them):
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
 | `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR. Its process EXIT is the wake signal; the exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
 
-> **The serial floor for unscoped items (#2613, ruled 2026-07-22).** Predicted `scope:` is authored UPSTREAM at
-> readiness (prepare/shape time); the dispatcher only READS it — it never probes for scope at dispatch. An item
-> that reaches dispatch with **no** `scope:` is a readiness gap, and the dispatcher handles it two ways at once:
-> it **never permanently stalls** (an unscoped item runs **SERIALLY** — one at a time, and only into an
-> otherwise-idle pool, because with no scope it might touch any file and so can't run beside anything), and it is
-> **surfaced loudly** so scope gets authored. Such held items carry the reason **`unshaped-no-scope`** ("no
-> predicted scope — author it to parallelize") in the dispatch plan, and appear in `state.unshaped` in the tick
-> read. **To get PARALLELISM, an item needs a predicted `scope:`** — so each tick, surface the `unshaped` items
-> (and any `held: unshaped-no-scope`) to the operator so they get scoped upstream. Do **not** add a runtime probe
-> here (ruled against — scope is authored at readiness, not by the dispatcher).
+> **Auto-prepare for unscoped items (#2613, corrected design — Nicolas, 2026-07-22).** Predicted `scope:` is
+> authored UPSTREAM at readiness; the dispatcher only READS it — it never probes for scope at dispatch and
+> **never launches an unscoped item to build.** An item that reaches dispatch with **no** `scope:` is held
+> **`unshaped-no-scope`** ("no predicted scope — author it to parallelize") — **always**, even in a fully-idle
+> pool with free lanes (building blind is exactly the hazard; there is **no** "serial floor" that runs it alone).
+> Instead, the conveyor **auto-prepares** it: each tick, for every `unshaped-no-scope` held item (from the plan /
+> `state.unshaped`), spawn ONE background **prepare-scope agent** (§3b) that predicts the item's touch-set and
+> writes its `scope:` frontmatter as a one-file `ready-to-merge` PR. When that PR lands the item is scoped, and
+> the dispatcher launches it to **BUILD** on a later tick. **So the flow is: unscoped cleared item → auto-prepare
+> (add scope) → then build. The conveyor never builds without scope and never dispatches blind.** Scope is
+> authored at readiness (here, just-in-time), not by the dispatcher
+> ([we:docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates](../../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)
+> — being codified in a sibling statute PR).
 
-The delivery-agent template it instantiates: [`delivery-agent-brief.md`](delivery-agent-brief.md) (#2608).
+The two agent templates it instantiates: [`delivery-agent-brief.md`](delivery-agent-brief.md) (build a scoped
+item, #2608) and [`prepare-scope-agent-brief.md`](prepare-scope-agent-brief.md) (author an unscoped item's
+`scope:`, #2613).
 
 ---
 
@@ -130,6 +135,29 @@ one that works for a completed background task), so it re-invokes this loop reli
    - **Record a guard entry** for this spawn: `{ num, lane, spawnedTick: <this tick's count or timestamp> }`
      (see the guard below).
 
+3b. **Auto-prepare every unscoped held item — spawn ONE background prepare-scope agent per `unshaped-no-scope`.**
+   The dispatcher NEVER launches an unscoped item to build; it holds it `unshaped-no-scope` (in `plan.held`) and
+   surfaces it in `state.unshaped`. For each such held item — **deciding to prepare vs to build is entirely the
+   dispatch plan's classification: a scoped item appears in `plan.launch` (step 3, build); an unscoped one appears
+   as `held: unshaped-no-scope` / `state.unshaped` (here, prepare)** — spawn ONE background prepare-scope agent,
+   UNLESS a prepare is **already in flight for that `num`** (the in-flight guard, keyed by num — see below):
+   - Resolve the item's spec path by **globbing `backlog/<num>-*.md`** (this is the ONLY file the prepare edits).
+   - Pick a free lane for the prepare from `state.freeSlots` / the free-lane set (a prepare needs a lane clone
+     too). A prepare's lane is its OWN — it is **parallel-safe** with every build and every other prepare, because
+     each prepare's `--scope` is a single, distinct backlog file (`we:backlog/<num>-<slug>.md`), disjoint by
+     construction from any builder's code scope and from every other prepare's file.
+   - Instantiate [`prepare-scope-agent-brief.md`](prepare-scope-agent-brief.md) by substituting its four
+     placeholders: `{{ITEM_NUM}}`=`num`, `{{ITEM_SPEC_PATH}}`=the globbed `backlog/<num>-<slug>.md`, `{{LANE}}`=the
+     picked lane, `{{SESSION_SLUG}}`=`prepare-<num>`. Those four `{{DOUBLE_BRACE}}` tokens are the whole fill — do
+     not rewrite the brief's prose.
+   - Spawn it as **one background `Agent`** with the filled brief as the prompt. It acquires its lane, predicts the
+     item's touch-set, writes `scope:` into the one backlog file, gets the gate green, and opens a one-file
+     `ready-to-merge` PR (auto-lands — no review escalation unless the item is statute-touching), then **exits
+     without merging**. When that PR lands the item is scoped and dispatches to **build** on a later tick.
+   - **Record a prepare-guard entry** `{ num, kind: 'prepare', spawnedTick }` so the next tick does not spawn a
+     second prepare for the same `num` while the first is in flight (guard keyed by num — a prepare's lane is
+     incidental, the contended resource is the item's scope authorship).
+
 4. **Spawn a merge watcher per newly-opened PR — but ONLY for items THIS conveyor launched.** `state.prs` (each
    row `{ num, prNumber, state, ci, labels }`) is built from `gh pr list` **repo-wide**, so it also carries PRs
    from other sessions / humans. Filter it to rows whose `num` is one the conveyor dispatched this session
@@ -142,13 +170,19 @@ one that works for a completed background task), so it re-invokes this loop reli
    under *State*). The board (`state.prs`) is the source of truth for which PRs exist; the watcher just wakes you
    the instant one reaches a terminal state. Scoping to conveyor-launched nums keeps an unrelated PR's stray
    `review:*` label from waking the loop with a spurious "PR #N needs review".
+   - **Prepare-scope PRs are watched the same way** (their `num` was dispatched this session too). When a prepare
+     PR **merges** (watcher exit `0`), the item now carries committed `scope:`, so the very next tick's
+     `dispatch-plan` sees it as scoped and launches it to **BUILD** — the auto-prepare → build handoff. Retire the
+     prepare-guard entry for that `num` when its prepare Agent returns or its PR lands (same retirement rules as a
+     delivery guard entry).
 
 5. **Post ONE terse status line, then start the next tick.** Per the operator's progress-tracking preference the
    checklist is the channel and prose stays quiet — one line per tick, e.g.:
-   > `conveyor · N building · N queued · N parked · health ok` (add `⚠` + the flagged lanes when
-   > `state.health.verdict === 'warn'`; add `⚠ N unshaped — author scope: #A #B` when `state.unshaped` is
-   > non-empty, so the operator knows those cleared items are running SERIALLY until scope is authored — see the
-   > serial-floor callout above).
+   > `conveyor · N building · N preparing · N queued · N parked · health ok` — where **`N preparing`** is the
+   > count of prepare-scope agents in flight (auto-preparing unscoped items' scope). Add `⚠` + the flagged lanes
+   > when `state.health.verdict === 'warn'`; add `⚠ N auto-preparing scope: #A #B` when `state.unshaped` is
+   > non-empty, so the operator sees those cleared items are being scoped now (a prepare agent per item) and will
+   > build once their scope lands — see the auto-prepare callout above.
    Then arm the next tick — this is the heartbeat:
    ```
    Bash({ command: "sleep 120", run_in_background: true })
@@ -162,6 +196,13 @@ a naive next tick could double-dispatch it. Keep an in-session list of guard ent
 assigned `lane` matches a live guard entry — the contended resource is the LANE, not just the item, so both must
 be excluded (else tick N launches `{num:100, lane:4}`, 100 is slow to acquire, and tick N+1 re-assigns lane 4 to
 a different top-of-queue `num` while agent A is still starting — two agents targeting lane 4).
+
+**The prepare guard is the same bookkeeping, keyed by `num` only.** A prepare-scope agent (§3b) gets a
+`{ num, kind: 'prepare', spawnedTick }` entry; on each tick, skip auto-preparing any `unshaped-no-scope` `num`
+that already has a live prepare entry, so a slow-to-land prepare is never double-spawned. Key it by `num` (the
+contended resource is the item's scope authorship, not the incidental lane) — and it retires the same three ways
+below, treating "the item now shows committed `scope:` / has left the `unshaped` set" as its version of retirement
+path (1).
 
 **Retire a guard entry three ways:**
 
@@ -275,6 +316,9 @@ Per #deterministic-core-thin-judgment, the line is:
 - **Scripts (deterministic, tested — this skill only shells them):** the tick state read, the dispatch plan,
   the merge-watcher verdict, the idle-clock inputs, the health/stall scan. Same inputs → same output, always.
 - **Judgment (stays with the operator + the agents — this skill's real content):** the readiness discussion,
-  clearing items for build, supervising a build, **each delivery agent's adversarial review of its own diff**,
-  the **escalate-or-auto-land call**, reviewing an escalation (`/review`), and investigating an anomaly. Never
-  spend model context re-deriving a computable plan — read the script's answer and act on it.
+  clearing items for build, supervising a build, **each prepare-scope agent's touch-set prediction** and **each
+  delivery agent's adversarial review of its own diff**, the **escalate-or-auto-land call**, reviewing an
+  escalation (`/review`), and investigating an anomaly. Never spend model context re-deriving a computable plan —
+  read the script's answer and act on it. **Prepare-vs-build is NOT a judgment call here — it is the dispatch
+  plan's classification:** `plan.launch` → build (scoped); `held: unshaped-no-scope` / `state.unshaped` → prepare
+  (unscoped). The skill just spawns the matching agent.
