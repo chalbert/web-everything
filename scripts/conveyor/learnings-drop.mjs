@@ -63,14 +63,33 @@ function charClasses(s) {
   return (/[a-z]/.test(s) ? 1 : 0) + (/[A-Z]/.test(s) ? 1 : 0) + (/[0-9]/.test(s) ? 1 : 0);
 }
 /**
- * A whitespace-delimited token that reads as an OPAQUE secret/key rather than prose: medium length, mixes
- * ≥3 character classes (so plain words & single-case identifiers pass), and high Shannon entropy. Catches
- * unknown-format keys (e.g. a Google AIza… key) and bare high-entropy blobs that prefix rules can't enumerate.
+ * Vowel ratio over the ALPHABETIC chars — the cheap discriminator between a random opaque token and a
+ * word-concatenation identifier. Random secrets (base32/hex/keys) run ~0–15% vowels; English-derived
+ * identifiers run ~25–55% (measured: `item2614dropbox` 0.36, `lane5poolacquire` 0.53, a base32 TOTP 0.05).
+ * Returns 1 (treated as "pronounceable, don't flag") when there are too few letters to judge.
+ */
+function vowelRatio(s) {
+  const letters = (s.match(/[A-Za-z]/g) || []).length;
+  if (letters < 8) return 1;
+  const vowels = (s.match(/[AEIOU]/gi) || []).length;
+  return vowels / letters;
+}
+/**
+ * A whitespace-delimited token that reads as an OPAQUE secret/key rather than prose. TWO shapes:
+ *   (a) MIXED — ≥3 character classes (lower+upper+digit) + high entropy: unknown-format keys and long
+ *       tokens the prefix/blob rules skip (e.g. a Google AIza… key, a github_pat_… PAT with internal `_`).
+ *   (b) NON-PRONOUNCEABLE — a long run of token chars with a very low vowel ratio + real entropy: catches
+ *       2-class base32/random secrets (e.g. a TOTP `jbswy3d…`) that entropy-alone can't separate from a
+ *       word-concatenation identifier (which stays pronounceable, so its vowel ratio spares it).
+ * The upper length bound is generous (a real field is length-capped anyway) so ~88-char PATs are not skipped.
  */
 export function isHighEntropyToken(tok) {
-  if (tok.length < 16 || tok.length > 40) return false;
-  if (charClasses(tok) < 3) return false;
-  return shannonEntropy(tok) >= 3.0;
+  if (tok.length < 16 || tok.length > 256) return false;
+  if (!/^[A-Za-z0-9_-]+$/.test(tok)) return false; // a single opaque run, not a phrase with punctuation
+  const entropy = shannonEntropy(tok);
+  if (charClasses(tok) >= 3 && entropy >= 3.0) return true;              // (a) mixed-class key
+  if (vowelRatio(tok) < 0.15 && entropy >= 3.0) return true;            // (b) non-pronounceable random token
+  return false;
 }
 
 // ── scrub: reject a VALUE that carries a secret / path / code / PII string ──────────────────────────
@@ -79,16 +98,21 @@ const SECRET_PATTERNS = [
   [/-----BEGIN [A-Z ]*(?:PRIVATE KEY|CERTIFICATE)/, 'PEM key/cert block'],
   [/\b(?:sk|pk|rk)-[A-Za-z0-9]{16,}/, 'api-key-shaped token (sk-/pk-/rk-)'],
   [/\bgh[posru]_[A-Za-z0-9]{16,}/, 'GitHub token (ghp_/gho_/…)'],
+  [/\bgithub_pat_[A-Za-z0-9_]{40,}/, 'GitHub fine-grained PAT (github_pat_…)'],
   [/\bxox[baprs]-[A-Za-z0-9-]{10,}/, 'Slack token (xox…)'],
   [/\bAKIA[0-9A-Z]{12,}/, 'AWS access key id (AKIA…)'],
   [/\bAIza[0-9A-Za-z_-]{30,}/, 'Google API key (AIza…)'],
   [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}/, 'JWT (eyJ….….…)'],
   [/\b[A-Za-z0-9+/]{40,}={0,2}\b/, 'long base64/secret-looking blob (≥40 chars)'],
-  [/\b[0-9a-fA-F]{32,}\b/, 'long hex string (≥32 hex chars — token/hash/secret)'],
+  // Lowered 32→20: a 20-char lowercase-hex session id / short-lived token is a real leak class. Pure-hex
+  // runs of ≥20 chars are ~never prose (git SHORT shas are ≤12 → pass; hex colors are 6 → pass).
+  [/\b[0-9a-fA-F]{20,}\b/, 'long hex string (≥20 hex chars — token/hash/session id)'],
 ];
 const PATH_PATTERNS = [
-  [/(?:^|\s)(?:\/[A-Za-z0-9._-]+){2,}/, 'absolute POSIX path (/a/b/…)'],
-  [/(?:^|\s)~\/[A-Za-z0-9._/-]+/, 'home-relative absolute path (~/…)'],
+  // Leading boundary is any NON-path char (not just whitespace), so an absolute path glued to `=`, a quote,
+  // or a paren — `path=/Users/nic/…`, `"/Users/…"`, `(/Users/…)` — is caught, not only the space-separated form.
+  [/(?:^|[^A-Za-z0-9._/-])(?:\/[A-Za-z0-9._-]+){2,}/, 'absolute POSIX path (/a/b/…)'],
+  [/(?:^|[^A-Za-z0-9._/-])~\/[A-Za-z0-9._/-]+/, 'home-relative absolute path (~/…)'],
   [/\b[A-Za-z]:\\[A-Za-z0-9._\\-]+/, 'absolute Windows path (C:\\…)'],
   [/\bfile:\/\//, 'file:// URL (filesystem path)'],
   [/\b[a-z][a-z0-9+.-]*:\/\/[^\s/@]+:[^\s/@]+@/, 'URL with inline credentials (user:pass@host)'],

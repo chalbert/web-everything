@@ -129,14 +129,55 @@ describe('scrub — domain vocabulary must NOT be rejected (must pass)', () => {
   it('a bare AGENTS.md mention (name, not a path) passes', () => pass('the AGENTS.md router omits the conveyor pointer'));
 });
 
+// ── round-3 review: three MORE single-value bypasses (each a complete secret/path in one field) ──────
+describe('scrub — round-3 audited bypasses (must reject)', () => {
+  const reject = (v) => expect(scrubReasons(v).length, `should reject: ${v}`).toBeGreaterThan(0);
+  it('1. GitHub fine-grained PAT (internal _ defeated the base64 \\b; >40 chars skipped entropy)', () => {
+    reject('rotate github_pat_11ABCDEFG0aZ1bY2cX3dW4eV5fU6gT7hS8iR9jQ0kP1lO2mN3');
+  });
+  it('2. absolute/home paths glued to a non-space char (=, quote, paren)', () => {
+    reject('path=/Users/nic/workspace/foo');
+    reject('the value "/Users/nic/workspace/foo" here');
+    reject('see (/Users/nic/workspace/foo) now');
+    reject('home=~/workspace/webeverything/scripts');
+  });
+  it('3. two-class opaque tokens 16–31 chars (base32 TOTP + 20-char hex session id)', () => {
+    reject('the secret jbswy3dpehpk3pxpjbswy3dp leaked');   // base32 TOTP, low vowel ratio
+    reject('session a3f9c1e8b7d2f6a0c4e1 expired');          // 20-char lowercase hex
+    reject('code JBSWY3DPEHPK3PXP now');                     // 16-char base32 upper
+  });
+});
+
+describe('scrub — round-3 false-positive-risk cases (must pass)', () => {
+  const pass = (v) => expect(scrubReasons(v), `should pass: ${v}`).toEqual([]);
+  it('git SHORT shas in prose (≤12 hex) pass; only long/opaque runs reject', () => {
+    pass('landed in abc1234 yesterday');
+    pass('landed in a3f9c1e8b7d2 today'); // 12-char hex short sha
+  });
+  it('a hex color passes', () => pass('use #a3f9c1 for the border'));
+  it('word-concatenation identifiers pass despite mixed 2-class shape', () => {
+    pass('see item2614dropbox for the fixture');       // 2-class, vowel ratio ~0.36
+    pass('lane5poolacquire is the helper');            // 2-class, vowel ratio ~0.53
+    pass('tag webeverything2024 release');             // 2-class + repo name, but not a path
+    pass('workflowprogress2 heartbeat block');
+    pass('the backlogworkflowworkflow module split');  // single-case long identifier
+  });
+  it('a 20-char kebab slug passes', () => pass('the my-cool-feature-slug branch'));
+});
+
 describe('isHighEntropyToken — catches opaque keys, spares identifiers', () => {
-  it('rejects a mixed-class medium blob', () => {
+  it('rejects a mixed-class medium blob (shape a)', () => {
     expect(isHighEntropyToken('abcdEFGH1234abcdEFGH')).toBe(true);
   });
+  it('rejects a non-pronounceable low-vowel token (shape b) and a long PAT (>40)', () => {
+    expect(isHighEntropyToken('jbswy3dpehpk3pxpjbswy3dp')).toBe(true);  // base32 TOTP
+    expect(isHighEntropyToken('github_pat_11ABCDEFG0aZ1bY2cX3dW4eV5fU6gT7hS8iR9jQ0kP1lO2mN3')).toBe(true);
+  });
   it('passes ordinary single-case identifiers and short tokens', () => {
-    expect(isHighEntropyToken('batch-backlog-items')).toBe(false); // single case / hyphen
-    expect(isHighEntropyToken('closingSession')).toBe(false);      // camelCase, no digit
+    expect(isHighEntropyToken('batch-backlog-items')).toBe(false); // single case / hyphen, pronounceable
+    expect(isHighEntropyToken('closingSession')).toBe(false);      // too short (<16)
     expect(isHighEntropyToken('check')).toBe(false);               // too short
+    expect(isHighEntropyToken('lane5poolacquire')).toBe(false);    // 16 chars, 2-class, but pronounceable (vowel ratio spares it)
   });
 });
 
