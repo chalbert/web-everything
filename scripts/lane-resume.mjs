@@ -67,6 +67,20 @@ export { remoteManifestApiArgs };
 // only the first `---`…`---` block — the same splice-scoped reader the backlog status verbs use.
 import { readField } from './backlog/frontmatter.mjs';
 
+/**
+ * The ONE frontmatter-strict "is this backlog doc `status: resolved` on main?" predicate (#2455). BOTH
+ * on-main resolved readers route through it — the discover blocker-gate (`resolvedItemSet`) and the
+ * rebuild proof-of-land (`resolvedOnMain`) — so a body-text `status: resolved` (a fenced frontmatter
+ * example in prose) can never be read as landed by one path while the other correctly refuses, and a future
+ * proof-format change lands here once instead of drifting. `readField` parses only inside the first
+ * `---`…`---` block, so body content never counts.
+ * @param {string} doc  the backlog file's full text
+ * @returns {boolean}
+ */
+function docIsResolved(doc) {
+  return readField(doc, 'status') === 'resolved';
+}
+
 const READY_LABEL = 'ready-to-merge';
 
 /** The cwd repo's "owner/name" slug (from origin), or null if underivable. Same derivation as merge-ai-prs. */
@@ -291,7 +305,7 @@ export function resolvedOnMain(num, cwd = process.cwd()) {
       const path = hit.replace(/^origin\/main:/, '');
       if (!path) continue;
       const doc = execFileSync('git', ['show', `origin/main:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-      if (readField(doc, 'status') === 'resolved') return true;
+      if (docIsResolved(doc)) return true;
     }
     return false;
   } catch { return false; }
@@ -487,16 +501,24 @@ function readManifest(ref, { repo = null } = {}) {
   return null;
 }
 
-/** Item numbers whose backlog file is status:resolved on origin/main (a blocker counts as landed). */
-function resolvedItemSet() {
+/**
+ * Item numbers whose backlog file is `status: resolved` on origin/main (a blocker counts as landed) —
+ * discover's blocker-gate. Reads each candidate's status FRONTMATTER-strict via {@link docIsResolved}, the
+ * same reader `resolvedOnMain` uses (#2455): a body-text `status: resolved` (a fenced frontmatter example)
+ * never spoofs a discover blocker. Keeps discover's one-sweep read (`ls-tree` + per-file `git show`) rather
+ * than resolvedOnMain's per-num grep — this fans out over the whole backlog in one pass.
+ * @param {string} [cwd]
+ * @returns {Set<number>}
+ */
+export function resolvedItemSet(cwd = process.cwd()) {
   const set = new Set();
   let files = [];
-  try { files = sh('git', ['ls-tree', '-r', '--name-only', 'origin/main']).split('\n').filter((f) => /^backlog\/\d+-/.test(f)); } catch { return set; }
+  try { files = execFileSync('git', ['ls-tree', '-r', '--name-only', 'origin/main'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n').filter((f) => /^backlog\/\d+-/.test(f)); } catch { return set; }
   for (const f of files) {
     const n = Number((f.match(/^backlog\/(\d+)-/) || [])[1]);
     try {
-      const head = execFileSync('git', ['show', `origin/main:${f}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).slice(0, 400);
-      if (/^status:\s*resolved/m.test(head)) set.add(n);
+      const doc = execFileSync('git', ['show', `origin/main:${f}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      if (docIsResolved(doc)) set.add(n);
     } catch { /* skip */ }
   }
   return set;
