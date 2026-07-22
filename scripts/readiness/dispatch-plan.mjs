@@ -24,9 +24,17 @@
  * THE DISPATCH RULES (§ conveyor dispatcher). Each queued item, in rank order (highest-priority first), resolves
  * to exactly ONE outcome:
  *   • openBlockers > 0                              → held "blocked"          (an unready item can't launch).
- *   • no predicted `scope` field                   → held "needs-probe"      (the script can't predict scope —
+ *   • scope ABSENT or EMPTY (`[]`)                  → held "needs-probe"      (the script can't predict scope —
  *                                                     a probe agent writes the item's `scope:` frontmatter
- *                                                     later; the deterministic half only READS it).
+ *                                                     later; the deterministic half only READS it). An EMPTY
+ *                                                     scope is treated identically to absent: it is NOT a
+ *                                                     meaningful "touches nothing" build (every built item
+ *                                                     produces a lane diff), so [] is the un-safe declaration
+ *                                                     and needs-probe is the safe default. This keeps the pure
+ *                                                     core aligned with BOTH other halves — the loader
+ *                                                     (normalizeScope collapses [] → undefined) and
+ *                                                     check:standards (which ERRORS on an empty scope) — so no
+ *                                                     shell can drift onto the launch-with-zero-protection path.
  *   • scope intersects an ACTIVE lease's scope      → held "overlaps lane-<n>" (a running lane owns those paths).
  *   • scope intersects a HIGHER-RANKED item WE JUST  → held "overlaps lane-<n>" (the rival pair: the higher-ranked
  *     LAUNCHED this same tick (a rival pair)           of two mutually-overlapping queued items launches; the
@@ -52,12 +60,6 @@ function hasOpenBlockers(item) {
   if (Array.isArray(ob)) return ob.length > 0;
   if (typeof ob === 'number') return ob > 0;
   return false;
-}
-
-/** True when the item declares a predicted `scope` (an array — even empty is a declaration of "touches
- *  nothing"). A missing / non-array scope is UNDECLARED ⇒ needs-probe. */
-function hasScope(item) {
-  return Array.isArray(item?.scope);
 }
 
 /**
@@ -98,16 +100,23 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
     const num = item.num;
 
     // 1. Structurally not ready — an open prerequisite gates the build regardless of scope / slots.
+    //    NOTE: via the production build-queue shell this branch is UNREACHABLE — `backlog.mjs build-queue`
+    //    emits only READY items (isReady requires every blockedBy resolved), so their openBlockers is always
+    //    []. It is kept as defense-in-depth for DIRECT core use (a future shell that feeds an unfiltered queue)
+    //    and is pinned by the unit tests below.
     if (hasOpenBlockers(item)) {
       held.push({ num, reason: 'blocked' });
       continue;
     }
-    // 2. No predicted scope — the script cannot decide overlap; a probe agent must write `scope:` first.
-    if (!hasScope(item)) {
+    // 2. No predicted scope — the script cannot decide overlap; a probe agent must write `scope:` first. An
+    //    ABSENT, non-array, OR EMPTY scope all read as undeclared (see the file header): [] is not a
+    //    meaningful "touches nothing" build, so it is treated identically to absent → needs-probe. Keying on
+    //    the NORMALIZED scope's emptiness catches all four (undefined / non-array / [] / all-blank) in one.
+    const scope = normScope(item.scope);
+    if (scope.length === 0) {
       held.push({ num, reason: 'needs-probe' });
       continue;
     }
-    const scope = normScope(item.scope);
 
     // 3. Overlaps a RUNNING lane's held scope — that lane owns those paths; hold behind it.
     const leaseHit = activeLeases.find((l) => scopesOverlap(scope, l.scope));
@@ -215,7 +224,11 @@ async function main(argv) {
   const paths = runJson('node', [LANE_POOL_CLI, 'list', '--acquirable', '--json'], 'lane-pool list');
   const freeLanes = (Array.isArray(paths) ? paths : [])
     .map((p) => { const m = /lane-(\d+)\/?$/.exec(String(p)); return m ? Number(m[1]) : null; })
-    .filter((n) => n != null);
+    .filter((n) => n != null)
+    // Ascending lane order is a SHELL contract: the pure core assigns launches to freeLanes in the order
+    // given, so sorting here makes the plan's lane assignment deterministic regardless of how `lane-pool
+    // list --acquirable` happens to order its output (removes the dependency on the pool's listing stability).
+    .sort((a, b) => a - b);
 
   const plan = dispatchPlan({ queue, leases, freeLanes });
 

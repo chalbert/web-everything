@@ -687,6 +687,13 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
       err(`Backlog item "${id}" scope must be an array of repo-relative path prefixes (e.g. ["src/backlog-view/", "docs/agent/"])`);
       continue;
     }
+    // An EMPTY scope is meaningless and is the one value where the two halves could disagree — the loader
+    // collapses [] → undefined (needs-probe) while a naive shape check would pass it. Error at author time so
+    // [] can never reach the loader OR the dispatcher: omit the field (→ needs-probe) or list real prefixes.
+    if (scope.length === 0) {
+      err(`Backlog item "${id}" scope is empty — an empty scope is meaningless (the dispatcher reads absent-or-empty as needs-probe). Omit the field, or list real repo-relative path prefixes.`);
+      continue;
+    }
     if (scope.some((p) => typeof p !== 'string'))
       err(`Backlog item "${id}" scope must contain only strings — every entry is a repo-relative path prefix (e.g. "src/backlog-view/")`);
   }

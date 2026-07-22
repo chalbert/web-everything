@@ -27,9 +27,23 @@ describe('dispatchPlan — happy path: disjoint items fill free lanes in rank or
     expect(plan.held).toEqual([]);
   });
 
-  it('an empty scope array is a valid (touches-nothing) declaration — it launches, never needs-probe', () => {
-    const plan = dispatchPlan({ queue: [{ num: 1, scope: [] }], leases: [], freeLanes: [2] });
-    expect(plan.launch).toEqual([{ num: 1, lane: 2 }]);
+  it('a sibling-name-prefix rival pair (src/x vs src/x-2) BOTH launch — segment-boundary non-overlap', () => {
+    // Hardens the keystone's most dangerous property at the DISPATCHER layer: `src/x` must NOT be read as a
+    // prefix of `src/x-2` (a path-SEGMENT boundary, not a raw string prefix), so the two are disjoint and both
+    // launch. Pins segment-boundary non-overlap here directly, not only transitively via scope-lease.test.mjs,
+    // so a future swap of the overlap primitive can't silently start double-booking sibling-named scopes.
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, scope: ['src/x'] },
+        { num: 2, scope: ['src/x-2'] },
+      ],
+      leases: [],
+      freeLanes: [3, 4],
+    });
+    expect(plan.launch).toEqual([
+      { num: 1, lane: 3 },
+      { num: 2, lane: 4 },
+    ]);
     expect(plan.held).toEqual([]);
   });
 });
@@ -154,6 +168,15 @@ describe('dispatchPlan — needs-probe (no scope field)', () => {
       leases: [],
       freeLanes: [2],
     });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-probe' }]);
+  });
+
+  it('an EMPTY scope array reads as undeclared → needs-probe (identical to an absent scope)', () => {
+    // The ratified empty-scope contract (#663 review): [] is NOT a "touches nothing" launch — it is the
+    // un-safe declaration, so the core treats it exactly like an absent scope. This keeps the pure core
+    // aligned with the loader (normalizeScope [] → undefined) and check:standards (errors on []).
+    const plan = dispatchPlan({ queue: [{ num: 1, scope: [] }], leases: [], freeLanes: [2] });
     expect(plan.launch).toEqual([]);
     expect(plan.held).toEqual([{ num: 1, reason: 'needs-probe' }]);
   });
