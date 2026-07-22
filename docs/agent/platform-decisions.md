@@ -2883,7 +2883,7 @@ came from the expressibility audit during ratification discussion. Composes with
 
 ### Deterministic core, thin judgment — delivery-loop machinery scripts every script-decidable decision, single-sourced in we:scripts {#deterministic-core-thin-judgment}
 
-**Ratified 2026-07-22 (#xoh7arv).** In delivery-loop machinery (skills, the conveyor, the console), every
+**Ratified 2026-07-22 (#2607).** In delivery-loop machinery (skills, the conveyor, the console), every
 **script-decidable** decision lives as a **deterministic, tested script single-sourced in `we:scripts`** —
 model judgment is reserved for genuinely judgment-shaped work. Three clauses:
 
@@ -2894,7 +2894,7 @@ model judgment is reserved for genuinely judgment-shaped work. Three clauses:
    `scope:` frontmatter field), building the item, escalation review, the readiness discussion with the human.
 2. **Judgment is reserved for judgment-shaped work.** Spending model context re-deriving a computable plan
    is both a latency source and a drift source (a prose rule re-interpreted per tick gives non-reproducible,
-   untestable decisions) — the rejected alternative on #xoh7arv.
+   untestable decisions) — the rejected alternative on #2607.
 3. **One source — skills and UIs SHELL the same script.** A skill body never carries a prose copy of a
    scripted rule, and a UI never re-implements it: plateau's dev server shells
    `we:scripts/readiness/scope-lease-collect.mjs` for `/api/scope-lease` (`plateau:vite.config.mts`), and the
@@ -2908,7 +2908,7 @@ duplicate-key lint), extended from agent-context management to **product/skill d
 [throughput program](backlog-workflow.md)'s watch (#2606) reviews adherence: judgment-work in the loop
 that has become script-decidable is a conversion item, not a norm.
 
-**Lineage:** #xoh7arv (ratified in-session 2026-07-22, conveyor design; parent program #2606, loop epic
+**Lineage:** #2607 (ratified in-session 2026-07-22, conveyor design; parent program #2606, loop epic
 #2527). Composes with [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) (landing is fully automatic)
 and [#agent-runner-cli-backend](#agent-runner-cli-backend) (the runner interface the loop's judgment agents
 ride).
