@@ -1,4 +1,5 @@
 ---
+bornAs: xkggoo0
 kind: epic
 parent: "2606"
 status: open
@@ -23,4 +24,4 @@ Each point below is a settled design ruling from the session, recorded here so t
 
 ## Slices
 
-Dispatch-plan script + `scope:` field (#x53zzf9), tick state-read script (#xe2fmix), the /conveyor skill itself (#xxa7f8p, blocked on the two scripts), the delivery-agent brief + merge watchers (#x32ajky), and the learnings drop-box + close-session sweep (#xzabmtp). The later product-feedback epic (#xcciuwx, under #2527) reuses the drop-box seam when the console goes multi-tenant.
+Dispatch-plan script + `scope:` field (#2609), tick state-read script (#2611), the /conveyor skill itself (#2613, blocked on the two scripts), the delivery-agent brief + merge watchers (#2608), and the learnings drop-box + close-session sweep (#2614). The later product-feedback epic (#2610, under #2527) reuses the drop-box seam when the console goes multi-tenant.

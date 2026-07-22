@@ -1,7 +1,8 @@
 ---
+bornAs: x53zzf9
 kind: story
 size: 5
-parent: "xkggoo0"
+parent: "2612"
 status: open
 dateOpened: "2026-07-22"
 tags: [conveyor, readiness, script, scope-lease]
@@ -9,7 +10,7 @@ tags: [conveyor, readiness, script, scope-lease]
 
 # Dispatch-plan script + scope frontmatter field
 
-Build `we:scripts/readiness/dispatch-plan.mjs` — the deterministic dispatcher core of the conveyor (#xkggoo0): given the build queue, the active scope leases, and the free lane slots, it decides what launches where and what holds, as JSON. Plus the new optional `scope:` frontmatter field on backlog items (predicted path prefixes) that makes overlap decidable by script. Scripted per [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](docs/agent/platform-decisions.md#deterministic-core-thin-judgment); this same script is the future product conveyor's dispatcher.
+Build `we:scripts/readiness/dispatch-plan.mjs` — the deterministic dispatcher core of the conveyor (#2612): given the build queue, the active scope leases, and the free lane slots, it decides what launches where and what holds, as JSON. Plus the new optional `scope:` frontmatter field on backlog items (predicted path prefixes) that makes overlap decidable by script. Scripted per [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](docs/agent/platform-decisions.md#deterministic-core-thin-judgment); this same script is the future product conveyor's dispatcher.
 
 ## The script
 

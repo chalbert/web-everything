@@ -1,7 +1,8 @@
 ---
+bornAs: xe2fmix
 kind: story
 size: 3
-parent: "xkggoo0"
+parent: "2612"
 status: open
 dateOpened: "2026-07-22"
 tags: [conveyor, script]
@@ -9,7 +10,7 @@ tags: [conveyor, script]
 
 # Conveyor tick state-read script
 
-One script call that returns the whole conveyor tick picture as a single JSON document, so each tick of the /conveyor skill (#xkggoo0) starts from one deterministic read instead of four ad-hoc commands plus eyeballing. Scripted per [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](docs/agent/platform-decisions.md#deterministic-core-thin-judgment).
+One script call that returns the whole conveyor tick picture as a single JSON document, so each tick of the /conveyor skill (#2612) starts from one deterministic read instead of four ad-hoc commands plus eyeballing. Scripted per [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](docs/agent/platform-decisions.md#deterministic-core-thin-judgment).
 
 ## The one JSON
 
@@ -22,4 +23,4 @@ One script call that returns the whole conveyor tick picture as a single JSON do
 
 ## Why
 
-Replaces four ad-hoc commands + eyeballing per tick with one reproducible read. The skill's tick loop (#xxa7f8p) consumes it directly, and the future product conveyor's server shells the same script — one implementation, two shells, per the statute's one-source clause.
+Replaces four ad-hoc commands + eyeballing per tick with one reproducible read. The skill's tick loop (#2613) consumes it directly, and the future product conveyor's server shells the same script — one implementation, two shells, per the statute's one-source clause.

@@ -1,4 +1,5 @@
 ---
+bornAs: xcciuwx
 kind: epic
 parent: "2527"
 status: open
@@ -8,11 +9,11 @@ tags: [plateau-loop, product, feedback, privacy]
 
 # Product feedback channel: opt-in suggestions → owner review screen
 
-When the conveyor/console is offered as a product, the learnings pipeline goes multi-tenant: opt-in suggestion telemetry from users' sessions flows to the owner, who reviews it on a triage screen. Deliberately later work — filed now to shape the seams (especially the drop-box schema in #xzabmtp, which must be tenant-ready from day one). Parent: the #2527 console program; lineage: governance epic #539 (approval roles, opt-in policy).
+When the conveyor/console is offered as a product, the learnings pipeline goes multi-tenant: opt-in suggestion telemetry from users' sessions flows to the owner, who reviews it on a triage screen. Deliberately later work — filed now to shape the seams (especially the drop-box schema in #2614, which must be tenant-ready from day one). Parent: the #2527 console program; lineage: governance epic #539 (approval roles, opt-in policy).
 
 ## Same pipeline shape
 
-capture → dedup → red-team → closed-verdict review → accept/land — the multi-tenant generalization of the single-tenant drop-box sweep (#xzabmtp).
+capture → dedup → red-team → closed-verdict review → accept/land — the multi-tenant generalization of the single-tenant drop-box sweep (#2614).
 
 ## The review screen reuses the ratified console grammar
 
