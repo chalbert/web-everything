@@ -2915,6 +2915,62 @@ ride).
 
 ---
 
+### State lives where its nature dictates — transient intent goes session-local, durable readiness goes committed-upstream {#state-lives-where-its-nature-dictates}
+
+**Ratified 2026-07-22 (Nicolas, merit-based; #2615 + #x11yunv).** *Where* a piece of state lives is
+decided by *what the state is* — its nature — not by which surface first happened to need it. Two kinds,
+two homes:
+
+1. **Transient operator / session intent → a session-local sidecar the lane guard does NOT police.** A
+   per-operator, this-session-only signal — the conveyor's clear-for-build queue is the type case — lives in
+   a **gitignored sidecar** (`we:.conveyor/queue.json`, the drain's `we:skills-src/batch-backlog-items/queued.json`,
+   `we:.claude/lane-ports.json`), **never committed frontmatter**. It is session scratch, so it is exempt from
+   the card-mutation guard and writable straight from the primary/main checkout — which is exactly why #2615
+   moved the conveyor's `buildQueued` here: the guarded committed-frontmatter path (#2302) blocks the main
+   session from ever clearing work, so operator intent had to leave git to be usable at all.
+
+2. **Durable spec / readiness of an item → committed frontmatter, guarded and human-reviewable.** An item's
+   predicted `scope` and its `size` — the *shape* of the work — are shared repo truth authored **upstream** at
+   the moment the item is made ready (`/prepare`, `/scaffold`, `/split` — shape time), **reviewable by a human
+   before the item is cleared**. Its `status` and `blockedBy` are the same kind of durable, committed truth,
+   but mutate across the lifecycle (claim, resolve, re-block), not only at shape time. What unifies all four —
+   and is the load-bearing point — is that every one lives in **committed frontmatter** and mutates **only**
+   through the guard-gated card-mutation path (#2302 — a lane→PR, never a primary-cwd splice).
+
+3. **A dispatcher/scheduler CONSUMES readiness; it never PRODUCES it.** Predicting an item's `scope` is a
+   **readiness/shaping act** — it belongs in `/prepare`, not at dispatch time. A runtime scope-probe *inside*
+   the conveyor is rejected on the merits (#x11yunv): it puts shaping in the dispatcher, produces the
+   prediction late and blind to human review, and hides a second PR; its only edge — freshness — is already
+   covered by the observed-scope breach detector. The dispatcher reads the authored `scope`; it does not
+   author it.
+
+4. **Consistent with PR #663's empty-scope hold (the empty-scope contract; durable home #2609) — resolved by
+   auto-prepare, never by a blind build.** An item that reaches dispatch without a predicted `scope` is
+   `needs-probe` / **unshaped**: it is **held**, never launched blind (exactly PR #663's rule — unscoped =
+   held, never launched unprotected). The conveyor's response to the hold is to **auto-prepare** the item — it
+   dispatches a *prepare-scope* task that predicts the item's touch-set and writes `scope:` into the item's own
+   `backlog/<num>.md`. That prepare task needs no scope prediction of its own: its touch-set is known a priori
+   — it *is* the story's own file — so it is parallel-safe (each prepare touches a different story file) and
+   free of any chicken-and-egg. So scope is **always** authored (at readiness) before a build: never predicted
+   at build time, never dispatched blind. The dispatcher still only *consumes* scope (clause 3); auto-prepare
+   is a separate readiness step that *produces* it.
+
+5. **The guard line is the same line.** The card-mutation guard (#2302) protects **committed durable state**
+   and leaves **session sidecars** alone — the same principle in both directions: the guard exists to protect
+   *shared repo truth*, not *session scratch*. Committed ⇒ guarded + reviewable; sidecar ⇒ unguarded + private.
+   Which side a signal falls on is settled by clause 1 vs. clause 2 — its nature — never by convenience.
+
+**Lineage:** ratified 2026-07-22 (Nicolas, merit-based), codifying #2615 (buildQueued → session-local
+sidecar) and #x11yunv (predicted scope authored at readiness, not at dispatch). Consistent with the empty-scope
+contract of PR #663 (durable home #2609: unscoped = held, never launched blind) — the conveyor resolves the
+held state by auto-preparing the item (authoring its `scope`), never by building it blind. Applies the
+card-mutation guard #2302, and governs the `scope:` field (#2609) the conveyor (#2612/#2613) reads. Composes
+with
+[#deterministic-core-thin-judgment](#deterministic-core-thin-judgment): scope *prediction* is the judgment
+half authored once upstream; dispatch is the deterministic half that only consumes it.
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
