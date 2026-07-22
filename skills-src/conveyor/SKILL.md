@@ -22,7 +22,7 @@ The three scripts this skill shells (do not reimplement any of them):
 
 | Script | What it decides (deterministically) |
 |---|---|
-| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, lanes, freeSlots, prs, daemon, idle, health }`. Every tick STARTS here. |
+| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, lanes, freeSlots, prs, daemon, idle, health }`. Every tick STARTS here. |
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
 | `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR. Its process EXIT is the wake signal; the exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
 
@@ -56,7 +56,15 @@ State plainly to the operator, once, at start:
 > node scripts/conveyor/queue.mjs list           # show what you've cleared this session
 > ```
 > The conveyor pulls **only** cleared items, in the build queue's ranked order. Re-prioritising the backlog
-> never arms a build — clearing does.
+> never arms a build — clearing does. Type the id with or without a leading `#` (`add 2613` ≡ `add '#2613'`).
+>
+> **Clearing a not-yet-ready item is allowed but flagged.** If you clear an id that is not currently a ready
+> build-queue row (blocked / resolved / typo), `add` still records it — a temporarily-blocked item auto-arms
+> when its blocker lands — but it **warns** rather than silently doing nothing, and the tick's
+> `state.clearedNotReady` (and a `held: 'cleared-but-not-ready'` in the dispatch plan) shows it so you always
+> see "you cleared #X but it isn't ready". **JIT-numbering drift:** clear the id the tooling currently shows —
+> a sidecar entry cleared as a `xHASH` won't match once the item lands as `#NNN` (and vice-versa); if a cleared
+> id stops matching, `remove` it and re-`add` the current id.
 >
 > **The conveyor queue is SESSION-LOCAL** (#2613). `queue.mjs add/remove` writes a gitignored sidecar
 > (`.conveyor/queue.json`) — it is NOT a card mutation (it never touches backlog frontmatter or
@@ -80,7 +88,7 @@ one that works for a completed background task), so it re-invokes this loop reli
    ```bash
    node scripts/readiness/conveyor-state.mjs --json
    ```
-   → `{ queue, lanes, freeSlots, prs, daemon, idle, health }`. Do not eyeball four commands; this is the one read.
+   → `{ queue, clearedNotReady, lanes, freeSlots, prs, daemon, idle, health }`. Do not eyeball four commands; this is the one read.
 
 2. **Plan the dispatch (one call):**
    ```bash

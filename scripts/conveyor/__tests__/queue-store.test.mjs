@@ -5,7 +5,10 @@
  *   an absent id is a no-op, list, malformed/missing text → empty, tolerant shapes, and padded/JIT-id
  *   normalization.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   normNum,
   parseQueue,
@@ -14,6 +17,8 @@ import {
   addToQueue,
   removeFromQueue,
   serializeQueue,
+  readQueueFile,
+  writeQueueFile,
 } from '../queue-store.mjs';
 
 describe('normNum — dedup/membership key', () => {
@@ -25,6 +30,15 @@ describe('normNum — dedup/membership key', () => {
     expect(normNum('')).toBe('');
     expect(normNum(null)).toBe('');
     expect(normNum(undefined)).toBe('');
+  });
+
+  it('treats a `#`-prefixed id as the same id (UI sugar) — #2613 ≡ 2613, #xHASH ≡ xHASH (#2613 review req 1)', () => {
+    expect(normNum('#2613')).toBe('2613');
+    expect(normNum('#2613')).toBe(normNum(2613));
+    expect(normNum(' #2613 ')).toBe('2613');
+    expect(normNum('#042')).toBe('42');
+    expect(normNum('#xQxPeac')).toBe('xqxpeac');
+    expect(normNum('#')).toBe('');
   });
 });
 
@@ -121,5 +135,28 @@ describe('serializeQueue — round-trips through parseQueue', () => {
     expect(text.endsWith('\n')).toBe(true);
     expect(JSON.parse(text)).toEqual(q); // bare array on disk
     expect(parseQueue(text)).toEqual(q);
+  });
+});
+
+describe('writeQueueFile / readQueueFile — atomic fs roundtrip (#2613 review nit 3)', () => {
+  let dir;
+  afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+
+  it('writes .conveyor/queue.json (creating the dir) and reads it back; no leftover temp file', () => {
+    dir = mkdtempSync(join(tmpdir(), 'qs-fs-'));
+    const path = join(dir, '.conveyor', 'queue.json');
+    const q = addToQueue([], '2613', 'T1');
+    writeQueueFile(q, path);
+    expect(existsSync(path)).toBe(true);
+    expect(readQueueFile(path)).toEqual(q);
+    // final content is complete JSON (the atomic rename means a reader never sees a partial write)
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(q);
+    // no *.tmp sibling left behind after the rename
+    expect(readdirSync(join(dir, '.conveyor')).some((f) => f.endsWith('.tmp'))).toBe(false);
+  });
+
+  it('readQueueFile on a missing path → []', () => {
+    dir = mkdtempSync(join(tmpdir(), 'qs-fs-'));
+    expect(readQueueFile(join(dir, 'nope', 'queue.json'))).toEqual([]);
   });
 });

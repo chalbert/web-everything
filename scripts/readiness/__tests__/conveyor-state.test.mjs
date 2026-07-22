@@ -21,6 +21,7 @@ import {
   transcriptMentionsItem,
   assessHealth,
   assembleConveyorState,
+  deriveClearedNotReady,
   DEFAULT_STALL_MS,
 } from '../conveyor-state.mjs';
 
@@ -66,6 +67,21 @@ describe('shapeQueue — ready/queued build-queue rows → the tick queue shape'
   it('clearedNums = null falls back to the committed buildQueued flag (backward-compatible)', () => {
     const buildQueue = { queue: [{ num: 42, buildQueued: true }, { num: 7, buildQueued: false }] };
     expect(shapeQueue(buildQueue, null).map((r) => r.buildQueued)).toEqual([true, false]);
+  });
+});
+
+describe('deriveClearedNotReady — cleared ids with no ready build-queue row (#2613 review req 2b)', () => {
+  const buildQueue = { queue: [{ num: '200' }, { num: 300 }] };
+
+  it('returns the cleared ids absent from the ready set (blocked / resolved / typo), stored spelling kept', () => {
+    expect(deriveClearedNotReady(buildQueue, ['200', '999', 'ghost'])).toEqual(['999', 'ghost']);
+  });
+  it('is padding/`#`-tolerant against the ready rows', () => {
+    expect(deriveClearedNotReady(buildQueue, ['#300', '#42'])).toEqual(['#42']);
+  });
+  it('all-ready → [], and null clearedNums → []', () => {
+    expect(deriveClearedNotReady(buildQueue, ['200', 300])).toEqual([]);
+    expect(deriveClearedNotReady(buildQueue, null)).toEqual([]);
   });
 });
 
@@ -265,6 +281,15 @@ describe('assembleConveyorState — the whole tick picture', () => {
       ['2611', false], // committed buildQueued:true but NOT in the sidecar → not armed
       ['2612', true], // in the sidecar → armed, despite committed buildQueued:false
     ]);
+    expect(s.clearedNotReady).toEqual([]); // both are ready rows
+  });
+
+  it('CLEARED-NOT-READY tick — a cleared id with no ready row surfaces in state.clearedNotReady (#2613 review 2b)', () => {
+    const inputs = baseInputs();
+    inputs.clearedNums = ['2612', '9999999']; // 9999999 is not a ready build-queue row
+    const s = assembleConveyorState(inputs);
+    expect(s.clearedNotReady).toEqual(['9999999']); // surfaced, not silently dropped
+    expect(s.queue.find((r) => r.num === '2612').buildQueued).toBe(true);
   });
 
   it('STALLED-LANE tick — a lane silent past the threshold → verdict warn + a stalled entry', () => {

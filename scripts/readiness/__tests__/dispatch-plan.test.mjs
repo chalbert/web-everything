@@ -6,7 +6,7 @@
  *   (higher rank wins), no-free-lane, blocked, and needs-probe — plus the precedence between them.
  */
 import { describe, it, expect } from 'vitest';
-import { dispatchPlan, selectClearedRows } from '../dispatch-plan.mjs';
+import { dispatchPlan, selectClearedRows, clearedNotReady } from '../dispatch-plan.mjs';
 import { normNum } from '../../conveyor/queue-store.mjs';
 
 describe('dispatchPlan — happy path: disjoint items fill free lanes in rank order', () => {
@@ -266,5 +266,35 @@ describe('selectClearedRows — cleared set comes from the SESSION-LOCAL sidecar
 
   it('defensive: non-array rows → []', () => {
     expect(selectClearedRows(null, new Set(['1']), normNum)).toEqual([]);
+  });
+
+  it('a `#`-spelled sidecar id matches a bare-numeric row (#2613 review req 1)', () => {
+    const cleared = new Set(['#2613'].map(normNum)); // operator typed `#2613`
+    expect(selectClearedRows([{ num: 2613 }, { num: 7 }], cleared, normNum)).toEqual([{ num: 2613 }]);
+  });
+});
+
+describe('clearedNotReady — a cleared id with no ready row is surfaced, never silently dropped (#2613 review req 2b)', () => {
+  const readyRows = [{ num: 200 }, { num: 300 }];
+
+  it('returns the cleared ids that have NO ready build-queue row (blocked / resolved / typo / unknown)', () => {
+    const sidecar = [{ num: '200' }, { num: '999' }, { num: 'ghost' }];
+    expect(clearedNotReady(sidecar, readyRows, normNum)).toEqual(['999', 'ghost']);
+  });
+
+  it('preserves the stored spelling for display and is padding/`#`-tolerant', () => {
+    // "042" IS ready (row 200? no — 042→42, not ready); "#300" IS ready (→300); "#42" is NOT ready.
+    const sidecar = [{ num: '#300' }, { num: '#42' }];
+    expect(clearedNotReady(sidecar, readyRows, normNum)).toEqual(['#42']);
+  });
+
+  it('everything ready → [] (nothing to flag)', () => {
+    expect(clearedNotReady([{ num: '200' }, { num: 300 }], readyRows, normNum)).toEqual([]);
+  });
+
+  it('accepts bare-id entries and tolerates empty/missing input', () => {
+    expect(clearedNotReady(['999', 200], readyRows, normNum)).toEqual(['999']);
+    expect(clearedNotReady(null, readyRows, normNum)).toEqual([]);
+    expect(clearedNotReady([{ num: '' }, { num: null }], readyRows, normNum)).toEqual([]);
   });
 });

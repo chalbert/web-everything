@@ -18,9 +18,10 @@
  * PURE-CORE / IO-SHELL SPLIT (mirrors queued-state.mjs #2161): the PURE core (`parseQueue` / `addToQueue`
  *   / `removeFromQueue` / `queueHas` / `serializeQueue`) has NO fs / clock / process — callers inject the
  *   file text (and, for adds, an ISO stamp), so the same logic runs against the live `.conveyor/queue.json`
- *   or an in-memory fixture in tests. The thin fs helpers (`repoRoot` / `queuePath` / `readQueueFile` /
+ *   or an in-memory fixture in tests. The thin fs helpers (`queuePath` / `resolveQueuePath` / `readQueueFile` /
  *   `writeQueueFile`) own the boundary and are used by the CLI ({@link ./queue.mjs}) and the readiness
- *   shells (dispatch-plan / conveyor-state) that read the cleared set.
+ *   shells (dispatch-plan / conveyor-state) that read the cleared set. The sidecar path resolves by SCRIPT
+ *   LOCATION (never CWD) so the writer and readers can never diverge; `CONVEYOR_QUEUE_FILE` overrides it.
  *
  * SHAPE: a JSON ARRAY of `{ num, addedAt }` entries — `num` is the item id as the operator typed it
  *   (a numeric run like "2613" or a JIT hash like "xqxpeac"), `addedAt` an optional ISO stamp (the CLI
@@ -28,22 +29,25 @@
  *   `{ queue: [...] }` wrapper both parse tolerantly, so a hand-edited sidecar never wedges a read.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { join, dirname } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join, dirname, resolve } from 'node:path';
 
 // ── PURE CORE (no fs / clock / process — every input is injected) ─────────────────────────────────────────────
 
 /**
- * Normalize an item id for DEDUP + MEMBERSHIP: a pure-numeric id is compared with leading zeros stripped
- * ("042" ≡ "42"), so the sidecar never double-lists the same item under a padded/unpadded spelling and a
- * membership test matches regardless of how a caller pads. A non-numeric id (a JIT hash) is trimmed +
- * lower-cased. Empty/nullish → "".
+ * Normalize an item id for DEDUP + MEMBERSHIP. Strips a leading `#` sigil first — every UI (and this CLI's own
+ * `list`) renders ids as `#NNN`, so an operator who types `queue.mjs add '#2613'` must match build-queue row
+ * `2613`, not be silently dropped (the `#` is display sugar, never part of the id). Then a pure-numeric id is
+ * compared with leading zeros stripped ("042" ≡ "42"), so the sidecar never double-lists the same item under a
+ * padded/unpadded spelling and a membership test matches regardless of how a caller pads. A non-numeric id (a
+ * JIT hash) is trimmed + lower-cased. Empty/nullish → "".
  * @param {*} num
  * @returns {string}
  */
 export function normNum(num) {
-  const s = String(num ?? '').trim();
+  let s = String(num ?? '').trim();
+  if (s.startsWith('#')) s = s.slice(1).trim(); // `#NNN` UI sugar — the `#` is not part of the id
   if (s === '') return '';
   return /^\d+$/.test(s) ? String(Number(s)) : s.toLowerCase();
 }
@@ -117,31 +121,45 @@ export function serializeQueue(queue) {
 
 // ── THIN FS SHELL (the boundary — used by the CLI + the readiness shells that read the cleared set) ───────────
 
-/** The repo ROOT — `git rev-parse --show-toplevel`, cwd as the fallback (mirrors learnings-drop.mjs). */
-export function repoRoot() {
-  try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
+// The repo root resolved by SCRIPT LOCATION (this file is scripts/conveyor/queue-store.mjs → root is two up),
+// NOT by `git rev-parse`/CWD. WHY: the readers (dispatch-plan, conveyor-state) resolve the sidecar by their
+// own script location; a CWD-based writer would diverge if the operator ran the CLI from a different worktree
+// — writer and reader would then use DIFFERENT sidecar files → silent no-dispatch. Resolving by script
+// location everywhere makes them provably coincide (they load from the same checkout). (#2613 review, nit 4.)
+const HERE = dirname(fileURLToPath(import.meta.url));
+export const QUEUE_ROOT = resolve(HERE, '..', '..');
 
-/** The session sidecar path: `<root>/.conveyor/queue.json` (root defaults to {@link repoRoot}). */
-export function queuePath(root = repoRoot()) {
+/** The session sidecar path: `<root>/.conveyor/queue.json` (root defaults to the SCRIPT-location repo root). */
+export function queuePath(root = QUEUE_ROOT) {
   return join(root, '.conveyor', 'queue.json');
 }
 
+/**
+ * The canonical sidecar path every consumer (CLI + readiness shells) resolves to — the single source of truth
+ * so the writer and readers can NEVER diverge. An explicit `CONVEYOR_QUEUE_FILE` env override wins (used by
+ * tests + any caller that wants an out-of-tree sidecar); otherwise it is the script-location {@link queuePath}.
+ */
+export function resolveQueuePath() {
+  const env = process.env.CONVEYOR_QUEUE_FILE;
+  return env && env.trim() ? env.trim() : queuePath();
+}
+
 /** Read + parse the sidecar at `path` → the cleared `[{num, addedAt}]` array (empty on a missing/corrupt file). */
-export function readQueueFile(path = queuePath()) {
+export function readQueueFile(path = resolveQueuePath()) {
   if (!existsSync(path)) return [];
   try { return parseQueue(readFileSync(path, 'utf8')); }
   catch { return []; }
 }
 
-/** Write the queue to the sidecar at `path`, creating `.conveyor/` if needed. */
-export function writeQueueFile(queue, path = queuePath()) {
+/**
+ * Write the queue to the sidecar at `path`, creating `.conveyor/` if needed. ATOMIC: writes a temp file then
+ * `rename`s it into place, so a dispatch tick reading mid-write never sees partial JSON (which would parse-catch
+ * to `[]` → that tick dispatches nothing). Two racing `add`s are still last-write-wins — acceptable for a
+ * session-local single-operator sidecar, no lock needed. (#2613 review, nit 3.)
+ */
+export function writeQueueFile(queue, path = resolveQueuePath()) {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, serializeQueue(queue));
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, serializeQueue(queue));
+  renameSync(tmp, path);
 }

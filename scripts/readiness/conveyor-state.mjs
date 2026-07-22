@@ -37,7 +37,7 @@ import { existsSync, readFileSync, readdirSync, statSync, openSync, readSync, cl
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { readQueueFile, queuePath, normNum } from '../conveyor/queue-store.mjs';
+import { readQueueFile, resolveQueuePath, normNum } from '../conveyor/queue-store.mjs';
 
 // ── PURE CORE (no fs / git / Date / child_process / gh — every input is passed IN) ───────────────────────────
 
@@ -306,6 +306,27 @@ export function assessHealth({ lanes = [], now = 0, stallMs = DEFAULT_STALL_MS, 
 }
 
 /**
+ * The CLEARED-BUT-NOT-READY ids (#2613 review, required 2b): the sidecar ids (`clearedNums`) with NO row in the
+ * build queue. `build-queue --json .queue` is hard-filtered to READY items, so a cleared id that is blocked /
+ * resolved / a typo lands in the sidecar but never in a row — without surfacing it the operator gets NO feedback
+ * (the "I cleared it, nothing happened" failure #2613 kills). This returns each such id (stored spelling) for the
+ * tick's `clearedNotReady` signal. Pure — normalizes both sides via {@link normNum}.
+ * @param {{queue?:object[]}|object[]|null|undefined} buildQueue  the build-queue rows (ready set)
+ * @param {Array<string|number>|null|undefined} clearedNums  the sidecar ids
+ * @returns {Array<string|number>}
+ */
+export function deriveClearedNotReady(buildQueue, clearedNums) {
+  if (!Array.isArray(clearedNums)) return [];
+  const rows = Array.isArray(buildQueue)
+    ? buildQueue
+    : Array.isArray(buildQueue?.queue)
+      ? buildQueue.queue
+      : [];
+  const ready = new Set(rows.map((r) => normNum(r?.num)));
+  return clearedNums.filter((n) => n != null && String(n) !== '' && !ready.has(normNum(n)));
+}
+
+/**
  * The top-level PURE composer: raw collector outputs (+ an injected clock) → the whole conveyor tick picture. The
  * IO shell gathers the raw inputs and calls this; a test drives it directly with fixtures. `laneActivity` is a
  * `{ [lane]: epochMs }` map of each active lane's last transcript activity (the shell's best-effort transcript
@@ -316,7 +337,7 @@ export function assessHealth({ lanes = [], now = 0, stallMs = DEFAULT_STALL_MS, 
  *   laneActivity?:Record<string,number>|null, clearedNums?:Array<string|number>|null, now?:number,
  *   stallMs?:number, errors?:string[],
  * }} input
- * @returns {{queue:object[], lanes:object[], freeSlots:number, prs:object[], daemon:*, idle:object, health:object}}
+ * @returns {{queue:object[], clearedNotReady:Array<string|number>, lanes:object[], freeSlots:number, prs:object[], daemon:*, idle:object, health:object}}
  */
 export function assembleConveyorState({
   buildQueue,
@@ -340,6 +361,8 @@ export function assembleConveyorState({
   }));
   return {
     queue: shapeQueue(buildQueue, clearedNums),
+    // Cleared ids with no ready build-queue row — surfaced so a clear never silently vanishes (#2613 review, 2b).
+    clearedNotReady: deriveClearedNotReady(buildQueue, clearedNums),
     lanes,
     freeSlots: computeFreeSlots(poolStatus),
     prs: shapePrs(prList),
@@ -547,8 +570,9 @@ function main(argv) {
   // 5b. The SESSION-LOCAL conveyor queue (#2613): the ids the operator cleared for build via
   //     `scripts/conveyor/queue.mjs` (the gitignored `.conveyor/queue.json` sidecar). This — NOT committed
   //     `buildQueued` frontmatter — is what arms a conveyor build, so the tick picture's `queue.buildQueued`
-  //     reflects it (see shapeQueue). Read via queue-store; a missing/corrupt sidecar degrades to [].
-  const clearedNums = readQueueFile(queuePath(ROOT)).map((e) => e.num);
+  //     reflects it (see shapeQueue). Read via the SAME resolver the dispatcher uses (script-location + env
+  //     override) so the reader here can never diverge from the writer. A missing/corrupt sidecar degrades to [].
+  const clearedNums = readQueueFile(resolveQueuePath()).map((e) => e.num);
 
   // 6. Lane → item map + the best-effort transcript activity scan for the health verdict.
   const laneItem = laneItemMap();
