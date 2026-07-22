@@ -1,5 +1,6 @@
 ---
 bornAs: xza531q
+shortTitle: "Deep-link reveal regression tests"
 kind: task
 parent: "2505"
 status: open

@@ -1,5 +1,6 @@
 ---
 bornAs: xh4htpb
+shortTitle: "Visual-differ protocol design"
 kind: decision
 status: open
 dateOpened: "2026-07-18"

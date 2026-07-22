@@ -1,5 +1,6 @@
 ---
 bornAs: x0xy5mj
+shortTitle: "shortTitle field + backfill"
 kind: story
 size: 3
 parent: "2527"

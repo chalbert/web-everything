@@ -1,5 +1,6 @@
 ---
 bornAs: x2rfm5x
+shortTitle: "Agent-supervision surface"
 kind: epic
 size: 8
 parent: "2527"

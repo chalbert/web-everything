@@ -1,5 +1,6 @@
 ---
 bornAs: xuff4b8
+shortTitle: "Board review + queue actions"
 kind: story
 size: 5
 parent: "2555"

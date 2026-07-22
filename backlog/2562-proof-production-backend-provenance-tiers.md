@@ -1,5 +1,6 @@
 ---
 bornAs: x66ywyw
+shortTitle: "Proof-production backend"
 kind: epic
 size: 8
 parent: "2527"

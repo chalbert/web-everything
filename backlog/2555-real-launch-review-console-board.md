@@ -1,5 +1,6 @@
 ---
 bornAs: xaz4dcn
+shortTitle: "Launch-review console board"
 kind: epic
 parent: "2505"
 status: open

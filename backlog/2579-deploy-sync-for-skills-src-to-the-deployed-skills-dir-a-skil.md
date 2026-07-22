@@ -1,5 +1,6 @@
 ---
 bornAs: xybdl27
+shortTitle: "Sync skills-src to deployed dir"
 kind: task
 status: open
 dateOpened: "2026-07-20"
