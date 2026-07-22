@@ -27,8 +27,9 @@
 
 ## Your job (one sentence)
 
-Build backlog item **#{{ITEM_NUM}}** to spec in an isolated lane clone, get its gate green, open a
-`ready-to-merge` PR, drop a learnings entry — then **EXIT WITHOUT MERGING**. The resident drain daemon
+Build backlog item **#{{ITEM_NUM}}** to spec in an isolated lane clone, get its gate green, **review your own
+diff to convergence with an adversarial subagent**, open a PR (`ready-to-merge`, or parked `review:human`
+**only for good reason**), drop a learnings entry — then **EXIT WITHOUT MERGING**. The resident drain daemon
 (`plateau:tools/drain-daemon/`) is the single landing serializer; it lands green couples and parks escalations
 `review:human` for the main session. You never run `gh pr merge`.
 
@@ -74,7 +75,22 @@ npm run check:standards          # (or the item's locus gate)
 node scripts/backlog.mjs resolve {{ITEM_NUM}}
 ```
 
-### 5. Commit + push the `lane/{{ITEM_NUM}}` branch + open the PR (label green ONLY after `test` passes)
+### 5. Review your own diff — spawn an adversarial code-review subagent (converge BEFORE the PR)
+
+A green gate proves the **checks** pass; it does **not** prove the **diff is correct**. Before you open the
+PR, get the work reviewed — the gate is the deterministic core, this review is the judgment a script cannot
+do (per [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
+Spawn **one adversarial code-review subagent** on your working diff:
+
+- **Read-only, diff-focused.** It reviews *this lane's* diff — **correctness first**, plus the lens the change
+  earns: a **security** pass for anything touching untrusted input, secrets, auth, or file/network I/O; an
+  interface/compat pass for a contract change; and so on. It reports findings; it does not edit.
+- **Address every finding to CONVERGENCE — don't rubber-stamp, don't silently drop.** Fix the real issues in
+  the lane. A finding you judge not-real is **dismissed with a one-line reason** (never dropped in silence).
+  Re-run the review after any nontrivial fix, until a pass comes back clean (or with only
+  dismissed-with-reason findings). **Only then** proceed to the PR.
+
+### 6. Commit + push the `lane/{{ITEM_NUM}}` branch + open the PR (label green ONLY after `test` passes)
 
 Commit only this item's files (explicit paths, never `git add -A`; one commit), then open the PR through the
 canonical producer — **never a hand-rolled `gh pr create`** (that skips the #2307 producer review-labeling):
@@ -94,7 +110,15 @@ red PR never enters the drain's queue.
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
 - If the PR's CI ends up red, it is left **unlabelled** — that is an escalation (below), not a land.
 
-### 6. Append a structured learnings entry to the session drop-box (#2614)
+**Which label — escalate `review:human` by good reason ONLY.** The escalation call is **judgment**, not a
+script ([#deterministic-core-thin-judgment](../../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
+**Default** is `--label-on-green` (opens `ready-to-merge`; the daemon lands it with no human in the loop) — a
+clean, reviewed, non-statute PR whose `test` is green lands that way, and that is the norm, not the exception.
+Open the PR **parked** instead — `--label=review:human` (STOPS at open, no auto-land), or leave it
+**unlabelled** (`--no-wait`) on a red gate — ONLY when an *Escalations* condition below applies. Do **NOT**
+blanket-park a clean, reviewed PR "so a human can see it".
+
+### 7. Append a structured learnings entry to the session drop-box (#2614)
 
 Append **exactly one** structured, generalized-lesson entry to the session drop-box — a friction hit, a missing
 convention, a doc/skill gap, or an improvement idea from building this item. The drop-box (#2614) is
@@ -118,11 +142,11 @@ generalize it and retry; do **not** try to force it through. Skip this step only
 generalizable friction. Distributed capture (every agent, cheaply, in the moment); the `/closing-session` sweep
 curates centrally.
 
-### 7. EXIT — do not merge, do not release, do not wait
+### 8. EXIT — do not merge, do not release, do not wait
 
 **Stop here.** Do NOT run `gh pr merge`. Do NOT run a drain. Do NOT `release` the lane — the resident drain
 daemon lands the PR. The **merge watcher** (`scripts/conveyor/pr-watch.mjs <pr-number>`) is spawned by the
-**conveyor skill, not by you**, on the PR number `pr-land` reported for this item in step 5; its process exit
+**conveyor skill, not by you**, on the PR number `pr-land` reported for this item in step 6; its process exit
 (merged / parked / closed) wakes the main session and re-dispatches the freed lane. Your OWN process EXIT is the
 signal you are done. Return a one-line result to the conveyor: `#{{ITEM_NUM}} → PR #<n> (ready-to-merge |
 escalated <label> | gate-red)`. **A red gate / red CI is NOT watcher-visible** (it reads only state/labels) —
@@ -132,7 +156,11 @@ your one-line RETURN is the only signal that surfaces it, so always report it ex
 
 ## Escalations — when you do NOT reach ready-to-merge
 
-Three conditions mean the item does **not** auto-land; it is reviewed in the **main session**, never by you:
+Escalation is **by good reason only** — a clean, reviewed, non-statute PR with a green `test` lands via the
+daemon with **no human in the loop**, and that is the default. Escalate — the item does **not** auto-land and
+is reviewed in the **main session**, never by you — ONLY when one of these holds. **Never blanket-park** a
+clean PR "so a human can see it": over-parking makes the human the bottleneck the conveyor exists to remove
+and dilutes what `review:human` means.
 
 1. **Statute-touching change** — the item edits a policy-core / gate-self path (see `scripts/lib/gate-config.mjs`).
    `pr-land`'s deterministic rubric (`scoreEscalation` → `producerReviewLabel`, #2307) applies **`review:human`**
@@ -140,7 +168,12 @@ Three conditions mean the item does **not** auto-land; it is reviewed in the **m
 2. **Gate red** — `check:standards` (or the locus gate) fails from your own work, OR the PR's `test` check ends
    red. The PR is left **unlabelled** (never `ready-to-merge`); report the failing check and stop. Do not weaken
    or delete a test to go green.
-3. **`review:changes`** — a human bounced a prior version of this diff. Repair before any land; if it is still
+3. **A review finding that needs human judgment** — the step-5 adversarial review surfaced an issue you could
+   not safely self-clear (you fixed what you could to convergence; this one needs a human call). Open the PR
+   parked `review:human` (`--label=review:human`).
+4. **Genuine uncertainty** — you are not confident the change is right and want a human eye before it lands.
+   Park it `review:human`. (Uncertainty is a *good reason*; "so a human can see a clean change" is not.)
+5. **`review:changes`** — a human bounced a prior version of this diff. Repair before any land; if it is still
    red after your fix, it stays parked.
 
 In every escalation case the outcome is the same: **the daemon parks the PR `review:human` (or leaves it
