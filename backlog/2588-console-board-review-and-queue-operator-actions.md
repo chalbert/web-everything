@@ -41,19 +41,20 @@ finished work — reviewing never leaves the board. The create/decide write affo
   `main` and never reaches a bare CLI / `gh` ([#2558] R2 boundary). The build-queue verb it extends is
   [#2522].
 
-## Delivered so far (the ready-item foundation)
-The prerequisite the drag-to-queue concern needs — the board actually *surfacing* ready-to-launch work — shipped
-(plateau-app PR #99). `plateau-app:src/backlog-view/lane-board-data.ts` `buildBoard` now collects a **ready set**
-(status:open, non-decision, unblocked items no live lane owns), ranked by ⚡ leverage then num and capped, rendered
-as **UC-C1 "⠿ ready to queue"** cards in a new `.lb-ready` "Ready to queue" board section
-(`plateau-app:src/backlog-view/lane-board.ts`) with each card's ⚡ frees/gates count — the design-record §3i v20-v21
-"Ready to queue" surface. Before this, open items never appeared on the board, so there was nothing to drag; the
-drag-to-queue concern is now buildable on top.
+## Delivered (the ready surface + drag-to-queue)
+- **The ready-item surface** (plateau-app PR #99). `plateau-app:src/backlog-view/lane-board-data.ts` `buildBoard`
+  collects a **ready set** (status:open, non-decision, unblocked items no live lane owns), ranked by ⚡ leverage then
+  num and capped, rendered as **UC-C1 "⠿ ready to queue"** cards in a new `.lb-ready` "Ready to queue" board section
+  (`plateau-app:src/backlog-view/lane-board.ts`) with each card's ⚡ frees/gates count — the design-record §3i v20-v21
+  "Ready to queue" surface. Before this, open items never appeared on the board, so there was nothing to drag.
+- **Drag-to-queue** (plateau-app PR #100). Those UC-C1 cards are **draggable onto a lane** to clear them for build,
+  in the slice's own `plateau-app:src/backlog-view/operator-actions.ts`: dragover highlights lanes **green** (clean /
+  fits) or **amber** (the lane holds a scope-lease conflict card — UC-A4/B2/B3 from #2589), the **drain** lane is
+  refused, and a drop dispatches the existing #2522 `build-queue` add verb (clears the item for the autonomous
+  builder — extends #2522, not a parallel path) through the lane→PR write port (#2558 R2). An in-flight lock makes a
+  double-drop arm spend at most once. Adversarial review SHIP (write-safety traced).
 
 ## Remaining (why this stays open)
-- **Drag-to-queue** — now unblocked (the ready set exists): the drag machinery + green-fits/amber-overlap lane
-  highlight (from the scope-lease picture) + drop→`build-queue` dispatch + drain-lane refusal, in the slice's own
-  `plateau-app:src/backlog-view/operator-actions.ts`.
 - **Review modal + merge/bounce/take-over verbs** — still gated on UNBUILT infrastructure: the finished-build
   review DATA (spec-proven rows, evidence deep-links, findings, the visual diff) is not produced by any endpoint
   today, and `merge`/`bounce`/`take-over` are not in the write-verb set (no console review/label write path). Needs
