@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyLane, orderByBlockedBy, landDecision, land, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain } from '../lane-resume.mjs';
+import { classifyLane, orderByBlockedBy, landDecision, land, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain, resolvedItemSet } from '../lane-resume.mjs';
 
 const resolved = new Set([2110, 2113]); // blockers already landed on main
 
@@ -597,6 +597,36 @@ describe('lane-resume — deriveLandedFromMain (#2396: stackParent landed status
       expect(resolvedOnMain(777, repo)).toBe(false); // open + spoofed body → NOT landed (the F5 stowaway guard)
       expect(resolvedOnMain(778, repo)).toBe(true);  // genuinely resolved in frontmatter → landed
       expect(resolvedOnMain(999, repo)).toBe(false); // no file at all → fails closed
+    } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
+
+  it('resolvedItemSet reads the SAME frontmatter-strict predicate as resolvedOnMain — both entry points agree on the spoof (#2455)', () => {
+    // The unification #2455 pins: before it, discover's `resolvedItemSet` regex-matched `status: resolved`
+    // anywhere in the first 400 bytes, so a fenced frontmatter example in an OPEN item's body read as a
+    // LANDED blocker — while the same /finish pass's rebuild half (`resolvedOnMain`) correctly refused it.
+    // One question, two answers. Now both route through `docIsResolved` (frontmatter-only), so the spoof
+    // reads NOT resolved through BOTH entry points.
+    const repo = mkdtempSync(join(tmpdir(), 'lane-resume-ris-'));
+    const git = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      git('init', '-q');
+      git('config', 'user.email', 'test@test'); git('config', 'user.name', 'Test');
+      git('config', 'commit.gpgsign', 'false');
+      mkdirSync(join(repo, 'backlog'));
+      // 777: OPEN, but a column-0 `status: resolved` sits in the body within the first 400 bytes — the exact
+      // shape the old loose reader mis-read as landed.
+      writeFileSync(join(repo, 'backlog/777-open-spoof.md'),
+        '---\nkind: story\nstatus: open\n---\n# Open item\n\nExample frontmatter:\n\n```yaml\nstatus: resolved\n```\n');
+      // 778: genuinely resolved in the frontmatter.
+      writeFileSync(join(repo, 'backlog/778-really-resolved.md'),
+        '---\nkind: story\nstatus: resolved\n---\n# Landed item\n');
+      git('add', 'backlog'); git('commit', '-qm', 'seed');
+      git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+      const set = resolvedItemSet(repo);
+      expect(set.has(777)).toBe(false); // the spoof is NOT a landed blocker (this is the #2455 fix)
+      expect(set.has(778)).toBe(true);  // the genuinely-resolved item IS
+      // The two readers now answer identically for every item in the fixture — the whole point of #2455.
+      for (const n of [777, 778, 999]) expect(set.has(n)).toBe(resolvedOnMain(n, repo));
     } finally { rmSync(repo, { recursive: true, force: true }); }
   });
 });
