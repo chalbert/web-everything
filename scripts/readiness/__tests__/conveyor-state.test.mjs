@@ -21,6 +21,7 @@ import {
   transcriptMentionsItem,
   assessHealth,
   assembleConveyorState,
+  deriveClearedNotReady,
   DEFAULT_STALL_MS,
 } from '../conveyor-state.mjs';
 
@@ -44,6 +45,43 @@ describe('shapeQueue — ready/queued build-queue rows → the tick queue shape'
   it('tolerates null / missing queue → []', () => {
     expect(shapeQueue(null)).toEqual([]);
     expect(shapeQueue({})).toEqual([]);
+  });
+
+  it('with a sidecar clearedNums, buildQueued reflects the SESSION-LOCAL conveyor queue, not the committed flag (#2613)', () => {
+    // A row committed-cleared (buildQueued:true) but NOT in the sidecar reads buildQueued:false; a row in the
+    // sidecar reads buildQueued:true even with no committed flag. Padding-tolerant (sidecar "042" ≡ row 42).
+    const buildQueue = { queue: [{ num: 42, buildQueued: true }, { num: '200', buildQueued: false }, { num: 300 }] };
+    const shaped = shapeQueue(buildQueue, ['200', '042']);
+    expect(shaped.map((r) => [r.num, r.buildQueued])).toEqual([
+      ['42', true], // sidecar "042" matches → cleared, despite… (also committed, but the sidecar is the source now)
+      ['200', true], // sidecar member with NO committed flag → cleared
+      ['300', false], // not in the sidecar → not cleared
+    ]);
+  });
+
+  it('an EMPTY sidecar clears nothing even when rows carry committed buildQueued:true', () => {
+    const buildQueue = { queue: [{ num: 42, buildQueued: true }] };
+    expect(shapeQueue(buildQueue, []).map((r) => r.buildQueued)).toEqual([false]);
+  });
+
+  it('clearedNums = null falls back to the committed buildQueued flag (backward-compatible)', () => {
+    const buildQueue = { queue: [{ num: 42, buildQueued: true }, { num: 7, buildQueued: false }] };
+    expect(shapeQueue(buildQueue, null).map((r) => r.buildQueued)).toEqual([true, false]);
+  });
+});
+
+describe('deriveClearedNotReady — cleared ids with no ready build-queue row (#2613 review req 2b)', () => {
+  const buildQueue = { queue: [{ num: '200' }, { num: 300 }] };
+
+  it('returns the cleared ids absent from the ready set (blocked / resolved / typo), stored spelling kept', () => {
+    expect(deriveClearedNotReady(buildQueue, ['200', '999', 'ghost'])).toEqual(['999', 'ghost']);
+  });
+  it('is padding/`#`-tolerant against the ready rows', () => {
+    expect(deriveClearedNotReady(buildQueue, ['#300', '#42'])).toEqual(['#42']);
+  });
+  it('all-ready → [], and null clearedNums → []', () => {
+    expect(deriveClearedNotReady(buildQueue, ['200', 300])).toEqual([]);
+    expect(deriveClearedNotReady(buildQueue, null)).toEqual([]);
   });
 });
 
@@ -232,6 +270,26 @@ describe('assembleConveyorState — the whole tick picture', () => {
     expect(s.daemon).toEqual({ resident: true, lastPass: inputs.daemonReport.lastPass, parked: inputs.daemonReport.parkedNow });
     expect(s.idle).toEqual({ lastMerge: '2026-07-22T14:00:00Z', lastQueueAdd: '2026-07-22T14:30:00Z', now });
     expect(s.health).toEqual({ verdict: 'ok', stalled: [], errors: [] });
+  });
+
+  it('SIDECAR-QUEUE tick — clearedNums flips queue.buildQueued to the session-local conveyor queue (#2613)', () => {
+    const inputs = baseInputs();
+    // Committed frontmatter says 2611 cleared, 2612 not — but the session sidecar cleared only 2612.
+    inputs.clearedNums = ['2612'];
+    const s = assembleConveyorState(inputs);
+    expect(s.queue.map((r) => [r.num, r.buildQueued])).toEqual([
+      ['2611', false], // committed buildQueued:true but NOT in the sidecar → not armed
+      ['2612', true], // in the sidecar → armed, despite committed buildQueued:false
+    ]);
+    expect(s.clearedNotReady).toEqual([]); // both are ready rows
+  });
+
+  it('CLEARED-NOT-READY tick — a cleared id with no ready row surfaces in state.clearedNotReady (#2613 review 2b)', () => {
+    const inputs = baseInputs();
+    inputs.clearedNums = ['2612', '9999999']; // 9999999 is not a ready build-queue row
+    const s = assembleConveyorState(inputs);
+    expect(s.clearedNotReady).toEqual(['9999999']); // surfaced, not silently dropped
+    expect(s.queue.find((r) => r.num === '2612').buildQueued).toBe(true);
   });
 
   it('STALLED-LANE tick — a lane silent past the threshold → verdict warn + a stalled entry', () => {

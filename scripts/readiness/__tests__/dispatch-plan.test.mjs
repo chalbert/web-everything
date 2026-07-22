@@ -6,7 +6,8 @@
  *   (higher rank wins), no-free-lane, blocked, and needs-probe — plus the precedence between them.
  */
 import { describe, it, expect } from 'vitest';
-import { dispatchPlan } from '../dispatch-plan.mjs';
+import { dispatchPlan, selectClearedRows, clearedNotReady } from '../dispatch-plan.mjs';
+import { normNum } from '../../conveyor/queue-store.mjs';
 
 describe('dispatchPlan — happy path: disjoint items fill free lanes in rank order', () => {
   it('assigns free lanes to disjoint queued items in queue (rank) order', () => {
@@ -228,5 +229,72 @@ describe('dispatchPlan — defensive input handling', () => {
   it('returns an empty plan for empty / missing inputs', () => {
     expect(dispatchPlan({})).toEqual({ launch: [], held: [] });
     expect(dispatchPlan()).toEqual({ launch: [], held: [] });
+  });
+});
+
+describe('selectClearedRows — cleared set comes from the SESSION-LOCAL sidecar, not committed buildQueued (#2613)', () => {
+  // The shell's new membership rule: an item is in the conveyor queue IFF its num is in `.conveyor/queue.json`
+  // (the sidecar), NOT because it carries committed `buildQueued:true` frontmatter. Rank order (the row order
+  // the build-queue engine emits) is preserved; only membership moved to the sidecar.
+  const rows = [
+    { num: 100, buildQueued: true }, // committed-cleared but NOT in the sidecar → dropped
+    { num: 200, buildQueued: false }, // in the sidecar → kept, despite no committed flag
+    { num: 300, buildQueued: true }, // in the sidecar → kept
+  ];
+
+  it('keeps only sidecar members, in rank order — a committed buildQueued NOT in the sidecar is dropped', () => {
+    const cleared = new Set(['200', '300'].map(normNum));
+    expect(selectClearedRows(rows, cleared, normNum)).toEqual([
+      { num: 200, buildQueued: false },
+      { num: 300, buildQueued: true },
+    ]);
+  });
+
+  it('a sidecar item with NO committed buildQueued flag is still dispatched (pins the inverted source)', () => {
+    const cleared = new Set(['200'].map(normNum));
+    expect(selectClearedRows(rows, cleared, normNum)).toEqual([{ num: 200, buildQueued: false }]);
+  });
+
+  it('an empty sidecar dispatches nothing even when rows carry committed buildQueued:true', () => {
+    expect(selectClearedRows(rows, new Set(), normNum)).toEqual([]);
+  });
+
+  it('membership is padding-tolerant (sidecar "042" matches row num 42)', () => {
+    const cleared = new Set(['042'].map(normNum));
+    expect(selectClearedRows([{ num: 42 }], cleared, normNum)).toEqual([{ num: 42 }]);
+  });
+
+  it('defensive: non-array rows → []', () => {
+    expect(selectClearedRows(null, new Set(['1']), normNum)).toEqual([]);
+  });
+
+  it('a `#`-spelled sidecar id matches a bare-numeric row (#2613 review req 1)', () => {
+    const cleared = new Set(['#2613'].map(normNum)); // operator typed `#2613`
+    expect(selectClearedRows([{ num: 2613 }, { num: 7 }], cleared, normNum)).toEqual([{ num: 2613 }]);
+  });
+});
+
+describe('clearedNotReady — a cleared id with no ready row is surfaced, never silently dropped (#2613 review req 2b)', () => {
+  const readyRows = [{ num: 200 }, { num: 300 }];
+
+  it('returns the cleared ids that have NO ready build-queue row (blocked / resolved / typo / unknown)', () => {
+    const sidecar = [{ num: '200' }, { num: '999' }, { num: 'ghost' }];
+    expect(clearedNotReady(sidecar, readyRows, normNum)).toEqual(['999', 'ghost']);
+  });
+
+  it('preserves the stored spelling for display and is padding/`#`-tolerant', () => {
+    // "042" IS ready (row 200? no — 042→42, not ready); "#300" IS ready (→300); "#42" is NOT ready.
+    const sidecar = [{ num: '#300' }, { num: '#42' }];
+    expect(clearedNotReady(sidecar, readyRows, normNum)).toEqual(['#42']);
+  });
+
+  it('everything ready → [] (nothing to flag)', () => {
+    expect(clearedNotReady([{ num: '200' }, { num: 300 }], readyRows, normNum)).toEqual([]);
+  });
+
+  it('accepts bare-id entries and tolerates empty/missing input', () => {
+    expect(clearedNotReady(['999', 200], readyRows, normNum)).toEqual(['999']);
+    expect(clearedNotReady(null, readyRows, normNum)).toEqual([]);
+    expect(clearedNotReady([{ num: '' }, { num: null }], readyRows, normNum)).toEqual([]);
   });
 });

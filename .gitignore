@@ -34,6 +34,11 @@ commitment-policy/**/*.d.ts
 # append generalized-lesson entries during a session; the /closing-session sweep consumes it at close. Never
 # committed — it holds pre-vetting, pre-dedup entries that the sweep + red-team curate before anything lands.
 .conveyor/learnings/
+# Session-local conveyor CLEAR-FOR-BUILD queue (#2613) — the operator's "clear this item for the conveyor
+# to pull" gesture. Session-local operator INTENT, not committed repo state (distinct from committed
+# `buildQueued` frontmatter), so it rides a gitignored sidecar the lane guard does not police — that is what
+# lets the operator clear work from the MAIN session (see scripts/conveyor/queue.mjs). Never committed.
+.conveyor/queue.json
 # Per-session runtime bookkeeping (TTL'd, machine-local) — tooling recreates on demand (#952).
 # SoT relocated to skills-src/ (#2266), so ignore the real path; capacity.json is durable calibration → stays tracked.
 skills-src/batch-backlog-items/claims.json

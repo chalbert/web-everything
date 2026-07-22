@@ -50,8 +50,13 @@ import { scopesOverlap, normScope } from './scope-lease.mjs';
 
 // ── PURE CORE (no fs / git / clock / child_process — every input is injected) ─────────────────────────────────
 
-/** The held-reason vocabulary the plan emits (the exact `reason` set #x53zzf9 specifies). */
-export const HELD_REASONS = Object.freeze(['blocked', 'needs-probe', 'no free lane', 'overlaps lane-<n>']);
+/** The held-reason vocabulary the plan emits (the exact `reason` set #x53zzf9 specifies). `cleared-but-not-ready`
+ *  is SHELL-emitted (#2613 review, required 2b): a sidecar id with no ready build-queue row — surfaced as a held
+ *  entry so a clear never silently vanishes. The pure {@link dispatchPlan} itself never emits it (those items are
+ *  not in its `queue` input); the IO shell appends them via {@link clearedNotReady}. */
+export const HELD_REASONS = Object.freeze([
+  'blocked', 'needs-probe', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
+]);
 
 /** True when an item's `openBlockers` signals it is not ready to build. Tolerant of either the loader's array
  *  shape (`item.openBlockers` = the still-open blocker nums) or a bare count. */
@@ -146,6 +151,45 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
   return { launch, held };
 }
 
+/**
+ * Select the CLEARED build-queue rows, in the engine's rank order, by SESSION-LOCAL sidecar MEMBERSHIP (#2613).
+ * The conveyor's cleared set is `.conveyor/queue.json` (session-local operator intent), NOT committed
+ * `buildQueued` frontmatter — so a row is kept IFF its num is in `clearedKeys` (a set of NORMALIZED ids). The
+ * ranked ORDER still comes from the build-queue engine (the rows are already ranked); only membership moved to
+ * the sidecar. A committed `buildQueued:true` row that is NOT in the sidecar is dropped; a sidecar item that is
+ * ranked is kept. `norm` is injected (queue-store's `normNum`) so this stays import-clean (no node built-ins in
+ * the pure core) and directly unit-testable. Pure.
+ * @param {Array<{num:*}>} rows  the ranked build-queue rows (`backlog.mjs build-queue --json` `.queue`)
+ * @param {Set<string>|Iterable<string>} clearedKeys  the sidecar's ids, normalized via `norm`
+ * @param {(n:*)=>string} norm  the id normalizer (queue-store `normNum`)
+ * @returns {Array<{num:*}>} the cleared rows, rank order preserved
+ */
+export function selectClearedRows(rows, clearedKeys, norm) {
+  const cleared = clearedKeys instanceof Set ? clearedKeys : new Set(clearedKeys);
+  const key = typeof norm === 'function' ? norm : (x) => String(x);
+  return (Array.isArray(rows) ? rows : []).filter((r) => r && cleared.has(key(r.num)));
+}
+
+/**
+ * The CLEARED-BUT-NOT-READY set (#2613 review, required 2b): the sidecar entries whose id has NO ready
+ * build-queue row. `build-queue --json .queue` is hard-filtered to READY items, so a cleared id that is
+ * blocked / resolved / a typo / nonexistent lands in the sidecar but never in `rows` — without this it would
+ * appear in NEITHER `launch` NOR `held`, a silent vanish (the exact "I cleared it, nothing happened" failure
+ * #2613 kills). This returns each such id (in its stored spelling, for display) so the shell can surface it as
+ * `held: {num, reason:'cleared-but-not-ready'}`. Pure — `norm` injected to stay import-clean.
+ * @param {Array<{num:*}|string|number>} clearedEntries  the sidecar entries (`{num, addedAt}`) or bare ids
+ * @param {Array<{num:*}>} readyRows  the ready build-queue rows
+ * @param {(n:*)=>string} norm  the id normalizer (queue-store `normNum`)
+ * @returns {Array<*>} the cleared ids with no ready row, original spelling preserved
+ */
+export function clearedNotReady(clearedEntries, readyRows, norm) {
+  const key = typeof norm === 'function' ? norm : (x) => String(x);
+  const ready = new Set((Array.isArray(readyRows) ? readyRows : []).map((r) => key(r?.num)));
+  return (Array.isArray(clearedEntries) ? clearedEntries : [])
+    .map((e) => (e && typeof e === 'object' ? e.num : e))
+    .filter((n) => n != null && String(n) !== '' && !ready.has(key(n)));
+}
+
 // ── IO SHELL (runs only as a CLI — owns all child_process; keeps the pure core import-clean) ──────────────────
 
 // Lazily required so importing the pure core pulls in NO node built-ins beyond scope-lease.mjs.
@@ -188,11 +232,23 @@ async function main(argv) {
   const toRepoRelative = (list) =>
     (Array.isArray(list) ? list : []).map((p) => String(p).replace(/^[^/:]+:/, ''));
 
-  // 1. THE BUILD QUEUE — reuse the ranking engine wholesale (backlog.mjs build-queue --json), keep only the
-  //    items the human CLEARED for build (`buildQueued`), in the engine's exact next-to-build order. Enrich
-  //    each with its predicted `scope` + `openBlockers` from the backlog loader (build-queue doesn't emit them).
+  // 1. THE BUILD QUEUE — reuse the ranking engine wholesale (backlog.mjs build-queue --json) for the exact
+  //    next-to-build ORDER + tier/score enrichment, but MEMBERSHIP of the cleared set now comes from the
+  //    SESSION-LOCAL conveyor sidecar (`.conveyor/queue.json`, #2613), NOT committed `buildQueued` frontmatter.
+  //    Clearing an item for build is session-local operator INTENT, so it rides a gitignored sidecar the lane
+  //    guard does not police (the operator clears work from the MAIN session, which the frontmatter path
+  //    blocks). An item is in the conveyor queue IFF its num is in the sidecar; committed `buildQueued` no
+  //    longer arms a conveyor build. Enrich each with its predicted `scope` + `openBlockers` from the backlog
+  //    loader (build-queue doesn't emit them). Dynamic-import keeps the pure core import-clean.
+  const { readQueueFile, resolveQueuePath, normNum } = await import('../conveyor/queue-store.mjs');
+  const sidecar = readQueueFile(resolveQueuePath()); // script-location + env override — matches conveyor-state
+  const cleared = new Set(sidecar.map((e) => normNum(e.num)));
   const bq = runJson('node', [BACKLOG_CLI, 'build-queue', '--json'], 'backlog build-queue');
-  const rows = (Array.isArray(bq?.queue) ? bq.queue : []).filter((r) => r && r.buildQueued === true);
+  const bqRows = Array.isArray(bq?.queue) ? bq.queue : [];
+  const rows = selectClearedRows(bqRows, cleared, normNum);
+  // Cleared-but-not-ready: sidecar ids with no ready build-queue row — surfaced as held entries below, never
+  // silently dropped (#2613 review, required 2b).
+  const notReady = clearedNotReady(sidecar, bqRows, normNum);
   let byNum = new Map();
   try {
     const { createRequire } = await import('node:module');
@@ -231,6 +287,8 @@ async function main(argv) {
     .sort((a, b) => a - b);
 
   const plan = dispatchPlan({ queue, leases, freeLanes });
+  // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
+  for (const num of notReady) plan.held.push({ num, reason: 'cleared-but-not-ready' });
 
   if (flags.json) {
     process.stdout.write(JSON.stringify(plan, null, 2) + '\n');

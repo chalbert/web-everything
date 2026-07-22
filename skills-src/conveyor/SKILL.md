@@ -22,7 +22,7 @@ The three scripts this skill shells (do not reimplement any of them):
 
 | Script | What it decides (deterministically) |
 |---|---|
-| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, lanes, freeSlots, prs, daemon, idle, health }`. Every tick STARTS here. |
+| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, lanes, freeSlots, prs, daemon, idle, health }`. Every tick STARTS here. |
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
 | `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR. Its process EXIT is the wake signal; the exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
 
@@ -51,12 +51,30 @@ State plainly to the operator, once, at start:
 > block the chat. You steer it by talking here and by queuing work — to clear an item for the conveyor to
 > pull, run:
 > ```bash
-> node scripts/backlog.mjs build-queue add <NNN>      # clear-for-build: the conveyor may now pull it
-> node scripts/backlog.mjs build-queue remove <NNN>   # un-clear it (before it launches)
+> node scripts/conveyor/queue.mjs add <NNN>      # clear-for-build: the conveyor may now pull it
+> node scripts/conveyor/queue.mjs remove <NNN>   # un-clear it (before it launches)
+> node scripts/conveyor/queue.mjs list           # show what you've cleared this session
 > ```
-> The conveyor pulls **only** cleared (`buildQueued`) items, in the build queue's ranked order. Re-prioritising
-> the backlog never arms a build — clearing does. (`build-queue add/remove` is frontmatter-only and runs fine
-> from this main session; it is not one of the lane-gated mutation verbs.)
+> The conveyor pulls **only** cleared items, in the build queue's ranked order. Re-prioritising the backlog
+> never arms a build — clearing does. Type the id with or without a leading `#` (`add 2613` ≡ `add '#2613'`).
+>
+> **Clearing a not-yet-ready item is allowed but flagged.** If you clear an id that is not currently a ready
+> build-queue row (blocked / resolved / typo), `add` still records it — a temporarily-blocked item auto-arms
+> when its blocker lands — but it **warns** rather than silently doing nothing, and the tick's
+> `state.clearedNotReady` (and a `held: 'cleared-but-not-ready'` in the dispatch plan) shows it so you always
+> see "you cleared #X but it isn't ready". **JIT-numbering drift:** clear the id the tooling currently shows —
+> a sidecar entry cleared as a `xHASH` won't match once the item lands as `#NNN` (and vice-versa); if a cleared
+> id stops matching, `remove` it and re-`add` the current id.
+>
+> **The conveyor queue is SESSION-LOCAL** (#2613). `queue.mjs add/remove` writes a gitignored sidecar
+> (`.conveyor/queue.json`) — it is NOT a card mutation (it never touches backlog frontmatter or
+> `writeBacklogMd`), so it is **not** policed by the no-override lane guard and runs fine from THIS main
+> session. That is deliberate: clearing an item for build is session-local operator intent, not committed repo
+> state — so it must NOT go through `backlog.mjs build-queue add`, which writes `buildQueued:true` frontmatter
+> and is BLOCKED from the primary checkout by the lane guard (#2302). Committed `buildQueued` frontmatter still
+> exists (it feeds the `build-queue` view #2528/#2529 and the future product board), but it is a distinct,
+> shared artifact from this session's conveyor queue — whether the two should reconcile is the open decision
+> filed under #2612.
 
 Then launch the first tick (§2).
 
@@ -70,7 +88,7 @@ one that works for a completed background task), so it re-invokes this loop reli
    ```bash
    node scripts/readiness/conveyor-state.mjs --json
    ```
-   → `{ queue, lanes, freeSlots, prs, daemon, idle, health }`. Do not eyeball four commands; this is the one read.
+   → `{ queue, clearedNotReady, lanes, freeSlots, prs, daemon, idle, health }`. Do not eyeball four commands; this is the one read.
 
 2. **Plan the dispatch (one call):**
    ```bash
@@ -214,12 +232,16 @@ lanes/PRs) **AND** there has been **no operator feedback for the configured idle
 measure from the last chat turn). When both hold, **announce it and STOP the tick loop** (do not arm another
 `sleep`). The conveyor does not outlive its purpose; a fresh `/conveyor` restarts it.
 
+> `state.queue`'s `buildQueued` now reflects the SESSION-LOCAL conveyor queue (`.conveyor/queue.json`, #2613),
+> so `state.queue.filter(buildQueued)` is exactly what the operator cleared this session — the reliable
+> queue-empty half.
+>
 > **Do NOT gate idle-stop on `state.idle.lastQueueAdd`.** That field is sourced from the **drain's**
-> `queued.json` (the ready-to-merge token queue), **not** the build-queue the operator feeds with
-> `build-queue add` — a fresh clear never updates it, so it is the wrong signal for "was work queued recently".
-> The queue-empty test above already reads `buildQueued` correctly (via `state.queue`), which is the reliable
-> half; rely on queue-empty + operator-feedback and ignore the `lastQueueAdd` grace clause until a build-queue
-> clear timestamp exists.
+> `queued.json` (the ready-to-merge token queue), **not** the conveyor queue the operator feeds with
+> `queue.mjs add` — a fresh clear never updates it, so it is the wrong signal for "was work queued recently".
+> The queue-empty test above already reads the conveyor queue correctly (via `state.queue`), which is the
+> reliable half; rely on queue-empty + operator-feedback and ignore the `lastQueueAdd` grace clause until a
+> conveyor-queue clear timestamp is wired into the state read.
 
 ## 7. Final ledger (on stop)
 
