@@ -1,8 +1,9 @@
 ---
 bornAs: xhdax28
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-14"
+dateResolved: "2026-07-21"
 tags: [plateau-app, build, bug]
 ---
 
@@ -32,3 +33,15 @@ That reference resolves to `plateau:src/conformance-engine/conformanceEmbed.ts`,
 **Impact.** No production `vite build` succeeds → plateau-app has no working production build and cannot ship until this is fixed.
 
 **Fix direction** (impl lives in plateau-app; this card is the tracker): re-point the `plateau:conformance.html` line-34 script `src` at the module's real location — either the moved path `plateau:packages/core/src/conformance-engine/conformanceEmbed.ts` or the `@webeverything`/`@plateau/core` alias the config exposes for that package — or, if the standalone conformance iframe surface is no longer needed as a build input, drop the `conformance` input from `plateau:vite.config.mts` and remove the dead HTML. Restoring a resolvable reference is the true fix; the specifics were verified against the working tree on 2026-07-14.
+
+## Resolved — already fixed in code, verified green (2026-07-21)
+The re-point already landed (the "restore a resolvable reference" fix direction). `plateau:conformance.html`
+line 34 now loads the module from `plateau:packages/core/src/conformance-engine/conformanceEmbed.ts` (the moved
+path, which exists on disk) instead of the dead `plateau:src/conformance-engine/conformanceEmbed.ts`. The
+correction rode in plateau-app commit `5d6cff2` (#2507 "Backlog-view v1"); the dead path was last present in
+`d82efd7` (#1801).
+
+**Verified green:** `npx vite build` in plateau-app now succeeds — **599 modules transformed**, emits
+`plateau:dist/conformance.html` (1.65 kB) + a `conformance-*.js` chunk (46.46 kB), `✓ built in 911ms`. The
+`[vite:build-html] Failed to resolve … Build failed in 27ms` failure no longer reproduces. No change needed;
+closing on verification.
