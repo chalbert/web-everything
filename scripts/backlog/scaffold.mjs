@@ -45,11 +45,12 @@ export const slugify = (s) =>
  * @param {{
  *   kind: string, size?: number, slug: string, title: string,
  *   today: string, blockedBy?: string[], parent?: string, digest?: string,
+ *   scope?: string[],
  * }} spec
  * @returns {string} the file content
  */
 export function renderItem(spec) {
-  const { kind, size, title, today, blockedBy = [], parent, digest, scaffoldedBy } = spec;
+  const { kind, size, title, today, blockedBy = [], parent, digest, scaffoldedBy, scope = [] } = spec;
   const fm = ['---', `kind: ${kind}`];
   if (kind === 'story' || (kind === 'epic' && typeof size === 'number')) fm.push(`size: ${size}`);
   if (parent) fm.push(`parent: "${parent}"`);
@@ -63,6 +64,8 @@ export function renderItem(spec) {
     fm.push('status: open');
   }
   if (blockedBy.length) fm.push(`blockedBy: [${blockedBy.map((n) => `"${n}"`).join(', ')}]`);
+  // Optional predicted touch-set (#x53zzf9) — the conveyor dispatcher reads it to hold overlapping items apart.
+  if (scope.length) fm.push(`scope: [${scope.map((p) => `"${p}"`).join(', ')}]`);
   fm.push(`dateOpened: "${today}"`, 'tags: []', '---', '');
   const lead = digest || 'TODO digest — one ≤100-word paragraph: what this item does and why (replace this line).';
   return `${fm.join('\n')}\n# ${title}\n\n${lead}\n`;

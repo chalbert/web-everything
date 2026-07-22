@@ -667,6 +667,38 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
   }
 }
 
+// ── 6d-sexies. Optional `scope:` predicted touch-set (#x53zzf9) ──
+// `scope: ["src/x/", "docs/y/"]` is the item's PREDICTED file-scope (repo-relative path prefixes) a probe
+// agent writes once so the deterministic conveyor dispatcher (scripts/readiness/dispatch-plan.mjs) can hold
+// overlapping items apart by script. Optional — but WHEN present it must be an array of strings (the shape the
+// dispatcher's overlap check reads). The loader NORMALIZES a wrong type to `undefined`, which would hide the
+// author error, so this reads the RAW frontmatter (like the unquoted-colon scan above) to catch a bad type at
+// author time. Mirrors the blockedBy shape rule below.
+{
+  const matterFm = require('gray-matter');
+  for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('.md'))) {
+    let raw;
+    try { raw = matterFm(readFileSync(join(ROOT, 'backlog', file), 'utf8')).data; }
+    catch { continue; } // a malformed-YAML item is already reported by the unquoted-colon scan above
+    const scope = raw?.scope;
+    if (scope === undefined) continue;
+    const id = file.replace(/\.md$/, '');
+    if (!Array.isArray(scope)) {
+      err(`Backlog item "${id}" scope must be an array of repo-relative path prefixes (e.g. ["src/backlog-view/", "docs/agent/"])`);
+      continue;
+    }
+    // An EMPTY scope is meaningless and is the one value where the two halves could disagree — the loader
+    // collapses [] → undefined (needs-probe) while a naive shape check would pass it. Error at author time so
+    // [] can never reach the loader OR the dispatcher: omit the field (→ needs-probe) or list real prefixes.
+    if (scope.length === 0) {
+      err(`Backlog item "${id}" scope is empty — an empty scope is meaningless (the dispatcher reads absent-or-empty as needs-probe). Omit the field, or list real repo-relative path prefixes.`);
+      continue;
+    }
+    if (scope.some((p) => typeof p !== 'string'))
+      err(`Backlog item "${id}" scope must contain only strings — every entry is a repo-relative path prefix (e.g. "src/backlog-view/")`);
+  }
+}
+
 // ── 6d-ter. blockedBy dependency edges (#248) ──
 // `blockedBy: ["NNN", …]` is a directional prerequisite edge ("this can't start until NNN is
 // resolved"), making the backlog a real DAG that a deterministic readiness function (#249/#250)

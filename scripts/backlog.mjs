@@ -515,6 +515,8 @@ function scaffold() {
   // blindly zero-pad (padding a hash would corrupt it). #2288.
   const blockedBy = (flag('blocked-by') || '').split(',').map((s) => s.trim()).filter(Boolean).map(normalizeId);
   const parent = flag('parent') ? normalizeId(flag('parent')) : undefined;
+  // Optional predicted touch-set (#x53zzf9) — comma-separated repo-relative path prefixes for the dispatcher.
+  const scope = (flag('scope') || '').split(',').map((s) => s.trim()).filter(Boolean);
 
   // JIT numbering (#2288): a new item is born with a collision-free HASH id, NOT `max+1`. Parallel lanes
   // can no longer race on the next number — the drain (sole serial writer to main, #2290) rewrites the
@@ -533,7 +535,7 @@ function scaffold() {
   // author `settle`s it (closes the born-public, half-authored-item race). Without `--session` (ad-hoc /
   // hand / non-batch callers) it stays born-open, the long-standing default.
   const session = flag('session');
-  const content = renderItem({ kind, size, slug, title, today: today(), blockedBy, parent, digest: flag('digest'), scaffoldedBy: session });
+  const content = renderItem({ kind, size, slug, title, today: today(), blockedBy, parent, scope, digest: flag('digest'), scaffoldedBy: session });
   writeBacklogMd(finalAbs, `backlog/${finalName}`, content);
   const id = finalName.replace(/\.md$/, '');
   const filled = !!flag('digest');

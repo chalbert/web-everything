@@ -49,6 +49,18 @@ const ID_TOKEN = '\\d{1,5}|x[0-9a-z]{6}';
 const toDateString = (v) =>
   v instanceof Date ? v.toISOString().slice(0, 10) : v;
 
+// Optional `scope:` (#x53zzf9) — an item's PREDICTED touch-set: repo-relative path prefixes a /workflow probe
+// agent writes ONCE so the deterministic conveyor dispatcher (scripts/readiness/dispatch-plan.mjs) can hold
+// overlapping items apart by SCRIPT (the judgment/deterministic split of platform-decisions.md
+// #deterministic-core-thin-judgment). The loader only sanitizes it to a clean string[] (drop non-strings /
+// blanks) or `undefined` when absent/empty — the array-of-strings SHAPE is enforced by check:standards; the
+// OVERLAP semantics live in the dispatcher, never here.
+const normalizeScope = (v) => {
+  if (!Array.isArray(v)) return undefined;
+  const list = v.map((s) => (s == null ? '' : String(s).trim())).filter(Boolean);
+  return list.length ? list : undefined;
+};
+
 // Infer an item's repo-LOCUS when no explicit `locus:` is authored. Two PRECISE signals only — locus is
 // "which gate/loop honestly CLOSES the item", so the signal must indicate where it BUILDS, never mere
 // provenance. The big noise source is the `exercise-app` *tag*, which WE standards/blocks carry to mean
@@ -301,6 +313,9 @@ module.exports = function backlog() {
         dateStarted: toDateString(data.dateStarted),
         dateResolved: toDateString(data.dateResolved),
         reportDate,
+        // Optional predicted touch-set (#x53zzf9) — sanitized to a clean string[] or undefined. Overrides the
+        // raw `...data.scope` spread above so every consumer sees the normalized shape.
+        scope: normalizeScope(data.scope),
         details: src.details || data.details || undefined,
       };
     })
@@ -861,6 +876,9 @@ module.exports.deriveTier = deriveTier;
 // Eleventy build, which only invokes the default function export.
 module.exports.deriveBuildState = deriveBuildState;
 module.exports.HUMAN_GATE_KINDS = HUMAN_GATE_KINDS;
+// Named export of the pure `scope:` sanitizer (#x53zzf9) for direct regression testing — inert to the
+// Eleventy build, which only invokes the default function export.
+module.exports.normalizeScope = normalizeScope;
 // Named export of the title/summary/details derivation (#745) for direct regression testing — Eleventy
 // only ever invokes the default function export, so attaching this property is inert to the build.
 module.exports.derive = derive;
