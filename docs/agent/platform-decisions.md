@@ -2881,6 +2881,40 @@ came from the expressibility audit during ratification discussion. Composes with
 
 ---
 
+### Deterministic core, thin judgment — delivery-loop machinery scripts every script-decidable decision, single-sourced in we:scripts {#deterministic-core-thin-judgment}
+
+**Ratified 2026-07-22 (#xoh7arv).** In delivery-loop machinery (skills, the conveyor, the console), every
+**script-decidable** decision lives as a **deterministic, tested script single-sourced in `we:scripts`** —
+model judgment is reserved for genuinely judgment-shaped work. Three clauses:
+
+1. **Script-decidable → a deterministic, tested script in `we:scripts`.** If a rule can be computed from
+   readable state (queue × scope-leases × free slots → a launch/held dispatch plan, tick state reads, merge
+   watchers, idle/stop clocks, health checks), it is a script with unit tests — never a policy the model
+   re-derives at run time. The ratified split's judgment side: scope prediction (a probe agent, written to a
+   `scope:` frontmatter field), building the item, escalation review, the readiness discussion with the human.
+2. **Judgment is reserved for judgment-shaped work.** Spending model context re-deriving a computable plan
+   is both a latency source and a drift source (a prose rule re-interpreted per tick gives non-reproducible,
+   untestable decisions) — the rejected alternative on #xoh7arv.
+3. **One source — skills and UIs SHELL the same script.** A skill body never carries a prose copy of a
+   scripted rule, and a UI never re-implements it: plateau's dev server shells
+   `we:scripts/readiness/scope-lease-collect.mjs` for `/api/scope-lease` (`plateau:vite.config.mts`), and the
+   resident drain daemon (#2449) keeps all drain logic in `we:scripts`, scheduling
+   `we:scripts/merge-ai-prs.mjs` passes — those precedents are the norm, not exceptions. A second
+   implementation of a scripted rule is the dead-end duplication this rule exists to forbid.
+
+This is the delivery-loop application of the hookable-vs-judgment discipline (script-decidable → hook;
+judgment stays in context — already applied by [merge-risk](#merge-risk-optimistic-with-targeted-lock)'s
+duplicate-key lint), extended from agent-context management to **product/skill design**. The
+[throughput program](backlog-workflow.md)'s watch (#2606) reviews adherence: judgment-work in the loop
+that has become script-decidable is a conversion item, not a norm.
+
+**Lineage:** #xoh7arv (ratified in-session 2026-07-22, conveyor design; parent program #2606, loop epic
+#2527). Composes with [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) (landing is fully automatic)
+and [#agent-runner-cli-backend](#agent-runner-cli-backend) (the runner interface the loop's judgment agents
+ride).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
