@@ -28,8 +28,26 @@ also shipped (below). What remains is the ONE "surface a requirement as a candid
 - **New-spec-candidate → constitution-promotion loop (design-record §3e-2 + §3f-D).** A requirement surfaced
   mid-build appears as a new-spec candidate with accept / reject; accepting a candidate that generalizes is
   **promoted to the constitution by FILING A DECISION** (prepare → ratify via the `scaffold` verb), never a
-  one-click direct law change. This is now UNBLOCKED (the ratify surface + the scaffold verb it files through
-  both exist).
+  one-click direct law change.
+
+### Gate correction (2026-07-21 feasibility scoping) — only the OUTPUT half is unblocked
+A prior note called this UNBLOCKED. That is only half-true, and the missing half is load-bearing:
+- **Output half — DONE / unblocked.** Filing a decision on accept is real today: `plateau:scripts/backlog.mjs`
+  `scaffold` accepts `--kind=decision` (kind validation line ~508), the client scaffold plan in
+  `plateau:src/backlog-view/write-action.ts` passes kind straight through, and
+  `plateau:src/backlog-view/composer.ts` already lists `decision` in `COMPOSER_KINDS`. The filed decision then
+  rides the shipped ratify surface (`plateau:src/backlog-view/ruling-surface.ts`, PR #91). Note prepare→ratify
+  is three decoupled verbs (scaffold files it OPEN → `prepare-stamp` sets preparedDate → `resolve --codified-to`
+  ratifies), not a single scaffold call — but each step already exists.
+- **Input half — GATED, not built.** Where a "new-spec candidate" comes FROM does not exist. Per the
+  design-record `plateau:docs/backlog-console-design.md` §3e (lines 183-184), candidates are emitted by the
+  **L3 build inspector (mockup v5)**, which is unbuilt — there is no candidate feed, type, store, or event.
+  The runner event union (`plateau:src/build-runner/events.ts`) carries no per-requirement / spec-candidate
+  event. So the surface has **no data source**. Building it tonight would mean a manual, hand-typed
+  composer-style stand-in that (a) contradicts §3e-2's auto-surfacing intent, (b) largely duplicates the
+  already-shipped composer (which can file `kind:decision` today), and (c) still needs a **net-new rejection
+  store** ("reject records the rejection" has nowhere to persist). Deferred: build the L3 build inspector +
+  a spec-candidate runner event first (housed under the supervision epic #2551), then this loop consumes them.
 
 ## Where the code goes (locus)
 - Extends the write family in `plateau-app:src/backlog-view/` (the open-decision affordance acts on a cell from
