@@ -51,14 +51,33 @@ describe('dedup — ranking', () => {
   it('ranks clusters by member count descending', () => {
     const entries = [
       e('doc-gap', 'memory docs', 'the memory doc omits the sub-index budget rule'),
+      // three mutually-similar friction summaries (complete-link needs ALL pairs ≥ threshold)
       e('friction', 'lane gating', 'lane gate reruns full suite for docs only diff'),
-      e('friction', 'lane gating', 'the lane gate reruns the full suite even for docs only diffs'),
-      e('friction', 'lane gating', 'lane gate reruns whole suite for a docs only diff again'),
+      e('friction', 'lane gating', 'lane gate reruns full suite for docs only change'),
+      e('friction', 'lane gating', 'lane gate reruns full suite for docs only edit'),
     ];
     const { clusters } = dedup(entries);
     expect(clusters[0].kind).toBe('friction');
     expect(clusters[0].count).toBe(3);
     expect(clusters[1].count).toBe(1);
+  });
+});
+
+describe('dedup — complete-link stops transitive over-merge (review fix 8)', () => {
+  // A~B ≥ t and B~C ≥ t but A~C < t: single-link would chain all three via the B bridge; complete-link
+  // keeps {A,B} and {C} apart, so C's DISTINCT suggestion is preserved as its own candidate.
+  const A = e('friction', 'gate', 'alpha beta gamma delta', 'widen the scope');
+  const B = e('friction', 'gate', 'alpha beta gamma epsilon', 'widen the scope');
+  const C = e('friction', 'gate', 'beta gamma epsilon omega', 'rewrite the gate');
+  it('does not chain A–B–C into one cluster', () => {
+    const { clusters } = dedup([A, B, C]);
+    expect(clusters).toHaveLength(2);
+    expect(clusters[0].count).toBe(2); // {A,B}
+    expect(clusters[1].count).toBe(1); // {C}
+  });
+  it('carries distinct member suggestions on the merged cluster', () => {
+    const { clusters } = dedup([A, B]);
+    expect(clusters[0].suggestions).toEqual(['widen the scope']); // deduped identical suggestions
   });
 });
 

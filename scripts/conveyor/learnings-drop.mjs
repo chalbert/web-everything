@@ -44,9 +44,36 @@ export const KINDS = ['friction', 'missing-convention', 'doc-gap', 'skill-gap', 
 // `path`/`code`/`diff`/`secret` field past the schema. `ts` is the ONE envelope field the helper stamps.
 export const ALLOWED_KEYS = ['kind', 'summary', 'area', 'suggestion'];
 const TEXT_FIELDS = ['summary', 'area', 'suggestion'];
-const MAX_FIELD_LEN = 280; // a generalized lesson is a sentence; anything longer is a code/log paste smell.
+// STRUCTURAL leak-class kill (review fix A): a summary is a sentence, a suggestion a short recommendation, an
+// area a coarse label. Capping each field forecloses whole leak classes (PEM keys, code blocks, pasted files
+// can't FIT) with zero false positives on real prose — cheaper and stronger than any regex list.
+export const FIELD_CAPS = { summary: 240, area: 60, suggestion: 400 };
 
-// ── scrub: reject a VALUE that carries a secret / absolute path / code-looking string ──────────────
+// ── entropy / character-class helpers (review fix B) ─────────────────────────────────────────────
+/** Shannon entropy in bits/char — high for opaque keys, low for repetitive/dictionary text. */
+function shannonEntropy(s) {
+  const freq = new Map();
+  for (const ch of s) freq.set(ch, (freq.get(ch) || 0) + 1);
+  let h = 0;
+  for (const n of freq.values()) { const p = n / s.length; h -= p * Math.log2(p); }
+  return h;
+}
+/** How many of {lowercase, uppercase, digit} a string uses (0–3). ≥3 ⇒ mixed like a random secret. */
+function charClasses(s) {
+  return (/[a-z]/.test(s) ? 1 : 0) + (/[A-Z]/.test(s) ? 1 : 0) + (/[0-9]/.test(s) ? 1 : 0);
+}
+/**
+ * A whitespace-delimited token that reads as an OPAQUE secret/key rather than prose: medium length, mixes
+ * ≥3 character classes (so plain words & single-case identifiers pass), and high Shannon entropy. Catches
+ * unknown-format keys (e.g. a Google AIza… key) and bare high-entropy blobs that prefix rules can't enumerate.
+ */
+export function isHighEntropyToken(tok) {
+  if (tok.length < 16 || tok.length > 40) return false;
+  if (charClasses(tok) < 3) return false;
+  return shannonEntropy(tok) >= 3.0;
+}
+
+// ── scrub: reject a VALUE that carries a secret / path / code / PII string ──────────────────────────
 // Deny-at-the-write-seam (the #883 write-time-gate precedent). Each matcher returns a human reason.
 const SECRET_PATTERNS = [
   [/-----BEGIN [A-Z ]*(?:PRIVATE KEY|CERTIFICATE)/, 'PEM key/cert block'],
@@ -54,36 +81,81 @@ const SECRET_PATTERNS = [
   [/\bgh[posru]_[A-Za-z0-9]{16,}/, 'GitHub token (ghp_/gho_/…)'],
   [/\bxox[baprs]-[A-Za-z0-9-]{10,}/, 'Slack token (xox…)'],
   [/\bAKIA[0-9A-Z]{12,}/, 'AWS access key id (AKIA…)'],
+  [/\bAIza[0-9A-Za-z_-]{30,}/, 'Google API key (AIza…)'],
   [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}/, 'JWT (eyJ….….…)'],
   [/\b[A-Za-z0-9+/]{40,}={0,2}\b/, 'long base64/secret-looking blob (≥40 chars)'],
   [/\b[0-9a-fA-F]{32,}\b/, 'long hex string (≥32 hex chars — token/hash/secret)'],
-  [/\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)\b\s*[:=]\s*\S+/i, 'inline credential assignment'],
 ];
 const PATH_PATTERNS = [
   [/(?:^|\s)(?:\/[A-Za-z0-9._-]+){2,}/, 'absolute POSIX path (/a/b/…)'],
   [/(?:^|\s)~\/[A-Za-z0-9._/-]+/, 'home-relative absolute path (~/…)'],
   [/\b[A-Za-z]:\\[A-Za-z0-9._\\-]+/, 'absolute Windows path (C:\\…)'],
   [/\bfile:\/\//, 'file:// URL (filesystem path)'],
+  [/\b[a-z][a-z0-9+.-]*:\/\/[^\s/@]+:[^\s/@]+@/, 'URL with inline credentials (user:pass@host)'],
 ];
+// Single-line code smells too (not just fenced/multi-line): a one-liner `const x = fetch(…)` or inline SQL
+// must not slip through. Kept narrow to spare domain prose — see the should-pass fixtures in the tests.
 const CODE_PATTERNS = [
   [/```/, 'fenced code block (```)'],
-  [/[{;]\s*[\r\n]/, 'multi-line code (brace/semicolon + newline)'],
-  [/\bfunction\s+\w+\s*\(|=>\s*\{|\bimport\s+.+\bfrom\b/, 'source code (function/arrow/import)'],
-  [/<\/?[a-z][\w-]*(?:\s[^>]*)?>/i, 'HTML/markup tag'],
+  [/[{};]\s*[\r\n]/, 'multi-line code (brace/semicolon + newline)'],
+  [/=>/, 'arrow function (=>)'],
+  [/===|!==/, 'strict comparison operator (===/!==)'],
+  [/\b[A-Za-z_]\w*\([^)]*\)/, 'call-syntax (name(...))'],
+  [/\b(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=/, 'JS declaration (const/let/var x =)'],
+  [/\bimport\s+.+\bfrom\b/, 'ES import statement'],
+  [/\bSELECT\b[\s\S]*\bFROM\b/, 'SQL SELECT … FROM'],
+  [/\bDELETE\s+FROM\b/, 'SQL DELETE FROM'],
+  [/\bINSERT\s+INTO\b/, 'SQL INSERT INTO'],
+  [/\bUPDATE\s+\S+\s+SET\b/, 'SQL UPDATE … SET'],
+  // Markup: only a tag WITH attributes, or a CLOSING tag — so domain vocabulary like a bare `<select>`,
+  // `<dialog>`, `<slot>` still passes (this is a web-components repo; those ARE the content).
+  [/<[a-z][\w-]*\s+[^>]*>/i, 'HTML tag with attributes'],
+  [/<\/[a-z][\w-]*>/i, 'HTML closing tag'],
 ];
+// PII the downstream product/telemetry seam (#2610) must never carry: author emails, internal IPs.
+const PII_PATTERNS = [
+  [/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/, 'email address'],
+  [/\b\d{1,3}(?:\.\d{1,3}){3}\b/, 'IPv4 address'],
+  [/\b(?:[0-9A-Fa-f]{1,4}:){3,}[0-9A-Fa-f]{1,4}\b/, 'IPv6 address'],
+];
+// Source-code file extensions: a filename/path with one is repo-identifying (the ratified "no
+// repo-identifying paths"). EXTENSION-based, not slash-based, so `check:standards` / `scope: []` pass.
+const CODE_EXT = /\.(?:ts|tsx|mjs|cjs|js|jsx|py|go|rs|sh|css|scss|less)\b/i;
+// Doc/data extensions are repo-identifying only inside a PATH (has a slash) — a bare `AGENTS.md` mention passes.
+const DOC_EXT = /\.(?:md|json|njk|html?|ya?ml)\b/i;
+const REPO_NAMES = /\bweb-?everything\b/i;
+// Labeled credential — reject only when the VALUE is secret-shaped, so `the session token: often expires`
+// (a plain word value) passes but `password: hunter2Trombone` does not. `matchAll` (global) → each hit.
+const CRED_LABEL = /\b(?:password|passwd|secret|api[_-]?key|access[_-]?key|token|credential)s?\b\s*[:=]\s*(['"]?)([^\s'"]+)\1/gi;
 
 /**
  * scrubReasons(value) → string[] of reasons this string value is unsafe to store. Empty ⇒ clean.
- * Pure; the single source the validator + tests share.
+ * Pure; the single source the validator + tests share. NOTE: field-LOCAL — it scans one value, so a secret
+ * SPLIT across two fields (e.g. the word "password" in `summary` and the value in `suggestion`) cannot be
+ * caught here by construction; the length caps + entropy + labeled-value check narrow that gap but the
+ * composition limit is inherent to per-field scrubbing (documented; see the split-secret test).
  */
 export function scrubReasons(value) {
-  const reasons = [];
   if (typeof value !== 'string') return ['not a string'];
-  if (value.length > MAX_FIELD_LEN) reasons.push(`too long (${value.length} > ${MAX_FIELD_LEN} chars) — likely a code/log paste`);
-  for (const [re, why] of [...SECRET_PATTERNS, ...PATH_PATTERNS, ...CODE_PATTERNS]) {
+  const reasons = [];
+  for (const [re, why] of [...SECRET_PATTERNS, ...PATH_PATTERNS, ...CODE_PATTERNS, ...PII_PATTERNS]) {
     if (re.test(value)) reasons.push(why);
   }
-  return reasons;
+  // Labeled credential with a secret-shaped value (≥8 chars, ≥2 character classes).
+  for (const m of value.matchAll(CRED_LABEL)) {
+    const v = m[2] || '';
+    if (v.length >= 8 && charClasses(v) >= 2) { reasons.push('inline credential (secret-shaped value)'); break; }
+  }
+  // Per-token: repo-identifying paths/names + opaque high-entropy secrets.
+  for (const tok of value.split(/\s+/)) {
+    if (!tok) continue;
+    if (tok.includes('../')) reasons.push('relative path traversal (../ — repo-identifying)');
+    else if (CODE_EXT.test(tok)) reasons.push('source file path/name (code extension — repo-identifying)');
+    else if (DOC_EXT.test(tok) && tok.includes('/')) reasons.push('repo-relative doc path');
+    if (REPO_NAMES.test(tok)) reasons.push('repo-identifying name (webeverything)');
+    if (isHighEntropyToken(tok)) reasons.push('high-entropy token (opaque key/secret)');
+  }
+  return [...new Set(reasons)];
 }
 
 /**
@@ -105,12 +177,15 @@ export function validateEntry(entry) {
   if (!KINDS.includes(entry.kind)) {
     errors.push(`kind must be one of ${KINDS.join('|')} (got ${JSON.stringify(entry.kind)})`);
   }
-  // (3) text fields present, non-empty, and scrub-clean.
+  // (3) text fields present, non-empty, within the per-field cap, and scrub-clean.
   for (const f of TEXT_FIELDS) {
     const v = entry[f];
     if (typeof v !== 'string' || !v.trim()) {
       errors.push(`${f} is required and must be a non-empty string`);
       continue;
+    }
+    if (v.length > FIELD_CAPS[f]) {
+      errors.push(`${f}: too long (${v.length} > ${FIELD_CAPS[f]} chars) — a ${f} is a short generalized lesson, not a paste`);
     }
     for (const reason of scrubReasons(v)) errors.push(`${f}: ${reason}`);
   }

@@ -46,6 +46,9 @@ export function sweep(rawEntries, { threshold = DEFAULT_THRESHOLD } = {}) {
     suggestion: c.suggestion,
     count: c.count,
     summaries: c.summaries,
+    // Carry the DISTINCT member suggestions through (review fix 8): a chained-in member's own suggestion
+    // must still reach the red-team, not be dropped when only the representative's is kept.
+    suggestions: c.suggestions,
   }));
   return {
     candidates,

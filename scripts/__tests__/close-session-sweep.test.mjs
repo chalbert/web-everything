@@ -34,7 +34,21 @@ describe('sweep — re-scrub + dedup', () => {
 
   it('carries count through as a priority signal and keeps only generalized-lesson fields', () => {
     const { candidates } = sweep([e('improvement', 'x', 'do the thing better')]);
-    expect(Object.keys(candidates[0]).sort()).toEqual(['area', 'count', 'kind', 'suggestion', 'summaries', 'summary']);
+    expect(Object.keys(candidates[0]).sort()).toEqual(['area', 'count', 'kind', 'suggestion', 'suggestions', 'summaries', 'summary']);
+  });
+
+  it("a distinct member's suggestion survives into a sweep candidate (review fix 8)", () => {
+    // Complete-link keeps the A≁C pair apart, so C's distinct suggestion reaches the red-team as its own
+    // candidate rather than being dropped behind a chained cluster representative.
+    const raw = [
+      e('friction', 'gate', 'alpha beta gamma delta', 'widen the scope'),
+      e('friction', 'gate', 'alpha beta gamma epsilon', 'widen the scope'),
+      e('friction', 'gate', 'beta gamma epsilon omega', 'rewrite the gate entirely'),
+    ];
+    const { candidates } = sweep(raw);
+    const allSuggestions = candidates.flatMap((c) => c.suggestions);
+    expect(allSuggestions).toContain('rewrite the gate entirely');
+    expect(allSuggestions).toContain('widen the scope');
   });
 });
 

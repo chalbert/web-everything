@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  KINDS, ALLOWED_KEYS, scrubReasons, validateEntry, appendEntry, resolveDropboxPath,
+  KINDS, ALLOWED_KEYS, FIELD_CAPS, scrubReasons, isHighEntropyToken, validateEntry, appendEntry, resolveDropboxPath,
 } from '../conveyor/learnings-drop.mjs';
 
 const good = {
@@ -83,6 +83,71 @@ describe('scrubReasons — clean text passes', () => {
   it('flags an absolute path and a code fence', () => {
     expect(scrubReasons('/etc/passwd was read').length).toBeGreaterThan(0);
     expect(scrubReasons('```bash\nrm -rf\n```').length).toBeGreaterThan(0);
+  });
+});
+
+// ── review-round red-team fixtures: every confirmed bypass must now be REJECTED ──────────────────
+describe('scrub — closes the audited bypasses (must reject)', () => {
+  const reject = (v) => expect(scrubReasons(v).length, `should reject: ${v}`).toBeGreaterThan(0);
+  it('1. Google API key class (AIza…, no known prefix rule caught it)', () => {
+    reject('leaked AIzaSyD1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT today');
+  });
+  it('2. URL with inline credentials (glued // dodged the path rule)', () => {
+    reject('connect via https://admin:hunter2Trombone@db.internal');
+  });
+  it('3. repo-identifying relative + repo-relative source paths', () => {
+    reject('see ../../webeverything/src/lane-board.ts for the bug');
+    reject('the file src/backlog-view/lane-board.ts is wrong');
+  });
+  it('4. single-line code and one-liner SQL', () => {
+    reject("const x = fetch('/api/users')");
+    reject('SELECT * FROM users WHERE id = 1');
+  });
+  it('5. bare high-entropy token (unknown format, no prefix)', () => {
+    reject('the value was abcdEFGH1234abcdEFGH somewhere');
+  });
+  it('6. email and IPs (PII for the downstream telemetry seam)', () => {
+    reject('ping nic.g.gilbert@gmail.com about it');
+    reject('the host at 10.0.0.5 was unreachable');
+    reject('bind fe80:0:0:0:0:0:0:1 failed');
+  });
+  it('labeled credential with a secret-shaped value', () => {
+    reject('password: hunter2Trombone was committed');
+  });
+});
+
+// ── critical balance: domain vocabulary of THIS web-standards repo must PASS ───────────────────────
+describe('scrub — domain vocabulary must NOT be rejected (must pass)', () => {
+  const pass = (v) => expect(scrubReasons(v), `should pass: ${v}`).toEqual([]);
+  it('7a. a bare web-component element name', () => pass('the <select> element needs an aria-label default'));
+  it('7b. bare <dialog>/<slot> element names', () => pass('a <dialog> should trap focus and a <slot> should forward it'));
+  it('7c. "token:" as prose, not a credential', () => pass('the session token: often expires mid long run'));
+  it('7d. scope: [] and check:standards vocabulary', () => {
+    pass('an empty scope: [] should still acquire the whole lane');
+    pass('the check:standards gate must stay green before landing');
+  });
+  it('a bare AGENTS.md mention (name, not a path) passes', () => pass('the AGENTS.md router omits the conveyor pointer'));
+});
+
+describe('isHighEntropyToken — catches opaque keys, spares identifiers', () => {
+  it('rejects a mixed-class medium blob', () => {
+    expect(isHighEntropyToken('abcdEFGH1234abcdEFGH')).toBe(true);
+  });
+  it('passes ordinary single-case identifiers and short tokens', () => {
+    expect(isHighEntropyToken('batch-backlog-items')).toBe(false); // single case / hyphen
+    expect(isHighEntropyToken('closingSession')).toBe(false);      // camelCase, no digit
+    expect(isHighEntropyToken('check')).toBe(false);               // too short
+  });
+});
+
+describe('field length caps — structural leak-class kill (review fix A)', () => {
+  it('rejects an over-length summary / area / suggestion', () => {
+    expect(validateEntry({ ...good, summary: 'x '.repeat(FIELD_CAPS.summary) }).ok).toBe(false);
+    expect(validateEntry({ ...good, area: 'a '.repeat(FIELD_CAPS.area) }).ok).toBe(false);
+    expect(validateEntry({ ...good, suggestion: 's '.repeat(FIELD_CAPS.suggestion) }).ok).toBe(false);
+  });
+  it('caps are summary 240 / area 60 / suggestion 400', () => {
+    expect(FIELD_CAPS).toEqual({ summary: 240, area: 60, suggestion: 400 });
   });
 });
 

@@ -159,8 +159,9 @@ memory candidates*; they ride the EXISTING §1 gate → §1a red-team → lane �
    `node scripts/conveyor/close-session-sweep.mjs [--session=<slug>] --json`. It re-scrubs every entry
    through the same tenant-ready gate the append used (rejects any secret/token/absolute-path/code-looking
    value — belt-and-braces on the write seam), clusters near-duplicates (same `kind` + `area`, similar
-   `summary`), and returns a **deduped, ranked** `candidates[]` (each `{ kind, area, summary, suggestion,
-   count }`; `count` = how many agents hit it = a priority signal). Per
+   `summary`, **complete-link** so no A–B–C chaining), and returns a **deduped, ranked** `candidates[]`
+   (each `{ kind, area, summary, suggestion, count, summaries, suggestions }`; `count` = how many agents hit
+   it = a priority signal; `suggestions` carries every distinct member fix so none is lost). Per
    `docs/agent/platform-decisions.md#deterministic-core-thin-judgment` this clustering is script-decidable,
    so the close **shells the script** — it never re-derives the dedup in prose.
 2. **Feed survivors into §1's candidate drafting.** Treat each swept candidate as a drafted memory

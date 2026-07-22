@@ -10,10 +10,12 @@
  * #deterministic-core-thin-judgment it is a pure, tested core the sweep + any UI SHELL — never re-derived.
  *
  * ALGORITHM (pure): entries cluster when they share the same `kind` AND a normalized `area`, AND their
- * `summary` token-sets are similar (Jaccard ≥ threshold). Single-link agglomeration: an entry joins the
- * first existing cluster it matches, else opens a new one. Each cluster emits { kind, area, summary,
- * suggestion } from its representative (the longest/most-specific summary) plus `count` and the member
- * `summaries`. Output is ranked by count desc, then first-seen order (stable).
+ * `summary` token-sets are similar (Jaccard ≥ threshold). COMPLETE-link agglomeration: an entry joins a
+ * cluster only when it matches EVERY current member (not just one) — this stops the single-link failure
+ * where A~B and B~C but A≁C chain all three into one blob through the B bridge (#2614 review fix 8). Each
+ * cluster emits { kind, area, summary, suggestion } from its representative (the longest/most-specific
+ * summary) plus `count`, the member `summaries`, and the distinct member `suggestions` (so a member's
+ * DISTINCT suggestion still reaches the red-team). Output is ranked by count desc, then first-seen (stable).
  *
  * Usage (CLI):
  *   node scripts/conveyor/learnings-dedup.mjs <drop-box.jsonl> [--threshold=0.6] [--json]
@@ -69,10 +71,10 @@ export function dedup(entries, { threshold = DEFAULT_THRESHOLD } = {}) {
   const clusters = [];
   let order = 0;
   for (const e of entries) {
-    // Single-link: join the FIRST cluster this entry near-duplicates (compare against each member).
+    // Complete-link: join the FIRST cluster this entry near-duplicates AGAINST EVERY member (no chaining).
     let target = null;
     for (const c of clusters) {
-      if (c.members.some((m) => isNearDup(m, e, threshold))) { target = c; break; }
+      if (c.members.every((m) => isNearDup(m, e, threshold))) { target = c; break; }
     }
     if (target) {
       target.members.push(e);
