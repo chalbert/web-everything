@@ -26,8 +26,11 @@ Serves G5 (reviewable) and G6 (any repo's cases). Builds on [#2532] (sandbox har
   reload.
 
 ## Acceptance
-Any registered repo/product's webcases are browsable through the viewer; a per-case verdict persists across
-reload via a lane→PR write; no re-implementation of the shipped viewer/preview/source slices.
+Any registered repo/product's webcases are browsable through the viewer; per-case verdicts persist across
+reload via a **coalesced "Submit review" flush** — one lane→PR writes all pending verdicts to a committed
+ledger (central plateau-app file for v1, per the ruling below), and a reload rehydrates them from that ledger;
+pending-but-unsubmitted verdicts survive a reload via the local buffer and show an "N unsaved" indicator; no
+per-verdict PR, and no re-implementation of the shipped viewer/preview/source slices.
 
 ## Scoping + open design fork (2026-07-21, before building)
 Scoped the shipped code so the builder doesn't re-implement it, and surfaced one design decision that should
@@ -53,18 +56,36 @@ writes a webcase verdict, and the whole model is backlog-item-frontmatter-scoped
 per-webcase review ledger — possibly in the source's OWN repo — is a new write target + a new verb + a new
 in-lane applier + a durable read-back path. This is unbuilt foundation, not plumbing.
 
-**The fork (needs a human ruling):** "a per-case verdict persists via a lane→PR write" taken literally means
-**one GitHub PR per accept-click** — a review pass over the console's 37 cases would open ~37 PRs and swamp
-the drain. Realistic options:
-1. **Coalesced review-session PR** — batch a reviewer's verdicts and open ONE PR per session (the write store
-   already has a coalesce-key concept, `num:'config'`/`pendingByNum`). Fewer PRs; needs a "flush" trigger and
-   a pending-verdict buffer.
-2. **A committed review ledger** written by a single coalesced lane→PR write — verdicts live in one
-   JSON/MD ledger; the write updates the ledger, not per-verdict PRs. Cleanest durability; still one PR per
-   flush.
-3. **Per-verdict PR** as written — simplest to build, floods the queue. Only viable if verdicts are rare.
-Recommendation: **option 2** (a coalesced ledger write), with the ledger in the source's repo so a product owns
-its own review record. But this trades off against the console philosophy that every write is individually
-lane→PR-audited — hence a human call, not a silent default. The same durable-write question governs part 1
-(registering a source durably), so settle it once for both. Related: #2588's remaining review-modal work is
-gated on the SAME missing "console review/label write path."
+**The fork (was a human ruling; RULED 2026-07-22 — see below):** "a per-case verdict persists via a lane→PR
+write" taken literally means **one GitHub PR per accept-click** — a review pass over the console's 37 cases
+would open ~37 PRs and swamp the drain. The options weighed were: (1) coalesced review-session PR; (2) a
+committed review ledger written by a single coalesced write; (3) per-verdict PR (floods the queue). The same
+durable-write question governs part 1 (registering a source) and #2588's remaining review modal.
+
+## RULED (2026-07-22) — coalesced flush to a committed ledger
+Console durable artifacts (review verdicts, and source registrations) persist via a **coalesced per-session
+flush**, NOT a write per action: a reviewer marks many verdicts (held **pending**, shown optimistically), then
+one explicit **"Submit review (N)"** action opens **ONE lane→PR** that writes all pending verdicts to a
+**committed ledger**. This is options 1 + 2 combined (option 1 = *when* to write, option 2 = *where*); option 3
+(per-verdict PR) is rejected.
+
+Why: it mirrors GitHub's own review model (mark lines as *pending* → **Submit review** posts them at once), so
+reviewers already hold the mental model; a verdict is durable, auditable **governance** (serves G5 reviewable /
+G6 any-repo), so it stays lane→PR-audited rather than moving to a lighter side-store (which would undercut the
+console's "every durable write is lane→PR" thesis); and one PR per session ("reviewed 12 cases: 9 accepted, 3
+flagged") is cleaner history than dozens of noisy ones while keeping the heavy seam rare.
+
+**Build shape:**
+- **Ledger location — CENTRAL in plateau-app for v1:** one file (e.g. `plateau:src/backlog-view/webcases-reviews.json`)
+  keyed by `source::block::case`. Move to a **per-source ledger in each source's own repo** (a product owning
+  its conformance record — the long-term model) as a follow-up when a second real source lands; the write port
+  already resolves a repo per write, so the migration is localized.
+- **Client:** pending verdicts buffered in `localStorage` (crash safety) with an **"N unsaved" indicator**;
+  auto-flush on navigate-away; the in-memory `WebcasesReviewStore` stays as the fast optimistic session cache.
+- **Read-back:** on load, hydrate standing verdicts from the **committed ledger** (the durable truth), then
+  overlay any still-pending local buffer.
+- **The write:** one new coalesced write verb whose lane→PR applier rewrites the ledger file in-lane (coalesce
+  key like the existing `num:'config'`/`pendingByNum`), reusing `runWriteFlow`.
+- **Part 1 (source registry):** registering a source rides the **same** coalesced-flush-to-committed-ledger
+  seam (a registry file entry), and the two hard-coded client sources fold into it. **#2588's** review modal
+  uses the same write path — settle-once, three consumers.
