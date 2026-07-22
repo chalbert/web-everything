@@ -144,6 +144,33 @@ never a direct write to the primary tree. For **memory candidates only** (backlo
    **Context capture** as "left on-disk (red-team rejected: <reason>)". This is the **one** place the close
    opens a PR — the Hard-rules "never open a PR" carve-out, memory only. Backlog capture, cost attribution,
    and the session's own auto-commit are unchanged.
+
+### 1b. Delivery-agent learnings sweep — the conveyor drop-box feeds the SAME memory intake (#2614)
+**Runs when a conveyor delivery run wrote a learnings drop-box this session** (the file resolved by
+`node scripts/conveyor/close-session-sweep.mjs` — `--file`, else `$LEARNINGS_DROPBOX`, else
+`.conveyor/learnings/<session>.jsonl`; **absent = skip silently**, the common case). Conveyor delivery
+agents (#2608) can't each run a session close — N micro-closes would land N unvetted duplicates — so
+**capture is distributed** (every agent appends one generalized-lesson entry via
+`scripts/conveyor/learnings-drop.mjs`) and **curation is centralized here**: this one vetted close sweeps,
+dedups, and red-teams the pile. Do **not** build a parallel pipeline — this step only produces *extra
+memory candidates*; they ride the EXISTING §1 gate → §1a red-team → lane → PR unchanged.
+
+1. **Sweep (deterministic, scripted).** Run
+   `node scripts/conveyor/close-session-sweep.mjs [--session=<slug>] --json`. It re-scrubs every entry
+   through the same tenant-ready gate the append used (rejects any secret/token/absolute-path/code-looking
+   value — belt-and-braces on the write seam), clusters near-duplicates (same `kind` + `area`, similar
+   `summary`, **complete-link** so no A–B–C chaining), and returns a **deduped, ranked** `candidates[]`
+   (each `{ kind, area, summary, suggestion, count, summaries, suggestions }`; `count` = how many agents hit
+   it = a priority signal; `suggestions` carries every distinct member fix so none is lost). Per
+   `docs/agent/platform-decisions.md#deterministic-core-thin-judgment` this clustering is script-decidable,
+   so the close **shells the script** — it never re-derives the dedup in prose.
+2. **Feed survivors into §1's candidate drafting.** Treat each swept candidate as a drafted memory
+   candidate: run it through the **memory-worthiness gate** above (dedup vs the existing cluster,
+   budget/eviction, on-disk sufficiency), then the survivors enter **§1a** (red-team → lane → PR) with the
+   session's own candidates — one memory PR, one close. A candidate that fails the gate/red-team is dropped
+   exactly as any other (report it "left on-disk, not memory-worthy" / "red-team rejected: <reason>").
+3. **Empty pass is the norm.** Zero drop-box, zero survivors → do nothing and say so; not a failure.
+
 - **Blocker-edge audit** (if the session touched `backlog/`): did this session create items, resolve
   prerequisites, or surface a dependency stated only in prose? Verify the `blockedBy` edges reflect it —
   any new item carries the right prerequisites, and no item that was just finished still falsely gates
