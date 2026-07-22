@@ -14,6 +14,7 @@ import {
   isDimensionPointer,
   InvalidConfigEntryError,
 } from '../defineConfig';
+import { PLATFORM_FLAVOR_DEFAULTS } from '../platformDefaults';
 
 describe('defineConfig — validation + identity', () => {
   it('returns the config unchanged (identity) for inference', () => {
@@ -29,6 +30,18 @@ describe('defineConfig — validation + identity', () => {
         renderStrategy: { mode: 'eager-sync' }, // inline value
       }),
     ).not.toThrow();
+  });
+
+  // #2523: the list-virtualization strategy is a config dimension (native content-visibility default +
+  // an opt-in js-windowing strategy), selected per project without the surface re-deciding.
+  it('accepts a windowedCollection dimension entry (native default or an opt-in js-windowing strategy)', () => {
+    expect(() => defineConfig({ windowedCollection: extendsFlavor('js-windowing') })).not.toThrow();
+    expect(() => defineConfig({ windowedCollection: { strategy: 'content-visibility' } })).not.toThrow();
+    expect(() => defineConfig({ windowedCollection: './config/virtualization.config.ts' })).not.toThrow();
+  });
+
+  it('#2523: the windowedCollection platform default is native-first (content-visibility)', () => {
+    expect(PLATFORM_FLAVOR_DEFAULTS.windowedCollection).toBe('content-visibility');
   });
 
   it('ignores omitted/undefined dimensions', () => {

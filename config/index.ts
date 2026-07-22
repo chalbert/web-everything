@@ -23,6 +23,7 @@ export {
   type AutoDefineFlavorName,
   type RenderStrategyFlavorName,
   type CodegenSoTFlavorName,
+  type WindowedCollectionFlavorName,
 } from './defineConfig';
 
 export { type DimensionResolver } from './resolverContract';

@@ -42,4 +42,8 @@ export const PLATFORM_FLAVOR_DEFAULTS = {
   renderStrategy: 'eager-sync',
   /** Codegen source-of-truth mode (#798): most-flexible = author-in-standard-form (no lowering). */
   codegenSoT: 'standard-form',
+  /** List virtualization (#2523): native-first = `content-visibility` (every row stays a real DOM node, so
+   *  selection / count / find / focus behave as if the whole list were present, #2513). The `js-windowing`
+   *  strategy is the opt-in for tens-of-thousands lists. */
+  windowedCollection: 'content-visibility',
 } as const;
