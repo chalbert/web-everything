@@ -850,6 +850,18 @@ for (const item of backlog) {
     err(`Backlog item "${item.id}" has dateResolved "${item.dateResolved}" but status is "${item.status}" — clear the date or set status: resolved.`);
 }
 
+// shortTitle length bound (#2549): the console's scanning surfaces render `shortTitle ?? title`, so a
+// short title must stay glanceable (3–5 words, ≤ 42 chars). A too-long one defeats the point — warn (not
+// err: it still renders, just isn't scannable). An empty shortTitle should be dropped, not kept as noise.
+const SHORT_TITLE_MAX = 42;
+for (const item of backlog) {
+  if (item.shortTitle === undefined) continue;
+  if (typeof item.shortTitle !== 'string' || item.shortTitle.trim() === '')
+    warn(`Backlog item "${item.id}" has an empty/non-string shortTitle — drop the field (surfaces fall back to the full title).`);
+  else if (item.shortTitle.length > SHORT_TITLE_MAX)
+    warn(`Backlog item "${item.id}" shortTitle is ${item.shortTitle.length} chars (> ${SHORT_TITLE_MAX}) — tighten it to a glanceable 3–5 words, or drop it to fall back to the title.`);
+}
+
 // ── 6d-bis. Old-slug redirects (#110): validate `formerSlugs` back-compat aliases ──
 // A renamed item lists prior URL segments in `formerSlugs:`; src/backlog-slug-redirects.njk turns
 // each into a redirect page at /backlog/<former>/ → /backlog/<id>/. Guard the field so a former slug

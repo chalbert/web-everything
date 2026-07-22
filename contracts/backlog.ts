@@ -36,6 +36,10 @@ export interface BacklogItemDTO {
   slug: string;
   /** Title = the body's H1 (never the filename). Falls back to `id` when the body has no H1. */
   title: string;
+  /** #2549: a human-glanceable 3–5 word short title for the console's scanning surfaces (cards, lanes,
+   *  inbox). Optional — a surface renders `shortTitle ?? title`, so an un-backfilled item degrades to the
+   *  full title. Bounded to ≤ 42 chars (validated); agent titles are precise but unscannable at a glance. */
+  shortTitle?: string;
   /** One-line summary = the body's first real paragraph (inline markdown stripped). */
   summary?: string;
   /** Lifecycle state — one of {@link Status}; typed loose so a read port never crashes on an unknown value. */

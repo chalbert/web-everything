@@ -1,5 +1,6 @@
 ---
 bornAs: xaqt5ws
+shortTitle: "Decision-record rationale schema"
 kind: story
 size: 5
 parent: "2577"

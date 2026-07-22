@@ -1,5 +1,6 @@
 ---
 bornAs: xprj9ov
+shortTitle: "Spec-candidate → decision loop"
 kind: story
 size: 2
 parent: "2555"

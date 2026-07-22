@@ -1,5 +1,6 @@
 ---
 bornAs: xzcdvz7
+shortTitle: "Narrow review gate to spec-diff"
 kind: story
 size: 5
 status: open

@@ -1,5 +1,6 @@
 ---
 bornAs: xkkvkfg
+shortTitle: "Plateau Ruler decision surface"
 kind: epic
 status: open
 dateOpened: "2026-07-20"

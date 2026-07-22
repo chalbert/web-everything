@@ -1,5 +1,6 @@
 ---
 bornAs: xh56pz3
+shortTitle: "Constitution curation + form"
 kind: decision
 size: 3
 parent: "2527"
