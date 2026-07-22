@@ -1,10 +1,11 @@
 ---
 bornAs: x8vx79a
 kind: task
-status: open
+status: resolved
 relatedTo: ["2509", "2555"]
 tags: [plateau-loop, console, console-board, read-model, bug]
 dateOpened: "2026-07-22"
+dateResolved: "2026-07-22"
 ---
 
 # Console board shows open items stuck at "landed — resolving" when a non-resolve lane PR merged
@@ -39,3 +40,21 @@ lane** (`lane/<num>-resolve[-…]`):
 An open item whose only merged PR is a non-resolve `lane/<num>-*` branch does NOT render "resolving" and does
 NOT occupy the drain lane; a merged `lane/<num>-resolve` PR on a not-yet-resolved item still reads UC-D1
 "resolving". `plateau` `npm test` + `we:` `check:standards` pass; board sighted in both themes.
+
+## Delivered (WE contract PR #654 + plateau-app PR #103)
+- WE `we:contracts/backlog.ts`: added `headRefName?: string` to `OverlayState.pr` (optional → older data /
+  fixtures degrade to non-resolve, fail safe).
+- plateau `plateau:src/backlog-view/overlay.ts`: thread `headRefName` into the recorded overlay PR.
+- plateau `plateau:src/backlog-view/lane-board-data.ts`: `isResolvingPr(pr)` = merged AND the head matches
+  `^lane/<num>-resolve(-ui)?$` (the trailing segment must be *exactly* the resolve verb — a build lane whose
+  slug merely starts with "resolve", e.g. `lane/1771-resolve-the-seam`, does NOT re-trigger the bug). Both the
+  `resolving` signal and `isInFlight`'s merged-PR case now gate on it. A merged slice/note/fix PR (or a closed
+  PR) is landed history → not in-flight → the open item renders by its durable status; a merged resolve PR
+  still reads UC-D1, so a genuinely stuck resolve still surfaces.
+
+**Verified live** on `/console-board` (localhost:4000) in BOTH light and dark: the six previously-stuck items
+(#2550, #2587, #2588, #2555, #2450, #2423 — each a merged non-resolve `lane/<num>-*` PR) no longer render
+"landed — resolving"; they now populate "Ready to queue". The DRAIN lane correctly holds only #2455, which has
+a genuine OPEN review PR (real in-flight work, not a false resolving). Adversarially reviewed SHIP (the
+"resolve"-prefixed-slug false-positive finding was applied); plateau suite 1484 green, `tsc` clean,
+`check:standards` 0 errors.
