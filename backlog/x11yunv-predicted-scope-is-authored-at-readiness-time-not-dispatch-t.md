@@ -48,18 +48,22 @@ time (spawn a probe, compute `scope`, then plan) instead of requiring it authore
   reconciles a stale prediction against what the lane actually touches, so the dispatcher does not need a
   fresh probe to stay safe.
 
-## The serial floor for an unscoped item
+## Auto-prepare an unscoped item — never build it blind
 
-Refining the empty-scope contract of PR #663 (durable home #2609): an item with no `scope:` is `needs-probe` /
-unshaped — **not a permanent hold**. The dispatcher runs it **serially** (implemented in #2613 — alone, into
-an idle pool only — the safe assume-it-overlaps-everything worst case, never the unsafe "launch it free" that
-PR #663 rejected) as a floor, and surfaces it so its `scope` gets authored upstream in the readiness flow.
-Absent scope means *unknown* overlap, and unknown overlap is treated as *total* overlap — hence serial-alone.
+Consistent with the empty-scope contract of PR #663 (durable home #2609): an item with no `scope:` is
+`needs-probe` / unshaped and is **held** — never launched blind. The conveyor resolves the held state by
+**auto-preparing** the item: it dispatches a *prepare-scope* task that predicts the item's touch-set and writes
+`scope:` into the item's own `backlog/<num>.md`. That prepare task touches only the story's own file, so its
+scope is known a priori (no chicken-and-egg) and it is parallel-safe (each prepare touches a different file).
+So scope is always authored at readiness before any build — never predicted at build time, never dispatched
+blind. This does not weaken the ruling: the prepare task authors scope *upstream* (a readiness step that
+produces it), while the dispatcher still only *consumes* scope — it is not a dispatch-time probe.
 
 ## Lineage / links
 
 Codified in [we:docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates).
 Sibling ruling from the same 2026-07-22 statute session: #2615 (buildQueued → session-local sidecar; born
-`xf757h3`). Refines the empty-scope contract of PR #663 (durable home #2609: empty-scope hold → serial floor,
-built in #2613), applies the card-mutation guard #2302, governs the `scope:` field built in #2609, and is read
-by the conveyor skill #2613. Parent: the conveyor epic #2612.
+`xf757h3`). Consistent with the empty-scope contract of PR #663 (durable home #2609: unscoped = held, never
+launched blind) — the conveyor resolves the hold by auto-preparing the item, not by building it blind. Applies
+the card-mutation guard #2302, governs the `scope:` field built in #2609, and is read by the conveyor skill
+#2613. Parent: the conveyor epic #2612.

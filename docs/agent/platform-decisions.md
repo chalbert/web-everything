@@ -2944,12 +2944,16 @@ two homes:
    covered by the observed-scope breach detector. The dispatcher reads the authored `scope`; it does not
    author it.
 
-4. **This refines the empty-scope hold of PR #663 (the empty-scope contract; durable home #2609).** An
-   unscoped item is `needs-probe` / **unshaped** — not a *permanent* hold. The dispatcher runs it **serially**
-   (implemented in #2613) — alone, into an idle pool only — the safe **assume-it-overlaps-everything** worst
-   case, never the unsafe "launch it free" that PR #663 rejected — as a **floor**, and surfaces it so its
-   `scope` gets authored upstream. Serial-alone is the correct floor because absent scope means *unknown*
-   overlap, and unknown overlap must be treated as *total* overlap.
+4. **Consistent with PR #663's empty-scope hold (the empty-scope contract; durable home #2609) — resolved by
+   auto-prepare, never by a blind build.** An item that reaches dispatch without a predicted `scope` is
+   `needs-probe` / **unshaped**: it is **held**, never launched blind (exactly PR #663's rule — unscoped =
+   held, never launched unprotected). The conveyor's response to the hold is to **auto-prepare** the item — it
+   dispatches a *prepare-scope* task that predicts the item's touch-set and writes `scope:` into the item's own
+   `backlog/<num>.md`. That prepare task needs no scope prediction of its own: its touch-set is known a priori
+   — it *is* the story's own file — so it is parallel-safe (each prepare touches a different story file) and
+   free of any chicken-and-egg. So scope is **always** authored (at readiness) before a build: never predicted
+   at build time, never dispatched blind. The dispatcher still only *consumes* scope (clause 3); auto-prepare
+   is a separate readiness step that *produces* it.
 
 5. **The guard line is the same line.** The card-mutation guard (#2302) protects **committed durable state**
    and leaves **session sidecars** alone — the same principle in both directions: the guard exists to protect
@@ -2957,10 +2961,11 @@ two homes:
    Which side a signal falls on is settled by clause 1 vs. clause 2 — its nature — never by convenience.
 
 **Lineage:** ratified 2026-07-22 (Nicolas, merit-based), codifying #2615 (buildQueued → session-local
-sidecar) and #x11yunv (predicted scope authored at readiness, not at dispatch). Refines the empty-scope
-contract of PR #663 (durable home #2609: empty scope → a serial floor, not a permanent hold; the floor built
-in #2613), applies the card-mutation guard #2302, and governs the `scope:` field (#2609) the conveyor
-(#2612/#2613) reads. Composes with
+sidecar) and #x11yunv (predicted scope authored at readiness, not at dispatch). Consistent with the empty-scope
+contract of PR #663 (durable home #2609: unscoped = held, never launched blind) — the conveyor resolves the
+held state by auto-preparing the item (authoring its `scope`), never by building it blind. Applies the
+card-mutation guard #2302, and governs the `scope:` field (#2609) the conveyor (#2612/#2613) reads. Composes
+with
 [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment): scope *prediction* is the judgment
 half authored once upstream; dispatch is the deterministic half that only consumes it.
 

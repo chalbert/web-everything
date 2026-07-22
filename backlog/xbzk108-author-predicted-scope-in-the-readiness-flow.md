@@ -26,5 +26,5 @@ time.
 - Keep it judgment-in / script-read: the probe (judgment) writes `scope:` once; the dispatcher (deterministic)
   only consumes it, per [#deterministic-core-thin-judgment](../docs/agent/platform-decisions.md#deterministic-core-thin-judgment).
 
-Without this, every item is `needs-probe` and the conveyor can only run the serial floor — the dispatcher has
-nothing scope-bearing to parallelize.
+Without this, every item is `needs-probe` and must be auto-prepared before it can build — the dispatcher has
+nothing scope-bearing to parallelize until scope is authored at readiness.

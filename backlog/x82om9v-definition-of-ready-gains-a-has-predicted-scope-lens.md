@@ -11,7 +11,7 @@ tags: [conveyor, readiness, scope, lens]
 
 Surface a readiness lens / check that flags ready items missing a predicted `scope:`, so "has predicted scope"
 becomes a **visible** part of Definition of Ready — a dev-ready item without `scope:` reads as *not fully
-shaped* (the dispatcher can only run it on the serial floor).
+shaped* (it is held and auto-prepared before it can build, never dispatched blind).
 
 ## What to build
 
