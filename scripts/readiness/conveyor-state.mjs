@@ -28,8 +28,9 @@
  *
  * DAEMON, GRACEFUL DEGRADE: the drain daemon lives in the SIBLING plateau-app repo, which may be absent (a WE-only
  *   checkout, or a lane pool without the sibling clone). When its CLI can't be found or errors, {@link shapeDaemon}
- *   yields the string `"unavailable"` — the conveyor skill reads that as "no resident drain, do the drain inline"
- *   rather than failing the whole tick.
+ *   yields the string `"unavailable"` — the conveyor skill SURFACES that to the operator (it offers `/drain`); it
+ *   NEVER drains inline (landing is the resident daemon's job, per the ratified /conveyor design) — rather than
+ *   failing the whole tick.
  */
 
 import { execFileSync } from 'node:child_process';
