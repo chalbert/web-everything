@@ -96,19 +96,27 @@ red PR never enters the drain's queue.
 
 ### 6. Append a structured learnings entry to the session drop-box (#2614)
 
-> **HOOK ONLY — do NOT implement the drop-box here.** Its schema + path are built in parallel as **#2614**
-> (delivery-learnings drop-box). When #2614 lands, append **one** structured, generalized-lesson entry (friction
-> hit, missing convention, doc/skill gap, improvement candidate — **no** raw code, diffs, secrets, or repo paths;
-> the schema is tenant-ready by construction). Until #2614 lands, this step is a documented no-op the conveyor
-> wires up; do not invent a format.
-
-Placeholder the conveyor substitutes once #2614 lands (append-only JSONL, one entry per delivery):
+Append **exactly one** structured, generalized-lesson entry to the session drop-box — a friction hit, a missing
+convention, a doc/skill gap, or an improvement idea from building this item. The drop-box (#2614) is
+`scripts/conveyor/learnings-drop.mjs`; it is a **write-time-gated scrub** that REJECTS any entry carrying raw
+code, diffs, secrets, absolute/repo-identifying paths, or PII (the schema is tenant-ready by construction), so
+keep every field a short generalized lesson — **no** code, paths, or repo names:
 
 ```bash
-# node scripts/conveyor/learnings-append.mjs --session=<conveyor-session> --item={{ITEM_NUM}} --entry=<json>   # (#2614)
+node scripts/conveyor/learnings-drop.mjs \
+  --kind=<friction|missing-convention|doc-gap|skill-gap|improvement> \
+  --summary="<one sentence — the lesson>" \
+  --area="<coarse label, e.g. lane gating / check:standards>" \
+  --suggestion="<short recommendation>" \
+  --session={{SESSION_SLUG}}
 ```
 
-Distributed capture (every agent, cheaply, in the moment); the `/closing-session` sweep curates centrally.
+The flags are `--kind`/`--summary`/`--area`/`--suggestion` (all four required) plus an optional `--session`;
+there is deliberately **no** `--item`/`--entry`/free-form field (the allow-list is the privacy boundary — a
+disallowed key is rejected, never appended). If your entry is rejected, it named something it should not have —
+generalize it and retry; do **not** try to force it through. Skip this step only if you genuinely hit no
+generalizable friction. Distributed capture (every agent, cheaply, in the moment); the `/closing-session` sweep
+curates centrally.
 
 ### 7. EXIT — do not merge, do not release, do not wait
 

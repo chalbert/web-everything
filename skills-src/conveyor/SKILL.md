@@ -80,28 +80,35 @@ one that works for a completed background task), so it re-invokes this loop reli
    × free lanes decision. Do not re-derive it; read it. (It shells the same build-queue, scope-lease, and pool
    pickers under the hood, so its inputs match the state read above.)
 
-3. **Spawn ONE background delivery agent per `launch` entry.** For each `{num, lane}` in `plan.launch` that you
-   have not already dispatched this session (see *In-flight dispatch guard* below):
-   - Read the item's spec `backlog/<num>-<slug>.md` and its `scope:` frontmatter.
+3. **Spawn ONE background delivery agent per `launch` entry.** For each `{num, lane}` in `plan.launch` that the
+   *In-flight dispatch guard* (below) does not suppress — i.e. neither its `num` **nor** its assigned `lane` is
+   held by a still-pending spawned agent:
+   - Resolve the item's spec path by **globbing `backlog/<num>-*.md`** (the plan returns only `{num, lane}`, not
+     the slug), then read that file and its `scope:` frontmatter.
    - Instantiate [`delivery-agent-brief.md`](delivery-agent-brief.md) by substituting its placeholders:
-     `{{ITEM_NUM}}`=`num`, `{{ITEM_SPEC_PATH}}`=`backlog/<num>-<slug>.md`, `{{LANE}}`=`lane`,
+     `{{ITEM_NUM}}`=`num`, `{{ITEM_SPEC_PATH}}`=the globbed `backlog/<num>-<slug>.md`, `{{LANE}}`=`lane`,
      `{{SESSION_SLUG}}`=`conveyor-<num>`, `{{SCOPE}}`=the item's `scope:` entries, repo-qualified and
-     comma-joined (e.g. `we:scripts/conveyor,we:skills-src/conveyor`). Also substitute the brief's step-6
-     learnings placeholder with the now-landed drop-box command (#2614 landed as `learnings-drop.mjs`):
-     `node scripts/conveyor/learnings-drop.mjs --kind=<k> --summary="…" --area="…" --suggestion="…" --session=conveyor-<num>`.
+     comma-joined (e.g. `we:scripts/conveyor,we:skills-src/conveyor`). Those five `{{DOUBLE_BRACE}}` tokens are
+     the whole fill — the brief already names the real learnings drop-box command (`learnings-drop.mjs`) and
+     every other step verbatim; do not rewrite its prose.
    - Spawn it as **one background `Agent`** with the filled brief as the prompt (default `run_in_background`).
      One agent = one item = one lane = one PR. The agent acquires its lane, claims the item, builds it, opens a
      `ready-to-merge` PR, and **exits without merging**.
+   - **Record a guard entry** for this spawn: `{ num, lane, spawnedTick: <this tick's count or timestamp> }`
+     (see the guard below).
 
-4. **Spawn a merge watcher per newly-opened PR.** From `state.prs` (each row is `{ num, prNumber, state, ci,
-   labels }`), for every open PR you are not already watching, spawn a background watcher whose **exit** wakes
-   this loop:
+4. **Spawn a merge watcher per newly-opened PR — but ONLY for items THIS conveyor launched.** `state.prs` (each
+   row `{ num, prNumber, state, ci, labels }`) is built from `gh pr list` **repo-wide**, so it also carries PRs
+   from other sessions / humans. Filter it to rows whose `num` is one the conveyor dispatched this session
+   (a spawned/claimed item — keep a small in-session set of the nums you launched). For each such open PR you are
+   not already watching, spawn a background watcher whose **exit** wakes this loop:
    ```bash
    node scripts/conveyor/pr-watch.mjs <prNumber>   # run_in_background: true
    ```
    Track the small set of `prNumber`s you have a live watcher for (ephemeral process bookkeeping — see the note
    under *State*). The board (`state.prs`) is the source of truth for which PRs exist; the watcher just wakes you
-   the instant one reaches a terminal state.
+   the instant one reaches a terminal state. Scoping to conveyor-launched nums keeps an unrelated PR's stray
+   `review:*` label from waking the loop with a spurious "PR #N needs review".
 
 5. **Post ONE terse status line, then start the next tick.** Per the operator's progress-tracking preference the
    checklist is the channel and prose stays quiet — one line per tick, e.g.:
@@ -115,11 +122,34 @@ one that works for a completed background task), so it re-invokes this loop reli
 
 **In-flight dispatch guard (the one bit of ephemeral bookkeeping).** Between spawning a delivery agent and that
 agent acquiring its lane + claiming the item, the item is still in the queue and its lane still reads free — so
-a naive next tick could double-dispatch it. Keep an in-session set of `num`s you have spawned an agent for but
-whose lane-lease / `active` claim has not yet appeared in `conveyor-state` (`state.lanes` / the item leaving
-`state.queue`). Exclude those from re-dispatch until they either show up as claimed (the agent got going) or the
-agent completes / is flagged stalled (`state.health`). This is process bookkeeping — which agents you launched —
-not a state store: the board stays the single truth (see *State*).
+a naive next tick could double-dispatch it. Keep an in-session list of guard entries, one per spawned agent:
+`{ num, lane, spawnedTick }`. On each tick, **filter `plan.launch`** to drop any entry whose `num` **OR** whose
+assigned `lane` matches a live guard entry — the contended resource is the LANE, not just the item, so both must
+be excluded (else tick N launches `{num:100, lane:4}`, 100 is slow to acquire, and tick N+1 re-assigns lane 4 to
+a different top-of-queue `num` while agent A is still starting — two agents targeting lane 4).
+
+**Retire a guard entry three ways:**
+
+1. **Claimed → the agent got going.** When the item shows as claimed in `conveyor-state` — its lane appears in
+   `state.lanes` (leased) or it has left `state.queue` — drop the entry. This is the normal path.
+2. **Agent completed / errored** — when the delivery `Agent` returns (any result, including an escalation),
+   drop its entry.
+3. **TTL EXPIRY (the required backstop).** If an entry is still pending after **N ticks (default 3, ≈ 6 min)**
+   without ever showing as claimed, **DROP it and let it re-dispatch**, and surface a one-line note the first
+   time (`⚠ #<num> never claimed after <N> ticks — re-dispatching`). This covers an agent that **died after
+   spawn but before claiming** (a crash during `acquire`/`npm`, a lost background task, a lost lane race): path
+   (1) never fires and path (2)'s health backstop is currently inert (see below), so without the TTL the `num`
+   would sit guarded **forever** and that one item would silently stop delivering for the whole session.
+
+> **Do NOT rely on `state.health` as the guard backstop.** The stall scan is **dormant** today: it maps a lane
+> to its item via `.claude/lane-ports.json`, which is `{}` (nothing in the acquire path populates it yet), so
+> `conveyor-state`'s health scan never flags a stalled lane and `state.health` reads `ok` regardless. The **TTL
+> (rule 3) is the real backstop** until that lane→num mapping exists (populating it is a separate follow-up — do
+> not build it here). Still surface `state.health.verdict === 'warn'` when it does fire, but never make the guard
+> depend on it.
+
+This is process bookkeeping — which agents you launched — not a state store: the board stays the single truth
+(see *State*).
 
 ## 3. On a watcher exit (the wake)
 
@@ -163,11 +193,17 @@ in-flight dispatch guard and the watched-PR set). That is not item state; it is 
 
 ## 6. Idle-stop (the conveyor's lifetime = the session's)
 
-Each tick, read `state.idle` (`{ lastMerge, lastQueueAdd, now }`). When the **queue is empty** (no
-`buildQueued` items, no in-flight lanes/PRs) **AND** there has been **no operator feedback and no queue-add for
-the configured idle window** (default 15 min — compare `now` against `lastQueueAdd` / `lastMerge` and the last
-chat turn), **announce it and STOP the tick loop** (do not arm another `sleep`). The conveyor does not outlive
-its purpose; a fresh `/conveyor` restarts it.
+Stop on two signals only: the **queue is empty** (no `buildQueued` items in `state.queue`, no in-flight
+lanes/PRs) **AND** there has been **no operator feedback for the configured idle window** (default 15 min —
+measure from the last chat turn). When both hold, **announce it and STOP the tick loop** (do not arm another
+`sleep`). The conveyor does not outlive its purpose; a fresh `/conveyor` restarts it.
+
+> **Do NOT gate idle-stop on `state.idle.lastQueueAdd`.** That field is sourced from the **drain's**
+> `queued.json` (the ready-to-merge token queue), **not** the build-queue the operator feeds with
+> `build-queue add` — a fresh clear never updates it, so it is the wrong signal for "was work queued recently".
+> The queue-empty test above already reads `buildQueued` correctly (via `state.queue`), which is the reliable
+> half; rely on queue-empty + operator-feedback and ignore the `lastQueueAdd` grace clause until a build-queue
+> clear timestamp exists.
 
 ## 7. Final ledger (on stop)
 
