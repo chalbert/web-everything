@@ -689,10 +689,11 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
     }
     // An EMPTY scope is meaningless and is the one value where the two halves could disagree — the loader
     // collapses [] → undefined (unscoped) while a naive shape check would pass it. Error at author time so [] can
-    // never reach the loader OR the dispatcher: an unscoped item runs only on the dispatcher's SERIAL FLOOR
-    // (alone, in an idle pool — #2613), so to earn parallelism, omit the field for now or list real prefixes.
+    // never reach the loader OR the dispatcher: an unscoped item is NEVER launched to build — the dispatcher holds
+    // it `unshaped-no-scope` and the /conveyor skill AUTO-PREPARES its scope (#2613), so to build it, omit the
+    // field for now or list real prefixes.
     if (scope.length === 0) {
-      err(`Backlog item "${id}" scope is empty — an empty scope is meaningless (the dispatcher reads absent-or-empty as unscoped: it runs on the serial floor, one at a time). Omit the field, or list real repo-relative path prefixes.`);
+      err(`Backlog item "${id}" scope is empty — an empty scope is meaningless (the dispatcher reads absent-or-empty as unscoped: it never builds it, and auto-prepares the scope instead). Omit the field, or list real repo-relative path prefixes.`);
       continue;
     }
     if (scope.some((p) => typeof p !== 'string'))
