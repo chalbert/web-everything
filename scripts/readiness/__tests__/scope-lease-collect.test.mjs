@@ -15,6 +15,8 @@ import {
   collectSnapshot,
   breachSig,
   advanceBreachCount,
+  backlogItemsFromObserved,
+  GHOST_GRACE_MS,
 } from '../scope-lease-collect.mjs';
 import { liveScopePicture } from '../scope-lease-live.mjs';
 
@@ -219,6 +221,125 @@ describe('collectSnapshot — pool rows → the observer lease shape', () => {
   });
 });
 
+describe('backlogItemsFromObserved — claimed-item ids evidenced in the observed diff (WE #2623)', () => {
+  it('extracts the backlog number from a repo-qualified backlog path', () => {
+    expect(backlogItemsFromObserved(['we:backlog/2623-conveyor-lease.md'])).toEqual(['2623']);
+  });
+  it('extracts from an unqualified backlog path too', () => {
+    expect(backlogItemsFromObserved(['backlog/2611-conveyor-state.md'])).toEqual(['2611']);
+  });
+  it('ignores non-backlog paths and dedupes, first-seen order', () => {
+    expect(
+      backlogItemsFromObserved(['we:src/a.ts', 'we:backlog/2623-x.md', 'we:scripts/y.mjs', 'we:backlog/2623-x.md']),
+    ).toEqual(['2623']);
+  });
+  it('is empty for a lane with no backlog file in its observed scope', () => {
+    expect(backlogItemsFromObserved(['we:src/a.ts', 'we:scripts/readiness/x.mjs'])).toEqual([]);
+    expect(backlogItemsFromObserved([])).toEqual([]);
+  });
+  it('tolerates a non-array input', () => {
+    expect(backlogItemsFromObserved(null)).toEqual([]);
+  });
+});
+
+describe('collectSnapshot — empty/stale (ghost) lease drop (WE #2623)', () => {
+  // A finished-agent lane: still leased, carries its STALE marker-declared predicted scope, but has EMPTY observed
+  // scope and no claimed item. Its leftover predicted scope is exactly what falsely blocks a new dispatch.
+  const ghostLane = (lane) => laneRow(lane, { predictedScope: ['we:scripts/readiness/'] });
+  const OLD = GHOST_GRACE_MS + 1; // held past the grace → eligible to reap
+  const FRESH = 1_000; // seconds old → still inside the acquire→claim window
+
+  it('DROPS a ghost lease: item-aware, empty observed, no claimed item, held past the grace', () => {
+    const poolStatus = { lanes: [ghostLane(1)] };
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => [], // no diff / no git status change
+      itemsForLane: () => [], // no claimed backlog item
+      leaseAgeMsForLane: () => OLD,
+    });
+    expect(leases).toEqual([]);
+  });
+
+  it('REGRESSION GUARD: KEEPS a FRESH empty lease (inside the acquire→claim window) — its reservation still holds', () => {
+    const poolStatus = { lanes: [ghostLane(1)] };
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => [], // acquired, not yet claimed → no diff YET
+      itemsForLane: () => [],
+      leaseAgeMsForLane: () => FRESH, // seconds old — must NOT be reaped (a rival would else overlap it)
+    });
+    expect(leases).toHaveLength(1);
+    expect(leases[0].predictedScope).toEqual(['we:scripts/readiness/']);
+  });
+
+  it('KEEPS an empty, unclaimed lease of UNKNOWN age (null) — never reap what we cannot age', () => {
+    const poolStatus = { lanes: [ghostLane(1)] };
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => [],
+      itemsForLane: () => [],
+      leaseAgeMsForLane: () => null, // unparseable/missing acquiredAt
+    });
+    expect(leases).toHaveLength(1);
+  });
+
+  it('KEEPS a real lease with a claimed item even when observed is empty and it is old (pure contract)', () => {
+    const poolStatus = { lanes: [ghostLane(1)] };
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => [],
+      itemsForLane: () => ['2623'], // holds a claim → a real work stream, not a ghost
+      leaseAgeMsForLane: () => OLD,
+    });
+    expect(leases).toHaveLength(1);
+    expect(leases[0].lane).toBe(1);
+  });
+
+  it('KEEPS a real lease with observed diff even when old and holding no claimed item', () => {
+    const poolStatus = { lanes: [ghostLane(1)] };
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => ['we:scripts/readiness/x.mjs'], // real live work
+      itemsForLane: () => [],
+      leaseAgeMsForLane: () => OLD,
+    });
+    expect(leases).toHaveLength(1);
+    expect(leases[0].observedScope).toEqual(['we:scripts/readiness/x.mjs']);
+  });
+
+  it('PRODUCTION WIRING: item signal derived from the SAME observed source (shell shape) — old ghost dropped, claim-in-diff kept', () => {
+    // Mirror the IO shell: one observed source feeds both observedForLane and itemsForLane (via backlogItemsFromObserved).
+    const poolStatus = { lanes: [ghostLane(1), ghostLane(2)] };
+    const observedByLane = { 1: [], 2: ['we:backlog/2624-x.md', 'we:scripts/conveyor/y.mjs'] };
+    const observedForLane = (l) => observedByLane[l.lane];
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane,
+      itemsForLane: (l) => backlogItemsFromObserved(observedForLane(l)),
+      leaseAgeMsForLane: () => OLD, // both old; only lane-1 (empty, no claim) is a ghost
+    });
+    expect(leases.map((l) => l.lane)).toEqual([2]);
+  });
+
+  it('BACK-COMPAT: with NO itemsForLane, a zero-observed lease is KEPT (not dropped)', () => {
+    const poolStatus = { lanes: [ghostLane(1)] };
+    const leases = collectSnapshot({ poolStatus, observedForLane: () => [], leaseAgeMsForLane: () => OLD });
+    expect(leases).toHaveLength(1);
+    expect(leases[0].predictedScope).toEqual(['we:scripts/readiness/']);
+  });
+
+  it('a non-array itemsForLane result is treated as no claim (a ghost when empty + old)', () => {
+    const poolStatus = { lanes: [ghostLane(1)] };
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => [],
+      itemsForLane: () => null,
+      leaseAgeMsForLane: () => OLD,
+    });
+    expect(leases).toEqual([]);
+  });
+});
+
 describe('END-TO-END (pure) — collectSnapshot → liveScopePicture', () => {
   it('two leased lanes whose observed scopes OVERLAP ⇒ the observer reports the overlap, clean:false', () => {
     const poolStatus = { lanes: [laneRow(1), laneRow(2)] };
@@ -234,6 +355,21 @@ describe('END-TO-END (pure) — collectSnapshot → liveScopePicture', () => {
     expect(picture.clean).toBe(false);
     // predicted=observed ⇒ no false breach on either lane.
     expect(picture.breachedLanes).toEqual([]);
+  });
+
+  it('a dropped ghost lease (WE #2623) contributes NO stale predicted scope to the picture', () => {
+    // Lane-1 finished: still leased, marker-declared predicted scope, but empty observed + no claim. Its leftover
+    // predicted scope must NOT surface as a live lease — else the dispatcher would false-block an overlapping item.
+    const poolStatus = { lanes: [laneRow(1, { predictedScope: ['we:scripts/readiness/'] })] };
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => [],
+      itemsForLane: () => [],
+      leaseAgeMsForLane: () => GHOST_GRACE_MS + 1, // finished long ago → reaped
+    });
+    const picture = liveScopePicture({ leases });
+    expect(picture.leases).toEqual([]); // the ghost is gone — no scope, no overlap contribution
+    expect(picture.clean).toBe(true);
   });
 
   it('two leased lanes with DISJOINT observed scopes ⇒ clean:true, no overlaps', () => {

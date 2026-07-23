@@ -102,6 +102,38 @@ export function parseObservedFiles({ diffOut = '', porcelainOut = '', repoKey = 
 }
 
 /**
+ * The grace period (ms) an empty, unclaimed lease is spared before it counts as a finished GHOST (WE #2623). It
+ * must comfortably exceed a fresh build lane's acquire→claim window — acquire writes the lease marker, THEN resets
+ * + installs deps (can run a couple minutes) before the agent claims and produces its first diff — yet stay well
+ * under a real build's duration, so a genuinely-finished ghost (held far longer) is still reaped promptly. Exported
+ * so a test / caller can override it. 5 minutes is that middle ground.
+ */
+export const GHOST_GRACE_MS = 5 * 60_000;
+
+/**
+ * The backlog item numbers EVIDENCED in a lane's observed scope (WE #2623 — the ghost drop's claimed-item signal).
+ * A lane's live claim shows up as a `backlog/<NNN>-*.md` change in its diff (`backlog.mjs claim` flips the item to
+ * `active` + stamps `dateStarted`), so the ids among the observed paths are the items the lane is holding. Matches
+ * a `backlog/<digits>` segment anywhere in a (possibly repo-qualified `we:backlog/…`) path; deduped, order-stable.
+ * PURE — string parsing only, no fs/git. Returns [] for a lane with no backlog file in its observed scope.
+ * @param {string[]} observed  repo-qualified observed paths.
+ * @returns {string[]} the distinct backlog item numbers (as strings), in first-seen order.
+ */
+export function backlogItemsFromObserved(observed) {
+  const list = Array.isArray(observed) ? observed : [];
+  const seen = new Set();
+  const out = [];
+  for (const p of list) {
+    const m = String(p == null ? '' : p).match(/(?:^|[:/])backlog\/(\d+)/);
+    if (m && !seen.has(m[1])) {
+      seen.add(m[1]);
+      out.push(m[1]);
+    }
+  }
+  return out;
+}
+
+/**
  * Resolve a lane's PREDICTED scope. PRIORITY (#2560 final slice): marker-`declared` (the lane's own
  * `acquire --scope=` file-scope, persisted in its lease marker — the REAL predicted-scope producer #2596 noted
  * was missing) → `--plan` → observed. With a non-empty `declared`, predicted is that normalized declared scope
@@ -187,6 +219,7 @@ export function advanceBreachCount(prev, breach, session = null) {
  *   observedForLane: (lane:object) => string[],   // already-repo-qualified observed scope for a lane
  *   planForLane?: ((lane:object) => string[]|null) | null,  // optional per-lane predicted plan
  *   breachAttemptForLane?: ((lease:object) => number) | null,  // optional per-lease breach-attempt counter
+ *   itemsForLane?: ((lane:object) => Array<string|number>|null) | null,  // optional per-lane claimed backlog items
  * }} input
  *   The IO shell repo-qualifies each lane's paths inside `observedForLane`, so the pure shape needs no separate
  *   repo key — observed scope arrives already qualified, exactly as the observer expects.
@@ -200,16 +233,59 @@ export function advanceBreachCount(prev, breach, session = null) {
  * present — the real predicted-scope producer the collector previously lacked. It takes priority over `--plan`,
  * which takes priority over observed (see {@link resolvePredictedScope}).
  *
+ * EMPTY/STALE (GHOST) LEASE DROP (WE #2623): a lane whose agent has FINISHED but never released still holds a live
+ * lease marker, yet holds NO observed scope (no diff / no `git status` change) AND no claimed backlog item. Such a
+ * ghost contributes nothing real, but its STALE marker-declared `predictedScope` (from `acquire --scope=`) would
+ * otherwise flow into the observer's effective scope (predicted ∪ observed) and the dispatcher's overlap gate,
+ * FALSELY blocking a new item's dispatch (`overlaps lane-N` against a dead lane) and inflating the board's active
+ * count. So an empty/stale lease is DROPPED here at the collector — the single source every consumer (observer,
+ * dispatcher, board) reads, so they all see the same de-ghosted set. This mirrors the serial-floor-era rule that
+ * an empty lease must not block dispatch, applied to the COUNT as well as the gate.
+ *
+ * A lease is a GHOST when ALL THREE hold: (1) EMPTY observed scope, (2) NO claimed item, (3) held PAST a short
+ * grace ({@link GHOST_GRACE_MS}). All three are INJECTED so the pure core stays clock/fs-free:
+ *   • `itemsForLane(lane)` → the lane's claimed backlog items. TODAY the IO shell derives this from the lane's diff
+ *     (a live claim shows as a `backlog/<NNN>-*.md` change), so it moves in lockstep with observed — it is not yet
+ *     an INDEPENDENT signal (no authoritative item source exists: `.claude/lane-ports.json` is empty and the lease
+ *     marker carries no item). The param is the seam a future authoritative source (marker-declared item / merged-PR
+ *     state) plugs into to make axis (2) independently meaningful; the pure contract already honors it.
+ *   • `leaseAgeMsForLane(lane)` → ms since the lease was acquired (shell: now − marker `acquiredAt`). This is the
+ *     axis that ACTUALLY separates a finished ghost from a just-acquired reservation TODAY: a fresh build lane sits
+ *     EMPTY only during its brief acquire→claim window (seconds to a couple minutes of provisioning), whereas a
+ *     finished ghost has been held far longer (it ran a whole build). Without the grace, dropping every empty lease
+ *     would reap a fresh reservation and let a scope-overlapping rival launch — the exact conflict the lease exists
+ *     to prevent. An UNKNOWN age (null / unparseable `acquiredAt`) is treated as "still fresh" → NOT dropped (never
+ *     reap a lease we cannot age).
+ * The drop is GATED on `itemsForLane` being injected: with NO `itemsForLane` the collector KEEPS every leased lane
+ * — exact back-compat with the pre-#2623 collector. Predicted scope is deliberately NOT part of the ghost test: a
+ * ghost's whole harm IS its leftover predicted scope, so keying the drop on predicted would never fire.
+ *
  * BREACH-ATTEMPT COUNTER (WE #2598): `breachAttemptForLane(lease)` is the INJECTED counter — the IO shell's fn
  * reads/advances/writes the per-lane sidecar and returns the current attempt count for the just-built lease. Kept
  * OUT of the pure core (it does fs) — this pure fn only stamps the integer it returns onto `lease.breachAttempt`.
  */
-export function collectSnapshot({ poolStatus, observedForLane, planForLane = null, breachAttemptForLane = null } = {}) {
+export function collectSnapshot({ poolStatus, observedForLane, planForLane = null, breachAttemptForLane = null, itemsForLane = null, leaseAgeMsForLane = null } = {}) {
   const lanes = Array.isArray(poolStatus?.lanes) ? poolStatus.lanes : [];
   // Keep only LIVE-held lanes — `leased === true` marks an active work stream (a stale marker reads as free).
   const held = lanes.filter((l) => l && typeof l === 'object' && l.leased === true);
-  return held.map((lane) => {
+  const itemAware = typeof itemsForLane === 'function';
+  const ageOf = typeof leaseAgeMsForLane === 'function' ? leaseAgeMsForLane : null;
+  const leases = [];
+  for (const lane of held) {
     const observed = normScope(observedForLane(lane));
+    // WE #2623 — DROP an empty/stale ghost lease (see the header): item-aware, EMPTY observed, NO claimed item, and
+    // held PAST the grace. Gated on item-awareness so a plain (pre-#2623) call keeps every leased lane.
+    if (itemAware && observed.length === 0) {
+      // The lane's claimed backlog items (evidence it is a REAL work stream). Never emitted on the lease.
+      const rawItems = itemsForLane(lane);
+      const claimedItems = Array.isArray(rawItems)
+        ? rawItems.filter((x) => x != null && String(x).trim() !== '')
+        : [];
+      const ageMs = ageOf ? ageOf(lane) : null;
+      // Past the grace only when age is KNOWN and ≥ threshold; an unknown age reads as "still fresh" (kept).
+      const pastGrace = Number.isFinite(ageMs) && ageMs >= GHOST_GRACE_MS;
+      if (claimedItems.length === 0 && pastGrace) continue; // reap the ghost
+    }
     const plan = typeof planForLane === 'function' ? planForLane(lane) : null;
     const lease = {
       lane: lane.lane,
@@ -223,8 +299,9 @@ export function collectSnapshot({ poolStatus, observedForLane, planForLane = nul
       const a = breachAttemptForLane(lease);
       if (Number.isInteger(a) && a >= 1) lease.breachAttempt = a;
     }
-    return lease;
-  });
+    leases.push(lease);
+  }
+  return leases;
 }
 
 // ── IO SHELL (runs only as a CLI — owns all git / child_process / fs) ────────────────────────────────────────
@@ -362,20 +439,28 @@ function main(argv) {
     return key;
   };
 
+  // MEMOIZED (per lane path) so the git-heavy read runs ONCE per lane per tick even though both `collectSnapshot`
+  // and the `itemsForLane` derivation below consult it — avoids doubling the merge-base/diff/status subprocesses
+  // and pins both consumers to the SAME observation (no read-at-two-instants skew).
+  const observedCache = new Map();
   const observedForLane = (lane) => {
     const path = lane?.path;
     if (!path) return [];
+    if (observedCache.has(path)) return observedCache.get(path);
+    let observed;
     try {
       const repoKey = repoKeyForLane(lane);
       // Diff base: merge-base(origin/main, HEAD); fall back to origin/main if merge-base fails.
       const base = tryGit(['merge-base', 'origin/main', 'HEAD'], path) || 'origin/main';
       const diffOut = tryGit(['diff', '--name-only', '--end-of-options', `${base}...HEAD`], path) || '';
       const porcelainOut = tryGit(['status', '--porcelain'], path) || '';
-      return parseObservedFiles({ diffOut, porcelainOut, repoKey });
+      observed = parseObservedFiles({ diffOut, porcelainOut, repoKey });
     } catch (e) {
       log(`  ⚠ lane-${lane?.lane ?? '?'}: git read failed (${String(e.message || e).split('\n')[0]}) — treating observed scope as empty`);
-      return [];
+      observed = [];
     }
+    observedCache.set(path, observed);
+    return observed;
   };
 
   const planForLane = planMap
@@ -384,6 +469,26 @@ function main(argv) {
         return Array.isArray(p) ? p : null;
       }
     : null;
+
+  // WE #2623 — the injected CLAIMED-ITEM signal for the empty/stale ghost drop. A lane's live claim is EVIDENCED
+  // by its backlog file appearing in the observed diff: `backlog.mjs claim` flips the item to `active`+stamps
+  // `dateStarted` in the lane clone, and that `backlog/<NNN>-*.md` change stays in the diff until the PR merges;
+  // once merged the item is resolved and the file drops out — exactly the finished-ghost state. So the item ids a
+  // lane holds = the backlog numbers among its observed paths. This needs no populated lane-ports registry (it is
+  // `{}` today) nor a marker item field (there is none) — it reads the diff the collector already has. A future
+  // authoritative item source (marker-declared item, or a populated registry) can supersede this fn unchanged.
+  const itemsForLane = (lane) => backlogItemsFromObserved(observedForLane(lane));
+
+  // WE #2623 — the injected LEASE-AGE signal (ms since acquire) for the ghost drop's grace gate. The lease marker
+  // stamps `acquiredAt` (ISO) at acquire; age = now − acquiredAt. A missing / unparseable stamp → null (the pure
+  // core reads that as "still fresh" and keeps the lease — never reap a lease we cannot age). `now` is read ONCE
+  // here (IO) so the whole tick ages every lane against the same clock.
+  const nowMs = Date.now();
+  const leaseAgeMsForLane = (lane) => {
+    const at = lane?.lease?.acquiredAt;
+    const t = at ? Date.parse(at) : NaN;
+    return Number.isFinite(t) ? nowMs - t : null;
+  };
 
   // WE #2598 — the durable per-lane breach-attempt counter. lane id → lane clone dir (for the sidecar path).
   const pathByLane = new Map(
@@ -411,6 +516,8 @@ function main(argv) {
     observedForLane,
     planForLane,
     breachAttemptForLane: trackAttempts ? breachAttemptForLane : null,
+    itemsForLane,
+    leaseAgeMsForLane,
   });
   const picture = liveScopePicture({ leases, policy });
 

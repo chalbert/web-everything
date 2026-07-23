@@ -3,8 +3,10 @@ bornAs: x7v8jvr
 kind: story
 size: 3
 parent: "2612"
-status: open
+status: resolved
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-23"
+dateResolved: "2026-07-23"
 tags: [plateau-loop, conveyor, scope-lease, status-board]
 scope:
   - we:scripts/readiness/
@@ -22,3 +24,11 @@ The live scope-lease collector counts a **held-but-empty lane** as an active lea
 **Fix.** Drop leases with **no observed scope and no claimed item** from the collected picture — either in `scope-lease-collect` (don't emit a zero-scope, zero-item lease) or in the board's lane derivation (don't render one as running). Prefer the collector, so every consumer sees the same de-ghosted set. This lines up with the earlier serial-floor-era note that an **empty lease shouldn't block dispatch** — the same "empty holds nothing" principle, applied to the *count* as well as the *gate*.
 
 Refs the status-board ([#2613](/backlog/2613-the-conveyor-skill-command/)) and the scope-lease engine ([#2560](/backlog/2560-scope-lease-and-conflict-policy-engine/)).
+
+## Progress
+
+- Fixed at the **collector** (`we:scripts/readiness/scope-lease-collect.mjs`), so every consumer — observer, dispatcher, status-board — sees the same de-ghosted set.
+- `collectSnapshot` gained an injected `itemsForLane(lane)` claimed-item signal. A lease with **empty observed scope AND no claimed item** is dropped as an empty/stale ghost. Predicted scope is intentionally excluded from the test (a ghost's leftover predicted scope is precisely the false-block being removed).
+- The drop is **gated on item-awareness**: with no `itemsForLane` the collector keeps every leased lane (exact pre-#2623 back-compat), since a zero-observed lane could be freshly acquired mid-claim.
+- IO shell derives the claim signal from the lane's diff: a live claim shows as a `we:backlog/<NNN>-*.md` change (via the new pure `backlogItemsFromObserved`); once the PR merges the file drops out — the finished-ghost state. No populated lane-ports registry or marker item field required (neither exists today); a future authoritative item source can supersede the fn unchanged.
+- Tests: added ghost-drop coverage (dropped when empty+unclaimed; kept via a claim OR a diff; mixed-pool drops only the ghost; back-compat keep with no `itemsForLane`), `backlogItemsFromObserved` unit coverage, and an end-to-end check that a dropped ghost contributes no stale predicted scope to the observer picture. Full collector suite 51/51; sibling consumers (`we:scripts/readiness/dispatch-plan.mjs`, `we:scripts/readiness/conveyor-state.mjs`, `we:scripts/readiness/scope-lease-live.mjs`) green.
