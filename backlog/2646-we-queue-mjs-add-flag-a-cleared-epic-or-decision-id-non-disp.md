@@ -3,9 +3,11 @@ bornAs: xcv9uhj
 kind: story
 size: 2
 parent: "2612"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/"]
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-23"
+dateResolved: "2026-07-23"
 tags: []
 ---
 
