@@ -55,16 +55,56 @@ LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-del
 node scripts/backlog.mjs claim {{ITEM_NUM}} --session={{SESSION_SLUG}}
 ```
 
-Claim flips `open → active` + stamps `dateStarted` **in the lane clone**. Then re-read
-`{{ITEM_SPEC_PATH}}` in full and re-evaluate its `blockedBy` edges before writing code. (You are a background
-agent — do the claim and the build in the same run; the two-turn human arc does not apply here.)
+Claim flips `open → active` + stamps `dateStarted` **in the lane clone**. (You are a background agent — do the
+claim, the readiness pre-check, and the build in the same run; the two-turn human arc does not apply here.)
+**Before writing any code, run the readiness pre-check (step 3)** — that step owns the full re-read of
+`{{ITEM_SPEC_PATH}}` and the `blockedBy` re-check.
 
-### 3. Build it to spec
+### 3. Readiness pre-check — is this card still worth building? (a LIGHT gate, not a deep analysis)
+
+State drifts between when the operator cleared this item and when your lane picked it up: a blocker can
+**re-open**, other work can land the **same** change, a spec can go **stale**. So **before writing any code**,
+re-confirm the item is still buildable **as written, against the fresh `main` your lane just reset to**. This
+enacts the **Definition-of-Ready lens** ([#x82om9v] — the durable home of what "ready" means) at *claim* time —
+the same "still holds against the current tree, no reopened fork, no reappeared blocker" re-read the delegation
+rule already requires, and the "re-evaluate `blockedBy` at every seam" discipline
+(`we:docs/agent/backlog-workflow.md`). Keep it **proportionate**: read the item + take a quick look at `main`,
+**NOT** a full audit that doubles the build cost. Check four things:
+
+- **Still ready** — re-confirm on the fresh clone that **every `blockedBy` edge is resolved**. A blocker cleared
+  at prepare time can have **re-opened** since it was queued (read each blocker's current `status:`). → reason
+  `re-blocked <num>`.
+- **Up to date / not stale** — a quick sanity read that the spec **still makes sense against current `main`**: it
+  wasn't **already done** or **superseded** by other work that landed while it queued (the "desynced — spec
+  changed under it" case). A skim, not a deep diff audit. → reason `stale/superseded`.
+- **Scope sane** — the item **carries a `scope:`** and it's **plausible for the spec** (auto-prepare authored
+  it; just sanity-check it matches the described work, not obviously wrong). → reason `scope-wrong`.
+- **Coherent** — **buildable as written**: not a placeholder / TODO-digest stub, not internally contradictory,
+  the ask clear enough to implement. → reason `incoherent`.
+
+**PASS** — all four hold → proceed to build (step 4 onward).
+
+**FAIL** — any check trips → **do NOT build, and do NOT try to fix the item yourself.** Release the claim
+cleanly so the item returns to the pool (not stranded), hand the lane back, and RETURN the one-line escalation
+naming the reason:
+
+```bash
+node scripts/backlog.mjs release {{ITEM_NUM}} --session={{SESSION_SLUG}}   # active → open — back in the pool
+node scripts/lane-pool.mjs release --lane={{LANE}} --session={{SESSION_SLUG}}
+```
+
+Return: `#{{ITEM_NUM}} → not-ready (re-blocked <num> | stale/superseded | scope-wrong | incoherent)`. **This is
+a GOOD reason to stop** — the *escalate-by-good-reason-only* rule cuts both ways, and a card that drifted out
+from under its spec is exactly the kind of thing worth surfacing. The conveyor hands it to the operator to
+**re-prepare / re-check / drop**; it **never silently builds a stale card**. No PR is opened — nothing was
+built (this is the one pre-build stop; see *Escalations*).
+
+### 4. Build it to spec
 
 Do the actual work in `$LANE`: implement `{{ITEM_SPEC_PATH}}`, keep `## Progress` synced, capture any
 leftover work as new backlog items (`scaffold` with `blockedBy` + a digest) rather than half-doing them.
 
-### 4. Run the gate GREEN (in the item's own locus)
+### 5. Run the gate GREEN (in the item's own locus)
 
 A WE item's gate is `npm run check:standards`. For a cross-locus item, run **that** locus's gate
 (look up `LOCI[item.locus]` in `check-standards-rules.mjs`). **The gate must be green before you push** — a red
@@ -75,7 +115,7 @@ npm run check:standards          # (or the item's locus gate)
 node scripts/backlog.mjs resolve {{ITEM_NUM}}
 ```
 
-### 5. Review your own diff — spawn an adversarial code-review subagent (converge BEFORE the PR)
+### 6. Review your own diff — spawn an adversarial code-review subagent (converge BEFORE the PR)
 
 A green gate proves the **checks** pass; it does **not** prove the **diff is correct**. Before you open the
 PR, get the work reviewed — the gate is the deterministic core, this review is the judgment a script cannot
@@ -90,7 +130,7 @@ Spawn **one adversarial code-review subagent** on your working diff:
   Re-run the review after any nontrivial fix, until a pass comes back clean (or with only
   dismissed-with-reason findings). **Only then** proceed to the PR.
 
-### 6. Commit + push the `lane/{{ITEM_NUM}}` branch + open the PR (label green ONLY after `test` passes)
+### 7. Commit + push the `lane/{{ITEM_NUM}}` branch + open the PR (label green ONLY after `test` passes)
 
 Commit only this item's files (explicit paths, never `git add -A`; one commit), then open the PR through the
 canonical producer — **never a hand-rolled `gh pr create`** (that skips the #2307 producer review-labeling):
@@ -118,7 +158,7 @@ Open the PR **parked** instead — `--label=review:human` (STOPS at open, no aut
 **unlabelled** (`--no-wait`) on a red gate — ONLY when an *Escalations* condition below applies. Do **NOT**
 blanket-park a clean, reviewed PR "so a human can see it".
 
-### 7. Append a structured learnings entry to the session drop-box (#2614)
+### 8. Append a structured learnings entry to the session drop-box (#2614)
 
 Append **exactly one** structured, generalized-lesson entry to the session drop-box — a friction hit, a missing
 convention, a doc/skill gap, or an improvement idea from building this item. The drop-box (#2614) is
@@ -142,11 +182,11 @@ generalize it and retry; do **not** try to force it through. Skip this step only
 generalizable friction. Distributed capture (every agent, cheaply, in the moment); the `/closing-session` sweep
 curates centrally.
 
-### 8. EXIT — do not merge, do not release, do not wait
+### 9. EXIT — do not merge, do not release, do not wait
 
 **Stop here.** Do NOT run `gh pr merge`. Do NOT run a drain. Do NOT `release` the lane — the resident drain
 daemon lands the PR. The **merge watcher** (`scripts/conveyor/pr-watch.mjs <pr-number>`) is spawned by the
-**conveyor skill, not by you**, on the PR number `pr-land` reported for this item in step 6; its process exit
+**conveyor skill, not by you**, on the PR number `pr-land` reported for this item in step 7; its process exit
 (merged / parked / closed) wakes the main session and re-dispatches the freed lane. Your OWN process EXIT is the
 signal you are done. Return a one-line result to the conveyor: `#{{ITEM_NUM}} → PR #<n> (ready-to-merge |
 escalated <label> | gate-red)`. **A red gate / red CI is NOT watcher-visible** (it reads only state/labels) —
@@ -162,13 +202,20 @@ is reviewed in the **main session**, never by you — ONLY when one of these hol
 clean PR "so a human can see it": over-parking makes the human the bottleneck the conveyor exists to remove
 and dilutes what `review:human` means.
 
+0. **Not ready — the readiness pre-check failed (a PRE-BUILD stop, no PR).** The step-3 gate found the card
+   drifted out from under its spec: a `blockedBy` **re-opened**, the spec is **stale/superseded**, its `scope:`
+   is **wrong**, or it's **incoherent**. This is the one case that opens **no PR** — you release the claim
+   (`active → open`, back in the pool) and hand the lane back per step 3, then RETURN
+   `#{{ITEM_NUM}} → not-ready (re-blocked <num> | stale/superseded | scope-wrong | incoherent)`. It is a **good
+   reason to stop**: the conveyor surfaces it to the operator to re-prepare / re-check / drop. Do **not** try to
+   fix the item yourself, and do **not** build a card that no longer holds.
 1. **Statute-touching change** — the item edits a policy-core / gate-self path (see `scripts/lib/gate-config.mjs`).
    `pr-land`'s deterministic rubric (`scoreEscalation` → `producerReviewLabel`, #2307) applies **`review:human`**
    at PR-open, and the daemon parks it. Do not try to clear it yourself.
 2. **Gate red** — `check:standards` (or the locus gate) fails from your own work, OR the PR's `test` check ends
    red. The PR is left **unlabelled** (never `ready-to-merge`); report the failing check and stop. Do not weaken
    or delete a test to go green.
-3. **A review finding that needs human judgment** — the step-5 adversarial review surfaced an issue you could
+3. **A review finding that needs human judgment** — the step-6 adversarial review surfaced an issue you could
    not safely self-clear (you fixed what you could to convergence; this one needs a human call). Open the PR
    parked `review:human` (`--label=review:human`).
 4. **Genuine uncertainty** — you are not confident the change is right and want a human eye before it lands.
@@ -176,9 +223,11 @@ and dilutes what `review:human` means.
 5. **`review:changes`** — a human bounced a prior version of this diff. Repair before any land; if it is still
    red after your fix, it stays parked.
 
-In every escalation case the outcome is the same: **the daemon parks the PR `review:human` (or leaves it
-unlabelled on a red gate), and it is reviewed in the main session** (`/review`). You surface the reason in your
-one-line return and exit — you never merge, never override, never self-clear a review.
+In every **post-build** escalation case (1–5) the outcome is the same: **the daemon parks the PR `review:human`
+(or leaves it unlabelled on a red gate), and it is reviewed in the main session** (`/review`). The **pre-build**
+case (0) has no PR to park — you return the claim to the pool and surface the `not-ready` reason, and the
+conveyor routes it to the operator. Either way you surface the reason in your one-line return and exit — you
+never merge, never override, never self-clear a review, and never build a card that failed the readiness gate.
 
 ## Guardrails (the non-negotiables)
 
