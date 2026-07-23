@@ -1,4 +1,5 @@
 ---
+bornAs: x82om9v
 kind: story
 size: 2
 parent: "2612"
@@ -21,5 +22,5 @@ shaped* (it is held and auto-prepared before it can build, never dispatched blin
 - It is a *surfacing* lens, not a hard gate: an unscoped item is `needs-probe` / unshaped, not blocked (per the
   PR #663 empty-scope refinement in [state lives where its nature dictates](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)).
 
-**Optional / may fold into #xbzk108** if the readiness-flow authoring already surfaces the missing-scope signal
+**Optional / may fold into #2619** if the readiness-flow authoring already surfaces the missing-scope signal
 cleanly — file separately only if the lens is a distinct surface.

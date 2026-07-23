@@ -2917,7 +2917,7 @@ ride).
 
 ### State lives where its nature dictates — transient intent goes session-local, durable readiness goes committed-upstream {#state-lives-where-its-nature-dictates}
 
-**Ratified 2026-07-22 (Nicolas, merit-based; #2615 + #x11yunv).** *Where* a piece of state lives is
+**Ratified 2026-07-22 (Nicolas, merit-based; #2615 + #2617).** *Where* a piece of state lives is
 decided by *what the state is* — its nature — not by which surface first happened to need it. Two kinds,
 two homes:
 
@@ -2939,7 +2939,7 @@ two homes:
 
 3. **A dispatcher/scheduler CONSUMES readiness; it never PRODUCES it.** Predicting an item's `scope` is a
    **readiness/shaping act** — it belongs in `/prepare`, not at dispatch time. A runtime scope-probe *inside*
-   the conveyor is rejected on the merits (#x11yunv): it puts shaping in the dispatcher, produces the
+   the conveyor is rejected on the merits (#2617): it puts shaping in the dispatcher, produces the
    prediction late and blind to human review, and hides a second PR; its only edge — freshness — is already
    covered by the observed-scope breach detector. The dispatcher reads the authored `scope`; it does not
    author it.
@@ -2961,7 +2961,7 @@ two homes:
    Which side a signal falls on is settled by clause 1 vs. clause 2 — its nature — never by convenience.
 
 **Lineage:** ratified 2026-07-22 (Nicolas, merit-based), codifying #2615 (buildQueued → session-local
-sidecar) and #x11yunv (predicted scope authored at readiness, not at dispatch). Consistent with the empty-scope
+sidecar) and #2617 (predicted scope authored at readiness, not at dispatch). Consistent with the empty-scope
 contract of PR #663 (durable home #2609: unscoped = held, never launched blind) — the conveyor resolves the
 held state by auto-preparing the item (authoring its `scope`), never by building it blind. Applies the
 card-mutation guard #2302, and governs the `scope:` field (#2609) the conveyor (#2612/#2613) reads. Composes

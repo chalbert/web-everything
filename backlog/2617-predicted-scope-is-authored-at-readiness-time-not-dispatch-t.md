@@ -1,4 +1,5 @@
 ---
+bornAs: x11yunv
 kind: decision
 size: 2
 parent: "2612"
@@ -63,7 +64,7 @@ produces it), while the dispatcher still only *consumes* scope — it is not a d
 
 Codified in [we:docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates).
 Sibling ruling from the same 2026-07-22 statute session: #2615 (buildQueued → session-local sidecar; born
-`xf757h3`). Consistent with the empty-scope contract of PR #663 (durable home #2609: unscoped = held, never
+`2615`). Consistent with the empty-scope contract of PR #663 (durable home #2609: unscoped = held, never
 launched blind) — the conveyor resolves the hold by auto-preparing the item, not by building it blind. Applies
 the card-mutation guard #2302, governs the `scope:` field built in #2609, and is read by the conveyor skill
 #2613. Parent: the conveyor epic #2612.

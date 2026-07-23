@@ -1,4 +1,5 @@
 ---
+bornAs: xgntiy7
 kind: story
 size: 3
 parent: "2612"
@@ -11,7 +12,7 @@ tags: [conveyor, readiness, scope, backfill]
 
 Author `scope:` frontmatter on the existing dev-ready backlog items so the conveyor has real scope-bearing,
 parallelizable work to dispatch — instead of holding everything `needs-probe` and auto-preparing it before any
-build. This is the one-time catch-up for the readiness-flow authoring built in #xbzk108: the flow writes
+build. This is the one-time catch-up for the readiness-flow authoring built in #2619: the flow writes
 `scope:` for *new* items going forward; this backfills the *current* ready pool.
 
 ## What to build
@@ -24,4 +25,4 @@ build. This is the one-time catch-up for the readiness-flow authoring built in #
   routing through auto-prepare first because it is `needs-probe`.
 
 Instance of [state lives where its nature dictates](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)
-(#x11yunv) — durable readiness authored upstream, script-read forever.
+(#2617) — durable readiness authored upstream, script-read forever.
