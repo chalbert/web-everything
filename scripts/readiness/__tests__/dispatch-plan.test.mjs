@@ -220,6 +220,53 @@ describe('dispatchPlan — a cleared kind:epic is HELD "needs-slice", never buil
   });
 });
 
+describe('dispatchPlan — a cleared kind:decision is HELD "needs-decision", never built (#2647)', () => {
+  // A decision is NOT build work; its lifecycle is prepare (research + author forks) then present (surface to
+  // ratify). Like an epic, a cleared decision must not launch to build AND must not fall through to the scope gate
+  // (which would aim a prepare-SCOPE agent at an item that has no build touch-set).
+  it('holds a scope-less decision "needs-decision" even in a fully-idle pool with free lanes (never built, never scope-auto-prepared)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'decision' }], // no scope, but decision → needs-decision, NOT unshaped-no-scope
+      leases: [],
+      freeLanes: [2, 3],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-decision' }]);
+  });
+
+  it('holds a decision "needs-decision" even when it somehow carries a scope (a decision is never a direct build)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'decision', scope: ['src/a/'] }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-decision' }]);
+  });
+
+  it('blocked takes precedence over needs-decision (a blocked decision can\'t be prepared until its blockers clear)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'decision', openBlockers: ['9'] }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'blocked' }]);
+  });
+
+  it('needs-decision holds the decision while a disjoint story on the same tick still launches', () => {
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, kind: 'decision' }, // decision → held needs-decision
+        { num: 2, kind: 'story', scope: ['src/b/'] }, // buildable story → launches
+      ],
+      leases: [],
+      freeLanes: [7],
+    });
+    expect(plan.launch).toEqual([{ num: 2, lane: 7 }]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-decision' }]);
+  });
+});
+
 describe('dispatchPlan — the UNSCOPED AUTO-PREPARE hold (#2613, ruled 2026-07-22)', () => {
   // An unscoped item is "assume-overlaps-everything" and is NEVER launched to build — not even alone into an idle
   // pool. It is ALWAYS held `unshaped-no-scope` so the /conveyor skill auto-prepares its scope upstream; once that

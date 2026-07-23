@@ -22,7 +22,7 @@ The three scripts this skill shells (do not reimplement any of them):
 
 | Script | What it decides (deterministically) |
 |---|---|
-| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, needsSlice, lanes, freeSlots, prs, daemon, idle, health }`. Every tick STARTS here. |
+| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health }`. Every tick STARTS here. |
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
 | `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR. Its process EXIT is the wake signal; the exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
 
@@ -50,10 +50,24 @@ The three scripts this skill shells (do not reimplement any of them):
 > `/slice`**, so a cleared epic always ends up either sliced-and-dispatched or explicitly awaiting slice, never
 > silently stalled.
 
-The three agent templates it instantiates: [`delivery-agent-brief.md`](delivery-agent-brief.md) (build a scoped
+> **The conveyor drives DECISIONS too — prepare, then present (#2647).** A **decision** is NOT build work — its
+> lifecycle is **prepare** (research + author its forks to "ready to ratify", the `/prepare` skill's autonomous
+> half) then **present** (surface the prepared forks for a human to ratify). A decision carries no `scope:`, so —
+> exactly like an epic — a cleared `kind:decision` is held **`needs-decision`** ("decision — prepare its forks,
+> then present for ratify"), checked BEFORE the scope gate so it is **not** mislabeled `unshaped-no-scope` and
+> aimed at a scope-prediction agent (which authors a build touch-set — meaningless for a decision). Each tick
+> surfaces every cleared decision in `state.decisions` (each entry carries `prepared` + `preparedDate`); handle
+> them per §3e — route by `prepared`: **UNPREPARED → spawn a prepare-decision agent** (autonomous research +
+> fork authoring, lands a `preparedDate`); **PREPARED → present its forks** (a chat artefact + the #2565 ruling
+> surface) for the human to ratify. Ratifying is human judgment — the conveyor prepares and presents, it never
+> auto-ratifies. So a cleared decision always ends up either prepared-and-presented or explicitly awaiting
+> ratification, never silently stalled — the conveyor drives the whole lifecycle: deliver + slice + decide.
+
+The agent templates it instantiates: [`delivery-agent-brief.md`](delivery-agent-brief.md) (build a scoped
 item, #2608), [`prepare-scope-agent-brief.md`](prepare-scope-agent-brief.md) (author an unscoped item's
-`scope:`, #2613), and [`fix-agent-brief.md`](fix-agent-brief.md) (repair a `review:changes` bounce in its own
-lane and re-arm review, #2630).
+`scope:`, #2613), [`prepare-decision-agent-brief.md`](prepare-decision-agent-brief.md) (prepare an unprepared
+decision's forks to "ready to ratify", #2647), and [`fix-agent-brief.md`](fix-agent-brief.md) (repair a
+`review:changes` bounce in its own lane and re-arm review, #2630).
 
 ---
 
@@ -115,7 +129,7 @@ one that works for a completed background task), so it re-invokes this loop reli
    ```bash
    node scripts/readiness/conveyor-state.mjs --json
    ```
-   → `{ queue, clearedNotReady, unshaped, needsSlice, lanes, freeSlots, prs, daemon, idle, health }`. Do not eyeball four commands; this is the one read.
+   → `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health }`. Do not eyeball four commands; this is the one read.
 
 2. **Plan the dispatch (one call):**
    ```bash
@@ -404,6 +418,61 @@ decomposed into buildable children (which the conveyor then dispatches on later 
   until the operator slices/resolves/removes it (idempotent — re-surfacing the same epic each tick is correct,
   it is a standing "awaiting slice" signal, not a repeated action).
 
+### 3e. Drive every cleared decision — prepare then present (#2647)
+
+A **decision** is NOT build work; its lifecycle is **prepare** then **present**. A cleared `kind:decision` is
+held **`needs-decision`** (in `plan.held`) and surfaced in `state.decisions` (each entry `{ num, prepared,
+preparedDate }`). Before this rule a cleared decision fell into the same silent hole an epic did — never built
+(a decision isn't buildable), and worse, mislabeled `unshaped-no-scope` and aimed at a scope-prediction agent.
+Now, each tick, for every item in `state.decisions`, route by its `prepared` flag:
+
+- **UNPREPARED (`prepared === false`) → auto-prepare it: spawn ONE background prepare-decision agent.** This is
+  the autonomous half of a decision (the `/prepare` skill is pure agent work — no human judgment yet). It
+  mirrors §3b's auto-prepare-scope exactly, one kind over — **UNLESS a prepare for that `num` is already in
+  flight** by the *prepare in-flight test* (the union rule below): **skip** re-dispatch when EITHER a live
+  decision-prepare-guard entry exists for `num`, OR `state.prs` already has an **OPEN PR for that `num`** (while
+  the decision is still un-prepared it has no build PR, so any open PR for its `num` can only be its in-flight
+  prepare). Only when NEITHER holds do you spawn:
+  - Resolve the item's spec path by **globbing `backlog/<num>-*.md`**.
+  - **Pick a prepare lane that no build/prepare/guard already owns this tick** — the same lane-exclusion §3b
+    uses (a `freeSlots` lane MINUS this tick's `plan.launch` builds MINUS every guard-held lane). A
+    prepare-decision lane is parallel-safe with builds and other prepares: its scope is the one decision's item
+    body plus a new `/research/` topic — disjoint from any builder's code scope.
+  - Instantiate [`prepare-decision-agent-brief.md`](prepare-decision-agent-brief.md) by substituting its four
+    placeholders: `{{ITEM_NUM}}`=`num`, `{{ITEM_SPEC_PATH}}`=the globbed `backlog/<num>-<slug>.md`,
+    `{{LANE}}`=the picked lane, `{{SESSION_SLUG}}`=`prepare-decision-<num>`. Those four `{{DOUBLE_BRACE}}`
+    tokens are the whole fill — do not rewrite the brief's prose.
+  - Spawn it as **one background `Agent`**. It acquires its lane, prepare-holds the decision, runs the
+    `/prepare` passes (prior-art research → per-fork classification → author the prepared-fork shape → skeptic
+    pass → two-confusion screen → `prepare-stamp` the `preparedDate`), gets the gate green, **runs an
+    adversarial review subagent on its prepared forks and addresses the findings to convergence BEFORE opening
+    the PR**, then opens ONE `ready-to-merge` PR and `prepare-release`s the hold — **exits without merging**.
+    When that PR lands the decision is prepared, so on a later tick `state.decisions` reads it `prepared:true`
+    and this section presents it (below).
+  - **Record a decision-prepare-guard entry** `{ num, kind: 'prepare-decision', spawnedTick }` — keyed by `num`
+    (the contended resource is the decision's authorship). Its retirement is the SAME as §3b's prepare guard
+    (retire only when the item leaves `state.decisions[].prepared === false`, i.e. its `preparedDate` landed, or
+    the prepare PR closed) — a returning prepare-decision Agent does NOT retire its guard (it returns at PR-open,
+    mid-flight).
+- **PREPARED (`prepared === true`) → present its forks for ratification. Surface, do not auto-ratify.** A
+  prepared decision is ready to *ratify*, and ratifying is human judgment (MEMORY #39 — *never take an unprepared
+  decision*; and `/prepare` explicitly does **not** make the call). So — exactly like §3d surfaces an epic
+  rather than auto-slicing — the conveyor **presents** the prepared forks and lets the human ratify:
+  - **Publish a forks artefact in the chat conveyor** — the conversational surface. Read the prepared item body,
+    and publish a self-contained artefact summarizing each `## Fork N` (its options, the bold default, the
+    `Skeptic:`/`Screen:` verdicts) so the operator can see and ratify it inline. This is the main-session
+    (chat) present channel.
+  - **Feed the #2565 console decision-ratify (ruling) surface** — the product/UI conveyor's present channel. The
+    console's ruling read/write ports (#2580 / #2581 / #2582) are already built; the autonomous feed that wires
+    a prepared decision into them is a **cross-locus follow-up** (see the blocked follow-up item) — until it
+    lands, note the prepared decision is available for the console ruling surface and rely on the chat artefact.
+  - **Surface for `/next decision`** — add a line to the tick status, e.g.
+    `⚖ N decision(s) ready to ratify: #A #B (/next decision)`, so a prepared cleared decision is **always** either
+    ratified (once the operator makes the call) or explicitly awaiting ratification — never silently stalled.
+  - **No agent, no guard for the present half** — like §3d it is a pure per-tick SURFACE of the prepared rows
+    (idempotent; re-presenting each tick is correct — a standing "ready to ratify" signal). Only the *prepare*
+    half (above) spawns an agent and carries a guard.
+
 ## 4. Landing is the drain daemon's job — the conveyor NEVER merges
 
 Delivery agents stop at `ready-to-merge` — but only **after** each has reviewed its own diff to convergence
@@ -435,8 +504,9 @@ in the `lane/<num>` branch → `pr-land` → the daemon merges → resolve. Thos
 plateau lane board reads (`claimed.session`, `queued.lane`, `pr.state`+`ci`, the scope-lease collect). So the
 board reflects conveyor state **for free**, and `conveyor-state.mjs` reads that same truth. **Never keep a
 parallel state store of item / claim / PR / resolve state** — the only in-session bookkeeping allowed is
-ephemeral *process* tracking: which delivery / prepare / fix `Agent`s and which `pr-watch` processes you have
-spawned (the in-flight dispatch guard, the prepare guard, the **fix guard** (§3c), and the watched-PR set). That
+ephemeral *process* tracking: which delivery / prepare-scope / prepare-decision / fix `Agent`s and which
+`pr-watch` processes you have spawned (the in-flight dispatch guard, the prepare-scope guard, the
+**decision-prepare guard** (§3e), the **fix guard** (§3c), and the watched-PR set). That
 is not item state; it is which background jobs are live — the re-arm swap and every repair still flow through the
 board's normal verbs (`git push … lane/*` → `rearm-review.mjs` → the PR's labels → the daemon / `/review`).
 
@@ -483,7 +553,10 @@ Per #deterministic-core-thin-judgment, the line is:
   **escalate-or-auto-land call**, reviewing an escalation (`/review`), and investigating an anomaly. The
   `review:changes → review:pending` re-arm, by contrast, is a script-decidable swap (`rearm-review.mjs`) — the
   fix agent shells it, never re-deriving the "never clear the human gate" rule in prose. Never spend model context re-deriving a computable plan —
-  read the script's answer and act on it. **Build-vs-prepare-vs-slice is NOT a judgment call here — it is the
-  dispatch plan's classification:** `plan.launch` → build (scoped, §3); `held: unshaped-no-scope` /
-  `state.unshaped` → prepare (unscoped, §3b); `held: needs-slice` / `state.needsSlice` → surface for `/slice`
-  (an epic container, §3d). The skill just spawns the matching agent (or, for an epic, surfaces it — no agent).
+  read the script's answer and act on it. **Build-vs-prepare-vs-slice-vs-decide is NOT a judgment call here — it
+  is the dispatch plan's classification:** `plan.launch` → build (scoped, §3); `held: unshaped-no-scope` /
+  `state.unshaped` → prepare scope (unscoped, §3b); `held: needs-slice` / `state.needsSlice` → surface for
+  `/slice` (an epic container, §3d); `held: needs-decision` / `state.decisions` → prepare-or-present a decision
+  (§3e — an UNPREPARED one spawns a prepare-decision agent; a PREPARED one is surfaced/presented for ratify, no
+  agent). The skill just spawns the matching agent (or, for an epic or a prepared decision, surfaces it — no
+  agent). The one judgment that stays human throughout: **ratifying** a presented decision (never autonomous).

@@ -66,7 +66,7 @@ export const DEFAULT_STALL_MS = 180_000;
  * frontmatter flag (backward-compatible with any caller that doesn't pass the sidecar).
  * @param {{queue?:object[]}|object[]|null|undefined} buildQueue
  * @param {Array<string|number>|null|undefined} clearedNums  the sidecar's cleared ids, or null to use frontmatter
- * @returns {Array<{num:(string|null), rank:(number|null), buildQueued:boolean, openBlockers:string[], scope:*, kind:(string|null), epicState:(string|null)}>}
+ * @returns {Array<{num:(string|null), rank:(number|null), buildQueued:boolean, openBlockers:string[], scope:*, kind:(string|null), epicState:(string|null), prepared:boolean, preparedDate:(string|null)}>}
  */
 export function shapeQueue(buildQueue, clearedNums = null) {
   const rows = Array.isArray(buildQueue)
@@ -93,6 +93,13 @@ export function shapeQueue(buildQueue, clearedNums = null) {
     // /slice, `done` → resolve, `tracking`/`program`/`parked` → no slice). Both null until enriched.
     kind: r?.kind ?? null,
     epicState: r?.epicState ?? null,
+    // prepared / preparedDate: enriched by the IO shell from the loader (#2647). `kind:decision` drives the
+    // decision → `needs-decision` surface (a decision is never built); `prepared` lets the skill route a held
+    // decision precisely — UNPREPARED → spawn a prepare-decision agent, PREPARED → present its forks for ratify.
+    // `prepared` is false and `preparedDate` null until enriched (a decision then reads UNPREPARED — a SAFE
+    // default: "prepare it", never a false "ready to ratify" surfaced with un-researched forks).
+    prepared: r?.prepared === true,
+    preparedDate: r?.preparedDate ?? null,
   }));
 }
 
@@ -349,18 +356,21 @@ export function deriveClearedNotReady(buildQueue, clearedNums) {
  * excludes epics to mirror that precedence EXACTLY: a scope-less epic surfaces ONLY in {@link deriveNeedsSlice},
  * never here. Without that guard an armed scope-less epic (the common case — epics rarely carry scope) would appear
  * in BOTH sets, and the skill's §3b would aim a prepare-scope agent at a container — the very hazard #2645 closes.
- * So the two surfaces never disagree with `plan.held`. Reads `buildQueued` from the session-local sidecar when
+ * A `kind:decision` is excluded for the SAME reason (#2647): it is held `needs-decision` before the scope gate (a
+ * decision is prepared/presented, never scope-authored), and surfaces ONLY in {@link deriveDecisions}. So the two
+ * surfaces never disagree with `plan.held`. Reads `buildQueued` from the session-local sidecar when
  * `clearedNums` is injected (else the committed frontmatter flag), so `unshaped` tracks exactly what the operator
  * cleared this session. Pure — shapes the queue via {@link shapeQueue} and filters; no fs / clock.
  * @param {{queue?:object[]}|object[]|null|undefined} buildQueue  the build-queue rows (scope+kind-enriched by the shell)
  * @param {Array<string|number>|null|undefined} clearedNums  the sidecar's cleared ids, or null to use frontmatter
- * @returns {Array<{num:(string|null), scope:*}>} the armed, no-usable-scope, non-epic rows (stored spelling kept)
+ * @returns {Array<{num:(string|null), scope:*}>} the armed, no-usable-scope, non-epic, non-decision rows (spelling kept)
  */
 export function deriveUnshaped(buildQueue, clearedNums = null) {
   return shapeQueue(buildQueue, clearedNums)
-    // Epics are held `needs-slice` before the scope gate (see deriveNeedsSlice) — exclude them so a scope-less epic
-    // is not double-surfaced as unshaped (which would drive §3b to prepare-scope a container, #2645).
-    .filter((r) => r.buildQueued && r.kind !== 'epic' && normScope(r.scope).length === 0)
+    // Epics are held `needs-slice` and decisions `needs-decision`, both BEFORE the scope gate (see deriveNeedsSlice
+    // / deriveDecisions) — exclude both so a scope-less container/decision is not double-surfaced as unshaped
+    // (which would drive §3b to prepare-scope a container #2645, or a decision that needs no build scope #2647).
+    .filter((r) => r.buildQueued && r.kind !== 'epic' && r.kind !== 'decision' && normScope(r.scope).length === 0)
     .map((r) => ({ num: r.num, scope: r.scope }));
 }
 
@@ -385,6 +395,28 @@ export function deriveNeedsSlice(buildQueue, clearedNums = null) {
 }
 
 /**
+ * The DECISIONS set (#2647): the ARMED (cleared-for-build) queue rows that are a `kind:decision`. A decision is
+ * NOT build work — its lifecycle is prepare (research + author its forks to "ready to ratify") then present
+ * (surface the prepared forks for a human to ratify). The dispatcher NEVER launches a decision to build; it holds
+ * every cleared decision `needs-decision` BEFORE the scope gate (mirroring how {@link deriveNeedsSlice} tracks the
+ * `needs-slice` holds), and the /conveyor skill reads THIS set to drive each per its `prepared` state: UNPREPARED
+ * (`prepared === false`) → spawn a prepare-decision agent that researches + authors its forks and lands a
+ * `preparedDate`; PREPARED → present its forks (a chat artefact + the ruling surface) for ratification. Each entry
+ * carries `prepared` + `preparedDate` so the skill routes precisely, exactly as `needs-slice` carries `epicState`.
+ * Kept aligned with the dispatch plan's `needs-decision` holds — the two surfaces read the same `kind:decision`
+ * signal off the same enriched rows, so they never disagree on which cleared items are decisions. Pure — shapes the
+ * queue via {@link shapeQueue} and filters; no fs / clock.
+ * @param {{queue?:object[]}|object[]|null|undefined} buildQueue  the build-queue rows (kind+prepared-enriched by the shell)
+ * @param {Array<string|number>|null|undefined} clearedNums  the sidecar's cleared ids, or null to use frontmatter
+ * @returns {Array<{num:(string|null), prepared:boolean, preparedDate:(string|null)}>} the armed, `kind:decision` rows
+ */
+export function deriveDecisions(buildQueue, clearedNums = null) {
+  return shapeQueue(buildQueue, clearedNums)
+    .filter((r) => r.buildQueued && r.kind === 'decision')
+    .map((r) => ({ num: r.num, prepared: r.prepared, preparedDate: r.preparedDate }));
+}
+
+/**
  * The top-level PURE composer: raw collector outputs (+ an injected clock) → the whole conveyor tick picture. The
  * IO shell gathers the raw inputs and calls this; a test drives it directly with fixtures. `laneActivity` is a
  * `{ [lane]: epochMs }` map of each active lane's last transcript activity (the shell's best-effort transcript
@@ -395,7 +427,7 @@ export function deriveNeedsSlice(buildQueue, clearedNums = null) {
  *   laneActivity?:Record<string,number>|null, clearedNums?:Array<string|number>|null, now?:number,
  *   stallMs?:number, errors?:string[],
  * }} input
- * @returns {{queue:object[], clearedNotReady:Array<string|number>, unshaped:object[], needsSlice:object[], lanes:object[], freeSlots:number, prs:object[], daemon:*, idle:object, health:object}}
+ * @returns {{queue:object[], clearedNotReady:Array<string|number>, unshaped:object[], needsSlice:object[], decisions:object[], lanes:object[], freeSlots:number, prs:object[], daemon:*, idle:object, health:object}}
  */
 export function assembleConveyorState({
   buildQueue,
@@ -427,6 +459,9 @@ export function assembleConveyorState({
     // Armed `kind:epic` rows — the dispatcher NEVER builds an epic (a container); the /conveyor skill reads this
     // set to SURFACE each for `/slice` so a cleared epic is decomposed into buildable children (#2645).
     needsSlice: deriveNeedsSlice(buildQueue, clearedNums),
+    // Armed `kind:decision` rows — the dispatcher NEVER builds a decision; the /conveyor skill reads this set to
+    // drive each by its `prepared` state: UNPREPARED → prepare-decision agent; PREPARED → present its forks (#2647).
+    decisions: deriveDecisions(buildQueue, clearedNums),
     lanes,
     freeSlots: computeFreeSlots(poolStatus),
     prs: shapePrs(prList),
@@ -613,11 +648,13 @@ function main(argv) {
   // 1. Build queue (ready + queued items, ranked) — READ-ONLY.
   const buildQueue = runJson('node', [BACKLOG_CLI, 'build-queue', '--json'], { errors, label: 'build-queue' });
 
-  // 1b. Enrich the build-queue rows with each item's predicted `scope`, `kind`, and `epicState` (the `build-queue`
-  //     view omits them) so the tick picture can flag UNSHAPED armed items — cleared-for-build rows with no
-  //     predicted scope, which the dispatcher NEVER builds (the skill AUTO-PREPARES their scope instead, #2613) —
-  //     AND NEEDS-SLICE armed items — cleared `kind:epic` containers, which the dispatcher NEVER builds either
-  //     (the skill surfaces them for `/slice`, #2645). Best-effort + guarded: a load failure leaves scope/kind
+  // 1b. Enrich the build-queue rows with each item's predicted `scope`, `kind`, `epicState`, and `preparedDate`
+  //     (the `build-queue` view omits them) so the tick picture can flag UNSHAPED armed items — cleared-for-build
+  //     rows with no predicted scope, which the dispatcher NEVER builds (the skill AUTO-PREPARES their scope
+  //     instead, #2613) — NEEDS-SLICE armed items — cleared `kind:epic` containers, which the dispatcher NEVER
+  //     builds either (the skill surfaces them for `/slice`, #2645) — AND DECISIONS — cleared `kind:decision`
+  //     rows, which the dispatcher NEVER builds either (the skill prepares/presents them, #2647; `preparedDate`
+  //     splits prepare-vs-present). Best-effort + guarded: a load failure leaves scope/kind
   //     absent (every armed row then reads as unshaped and non-epic — a SAFE over-surface: "prepare scope", never a
   //     false parallel claim, and no false needs-slice) and is logged to stderr ONLY, NOT pushed to errors[] (a
   //     cosmetic enrichment miss must not flip the tick's health verdict to warn). Mirrors dispatch-plan.mjs's own
@@ -635,6 +672,10 @@ function main(argv) {
           scope: r?.scope ?? it?.scope ?? null,
           kind: r?.kind ?? it?.kind ?? null,
           epicState: r?.epicState ?? it?.epicState ?? null,
+          // prepared / preparedDate (#2647): drive the `kind:decision` → prepared-vs-unprepared routing. A
+          // decision with a `preparedDate` reads PREPARED (present its forks); without, UNPREPARED (prepare them).
+          prepared: r?.prepared ?? (it?.preparedDate != null),
+          preparedDate: r?.preparedDate ?? it?.preparedDate ?? null,
         };
       });
     } catch (e) {

@@ -26,6 +26,7 @@
  *
  *   • openBlockers > 0                              → held "blocked"           (an unready item can't launch).
  *   • kind:epic                                     → held "needs-slice"       (a container — /slice it, never build; see below).
+ *   • kind:decision                                 → held "needs-decision"    (not a build — prepare/present it; see below).
  *   • no usable scope (absent / non-array / [])     → held "unshaped-no-scope" (NEVER launched to build — see below).
  *   • scope intersects an ACTIVE lease's scope      → held "overlaps lane-<n>" (a running lane owns those paths).
  *   • scope intersects a HIGHER-RANKED item WE JUST  → held "overlaps lane-<n>" (the rival pair: the higher-ranked
@@ -76,9 +77,18 @@ import { scopesOverlap, normScope } from './scope-lease.mjs';
  *  aim a build agent at a container). The dispatcher HOLDS every cleared epic `needs-slice` — a FIRST-CLASS
  *  outcome, not a silent skip — so the /conveyor skill surfaces it for `/slice` (decompose into buildable child
  *  stories, which dispatch on later ticks). A cleared epic is a slice TRIGGER, not a dead end; the operator gloss
- *  is {@link NEEDS_SLICE_HINT}. */
+ *  is {@link NEEDS_SLICE_HINT}.
+ *
+ *  `needs-decision` (#2647): a cleared `kind:decision`. A decision is NOT build work — its lifecycle is
+ *  prepare (research + author its forks to "ready to ratify", the /prepare skill's autonomous half) then present
+ *  (surface the prepared forks for a human to ratify). A decision has no `scope:`, so — exactly like the epic
+ *  case — it is held BEFORE the scope gate so it is not mislabeled `unshaped-no-scope` and aimed at a scope-
+ *  prediction agent (which authors a build touch-set, meaningless for a decision). The dispatcher HOLDS every
+ *  cleared decision `needs-decision` — a FIRST-CLASS outcome — so the /conveyor skill drives it per its prepared
+ *  state (`state.decisions[].prepared`): UNPREPARED → spawn a prepare-decision agent; PREPARED → present its forks
+ *  (artefact + the ruling surface) for ratification. The operator gloss is {@link NEEDS_DECISION_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'blocked', 'unshaped-no-scope', 'needs-slice', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
+  'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
@@ -90,6 +100,13 @@ export const UNSHAPED_HINT = 'no predicted scope — author it to parallelize';
  *  operator WHAT to do: decompose it (`/slice <num>`) into buildable child stories, which the conveyor then
  *  dispatches. An epic is a container, never a direct build. */
 export const NEEDS_SLICE_HINT = 'epic — /slice into buildable child stories';
+
+/** The operator-facing gloss for a `needs-decision` hold (#2647) — surfaced beside the token so a held decision
+ *  always tells the operator WHAT the conveyor does with it: an UNPREPARED decision gets its forks prepared
+ *  (research + author to "ready to ratify"); a PREPARED one has its forks PRESENTED for a human to ratify. A
+ *  decision is never a build. The reason TOKEN stays short (`needs-decision`) for stable matching; the
+ *  prepared/unprepared split that routes prepare-vs-present is carried in `state.decisions[].prepared`. */
+export const NEEDS_DECISION_HINT = 'decision — prepare its forks, then present for ratify';
 
 /** True when an item's `openBlockers` signals it is not ready to build. Tolerant of either the loader's array
  *  shape (`item.openBlockers` = the still-open blocker nums) or a bare count. */
@@ -109,7 +126,8 @@ function hasOpenBlockers(item) {
  *   freeLanes: Array<string|number>,
  * }} input
  *   • `queue`     — the build queue ALREADY IN RANK ORDER (highest-priority first): the `buildQueued` items.
- *                   Each carries its `kind` (so a `kind:epic` container is held `needs-slice`, never built), its
+ *                   Each carries its `kind` (so a `kind:epic` container is held `needs-slice` and a `kind:decision`
+ *                   is held `needs-decision` — neither is ever built), its
  *                   predicted `scope` (repo-relative path prefixes, comparable to the leases' scopes) and its
  *                   `openBlockers`. The pure core does NOT re-order — the ordering engine
  *                   ({@link ../lib/build-queue.mjs orderQueueDetailed}) owns rank; this consumes that order.
@@ -123,7 +141,7 @@ function hasOpenBlockers(item) {
  *   `launch` — the SCOPED items to start now, each on the free lane it was assigned, in rank order. An UNSCOPED
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
  *   `held`   — every other queued item with its single reason ∈
- *              "blocked" | "needs-slice" | "overlaps lane-<n>" | "no free lane" | "unshaped-no-scope".
+ *              "blocked" | "needs-slice" | "needs-decision" | "overlaps lane-<n>" | "no free lane" | "unshaped-no-scope".
  */
 export function dispatchPlan({ queue, leases, freeLanes } = {}) {
   const items = Array.isArray(queue) ? queue.filter((it) => it && typeof it === 'object') : [];
@@ -160,7 +178,19 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
       held.push({ num, reason: 'needs-slice' });
       continue;
     }
-    // 3. No predicted scope — HOLD `unshaped-no-scope`, ALWAYS. An unscoped item is NEVER launched to build, not
+    // 3. A cleared `kind:decision` — HOLD `needs-decision`, ALWAYS (#2647). A decision is NOT build work; its
+    //    lifecycle is prepare (research + author its forks) then present (surface the prepared forks to ratify).
+    //    Checked BEFORE the scope gate for the SAME reason the epic branch is: a decision carries no `scope:`, so
+    //    without this it would fall through to the scope gate and be mislabeled `unshaped-no-scope` — aiming a
+    //    scope-prediction (build touch-set) agent at an item that has no build. A cleared decision is a
+    //    prepare/present TRIGGER: the /conveyor skill reads this hold (and `state.decisions`) and routes by the
+    //    decision's prepared state — UNPREPARED → spawn a prepare-decision agent; PREPARED → present its forks.
+    //    A BLOCKED decision is still `blocked` (checked first): it can't be prepared until its blockers clear.
+    if (item.kind === 'decision') {
+      held.push({ num, reason: 'needs-decision' });
+      continue;
+    }
+    // 4. No predicted scope — HOLD `unshaped-no-scope`, ALWAYS. An unscoped item is NEVER launched to build, not
     //    even alone into an idle pool (auto-prepare, ruled 2026-07-22): building blind is the hazard, and an
     //    unscoped build is "assume-overlaps-everything". The skill sees this hold (and `state.unshaped`) and
     //    dispatches a prepare-scope task that authors the item's `scope:`; once that lands the item is scoped and
@@ -173,13 +203,13 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
       continue;
     }
 
-    // 4. Overlaps a RUNNING lane's held scope — that lane owns those paths; hold behind it.
+    // 5. Overlaps a RUNNING lane's held scope — that lane owns those paths; hold behind it.
     const leaseHit = activeLeases.find((l) => scopesOverlap(scope, l.scope));
     if (leaseHit) {
       held.push({ num, reason: `overlaps lane-${leaseHit.lane}` });
       continue;
     }
-    // 5. Rival pair — overlaps a HIGHER-RANKED item already launched this tick. Rank order guarantees the
+    // 6. Rival pair — overlaps a HIGHER-RANKED item already launched this tick. Rank order guarantees the
     //    higher-ranked rival was processed first and (if it launched) sits in `launched`, so the lower-ranked
     //    one holds on the lane its rival took. A higher rival that did NOT launch is absent here, so it never
     //    spuriously blocks a lower item — the hold is only against work that is actually starting.
@@ -188,7 +218,7 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
       held.push({ num, reason: `overlaps lane-${rival.lane}` });
       continue;
     }
-    // 6. Disjoint — launch it on the next free lane, or hold for want of one.
+    // 7. Disjoint — launch it on the next free lane, or hold for want of one.
     if (free.length === 0) {
       held.push({ num, reason: 'no free lane' });
       continue;
@@ -354,10 +384,12 @@ async function main(argv) {
     for (const l of plan.launch) log(`  ▶ #${l.num} → lane-${l.lane}`);
     for (const h of plan.held) {
       // Surface the operator gloss beside the short token so a held item always says WHAT to do — author scope
-      // for `unshaped-no-scope` (#2613), or `/slice` for a held `needs-slice` epic (#2645).
+      // for `unshaped-no-scope` (#2613), `/slice` for a held `needs-slice` epic (#2645), or prepare/present a
+      // held `needs-decision` (#2647).
       const hint = h.reason === 'unshaped-no-scope' ? ` (${UNSHAPED_HINT})`
         : h.reason === 'needs-slice' ? ` (${NEEDS_SLICE_HINT})`
-          : '';
+          : h.reason === 'needs-decision' ? ` (${NEEDS_DECISION_HINT})`
+            : '';
       log(`  ⏸ #${h.num} — ${h.reason}${hint}`);
     }
   }
