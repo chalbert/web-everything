@@ -114,6 +114,20 @@ const items = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
 const report = computeReadiness(items);
 const selection = computeSelection(items); // the deterministic ranked view (same source as the Prioritisation tab)
 
+// HAS-PREDICTED-SCOPE readiness lens (#2618) — the OPEN, unblocked, agent-ready (Tier-A) BUILD items that
+// carry NO predicted `scope:` (loader `unshapedNoScope`). This mirrors the conveyor dispatcher's exact
+// `unshaped-no-scope` / needs-probe hold (scripts/readiness/dispatch-plan.mjs): such an item reads as
+// dev-ready but is NOT fully shaped, so the conveyor NEVER launches it blind — it auto-prepares its `scope:`
+// upstream before it can build. Surfaced as a note (not a hard gate): the item stays agent-ready, it just
+// isn't dispatchable-in-parallel until its touch-set is authored.
+const unshaped = items.filter((it) => it.unshapedNoScope);
+// Shared printer for the unshaped-scope note, reused by both the --select view and the default human report.
+function printUnshapedScopeNote() {
+  if (!unshaped.length) return;
+  console.log(`\n${YEL}${BLD}Unshaped — agent-ready but missing predicted \`scope:\` (#2618): reads as dev-ready but isn't fully shaped; the conveyor auto-prepares its scope before it can build (never dispatched blind)${RST}`);
+  unshaped.forEach((it) => console.log(`  ${YEL}▽${RST} #${it.num} ${slugFromName(it.id)} ${DIM}— no predicted scope; add a \`scope:\` touch-set to parallelize it${RST}`));
+}
+
 // Apply the prepare-hold HARD exclusion: drop every live-held item from the selection surfaces so a held item
 // is neither offered (--select) nor packed (batch). Excluded, not deprioritized — the strengthened #2219 (b)
 // replacement for the soft `reserve`. `computeSelection` stays the pure projection; only this CLI view removes.
@@ -184,7 +198,7 @@ if (JSON_MODE) {
     mySession: MY_SESSION ?? null,
     foreign: [...foreign.entries()].map(([num, session]) => ({ num, session })),
   };
-  console.log(JSON.stringify({ ...report, selection, batch: { capacity, budget, ...batchPack }, report: buildReadinessReport(selection, batchPack, budget), reservations: reservationsOut, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
+  console.log(JSON.stringify({ ...report, selection, batch: { capacity, budget, ...batchPack }, report: buildReadinessReport(selection, batchPack, budget), unshaped: unshaped.map((it) => ({ num: it.num, id: it.id })), reservations: reservationsOut, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
   process.exit(0);
 }
 
@@ -322,6 +336,8 @@ if (SELECT) {
     });
   }
 
+  printUnshapedScopeNote();
+
   console.log(`\n${DIM}Ranking is a pure projection of loader fields (tier/batchable/leverage) — instant, identical to the tab, no rubric re-derived. Body-fork pre-flight (skill) is the only per-item judgment left.${RST}`);
   process.exit(0);
 }
@@ -354,6 +370,8 @@ if (!report.normalization.length) {
     console.log(`  ${tag} ${mark}${n.id} ${DIM}— ${n.detail}${RST}`);
   }
 }
+
+printUnshapedScopeNote();
 
 if (APPLY) {
   console.log(

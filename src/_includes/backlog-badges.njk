@@ -67,6 +67,16 @@
 {% if tier %}<we-tag set="tier" value="{{ tier }}" title="Agent-readiness hint — {{ backlogMeta.tierMeaning[tier] }}. Heuristic from structured fields only (type + resolved prerequisites); not authoritative — the selection pass still refines it.">{{ backlogMeta.tierLabel[tier] }}</we-tag>{% endif %}
 {% endmacro %}
 
+{# HAS-PREDICTED-SCOPE lens (#2618) — a Definition-of-Ready hint that sits BESIDE the agent-ready tier badge:
+   an OPEN, unblocked, Tier-A build item that carries NO predicted `scope:` (loader `unshapedNoScope`) reads
+   as dev-ready but is not fully shaped. The conveyor dispatcher (scripts/readiness/dispatch-plan.mjs) holds
+   exactly this `unshaped-no-scope`/needs-probe item and NEVER launches it blind — it is auto-prepared (its
+   `scope:` authored) before it can build. A SURFACING lens, NOT a hard gate (the item stays Tier A), so it is
+   a warning-tone `<we-badge>`, not a reasonPill ⊗ hold. `data-unshaped-scope` is the stable tile/test hook. #}
+{% macro unshapedScopeBadge(item, scale='sm') %}{%- if item.unshapedNoScope -%}
+<we-badge tone="warning" data-unshaped-scope="1" icon="◇" title="Missing predicted scope — this item is agent-ready but carries no `scope:` touch-set, so it isn't fully shaped: the conveyor holds it `unshaped-no-scope` and auto-prepares its scope before it can build (never dispatched blind). A surfacing lens, not a blocker — add a `scope:` to parallelize it.">needs scope</we-badge>
+{%- endif -%}{% endmacro %}
+
 {# The "unsliced" badge for a childless epic — "unsliced · <why>" (colour/tooltip from backlogMeta) or a bare "unsliced". #}
 {% macro unslicedBadge(reason, scale='sm') %}{# #1208: epic "unsliced·reason" → FUI `<we-tag>`; the per-reason palette (backlogMeta.childlessReasonMeta) is injected as inline `--cat-*`/background custom props so it survives the transient upgrade without duplicating the vocabulary into CSS. #}{% set m = backlogMeta.childlessReasonMeta[reason] %}
 {% if m %}<we-tag set="unsliced" value="{{ reason }}" title="{{ m.tip }}" style="background:{{ m.bg }}; color:{{ m.fg }}; --cat-bg:{{ m.bg }}; --cat-color:{{ m.fg }};">unsliced &middot; {{ m.label }}</we-tag>{% else %}<we-tag set="unsliced" value="none" title="Unsliced epic — no child stories cut yet, and no reason recorded (add a childlessReason).">unsliced</we-tag>{% endif %}
