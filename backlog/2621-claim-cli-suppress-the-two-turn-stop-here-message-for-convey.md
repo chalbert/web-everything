@@ -1,4 +1,5 @@
 ---
+bornAs: x2pgool
 kind: story
 size: 2
 parent: "2612"
