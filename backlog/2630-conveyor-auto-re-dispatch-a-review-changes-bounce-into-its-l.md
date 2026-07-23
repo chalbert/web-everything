@@ -3,9 +3,11 @@ bornAs: xi6jbiw
 kind: story
 size: 5
 parent: "2612"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/", "we:skills-src/conveyor/"]
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-23"
+dateResolved: "2026-07-23"
 tags: []
 ---
 

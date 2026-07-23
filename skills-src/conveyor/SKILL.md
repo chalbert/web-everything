@@ -40,9 +40,10 @@ The three scripts this skill shells (do not reimplement any of them):
 > ([we:docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates](../../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)
 > — being codified in a sibling statute PR).
 
-The two agent templates it instantiates: [`delivery-agent-brief.md`](delivery-agent-brief.md) (build a scoped
-item, #2608) and [`prepare-scope-agent-brief.md`](prepare-scope-agent-brief.md) (author an unscoped item's
-`scope:`, #2613).
+The three agent templates it instantiates: [`delivery-agent-brief.md`](delivery-agent-brief.md) (build a scoped
+item, #2608), [`prepare-scope-agent-brief.md`](prepare-scope-agent-brief.md) (author an unscoped item's
+`scope:`, #2613), and [`fix-agent-brief.md`](fix-agent-brief.md) (repair a `review:changes` bounce in its own
+lane and re-arm review, #2630).
 
 ---
 
@@ -191,8 +192,9 @@ one that works for a completed background task), so it re-invokes this loop reli
 
 5. **Post ONE terse status line, then start the next tick.** Per the operator's progress-tracking preference the
    checklist is the channel and prose stays quiet — one line per tick, e.g.:
-   > `conveyor · N building · N preparing · N queued · N parked · health ok` — where **`N preparing`** is the
-   > count of prepare-scope agents in flight (auto-preparing unscoped items' scope). Add `⚠` + the flagged lanes
+   > `conveyor · N building · N preparing · N fixing · N queued · N parked · health ok` — where **`N preparing`**
+   > is the count of prepare-scope agents in flight (auto-preparing unscoped items' scope) and **`N fixing`** is
+   > the count of fix agents in flight (repairing `review:changes` bounces, §3c). Add `⚠` + the flagged lanes
    > when `state.health.verdict === 'warn'`; add `⚠ N auto-preparing scope: #A #B` when `state.unshaped` is
    > non-empty, so the operator sees those cleared items are being scoped now (a prepare agent per item) and will
    > build once their scope lands — see the auto-prepare callout above.
@@ -279,19 +281,88 @@ contract — do not re-derive the verdict; the watcher already classified the PR
 
 - **`0` merged** — the resident drain landed it; the lane is now free. Drop it from your watched set; the next
   tick's `dispatch-plan` fills the freed lane. Nothing else to do.
-- **`2` parked** — the PR carries `review:human` / `review:pending` / `review:changes`. Surface in chat:
-  **"PR #N (#`<num>`) needs review — run `/review N`."** Do **NOT** auto-land it: a human review park is a
-  hard human-only gate. The lane stays held until the review resolves.
+- **`2` parked** — the PR carries a review label. **Which label decides the branch** (`pr-watch` exits `2` for
+  all three; re-read the PR's labels from a fresh `state.prs` row — or `gh pr view <N> --json labels` — to tell
+  them apart, #2630):
+  - **`review:changes`** — a human bounced this diff and asked for a fix. **Auto-re-dispatch a fix agent into
+    the PR's lane** (§3c below) — do NOT just surface it. The repair is script-shaped (reuse the ref, apply the
+    finding, re-push, re-arm review); the fix agent does it and hands the PR back `review:pending`.
+  - **`review:human` / `review:pending`** — an independent human verdict is owed. Surface in chat: **"PR #N
+    (#`<num>`) needs review — run `/review N`."** Do **NOT** auto-land it and do **NOT** auto-fix it: a human
+    review park is a hard human-only gate. The lane stays held until the review resolves.
+
+  Either way the PR stays OPEN, so the next tick's step-4 re-arms a watcher on it — a re-armed `review:pending`
+  (after a fix) or a fresh human bounce wakes the loop again.
 - **`4` closed** — the PR was closed without merging (a human abandoned it). Surface as an **anomaly to
   investigate** — do NOT run `/review` (a label swap can't land a closed PR). Note the stranded lane.
 - **`3` timeout** — the wall-clock budget elapsed with the PR still pending. Re-arm a watcher on it, or flag a
   possibly-stuck lane for the operator if it keeps timing out.
 - **`1` error** — bad arguments / the watcher couldn't run. Report it; re-spawn with a correct PR number.
 
+### 3c. Auto-re-dispatch a `review:changes` bounce — spawn ONE fix agent into the PR's lane (#2630)
+
+When exit `2` resolves to **`review:changes`** on a PR **this conveyor launched**, a human bounced the diff and
+asked for a change. Before #2630 that only parked and a human had to `/finish` it; now the conveyor re-dispatches
+a **fix agent** to repair it in the same lane — **UNLESS** the *fix in-flight test* or the *retry cap* suppresses
+it (both below). When neither suppresses:
+
+- **Resolve the PR's lane ref and item.** From `state.prs` you have `{ num, prNumber }`; read the head ref with
+  `gh pr view <prNumber> --json headRefName` → `lane/<num>-<slug>`. Glob `backlog/<num>-*.md` for the spec path
+  and read its `scope:`.
+- **Pick a free lane** the same way step 3 does (a `freeSlots` lane minus this tick's builds/prepares/guards) —
+  the fix runs in a FRESH clone reset to the pushed lane ref (`acquire --base=<headRef>`), not the original
+  lease, so it needs its own free lane.
+- **Instantiate [`fix-agent-brief.md`](fix-agent-brief.md)** by substituting its placeholders: `{{ITEM_NUM}}`=`num`,
+  `{{PR_NUM}}`=`prNumber`, `{{LANE_REF}}`=the head ref, `{{LANE}}`=the picked lane, `{{SESSION_SLUG}}`=`fix-<num>`,
+  `{{SCOPE}}`=the item's `scope:` entries repo-qualified and comma-joined. Those six `{{DOUBLE_BRACE}}` tokens are
+  the whole fill — do not rewrite the brief's prose.
+- **Spawn it as ONE background `Agent`.** It acquires a lane on the pushed ref, reads the reviewer's finding off
+  the PR, applies ONLY that fix, gets the gate green, re-pushes HEAD to the same `lane/*` ref, then **re-arms the
+  review** (`review:changes → review:pending` via `scripts/conveyor/rearm-review.mjs`) and exits. It **NEVER**
+  self-clears the human review label — the human (or the drain's AI-review convergence pass) re-verdicts the
+  re-armed PR.
+- **Record a fix-guard entry** `{ pr: prNumber, num, spawnedTick }` AND **bump a separate per-PR attempt
+  counter** `fixAttempts[prNumber] += 1` (see the fix guard below — the two are DISTINCT state). The PR stays
+  OPEN, so step 4 keeps a watcher on it — when the fix re-arms it to `review:pending`, that exit `2` routes to
+  the `review:human`/`review:pending` branch (surface for `/review`), not back into auto-fix.
+
+**The fix guard — its own bookkeeping, and TWO separate pieces of state (do NOT copy the build/prepare guard's
+retirement, and do NOT conflate the two).** A fix dispatch tracks:
+
+1. **An in-flight guard entry** `{ pr, num, spawnedTick }` keyed by the **PR number** — "a fix agent for this PR
+   is live right now." It is retired (see below) the moment the PR is no longer awaiting an in-flight repair.
+2. **A per-PR attempt counter** `fixAttempts[pr]` — "how many auto-fixes this PR has cost in total." It is a
+   SEPARATE longer-lived tally that **survives the guard-entry retirement** and is cleared **only when the PR is
+   terminal** (merged / closed). Keeping it off the guard entry is the whole point: a human bounce → fix →
+   re-arm → human bounces AGAIN is a NEW `review:changes` with NO live guard entry, so if the count lived on the
+   entry it would reset to 1 each cycle and the cap below would never bind. The counter must persist across
+   fix↔bounce cycles or the loop is unbounded.
+
+Its rules — two suppressions and one cap:
+
+- **Fix in-flight test (skip re-dispatch).** Skip spawning a fix for a PR when a live guard ENTRY (piece 1)
+  already exists for it. This is essential: right after you spawn the fix agent, step 4 re-arms a watcher on the
+  still-`review:changes` PR (the agent hasn't re-armed yet), so the watcher exits `2` again almost immediately —
+  the entry is what stops that second exit-2 from spawning a duplicate fix on a second burned lane.
+- **Retry cap (default 3 auto-fix attempts per PR).** BEFORE spawning, check `fixAttempts[pr]` (piece 2). Once it
+  has reached **3**, **stop auto-fixing** this PR and surface it for `/review` instead
+  (`⚠ PR #N (#<num>) bounced <k>× — auto-fix exhausted, run /review N`). Because the counter persists across
+  cycles, this binds even when each cycle is a fresh human bounce with no live entry — a finding the auto-fixer
+  can't satisfy in a few passes needs a human; never loop a fix↔bounce cycle unboundedly.
+- **Retire the in-flight guard ENTRY (piece 1) two ways — NOT the attempt counter:** (1) **Re-armed / resolved**
+  — a fresh `state.prs` read shows the PR no longer carries `review:changes` (it re-armed to `review:pending`, or
+  merged/closed). Drop the ENTRY; **leave `fixAttempts[pr]` intact** (it only clears on PR-terminal). (2) **TTL
+  backstop** — if the PR is STILL `review:changes` after **N ticks (default 5)** of the spawn (the fix agent died
+  before re-pushing/re-arming), drop the ENTRY and allow a re-dispatch — still gated by the retry cap (the
+  counter did NOT reset), so a repeatedly-dying fix still terminates at the human. Clear `fixAttempts[pr]` only
+  when the PR reaches a terminal state (merged / closed).
+
 > **Red gate / red CI is NOT watcher-visible.** `pr-watch` reads only `state,mergedAt,labels`, so a gate-red or
-> red-CI PR reads as `pending`. That escalation surfaces via the **delivery agent's one-line return** (the #2608
-> brief), not the watcher — when a delivery `Agent` completes with `… gate-red` / `escalated <label>`, surface
-> that in chat. Never assume the watcher caught a red build.
+> red-CI PR reads as `pending`. That escalation surfaces via the **delivery / fix agent's one-line return** (the
+> #2608 / #2630 briefs), not the watcher — when a delivery or fix `Agent` completes with `… gate-red` /
+> `fix escalated <reason>` / `escalated <label>`, surface that in chat. Never assume the watcher caught a red
+> build. (A fix agent that hits a red gate or an ambiguous finding leaves the PR `review:changes` and does NOT
+> re-arm — so it re-enters the fix path on a later tick unless the retry cap has been reached.)
 
 ## 4. Landing is the drain daemon's job — the conveyor NEVER merges
 
@@ -311,8 +382,11 @@ judgment**, or **genuine uncertainty** — and **never blanket-park** a clean PR
 (over-parking makes the human the bottleneck the conveyor exists to remove and dilutes the label). Whether to
 escalate is **judgment**, kept with the agent rather than a script
 ([we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
-A parked PR waking this loop (watcher exit `2`) is handled exactly as in §3 — surface it for `/review`, never
-auto-land it.
+A parked PR waking this loop (watcher exit `2`) is handled as in §3 by its label: a `review:human` /
+`review:pending` park is surfaced for `/review` (never auto-landed); a `review:changes` bounce is
+auto-re-dispatched to a fix agent (§3c) that repairs and re-arms it — but the fix agent still **never
+self-clears** the review, so the re-armed PR returns to `review:pending` for a human (or the AI-review pass) to
+verdict, never straight to `review:accepted`.
 
 ## 5. State is the board's channels only — no parallel store
 
@@ -321,8 +395,10 @@ in the `lane/<num>` branch → `pr-land` → the daemon merges → resolve. Thos
 plateau lane board reads (`claimed.session`, `queued.lane`, `pr.state`+`ci`, the scope-lease collect). So the
 board reflects conveyor state **for free**, and `conveyor-state.mjs` reads that same truth. **Never keep a
 parallel state store of item / claim / PR / resolve state** — the only in-session bookkeeping allowed is
-ephemeral *process* tracking: which delivery `Agent`s and which `pr-watch` processes you have spawned (the
-in-flight dispatch guard and the watched-PR set). That is not item state; it is which background jobs are live.
+ephemeral *process* tracking: which delivery / prepare / fix `Agent`s and which `pr-watch` processes you have
+spawned (the in-flight dispatch guard, the prepare guard, the **fix guard** (§3c), and the watched-PR set). That
+is not item state; it is which background jobs are live — the re-arm swap and every repair still flow through the
+board's normal verbs (`git push … lane/*` → `rearm-review.mjs` → the PR's labels → the daemon / `/review`).
 
 ## 6. Idle-stop (the conveyor's lifetime = the session's)
 
@@ -361,9 +437,12 @@ Per #deterministic-core-thin-judgment, the line is:
 - **Scripts (deterministic, tested — this skill only shells them):** the tick state read, the dispatch plan,
   the merge-watcher verdict, the idle-clock inputs, the health/stall scan. Same inputs → same output, always.
 - **Judgment (stays with the operator + the agents — this skill's real content):** the readiness discussion,
-  clearing items for build, supervising a build, **each prepare-scope agent's touch-set prediction** and **each
-  delivery agent's adversarial review of its own diff**, the **escalate-or-auto-land call**, reviewing an
-  escalation (`/review`), and investigating an anomaly. Never spend model context re-deriving a computable plan —
+  clearing items for build, supervising a build, **each prepare-scope agent's touch-set prediction**, **each
+  delivery agent's adversarial review of its own diff**, **each fix agent's application of the reviewer's
+  finding** (the repair itself — routed by the deterministic exit-2 label, but the fix is judgment), the
+  **escalate-or-auto-land call**, reviewing an escalation (`/review`), and investigating an anomaly. The
+  `review:changes → review:pending` re-arm, by contrast, is a script-decidable swap (`rearm-review.mjs`) — the
+  fix agent shells it, never re-deriving the "never clear the human gate" rule in prose. Never spend model context re-deriving a computable plan —
   read the script's answer and act on it. **Prepare-vs-build is NOT a judgment call here — it is the dispatch
   plan's classification:** `plan.launch` → build (scoped); `held: unshaped-no-scope` / `state.unshaped` → prepare
   (unscoped). The skill just spawns the matching agent.
