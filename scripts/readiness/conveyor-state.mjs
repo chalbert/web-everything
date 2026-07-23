@@ -34,7 +34,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, openSync, readSync, closeSync, writeSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -415,6 +415,24 @@ const LANE_PORTS_PATH = join(ROOT, '.claude', 'lane-ports.json');
 // stdout = machine payload ONLY; ALL logs / human text → stderr.
 const log = (m) => process.stderr.write(m + '\n');
 
+/**
+ * Write a line to a fd SYNCHRONOUSLY and completely, then return. `process.stdout.write` is ASYNC to a pipe,
+ * and `process.exit()` drops the unflushed tail — so this script's ~23KB `--json` payload is silently
+ * TRUNCATED at the ~8-64KB pipe buffer when a parent captures our stdout over a pipe (`execFileSync`), while a
+ * TTY / redirect-to-file happens to win the flush race. A synchronous `writeSync` fully drains BEFORE
+ * `process.exit` runs. Mirrors `backlog.mjs`'s `writeAllSync` (its `build-queue --json` hit the exact same bug)
+ * so the two machine emitters flush identically. The EAGAIN loop handles a full non-blocking pipe; EPIPE (the
+ * reader closed early) is a benign stop, not a crash.
+ */
+function writeAllSync(fd, line) {
+  const buf = Buffer.from(String(line) + '\n', 'utf8');
+  let off = 0;
+  while (off < buf.length) {
+    try { off += writeSync(fd, buf, off, buf.length - off); }
+    catch (e) { if (e.code === 'EAGAIN') continue; if (e.code === 'EPIPE') break; throw e; }
+  }
+}
+
 /** Hand-rolled `--k=v` flag parsing. */
 function parseFlags(argv) {
   const flags = {};
@@ -646,7 +664,10 @@ function main(argv) {
   // human summary would just be the "eyeball four commands" this replaces). `--json` is accepted for call-site
   // symmetry with the sibling collectors but is not required.
   void flags.json;
-  process.stdout.write(JSON.stringify(picture, null, 2) + '\n');
+  // Emit the payload SYNCHRONOUSLY so it fully drains before the process exits — a plain
+  // `process.stdout.write` is async to a pipe and `process.exit(0)` would drop the unflushed tail, truncating
+  // the JSON for an `execFileSync`/pipe consumer (see writeAllSync). writeAllSync appends the trailing newline.
+  writeAllSync(1, JSON.stringify(picture, null, 2));
   process.exit(0);
 }
 

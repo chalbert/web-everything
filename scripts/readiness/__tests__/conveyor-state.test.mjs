@@ -7,6 +7,9 @@
  *   and a DAEMON-UNAVAILABLE tick (a null report degrades to the `"unavailable"` sentinel, not a crash).
  */
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import {
   shapeQueue,
   itemNumFromRef,
@@ -373,4 +376,26 @@ describe('assembleConveyorState — the whole tick picture', () => {
     expect(s.health.verdict).toBe('warn');
     expect(s.health.errors).toEqual(['lane-pool status: spawn failed']);
   });
+});
+
+// ── CLI FLUSH regression pin (the IO shell) ──────────────────────────────────────────────────────────────────
+// The pure core above is fixture-driven; this ONE test exercises the real `main()` CLI over an execFileSync PIPE
+// — the exact consumer shape that TRUNCATED before the flush fix. `process.stdout.write` is async to a pipe, and
+// the old `process.exit(0)` dropped the unflushed tail, so a large `--json` payload arrived as INVALID/partial
+// JSON. The CLI now emits synchronously (writeAllSync) so the whole ~24KB payload drains before exit. If anyone
+// reverts to async-write-then-exit, this JSON.parse throws on the truncated tail. The CLI's collectors degrade
+// gracefully (a missing gh/daemon/lane-pool → empty section + errors[]), so the read never crashes; the build
+// queue is derived from the repo's own backlog files, keeping the payload comfortably past the pipe buffer.
+describe('CLI --json flush — the full payload round-trips through an execFileSync pipe (no truncation)', () => {
+  const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'conveyor-state.mjs');
+  it('emits complete, parseable JSON with every top-level section present', () => {
+    const out = execFileSync('node', [CLI, '--json'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+    // The whole payload arrived (a truncated tail would make this throw — the bug this pins).
+    const state = JSON.parse(out);
+    for (const key of ['queue', 'clearedNotReady', 'unshaped', 'lanes', 'freeSlots', 'prs', 'daemon', 'idle', 'health']) {
+      expect(state, `missing top-level key: ${key}`).toHaveProperty(key);
+    }
+    // The trailing brace + newline made it through intact — the precise tail the async-exit race dropped.
+    expect(out.trimEnd().endsWith('}')).toBe(true);
+  }, 60_000); // the shell spawns several collectors — generous timeout, not a perf assertion
 });
