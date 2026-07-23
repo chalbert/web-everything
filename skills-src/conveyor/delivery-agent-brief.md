@@ -57,6 +57,9 @@ node scripts/backlog.mjs claim {{ITEM_NUM}} --session={{SESSION_SLUG}}
 
 Claim flips `open → active` + stamps `dateStarted` **in the lane clone**. (You are a background agent — do the
 claim, the readiness pre-check, and the build in the same run; the two-turn human arc does not apply here.)
+**The `claim` CLI prints a two-turn "⏸ stop here / let the chat be renamed" message meant for INTERACTIVE human
+sessions — you MUST ignore it and proceed to the readiness pre-check + build in the SAME run** (as this brief's
+arc directs). Obeying it literally would STALL a background delivery agent.
 **Before writing any code, run the readiness pre-check (step 3)** — that step owns the full re-read of
 `{{ITEM_SPEC_PATH}}` and the `blockedBy` re-check.
 
@@ -65,7 +68,7 @@ claim, the readiness pre-check, and the build in the same run; the two-turn huma
 State drifts between when the operator cleared this item and when your lane picked it up: a blocker can
 **re-open**, other work can land the **same** change, a spec can go **stale**. So **before writing any code**,
 re-confirm the item is still buildable **as written, against the fresh `main` your lane just reset to**. This
-enacts the **Definition-of-Ready lens** ([#x82om9v] — the durable home of what "ready" means) at *claim* time —
+enacts the **Definition-of-Ready lens** (#2618 — the durable home of what "ready" means) at *claim* time —
 the same "still holds against the current tree, no reopened fork, no reappeared blocker" re-read the delegation
 rule already requires, and the "re-evaluate `blockedBy` at every seam" discipline
 (`we:docs/agent/backlog-workflow.md`). Keep it **proportionate**: read the item + take a quick look at `main`,
@@ -130,12 +133,22 @@ Spawn **one adversarial code-review subagent** on your working diff:
   Re-run the review after any nontrivial fix, until a pass comes back clean (or with only
   dismissed-with-reason findings). **Only then** proceed to the PR.
 
-### 7. Commit + push the `lane/{{ITEM_NUM}}` branch + open the PR (label green ONLY after `test` passes)
+### 7. Commit on the lane's current branch + publish HEAD to the `lane/...` ref + open the PR (label green ONLY after `test` passes)
 
-Commit only this item's files (explicit paths, never `git add -A`; one commit), then open the PR through the
-canonical producer — **never a hand-rolled `gh pr create`** (that skips the #2307 producer review-labeling):
+Commit only this item's files (explicit paths, never `git add -A`; one commit) on the lane's **current branch**
+(its local `main`) — do **NOT** `git checkout -b lane/...`; the single-branch hook blocks branch creation even
+inside a lane clone. You never create the `lane/...` branch locally: `pr-land` **publishes HEAD** to that ref
+for you via `--ref=... --sha=HEAD`. Then open the PR through the canonical producer — **never a hand-rolled
+`gh pr create`** (that skips the #2307 producer review-labeling):
 
 ```bash
+# Write the commit message to a file, then commit -F it. Do NOT put the message
+# in a bash heredoc: backticks in a heredoc (e.g. `scope:`) run as a subshell
+# (`bad substitution`). A message file has no such footgun.
+printf '%s\n' "WE #{{ITEM_NUM}}: <one-line summary>" "" \
+  "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
+git commit -F <msgfile> <explicit-paths>
+
 node scripts/pr-land.mjs --ref=lane/{{ITEM_NUM}}-<slug> --sha=HEAD --base=main \
   --body-file=<pr-body> --label-on-green
 ```
@@ -176,7 +189,8 @@ node scripts/conveyor/learnings-drop.mjs \
 ```
 
 The flags are `--kind`/`--summary`/`--area`/`--suggestion` (all four required) plus an optional `--session`;
-there is deliberately **no** `--item`/`--entry`/free-form field (the allow-list is the privacy boundary — a
+`--summary` is capped at 240 chars (over-length is rejected) — keep it to one tight sentence.
+There is deliberately **no** `--item`/`--entry`/free-form field (the allow-list is the privacy boundary — a
 disallowed key is rejected, never appended). If your entry is rejected, it named something it should not have —
 generalize it and retry; do **not** try to force it through. Skip this step only if you genuinely hit no
 generalizable friction. Distributed capture (every agent, cheaply, in the moment); the `/closing-session` sweep
