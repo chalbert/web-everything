@@ -2,6 +2,7 @@
 bornAs: xjnmv6d
 kind: story
 size: 5
+buildQueued: true
 parent: "2636"
 status: open
 blockedBy: ["2634"]

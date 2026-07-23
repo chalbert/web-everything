@@ -2,6 +2,7 @@
 bornAs: xomlggf
 kind: story
 size: 8
+buildQueued: true
 parent: "2636"
 status: open
 blockedBy: ["2638", "2635"]
