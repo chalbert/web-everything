@@ -2,6 +2,7 @@
 bornAs: x832chf
 kind: story
 size: 3
+buildQueued: true
 parent: "2636"
 status: open
 blockedBy: ["2634"]
