@@ -12,29 +12,29 @@ import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
   it('a policy-core diff (edits the leash-defining trust chain) → review:human, applied', () => {
-    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/lib/review-escalation.mjs'], diffLines: 10, prNum: 3 });
+    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/lib/review-escalation.mjs'], diffLines: 10 });
     expect(v.label).toBe(REVIEW_LABELS.human);
     expect(v.apply).toBe(true);
     expect(v.humanRequired).toBe(true);
     expect(v.reasons.join(' ')).toMatch(/gate-self/);
   });
   it('an escalating non-gate-self diff (blast-radius) → review:pending, applied', () => {
-    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10, prNum: 3 });
+    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10 });
     expect(v.label).toBe(REVIEW_LABELS.pending);
     expect(v.apply).toBe(true);
     expect(v.humanRequired).toBe(false);
   });
   it('a leaf diff with no escalation signal → no review label at all', () => {
-    const v = resolveProducerReviewLabel({ changedFiles: ['backlog/2307-x.md'], diffLines: 10, prNum: 3 });
+    const v = resolveProducerReviewLabel({ changedFiles: ['backlog/2307-x.md'], diffLines: 10 });
     expect(v.label).toBe(null);
     expect(v.apply).toBe(false);
   });
   it('cross-repo + dismissed-findings signals off the manifest also escalate (review:pending)', () => {
-    expect(resolveProducerReviewLabel({ crossRepo: true, prNum: 3 }).label).toBe(REVIEW_LABELS.pending);
-    expect(resolveProducerReviewLabel({ dismissedFindings: 2, prNum: 3 }).label).toBe(REVIEW_LABELS.pending);
+    expect(resolveProducerReviewLabel({ crossRepo: true }).label).toBe(REVIEW_LABELS.pending);
+    expect(resolveProducerReviewLabel({ dismissedFindings: 2 }).label).toBe(REVIEW_LABELS.pending);
   });
   it('a PR that already carries the verdict label is NOT re-applied (idempotent — never a double-apply)', () => {
-    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10, prNum: 3, currentLabels: [REVIEW_LABELS.pending] });
+    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10, currentLabels: [REVIEW_LABELS.pending] });
     expect(v.label).toBe(REVIEW_LABELS.pending);
     expect(v.apply).toBe(false);
   });

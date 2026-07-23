@@ -99,7 +99,6 @@ describe('INVARIANT 1 — policy/statute ⇒ human; engine ⇒ escalate-but-agen
     [0, 500],        // diffLines: below and above the size threshold
     [0, 3],          // dismissedFindings
     [false, true],   // crossRepo
-    [3, 10],         // prNum: non-sampled and sampled
   );
   it('every POLICY-CORE path is classified gate-self (human); every ENGINE path is NOT', () => {
     for (const f of POLICY_CORE_FILES) expect(isGateSelfPath(f)).toBe(true);
@@ -108,8 +107,8 @@ describe('INVARIANT 1 — policy/statute ⇒ human; engine ⇒ escalate-but-agen
   it('POLICY-CORE ⇒ humanRequired across arbitrary other signals + noise', () => {
     for (const gateFile of POLICY_CORE_FILES) {
       for (const noise of powerset(LEAF_FILES)) {
-        for (const [diffLines, dismissedFindings, crossRepo, prNum] of noiseSignals) {
-          const r = scoreEscalation({ changedFiles: [...noise, gateFile], diffLines, dismissedFindings, crossRepo, prNum });
+        for (const [diffLines, dismissedFindings, crossRepo] of noiseSignals) {
+          const r = scoreEscalation({ changedFiles: [...noise, gateFile], diffLines, dismissedFindings, crossRepo });
           expect(r.humanRequired).toBe(true); // leash-defining code — never falls to agent-reviewable
           expect(r.escalate).toBe(true);
         }
@@ -120,7 +119,7 @@ describe('INVARIANT 1 — policy/statute ⇒ human; engine ⇒ escalate-but-agen
     for (const s of STATUTE_FILES) {
       expect(isStatutePath(s)).toBe(true);
       for (const noise of powerset(LEAF_FILES)) {
-        const r = scoreEscalation({ changedFiles: [...noise, s], prNum: 3 });
+        const r = scoreEscalation({ changedFiles: [...noise, s] });
         expect(r.humanRequired).toBe(true);
         expect(r.escalate).toBe(true);
       }
@@ -129,8 +128,8 @@ describe('INVARIANT 1 — policy/statute ⇒ human; engine ⇒ escalate-but-agen
   it('#2445 flip — an ENGINE (lander) edit ESCALATES but is NOT humanRequired (agent-reviewable)', () => {
     for (const engineFile of ENGINE_FILES) {
       for (const noise of powerset(LEAF_FILES)) {
-        for (const [diffLines, dismissedFindings, crossRepo, prNum] of noiseSignals) {
-          const r = scoreEscalation({ changedFiles: [...noise, engineFile], diffLines, dismissedFindings, crossRepo, prNum });
+        for (const [diffLines, dismissedFindings, crossRepo] of noiseSignals) {
+          const r = scoreEscalation({ changedFiles: [...noise, engineFile], diffLines, dismissedFindings, crossRepo });
           expect(r.escalate).toBe(true);        // the lander always gets an independent review
           expect(r.humanRequired).toBe(false);  // but a converged agent verdict may clear it — the flip
         }
@@ -141,7 +140,7 @@ describe('INVARIANT 1 — policy/statute ⇒ human; engine ⇒ escalate-but-agen
     for (const moved of RELOCATED_POLICY_FILES) {
       expect(isGateSelfPath(moved)).toBe(true);
       for (const noise of powerset(LEAF_FILES)) {
-        const r = scoreEscalation({ changedFiles: [...noise, moved], diffLines: 0, prNum: 3 });
+        const r = scoreEscalation({ changedFiles: [...noise, moved], diffLines: 0 });
         expect(r.humanRequired).toBe(true); // the coordinator can never auto-clear a change to its own leash
         expect(r.escalate).toBe(true);
       }
@@ -149,7 +148,7 @@ describe('INVARIANT 1 — policy/statute ⇒ human; engine ⇒ escalate-but-agen
     for (const moved of RELOCATED_ENGINE_FILES) {
       expect(isGateSelfPath(moved)).toBe(false);
       for (const noise of powerset(LEAF_FILES)) {
-        const r = scoreEscalation({ changedFiles: [...noise, moved], diffLines: 0, prNum: 3 });
+        const r = scoreEscalation({ changedFiles: [...noise, moved], diffLines: 0 });
         expect(r.humanRequired).toBe(false);
         expect(r.escalate).toBe(true); // still escalates even though a package path no longer matches ^scripts/
       }
@@ -157,9 +156,7 @@ describe('INVARIANT 1 — policy/statute ⇒ human; engine ⇒ escalate-but-agen
   });
   it('a diff with NO policy/statute path is never humanRequired (the converse — no false human-gating)', () => {
     for (const files of powerset(LEAF_FILES)) {
-      for (const prNum of [1, 3, 10]) {
-        expect(scoreEscalation({ changedFiles: files, diffLines: 999, dismissedFindings: 9, crossRepo: true, prNum }).humanRequired).toBe(false);
-      }
+      expect(scoreEscalation({ changedFiles: files, diffLines: 999, dismissedFindings: 9, crossRepo: true }).humanRequired).toBe(false);
     }
   });
 });
@@ -303,7 +300,7 @@ describe('INVARIANT 6 — producerReviewLabel matches the score across both tier
   it('any POLICY-CORE or STATUTE diff ⇒ producer label review:human, across noise', () => {
     for (const gateFile of [...POLICY_CORE_FILES, ...STATUTE_FILES]) {
       for (const noise of powerset(LEAF_FILES)) {
-        const score = scoreEscalation({ changedFiles: [...noise, gateFile], prNum: 3 });
+        const score = scoreEscalation({ changedFiles: [...noise, gateFile] });
         expect(producerReviewLabel(score)).toBe(REVIEW_LABELS.human);
       }
     }
@@ -311,13 +308,13 @@ describe('INVARIANT 6 — producerReviewLabel matches the score across both tier
   it('#2445 flip — an ENGINE (lander) diff ⇒ review:pending (escalated, agent-reviewable), never review:human', () => {
     for (const engineFile of ENGINE_FILES) {
       for (const noise of powerset(LEAF_FILES)) {
-        expect(producerReviewLabel(scoreEscalation({ changedFiles: [...noise, engineFile], prNum: 3 }))).toBe(REVIEW_LABELS.pending);
+        expect(producerReviewLabel(scoreEscalation({ changedFiles: [...noise, engineFile] }))).toBe(REVIEW_LABELS.pending);
       }
     }
   });
   it('escalated-but-agent-reviewable ⇒ review:pending; a plain leaf ⇒ null', () => {
-    expect(producerReviewLabel(scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], prNum: 3 }))).toBe(REVIEW_LABELS.pending);
-    expect(producerReviewLabel(scoreEscalation({ changedFiles: ['backlog/x.md'], prNum: 3 }))).toBe(null);
+    expect(producerReviewLabel(scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] }))).toBe(REVIEW_LABELS.pending);
+    expect(producerReviewLabel(scoreEscalation({ changedFiles: ['backlog/x.md'] }))).toBe(null);
   });
 });
 
