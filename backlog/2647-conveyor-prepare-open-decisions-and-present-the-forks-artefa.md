@@ -55,5 +55,5 @@ Delivered the WE-side core (scope: `we:scripts/readiness/`, `we:skills-src/conve
 
 **Split out** (cross-locus, out of WE scope): the autonomous feed that wires a PREPARED decision's forks into the
 already-built #2565 console ruling surface via ports #2580/#2581/#2582 lives in the impl repo, so it was carved
-to follow-up **#xtzhhcu** (blockedBy #2647) rather than half-done here. The WE side presents via the chat
-artefact today; the console feed lands under #xtzhhcu.
+to follow-up **#2648** (blockedBy #2647) rather than half-done here. The WE side presents via the chat
+artefact today; the console feed lands under #2648.
