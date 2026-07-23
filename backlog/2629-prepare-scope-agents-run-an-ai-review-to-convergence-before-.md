@@ -3,9 +3,11 @@ bornAs: xakcnr6
 kind: story
 size: 3
 parent: "2612"
-status: open
+status: resolved
 scope: ["we:skills-src/conveyor/", "we:scripts/conveyor/"]
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-23"
+dateResolved: "2026-07-23"
 tags: []
 ---
 
