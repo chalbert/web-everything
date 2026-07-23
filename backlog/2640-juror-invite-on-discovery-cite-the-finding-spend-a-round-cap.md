@@ -1,9 +1,10 @@
 ---
+bornAs: xp71hri
 kind: story
 size: 5
-parent: "x8lajxj"
+parent: "2636"
 status: open
-blockedBy: ["xomlggf"]
+blockedBy: ["2639"]
 scope: ["we:scripts/lib/review-core.mjs", "we:scripts/workflows/review-parked-prs.mjs"]
 dateOpened: "2026-07-23"
 tags: []

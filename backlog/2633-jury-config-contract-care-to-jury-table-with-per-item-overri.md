@@ -1,7 +1,8 @@
 ---
+bornAs: x458es8
 kind: story
 size: 3
-parent: "x8lajxj"
+parent: "2636"
 status: open
 scope: ["we:scripts/lib/review-policy.contract.json", "we:scripts/lib/review-policy.mjs"]
 dateOpened: "2026-07-23"

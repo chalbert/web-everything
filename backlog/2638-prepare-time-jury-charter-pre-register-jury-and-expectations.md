@@ -1,9 +1,10 @@
 ---
+bornAs: xjnmv6d
 kind: story
 size: 5
-parent: "x8lajxj"
+parent: "2636"
 status: open
-blockedBy: ["x1y2w7s"]
+blockedBy: ["2634"]
 scope: ["we:skills-src/prepare-decision-item/", "we:scripts/lib/review-core.mjs"]
 dateOpened: "2026-07-23"
 tags: []

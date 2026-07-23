@@ -1,9 +1,10 @@
 ---
+bornAs: xomlggf
 kind: story
 size: 8
-parent: "x8lajxj"
+parent: "2636"
 status: open
-blockedBy: ["xjnmv6d", "x832chf"]
+blockedBy: ["2638", "2635"]
 scope: ["we:scripts/workflows/review-parked-prs.mjs", "we:scripts/lib/review-core.mjs"]
 dateOpened: "2026-07-23"
 tags: []

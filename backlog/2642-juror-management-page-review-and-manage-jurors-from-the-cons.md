@@ -1,9 +1,10 @@
 ---
+bornAs: xg1k1u9
 kind: story
 size: 5
-parent: "x8lajxj"
+parent: "2636"
 status: open
-blockedBy: ["xznjbt6"]
+blockedBy: ["2641"]
 scope: ["plateau-app:src/"]
 dateOpened: "2026-07-23"
 tags: []

@@ -1,9 +1,10 @@
 ---
+bornAs: xznjbt6
 kind: story
 size: 5
-parent: "x8lajxj"
+parent: "2636"
 status: open
-blockedBy: ["xomlggf"]
+blockedBy: ["2639"]
 scope: ["we:scripts/conveyor/", "we:skills-src/conveyor/"]
 dateOpened: "2026-07-23"
 tags: []

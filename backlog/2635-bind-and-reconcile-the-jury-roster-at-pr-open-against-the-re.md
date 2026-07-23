@@ -1,9 +1,10 @@
 ---
+bornAs: x832chf
 kind: story
 size: 3
-parent: "x8lajxj"
+parent: "2636"
 status: open
-blockedBy: ["x1y2w7s"]
+blockedBy: ["2634"]
 scope: ["we:scripts/pr-land.mjs", "we:scripts/lib/review-escalation.mjs"]
 dateOpened: "2026-07-23"
 tags: []

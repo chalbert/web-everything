@@ -1,9 +1,10 @@
 ---
+bornAs: x1y2w7s
 kind: story
 size: 5
-parent: "x8lajxj"
+parent: "2636"
 status: open
-blockedBy: ["x458es8"]
+blockedBy: ["2633"]
 scope: ["we:scripts/lib/review-core.mjs"]
 dateOpened: "2026-07-23"
 tags: []
