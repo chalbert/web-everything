@@ -6,6 +6,11 @@ parent: "2612"
 status: open
 dateOpened: "2026-07-22"
 tags: [conveyor, readiness, scope, lens]
+scope:
+  - we:src/_data/
+  - we:src/_includes/backlog-badges.njk
+  - we:src/backlog.njk
+  - we:scripts/check-readiness.mjs
 ---
 
 # Definition-of-Ready gains a has-predicted-scope lens
