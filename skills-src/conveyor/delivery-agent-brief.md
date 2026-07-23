@@ -123,11 +123,18 @@ node scripts/backlog.mjs resolve {{ITEM_NUM}}
 A green gate proves the **checks** pass; it does **not** prove the **diff is correct**. Before you open the
 PR, get the work reviewed — the gate is the deterministic core, this review is the judgment a script cannot
 do (per [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
-Spawn **one adversarial code-review subagent** on your working diff:
+Spawn **one adversarial code-review subagent** on your working diff and **AWAIT its completion — its final
+report (return value) IS the verdict.** The harness delivers a spawned subagent's final report to its spawner
+automatically, so you read that returned report directly; nothing can lose it in transit.
 
 - **Read-only, diff-focused.** It reviews *this lane's* diff — **correctness first**, plus the lens the change
   earns: a **security** pass for anything touching untrusted input, secrets, auth, or file/network I/O; an
   interface/compat pass for a contract change; and so on. It reports findings; it does not edit.
+- **The verdict rides the RETURN, never a name-addressed message.** Instruct the review subagent to put its
+  FULL verdict — converged / the findings list / any blockers — in its **final report/return**, NOT to
+  `SendMessage` it back to you by name. Do **not** rely on a name-addressed hand-back: a name can be
+  unreachable once an agent completes ("no agent named … reachable"), which stalls the converge-before-PR
+  handshake (#2624). Read the verdict off the returned final report.
 - **Address every finding to CONVERGENCE — don't rubber-stamp, don't silently drop.** Fix the real issues in
   the lane. A finding you judge not-real is **dismissed with a one-line reason** (never dropped in silence).
   Re-run the review after any nontrivial fix, until a pass comes back clean (or with only
@@ -158,6 +165,11 @@ node scripts/pr-land.mjs --ref=lane/{{ITEM_NUM}}-<slug> --sha=HEAD --base=main \
 drain — the resident drain daemon lands the labelled PR on its next pass. The `ready-to-merge` label means
 "fully checked, the drain may land" — it is applied by `pr-land` after CI is green, never eagerly at open, so a
 red PR never enters the drain's queue.
+
+`pr-land --label-on-green` BLOCKS until the required `test` check is green (often several minutes). Run it
+BACKGROUNDED (or with a generous timeout) — a foreground call may hit the tool timeout mid-wait, which is
+EXPECTED and harmless: the PR is already open (`checking`), and re-invoking `pr-land` with the SAME `--ref` is
+idempotent (it targets the existing PR and applies the label, never a duplicate).
 
 - End the commit message with:
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
