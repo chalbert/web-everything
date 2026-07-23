@@ -297,8 +297,12 @@ and dilutes what `review:human` means.
    parked `review:human` (`--label=review:human`).
 4. **Genuine uncertainty** — you are not confident the change is right and want a human eye before it lands.
    Park it `review:human`. (Uncertainty is a *good reason*; "so a human can see a clean change" is not.)
-5. **`review:changes`** — a human bounced a prior version of this diff. Repair before any land; if it is still
-   red after your fix, it stays parked.
+5. **`review:changes`** — a human bounced a prior version of this diff. As a fresh delivery agent you normally
+   will NOT see this (you build a NEW item; a bounce lands on an ALREADY-open PR after you have exited). When a
+   conveyor-launched PR is bounced `review:changes`, the conveyor auto-re-dispatches a dedicated **fix agent**
+   into that PR's lane to repair it and re-arm review — see
+   [`fix-agent-brief.md`](fix-agent-brief.md) (#2630); that is the repair path, not this build arc. Repair
+   before any land; the fix agent never self-clears the review, so a still-red fix stays parked.
 
 In every **post-build** escalation case (1–5) the outcome is the same: **the daemon parks the PR `review:human`
 (or leaves it unlabelled on a red gate), and it is reviewed in the main session** (`/review`). The **pre-build**
