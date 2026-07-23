@@ -6,6 +6,11 @@ parent: "2612"
 status: open
 dateOpened: "2026-07-22"
 tags: [conveyor, readiness, script, scope-lease]
+scope:
+  - we:scripts/readiness/
+  - we:scripts/check-backlog-item.mjs
+  - we:scripts/check-standards-rules.mjs
+  - we:docs/agent/backlog-workflow.md
 ---
 
 # Dispatch-plan script + scope frontmatter field
