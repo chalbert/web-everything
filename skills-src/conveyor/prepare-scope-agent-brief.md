@@ -42,9 +42,10 @@ JUDGMENT (predict the touch-set); every script-decidable step around it is a scr
 
 In an isolated lane clone, **predict item #{{ITEM_NUM}}'s touch-set** (the directories/files its build will
 modify, coarse and module-level), write that as `scope:` frontmatter in `{{ITEM_SPEC_PATH}}` (and **only** that
-file), get the gate green, open a `ready-to-merge` PR through the canonical producer — then **EXIT WITHOUT
-MERGING**. The resident drain daemon lands it; the now-scoped item builds on a later conveyor tick. You do **not**
-claim, build, or resolve the item — you only author its scope.
+file), get the gate green, **review your own scope prediction to convergence with an adversarial subagent**,
+open a `ready-to-merge` PR through the canonical producer — then **EXIT WITHOUT MERGING**. The resident drain
+daemon lands it; the now-scoped item builds on a later conveyor tick. You do **not** claim, build, or resolve
+the item — you only author its scope.
 
 ## The arc — one command per transition
 
@@ -105,7 +106,41 @@ npm run check:standards
 
 A red gate is a hard stop — fix your frontmatter (usually a bad YAML shape or an empty array) until it is green.
 
-### 5. Commit on the lane's current branch + publish HEAD to the `lane/...` ref + open the PR (ready-to-merge)
+### 5. Review your own scope prediction — spawn an adversarial review subagent (converge BEFORE the PR)
+
+A green gate proves the scope frontmatter has a **valid shape**; it does **not** prove the prediction is
+**right** — that the listed prefixes actually cover what a builder would touch, are honestly repo-qualified, and
+are not so narrow that the build spills onto an undeclared path. That is judgment a script cannot do (the gate
+is the deterministic core, this review is the judgment, per
+[we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
+**This step is the operator invariant (#2629): NO PR reaches a human review gate without an automated
+AI-reviewer convergence pass first.** A scope PR is normally auto-landing, but it **can** be human-routed — a
+statute-touching item is parked `review:human` by `pr-land`'s rubric, and a human may sample any open PR (that
+is exactly what happened to a scope PR bounced with no prior AI pass). So run the review **unconditionally**,
+here, before the PR opens — never skip it because "scope PRs usually auto-land".
+
+Spawn **one adversarial review subagent** on your predicted `scope:` + the spec it was predicted from, and
+**AWAIT its completion — its final report (return value) IS the verdict.** The harness delivers a spawned
+subagent's final report to its spawner automatically, so you read that returned report directly; nothing can
+lose it in transit.
+
+- **Read-only, scope-focused.** It reviews the one-line-of-truth of this lane: the `scope:` array against
+  `{{ITEM_SPEC_PATH}}`'s story. It checks the prediction is **complete** (every module the build plainly implies
+  is covered), **honest** (no invented path the spec does not support), **correctly repo-qualified** (`we:` /
+  `fui:` / `plateau:`, never a bare prefix), **coarse but not too narrow** (err to the enclosing directory), and
+  **non-empty**. It reports findings; it does not edit the frontmatter.
+- **The verdict rides the RETURN, never a name-addressed message.** Instruct the review subagent to put its
+  FULL verdict — converged / the findings list / any blockers — in its **final report/return**, NOT to
+  `SendMessage` it back to you by name. A name can be unreachable once an agent completes, which would stall the
+  converge-before-PR handshake (#2624). Read the verdict off the returned final report.
+- **Address every finding to CONVERGENCE — don't rubber-stamp, don't silently drop.** Fix a real gap by
+  widening / correcting the `scope:` in `{{ITEM_SPEC_PATH}}` (still that ONE file only). A finding you judge
+  not-real is **dismissed with a one-line reason** (never dropped in silence). Re-run the review after any
+  nontrivial change, until a pass comes back clean (or with only dismissed-with-reason findings). **Only then**
+  proceed to the PR. If a finding needs human judgment you cannot self-clear (e.g. the spec is genuinely too
+  vague to scope honestly), escalate per *Escalations* rather than ship an unreviewed guess.
+
+### 6. Commit on the lane's current branch + publish HEAD to the `lane/...` ref + open the PR (ready-to-merge)
 
 Commit **only** `{{ITEM_SPEC_PATH}}` (explicit path, never `git add -A`; one commit) on the lane's **current
 branch** (its local `main`) — do **NOT** `git checkout -b lane/...`; the single-branch hook blocks branch
@@ -140,7 +175,7 @@ idempotent (it targets the existing PR and applies the label, never a duplicate)
 - End the commit message with:
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
 
-### 6. (optional) Drop one learnings entry, then EXIT — do not merge, do not release
+### 7. (optional) Drop one learnings entry, then EXIT — do not merge, do not release
 
 If preparing this item surfaced a generalizable lesson (a friction, a missing convention, a doc/skill gap),
 append **one** structured entry via the write-gated drop-box (no code / paths / repo names — the schema rejects
@@ -173,7 +208,13 @@ Escalation is **by good reason only** — a scope-only PR normally auto-lands. E
 2. **Gate red** — `check:standards` fails from your frontmatter and you cannot get it green. Report the failing
    check and stop; do not weaken a test to go green.
 3. **Statute-touching item** — if the item is statute-touching, `pr-land`'s rubric parks it `review:human` on
-   its own. Let it — do not try to clear it yourself.
+   its own. Let it — do not try to clear it yourself. **You still run the step-5 review first** (#2629): the
+   invariant is that even a parked scope PR reaches the human only *after* an AI convergence pass.
+4. **A review finding you cannot self-clear** — the step-5 adversarial review surfaced a gap you fixed what you
+   could of, but one issue needs a human call (e.g. the spec is genuinely too vague to scope honestly). Do
+   **not** ship an unreviewed guess: either return `could-not-predict` (case 1) if no honest scope exists, or
+   open the PR parked `review:human` (`--label=review:human`) — never leave a scope PR to auto-land with an
+   unresolved review finding.
 
 ## Guardrails (the non-negotiables)
 

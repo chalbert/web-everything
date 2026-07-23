@@ -159,7 +159,10 @@ one that works for a completed background task), so it re-invokes this loop reli
      picked lane, `{{SESSION_SLUG}}`=`prepare-<num>`. Those four `{{DOUBLE_BRACE}}` tokens are the whole fill — do
      not rewrite the brief's prose.
    - Spawn it as **one background `Agent`** with the filled brief as the prompt. It acquires its lane, predicts the
-     item's touch-set, writes `scope:` into the one backlog file, gets the gate green, and opens a one-file
+     item's touch-set, writes `scope:` into the one backlog file, gets the gate green, then **runs an adversarial
+     review subagent on its own scope prediction and addresses the findings to convergence BEFORE opening the
+     PR** (the operator invariant #2629: no PR reaches a human review gate without a prior AI convergence pass —
+     a scope PR can still be human-routed when statute-touching or sampled). Only then does it open a one-file
      `ready-to-merge` PR (auto-lands — no review escalation unless the item is statute-touching), then **exits
      without merging**. When that PR lands the item is scoped and dispatches to **build** on a later tick.
    - **Record a prepare-guard entry** `{ num, kind: 'prepare', spawnedTick }` — keyed by `num` (a prepare's lane is
