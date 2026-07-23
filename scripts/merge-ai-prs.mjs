@@ -595,7 +595,7 @@ export function parseWatchOpts({ watch, interval, maxIdle, untilBatchesIdle, bat
  *      surfacing the holder; that drain's next pass already covers this work.
  *    • `acquire`     — the lease is free (or stale → reclaimable): take it for this run's FULL lifetime,
  *      one-shot and watch alike. */
-export function decideDrainLeaseGate({ dryRun = false, onlyPr = null, noLease = false, underLease = null, status = { held: false, stale: false, owner: null } } = {}) {
+export function decideDrainLeaseGate({ dryRun = false, onlyPr = null, noLease = false, underLease = null, repos = null, status = { held: false, stale: false, owner: null, scope: null } } = {}) {
   if (dryRun) return { action: 'bypass', reason: 'dry-run' };
   if (onlyPr != null) return { action: 'bypass', reason: 'single-pr-fast-drain' };
   if (noLease) return { action: 'bypass', reason: 'no-drain-lease' };
@@ -603,7 +603,29 @@ export function decideDrainLeaseGate({ dryRun = false, onlyPr = null, noLease = 
     if (status.held && status.owner === underLease) return { action: 'under-lease', heldBy: status.owner };
     return { action: 'noop', heldBy: status.held ? status.owner : null, reason: status.held ? 'lease-held-by-other' : 'declared-holder-gone' };
   }
-  if (status.held) return { action: 'noop', heldBy: status.owner, reason: 'lease-held' };
+  if (status.held) {
+    // #2458 — a held lease no longer BLINDLY no-ops claiming "the holder's next pass covers this work". Before
+    // #2458 any full/label sweep exited 0 with that claim — FALSE when the holder is a differently-scoped drain
+    // (--this-repo / --repos=…) that never sweeps this run's repos, silently stranding those PRs until it exits.
+    // Compare the holder's recorded repo scope to THIS run's and NEVER assert coverage that is false:
+    //   • holder scope UNKNOWN (legacy/unscoped lease) or this run's scope unknown → conservative: assume
+    //     covered, no-op (preserves the safe pre-#2458 behaviour; never a false-negative land).
+    //   • this run ⊆ holder → the holder genuinely covers this work → honest no-op.
+    //   • otherwise (some repos NOT in the holder's scope — a partial OR a full disjoint) → no-op, but report
+    //     the UNCOVERED repos HONESTLY instead of the old false "its next pass covers this work". We do NOT
+    //     auto-run concurrently: a lease-less bypass would remove mutual exclusion between two SAME-scope
+    //     launches (both see only the narrow holder → both bypass → a same-repo drain race), re-introducing the
+    //     very "two full drains at once" #2391/#2449 prevents. Honesty is the safe floor the item requires; the
+    //     operator forces an immediate scoped run with --no-drain-lease if the uncovered repos can't wait.
+    const runScope = Array.isArray(repos) ? [...new Set(repos.filter(Boolean))] : [];
+    const holderScope = Array.isArray(status.scope) ? status.scope.filter(Boolean) : null;
+    if (!holderScope || !holderScope.length || !runScope.length) return { action: 'noop', heldBy: status.owner, reason: 'lease-held' };
+    const holderSet = new Set(holderScope);
+    const uncovered = runScope.filter((r) => !holderSet.has(r));
+    const covered = runScope.filter((r) => holderSet.has(r));
+    if (!uncovered.length) return { action: 'noop', heldBy: status.owner, reason: 'lease-held' };
+    return { action: 'noop', heldBy: status.owner, reason: 'lease-held-uncovered', uncovered, covered };
+  }
   return { action: 'acquire' };
 }
 
@@ -1199,6 +1221,9 @@ function runCli() {
     } catch { return null; }
   })();
   const REPOS = resolveRepos({ repos: typeof flags.repos === 'string' ? flags.repos : null, singleRepo: !!flags['this-repo'], self: localSlug });
+  // #2458 — THIS run's repo scope (`null` = the cwd repo → normalize to localSlug), recorded in the drain
+  // lease so a differently-scoped launch can tell whether the holder actually covers its repos.
+  const leaseScope = [...new Set(REPOS.map((r) => r || localSlug).filter(Boolean))].sort();
   const repoFlag = (repo) => (repo ? ['--repo', repo] : []);      // a slug → scope the gh call; null → cwd repo
   const isLocalRepo = (repo) => repo == null || repo === localSlug; // git-side ops only run against the local clone
   const repoTag = (repo) => (repo && repo !== localSlug ? `${repo.split('/').pop()}#` : '#'); // display prefix per PR
@@ -2047,16 +2072,21 @@ function runCli() {
   // signal) via the `exit` handler. `--only` fast drains, `--dry-run`, and `--no-drain-lease` bypass;
   // a daemon child pass runs `under-lease` without acquiring (the parent heartbeats).
   const leaseOwner = drainOwner();
-  const leaseGate = decideDrainLeaseGate({ dryRun: DRY_RUN, onlyPr, noLease: NO_DRAIN_LEASE, underLease: UNDER_LEASE, status: drainLeaseStatus(DRAIN_LOCK_ROOT) });
+  const leaseGate = decideDrainLeaseGate({ dryRun: DRY_RUN, onlyPr, noLease: NO_DRAIN_LEASE, underLease: UNDER_LEASE, repos: leaseScope, status: drainLeaseStatus(DRAIN_LOCK_ROOT) });
   let leaseHeld = false;
-  if (leaseGate.action === 'acquire') leaseHeld = acquireDrainLease(DRAIN_LOCK_ROOT, leaseOwner).ok === true;
+  if (leaseGate.action === 'acquire') leaseHeld = acquireDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { scope: leaseScope }).ok === true;
   if (leaseGate.action === 'noop' || (leaseGate.action === 'acquire' && !leaseHeld)) {
     const st = drainLeaseStatus(DRAIN_LOCK_ROOT);
     const heldBy = st.owner || leaseGate.heldBy || null;
+    const uncovered = Array.isArray(leaseGate.uncovered) ? leaseGate.uncovered : [];
     const detail = leaseGate.reason === 'declared-holder-gone'
       ? `--under-lease holder ${UNDER_LEASE} no longer holds a live lease — no-op; the queue rides the next drain (#2449)`
+      // #2458 — a scoped holder that does NOT cover some of this run's repos: report the UNCOVERED repos HONESTLY
+      // rather than the old false "its next pass covers this work" (which stranded them until the holder exited).
+      : leaseGate.reason === 'lease-held-uncovered'
+      ? `another drain holds the whole-process lease (${heldBy || '?'}) but its scope does NOT cover ${uncovered.join(', ')} — those repos are NOT swept by the holder; wait for it to exit, or force an immediate scoped run with --no-drain-lease (#2458)`
       : `another drain already holds the whole-process lease (${heldBy || '?'}) — no-op; its next pass covers this work (#2449/#2391)`;
-    if (AS_JSON) process.stdout.write(JSON.stringify({ ok: true, ...(WATCH ? { watch: true } : {}), skipped: 'drain-in-progress', heldBy, detail }) + '\n');
+    if (AS_JSON) process.stdout.write(JSON.stringify({ ok: true, ...(WATCH ? { watch: true } : {}), skipped: 'drain-in-progress', heldBy, detail, ...(uncovered.length ? { uncovered } : {}) }) + '\n');
     else process.stderr.write(`merge-ai-prs · ${detail}\n`);
     process.exit(0);
   }
@@ -2098,7 +2128,7 @@ function runCli() {
   let lastFailed = [];
   let lastDup = [];
   for (let pass = 1; ; pass++) {
-    if (leaseHeld) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner); // #2395 — keep the whole-process lease alive across a long watch (an `under-lease` child never heartbeats — its parent daemon owns that)
+    if (leaseHeld) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { scope: leaseScope }); // #2395 — keep the whole-process lease alive across a long watch (an `under-lease` child never heartbeats — its parent daemon owns that); #2458 re-supply the scope so it survives the heartbeat rewrite
     // #2395 — wall-clock lifetime cap: hard-stop a `--max-runtime-min` watch so an inert `--until-batches-idle`
     // (no batch feed present) can never poll forever. The deferred sweep is the backstop for anything unlanded.
     if (MAX_RUNTIME_MS != null && Date.now() - watchStartedAt >= MAX_RUNTIME_MS) {

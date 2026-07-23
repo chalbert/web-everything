@@ -36,6 +36,19 @@ describe('parseLockEntry — tolerant, never throws', () => {
     const e = parseLockEntry(JSON.stringify({ owner: 'A', heartbeatAt: iso(T0), pid: 'x' }));
     expect(e.pid).toBeNull();
   });
+  it('preserves opaque owner meta round-trip; omits it when absent or non-object (#2458)', () => {
+    const withMeta = parseLockEntry(JSON.stringify({ owner: 'A', path: 'p', heartbeatAt: iso(T0), meta: { scope: ['o/we'] } }));
+    expect(withMeta.meta).toEqual({ scope: ['o/we'] });
+    const noMeta = parseLockEntry(JSON.stringify({ owner: 'A', path: 'p', heartbeatAt: iso(T0) }));
+    expect('meta' in noMeta).toBe(false); // no meta key when the entry has none (byte-identical to pre-#2458)
+    const badMeta = parseLockEntry(JSON.stringify({ owner: 'A', path: 'p', heartbeatAt: iso(T0), meta: ['not', 'an', 'object'] }));
+    expect('meta' in badMeta).toBe(false); // an array/non-object meta is ignored, never surfaced
+  });
+  it('makeLockEntry carries meta only when it is a non-empty object; reserve/heartbeat thread it through (#2458)', () => {
+    expect('meta' in makeLockEntry('A', 'p', iso(T0))).toBe(false);
+    expect('meta' in makeLockEntry('A', 'p', iso(T0), null, {})).toBe(false); // empty object adds no key
+    expect(makeLockEntry('A', 'p', iso(T0), null, { scope: ['x'] }).meta).toEqual({ scope: ['x'] });
+  });
 });
 
 describe('isLeaseExpired — Fork-2 correctness floor', () => {
@@ -169,6 +182,15 @@ describe('atomic fs primitives — real temp lock root', () => {
     releaseLockDir(root, 'p');
     expect(readLockEntry(root, 'p')).toBeNull();
     expect(heartbeat(root, 'p', 'A', iso(T0), 100)).toBe(false); // no-op once gone
+  });
+
+  it('reserve persists meta and heartbeat can re-supply it (#2458)', () => {
+    reserve(root, 'p', 'A', T0, iso(T0), 100, 'unknown', DEFAULT_LEASE_MINUTES, { scope: ['o/we'] });
+    expect(readLockEntry(root, 'p').meta).toEqual({ scope: ['o/we'] });
+    heartbeat(root, 'p', 'A', iso(T0 + 60_000), 100, { scope: ['o/we', 'o/frontierui'] });
+    expect(readLockEntry(root, 'p').meta).toEqual({ scope: ['o/we', 'o/frontierui'] });
+    heartbeat(root, 'p', 'A', iso(T0 + 120_000), 100); // no meta → entry has none (heartbeat rebuilds the payload)
+    expect('meta' in readLockEntry(root, 'p')).toBe(false);
   });
 
   it('end-to-end fencing: after B reclaims A\'s stale lock, wasReclaimed flags A\'s push for rejection', () => {

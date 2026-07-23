@@ -360,6 +360,49 @@ describe('merge-ai-prs — decideDrainLeaseGate (#2449 always-on whole-process l
   });
 });
 
+describe('merge-ai-prs — decideDrainLeaseGate REPO-SCOPE awareness (#2458)', () => {
+  const heldScoped = (owner, scope) => ({ held: true, stale: false, owner, heartbeatAt: 'now', scope });
+
+  it('holder scope UNKNOWN (legacy/unscoped lease) → conservative no-op, never a false-negative land (preserves pre-#2458)', () => {
+    const g = decideDrainLeaseGate({ repos: ['o/we'], status: { held: true, stale: false, owner: 'mac:9:drain', scope: null } });
+    expect(g).toMatchObject({ action: 'noop', reason: 'lease-held', heldBy: 'mac:9:drain' });
+  });
+
+  it('this run has NO scope input → conservative no-op (cannot prove disjointness → assume covered)', () => {
+    expect(decideDrainLeaseGate({ repos: [], status: heldScoped('mac:9:drain', ['o/we']) }).reason).toBe('lease-held');
+    expect(decideDrainLeaseGate({ status: heldScoped('mac:9:drain', ['o/we']) }).reason).toBe('lease-held');
+  });
+
+  it('this run ⊆ holder scope → honest no-op (the holder genuinely covers this work)', () => {
+    const g = decideDrainLeaseGate({ repos: ['o/we'], status: heldScoped('mac:9:drain', ['o/we', 'o/frontierui', 'o/plateau-app']) });
+    expect(g).toMatchObject({ action: 'noop', reason: 'lease-held' });
+  });
+
+  it('fully DISJOINT scope → HONEST no-op naming the uncovered repos (NOT a lease-less bypass — that would race two same-scope launches under a narrow holder)', () => {
+    const g = decideDrainLeaseGate({ repos: ['o/plateau-app'], status: heldScoped('mac:9:drain', ['o/we']) });
+    expect(g).toMatchObject({ action: 'noop', reason: 'lease-held-uncovered', heldBy: 'mac:9:drain' });
+    expect(g.uncovered).toEqual(['o/plateau-app']); // reported honestly instead of a false "covers this work"
+  });
+
+  it('PARTIAL overlap → same honest no-op, reporting the UNCOVERED repos (no false coverage claim; no shared-repo merge race)', () => {
+    const g = decideDrainLeaseGate({ repos: ['o/we', 'o/plateau-app'], status: heldScoped('mac:9:drain', ['o/we']) });
+    expect(g).toMatchObject({ action: 'noop', reason: 'lease-held-uncovered' });
+    expect(g.uncovered).toEqual(['o/plateau-app']); // named so the message can be honest about what is NOT swept
+    expect(g.covered).toEqual(['o/we']);
+  });
+
+  it('scope comparison is order-independent (both sides may arrive unsorted)', () => {
+    const g = decideDrainLeaseGate({ repos: ['o/frontierui', 'o/we'], status: heldScoped('mac:9:drain', ['o/we', 'o/frontierui']) });
+    expect(g.reason).toBe('lease-held'); // fully covered regardless of order
+  });
+
+  it('scope awareness never overrides the earlier bypass/under-lease branches', () => {
+    // A --only fast drain or --dry-run still bypasses even against a disjoint scoped holder (scope check is only for the plain held path).
+    expect(decideDrainLeaseGate({ onlyPr: '5', repos: ['o/plateau-app'], status: heldScoped('mac:9:drain', ['o/we']) }).reason).toBe('single-pr-fast-drain');
+    expect(decideDrainLeaseGate({ dryRun: true, repos: ['o/plateau-app'], status: heldScoped('mac:9:drain', ['o/we']) }).reason).toBe('dry-run');
+  });
+});
+
 describe('merge-ai-prs — batch-aware --until-batches-idle exit (#2330)', () => {
   const feedOf = (runs) => ({ runs });
 
