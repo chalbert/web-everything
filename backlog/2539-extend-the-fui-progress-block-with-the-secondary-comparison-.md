@@ -13,6 +13,11 @@ tags:
   - console-board
 crossRef: { url: /intents/progress/, label: progress intent }
 relatedProject: webblocks
+scope:
+  - fui:blocks/progress/
+  - fui:blocks/__tests__/unit/progress/
+  - fui:demos/progress-demo.html
+  - fui:src/_data/blocks.json
 ---
 
 # Extend the FUI progress block with the secondary/comparison track
