@@ -9,6 +9,10 @@ scaffoldedBy: "slice-2555"
 dateScaffolded: "2026-07-20"
 dateOpened: "2026-07-20"
 tags: [plateau-loop, console, console-board, operator-actions, review, drag-to-queue, slice-2555]
+scope:
+  - plateau-app:src/backlog-view/
+  - plateau-app:src/build-runner/
+  - we:contracts/backlog.ts
 ---
 
 # Console board review and queue operator actions
