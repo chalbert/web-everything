@@ -5,6 +5,10 @@ size: 2
 status: open
 dateOpened: "2026-07-12"
 tags: []
+scope:
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/readiness/
+  - we:scripts/__tests__/
 ---
 
 # decideDrainLeaseGate is repo-scope-blind — a scoped drain holder falsely no-ops differently-scoped sweeps
