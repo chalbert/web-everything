@@ -1,4 +1,5 @@
 ---
+bornAs: xtkdu9s
 kind: story
 size: 8
 parent: "2612"
@@ -14,7 +15,7 @@ The conveyor today only drives story delivery. Decisions are ignored entirely. T
 
 ## Problem
 
-Decisions are excluded from buildable work. In [we:scripts/readiness/engine.mjs](scripts/readiness/engine.mjs), `isBuildable = kind !== 'decision'`, so the conveyor never touches a `kind:decision` item. An open decision that is ready to be prepared and ratified just sits there — the autonomous loop can deliver and (with sibling item x254bqo) slice, but it can never move a decision forward.
+Decisions are excluded from buildable work. In [we:scripts/readiness/engine.mjs](scripts/readiness/engine.mjs), `isBuildable = kind !== 'decision'`, so the conveyor never touches a `kind:decision` item. An open decision that is ready to be prepared and ratified just sits there — the autonomous loop can deliver and (with sibling item 2645) slice, but it can never move a decision forward.
 
 ## Proposed behavior
 

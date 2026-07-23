@@ -1,4 +1,5 @@
 ---
+bornAs: xcv9uhj
 kind: story
 size: 2
 parent: "2612"
@@ -23,4 +24,4 @@ Mirror the existing not-ready warning already in `add`: at add time, detect the 
 - an **epic** needs slicing before the conveyor can act; and
 - a **decision** needs preparing (and a ratify) before the conveyor can act.
 
-The warning is advisory — it still lets the id be added — so the operator sees why it won't dispatch. The blocked-behavior only becomes real once sibling items x254bqo (slice) and xtkdu9s (decide) land, but the warning is useful immediately.
+The warning is advisory — it still lets the id be added — so the operator sees why it won't dispatch. The blocked-behavior only becomes real once sibling items 2645 (slice) and 2647 (decide) land, but the warning is useful immediately.
