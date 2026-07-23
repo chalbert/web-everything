@@ -68,21 +68,25 @@ LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-pre
   or plainly implies. You are not building it — you are locating **where** it would build.
 - Form a **coarse, module-level** touch-set: the directory or file **prefixes** a builder would modify.
   Same kind of prediction the /workflow lane's touch-set probe makes — err toward the **enclosing directory**
-  (`scripts/readiness/`, `skills-src/conveyor/`) rather than guessing exact filenames, and toward **slightly
+  (`we:scripts/readiness/`, `we:skills-src/conveyor/`) rather than guessing exact filenames, and toward **slightly
   wider** when unsure (a scope that is too narrow risks a build touching an undeclared path; a coarse directory
-  prefix is the safe, honest prediction). Repo-qualify cross-repo paths (`fui:...`, `plateau:...`) when the item
-  spans the constellation; a WE-only item uses bare repo-relative prefixes.
+  prefix is the safe, honest prediction). **Every** entry is repo-qualified — a WE path is `we:...`, a cross-repo
+  path is `fui:...` / `plateau:...`; never a bare prefix (a bare path is rejected by the locus hook and the
+  lease engine reads it as repo `null`, so it never matches an observed `we:`-qualified file).
 
 ### 3. Write `scope:` into the story frontmatter — edit ONLY `{{ITEM_SPEC_PATH}}`
 
-Add a `scope:` key to the YAML frontmatter of `{{ITEM_SPEC_PATH}}` — an array of repo-relative path prefixes:
+Add a `scope:` key to the YAML frontmatter of `{{ITEM_SPEC_PATH}}` — an array of repo-qualified path prefixes:
 
 ```yaml
 scope:
-  - scripts/readiness/
-  - skills-src/conveyor/
+  - we:scripts/readiness/
+  - we:skills-src/conveyor/
 ```
 
+- **Scope entries MUST be repo-qualified (`we:...`)** — bare prefixes are rejected by the locus hook (#883) and
+  break lease matching (the scope-lease engine reads a bare path as repo `null`, which never matches an observed
+  `we:`-qualified file, so overlap detection silently fails).
 - **Edit that one file only.** No code, no other backlog item, no docs. Writing `scope:` is a frontmatter/card
   mutation — it flows through the normal backlog write path and the lane guard, which is exactly why it must ride
   a lane→PR (committed frontmatter, authored upstream). Because you are in the lane clone, the write is allowed.
@@ -101,12 +105,22 @@ npm run check:standards
 
 A red gate is a hard stop — fix your frontmatter (usually a bad YAML shape or an empty array) until it is green.
 
-### 5. Commit + push the `lane/{{ITEM_NUM}}` branch + open the PR (ready-to-merge)
+### 5. Commit on the lane's current branch + publish HEAD to the `lane/...` ref + open the PR (ready-to-merge)
 
-Commit **only** `{{ITEM_SPEC_PATH}}` (explicit path, never `git add -A`; one commit), then open the PR through
-the canonical producer — **never a hand-rolled `gh pr create`**:
+Commit **only** `{{ITEM_SPEC_PATH}}` (explicit path, never `git add -A`; one commit) on the lane's **current
+branch** (its local `main`) — do **NOT** `git checkout -b lane/...`; the single-branch hook blocks branch
+creation even inside a lane clone. You never create the `lane/...` branch locally: `pr-land` **publishes HEAD**
+to that ref for you via `--ref=... --sha=HEAD`. Then open the PR through the canonical producer — **never a
+hand-rolled `gh pr create`**:
 
 ```bash
+# Write the commit message to a file, then commit -F it. Do NOT put the message
+# in a bash heredoc: backticks in a heredoc (e.g. `scope:`) run as a subshell
+# (`bad substitution`). A message file has no such footgun.
+printf '%s\n' "WE #{{ITEM_NUM}}: author scope: for #{{ITEM_NUM}}" "" \
+  "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
+git commit -F <msgfile> {{ITEM_SPEC_PATH}}
+
 node scripts/pr-land.mjs --ref=lane/{{ITEM_NUM}}-scope-<slug> --sha=HEAD --base=main \
   --body-file=<pr-body> --label-on-green
 ```
@@ -133,6 +147,8 @@ node scripts/conveyor/learnings-drop.mjs \
   --summary="<one sentence — the lesson>" --area="<coarse label, e.g. scope prediction>" \
   --suggestion="<short recommendation>" --session={{SESSION_SLUG}}
 ```
+
+`--summary` is capped at 240 chars (over-length is rejected) — keep it to one tight sentence.
 
 Then **STOP.** Do NOT run `gh pr merge`. Do NOT run a drain. Do NOT `release` the lane — the resident drain
 daemon lands the PR, and when it does the item is scoped, so the conveyor dispatches it to **build** on a later
