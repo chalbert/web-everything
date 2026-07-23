@@ -3,9 +3,11 @@ bornAs: x3q09nh
 kind: story
 size: 3
 parent: "2555"
-status: open
+status: resolved
 scope: ["plateau-app:src/main.ts", "plateau-app:src/backlog-view/"]
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-23"
+dateResolved: "2026-07-23"
 tags: []
 ---
 
