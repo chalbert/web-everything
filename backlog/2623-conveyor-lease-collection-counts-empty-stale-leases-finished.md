@@ -6,6 +6,9 @@ parent: "2612"
 status: open
 dateOpened: "2026-07-23"
 tags: [plateau-loop, conveyor, scope-lease, status-board]
+scope:
+  - we:scripts/readiness/
+  - we:scripts/conveyor/
 ---
 
 # Conveyor lease-collection counts empty/stale leases (finished-agent lanes read as running)
