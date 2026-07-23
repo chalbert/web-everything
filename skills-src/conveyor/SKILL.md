@@ -199,6 +199,18 @@ one that works for a completed background task), so it re-invokes this loop reli
    ```
    Its exit (~120s, just under the 5-min prompt-cache window so ticks stay cheap) re-invokes this loop at step 1.
 
+> **On-demand board — the fuller status view.** The per-tick line above stays the routine channel. When the
+> operator asks "status" (or you want a fuller look on a slower beat), print the compact text board instead:
+> ```bash
+> node scripts/conveyor/status-board.mjs
+> ```
+> It is a pure text mirror of the plateau lane board that renders THIS same tick read
+> (`conveyor-state.mjs --json`, env-inherited so `CONVEYOR_QUEUE_FILE` still points at the session sidecar) —
+> a header count line plus **RUNNING** (each active lane + its state marker), **QUEUE** (each cleared item and
+> WHY it waits), and **NEEDS YOU** (parked PRs with their `/review N` action). It invents no state and makes no
+> decision; it only formats the read. Keep the terse one-liner for the heartbeat and reach for the board on
+> demand — do not replace one with the other.
+
 **In-flight dispatch guard (the one bit of ephemeral bookkeeping).** Between spawning a delivery agent and that
 agent acquiring its lane + claiming the item, the item is still in the queue and its lane still reads free — so
 a naive next tick could double-dispatch it. Keep an in-session list of guard entries, one per spawned agent:
