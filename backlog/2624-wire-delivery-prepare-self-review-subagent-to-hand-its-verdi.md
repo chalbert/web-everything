@@ -3,8 +3,10 @@ bornAs: xnyz8ch
 kind: story
 size: 2
 parent: "2612"
-status: open
+status: resolved
 dateOpened: "2026-07-23"
+dateResolved: "2026-07-23"
+graduatedTo: none
 tags: [plateau-loop, conveyor, agent, review]
 ---
 
@@ -19,3 +21,7 @@ In the dry-run, the delivery agent's **step-6 self-review subagent** tried to ha
 **First: confirm benign vs. real gap.** Reproduce or reason through whether the out-of-band arrival was luck (a real loss risk) or guaranteed by the harness. If it's a real gap, the return-value wiring above is the fix; if it's structurally safe, downgrade this to a brief-wording clarification. Either way the step-6 hand-back should be stated so a verdict can't depend on the parent's name still resolving.
 
 Refs the conveyor delivery brief ([#2613](/backlog/2613-the-conveyor-skill-command/)).
+
+## Resolution
+
+Fixed in PR #685 — the delivery-agent brief's step-6 self-review now hands its verdict back via the subagent's RETURN VALUE (the harness delivers a spawned agent's final report to its spawner), not a name-addressed SendMessage that could be unreachable once the agent completes. Observed live in the #2623 dry-run: the name-addressed hand-back stalled the delivery agent; the operator relayed the verdict manually. The return-value wording removes that failure mode.
