@@ -123,3 +123,43 @@ describe('whole-process drain lease — one drain at a time (#2391)', () => {
     expect(makeOwner('drain')).not.toBe(makeOwner('numbering'));
   });
 });
+
+describe('drain lease REPO-SCOPE metadata (#2458)', () => {
+  it('records the drain repo scope in the lease and surfaces it via drainLeaseStatus (de-duped + sorted)', () => {
+    acquireDrainLease(root, 'drainA', { nowMs: T0, scope: ['o/plateau-app', 'o/we', 'o/we'] });
+    const st = drainLeaseStatus(root, { nowMs: T0 });
+    expect(st.owner).toBe('drainA');
+    expect(st.scope).toEqual(['o/plateau-app', 'o/we']); // normalized: unique + sorted
+  });
+
+  it('a lease acquired WITHOUT a scope has scope null (legacy/unscoped holder → gate treats as covers-all)', () => {
+    acquireDrainLease(root, 'drainA', { nowMs: T0 });
+    expect(drainLeaseStatus(root, { nowMs: T0 }).scope).toBeNull();
+    expect(readLockEntry(root, DRAIN_LEASE_PATH).meta).toBeUndefined(); // no meta key when there is nothing to record
+  });
+
+  it('the recorded scope SURVIVES a heartbeat that supplies no scope (the resident-daemon case)', () => {
+    acquireDrainLease(root, 'drainA', { nowMs: T0, scope: ['o/we'] });
+    expect(heartbeatDrainLease(root, 'drainA', { nowMs: T0 + 5 * MIN })).toBe(true); // no scope re-supplied
+    expect(drainLeaseStatus(root, { nowMs: T0 + 6 * MIN }).scope).toEqual(['o/we']); // preserved, not dropped
+  });
+
+  it('a heartbeat MAY refresh the scope when the holder re-supplies it', () => {
+    acquireDrainLease(root, 'drainA', { nowMs: T0, scope: ['o/we'] });
+    heartbeatDrainLease(root, 'drainA', { nowMs: T0 + 5 * MIN, scope: ['o/we', 'o/frontierui'] });
+    expect(drainLeaseStatus(root, { nowMs: T0 + 6 * MIN }).scope).toEqual(['o/frontierui', 'o/we']);
+  });
+
+  it('re-acquiring an OWN live lease with no scope carries the recorded scope forward (never silently dropped)', () => {
+    acquireDrainLease(root, 'drainA', { nowMs: T0, scope: ['o/we'] });
+    expect(acquireDrainLease(root, 'drainA', { nowMs: T0 + MIN }).ok).toBe(true); // own re-acquire (reserve 'own' path), no scope re-supplied
+    expect(drainLeaseStatus(root, { nowMs: T0 + 2 * MIN }).scope).toEqual(['o/we']);
+  });
+
+  it('reclaiming a STALE foreign lease does NOT inherit the dead holder\'s scope', () => {
+    acquireDrainLease(root, 'drainA', { nowMs: T0, scope: ['o/we'] });
+    const stale = T0 + 16 * MIN; // past the 15-min TTL
+    expect(acquireDrainLease(root, 'drainB', { nowMs: stale }).ok).toBe(true); // B reclaims, supplies no scope
+    expect(drainLeaseStatus(root, { nowMs: stale }).scope).toBeNull(); // B's lease is unscoped, not A's old scope
+  });
+});

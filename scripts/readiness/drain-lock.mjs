@@ -137,17 +137,26 @@ export function withNumberingLock(fn, {
  * lease, or reclaimed a STALE one via the TTL). `ok:false, reason:'held'` ⇒ a LIVE drain already holds it —
  * the caller must NO-OP (a second drain launch). Thin over file-locks `reserve`.
  */
-export function acquireDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner(), { pid = process.pid, leaseMinutes = DRAIN_LEASE_MINUTES, nowMs = Date.now() } = {}) {
+export function acquireDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner(), { pid = process.pid, leaseMinutes = DRAIN_LEASE_MINUTES, nowMs = Date.now(), scope = null } = {}) {
   ensureRoot(lockRoot);
-  return reserve(lockRoot, DRAIN_LEASE_PATH, owner, nowMs, nowIsoFrom(nowMs), pid, 'unknown', leaseMinutes);
+  // #2458 — record THIS drain's repo scope in the lease so a differently-scoped launch can tell whether the
+  // holder's next pass actually covers its repos, instead of blindly no-op'ing with a false coverage claim.
+  // On a re-acquire of an OWN live lease (reserve's 'own' path is a heartbeat) a null `scope` carries the
+  // existing recorded scope forward — mirrors heartbeatDrainLease so a re-acquire never silently drops it.
+  const cur = readLockEntry(lockRoot, DRAIN_LEASE_PATH);
+  const keep = normalizeScope(scope) || (cur && cur.owner === owner && cur.meta && normalizeScope(cur.meta.scope)) || null;
+  return reserve(lockRoot, DRAIN_LEASE_PATH, owner, nowMs, nowIsoFrom(nowMs), pid, 'unknown', leaseMinutes, keep ? { scope: keep } : null);
 }
 
 /** Refresh the drain lease heartbeat (a live drain extends its lease each pass). No-op if the lease was
- *  reclaimed away from `owner` (returns false — the caller's next acquire attempt will surface it). */
-export function heartbeatDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner(), { pid = process.pid, nowMs = Date.now() } = {}) {
+ *  reclaimed away from `owner` (returns false — the caller's next acquire attempt will surface it). The
+ *  recorded repo `scope` (#2458) is PRESERVED across heartbeats: a caller-supplied scope refreshes it, else
+ *  the existing lease's scope is carried forward (heartbeat rebuilds the entry, so it must be re-supplied). */
+export function heartbeatDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner(), { pid = process.pid, nowMs = Date.now(), scope = null } = {}) {
   const cur = readLockEntry(lockRoot, DRAIN_LEASE_PATH);
   if (!cur || cur.owner !== owner) return false;
-  return heartbeat(lockRoot, DRAIN_LEASE_PATH, owner, nowIsoFrom(nowMs), pid);
+  const keep = normalizeScope(scope) || (cur.meta && normalizeScope(cur.meta.scope)) || null;
+  return heartbeat(lockRoot, DRAIN_LEASE_PATH, owner, nowIsoFrom(nowMs), pid, keep ? { scope: keep } : null);
 }
 
 /** Release the drain lease, but ONLY if `owner` still holds it (never stomp a reclaimer). Idempotent. */
@@ -166,7 +175,16 @@ export function releaseDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner
  */
 export function drainLeaseStatus(lockRoot = DRAIN_LOCK_ROOT, { nowMs = Date.now(), leaseMinutes = DRAIN_LEASE_MINUTES } = {}) {
   const entry = readLockEntry(lockRoot, DRAIN_LEASE_PATH);
-  if (!entry) return { held: false, stale: false, owner: null, heartbeatAt: null };
+  if (!entry) return { held: false, stale: false, owner: null, heartbeatAt: null, scope: null };
   const stale = isLeaseExpired(entry, nowMs, leaseMinutes);
-  return { held: !stale, stale, owner: entry.owner, heartbeatAt: entry.heartbeatAt };
+  // #2458 — surface the holder's recorded repo scope (or null when a legacy/unscoped lease didn't record it).
+  return { held: !stale, stale, owner: entry.owner, heartbeatAt: entry.heartbeatAt, scope: (entry.meta && normalizeScope(entry.meta.scope)) || null };
+}
+
+/** #2458 — normalize a repo-scope input to a de-duped, sorted array of non-empty slug strings, or `null`
+ *  when there is nothing usable. Keeps the lease payload canonical and scope comparisons order-independent. */
+export function normalizeScope(scope) {
+  if (!Array.isArray(scope)) return null;
+  const slugs = [...new Set(scope.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()))].sort();
+  return slugs.length ? slugs : null;
 }

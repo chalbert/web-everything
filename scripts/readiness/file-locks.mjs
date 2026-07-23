@@ -74,7 +74,10 @@ export function parseLockEntry(text) {
   try { raw = JSON.parse(text); } catch { return null; }
   if (!raw || !raw.owner || !raw.heartbeatAt) return null;
   const pid = Number.isInteger(raw.pid) ? raw.pid : null;
-  return { owner: String(raw.owner), path: raw.path != null ? String(raw.path) : null, pid, heartbeatAt: String(raw.heartbeatAt) };
+  // `meta` (#2458) is opaque owner-supplied metadata (e.g. a drain lease's repo scope). Preserve it verbatim
+  // when present and a plain object; a lock with no meta parses exactly as before (no `meta` key added).
+  const meta = raw.meta && typeof raw.meta === 'object' && !Array.isArray(raw.meta) ? raw.meta : null;
+  return { owner: String(raw.owner), path: raw.path != null ? String(raw.path) : null, pid, heartbeatAt: String(raw.heartbeatAt), ...(meta ? { meta } : {}) };
 }
 
 /** Age in ms of an ISO timestamp vs `nowMs`; Infinity when unparseable (⇒ treated as expired/stale). */
@@ -135,10 +138,13 @@ export function wasReclaimed(currentEntry, laneOwner) {
 
 /**
  * Build a fresh lock-entry payload. Pure (caller injects `nowIso` + `pid`). `pid` is optional metadata
- * for the same-machine fast path; omit it (null) when it can't be trusted.
+ * for the same-machine fast path; omit it (null) when it can't be trusted. `meta` (#2458) is optional,
+ * opaque owner-supplied metadata (e.g. a drain lease's repo scope); a null/empty meta adds no key, so
+ * entries without it are byte-identical to before.
  */
-export function makeLockEntry(owner, path, nowIso, pid = null) {
-  return { owner: String(owner), path: String(path), pid: Number.isInteger(pid) ? pid : null, heartbeatAt: String(nowIso) };
+export function makeLockEntry(owner, path, nowIso, pid = null, meta = null) {
+  const hasMeta = meta && typeof meta === 'object' && !Array.isArray(meta) && Object.keys(meta).length > 0;
+  return { owner: String(owner), path: String(path), pid: Number.isInteger(pid) ? pid : null, heartbeatAt: String(nowIso), ...(hasMeta ? { meta } : {}) };
 }
 
 /**
@@ -207,10 +213,10 @@ export function readLockEntry(lockRoot, path) {
 
 /** Refresh `path`'s heartbeat (a live owner extends its lease). Overwrites the entry's `heartbeatAt`
  *  in place; no-op if the lock dir is gone (reclaimed away — the broker fencing check will catch it). */
-export function heartbeat(lockRoot, path, owner, nowIso, pid = null) {
+export function heartbeat(lockRoot, path, owner, nowIso, pid = null, meta = null) {
   const dir = lockDirFor(lockRoot, path);
   if (!existsSync(dir)) return false;
-  writeFileSync(join(dir, 'lock.json'), JSON.stringify(makeLockEntry(owner, path, nowIso, pid), null, 2) + '\n', 'utf8');
+  writeFileSync(join(dir, 'lock.json'), JSON.stringify(makeLockEntry(owner, path, nowIso, pid, meta), null, 2) + '\n', 'utf8');
   return true;
 }
 
@@ -228,13 +234,13 @@ export function releaseLockDir(lockRoot, path) {
  * probed same-machine liveness.
  * @returns {{ ok: boolean, reason: string, heldBy: string|null }}
  */
-export function reserve(lockRoot, path, owner, nowMs, nowIso, pid = null, pidLiveness = 'unknown', leaseMinutes = DEFAULT_LEASE_MINUTES) {
-  const entry = makeLockEntry(owner, path, nowIso, pid);
+export function reserve(lockRoot, path, owner, nowMs, nowIso, pid = null, pidLiveness = 'unknown', leaseMinutes = DEFAULT_LEASE_MINUTES, meta = null) {
+  const entry = makeLockEntry(owner, path, nowIso, pid, meta);
   if (acquireLockDir(lockRoot, path, entry)) return { ok: true, reason: 'free', heldBy: owner };
   const current = readLockEntry(lockRoot, path);
   const d = reclaimDecision(current, nowMs, owner, pidLiveness, leaseMinutes);
   if (!d.acquirable) return { ok: false, reason: d.reason, heldBy: d.heldBy };
-  if (d.reason === 'own') { heartbeat(lockRoot, path, owner, nowIso, pid); return { ok: true, reason: 'own', heldBy: owner }; }
+  if (d.reason === 'own') { heartbeat(lockRoot, path, owner, nowIso, pid, meta); return { ok: true, reason: 'own', heldBy: owner }; }
   // reclaim a stale/dead owner: drop its dir then re-win atomically (another reclaimer may race — EEXIST
   // ⇒ we lost the reclaim, report blocked so the caller re-probes rather than stomping the winner).
   releaseLockDir(lockRoot, path);
