@@ -24,11 +24,14 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   readQueueFile, writeQueueFile, addToQueue, removeFromQueue, queueHas, resolveQueuePath, normNum,
 } from './queue-store.mjs';
+import { readField } from '../backlog/frontmatter.mjs';
+import { idFromName, normalizeId } from '../backlog/id.mjs';
 
 const GRN = '\x1b[32m';
 const DIM = '\x1b[2m';
@@ -38,6 +41,47 @@ const RST = '\x1b[0m';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BACKLOG_CLI = join(HERE, '..', 'backlog.mjs');
+const BACKLOG_DIR = process.env.CONVEYOR_BACKLOG_DIR || join(HERE, '..', '..', 'backlog');
+
+// A cleared id whose card is a `kind:epic` (needs `/slice`) or `kind:decision` (needs `/prepare` + a ratify)
+// can NEVER be dispatched — the conveyor only builds ready stories/tasks. Flag it at add-time so the operator
+// isn't surprised by a silent non-dispatch (#2646). WARNINGS keyed off `kind` for a non-dispatchable card.
+const NON_DISPATCHABLE = {
+  epic: 'is a `kind:epic`; the conveyor can\'t build an epic — `/slice` it into stories first',
+  decision: 'is a `kind:decision`; the conveyor can\'t build a decision — `/prepare` then `/decision` (ratify) it first',
+};
+
+/**
+ * Best-effort `kind` of the item behind `num` — reads the backlog card's frontmatter directly (fast, no
+ * subprocess). Returns `{ checked, kind }`: `checked:false` when the card can't be resolved/read (never blocks
+ * the add). Skipped entirely when `CONVEYOR_NO_KIND_CHECK` is set (tests / offline use). Resolves by the
+ * on-disk id (`normalizeId`) and falls back to a `bornAs:` match so a card cleared as its `xHASH` still
+ * resolves after it JIT-lands as `#NNN` (and vice-versa).
+ */
+function kindOf(num) {
+  if (process.env.CONVEYOR_NO_KIND_CHECK) return { checked: false, kind: null };
+  try {
+    // `normalizeId` matches `idFromName` (the on-disk filename token): it pads a number to NNN and leaves a
+    // hash as-is. Both the filename id and the queried `num` run through it, so the two sides are consistent.
+    const key = normalizeId(num);
+    const mdFiles = readdirSync(BACKLOG_DIR).filter((f) => f.endsWith('.md'));
+    // Fast path: match by the filename id (no file read). Fall back to a `bornAs:` match so a card cleared as
+    // its `xHASH` still resolves after it JIT-lands as `#NNN` (and vice-versa) — reading each card's content
+    // once and reusing it for the `kind` lookup on the winner.
+    const byName = mdFiles.find((f) => normalizeId(idFromName(f) || '') === key);
+    if (byName) return { checked: true, kind: readField(readFileSync(join(BACKLOG_DIR, byName), 'utf8'), 'kind') || null };
+    for (const f of mdFiles) {
+      let content;
+      try { content = readFileSync(join(BACKLOG_DIR, f), 'utf8'); } catch { continue; }
+      if (normalizeId(readField(content, 'bornAs') || '') === key) {
+        return { checked: true, kind: readField(content, 'kind') || null };
+      }
+    }
+    return { checked: false, kind: null };
+  } catch {
+    return { checked: false, kind: null };
+  }
+}
 
 /**
  * Is `num` CURRENTLY a ready build-queue row? Best-effort — shells `backlog.mjs build-queue --json` (the same
@@ -100,19 +144,29 @@ function main(argv) {
     const already = queueHas(before, num);
     const after = addToQueue(before, num, new Date().toISOString());
     if (!already) writeQueueFile(after, path);
-    // Feedback so a clear never silently vanishes (#2613 review, required 2a): a cleared id that is NOT a ready
-    // build-queue row (blocked / resolved / typo / unknown) is STILL added — a temporarily-blocked item should
-    // auto-arm when its blocker lands — but we WARN rather than lie with a bare "✓ cleared".
+    // Feedback so a clear never silently vanishes: a cleared id is STILL added (a temporarily-blocked item
+    // should auto-arm when its blocker lands), but we WARN rather than lie with a bare "✓ cleared". Two WARN
+    // reasons, kind-specific first:
+    //   1. NON-DISPATCHABLE kind (#2646, required): an epic/decision can NEVER be dispatched — the conveyor
+    //      only builds ready stories/tasks. This warning explains the fix (`/slice` or `/prepare`+`/decision`)
+    //      precisely, so it TAKES PRECEDENCE over the generic not-ready note below (which would just say
+    //      "blocked / resolved / unknown" — true but unhelpful for a card that needs a state transition).
+    //   2. NOT-READY row (#2613 review, required 2a): a cleared id that is NOT a ready build-queue row
+    //      (blocked / resolved / typo / unknown).
+    const { checked: kindChecked, kind } = kindOf(num);
+    const nonDispatchable = kindChecked && Object.prototype.hasOwnProperty.call(NON_DISPATCHABLE, kind);
     const { checked, ready } = readinessOf(num);
     const notReady = checked && !ready;
-    const warn = notReady
-      ? ` — but #${num} is not currently ready (blocked / resolved / unknown); it will dispatch once it becomes ready, or \`remove\` it`
-      : '';
+    const warn = nonDispatchable
+      ? ` — but #${num} ${NON_DISPATCHABLE[kind]}`
+      : notReady
+        ? ` — but #${num} is not currently ready (blocked / resolved / unknown); it will dispatch once it becomes ready, or \`remove\` it`
+        : '';
     return emit(
-      { ok: true, verb: 'queue', action: 'add', num, already, ready: checked ? ready : null, queue: after },
+      { ok: true, verb: 'queue', action: 'add', num, already, ready: checked ? ready : null, kind: kindChecked ? kind : null, nonDispatchable, queue: after },
       already
-        ? `${DIM}#${num} was already cleared — no change (${after.length} in queue)${RST}${notReady ? `\n${YEL}⚠${RST}${warn}` : ''}`
-        : `${GRN}✓ cleared${RST} #${num} for the conveyor ${DIM}→ ${after.length} in queue (session-local, ${path})${RST}${notReady ? `\n${YEL}⚠${RST}${warn}` : ''}`,
+        ? `${DIM}#${num} was already cleared — no change (${after.length} in queue)${RST}${warn ? `\n${YEL}⚠${RST}${warn}` : ''}`
+        : `${GRN}✓ cleared${RST} #${num} for the conveyor ${DIM}→ ${after.length} in queue (session-local, ${path})${RST}${warn ? `\n${YEL}⚠${RST}${warn}` : ''}`,
     );
   }
 

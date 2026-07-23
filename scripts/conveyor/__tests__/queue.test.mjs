@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,5 +98,80 @@ describe('queue.mjs CLI — clearing a not-ready id still adds but WARNS (#2613 
     expect(readSidecar().map((e) => e.num)).toEqual(['9999999']); // still added
     // human output carries the warning (stderr+stdout are both captured by execFileSync's return on success is
     // stdout only; assert via the --json `ready:false` above, which is the machine signal the skill reads).
+  });
+});
+
+describe('queue.mjs CLI — clearing a non-dispatchable kind (epic/decision) still adds but WARNS (#2646)', () => {
+  let backlogDir;
+  // Point kindOf at a fixture backlog dir (CONVEYOR_BACKLOG_DIR override) with one card per kind. Keep the
+  // readiness shell OFF (default) so the non-dispatchable-kind warning is exercised in isolation.
+  const card = (name, kind, extra = '') =>
+    writeFileSync(join(backlogDir, name), `---\nkind: ${kind}\nstatus: open\n${extra}---\n\n# ${name}\n`);
+  const runKind = (args) =>
+    execFileSync('node', [CLI, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, CONVEYOR_QUEUE_FILE: SIDECAR, CONVEYOR_NO_READY_CHECK: '1', CONVEYOR_BACKLOG_DIR: backlogDir },
+    });
+
+  beforeEach(() => {
+    backlogDir = join(dir, 'backlog');
+    mkdirSync(backlogDir, { recursive: true });
+    card('2100-an-epic.md', 'epic');
+    card('2101-a-decision.md', 'decision');
+    card('2102-a-story.md', 'story');
+    card('2103-landed-was-hash.md', 'epic', 'bornAs: xabc123\n');
+  });
+
+  it('an epic is added but flagged non-dispatchable (kind:epic → /slice)', () => {
+    const out = JSON.parse(runKind(['add', '2100', '--json']));
+    expect(out.ok).toBe(true);
+    expect(out.kind).toBe('epic');
+    expect(out.nonDispatchable).toBe(true);
+    expect(readSidecar().map((e) => e.num)).toEqual(['2100']); // advisory — still added
+  });
+
+  it('a decision is added but flagged non-dispatchable (kind:decision → /prepare + /decision)', () => {
+    const out = JSON.parse(runKind(['add', '2101', '--json']));
+    expect(out.kind).toBe('decision');
+    expect(out.nonDispatchable).toBe(true);
+    expect(readSidecar().map((e) => e.num)).toEqual(['2101']);
+  });
+
+  it('a dispatchable kind (story) is NOT flagged non-dispatchable', () => {
+    const out = JSON.parse(runKind(['add', '2102', '--json']));
+    expect(out.kind).toBe('story');
+    expect(out.nonDispatchable).toBe(false);
+  });
+
+  it('resolves a card cleared as its bornAs hash after it JIT-landed as a number', () => {
+    const out = JSON.parse(runKind(['add', 'xabc123', '--json']));
+    expect(out.kind).toBe('epic'); // matched via bornAs fallback
+    expect(out.nonDispatchable).toBe(true);
+    expect(readSidecar().map((e) => e.num)).toEqual(['xabc123']);
+  });
+
+  it('an unresolvable id is not flagged (kind check is best-effort, never blocks the add)', () => {
+    const out = JSON.parse(runKind(['add', '8888888', '--json']));
+    expect(out.kind).toBe(null);
+    expect(out.nonDispatchable).toBe(false);
+    expect(readSidecar().map((e) => e.num)).toEqual(['8888888']); // still added
+  });
+
+  it('the kind warning WINS over (suppresses) the generic not-ready warning, and renders its guidance', () => {
+    // Readiness ON (no CONVEYOR_NO_READY_CHECK): the real build-queue is consulted. 90001 is a fixture epic id
+    // that is never a ready build-queue row, so BOTH signals fire — not-ready AND non-dispatchable-kind. The
+    // kind warning must take precedence: the human output shows the epic `/slice` guidance, NOT the generic
+    // "not currently ready" note. Asserting stdout is the only way to prove the precedence + message text.
+    card('90001-not-ready-epic.md', 'epic');
+    const stdout = execFileSync('node', [CLI, 'add', '90001'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, CONVEYOR_QUEUE_FILE: SIDECAR, CONVEYOR_BACKLOG_DIR: backlogDir }, // readiness ON
+    });
+    expect(stdout).toContain('kind:epic');
+    expect(stdout).toContain('/slice');
+    expect(stdout).not.toContain('not currently ready'); // generic warning suppressed
+    expect(readSidecar().map((e) => e.num)).toEqual(['90001']); // still added
   });
 });
