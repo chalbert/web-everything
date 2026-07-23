@@ -7,6 +7,8 @@ parent: "2555"
 status: open
 dateOpened: "2026-07-20"
 tags: [plateau-loop, console, console-board, decision-surface, write-seam, slice-2555]
+scope:
+  - plateau-app:src/backlog-view/
 ---
 
 # Console board write affordances — new-spec-candidate → decision loop
