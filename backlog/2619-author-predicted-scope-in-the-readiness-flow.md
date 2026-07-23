@@ -1,4 +1,5 @@
 ---
+bornAs: xbzk108
 kind: story
 size: 5
 parent: "2612"
@@ -12,7 +13,7 @@ tags: [conveyor, readiness, scope, prepare]
 Make `/prepare` (and `/scaffold` / `/split`) predict and write an item's `scope:` frontmatter as part of
 Definition of Ready, so the human sees the predicted touch-set **before** the item is cleared for build. This
 is the upstream-authoring half of the ruling [state lives where its nature
-dictates](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates) (#x11yunv): scope is
+dictates](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates) (#2617): scope is
 durable readiness, produced once at shape time by a probe agent's judgment, not by the dispatcher at dispatch
 time.
 
