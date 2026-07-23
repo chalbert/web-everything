@@ -1194,9 +1194,10 @@ function runCli() {
   // each interval — self-healing, with no human step and no per-check-tick `pr-land` write.
   const RECONCILE = label && !flags['no-reconcile-labels'];
   // #2171 — DETERMINISTIC review-escalation rubric: before merging a ready PR, score it (blast radius, size,
-  // dismissed pre-PR findings, cross-repo couple, 1-in-N sampling); an escalated PR PARKS ALIVE (labelled
+  // dismissed pre-PR findings, cross-repo couple); an escalated PR PARKS ALIVE (labelled
   // review:pending, SKIPPED — non-blocking, the queue keeps flowing) until a reviewer applies review:accepted.
-  // ON by default for a label-scoped drain. `--sample-nth=N` tunes the floor.
+  // ON by default for a label-scoped drain. #xlno40g — there is NO random/sampling floor: a PR reaches a
+  // reviewer only for a real reason, never a dice roll (random sampling was found to have no value).
   // #2423 — the RELIEF VALVE. `--no-review-escalation=<pr#>` (repeatable + comma-separated) is the PER-PR form:
   // it waives ONLY the named PR's agent-reviewable review:pending park (via `applyEscalationRelief` below), and
   // the rubric stays LIVE for every OTHER candidate — so REVIEW_ESCALATION is driven off `!passWide`, NOT flag
@@ -1208,7 +1209,6 @@ function runCli() {
   if (escalationRelief.passWide && !AS_JSON) {
     process.stderr.write('  ⚠ --no-review-escalation (bare) is DEPRECATED: it waives the escalation rubric PASS-WIDE — EVERY candidate this pass merges unscored, incl. a fresh gate-self diff. Prefer the per-PR form --no-review-escalation=<pr#> (repeatable, comma-separated) to relieve just the stuck PR while the rubric stays live for the rest (#2423).\n');
   }
-  const SAMPLE_NTH = Number.isFinite(Number(flags['sample-nth'])) && Number(flags['sample-nth']) > 0 ? Number(flags['sample-nth']) : undefined;
   // #2257 — the ONE /drain lander sweeps all 3 constellation repos. Derive the local repo slug from origin
   // (used to keep git-side ops — manifest read, rebase-drop, local-main sync — scoped to the local clone), then
   // resolve the repo set: `--repos=a,b` (explicit) / `--this-repo` (scoped single-repo) / neither → the
@@ -1639,7 +1639,7 @@ function runCli() {
   // Every candidate is STAMPED with the rule outcome (escalated yes/no + reasons). Couples: any WE-PR carrying
   // the manifest already fails-strict via crossRepo, so an escalated impl half keeps its WE half from landing
   // through the existing blockedBy ordering. Signals: blast radius (diff files), size, dismissed findings +
-  // cross-repo (manifest), 1-in-N sampling. Best-effort per candidate; a signal-fetch miss defaults to no-escalate.
+  // cross-repo (manifest). Best-effort per candidate; a signal-fetch miss defaults to no-escalate.
   const parked = [];
   if (REVIEW_ESCALATION) {
     // #2262 fix (1/2) — the `review:*` verdict labels are never minted anywhere (unlike `ready-to-merge`,
@@ -1703,7 +1703,7 @@ function runCli() {
           humanBasisFiles = changedFiles;
         } catch { /* signal-fetch miss → score on the manifest signals alone */ }
       }
-      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, prNum: Number(v.num), thresholds: SAMPLE_NTH ? { sampleNth: SAMPLE_NTH } : {} });
+      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo });
       // #2414 — first-drain-sighting manifest baseline gate. The manifest values (`v.hasManifest`/
       // `dismissedFindings`/`crossRepo`/`blockedBy`) are re-read from the LIVE PR body every pass
       // (readPrManifest), so we can capture what the drain FIRST saw for a ready-to-merge PR and diff a later

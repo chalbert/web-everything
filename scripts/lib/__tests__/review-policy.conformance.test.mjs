@@ -67,7 +67,6 @@ describe('threshold conformance — DEFAULT_THRESHOLDS is sourced from the contr
   it('DEFAULT_THRESHOLDS deep-equals the contract threshold values', () => {
     expect(DEFAULT_THRESHOLDS).toEqual({
       diffLines: REVIEW_POLICY.thresholds.diffLines.value,
-      sampleNth: REVIEW_POLICY.thresholds.sampleNth.value,
     });
     expect(POLICY_THRESHOLDS).toEqual(DEFAULT_THRESHOLDS);
   });
@@ -117,7 +116,6 @@ describe('decorated-string conformance — the drain\'s real reason strings deri
     [REVIEW_REASONS.SIZE]: 'size (1080 ≥ 400 changed lines)',
     [REVIEW_REASONS.DISMISSED_FINDINGS]: 'dismissed-findings (2 pre-PR review finding(s) the lane dismissed)',
     [REVIEW_REASONS.CROSS_REPO]: 'cross-repo impl+WE couple',
-    [REVIEW_REASONS.SAMPLING]: 'sampling floor (1-in-10)',
     [REVIEW_REASONS.NON_CONVERGENCE]: 'non-convergence',
     [REVIEW_REASONS.MANDATE_CONFLICT]: 'mandate-conflict',
   };

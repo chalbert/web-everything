@@ -379,7 +379,7 @@ export const REVIEW_DISPOSITIONS = Object.freeze({
  *   • DEADLOCK reasons — the panel↔editor loop ALREADY ran and could not agree. Re-converging just repeats the
  *     deadlock, so these go straight to a HUMAN.
  * These are the BARE (canonical) tokens; they are the un-decorated form of `scoreEscalation`'s fired signals
- * (`we:scripts/lib/review-escalation.mjs`, e.g. `blast-radius (…)`, `sampling floor (1-in-10)`) — which
+ * (`we:scripts/lib/review-escalation.mjs`, e.g. `blast-radius (…)`, `size (1080 ≥ 400 changed lines)`) — which
  * `deriveReviewDisposition` canonicalizes back to these via `canonicalizeReason` — plus the two escalating
  * negotiation outcomes (round-cap non-convergence, mandate conflict).
  */
@@ -391,7 +391,6 @@ export const REVIEW_REASONS = Object.freeze({
   SIZE: 'size',
   DISMISSED_FINDINGS: 'dismissed-findings',
   CROSS_REPO: 'cross-repo',
-  SAMPLING: 'sampling',
   // deadlock (post-review) — human
   NON_CONVERGENCE: 'non-convergence',
   MANDATE_CONFLICT: 'mandate-conflict',
@@ -415,7 +414,7 @@ const ALL_REASON_TOKENS = POLICY_REASON_TOKENS;
  * Canonicalize ONE raw reason string to its bare `REVIEW_REASONS` token, or `null` if unrecognized. Pure.
  * The drain carries DECORATED reasons (from `scoreEscalation`, `we:scripts/lib/review-escalation.mjs`) —
  * `blast-radius (a.mjs, b.mjs)`, `gate-self (…) — human review required`, `size (1080 ≥ 400 changed lines)`,
- * `dismissed-findings (…)`, `cross-repo impl+WE couple`, `sampling floor (1-in-10)` — each of which BEGINS with
+ * `dismissed-findings (…)`, `cross-repo impl+WE couple` — each of which BEGINS with
  * its bare token followed by a boundary (a space or `(`). A bare token (e.g. `'gate-self'`) matches exactly too.
  * Matches the LONGEST token prefix so that, should two tokens ever both prefix a string (none do today), the more
  * specific one wins rather than an arbitrary order. The boundary check keeps a token from matching a longer word
@@ -449,8 +448,8 @@ function canonicalizeReason(raw) {
  * Accepts EITHER bare `REVIEW_REASONS` tokens (`'gate-self'`, `'blast-radius'`, …) OR the DECORATED reason
  * strings `scoreEscalation` (`we:scripts/lib/review-escalation.mjs`) actually emits and the drain carries in its
  * `parked` JSON verbatim (`blast-radius (a.mjs, …)`, `gate-self (…) — human review required`,
- * `size (1080 ≥ 400 changed lines)`, `dismissed-findings (…)`, `cross-repo impl+WE couple`,
- * `sampling floor (1-in-10)`) — each is canonicalized to its bare token via `canonicalizeReason` before the
+ * `size (1080 ≥ 400 changed lines)`, `dismissed-findings (…)`, `cross-repo impl+WE couple`) — each is
+ * canonicalized to its bare token via `canonicalizeReason` before the
  * precedence check, so `deriveReviewDisposition({ reasons })` works when handed the parked array as-is. Still
  * throws `unknown reason(s)` on a genuinely unrecognized reason and `at least one reason` on empty input.
  *
@@ -498,7 +497,6 @@ export function careLevelFromReasons(reasons) {
         break;
       }
       case REVIEW_REASONS.CROSS_REPO: signals.crossRepo = true; break;
-      case REVIEW_REASONS.SAMPLING: signals.sampled = 1; break;
       case REVIEW_REASONS.GATE_SELF:
       case REVIEW_REASONS.STATUTE:
       case REVIEW_REASONS.NON_CONVERGENCE:
