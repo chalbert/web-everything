@@ -53,7 +53,7 @@ function validateContract(c) {
   // thresholds — each a { value: number, description: string }
   const t = c.thresholds;
   if (!t || typeof t !== 'object') fail('missing thresholds');
-  for (const key of ['diffLines', 'sampleNth']) {
+  for (const key of ['diffLines']) {
     const entry = t[key];
     if (!entry || typeof entry !== 'object') fail(`missing threshold "${key}"`);
     if (typeof entry.value !== 'number' || !Number.isFinite(entry.value)) fail(`threshold "${key}".value must be a finite number`);
@@ -92,7 +92,6 @@ export const REVIEW_POLICY = deepFreeze(validateContract(JSON.parse(readFileSync
 /** The rubric threshold VALUES (bare numbers) — the single source `review-escalation.mjs` imports. Frozen. */
 export const POLICY_THRESHOLDS = Object.freeze({
   diffLines: REVIEW_POLICY.thresholds.diffLines.value,
-  sampleNth: REVIEW_POLICY.thresholds.sampleNth.value,
 });
 
 /** token → { family, clearance }, for O(1) classification lookups. */

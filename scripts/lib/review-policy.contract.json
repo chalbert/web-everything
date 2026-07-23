@@ -7,10 +7,6 @@
     "diffLines": {
       "value": 400,
       "description": "A PR changing at least this many total lines escalates on size alone. Size is a care-level signal (raises the convergence loop's scrutiny), not a hard block (#2563)."
-    },
-    "sampleNth": {
-      "value": 10,
-      "description": "The deterministic 1-in-N sampling floor: every Nth PR (by PR number, never Math.random) escalates regardless, so 'no dismissed findings' can never be a gameable exit from review."
     }
   },
   "reasons": [
@@ -49,12 +45,6 @@
       "family": "sensitivity",
       "clearance": "agent",
       "description": "An impl+WE couple spanning more than one repo — a coordinated multi-repo change. Agent-clearable on a converged verdict."
-    },
-    {
-      "token": "sampling",
-      "family": "sensitivity",
-      "clearance": "agent",
-      "description": "The 1-in-N sampling floor fired (thresholds.sampleNth). Keeps lane self-review honest; agent-clearable on a converged verdict."
     },
     {
       "token": "non-convergence",

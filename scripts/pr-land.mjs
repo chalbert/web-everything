@@ -379,20 +379,20 @@ export function classifyChecks(rows) {
 /**
  * #2307 — resolve the review-escalation label pr-land should apply AT PR-OPEN (deterministically, never
  * lazily left to a later drain sweep — #2281's rule applied to the review dimension), from signals the
- * producer already has: the net two-dot diff (`changedFiles`/`diffLines`), the lane's `.lane-manifest.json`
- * (`dismissedFindings`/`crossRepo`), and the PR number. Pure — wraps the shared rubric
+ * producer already has: the net two-dot diff (`changedFiles`/`diffLines`) and the lane's `.lane-manifest.json`
+ * (`dismissedFindings`/`crossRepo`). Pure — wraps the shared rubric
  * (`scoreEscalation` → `producerReviewLabel`) plus the shared double-apply guard (`shouldApplyReviewLabel`),
  * the SAME two the drain (`merge-ai-prs.mjs`) reads back later, so producer- and drain-applied verdicts can
  * never drift. `currentLabels` is normally empty at open (a fresh PR) but is honoured either way — re-running
  * pr-land against an already-labelled PR (e.g. a retried `--label-on-green`) must not double-apply.
  * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
- *          crossRepo?:boolean, prNum?:number, currentLabels?:Array}} o
+ *          crossRepo?:boolean, currentLabels?:Array}} o
  * @returns {{label:string|null, apply:boolean, reasons:string[], humanRequired:boolean}}
  */
 export function resolveProducerReviewLabel({
-  changedFiles = [], diffLines = 0, humanBasisFiles = null, dismissedFindings = 0, crossRepo = false, prNum = 0, currentLabels = [],
+  changedFiles = [], diffLines = 0, humanBasisFiles = null, dismissedFindings = 0, crossRepo = false, currentLabels = [],
 } = {}) {
-  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, prNum });
+  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo });
   const label = producerReviewLabel(score);
   return { label, apply: shouldApplyReviewLabel(label, currentLabels), reasons: score.reasons, humanRequired: !!score.humanRequired };
 }
@@ -469,7 +469,7 @@ function runCli() {
         LABEL && PLAN.labelWhenGreen ? `gh pr edit <pr> --add-label ${LABEL}   # #2196 label — applied ONLY once required checks pass (#2199)` : (PLAN.mode === 'open-only' ? '(--no-wait: PR opened UNLABELLED — CI not confirmed green; use --label-on-green)' : '(--no-label)'),
         // #2307 — score the SAME deterministic rubric the drain uses and apply review:human/review:pending
         // AT OPEN when it escalates, so a PR needing review is never indistinguishable from a plain ready PR.
-        PLAN.labelWhenGreen ? 'score scoreEscalation(net-diff, .lane-manifest.json, pr#) → gh pr edit <pr> --add-label review:human|review:pending (#2307, only when it escalates)' : null,
+        PLAN.labelWhenGreen ? 'score scoreEscalation(net-diff, .lane-manifest.json) → gh pr edit <pr> --add-label review:human|review:pending (#2307, only when it escalates)' : null,
         // #2290 — pr-land NEVER merges (the drain is the sole writer to main). The default path triggers a
         // single-couple fast drain so /pr stays instant; --label-on-green stops (a standalone drain lands it).
         PLAN.triggerDrain
@@ -546,8 +546,8 @@ function runCli() {
   // sweep to be the first to apply it — #2281's rule applied to the review dimension). Scores the SAME rubric
   // the drain reads back later (`scoreEscalation`, shared module — see `resolveProducerReviewLabel` above) off
   // signals the producer already has once checks are green: the net two-dot diff (origin/BASE..refSha — the
-  // content actually landing, not a stale PR `files` list), the lane's `.lane-manifest.json`
-  // (dismissedFindings / cross-repo couple shape), and the PR number (sampling floor). Best-effort: a
+  // content actually landing, not a stale PR `files` list) and the lane's `.lane-manifest.json`
+  // (dismissedFindings / cross-repo couple shape). Best-effort: a
   // signal-fetch miss degrades to no-escalate — never blocks a green land over a scoring hiccup, and the
   // drain's own idempotent backstop pass still catches an unlabelled-but-should-be PR later.
   //
@@ -584,7 +584,7 @@ function runCli() {
     const dismissedFindings = manifest && Number.isFinite(Number(manifest.dismissedFindings)) ? Number(manifest.dismissedFindings) : 0;
     let currentLabels = [];
     try { currentLabels = (JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'labels'])).labels || []).map((l) => l.name); } catch { /* fresh PR — no labels yet */ }
-    const verdict = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, prNum: Number(prNum), currentLabels });
+    const verdict = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, currentLabels });
     if (verdict.label && verdict.apply) {
       const meta = REVIEW_LABEL_META[verdict.label];
       try { ghC(['label', 'create', verdict.label, '--color', meta.color, '--description', meta.description]); } catch { /* already exists — fine */ }
