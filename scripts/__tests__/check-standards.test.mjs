@@ -10,7 +10,7 @@
  * tightening can't silently start erroring on legitimate free-form data.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -193,6 +193,53 @@ describe('validateBacklogItem — real backlog stays clean', () => {
     for (const item of backlog) {
       const { errors } = validateBacklogItem(item, ctx);
       if (errors.length) offenders.push({ id: item.id, errors: errors.map((e) => e.message) });
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
+// ── `scope:` must be repo-qualified (#883/#2613) ──────────────────────────────────
+// The `scope:` shape/qualification rule lives INLINE in check-standards.mjs (it reads RAW frontmatter, before
+// the loader normalizes), and that script isn't importable here (top-level `git ls-tree origin/main` +
+// `process.exit`). So we mirror its three-branch decision as a pure `classifyScope` — the SAME repo-prefix key
+// set as check-standards-rules.mjs `LOCUS_MARKER_RE` — kept in sync by (a) the requested unit cases below and
+// (b) the standing corpus guard, which runs the identical predicate over the REAL backlog so a bare entry
+// reaching disk fails here, not only on a live gate run.
+describe('scope: must be repo-qualified', () => {
+  const matter = require('gray-matter');
+  const SCOPE_REPO_PREFIX_RE = /^(?:we|fui|plateau|webeverything|frontierui|plateau-app):/;
+
+  /** Mirror of the inline check-standards.mjs branches → 'ok' | 'empty' | 'non-string' | 'bare'. */
+  const classifyScope = (scope) => {
+    if (!Array.isArray(scope)) return 'non-array';
+    if (scope.length === 0) return 'empty';
+    if (scope.some((p) => typeof p !== 'string')) return 'non-string';
+    if (scope.some((p) => !SCOPE_REPO_PREFIX_RE.test(p))) return 'bare';
+    return 'ok';
+  };
+
+  it('accepts a we:-qualified (and multi-repo) scope', () => {
+    expect(classifyScope(['we:src/backlog-view/', 'we:docs/agent/'])).toBe('ok');
+    expect(classifyScope(['we:src/x/', 'fui:plugs/foo/', 'plateau:app/y/'])).toBe('ok');
+  });
+
+  it('errors on a bare (non-repo-qualified) entry', () => {
+    expect(classifyScope(['src/x/'])).toBe('bare');
+    expect(classifyScope(['we:src/x/', 'docs/agent/'])).toBe('bare'); // one bad entry taints the array
+  });
+
+  it('still errors on an empty scope', () => {
+    expect(classifyScope([])).toBe('empty');
+  });
+
+  it('every real backlog item with a scope is repo-qualified', () => {
+    const dir = join(ROOT, 'backlog');
+    const offenders = [];
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.md'))) {
+      let data;
+      try { data = matter(readFileSync(join(dir, file), 'utf8')).data; } catch { continue; }
+      if (data?.scope === undefined) continue;
+      if (classifyScope(data.scope) !== 'ok') offenders.push({ id: file.replace(/\.md$/, ''), scope: data.scope });
     }
     expect(offenders).toEqual([]);
   });

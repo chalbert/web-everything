@@ -668,14 +668,25 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
 }
 
 // ── 6d-sexies. Optional `scope:` predicted touch-set (#x53zzf9) ──
-// `scope: ["src/x/", "docs/y/"]` is the item's PREDICTED file-scope (repo-relative path prefixes) a probe
-// agent writes once so the deterministic conveyor dispatcher (scripts/readiness/dispatch-plan.mjs) can hold
-// overlapping items apart by script. Optional — but WHEN present it must be an array of strings (the shape the
-// dispatcher's overlap check reads). The loader NORMALIZES a wrong type to `undefined`, which would hide the
-// author error, so this reads the RAW frontmatter (like the unquoted-colon scan above) to catch a bad type at
-// author time. Mirrors the blockedBy shape rule below.
+// `scope: ["we:src/x/", "we:docs/y/"]` is the item's PREDICTED file-scope (REPO-QUALIFIED path prefixes) a
+// probe agent writes once so the deterministic conveyor dispatcher (scripts/readiness/dispatch-plan.mjs) can
+// hold overlapping items apart by script. Optional — but WHEN present it must be an array of strings (the shape
+// the dispatcher's overlap check reads), and every entry must carry a `<repo>:` locus prefix. The loader
+// NORMALIZES a wrong type to `undefined`, which would hide the author error, so this reads the RAW frontmatter
+// (like the unquoted-colon scan above) to catch a bad type/shape at author time. Mirrors the blockedBy shape
+// rule below.
+//
+// WHY repo-qualified (#883/#2613): a scope entry is matched against observed `<repo>:<path>` files by the
+// scope-lease engine (readiness/scope-lease.mjs `splitRepo`/`coversFile`), which splits on the FIRST colon and
+// requires the repo halves to be equal. A BARE entry (`src/…`, no `<repo>:`) splits to repo `null`, which never
+// equals an observed `we:`-qualified file — so the lane's overlap is SILENTLY never detected and two
+// overlapping lanes could both launch (the exact hazard the conveyor prevents). A bare ref is ALSO rejected by
+// the write-time locus-prefix hook (#883). Hence a bare entry is an error here too.
 {
   const matterFm = require('gray-matter');
+  // Recognize a `<repo>:` locus prefix — the SAME key set as check-standards-rules.mjs `LOCUS_MARKER_RE`
+  // (we/fui/plateau + full names) and the #883 locus-prefix convention, anchored to the START of the entry.
+  const SCOPE_REPO_PREFIX_RE = /^(?:we|fui|plateau|webeverything|frontierui|plateau-app):/;
   for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('.md'))) {
     let raw;
     try { raw = matterFm(readFileSync(join(ROOT, 'backlog', file), 'utf8')).data; }
@@ -684,7 +695,7 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
     if (scope === undefined) continue;
     const id = file.replace(/\.md$/, '');
     if (!Array.isArray(scope)) {
-      err(`Backlog item "${id}" scope must be an array of repo-relative path prefixes (e.g. ["src/backlog-view/", "docs/agent/"])`);
+      err(`Backlog item "${id}" scope must be an array of repo-qualified path prefixes (e.g. ["we:src/backlog-view/", "we:docs/agent/"])`);
       continue;
     }
     // An EMPTY scope is meaningless and is the one value where the two halves could disagree — the loader
@@ -696,8 +707,17 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
       err(`Backlog item "${id}" scope is empty — an empty scope is meaningless (the dispatcher reads absent-or-empty as unscoped: it never builds it, and auto-prepares the scope instead). Omit the field, or list real repo-relative path prefixes.`);
       continue;
     }
-    if (scope.some((p) => typeof p !== 'string'))
-      err(`Backlog item "${id}" scope must contain only strings — every entry is a repo-relative path prefix (e.g. "src/backlog-view/")`);
+    if (scope.some((p) => typeof p !== 'string')) {
+      err(`Backlog item "${id}" scope must contain only strings — every entry is a repo-qualified path prefix (e.g. "we:src/backlog-view/")`);
+      continue;
+    }
+    // Every entry must be REPO-QUALIFIED (`we:…`/`fui:…`/`plateau:…`). A bare prefix is rejected by the #883
+    // locus hook and, unqualified, the scope-lease engine reads its repo as `null` and it never matches an
+    // observed `we:`-qualified file — silently breaking the overlap detection two lanes rely on to not both
+    // launch. (See the WHY-repo-qualified note above.)
+    const bare = scope.filter((p) => !SCOPE_REPO_PREFIX_RE.test(p));
+    if (bare.length)
+      err(`Backlog item "${id}" scope has non-repo-qualified entr${bare.length > 1 ? 'ies' : 'y'} ${JSON.stringify(bare)} — every scope entry must carry a <repo>: locus prefix (e.g. "we:src/backlog-view/", "fui:plugs/…", "plateau:…"), NOT a bare path. A bare path is rejected by the write-time locus-prefix hook (#883) and, unqualified, the scope-lease engine (readiness/scope-lease.mjs) reads its repo as null so it never matches an observed we:-qualified file — the lane's overlap is silently never detected and two overlapping lanes could both launch.`);
   }
 }
 
