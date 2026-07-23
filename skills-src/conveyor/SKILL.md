@@ -22,7 +22,7 @@ The three scripts this skill shells (do not reimplement any of them):
 
 | Script | What it decides (deterministically) |
 |---|---|
-| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, lanes, freeSlots, prs, daemon, idle, health }`. Every tick STARTS here. |
+| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, needsSlice, lanes, freeSlots, prs, daemon, idle, health }`. Every tick STARTS here. |
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
 | `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR. Its process EXIT is the wake signal; the exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
 
@@ -39,6 +39,16 @@ The three scripts this skill shells (do not reimplement any of them):
 > authored at readiness (here, just-in-time), not by the dispatcher
 > ([we:docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates](../../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)
 > — being codified in a sibling statute PR).
+
+> **A cleared epic is a slice trigger, not a dead end (#2645).** An **epic** is a CONTAINER — its work lives in
+> child stories/tasks, so it is **never directly buildable**. Before this rule a cleared epic fell into a silent
+> hole: the dispatcher never launched it (an epic isn't agent-ready) and nothing routed it to slicing either. Now
+> a cleared `kind:epic` is held **`needs-slice`** ("epic — /slice into buildable child stories") — a **first-class
+> dispatch outcome**, checked BEFORE the scope gate so an (almost always scope-less) epic is **not** mislabeled
+> `unshaped-no-scope` and auto-prepared (which would aim a build agent at a container). Each tick surfaces every
+> such epic in `state.needsSlice` (each entry carries its `epicState`); handle them per §3d — **surface for
+> `/slice`**, so a cleared epic always ends up either sliced-and-dispatched or explicitly awaiting slice, never
+> silently stalled.
 
 The three agent templates it instantiates: [`delivery-agent-brief.md`](delivery-agent-brief.md) (build a scoped
 item, #2608), [`prepare-scope-agent-brief.md`](prepare-scope-agent-brief.md) (author an unscoped item's
@@ -105,7 +115,7 @@ one that works for a completed background task), so it re-invokes this loop reli
    ```bash
    node scripts/readiness/conveyor-state.mjs --json
    ```
-   → `{ queue, clearedNotReady, lanes, freeSlots, prs, daemon, idle, health }`. Do not eyeball four commands; this is the one read.
+   → `{ queue, clearedNotReady, unshaped, needsSlice, lanes, freeSlots, prs, daemon, idle, health }`. Do not eyeball four commands; this is the one read.
 
 2. **Plan the dispatch (one call):**
    ```bash
@@ -364,6 +374,36 @@ Its rules — two suppressions and one cap:
 > build. (A fix agent that hits a red gate or an ambiguous finding leaves the PR `review:changes` and does NOT
 > re-arm — so it re-enters the fix path on a later tick unless the retry cap has been reached.)
 
+### 3d. Surface every cleared epic for `/slice` — a cleared epic is a slice trigger, not a dead end (#2645)
+
+An **epic** is a CONTAINER; its work lives in child stories/tasks, so the dispatcher **never** launches it to
+build. A cleared `kind:epic` is held **`needs-slice`** (in `plan.held`) and surfaced in `state.needsSlice` (each
+entry `{ num, epicState }`). Before this rule such an epic fell into a silent hole — never built, never sliced,
+no signal. Now, each tick, for every item in `state.needsSlice`, **surface it to the operator** so it gets
+decomposed into buildable children (which the conveyor then dispatches on later ticks):
+
+- **Route by `epicState`** — the surfaced action depends on the epic's state (the same states the readiness view
+  uses), so you never prompt a `/slice` on an already-sliced epic:
+  - `unsliced` → **`/slice <num>`** — decompose it into buildable child stories. This is the core case.
+  - `done` → **`/resolve <num>`** — every child is resolved; the epic just needs its explicit resolve, not a slice.
+  - `tracking` → **no slice** — it already has open child slices; those children ARE the work (clear the children,
+    not the container). Note it so the operator can `remove` the epic from the conveyor queue.
+  - `program` / `parked` → **no slice** — a perpetual program, or a `childlessReason` gates decomposition; surface
+    the state, never prompt a slice.
+  - `null` (unknown — a loader-degraded read, or an epic armed while not open/unblocked, so `epicState` was never
+    derived) → **surface, no auto-route** — show it as an epic awaiting attention; don't presume `/slice`.
+- **Surface, do not auto-slice.** Slicing is human judgment (the `/slice` flow is gated on approval per the
+  split-backlog-item skill), so the conveyor **surfaces** the epic rather than spawning an autonomous slice agent
+  — the deliberately-chosen branch of the spec's "surface **or** auto-run" (auto-slicing an epic without a human
+  in the loop is out of scope here). Add a line to the tick status, e.g.
+  `⚠ N epic(s) need slicing: #A (/slice) #B (/resolve)`, so a cleared epic is **always** either
+  sliced-and-dispatched (once the operator runs `/slice` and its children land + are cleared) or explicitly
+  awaiting slice — never silently stalled.
+- **No guard, no spawn.** Unlike §3b/§3c this dispatches **no** agent and consumes **no** lane, so it needs no
+  in-flight guard — it is a pure per-tick SURFACE of `state.needsSlice`. The epic stays `needs-slice` every tick
+  until the operator slices/resolves/removes it (idempotent — re-surfacing the same epic each tick is correct,
+  it is a standing "awaiting slice" signal, not a repeated action).
+
 ## 4. Landing is the drain daemon's job — the conveyor NEVER merges
 
 Delivery agents stop at `ready-to-merge` — but only **after** each has reviewed its own diff to convergence
@@ -443,6 +483,7 @@ Per #deterministic-core-thin-judgment, the line is:
   **escalate-or-auto-land call**, reviewing an escalation (`/review`), and investigating an anomaly. The
   `review:changes → review:pending` re-arm, by contrast, is a script-decidable swap (`rearm-review.mjs`) — the
   fix agent shells it, never re-deriving the "never clear the human gate" rule in prose. Never spend model context re-deriving a computable plan —
-  read the script's answer and act on it. **Prepare-vs-build is NOT a judgment call here — it is the dispatch
-  plan's classification:** `plan.launch` → build (scoped); `held: unshaped-no-scope` / `state.unshaped` → prepare
-  (unscoped). The skill just spawns the matching agent.
+  read the script's answer and act on it. **Build-vs-prepare-vs-slice is NOT a judgment call here — it is the
+  dispatch plan's classification:** `plan.launch` → build (scoped, §3); `held: unshaped-no-scope` /
+  `state.unshaped` → prepare (unscoped, §3b); `held: needs-slice` / `state.needsSlice` → surface for `/slice`
+  (an epic container, §3d). The skill just spawns the matching agent (or, for an epic, surfaces it — no agent).

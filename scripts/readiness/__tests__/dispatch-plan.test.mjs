@@ -164,6 +164,62 @@ describe('dispatchPlan — blocked', () => {
   });
 });
 
+describe('dispatchPlan — a cleared kind:epic is HELD "needs-slice", never built (#2645)', () => {
+  // An epic is a CONTAINER; its work lives in child stories/tasks, so it is never directly buildable. A cleared
+  // epic must not launch to build AND must not fall through to the scope gate (which would auto-prepare a container).
+  it('holds a scope-less epic "needs-slice" even in a fully-idle pool with free lanes (never built, never auto-prepared)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'epic' }], // no scope, but epic → needs-slice, NOT unshaped-no-scope
+      leases: [],
+      freeLanes: [2, 3],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-slice' }]);
+  });
+
+  it('holds an epic "needs-slice" even when it carries a scope (an epic is never a direct build)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'epic', scope: ['src/a/'] }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-slice' }]);
+  });
+
+  it('blocked takes precedence over needs-slice (a blocked epic can\'t be sliced until its blockers clear)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'epic', openBlockers: ['9'] }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'blocked' }]);
+  });
+
+  it('needs-slice holds the epic while a disjoint story on the same tick still launches', () => {
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, kind: 'epic', scope: ['src/a/'] }, // epic → held needs-slice
+        { num: 2, kind: 'story', scope: ['src/b/'] }, // buildable story → launches
+      ],
+      leases: [],
+      freeLanes: [7],
+    });
+    expect(plan.launch).toEqual([{ num: 2, lane: 7 }]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-slice' }]);
+  });
+
+  it('a non-epic with no kind field still flows through the normal scope/launch path (no false needs-slice)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['src/a/'] }], // kind absent → not an epic → launches
+      leases: [],
+      freeLanes: [4],
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 4 }]);
+    expect(plan.held).toEqual([]);
+  });
+});
+
 describe('dispatchPlan — the UNSCOPED AUTO-PREPARE hold (#2613, ruled 2026-07-22)', () => {
   // An unscoped item is "assume-overlaps-everything" and is NEVER launched to build — not even alone into an idle
   // pool. It is ALWAYS held `unshaped-no-scope` so the /conveyor skill auto-prepares its scope upstream; once that
