@@ -324,7 +324,7 @@ describe('deriveReviewDisposition (#2285 — one reason→disposition derivation
   });
 
   it('a plain sensitivity park converges AND may auto-land (today\'s agent-reviewable path)', () => {
-    for (const reason of [REVIEW_REASONS.BLAST_RADIUS, REVIEW_REASONS.SIZE, REVIEW_REASONS.DISMISSED_FINDINGS, REVIEW_REASONS.CROSS_REPO, REVIEW_REASONS.SAMPLING]) {
+    for (const reason of [REVIEW_REASONS.BLAST_RADIUS, REVIEW_REASONS.SIZE, REVIEW_REASONS.DISMISSED_FINDINGS, REVIEW_REASONS.CROSS_REPO]) {
       expect(deriveReviewDisposition({ reason })).toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
     }
   });
@@ -371,7 +371,6 @@ describe('deriveReviewDisposition (#2285 — one reason→disposition derivation
         'size (1080 ≥ 400 changed lines)',
         'dismissed-findings (2 pre-PR review finding(s) the lane dismissed)',
         'cross-repo impl+WE couple',
-        'sampling floor (1-in-10)',
       ];
       for (const reason of decorated) {
         expect(deriveReviewDisposition({ reason })).toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
@@ -384,7 +383,7 @@ describe('deriveReviewDisposition (#2285 — one reason→disposition derivation
         'blast-radius (scripts/lib/review-core.mjs)',
         'size (1080 ≥ 400 changed lines)',
         'gate-self (scripts/lib/review-escalation.mjs) — human review required',
-        'sampling floor (1-in-10)',
+        'cross-repo impl+WE couple',
       ];
       expect(() => deriveReviewDisposition({ reasons: parkedReasons })).not.toThrow();
       expect(deriveReviewDisposition({ reasons: parkedReasons }))
@@ -392,9 +391,11 @@ describe('deriveReviewDisposition (#2285 — one reason→disposition derivation
     });
 
     it('mixes bare and decorated tokens freely, and still throws on a genuinely unknown decorated reason', () => {
-      expect(deriveReviewDisposition({ reasons: [REVIEW_REASONS.BLAST_RADIUS, 'sampling floor (1-in-10)'] }))
+      expect(deriveReviewDisposition({ reasons: [REVIEW_REASONS.BLAST_RADIUS, 'size (500 ≥ 400 changed lines)'] }))
         .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
       expect(() => deriveReviewDisposition({ reason: 'sizeable rewrite (not a real signal)' })).toThrow(/unknown reason/);
+      // #xlno40g — the retired sampling reason is now a genuinely unknown token (there is no sampling floor).
+      expect(() => deriveReviewDisposition({ reason: 'sampling floor (1-in-10)' })).toThrow(/unknown reason/);
     });
   });
 });
@@ -766,8 +767,10 @@ describe('careLevelFromReasons — recover the care-level from decorated escalat
   it('a decorated blast-radius reason → elevated', () => {
     expect(careLevelFromReasons(['blast-radius (scripts/x.mjs, scripts/y.mjs)'])).toBe('elevated');
   });
-  it('the sampling floor alone → low', () => {
-    expect(careLevelFromReasons(['sampling floor (1-in-10)'])).toBe('low');
+  it('#xlno40g — a retired sampling reason contributes nothing → none (lenient, never crashes)', () => {
+    // Sampling is dropped: its decorated string is now an unrecognized token, so careLevelFromReasons
+    // (lenient by design) ignores it rather than throwing — an in-flight parked PR can never crash the panel.
+    expect(careLevelFromReasons(['sampling floor (1-in-10)'])).toBe('none');
   });
   it('parses the dismissed-findings COUNT — one → elevated, many → high', () => {
     expect(careLevelFromReasons(['dismissed-findings (1 pre-PR review finding(s) the lane dismissed)'])).toBe('elevated');

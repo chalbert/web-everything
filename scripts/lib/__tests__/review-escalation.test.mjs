@@ -58,8 +58,8 @@ describe('isBlastRadiusPath', () => {
       expect(isBlastRadiusPath('plateau-app/tools/check-standards.mjs')).toBe(false);
     });
     it('scoreEscalation escalates end-to-end for a relocated engine file, and not for an unrelated relocated file', () => {
-      expect(scoreEscalation({ changedFiles: ['plateau-app/tools/loop/pr-land.mjs'], prNum: 3 }).escalate).toBe(true);
-      expect(scoreEscalation({ changedFiles: ['plateau-app/src/some-feature.mjs'], prNum: 3 }).escalate).toBe(false);
+      expect(scoreEscalation({ changedFiles: ['plateau-app/tools/loop/pr-land.mjs'] }).escalate).toBe(true);
+      expect(scoreEscalation({ changedFiles: ['plateau-app/src/some-feature.mjs'] }).escalate).toBe(false);
     });
   });
 });
@@ -91,59 +91,64 @@ describe('isGateSelfPath — the POLICY tier of the trust chain (#2285 v1, #2448
 
 describe('scoreEscalation', () => {
   it('a small leaf change with no dismissals → NO escalation', () => {
-    const r = scoreEscalation({ changedFiles: ['backlog/2171-x.md'], diffLines: 20, prNum: 3 });
+    const r = scoreEscalation({ changedFiles: ['backlog/2171-x.md'], diffLines: 20 });
     expect(r.escalate).toBe(false);
     expect(r.reasons).toEqual([]);
   });
   it('a blast-radius file escalates', () => {
-    const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], prNum: 3 });
+    const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] });
     expect(r.escalate).toBe(true);
     expect(r.reasons.join(' ')).toMatch(/blast-radius/);
   });
   it('size threshold escalates (≥ default 400 changed lines)', () => {
-    expect(scoreEscalation({ diffLines: 400, prNum: 3 }).escalate).toBe(true);
-    expect(scoreEscalation({ diffLines: 399, prNum: 3 }).escalate).toBe(false);
+    expect(scoreEscalation({ diffLines: 400 }).escalate).toBe(true);
+    expect(scoreEscalation({ diffLines: 399 }).escalate).toBe(false);
   });
   it('a dismissed pre-PR review finding is the strongest signal — escalates on ≥1', () => {
-    const r = scoreEscalation({ dismissedFindings: 1, prNum: 3 });
+    const r = scoreEscalation({ dismissedFindings: 1 });
     expect(r.escalate).toBe(true);
     expect(r.reasons.join(' ')).toMatch(/dismissed-findings/);
   });
   it('a cross-repo couple escalates', () => {
-    expect(scoreEscalation({ crossRepo: true, prNum: 3 }).escalate).toBe(true);
+    expect(scoreEscalation({ crossRepo: true }).escalate).toBe(true);
   });
-  it('the 1-in-N sampling floor escalates deterministically by PR number', () => {
-    expect(scoreEscalation({ prNum: 10 }).escalate).toBe(true);   // 10 % 10 === 0
-    expect(scoreEscalation({ prNum: 20 }).escalate).toBe(true);
-    expect(scoreEscalation({ prNum: 7 }).escalate).toBe(false);
-    // custom N
-    expect(scoreEscalation({ prNum: 5, thresholds: { sampleNth: 5 } }).escalate).toBe(true);
+  it('#xlno40g — a clean PR NEVER escalates on PR number: there is no random/sampling floor', () => {
+    // Every prNum used to matter (a 1-in-N floor parked every Nth PR for nothing). It is gone: a clean,
+    // signal-free change never escalates, whatever its number would have been.
+    for (const n of [7, 10, 20, 100, 1000]) {
+      const r = scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20, prNum: n });
+      expect(r.escalate).toBe(false);
+      expect(r.reasons).toEqual([]);
+      expect(r.signals.sampled).toBeUndefined();
+    }
+    // A stray sampleNth threshold is inert too — nothing reads it anymore.
+    expect(scoreEscalation({ diffLines: 20, thresholds: { sampleNth: 5 } }).escalate).toBe(false);
   });
   it('collects EVERY firing reason (multiple signals compound)', () => {
-    const r = scoreEscalation({ changedFiles: ['scripts/x.mjs'], diffLines: 500, dismissedFindings: 2, crossRepo: true, prNum: 10 });
-    expect(r.reasons.length).toBe(5);
+    const r = scoreEscalation({ changedFiles: ['scripts/x.mjs'], diffLines: 500, dismissedFindings: 2, crossRepo: true });
+    expect(r.reasons.length).toBe(4);
   });
   it('humanRequired for POLICY-CORE or STATUTE, but NOT for the ENGINE lander (#2445 two-tier flip)', () => {
     // a policy-core file → escalate AND humanRequired
-    const policy = scoreEscalation({ changedFiles: ['scripts/lib/review-core.mjs'], prNum: 3 });
+    const policy = scoreEscalation({ changedFiles: ['scripts/lib/review-core.mjs'] });
     expect(policy.escalate).toBe(true);
     expect(policy.humanRequired).toBe(true);
     expect(policy.reasons.join(' ')).toMatch(/gate-self/);
     // the statute layer → escalate AND humanRequired (#2412)
-    const statute = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'], prNum: 3 });
+    const statute = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'] });
     expect(statute.escalate).toBe(true);
     expect(statute.humanRequired).toBe(true);
     expect(statute.reasons.join(' ')).toMatch(/statute/);
     // the ENGINE lander → escalates but agent-reviewable (NOT humanRequired) — the flip
-    const lander = scoreEscalation({ changedFiles: ['scripts/merge-ai-prs.mjs'], prNum: 3 });
+    const lander = scoreEscalation({ changedFiles: ['scripts/merge-ai-prs.mjs'] });
     expect(lander.escalate).toBe(true);
     expect(lander.humanRequired).toBe(false);
     // other blast-radius → escalates but agent-reviewable (NOT humanRequired)
-    const other = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], prNum: 3 });
+    const other = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] });
     expect(other.escalate).toBe(true);
     expect(other.humanRequired).toBe(false);
     // a plain leaf → neither
-    expect(scoreEscalation({ changedFiles: ['backlog/x.md'], prNum: 3 }).humanRequired).toBe(false);
+    expect(scoreEscalation({ changedFiles: ['backlog/x.md'] }).humanRequired).toBe(false);
   });
 });
 
@@ -305,11 +310,12 @@ describe('deriveCareLevel — the advisory care-level (#2567)', () => {
     expect(deriveCareLevel({ signals: {} })).toBe(CARE_LEVELS.NONE);
     expect(deriveCareLevel({})).toBe(CARE_LEVELS.NONE);
   });
-  it('sampling alone is the honesty FLOOR → low (weakest signal)', () => {
-    expect(deriveCareLevel({ signals: { sampled: 10 } })).toBe(CARE_LEVELS.LOW);
-  });
   it('size alone → low', () => {
     expect(deriveCareLevel({ signals: { size: 500 } })).toBe(CARE_LEVELS.LOW);
+  });
+  it('#xlno40g — a stray `sampled` signal contributes NOTHING (the weight is gone)', () => {
+    // Random sampling is dropped: even if a caller passed a `sampled` key, it no longer moves the care score.
+    expect(deriveCareLevel({ signals: { sampled: 10 } })).toBe(CARE_LEVELS.NONE);
   });
   it('blast-radius alone → elevated (system machinery)', () => {
     expect(deriveCareLevel({ signals: { blastRadius: ['scripts/x.mjs'] } })).toBe(CARE_LEVELS.ELEVATED);
@@ -328,10 +334,10 @@ describe('deriveCareLevel — the advisory care-level (#2567)', () => {
   });
   it('humanRequired (gate-self / statute) is MAXIMUM care → high, regardless of scored signals', () => {
     expect(deriveCareLevel({ signals: {}, humanRequired: true })).toBe(CARE_LEVELS.HIGH);
-    expect(deriveCareLevel({ signals: { sampled: 10 }, humanRequired: true })).toBe(CARE_LEVELS.HIGH);
+    expect(deriveCareLevel({ signals: { size: 500 }, humanRequired: true })).toBe(CARE_LEVELS.HIGH);
   });
   it('is total — every output is a known ordered CARE_LEVELS value', () => {
-    for (const sig of [{}, { sampled: 10 }, { size: 500 }, { blastRadius: ['a'] }, { dismissedFindings: 2 }]) {
+    for (const sig of [{}, { crossRepo: true }, { size: 500 }, { blastRadius: ['a'] }, { dismissedFindings: 2 }]) {
       expect(CARE_LEVEL_ORDER).toContain(deriveCareLevel({ signals: sig }));
     }
   });
@@ -339,16 +345,16 @@ describe('deriveCareLevel — the advisory care-level (#2567)', () => {
 
 describe('scoreEscalation carries the advisory careLevel (#2567 — additive)', () => {
   it('a plain non-escalating PR → none', () => {
-    expect(scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20, prNum: 3 }).careLevel).toBe(CARE_LEVELS.NONE);
+    expect(scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20 }).careLevel).toBe(CARE_LEVELS.NONE);
   });
   it('a blast-radius PR → elevated', () => {
-    expect(scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], prNum: 3 }).careLevel).toBe(CARE_LEVELS.ELEVATED);
+    expect(scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] }).careLevel).toBe(CARE_LEVELS.ELEVATED);
   });
   it('a gate-self (humanRequired) PR → high', () => {
-    expect(scoreEscalation({ changedFiles: ['scripts/lib/review-core.mjs'], prNum: 3 }).careLevel).toBe(CARE_LEVELS.HIGH);
+    expect(scoreEscalation({ changedFiles: ['scripts/lib/review-core.mjs'] }).careLevel).toBe(CARE_LEVELS.HIGH);
   });
   it('is ADDITIVE — the existing escalate/humanRequired/reasons/signals fields are unchanged', () => {
-    const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], prNum: 3 });
+    const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] });
     expect(r.escalate).toBe(true);
     expect(r.humanRequired).toBe(false);
     expect(Array.isArray(r.reasons)).toBe(true);
@@ -359,7 +365,7 @@ describe('scoreEscalation carries the advisory careLevel (#2567 — additive)', 
 describe('coupleEscalation inherits the STRICTEST care-level (#2567)', () => {
   it('the couple takes the highest member care-level', () => {
     const r = coupleEscalation([
-      { escalate: true, careLevel: CARE_LEVELS.LOW, reasons: ['sampling floor (1-in-10)'] },
+      { escalate: true, careLevel: CARE_LEVELS.LOW, reasons: ['size (500 ≥ 400 changed lines)'] },
       { escalate: true, careLevel: CARE_LEVELS.HIGH, reasons: ['blast-radius (scripts/x)'] },
     ]);
     expect(r.careLevel).toBe(CARE_LEVELS.HIGH);

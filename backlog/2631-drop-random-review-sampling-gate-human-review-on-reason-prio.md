@@ -3,9 +3,11 @@ bornAs: xlno40g
 kind: story
 size: 3
 parent: "2606"
-status: open
+status: resolved
 scope: ["we:scripts/pr-land.mjs", "we:scripts/lib/"]
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-23"
+dateResolved: "2026-07-23"
 tags: []
 ---
 

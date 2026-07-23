@@ -152,7 +152,7 @@ export const isGateSelfPath = isPolicyCorePath;
 
 /**
  * The advisory CARE-LEVEL an escalated PR carries (#2567, codified `#blast-radius-advisory-care-not-a-gate`,
- * #2563). The reframe: a scored escalation signal (blast-radius / size / dismissed / cross-repo / sampling) is
+ * #2563). The reframe: a scored escalation signal (blast-radius / size / dismissed / cross-repo) is
  * NOT a park-gate that routes to a human — it is *care-level information* that tells the reviewer (the AI panel)
  * HOW HARD to look. Care-level dials panel rigor (`panelRigorForCareLevel` in review-core.mjs — rounds / lenses /
  * jurors), never the *route*: a high-care change still gets an agent review, it does not get handed to a human
@@ -175,7 +175,6 @@ export const CARE_LEVEL_ORDER = Object.freeze([CARE_LEVELS.NONE, CARE_LEVELS.LOW
  *     author-anchoring), and it scales with the count.
  *   • blast-radius — touches system machinery, so a bad merge is far costlier than a leaf edit → elevated alone.
  *   • size / cross-repo — real but weaker scored signals.
- *   • sampling — the 1-in-N honesty FLOOR, the weakest: a sampled-only PR is `low` care, a routine spot-check.
  * Tuning knobs (loose to start), kept here so a re-weight is one edit + a test — never scattered.
  */
 export const CARE_WEIGHTS = Object.freeze({
@@ -184,7 +183,6 @@ export const CARE_WEIGHTS = Object.freeze({
   blastRadius: 3,     // system-machinery surface — elevated on its own
   size: 2,            // a large diff — humans review these worse, so the panel looks harder
   crossRepo: 2,       // a coordinated multi-repo couple
-  sampled: 1,         // the honesty floor — lowest care (a routine spot-check)
 });
 
 /** Care-score band edges (#2567): score → level. `< low` ⇒ none; `< elevated` ⇒ low; `< high` ⇒ elevated;
@@ -208,7 +206,6 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
   if (s.blastRadius) score += CARE_WEIGHTS.blastRadius;
   if (s.size) score += CARE_WEIGHTS.size;
   if (s.crossRepo) score += CARE_WEIGHTS.crossRepo;
-  if (s.sampled) score += CARE_WEIGHTS.sampled;
   if (score >= CARE_BANDS.high) return CARE_LEVELS.HIGH;
   if (score >= CARE_BANDS.elevated) return CARE_LEVELS.ELEVATED;
   if (score >= CARE_BANDS.low) return CARE_LEVELS.LOW;
@@ -225,7 +222,9 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  *   • dismissed    — the lane's pre-PR review (#2170) DISMISSED ≥1 finding — the STRONGEST signal (it targets
  *                    author anchoring directly: the lane judged its own reviewer's findings away).
  *   • cross-repo   — an impl+WE couple spanning >1 repo (a coordinated multi-repo change).
- *   • sampling     — the 1-in-N floor (prNum % sampleNth === 0): keeps "no dismissals" from being a gameable exit.
+ *
+ * A PR escalates ONLY for one of these real reasons — there is no random/sampling floor (#xlno40g): a
+ * clean, CI-green PR with no scored signal and no dismissed finding reaches no reviewer, it just lands.
  *
  * Also returns `humanRequired` (#2285 v1, narrowed by the #2445 two-tier flip): true iff the diff touches the
  * POLICY tier of the trust chain (`isGateSelfPath`) or the STATUTE layer (`isStatutePath`) — the classes where
@@ -244,7 +243,7 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * identical), so every existing caller is unchanged.
  *
  * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
- *          crossRepo?:boolean, prNum?:number, thresholds?:object}} o
+ *          crossRepo?:boolean, thresholds?:object}} o
  */
 export function scoreEscalation({
   changedFiles = [],
@@ -252,7 +251,6 @@ export function scoreEscalation({
   humanBasisFiles = null,
   dismissedFindings = 0,
   crossRepo = false,
-  prNum = 0,
   thresholds = {},
 } = {}) {
   const t = { ...DEFAULT_THRESHOLDS, ...thresholds };
@@ -282,8 +280,9 @@ export function scoreEscalation({
 
   if (crossRepo) { signals.crossRepo = true; reasons.push('cross-repo impl+WE couple'); }
 
-  // Deterministic 1-in-N sampling floor: keyed on the PR number so it's reproducible (never Math.random).
-  if (Number(prNum) > 0 && t.sampleNth > 0 && Number(prNum) % t.sampleNth === 0) { signals.sampled = t.sampleNth; reasons.push(`sampling floor (1-in-${t.sampleNth})`); }
+  // #xlno40g — NO random/sampling floor. A PR escalates only for a real reason above (blast-radius, size,
+  // dismissed findings, cross-repo) or the human gate below (gate-self / statute). A clean PR whose number
+  // happened to be divisible by N no longer parks for nothing — random sampling was found to have no value.
 
   // #2567 — the advisory CARE-LEVEL, derived from the same signals. ADDITIVE: existing callers that only read
   // escalate/humanRequired/reasons/signals are unchanged; the care-level is the new advisory dial (it tells the
@@ -360,7 +359,7 @@ export function hasReviewLabel(labels, label) {
  * `/merge` orphan sweep (no `--label`) has no owner for the review verdict, so it refuses ALL un-cleared labels
  * (`allowPending: false`, the default — the plateau#11 / web-everything#290 race). But `--label
  * --no-review-escalation` is an OPERATOR deliberately waiving the escalation rubric to push a green-but-parked
- * `review:pending` PR through (backlog #2262's documented manual override for a sampled PR with no reviewer
+ * `review:pending` PR through (backlog #2262's documented manual override for a parked PR with no reviewer
  * daemon) — that path passes `allowPending: true` so it honors the operator on `review:pending`, yet STILL
  * refuses `review:human` (a gate-self edit is human-only, never waivable by this flag — #2285) and
  * `review:changes` (the reviewer actively rejected the diff; the author lane must re-push). With no review
