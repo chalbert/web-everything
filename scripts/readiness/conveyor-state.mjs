@@ -66,7 +66,7 @@ export const DEFAULT_STALL_MS = 180_000;
  * frontmatter flag (backward-compatible with any caller that doesn't pass the sidecar).
  * @param {{queue?:object[]}|object[]|null|undefined} buildQueue
  * @param {Array<string|number>|null|undefined} clearedNums  the sidecar's cleared ids, or null to use frontmatter
- * @returns {Array<{num:(string|null), rank:(number|null), buildQueued:boolean, openBlockers:string[], scope:*}>}
+ * @returns {Array<{num:(string|null), rank:(number|null), buildQueued:boolean, openBlockers:string[], scope:*, kind:(string|null), epicState:(string|null)}>}
  */
 export function shapeQueue(buildQueue, clearedNums = null) {
   const rows = Array.isArray(buildQueue)
@@ -88,6 +88,11 @@ export function shapeQueue(buildQueue, clearedNums = null) {
         : [],
     // scope: read defensively — absent today (the dispatch-plan sibling owns adding it), null until then.
     scope: r?.scope ?? null,
+    // kind / epicState: enriched by the IO shell from the loader (#2645). `kind` drives the epic → `needs-slice`
+    // surface (a container is never built); `epicState` lets the skill route a held epic precisely (`unsliced` →
+    // /slice, `done` → resolve, `tracking`/`program`/`parked` → no slice). Both null until enriched.
+    kind: r?.kind ?? null,
+    epicState: r?.epicState ?? null,
   }));
 }
 
@@ -339,18 +344,44 @@ export function deriveClearedNotReady(buildQueue, clearedNums) {
  * task that authors each item's `scope:` upstream; once that lands the item is scoped and dispatches to BUILD.
  * Surfacing them here is how the skill decides to AUTO-PREPARE: "these cleared items have no scope — prepare it so
  * they can build and parallelize." An item counts as unshaped when its scope is absent / non-array / empty /
- * all-blank (the SAME `normScope`-emptiness test the dispatcher keys on), so the
- * two surfaces never disagree. Reads `buildQueued` from the session-local sidecar when `clearedNums` is injected
- * (else the committed frontmatter flag), so `unshaped` tracks exactly what the operator cleared this session.
- * Pure — shapes the queue via {@link shapeQueue} and filters; no fs / clock.
- * @param {{queue?:object[]}|object[]|null|undefined} buildQueue  the build-queue rows (scope-enriched by the shell)
+ * all-blank (the SAME `normScope`-emptiness test the dispatcher keys on) AND it is NOT a `kind:epic` — an epic is
+ * held `needs-slice` BEFORE the scope gate in the dispatcher (a container is sliced, never scope-authored), so this
+ * excludes epics to mirror that precedence EXACTLY: a scope-less epic surfaces ONLY in {@link deriveNeedsSlice},
+ * never here. Without that guard an armed scope-less epic (the common case — epics rarely carry scope) would appear
+ * in BOTH sets, and the skill's §3b would aim a prepare-scope agent at a container — the very hazard #2645 closes.
+ * So the two surfaces never disagree with `plan.held`. Reads `buildQueued` from the session-local sidecar when
+ * `clearedNums` is injected (else the committed frontmatter flag), so `unshaped` tracks exactly what the operator
+ * cleared this session. Pure — shapes the queue via {@link shapeQueue} and filters; no fs / clock.
+ * @param {{queue?:object[]}|object[]|null|undefined} buildQueue  the build-queue rows (scope+kind-enriched by the shell)
  * @param {Array<string|number>|null|undefined} clearedNums  the sidecar's cleared ids, or null to use frontmatter
- * @returns {Array<{num:(string|null), scope:*}>} the armed, no-usable-scope rows (stored spelling of num kept)
+ * @returns {Array<{num:(string|null), scope:*}>} the armed, no-usable-scope, non-epic rows (stored spelling kept)
  */
 export function deriveUnshaped(buildQueue, clearedNums = null) {
   return shapeQueue(buildQueue, clearedNums)
-    .filter((r) => r.buildQueued && normScope(r.scope).length === 0)
+    // Epics are held `needs-slice` before the scope gate (see deriveNeedsSlice) — exclude them so a scope-less epic
+    // is not double-surfaced as unshaped (which would drive §3b to prepare-scope a container, #2645).
+    .filter((r) => r.buildQueued && r.kind !== 'epic' && normScope(r.scope).length === 0)
     .map((r) => ({ num: r.num, scope: r.scope }));
+}
+
+/**
+ * The NEEDS-SLICE set (#2645): the ARMED (cleared-for-build) queue rows that are a `kind:epic`. An epic is a
+ * CONTAINER — its work lives in child stories/tasks — so the dispatcher NEVER launches it to build; it holds every
+ * cleared epic `needs-slice` (mirroring how {@link deriveUnshaped} tracks the `unshaped-no-scope` holds), and the
+ * /conveyor skill reads THIS set to surface each for `/slice` so a cleared epic is decomposed into buildable
+ * children instead of silently stalling. Each entry carries `epicState` so the skill routes precisely: `unsliced`
+ * → `/slice`; `done` → resolve; `tracking` / `program` / `parked` → no slice (its children ARE the work / a
+ * recorded reason gates it). Kept aligned with the dispatch plan's `needs-slice` holds — the two surfaces read the
+ * same `kind:epic` signal off the same enriched rows, so they never disagree on which cleared items are epics.
+ * Pure — shapes the queue via {@link shapeQueue} and filters; no fs / clock.
+ * @param {{queue?:object[]}|object[]|null|undefined} buildQueue  the build-queue rows (kind-enriched by the shell)
+ * @param {Array<string|number>|null|undefined} clearedNums  the sidecar's cleared ids, or null to use frontmatter
+ * @returns {Array<{num:(string|null), epicState:(string|null)}>} the armed, `kind:epic` rows (stored spelling kept)
+ */
+export function deriveNeedsSlice(buildQueue, clearedNums = null) {
+  return shapeQueue(buildQueue, clearedNums)
+    .filter((r) => r.buildQueued && r.kind === 'epic')
+    .map((r) => ({ num: r.num, epicState: r.epicState }));
 }
 
 /**
@@ -364,7 +395,7 @@ export function deriveUnshaped(buildQueue, clearedNums = null) {
  *   laneActivity?:Record<string,number>|null, clearedNums?:Array<string|number>|null, now?:number,
  *   stallMs?:number, errors?:string[],
  * }} input
- * @returns {{queue:object[], clearedNotReady:Array<string|number>, unshaped:object[], lanes:object[], freeSlots:number, prs:object[], daemon:*, idle:object, health:object}}
+ * @returns {{queue:object[], clearedNotReady:Array<string|number>, unshaped:object[], needsSlice:object[], lanes:object[], freeSlots:number, prs:object[], daemon:*, idle:object, health:object}}
  */
 export function assembleConveyorState({
   buildQueue,
@@ -393,6 +424,9 @@ export function assembleConveyorState({
     // Armed rows with NO predicted scope — the dispatcher NEVER builds these; the /conveyor skill reads this set
     // to AUTO-PREPARE each item's scope upstream, after which it dispatches to build (#2613 auto-prepare).
     unshaped: deriveUnshaped(buildQueue, clearedNums),
+    // Armed `kind:epic` rows — the dispatcher NEVER builds an epic (a container); the /conveyor skill reads this
+    // set to SURFACE each for `/slice` so a cleared epic is decomposed into buildable children (#2645).
+    needsSlice: deriveNeedsSlice(buildQueue, clearedNums),
     lanes,
     freeSlots: computeFreeSlots(poolStatus),
     prs: shapePrs(prList),
@@ -579,22 +613,32 @@ function main(argv) {
   // 1. Build queue (ready + queued items, ranked) — READ-ONLY.
   const buildQueue = runJson('node', [BACKLOG_CLI, 'build-queue', '--json'], { errors, label: 'build-queue' });
 
-  // 1b. Enrich the build-queue rows with each item's predicted `scope` (the `build-queue` view omits it) so the
-  //     tick picture can flag UNSHAPED armed items — cleared-for-build rows with no predicted scope, which the
-  //     dispatcher NEVER builds; the skill AUTO-PREPARES their scope instead (#2613 auto-prepare). Best-effort +
-  //     guarded: a load failure leaves scope absent (every armed row then reads as unshaped — a SAFE over-surface:
-  //     "prepare scope",
-  //     never a false parallel claim) and is logged to stderr ONLY, NOT pushed to errors[] (a cosmetic enrichment
-  //     miss must not flip the tick's health verdict to warn). Mirrors dispatch-plan.mjs's own scope enrichment.
+  // 1b. Enrich the build-queue rows with each item's predicted `scope`, `kind`, and `epicState` (the `build-queue`
+  //     view omits them) so the tick picture can flag UNSHAPED armed items — cleared-for-build rows with no
+  //     predicted scope, which the dispatcher NEVER builds (the skill AUTO-PREPARES their scope instead, #2613) —
+  //     AND NEEDS-SLICE armed items — cleared `kind:epic` containers, which the dispatcher NEVER builds either
+  //     (the skill surfaces them for `/slice`, #2645). Best-effort + guarded: a load failure leaves scope/kind
+  //     absent (every armed row then reads as unshaped and non-epic — a SAFE over-surface: "prepare scope", never a
+  //     false parallel claim, and no false needs-slice) and is logged to stderr ONLY, NOT pushed to errors[] (a
+  //     cosmetic enrichment miss must not flip the tick's health verdict to warn). Mirrors dispatch-plan.mjs's own
+  //     enrichment.
   if (buildQueue && Array.isArray(buildQueue.queue) && buildQueue.queue.length) {
     try {
       const require = createRequire(import.meta.url);
       const loadBacklog = require(join(ROOT, 'src', '_data', 'backlog.js'));
       const items = typeof loadBacklog === 'function' ? loadBacklog() : [];
-      const scopeByNum = new Map(items.map((it) => [String(it.num), it.scope]));
-      buildQueue.queue = buildQueue.queue.map((r) => ({ ...r, scope: r?.scope ?? scopeByNum.get(String(r?.num)) ?? null }));
+      const byNum = new Map(items.map((it) => [String(it.num), it]));
+      buildQueue.queue = buildQueue.queue.map((r) => {
+        const it = byNum.get(String(r?.num));
+        return {
+          ...r,
+          scope: r?.scope ?? it?.scope ?? null,
+          kind: r?.kind ?? it?.kind ?? null,
+          epicState: r?.epicState ?? it?.epicState ?? null,
+        };
+      });
     } catch (e) {
-      log(`  ⚠ could not load backlog for scope enrichment (${String(e.message || e).split('\n')[0]}) — armed items read as unshaped`);
+      log(`  ⚠ could not load backlog for scope/kind enrichment (${String(e.message || e).split('\n')[0]}) — armed items read as unshaped, non-epic`);
     }
   }
 

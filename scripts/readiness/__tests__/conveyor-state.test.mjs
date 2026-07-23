@@ -26,6 +26,7 @@ import {
   assembleConveyorState,
   deriveClearedNotReady,
   deriveUnshaped,
+  deriveNeedsSlice,
   DEFAULT_STALL_MS,
 } from '../conveyor-state.mjs';
 
@@ -33,16 +34,16 @@ describe('shapeQueue — ready/queued build-queue rows → the tick queue shape'
   it('maps num/rank/buildQueued and defaults openBlockers/scope defensively', () => {
     const buildQueue = { queue: [{ num: '554', rank: null, buildQueued: false }, { num: 42, rank: 3, buildQueued: true }] };
     expect(shapeQueue(buildQueue)).toEqual([
-      { num: '554', rank: null, buildQueued: false, openBlockers: [], scope: null },
-      { num: '42', rank: 3, buildQueued: true, openBlockers: [], scope: null },
+      { num: '554', rank: null, buildQueued: false, openBlockers: [], scope: null, kind: null, epicState: null },
+      { num: '42', rank: 3, buildQueued: true, openBlockers: [], scope: null, kind: null, epicState: null },
     ]);
   });
   it('reads a bare row array too', () => {
-    expect(shapeQueue([{ num: '1' }])).toEqual([{ num: '1', rank: null, buildQueued: false, openBlockers: [], scope: null }]);
+    expect(shapeQueue([{ num: '1' }])).toEqual([{ num: '1', rank: null, buildQueued: false, openBlockers: [], scope: null, kind: null, epicState: null }]);
   });
-  it('picks up openBlockers / blockedBy / scope when a producer annotates them', () => {
-    expect(shapeQueue([{ num: '9', openBlockers: [7, 8], scope: ['we:src/a.ts'] }])[0]).toEqual({
-      num: '9', rank: null, buildQueued: false, openBlockers: ['7', '8'], scope: ['we:src/a.ts'],
+  it('picks up openBlockers / blockedBy / scope / kind / epicState when a producer annotates them', () => {
+    expect(shapeQueue([{ num: '9', openBlockers: [7, 8], scope: ['we:src/a.ts'], kind: 'epic', epicState: 'unsliced' }])[0]).toEqual({
+      num: '9', rank: null, buildQueued: false, openBlockers: ['7', '8'], scope: ['we:src/a.ts'], kind: 'epic', epicState: 'unsliced',
     });
     expect(shapeQueue([{ num: '9', blockedBy: ['10'] }])[0].openBlockers).toEqual(['10']);
   });
@@ -121,6 +122,46 @@ describe('deriveUnshaped — armed rows with no predicted scope (the auto-prepar
   it('empty / null build queue → []', () => {
     expect(deriveUnshaped(null, ['1'])).toEqual([]);
     expect(deriveUnshaped({ queue: [] }, ['1'])).toEqual([]);
+  });
+
+  it('EXCLUDES a scope-less epic — it is needs-slice, NOT unshaped (mirrors the dispatcher\'s epic-before-scope precedence, #2645)', () => {
+    // A scope-less epic satisfies the empty-scope test, but an epic is held `needs-slice` before the scope gate —
+    // never `unshaped-no-scope` — so it must NOT surface here (else §3b would prepare-scope a container).
+    const buildQueue = { queue: [{ num: '10', kind: 'epic' }, { num: '20', kind: 'story' }] };
+    expect(deriveUnshaped(buildQueue, ['10', '20'])).toEqual([{ num: '20', scope: null }]); // the story only
+    expect(deriveNeedsSlice(buildQueue, ['10', '20'])).toEqual([{ num: '10', epicState: null }]); // the epic only
+  });
+});
+
+describe('deriveNeedsSlice — armed kind:epic rows (the /slice surface, #2645)', () => {
+  it('returns ARMED epic rows with their epicState; non-epic armed rows are excluded', () => {
+    const buildQueue = {
+      queue: [
+        { num: '10', kind: 'epic', epicState: 'unsliced' }, // armed epic → needs-slice
+        { num: '20', kind: 'story', scope: ['we:src/a.ts'] }, // armed story → NOT needs-slice
+        { num: '30', kind: 'epic', epicState: 'done' }, // armed epic (done) → surfaced, skill routes to resolve
+      ],
+    };
+    expect(deriveNeedsSlice(buildQueue, ['10', '20', '30'])).toEqual([
+      { num: '10', epicState: 'unsliced' },
+      { num: '30', epicState: 'done' },
+    ]);
+  });
+
+  it('excludes UN-armed epics even though they are epics (only CLEARED items are surfaced)', () => {
+    const buildQueue = { queue: [{ num: '10', kind: 'epic' }, { num: '20', kind: 'epic' }] };
+    // Only 10 is cleared this session; 20 is an epic but not armed, so it is not a needs-slice surface.
+    expect(deriveNeedsSlice(buildQueue, ['10'])).toEqual([{ num: '10', epicState: null }]);
+  });
+
+  it('with clearedNums = null, falls back to the committed buildQueued flag', () => {
+    const buildQueue = { queue: [{ num: '10', kind: 'epic', buildQueued: true }, { num: '20', kind: 'epic', buildQueued: false }] };
+    expect(deriveNeedsSlice(buildQueue, null)).toEqual([{ num: '10', epicState: null }]);
+  });
+
+  it('empty / null build queue → []', () => {
+    expect(deriveNeedsSlice(null, ['1'])).toEqual([]);
+    expect(deriveNeedsSlice({ queue: [] }, ['1'])).toEqual([]);
   });
 });
 
@@ -302,7 +343,7 @@ describe('assembleConveyorState — the whole tick picture', () => {
     inputs.laneActivity = { 1: now - 5_000 }; // lane-1 active 5s ago
     const s = assembleConveyorState(inputs);
     expect(s.queue).toHaveLength(2);
-    expect(s.queue[0]).toEqual({ num: '2611', rank: 1, buildQueued: true, openBlockers: [], scope: null });
+    expect(s.queue[0]).toEqual({ num: '2611', rank: 1, buildQueued: true, openBlockers: [], scope: null, kind: null, epicState: null });
     expect(s.lanes).toEqual([{ lane: 1, num: '2611', session: 'sess-1', lease: ['we:scripts/readiness/conveyor-state.mjs'], breach: [] }]);
     expect(s.freeSlots).toBe(2);
     expect(s.prs).toEqual([{ num: '2611', prNumber: 658, state: 'OPEN', ci: 'pass', labels: ['review:human'] }]);

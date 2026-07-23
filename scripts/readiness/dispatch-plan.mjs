@@ -25,6 +25,7 @@
  * Each queued item resolves to exactly ONE outcome:
  *
  *   • openBlockers > 0                              → held "blocked"           (an unready item can't launch).
+ *   • kind:epic                                     → held "needs-slice"       (a container — /slice it, never build; see below).
  *   • no usable scope (absent / non-array / [])     → held "unshaped-no-scope" (NEVER launched to build — see below).
  *   • scope intersects an ACTIVE lease's scope      → held "overlaps lane-<n>" (a running lane owns those paths).
  *   • scope intersects a HIGHER-RANKED item WE JUST  → held "overlaps lane-<n>" (the rival pair: the higher-ranked
@@ -68,15 +69,27 @@ import { scopesOverlap, normScope } from './scope-lease.mjs';
  *  "assume-overlaps-everything" and is NEVER launched to build — it is ALWAYS HELD `unshaped-no-scope` (even in a
  *  fully-idle pool with free lanes) and surfaced so the /conveyor skill auto-prepares its `scope:` upstream; once
  *  that lands the item is scoped and dispatches to BUILD. The operator gloss is fixed — "no predicted scope —
- *  author it to parallelize" ({@link UNSHAPED_HINT}); the reason TOKEN stays short for stable matching. */
+ *  author it to parallelize" ({@link UNSHAPED_HINT}); the reason TOKEN stays short for stable matching.
+ *
+ *  `needs-slice` (#2645): a cleared `kind:epic`. An epic is a CONTAINER — its work lives in child stories/tasks,
+ *  so it is NEVER directly buildable and must never be launched to build (nor auto-prepared for scope, which would
+ *  aim a build agent at a container). The dispatcher HOLDS every cleared epic `needs-slice` — a FIRST-CLASS
+ *  outcome, not a silent skip — so the /conveyor skill surfaces it for `/slice` (decompose into buildable child
+ *  stories, which dispatch on later ticks). A cleared epic is a slice TRIGGER, not a dead end; the operator gloss
+ *  is {@link NEEDS_SLICE_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'blocked', 'unshaped-no-scope', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
+  'blocked', 'unshaped-no-scope', 'needs-slice', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
  *  conveyor skill so a held unshaped item always tells the operator WHAT to do: author the item's predicted
  *  `scope:` (the /conveyor skill auto-prepares it) so the dispatcher can BUILD and parallelize it. */
 export const UNSHAPED_HINT = 'no predicted scope — author it to parallelize';
+
+/** The operator-facing gloss for a `needs-slice` hold — surfaced beside the token so a held epic always tells the
+ *  operator WHAT to do: decompose it (`/slice <num>`) into buildable child stories, which the conveyor then
+ *  dispatches. An epic is a container, never a direct build. */
+export const NEEDS_SLICE_HINT = 'epic — /slice into buildable child stories';
 
 /** True when an item's `openBlockers` signals it is not ready to build. Tolerant of either the loader's array
  *  shape (`item.openBlockers` = the still-open blocker nums) or a bare count. */
@@ -91,13 +104,14 @@ function hasOpenBlockers(item) {
  * The DETERMINISTIC dispatch plan — the pure keystone. Same (queue, leases, freeLanes) → same plan, always.
  *
  * @param {{
- *   queue: Array<{num:(string|number), scope?:string[], openBlockers?:(string[]|number)}>,
+ *   queue: Array<{num:(string|number), kind?:string, scope?:string[], openBlockers?:(string[]|number)}>,
  *   leases: Array<{lane:(string|number), scope:string[]}>,
  *   freeLanes: Array<string|number>,
  * }} input
  *   • `queue`     — the build queue ALREADY IN RANK ORDER (highest-priority first): the `buildQueued` items.
- *                   Each carries its predicted `scope` (repo-relative path prefixes, comparable to the leases'
- *                   scopes) and its `openBlockers`. The pure core does NOT re-order — the ordering engine
+ *                   Each carries its `kind` (so a `kind:epic` container is held `needs-slice`, never built), its
+ *                   predicted `scope` (repo-relative path prefixes, comparable to the leases' scopes) and its
+ *                   `openBlockers`. The pure core does NOT re-order — the ordering engine
  *                   ({@link ../lib/build-queue.mjs orderQueueDetailed}) owns rank; this consumes that order.
  *   • `leases`    — the ACTIVE scope leases (running lanes): `{ lane, scope }`. `scope` is the lane's held
  *                   file-scope (predicted ∪ observed, from {@link ./scope-lease-collect.mjs}).
@@ -109,7 +123,7 @@ function hasOpenBlockers(item) {
  *   `launch` — the SCOPED items to start now, each on the free lane it was assigned, in rank order. An UNSCOPED
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
  *   `held`   — every other queued item with its single reason ∈
- *              "blocked" | "overlaps lane-<n>" | "no free lane" | "unshaped-no-scope".
+ *              "blocked" | "needs-slice" | "overlaps lane-<n>" | "no free lane" | "unshaped-no-scope".
  */
 export function dispatchPlan({ queue, leases, freeLanes } = {}) {
   const items = Array.isArray(queue) ? queue.filter((it) => it && typeof it === 'object') : [];
@@ -136,7 +150,17 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
       held.push({ num, reason: 'blocked' });
       continue;
     }
-    // 2. No predicted scope — HOLD `unshaped-no-scope`, ALWAYS. An unscoped item is NEVER launched to build, not
+    // 2. A cleared `kind:epic` — HOLD `needs-slice`, ALWAYS (#2645). An epic is a CONTAINER; its work lives in
+    //    child stories/tasks, so it is NEVER directly buildable. Checked BEFORE the scope gate so an (almost always
+    //    scope-less) epic is not mislabeled `unshaped-no-scope` and auto-prepared — that would aim a build agent at
+    //    a container. A cleared epic is a slice TRIGGER: the /conveyor skill sees this hold and surfaces it for
+    //    `/slice` (decompose into buildable child stories, which dispatch on later ticks), rather than silently
+    //    stalling it. A BLOCKED epic is still `blocked` (checked first): it can't be sliced until its blockers clear.
+    if (item.kind === 'epic') {
+      held.push({ num, reason: 'needs-slice' });
+      continue;
+    }
+    // 3. No predicted scope — HOLD `unshaped-no-scope`, ALWAYS. An unscoped item is NEVER launched to build, not
     //    even alone into an idle pool (auto-prepare, ruled 2026-07-22): building blind is the hazard, and an
     //    unscoped build is "assume-overlaps-everything". The skill sees this hold (and `state.unshaped`) and
     //    dispatches a prepare-scope task that authors the item's `scope:`; once that lands the item is scoped and
@@ -149,13 +173,13 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
       continue;
     }
 
-    // 3. Overlaps a RUNNING lane's held scope — that lane owns those paths; hold behind it.
+    // 4. Overlaps a RUNNING lane's held scope — that lane owns those paths; hold behind it.
     const leaseHit = activeLeases.find((l) => scopesOverlap(scope, l.scope));
     if (leaseHit) {
       held.push({ num, reason: `overlaps lane-${leaseHit.lane}` });
       continue;
     }
-    // 4. Rival pair — overlaps a HIGHER-RANKED item already launched this tick. Rank order guarantees the
+    // 5. Rival pair — overlaps a HIGHER-RANKED item already launched this tick. Rank order guarantees the
     //    higher-ranked rival was processed first and (if it launched) sits in `launched`, so the lower-ranked
     //    one holds on the lane its rival took. A higher rival that did NOT launch is absent here, so it never
     //    spuriously blocks a lower item — the hold is only against work that is actually starting.
@@ -164,7 +188,7 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
       held.push({ num, reason: `overlaps lane-${rival.lane}` });
       continue;
     }
-    // 5. Disjoint — launch it on the next free lane, or hold for want of one.
+    // 6. Disjoint — launch it on the next free lane, or hold for want of one.
     if (free.length === 0) {
       held.push({ num, reason: 'no free lane' });
       continue;
@@ -289,6 +313,10 @@ async function main(argv) {
     const it = byNum.get(String(r.num));
     return {
       num: r.num,
+      // `kind` drives the epic → `needs-slice` hold (#2645): a container is never built. Absent when the loader
+      // failed to load (the catch above) — then it reads as non-epic and falls through to the scope gate, a SAFE
+      // degradation (an unscoped epic still holds `unshaped-no-scope` rather than launching to build).
+      kind: it?.kind,
       scope: Array.isArray(it?.scope) ? toRepoRelative(it.scope) : undefined,
       openBlockers: Array.isArray(it?.openBlockers) ? it.openBlockers : [],
     };
@@ -325,9 +353,11 @@ async function main(argv) {
     );
     for (const l of plan.launch) log(`  ▶ #${l.num} → lane-${l.lane}`);
     for (const h of plan.held) {
-      // Surface the operator gloss beside the short `unshaped-no-scope` token so a held unshaped item always
-      // says WHAT to do — author the item's predicted scope so the dispatcher can parallelize it (#2613).
-      const hint = h.reason === 'unshaped-no-scope' ? ` (${UNSHAPED_HINT})` : '';
+      // Surface the operator gloss beside the short token so a held item always says WHAT to do — author scope
+      // for `unshaped-no-scope` (#2613), or `/slice` for a held `needs-slice` epic (#2645).
+      const hint = h.reason === 'unshaped-no-scope' ? ` (${UNSHAPED_HINT})`
+        : h.reason === 'needs-slice' ? ` (${NEEDS_SLICE_HINT})`
+          : '';
       log(`  ⏸ #${h.num} — ${h.reason}${hint}`);
     }
   }
