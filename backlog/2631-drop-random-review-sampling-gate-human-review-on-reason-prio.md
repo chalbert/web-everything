@@ -1,4 +1,5 @@
 ---
+bornAs: xlno40g
 kind: story
 size: 3
 parent: "2606"
