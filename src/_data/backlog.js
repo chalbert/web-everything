@@ -61,6 +61,19 @@ const normalizeScope = (v) => {
   return list.length ? list : undefined;
 };
 
+// HAS-PREDICTED-SCOPE readiness lens (#2618) — a PURE derivation (exported for direct regression testing,
+// like `deriveTier` / `normalizeScope`; inert to the Eleventy build). It is TRUE for an OPEN, unblocked,
+// agent-ready (Tier-A) BUILD item that carries NO usable predicted `scope:` — such a card reads as dev-ready
+// but is NOT fully shaped. It mirrors the conveyor dispatcher's exact `unshaped-no-scope` / needs-probe hold
+// (scripts/readiness/dispatch-plan.mjs): the item is "assume-overlaps-everything" and is NEVER launched to
+// build blind — its `scope:` is auto-prepared upstream first. A SURFACING lens, not a hard gate (the item
+// stays Tier A). `normalizeScope` collapses an absent / non-array / empty / all-blank scope to `undefined`,
+// so `!normalizeScope(item.scope)` catches every "no usable scope" shape the dispatcher's `normScope()` does.
+// Tier A already excludes decisions, non-open, blocked, project-pending and human-gated items; `kind !==
+// 'epic'` drops umbrellas (sliced into children, never built directly, and out of the build queue).
+const deriveUnshapedNoScope = (item) =>
+  item.tier === 'A' && item.kind !== 'epic' && !normalizeScope(item.scope);
+
 // Infer an item's repo-LOCUS when no explicit `locus:` is authored. Two PRECISE signals only — locus is
 // "which gate/loop honestly CLOSES the item", so the signal must indicate where it BUILDS, never mere
 // provenance. The big noise source is the `exercise-app` *tag*, which WE standards/blocks carry to mean
@@ -469,6 +482,22 @@ module.exports = function backlog() {
       if (item.kind === 'story' && typeof item.size === 'number' && item.size > 8) return 'oversized'; // split pill
       return null;
     })();
+
+    // HAS-PREDICTED-SCOPE readiness lens (#2618) — an OPEN, unblocked, agent-ready (Tier-A) BUILD item that
+    // carries NO predicted `scope:` reads as dev-ready but is NOT fully shaped. It mirrors the exact
+    // `unshaped-no-scope` (needs-probe) condition the conveyor dispatcher holds on
+    // (scripts/readiness/dispatch-plan.mjs): such an item is "assume-overlaps-everything" and is NEVER
+    // launched to build blind — it is auto-prepared (its `scope:` authored upstream) before it can dispatch.
+    // This is a SURFACING lens, not a hard gate: the item stays agent-ready (Tier A), it just also carries a
+    // "needs scope" hint so a dev-ready-looking card with no touch-set doesn't read as fully shaped (per the
+    // PR #663 empty-scope refinement — an unscoped item is unshaped/needs-probe, not blocked). `item.scope`
+    // is already normalizeScope()'d to `undefined` when the frontmatter scope is absent / non-array / empty /
+    // all-blank, so `!item.scope` catches every "no usable scope" shape the dispatcher's normScope() does.
+    // Epics (umbrellas — sliced into children, never built directly; excluded from the build queue) don't
+    // apply; Tier A already excludes decisions and non-open items, so this is precisely the build pool. The
+    // predicate is the pure `deriveUnshapedNoScope` (exported + unit-pinned), so the loader field, the badge,
+    // and the check:readiness note never drift from one another.
+    item.unshapedNoScope = deriveUnshapedNoScope(item);
 
     // Active batchable — a batch-shaped item already CLAIMED (status:active). It carries no tier (tier is
     // open-only, deriveTier above), so it drops out of `batchable` and the open-only Prioritisation table.
@@ -879,6 +908,9 @@ module.exports.HUMAN_GATE_KINDS = HUMAN_GATE_KINDS;
 // Named export of the pure `scope:` sanitizer (#x53zzf9) for direct regression testing — inert to the
 // Eleventy build, which only invokes the default function export.
 module.exports.normalizeScope = normalizeScope;
+// Named export of the pure has-predicted-scope lens predicate (#2618) for direct regression testing — inert
+// to the Eleventy build, which only invokes the default function export.
+module.exports.deriveUnshapedNoScope = deriveUnshapedNoScope;
 // Named export of the title/summary/details derivation (#745) for direct regression testing — Eleventy
 // only ever invokes the default function export, so attaching this property is inert to the build.
 module.exports.derive = derive;
