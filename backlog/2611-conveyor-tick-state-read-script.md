@@ -6,6 +6,8 @@ parent: "2612"
 status: open
 dateOpened: "2026-07-22"
 tags: [conveyor, script]
+scope:
+  - we:scripts/readiness/
 ---
 
 # Conveyor tick state-read script
