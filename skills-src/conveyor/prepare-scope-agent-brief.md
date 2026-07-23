@@ -132,6 +132,11 @@ is **no review escalation** for a scope-only PR unless the item itself is **stat
 deterministic rubric, #2307, applies `review:human` on its own if so — you do nothing extra). Do **not**
 blanket-park a scope PR.
 
+`pr-land --label-on-green` BLOCKS until the required `test` check is green (often several minutes). Run it
+BACKGROUNDED (or with a generous timeout) — a foreground call may hit the tool timeout mid-wait, which is
+EXPECTED and harmless: the PR is already open (`checking`), and re-invoking `pr-land` with the SAME `--ref` is
+idempotent (it targets the existing PR and applies the label, never a duplicate).
+
 - End the commit message with:
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
 
