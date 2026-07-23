@@ -3,9 +3,12 @@ bornAs: xdn96bp
 kind: story
 size: 3
 parent: "2541"
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-23"
+dateResolved: "2026-07-23"
+graduatedTo: "fui:blocks/progress/Progress.ts"
 tags:
   - frontier-ui
   - progress
