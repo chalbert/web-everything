@@ -77,11 +77,13 @@ import {
   derivePanelVerdict,
 } from './jury-core.mjs';
 
-// #2655 — the STATELESS roster-recompute SPINE (F3). `resolveJuryPlan` below (the PR-diff resolver) now DELEGATES
-// the subject-NEUTRAL merge / de-dup / provenance / method-attach to this shared spine instead of re-implementing
-// it; the PR-diff-SPECIFIC half (classifyTouchSet's UI globs, the method registry) stays here. Imported for use,
-// NOT re-exported — subject-agnostic consumers import `resolveRoster` from jury-core.mjs directly.
-import { resolveRoster } from './jury-core.mjs';
+// #2655 — the STATELESS roster-recompute SPINE (F3). `resolveJuryPlan` below (the PR-diff resolver) delegates the
+// subject-NEUTRAL merge / de-dup / provenance / method-attach to this shared spine.
+// #2656 — the SUBJECT-ADAPTER CONTRACT (F2 heart). `buildSubjectMandate` is the subject-neutral mandate skeleton
+// this module's `buildMandate` frames the diff into; `resolveAdapterRoster` is the seam `resolveJuryPlan` now
+// routes through with `PR_DIFF_ADAPTER` (the reference adapter defined below). Imported for use, NOT re-exported —
+// subject-agnostic consumers import these from jury-core.mjs directly.
+import { buildSubjectMandate, resolveAdapterRoster } from './jury-core.mjs';
 
 export {
   VERDICTS,
@@ -118,23 +120,26 @@ export const DEFAULT_MANDATE = 'correctness';
  * @returns {string}
  */
 export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE } = {}) {
-  const mandates = (Array.isArray(mandate) ? mandate : [mandate]).filter(Boolean);
-  const mandateLine = mandates.length ? mandates.join(', ') : DEFAULT_MANDATE;
   const isolationLine = contextIsolation === 'diff-only'
     ? 'You see ONLY the diff (and, if supplied, the PR description) — no author framing, no prior session context.'
     : `Context isolation: ${contextIsolation}.`;
-  return [
-    `You are reviewing a diff against this mandate: ${mandateLine}.`,
+  // #2656 — the subject-neutral mandate SKELETON (mandate line + judge-only closing) lives once in jury-core's
+  // `buildSubjectMandate`; this PR-diff adapter supplies the diff-specific parts — the `diff` subject noun, the
+  // isolation line, the `file` finding anchor, and the #2336 no-checkout body. The output is byte-identical to the
+  // prior inline form. #2336: a review subagent runs inside the drain's shared primary checkout, so it must NEVER
+  // `git checkout` the PR branch there (that moves the shared HEAD and violates the never-branch-a-shared-checkout guard).
+  return buildSubjectMandate({
+    subjectNoun: 'diff',
+    mandate,
+    defaultMandate: DEFAULT_MANDATE,
     isolationLine,
-    // #2336 — a review subagent runs inside the drain's shared primary checkout; it must NEVER `git checkout`
-    // the PR branch there (that moves the shared HEAD and violates the never-branch-a-shared-checkout guard).
-    'Work from the diff text alone — do NOT `git checkout`, `git switch`, `git fetch`+checkout, or otherwise',
-    'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain. If',
-    'you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.',
-    'Judge only: report concrete findings (file, one-sentence summary, the failure scenario it causes) and',
-    'nothing about labels, merge policy, or who may clear this change — that is the caller\'s decision, not yours.',
-    'Report an empty findings list if nothing survives scrutiny; do not pad with stylistic nitpicks.',
-  ].join(' ');
+    findingAnchor: 'file',
+    bodyLines: [
+      'Work from the diff text alone — do NOT `git checkout`, `git switch`, `git fetch`+checkout, or otherwise',
+      'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain. If',
+      'you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.',
+    ],
+  });
 }
 
 /**
@@ -664,19 +669,40 @@ export function methodsForLens(lens, band) {
  *   lenses: Array<{lens: string, methods: string[], attachedBy: 'care'|'touch-set'}>}}
  */
 export function resolveJuryPlan({ careLevel, changedFiles = [] } = {}) {
-  // #2655 — DELEGATE the subject-neutral spine to jury-core's `resolveRoster` (merge the care band's static lenses
-  // with the touch-set's perspective lenses, de-dup with care winning, attach methods, carry `attachedBy`). This
-  // is the PR-DIFF resolver, so it supplies the two subject-specific halves the spine takes as inputs: the
-  // touch-set SIGNAL — `classifyTouchSet`'s UI-glob-derived perspective lenses — and the method resolver bound to
-  // this care band. `resolveRoster` reuses `panelRigorForCareLevel` (so care `none` → empty jury, whatever the
-  // diff touched; an unknown care-level throws there) — the behaviour is byte-identical to the prior inline form.
-  const band = POLICY_CARE_JURY.bands[careLevel];
-  return resolveRoster({
-    careLevel,
-    touchLenses: classifyTouchSet(changedFiles).lenses,
-    resolveMethods: (lens) => methodsForLens(lens, band),
-  });
+  // #2656 — route through the subject-agnostic adapter seam (`resolveAdapterRoster`) with the reference
+  // `PR_DIFF_ADAPTER`, in place of a direct `resolveRoster` call. The adapter supplies the two subject-specific
+  // halves the spine takes as inputs — the touch-set SIGNAL (`classifyTouchSet`'s UI-glob-derived perspective
+  // lenses) and the method resolver bound to the care band (`ctx.careLevel` → the band's `validationMethods`). The
+  // seam still delegates the subject-NEUTRAL merge / de-dup / provenance / method-attach (and the care `none` →
+  // empty jury, unknown-care-level throw) to `resolveRoster` (#2655) — so the behaviour is byte-identical to the
+  // prior inline form; only the wiring now goes through the F2 adapter contract.
+  return resolveAdapterRoster({ adapter: PR_DIFF_ADAPTER, careLevel, input: changedFiles, ctx: { careLevel } });
 }
+
+/**
+ * THE REFERENCE SUBJECT ADAPTER (#2656, F2 heart of epic #2649) — the PR-diff subject, re-homed behind the
+ * subject-adapter contract (`SubjectAdapter` in jury-core.mjs). This is the plug that PROVES the seam: every
+ * PR-diff-SPECIFIC piece the jury needs is declared here as one contract member, and the shipped PR-diff jury path
+ * (`resolveJuryPlan` above, and the mandate builders) now runs entirely through those members — a future subject
+ * (design-pixels, decision-prose = S5) adds only its own adapter, nothing in the core.
+ *   • `extractTouchSet` — the changed-file → perspective-lens classifier (`classifyTouchSet`, UI/page globs).
+ *   • `resolveMethods`  — the lens → grounding method registry, per care band (`methodsForLens`; the band comes
+ *     from `ctx.careLevel` via the #2633 care→jury table).
+ *   • `mandatoryLenses` — correctness + security (the two lenses that must unanimously accept to land a diff).
+ *   • `charterForLens`  — the diff-specific juror charter text (passed to `materializeRoster`).
+ *   • `buildMandate` / `buildPanelMandate` — the diff-specific mandate framing (built on `buildSubjectMandate`).
+ * Frozen so the reference adapter is a stable value other modules can import and compare against.
+ */
+export const PR_DIFF_ADAPTER = Object.freeze({
+  subject: 'pr-diff',
+  subjectNoun: 'diff',
+  mandatoryLenses: MANDATORY_LENSES,
+  extractTouchSet: (changedFiles) => classifyTouchSet(changedFiles).lenses,
+  resolveMethods: (lens, ctx) => methodsForLens(lens, POLICY_CARE_JURY.bands[ctx?.careLevel]),
+  charterForLens: (lens) => `judge the diff under the "${lens}" lens`,
+  buildMandate,
+  buildPanelMandate,
+});
 
 /**
  * Build the mandate handed to ONE lens reviewer in the v3 panel (#2310) — wraps `buildMandate({ mandate: lens

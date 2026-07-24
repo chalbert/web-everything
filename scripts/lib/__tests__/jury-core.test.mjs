@@ -20,6 +20,10 @@ import {
   rosterPickedEvent,
   AGGREGATION,
   PANEL_LENSES,
+  SUBJECT_ADAPTER_CONTRACT,
+  validateSubjectAdapter,
+  buildSubjectMandate,
+  resolveAdapterRoster,
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
@@ -311,5 +315,97 @@ describe('materializeRoster + rosterPickedEvent — the S2 ledger bridge (#2655)
     expect(ev.jurors.some((j) => j.lens === 'simplicity')).toBe(false);
     // round-trips through the validator it was built with
     expect(validateJuryEvent(ev).valid).toBe(true);
+  });
+});
+
+describe('SUBJECT_ADAPTER_CONTRACT / validateSubjectAdapter — the subject-adapter interface (#2656, F2)', () => {
+  // a minimal, subject-neutral stub adapter — the smallest thing that satisfies the contract
+  const stub = {
+    subject: 'stub',
+    extractTouchSet: (input) => (Array.isArray(input) ? input : []),
+    resolveMethods: (lens) => [`m:${lens}`],
+  };
+
+  it('names the required + optional interface keys as a frozen descriptor', () => {
+    expect(SUBJECT_ADAPTER_CONTRACT.required).toEqual(['subject', 'extractTouchSet', 'resolveMethods']);
+    expect(SUBJECT_ADAPTER_CONTRACT.optional).toEqual(['subjectNoun', 'mandatoryLenses', 'charterForLens', 'buildMandate']);
+    expect(Object.isFrozen(SUBJECT_ADAPTER_CONTRACT)).toBe(true);
+    expect(Object.isFrozen(SUBJECT_ADAPTER_CONTRACT.required)).toBe(true);
+  });
+
+  it('accepts a minimal well-formed adapter', () => {
+    expect(validateSubjectAdapter(stub)).toEqual({ valid: true, errors: [] });
+  });
+
+  it('rejects a non-object without throwing', () => {
+    for (const bad of [null, undefined, 42, 'x', []]) {
+      const res = validateSubjectAdapter(bad);
+      expect(res.valid).toBe(false);
+      expect(res.errors.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('flags each missing / mistyped REQUIRED member', () => {
+    const res = validateSubjectAdapter({ subject: '', extractTouchSet: 'nope' });
+    expect(res.valid).toBe(false);
+    expect(res.errors.some((e) => /subject/.test(e))).toBe(true);
+    expect(res.errors.some((e) => /extractTouchSet/.test(e))).toBe(true);
+    expect(res.errors.some((e) => /resolveMethods/.test(e))).toBe(true);
+  });
+
+  it('validates OPTIONAL members only when present', () => {
+    expect(validateSubjectAdapter({ ...stub, mandatoryLenses: [] }).valid).toBe(false);
+    expect(validateSubjectAdapter({ ...stub, charterForLens: 'x' }).valid).toBe(false);
+    expect(validateSubjectAdapter({ ...stub, subjectNoun: '  ' }).valid).toBe(false);
+    expect(validateSubjectAdapter({ ...stub, mandatoryLenses: ['correctness'], subjectNoun: 'thing' }).valid).toBe(true);
+  });
+});
+
+describe('buildSubjectMandate — the subject-neutral mandate skeleton (#2656, F2)', () => {
+  it('assembles the mandate line + neutral judge-only closing for any subject', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'design', mandate: 'accessibility', findingAnchor: 'region' });
+    expect(text).toContain('You are reviewing a design against this mandate: accessibility.');
+    expect(text).toContain('report concrete findings (region,');
+    expect(text).toMatch(/Report an empty findings list/);
+  });
+
+  it('joins a multi-mandate array and falls back to defaultMandate on an empty one', () => {
+    expect(buildSubjectMandate({ mandate: ['a', 'b'] })).toContain('this mandate: a, b.');
+    expect(buildSubjectMandate({ mandate: [], defaultMandate: 'correctness' })).toContain('this mandate: correctness.');
+  });
+
+  it('splices adapter body lines between the opening and the closing, and omits an empty isolation line', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'x', mandate: 'm', bodyLines: ['MIDDLE ONE', 'MIDDLE TWO'] });
+    expect(text).toContain('MIDDLE ONE MIDDLE TWO');
+    // no isolation line supplied → no stray double-space before the body
+    expect(text).not.toMatch(/ {2}/);
+  });
+});
+
+describe('resolveAdapterRoster — the adapter-driven roster seam (#2656, F2)', () => {
+  const adapter = {
+    subject: 'stub',
+    extractTouchSet: (input) => (Array.isArray(input) ? input : []),
+    resolveMethods: (lens, ctx) => [`${ctx?.tag ?? 'm'}:${lens}`],
+  };
+
+  it('feeds the adapter touch-set + ctx-bound methods into the stateless spine', () => {
+    const plan = resolveAdapterRoster({ adapter, careLevel: 'low', input: ['a11y'], ctx: { tag: 'X' } });
+    expect(plan.lenses.map((l) => l.lens)).toEqual([...PANEL_LENSES, 'a11y']);
+    expect(plan.lenses.find((l) => l.lens === 'a11y')).toEqual({ lens: 'a11y', methods: ['X:a11y'], attachedBy: 'touch-set' });
+    expect(plan.lenses.find((l) => l.lens === 'correctness').methods).toEqual(['X:correctness']);
+  });
+
+  it('applies minimal overrides on top of the recompute, grounded by the same ctx-bound resolver', () => {
+    const plan = resolveAdapterRoster({ adapter, careLevel: 'low', input: [], overrides: [{ op: 'add', lens: 'perf' }], ctx: { tag: 'X' } });
+    expect(plan.lenses.find((l) => l.lens === 'perf')).toEqual({ lens: 'perf', methods: ['X:perf'], attachedBy: 'override' });
+  });
+
+  it('throws loudly on an adapter that fails the contract', () => {
+    expect(() => resolveAdapterRoster({ adapter: { subject: 'bad' }, careLevel: 'low' })).toThrow(/invalid subject adapter/);
+  });
+
+  it('delegates the unknown-care-level throw to the spine', () => {
+    expect(() => resolveAdapterRoster({ adapter, careLevel: 'critical' })).toThrow(/unknown care-level/);
   });
 });
