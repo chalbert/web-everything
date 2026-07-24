@@ -13,6 +13,13 @@ import {
   JUROR_STATUSES,
   validateJuryEvent,
   normalizeJuryEvent,
+  resolveRoster,
+  ROSTER_OVERRIDE_OPS,
+  applyRosterOverrides,
+  materializeRoster,
+  rosterPickedEvent,
+  AGGREGATION,
+  PANEL_LENSES,
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
@@ -182,5 +189,127 @@ describe('normalizeJuryEvent', () => {
     ];
     const kept = log.map(normalizeJuryEvent).filter(Boolean);
     expect(kept.map((e) => e.type)).toEqual(['roster-picked', 'round-advanced']);
+  });
+});
+
+describe('resolveRoster — the stateless roster-recompute spine (#2655, F3)', () => {
+  const methodsFor = (lens) => [`m:${lens}`]; // a stand-in method resolver — the spine is subject-agnostic
+
+  it('care `none` → an EMPTY roster, regardless of the touch-set signal', () => {
+    const plan = resolveRoster({ careLevel: 'none', touchLenses: ['a11y', 'perf'], resolveMethods: methodsFor });
+    expect(plan.lenses).toEqual([]);
+    expect(plan.jurorsPerLens).toBe(0);
+    expect(plan.rounds).toBe(0);
+    expect(plan.aggregation).toBe(AGGREGATION.DIVERSITY_SELECTION);
+  });
+
+  it('merges the care-band static lenses with the subject touch-set lenses, static first, de-duped', () => {
+    const plan = resolveRoster({ careLevel: 'low', touchLenses: ['a11y', 'visual-vs-target'], resolveMethods: methodsFor });
+    expect(plan.lenses.map((l) => l.lens)).toEqual([...PANEL_LENSES, 'a11y', 'visual-vs-target']);
+    for (const l of plan.lenses) {
+      expect(l.attachedBy).toBe(PANEL_LENSES.includes(l.lens) ? 'care' : 'touch-set');
+      expect(l.methods).toEqual([`m:${l.lens}`]);
+    }
+  });
+
+  it('the care band WINS an overlap — a touch-set lens equal to a static lens is not duplicated', () => {
+    const plan = resolveRoster({ careLevel: 'low', touchLenses: ['correctness', 'a11y'], resolveMethods: methodsFor });
+    const lenses = plan.lenses.map((l) => l.lens);
+    expect(new Set(lenses).size).toBe(lenses.length);
+    expect(plan.lenses.find((l) => l.lens === 'correctness').attachedBy).toBe('care');
+  });
+
+  it('carries the rigor dial through from panelRigorForCareLevel unchanged', () => {
+    const plan = resolveRoster({ careLevel: 'high', touchLenses: [], resolveMethods: methodsFor });
+    expect(plan.jurorsPerLens).toBe(2);
+    expect(plan.rounds).toBe(3);
+  });
+
+  it('without a method resolver, seats carry no methods (subject-agnostic default)', () => {
+    const plan = resolveRoster({ careLevel: 'low' });
+    expect(plan.lenses.every((l) => l.methods.length === 0)).toBe(true);
+  });
+
+  it('ignores empty / falsy touch-set entries', () => {
+    const plan = resolveRoster({ careLevel: 'low', touchLenses: ['', null, 'a11y', undefined] });
+    expect(plan.lenses.filter((l) => l.attachedBy === 'touch-set').map((l) => l.lens)).toEqual(['a11y']);
+  });
+
+  it('delegates the unknown-care-level throw to panelRigorForCareLevel', () => {
+    expect(() => resolveRoster({ careLevel: 'critical' })).toThrow(/unknown care-level/);
+  });
+});
+
+describe('applyRosterOverrides — the minimal, ledger-trailed override layer (#2655, F3)', () => {
+  const base = () => resolveRoster({ careLevel: 'low', touchLenses: [], resolveMethods: (l) => [`m:${l}`] });
+
+  it('exposes exactly the two override ops as a frozen enum', () => {
+    expect(ROSTER_OVERRIDE_OPS).toEqual({ ADD: 'add', REMOVE: 'remove' });
+    expect(Object.isFrozen(ROSTER_OVERRIDE_OPS)).toBe(true);
+  });
+
+  it('add appends a lens tagged `override`, grounded via the injected resolver', () => {
+    const plan = applyRosterOverrides(base(), [{ op: 'add', lens: 'perf' }], { resolveMethods: (l) => [`m:${l}`] });
+    const perf = plan.lenses.find((l) => l.lens === 'perf');
+    expect(perf).toEqual({ lens: 'perf', methods: ['m:perf'], attachedBy: 'override' });
+  });
+
+  it('remove drops a lens; both ops are idempotent no-ops on an absent/present lens', () => {
+    const removed = applyRosterOverrides(base(), [{ op: 'remove', lens: 'simplicity' }]);
+    expect(removed.lenses.some((l) => l.lens === 'simplicity')).toBe(false);
+    // remove-absent and add-existing are no-ops
+    const noop = applyRosterOverrides(base(), [{ op: 'remove', lens: 'nope' }, { op: 'add', lens: 'correctness' }]);
+    expect(noop.lenses.map((l) => l.lens)).toEqual(base().lenses.map((l) => l.lens));
+  });
+
+  it('is PURE — never mutates the input plan', () => {
+    const plan = base();
+    const before = plan.lenses.map((l) => l.lens);
+    applyRosterOverrides(plan, [{ op: 'remove', lens: 'correctness' }, { op: 'add', lens: 'perf' }]);
+    expect(plan.lenses.map((l) => l.lens)).toEqual(before);
+  });
+
+  it('throws on a malformed override (bad shape, empty lens, unknown op)', () => {
+    expect(() => applyRosterOverrides(base(), [null])).toThrow(/must be an object/);
+    expect(() => applyRosterOverrides(base(), [{ op: 'add', lens: '  ' }])).toThrow(/non-empty string/);
+    expect(() => applyRosterOverrides(base(), [{ op: 'swap', lens: 'perf' }])).toThrow(/unknown override op/);
+  });
+});
+
+describe('materializeRoster + rosterPickedEvent — the S2 ledger bridge (#2655)', () => {
+  const plan = () => resolveRoster({ careLevel: 'high', touchLenses: ['perf'], resolveMethods: (l) => [`m:${l}`] });
+
+  it('expands each seat into jurorsPerLens jurors with unique ids and the seat method', () => {
+    const jurors = materializeRoster(plan());
+    // high → 2 jurors per lens; 4 static + 1 touch-set = 5 lenses → 10 jurors
+    expect(jurors.length).toBe(10);
+    expect(new Set(jurors.map((j) => j.id)).size).toBe(jurors.length);
+    const c1 = jurors.find((j) => j.id === 'correctness#1');
+    expect(c1.lens).toBe('correctness');
+    expect(c1.method).toBe('m:correctness');
+    expect(c1.charter).toMatch(/correctness/);
+  });
+
+  it('uses the injected charterForLens when supplied', () => {
+    const jurors = materializeRoster(plan(), { charterForLens: (l) => `find ${l} bugs` });
+    expect(jurors.find((j) => j.id === 'perf#1').charter).toBe('find perf bugs');
+  });
+
+  it('care `none` (jurorsPerLens 0) materializes to an empty roster and NO roster-picked event', () => {
+    const none = resolveRoster({ careLevel: 'none' });
+    expect(materializeRoster(none)).toEqual([]);
+    expect(rosterPickedEvent(none)).toBeNull();
+  });
+
+  it('rosterPickedEvent emits a SCHEMA-VALID S2 roster-picked event carrying the effective roster', () => {
+    const overridden = applyRosterOverrides(plan(), [{ op: 'remove', lens: 'simplicity' }], { resolveMethods: (l) => [`m:${l}`] });
+    const ev = rosterPickedEvent(overridden, { round: 0, at: '2026-07-24T10:00:00.000Z' });
+    expect(ev.type).toBe('roster-picked');
+    expect(ev.round).toBe(0);
+    expect(ev.at).toBe('2026-07-24T10:00:00.000Z');
+    // the removed lens is absent from the trailed roster (the override is reflected in the event)
+    expect(ev.jurors.some((j) => j.lens === 'simplicity')).toBe(false);
+    // round-trips through the validator it was built with
+    expect(validateJuryEvent(ev).valid).toBe(true);
   });
 });
