@@ -504,3 +504,187 @@ export function validateJuryEvent(raw) {
 export function normalizeJuryEvent(raw) {
   return validateJuryEvent(raw).event;
 }
+
+/**
+ * ============================================================================
+ * THE STATELESS ROSTER-RECOMPUTE SPINE + MINIMAL LEDGER-TRAILED OVERRIDE (#2655, F3 of epic #2649).
+ * ============================================================================
+ *
+ * The ratified F3 shape (jury-of-#2576, decision record 273a2dbd): the jury ROSTER is a STATELESS recompute from
+ * `care-level + a touch-set signal` — deterministic and re-derivable, never persisted — and any deviation from
+ * that recompute is a MINIMAL override layer ON TOP, trailed as an append-only ledger event (the #2654 S2 schema)
+ * so the effective roster is always reconstructable as `recompute(care, touch) THEN overrides`. Keeping the base
+ * a pure recompute is the whole point: nothing to migrate, nothing to drift — re-run it and you get the same
+ * roster, and the persisted state is only the small override delta.
+ *
+ * This is the SUBJECT-AGNOSTIC spine the PR-diff resolver (`resolveJuryPlan` in review-core.mjs) and the future
+ * per-domain adapters (#2656) build ON. It generalizes the PR-path-pattern touch-set (`classifyTouchSet`, which
+ * reads UI file globs — a review-DIFF concern that STAYS in review-core) to an abstract `touchLenses` SIGNAL the
+ * SUBJECT supplies: the spine merges the care band's static lenses with the subject's extra touch-set lenses,
+ * de-duplicates (the care band wins any overlap), attaches each lens's grounding method(s) through a
+ * caller-INJECTED resolver (so the UI method registry stays subject-specific), and carries provenance
+ * (`attachedBy`) — knowing nothing about what is being judged. The care→RIGOR half (jurors-per-lens, rounds) is
+ * reused from `panelRigorForCareLevel`, never re-derived; aggregation stays `DIVERSITY_SELECTION`.
+ */
+
+/**
+ * @typedef {Object} RosterSeat
+ * @property {string} lens - the review lens/perspective this seat judges under.
+ * @property {string[]} methods - the grounding method id(s) for this lens (empty when no resolver was injected).
+ * @property {'care'|'touch-set'|'override'} attachedBy - provenance: the care band's static set, the subject's
+ *   touch-set signal, or a minimal override applied on top of the recompute.
+ */
+
+/**
+ * @typedef {Object} RosterPlan
+ * @property {string} careLevel - the `CARE_LEVELS` value the plan was recomputed for.
+ * @property {number} jurorsPerLens - independent jurors per lens (the care band's rigor dial).
+ * @property {number} rounds - editor↔reviewer negotiation rounds (the care band's rigor dial).
+ * @property {string} aggregation - always `DIVERSITY_SELECTION`.
+ * @property {RosterSeat[]} lenses - the resolved seats, static (care) lenses first, then touch-set lenses.
+ */
+
+/**
+ * THE STATELESS ROSTER-RECOMPUTE SPINE (#2655) — `roster = f(care-level, touch-set)`. Pure, deterministic,
+ * re-derivable: the same inputs always produce the same plan, so nothing about it is persisted. Subject-agnostic —
+ * the SUBJECT supplies its extra lenses as the abstract `touchLenses` signal (the PR-diff subject derives that
+ * signal from a file touch-set via `classifyTouchSet`; another subject derives it however it likes). The spine:
+ *   • gets the care band's STATIC lens set + rigor dial from `panelRigorForCareLevel(careLevel)` — reused, never
+ *     re-derived (throws on an unknown care-level, which is where that throw is single-sourced).
+ *   • when the care band is `none` (no panel — nothing escalated) returns an EMPTY roster regardless of the
+ *     touch-set: the touch-set only ADDS perspective lenses to an existing panel, it never conjures one.
+ *   • otherwise merges the static lenses (first, in their care-band order) with the subject's `touchLenses`
+ *     (after), de-duplicating so the care band wins any overlap, and attaches each lens's grounding method(s)
+ *     via the injected `resolveMethods(lens)` (default: none — a subject-agnostic plan carries no methods until a
+ *     caller grounds it). Each seat records `attachedBy` provenance.
+ * @param {{careLevel: string, touchLenses?: string[], resolveMethods?: (lens: string) => string[]}} [o]
+ * @returns {RosterPlan}
+ */
+export function resolveRoster({ careLevel, touchLenses = [], resolveMethods } = {}) {
+  const rigor = panelRigorForCareLevel(careLevel); // throws on an unknown care-level; supplies base lenses + dial
+  const methodsFor = typeof resolveMethods === 'function' ? resolveMethods : () => [];
+  const attach = (lens, attachedBy) => {
+    const m = methodsFor(lens);
+    return { lens, methods: Array.isArray(m) ? [...m] : [], attachedBy };
+  };
+  const dial = { careLevel, jurorsPerLens: rigor.jurorsPerLens, rounds: rigor.rounds, aggregation: rigor.aggregation };
+  if (!rigor.lenses.length) return { ...dial, lenses: [] };
+  const seen = new Set();
+  const entries = [];
+  for (const lens of rigor.lenses) {                        // static care-band lenses first, in PANEL_LENSES order
+    if (seen.has(lens)) continue;
+    seen.add(lens);
+    entries.push(attach(lens, 'care'));
+  }
+  for (const raw of (Array.isArray(touchLenses) ? touchLenses : [])) { // the subject's touch-set lenses, after
+    if (!isNonEmptyString(raw)) continue;                   // reject falsy/whitespace lenses (same bar as the override path)
+    const lens = raw.trim();
+    if (seen.has(lens)) continue;                           // the care band wins any overlap
+    seen.add(lens);
+    entries.push(attach(lens, 'touch-set'));
+  }
+  return { ...dial, lenses: entries };
+}
+
+/** The two MINIMAL override operations on a recomputed roster (#2655, F3). Add or remove ONE lens — the smallest
+ *  override surface that still lets an operator deviate from the stateless recompute. A frozen enum so every
+ *  caller names them once. The overrides themselves are the ONLY persisted state (kept minimal by construction);
+ *  the recompute is re-derivable, so the durable trail is `recompute(care, touch)` + this small delta. */
+export const ROSTER_OVERRIDE_OPS = Object.freeze({ ADD: 'add', REMOVE: 'remove' });
+
+/**
+ * Apply a MINIMAL override list to a recomputed roster plan (#2655, F3) — the ledger-trailed override layer that
+ * sits ON TOP of the stateless recompute. Pure — returns a NEW plan, never mutates its input (the recompute stays
+ * canonical). Each override is `{ op: 'add'|'remove', lens }`:
+ *   • `add`    — append `lens` (grounded via the injected `resolveMethods`, `attachedBy: 'override'`) if the plan
+ *                does not already carry it; adding an already-present lens is a no-op (idempotent).
+ *   • `remove` — drop the seat for `lens` if present; removing an absent lens is a no-op (idempotent).
+ * A malformed override (not an object, empty `lens`, or an unknown `op`) throws loudly — an override is operator
+ * config, and a silent mis-apply here is exactly the drift the stateless spine exists to avoid. The applied
+ * effective roster is what `rosterPickedEvent` then records to the ledger, so the override is trailed there.
+ * @param {RosterPlan} plan - a `resolveRoster` output.
+ * @param {Array<{op: string, lens: string}>} [overrides]
+ * @param {{resolveMethods?: (lens: string) => string[]}} [o]
+ * @returns {RosterPlan}
+ */
+export function applyRosterOverrides(plan, overrides = [], { resolveMethods } = {}) {
+  const methodsFor = typeof resolveMethods === 'function' ? resolveMethods : () => [];
+  const entries = (Array.isArray(plan?.lenses) ? plan.lenses : []).map((e) => ({ ...e }));
+  const indexOfLens = (lens) => entries.findIndex((e) => e.lens === lens);
+  for (const ov of (Array.isArray(overrides) ? overrides : [])) {
+    if (!ov || typeof ov !== 'object' || Array.isArray(ov)) {
+      throw new Error('applyRosterOverrides: each override must be an object { op, lens }');
+    }
+    const { op, lens } = ov;
+    if (!isNonEmptyString(lens)) {
+      throw new Error(`applyRosterOverrides: override.lens must be a non-empty string (op "${String(op)}")`);
+    }
+    const cleanLens = lens.trim();
+    if (op === ROSTER_OVERRIDE_OPS.ADD) {
+      if (indexOfLens(cleanLens) === -1) {
+        const m = methodsFor(cleanLens);
+        entries.push({ lens: cleanLens, methods: Array.isArray(m) ? [...m] : [], attachedBy: 'override' });
+      }
+    } else if (op === ROSTER_OVERRIDE_OPS.REMOVE) {
+      const i = indexOfLens(cleanLens);
+      if (i !== -1) entries.splice(i, 1);
+    } else {
+      throw new Error(`applyRosterOverrides: unknown override op "${String(op)}" — must be one of ${Object.values(ROSTER_OVERRIDE_OPS).join(', ')}`);
+    }
+  }
+  return { ...plan, lenses: entries };
+}
+
+/**
+ * Materialize a roster plan into the concrete `JurorSpec[]` a `roster-picked` ledger event carries (#2655) —
+ * expand each lens seat into `plan.jurorsPerLens` independent jurors (the diverse jury a high-care band earns).
+ * Pure. Each juror gets a stable `id` (`lens#slot`, unique within the roster because the plan's lenses are
+ * de-duplicated), the seat's `lens`, a `charter`, and — when the seat is grounded — the seat's first grounding
+ * method as its `method`. The `charter` is subject-specific text, so it comes from the injected
+ * `charterForLens(lens)` (an adapter supplies real charters); the default is a neutral placeholder so the spine
+ * itself hardcodes no subject knowledge. A plan with `jurorsPerLens: 0` (care `none`) materializes to an empty
+ * roster.
+ * @param {RosterPlan} plan
+ * @param {{charterForLens?: (lens: string) => string}} [o]
+ * @returns {JurorSpec[]}
+ */
+export function materializeRoster(plan, { charterForLens } = {}) {
+  const entries = Array.isArray(plan?.lenses) ? plan.lenses : [];
+  const perLens = Number.isInteger(plan?.jurorsPerLens) && plan.jurorsPerLens > 0 ? plan.jurorsPerLens : 0;
+  const charterOf = typeof charterForLens === 'function' ? charterForLens : (lens) => `judge the subject under the "${lens}" lens`;
+  const jurors = [];
+  for (const entry of entries) {
+    const method = Array.isArray(entry.methods) && entry.methods.length ? entry.methods[0] : undefined;
+    const charter = String(charterOf(entry.lens) || `judge the "${entry.lens}" lens`);
+    for (let slot = 1; slot <= perLens; slot += 1) {
+      const juror = { id: `${entry.lens}#${slot}`, lens: entry.lens, charter };
+      if (method) juror.method = method;
+      jurors.push(juror);
+    }
+  }
+  return jurors;
+}
+
+/**
+ * Build the `roster-picked` ledger event (the #2654 S2 schema) that RECORDS an effective roster plan (#2655) —
+ * the append-only trail the F3 override layer leaves. Pure. Materializes the plan (`materializeRoster`) and wraps
+ * the jurors in a schema-VALID `roster-picked` event, so what lands in the ledger is exactly the effective
+ * (post-override) roster and nothing else. Returns `null` when the plan has no jurors (care `none`) — there is no
+ * roster to record. The optional `at` (stamped by the #2641 log writer) and `charterForLens` pass straight
+ * through. Throws only if the materialized roster somehow fails the S2 schema (a defensive self-check — the
+ * materializer builds a valid roster by construction).
+ * @param {RosterPlan} plan
+ * @param {{round?: number, at?: string, charterForLens?: (lens: string) => string}} [o]
+ * @returns {JuryEvent|null}
+ */
+export function rosterPickedEvent(plan, { round = 0, at, charterForLens } = {}) {
+  const jurors = materializeRoster(plan, { charterForLens });
+  if (!jurors.length) return null; // care `none` / no seats → no roster picked, nothing to record
+  const raw = { type: JURY_EVENT_TYPES.ROSTER_PICKED, round, jurors };
+  if (at != null) raw.at = at;
+  const { valid, errors, event } = validateJuryEvent(raw);
+  if (!valid) {
+    throw new Error(`rosterPickedEvent: materialized roster failed the S2 schema: ${errors.join('; ')}`);
+  }
+  return event;
+}

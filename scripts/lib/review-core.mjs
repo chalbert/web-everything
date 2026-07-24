@@ -77,6 +77,12 @@ import {
   derivePanelVerdict,
 } from './jury-core.mjs';
 
+// #2655 — the STATELESS roster-recompute SPINE (F3). `resolveJuryPlan` below (the PR-diff resolver) now DELEGATES
+// the subject-NEUTRAL merge / de-dup / provenance / method-attach to this shared spine instead of re-implementing
+// it; the PR-diff-SPECIFIC half (classifyTouchSet's UI globs, the method registry) stays here. Imported for use,
+// NOT re-exported — subject-agnostic consumers import `resolveRoster` from jury-core.mjs directly.
+import { resolveRoster } from './jury-core.mjs';
+
 export {
   VERDICTS,
   normalizeFinding,
@@ -658,26 +664,18 @@ export function methodsForLens(lens, band) {
  *   lenses: Array<{lens: string, methods: string[], attachedBy: 'care'|'touch-set'}>}}
  */
 export function resolveJuryPlan({ careLevel, changedFiles = [] } = {}) {
-  const rigor = panelRigorForCareLevel(careLevel); // throws on an unknown care-level; supplies base lenses + dial
+  // #2655 — DELEGATE the subject-neutral spine to jury-core's `resolveRoster` (merge the care band's static lenses
+  // with the touch-set's perspective lenses, de-dup with care winning, attach methods, carry `attachedBy`). This
+  // is the PR-DIFF resolver, so it supplies the two subject-specific halves the spine takes as inputs: the
+  // touch-set SIGNAL — `classifyTouchSet`'s UI-glob-derived perspective lenses — and the method resolver bound to
+  // this care band. `resolveRoster` reuses `panelRigorForCareLevel` (so care `none` → empty jury, whatever the
+  // diff touched; an unknown care-level throws there) — the behaviour is byte-identical to the prior inline form.
   const band = POLICY_CARE_JURY.bands[careLevel];
-  // No panel (care `none`) → empty jury, whatever the diff touched. The touch-set only ADDS perspective lenses to
-  // an existing panel; it never conjures one where the PR did not escalate.
-  if (!rigor.lenses.length) {
-    return { careLevel, jurorsPerLens: rigor.jurorsPerLens, rounds: rigor.rounds, aggregation: rigor.aggregation, lenses: [] };
-  }
-  const seen = new Set();
-  const entries = [];
-  for (const lens of rigor.lenses) {           // the static care-band lenses, first and in PANEL_LENSES order
-    if (seen.has(lens)) continue;
-    seen.add(lens);
-    entries.push({ lens, methods: methodsForLens(lens, band), attachedBy: 'care' });
-  }
-  for (const lens of classifyTouchSet(changedFiles).lenses) { // perspective lenses earned by the touch-set
-    if (seen.has(lens)) continue;              // care band wins any (today impossible) overlap
-    seen.add(lens);
-    entries.push({ lens, methods: methodsForLens(lens, band), attachedBy: 'touch-set' });
-  }
-  return { careLevel, jurorsPerLens: rigor.jurorsPerLens, rounds: rigor.rounds, aggregation: rigor.aggregation, lenses: entries };
+  return resolveRoster({
+    careLevel,
+    touchLenses: classifyTouchSet(changedFiles).lenses,
+    resolveMethods: (lens) => methodsForLens(lens, band),
+  });
 }
 
 /**
