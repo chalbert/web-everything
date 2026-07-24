@@ -14,6 +14,10 @@
  *     `AGGREGATION.DIVERSITY_SELECTION`, over the lens vocabulary (`MANDATE_LENSES` / `MANDATORY_LENSES` /
  *     `ADVISORY_LENSES` / `PANEL_LENSES`).
  *   • the CARE→RIGOR dial — `panelRigorForCareLevel` over the advisory `CARE_LEVELS` enum.
+ *   • the JURY-LEDGER EVENT VOCABULARY (#2654, S2 of epic #2649) — `JURY_EVENT_TYPES` + `JUROR_STATUSES` and
+ *     the pure `validateJuryEvent` / `normalizeJuryEvent` schema-validator. The append-only shape #2641's durable
+ *     on-disk log appends and the #2642 console serializes; this slice is the SHAPE ONLY — the on-disk log and
+ *     the fold that replays it into a live ledger are #2641, not here.
  *
  * What STAYS in `review-core.mjs`: everything that knows it is judging a PR DIFF — the mandate builders, the
  * plan-phase handshake, the escalation REASON→disposition policy, and the operator-facing renderers.
@@ -270,4 +274,233 @@ export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, c
   if (mandatoryVerdicts.some((v) => v === VERDICTS.NEEDS_HUMAN)) return VERDICTS.NEEDS_HUMAN;
   if (mandatoryVerdicts.every((v) => v === VERDICTS.ACCEPT)) return VERDICTS.ACCEPT;
   return VERDICTS.CHANGES;
+}
+
+/**
+ * ============================================================================
+ * THE JURY-LEDGER EVENT VOCABULARY (#2654, S2 of epic #2649) — SCHEMA ONLY.
+ * ============================================================================
+ *
+ * The jury is made observable (#2641, F4 = logbook ruling) by writing an APPEND-ONLY event log to disk; a single
+ * shared fold replays that log into the live ledger the conveyor's `/workflows`-style tree and the #2642 console
+ * both render. This slice defines ONLY the durable event SHAPE those two consumers serialize + a pure validator —
+ * it does NOT build the on-disk log or the fold (both are #2641). Keeping the vocabulary here, next to the verdict
+ * / round / panel contracts it references (a `finding` event carries a `Finding`; a `verdict` event carries a
+ * `VERDICTS` value), single-sources "what a jury event is" so the writer and every reader agree by construction.
+ *
+ * Five event types — the F4 logbook events named in #2641's body:
+ *   • `roster-picked`   — the jury roster was chosen: the jurors (id / lens / charter, optional method).
+ *   • `juror-running`   — a rostered juror started its pass (its lifecycle moved pending → running).
+ *   • `finding`         — a juror reported one finding (the canonical `Finding` shape).
+ *   • `verdict`         — a juror reported its current verdict (a `VERDICTS` value).
+ *   • `round-advanced`  — the editor↔reviewer negotiation loop advanced to a new round.
+ *
+ * Every event carries `type` and an integer `round` (the round it belongs to; `round-advanced` names the NEW,
+ * ≥1 round). `at` (an ISO-8601 timestamp) is OPTIONAL in the schema — the durable-log writer (#2641) stamps it;
+ * the validator only checks it parses when present, so the pure schema never depends on a clock. The validator is
+ * NORMALIZING: it returns a clean event built from KNOWN fields only, so no caller-junk is persisted to the log.
+ */
+
+/** The five append-only jury-ledger event types (#2654). A frozen enum so every writer/reader names them once. */
+export const JURY_EVENT_TYPES = Object.freeze({
+  ROSTER_PICKED: 'roster-picked',
+  JUROR_RUNNING: 'juror-running',
+  FINDING: 'finding',
+  VERDICT: 'verdict',
+  ROUND_ADVANCED: 'round-advanced',
+});
+
+/** Every jury-ledger event type, in lifecycle order — the membership set `validateJuryEvent` dispatches on. */
+export const JURY_EVENT_TYPE_LIST = Object.freeze(Object.values(JURY_EVENT_TYPES));
+
+/**
+ * The juror lifecycle statuses the #2641 fold DERIVES from the event stream (#2641 lists "pending / running /
+ * found"). These are ledger-STATE the fold reconstructs, NOT events themselves: a juror is `pending` once
+ * `roster-picked` names it, `running` after its `juror-running` event, and `found` once it has emitted a
+ * `finding` or `verdict`. Named here so the fold and the console label the derived status the same way.
+ */
+export const JUROR_STATUSES = Object.freeze({
+  PENDING: 'pending',
+  RUNNING: 'running',
+  FOUND: 'found',
+});
+
+const VERDICT_VALUES = new Set(Object.values(VERDICTS));
+
+/**
+ * @typedef {Object} JurorSpec
+ * @property {string} id - stable juror id, unique within the roster (the key later events reference via `jurorId`).
+ * @property {string} lens - the review lens/dimension this juror judges under (e.g. a `MANDATE_LENSES` value, or a
+ *   domain adapter's own lens — not constrained to the PR-diff set, since the jury is subject-agnostic).
+ * @property {string} charter - the juror's charter / expectation (what it was asked to look for).
+ * @property {string} [method] - optional method/model label (how this juror reviews).
+ */
+
+/**
+ * @typedef {Object} JuryEvent
+ * @property {'roster-picked'|'juror-running'|'finding'|'verdict'|'round-advanced'} type
+ * @property {number} round - the negotiation round the event belongs to (0-based; `round-advanced` is ≥1).
+ * @property {string} [at] - ISO-8601 timestamp; stamped by the #2641 log writer, absent in the pure schema.
+ * @property {JurorSpec[]} [jurors] - `roster-picked` only: the chosen roster.
+ * @property {string} [jurorId] - `juror-running`/`finding`/`verdict`: which rostered juror this is about.
+ * @property {Finding} [finding] - `finding` only: the reported finding (canonical `Finding` shape).
+ * @property {'accept'|'changes'|'needs-human'} [verdict] - `verdict` only: the juror's current verdict.
+ */
+
+/**
+ * @typedef {Object} JuryEventValidation
+ * @property {boolean} valid - true when `raw` is a well-formed jury event.
+ * @property {string[]} errors - one message per schema violation (empty when valid).
+ * @property {JuryEvent|null} event - the NORMALIZED event (known fields only) when valid, else null.
+ */
+
+function isNonEmptyString(v) {
+  return typeof v === 'string' && v.trim().length > 0;
+}
+
+function requireRound(raw, event, errors, min) {
+  if (!Number.isInteger(raw.round) || raw.round < min) {
+    errors.push(`${raw.type} requires an integer round >= ${min}`);
+  } else {
+    event.round = raw.round;
+  }
+}
+
+function requireJurorId(raw, event, errors) {
+  if (!isNonEmptyString(raw.jurorId)) {
+    errors.push(`${raw.type} requires a non-empty jurorId`);
+  } else {
+    event.jurorId = raw.jurorId.trim();
+  }
+}
+
+/** Normalize one roster juror spec; pushes an error (and returns null) for each malformed field. */
+function normalizeJurorSpec(raw, index, errors, seen) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    errors.push(`jurors[${index}] must be an object`);
+    return null;
+  }
+  const spec = {};
+  let ok = true;
+  if (!isNonEmptyString(raw.id)) {
+    errors.push(`jurors[${index}].id must be a non-empty string`);
+    ok = false;
+  } else {
+    spec.id = raw.id.trim();
+    if (seen.has(spec.id)) {
+      errors.push(`jurors[${index}].id "${spec.id}" is duplicated in the roster`);
+      ok = false;
+    }
+    seen.add(spec.id);
+  }
+  if (!isNonEmptyString(raw.lens)) {
+    errors.push(`jurors[${index}].lens must be a non-empty string`);
+    ok = false;
+  } else {
+    spec.lens = raw.lens.trim();
+  }
+  if (!isNonEmptyString(raw.charter)) {
+    errors.push(`jurors[${index}].charter must be a non-empty string`);
+    ok = false;
+  } else {
+    spec.charter = raw.charter.trim();
+  }
+  if (raw.method != null) {
+    if (!isNonEmptyString(raw.method)) errors.push(`jurors[${index}].method must be a non-empty string when present`);
+    else spec.method = raw.method.trim();
+  }
+  return ok ? spec : null;
+}
+
+/**
+ * Validate + normalize one append-only jury-ledger event (#2654). Pure — never throws (a malformed record must
+ * not crash the log writer or the fold). Returns a structured result: `{ valid, errors, event }`. When valid,
+ * `event` is a CLEAN copy carrying only the fields the schema knows (so caller-junk is never persisted); when
+ * invalid, `event` is null and `errors` lists every violation. The one validator BOTH #2641's writer (reject
+ * before append) and the #2642 console (reject on read) share, so a bad event is caught the same way everywhere.
+ *
+ * @param {*} raw
+ * @returns {JuryEventValidation}
+ */
+export function validateJuryEvent(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { valid: false, errors: ['event must be a non-null object'], event: null };
+  }
+  const { type } = raw;
+  if (!JURY_EVENT_TYPE_LIST.includes(type)) {
+    return {
+      valid: false,
+      // String(), not JSON.stringify(): the latter THROWS on a bigint type, breaking the never-throw contract.
+      errors: [`unknown event type "${String(type)}" — must be one of ${JURY_EVENT_TYPE_LIST.join(', ')}`],
+      event: null,
+    };
+  }
+
+  const errors = [];
+  /** @type {JuryEvent} */
+  const event = { type };
+
+  // Common envelope: `at` is optional; validate it parses as a date only when present (keeps the schema clock-free).
+  if (raw.at != null) {
+    if (typeof raw.at !== 'string' || Number.isNaN(Date.parse(raw.at))) {
+      errors.push('at must be a parseable date string when present');
+    } else {
+      event.at = raw.at;
+    }
+  }
+
+  switch (type) {
+    case JURY_EVENT_TYPES.ROSTER_PICKED: {
+      requireRound(raw, event, errors, 0);
+      if (!Array.isArray(raw.jurors) || raw.jurors.length === 0) {
+        errors.push('roster-picked requires a non-empty jurors array');
+      } else {
+        const seen = new Set();
+        event.jurors = raw.jurors.map((j, i) => normalizeJurorSpec(j, i, errors, seen)).filter(Boolean);
+      }
+      break;
+    }
+    case JURY_EVENT_TYPES.JUROR_RUNNING: {
+      requireRound(raw, event, errors, 0);
+      requireJurorId(raw, event, errors);
+      break;
+    }
+    case JURY_EVENT_TYPES.FINDING: {
+      requireRound(raw, event, errors, 0);
+      requireJurorId(raw, event, errors);
+      const finding = normalizeFinding(raw.finding);
+      if (!finding) errors.push('finding event requires a finding with a non-empty summary');
+      else event.finding = finding;
+      break;
+    }
+    case JURY_EVENT_TYPES.VERDICT: {
+      requireRound(raw, event, errors, 0);
+      requireJurorId(raw, event, errors);
+      if (!VERDICT_VALUES.has(raw.verdict)) {
+        errors.push(`verdict event requires a verdict of ${[...VERDICT_VALUES].join(', ')}`);
+      } else {
+        event.verdict = raw.verdict;
+      }
+      break;
+    }
+    case JURY_EVENT_TYPES.ROUND_ADVANCED: {
+      // The NEW round the loop advanced to — ≥1 (advancing to round 0 is meaningless; round 0 is the initial roster).
+      requireRound(raw, event, errors, 1);
+      break;
+    }
+    // No default: JURY_EVENT_TYPE_LIST membership was already checked above.
+  }
+
+  return errors.length ? { valid: false, errors, event: null } : { valid: true, errors: [], event };
+}
+
+/**
+ * Normalize one raw jury event to its clean `JuryEvent` shape, or `null` if it fails the schema. Pure. The
+ * `.filter(Boolean)`-friendly form the #2641 fold maps a raw log over (mirrors `normalizeFinding`). Callers that
+ * need the WHY of a rejection use `validateJuryEvent` for the `errors` list; this thin wrapper drops it.
+ * @param {*} raw
+ * @returns {JuryEvent|null}
+ */
+export function normalizeJuryEvent(raw) {
+  return validateJuryEvent(raw).event;
 }
