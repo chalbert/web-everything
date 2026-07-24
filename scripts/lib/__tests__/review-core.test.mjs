@@ -47,6 +47,14 @@ import {
   renderDrainRunSummary,
   renderReviewNotice,
   renderCloseSessionFlowLine,
+  REVIEW_METHODS,
+  PERSPECTIVE_LENSES,
+  METHOD_REGISTRY,
+  LENS_DEFAULT_METHOD,
+  isUiPath,
+  isPagePath,
+  classifyTouchSet,
+  resolveJuryPlan,
 } from '../review-core.mjs';
 
 describe('normalizeFinding', () => {
@@ -788,5 +796,145 @@ describe('careLevelFromReasons — recover the care-level from decorated escalat
     expect(panelRigorFromReasons(['blast-radius (x)']).rounds).toBe(2);       // elevated → 2 rounds
     expect(panelRigorFromReasons(['gate-self (x) — human review required']).jurorsPerLens).toBe(2); // high → jury
     expect(panelRigorFromReasons([]).lenses).toEqual([]);                     // none → no panel
+  });
+});
+
+describe('METHOD_REGISTRY / LENS_DEFAULT_METHOD — the lens/method split (#2634)', () => {
+  it('the static reviewer grounds all four static PANEL_LENSES', () => {
+    const staticMethod = METHOD_REGISTRY.find((m) => m.id === REVIEW_METHODS.STATIC_REVIEW);
+    expect(staticMethod.grounds).toEqual([...PANEL_LENSES]);
+  });
+  it('each perspective lens is grounded by exactly one automated method', () => {
+    expect(LENS_DEFAULT_METHOD[PERSPECTIVE_LENSES.A11Y]).toBe(REVIEW_METHODS.AXE_SCAN);
+    expect(LENS_DEFAULT_METHOD[PERSPECTIVE_LENSES.VISUAL]).toBe(REVIEW_METHODS.SCREENSHOT_DIFF);
+    expect(LENS_DEFAULT_METHOD[PERSPECTIVE_LENSES.PERF]).toBe(REVIEW_METHODS.LIGHTHOUSE);
+  });
+  it('every static lens defaults to the static reviewer', () => {
+    for (const lens of PANEL_LENSES) expect(LENS_DEFAULT_METHOD[lens]).toBe(REVIEW_METHODS.STATIC_REVIEW);
+  });
+  it('LENS_DEFAULT_METHOD is the exact inversion of METHOD_REGISTRY (no drift)', () => {
+    const rebuilt = {};
+    for (const m of METHOD_REGISTRY) for (const lens of m.grounds) rebuilt[lens] = m.id;
+    expect(LENS_DEFAULT_METHOD).toEqual(rebuilt);
+  });
+  it('every method that grounds a lens has a matching default entry (registry ⊆ index)', () => {
+    for (const m of METHOD_REGISTRY) {
+      for (const lens of m.grounds) expect(LENS_DEFAULT_METHOD[lens]).toBe(m.id);
+    }
+  });
+});
+
+describe('isUiPath / isPagePath / classifyTouchSet — the touch-set classifier (#2634)', () => {
+  it('classifies UI files (markup / styles / components) as UI', () => {
+    for (const p of ['src/x.css', 'demos/foo/index.html', 'src/_includes/card.njk', 'src/components/Btn.tsx', 'a/styles/theme.scss']) {
+      expect(isUiPath(p)).toBe(true);
+    }
+  });
+  it('does NOT classify a plain script / data / doc as UI', () => {
+    for (const p of ['scripts/lib/review-core.mjs', 'src/_data/blocks.json', 'docs/agent/x.md', 'a/util.ts']) {
+      expect(isUiPath(p)).toBe(false);
+    }
+  });
+  it('classifies whole pages (demos, html/njk) as pages — a page is always UI too', () => {
+    for (const p of ['demos/foo/index.html', 'src/pages/home.njk', 'a/b.html']) {
+      expect(isPagePath(p)).toBe(true);
+      expect(isUiPath(p)).toBe(true);
+    }
+  });
+  it('a lone stylesheet / component is UI but NOT a page', () => {
+    for (const p of ['src/components/Btn.tsx', 'a/styles/theme.css']) {
+      expect(isUiPath(p)).toBe(true);
+      expect(isPagePath(p)).toBe(false);
+    }
+  });
+  it('excludes never-rendered files (docs / data / test fixtures) even under a UI dir', () => {
+    // A doc, a data/config file, a fixture, or a snapshot sitting in a UI tree has nothing to render — it must
+    // not pull an a11y/visual/perf lens onto itself.
+    for (const p of ['demos/foo/README.md', 'src/components/__fixtures__/cases.ts', 'src/pages/data.json', 'src/components/Btn.test.ts']) {
+      expect(isUiPath(p)).toBe(false);
+      expect(isPagePath(p)).toBe(false);
+    }
+    expect(classifyTouchSet(['demos/foo/README.md', 'src/pages/data.json']).lenses).toEqual([]);
+  });
+  it('classifies a custom element authored as a plain .ts UNDER a UI dir as UI (no false negative)', () => {
+    // A Lit-style custom element (e.g. src/patterns/**/elements.ts) has a rendered surface even without a .tsx
+    // extension — it MUST earn a11y + visual. Extension-only classification would silently miss it.
+    for (const p of ['src/patterns/accordion/elements.ts', 'src/components/Grid.ts']) {
+      expect(isUiPath(p)).toBe(true);
+    }
+    expect(classifyTouchSet(['src/patterns/accordion/elements.ts']).lenses).toEqual([PERSPECTIVE_LENSES.A11Y, PERSPECTIVE_LENSES.VISUAL]);
+  });
+  it('a UI (non-page) diff earns a11y + visual, never perf', () => {
+    const r = classifyTouchSet(['src/components/Btn.tsx']);
+    expect(r.touchedUi).toBe(true);
+    expect(r.touchedPage).toBe(false);
+    expect(r.lenses).toEqual([PERSPECTIVE_LENSES.A11Y, PERSPECTIVE_LENSES.VISUAL]);
+  });
+  it('a page diff additionally earns perf', () => {
+    const r = classifyTouchSet(['demos/foo/index.html']);
+    expect(r.touchedPage).toBe(true);
+    expect(r.lenses).toEqual([PERSPECTIVE_LENSES.A11Y, PERSPECTIVE_LENSES.VISUAL, PERSPECTIVE_LENSES.PERF]);
+  });
+  it('a SCRIPT-only diff earns NO perspective lenses (the spec line)', () => {
+    const r = classifyTouchSet(['scripts/lib/review-core.mjs', 'scripts/lib/review-policy.mjs']);
+    expect(r.touchedUi).toBe(false);
+    expect(r.touchedPage).toBe(false);
+    expect(r.touchedScript).toBe(true);
+    expect(r.lenses).toEqual([]);
+  });
+  it('is total over junk input (empty / non-array) — never throws', () => {
+    expect(classifyTouchSet().lenses).toEqual([]);
+    expect(classifyTouchSet(null).lenses).toEqual([]);
+    expect(classifyTouchSet([null, '', undefined]).lenses).toEqual([]);
+  });
+});
+
+describe('resolveJuryPlan — care-level + touch-set → lens set → methods (#2634)', () => {
+  it('care `none` → an EMPTY jury, regardless of what the diff touched', () => {
+    const plan = resolveJuryPlan({ careLevel: 'none', changedFiles: ['demos/foo/index.html'] });
+    expect(plan.lenses).toEqual([]);
+    expect(plan.jurorsPerLens).toBe(0);
+    expect(plan.rounds).toBe(0);
+  });
+  it('a script-only diff at care `low` → the four static lenses, each grounded by the static reviewer', () => {
+    const plan = resolveJuryPlan({ careLevel: 'low', changedFiles: ['scripts/lib/x.mjs'] });
+    expect(plan.lenses.map((l) => l.lens)).toEqual([...PANEL_LENSES]);
+    for (const entry of plan.lenses) {
+      expect(entry.attachedBy).toBe('care');
+      expect(entry.methods).toEqual([REVIEW_METHODS.STATIC_REVIEW]);
+    }
+  });
+  it('a UI-file diff auto-pulls a11y + visual on top of the static lenses (the spec example)', () => {
+    const plan = resolveJuryPlan({ careLevel: 'low', changedFiles: ['src/components/Btn.tsx'] });
+    const lenses = plan.lenses.map((l) => l.lens);
+    expect(lenses).toEqual([...PANEL_LENSES, PERSPECTIVE_LENSES.A11Y, PERSPECTIVE_LENSES.VISUAL]);
+    const a11y = plan.lenses.find((l) => l.lens === PERSPECTIVE_LENSES.A11Y);
+    expect(a11y.attachedBy).toBe('touch-set');
+    expect(a11y.methods).toEqual([REVIEW_METHODS.AXE_SCAN]);
+    expect(plan.lenses.find((l) => l.lens === PERSPECTIVE_LENSES.VISUAL).methods).toEqual([REVIEW_METHODS.SCREENSHOT_DIFF]);
+  });
+  it('a whole-page diff additionally attaches perf grounded by Lighthouse', () => {
+    const plan = resolveJuryPlan({ careLevel: 'elevated', changedFiles: ['demos/foo/index.html'] });
+    const perf = plan.lenses.find((l) => l.lens === PERSPECTIVE_LENSES.PERF);
+    expect(perf).toBeDefined();
+    expect(perf.attachedBy).toBe('touch-set');
+    expect(perf.methods).toEqual([REVIEW_METHODS.LIGHTHOUSE]);
+  });
+  it('carries the rigor dial through from panelRigorForCareLevel (jurors + rounds + aggregation), unchanged', () => {
+    const plan = resolveJuryPlan({ careLevel: 'high', changedFiles: ['demos/foo/index.html'] });
+    expect(plan.jurorsPerLens).toBe(2);
+    expect(plan.rounds).toBe(3);
+    expect(plan.aggregation).toBe(AGGREGATION.DIVERSITY_SELECTION);
+  });
+  it('static (care) lenses are ordered before perspective (touch-set) lenses, no duplicates', () => {
+    const plan = resolveJuryPlan({ careLevel: 'low', changedFiles: ['demos/foo/index.html', 'scripts/x.mjs'] });
+    const lenses = plan.lenses.map((l) => l.lens);
+    expect(new Set(lenses).size).toBe(lenses.length);
+    const firstPerspective = lenses.findIndex((l) => Object.values(PERSPECTIVE_LENSES).includes(l));
+    const lastStatic = lenses.map((l) => PANEL_LENSES.includes(l)).lastIndexOf(true);
+    expect(lastStatic).toBeLessThan(firstPerspective);
+  });
+  it('delegates the unknown-care-level throw to panelRigorForCareLevel', () => {
+    expect(() => resolveJuryPlan({ careLevel: 'critical' })).toThrow(/unknown care-level/);
   });
 });
