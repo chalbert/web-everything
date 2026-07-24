@@ -1,9 +1,10 @@
 ---
+bornAs: xwrsimd
 kind: story
 size: 5
 parent: "2649"
 status: open
-blockedBy: ["xswr4dr", "xiiyuvd", "2633", "2634"]
+blockedBy: ["2653", "2654", "2633", "2634"]
 scope: ["we:scripts/lib/"]
 dateOpened: "2026-07-24"
 tags: []

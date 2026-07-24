@@ -1,9 +1,10 @@
 ---
+bornAs: x9pa439
 kind: story
 size: 5
 parent: "2649"
 status: open
-blockedBy: ["xswr4dr", "xwrsimd"]
+blockedBy: ["2653", "2655"]
 scope: ["we:scripts/lib/"]
 dateOpened: "2026-07-24"
 tags: []

@@ -1,9 +1,10 @@
 ---
+bornAs: xnthi3f
 kind: story
 size: 5
 parent: "2649"
 status: open
-blockedBy: ["x9pa439", "xqg3my2"]
+blockedBy: ["2656", "2657"]
 scope: ["we:skills-src/"]
 dateOpened: "2026-07-24"
 tags: []

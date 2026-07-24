@@ -1,9 +1,10 @@
 ---
+bornAs: xiiyuvd
 kind: story
 size: 3
 parent: "2649"
 status: open
-blockedBy: ["xswr4dr"]
+blockedBy: ["2653"]
 scope: ["we:scripts/lib/"]
 dateOpened: "2026-07-24"
 tags: []

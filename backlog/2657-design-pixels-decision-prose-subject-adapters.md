@@ -1,9 +1,10 @@
 ---
+bornAs: xqg3my2
 kind: story
 size: 5
 parent: "2649"
 status: open
-blockedBy: ["x9pa439"]
+blockedBy: ["2656"]
 scope: ["we:scripts/lib/"]
 dateOpened: "2026-07-24"
 tags: []
