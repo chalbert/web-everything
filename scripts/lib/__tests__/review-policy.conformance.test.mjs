@@ -24,10 +24,13 @@ import {
   REVIEW_POLICY,
   POLICY_THRESHOLDS,
   POLICY_REASON_TOKENS,
+  POLICY_CARE_JURY,
+  POLICY_CARE_BAND_NAMES,
   derivePolicyDisposition,
 } from '../review-policy.mjs';
-import { DEFAULT_THRESHOLDS } from '../review-escalation.mjs';
+import { DEFAULT_THRESHOLDS, CARE_LEVELS, CARE_LEVEL_ORDER } from '../review-escalation.mjs';
 import { REVIEW_REASONS, deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
+import { panelRigorForCareLevel, PANEL_LENSES } from '../jury-core.mjs';
 
 /** Every non-empty subset of `items` (the powerset minus the empty set), as arrays — deterministic, no random. */
 function nonEmptyPowerset(items) {
@@ -135,6 +138,52 @@ describe('decorated-string conformance — the drain\'s real reason strings deri
 // The contract's disposition outcomes match the ratified policy tokens (a guard that the CONTRACT itself still
 // encodes the #2445 two-tier flip: deadlock ⇒ human, gate-self/statute ⇒ converge-no-autoland, else auto-land).
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// CARE→JURY CONFORMANCE (#2633) — the care→jury table is the DATA form of the bands hardcoded today in
+// jury-core.mjs panelRigorForCareLevel. This is the same "contract single-sources the impl" bridge the
+// threshold block enforces: the contract declares the bands, and the impl must realize EXACTLY them. A re-tune
+// of the contract that jury-core does not (yet) mirror fails here, on the band that diverged — so "the policy
+// changed" stays a deterministic diff to the contract, and the two can never silently drift apart.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('care→jury conformance — the contract table single-sources jury-core panelRigorForCareLevel bands', () => {
+  it('the care→jury table loaded, is frozen, and carries prose (schema skeleton + prose layer, #2564)', () => {
+    expect(Object.isFrozen(POLICY_CARE_JURY)).toBe(true);
+    expect(POLICY_CARE_JURY.description.trim().length).toBeGreaterThan(0);
+    expect(POLICY_CARE_JURY.rosterTimingMode.description.trim().length).toBeGreaterThan(0);
+    for (const name of POLICY_CARE_BAND_NAMES) {
+      expect(POLICY_CARE_JURY.bands[name].description.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('the contract band names EXACTLY match the CARE_LEVELS enum, in least→most order (no vocabulary drift)', () => {
+    expect(POLICY_CARE_BAND_NAMES).toEqual([...CARE_LEVEL_ORDER]);
+    expect([...POLICY_CARE_BAND_NAMES].sort()).toEqual(Object.values(CARE_LEVELS).sort());
+    expect(Object.keys(POLICY_CARE_JURY.bands).sort()).toEqual(Object.values(CARE_LEVELS).sort());
+  });
+
+  it('the roster-timing mode (knob #4) is a valid, single value', () => {
+    expect(['up-front', 'incremental']).toContain(POLICY_CARE_JURY.rosterTimingMode.value);
+  });
+
+  it('every band lens is drawn from the real PANEL_LENSES set (no lens the panel cannot fan out)', () => {
+    for (const name of POLICY_CARE_BAND_NAMES) {
+      for (const lens of POLICY_CARE_JURY.bands[name].lenses) {
+        expect(PANEL_LENSES).toContain(lens);
+      }
+    }
+  });
+
+  it('each band conforms to panelRigorForCareLevel: lenses, jurorsPerLens, and roundCap===rounds match the impl', () => {
+    for (const name of POLICY_CARE_BAND_NAMES) {
+      const band = POLICY_CARE_JURY.bands[name];
+      const rigor = panelRigorForCareLevel(name);
+      expect(band.lenses).toEqual(rigor.lenses);
+      expect(band.jurorsPerLens).toBe(rigor.jurorsPerLens);
+      expect(band.roundCap).toBe(rigor.rounds);
+    }
+  });
+});
+
 describe('the contract encodes the ratified two-tier flip (#2445)', () => {
   it('deadlock reasons ⇒ human, never auto-land', () => {
     for (const token of REVIEW_POLICY.reasons.filter((r) => r.family === 'deadlock').map((r) => r.token)) {

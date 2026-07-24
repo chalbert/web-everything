@@ -81,5 +81,42 @@
         "description": "Any other sensitivity reason: agent-reviewable — a converged verdict lands. This is the catch-all for the remaining scored signals."
       }
     ]
+  },
+  "careJury": {
+    "description": "The care→jury table (#2633, foundation slice of the jury cluster #2636). For each advisory care band (the CARE_LEVELS enum none/low/elevated/high, single-sourced in review-escalation.mjs) this declares — as DATA — WHICH lenses fan out, HOW MANY jurors per lens, the per-band roundCap (the max editor↔reviewer round-trips that band runs before a deadlock hands to a human), and the OPTIONAL validation methods each lens may pull in. It single-sources the bands hardcoded today in jury-core.mjs panelRigorForCareLevel (roundCap here is that function's per-band `rounds`): the conformance suite pins the two equal, so a re-tune becomes one human-gated edit to THIS file, not scattered constants. FORWARD-FIT (#2651, ratified record 273a2dbd, FF3): each band is deliberately an OPEN object so it can LATER receive per-lens weights, a dissent-tolerance threshold, and a resolutionMode (accept-best ↔ present-unless-all-agree) — each with a per-decision override — as PURELY ADDITIVE keys. Those fields are NOT built in this foundation slice; the room is reserved here so adding them is an edit, never a migration (the shape validator tolerates unknown keys by construction). Aggregation stays diversity-selection (strictest-wins, never a vote — #2567); a future resolutionMode tunes accept-best vs present-unless-all-agree WITHIN that, it never reintroduces majority voting.",
+    "rosterTimingMode": {
+      "value": "up-front",
+      "description": "Knob #4 — WHEN the jury roster is chosen relative to the run. 'up-front' (today's behavior) picks the whole roster before any juror runs; the reserved alternative 'incremental' would add jurors as care escalates mid-run. One human-gated setting; a per-decision override may narrow it later."
+    },
+    "bands": {
+      "none": {
+        "lenses": [],
+        "jurorsPerLens": 0,
+        "roundCap": 0,
+        "validationMethods": {},
+        "description": "The PR did not escalate — no panel, nothing to review. Zero jurors, zero rounds."
+      },
+      "low": {
+        "lenses": ["correctness", "security", "simplicity", "standards-conformance"],
+        "jurorsPerLens": 1,
+        "roundCap": 1,
+        "validationMethods": {},
+        "description": "The baseline panel a routine spot-check earns — the full lens set, one juror each, a single editor↔reviewer round."
+      },
+      "elevated": {
+        "lenses": ["correctness", "security", "simplicity", "standards-conformance"],
+        "jurorsPerLens": 1,
+        "roundCap": 2,
+        "validationMethods": {},
+        "description": "A system-machinery / dismissed-finding change earns a second negotiation round; still one juror per lens over the full set."
+      },
+      "high": {
+        "lenses": ["correctness", "security", "simplicity", "standards-conformance"],
+        "jurorsPerLens": 2,
+        "roundCap": 3,
+        "validationMethods": {},
+        "description": "Maximum scrutiny (a gate-self/statute change, or several stacked scored signals) — three rounds and TWO jurors per lens, the diverse jury against shared blind spots."
+      }
+    }
   }
 }

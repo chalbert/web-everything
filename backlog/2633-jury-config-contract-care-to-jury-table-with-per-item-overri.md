@@ -4,9 +4,11 @@ kind: story
 size: 3
 buildQueued: true
 parent: "2636"
-status: open
+status: resolved
 scope: ["we:scripts/lib/review-policy.contract.json", "we:scripts/lib/review-policy.mjs"]
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-24"
+dateResolved: "2026-07-24"
 tags: []
 ---
 
