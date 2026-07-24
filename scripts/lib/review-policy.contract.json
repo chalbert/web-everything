@@ -1,7 +1,7 @@
 {
   "contract": "review-escalation-policy",
   "version": 1,
-  "summary": "The deterministic review-escalation policy as an explicit, machine-diffable CONTRACT (#2566, first concrete instance of spec-based programming #2564, under #2563 Fork 1). It declares — as DATA, not code — the three policy VALUES that used to live only as literals inside the derivation code: the rubric thresholds, the escalation-reason vocabulary with each reason's family + clearance, and the strictest-wins disposition decision table. The DERIVATION LOGIC (scoreEscalation, deriveReviewDisposition) stays in code and is proven to realize this table by the conformance suite (review-policy.conformance.test.mjs). Because every VALUE lives here and nowhere else, 'did the policy change?' collapses to 'did this file change?' — a deterministic yes/no. A diff to this file trips the trust-chain policy-tier path test and forces review:human; an implementation change that keeps the conformance suite green is agent-clearable (a 1-char threshold flip is a SPEC change here → human; a behaviour-preserving refactor of the branches is IMPL → agent). Per #2564 a spec is a schema skeleton + a first-class prose layer in one artifact: the machine-checkable shape is the fields below, the contract's MEANING is the 'description' prose on each entry.",
+  "summary": "The deterministic review-escalation policy as an explicit, machine-diffable CONTRACT (#2566, first concrete instance of spec-based programming #2564, under #2563 Fork 1). It declares — as DATA, not code — the policy VALUES that used to live only as literals inside the derivation code: the rubric thresholds, the escalation-reason vocabulary with each reason's family + clearance, the strictest-wins disposition decision table, and (added #2633, the foundation slice of the #2636 jury cluster) the care→jury TABLE that sizes the review jury to the change. The DERIVATION LOGIC (scoreEscalation, deriveReviewDisposition, panelRigorForCareLevel) stays in code and is proven to realize this data by the conformance suite (review-policy.conformance.test.mjs). Because every VALUE lives here and nowhere else, 'did the policy change?' collapses to 'did this file change?' — a deterministic yes/no. A diff to this file trips the trust-chain policy-tier path test and forces review:human; an implementation change that keeps the conformance suite green is agent-clearable (a 1-char threshold flip is a SPEC change here → human; a behaviour-preserving refactor of the branches is IMPL → agent). Per #2564 a spec is a schema skeleton + a first-class prose layer in one artifact: the machine-checkable shape is the fields below, the contract's MEANING is the 'description' prose on each entry.",
   "thresholds": {
     "description": "The rubric tuning knobs — loose to start, tightened from data. These are the ONLY home for the numbers; the code (scripts/lib/review-escalation.mjs DEFAULT_THRESHOLDS) imports them from here, so flipping one is necessarily a diff to THIS file → a human-gated spec change.",
     "diffLines": {
@@ -81,5 +81,57 @@
         "description": "Any other sensitivity reason: agent-reviewable — a converged verdict lands. This is the catch-all for the remaining scored signals."
       }
     ]
+  },
+  "careJury": {
+    "description": "The care→jury TABLE (#2633, the foundation slice of the #2636 jury cluster). Per advisory CARE BAND (none | low | elevated | high — the CARE_LEVELS enum in review-escalation.mjs, ordered least→most scrutiny) it declares the jury the drain's convergence loop fans out over a parked PR: `lenses` (which review perspectives fan out), `methods` (per fanned-out lens, which validation methods GROUND it), `jurorsPerLens` (independent jurors per lens — >1 is the diverse JURY a high-care change earns, aggregated by diversity-selection: the strictest juror wins, never a majority vote), and `roundCap` (the max editor↔reviewer round-trips this band spends before a deadlock hands to a human). This is the SINGLE, human-gated HOME for the bands that live today as literals in `panelRigorForCareLevel` (scripts/lib/jury-core.mjs) — the conformance suite proves the code's bands equal these, so re-tuning the review leash becomes one diff to THIS file, not scattered constants. The stateless roster recompute (S3 #2655) and the lens↔method split (#2634) READ this table; this slice lands the DATA + its validator + the pure per-item override merge, not the consumers. Today `methods` is the single baseline grounding (`panel-review`, the static diff reviewer of #2310/#2439); #2634 stands up the method REGISTRY and attaches the a11y / visual-vs-target / perf methods per touch-set, so the method vocabulary here is validated for SHAPE (non-empty tokens), not enum-frozen — #2634 must be free to add tokens. FORWARD-FIT (ratified #2649 record 273a2dbd, carried by #2651): each band is an OBJECT and `careJury` itself is an object, so per-lens WEIGHTS (a per-band `weights` map), a DISSENT-TOLERANCE threshold, and the accept-best ↔ present-unless-all-agree AGGREGATION setting (top-level `careJury` keys) can be ADDED later as purely additive fields — no migration, no restructure. Those three are DELIBERATELY NOT built here; #2651 owns them.",
+    "rosterTimingMode": {
+      "value": "bind-at-open",
+      "description": "Knob #4 — roster-timing strictness: WHEN the jury roster binds against the real diff. `bind-at-open` (the default) recomputes and binds the roster when the PR opens, so drift past any prepare-time pre-registration re-triggers alignment rather than silently reusing a stale roster; `bind-at-prepare` freezes a roster pre-registered at prepare time and treats later drift as an escalation. The ONE home for this knob so the resolver (S3 #2655) reads it, never a scattered literal."
+    },
+    "bands": {
+      "none": {
+        "lenses": [],
+        "methods": {},
+        "jurorsPerLens": 0,
+        "roundCap": 0,
+        "description": "The PR did not escalate — no jury convenes (nothing to review). Mirrors panelRigorForCareLevel('none')."
+      },
+      "low": {
+        "lenses": ["correctness", "security", "simplicity", "standards-conformance"],
+        "methods": {
+          "correctness": ["panel-review"],
+          "security": ["panel-review"],
+          "simplicity": ["panel-review"],
+          "standards-conformance": ["panel-review"]
+        },
+        "jurorsPerLens": 1,
+        "roundCap": 1,
+        "description": "The baseline panel a routine spot-check earns: the full lens set, one juror each, a single editor↔reviewer round, every lens grounded by the standard diff panel-review method."
+      },
+      "elevated": {
+        "lenses": ["correctness", "security", "simplicity", "standards-conformance"],
+        "methods": {
+          "correctness": ["panel-review"],
+          "security": ["panel-review"],
+          "simplicity": ["panel-review"],
+          "standards-conformance": ["panel-review"]
+        },
+        "jurorsPerLens": 1,
+        "roundCap": 2,
+        "description": "A system-machinery / dismissed-finding change gets a second negotiation round — same lenses, jurors, and methods as low, one extra round-trip to converge."
+      },
+      "high": {
+        "lenses": ["correctness", "security", "simplicity", "standards-conformance"],
+        "methods": {
+          "correctness": ["panel-review"],
+          "security": ["panel-review"],
+          "simplicity": ["panel-review"],
+          "standards-conformance": ["panel-review"]
+        },
+        "jurorsPerLens": 2,
+        "roundCap": 3,
+        "description": "Maximum scrutiny (a gate-self/statute change, or several stacked scored signals): two jurors per lens — the diverse jury against shared blind spots — and three rounds, the full lens set grounded by the baseline panel-review method."
+      }
+    }
   }
 }

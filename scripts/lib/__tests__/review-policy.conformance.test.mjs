@@ -25,9 +25,14 @@ import {
   POLICY_THRESHOLDS,
   POLICY_REASON_TOKENS,
   derivePolicyDisposition,
+  POLICY_CARE_JURY,
+  POLICY_ROSTER_TIMING_MODE,
+  deriveCareJuryRigor,
+  resolveCareJuryConfig,
+  CARE_JURY_OVERRIDE_KEYS,
 } from '../review-policy.mjs';
-import { DEFAULT_THRESHOLDS } from '../review-escalation.mjs';
-import { REVIEW_REASONS, deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
+import { DEFAULT_THRESHOLDS, CARE_LEVELS } from '../review-escalation.mjs';
+import { REVIEW_REASONS, deriveReviewDisposition, REVIEW_DISPOSITIONS, panelRigorForCareLevel } from '../review-core.mjs';
 
 /** Every non-empty subset of `items` (the powerset minus the empty set), as arrays — deterministic, no random. */
 function nonEmptyPowerset(items) {
@@ -150,5 +155,87 @@ describe('the contract encodes the ratified two-tier flip (#2445)', () => {
     for (const token of REVIEW_POLICY.reasons.filter((r) => r.family === 'sensitivity' && r.clearance === 'agent').map((r) => r.token)) {
       expect(derivePolicyDisposition({ reason: token })).toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// CARE→JURY TABLE CONFORMANCE (#2633) — the contract's care→jury bands are the SINGLE source for the rigor that
+// lives today as literals in jury-core.mjs's `panelRigorForCareLevel`. This proves the contract-derived oracle
+// (`deriveCareJuryRigor`) equals the impl's bands over EVERY care level, so #2655 can later rewire
+// `panelRigorForCareLevel` to import from the contract with no behaviour change — and so a re-tune of the bands
+// in the contract that the impl does NOT track turns this suite red (forcing the two back into agreement).
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('care→jury table conformance — the contract bands realize panelRigorForCareLevel (#2633)', () => {
+  it('the contract bands cover EXACTLY the CARE_LEVELS vocabulary (data ↔ enum never drift)', () => {
+    expect(Object.keys(POLICY_CARE_JURY.bands).sort()).toEqual(Object.values(CARE_LEVELS).sort());
+  });
+
+  it('for every care level the contract-derived rigor (lenses, rounds, jurorsPerLens) equals panelRigorForCareLevel', () => {
+    for (const careLevel of Object.values(CARE_LEVELS)) {
+      const impl = panelRigorForCareLevel(careLevel);
+      const oracle = deriveCareJuryRigor(careLevel);
+      expect(oracle.lenses).toEqual(impl.lenses);
+      expect(oracle.rounds).toBe(impl.rounds);
+      expect(oracle.jurorsPerLens).toBe(impl.jurorsPerLens);
+    }
+  });
+
+  it('every fanned-out lens in every band pulls in at least one grounding method (methods keys == lenses)', () => {
+    for (const band of Object.values(POLICY_CARE_JURY.bands)) {
+      expect(Object.keys(band.methods).sort()).toEqual([...band.lenses].sort());
+      for (const lens of band.lenses) {
+        expect(Array.isArray(band.methods[lens])).toBe(true);
+        expect(band.methods[lens].length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('the roster-timing mode is a declared knob with a value and prose', () => {
+    expect(typeof POLICY_ROSTER_TIMING_MODE).toBe('string');
+    expect(POLICY_ROSTER_TIMING_MODE.length).toBeGreaterThan(0);
+    expect(POLICY_CARE_JURY.rosterTimingMode.description.trim().length).toBeGreaterThan(0);
+  });
+
+  it('deriveCareJuryRigor throws on an unknown care band', () => {
+    expect(() => deriveCareJuryRigor('bogus')).toThrow(/unknown care band/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// PER-ITEM OVERRIDE (#2633) — an item file carries only OVERRIDES onto the human-gated default band (the `scope:`
+// pattern). resolveCareJuryConfig merges an allow-listed override and rejects anything else loudly.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('per-item override merge — resolveCareJuryConfig (#2633)', () => {
+  it('with no override returns the band defaults verbatim', () => {
+    const r = resolveCareJuryConfig(CARE_LEVELS.LOW);
+    expect(r.roundCap).toBe(POLICY_CARE_JURY.bands.low.roundCap);
+    expect(r.jurorsPerLens).toBe(POLICY_CARE_JURY.bands.low.jurorsPerLens);
+    expect(r.lenses).toEqual(POLICY_CARE_JURY.bands.low.lenses);
+  });
+
+  it('an allow-listed override replaces ONLY that knob', () => {
+    const r = resolveCareJuryConfig(CARE_LEVELS.LOW, { roundCap: 4 });
+    expect(r.roundCap).toBe(4);
+    expect(r.jurorsPerLens).toBe(POLICY_CARE_JURY.bands.low.jurorsPerLens); // untouched
+    expect(r.lenses).toEqual(POLICY_CARE_JURY.bands.low.lenses);            // untouched
+  });
+
+  it('every allow-listed key is overridable, and only those', () => {
+    for (const key of CARE_JURY_OVERRIDE_KEYS) {
+      expect(() => resolveCareJuryConfig(CARE_LEVELS.HIGH, { [key]: POLICY_CARE_JURY.bands.high[key] })).not.toThrow();
+    }
+  });
+
+  it('a non-overridable key is rejected loudly (the leash is not silently widened)', () => {
+    expect(() => resolveCareJuryConfig(CARE_LEVELS.LOW, { rosterTimingMode: 'x' })).toThrow(/non-overridable/);
+    expect(() => resolveCareJuryConfig(CARE_LEVELS.LOW, { bogus: 1 })).toThrow(/non-overridable/);
+  });
+
+  it('an unknown care band throws', () => {
+    expect(() => resolveCareJuryConfig('bogus')).toThrow(/unknown care band/);
+  });
+
+  it('the returned config is frozen (a resolved config is not a mutable handle onto the contract)', () => {
+    expect(Object.isFrozen(resolveCareJuryConfig(CARE_LEVELS.LOW))).toBe(true);
   });
 });
