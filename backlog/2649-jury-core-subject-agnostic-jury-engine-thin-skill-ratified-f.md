@@ -1,11 +1,11 @@
 ---
 bornAs: x1gvvdx
 kind: epic
-size: 13
 parent: "2636"
 status: open
 scope: ["we:scripts/lib/", "we:scripts/conveyor/", "we:skills-src/"]
 dateOpened: "2026-07-24"
+relatedReport: "reports/2026-07-24-backlog-split-analysis.md"
 tags: []
 ---
 
