@@ -40,6 +40,15 @@ const VALID_CLEARANCES = new Set(['human', 'agent']);
 const VALID_MODES = new Set(['converge', 'human']);
 const VALID_MATCH_KEYS = new Set(['family', 'clearance']);
 
+// The care→jury table's fixed vocabulary (#2633). These MIRROR enums that live in other modules — the advisory
+// care bands (`CARE_LEVELS`, review-escalation.mjs) and the panel lens set (`PANEL_LENSES`, jury-core.mjs) — but
+// are duplicated as bare literals HERE on purpose: review-policy.mjs is a trust-chain LEAF that imports only
+// fs/path (review-escalation → review-policy already; importing either back would cycle). The conformance suite
+// pins these literals equal to the real enums, so drift is caught mechanically rather than risked by a coupling.
+const CARE_BAND_NAMES = ['none', 'low', 'elevated', 'high'];
+const VALID_CARE_LENSES = new Set(['correctness', 'security', 'simplicity', 'standards-conformance']);
+const VALID_ROSTER_TIMING_MODES = new Set(['up-front', 'incremental']);
+
 /**
  * Validate the parsed contract's SHAPE (the meta-schema / static-conformance check, done in plain JS to stay
  * dependency-free). Throws on any structural defect so a broken contract can never load and silently mis-gate.
@@ -83,6 +92,43 @@ function validateContract(c) {
     const keys = Object.keys(rule.match);
     if (keys.length !== 1 || !VALID_MATCH_KEYS.has(keys[0])) fail('a precedence rule match must have exactly one of { family, clearance }');
   }
+
+  // careJury — the care→jury table (#2633). A rosterTimingMode knob + one band per care level, each declaring the
+  // lens fan-out, jurorsPerLens, roundCap, and optional per-lens validation methods. Validated for SHAPE only;
+  // UNKNOWN keys are tolerated on purpose so the ratified forward-fit (per-lens weights, dissent threshold,
+  // resolutionMode — #2651 / record 273a2dbd) is a purely-additive edit later, never a migration.
+  const cj = c.careJury;
+  if (!cj || typeof cj !== 'object') fail('missing careJury');
+  const rtm = cj.rosterTimingMode;
+  if (!rtm || typeof rtm !== 'object') fail('careJury.rosterTimingMode must be an object');
+  if (!VALID_ROSTER_TIMING_MODES.has(rtm.value)) fail(`careJury.rosterTimingMode.value must be one of ${[...VALID_ROSTER_TIMING_MODES].join(', ')}`);
+  if (typeof rtm.description !== 'string' || !rtm.description.trim()) fail('careJury.rosterTimingMode has no description prose');
+  const bands = cj.bands;
+  if (!bands || typeof bands !== 'object') fail('careJury.bands must be an object');
+  for (const name of CARE_BAND_NAMES) {
+    const band = bands[name];
+    if (!band || typeof band !== 'object') fail(`careJury.bands missing band "${name}"`);
+    if (!Array.isArray(band.lenses)) fail(`careJury band "${name}".lenses must be an array`);
+    for (const lens of band.lenses) {
+      if (!VALID_CARE_LENSES.has(lens)) fail(`careJury band "${name}" has invalid lens "${lens}"`);
+    }
+    if (new Set(band.lenses).size !== band.lenses.length) fail(`careJury band "${name}".lenses has duplicates`);
+    if (!Number.isInteger(band.jurorsPerLens) || band.jurorsPerLens < 0) fail(`careJury band "${name}".jurorsPerLens must be a non-negative integer`);
+    if (!Number.isInteger(band.roundCap) || band.roundCap < 0) fail(`careJury band "${name}".roundCap must be a non-negative integer`);
+    if (typeof band.description !== 'string' || !band.description.trim()) fail(`careJury band "${name}" has no description prose`);
+    // validationMethods is OPTIONAL. When present it maps lens → array of non-empty method labels; every keyed
+    // lens must be one this band actually fans out (a method for a lens that never runs is a spec error).
+    if (band.validationMethods !== undefined) {
+      const vm = band.validationMethods;
+      if (!vm || typeof vm !== 'object' || Array.isArray(vm)) fail(`careJury band "${name}".validationMethods must be an object`);
+      for (const [lens, methods] of Object.entries(vm)) {
+        if (!band.lenses.includes(lens)) fail(`careJury band "${name}".validationMethods names lens "${lens}" not in this band's lenses`);
+        if (!Array.isArray(methods) || methods.some((m) => typeof m !== 'string' || !m.trim())) {
+          fail(`careJury band "${name}".validationMethods["${lens}"] must be an array of non-empty strings`);
+        }
+      }
+    }
+  }
   return c;
 }
 
@@ -93,6 +139,16 @@ export const REVIEW_POLICY = deepFreeze(validateContract(JSON.parse(readFileSync
 export const POLICY_THRESHOLDS = Object.freeze({
   diffLines: REVIEW_POLICY.thresholds.diffLines.value,
 });
+
+/** The care→jury table (#2633) as a derived, deep-frozen constant — the single source a future jury-roster
+ *  consumer imports for the per-band lens fan-out / jurorsPerLens / roundCap (today's `panelRigorForCareLevel`
+ *  bands live in jury-core.mjs and the conformance suite pins them equal to this table). Includes the
+ *  `rosterTimingMode` knob (#4) and the reserved forward-fit room (#2651). Already frozen via REVIEW_POLICY. */
+export const POLICY_CARE_JURY = REVIEW_POLICY.careJury;
+
+/** The care band names in least→most order (`none` → `high`) — mirrors CARE_LEVEL_ORDER (review-escalation.mjs),
+ *  pinned equal by the conformance suite. Frozen. */
+export const POLICY_CARE_BAND_NAMES = Object.freeze([...CARE_BAND_NAMES]);
 
 /** token → { family, clearance }, for O(1) classification lookups. */
 const REASON_META = new Map(REVIEW_POLICY.reasons.map((r) => [r.token, { family: r.family, clearance: r.clearance }]));

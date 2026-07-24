@@ -2,7 +2,7 @@
 bornAs: xsnpomx
 kind: story
 size: 5
-parent: "2633"
+parent: "2636"
 status: open
 scope: ["we:scripts/lib/"]
 dateOpened: "2026-07-24"
