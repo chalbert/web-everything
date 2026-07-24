@@ -42,6 +42,7 @@ import {
   POLICY_REASON_TOKENS,
   POLICY_REASONS_BY_FAMILY,
   POLICY_HUMAN_SENSITIVITY_REASONS,
+  POLICY_CARE_JURY,
 } from './review-policy.mjs';
 
 // #2567 — the advisory CARE-LEVEL derivation is single-sourced in review-escalation.mjs (where it is derived
@@ -451,6 +452,232 @@ export function careLevelFromReasons(reasons) {
  */
 export function panelRigorFromReasons(reasons) {
   return panelRigorForCareLevel(careLevelFromReasons(reasons));
+}
+
+/**
+ * ============================================================================
+ * LENS vs METHOD — the perspective / grounding split + the resolver (#2634).
+ * ============================================================================
+ *
+ * A juror is `lens + method + model` (epic #2636). Until now the two were CONFLATED: every `PANEL_LENSES` entry
+ * (correctness / security / simplicity / standards-conformance) was implicitly grounded by the ONE method a
+ * static reviewer subagent uses — reading the diff text. That is fine for those four, but it hides the real
+ * shape: a LENS is a PERSPECTIVE to judge from (is this accessible? does it match the target design? is it fast
+ * enough?), and a METHOD is the TOOL that grounds that perspective in evidence (an axe scan, a screenshot-diff
+ * against a target, a Lighthouse run, a reviewer reading the diff). Splitting them makes the config composable:
+ * the same lens can be grounded by a different method, and a new method can serve an existing lens, without
+ * re-deriving either. This section stands up (1) the METHOD REGISTRY, (2) the extra PERSPECTIVE LENSES a UI diff
+ * earns, and (3) the RESOLVER that maps `care-level + the diff's touch-set → the lens set → the method(s) each
+ * lens attaches`. Aggregation is UNCHANGED — the resolved lenses still reduce by `DIVERSITY_SELECTION` (strictest
+ * juror wins, never a vote); this slice only decides WHO is on the jury and WHAT grounds each seat, not how their
+ * verdicts combine.
+ *
+ * This is the review-DIFF layer: the four static lenses live subject-agnostically in jury-core.mjs (`PANEL_LENSES`),
+ * but the perspective lenses here (a11y / visual-vs-target / perf) and the touch-set classification are specific to
+ * judging a UI code diff, so they live in review-core.mjs alongside the mandate builders. The care→METHOD mapping
+ * is DATA in the #2633 contract (`POLICY_CARE_JURY.bands[band].validationMethods`) — the resolver reads it as the
+ * per-band override, falling back to each lens's default grounding method when a band declares none (all bands
+ * declare none today; the room is reserved). The care→RIGOR half (how many jurors, how many rounds, which static
+ * lenses) is reused from jury-core's `panelRigorForCareLevel`, never re-derived here.
+ */
+
+/** The METHODS that can GROUND a lens (#2634) — the tool that produces the evidence a juror judges on. A frozen
+ *  enum so every consumer names a method once. `static-review` is the existing grounding (a fresh-context
+ *  reviewer subagent reads the diff); the other three are the automated UI-evidence tools a perspective lens pulls in. */
+export const REVIEW_METHODS = Object.freeze({
+  STATIC_REVIEW: 'static-review',     // a reviewer subagent reads the diff text and reports findings (the #2311 reviewer)
+  AXE_SCAN: 'axe-scan',               // an automated accessibility scan (axe-core) over the rendered UI
+  SCREENSHOT_DIFF: 'screenshot-diff', // a screenshot of the rendered UI compared against a target / baseline image
+  LIGHTHOUSE: 'lighthouse',           // a Lighthouse performance audit of the rendered page
+});
+
+/** The PERSPECTIVE lenses a UI diff earns on top of the four static `PANEL_LENSES` (#2634). These are review-DIFF
+ *  specific (they only make sense for a rendered UI), so they live here, not in jury-core's subject-agnostic set.
+ *  Each is grounded by a distinct automated method (see `LENS_DEFAULT_METHOD`), never by the static reviewer. */
+export const PERSPECTIVE_LENSES = Object.freeze({
+  A11Y: 'a11y',
+  VISUAL: 'visual-vs-target',
+  PERF: 'perf',
+});
+
+/**
+ * The method registry (#2634) — each method declares WHICH lenses it can ground, plus a human label. Pure data.
+ * The one static reviewer grounds all four `PANEL_LENSES`; each automated tool grounds exactly one perspective
+ * lens. `LENS_DEFAULT_METHOD` (below) is the inverted lens→method index derived from this, so the two never drift.
+ */
+export const METHOD_REGISTRY = Object.freeze([
+  Object.freeze({
+    id: REVIEW_METHODS.STATIC_REVIEW,
+    label: 'static reviewer (reads the diff)',
+    grounds: Object.freeze([...PANEL_LENSES]),
+  }),
+  Object.freeze({
+    id: REVIEW_METHODS.AXE_SCAN,
+    label: 'axe accessibility scan',
+    grounds: Object.freeze([PERSPECTIVE_LENSES.A11Y]),
+  }),
+  Object.freeze({
+    id: REVIEW_METHODS.SCREENSHOT_DIFF,
+    label: 'screenshot-diff against a target',
+    grounds: Object.freeze([PERSPECTIVE_LENSES.VISUAL]),
+  }),
+  Object.freeze({
+    id: REVIEW_METHODS.LIGHTHOUSE,
+    label: 'Lighthouse performance audit',
+    grounds: Object.freeze([PERSPECTIVE_LENSES.PERF]),
+  }),
+]);
+
+/** lens → its DEFAULT grounding method id, inverted from `METHOD_REGISTRY` so the two are single-sourced. A lens
+ *  the resolver attaches always has a default here; the contract's per-band `validationMethods` can OVERRIDE it. */
+export const LENS_DEFAULT_METHOD = Object.freeze(
+  METHOD_REGISTRY.reduce((acc, m) => {
+    for (const lens of m.grounds) acc[lens] = m.id;
+    return acc;
+  }, {}),
+);
+
+// The touch-set classifier's file patterns (#2634). A UI diff (markup / styles / component / element files) earns
+// the a11y + visual perspective lenses; a PAGE-level diff (a whole renderable page) additionally earns the perf
+// lens (a lone component or stylesheet is judged visually, but only a full page has a Lighthouse-measurable load);
+// a script-only diff earns NEITHER — grounded by the static lenses alone. That is exactly the "a UI-file diff
+// auto-pulls a11y + visual; a script diff does not" spec line.
+//
+// A file is UI by its EXTENSION (a renderable markup/style file) OR by living in a UI DIRECTORY. The directory
+// signal is what catches a custom element authored as a plain `.ts` (a Lit-style element, e.g.
+// `src/patterns/**/elements.ts`): it earns the same lenses its `.tsx` sibling would, where extension-alone would
+// MISS it — an UNSAFE false negative on a real UI change. Over-attaching a lens is the safe direction (a lens is
+// only a review perspective, and this slice merely PLANS the jury — no method runs here), the same "over-escalate
+// rather than under" posture `isBlastRadiusPath` takes. But files that NEVER render — docs, data, and test
+// scaffolding — are excluded (`NON_UI`) so a README or a fixtures table sitting in a UI tree does not pull an
+// a11y/perf lens onto something with nothing to render (the absurd over-attachment a bare directory rule causes).
+// KNOWN GAP: a UI component authored as a `.ts` OUTSIDE any UI-named directory is not detectable from its path
+// alone, so it is treated as a script — best-effort by design; a later slice may inspect content to close it.
+const UI_EXTENSIONS = /\.(css|scss|sass|less|html?|njk|tsx|jsx|svelte|vue)$/i;
+const UI_DIR_SEGMENTS = /(^|\/)(components?|elements?|patterns?|demos?|pages?|styles?|stories|ui)(\/|$)/i;
+const PAGE_EXTENSIONS = /\.(html?|njk)$/i;
+const PAGE_DIR_SEGMENTS = /(^|\/)(demos?|pages?)(\/|$)/i;
+// Files that never render even when they sit in a UI tree — docs, config/data, and test scaffolding. Matched FIRST
+// so they are excluded from BOTH the UI and page classification regardless of directory.
+const NON_UI = /\.(md|markdown|json|ya?ml|txt|lock|snap)$|(^|\/)__(fixtures|snapshots|tests)__(\/|$)|\.(test|spec)\.[a-z0-9]+$/i;
+
+/** Is this repo-relative path a UI surface (markup / styles / component / element)? Pure. A renderable extension,
+ *  OR a file under a UI directory (so a `.ts` custom element counts) — minus the never-rendered `NON_UI` files. */
+export function isUiPath(path) {
+  const p = String(path || '');
+  if (NON_UI.test(p)) return false;
+  return UI_EXTENSIONS.test(p) || UI_DIR_SEGMENTS.test(p);
+}
+
+/** Is this repo-relative path a whole renderable PAGE (a demo / page — html/njk, or code under a page dir)? Pure.
+ *  A page is always UI too. Same `NON_UI` exclusion as `isUiPath`. */
+export function isPagePath(path) {
+  const p = String(path || '');
+  if (NON_UI.test(p)) return false;
+  return PAGE_EXTENSIONS.test(p) || PAGE_DIR_SEGMENTS.test(p);
+}
+
+/**
+ * Classify a diff's TOUCH-SET (#2634) — the changed-file list — into the perspective lenses it earns. Pure. A UI
+ * file pulls a11y + visual-vs-target; a page file additionally pulls perf; a script-only diff pulls none. Returns
+ * both the boolean touch flags (for callers that want the raw signal) and the ordered `lenses` those flags imply.
+ * @param {string[]} changedFiles - repo-relative paths of the diff's net changed files.
+ * @returns {{touchedUi: boolean, touchedPage: boolean, touchedScript: boolean, lenses: string[]}}
+ */
+export function classifyTouchSet(changedFiles = []) {
+  const files = (Array.isArray(changedFiles) ? changedFiles : []).filter(Boolean).map(String);
+  const touchedUi = files.some(isUiPath);
+  const touchedPage = files.some(isPagePath);
+  // A file that is neither UI nor page is a plain script/data/doc — the "script diff" case.
+  const touchedScript = files.some((f) => !isUiPath(f) && !isPagePath(f));
+  const lenses = [];
+  if (touchedUi) lenses.push(PERSPECTIVE_LENSES.A11Y, PERSPECTIVE_LENSES.VISUAL);
+  if (touchedPage) lenses.push(PERSPECTIVE_LENSES.PERF);
+  return { touchedUi, touchedPage, touchedScript, lenses };
+}
+
+/** The known method id space — every value of `REVIEW_METHODS`, as a Set for O(1) membership. Derived from
+ *  `REVIEW_METHODS` so the two never drift. `methodsForLens` validates each band override against this so the
+ *  `methods` it returns is always ONE consistent id space a `METHOD_REGISTRY`-by-id lookup can resolve. */
+const KNOWN_METHOD_IDS = new Set(Object.values(REVIEW_METHODS));
+
+/** The method(s) that ground one lens under one care band (#2634): the band's contract-declared `validationMethods`
+ *  override if present (the care→method mapping this slice depends on), else the lens's default grounding method.
+ *  Pure. Returns a fresh array so a caller can never mutate the frozen contract or the default index. Exported for
+ *  direct unit testing / composition (its sibling touch-set helpers `isUiPath`/`isPagePath`/`classifyTouchSet` are
+ *  exported too).
+ *
+ *  Every override entry MUST be a known `REVIEW_METHODS` id — validated here, throwing on an unknown id. Without
+ *  this, a band could carry an arbitrary override string on one lens (e.g. `'pair-review'`) while every other lens
+ *  carries a real method id like `'static-review'`, and a downstream consumer resolving `methods` against
+ *  `METHOD_REGISTRY` by id would SILENTLY miss the overridden lens. Throwing keeps `methods` a single consistent id
+ *  space. All shipped bands declare `validationMethods: {}`, so this path is dormant today; it hardens the reserved
+ *  override for when a band populates it.
+ *  @param {string} lens
+ *  @param {{validationMethods?: Object<string, string[]>}} [band]
+ *  @returns {string[]} */
+export function methodsForLens(lens, band) {
+  const override = band && band.validationMethods && band.validationMethods[lens];
+  if (Array.isArray(override) && override.length) {
+    const unknown = override.filter((m) => !KNOWN_METHOD_IDS.has(m));
+    if (unknown.length) {
+      throw new Error(
+        `methodsForLens: lens "${lens}" declares unknown override method id(s): ${unknown.join(', ')} — every `
+        + `validationMethods entry must be a known REVIEW_METHODS value (${Object.values(REVIEW_METHODS).join(', ')})`,
+      );
+    }
+    return [...override];
+  }
+  const fallback = LENS_DEFAULT_METHOD[lens];
+  return fallback ? [fallback] : [];
+}
+
+/**
+ * THE RESOLVER (#2634) — `care-level + the diff's touch-set → the lens set → the method(s) each lens attaches`.
+ * Pure. This is the prerequisite the jury-core resolver spine (#2655) and the adapter contract (S4) build on: it
+ * decides WHO sits on the jury (which lenses) and WHAT grounds each seat (which methods), leaving the rigor knobs
+ * (jurors-per-lens, rounds) to jury-core's `panelRigorForCareLevel` and the many-verdicts-to-one reduction to
+ * `derivePanelVerdict` (aggregation is UNCHANGED — always `DIVERSITY_SELECTION`).
+ *
+ * Two inputs, composed:
+ *   • the CARE band (`panelRigorForCareLevel(careLevel)`, jury-core) supplies the base STATIC lens set
+ *     (`PANEL_LENSES` for low/elevated/high, empty for `none`) plus the rigor dial — reused, never re-derived.
+ *   • the TOUCH-SET (`classifyTouchSet(changedFiles)`) supplies the extra PERSPECTIVE lenses the diff earns (a UI
+ *     diff → a11y + visual; a page diff → + perf; a script-only diff → none).
+ * When the care band is `none` (the PR did not escalate) there is no panel at all, so the resolver returns an
+ * empty lens set REGARDLESS of the touch-set — nothing to review means no jury, even for a UI change.
+ *
+ * Each resolved lens carries `attachedBy` (`care` = from the care band's static set; `touch-set` = earned by what
+ * the diff touches) so a downstream consumer (#2655, the console) keeps the provenance. Lenses are de-duplicated
+ * with the care band winning; static lenses are ordered first (in `PANEL_LENSES` order), then perspective lenses.
+ *
+ * @param {{careLevel: string, changedFiles?: string[]}} o - `careLevel` is a `CARE_LEVELS` value; `changedFiles`
+ *   is the diff's net changed-file set (repo-relative paths). Delegates the unknown-care-level throw to
+ *   `panelRigorForCareLevel`.
+ * @returns {{careLevel: string, jurorsPerLens: number, rounds: number, aggregation: string,
+ *   lenses: Array<{lens: string, methods: string[], attachedBy: 'care'|'touch-set'}>}}
+ */
+export function resolveJuryPlan({ careLevel, changedFiles = [] } = {}) {
+  const rigor = panelRigorForCareLevel(careLevel); // throws on an unknown care-level; supplies base lenses + dial
+  const band = POLICY_CARE_JURY.bands[careLevel];
+  // No panel (care `none`) → empty jury, whatever the diff touched. The touch-set only ADDS perspective lenses to
+  // an existing panel; it never conjures one where the PR did not escalate.
+  if (!rigor.lenses.length) {
+    return { careLevel, jurorsPerLens: rigor.jurorsPerLens, rounds: rigor.rounds, aggregation: rigor.aggregation, lenses: [] };
+  }
+  const seen = new Set();
+  const entries = [];
+  for (const lens of rigor.lenses) {           // the static care-band lenses, first and in PANEL_LENSES order
+    if (seen.has(lens)) continue;
+    seen.add(lens);
+    entries.push({ lens, methods: methodsForLens(lens, band), attachedBy: 'care' });
+  }
+  for (const lens of classifyTouchSet(changedFiles).lenses) { // perspective lenses earned by the touch-set
+    if (seen.has(lens)) continue;              // care band wins any (today impossible) overlap
+    seen.add(lens);
+    entries.push({ lens, methods: methodsForLens(lens, band), attachedBy: 'touch-set' });
+  }
+  return { careLevel, jurorsPerLens: rigor.jurorsPerLens, rounds: rigor.rounds, aggregation: rigor.aggregation, lenses: entries };
 }
 
 /**
