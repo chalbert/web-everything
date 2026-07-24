@@ -596,12 +596,38 @@ export function classifyTouchSet(changedFiles = []) {
   return { touchedUi, touchedPage, touchedScript, lenses };
 }
 
+/** The known method id space — every value of `REVIEW_METHODS`, as a Set for O(1) membership. Derived from
+ *  `REVIEW_METHODS` so the two never drift. `methodsForLens` validates each band override against this so the
+ *  `methods` it returns is always ONE consistent id space a `METHOD_REGISTRY`-by-id lookup can resolve. */
+const KNOWN_METHOD_IDS = new Set(Object.values(REVIEW_METHODS));
+
 /** The method(s) that ground one lens under one care band (#2634): the band's contract-declared `validationMethods`
  *  override if present (the care→method mapping this slice depends on), else the lens's default grounding method.
- *  Pure. Returns a fresh array so a caller can never mutate the frozen contract or the default index. */
-function methodsForLens(lens, band) {
+ *  Pure. Returns a fresh array so a caller can never mutate the frozen contract or the default index. Exported for
+ *  direct unit testing / composition (its sibling touch-set helpers `isUiPath`/`isPagePath`/`classifyTouchSet` are
+ *  exported too).
+ *
+ *  Every override entry MUST be a known `REVIEW_METHODS` id — validated here, throwing on an unknown id. Without
+ *  this, a band could carry an arbitrary override string on one lens (e.g. `'pair-review'`) while every other lens
+ *  carries a real method id like `'static-review'`, and a downstream consumer resolving `methods` against
+ *  `METHOD_REGISTRY` by id would SILENTLY miss the overridden lens. Throwing keeps `methods` a single consistent id
+ *  space. All shipped bands declare `validationMethods: {}`, so this path is dormant today; it hardens the reserved
+ *  override for when a band populates it.
+ *  @param {string} lens
+ *  @param {{validationMethods?: Object<string, string[]>}} [band]
+ *  @returns {string[]} */
+export function methodsForLens(lens, band) {
   const override = band && band.validationMethods && band.validationMethods[lens];
-  if (Array.isArray(override) && override.length) return [...override];
+  if (Array.isArray(override) && override.length) {
+    const unknown = override.filter((m) => !KNOWN_METHOD_IDS.has(m));
+    if (unknown.length) {
+      throw new Error(
+        `methodsForLens: lens "${lens}" declares unknown override method id(s): ${unknown.join(', ')} — every `
+        + `validationMethods entry must be a known REVIEW_METHODS value (${Object.values(REVIEW_METHODS).join(', ')})`,
+      );
+    }
+    return [...override];
+  }
   const fallback = LENS_DEFAULT_METHOD[lens];
   return fallback ? [fallback] : [];
 }

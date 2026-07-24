@@ -55,6 +55,7 @@ import {
   isPagePath,
   classifyTouchSet,
   resolveJuryPlan,
+  methodsForLens,
 } from '../review-core.mjs';
 
 describe('normalizeFinding', () => {
@@ -936,5 +937,30 @@ describe('resolveJuryPlan — care-level + touch-set → lens set → methods (#
   });
   it('delegates the unknown-care-level throw to panelRigorForCareLevel', () => {
     expect(() => resolveJuryPlan({ careLevel: 'critical' })).toThrow(/unknown care-level/);
+  });
+});
+
+describe('methodsForLens — band override validated against the REVIEW_METHODS id space (#2634)', () => {
+  it('no band / empty validationMethods → the lens default grounding method', () => {
+    expect(methodsForLens('correctness')).toEqual([REVIEW_METHODS.STATIC_REVIEW]);
+    expect(methodsForLens('correctness', {})).toEqual([REVIEW_METHODS.STATIC_REVIEW]);
+    expect(methodsForLens('correctness', { validationMethods: {} })).toEqual([REVIEW_METHODS.STATIC_REVIEW]);
+    expect(methodsForLens(PERSPECTIVE_LENSES.A11Y)).toEqual([REVIEW_METHODS.AXE_SCAN]);
+  });
+  it('a VALID override (all known REVIEW_METHODS ids) replaces the default, returning a fresh array', () => {
+    const band = { validationMethods: { correctness: [REVIEW_METHODS.STATIC_REVIEW, REVIEW_METHODS.AXE_SCAN] } };
+    const methods = methodsForLens('correctness', band);
+    expect(methods).toEqual([REVIEW_METHODS.STATIC_REVIEW, REVIEW_METHODS.AXE_SCAN]);
+    // fresh array — mutating the result never reaches back into the contract
+    methods.push('x');
+    expect(band.validationMethods.correctness).toEqual([REVIEW_METHODS.STATIC_REVIEW, REVIEW_METHODS.AXE_SCAN]);
+  });
+  it('an UNKNOWN override id throws — keeps `methods` a single consistent REVIEW_METHODS id space', () => {
+    const band = { validationMethods: { correctness: ['pair-review'] } };
+    expect(() => methodsForLens('correctness', band)).toThrow(/unknown override method id/);
+    expect(() => methodsForLens('correctness', band)).toThrow(/pair-review/);
+    // a mix of one valid + one unknown still throws (names the unknown one)
+    expect(() => methodsForLens('correctness', { validationMethods: { correctness: [REVIEW_METHODS.STATIC_REVIEW, 'bogus'] } }))
+      .toThrow(/bogus/);
   });
 });
