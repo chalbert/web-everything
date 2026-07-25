@@ -311,6 +311,90 @@ export function producerReviewLabel({ escalate, humanRequired = false } = {}) {
 }
 
 /**
+ * The ROSTER-TIMING strictness values (#2635 / #2633 knob #4). Mirrors the value space of the care→jury
+ * contract's `careJury.rosterTimingMode` (`./review-policy.contract.json`) — kept here, on the leaf the producer
+ * (`pr-land.mjs`) and `reconcileRoster` below both read, so the two never drift on what a mode means:
+ *   • `up-front`    — the STRICT default: the whole roster is bound before any juror runs, so a real-diff
+ *                     expansion PAST what was pre-registered at prepare is drift that re-triggers HUMAN alignment
+ *                     (never a silent rebind).
+ *   • `incremental` — the reserved lenient alternative: jurors are added as care escalates mid-run, so an
+ *                     expansion binds silently (no re-alignment).
+ */
+export const ROSTER_TIMING = Object.freeze({ UP_FRONT: 'up-front', INCREMENTAL: 'incremental' });
+
+/** Normalize a lens list to unique, non-empty, trimmed strings, preserving first-seen order. Pure, internal. */
+function normalizeLenses(list) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of Array.isArray(list) ? list : []) {
+    if (typeof raw !== 'string') continue;
+    const lens = raw.trim();
+    if (!lens || seen.has(lens)) continue;
+    seen.add(lens);
+    out.push(lens);
+  }
+  return out;
+}
+
+/**
+ * #2635 — BIND and RECONCILE the jury roster at PR-open against the REAL diff. Pure.
+ *
+ * At prepare, a jury is pre-registered from the item's predicted scope (its charter). At PR-open the roster is
+ * RE-picked from the real diff (`recomputed` — the caller runs the same cheap `scoreEscalation` care→roster pass
+ * over the ACTUAL `changedFiles`), because the predicted scope often misses an axis the real diff touches (the
+ * "a small script fix that moves a UI file needs the a11y + visual jurors nobody picked" case). This reconciles
+ * the pre-registered set against that recompute:
+ *
+ *   • `effective` — the UNION of the pre-registered lenses and the recomputed lenses (pre-registered first, in
+ *     order, then any lens the real diff newly earned). A pre-registered seat is NEVER silently dropped; the real
+ *     diff only ever ADDS perspective. `removed` (pre-registered lenses the recompute no longer earns) is reported
+ *     for the ledger but stays SEATED in `effective` — losing a charter-registered juror is not this step's call.
+ *   • `added` — the recomputed lenses NOT in the pre-registered set: the expansion past registration.
+ *   • `expanded` — `added.length > 0`.
+ *   • `humanAlignmentRequired` — per the settled default, an expansion past pre-registration under the STRICT
+ *     `up-front` timing re-triggers HUMAN alignment (not a silent rebind), so a human re-confirms a roster the
+ *     charter did not anticipate. Under the lenient `incremental` timing the expansion binds silently, so it is
+ *     false. The caller folds this into the producer review label (→ `review:human`) and trails `reasons` in the
+ *     jury ledger / PR body.
+ *
+ * NO pre-registered set (`preRegistered == null`) is the pre-charter case (before a prepare-time slice records a
+ * roster to reconcile against): there is nothing to have drifted past, so this is a pure BIND — `effective` =
+ * recomputed, `expanded` = false, no re-alignment. The re-trigger is dormant until a pre-registered roster exists.
+ *
+ * @param {{preRegistered?: string[]|null, recomputed?: string[], mode?: string}} o
+ * @returns {{effective: string[], added: string[], removed: string[], expanded: boolean,
+ *   humanAlignmentRequired: boolean, mode: string, reasons: string[]}}
+ */
+export function reconcileRoster({ preRegistered = null, recomputed = [], mode = ROSTER_TIMING.UP_FRONT } = {}) {
+  const recomputedLenses = normalizeLenses(recomputed);
+  const timing = mode === ROSTER_TIMING.INCREMENTAL ? ROSTER_TIMING.INCREMENTAL : ROSTER_TIMING.UP_FRONT;
+
+  // No pre-registered roster to reconcile against — a pure bind of the real-diff roster (nothing drifted past).
+  if (preRegistered == null) {
+    return { effective: recomputedLenses, added: [], removed: [], expanded: false, humanAlignmentRequired: false, mode: timing, reasons: [] };
+  }
+
+  const preLenses = normalizeLenses(preRegistered);
+  const preSet = new Set(preLenses);
+  const recSet = new Set(recomputedLenses);
+  const added = recomputedLenses.filter((l) => !preSet.has(l));
+  const removed = preLenses.filter((l) => !recSet.has(l));
+  // The union: pre-registered seats first (never dropped), then the lenses the real diff newly earned.
+  const effective = [...preLenses, ...added];
+  const expanded = added.length > 0;
+  const humanAlignmentRequired = expanded && timing === ROSTER_TIMING.UP_FRONT;
+  const reasons = [];
+  if (expanded) {
+    reasons.push(
+      humanAlignmentRequired
+        ? `jury roster expanded past pre-registration (added ${added.join(', ')}) — re-triggering human alignment (${timing})`
+        : `jury roster expanded past pre-registration (added ${added.join(', ')}) — bound incrementally without re-alignment`,
+    );
+  }
+  return { effective, added, removed, expanded, humanAlignmentRequired, mode: timing, reasons };
+}
+
+/**
  * Couples inherit the STRICTEST member (#2171 / #2138 Fork 5): if EITHER PR of an impl+WE couple escalates,
  * BOTH wait — impl-first/WE-last order cannot tolerate half a couple merging. `humanRequired` inherits the same
  * way (#2285 v1): if either half edits the gate's own code, the whole couple needs a human. Pure.
