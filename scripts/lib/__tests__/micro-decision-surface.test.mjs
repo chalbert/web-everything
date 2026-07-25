@@ -48,6 +48,30 @@ function dissentingLedger() {
   return [rosterEvent(jurors), ...verdicts];
 }
 
+/**
+ * A WEIGHTED-DISSENT-ONLY ledger: every MANDATORY lens (correctness, security) accepts unanimously (two jurors
+ * each), and the ONLY dissent comes from a single NON-mandatory lens (`simplicity`) voting CHANGES. Because no
+ * mandatory lens objects, the panel-verdict step (strictest mandatory = accept) does NOT short-circuit at
+ * `panel-changes` — the judge REACHES the `resolutionMode` / `dissentThreshold` branch. That is the branch the
+ * `dissentingLedger` fixture never reached (a mandatory `correctness#2` CHANGES escalates it at `panel-changes`
+ * first), so THIS is the ledger that genuinely exercises per-fork disposition-config threading.
+ */
+function weightedDissentOnlyLedger() {
+  const jurors = [];
+  const verdicts = [];
+  for (const lens of MANDATORY_LENSES) {
+    for (const slot of [1, 2]) {
+      const id = `${lens}#${slot}`;
+      jurors.push({ id, lens, charter: CHARTER });
+      verdicts.push(verdictEvent(id, VERDICTS.ACCEPT));
+    }
+  }
+  // A single NON-mandatory-lens dissenter (weight 1 of five jurors → weighted dissent 0.2, below a high threshold).
+  jurors.push({ id: 'simplicity#1', lens: 'simplicity', charter: CHARTER });
+  verdicts.push(verdictEvent('simplicity#1', VERDICTS.CHANGES));
+  return [rosterEvent(jurors), ...verdicts];
+}
+
 describe('classifyForkContention', () => {
   it('auto-clears a clean, unanimous fork (NOT contested)', () => {
     const dto = classifyForkContention({ n: 1, question: 'Read-time or baked?', ledger: cleanDiverseLedger() });
@@ -87,14 +111,45 @@ describe('classifyForkContention', () => {
     expect(without).not.toHaveProperty('recommendedDefault');
   });
 
-  it('honours a per-fork accept-best config (tolerates weighted dissent below the threshold)', () => {
-    // A single dissenter under accept-best with a high threshold auto-clears — proving the module consumes the
-    // fork's own resolved config rather than a hardcoded policy.
+  it('a per-fork accept-best config cannot loosen the MANDATORY panel (mandatory-lens changes escalates at panel-changes, before the dissent branch)', () => {
+    // A mandatory lens (`correctness#2`) wants changes, so the judge escalates at the panel-verdict step
+    // (`panel-changes`) BEFORE the resolutionMode / dissentThreshold branch is ever reached. A per-fork
+    // accept-best config — however high its threshold — can never buy off a mandatory-lens objection. This case
+    // guards that invariant; it does NOT exercise the config-threading branch (it short-circuits first), which is
+    // exactly why the vacuous version of this test proved nothing about threading. The branch itself is exercised
+    // by the weighted-dissent-only case below.
     const acceptBest = resolveDispositionConfig({ override: { resolutionMode: 'accept-best', dissentThreshold: 0.9 } });
     const dto = classifyForkContention({ n: 1, ledger: dissentingLedger(), config: acceptBest });
-    // panel-changes still escalates (a mandatory lens wanting changes is not a mere weighted dissent) — so this
-    // stays contested; the point is the config is threaded, verified next with a weighted-dissent-only ledger.
     expect(dto.disposition).toBe('escalate');
+    expect(dto.reason).toBe('panel-changes'); // escalated at the mandatory panel, NOT the tolerated-dissent branch
+  });
+
+  it('threads a per-fork accept-best config INTO the resolutionMode/dissentThreshold branch (weighted-dissent-only ledger)', () => {
+    // The genuine config-threading proof the previous case only claimed. The weighted-dissent-only ledger has the
+    // mandatory panel unanimously accepting, so the judge REACHES step 5 (the dissent policy) — the branch the
+    // per-fork config actually steers. We assert the SAME ledger disposes DIFFERENTLY under two configs, which is
+    // only possible if the fork's own config is threaded through `classifyForkContention`; strip the `config`
+    // argument's threading and accept-best falls back to the shared default → both reasons collapse to
+    // `dissent-present` and every assertion below fails.
+    const ledger = weightedDissentOnlyLedger();
+
+    // Shared DEFAULT config (present-unless-all-agree): any weighted dissent escalates at the GREEN judge. It
+    // reaches the dissent branch (reason `dissent-present`), NOT `panel-changes` — the mandatory panel accepted.
+    const withDefault = classifyForkContention({ n: 1, ledger });
+    expect(withDefault.disposition).toBe('escalate');
+    expect(withDefault.reason).toBe('dissent-present');
+
+    // Per-fork ACCEPT-BEST (dissentThreshold 0.9): the GREEN judge PROPOSES auto-dispose because the weighted
+    // dissent (0.2) is within tolerance — the trail records that accept-best decision, proving the fork's config
+    // reached the dissentThreshold branch. The RED judge then refutes the tolerated dissent (a load-bearing
+    // disagreement always reaches a human — the module consumes the COMBINED judge, `disposeVerdict`, not the
+    // green proposal alone), so the fork still surfaces, now with reason `red-refuted`. That reason FLIP vs the
+    // default on the identical ledger is the config-threading proof.
+    const acceptBest = resolveDispositionConfig({ override: { resolutionMode: 'accept-best', dissentThreshold: 0.9 } });
+    const withAcceptBest = classifyForkContention({ n: 1, ledger, config: acceptBest });
+    expect(withAcceptBest.reason).toBe('red-refuted');
+    expect(withAcceptBest.trail.some((line) => /accept-best/.test(line) && /dissentThreshold 0\.9/.test(line))).toBe(true);
+    expect(withAcceptBest.reason).not.toBe(withDefault.reason);
   });
 });
 
