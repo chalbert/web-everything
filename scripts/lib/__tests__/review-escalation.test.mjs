@@ -19,6 +19,8 @@ import {
   CARE_LEVELS,
   CARE_LEVEL_ORDER,
   deriveCareLevel,
+  reconcileRoster,
+  ROSTER_TIMING,
 } from '../review-escalation.mjs';
 
 describe('isBlastRadiusPath', () => {
@@ -372,5 +374,70 @@ describe('coupleEscalation inherits the STRICTEST care-level (#2567)', () => {
   });
   it('defaults a member with no careLevel to none', () => {
     expect(coupleEscalation([{ escalate: false }, { escalate: false }]).careLevel).toBe(CARE_LEVELS.NONE);
+  });
+});
+
+describe('reconcileRoster — #2635 bind + reconcile the jury roster at PR-open against the real diff', () => {
+  it('no pre-registered roster → a pure BIND: effective = recomputed, no expansion, no re-alignment', () => {
+    const r = reconcileRoster({ preRegistered: null, recomputed: ['correctness', 'security', 'a11y'] });
+    expect(r.effective).toEqual(['correctness', 'security', 'a11y']);
+    expect(r.expanded).toBe(false);
+    expect(r.humanAlignmentRequired).toBe(false);
+    expect(r.added).toEqual([]);
+    expect(r.reasons).toEqual([]);
+  });
+
+  it('real diff earns a lens the charter did not pre-register → UNION, expansion, human re-alignment (up-front default)', () => {
+    // The spec case: a "script fix" pre-registered only the static lenses, but the real diff moved a UI file →
+    // the recompute earns a11y + visual-vs-target that nobody picked.
+    const r = reconcileRoster({
+      preRegistered: ['correctness', 'security'],
+      recomputed: ['correctness', 'security', 'a11y', 'visual-vs-target'],
+    });
+    expect(r.effective).toEqual(['correctness', 'security', 'a11y', 'visual-vs-target']); // pre-registered first, then added
+    expect(r.added).toEqual(['a11y', 'visual-vs-target']);
+    expect(r.expanded).toBe(true);
+    expect(r.humanAlignmentRequired).toBe(true);
+    expect(r.reasons.join(' ')).toMatch(/expanded past pre-registration.*a11y.*re-triggering human alignment/);
+  });
+
+  it('recompute inside the pre-registered set → union is a no-op, no expansion, no re-alignment', () => {
+    const r = reconcileRoster({
+      preRegistered: ['correctness', 'security', 'a11y', 'visual-vs-target'],
+      recomputed: ['correctness', 'security'],
+    });
+    expect(r.effective).toEqual(['correctness', 'security', 'a11y', 'visual-vs-target']);
+    expect(r.added).toEqual([]);
+    expect(r.removed).toEqual(['a11y', 'visual-vs-target']); // reported, but the seats STAY in effective (never silently dropped)
+    expect(r.expanded).toBe(false);
+    expect(r.humanAlignmentRequired).toBe(false);
+  });
+
+  it('incremental timing binds an expansion SILENTLY — expanded true, but no human re-alignment', () => {
+    const r = reconcileRoster({
+      preRegistered: ['correctness'],
+      recomputed: ['correctness', 'a11y'],
+      mode: ROSTER_TIMING.INCREMENTAL,
+    });
+    expect(r.expanded).toBe(true);
+    expect(r.humanAlignmentRequired).toBe(false);
+    expect(r.mode).toBe(ROSTER_TIMING.INCREMENTAL);
+    expect(r.reasons.join(' ')).toMatch(/bound incrementally without re-alignment/);
+  });
+
+  it('normalizes lens lists — dedups, trims, drops non-strings/empties, preserves first-seen order', () => {
+    const r = reconcileRoster({
+      preRegistered: ['correctness', ' correctness ', '', 42, 'security'],
+      recomputed: ['security', ' a11y ', 'a11y', null],
+    });
+    expect(r.effective).toEqual(['correctness', 'security', 'a11y']);
+    expect(r.added).toEqual(['a11y']);
+    expect(r.humanAlignmentRequired).toBe(true);
+  });
+
+  it('an unknown mode falls back to the strict up-front default', () => {
+    const r = reconcileRoster({ preRegistered: ['correctness'], recomputed: ['correctness', 'a11y'], mode: 'nonsense' });
+    expect(r.mode).toBe(ROSTER_TIMING.UP_FRONT);
+    expect(r.humanAlignmentRequired).toBe(true);
   });
 });
