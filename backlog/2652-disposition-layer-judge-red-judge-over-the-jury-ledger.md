@@ -3,9 +3,11 @@ bornAs: xw3oxtg
 kind: story
 size: 8
 parent: "2636"
-status: open
+status: resolved
 scope: ["we:scripts/lib/"]
 dateOpened: "2026-07-24"
+dateStarted: "2026-07-25"
+dateResolved: "2026-07-25"
 tags: []
 ---
 
