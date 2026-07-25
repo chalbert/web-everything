@@ -293,6 +293,26 @@ describe('proposeDisposition — resolutionMode', () => {
     expect(p.disposition).toBe(DISPOSITIONS.ESCALATE);
     expect(p.reason).toBe('dissent-over-threshold');
   });
+
+  it('accept-best ESCALATES (never auto-disposes) on a degenerate dissentThreshold + a dissenting juror', () => {
+    // A directly-invoked accept-best config whose dissentThreshold is NaN / missing must NOT fail open:
+    // `dissentFraction > NaN` is false, so without the guard a contested review would auto-dispose. Fail-closed.
+    const ledger = [
+      rosterEvent([
+        { id: 'correctness#1', lens: 'correctness', charter: CHARTER },
+        { id: 'security#1', lens: 'security', charter: CHARTER },
+        { id: 'simplicity#1', lens: 'simplicity', charter: CHARTER },
+      ]),
+      verdictEvent('correctness#1', VERDICTS.ACCEPT),
+      verdictEvent('security#1', VERDICTS.ACCEPT),
+      verdictEvent('simplicity#1', VERDICTS.CHANGES),
+    ];
+    for (const dissentThreshold of [NaN, undefined]) {
+      const p = proposeDisposition({ ledger, config: { ...ACCEPT_BEST, dissentThreshold } });
+      expect(p.disposition).toBe(DISPOSITIONS.ESCALATE);
+      expect(p.reason).toBe('degenerate-threshold');
+    }
+  });
 });
 
 describe('redRefute — the adversary', () => {

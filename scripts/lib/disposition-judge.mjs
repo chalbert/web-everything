@@ -272,6 +272,9 @@ export function proposeDisposition({ ledger = [], config, signals = {}, mandator
     return { disposition: DISPOSITIONS.AUTO_DISPOSE, reason: 'unanimous-accept', panelVerdict: VERDICTS.ACCEPT, dissentFraction, trail: ['Every mandatory lens accepted and every weighted juror agreed (present-unless-all-agree) — propose auto-dispose.'] };
   }
   if (resolutionMode === 'accept-best') {
+    if (!Number.isFinite(dissentThreshold) || dissentThreshold < 0) {
+      return escalate('degenerate-threshold', `dissentThreshold "${String(dissentThreshold)}" is not a finite non-negative number — fail-closed escalate.`, { panelVerdict: VERDICTS.ACCEPT, dissentFraction });
+    }
     if (dissentFraction > dissentThreshold) {
       return escalate('dissent-over-threshold', `Weighted dissent ${dissentFraction.toFixed(3)} exceeds dissentThreshold ${dissentThreshold} — escalate.`, { panelVerdict: VERDICTS.ACCEPT, dissentFraction });
     }
