@@ -83,9 +83,11 @@ export { isPostLandTreeDirty }; // re-exported for backward compat — callers/t
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs'; // post-land dup-NNN tripwire (#2318)
 import { computeNetDiffChangedFiles } from './merge-ai-prs.mjs'; // SHARED net-diff basis w/ the drain, single source (#1821/#2373)
 import {
-  scoreEscalation, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META,
-  buildEscalationReasonBlock, bodyHasEscalationReason,
-} from './lib/review-escalation.mjs'; // #2307 — deterministic review-escalation label AT PR-OPEN
+  scoreEscalation, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META, REVIEW_LABELS,
+  buildEscalationReasonBlock, bodyHasEscalationReason, reconcileRoster, ROSTER_TIMING,
+} from './lib/review-escalation.mjs'; // #2307 — deterministic review-escalation label AT PR-OPEN; #2635 — roster bind+reconcile
+import { resolveJuryPlan } from './lib/review-core.mjs'; // #2635 — recompute the jury roster from the REAL diff at PR-open
+import { POLICY_CARE_JURY } from './lib/review-policy.mjs'; // #2635 — the care→jury contract's roster-timing mode (knob #4)
 import { parseManifest, embedManifestInBody, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs'; // xnsk54v — manifest rides the PR body, not a tracked file
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
@@ -394,7 +396,33 @@ export function resolveProducerReviewLabel({
 } = {}) {
   const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo });
   const label = producerReviewLabel(score);
-  return { label, apply: shouldApplyReviewLabel(label, currentLabels), reasons: score.reasons, humanRequired: !!score.humanRequired };
+  // #2635 — expose the advisory care-level too, so the caller can recompute the jury roster (`resolveJuryPlan`)
+  // for the SAME care band this rubric scored, then bind + reconcile it against the pre-registered roster.
+  return { label, apply: shouldApplyReviewLabel(label, currentLabels), reasons: score.reasons, humanRequired: !!score.humanRequired, careLevel: score.careLevel };
+}
+
+/**
+ * #2635 — BIND + RECONCILE the jury roster at PR-open against the REAL diff. Pure (both `resolveJuryPlan` and
+ * `reconcileRoster` are pure — no I/O). Recomputes the roster from the ACTUAL net diff (`careLevel` +
+ * `changedFiles` → the same care→roster pass the drain would run over this diff) and reconciles it against the
+ * pre-registered roster (the item's charter roster, carried on the lane manifest when a prepare-time slice
+ * recorded it) via `reconcileRoster`. Returns the effective (union) roster plus whether the real diff EXPANDED
+ * past pre-registration — which, under the strict `up-front` timing default, re-triggers human alignment.
+ *
+ * `preRegistered == null` (no charter roster recorded yet) degrades to a pure BIND (no re-alignment). A falsy /
+ * `none` care-level means the PR did not escalate, so there is no jury at all → an empty recomputed roster. The
+ * timing mode comes from the human-gated care→jury contract (`POLICY_CARE_JURY.rosterTimingMode.value`), never a
+ * hardcoded literal, so a governance flip of the knob is one contract edit.
+ * @param {{careLevel?: string, changedFiles?: string[], preRegistered?: string[]|null, mode?: string}} o
+ * @returns {{effective: string[], added: string[], removed: string[], expanded: boolean,
+ *   humanAlignmentRequired: boolean, mode: string, reasons: string[]}}
+ */
+export function resolveRosterReconcile({ careLevel, changedFiles = [], preRegistered = null, mode } = {}) {
+  const timing = mode || POLICY_CARE_JURY?.rosterTimingMode?.value || ROSTER_TIMING.UP_FRONT;
+  const recomputed = careLevel
+    ? resolveJuryPlan({ careLevel, changedFiles }).lenses.map((seat) => seat.lens)
+    : [];
+  return reconcileRoster({ preRegistered, recomputed, mode: timing });
 }
 
 // Allow importing the pure helpers without running the CLI (the test file imports this module).
@@ -584,14 +612,29 @@ function runCli() {
     const dismissedFindings = manifest && Number.isFinite(Number(manifest.dismissedFindings)) ? Number(manifest.dismissedFindings) : 0;
     let currentLabels = [];
     try { currentLabels = (JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'labels'])).labels || []).map((l) => l.name); } catch { /* fresh PR — no labels yet */ }
-    const verdict = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, currentLabels });
+    const rubric = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, currentLabels });
+
+    // #2635 — BIND + RECONCILE the jury roster against the REAL diff. The pre-registered roster (the item's
+    // charter roster) rides the lane manifest when a prepare-time slice recorded it (`preRegisteredLenses`);
+    // absent it, this is a pure bind (nothing to have drifted past). An expansion PAST pre-registration under the
+    // strict `up-front` default re-triggers HUMAN alignment — so fold it into the producer verdict by UPGRADING
+    // the review label to review:human (never a silent rebind). This only ever ADDS the human trigger; a
+    // gate-self / statute change already forces review:human via the rubric and is never relaxed here.
+    const preRegistered = manifest && Array.isArray(manifest.preRegisteredLenses) ? manifest.preRegisteredLenses : null;
+    const roster = resolveRosterReconcile({ careLevel: rubric.careLevel, changedFiles, preRegistered });
+    const humanRequired = rubric.humanRequired || roster.humanAlignmentRequired;
+    const finalLabel = humanRequired ? REVIEW_LABELS.human : rubric.label;
+    const reasons = [...rubric.reasons, ...roster.reasons];
+    const verdict = { label: finalLabel, apply: shouldApplyReviewLabel(finalLabel, currentLabels), reasons, humanRequired, roster };
+
     if (verdict.label && verdict.apply) {
       const meta = REVIEW_LABEL_META[verdict.label];
       try { ghC(['label', 'create', verdict.label, '--color', meta.color, '--description', meta.description]); } catch { /* already exists — fine */ }
       try { ghC(['pr', 'edit', String(prNum), '--add-label', verdict.label]); }
       catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply review label "${verdict.label}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
       // Stamp the WHY into the PR body (mirrors the drain's #2324 guarantee) so an operator sees it without
-      // re-deriving the rubric. Best-effort + idempotent (bodyHasEscalationReason guards a re-append).
+      // re-deriving the rubric — and, for #2635, so the roster-expansion re-alignment reason is trailed where
+      // the jury ledger (#2641) will read it. Best-effort + idempotent (bodyHasEscalationReason guards a re-append).
       try {
         let liveBody = '';
         try { liveBody = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'body'])).body || ''; } catch { /* fetch miss — augment from empty */ }
@@ -685,6 +728,9 @@ function runCli() {
     repo: REPO, merged: false, reason: PLAN.triggerDrain ? 'enqueued' : 'labelled-on-green',
     pr: Number(prNum), ref: REF, label: LABEL, labelApplied,
     ...(reviewVerdict.label ? { reviewLabel: reviewVerdict.label, reviewLabelApplied: reviewVerdict.apply, escalateReasons: reviewVerdict.reasons, humanRequired: reviewVerdict.humanRequired } : {}),
+    // #2635 — surface the bound jury roster + any expansion-past-registration (the ledger flag the #2641 durable
+    // log will consume; observable today in the producer's JSON result). Emitted whenever a roster was bound.
+    ...(reviewVerdict.roster && reviewVerdict.roster.effective.length ? { juryRoster: reviewVerdict.roster.effective, rosterExpanded: reviewVerdict.roster.expanded, ...(reviewVerdict.roster.added.length ? { rosterAdded: reviewVerdict.roster.added } : {}) } : {}),
     ...(drainTrigger ? { drainTriggered: !!drainTrigger.triggered } : {}),
     ...(primarySynced !== null ? { primarySynced } : {}),
     detail: `PR #${prNum} (${REF}) required checks green${labelApplied ? ` — labelled ${LABEL}` : ''}`

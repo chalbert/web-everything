@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile } from '../pr-land.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
@@ -373,5 +373,49 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     expect(src).toMatch(/function syncPrimaryMain/);
     expect(src).toMatch(/'pull', '--ff-only', '--autostash'/);
     expect(src).toMatch(/NOT fast-forwarded/);
+  });
+});
+
+describe('resolveRosterReconcile — #2635 bind + reconcile the jury roster from the REAL diff at PR-open', () => {
+  it('a care=none (non-escalating) PR recomputes an EMPTY roster and reconciles to a pure bind', () => {
+    const r = resolveRosterReconcile({ careLevel: 'none', changedFiles: ['src/components/thing.ts'] });
+    expect(r.effective).toEqual([]);
+    expect(r.expanded).toBe(false);
+    expect(r.humanAlignmentRequired).toBe(false);
+  });
+
+  it('a falsy care-level short-circuits to an empty recompute (no jury) — pure bind, no throw', () => {
+    const r = resolveRosterReconcile({ careLevel: undefined, changedFiles: ['scripts/pr-land.mjs'] });
+    expect(r.effective).toEqual([]);
+    expect(r.humanAlignmentRequired).toBe(false);
+  });
+
+  it('an escalating UI diff with NO pre-registered roster → binds the recomputed roster (incl. perspective lenses), no re-alignment', () => {
+    // careLevel high → the static PANEL_LENSES; a UI file in the diff → the a11y + visual perspective lenses.
+    const r = resolveRosterReconcile({ careLevel: 'high', changedFiles: ['src/components/widget.css'] });
+    expect(r.effective).toEqual(expect.arrayContaining(['correctness', 'security', 'a11y', 'visual-vs-target']));
+    expect(r.humanAlignmentRequired).toBe(false); // nothing pre-registered → nothing to have drifted past
+  });
+
+  it('a UI diff whose earned lenses EXCEED the pre-registered set → expansion re-triggers human alignment', () => {
+    // The charter pre-registered only the static lenses; the real diff moved a page file, earning a11y/visual/perf.
+    const r = resolveRosterReconcile({
+      careLevel: 'high',
+      changedFiles: ['demos/loan/index.html'],
+      preRegistered: ['correctness', 'security', 'simplicity', 'standards-conformance'],
+    });
+    expect(r.expanded).toBe(true);
+    expect(r.added).toEqual(expect.arrayContaining(['a11y', 'visual-vs-target', 'perf']));
+    expect(r.humanAlignmentRequired).toBe(true);
+  });
+
+  it('a script-only diff that matches its pre-registered roster → no expansion, no re-alignment', () => {
+    const r = resolveRosterReconcile({
+      careLevel: 'high',
+      changedFiles: ['scripts/pr-land.mjs'],
+      preRegistered: ['correctness', 'security', 'simplicity', 'standards-conformance'],
+    });
+    expect(r.expanded).toBe(false);
+    expect(r.humanAlignmentRequired).toBe(false);
   });
 });
