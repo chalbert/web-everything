@@ -3,9 +3,11 @@ bornAs: xmrqlpp
 kind: story
 size: 5
 parent: "2541"
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-25"
+dateResolved: "2026-07-25"
 tags:
   - frontier-ui
   - semantic-zoom
