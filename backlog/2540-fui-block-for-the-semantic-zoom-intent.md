@@ -13,6 +13,10 @@ tags:
   - console-board
 crossRef: { url: /intents/semantic-zoom/, label: semantic-zoom intent }
 relatedProject: webblocks
+scope:
+  - frontierui:blocks/
+  - frontierui:src/_data/blocks.json
+  - frontierui:demos/
 ---
 
 # FUI block for the semantic-zoom intent
