@@ -14,6 +14,9 @@ tags:
   - console-board
 crossRef: { url: /projects/webgraph/, label: Web Graph }
 relatedProject: webgraph
+scope:
+  - frontierui:graphs/
+  - frontierui:demos/
 ---
 
 # Add the swimlane layout to the FUI graph layout impl
