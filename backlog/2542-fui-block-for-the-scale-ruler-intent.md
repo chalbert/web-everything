@@ -13,6 +13,12 @@ tags:
   - console-board
 crossRef: { url: /intents/scale-ruler/, label: scale-ruler intent }
 relatedProject: webblocks
+scope:
+  - frontierui:blocks/scale-ruler/
+  - frontierui:blocks/__tests__/
+  - frontierui:demos/scale-ruler
+  - frontierui:demos/__tests__/
+  - frontierui:src/_data/blocks.json
 ---
 
 # FUI block for the scale-ruler intent
