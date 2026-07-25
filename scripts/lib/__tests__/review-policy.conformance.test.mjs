@@ -26,7 +26,10 @@ import {
   POLICY_REASON_TOKENS,
   POLICY_CARE_JURY,
   POLICY_CARE_BAND_NAMES,
+  POLICY_DISPOSITION,
+  POLICY_DISPOSITION_OVERRIDABLE_KEYS,
   derivePolicyDisposition,
+  resolveDispositionConfig,
 } from '../review-policy.mjs';
 import { DEFAULT_THRESHOLDS, CARE_LEVELS, CARE_LEVEL_ORDER } from '../review-escalation.mjs';
 import { REVIEW_REASONS, deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
@@ -174,6 +177,91 @@ describe('care→jury conformance — the contract table single-sources jury-cor
   });
 
   it('each band conforms to panelRigorForCareLevel: lenses, jurorsPerLens, and roundCap===rounds match the impl', () => {
+    for (const name of POLICY_CARE_BAND_NAMES) {
+      const band = POLICY_CARE_JURY.bands[name];
+      const rigor = panelRigorForCareLevel(name);
+      expect(band.lenses).toEqual(rigor.lenses);
+      expect(band.jurorsPerLens).toBe(rigor.jurorsPerLens);
+      expect(band.roundCap).toBe(rigor.rounds);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// DISPOSITION-CONFIG CONFORMANCE (#2651, FF3 filled in) — the disposition knobs the #2633 shape reserved room for
+// are now concrete: per-lens weights, a dissent threshold, resolutionMode, plus the per-decision override allow-list.
+// This is CONFIG-only (the judge is #2652), so conformance here is STATIC: the block loads well-formed, its values
+// are in range, the override allow-list is exactly the three knobs, and resolveDispositionConfig merges the three
+// precedence layers (decision > band > global) as the contract prose declares. It also guards that #2651 was purely
+// ADDITIVE — every #2633 band's rigor is UNCHANGED (that invariant is the "edit, not a migration" claim made real).
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('disposition-config conformance — the FF3 knobs load, validate, and merge by precedence (#2651)', () => {
+  it('the disposition block loaded, is frozen, and carries prose on every knob (schema + prose layer, #2564)', () => {
+    expect(Object.isFrozen(POLICY_DISPOSITION)).toBe(true);
+    expect(POLICY_DISPOSITION.description.trim().length).toBeGreaterThan(0);
+    expect(POLICY_DISPOSITION.lensWeights.description.trim().length).toBeGreaterThan(0);
+    expect(POLICY_DISPOSITION.dissentThreshold.description.trim().length).toBeGreaterThan(0);
+    expect(POLICY_DISPOSITION.resolutionMode.description.trim().length).toBeGreaterThan(0);
+    expect(POLICY_DISPOSITION.override.description.trim().length).toBeGreaterThan(0);
+  });
+
+  it('the three global knob values are in their declared domains', () => {
+    expect(POLICY_DISPOSITION.lensWeights.default).toBeGreaterThanOrEqual(0);
+    expect(POLICY_DISPOSITION.dissentThreshold.value).toBeGreaterThanOrEqual(0);
+    expect(POLICY_DISPOSITION.dissentThreshold.value).toBeLessThanOrEqual(1);
+    expect(['accept-best', 'present-unless-all-agree']).toContain(POLICY_DISPOSITION.resolutionMode.value);
+  });
+
+  it('the per-decision override allow-list is EXACTLY the three disposition knobs (knob 4 bounds the override)', () => {
+    expect([...POLICY_DISPOSITION_OVERRIDABLE_KEYS].sort()).toEqual(
+      ['dissentThreshold', 'lensWeights', 'resolutionMode'],
+    );
+    expect([...POLICY_DISPOSITION.override.overridableKeys].sort()).toEqual([...POLICY_DISPOSITION_OVERRIDABLE_KEYS].sort());
+  });
+
+  it('every lens named in the global weight map is a real panel lens (no weight for a lens that never runs)', () => {
+    for (const lens of Object.keys(POLICY_DISPOSITION.lensWeights.values)) {
+      expect(PANEL_LENSES).toContain(lens);
+    }
+  });
+
+  it('resolveDispositionConfig with no args returns the global defaults', () => {
+    const g = resolveDispositionConfig();
+    expect(g.dissentThreshold).toBe(POLICY_DISPOSITION.dissentThreshold.value);
+    expect(g.resolutionMode).toBe(POLICY_DISPOSITION.resolutionMode.value);
+    expect(g.lensWeights.default).toBe(POLICY_DISPOSITION.lensWeights.default);
+    expect(g.lensWeights.values).toEqual(POLICY_DISPOSITION.lensWeights.values);
+  });
+
+  it('a per-decision override wins over the global default (decision > global)', () => {
+    const r = resolveDispositionConfig({
+      override: { dissentThreshold: 0.5, resolutionMode: 'accept-best', lensWeights: { security: 3 } },
+    });
+    expect(r.dissentThreshold).toBe(0.5);
+    expect(r.resolutionMode).toBe('accept-best');
+    expect(r.lensWeights.values.security).toBe(3);
+  });
+
+  it('an override naming a key outside the allow-list is rejected (the boundary is enforced)', () => {
+    expect(() => resolveDispositionConfig({ override: { roundCap: 9 } })).toThrow(/not overridable/);
+  });
+
+  it('an override whose VALUES break the declared domains is rejected (runtime boundary fails loud)', () => {
+    expect(() => resolveDispositionConfig({ override: { dissentThreshold: 5 } })).toThrow(/invalid override/);
+    expect(() => resolveDispositionConfig({ override: { resolutionMode: 'garbage' } })).toThrow(/invalid override/);
+    expect(() => resolveDispositionConfig({ override: { lensWeights: { correctness: -3 } } })).toThrow(/invalid override/);
+    expect(() => resolveDispositionConfig({ override: { lensWeights: { boguslens: 2 } } })).toThrow(/invalid override/);
+  });
+
+  it('resolving against every real care band succeeds (band layer never throws on a valid band)', () => {
+    for (const name of POLICY_CARE_BAND_NAMES) {
+      const r = resolveDispositionConfig({ band: name });
+      expect(['accept-best', 'present-unless-all-agree']).toContain(r.resolutionMode);
+    }
+    expect(() => resolveDispositionConfig({ band: 'nope' })).toThrow(/unknown care band/);
+  });
+
+  it('#2651 was purely ADDITIVE — every #2633 band rigor is unchanged (edit, not a migration)', () => {
     for (const name of POLICY_CARE_BAND_NAMES) {
       const band = POLICY_CARE_JURY.bands[name];
       const rigor = panelRigorForCareLevel(name);

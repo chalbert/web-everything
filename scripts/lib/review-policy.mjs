@@ -49,6 +49,63 @@ const CARE_BAND_NAMES = ['none', 'low', 'elevated', 'high'];
 const VALID_CARE_LENSES = new Set(['correctness', 'security', 'simplicity', 'standards-conformance']);
 const VALID_ROSTER_TIMING_MODES = new Set(['up-front', 'incremental']);
 
+// The disposition-config vocabulary (#2651). resolutionMode's two settings and the three knobs a per-decision
+// override is allowed to set. Declared here so the shape validator and the resolver name them once.
+const VALID_RESOLUTION_MODES = new Set(['accept-best', 'present-unless-all-agree']);
+const DISPOSITION_KNOB_KEYS = ['lensWeights', 'dissentThreshold', 'resolutionMode'];
+
+/**
+ * Validate the disposition-config knob shape (#2651) — shared by the global default block and each optional
+ * per-band override (a band override is PARTIAL: any knob it omits inherits the global default). `require` gates
+ * whether every knob must be present (true for the global block, false for a partial band override).
+ * @param {*} d the disposition object
+ * @param {(msg: string) => never} fail
+ * @param {string} where a label for error messages
+ * @param {boolean} require whether all three knobs are mandatory
+ */
+function validateDispositionKnobs(d, fail, where, require) {
+  if (!d || typeof d !== 'object' || Array.isArray(d)) fail(`${where} must be an object`);
+  if (require || d.lensWeights !== undefined) {
+    const lw = d.lensWeights;
+    if (!lw || typeof lw !== 'object' || Array.isArray(lw)) fail(`${where}.lensWeights must be an object`);
+    // The global block requires the {default, values} wrapper; a partial override may omit either — but WHEN
+    // present, `default` and `values` are validated the same way (so a mistyped override default is caught, not
+    // silently dropped by the merge).
+    if (require && lw.default === undefined) fail(`${where}.lensWeights.default is required`);
+    if (lw.default !== undefined && (typeof lw.default !== 'number' || !Number.isFinite(lw.default) || lw.default < 0)) {
+      fail(`${where}.lensWeights.default must be a non-negative finite number`);
+    }
+    if (require && lw.values === undefined) fail(`${where}.lensWeights.values is required`);
+    if (lw.values !== undefined && (!lw.values || typeof lw.values !== 'object' || Array.isArray(lw.values))) {
+      fail(`${where}.lensWeights.values must be an object`);
+    }
+    const values = lw.values ?? lw; // a band override may give a bare lens→weight map or the {default,values} shape
+    for (const [lens, weight] of Object.entries(values)) {
+      if (lens === 'default' || lens === 'values' || lens === 'description') continue;
+      if (!VALID_CARE_LENSES.has(lens)) fail(`${where}.lensWeights names lens "${lens}" not in the panel lens set`);
+      if (typeof weight !== 'number' || !Number.isFinite(weight) || weight < 0) {
+        fail(`${where}.lensWeights["${lens}"] must be a non-negative finite number`);
+      }
+    }
+  }
+  if (require || d.dissentThreshold !== undefined) {
+    // Global block: the knob is a { value, description } wrapper (require the object so a mistyped bare `0` can't
+    // slip a truthiness short-circuit). Partial override: the knob is a bare number.
+    if (require && (!d.dissentThreshold || typeof d.dissentThreshold !== 'object')) fail(`${where}.dissentThreshold must be a { value, description } object`);
+    const dt = require ? d.dissentThreshold.value : d.dissentThreshold;
+    if (typeof dt !== 'number' || !Number.isFinite(dt) || dt < 0 || dt > 1) {
+      fail(`${where}.dissentThreshold must be a finite number in [0, 1]`);
+    }
+  }
+  if (require || d.resolutionMode !== undefined) {
+    if (require && (!d.resolutionMode || typeof d.resolutionMode !== 'object')) fail(`${where}.resolutionMode must be a { value, description } object`);
+    const rm = require ? d.resolutionMode.value : d.resolutionMode;
+    if (!VALID_RESOLUTION_MODES.has(rm)) {
+      fail(`${where}.resolutionMode must be one of ${[...VALID_RESOLUTION_MODES].join(', ')}`);
+    }
+  }
+}
+
 /**
  * Validate the parsed contract's SHAPE (the meta-schema / static-conformance check, done in plain JS to stay
  * dependency-free). Throws on any structural defect so a broken contract can never load and silently mis-gate.
@@ -103,6 +160,23 @@ function validateContract(c) {
   if (!rtm || typeof rtm !== 'object') fail('careJury.rosterTimingMode must be an object');
   if (!VALID_ROSTER_TIMING_MODES.has(rtm.value)) fail(`careJury.rosterTimingMode.value must be one of ${[...VALID_ROSTER_TIMING_MODES].join(', ')}`);
   if (typeof rtm.description !== 'string' || !rtm.description.trim()) fail('careJury.rosterTimingMode has no description prose');
+
+  // disposition — the disposition-config knobs (#2651, FF3 filled in). The global default block declares all three
+  // knobs plus the per-decision override allow-list. Additive over the #2633 shape; a band may narrow it per band
+  // (validated in the band loop below) and a decision per subject (the allow-list here bounds what an override sets).
+  const disp = cj.disposition;
+  if (!disp || typeof disp !== 'object') fail('missing careJury.disposition');
+  if (typeof disp.description !== 'string' || !disp.description.trim()) fail('careJury.disposition has no description prose');
+  validateDispositionKnobs(disp, fail, 'careJury.disposition', true);
+  const ov = disp.override;
+  if (!ov || typeof ov !== 'object') fail('careJury.disposition.override must be an object');
+  if (typeof ov.description !== 'string' || !ov.description.trim()) fail('careJury.disposition.override has no description prose');
+  if (!Array.isArray(ov.overridableKeys) || ov.overridableKeys.length === 0) fail('careJury.disposition.override.overridableKeys must be a non-empty array');
+  for (const k of ov.overridableKeys) {
+    if (!DISPOSITION_KNOB_KEYS.includes(k)) fail(`careJury.disposition.override.overridableKeys names unknown knob "${k}"`);
+  }
+  if (new Set(ov.overridableKeys).size !== ov.overridableKeys.length) fail('careJury.disposition.override.overridableKeys has duplicates');
+
   const bands = cj.bands;
   if (!bands || typeof bands !== 'object') fail('careJury.bands must be an object');
   for (const name of CARE_BAND_NAMES) {
@@ -128,6 +202,20 @@ function validateContract(c) {
         }
       }
     }
+    // disposition — OPTIONAL per-band override of the global disposition knobs (#2651). Partial: any knob the band
+    // omits inherits the global default (require=false). Reserved room today — no band carries one — but validated
+    // so a later per-band tune is a checked edit. A band override names a lens only from its own fanned-out lenses.
+    if (band.disposition !== undefined) {
+      validateDispositionKnobs(band.disposition, fail, `careJury band "${name}".disposition`, false);
+      const lw = band.disposition.lensWeights;
+      if (lw && typeof lw === 'object' && !Array.isArray(lw)) {
+        const weightMap = lw.values ?? lw; // descend into the {default, values} wrapper, else the bare lens→weight map
+        for (const lens of Object.keys(weightMap)) {
+          if (lens === 'default' || lens === 'values' || lens === 'description') continue;
+          if (!band.lenses.includes(lens)) fail(`careJury band "${name}".disposition.lensWeights names lens "${lens}" not in this band's lenses`);
+        }
+      }
+    }
   }
   return c;
 }
@@ -149,6 +237,72 @@ export const POLICY_CARE_JURY = REVIEW_POLICY.careJury;
 /** The care band names in least→most order (`none` → `high`) — mirrors CARE_LEVEL_ORDER (review-escalation.mjs),
  *  pinned equal by the conformance suite. Frozen. */
 export const POLICY_CARE_BAND_NAMES = Object.freeze([...CARE_BAND_NAMES]);
+
+/** The disposition-config block (#2651, FF3) — the global default knobs + the per-decision override allow-list a
+ *  future disposition judge (#2652) reads. Already deep-frozen via REVIEW_POLICY. */
+export const POLICY_DISPOSITION = REVIEW_POLICY.careJury.disposition;
+
+/** The allow-list of knob keys a per-decision override may set (`lensWeights`, `dissentThreshold`, `resolutionMode`).
+ *  The privacy/authority boundary for `resolveDispositionConfig`: an override naming any other key is rejected. Frozen. */
+export const POLICY_DISPOSITION_OVERRIDABLE_KEYS = Object.freeze([...REVIEW_POLICY.careJury.disposition.override.overridableKeys]);
+
+/**
+ * The CONFIG half of the resolver-spined F3 shape (#2651) — resolve the EFFECTIVE disposition config for one review
+ * subject by merging the three precedence layers the contract declares: per-decision override > per-band override >
+ * global default. PURE (a stateless recompute, no I/O) — this is the config a future disposition judge (#2652) reads;
+ * it does NOT itself dispose (build the config, not the judge). Returns `{ lensWeights, dissentThreshold, resolutionMode }`
+ * where `lensWeights` is a resolved `{ default, values }` (lens → weight; absent lens = `default`).
+ *
+ * @param {{ band?: string, override?: {lensWeights?: object, dissentThreshold?: number, resolutionMode?: string} }} o
+ *   `band` names a care band whose optional per-band override narrows the global default; `override` is the
+ *   per-decision override (only `POLICY_DISPOSITION_OVERRIDABLE_KEYS` keys honoured — an unknown key throws).
+ * @returns {{ lensWeights: {default: number, values: object}, dissentThreshold: number, resolutionMode: string }}
+ */
+export function resolveDispositionConfig({ band, override } = {}) {
+  const g = REVIEW_POLICY.careJury.disposition;
+  // Layer 1 — global default.
+  let lensWeights = { default: g.lensWeights.default, values: { ...g.lensWeights.values } };
+  let dissentThreshold = g.dissentThreshold.value;
+  let resolutionMode = g.resolutionMode.value;
+  // Layer 2 — per-band override (partial; a band omits the disposition key entirely when it inherits everything).
+  if (band !== undefined) {
+    if (!CARE_BAND_NAMES.includes(band)) throw new Error(`resolveDispositionConfig: unknown care band "${band}"`);
+    const bd = REVIEW_POLICY.careJury.bands[band].disposition;
+    if (bd) {
+      if (bd.lensWeights) lensWeights = mergeLensWeights(lensWeights, bd.lensWeights);
+      if (bd.dissentThreshold !== undefined) dissentThreshold = bd.dissentThreshold;
+      if (bd.resolutionMode !== undefined) resolutionMode = bd.resolutionMode;
+    }
+  }
+  // Layer 3 — per-decision override (allow-list gated: an override may only set the three declared knobs), and its
+  // VALUES must satisfy the contract's declared domains — the resolver is the runtime boundary for a decision
+  // override, so a bad override fails loud here rather than emitting an out-of-domain effective config.
+  if (override) {
+    for (const key of Object.keys(override)) {
+      if (!POLICY_DISPOSITION_OVERRIDABLE_KEYS.includes(key)) {
+        throw new Error(`resolveDispositionConfig: override key "${key}" is not overridable (allowed: ${POLICY_DISPOSITION_OVERRIDABLE_KEYS.join(', ')})`);
+      }
+    }
+    validateDispositionKnobs(override, (msg) => { throw new Error(`resolveDispositionConfig: invalid override — ${msg}`); }, 'override', false);
+    if (override.lensWeights) lensWeights = mergeLensWeights(lensWeights, override.lensWeights);
+    if (override.dissentThreshold !== undefined) dissentThreshold = override.dissentThreshold;
+    if (override.resolutionMode !== undefined) resolutionMode = override.resolutionMode;
+  }
+  return { lensWeights, dissentThreshold, resolutionMode };
+}
+
+/** Merge a partial lens-weight override onto a resolved `{ default, values }` — a bare lens→weight map (or a
+ *  `{ default?, values? }` shape) narrows the base; unspecified lenses keep their inherited weight. Pure. */
+function mergeLensWeights(base, patch) {
+  const out = { default: base.default, values: { ...base.values } };
+  const patchValues = patch.values && typeof patch.values === 'object' ? patch.values : patch;
+  if (typeof patch.default === 'number') out.default = patch.default;
+  for (const [lens, weight] of Object.entries(patchValues)) {
+    if (lens === 'default' || lens === 'values' || lens === 'description') continue;
+    out.values[lens] = weight;
+  }
+  return out;
+}
 
 /** token → { family, clearance }, for O(1) classification lookups. */
 const REASON_META = new Map(REVIEW_POLICY.reasons.map((r) => [r.token, { family: r.family, clearance: r.clearance }]));
