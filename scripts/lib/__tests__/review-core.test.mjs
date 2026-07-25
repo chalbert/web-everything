@@ -57,6 +57,10 @@ import {
   resolveJuryPlan,
   methodsForLens,
   PR_DIFF_ADAPTER,
+  ROSTER_CRITIQUE_LENSES,
+  critiqueRosterCompleteness,
+  buildRosterCritiqueMandate,
+  applyRosterCritique,
 } from '../review-core.mjs';
 import { validateSubjectAdapter, resolveAdapterRoster } from '../jury-core.mjs';
 
@@ -995,5 +999,125 @@ describe('methodsForLens — band override validated against the REVIEW_METHODS 
     // a mix of one valid + one unknown still throws (names the unknown one)
     expect(() => methodsForLens('correctness', { validationMethods: { correctness: [REVIEW_METHODS.STATIC_REVIEW, 'bogus'] } }))
       .toThrow(/bogus/);
+  });
+});
+
+describe('ROSTER_CRITIQUE_LENSES — the completeness critic\'s lens vocabulary (#2637)', () => {
+  it('is the four static lenses plus the three UI perspective lenses (concrete ids), and is frozen', () => {
+    expect(ROSTER_CRITIQUE_LENSES).toEqual([
+      'correctness', 'security', 'simplicity', 'standards-conformance', 'a11y', 'visual-vs-target', 'perf',
+    ]);
+    expect(Object.isFrozen(ROSTER_CRITIQUE_LENSES)).toBe(true);
+  });
+});
+
+describe('critiqueRosterCompleteness — red-team a resolved roster for a MISSED lens (#2637)', () => {
+  it('a complete UI roster has NO gaps (mandatory + a11y + visual all seated)', () => {
+    const plan = resolveJuryPlan({ careLevel: 'low', changedFiles: ['src/components/Btn.tsx'] });
+    const { gaps } = critiqueRosterCompleteness({ roster: plan, changedFiles: ['src/components/Btn.tsx'] });
+    expect(gaps).toEqual([]);
+  });
+
+  it('flags the a11y + visual perspective lenses a UI change earns but the roster is missing', () => {
+    // a script-only roster (no perspective lenses) judged against a UI change → both perspectives are gaps
+    const plan = resolveJuryPlan({ careLevel: 'low', changedFiles: ['scripts/lib/x.mjs'] });
+    const { gaps } = critiqueRosterCompleteness({ roster: plan, changedFiles: ['src/components/Btn.tsx'] });
+    expect(gaps.map((g) => g.lens)).toEqual([PERSPECTIVE_LENSES.A11Y, PERSPECTIVE_LENSES.VISUAL]);
+    const a11y = gaps.find((g) => g.lens === PERSPECTIVE_LENSES.A11Y);
+    expect(a11y.earnedBy).toBe('touch-set');
+    expect(a11y.method).toBe(REVIEW_METHODS.AXE_SCAN);
+    expect(a11y.reason).toMatch(/unguarded/);
+  });
+
+  it('flags a MANDATORY lens stripped off the roster by an override (the F3 remove case)', () => {
+    const plan = resolveJuryPlan({ careLevel: 'low', changedFiles: ['scripts/lib/x.mjs'] });
+    // simulate an override that removed the security seat
+    const stripped = { ...plan, lenses: plan.lenses.filter((l) => l.lens !== MANDATE_LENSES.SECURITY) };
+    const { gaps } = critiqueRosterCompleteness({ roster: stripped, changedFiles: ['scripts/lib/x.mjs'] });
+    expect(gaps.map((g) => g.lens)).toEqual([MANDATE_LENSES.SECURITY]);
+    expect(gaps[0].earnedBy).toBe('mandatory');
+    expect(gaps[0].method).toBe(REVIEW_METHODS.STATIC_REVIEW);
+  });
+
+  it('an EMPTY roster (care `none`) yields NO gaps — the critic never conjures a jury', () => {
+    const plan = resolveJuryPlan({ careLevel: 'none', changedFiles: ['src/components/Btn.tsx'] });
+    const { gaps, expectedLenses } = critiqueRosterCompleteness({ roster: plan, changedFiles: ['src/components/Btn.tsx'] });
+    expect(gaps).toEqual([]);
+    expect(expectedLenses).toEqual([]);
+  });
+
+  it('accepts an explicit expectedLenses (the subject-agnostic seam), skipping classifyTouchSet', () => {
+    const { gaps } = critiqueRosterCompleteness({
+      roster: ['correctness', 'security'],
+      expectedLenses: ['some-domain-lens'],
+    });
+    expect(gaps.map((g) => g.lens)).toEqual(['some-domain-lens']);
+    expect(gaps[0].earnedBy).toBe('touch-set');
+    expect(gaps[0].method).toBeNull(); // an out-of-registry lens has no default grounding method
+  });
+
+  it('accepts a bare lens-id list as the roster; orders gaps mandatory-first', () => {
+    const { gaps, presentLenses } = critiqueRosterCompleteness({
+      roster: ['simplicity'], // a non-empty roster missing both mandatory lenses + the UI perspectives
+      changedFiles: ['src/components/Btn.tsx'],
+    });
+    expect(presentLenses).toEqual(['simplicity']);
+    expect(gaps.map((g) => g.lens)).toEqual([
+      MANDATE_LENSES.CORRECTNESS, MANDATE_LENSES.SECURITY, PERSPECTIVE_LENSES.A11Y, PERSPECTIVE_LENSES.VISUAL,
+    ]);
+  });
+});
+
+describe('buildRosterCritiqueMandate — the adversarial "what axis is unguarded?" pass (#2637)', () => {
+  it('names the seated lenses, the vocabulary, and asks the one completeness question', () => {
+    const m = buildRosterCritiqueMandate({ subjectNoun: 'diff', roster: ['correctness', 'security'] });
+    expect(m).toMatch(/ROSTER COMPLETENESS CRITIC/);
+    expect(m).toMatch(/currently seated on the roster are: correctness, security/);
+    expect(m).toMatch(/what failure axis is UNGUARDED/i);
+    expect(m).toContain(ROSTER_CRITIQUE_LENSES.join(', '));
+    expect(m).toMatch(/EXACT id from the vocabulary/);
+  });
+  it('renders "(none)" when the roster is empty and stays judge-only', () => {
+    const m = buildRosterCritiqueMandate({ roster: [] });
+    expect(m).toMatch(/seated on the roster are: \(none\)/);
+    expect(m).toMatch(/adding the surfaced lenses to the roster is the caller's action/);
+  });
+});
+
+describe('applyRosterCritique — fold surfaced gaps back onto the roster (#2637)', () => {
+  it('seats a missing perspective lens as an override, grounded by the injected resolver', () => {
+    const plan = resolveJuryPlan({ careLevel: 'low', changedFiles: ['scripts/lib/x.mjs'] });
+    const { gaps } = critiqueRosterCompleteness({ roster: plan, changedFiles: ['src/components/Btn.tsx'] });
+    const augmented = applyRosterCritique(plan, gaps, { resolveMethods: (lens) => methodsForLens(lens) });
+    const lenses = augmented.lenses.map((l) => l.lens);
+    expect(lenses).toContain(PERSPECTIVE_LENSES.A11Y);
+    expect(lenses).toContain(PERSPECTIVE_LENSES.VISUAL);
+    const a11y = augmented.lenses.find((l) => l.lens === PERSPECTIVE_LENSES.A11Y);
+    expect(a11y.attachedBy).toBe('override');
+    expect(a11y.methods).toEqual([REVIEW_METHODS.AXE_SCAN]);
+  });
+  it('self-grounds from the gap\'s own method when NO resolver is injected', () => {
+    const plan = resolveJuryPlan({ careLevel: 'low', changedFiles: ['scripts/lib/x.mjs'] });
+    const { gaps } = critiqueRosterCompleteness({ roster: plan, changedFiles: ['src/components/Btn.tsx'] });
+    const augmented = applyRosterCritique(plan, gaps); // no resolveMethods — must not seat ungrounded
+    const a11y = augmented.lenses.find((l) => l.lens === PERSPECTIVE_LENSES.A11Y);
+    expect(a11y.methods).toEqual([REVIEW_METHODS.AXE_SCAN]);
+    // a bare-string gap has no method → seats ungrounded (nothing known to ground it)
+    const bare = applyRosterCritique(plan, [PERSPECTIVE_LENSES.PERF]);
+    expect(bare.lenses.find((l) => l.lens === PERSPECTIVE_LENSES.PERF).methods).toEqual([]);
+  });
+  it('is idempotent — folding the same gaps twice adds no duplicate seat', () => {
+    const plan = resolveJuryPlan({ careLevel: 'low', changedFiles: ['scripts/lib/x.mjs'] });
+    const gaps = [{ lens: PERSPECTIVE_LENSES.A11Y }];
+    const once = applyRosterCritique(plan, gaps);
+    const twice = applyRosterCritique(once, gaps);
+    expect(twice.lenses.filter((l) => l.lens === PERSPECTIVE_LENSES.A11Y)).toHaveLength(1);
+  });
+  it('accepts bare lens-id strings as gaps and never mutates the input plan', () => {
+    const plan = resolveJuryPlan({ careLevel: 'low', changedFiles: ['scripts/lib/x.mjs'] });
+    const before = plan.lenses.length;
+    const augmented = applyRosterCritique(plan, [PERSPECTIVE_LENSES.PERF]);
+    expect(augmented.lenses.map((l) => l.lens)).toContain(PERSPECTIVE_LENSES.PERF);
+    expect(plan.lenses).toHaveLength(before); // input untouched
   });
 });
