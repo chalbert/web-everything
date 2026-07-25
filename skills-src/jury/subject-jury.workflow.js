@@ -59,23 +59,9 @@
 export const meta = {
   name: 'subject-jury',
   description:
-    'Run the subject-agnostic jury on ONE subject (pr-diff | design-pixels | decision-prose) through its adapter. '
-    + 'Given a subject + careLevel + the subject\'s input, an agent shells the resolve-roster shim (the engine\'s '
-    + 'resolveAdapterRoster + materializeRoster) to select the adapter and resolve the jury roster; the harness then '
-    + 'fans out one fresh-context juror agent per rostered seat (jurorsPerLens per lens, the diverse jury a high-care '
-    + 'band earns) under the adapter\'s own mandate over one shared subject snapshot, reduces the panel to per-lens '
-    + 'verdicts + one panel verdict via the shared review core (review-core-cli reduce, diversity-selection — never '
-    + 'a majority vote), and RETURNS an in-memory jury ledger { subject, careLevel, verdict, lensVerdicts, findings, '
-    + 'ledger }. It applies NO label, posts NO comment, merges NOTHING (the caller decides what a verdict does). A '
-    + 'mandatory lens whose whole jury fails degrades the panel to needs-human — a juror that did not run never '
-    + 'reads as accept. NO jury logic lives in the harness: the roster, the care→rigor dial, the mandatory set, and '
-    + 'the verdict reduction all come from jury-core via the two shims (F1). The durable logbook (#2641) and the '
-    + 'editor↔reviewer convergence loop (#2285) are deferred.',
+    'Run the subject-agnostic jury on ONE subject (pr-diff | design-pixels | decision-prose) through its adapter. Given a subject + careLevel + the subject\'s input, an agent shells the resolve-roster shim (the engine\'s resolveAdapterRoster + materializeRoster) to select the adapter and resolve the jury roster; the harness then fans out one fresh-context juror agent per rostered seat (jurorsPerLens per lens, the diverse jury a high-care band earns) under the adapter\'s own mandate over one shared subject snapshot, reduces the panel to per-lens verdicts + one panel verdict via the shared review core (review-core-cli reduce, diversity-selection — never a majority vote), and RETURNS an in-memory jury ledger { subject, careLevel, verdict, lensVerdicts, findings, ledger }. It applies NO label, posts NO comment, merges NOTHING (the caller decides what a verdict does). A mandatory lens whose whole jury fails degrades the panel to needs-human — a juror that did not run never reads as accept. NO jury logic lives in the harness: the roster, the care→rigor dial, the mandatory set, and the verdict reduction all come from jury-core via the two shims (F1). The durable logbook (#2641) and the editor↔reviewer convergence loop (#2285) are deferred.',
   whenToUse:
-    'Invoked to run the jury method on a single review subject via its adapter — the subject-agnostic generalization '
-    + 'of review-parked-prs. It produces a verdict + ledger for the caller to act on; it never lands, labels, or '
-    + 'comments anything itself. NOT for landing a PR (that is the drain) and NOT for the interactive human verdict '
-    + 'on a parked PR (that is /review).',
+    'Invoked to run the jury method on a single review subject via its adapter — the subject-agnostic generalization of review-parked-prs. It produces a verdict + ledger for the caller to act on; it never lands, labels, or comments anything itself. NOT for landing a PR (that is the drain) and NOT for the interactive human verdict on a parked PR (that is /review).',
   phases: [
     { title: 'Resolve', detail: 'an agent shells `node skills-src/jury/resolve-roster.mjs --subject --care-level --input` — the engine selects the adapter, resolves the roster (resolveAdapterRoster), and materializes the jurors + each lens\'s mandate; an empty roster (care none / empty input) means no jury' },
     { title: 'Panel', detail: 'fan out one fresh-context juror agent per rostered seat (jurorsPerLens per lens) over the ONE shared subject snapshot under the adapter\'s mandate; each lens\'s jury is reduced by diversity-SELECTION (the union of every juror\'s findings — the strictest read wins, never a vote)' },
@@ -111,6 +97,11 @@ const SUBJECT_NOUN = {
  *                   roster. Passed to the shim verbatim.
  *   • `material`  — the actual content the jurors judge (the diff text / a description of the rendered design /
  *                   the approach prose). A string; when absent the juror is told to judge from the input alone.
+ *   • `materialFile` — an ALTERNATIVE to inline `material`: a repo-relative path the JUROR agents read the
+ *                   material from (a real multi-hundred-line diff / design / prose file too big to paste inline).
+ *                   The sandboxed harness body never touches the filesystem — only the fan-out jurors (which have
+ *                   file access) open it. Inline `material` wins when both are given; otherwise `materialFile`
+ *                   supplies the content.
  *   • `overrides` — the F3 minimal roster override list [{op,lens}] (optional).
  *   • `reasons`   — escalation reasons (optional; only used to derive careLevel via review-core-cli rigor).
  */
@@ -126,9 +117,10 @@ function normalizeLaunch(rawArgs) {
   const careLevel = (typeof a.careLevel === 'string' && CARE_LEVELS.includes(a.careLevel)) ? a.careLevel : '';
   const input = a.input;
   const material = typeof a.material === 'string' ? a.material : '';
+  const materialFile = typeof a.materialFile === 'string' ? a.materialFile : '';
   const overrides = Array.isArray(a.overrides) ? a.overrides : [];
   const reasons = Array.isArray(a.reasons) ? a.reasons.filter((r) => typeof r === 'string' && r) : [];
-  return { subject, careLevel, input, material, overrides, reasons };
+  return { subject, careLevel, input, material, materialFile, overrides, reasons };
 }
 
 /** Group a materialized juror list by lens, preserving roster order. Pure. Returns `[{ lens, method?, mandate?,
@@ -332,9 +324,12 @@ function resolvePrompt(subject, careLevel, input, overrides) {
   return lines.join('\n');
 }
 
-/** ONE juror's prompt — judges the SHARED subject snapshot under its lens's mandate (no fetch). When the lens's
- *  jury has >1 juror, each is told it is one INDEPENDENT member (the diversity a high-care band earns, #2567). */
-function jurorPrompt(subject, lens, mandate, method, material, juror, jurorsPerLens) {
+/** ONE juror's prompt — judges the SHARED subject snapshot under its lens's mandate (no fetch beyond the material).
+ *  The material is either INLINE (`material`, embedded in the prompt) or, when a `materialFile` path is given and no
+ *  inline material, READ from that file by this juror agent (the sandboxed harness body cannot read files — the
+ *  fan-out jurors, which have file access, do). When the lens's jury has >1 juror, each is told it is one
+ *  INDEPENDENT member (the diversity a high-care band earns, #2567). */
+function jurorPrompt(subject, lens, mandate, method, material, materialFile, juror, jurorsPerLens) {
   const noun = SUBJECT_NOUN[subject] || 'subject';
   const juryFraming = jurorsPerLens > 1
     ? `You are juror ${juror + 1} of ${jurorsPerLens} INDEPENDENT ${lens} jurors on this ${noun} — judge it entirely on your own, do NOT try to agree with the other jurors; the panel keeps any concern ANY juror raises (diversity-selection, never a majority vote).`
@@ -345,6 +340,20 @@ function jurorPrompt(subject, lens, mandate, method, material, juror, jurorsPerL
   const methodLine = method
     ? `Your grounding method is "${method}" — ground your judgement in that evidence where you can; if the method is not callable in this run (e.g. a deferred visual-diff primitive), judge by inspection and SAY you could not run it.`
     : '';
+  // Material source: inline text wins; otherwise read it from the given file (the harness body can't). The file is
+  // the ONLY thing a juror may open — everything else stays off-limits, same no-fetch posture as the inline path.
+  const fromFile = !material && materialFile;
+  const sourceLine = fromFile
+    ? `You judge ONLY the ${noun} in the file below — READ it (it is the ONLY thing you may open); do NOT fetch, check out, or open anything else.`
+    : 'You judge ONLY the subject material below — do NOT fetch, check out, or open anything else.';
+  const materialBlock = fromFile
+    ? [`The ${noun} to review is in this file (READ it — judge from its contents alone):`, materialFile]
+    : [
+        `The ${noun} to review (the ONLY context — judge from this alone):`,
+        '```',
+        material || '(no material was supplied — say so and return no findings you cannot ground)',
+        '```',
+      ];
   return [
     RETURN_HYGIENE,
     '',
@@ -352,12 +361,9 @@ function jurorPrompt(subject, lens, mandate, method, material, juror, jurorsPerL
     juryFraming,
     ...mandateLine,
     methodLine,
-    'You judge ONLY the subject material below — do NOT fetch, check out, or open anything else.',
+    sourceLine,
     '',
-    `The ${noun} to review (the ONLY context — judge from this alone):`,
-    '```',
-    material || '(no material was supplied — say so and return no findings you cannot ground)',
-    '```',
+    ...materialBlock,
     '',
     `Return { lens: "${lens}", findings: [{ summary, file?, failure_scenario?, category?, line? }] }. Return an`,
     'EMPTY findings array if the subject survives your lens\'s scrutiny (do not pad with nitpicks). Return ONLY the',
@@ -403,14 +409,14 @@ function reducePrompt(subject, okLenses, failedLenses, mandatoryLenses, humanReq
  * `juror-running` / `finding` / `verdict` ledger events as it goes.
  */
 async function panelReview(roster) {
-  const { subject, material, ledger } = roster;
+  const { subject, material, materialFile, ledger } = roster;
   const lensGroups = groupJurorsByLens(roster.jurors);
   const jurorsPerLens = lensGroups.length ? Math.max(...lensGroups.map((g) => g.jurors.length)) : 0;
 
   const lensResults = await parallel(lensGroups.map((group) => () =>
     parallel(group.jurors.map((juror, idx) => () =>
       agent(
-        jurorPrompt(subject, group.lens, group.mandate, group.method, material, idx, group.jurors.length),
+        jurorPrompt(subject, group.lens, group.mandate, group.method, material, materialFile, idx, group.jurors.length),
         { label: `juror:${subject}:${group.lens}${group.jurors.length > 1 ? `#${idx + 1}` : ''}`, phase: 'Panel', schema: JUROR_SCHEMA },
       )
         .then((r) => {
@@ -541,7 +547,7 @@ const ledger = rosterEvent ? [rosterEvent] : [];
 phase('Panel');
 log(`Fanning out ${jurors.length} juror(s) across ${new Set(jurors.map((j) => j.lens)).size} lens(es)…`);
 
-const roster = { subject: launch.subject, careLevel, material: launch.material, jurors, mandatoryLenses, ledger };
+const roster = { subject: launch.subject, careLevel, material: launch.material, materialFile: launch.materialFile, jurors, mandatoryLenses, ledger };
 const panel = await panelReview(roster);
 const result = await reducePanel(panel);
 

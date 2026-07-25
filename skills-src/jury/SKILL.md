@@ -49,9 +49,18 @@ jury reads:
 /workflow subject-jury { "subject": "decision-prose", "careLevel": "elevated", "input": { "approach": "<the proposed approach>" }, "material": "<the approach prose>" }
 ```
 
+For a real, multi-hundred-line subject too big to paste inline, point at a file with `materialFile` instead of
+`material` — a repo-relative path the **juror agents** read (the sandboxed harness body never touches the
+filesystem; only the fan-out jurors, which have file access, open it):
+
+```
+/workflow subject-jury { "subject": "pr-diff", "careLevel": "high", "input": ["src/board.ts"], "materialFile": "reports/pr-719.diff" }
+```
+
 `careLevel` may be omitted when `reasons` (escalation reasons) are supplied — the harness derives it from them
 through the shared review core (`review-core-cli rigor`). The `input` drives which perspective lenses the subject
-earns; `material` is the content the jurors actually judge.
+earns; `material` (inline) **or** `materialFile` (a path the jurors read) is the content the jurors actually judge —
+inline `material` wins when both are given.
 
 To resolve just the roster (no fan-out) — e.g. to inspect who the jury would be — shell the engine-invoker directly:
 
