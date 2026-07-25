@@ -21,7 +21,7 @@ Serves G5 (reviewable) and G6 (any repo's cases). Builds on [#2532] (sandbox har
 
 ## Carved (2026-07-25): Part 1 → its own item
 The **source registry** half is carved out to its own story (the "durable source registry + add-a-source" item,
-`bornAs: xx9738m`), which is blocked on this item so it lands after PR #104 and reuses the Part 2 write seam
+`bornAs: 2662`), which is blocked on this item so it lands after PR #104 and reuses the Part 2 write seam
 rather than touching the same files in parallel. This item now tracks ONLY the **verdict-persistence** half
 (Part 2), delivered in plateau-app PR #104 — it resolves once #104 merges.
 
