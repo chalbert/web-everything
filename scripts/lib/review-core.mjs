@@ -85,6 +85,12 @@ import {
 // subject-agnostic consumers import these from jury-core.mjs directly.
 import { buildSubjectMandate, resolveAdapterRoster } from './jury-core.mjs';
 
+// #2637 — the ROSTER COMPLETENESS CRITIC folds the lenses it surfaces back onto the resolved roster through the
+// SAME minimal ledger-trailed override path the F3 spine (#2655) already defines (`applyRosterOverrides` +
+// `ROSTER_OVERRIDE_OPS.ADD`) — a critique-surfaced lens IS a minimal deviation from the stateless recompute, so
+// it rides the existing override machinery rather than a parallel one. Imported for use, NOT re-exported.
+import { applyRosterOverrides, ROSTER_OVERRIDE_OPS } from './jury-core.mjs';
+
 export {
   VERDICTS,
   normalizeFinding,
@@ -915,4 +921,181 @@ export function renderCloseSessionFlowLine({ candidates = [] } = {}) {
   return candidates
     .map((c) => `${c.summary}${c.target ? ` → ${c.route ?? 'backlog'} (${c.target})` : c.route ? ` → ${c.route}` : ''}`)
     .join('; ');
+}
+
+/**
+ * ============================================================================
+ * THE ROSTER COMPLETENESS CRITIC — red-team the jury SELECTION (#2637, under jury cluster #2636).
+ * ============================================================================
+ *
+ * Distinct from the red-JUDGE (#2652, which red-teams the DISPOSITION — the verdict a jury reaches) and from the
+ * INDEPENDENT FINAL VALIDATOR (#2439, which re-judges the final DIFF): this red-teams the ROSTER ITSELF — "is the
+ * jury complete? are the right lenses present for what this subject is?" — BEFORE the fan-out. The resolver
+ * (`resolveJuryPlan`) picks a roster from `care-level + touch-set`, and the F3 override layer (#2655) can add or
+ * REMOVE seats on top; either can leave a failure axis unguarded (an override strips the a11y seat off a UI
+ * change; a hot-path edit that isn't a whole-page file never earns the perf lens). This section adds one cheap
+ * completeness pass that runs wherever a roster is resolved — at prepare AND again at open — and whatever it
+ * surfaces is folded back onto the roster (via the same minimal-override path, #2655) before the jury runs.
+ *
+ * Two teeth, same as the jury's other red-team pairs (#2438's plan handshake, #2439's validator):
+ *   1. `critiqueRosterCompleteness` — the PURE, always-on, deterministic backstop. It compares the roster's
+ *      seated lenses against the lenses the subject EARNS (the mandatory axes + the touch-set's perspective
+ *      lenses) and reports every earned-but-absent lens as a gap. This catches the mechanically-detectable
+ *      misses — an override that removed a needed lens, a resolver that never attached one — with no model call.
+ *   2. `buildRosterCritiqueMandate` — the ADVERSARIAL subagent pass (the "what failure axis is unguarded here?"
+ *      red-team). It catches what path-globs CANNOT: a `.ts` custom element outside a UI-named directory that the
+ *      touch-set classifier reads as a script (its own KNOWN GAP), a hot-path edit that earns perf on semantic
+ *      grounds no page-glob sees. The pure core builds the mandate; SPAWNING the subagent and reading its
+ *      surfaced gaps stays the caller's action (the same judgment/derivation split every mandate builder here keeps).
+ *
+ * `applyRosterCritique` folds either set of gaps back onto the plan. Aggregation, rigor, and the verdict reducers
+ * are all UNCHANGED — this only makes the roster more complete; it never changes how the seated jurors combine.
+ */
+
+/** The lens vocabulary the completeness critic draws from (#2637) — every lens a PR-diff roster can carry: the
+ *  four static `PANEL_LENSES` plus the three UI `PERSPECTIVE_LENSES`. The adversarial subagent must name a missed
+ *  lens by an id from THIS set so what it surfaces is foldable back onto the roster (an out-of-vocabulary "lens"
+ *  has no grounding method and no seat). Frozen; derived from the two source sets so it never drifts from them. */
+export const ROSTER_CRITIQUE_LENSES = Object.freeze([...PANEL_LENSES, ...Object.values(PERSPECTIVE_LENSES)]);
+
+/** Normalize a roster input to its ordered, de-duplicated list of seated lens ids (#2637). Accepts a `RosterPlan`
+ *  (`{ lenses: [{ lens }] }`, what `resolveJuryPlan` returns), a bare `RosterSeat[]`, or a plain `string[]` of lens
+ *  ids — so a caller can critique a full plan or just a lens list. Pure; never throws on a malformed entry. */
+function rosterLensList(roster) {
+  const seats = Array.isArray(roster) ? roster : Array.isArray(roster?.lenses) ? roster.lenses : [];
+  const out = [];
+  const seen = new Set();
+  for (const seat of seats) {
+    const lens = typeof seat === 'string' ? seat : seat && typeof seat === 'object' ? seat.lens : null;
+    if (typeof lens !== 'string' || !lens.trim()) continue;
+    const clean = lens.trim();
+    if (seen.has(clean)) continue;
+    seen.add(clean);
+    out.push(clean);
+  }
+  return out;
+}
+
+/**
+ * @typedef {Object} RosterGap
+ * @property {string} lens - a lens the subject EARNS but the roster is missing a seat for.
+ * @property {string|null} method - the lens's default grounding method id (`LENS_DEFAULT_METHOD`), or null if none.
+ * @property {'mandatory'|'touch-set'} earnedBy - WHY the lens is expected: a mandatory axis every jury guards, or
+ *   one the subject's touch-set earned.
+ * @property {string} reason - a one-sentence human explanation of the gap.
+ */
+
+/**
+ * THE PURE COMPLETENESS BACKSTOP (#2637) — red-team a resolved roster for a MISSED lens, deterministically. Pure,
+ * no model call. Compares the roster's seated lenses against the lenses the subject EARNS and returns every
+ * earned-but-absent lens as a `RosterGap`. The earned set is:
+ *   • the MANDATORY lenses (correctness + security) — a non-empty jury must always guard these; and
+ *   • the subject's PERSPECTIVE lenses — supplied explicitly as `expectedLenses` (the subject-agnostic seam), or,
+ *     for the PR-diff subject, derived from `changedFiles` via `classifyTouchSet` (a11y/visual for a UI file, perf
+ *     for a whole page).
+ *
+ * An EMPTY roster returns NO gaps — an empty roster means care `none` ("nothing escalated, no jury"), and the
+ * critic completes an EXISTING roster; it never conjures a jury the care-level deliberately withheld (the same
+ * contract `resolveRoster` states: the touch-set only ADDS to an existing panel, never creates one). Each gap
+ * carries the lens's default grounding method so `applyRosterCritique` can seat it, plus provenance + a reason.
+ *
+ * @param {{roster: *, changedFiles?: string[], expectedLenses?: string[], mandatoryLenses?: string[]}} o -
+ *   `roster` is a `RosterPlan` / `RosterSeat[]` / lens `string[]`; `expectedLenses`, when given, is the subject's
+ *   earned perspective lenses (used verbatim, skipping `classifyTouchSet`); else they are derived from `changedFiles`.
+ * @returns {{gaps: RosterGap[], expectedLenses: string[], presentLenses: string[]}}
+ */
+export function critiqueRosterCompleteness({ roster, changedFiles = [], expectedLenses, mandatoryLenses = MANDATORY_LENSES } = {}) {
+  const presentLenses = rosterLensList(roster);
+  // An empty roster is care `none` — there is no jury to complete. Report no gaps (never conjure one).
+  if (!presentLenses.length) return { gaps: [], expectedLenses: [], presentLenses };
+
+  const mandatory = (Array.isArray(mandatoryLenses) ? mandatoryLenses : []).filter((l) => typeof l === 'string' && l.trim());
+  const perspective = Array.isArray(expectedLenses)
+    ? expectedLenses.filter((l) => typeof l === 'string' && l.trim())
+    : classifyTouchSet(changedFiles).lenses;
+
+  const earnedBy = new Map();                          // lens → 'mandatory' | 'touch-set', mandatory wins ties
+  for (const lens of perspective) if (!earnedBy.has(lens)) earnedBy.set(lens, 'touch-set');
+  for (const lens of mandatory) earnedBy.set(lens, 'mandatory'); // mandatory first in the ordered expected set below
+
+  // Ordered, unique expected set: mandatory axes first, then the touch-set perspective lenses.
+  const expected = [...mandatory, ...perspective.filter((l) => !mandatory.includes(l))]
+    .filter((l, i, a) => a.indexOf(l) === i);
+
+  const present = new Set(presentLenses);
+  const gaps = expected
+    .filter((lens) => !present.has(lens))
+    .map((lens) => {
+      const why = earnedBy.get(lens);
+      const reason = why === 'mandatory'
+        ? `"${lens}" is a mandatory lens but the roster has no seat for it — that failure axis is unguarded`
+        : `the subject earns the "${lens}" perspective but the roster has no seat for it — that failure axis is unguarded`;
+      return { lens, method: LENS_DEFAULT_METHOD[lens] ?? null, earnedBy: why, reason };
+    });
+
+  return { gaps, expectedLenses: expected, presentLenses };
+}
+
+/**
+ * Build the mandate handed to the ADVERSARIAL roster-completeness critic subagent (#2637) — the "what failure
+ * axis is unguarded here?" red-team the pure backstop cannot do (it catches the semantic misses no path-glob
+ * sees: a custom element authored as a plain script, a hot-path edit that earns perf on grounds no page-glob
+ * detects). Pure — returns the instruction string; SPAWNING the subagent and reading the gaps it names stays the
+ * caller's action (the same split every mandate builder in this module keeps). The subagent must name each missed
+ * lens by an exact id from `ROSTER_CRITIQUE_LENSES`, so what it surfaces is foldable via `applyRosterCritique`.
+ * @param {{subjectNoun?: string, roster?: *, availableLenses?: string[]}} [o]
+ * @returns {string}
+ */
+export function buildRosterCritiqueMandate({ subjectNoun = 'change', roster = [], availableLenses = ROSTER_CRITIQUE_LENSES } = {}) {
+  const seated = rosterLensList(roster);
+  const seatedText = seated.length ? seated.join(', ') : '(none)';
+  const availText = (Array.isArray(availableLenses) ? availableLenses : ROSTER_CRITIQUE_LENSES).join(', ');
+  return [
+    'You are the ROSTER COMPLETENESS CRITIC (#2637) — one cheap adversarial pass that runs BEFORE the jury fans out.',
+    `A jury roster has been picked to review this ${subjectNoun}. The lenses currently seated on the roster are: ${seatedText}.`,
+    `The full lens vocabulary a roster can draw from is: ${availText}.`,
+    `Judge ONE question only: what failure axis is UNGUARDED here — is there a lens the roster SHOULD carry for this`,
+    `${subjectNoun} but does NOT (e.g. it forgot accessibility on a UI change, or performance on a hot-path edit)?`,
+    'Report each missed lens by its EXACT id from the vocabulary above, with a one-sentence reason it is needed for',
+    `this ${subjectNoun}. Do NOT propose a lens already seated, do NOT invent a lens outside the vocabulary, and`,
+    'report an EMPTY list if the roster is already complete — do not pad it to look thorough.',
+    'You judge only: you NAME the gaps; adding the surfaced lenses to the roster is the caller\'s action, not yours.',
+  ].join(' ');
+}
+
+/**
+ * Fold the gaps a completeness critic surfaced (from `critiqueRosterCompleteness`, the adversarial subagent, or
+ * both) back onto a resolved roster plan (#2637) — so the jury runs against the COMPLETED roster. Pure — returns a
+ * NEW plan, never mutates its input. Each gap's `lens` becomes a minimal `ADD` override applied through the F3
+ * override machinery (`applyRosterOverrides`, #2655): a critique-surfaced lens is exactly a minimal deviation from
+ * the stateless recompute, so it rides the same trailed-override path (seat provenance `attachedBy: 'override'`)
+ * rather than a parallel one — and adding an already-seated lens is a no-op there (idempotent), so folding the
+ * same gaps twice is safe. Accepts gap objects (`{ lens, method }`) or bare lens id strings.
+ *
+ * GROUNDING: an explicit `resolveMethods` (when given) always wins. When it is OMITTED, the fold self-grounds from
+ * each gap's own `method` (which `critiqueRosterCompleteness` already computed via `LENS_DEFAULT_METHOD`), so
+ * `applyRosterCritique(plan, gaps)` seats the surfaced lens WITH its default grounding, not a bare ungrounded seat,
+ * without the caller re-injecting the same registry. A bare-string gap carries no method, so it seats ungrounded.
+ * @param {import('./jury-core.mjs').RosterPlan} plan - a `resolveJuryPlan` / `resolveRoster` output.
+ * @param {Array<{lens: string, method?: string|null}>|string[]} [gaps] - the surfaced gaps (or bare lens ids) to seat.
+ * @param {{resolveMethods?: (lens: string) => string[]}} [o] - grounds each added lens; overrides the self-grounding.
+ * @returns {import('./jury-core.mjs').RosterPlan}
+ */
+export function applyRosterCritique(plan, gaps = [], { resolveMethods } = {}) {
+  const list = Array.isArray(gaps) ? gaps : [];
+  // Self-grounding fallback: map each gap lens to its own computed method, used only when no resolver is injected.
+  const methodByLens = new Map();
+  for (const g of list) {
+    if (g && typeof g === 'object' && typeof g.lens === 'string' && typeof g.method === 'string' && g.method.trim()) {
+      methodByLens.set(g.lens.trim(), g.method.trim());
+    }
+  }
+  const ground = typeof resolveMethods === 'function'
+    ? resolveMethods
+    : (lens) => (methodByLens.has(lens) ? [methodByLens.get(lens)] : []);
+  const overrides = list
+    .map((g) => (typeof g === 'string' ? g : g && typeof g === 'object' ? g.lens : null))
+    .filter((lens) => typeof lens === 'string' && lens.trim())
+    .map((lens) => ({ op: ROSTER_OVERRIDE_OPS.ADD, lens: lens.trim() }));
+  return applyRosterOverrides(plan, overrides, { resolveMethods: ground });
 }
