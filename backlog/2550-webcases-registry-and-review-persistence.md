@@ -19,11 +19,17 @@ preview, preview-runtime injection, git/registry source, per-case review afforda
 review verdicts** (accept / annotate / mark-drifted) via the lane→PR write seam so a review survives reload.
 Serves G5 (reviewable) and G6 (any repo's cases). Builds on [#2532] (sandbox hardening).
 
+## Carved (2026-07-25): Part 1 → its own item
+The **source registry** half is carved out to its own story (the "durable source registry + add-a-source" item,
+`bornAs: xx9738m`), which is blocked on this item so it lands after PR #104 and reuses the Part 2 write seam
+rather than touching the same files in parallel. This item now tracks ONLY the **verdict-persistence** half
+(Part 2), delivered in plateau-app PR #104 — it resolves once #104 merges.
+
 ## Scope
-- A source registry (id · label · async load) with an "add a source" input; the two current sources become
-  registry entries.
+- ~~A source registry (id · label · async load) with an "add a source" input; the two current sources become
+  registry entries.~~ → **carved to its own item** (see above).
 - Review verdicts persisted through the write seam, not just in-memory; a reviewed case shows its verdict on
-  reload.
+  reload. **← this item.** Delivered in PR #104.
 
 ## Acceptance
 Any registered repo/product's webcases are browsable through the viewer; per-case verdicts persist across
