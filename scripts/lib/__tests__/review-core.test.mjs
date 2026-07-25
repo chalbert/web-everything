@@ -56,7 +56,9 @@ import {
   classifyTouchSet,
   resolveJuryPlan,
   methodsForLens,
+  PR_DIFF_ADAPTER,
 } from '../review-core.mjs';
+import { validateSubjectAdapter, resolveAdapterRoster } from '../jury-core.mjs';
 
 describe('normalizeFinding', () => {
   it('accepts a well-formed raw finding, coercing types', () => {
@@ -937,6 +939,37 @@ describe('resolveJuryPlan — care-level + touch-set → lens set → methods (#
   });
   it('delegates the unknown-care-level throw to panelRigorForCareLevel', () => {
     expect(() => resolveJuryPlan({ careLevel: 'critical' })).toThrow(/unknown care-level/);
+  });
+});
+
+describe('PR_DIFF_ADAPTER — the reference subject adapter proves the F2 contract (#2656)', () => {
+  it('conforms to the subject-adapter contract', () => {
+    expect(validateSubjectAdapter(PR_DIFF_ADAPTER)).toEqual({ valid: true, errors: [] });
+    expect(PR_DIFF_ADAPTER.subject).toBe('pr-diff');
+    expect(Object.isFrozen(PR_DIFF_ADAPTER)).toBe(true);
+  });
+
+  it('declares correctness + security as the mandatory lenses', () => {
+    expect(PR_DIFF_ADAPTER.mandatoryLenses).toEqual(MANDATORY_LENSES);
+    expect(PR_DIFF_ADAPTER.mandatoryLenses).toContain(MANDATE_LENSES.CORRECTNESS);
+    expect(PR_DIFF_ADAPTER.mandatoryLenses).toContain(MANDATE_LENSES.SECURITY);
+  });
+
+  it('extractTouchSet re-homes classifyTouchSet; resolveMethods re-homes methodsForLens', () => {
+    expect(PR_DIFF_ADAPTER.extractTouchSet(['src/components/Btn.tsx']))
+      .toEqual([PERSPECTIVE_LENSES.A11Y, PERSPECTIVE_LENSES.VISUAL]);
+    expect(PR_DIFF_ADAPTER.resolveMethods('correctness', { careLevel: 'low' })).toEqual([REVIEW_METHODS.STATIC_REVIEW]);
+    expect(PR_DIFF_ADAPTER.resolveMethods(PERSPECTIVE_LENSES.A11Y, { careLevel: 'low' })).toEqual([REVIEW_METHODS.AXE_SCAN]);
+  });
+
+  it('resolveJuryPlan is exactly resolveAdapterRoster over PR_DIFF_ADAPTER (the shipped path routes through the seam)', () => {
+    for (const careLevel of ['none', 'low', 'elevated', 'high']) {
+      for (const changedFiles of [['scripts/lib/x.mjs'], ['src/components/Btn.tsx'], ['demos/foo/index.html', 'scripts/x.mjs']]) {
+        const viaPlan = resolveJuryPlan({ careLevel, changedFiles });
+        const viaSeam = resolveAdapterRoster({ adapter: PR_DIFF_ADAPTER, careLevel, input: changedFiles, ctx: { careLevel } });
+        expect(viaPlan).toEqual(viaSeam);
+      }
+    }
   });
 });
 

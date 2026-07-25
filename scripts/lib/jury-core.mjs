@@ -688,3 +688,141 @@ export function rosterPickedEvent(plan, { round = 0, at, charterForLens } = {}) 
   }
   return event;
 }
+
+/**
+ * ============================================================================
+ * THE SUBJECT-ADAPTER CONTRACT + THE SUBJECT-NEUTRAL MANDATE FRAMING (#2656, F2 heart of epic #2649).
+ * ============================================================================
+ *
+ * The ratified F2 shape (jury-of-#2576, decision record 273a2dbd): the jury METHOD lives ONCE here in the
+ * subject-agnostic core, and each SUBJECT (PR-diff review, design-pixel review, decision-prose review) plugs in
+ * through a THIN per-domain ADAPTER. This section defines the SEAM that plug snaps into — the four interface
+ * pieces every adapter supplies, plus the two core primitives that consume an adapter without knowing what is
+ * being judged:
+ *
+ *   1. THE LENS-SET — the lenses this subject judges under. The static care-band set is subject-neutral
+ *      (`PANEL_LENSES`, reused by `resolveRoster` via `panelRigorForCareLevel`); the adapter declares its extra
+ *      perspective lenses (through `extractTouchSet`) and, optionally, which lenses are mandatory.
+ *   2. THE GROUNDING / VALIDATION METHOD — `resolveMethods(lens, ctx)`: the tool id(s) that ground each lens in
+ *      evidence (a diff-reading reviewer, an axe scan, a screenshot-diff …). The registry that maps a lens to a
+ *      method stays subject-specific — the core only asks the adapter for the answer.
+ *   3. THE TOUCH-SET EXTRACTOR — `extractTouchSet(input)`: the subject's raw input → the extra perspective lenses
+ *      it earns. The PR-diff subject derives this from a changed-file glob; another subject derives it however it
+ *      likes. The core feeds the result to `resolveRoster` as the abstract `touchLenses` signal.
+ *   4. THE SUBJECT-NEUTRAL MANDATE FRAMING — `buildSubjectMandate(...)` (below): the shared "you are reviewing a
+ *      <subject> against <mandate>; judge only, report concrete findings, empty list if nothing" skeleton every
+ *      adapter frames its subject into. Knowing nothing about diffs, pixels, or prose, it assembles the mandate
+ *      line + the neutral judge-only closing; the adapter supplies the subject noun, its isolation line, and any
+ *      subject-specific body lines (for PR-diff: the #2336 no-checkout constraint).
+ *
+ * The reference adapter that PROVES this contract is `PR_DIFF_ADAPTER` in review-core.mjs — it re-homes the
+ * existing PR-diff behaviour (the touch-set classifier, the method registry, the PR mandate framing, the
+ * correctness/security mandatory lenses) behind this seam, and `resolveJuryPlan` now routes through
+ * `resolveAdapterRoster` byte-for-byte. Future subjects (design-pixels, decision-prose = S5) add ONLY an adapter.
+ */
+
+/**
+ * @typedef {Object} SubjectAdapter
+ * @property {string} subject - stable subject id ('pr-diff' | 'design-pixels' | 'decision-prose'). REQUIRED.
+ * @property {(input: *) => string[]} extractTouchSet - the subject's raw input → the extra perspective lenses it
+ *   earns (the abstract `touchLenses` signal `resolveRoster` merges onto the care band). REQUIRED.
+ * @property {(lens: string, ctx?: *) => string[]} resolveMethods - the grounding/validation method id(s) for a
+ *   lens; the optional `ctx` carries whatever the subject needs (the PR-diff adapter reads the care band from it).
+ *   REQUIRED.
+ * @property {string} [subjectNoun] - the noun the mandate frames the work as ('diff', 'rendered design', …).
+ * @property {string[]} [mandatoryLenses] - the lenses that must unanimously accept to land (defaults, per subject,
+ *   to the core `MANDATORY_LENSES`).
+ * @property {(lens: string) => string} [charterForLens] - the juror charter text for a lens (passed to
+ *   `materializeRoster`); defaults to a neutral placeholder there when absent.
+ * @property {(o: *) => string} [buildMandate] - the subject's mandate builder (built on `buildSubjectMandate`).
+ */
+
+/** The subject-adapter contract descriptor (#2656) — the REQUIRED and OPTIONAL interface keys, single-sourced so
+ *  `validateSubjectAdapter` and adapter authors name them once. Frozen. */
+export const SUBJECT_ADAPTER_CONTRACT = Object.freeze({
+  required: Object.freeze(['subject', 'extractTouchSet', 'resolveMethods']),
+  optional: Object.freeze(['subjectNoun', 'mandatoryLenses', 'charterForLens', 'buildMandate']),
+});
+
+/**
+ * Validate that a value implements the `SubjectAdapter` contract (#2656). Pure — never throws (a malformed
+ * adapter must surface as a structured result, not crash the caller). Returns `{ valid, errors }`: the three
+ * REQUIRED members must be present and the right type; each OPTIONAL member, when present, must be well-typed.
+ * The seam `resolveAdapterRoster` gate-checks every adapter through this before building a roster, and a
+ * per-domain adapter's conformance test asserts it here — so a new subject that half-implements the contract
+ * fails loudly at its own boundary, not deep inside the recompute.
+ * @param {*} adapter
+ * @returns {{valid: boolean, errors: string[]}}
+ */
+export function validateSubjectAdapter(adapter) {
+  if (!adapter || typeof adapter !== 'object' || Array.isArray(adapter)) {
+    return { valid: false, errors: ['adapter must be a non-null object'] };
+  }
+  const errors = [];
+  if (!isNonEmptyString(adapter.subject)) errors.push('adapter.subject must be a non-empty string');
+  if (typeof adapter.extractTouchSet !== 'function') errors.push('adapter.extractTouchSet must be a function (input) => string[]');
+  if (typeof adapter.resolveMethods !== 'function') errors.push('adapter.resolveMethods must be a function (lens, ctx?) => string[]');
+  if (adapter.subjectNoun != null && !isNonEmptyString(adapter.subjectNoun)) errors.push('adapter.subjectNoun, when present, must be a non-empty string');
+  if (adapter.mandatoryLenses != null && !(Array.isArray(adapter.mandatoryLenses) && adapter.mandatoryLenses.length)) {
+    errors.push('adapter.mandatoryLenses, when present, must be a non-empty array');
+  }
+  if (adapter.charterForLens != null && typeof adapter.charterForLens !== 'function') errors.push('adapter.charterForLens, when present, must be a function');
+  if (adapter.buildMandate != null && typeof adapter.buildMandate !== 'function') errors.push('adapter.buildMandate, when present, must be a function');
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * THE SUBJECT-NEUTRAL MANDATE SKELETON (#2656) — the shared framing every adapter builds its subject's mandate
+ * on. Pure. Assembles the parts that are the SAME across subjects — the "you are reviewing a <subject> against
+ * this mandate: <mandate>" opening line, and the neutral judge-only closing ("report concrete findings … nothing
+ * about labels/merge policy … empty list if nothing survives") — while the adapter supplies the parts that VARY:
+ * its `subjectNoun`, the `isolationLine` (what context the reviewer sees), the `findingAnchor` (what a finding is
+ * anchored to — a `file` for a diff, a region for pixels), and any subject-specific `bodyLines` (the PR-diff
+ * adapter's #2336 no-checkout constraint). The reference PR-diff `buildMandate` (review-core.mjs) calls this with
+ * the diff-specific values, reproducing its prior text byte-for-byte — that is what "re-home the mandate framing,
+ * factoring shared logic into the core rather than duplicating" means.
+ * @param {{subjectNoun?: string, mandate?: string|string[], defaultMandate?: string, isolationLine?: string,
+ *   findingAnchor?: string, bodyLines?: string[]}} [o]
+ * @returns {string}
+ */
+export function buildSubjectMandate({
+  subjectNoun = 'subject',
+  mandate,
+  defaultMandate = 'correctness',
+  isolationLine = '',
+  findingAnchor = 'file',
+  bodyLines = [],
+} = {}) {
+  const mandates = (Array.isArray(mandate) ? mandate : [mandate]).filter(Boolean);
+  const mandateLine = mandates.length ? mandates.join(', ') : defaultMandate;
+  const body = Array.isArray(bodyLines) ? bodyLines.filter((l) => typeof l === 'string' && l.length) : [];
+  return [
+    `You are reviewing a ${subjectNoun} against this mandate: ${mandateLine}.`,
+    ...(isNonEmptyString(isolationLine) ? [isolationLine] : []),
+    ...body,
+    `Judge only: report concrete findings (${findingAnchor}, one-sentence summary, the failure scenario it causes) and`,
+    'nothing about labels, merge policy, or who may clear this change — that is the caller\'s decision, not yours.',
+    'Report an empty findings list if nothing survives scrutiny; do not pad with stylistic nitpicks.',
+  ].join(' ');
+}
+
+/**
+ * THE ADAPTER-DRIVEN ROSTER SEAM (#2656) — resolve a jury roster for ANY subject through its adapter. Pure. This
+ * is the one place a subject's adapter meets the subject-agnostic spine: it validates the adapter, asks it for the
+ * touch-set signal (`extractTouchSet(input)`) and a method resolver bound to the caller's `ctx`, runs the
+ * stateless `resolveRoster` recompute, and applies any minimal ledger-trailed overrides on top — all without
+ * knowing what `input` is. `resolveJuryPlan` (review-core.mjs, the PR-diff resolver) delegates to this with
+ * `PR_DIFF_ADAPTER`, so the shipped PR-diff path IS the reference proof that the contract holds; a future subject
+ * reuses this verbatim with its own adapter.
+ * @param {{adapter: SubjectAdapter, careLevel: string, input?: *, overrides?: Array<{op: string, lens: string}>,
+ *   ctx?: *}} o
+ * @returns {RosterPlan}
+ */
+export function resolveAdapterRoster({ adapter, careLevel, input, overrides = [], ctx } = {}) {
+  const { valid, errors } = validateSubjectAdapter(adapter);
+  if (!valid) throw new Error(`resolveAdapterRoster: invalid subject adapter: ${errors.join('; ')}`);
+  const resolveMethods = (lens) => adapter.resolveMethods(lens, ctx);
+  const plan = resolveRoster({ careLevel, touchLenses: adapter.extractTouchSet(input), resolveMethods });
+  const ovs = Array.isArray(overrides) ? overrides : [];
+  return ovs.length ? applyRosterOverrides(plan, ovs, { resolveMethods }) : plan;
+}

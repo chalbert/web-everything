@@ -3,10 +3,12 @@ bornAs: x9pa439
 kind: story
 size: 5
 parent: "2649"
-status: open
+status: resolved
 blockedBy: ["2653", "2655"]
 scope: ["we:scripts/lib/"]
 dateOpened: "2026-07-24"
+dateStarted: "2026-07-24"
+dateResolved: "2026-07-24"
 tags: []
 ---
 
