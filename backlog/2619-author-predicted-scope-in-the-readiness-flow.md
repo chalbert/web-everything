@@ -2,6 +2,7 @@
 bornAs: xbzk108
 kind: story
 size: 5
+tier: pinned
 parent: "2612"
 status: open
 dateOpened: "2026-07-22"
