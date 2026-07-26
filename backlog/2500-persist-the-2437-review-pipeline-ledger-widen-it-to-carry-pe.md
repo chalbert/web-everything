@@ -5,6 +5,10 @@ parent: "2445"
 status: open
 dateOpened: "2026-07-14"
 tags: [plateau-loop, console, review-pipeline]
+scope:
+  - we:scripts/workflows/review-parked-prs.mjs
+  - plateau:tools/drain-daemon/
+  - plateau:tools/dev-panel/
 ---
 
 # Persist the #2437 review-pipeline ledger + widen it to carry per-lens verdicts (prerequisite for #2486)
