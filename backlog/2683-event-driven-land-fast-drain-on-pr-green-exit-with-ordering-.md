@@ -1,4 +1,5 @@
 ---
+bornAs: xuasox4
 kind: story
 size: 5
 parent: "2612"

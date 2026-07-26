@@ -1,4 +1,5 @@
 ---
+bornAs: xfgacpz
 kind: story
 size: 3
 parent: "2612"
@@ -40,5 +41,5 @@ measures**.
 
 - The report distinguishes **latency-bound**, **land-serialization-bound**, **authoring-bound**, and
   **pool-saturation-bound** regimes from real data, so the B/E/D go/no-go is measured, not asserted.
-- Also emits the **false-green signal** Lever D (#xo1m764) needs: how often a scope-shrunk CI would have passed
+- Also emits the **false-green signal** Lever D (#2681) needs: how often a scope-shrunk CI would have passed
   while the full suite failed (measurable once D pilots).
