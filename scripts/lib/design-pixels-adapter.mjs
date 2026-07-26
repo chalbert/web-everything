@@ -16,21 +16,27 @@
  * signal `resolveRoster` merges onto the care band, the same mechanism the PR-diff subject uses for its a11y /
  * visual-vs-target / perf lenses.
  *
- * THE GROUNDING METHODS — and the KNOWN GAP (the DEFERRED screenshot grounding). Each lens is grounded by a tool:
+ * THE GROUNDING METHODS. Each lens is grounded by a tool:
  *   • `usability` + `design-systems` → `design-heuristic-review` — a reviewer subagent judges the rendered design
  *     against usability / design-system heuristics (the callable, ships-now grounding).
  *   • `a11y` → `axe-scan` — an automated accessibility scan over the rendered UI (callable; the same tool id the
  *     PR-diff subject's a11y lens uses, so a runner keys on ONE consistent method-id string across subjects).
  *   • `visual` → `screenshot-vs-target` — a screenshot of the rendered design compared against a target/baseline
- *     image. Per the ratified record + spec, the screenshot-vs-target primitive HAS NO CALLABLE FORM YET: it lives
- *     in the unbuilt visual-diff protocol. So this method is registered here as **DEFERRED** (`deferred: true`) —
- *     the roster still records that the visual lens WOULD be grounded by it (so provenance is complete), but a
- *     runner MUST check `isDesignPixelMethodDeferred` and NOT try to call it. The real screenshot grounding wires
- *     in when the visual-diff primitive lands — a ~size-2 follow-up, out of scope for this slice.
+ *     image. This was registered DEFERRED in #2657 (no primitive yet); #2671 WIRES IN the shared comparator
+ *     (`visual-comparator.mjs`, from #2670), so the method now has a CALLABLE FORM: `groundVisualLens(...)` runs the
+ *     real automated screenshot-vs-baseline diff and returns a grounded `{ grounded, match, delta, findings }`
+ *     verdict. A runner resolves it via `runnerForDesignMethod('screenshot-vs-target')`. The by-eye fallback is
+ *     PRESERVED for the one case the comparator itself documents as a skip — a surface with NO committed baseline:
+ *     the comparator returns `skipped`, `groundVisualLens` reports `{ grounded: false, byEye: true }`, and the juror
+ *     judges the visual match by eye and marks the lens ungrounded (a skip is never a fail).
  *
- * Pure — no I/O, no model calls. Unit-tested in `scripts/lib/__tests__/design-pixels-adapter.test.mjs`.
+ * THE I/O SEAM. The lens classification + mandate framing (`classifyDesignTouchSet`, `designMethodsForLens`,
+ * `buildDesignMandate`) stay PURE — no I/O, no model calls. The only I/O is the visual grounding runner
+ * (`groundVisualLens` → `compareToBaseline`), which reads the shot + baseline PNGs off disk; all its judgement is
+ * delegated to the pure comparator. Unit-tested in `scripts/lib/__tests__/design-pixels-adapter.test.mjs`.
  */
 import { buildSubjectMandate } from './jury-core.mjs';
+import { compareToBaseline } from './visual-comparator.mjs';
 
 /** The #2576 design-review lenses this subject judges under. A frozen enum so every consumer names them once. */
 export const DESIGN_PIXEL_LENSES = Object.freeze({
@@ -52,9 +58,11 @@ export const DESIGN_PIXEL_LENS_SET = Object.freeze([
  * The lenses that must UNANIMOUSLY accept for a design to be judged "ships" (the design analogue of the PR-diff
  * subject's correctness + security). `usability` and `a11y` are the two design invariants that (a) have a CALLABLE
  * grounding today and (b) a design must not fail: an unusable or inaccessible design does not ship regardless of
- * how well it matches the target or the system. `visual` is deliberately NOT mandatory — its `screenshot-vs-target`
- * grounding is DEFERRED (no primitive yet), so gating a land on a lens that cannot be grounded would be unsound;
- * `design-systems` is advisory (conformance is a judgment call a reasonable reviewer can weigh). A tuning knob.
+ * how well it matches the target or the system. `visual` is deliberately NOT mandatory — even though its
+ * `screenshot-vs-target` grounding is now CALLABLE (#2671), a surface with no committed baseline is a documented
+ * SKIP (the comparator's own contract), so gating a land on a lens that legitimately skips would false-block every
+ * brand-new surface before anyone has drawn its target; `design-systems` is advisory (conformance is a judgment
+ * call a reasonable reviewer can weigh). A tuning knob.
  *
  * INVARIANT (mandatory lenses ride the TOUCH-SET, not the static care band). Unlike the reference `PR_DIFF_ADAPTER`
  * — whose mandatory lenses (correctness / security) are members of the subject-neutral `PANEL_LENSES` that
@@ -75,16 +83,17 @@ export const DESIGN_PIXEL_MANDATORY_LENSES = Object.freeze([
 export const DESIGN_PIXEL_METHODS = Object.freeze({
   HEURISTIC_REVIEW: 'design-heuristic-review', // a reviewer subagent judges the rendered design against heuristics
   AXE_SCAN: 'axe-scan',                         // an automated accessibility scan over the rendered UI
-  SCREENSHOT_VS_TARGET: 'screenshot-vs-target', // a screenshot compared against a target/baseline — DEFERRED (below)
+  SCREENSHOT_VS_TARGET: 'screenshot-vs-target', // a screenshot diffed against a target/baseline — callable (#2671)
 });
 
 /**
  * The design-pixels method registry (#2657) — each method declares WHICH lenses it grounds, a human label, and
  * whether it is DEFERRED. Pure data. `design-heuristic-review` grounds usability + design-systems; `axe-scan`
- * grounds a11y; `screenshot-vs-target` grounds visual but is DEFERRED — its callable primitive (the visual-diff
- * protocol) is not built yet, so a runner registers it for provenance but never calls it (guard with
- * `isDesignPixelMethodDeferred`). `DESIGN_PIXEL_LENS_DEFAULT_METHOD` (below) is the inverted lens→method index
- * derived from this, so the two never drift.
+ * grounds a11y; `screenshot-vs-target` grounds visual — CALLABLE as of #2671 (`deferred: false`), wired to the
+ * shared comparator via `groundVisualLens` / `runnerForDesignMethod` (below). No method is deferred today; the
+ * `deferred` field + `isDesignPixelMethodDeferred` guard stay as general infrastructure for any future
+ * not-yet-built method. `DESIGN_PIXEL_LENS_DEFAULT_METHOD` (below) is the inverted lens→method index derived from
+ * this, so the two never drift.
  */
 export const DESIGN_PIXEL_METHOD_REGISTRY = Object.freeze([
   Object.freeze({
@@ -101,25 +110,25 @@ export const DESIGN_PIXEL_METHOD_REGISTRY = Object.freeze([
   }),
   Object.freeze({
     id: DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET,
-    label: 'screenshot compared against a target/baseline',
+    label: 'screenshot diffed against a target/baseline (shared visual comparator)',
     grounds: Object.freeze([DESIGN_PIXEL_LENSES.VISUAL]),
-    // DEFERRED (#2657): no callable primitive yet — the screenshot-vs-target grounding lives in the unbuilt
-    // visual-diff protocol. Registered for provenance; a runner MUST NOT call it until the primitive lands.
-    deferred: true,
-    deferredReason: 'the screenshot-vs-target grounding primitive (visual-diff protocol) is not built yet',
-    unblock: 'a follow-up wires the real screenshot grounding in when the visual-diff primitive lands',
+    // CALLABLE (#2671): the shared comparator (`visual-comparator.mjs`, #2670) is now wired in. A runner resolves
+    // the in-process runner via `runnerForDesignMethod` and invokes `groundVisualLens`, which runs the real
+    // automated screenshot-vs-baseline diff. A surface with no baseline is a documented skip (by-eye fallback).
+    deferred: false,
   }),
 ]);
 
-/** The DEFERRED method ids (#2657) — the methods registered for provenance but with no callable primitive yet.
- *  Derived from the registry so it never drifts. A runner checks this before attempting to invoke a method. */
+/** The DEFERRED method ids — methods registered for provenance but with no callable primitive yet. Derived from
+ *  the registry so it never drifts. As of #2671 this is EMPTY (screenshot-vs-target became callable); the
+ *  machinery stays for any future not-yet-built method. A runner checks it before attempting to invoke a method. */
 export const DESIGN_PIXEL_DEFERRED_METHODS = Object.freeze(
   new Set(DESIGN_PIXEL_METHOD_REGISTRY.filter((m) => m.deferred).map((m) => m.id)),
 );
 
-/** Is this design-pixels method DEFERRED — registered for provenance but not yet callable (#2657)? Pure. The guard
- *  a runner uses so it records the intended grounding method on the roster seat but never tries to invoke the
- *  screenshot-vs-target primitive before the visual-diff protocol ships. */
+/** Is this design-pixels method DEFERRED — registered for provenance but not yet callable? Pure. A general guard a
+ *  runner uses so it never invokes a method whose primitive is not built. Returns `false` for every method today
+ *  (all are callable as of #2671); retained for future deferred methods. */
 export function isDesignPixelMethodDeferred(methodId) {
   return DESIGN_PIXEL_DEFERRED_METHODS.has(methodId);
 }
@@ -163,9 +172,9 @@ export function classifyDesignTouchSet(input = {}) {
  * The grounding method(s) for one design-pixels lens (#2657) — the subject's `resolveMethods`. Pure. Returns a
  * FRESH single-element array with the lens's default grounding method, or an EMPTY array for a lens the design
  * registry does not know (e.g. one of the subject-neutral care-band lenses `resolveRoster` prepends — the design
- * subject grounds only its OWN perspective lenses, never the generic panel's). The returned method id may be a
- * DEFERRED one (`screenshot-vs-target` for `visual`) — that is intentional: the roster seat records the intended
- * grounding for provenance, and the runner guards with `isDesignPixelMethodDeferred` before invoking.
+ * subject grounds only its OWN perspective lenses, never the generic panel's). The `visual` lens's method id
+ * (`screenshot-vs-target`) is now CALLABLE (#2671): a runner resolves it via `runnerForDesignMethod` and invokes
+ * `groundVisualLens` — the real automated diff — with a documented by-eye skip when no baseline exists.
  * @param {string} lens
  * @returns {string[]}
  */
@@ -175,16 +184,76 @@ export function designMethodsForLens(lens) {
 }
 
 /**
+ * @typedef {{ method: string, grounded: boolean, byEye: boolean, match: boolean|null, delta: number,
+ *             skipped: boolean, findings: import('./visual-comparator.mjs').ComparisonResult['findings'],
+ *             dimensions?: import('./visual-comparator.mjs').ComparisonResult['dimensions'] }} VisualGrounding
+ */
+
+/**
+ * THE CALLABLE FORM of the `visual → screenshot-vs-target` lens (#2671) — the wire-in of the shared comparator
+ * (`visual-comparator.mjs`, #2670). Runs the REAL automated screenshot-vs-baseline diff and returns a grounded
+ * verdict, replacing the by-eye-only judgment the lens was DEFERRED to in #2657. Thin over `compareToBaseline`: it
+ * owns NO diff logic (that stays single-sourced in the comparator, per #96), only the mapping of the comparator's
+ * result into a lens-grounding shape a juror/runner consumes.
+ *
+ * TWO OUTCOMES, mirroring the comparator's contract:
+ *   • Baseline present → the diff RAN → `{ grounded: true, byEye: false, match, delta, findings, dimensions }`.
+ *     `match`/`delta`/the `region-shift` findings are the automated grounding — the juror weighs them, it does not
+ *     re-eyeball what the diff already measured.
+ *   • Baseline MISSING → the comparator returns a documented SKIP → `{ grounded: false, byEye: true, match: null }`.
+ *     This PRESERVES the by-eye fallback: the juror judges the visual match by eye and reports the lens as
+ *     ungrounded (a skip is never a fail — a brand-new surface must not red a gate before its target is drawn).
+ *
+ * The ONLY I/O in this module (reads the shot + baseline PNGs, via the comparator's file-facing wrapper). All
+ * threshold options (`pixelTolerance` / `pixelDeltaThreshold` / `grid` / `cellThreshold`) pass straight through.
+ * @param {{ shotPath: string, baselinePath: string, pixelTolerance?: number, pixelDeltaThreshold?: number,
+ *           grid?: number, cellThreshold?: number }} [args]
+ * @returns {VisualGrounding}
+ */
+export function groundVisualLens({ shotPath, baselinePath, ...opts } = {}) {
+  const result = compareToBaseline({ shotPath, baselinePath, ...opts });
+  const skipped = result.skipped === true;
+  return {
+    method: DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET,
+    grounded: !skipped,     // the automated diff RAN (a baseline existed) — false on a documented skip
+    byEye: skipped,         // no baseline → the juror falls back to a by-eye visual judgment
+    match: result.match,    // true/false when grounded; null on a skip (the comparator makes no claim)
+    delta: result.delta,
+    skipped,
+    findings: result.findings,
+    ...(result.dimensions ? { dimensions: result.dimensions } : {}),
+  };
+}
+
+/**
+ * The in-process runner index (#2671): design method id → its callable grounding function. Only
+ * `screenshot-vs-target` has an IN-PROCESS runner here (`groundVisualLens`, the automated diff); the other two
+ * methods are grounded OUT of process — `design-heuristic-review` by a reviewer subagent, `axe-scan` by the axe
+ * tool — so they are absent from this map (a runner orchestrates them itself). Frozen so it is a stable value.
+ */
+export const DESIGN_PIXEL_METHOD_RUNNERS = Object.freeze({
+  [DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET]: groundVisualLens,
+});
+
+/** The in-process runner for a design method id, or `null` if the method has no in-process callable form (it is
+ *  grounded out of process by a subagent / external tool). Pure lookup. The seam a runner uses to invoke the
+ *  screenshot-vs-target diff by its method id without hard-wiring the function. */
+export function runnerForDesignMethod(methodId) {
+  return DESIGN_PIXEL_METHOD_RUNNERS[methodId] ?? null;
+}
+
+/**
  * Build the design-pixels review mandate (#2657) — the subject's `buildMandate`, framed on the subject-neutral
  * `buildSubjectMandate` skeleton (the same skeleton the PR-diff `buildMandate` uses). Pure. Supplies the
  * design-specific parts: the `rendered design` subject noun, the isolation line (the reviewer sees the rendered
  * pixels / DOM, not the source), the `region` finding anchor (a design finding is anchored to a region of the
- * rendered surface, not a source file), and — for the `visual` lens — a body note that the screenshot-vs-target
- * grounding is DEFERRED, so the reviewer judges by eye rather than expecting an automated diff.
+ * rendered surface, not a source file), and — for the `visual` lens — a body note that an automated
+ * screenshot-vs-target diff GROUNDS the lens (its verdict is provided as evidence to weigh), falling back to a
+ * by-eye judgment only when no baseline exists (a documented skip → an ungrounded lens).
  *
  * The lens can be named EITHER as `lens` OR (matching the reference `buildMandate({ mandate: <lens> })` /
- * `buildPanelMandate` convention) as `mandate` — the deferred-`visual` note fires when EITHER names `visual`, so a
- * caller using the reference shape does not silently lose it.
+ * `buildPanelMandate` convention) as `mandate` — the `visual` note fires when EITHER names `visual`, so a caller
+ * using the reference shape does not silently lose it.
  * @param {{lens?: string, mandate?: string|string[]}} [o]
  * @returns {string}
  */
@@ -196,8 +265,10 @@ export function buildDesignMandate({ lens, mandate } = {}) {
   const bodyLines = [];
   if (namesVisual) {
     bodyLines.push(
-      'Automated screenshot-vs-target grounding is NOT available yet (the visual-diff primitive is unbuilt) —',
-      'judge the visual match against the target by eye from the rendered design, and say so if no target is shown.',
+      'An automated screenshot-vs-target diff grounds this lens: when a baseline exists, its verdict (match / pixel',
+      'delta / region-shift findings) is provided as evidence — weigh it, do not re-eyeball what it already measured.',
+      'When no baseline exists the diff is a documented SKIP: judge the visual match by eye and report the lens as',
+      'ungrounded (a skip is never a fail).',
     );
   }
   return buildSubjectMandate({
@@ -215,8 +286,8 @@ export function buildDesignMandate({ lens, mandate } = {}) {
  * Conforms to `SUBJECT_ADAPTER_CONTRACT` (validated by `validateSubjectAdapter`), so `resolveAdapterRoster` builds a
  * design-review roster from it exactly as it does from `PR_DIFF_ADAPTER` — the core knows nothing about pixels.
  *   • `extractTouchSet` — the design input → the perspective lenses it earns (`classifyDesignTouchSet`).
- *   • `resolveMethods`  — the design lens → its grounding method (`designMethodsForLens`); `visual`'s method is
- *     DEFERRED (`screenshot-vs-target`), recorded for provenance but not callable yet.
+ *   • `resolveMethods`  — the design lens → its grounding method (`designMethodsForLens`); `visual`'s method
+ *     (`screenshot-vs-target`) is CALLABLE (#2671) — run it via `runnerForDesignMethod` → `groundVisualLens`.
  *   • `mandatoryLenses` — usability + a11y (the two grounded design invariants that gate a land).
  *   • `charterForLens`  — the design-specific juror charter text (passed to `materializeRoster`).
  *   • `buildMandate`    — the design-specific mandate framing (built on `buildSubjectMandate`).
