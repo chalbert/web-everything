@@ -27,13 +27,16 @@
  *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
  *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`.
- *   node scripts/lane-pool.mjs release (--lane=N | --all) [--session=<slug>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one)
+ *   node scripts/lane-pool.mjs release (--lane=N | --all | --all-pools --session=<slug>) [--session=<slug>] [--pool=<name>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one); #2667 --all-pools --session sweeps EVERY pool under POOL_ROOT and releases that session's leases (cross-locus couple cleanup in one call), and --pool=<name> selects a pool by dir-name (no checkout path needed)
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s); #2350 REFUSES a reserved lane (even --all/--force) — deliberate teardown is `remove --lane=N --release-reserved`
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
  *   node scripts/lane-pool.mjs unmap   (--item=NNN[,…] | --lane=N | --all)   # drop lane-ports registry entries
  *
  * Repo / pool overrides (apply to any command):
  *   --repo=<path>        a checkout to derive the lane repo from (default: the cwd's git toplevel)
+ *   --pool=<name>        (#2667) select a pool DIRECTLY by its dir-name under POOL_ROOT — the read/release
+ *                        selector (status / list / path / release) that needs only the poolDir, no checkout path
+ *                        or origin URL (e.g. release a plateau-app-pool lease from the WE checkout)
  *   --origin=<url>       clone source (default: that checkout's `origin` remote URL)
  *   --reference=<path>   object-sharing reference repo for `git clone --reference` (default: --repo path)
  *   --name=<slug>        pool key under the root (default: derived from the origin URL basename)
@@ -124,14 +127,22 @@ function resolveRepo() {
   const referencePath = resolve(expandHome(flags.reference) || repoPath);
   const topLevel = tryGit(['rev-parse', '--show-toplevel'], referencePath) || referencePath;
   const originUrl = flags.origin || tryGit(['remote', 'get-url', 'origin'], topLevel);
-  if (!originUrl) {
+  // #2667 — `--pool=<name>` selects a pool DIRECTLY by its directory name under POOL_ROOT, bypassing origin-URL
+  // derivation. It is the pool selector for the READ / RELEASE ops (status / list / path / release) that need
+  // only `poolDir` — e.g. the main session releasing a cross-locus couple's lingering lease in the `plateau-app`
+  // pool from the WE checkout, without needing a plateau-app checkout path. When `--pool` names the pool an
+  // undeterminable origin URL is NOT fatal (these ops never clone). `acquire`/`provision`/`refresh` still need a
+  // real origin, and hit the same guard at use (`cloneLane` throws on a null origin) — so the fail just moves
+  // from resolve-time to the op that actually needs it, keeping the read/release selector usable without one.
+  const explicitPool = typeof flags.pool === 'string' && flags.pool ? flags.pool : null;
+  if (!originUrl && !explicitPool) {
     fail(`could not determine an origin URL — pass --origin=<url> (looked in ${topLevel})`);
   }
-  const name = flags.name || basename(originUrl).replace(/\.git$/, '');
+  const name = explicitPool || flags.name || basename(originUrl).replace(/\.git$/, '');
   // Default integration branch: the reference's origin/HEAD if known, else `main`.
   const head = tryGit(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], topLevel);
   const branch = flags.branch || (head ? head.replace(/^origin\//, '') : 'main');
-  return { name, originUrl, referencePath: topLevel, branch, poolDir: join(POOL_ROOT, name) };
+  return { name, originUrl: originUrl || null, referencePath: topLevel, branch, poolDir: join(POOL_ROOT, name) };
 }
 
 const laneDir = (repo, n) => join(repo.poolDir, `lane-${n}`);
@@ -346,15 +357,35 @@ function unmapLanes(repo, lanes) {
   log(`  unmapped item(s) ${dropped.join(', ')} (lane ${lanes.join(', ')}) from ${registryPath(repo)}`);
 }
 
-// Lanes currently on disk, sorted by index.
-function existingLanes(repo) {
-  if (!existsSync(repo.poolDir)) return [];
-  return execFileSync('ls', ['-1', repo.poolDir], { encoding: 'utf8' })
+// Lane indices on disk under a pool DIR, sorted by index (the primitive both the repo-scoped `existingLanes`
+// and the #2667 cross-pool sweep share, so "what counts as a lane" is defined in exactly one place).
+function laneIndicesIn(poolDir) {
+  if (!existsSync(poolDir)) return [];
+  return execFileSync('ls', ['-1', poolDir], { encoding: 'utf8' })
     .split('\n')
     .map((d) => d.trim())
     .filter((d) => /^lane-\d+$/.test(d))
     .map((d) => Number(d.slice(5)))
     .sort((a, b) => a - b);
+}
+
+// Lanes currently on disk for a repo's pool, sorted by index.
+function existingLanes(repo) {
+  return laneIndicesIn(repo.poolDir);
+}
+
+// #2667 — pool NAMES under POOL_ROOT that actually hold lanes (have at least one `lane-N` child). Skips the
+// one-off scratch clones that also live under POOL_ROOT (drain / heal / pipeline checkouts) and the
+// constellation sibling clones (`frontierui` / `plateau-app` render siblings) — none of those have `lane-N`
+// children, so they never match. This is the set the cross-pool release-by-session sweep walks.
+function existingPools() {
+  if (!existsSync(POOL_ROOT)) return [];
+  return execFileSync('ls', ['-1', POOL_ROOT], { encoding: 'utf8' })
+    .split('\n')
+    .map((d) => d.trim())
+    .filter(Boolean)
+    .filter((name) => laneIndicesIn(join(POOL_ROOT, name)).length > 0)
+    .sort();
 }
 
 // ── deps (node_modules) — not shared by --reference, so installed per lane on fresh-clone / lockfile change ──
@@ -419,6 +450,12 @@ const defaultSession = () => flags.session || process.env.LANE_SESSION || `${hos
 // ── core ops ──────────────────────────────────────────────────────────────────────────────────────
 function cloneLane(repo, n) {
   const dest = laneDir(repo, n);
+  // #2667 — `--pool=<name>` makes a null origin non-fatal at resolve (for read/release ops), so a CLONE path
+  // must fail CLEANLY here rather than passing null to `git clone` (a raw TypeError). --pool selects an EXISTING
+  // pool for read/release; to clone/acquire a new lane, pass --repo or --origin so an origin URL is derivable.
+  if (!repo.originUrl) {
+    fail(`could not determine an origin URL for pool "${repo.name}" — --pool selects an existing pool for read/release only; to clone/acquire a lane pass --repo=<checkout> or --origin=<url>`);
+  }
   log(`  clone lane-${n} ← ${repo.originUrl} (--reference ${repo.referencePath}) …`);
   gitQuiet(['clone', '--quiet', '--reference', repo.referencePath, repo.originUrl, dest]);
   // Pin a stable local default branch so refresh's hard-reset target is unambiguous.
@@ -828,8 +865,52 @@ function assertReleaseReservedScoped() {
   }
 }
 
+// #2667 — cross-pool release-by-session. `release --all-pools --session=<slug>` sweeps EVERY pool under
+// POOL_ROOT and hands back every lane that `<slug>` leases — clearing a cross-locus couple's lease in the WE
+// pool AND the plateau-app pool in ONE call (the exact toil the auto-release + this selector remove). It is BY
+// SESSION on purpose: the lease markers themselves record the owning session at acquire (dispatch) time, so a
+// by-session sweep needs no separate `(pool, lane)` ledger — the markers ARE that record. A blanket cross-pool
+// `--all` would nuke every session's leases everywhere, so `--all-pools` REQUIRES `--session` and refuses
+// `--all`. Reserved (permanent memory) leases are always skipped — a sweep never un-reserves.
+function cmdReleaseAllPools() {
+  const session = flags.session || process.env.LANE_SESSION || null;
+  if (!session) {
+    fail('release --all-pools requires --session=<slug> — it releases THAT session\'s leases in every pool; a blanket cross-pool release is deliberately not offered');
+  }
+  if (flags.all) {
+    fail('release --all-pools --all is not allowed — cross-pool release is BY SESSION (targeted); pass --session=<slug> alone');
+  }
+  const pools = existingPools();
+  const perPool = [];
+  let released = 0;
+  for (const name of pools) {
+    const poolDir = join(POOL_ROOT, name);
+    const lanes = [];
+    for (const n of laneIndicesIn(poolDir)) {
+      const dir = join(poolDir, `lane-${n}`);
+      const lease = readLease(dir);
+      if (!lease) continue;
+      if (!leaseOwnedBy(lease, session)) continue; // only THIS session's leases — never a foreign one
+      if (isReservedLease(lease)) {
+        // A reserved lane owned by this session is still off-limits to a bulk sweep (its whole point is to
+        // survive routine release); un-reserving stays the deliberate single-lane `--release-reserved` act.
+        log(`  ${name}/lane-${n}: ${describeLease(lease)} — reserved; skipped (un-reserve is single-lane --release-reserved)`);
+        continue;
+      }
+      rmSync(LEASE_MARKER(dir), { force: true });
+      log(`  released ${name}/lane-${n} (was ${describeLease(lease)})`);
+      lanes.push(n);
+      released++;
+    }
+    if (lanes.length) perPool.push({ pool: name, lanes });
+  }
+  if (released === 0) log(`  no leases held by session "${session}" in any pool (${pools.length} pool(s) scanned)`);
+  if (flags.json) process.stdout.write(JSON.stringify({ session, released, pools: perPool }, null, 2) + '\n');
+}
+
 function cmdRelease(repo) {
   assertReleaseReservedScoped();
+  if (flags['all-pools']) return cmdReleaseAllPools(); // #2667 — cross-pool release-by-session
   const session = defaultSession();
   const force = !!flags.force;
   let targets;
@@ -991,8 +1072,8 @@ const COMMANDS = {
 if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
-    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|release|remove|map|unmap> [--count=N] [--lane=N] [--all] ' +
-      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--repo=<path>] [--origin=<url>] ' +
+    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|release|remove|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] ' +
+      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
       '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json]\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);
