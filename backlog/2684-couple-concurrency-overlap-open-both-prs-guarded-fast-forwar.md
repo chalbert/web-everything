@@ -40,3 +40,11 @@ breaks in the common cases. So the skip is **gated**, with a clean fallback:
 
 **Savings are best-case, not headline:** the robust win is the overlapped first CIs (always); the FF-skip is an
 opportunistic bonus when the stack base is still main's tip. The earlier −48% figure is withdrawn as best-case.
+
+## Round-2 review — acceptance criteria
+
+- **The overlap-CI win is NOT unconditional.** The WE PR is stacked on impl, so an impl `review:changes` bounce
+  (which the guards above call the *norm*) moves the stacked base and **discards the WE half's first CI** — the
+  same event that guts the FF-skip. So the "robust, always-true" framing overstates it: quantify B's benefit
+  against the **observed impl-bounce rate** (from #2680), and treat the overlapped first CI as a win *conditional*
+  on impl not bouncing, not a guarantee.
