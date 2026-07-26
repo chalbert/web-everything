@@ -100,6 +100,13 @@ export const TRUST_CHAIN = [
     homes: ['scripts/lib/disposition-land-seam.mjs'],
   },
   {
+    role: 'auto-land-seam',
+    file: 'auto-land-seam.mjs',
+    tier: 'policy',
+    desc: 'the seam that ACTS on a clean auto-dispose intent (#2675) — decideAutoLand/applyAutoLand turn the #2674 label intent into the actual review:accepted WRITE (so the drain merges it) behind the global shadow|enforce landMode knob, defaulting to SHADOW (observe-only). It is the acting end of the auto-dispose leash — it decides whether a clean intent LANDS or only observes — so it is leash-defining policy tier: an agent may not clear an edit to its own auto-land machinery. Safety rails hold in both modes (never auto-lands a keep-parked/red-refuted/gate-self intent; fail-closed on any write error) and INVARIANT 2 is double-locked (the intent carries decideSetLabel\'s guarded swap AND the default writer shells the INVARIANT-2-guarded review-set-label.mjs)',
+    homes: ['scripts/lib/auto-land-seam.mjs'],
+  },
+  {
     role: 'policy-conformance',
     file: 'review-policy.conformance.test.mjs',
     tier: 'policy',
