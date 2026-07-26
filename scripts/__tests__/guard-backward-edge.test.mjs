@@ -1,18 +1,35 @@
 // Regression guard for guard-backward-edge.mjs — the PreToolUse(Edit|Write) hook that DENIES a static
 // Frontier UI import in WE package source (the banned WE→FUI backward module edge, #6/#30/#932/#1282).
 //
-// Two layers: the PURE detector (hasBackwardEdge) pins what counts as a static edge vs an allowed runtime
-// / commented / URL reference; the SPAWN cases pin the wiring — scope (src/ yes, demos/ no) and the
-// deny-via-exit-2 protocol the hook contract depends on.
+// Three layers: the PURE detector (hasBackwardEdge) pins what counts as a static edge vs an allowed runtime
+// / commented / URL reference; the SCOPE gate (isWeSource / repoNameFor) pins that only WE's OWN src/ is in
+// scope, keyed on repo identity not the bare /src/ segment (#2673); the SPAWN cases pin the end-to-end wiring
+// — the deny-via-exit-2 protocol the hook contract depends on — against real repo-rooted fixtures.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-import { hasBackwardEdge, isWeSource } from '../guard-backward-edge.mjs';
+import { tmpdir } from 'node:os';
+import { dirname, resolve, join } from 'node:path';
+import { hasBackwardEdge, isWeSource, repoNameFor } from '../guard-backward-edge.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const HOOK = resolve(here, '../guard-backward-edge.mjs');
+
+// Real repo-rooted fixtures so repoNameFor's package.json walk-up resolves (#2673). The target files
+// themselves need not exist — only the repo-root package.json above them does.
+let weRoot, plateauRoot;
+beforeAll(() => {
+  weRoot = mkdtempSync(join(tmpdir(), 'gbe-we-'));
+  writeFileSync(join(weRoot, 'package.json'), JSON.stringify({ name: 'web-everything' }));
+  plateauRoot = mkdtempSync(join(tmpdir(), 'gbe-pa-'));
+  writeFileSync(join(plateauRoot, 'package.json'), JSON.stringify({ name: 'plateau-app' }));
+});
+afterAll(() => {
+  rmSync(weRoot, { recursive: true, force: true });
+  rmSync(plateauRoot, { recursive: true, force: true });
+});
 
 /** Spawn the hook with a synthetic PreToolUse event; return the exit code. */
 function runHook(tool_name, file_path, extra = {}) {
@@ -58,38 +75,59 @@ describe('hasBackwardEdge — pure detector', () => {
     expect(hasBackwardEdge(`import x from '@frontierui-legacy/x';`)).toBe(false);
   });
 
-  it('isWeSource — scope is repo src/, never a demos subtree (F3)', () => {
-    expect(isWeSource('/ws/lane-1/src/foo.ts')).toBe(true);
-    expect(isWeSource('/ws/lane-1/src/_data/backlog.js')).toBe(true);
-    expect(isWeSource('/ws/lane-1/demos/foo/src/x.ts')).toBe(false); // nested demos/**/src
-    expect(isWeSource('/ws/lane-1/demos/bar.ts')).toBe(false);
-    expect(isWeSource('/ws/lane-1/scripts/x.mjs')).toBe(false);
+  it('isWeSource — WE src yes, demos no, and a SIBLING repo src no (F3 / #2673)', () => {
+    // repoName injected → hermetic, no fs walk. WE's own src/ is in scope.
+    expect(isWeSource('/ws/lane-1/src/foo.ts', 'web-everything')).toBe(true);
+    expect(isWeSource('/ws/lane-1/src/_data/backlog.js', 'web-everything')).toBe(true);
+    // #2673 — WE's in-repo sub-packages (@webeverything/*) are WE source too.
+    expect(isWeSource('/ws/lane-1/packages/webcases/src/x.ts', '@webeverything/webcases')).toBe(true);
+    expect(isWeSource('/ws/lane-1/demos/foo/src/x.ts', 'web-everything')).toBe(false); // nested demos/**/src
+    expect(isWeSource('/ws/lane-1/demos/bar.ts', 'web-everything')).toBe(false);
+    expect(isWeSource('/ws/lane-1/scripts/x.mjs', 'web-everything')).toBe(false);
+    // #2673 — a sibling repo's src/ shares the /src/ segment but is NOT WE source (forward edge, allowed).
+    expect(isWeSource('/ws/plateau-app/src/foo.ts', 'plateau-app')).toBe(false);
+    expect(isWeSource('/ws/frontierui/src/foo.ts', 'frontierui')).toBe(false);
+    // no package.json found above the file → null repo → not WE source (fail-open, never wedges the agent).
+    expect(isWeSource('/ws/orphan/src/foo.ts', null)).toBe(false);
+  });
+
+  it('repoNameFor — resolves the nearest package.json name via walk-up (#2673)', () => {
+    expect(repoNameFor(join(weRoot, 'src/foo.ts'))).toBe('web-everything');
+    expect(repoNameFor(join(weRoot, 'src/deep/nested/x.ts'))).toBe('web-everything');
+    expect(repoNameFor(join(plateauRoot, 'src/foo.ts'))).toBe('plateau-app');
   });
 });
 
-describe('guard-backward-edge.mjs — wiring (deny via exit 2)', () => {
-  it('DENIES a static FUI import written into src/', () => {
-    expect(runHook('Write', '/ws/lane-1/src/foo.ts', { content: `import x from '@frontierui/embed';` })).toBe(2);
+describe('guard-backward-edge.mjs — wiring (deny via exit 2, repo-scoped #2673)', () => {
+  it('DENIES a static FUI import written into WE src/', () => {
+    expect(runHook('Write', join(weRoot, 'src/foo.ts'), { content: `import x from '@frontierui/embed';` })).toBe(2);
   });
-  it('DENIES an Edit that INTRODUCES a FUI import into a src file', () => {
+  it('DENIES an Edit that INTRODUCES a FUI import into a WE src file', () => {
     // old_string absent on disk → hook scans new_string (fail-safe path)
-    expect(runHook('Edit', '/ws/lane-1/src/foo.ts',
+    expect(runHook('Edit', join(weRoot, 'src/foo.ts'),
       { old_string: 'export const y = 1;', new_string: `import x from '@frontierui/embed';` })).toBe(2);
   });
-  it('ALLOWS a FUI import in demos/ (runtime pages, out of scope)', () => {
-    expect(runHook('Write', '/ws/lane-1/demos/bar.ts', { content: `import x from '@frontierui/embed';` })).toBe(0);
+  it('ALLOWS a FUI import in a plateau-app src/ file — a forward edge, not WE source (#2673)', () => {
+    // The core regression: a WE-rooted agent editing plateau-app:src/** that dogfoods FUI must NOT be denied.
+    expect(runHook('Write', join(plateauRoot, 'src/foo.ts'), { content: `import x from '@frontierui/embed';` })).toBe(0);
   });
-  it('ALLOWS a cross-origin dynamic import in src/', () => {
-    expect(runHook('Write', '/ws/lane-1/src/foo.ts',
+  it('ALLOWS a FUI import in WE demos/ (runtime pages, out of scope)', () => {
+    expect(runHook('Write', join(weRoot, 'demos/bar.ts'), { content: `import x from '@frontierui/embed';` })).toBe(0);
+  });
+  it('ALLOWS a cross-origin dynamic import in WE src/', () => {
+    expect(runHook('Write', join(weRoot, 'src/foo.ts'),
       { content: `const m = await import('https://frontierui.dev/embed.js');` })).toBe(0);
   });
-  it('DENIES a bare side-effect import written into src/ (F1)', () => {
-    expect(runHook('Write', '/ws/lane-1/src/foo.ts', { content: `import '@frontierui/embed';` })).toBe(2);
+  it('DENIES a bare side-effect import written into WE src/ (F1)', () => {
+    expect(runHook('Write', join(weRoot, 'src/foo.ts'), { content: `import '@frontierui/embed';` })).toBe(2);
   });
-  it('ALLOWS a FUI import in a nested demos/**/src subtree (F3)', () => {
-    expect(runHook('Write', '/ws/lane-1/demos/app/src/x.ts', { content: `import x from '@frontierui/embed';` })).toBe(0);
+  it('ALLOWS a FUI import in a nested WE demos/**/src subtree (F3)', () => {
+    expect(runHook('Write', join(weRoot, 'demos/app/src/x.ts'), { content: `import x from '@frontierui/embed';` })).toBe(0);
   });
   it('ALLOWS a non-src path', () => {
-    expect(runHook('Write', '/ws/lane-1/scripts/x.mjs', { content: `import x from '@frontierui/embed';` })).toBe(0);
+    expect(runHook('Write', join(weRoot, 'scripts/x.mjs'), { content: `import x from '@frontierui/embed';` })).toBe(0);
+  });
+  it('ALLOWS a src path with no package.json above it (fail-open, never wedges)', () => {
+    expect(runHook('Write', '/nonexistent-orphan-xyz/src/foo.ts', { content: `import x from '@frontierui/embed';` })).toBe(0);
   });
 });
