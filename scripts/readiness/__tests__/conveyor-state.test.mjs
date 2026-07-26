@@ -28,6 +28,7 @@ import {
   deriveUnshaped,
   deriveNeedsSlice,
   deriveDecisions,
+  reverseLaneItemMap,
   DEFAULT_STALL_MS,
 } from '../conveyor-state.mjs';
 
@@ -291,6 +292,26 @@ const poolRow = (lane, { leased = true, session = `sess-${lane}`, predictedScope
   lease: leased ? { session, ...(predictedScope ? { predictedScope } : {}) } : null,
 });
 const picLease = (lane, { predicted = [], breach = [], session = `sess-${lane}` } = {}) => ({ lane, session, predicted, observed: predicted, breach, clean: breach.length === 0 });
+
+describe('reverseLaneItemMap — lane-ports registry → { lane: num } the health scan reads (#2616)', () => {
+  it('reverses each entry that carries a lane (the shape acquire --item / map writes)', () => {
+    const reg = { 2616: { port: 3110, lane: 1, repo: 'web-everything' }, 2617: { lane: 2, repo: 'basetest' } };
+    expect(reverseLaneItemMap(reg)).toEqual({ 1: '2616', 2: '2617' });
+  });
+  it('keeps a JIT x-slug key verbatim', () => {
+    expect(reverseLaneItemMap({ x5etmdv: { lane: 3 } })).toEqual({ 3: 'x5etmdv' });
+  });
+  it('an entry with no lane, and a missing / non-object / array registry, contribute nothing (never fabricated)', () => {
+    expect(reverseLaneItemMap({ 42: { port: 3100 } })).toEqual({}); // no `lane` → skipped
+    expect(reverseLaneItemMap({})).toEqual({});
+    expect(reverseLaneItemMap(null)).toEqual({});
+    expect(reverseLaneItemMap(undefined)).toEqual({});
+    expect(reverseLaneItemMap([{ lane: 1 }])).toEqual({}); // an array registry is not a valid map
+  });
+  it('empty registry → empty map → assessHealth stays ok (the pre-#2616 inert-but-safe degrade)', () => {
+    expect(reverseLaneItemMap({})).toEqual({});
+  });
+});
 
 describe('shapeLanes — pool rows × scope picture → the tick lanes shape', () => {
   it('keeps only live-leased lanes and crosses in predicted scope + breach', () => {

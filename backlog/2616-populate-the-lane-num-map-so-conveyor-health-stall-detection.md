@@ -3,8 +3,10 @@ bornAs: x5etmdv
 kind: story
 size: 3
 parent: "2612"
-status: open
+status: resolved
 dateOpened: "2026-07-22"
+dateStarted: "2026-07-26"
+dateResolved: "2026-07-26"
 tags: [plateau-loop, conveyor, health, lane]
 scope:
   - we:scripts/lane-pool.mjs
@@ -34,3 +36,24 @@ The work: have the lane acquire path (or a small collector) write `{ "<num>": { 
 
 Reference: the state-read script #2611 and the `/conveyor` skill #2613 both note this map is required; the
 dispatch-guard TTL is the interim mitigation until it lands.
+
+## Progress
+
+- Added `--item=NNN[,NNN…]` to `we:scripts/lane-pool.mjs` acquire: it records the item→lane mapping into the
+  PRIMARY checkout's `we:.claude/lane-ports.json` (the same registry #2139's `map` writes and
+  `we:scripts/readiness/conveyor-state.mjs` reverse-derives lane→num from). Runs at acquire time in the primary
+  checkout — where the main-session tick reads it — after the reset's `unmapLanes`, with its own pre-map unmap so
+  lane→num stays 1:1 (covers the `--no-reset` path too). Band-less pools record `{ lane }` (no page port, all the
+  health scan needs); the write is wrapped so a hiccup never fails the acquire, and rides stderr so acquire stdout
+  stays the clean lane path.
+- Factored the shared `registerItemsToLane` writer out of `cmdMap` (which keeps its port-required fail-loud);
+  numeric ids normalize via `String(Number())`, JIT `x…` slugs lower-case (the `#num` transcript scan is
+  case-sensitive).
+- `we:scripts/readiness/conveyor-state.mjs`: extracted the pure `reverseLaneItemMap` (exported + unit-tested)
+  from `laneItemMap`; refreshed the stale "registry is `{}` today / scan is INERT" comments to note acquire now
+  populates it.
+- `we:skills-src/conveyor/delivery-agent-brief.md`: the delivery-agent acquire call now passes `--item={{ITEM_NUM}}`.
+- Tests: `we:scripts/__tests__/lane-pool-item-map.test.mjs` (real-CLI: primary-checkout write, banded-vs-band-less
+  port, x-slug lower-case, reverse-derivation, back-compat no-write, 1:1 re-acquire, `--no-reset` replacement,
+  multi-item) + `reverseLaneItemMap` unit tests in `we:scripts/readiness/__tests__/conveyor-state.test.mjs`. Gate
+  green (check:standards, 0 errors).
