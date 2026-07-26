@@ -3,10 +3,12 @@ bornAs: xqu6daq
 kind: story
 size: 5
 parent: "2636"
-status: open
+status: resolved
 blockedBy: ["2674"]
 scope: ["we:scripts/lib", "we:scripts"]
 dateOpened: "2026-07-26"
+dateStarted: "2026-07-26"
+dateResolved: "2026-07-26"
 tags: [jury, disposition, auto-land, shadow]
 relatedTo: ["2652", "2651", "2668"]
 ---
