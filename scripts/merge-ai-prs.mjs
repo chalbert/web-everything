@@ -390,14 +390,25 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
   const title = pr?.title || '';
   const aiGenerated = isAiGeneratedPr(pr);
   const certifyLabel = hasLabel(pr, trustLabel);
-  const certified = certifyLabel || aiGenerated; // #2195: the label OR the every-commit-AI trailer certifies
+  // #2196/#2326 — a HUMAN clearing a parked PR (review:accepted, applied ONLY by /review) is the strongest
+  // producer-certification there is: it means "this may merge", regardless of the AI-trailer heuristic. Without
+  // this a cleared PR whose only non-AI commit is the drain's OWN rebase (`drain: rebase …`, no Co-Authored-By
+  // trailer, and not a `Merge branch` mechanical commit isAiGeneratedPr forgives) is neither label- nor
+  // AI-certified — silently dropped from the queue: accepted but stranded. decideReviewGate already says merge
+  // on review:accepted, but a PR must first BE certified to enter the candidate set for that gate to run.
+  const humanCleared = hasLabel(pr, REVIEW_LABELS.accepted);
+  const certified = certifyLabel || aiGenerated || humanCleared; // #2195: the label OR every-commit-AI OR a human clear certifies
   const testGreen = isRequiredCheckGreen(pr, requiredCheck);
   const state = String(pr?.mergeStateStatus || '').toUpperCase();
   const mergeable = String(pr?.mergeable || '').toUpperCase();
   const landableState = state === 'CLEAN' || state === 'UNSTABLE'; // UNSTABLE = mergeable, only non-required checks red
   let decision = 'merge';
-  let reason = certifyLabel ? `producer-certified (label "${trustLabel}"), required check green, cleanly mergeable` : 'AI-generated, required check green, cleanly mergeable';
-  if (!certified) { decision = 'skip'; reason = `not AI-generated (a commit lacks the Co-Authored-By: Claude trailer) and no "${trustLabel}" label`; }
+  let reason = certifyLabel
+    ? `producer-certified (label "${trustLabel}"), required check green, cleanly mergeable`
+    : humanCleared
+      ? 'human-cleared (review:accepted), required check green, cleanly mergeable'
+      : 'AI-generated, required check green, cleanly mergeable';
+  if (!certified) { decision = 'skip'; reason = `not AI-generated (a commit lacks the Co-Authored-By: Claude trailer), no "${trustLabel}" label, and not human-cleared (review:accepted)`; }
   else if (!testGreen) { decision = 'skip'; reason = `required check "${requiredCheck}" is not green`; }
   else if (mergeable !== 'MERGEABLE') { decision = 'skip'; reason = `not mergeable (mergeable=${mergeable || 'UNKNOWN'})`; }
   else if (!landableState) { decision = 'skip'; reason = `merge state ${state || 'UNKNOWN'} (BEHIND⇒needs rebase, DIRTY/BLOCKED/DRAFT⇒not landable) — left for its author`; }
@@ -405,7 +416,7 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
   // labelling (PR #206 landed bodyless). Checked LAST so the earlier, more actionable reasons (uncertified /
   // red / unmergeable) still win when several are true at once.
   else if (!hasNonEmptyBody(pr?.body)) { decision = 'skip'; reason = 'empty/whitespace description — refusing to land it (add a real summary of what changed and why; #2324)'; }
-  return { num, title, decision, reason, aiGenerated, certifyLabel, testGreen, state, mergeable };
+  return { num, title, decision, reason, aiGenerated, certifyLabel, humanCleared, testGreen, state, mergeable };
 }
 
 /**
@@ -671,7 +682,10 @@ export function decideBatchesIdleExit({ enabled = false, idlePass = false, consi
  *  never a human orphan, and never a PR that already carries the label. */
 export function shouldLabelOnGreen(pr, { requiredCheck = 'test', label = 'ready-to-merge' } = {}) {
   if (!label || hasLabel(pr, label)) return false;    // already labelled (or no label configured) → nothing to do
-  if (!isAiGeneratedPr(pr)) return false;             // only the producer's own AI PRs — never a human orphan
+  // Only the producer's own AI PRs are auto-labelled — never a human orphan — EXCEPT a human-cleared parked PR
+  // (review:accepted): the human clear IS the certification, so mint ready-to-merge on green even when the
+  // AI-trailer heuristic reads non-AI (e.g. the drain's own `drain: rebase …` commit stranded it). #2196/#2326
+  if (!isAiGeneratedPr(pr) && !hasLabel(pr, REVIEW_LABELS.accepted)) return false;
   return isRequiredCheckGreen(pr, requiredCheck);     // label the instant the required check is green
 }
 
