@@ -801,6 +801,16 @@ export function buildValidatorMandate({ lens, contextIsolation = 'diff-only' } =
     'validated. Report any concrete reason this should NOT land (a real bug, an unhandled case, a missing or',
     'gamed test that would pass while the behaviour is wrong), or accept ONLY if you independently would — never',
     'defer to the fact that a panel already accepted it.',
+    // #2440 (slice C of epic #2410) — the ANTI-TEST-GAMING mandate. A deterministic gate
+    // (`scanTestTampering` in `pr-merge-gate.mjs`) already refuses the auto-land on the diff-VISIBLE tamper
+    // forms (a deleted / `.skip`-ed / `.only`-ed / removed test). Your job is the JUDGMENT half a script cannot
+    // do: inspect the test changes for SUBTLER gaming a green check would hide.
+    'ANTI-TEST-GAMING — the CI-green land clause is only as trustworthy as the tests behind it, so scrutinise',
+    'EVERY test change as an adversary: (1) for a logic/behaviour fix, confirm it carries a test that would FAIL',
+    'on the PRE-CHANGE behaviour — a test that passes both before and after proves nothing and is a red flag;',
+    '(2) reject a change that WEAKENS coverage — an assertion loosened or deleted, a case narrowed, an edge',
+    'stripped — even when the suite still goes green; (3) treat any author-peer edit to a test as suspect by',
+    'default and satisfy yourself it strengthens rather than launders the check. A gamed green is a NOT-land.',
   ].join(' ');
 }
 

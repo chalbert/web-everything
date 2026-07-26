@@ -46,6 +46,91 @@ export function hasNonEmptyBody(body) {
   return typeof body === 'string' && body.trim().length > 0;
 }
 
+// ── Anti-test-gaming gate (#2440, slice C of epic #2410) ─────────────────────────────────────────────────
+// The convergence loop lands a couple on a GREEN required check. A peer could manufacture that green by
+// GAMING the tests rather than fixing the code: delete a failing test, `.skip`/`.only` it away, or shrink the
+// case set so the surviving suite no longer covers the bug. Those are DETERMINISTIC, diff-visible tamper forms
+// — this gate scans the PR's net diff for them and REFUSES the auto-land (the drain parks the couple
+// `review:human`, so a human clears a genuine test removal rather than a script guessing intent).
+//
+// SCOPE (honest): this catches only what a DIFF proves — a removed/skipped/deleted test. True line-coverage %
+// needs a coverage artifact the drain does not have, so "coverage drops" is enforced here in its diff-visible
+// proxy (test cases / files removed net). The JUDGMENT half — does a logic fix carry a test that FAILS on the
+// pre-change behaviour, is an edited assertion subtly weakened — is not script-decidable; it is the independent
+// validator's explicit mandate (`buildValidatorMandate` in `review-core.mjs`), not this gate.
+
+/** A test file: a `__tests__/` dir member, or a `*.test.*` / `*.spec.*` module (the repo's test convention). Pure. */
+export function isTestPath(path) {
+  return /(^|\/)__tests__\/|\.(?:test|spec)\.[cm]?[jt]sx?$/.test(String(path || ''));
+}
+
+// A `.skip(`/`.only(` (or an `xit(`/`xdescribe(`/`fit(`/`fdescribe(`) CALL — the two ways a test is disabled or
+// narrowed-to so a failing sibling never runs. Anchored to the CALL form (a `(` must follow) and to the real
+// test callees so it can't false-positive on ordinary code: `.skip(`/`.only(` count only on `it`/`test`/
+// `describe` (never a variable named `context`/`suite`), and the bare Jasmine-style globals must be an
+// invocation NOT preceded by a `.` or word char — so `model.fit(`, `fitAffineCost(`, and `object-fit` never
+// match. `.todo` is deliberately NOT here: it marks an unwritten test, it does not hide a failing one.
+const SKIP_FOCUS_MARKER_RE = /\b(?:it|test|describe)\s*\.\s*(?:skip|only)\s*\(|(?<![.\w])(?:xit|xdescribe|xtest|fit|fdescribe)\s*\(/;
+// A test-case opener with a string title — `it('…'`, `test("…"` — used to COUNT cases so a net removal is
+// detectable. The string-title requirement keeps a bare identifier named `test` from counting.
+const TEST_CASE_OPENER_RE = /\b(?:it|test)\s*(?:\.\s*\w+\s*)?\(\s*['"`]/;
+
+/**
+ * Parse a unified `git diff` into per-file added/removed CONTENT lines + a `deleted` flag. Pure. Only the diff
+ * BODY matters here (not exact line numbers), so this is intentionally minimal: it keys files off the
+ * `diff --git a/… b/…` header, notes `deleted file mode`, and buckets `+`/`-` content lines (skipping the
+ * `+++`/`---` file headers and `@@` hunk markers). Good enough to detect test tampering; not a general patch lib.
+ * @param {string} diffText
+ * @returns {Array<{path:string|null, deleted:boolean, added:string[], removed:string[]}>}
+ */
+export function parseUnifiedDiff(diffText) {
+  const files = [];
+  let cur = null;
+  for (const raw of String(diffText || '').split('\n')) {
+    if (raw.startsWith('diff --git ')) {
+      const m = raw.match(/ b\/(.+)$/);
+      cur = { path: m ? m[1] : null, deleted: false, added: [], removed: [] };
+      files.push(cur);
+      continue;
+    }
+    if (!cur) continue;
+    if (raw.startsWith('deleted file mode')) { cur.deleted = true; continue; }
+    if (raw.startsWith('+++') || raw.startsWith('---') || raw.startsWith('@@')) continue; // headers/hunk markers, not content
+    if (raw.startsWith('+')) cur.added.push(raw.slice(1));
+    else if (raw.startsWith('-')) cur.removed.push(raw.slice(1));
+  }
+  return files;
+}
+
+/**
+ * Scan a PR's net diff for DETERMINISTIC test-gaming — the tamper forms a diff proves. Pure. For each TEST file
+ * in the diff it flags:
+ *   - `test-file-removed`  — the whole test file was deleted.
+ *   - `test-skipped`       — a `.skip`/`.only` (or `xit`/`fit`/…) marker was ADDED (a live test disabled/narrowed).
+ *   - `tests-removed`      — net test CASES removed (removed `it(`/`test(` openers exceed added ones).
+ * Returns `{ tampered, findings, reasons }`, mirroring the manifest-tamper shape the drain's land loop already
+ * consumes, so wiring it is a drop-in park. A clean diff (no test file, or only ADDED tests) → `tampered:false`.
+ * @param {{diffText?:string}} o  the two-tree net diff TEXT (`computeNetDiffText`, merge-ai-prs.mjs).
+ * @returns {{tampered:boolean, findings:Array<{path:string,kind:string,detail:string}>, reasons:string[]}}
+ */
+export function scanTestTampering({ diffText = '' } = {}) {
+  const findings = [];
+  for (const f of parseUnifiedDiff(diffText)) {
+    if (!f.path || !isTestPath(f.path)) continue;
+    if (f.deleted) {
+      findings.push({ path: f.path, kind: 'test-file-removed', detail: 'a test file was deleted' });
+      continue; // a delete has no surviving markers/cases to also flag
+    }
+    const skipAdds = f.added.filter((l) => SKIP_FOCUS_MARKER_RE.test(l)).length;
+    if (skipAdds) findings.push({ path: f.path, kind: 'test-skipped', detail: `${skipAdds} skip/only marker(s) added` });
+    const removedCases = f.removed.filter((l) => TEST_CASE_OPENER_RE.test(l)).length;
+    const addedCases = f.added.filter((l) => TEST_CASE_OPENER_RE.test(l)).length;
+    if (removedCases > addedCases) findings.push({ path: f.path, kind: 'tests-removed', detail: `net ${removedCases - addedCases} test case(s) removed` });
+  }
+  const reasons = findings.map((x) => `${x.kind}: ${x.path} (${x.detail})`);
+  return { tampered: findings.length > 0, findings, reasons };
+}
+
 /**
  * Assert this caller MAY write to main, WITHOUT shelling a merge (used by non-gh write-to-main intents such as
  * pr-land's `--fallback-git` local `git merge`). `caller === 'drain'` always passes. Any other route THROWS

@@ -585,6 +585,18 @@ describe('buildValidatorMandate (#2439 — the independent hardened validator)',
       expect(buildValidatorMandate({ lens })).toContain(`INDEPENDENT FINAL VALIDATOR for the ${lens} lens`);
     }
   });
+
+  it('carries the #2440 anti-test-gaming mandate — pre-change-failing test, no weakening, suspect author test edits', () => {
+    const text = buildValidatorMandate({ lens: 'correctness' });
+    expect(text).toContain('ANTI-TEST-GAMING');
+    // (1) a logic fix must carry a test that FAILS on the pre-change behaviour
+    expect(text).toMatch(/FAIL[\s\S]*PRE-CHANGE behaviour/);
+    // (2) reject weakened coverage even when the suite still goes green
+    expect(text).toMatch(/WEAKENS coverage/);
+    expect(text).toMatch(/even when the suite still goes green/);
+    // (3) treat author-peer test edits as suspect by default
+    expect(text).toMatch(/author-peer edit to a test as suspect/);
+  });
 });
 
 describe('combineValidatedVerdict (#2439 — gate a panel accept on the independent validator)', () => {
