@@ -1,8 +1,10 @@
 /**
  * review-parked-prs.mjs — encode the drain's PARKED-PR review loop as a Workflow-harness script (#2437,
- * slice of epic #2418). Collapses the ~24 hand-run main-loop steps of reviewing a drain-parked PR
- * (fetch the diff → run a fresh-context multi-lens panel → reduce to a verdict + disposition + comment)
- * into ONE launch, one item per parked PR flowing independently through the pipeline.
+ * slice of epic #2418), now running the REAL editor↔reviewer CONVERGENCE loop (#2639, the heaviest slice of
+ * epic #2285). Collapses the hand-run main-loop steps of reviewing a drain-parked PR — fetch the diff → run a
+ * fresh-context multi-lens panel → reduce to a verdict → have an editor subagent fix each finding (or dismiss it
+ * with a stated reason) → RE-review the revised diff, repeating until it converges or deadlocks — into ONE launch,
+ * one item per parked PR flowing independently through the pipeline.
  *
  * HARNESS SANDBOX — structured EXACTLY like the proven reference
  * `we:skills-src/batch-backlog-items/parallel-execute.workflow.js`: a PURE literal `export const meta` followed
@@ -16,21 +18,32 @@
  *     subagent runs `node scripts/fetch-parked.mjs` / `node scripts/review-core-cli.mjs …` and returns
  *     structured data. Small PURE orchestration helpers are inlined as top-level `function` declarations.
  *
- * THE BOUNDARY (epic #2418 / INVARIANT 2) — this workflow RETURNS a ledger of verdicts and NOTHING ELSE:
- *   • It NEVER applies a label, posts a comment, or merges anything — the operator/caller decides what a verdict
- *     does (the "decisions stay in the loop" boundary). The panel JUDGES; acting on the judgment is the caller's.
+ * THE CONVERGENCE LOOP (#2639, epic #2285) — the linchpin of the autonomous jury chain. Per parked PR:
+ *   1. the fresh-context multi-lens panel judges the CURRENT diff → one reduced verdict;
+ *   2. `deriveNegotiationOutcome({ verdict, round, roundCap })` (shelled via `review-core-cli reduce --round`)
+ *      decides `land` / `continue` / `escalate` — the ONE round-cap decision, never re-derived here;
+ *   3. on `continue`, an EDITOR subagent (seeded by `review-core-cli mandate --editor`, i.e. `buildEditorMandate`)
+ *      fixes each finding or dismisses it with a stated reason, pushing the revision back to the SAME PR branch;
+ *   4. the panel RE-reviews the revised diff next round, until it converges (`land`) or hits the round cap /
+ *      needs-human (`escalate` → deadlocks to `review:human`).
+ * The bound is PASSES, not time — NO clock anywhere. The round cap is PER CARE BAND: `panelRigorForCareLevel`'s
+ * `rounds` (dialed by the PR's advisory care-level, never above `NEGOTIATION_ROUND_CAP`, the loop's hard budget).
+ * THE INVARIANT: a `land` outcome means the FINAL diff was signed off by a fresh-context panel that did NOT author
+ * it (the editor writes; the next round's independent reviewers judge) — the landed diff is reviewer-approved.
+ *
+ * THE BOUNDARY (epic #2418 / INVARIANT 2) — this workflow RETURNS a ledger of converged verdicts and NOTHING ELSE:
+ *   • It NEVER applies a label, posts a comment, or MERGES anything — the operator/caller decides what a verdict
+ *     does (the "decisions stay in the loop" boundary). The panel JUDGES and the editor REVISES the diff (the loop's
+ *     own mechanism, pushed to the PR branch); applying the review LABEL / landing the merge stays the caller's.
  *   • It reviews the AGENT-CLEARABLE `review:pending` class ONLY. It NEVER touches a `review:human` PR — a
  *     gate-self / statute PR is a human's to clear (conflict of interest). The guard holds on EVERY path: each
  *     candidate PR's CURRENT labels are fetched fresh (never trusting caller-supplied/absent labels) and any
  *     `review:human` PR — or any PR whose labels could not be verified — is filtered out (fail-closed).
  *
  * SAFETY — a reviewer that did not run NEVER reads as accept. If a MANDATORY lens (correctness/security) reviewer
- * crashes, or the diff cannot be fetched at all, that PR degrades to `needs-human` with a human disposition
- * (autoLand=false) — it is never silently accepted on missing signal.
- *
- * SCOPE (MVP). The `review` skill (`we:skills-src/review/SKILL.md`) states the panel↔editor CONVERGENCE loop is
- * v2, epic #2285. So this MVP builds ONLY the one-shot panel→reduce→render pipeline. The `editorRound` +
- * `reReview` negotiation is DEFERRED to epic #2285 (`buildEditorMandate`/`deriveNegotiationOutcome` exist there).
+ * crashes, or the diff cannot be fetched at all, that round degrades to `needs-human` → `escalate` (autoLand=false)
+ * — it is never silently accepted on missing signal. A round-cap DEADLOCK, a needs-human verdict, or an editor that
+ * could not revise the diff all resolve to `escalate` with a HUMAN disposition (the caller parks it review:human).
  *
  * LIVE VALIDATION awaits a real parked PR — a harness workflow is not unit-testable (it needs live agents + the
  * runtime primitives); it is validated by a live run against an actual `review:pending` PR.
@@ -43,25 +56,31 @@
 export const meta = {
   name: 'review-parked-prs',
   description:
-    'Review the drain\'s PARKED PRs in one launch: per parked PR, a fresh-context multi-lens panel (one agent per '
-    + 'lens: correctness/security/simplicity/standards-conformance — correctness and security are mandatory) '
-    + 'judges one shared diff snapshot, then a reduce step shells the shared review core (review-core-cli '
-    + 'reduce/comment) to a verdict + disposition + rendered comment body. Returns a ledger of '
-    + '{ pr, repo, disposition, verdict, lensVerdicts, commentBody } — it NEVER applies a label, posts a comment, or merges '
-    + '(the operator decides what a verdict does; the "decisions stay in the loop" boundary of epic #2418). '
-    + 'Reviews the agent-clearable review:pending class ONLY — a review:human PR (its labels re-fetched fresh on '
-    + 'every path) is filtered out and never touched (INVARIANT 2). A mandatory reviewer that fails to run '
-    + 'degrades that PR to needs-human — a dead reviewer never reads as accept. The panel↔editor convergence '
-    + 'loop (editorRound + reReview) is DEFERRED to v2, epic #2285.',
+    'Review the drain\'s PARKED PRs in one launch, running the REAL editor↔reviewer convergence loop (#2639). Per '
+    + 'parked PR: a fresh-context multi-lens panel (one agent per lens: correctness/security/simplicity/'
+    + 'standards-conformance — correctness and security are mandatory) judges one shared diff snapshot; a reduce '
+    + 'step shells the shared review core (review-core-cli reduce --round) to a verdict + disposition + the '
+    + 'negotiation OUTCOME (land/continue/escalate, from deriveNegotiationOutcome); on `continue` an EDITOR subagent '
+    + '(seeded by review-core-cli mandate --editor = buildEditorMandate) fixes each finding or dismisses it with a '
+    + 'stated reason and pushes the revision to the SAME PR branch, and the panel RE-reviews it next round — until '
+    + 'it converges (accept → land) or hits the per-care-band round cap / needs-human (escalate → review:human). The '
+    + 'bound is passes, not time (no clock); the cap is panelRigorForCareLevel.rounds, never above '
+    + 'NEGOTIATION_ROUND_CAP. Returns a ledger of { pr, repo, disposition, verdict, lensVerdicts, commentBody, '
+    + 'rounds, outcome, dismissedFindings } — it NEVER applies a label, posts a comment, or merges (the operator '
+    + 'decides what a verdict does; the "decisions stay in the loop" boundary of epic #2418). Reviews the '
+    + 'agent-clearable review:pending class ONLY — a review:human PR (its labels re-fetched fresh on every path) is '
+    + 'filtered out and never touched (INVARIANT 2). A mandatory reviewer that fails to run degrades that round to '
+    + 'needs-human → escalate — a dead reviewer never reads as accept. INVARIANT: a `land` outcome means the final '
+    + 'diff was signed off by a fresh-context panel that did not author it.',
   whenToUse:
     'Invoked to review the PRs the drain parked with review:pending, as one batched launch instead of the '
-    + '~24 hand-run review steps per PR. NOT for a review:human PR (only a human clears those — use /review). It '
-    + 'produces verdicts for the operator to act on; it never lands or labels anything itself.',
+    + 'hand-run review+fix+re-review steps per PR. NOT for a review:human PR (only a human clears those — use '
+    + '/review). It runs the editor↔reviewer convergence loop and produces converged verdicts for the operator to '
+    + 'act on; it never lands or labels anything itself.',
   phases: [
     { title: 'Discover', detail: 'collect the review:pending parked PRs (from args, or `gh pr list --label review:pending` across the constellation repos), re-fetch each candidate\'s CURRENT labels, and DROP any review:human / label-unverifiable PR (fail-closed, INVARIANT 2)' },
-    { title: 'Panel', detail: 'per PR: fetch the diff + escalation reason ONCE, read the advisory care-level (review-core-cli rigor) to dial the jury size, then fan out jurorsPerLens fresh-context reviewer(s) per lens (correctness/security/simplicity/standards-conformance) over that single shared snapshot — reduced by diversity-selection (#2567)' },
-    { title: 'Reduce', detail: 'per PR: an agent shells review-core-cli (reduce + comment) to reduce the panel to one verdict + disposition + rendered comment body; a failed mandatory lens / unfetchable diff degrades to needs-human' },
-    { title: 'Deferred (#2285)', detail: 'the editorRound + reReview panel↔editor convergence loop is NOT built in this MVP — it is v2, epic #2285' },
+    { title: 'Converge', detail: 'per PR, the bounded editor↔reviewer loop: fetch the diff + escalation reason ONCE, read the advisory care band (review-core-cli rigor) to dial the jury size AND the round cap, then loop — fan out jurorsPerLens fresh-context reviewer(s) per lens over the current diff snapshot (reduced by diversity-selection, #2567) → reduce to verdict + OUTCOME (review-core-cli reduce --round = deriveNegotiationOutcome) → on `continue`, an editor subagent (mandate --editor = buildEditorMandate) fixes/dismisses each finding and pushes to the SAME PR branch → re-fetch + re-review — until `land` (accept) or `escalate` (round cap / needs-human)' },
+    { title: 'Ledger', detail: 'return one entry per PR — { pr, repo, disposition, verdict, lensVerdicts, commentBody, rounds, outcome, dismissedFindings }; a `land` is reviewer-approved (a non-author panel signed off the final diff), an `escalate` deadlocks to review:human. No label applied, no comment posted, nothing merged (epic #2418 boundary)' },
   ],
 };
 
@@ -93,6 +112,13 @@ const REVIEW_PENDING = 'review:pending';
 // standards lens is `standards-conformance`, not `standards` — the CLI validates against that spelling).
 const LENSES = ['correctness', 'security', 'simplicity', 'standards-conformance'];
 const MANDATORY_LENSES = ['correctness', 'security'];
+
+// The negotiation-loop outcomes `deriveNegotiationOutcome` (shelled via `review-core-cli reduce --round`) returns
+// (#2311). Literals mirroring NEGOTIATION_OUTCOMES in jury-core.mjs (no import in the sandbox). `continue` runs
+// another editor↔reviewer round; `land` = converged (accept); `escalate` = deadlock / needs-human → review:human.
+const OUTCOME_CONTINUE = 'continue';
+const OUTCOME_LAND = 'land';
+const OUTCOME_ESCALATE = 'escalate';
 
 /** `repo#pr` — a stable per-PR tag, unique across repos (a PR number alone collides between repos). */
 function prTag(item) {
@@ -205,6 +231,7 @@ const DISCOVER_SCHEMA = {
 };
 
 // What the single per-PR FETCH agent returns — the ONE shared diff snapshot + escalation reason every lens judges.
+// Re-run each round (after an editor push) so the panel always re-reviews the CURRENT revised diff.
 const FETCH_SCHEMA = {
   type: 'object',
   required: ['pr', 'diff'],
@@ -244,15 +271,17 @@ const LENS_SCHEMA = {
   },
 };
 
-// What the REDUCE agent returns — the panel verdict + per-lens verdicts + disposition + rendered comment body,
-// all from the CLI. `lensVerdicts` (the reduce step already computes it internally, #2500) is now SURFACED so the
-// #2486 console can render the per-lens breakdown, not just the reduced panel verdict.
+// What the REDUCE agent returns per round — the panel verdict + per-lens verdicts + disposition + rendered comment
+// body, all from the CLI, PLUS the negotiation `outcome` (land | continue | escalate) that drives the round loop
+// and the FLATTENED outstanding findings the editor round revises against. `lensVerdicts` is surfaced so the #2486
+// console can render the per-lens breakdown, not just the reduced verdict.
 const VERDICT_SCHEMA = {
   type: 'object',
-  required: ['verdict', 'commentBody'],
+  required: ['verdict', 'outcome', 'commentBody'],
   additionalProperties: true,
   properties: {
     verdict: { type: 'string', description: 'accept | changes | needs-human (from review-core-cli reduce)' },
+    outcome: { type: 'string', description: 'land | continue | escalate (from deriveNegotiationOutcome, via reduce --round)' },
     disposition: {
       type: ['object', 'null'],
       additionalProperties: true,
@@ -264,23 +293,57 @@ const VERDICT_SCHEMA = {
       additionalProperties: { type: 'string' },
       description: 'per-lens verdict map (lens → accept | changes | needs-human | unknown), one key per lens that '
         + 'ran plus "unknown" for any mandatory/advisory lens that failed to run; the reduce step computes this '
-        + 'internally and it is now surfaced for the #2486 per-lens console view (#2500)',
+        + 'internally and it is surfaced for the #2486 per-lens console view (#2500)',
+    },
+    findings: {
+      type: ['array', 'null'],
+      items: { type: 'object', additionalProperties: true },
+      description: 'the flattened outstanding findings across the lenses that ran (each tagged with its lens in '
+        + '`category`) — the input the editor round revises against; empty/null on an accept round',
     },
     commentBody: { type: 'string', description: 'the markdown PR-comment body from review-core-cli comment' },
     notes: { type: 'string' },
   },
 };
 
-// What the RIGOR agent returns (#2567) — the advisory care-level + the panel rigor it dials, from the shared core.
+// What the RIGOR agent returns (#2567) — the advisory care-level, the jury size AND the per-band ROUND CAP it dials.
 const RIGOR_SCHEMA = {
   type: 'object',
-  required: ['careLevel', 'jurorsPerLens'],
+  required: ['careLevel', 'jurorsPerLens', 'rounds'],
   additionalProperties: true,
   properties: {
     careLevel: { type: 'string', description: 'none | low | elevated | high (from review-core-cli rigor)' },
     jurorsPerLens: { type: 'number', description: 'independent reviewers per lens the care-level dials (>=1)' },
-    rounds: { type: 'number' },
+    rounds: { type: 'number', description: 'the per-care-band round cap — max editor↔reviewer passes before deadlock' },
     aggregation: { type: 'string', description: 'always diversity-selection — never a majority vote' },
+    notes: { type: 'string' },
+  },
+};
+
+// What the EDITOR agent returns (#2311/#2639) — the round's revision result: which findings it FIXED, which it
+// DISMISSED (each with a stated reason, the audit trail — never a silent drop), and whether it pushed the revised
+// diff back to the PR branch. `pushed:false`/`error` means the editor could not revise the diff → the loop escalates.
+const EDITOR_SCHEMA = {
+  type: 'object',
+  required: ['pushed'],
+  additionalProperties: true,
+  properties: {
+    pushed: { type: 'boolean', description: 'true iff the editor committed a revision and pushed it back to the SAME PR branch' },
+    fixed: { type: 'array', items: { type: 'string' }, description: 'one short summary per finding the editor fixed' },
+    dismissed: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['summary', 'reason'],
+        additionalProperties: true,
+        properties: {
+          summary: { type: 'string', description: 'the finding the editor judged not a real problem' },
+          reason: { type: 'string', description: 'why it was dismissed (the audit trail — never a silent drop)' },
+        },
+      },
+      description: 'findings the editor dismissed with a stated reason (the #2311 dismissedFindings audit trail)',
+    },
+    error: { type: 'string', description: 'set if the editor could not clone/revise/push the PR branch' },
     notes: { type: 'string' },
   },
 };
@@ -291,7 +354,8 @@ const RIGOR_SCHEMA = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** The RIGOR prompt (#2567) — shell the shared review core to turn this PR's escalation reasons into the advisory
- *  care-level + the panel rigor it dials (jurors per lens). Single-sourced: the workflow never re-derives the dial. */
+ *  care-level + the panel rigor it dials (jurors per lens AND the per-band round cap). Single-sourced: the workflow
+ *  never re-derives the dial. */
 function rigorPrompt(item, escalationReason) {
   const flag = repoPathFlag(item.repo);
   const where = flag ? `the checkout at ${REPOS[item.repo].path}` : 'this checkout (your cwd)';
@@ -303,7 +367,8 @@ function rigorPrompt(item, escalationReason) {
     `  node scripts/review-core-cli.mjs rigor --reasons=${JSON.stringify(escalationReason.join(', '))} --json`,
     'It prints { careLevel, rigor: { rounds, lenses, jurorsPerLens, aggregation } }.',
     'Return { careLevel: <that careLevel>, jurorsPerLens: <rigor.jurorsPerLens>, rounds: <rigor.rounds>,',
-    'aggregation: <rigor.aggregation> }. Return ONLY the structured object.',
+    'aggregation: <rigor.aggregation> }. `rounds` is the per-care-band round cap (the max editor↔reviewer passes',
+    'before deadlock). Return ONLY the structured object.',
   ].join('\n');
 }
 
@@ -352,15 +417,20 @@ function labelFetchPrompt(prs) {
   ].join('\n');
 }
 
-/** The single per-PR FETCH prompt — one read-only fetch of the diff + escalation reason all four lenses share. */
-function fetchPrompt(pr, repo) {
+/** The single per-PR FETCH prompt — one read-only fetch of the diff + escalation reason all four lenses share.
+ *  Re-run each round: after an editor pushes a revision, the next round fetches the CURRENT diff so the panel
+ *  re-reviews the revised code, not the stale snapshot. */
+function fetchPrompt(pr, repo, round = 1) {
   const flag = repoPathFlag(repo);
   const where = flag ? `the checkout at ${REPOS[repo].path}` : 'this checkout (your cwd)';
+  const roundNote = round > 1
+    ? `This is round ${round} — an editor pushed a revision to this PR branch, so fetch its CURRENT (revised) diff. `
+    : '';
   return [
     RETURN_HYGIENE,
     '',
     `Fetch the review bundle for drain-parked PR #${pr} (repo id: ${repo}) — a SINGLE read-only fetch that the`,
-    'whole review panel will share (do NOT fetch per-lens). Run, in ' + where + ':',
+    `whole review panel will share (do NOT fetch per-lens). ${roundNote}Run, in ` + where + ':',
     `  node scripts/fetch-parked.mjs ${pr}${flag} --json`,
     'It prints a JSON array; take the entry whose `number` is this PR. Use its `diff` and `body`.',
     'Parse escalationReason from the `body`: the "- <reason>" bullet lines under the "## Escalation reason"',
@@ -372,16 +442,21 @@ function fetchPrompt(pr, repo) {
 
 /** ONE lens reviewer's prompt — judges the SHARED diff snapshot (no fetch); gets its mandate from the CLI. When
  *  the care-level dialed a JURY (jurorsPerLens > 1), each juror is told it is one independent member judging the
- *  lens on its own — the diversity that a high-care change earns (#2567). */
-function lensPrompt(pr, repo, lens, diff, escalationReason, title, juror = 0, jurorsPerLens = 1) {
+ *  lens on its own — the diversity that a high-care change earns (#2567). In round > 1 it judges the editor's
+ *  REVISED diff fresh — that is what makes the final accept a non-author sign-off (the loop's invariant). */
+function lensPrompt(pr, repo, lens, diff, escalationReason, title, round = 1, juror = 0, jurorsPerLens = 1) {
   const juryFraming = jurorsPerLens > 1
     ? `You are juror ${juror + 1} of ${jurorsPerLens} INDEPENDENT ${lens} reviewers on this high-care PR — judge the diff entirely on your own, do NOT try to agree with the other jurors; the panel keeps any concern ANY juror raises (diversity-selection, never a majority vote).`
+    : '';
+  const roundFraming = round > 1
+    ? `This is negotiation round ${round}: an editor already revised this diff to address a prior round's findings. Judge the CURRENT diff below FRESH — do not assume the earlier findings were or were not fixed; report what the diff shows NOW.`
     : '';
   return [
     RETURN_HYGIENE,
     '',
     `You are the ${lens} reviewer on the review panel for drain-parked PR #${pr} (repo ${repo})${title ? ` — ${title}` : ''}.`,
     juryFraming,
+    roundFraming,
     `Get your lens mandate and follow it: run  node scripts/review-core-cli.mjs mandate --lens=${lens}`,
     escalationReason.length ? `The drain escalated this PR for: ${escalationReason.join('; ')}.` : 'No escalation reason block was present on the PR body.',
     'You review ONLY the diff below + the PR description + the escalation reason. NEVER `git checkout`/`switch`',
@@ -397,21 +472,24 @@ function lensPrompt(pr, repo, lens, diff, escalationReason, title, juror = 0, ju
   ].join('\n');
 }
 
-/** The REDUCE prompt — shell review-core-cli to derive per-lens verdicts, the panel verdict + disposition, and
- *  the rendered comment body. `humanRequired` (a mandatory reviewer did not run / the diff was unfetchable)
- *  forces needs-human; the step-4 panel verdict is threaded INTO the comment payload so the comment headline
- *  matches the reduced verdict (not a re-derivation over flattened findings). No judgement is hand-rolled. */
-function reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, humanRequired) {
+/** The REDUCE prompt — shell review-core-cli to derive per-lens verdicts, the panel verdict + disposition, the
+ *  rendered comment body, AND the negotiation `outcome` for this round (land | continue | escalate). `humanRequired`
+ *  (a mandatory reviewer did not run / the diff was unfetchable) forces needs-human; the panel verdict is threaded
+ *  INTO the comment payload so the headline matches the reduced verdict. `round`/`roundCap` drive
+ *  `deriveNegotiationOutcome` — the ONE round-cap decision, single-sourced through the CLI. No judgement is
+ *  hand-rolled. The step also returns the FLATTENED outstanding findings so the editor round revises against them. */
+function reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, humanRequired, round, roundCap) {
   return [
     RETURN_HYGIENE,
     '',
-    `Reduce the review panel for parked PR #${pr} (repo ${repo}) to a verdict + disposition + comment, using ONLY`,
-    'the shared review-core CLI (`node scripts/review-core-cli.mjs`). Hand-roll NO judgement — every value comes',
-    'from the CLI.',
+    `Reduce round ${round} of the review panel for parked PR #${pr} (repo ${repo}) to a verdict + disposition +`,
+    'comment + the negotiation OUTCOME, using ONLY the shared review-core CLI (`node scripts/review-core-cli.mjs`).',
+    'Hand-roll NO judgement — every value comes from the CLI.',
     '',
     `Lenses that RAN (JSON, each with its findings): ${JSON.stringify(okLenses)}`,
     `Lenses that FAILED to run (their verdict is "unknown"): ${JSON.stringify(failedLenses)}`,
     `Escalation reasons (JSON): ${JSON.stringify(escalationReason || [])}`,
+    `Round: ${round}   RoundCap (this care band's cap): ${roundCap}`,
     `humanRequired: ${humanRequired ? 'true' : 'false'}  (true ⇒ a mandatory reviewer did not run, or the diff was`,
     'unfetchable → the panel must NOT auto-accept; the reduce will return needs-human).',
     '',
@@ -422,14 +500,59 @@ function reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, humanR
     '2. FLATTEN the RAN lenses\' findings into ONE array, setting each finding\'s `category` to its lens name.',
     '3. Write payloadA = { "lensVerdicts": <step 1>, "findings": <step 2>, "humanRequired": ' + (humanRequired ? 'true' : 'false') + ',',
     '   "reasons": <the escalation reasons array> } — but OMIT the "reasons" key entirely if that array is empty.',
-    '4. Run  node scripts/review-core-cli.mjs reduce --file=payloadA --json  → read `.verdict` (the PANEL verdict)',
-    '   and `.disposition` (absent when there are no reasons → treat as null).',
+    `4. Run  node scripts/review-core-cli.mjs reduce --file=payloadA --round=${round} --roundCap=${roundCap} --json`,
+    '   → read `.verdict` (the PANEL verdict), `.disposition` (absent when there are no reasons → treat as null),',
+    '   and `.outcome` (land | continue | escalate — the negotiation step from deriveNegotiationOutcome).',
     '5. Write payloadB = payloadA PLUS "verdict": <the step-4 panel verdict> (so the comment headline uses the',
     '   reduced verdict verbatim, not a re-derivation). Run  node scripts/review-core-cli.mjs comment',
     '   --file=payloadB  → its stdout is the markdown comment body.',
     '',
-    'Return { verdict: <step-4 panel verdict>, disposition: <step-4 disposition or null>, lensVerdicts: <the',
-    'step-1 lensVerdicts map — every lens, with "unknown" for any that failed to run>, commentBody: <step 5> }.',
+    'Return { verdict: <step-4 panel verdict>, outcome: <step-4 outcome>, disposition: <step-4 disposition or',
+    'null>, lensVerdicts: <the step-1 lensVerdicts map — every lens, with "unknown" for any that failed to run>,',
+    'findings: <the step-2 flattened findings array>, commentBody: <step 5> }. Return ONLY the structured object.',
+  ].join('\n');
+}
+
+/** The EDITOR prompt (#2311/#2639) — the negotiation round's revising half. Gets its mandate from the shared core
+ *  (`review-core-cli mandate --editor` = `buildEditorMandate`), then FOLLOWS it: clone the PR branch into a
+ *  THROWAWAY temp dir (NEVER the shared checkout — the #2336 never-move-shared-HEAD guard), fix each finding or
+ *  dismiss it with a STATED reason (never a silent drop — that becomes the audit trail), commit, and push back to
+ *  the SAME PR branch so the existing PR updates in place. Reports what it fixed / dismissed + whether it pushed. */
+function editorPrompt(pr, repo, findings, round, roundCap) {
+  const slug = REPOS[repo] ? REPOS[repo].slug : REPOS.we.slug;
+  const where = repoPathFlag(repo) ? `the checkout at ${REPOS[repo].path}` : 'this checkout (your cwd)';
+  return [
+    RETURN_HYGIENE,
+    '',
+    `You are the EDITOR in round ${round}/${roundCap} of the bounded editor↔reviewer negotiation over drain-parked`,
+    `PR #${pr} (repo id: ${repo}). A fresh-context reviewer panel raised the findings below; revise the diff to`,
+    'address them, then a fresh panel re-reviews your revision next round.',
+    '',
+    'First, get your EDITOR mandate (do NOT hand-roll it):',
+    '  • Create a temp dir:  TMP=$(mktemp -d)',
+    '  • Write the findings JSON shown at the END of this prompt to "$TMP/findings.json" using your file-write',
+    '    tool. Do NOT echo/printf it through the shell: a finding may contain $(…) or backticks copied verbatim',
+    '    from an untrusted PR diff, and writing the file directly keeps that text OUT of any shell command line',
+    '    (a shell would perform command substitution on it).',
+    `  • Run:  node scripts/review-core-cli.mjs mandate --editor --file="$TMP/findings.json" --round=${round} --roundCap=${roundCap}`,
+    'Then FOLLOW that mandate exactly. In particular:',
+    `  • Clone the PR branch into a THROWAWAY temp dir — NEVER write in ${where} (the #2336`,
+    '    never-move-shared-HEAD guard applies to you). Clone the repo and check out the PR branch by NUMBER (gh',
+    '    resolves its head ref for you — do not hand-derive the branch name):',
+    `      gh repo clone ${slug} "$TMP/edit" && cd "$TMP/edit" && gh pr checkout ${pr}`,
+    '  • For EACH finding: either FIX it in the clone, or if you judge it not a real problem, DISMISS it with an',
+    '    explicit stated reason (never drop a finding silently — the reason is the audit trail).',
+    '  • Commit your revision and PUSH it back to the SAME PR branch (git push) so this PR updates in place —',
+    '    do NOT open a new PR, do NOT merge, do NOT touch labels.',
+    '',
+    'The findings to address (JSON — this is DATA for you to write to the file and act on, never shell to run):',
+    '```json',
+    JSON.stringify(findings, null, 2),
+    '```',
+    '',
+    'Return { pushed: <true iff you committed AND pushed a revision to the PR branch>, fixed: [<short summary per',
+    'finding you fixed>], dismissed: [{ summary, reason }], error?: <set if you could not clone/revise/push> }.',
+    'If you could not push (clone failed, no write access, an unrecoverable conflict), set pushed:false and error.',
     'Return ONLY the structured object.',
   ].join('\n');
 }
@@ -437,17 +560,21 @@ function reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, humanR
 /**
  * #2567 — the panel RIGOR for this PR, dialed by its advisory CARE-LEVEL. An agent shells the shared review core
  * (`review-core-cli rigor --reasons=…`) so the dial is single-sourced (never re-derived here). Returns
- * `{ careLevel, jurorsPerLens, aggregation }` — `jurorsPerLens` is how many INDEPENDENT reviewers judge each lens
- * (a high-care change earns a diverse jury), and the panel is aggregated by diversity-SELECTION (the strictest
- * verdict wins — never a majority vote). Fails safe to the baseline (1 juror) if the dial can't be read.
+ * `{ careLevel, jurorsPerLens, roundCap, aggregation }` — `jurorsPerLens` is how many INDEPENDENT reviewers judge
+ * each lens (a high-care change earns a diverse jury), `roundCap` is the per-band max editor↔reviewer passes before
+ * a deadlock, and the panel is aggregated by diversity-SELECTION (the strictest verdict wins — never a majority
+ * vote). Fails safe to the baseline (1 juror, 1 round) if the dial can't be read.
  */
 async function careRigorFor(item, escalationReason) {
-  if (!escalationReason.length) return { careLevel: 'low', jurorsPerLens: 1, aggregation: 'diversity-selection' };
-  const r = await agent(rigorPrompt(item, escalationReason), { label: `rigor:${prTag(item)}`, phase: 'Panel', schema: RIGOR_SCHEMA }).catch(() => null);
+  if (!escalationReason.length) return { careLevel: 'low', jurorsPerLens: 1, roundCap: 1, aggregation: 'diversity-selection' };
+  const r = await agent(rigorPrompt(item, escalationReason), { label: `rigor:${prTag(item)}`, phase: 'Converge', schema: RIGOR_SCHEMA }).catch(() => null);
   const jurorsPerLens = (r && Number.isFinite(Number(r.jurorsPerLens)) && Number(r.jurorsPerLens) >= 1) ? Math.floor(Number(r.jurorsPerLens)) : 1;
+  // The per-band round cap; floor at 1 so at least one panel review always runs (a `none`/0-round band still gets
+  // one review pass, just no editor round). Never trust a non-finite or <1 value from the dial.
+  const roundCap = (r && Number.isFinite(Number(r.rounds)) && Number(r.rounds) >= 1) ? Math.floor(Number(r.rounds)) : 1;
   const careLevel = (r && typeof r.careLevel === 'string') ? r.careLevel : 'low';
   const aggregation = (r && typeof r.aggregation === 'string') ? r.aggregation : 'diversity-selection';
-  return { careLevel, jurorsPerLens, aggregation };
+  return { careLevel, jurorsPerLens, roundCap, aggregation };
 }
 
 /** Reduce ONE lens's JURY (jurorsPerLens independent reviewers) to that lens's findings by diversity-SELECTION:
@@ -459,72 +586,163 @@ function reduceLensJury(lens, jurorResults) {
   return { lens, ok: true, findings: ran.flatMap((j) => j.findings) };
 }
 
-/** Pipeline STAGE 1 — one shared fetch, then the fresh-context multi-lens panel over that single snapshot, with
- *  panel rigor (jurors per lens) dialed by the PR's advisory care-level (#2567). Each lens is tagged ok/failed:
- *  a failed MANDATORY lens (or a failed fetch) must degrade to needs-human. */
-async function panelReview(item) {
-  const { pr, repo } = item;
-  const fetched = await agent(fetchPrompt(pr, repo), { label: `fetch:${prTag(item)}`, phase: 'Panel', schema: FETCH_SCHEMA }).catch(() => null);
-  const diff = (fetched && typeof fetched.diff === 'string') ? fetched.diff : '';
-  const title = (fetched && fetched.title) ? String(fetched.title) : '';
-  const escalationReason = (fetched && Array.isArray(fetched.escalationReason)) ? fetched.escalationReason : [];
-  const fetchOk = !!(fetched && !fetched.error && diff.length > 0);
-  if (!fetchOk) {
-    log(`  ${prTag(item)}: FETCH failed${fetched && fetched.error ? ` (${fetched.error})` : ''} — the panel has no diff to judge; this PR will degrade to needs-human.`);
-  }
-
-  // #2567 — care-level dials the jury size; the reviewer set (LENSES) is constant, jurorsPerLens scales.
-  const { careLevel, jurorsPerLens, aggregation } = await careRigorFor(item, escalationReason);
-
-  // Each lens is judged by jurorsPerLens INDEPENDENT reviewers, then reduced by diversity-selection (union).
+/** ONE panel round — fan out `jurorsPerLens` fresh-context reviewer(s) per lens over the CURRENT diff snapshot,
+ *  then reduce each lens's jury by diversity-selection (union). Returns the per-lens results, each tagged ok/failed:
+ *  a failed MANDATORY lens must degrade to needs-human. The fetch/rigor happen ONCE per PR (in `convergePr`); this
+ *  runs every round against the round's freshly-fetched diff. */
+async function runPanelRound(pr, repo, diff, escalationReason, title, round, jurorsPerLens) {
   const lensResults = await parallel(LENSES.map((lens) => () =>
     parallel(Array.from({ length: jurorsPerLens }, (_unused, juror) => () =>
-      agent(lensPrompt(pr, repo, lens, diff, escalationReason, title, juror, jurorsPerLens), { label: `panel:${prTag(item)}:${lens}${jurorsPerLens > 1 ? `#${juror + 1}` : ''}`, phase: 'Panel', schema: LENS_SCHEMA })
+      agent(lensPrompt(pr, repo, lens, diff, escalationReason, title, round, juror, jurorsPerLens), { label: `panel:${repo}#${pr}:r${round}:${lens}${jurorsPerLens > 1 ? `#${juror + 1}` : ''}`, phase: 'Converge', schema: LENS_SCHEMA })
         .then((r) => ({ ok: true, findings: (r && Array.isArray(r.findings)) ? r.findings : [] }))
         .catch(() => {
-          log(`  ${prTag(item)}: the ${lens} reviewer${jurorsPerLens > 1 ? ` (juror ${juror + 1}/${jurorsPerLens})` : ''} FAILED to run.`);
+          log(`  ${repo}#${pr}: round ${round} — the ${lens} reviewer${jurorsPerLens > 1 ? ` (juror ${juror + 1}/${jurorsPerLens})` : ''} FAILED to run.`);
           return { ok: false, findings: [] };
         }),
     )).then((jurors) => reduceLensJury(lens, jurors)),
   ));
-  const ran = lensResults.filter((r) => r.ok).map((r) => `${r.lens}:${r.findings.length}`).join(', ');
-  const failed = lensResults.filter((r) => !r.ok).map((r) => r.lens);
-  log(`  ${prTag(item)}: panel done (care=${careLevel}, ${jurorsPerLens} juror(s)/lens, ${aggregation}) — ran [${ran || 'none'}]${failed.length ? `; FAILED [${failed.join(', ')}]` : ''}${escalationReason.length ? `; escalated for ${escalationReason.join('; ')}` : ''}.`);
-  return { pr, repo, lensResults, escalationReason, fetchOk, careLevel };
+  return lensResults;
 }
 
-/** Pipeline STAGE 2 — reduce the panel to a verdict + disposition + comment via the review-core CLI (agent).
- *  A failed MANDATORY lens or an unfetchable diff DEGRADES to needs-human with a human disposition — a reviewer
- *  that did not run never reads as accept (enforced both in the reduce's `humanRequired` AND as a safety net). */
-async function reducePanelVerdict(panel) {
-  const { pr, repo, lensResults, escalationReason, fetchOk } = panel;
+/** Reduce ONE panel round to a verdict + disposition + comment + the negotiation OUTCOME, via the review-core CLI
+ *  (agent). A failed MANDATORY lens or an unfetchable diff DEGRADES to needs-human → escalate — a reviewer that did
+ *  not run never reads as accept (enforced both in the reduce's `humanRequired` AND as a safety net below). Returns
+ *  the round result the loop drives on: `outcome` (land | continue | escalate) + the flattened findings the editor
+ *  round revises against. */
+async function reducePanelRound(pr, repo, lensResults, escalationReason, fetchOk, round, roundCap) {
   const failedLenses = lensResults.filter((r) => !r.ok).map((r) => r.lens);
   const failedMandatory = failedLenses.filter((l) => MANDATORY_LENSES.includes(l));
   const degrade = failedMandatory.length > 0 || !fetchOk;
   if (degrade) {
     const why = !fetchOk ? 'the diff could not be fetched' : `mandatory reviewer(s) failed to run: ${failedMandatory.join(', ')}`;
-    log(`  ${prTag(panel)}: DEGRADING to needs-human — ${why} (a reviewer that did not run NEVER reads as accept).`);
+    log(`  ${repo}#${pr}: round ${round} DEGRADING to needs-human — ${why} (a reviewer that did not run NEVER reads as accept).`);
   }
 
   const okLenses = lensResults.filter((r) => r.ok).map((r) => ({ lens: r.lens, findings: r.findings }));
-  const r = await agent(reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, degrade), { label: `reduce:${prTag(panel)}`, phase: 'Reduce', schema: VERDICT_SCHEMA }).catch(() => null);
+  const r = await agent(reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, degrade, round, roundCap), { label: `reduce:${repo}#${pr}:r${round}`, phase: 'Converge', schema: VERDICT_SCHEMA }).catch(() => null);
 
   let verdict = (r && r.verdict) || (degrade ? 'needs-human' : 'unknown');
+  let outcome = (r && r.outcome) || null;
   let disposition = (r && r.disposition) || null;
   const commentBody = (r && r.commentBody) || '';
-  // #2500 — surface the per-lens verdict map the reduce step already computes (empty {} if the reduce agent
-  // itself failed, mirroring the commentBody='' fallback). This is what the #2486 console renders per-lens.
   const lensVerdicts = (r && r.lensVerdicts && typeof r.lensVerdicts === 'object') ? r.lensVerdicts : {};
+  const findings = (r && Array.isArray(r.findings)) ? r.findings : [];
 
-  // SAFETY NET — a degraded panel is needs-human with a human disposition regardless of what the reduce agent
-  // returned (a missing-signal PR must go to a human, never auto-land).
+  // SAFETY NET — a degraded round is needs-human → escalate with a human disposition regardless of what the reduce
+  // agent returned (a missing-signal PR must go to a human, never auto-land or loop pointlessly).
   if (degrade) {
     verdict = 'needs-human';
+    outcome = OUTCOME_ESCALATE;
     disposition = { mode: 'human', autoLand: false };
   }
+  // If the reduce agent failed to return an outcome (should not happen — it is schema-required), fail safe: a
+  // non-accept verdict with no readable outcome cannot be trusted to `land`, so treat it as escalate.
+  if (outcome == null) outcome = verdict === 'accept' ? OUTCOME_LAND : OUTCOME_ESCALATE;
 
-  log(`  ${prTag(panel)}: verdict ${verdict}${disposition ? `, disposition ${disposition.mode} (autoLand=${disposition.autoLand})` : ''}.`);
-  return { pr, repo, disposition, verdict, lensVerdicts, commentBody };
+  log(`  ${repo}#${pr}: round ${round} verdict ${verdict} → outcome ${outcome}${disposition ? `, disposition ${disposition.mode} (autoLand=${disposition.autoLand})` : ''}.`);
+  return { verdict, outcome, disposition, lensVerdicts, commentBody, findings };
+}
+
+/** ONE editor round — spawn the editor subagent to fix/dismiss the round's findings and push the revision back to
+ *  the SAME PR branch. Returns whether it pushed + the fixed/dismissed audit trail. A failure to push (`pushed`
+ *  false / an error) means the diff could not advance — the loop treats that as a deadlock (escalate). */
+async function editorRound(pr, repo, findings, round, roundCap) {
+  const r = await agent(editorPrompt(pr, repo, findings, round, roundCap), { label: `editor:${repo}#${pr}:r${round}`, phase: 'Converge', schema: EDITOR_SCHEMA }).catch(() => null);
+  const pushed = !!(r && r.pushed === true && !r.error);
+  const fixed = (r && Array.isArray(r.fixed)) ? r.fixed : [];
+  const dismissed = (r && Array.isArray(r.dismissed)) ? r.dismissed : [];
+  const error = (r && r.error) ? String(r.error) : (r ? '' : 'the editor subagent failed to run');
+  if (pushed) {
+    log(`  ${repo}#${pr}: round ${round} editor pushed a revision — fixed ${fixed.length}, dismissed ${dismissed.length}.`);
+  } else {
+    log(`  ${repo}#${pr}: round ${round} editor did NOT push${error ? ` (${error})` : ''} — the diff cannot advance; the loop will escalate.`);
+  }
+  return { pushed, fixed, dismissed, error };
+}
+
+/**
+ * THE CONVERGENCE LOOP (#2639) — run ONE parked PR through the bounded editor↔reviewer negotiation. Fetch the diff
+ * + escalation reason once, dial the care band (jury size + round cap), then loop: panel-review the current diff →
+ * reduce to a verdict + `outcome` (via `deriveNegotiationOutcome`) → on `continue`, an editor fixes/dismisses each
+ * finding and pushes to the SAME PR branch → re-fetch + re-review — until `land` (accept) or `escalate` (round cap /
+ * needs-human / an editor that could not advance the diff). Returns ONE ledger entry. THE INVARIANT: a `land`
+ * outcome means the FINAL round's fresh-context panel — which did NOT author the editor's last revision — accepted.
+ */
+async function convergePr(item) {
+  const { pr, repo } = item;
+
+  // ONE fetch + rigor dial up front (round 1's diff; re-fetched each subsequent round after an editor push).
+  let fetched = await agent(fetchPrompt(pr, repo, 1), { label: `fetch:${prTag(item)}:r1`, phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
+  let diff = (fetched && typeof fetched.diff === 'string') ? fetched.diff : '';
+  const title = (fetched && fetched.title) ? String(fetched.title) : '';
+  const escalationReason = (fetched && Array.isArray(fetched.escalationReason)) ? fetched.escalationReason : [];
+  let fetchOk = !!(fetched && !fetched.error && diff.length > 0);
+  if (!fetchOk) {
+    log(`  ${prTag(item)}: FETCH failed${fetched && fetched.error ? ` (${fetched.error})` : ''} — no diff to judge; this PR degrades to needs-human.`);
+  }
+
+  const { careLevel, jurorsPerLens, roundCap } = await careRigorFor(item, escalationReason);
+  log(`  ${prTag(item)}: care=${careLevel}, ${jurorsPerLens} juror(s)/lens, roundCap=${roundCap}${escalationReason.length ? `; escalated for ${escalationReason.join('; ')}` : ''}.`);
+
+  const dismissedFindings = [];
+  let round = 1;
+  let last = null;
+
+  while (true) {
+    const lensResults = await runPanelRound(pr, repo, diff, escalationReason, title, round, jurorsPerLens);
+    const ran = lensResults.filter((r) => r.ok).map((r) => `${r.lens}:${r.findings.length}`).join(', ');
+    const failed = lensResults.filter((r) => !r.ok).map((r) => r.lens);
+    log(`  ${prTag(item)}: round ${round} panel — ran [${ran || 'none'}]${failed.length ? `; FAILED [${failed.join(', ')}]` : ''}.`);
+
+    last = await reducePanelRound(pr, repo, lensResults, escalationReason, fetchOk, round, roundCap);
+
+    // DEFENSE-IN-DEPTH backstop — the round-cap decision is single-sourced in the CLI (`deriveNegotiationOutcome`,
+    // shelled via `reduce --round`), but this loop must be bounded by THIS body too, never solely by an outcome an
+    // LLM returns. If a reduce agent ever returns `continue` AT or past the cap, force the escalate the cap mandates
+    // (a deadlock → review:human) rather than trusting the agent to have applied the bound.
+    if (last.outcome === OUTCOME_CONTINUE && round >= roundCap) {
+      log(`  ${prTag(item)}: round ${round} reached the round cap (${roundCap}) — forcing escalate (deadlock → review:human).`);
+      last = { ...last, outcome: OUTCOME_ESCALATE, verdict: 'needs-human', disposition: { mode: 'human', autoLand: false } };
+    }
+
+    // `land` (accept) or `escalate` (deadlock / needs-human) → the loop is done for this PR.
+    if (last.outcome !== OUTCOME_CONTINUE) break;
+
+    // `continue` → an editor round revises the diff, then the next round re-reviews the revision.
+    const edit = await editorRound(pr, repo, last.findings, round, roundCap);
+    if (Array.isArray(edit.dismissed)) dismissedFindings.push(...edit.dismissed);
+    if (!edit.pushed) {
+      // The diff could not advance — re-reviewing the same diff would just repeat the deadlock. Escalate to a human.
+      log(`  ${prTag(item)}: round ${round} editor could not advance the diff — escalating to review:human.`);
+      last = { ...last, outcome: OUTCOME_ESCALATE, verdict: 'needs-human', disposition: { mode: 'human', autoLand: false } };
+      break;
+    }
+
+    round += 1;
+    // Re-fetch the CURRENT (revised) diff for the next round's re-review.
+    fetched = await agent(fetchPrompt(pr, repo, round), { label: `fetch:${prTag(item)}:r${round}`, phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
+    diff = (fetched && typeof fetched.diff === 'string') ? fetched.diff : diff;
+    fetchOk = !!(fetched && !fetched.error && diff.length > 0);
+    if (!fetchOk) log(`  ${prTag(item)}: round ${round} re-fetch failed — the round will degrade to needs-human.`);
+  }
+
+  // On `escalate` the final state is a HUMAN disposition (a deadlock / needs-human PR is a human's to clear — the
+  // "deadlocks to review:human" semantics), regardless of the escalation-reason-derived disposition. On `land` the
+  // reduced disposition stands (converge/autoLand, or human-gated for gate-self/statute — the #2445 two-tier flip).
+  const disposition = last.outcome === OUTCOME_ESCALATE ? { mode: 'human', autoLand: false } : last.disposition;
+
+  log(`  ${prTag(item)}: converged after ${round} round(s) → ${last.outcome} (verdict ${last.verdict}).`);
+  return {
+    pr,
+    repo,
+    disposition,
+    verdict: last.verdict,
+    lensVerdicts: last.lensVerdicts,
+    commentBody: last.commentBody,
+    rounds: round,
+    outcome: last.outcome,
+    dismissedFindings,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -558,33 +776,40 @@ log(`${clearable.length} agent-clearable review:pending PR(s) to review${clearab
 
 if (clearable.length === 0) {
   log('No agent-clearable parked PRs — nothing to review.');
-  return { ledger: [], reviewed: 0, skippedHuman: skippedHuman.length, skippedUnverified: skippedUnverified.length, note: 'no agent-clearable review:pending PRs; the editorRound + reReview convergence loop is deferred to epic #2285.' };
+  return { ledger: [], reviewed: 0, landed: 0, escalated: 0, skippedHuman: skippedHuman.length, skippedUnverified: skippedUnverified.length, note: 'no agent-clearable review:pending PRs; the editor↔reviewer convergence loop (#2639) had nothing to run.' };
 }
 
-// ── Phase 2+3 — run every clearable PR through the pipeline INDEPENDENTLY (fetch+panel → reduce). ──
-phase('Panel');
-log(`Reviewing ${clearable.length} parked PR(s): shared-snapshot multi-lens panel → reduce (each PR flows independently)…`);
+// ── Phase 2 — run every clearable PR through the CONVERGENCE loop INDEPENDENTLY (fetch → panel → reduce → editor → re-review). ──
+phase('Converge');
+log(`Reviewing ${clearable.length} parked PR(s) through the editor↔reviewer convergence loop (bounded by the per-care-band round cap)…`);
 
-const ledger = (await pipeline(clearable, panelReview, reducePanelVerdict)) || [];
+const ledger = (await parallel(clearable.map((item) => () => convergePr(item).catch((e) => {
+  // A PR whose whole loop threw is surfaced as an escalation, never silently dropped (fail-closed).
+  log(`  ${prTag(item)}: convergence loop threw (${String(e && e.message || e)}) — surfacing as needs-human.`);
+  return { pr: item.pr, repo: item.repo, disposition: { mode: 'human', autoLand: false }, verdict: 'needs-human', lensVerdicts: {}, commentBody: '', rounds: 0, outcome: OUTCOME_ESCALATE, dismissedFindings: [] };
+})))) || [];
 
-// ── Deferred note (#2285) — the panel↔editor convergence loop is intentionally NOT built in this MVP. ──
-log('editorRound + reReview (the panel↔editor CONVERGENCE loop) deferred to v2, epic #2285 — this MVP is '
-  + 'panel→reduce→render only (buildEditorMandate/deriveNegotiationOutcome already exist in review-core.mjs).');
-
+// ── Phase 3 — the ledger of converged verdicts. The workflow RETURNS it and acts on NOTHING (INVARIANT 2). ──
+phase('Ledger');
 const list = Array.isArray(ledger) ? ledger.filter(Boolean) : [];
-log(`Done: ${list.length} verdict(s) produced. This workflow RETURNS the verdicts — it applied NO label, posted `
-  + 'NO comment, and merged NOTHING. The operator decides what each verdict does (epic #2418 boundary).');
+const landed = list.filter((e) => e.outcome === OUTCOME_LAND).length;
+const escalated = list.filter((e) => e.outcome === OUTCOME_ESCALATE).length;
+log(`Done: ${list.length} PR(s) converged — ${landed} landed (accept; a non-author panel signed off the final diff), ${escalated} escalated (deadlock / needs-human → review:human). This workflow RETURNS the verdicts — it applied NO label, posted NO comment, and merged NOTHING. The operator decides what each verdict does (epic #2418 boundary).`);
 
 // The workflow RETURNS the ledger and nothing else acts on it (INVARIANT 2 + "decisions stay in the loop").
-// Each entry: { pr, repo, disposition, verdict, lensVerdicts, commentBody } (#2500 surfaced lensVerdicts — the
-// per-lens verdict map the reduce already computed — for the #2486 console; persisting the ledger to a
-// panel-reachable .drain-daemon/ artifact is the plateau-app half of #2500).
+// Each entry: { pr, repo, disposition, verdict, lensVerdicts, commentBody, rounds, outcome, dismissedFindings }.
+// `outcome` (land | escalate) is the convergence result; a `land` is reviewer-approved by a non-author panel, an
+// `escalate` deadlocks to review:human. `dismissedFindings` is the editor's audit trail (never a silent drop).
 return {
   ledger: list,
   reviewed: list.length,
+  landed,
+  escalated,
   skippedHuman: skippedHuman.length,
   skippedUnverified: skippedUnverified.length,
-  note: 'review-parked-prs MVP (#2437): returns verdicts ONLY — no label applied, no comment posted, nothing '
-    + 'merged; review:human PRs never touched, a failed mandatory reviewer degrades to needs-human. The '
-    + 'editorRound + reReview convergence loop is deferred to epic #2285.',
+  note: 'review-parked-prs (#2639 convergence loop): per PR, the bounded editor↔reviewer negotiation (panel → '
+    + 'reduce → editorRound → re-review) runs until it converges (accept → land) or hits the per-care-band round '
+    + 'cap / needs-human (escalate → review:human). Returns verdicts ONLY — no label applied, no comment posted, '
+    + 'nothing merged; review:human PRs never touched, a failed mandatory reviewer degrades to needs-human. '
+    + 'INVARIANT: a landed diff was signed off by a fresh-context panel that did not author it.',
 };
