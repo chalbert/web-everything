@@ -3,9 +3,11 @@ bornAs: xuqbibk
 kind: story
 size: 5
 parent: "2636"
-status: open
+status: resolved
 scope: ["we:scripts/lib", "we:scripts"]
 dateOpened: "2026-07-26"
+dateStarted: "2026-07-26"
+dateResolved: "2026-07-26"
 tags: [jury, disposition, review, land-path]
 relatedTo: ["2652", "2639"]
 ---
