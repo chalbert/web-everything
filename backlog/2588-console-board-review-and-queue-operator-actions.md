@@ -5,6 +5,7 @@ kind: story
 size: 3
 parent: "2555"
 status: open
+blockedBy: ["2224", "2551"]
 scaffoldedBy: "slice-2555"
 dateScaffolded: "2026-07-20"
 dateOpened: "2026-07-20"

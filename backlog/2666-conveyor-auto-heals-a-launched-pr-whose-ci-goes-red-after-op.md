@@ -3,6 +3,7 @@ bornAs: xppjnof
 kind: story
 size: 5
 status: open
+blockedBy: ["2643"]
 scope: ["we:scripts/conveyor/", "we:skills-src/conveyor/"]
 dateOpened: "2026-07-26"
 tags: []

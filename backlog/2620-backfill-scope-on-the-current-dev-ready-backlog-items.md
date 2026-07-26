@@ -4,6 +4,7 @@ kind: story
 size: 3
 parent: "2612"
 status: open
+blockedBy: ["2619"]
 dateOpened: "2026-07-22"
 tags: [conveyor, readiness, scope, backfill]
 ---
