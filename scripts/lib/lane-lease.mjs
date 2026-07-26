@@ -37,13 +37,26 @@ export const DEFAULT_LEASE_TTL_MINUTES = 240;
 /**
  * Has this lease outlived its TTL (so the owner is presumed gone and the lane is reclaimable)?
  * A malformed / dateless lease is treated as stale (fail-open to reclaim, never strand a lane forever).
+ *
+ * #2350 — a RESERVED (permanent) lease is the ONE exception: it has NO TTL and NEVER goes stale, so
+ * `acquire` never reclaims it, `refresh`/`provision` (even `--force`) never reset it, and auto-pick never
+ * couples an item onto it. This is what makes a lane a durable, off-limits slot (the dedicated persistent
+ * memory-lane). A reserved lease is dropped only by the deliberate `release --release-reserved` un-reserve.
  */
 export function isLeaseStale(lease, nowMs, ttlMs = DEFAULT_LEASE_TTL_MINUTES * 60_000) {
   if (!lease || typeof lease !== 'object') return true;
+  if (lease.reserved) return false; // #2350 — permanent reserved lane: never expires, never reclaimed/reset
   const at = Date.parse(lease.acquiredAt);
   if (Number.isNaN(at)) return true;
   const ttl = Number.isFinite(lease.ttlMinutes) ? lease.ttlMinutes * 60_000 : ttlMs;
   return nowMs - at >= ttl;
+}
+
+/** #2350 — is this a RESERVED (permanent) lease? A pure boolean read (older leases lack the field ⇒ falsy ⇒
+ *  ordinary TTL-governed lease, today's semantics). Callers use it to render the hold distinctly and to gate
+ *  `release` (a reserved lane is never handed back except via the deliberate `--release-reserved` override). */
+export function isReservedLease(lease) {
+  return !!(lease && lease.reserved);
 }
 
 /**
@@ -80,14 +93,20 @@ export function chooseFreeLane(laneInfos, nowMs, ttlMs) {
  *  list a lane declares at acquire (`acquire --scope=`). It is the real predicted-scope source the live
  *  scope-lease observer/collector consumes — but it NEVER gates the acquire (the whole-clone lease is the real
  *  lock; §3i-A4 Fork 1). OMITTED from the marker when empty/absent, so a scope-less acquire produces a
- *  byte-identical marker to today (back-compat). Normalization is the CALLER's job — this stays zero-import. */
-export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession, workflowLane, predictedScope }) {
+ *  byte-identical marker to today (back-compat). Normalization is the CALLER's job — this stays zero-import.
+ *  `reserved` (#2350) marks a PERMANENT reserved lane: no TTL, never stale, off-limits to acquire/refresh/
+ *  provision, dropped only by `release --release-reserved`. OMITTED when false so an ordinary acquire's marker
+ *  stays byte-identical to today (same back-compat discipline as `predictedScope`). */
+export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession, workflowLane, predictedScope, reserved }) {
   return {
     session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null,
     pid: pid ?? null, ownerSession: ownerSession ?? null,
     // #2413 — a MARKED (parallel-/workflow) lease. A plain boolean contract field (never null) so a reader can
     // key on it directly; older on-disk leases lack it (⇒ undefined ⇒ falsy ⇒ unmarked, today's semantics).
     workflowLane: !!workflowLane,
+    // #2350 — a PERMANENT reserved lane. Included ONLY when true (omit-when-false keeps an ordinary acquire's
+    // marker byte-identical to today); a reader keys on `isReservedLease`. A reserved lease never expires.
+    ...(reserved ? { reserved: true } : {}),
     // #2560 — advisory predicted file-scope, included ONLY when a non-empty array (omit-when-empty keeps a
     // scope-less acquire's marker byte-identical to today). A defensive copy so the caller can't alias in.
     ...(Array.isArray(predictedScope) && predictedScope.length ? { predictedScope: [...predictedScope] } : {}),
@@ -123,6 +142,8 @@ export function describeLease(lease) {
   if (!lease) return '';
   const who = lease.session || 'unknown';
   const why = lease.purpose ? ` (${lease.purpose})` : '';
+  // #2350 — a reserved lane is a PERMANENT hold, not a TTL-bounded one; label it so `status`/skip logs read true.
+  if (lease.reserved) return `RESERVED (permanent) by ${who}${why}`;
   return `leased by ${who}${why} @ ${lease.acquiredAt}`;
 }
 

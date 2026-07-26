@@ -26,9 +26,9 @@
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
  *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
- *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--scope=<repo:path,...>] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock).
- *   node scripts/lane-pool.mjs release (--lane=N | --all) [--session=<slug>] [--force]   # #2275 hand a leased lane back to the pool (own lease, or --force)
- *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s)
+ *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`.
+ *   node scripts/lane-pool.mjs release (--lane=N | --all) [--session=<slug>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one)
+ *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s); #2350 REFUSES a reserved lane (even --all/--force) — deliberate teardown is `remove --lane=N --release-reserved`
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
  *   node scripts/lane-pool.mjs unmap   (--item=NNN[,…] | --lane=N | --all)   # drop lane-ports registry entries
  *
@@ -55,6 +55,15 @@
  * SKIP a live-leased lane with a loud log (never reset it); `acquire --lane=N --force` on a live-leased lane
  * HARD-FAILS, pointing at the deliberate override — `release --force` (drop the lease), then re-acquire. No
  * separate `--force-lease` flag exists; `release --force` is the one escape hatch for a live lease.
+ *
+ * SAFETY (#2350): a RESERVED lease (`acquire --reserve --lane=N`) is STRONGER still than a live lease — it is a
+ * PERMANENT hold with no TTL that never goes stale, so it is off-limits to acquire (auto-pick skips it; an
+ * explicit `acquire --lane=N` HARD-FAILS on it, even with `--force`) AND to `refresh`/`provision` `reset --hard`
+ * (skipped forever, even with `--force`). It is the dedicated persistent memory-lane primitive (#2301/#2350):
+ * a durable slot the running session can write through without a lane→PR round-trip, kept off the primary
+ * checkout and off the recyclable pool. `--force` NEVER drops it; the ONE deliberate un-reserve is
+ * `release --lane=N --release-reserved`. (NOTE: this script only PROVISIONS the reserved lane; the live repoint
+ * of the machine-global `~/.claude/…/memory` symlink at it is the SUPERVISED, human-gated half of #2350.)
  */
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -66,6 +75,7 @@ import {
   DEFAULT_LEASE_TTL_MINUTES,
   WORKFLOW_LANE_PURPOSE,
   isLeaseStale,
+  isReservedLease,
   isLaneAcquirable,
   chooseFreeLane,
   leaseBody,
@@ -439,7 +449,12 @@ function refreshLane(repo, n, { force = false } = {}) {
   // reset. The deliberate override is `release --force` (drop the lease), not this flag.
   const lease = liveLease(dir, Date.now(), ttlMsFromFlags());
   if (lease) {
-    log(`  lane-${n}: SKIPPED (${describeLease(lease)}) — LIVE lease; --force does not override it (#2337); use \`release --lane=${n} --force\` first`);
+    // #2350 — a RESERVED (permanent) lane is skipped forever; the un-reserve is `release --release-reserved`,
+    // never `release --force` (which drops an ordinary hold but leaves a reserved one in place).
+    const escape = isReservedLease(lease)
+      ? `a PERMANENT reserved lane; --force never resets it (#2350); use \`release --lane=${n} --release-reserved\` to deliberately un-reserve`
+      : `LIVE lease; --force does not override it (#2337); use \`release --lane=${n} --force\` first`;
+    log(`  lane-${n}: SKIPPED (${describeLease(lease)}) — ${escape}`);
     return { skipped: true, leased: true, dirty: false, uncommitted: 0, ahead: 0 };
   }
   if (!force) {
@@ -607,6 +622,9 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
       // so a scope-less acquire's marker is unchanged). This is the real predicted-scope source the live
       // scope-lease collector/observer reads; it NEVER gates the claim (the O_EXCL marker below is the lock).
       predictedScope: parseScopeFlag(flags.scope),
+      // #2350 — `acquire --reserve` stamps a PERMANENT reserved lease: `isLeaseStale` short-circuits it to
+      // never-stale, so refresh/provision (even --force) never reset it and auto-pick never couples onto it.
+      reserved: !!flags.reserve,
     }),
     null, 2,
   ) + '\n';
@@ -635,6 +653,13 @@ function cmdAcquire(repo) {
   if (flags.base && flags['no-reset']) {
     fail(`--base=${flags.base} and --no-reset are mutually exclusive: --base resets the clone to that ref, which --no-reset would skip. Pass one or the other.`);
   }
+  // #2350 — `--reserve` mints a PERMANENT reserved lane, which must be a SPECIFIC, known slot (the dedicated
+  // memory-lane), never an auto-picked one — permanently reserving whichever lane happens to be free would be
+  // a footgun. Require an explicit `--lane=N` (and a `--session` so the reserved hold has a stable, human-named
+  // owner) before anything is claimed.
+  if (flags.reserve && flags.lane === undefined) {
+    fail('--reserve requires an explicit --lane=N (a permanent reserved lane is a specific, known slot — never auto-picked)');
+  }
   const session = defaultSession();
   const nowMs = Date.now();
   const ttlMs = ttlMsFromFlags();
@@ -653,13 +678,40 @@ function cmdAcquire(repo) {
   };
 
   let chosen = null;
+  // #2350 — was the explicitly-targeted lane ALREADY reserved before this acquire? Captured pre-claim so the
+  // reset path below can be skipped for an idempotent re-reserve (never `reset --hard` an already-populated
+  // memory lane out from under itself).
+  let targetWasReserved = false;
   if (flags.lane !== undefined) {
     // Explicit lane: honor it or fail loudly (don't silently divert to another).
     const n = Number(flags.lane);
     const dir = laneDir(repo, n);
     if (!existsSync(dir)) fail(`lane-${n} does not exist (${dir})`);
+    // #2350 — a RESERVED lane is off-limits to an ordinary acquire, INCLUDING the OWNING session's own plain
+    // re-acquire. Without this pre-claim guard, `tryClaimLane`'s `leaseOwnedBy` self-refresh would rewrite the
+    // marker as an ordinary (non-reserved) lease and then the reset path below would `reset --hard` the lane —
+    // silently un-reserving it and WIPING the memory it exists to hold (the exact footgun #2350 prevents).
+    // Only `--reserve` may touch a reserved lane (an idempotent re-reserve, which keeps `reserved:true`).
+    const preExisting = readLease(dir);
+    if (isReservedLease(preExisting)) {
+      if (!flags.reserve) {
+        fail(
+          `lane-${n} holds a ${describeLease(preExisting)} lease — a PERMANENT reserved lane, off-limits to acquire. ` +
+            `Un-reserve it first (\`release --lane=${n} --release-reserved\`) if you truly mean to reclaim it, or pick another lane.`,
+        );
+      }
+      targetWasReserved = true; // an idempotent re-reserve — skip the reset so accrued content survives
+    }
     if (!tryClaimLane(dir, session, nowMs, ttlMs)) {
       const lease = readLease(dir);
+      // #2350 — a RESERVED (permanent) lane is off-limits to an ordinary acquire; point at the deliberate
+      // un-reserve (`release --release-reserved`), NOT `release --force` (which never drops a reserved lease).
+      if (isReservedLease(lease)) {
+        fail(
+          `lane-${n} holds a ${describeLease(lease)} lease — a PERMANENT reserved lane, off-limits to acquire. ` +
+            `Un-reserve it first (\`release --lane=${n} --release-reserved\`) if you truly mean to reclaim it, or pick another lane.`,
+        );
+      }
       // #2337(b) — a LIVE lease hard-fails `acquire --lane=N --force` too (force never overrides a live
       // lease); point at the deliberate override (`release --force`) instead of implying --force helps.
       if (lease && !isLeaseStale(lease, nowMs, ttlMs)) {
@@ -707,8 +759,11 @@ function cmdAcquire(repo) {
   // overlap-stacked serial batches (a later lane's work builds on an earlier lane's not-yet-merged commits).
   // Still a pool clone — this never touches the primary checkout (#2219/#104): the ref is resolved and reset
   // to INSIDE this lane's own clone, same as the origin/<branch> default path it replaces.
+  // #2350 — an idempotent re-reserve (`acquire --reserve --lane=N` on an already-reserved lane) NEVER resets:
+  // resetting would `reset --hard` + `clean -fd` the reserved lane's accrued content (the memory it holds).
+  // A FIRST reserve of a not-yet-reserved lane still resets (clean-populate to origin/main), like any acquire.
   const dir = laneDir(repo, chosen);
-  if (!flags['no-reset']) {
+  if (!flags['no-reset'] && !targetWasReserved) {
     git(['fetch', 'origin', '--prune', '--quiet'], dir);
     const baseRef = flags.base ? resolveBaseRef(dir, flags.base, chosen) : `origin/${repo.branch}`;
     // #2419 — `checkout -B <branch> <baseRef>`, NOT `reset --hard <baseRef>`. A bare reset moves whatever
@@ -736,8 +791,8 @@ function cmdAcquire(repo) {
   // checkout's parent — correct only when run from the primary; run from INSIDE a lane (a consumer's cwd) it
   // mis-points the shared pool-root sibling clones at itself. The pool-root siblings are a provision/refresh
   // concern; a leased lane borrows a pool those already set up. (Regressed a live acquire until caught — #2275.)
-  log(`acquired lane-${chosen} for ${session}${flags.purpose ? ` (${flags.purpose})` : ''}${flags.base ? ` @ base=${flags.base}` : ''} → ${dir}`);
-  if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, purpose: flags.purpose || null, branch: repo.branch, base: flags.base || null }, null, 2) + '\n');
+  log(`${flags.reserve ? 'RESERVED' : 'acquired'} lane-${chosen} for ${session}${flags.purpose ? ` (${flags.purpose})` : ''}${flags.base ? ` @ base=${flags.base}` : ''}${flags.reserve ? ' — PERMANENT, off-limits to acquire/refresh/provision (#2350)' : ''} → ${dir}`);
+  if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, purpose: flags.purpose || null, branch: repo.branch, base: flags.base || null, reserved: !!flags.reserve }, null, 2) + '\n');
   else process.stdout.write(dir + '\n'); // stdout = path only, so `LANE=$(… acquire)` captures it clean
 }
 
@@ -762,7 +817,19 @@ function resolveBaseRef(dir, ref, laneNum) {
   );
 }
 
+// #2350 (review:changes on #745) — `--release-reserved` is the ONE deliberate un-reserve, and it is
+// single-lane BY CONTRACT: un-reserving (or removing) the memory lane is a specific, named act, never a side
+// effect of a bulk `--all` sweep. Reject the combination so `release --all --release-reserved` (and, with the
+// remove-guard escape hatch, `remove --all --release-reserved`) can never set `bypassOwnership` for EVERY
+// reserved lease and silently drop the memory lane — require an explicit single `--lane=N`.
+function assertReleaseReservedScoped() {
+  if (flags['release-reserved'] && flags.all) {
+    fail('--release-reserved may not be combined with --all — it is the deliberate single-lane un-reserve; pass an explicit --lane=N');
+  }
+}
+
 function cmdRelease(repo) {
+  assertReleaseReservedScoped();
   const session = defaultSession();
   const force = !!flags.force;
   let targets;
@@ -774,7 +841,18 @@ function cmdRelease(repo) {
     const dir = laneDir(repo, n);
     const lease = readLease(dir);
     if (!lease) { log(`  lane-${n}: no lease to release`); continue; }
-    if (!force && !leaseOwnedBy(lease, session)) {
+    // #2350 — a RESERVED (permanent) lane is NEVER handed back by an ordinary `release` (not even `--force`):
+    // its whole point is to be a durable, off-limits slot. Only the deliberate `--release-reserved` un-reserve
+    // drops it. This keeps a stray `release --all` / `--force` from silently un-reserving the memory-lane.
+    if (isReservedLease(lease) && !flags['release-reserved']) {
+      log(`  lane-${n}: ${describeLease(lease)} — a PERMANENT reserved lane; --force does not release it. Pass --release-reserved to deliberately un-reserve.`);
+      continue;
+    }
+    // #2350 — `--release-reserved` bypasses the ownership check ONLY for a RESERVED lease (its reserving owner
+    // is a fixed slug, so the human un-reserving is typically a different session). It must NOT double as a
+    // `--force` for an ordinary FOREIGN lease — that still requires the explicit `--force`.
+    const bypassOwnership = force || (flags['release-reserved'] && isReservedLease(lease));
+    if (!bypassOwnership && !leaseOwnedBy(lease, session)) {
       log(`  lane-${n}: ${describeLease(lease)} — not yours; pass --force to break`);
       continue;
     }
@@ -831,12 +909,27 @@ function cmdPath(repo) {
 }
 
 function cmdRemove(repo) {
+  assertReleaseReservedScoped();
   let targets;
   if (flags.all) targets = existingLanes(repo);
   else if (flags.lane !== undefined) targets = [Number(flags.lane)];
   else return fail('remove needs --lane=N or --all');
-  unmapLanes(repo, targets); // a torn-down lane must stop receiving proxied page requests (#2139)
-  for (const n of targets) {
+  // #2350 (review:changes on #745) — `remove` does an unconditional `rmSync(dir, {recursive,force})`, which
+  // would destroy a RESERVED memory lane, its `agent-memory-src`, and all accrued memory — the exact wipe
+  // #2350 exists to prevent. So a reserved lane is off-limits to `remove` the same way it is to
+  // `refresh`/`release`: skipped (loud), never torn down. The ONE escape hatch is the deliberate
+  // `--release-reserved` (single-lane; see assertReleaseReservedScoped). This runs REGARDLESS of any --force:
+  // a reserved lane's whole point is to survive routine `remove --all` pool teardown.
+  const removable = targets.filter((n) => {
+    const lease = readLease(laneDir(repo, n));
+    if (isReservedLease(lease) && !flags['release-reserved']) {
+      log(`  lane-${n}: ${describeLease(lease)} — a PERMANENT reserved lane; remove refuses it. Pass --release-reserved --lane=${n} to deliberately tear it down.`);
+      return false;
+    }
+    return true;
+  });
+  unmapLanes(repo, removable); // a torn-down lane must stop receiving proxied page requests (#2139); a skipped reserved lane still serves
+  for (const n of removable) {
     const dir = laneDir(repo, n);
     if (existsSync(dir)) {
       rmSync(dir, { recursive: true, force: true });
@@ -899,7 +992,7 @@ if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
     'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|release|remove|map|unmap> [--count=N] [--lane=N] [--all] ' +
-      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--scope=<repo:path,...>] [--ttl-minutes=N] [--no-reset] [--repo=<path>] [--origin=<url>] ' +
+      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--repo=<path>] [--origin=<url>] ' +
       '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json]\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);
