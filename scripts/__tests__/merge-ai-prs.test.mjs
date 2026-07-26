@@ -112,6 +112,28 @@ describe('merge-ai-prs — label-conditional AI gate (#2195, blockedBy #2196)', 
     expect(classifyPr(aiPr({ ...mixedCommits, labels: rtm, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' })).decision).toBe('skip');
   });
 
+  it('MERGES a human-cleared parked PR (review:accepted) even with a non-AI commit and NO ready-to-merge label — the drain-rebase stranding fix (#2196/#2326)', () => {
+    // The shape #745 hit: a review:accepted PR whose only non-AI commit is the drain's own `drain: rebase …`.
+    const v = classifyPr(aiPr({ ...mixedCommits, labels: [{ name: REVIEW_LABELS.accepted }] }));
+    expect(v.decision).toBe('merge');
+    expect(v.aiGenerated).toBe(false);  // truthfully NOT every-commit-AI…
+    expect(v.certifyLabel).toBe(false); // …and NOT ready-to-merge-labelled…
+    expect(v.humanCleared).toBe(true);  // …but the human clear certifies it
+    expect(v.reason).toMatch(/human-cleared/);
+  });
+
+  it('an un-accepted mixed-authorship PR (review:pending, not accepted) still SKIPS — the clear must be a human accept', () => {
+    const v = classifyPr(aiPr({ ...mixedCommits, labels: [{ name: 'review:pending' }] }));
+    expect(v.decision).toBe('skip');
+    expect(v.humanCleared).toBe(false);
+    expect(v.reason).toMatch(/not human-cleared/);
+  });
+
+  it('a human-cleared PR still SKIPS on a red required check (accept is not a rubber stamp)', () => {
+    const v = classifyPr(aiPr({ ...mixedCommits, labels: [{ name: REVIEW_LABELS.accepted }], statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] }));
+    expect(v.decision).toBe('skip');
+  });
+
   it('trustLabel:null forces the strict every-commit gate even when labelled', () => {
     const v = classifyPr(aiPr({ ...mixedCommits, labels: rtm }), { trustLabel: null });
     expect(v.decision).toBe('skip'); expect(v.certifyLabel).toBe(false);
@@ -468,6 +490,12 @@ describe('shouldLabelOnGreen (#2216 — post-CI reconcile labels a stranded gree
   });
   it('BEHIND-but-green is still labelled (mergeability is the drain\'s rebase-drop job, not the label gate)', () => {
     expect(shouldLabelOnGreen(aiPr({ mergeStateStatus: 'BEHIND', mergeable: 'UNKNOWN' }), {})).toBe(true);
+  });
+  it('a human-cleared parked PR (review:accepted) IS labelled on green even with a non-AI commit — the drain-rebase stranding fix (#2196/#2326)', () => {
+    expect(shouldLabelOnGreen(aiPr({ commits: [claudeCommit(), humanCommit], labels: [{ name: REVIEW_LABELS.accepted }] }), {})).toBe(true);
+  });
+  it('a non-AI PR that is NOT human-cleared (review:pending) is still not labelled', () => {
+    expect(shouldLabelOnGreen(aiPr({ commits: [claudeCommit(), humanCommit], labels: [{ name: 'review:pending' }] }), {})).toBe(false);
   });
 });
 
