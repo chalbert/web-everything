@@ -4,8 +4,10 @@ kind: story
 size: 5
 parent: "2555"
 scope: ["plateau-app:src/backlog-view/", "we:scripts/conveyor/"]
-status: open
+status: resolved
 dateOpened: "2026-07-24"
+dateStarted: "2026-07-26"
+dateResolved: "2026-07-26"
 tags: [conveyor, ui, infra]
 ---
 

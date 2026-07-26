@@ -8,7 +8,7 @@
  *   section renders its rows, that empty sections are OMITTED, and that a null/partial state never throws.
  */
 import { describe, it, expect } from 'vitest';
-import { renderBoard, laneMarker, MARKERS } from '../status-board.mjs';
+import { renderBoard, laneMarker, MARKERS, infraOf } from '../status-board.mjs';
 
 // ── laneMarker — the lane state derivation (paused ▸ parked ▸ preparing ▸ building, first match wins). ──
 describe('laneMarker — active-lane state derivation', () => {
@@ -184,5 +184,55 @@ describe('renderBoard — degrades gracefully', () => {
   it('a lane with no num falls back to its session name', () => {
     const board = renderBoard({ lanes: [{ lane: 9, num: null, session: 'conveyor-x', lease: ['we:a'], breach: [] }] });
     expect(board).toContain('conveyor-x building');
+  });
+});
+
+// ── #2660 — infra-blocked: a distinct ⊘ marker, retry+countdown on the RUNNING row, and ONE collapsed OUTAGE
+//    banner per cause (a widespread outage reads as one event, not N alarms). ──
+describe('infra-blocked (#2660) — outside-dependency outage', () => {
+  const infraLane = (lane, num, cause, attempt, nextRetrySec) => ({
+    lane, num, session: `conveyor-${num}`, lease: ['we:src/a.ts'], breach: [], infra: { cause, attempt, nextRetrySec },
+  });
+  const cleanState = (lanes) => ({
+    lanes, queue: [], clearedNotReady: [], unshaped: [], freeSlots: 6, prs: [],
+    daemon: { resident: true, parked: [] }, idle: {}, health: { verdict: 'ok', stalled: [], errors: [] },
+  });
+
+  it('infraOf reads the detail DEFENSIVELY (absent / empty cause / null → not infra)', () => {
+    expect(infraOf({ infra: { cause: 'GitHub outage', attempt: 2 } })).toMatchObject({ cause: 'GitHub outage' });
+    expect(infraOf({})).toBeNull();
+    expect(infraOf({ infra: { cause: '' } })).toBeNull();
+    expect(infraOf({ infra: null })).toBeNull();
+  });
+
+  it('laneMarker → infra for an infra-blocked lane (ABOVE a review-park, BELOW a local scope-breach)', () => {
+    const prByNum = new Map([['2700', { prNumber: 700, labels: ['review:human'] }]]);
+    expect(laneMarker({ num: '2700', lease: ['we:a'], infra: { cause: 'GitHub outage', attempt: 1 } }, prByNum)).toBe('infra');
+    expect(laneMarker({ num: '2700', lease: ['we:a'], breach: ['we:a'], infra: { cause: 'GitHub outage', attempt: 1 } }, prByNum)).toBe('paused');
+  });
+
+  it('N lanes down on the SAME cause collapse into ONE OUTAGE banner, not N alarms', () => {
+    const board = renderBoard(cleanState([infraLane(1, '2700', 'GitHub outage', 3, 45), infraLane(2, '2701', 'GitHub outage', 2, 78)]));
+    expect(board).toContain('OUTAGE');
+    expect((board.match(/outside dependency degraded/g) ?? []).length).toBe(1); // one banner
+    expect(board).toContain('2 lanes waiting on GitHub outage');
+    expect(board).toContain('attempt 3');          // the WORST (max) attempt across the lanes
+    expect(board).toContain('next retry in 45s');  // the SOONEST (min) countdown
+    expect(board).toContain('resume:');            // the hand-resume hint
+    // each infra lane STILL shows its own RUNNING row: the ⊘ marker + failure class + retry attempt + countdown.
+    expect(board).toContain(`${MARKERS.infra} #2700 infra-blocked (GitHub outage · retry 3 · next 45s)`);
+    expect(board).toContain(`${MARKERS.infra} #2701 infra-blocked (GitHub outage · retry 2 · next 78s)`);
+  });
+
+  it('two DIFFERENT causes render two banner lines, one per cause', () => {
+    const board = renderBoard(cleanState([infraLane(1, '2700', 'GitHub outage', 1, 30), infraLane(2, '2701', 'npm registry down', 1, 20)]));
+    expect((board.match(/outside dependency degraded/g) ?? []).length).toBe(2);
+    expect(board).toContain('waiting on GitHub outage');
+    expect(board).toContain('waiting on npm registry down');
+  });
+
+  it('a clean board (no infra lane) renders NO OUTAGE banner', () => {
+    const board = renderBoard(cleanState([{ lane: 1, num: '2530', session: 's', lease: ['we:a'], breach: [] }]));
+    expect(board).not.toContain('OUTAGE');
   });
 });
