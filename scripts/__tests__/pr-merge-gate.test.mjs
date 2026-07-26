@@ -6,7 +6,7 @@
  *   a loud audit line). The gh shell is injected (never actually called).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { mergePr, assertMayMerge, buildGateMergeArgs, mergeMethodFlag, hasNonEmptyBody } from '../lib/pr-merge-gate.mjs';
+import { mergePr, assertMayMerge, buildGateMergeArgs, mergeMethodFlag, hasNonEmptyBody, isTestPath, parseUnifiedDiff, scanTestTampering } from '../lib/pr-merge-gate.mjs';
 
 // A capturing fake gh exec + a capturing stderr sink, so nothing shells out and the audit line is observable.
 const fakeExec = () => { const calls = []; const exec = (cmd, args, opts) => { calls.push({ cmd, args, opts }); return { ok: true }; }; return { exec, calls }; };
@@ -74,6 +74,133 @@ describe('pr-merge-gate — hasNonEmptyBody (#2324 shared by pr-land.mjs + merge
   it('accepts a real description', () => {
     expect(hasNonEmptyBody('fixes the thing because reasons')).toBe(true);
     expect(hasNonEmptyBody('  padded but real  ')).toBe(true);
+  });
+});
+
+describe('pr-merge-gate — isTestPath (#2440 anti-test-gaming)', () => {
+  it('recognises __tests__/ members and *.test/spec.* modules across js/ts/jsx/mjs', () => {
+    expect(isTestPath('scripts/__tests__/foo.test.mjs')).toBe(true);
+    expect(isTestPath('src/components/Button.spec.ts')).toBe(true);
+    expect(isTestPath('a/b/thing.test.jsx')).toBe(true);
+    expect(isTestPath('pkg/__tests__/nested/deep.mjs')).toBe(true);
+  });
+  it('does NOT flag ordinary source, docs, or a file merely named "test" in a segment', () => {
+    expect(isTestPath('scripts/lib/pr-merge-gate.mjs')).toBe(false);
+    expect(isTestPath('docs/agent/backlog-workflow.md')).toBe(false);
+    expect(isTestPath('scripts/test-helpers/util.mjs')).toBe(false); // a dir named test-helpers is not __tests__
+  });
+});
+
+describe('pr-merge-gate — parseUnifiedDiff (#2440)', () => {
+  it('buckets +/- content lines per file and flags a deletion, skipping headers/hunk markers', () => {
+    const diff = [
+      'diff --git a/scripts/__tests__/x.test.mjs b/scripts/__tests__/x.test.mjs',
+      'index 111..222 100644',
+      '--- a/scripts/__tests__/x.test.mjs',
+      '+++ b/scripts/__tests__/x.test.mjs',
+      '@@ -1,3 +1,3 @@',
+      '-old line',
+      '+new line',
+      ' context',
+      'diff --git a/scripts/__tests__/gone.test.mjs b/scripts/__tests__/gone.test.mjs',
+      'deleted file mode 100644',
+      '--- a/scripts/__tests__/gone.test.mjs',
+      '+++ /dev/null',
+      '-was here',
+    ].join('\n');
+    const files = parseUnifiedDiff(diff);
+    expect(files).toHaveLength(2);
+    expect(files[0].path).toBe('scripts/__tests__/x.test.mjs');
+    expect(files[0].added).toEqual(['new line']);
+    expect(files[0].removed).toEqual(['old line']);
+    expect(files[0].deleted).toBe(false);
+    expect(files[1].deleted).toBe(true);
+    // the `+++ /dev/null` and `---` file headers are NOT counted as content
+    expect(files[1].added).toEqual([]);
+  });
+  it('is empty for an empty/blank diff', () => {
+    expect(parseUnifiedDiff('')).toEqual([]);
+    expect(parseUnifiedDiff(null)).toEqual([]);
+  });
+});
+
+describe('pr-merge-gate — scanTestTampering (#2440 the deterministic gate)', () => {
+  it('a clean diff that only ADDS a test is not tampering', () => {
+    const diff = [
+      'diff --git a/scripts/__tests__/x.test.mjs b/scripts/__tests__/x.test.mjs',
+      '@@',
+      "+  it('covers the new case', () => { expect(f()).toBe(1); });",
+    ].join('\n');
+    expect(scanTestTampering({ diffText: diff }).tampered).toBe(false);
+  });
+  it('flags a DELETED test file', () => {
+    const diff = [
+      'diff --git a/scripts/__tests__/gone.test.mjs b/scripts/__tests__/gone.test.mjs',
+      'deleted file mode 100644',
+      "-  it('was covering the bug', () => {});",
+    ].join('\n');
+    const r = scanTestTampering({ diffText: diff });
+    expect(r.tampered).toBe(true);
+    expect(r.findings[0].kind).toBe('test-file-removed');
+  });
+  it('flags an ADDED .skip / .only marker in a test file', () => {
+    const skip = 'diff --git a/x.test.mjs b/x.test.mjs\n@@\n+  it.skip(\'flaky\', () => {});';
+    const only = 'diff --git a/x.test.mjs b/x.test.mjs\n@@\n+  describe.only(\'just this\', () => {});';
+    expect(scanTestTampering({ diffText: skip }).findings[0].kind).toBe('test-skipped');
+    expect(scanTestTampering({ diffText: only }).findings[0].kind).toBe('test-skipped');
+  });
+  it('does NOT false-positive on ordinary identifiers that merely contain fit/skip/context (regression)', () => {
+    // A PR that ADDS coverage to a test file, using everyday names — `const fit = fitAffineCost(...)`,
+    // `model.fit(...)`, an `object-fit` string, a variable named `context` — must NOT read as a skip/only.
+    const diff = [
+      'diff --git a/scripts/__tests__/capacity.test.mjs b/scripts/__tests__/capacity.test.mjs',
+      '@@',
+      "+  it('fits the affine cost', () => {",
+      '+    const fit = fitAffineCost(samples);',
+      '+    model.fit(rows);',
+      "+    const context = { style: 'object-fit: cover' };",
+      '+    expect(fit).toBeGreaterThan(0);',
+      '+  });',
+    ].join('\n');
+    expect(scanTestTampering({ diffText: diff }).tampered).toBe(false);
+  });
+  it('flags a bare xit(/fit( invocation but not a dotted .fit( method call', () => {
+    const bare = 'diff --git a/x.test.mjs b/x.test.mjs\n@@\n+  fit(\'only me\', () => {});';
+    const method = 'diff --git a/x.test.mjs b/x.test.mjs\n@@\n+  chart.fit(data);';
+    expect(scanTestTampering({ diffText: bare }).findings[0].kind).toBe('test-skipped');
+    expect(scanTestTampering({ diffText: method }).tampered).toBe(false);
+  });
+  it('flags NET removal of test cases (removed openers exceed added)', () => {
+    const diff = [
+      'diff --git a/scripts/__tests__/x.test.mjs b/scripts/__tests__/x.test.mjs',
+      '@@',
+      "-  it('case one', () => {});",
+      "-  it('case two', () => {});",
+      "+  it('merged case', () => {});",
+    ].join('\n');
+    const r = scanTestTampering({ diffText: diff });
+    expect(r.tampered).toBe(true);
+    expect(r.findings.some((f) => f.kind === 'tests-removed')).toBe(true);
+  });
+  it('does NOT flag test-case churn that nets neutral or positive (refactor/rename)', () => {
+    const diff = [
+      'diff --git a/scripts/__tests__/x.test.mjs b/scripts/__tests__/x.test.mjs',
+      '@@',
+      "-  it('old name', () => { expect(g()).toBe(2); });",
+      "+  it('renamed', () => { expect(g()).toBe(2); });",
+      "+  it('extra coverage', () => {});",
+    ].join('\n');
+    expect(scanTestTampering({ diffText: diff }).tampered).toBe(false);
+  });
+  it('ignores removals in NON-test files (deleting product code is not test-gaming)', () => {
+    const diff = [
+      'diff --git a/scripts/lib/thing.mjs b/scripts/lib/thing.mjs',
+      '@@',
+      "-  it('this is not a real test file', () => {});",
+      'deleted file mode 100644',
+    ].join('\n');
+    // `deleted file mode` here attaches to the same non-test file → still not flagged.
+    expect(scanTestTampering({ diffText: diff }).tampered).toBe(false);
   });
 });
 

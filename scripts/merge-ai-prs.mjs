@@ -105,7 +105,7 @@ import { rebaseDropContent } from './lib/rebase-drop-content.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
-import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
+import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor } from './lane-drain.mjs';
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
 import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime
@@ -1761,6 +1761,35 @@ function runCli() {
         parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: tamper.reasons });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} re-parked — manifest baseline mismatch (post-review tamper, HUMAN required): ${tamper.reasons.join('; ')}\n`);
         continue;
+      }
+      // #2440 (slice C of epic #2410) — ANTI-TEST-GAMING gate on the CI-green land clause. A green required
+      // check is only trustworthy if it wasn't manufactured by GAMING the tests (deleting/`.skip`/`.only`-ing a
+      // failing test, or shrinking the case set). Scan this PR's NET diff text for those deterministic,
+      // diff-visible tamper forms; on a hit, REFUSE the auto-land and park `review:human` — a test removal is a
+      // trust-chain concern the agent panel must not clear for itself; a human clears a legit removal. Best-
+      // effort like the manifest gate: only when a local/sibling clone is present to read the diff text (no
+      // clone ⇒ no text ⇒ the scan is a no-op — the same fail-open the manifest baseline gate documents).
+      if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
+        const exec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts });
+        const net = computeNetDiffText({ exec, rev: v.headRef, fetchExtraRefs: [v.headRef] });
+        const gaming = scanTestTampering({ diffText: net.text });
+        if (net.scored && gaming.tampered) {
+          v.decision = 'skip';
+          v.escalated = 'yes';
+          v.humanRequired = true;
+          v.escalateReasons = gaming.reasons;
+          v.reason = `test-gaming suspected — CI-green may be manufactured by tampering with tests: ${gaming.reasons.join('; ')}`;
+          if (!DRY_RUN) {
+            if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
+              try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+            }
+            const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
+            if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} test-gaming reason stamped on PR\n`);
+          }
+          parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: gaming.reasons });
+          if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked — anti-test-gaming gate tripped (HUMAN required): ${gaming.reasons.join('; ')}\n`);
+          continue;
+        }
       }
       const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels });
       v.escalated = score.escalate ? 'yes' : 'no';
