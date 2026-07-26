@@ -3,9 +3,11 @@ bornAs: xqxpeac
 kind: story
 size: 3
 parent: "2505"
-status: open
+status: resolved
 tags: [plateau-loop, console, backlog-view, program-view, triage]
 dateOpened: "2026-07-22"
+dateStarted: "2026-07-26"
+dateResolved: "2026-07-26"
 scope:
   - plateau-app:src/backlog-view/
 ---
