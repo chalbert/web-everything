@@ -2,9 +2,11 @@
 bornAs: xt1ouq4
 kind: story
 size: 5
-status: open
+status: resolved
 scope: ["we:scripts/lib/", "plateau-app:tests/visual/"]
 dateOpened: "2026-07-26"
+dateStarted: "2026-07-26"
+dateResolved: "2026-07-26"
 tags: []
 ---
 
@@ -34,3 +36,23 @@ This is the single implementation — Layer 1 (#2672) and Layer 2 (#2671) both c
 
 - we:scripts/lib/design-pixels-adapter.mjs — the jury lens that will call this comparator.
 - jury epic #2649.
+
+## Progress
+
+Delivered as a cross-locus couple (impl-first plateau-app / WE-last):
+
+- **WE core** — `we:scripts/lib/visual-comparator.mjs` exports the pure `diffImages(shot, baseline, opts)`
+  (importable by the jury adapter, no I/O) plus the thin file-facing `compareToBaseline({ shotPath, baselinePath })`
+  → `{ match, delta, findings }`. Diff = a structural/layout region-mean grid diff PLUS a noise-tolerant pixel-delta
+  threshold (not naive equality); a missing baseline returns `{ skipped: true, match: null }` (documented skip,
+  never a false-fail). PNG I/O is isolated in `we:scripts/lib/png-io.mjs` — a dependency-free codec on Node `zlib`
+  (8-bit, colour type 2/6, non-interlaced — the Playwright profile). Tests in
+  `we:scripts/lib/__tests__/visual-comparator.test.mjs` cover identical→match, perturbed→delta/findings, missing→skip,
+  noise-tolerance, dimension mismatch, every PNG filter type, and a truncation guard.
+- **plateau-app harness** — `plateau-app:tests/visual/capture.mjs` (Playwright capture of a live surface into a
+  transient shots dir), `plateau-app:tests/visual/render-baselines.mjs` (renders the committed design mocks into
+  `plateau-app:tests/visual/baselines/`), `plateau-app:tests/visual/board.visual.spec.ts` (proves capture + the
+  baseline/skip convention; runs in the non-required e2e job), and a README. The two operator design mocks are
+  committed under `plateau-app:tests/visual/baselines/sources/` with their claude.ai frame-runtime preamble stripped
+  so they render standalone headless; the board mock is the `/console-board` surface baseline, the console-grammar
+  mock the 37-state grammar. Both rendered cleanly.
