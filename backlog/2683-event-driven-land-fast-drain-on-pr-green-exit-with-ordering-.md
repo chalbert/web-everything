@@ -38,6 +38,19 @@ three:
    **write** (not just NNN allocation), and add a **per-PR idempotency guard** so a concurrent daemon 60s sweep on
    the same PR is a safe no-op — never a double-attempt.
 
+## Round-2 review — acceptance criteria
+
+Two corrections from the second design-jury round:
+
+- **Trigger on the LAST precondition, not CI-green alone.** The non-author review sign-off usually lands *after*
+  CI goes green, so a green-only trigger fires while the gate is still incomplete, correctly no-ops, and nothing
+  re-fires when the sign-off arrives → the PR falls back to the ≤60s daemon sweep exactly as today (C saves
+  nothing for the common review-after-green item). The fast-drain must fire on **whichever of {CI-green,
+  review-sign-off-present} completes last** — i.e. also on the sign-off event.
+- **C's throughput claim is provisional on #2680.** Removing the ~60s poll-gap is only a *throughput* win if the
+  serial land is a material fraction of wall-clock — the exact thing #2680 measures. Until then C is a *latency*
+  lever; sequence/justify it against #2680's regime finding, don't assert it moves throughput.
+
 ## Invariants held
 
 Sole-writer-to-main (the merge still runs under the daemon's serialization), the non-author review sign-off (re-gated

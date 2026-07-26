@@ -41,5 +41,17 @@ measures**.
 
 - The report distinguishes **latency-bound**, **land-serialization-bound**, **authoring-bound**, and
   **pool-saturation-bound** regimes from real data, so the B/E/D go/no-go is measured, not asserted.
-- Also emits the **false-green signal** Lever D (#2681) needs: how often a scope-shrunk CI would have passed
-  while the full suite failed (measurable once D pilots).
+
+## Round-2 review — acceptance criteria
+
+Two corrections from the second design-jury round:
+
+- **This instrument does NOT produce Lever D's false-green signal.** A false-green is a test-*outcome* fact
+  (selected-suite green while the full suite would be red), recoverable only by a **shadow full-suite compare** —
+  never from timing data. That signal is owned by #2681 (Lever D), not this timing instrument. (Earlier drafts
+  wrongly sourced it here.)
+- **Authoring time is not cleanly derivable from `gh` PR timestamps** — a PR is created *after* authoring, so the
+  dispatch→first-CI gap also contains queueing/push/runner-startup. Isolating authoring needs a real
+  **dispatch → first-commit span**; if the lane board doesn't already record that boundary, capturing it is in
+  scope (a small signal, not a durable store). Without it the instrument returns the very ambiguity it exists to
+  remove, so this is load-bearing, not optional.
