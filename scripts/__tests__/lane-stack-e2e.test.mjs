@@ -30,6 +30,12 @@ const SCRIPT = resolve(process.cwd(), 'scripts/lane-stack.mjs');
 const MARKER_PATH = 'scripts/readiness/drain-capability.json';
 
 function git(args, cwd) {
+  // Every clone here is of a LOCAL bare origin, so git hardlinks the source pack objects by default. When the
+  // runner's git has background maintenance enabled, a transient `multi-pack-index.lock` can appear in the
+  // source `.git/objects/pack/` and the hardlink fails ("fatal: hardlink different from source at
+  // .../multi-pack-index.lock"), flaking the whole e2e run. Force a plain copy (--no-hardlinks) for local
+  // clones — correctness is unchanged, only the on-disk sharing optimisation is dropped.
+  if (args[0] === 'clone' && !args.includes('--no-hardlinks')) args = ['clone', '--no-hardlinks', ...args.slice(1)];
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 

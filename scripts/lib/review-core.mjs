@@ -50,7 +50,7 @@ import {
 // gate-config + review-policy), so review-core → review-escalation is acyclic. review-core stays label-free /
 // leash-free — a care-level is advisory review-RIGOR information (how hard to look), not a route/land policy
 // (that stays with review-escalation's decideReviewGate). `careLevelFromReasons` (below) is the one consumer.
-import { deriveCareLevel } from './review-escalation.mjs';
+import { deriveCareLevel, CARE_LEVELS, CARE_LEVEL_ORDER } from './review-escalation.mjs';
 
 // #2653 — the subject-agnostic JURY ENGINE core was extracted to jury-core.mjs (foundational slice of epic
 // #2649): the finding contract, the round loop + NEGOTIATION_ROUND_CAP, the diversity-selection reduction, and
@@ -90,6 +90,11 @@ import { buildSubjectMandate, resolveAdapterRoster } from './jury-core.mjs';
 // `ROSTER_OVERRIDE_OPS.ADD`) — a critique-surfaced lens IS a minimal deviation from the stateless recompute, so
 // it rides the existing override machinery rather than a parallel one. Imported for use, NOT re-exported.
 import { applyRosterOverrides, ROSTER_OVERRIDE_OPS } from './jury-core.mjs';
+
+// #2638 — the prepare-time jury charter derives its PROVISIONAL roster from the SAME `resolveJuryPlan` →
+// `materializeRoster` the open-time jury uses (below), so the pre-registered jury is the real jury, not a parallel
+// guess. Imported for use, NOT re-exported. `materializeRoster` is the subject-neutral plan → JurorSpec[] expander.
+import { materializeRoster } from './jury-core.mjs';
 
 export {
   VERDICTS,
@@ -1098,4 +1103,140 @@ export function applyRosterCritique(plan, gaps = [], { resolveMethods } = {}) {
     .filter((lens) => typeof lens === 'string' && lens.trim())
     .map((lens) => ({ op: ROSTER_OVERRIDE_OPS.ADD, lens: lens.trim() }));
   return applyRosterOverrides(plan, overrides, { resolveMethods: ground });
+}
+
+/**
+ * ============================================================================
+ * THE PREPARE-TIME JURY CHARTER — pre-register the jury + expectations (#2638, under jury cluster #2636).
+ * ============================================================================
+ *
+ * The EARLY-HUMAN-ALIGNMENT gate (a settled #2636 design call). Everything above resolves and red-teams the jury
+ * at PR-OPEN — AFTER the code is written. This section moves a PROVISIONAL copy of that same jury EARLIER, to
+ * prepare/claim time, so the human aligns on the review bar BEFORE any code exists. Two things the pre-registration
+ * buys, both from #2636's body: (1) the human sees WHO will judge the eventual PR and to WHAT bar, and can push
+ * back on the bar while it is still cheap to change; (2) the up-front expectations are a COMMITMENT that kills
+ * post-hoc goalpost-moving — a juror cannot invent a new bar at review time that was never pre-registered.
+ *
+ * CARE-GATED. Aligning every juror up front is real human cost, so the charter is authored ONLY for an
+ * elevated/high-care item and SKIPPED for low/none — the SAME care dial that sizes rigor (`panelRigorForCareLevel`)
+ * decides whether the charter is worth writing at all. `shouldRegisterJury` is that gate; `buildJuryCharter`
+ * returns an un-registered charter (carrying the skip reason) below the floor rather than throwing, so a caller can
+ * always call it and render whatever comes back.
+ *
+ * The provisional roster is derived from the SAME resolver the open-time jury uses (`resolveJuryPlan` →
+ * `materializeRoster`), so the pre-registered jury IS the real jury, not a parallel guess — only PROVISIONAL
+ * because it binds against the item's PREDICTED touch-set (its `scope:`), not a real diff, and #2636 re-checks it
+ * against the actual diff at open (drift past registration re-triggers alignment). Each juror's charter here IS its
+ * pre-registered EXPECTATION — the concrete bar that lens will hold, single-sourced in `LENS_EXPECTATIONS` so the
+ * same wording is what the human aligns on now and what the juror is later held to.
+ */
+
+/** The care level at/above which a jury charter is worth pre-registering (#2638). Below it (low/none) the up-front
+ *  alignment cost isn't earned — the item ships to the open-time jury without a pre-registered charter. A tuning
+ *  knob (exported, not a scattered literal): re-floor in one edit + a test. */
+export const JURY_CHARTER_CARE_FLOOR = CARE_LEVELS.ELEVATED;
+
+/**
+ * Each lens's UP-FRONT EXPECTATION (#2638) — the concrete bar that lens commits to hold, pre-registered so the
+ * human aligns on it before code and the juror is later held to exactly this (no post-hoc goalpost-moving). One
+ * generalized sentence per lens, covering every lens a PR-diff roster can seat (`PANEL_LENSES` + `PERSPECTIVE_LENSES`).
+ * Pure data — the wording IS the commitment, single-sourced so the charter the human sees and the mandate the juror
+ * later runs never drift. Frozen.
+ */
+export const LENS_EXPECTATIONS = Object.freeze({
+  [MANDATE_LENSES.CORRECTNESS]: 'The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong.',
+  [MANDATE_LENSES.SECURITY]: 'No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check.',
+  [MANDATE_LENSES.SIMPLICITY]: 'The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction.',
+  [MANDATE_LENSES.STANDARDS]: "The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule.",
+  [PERSPECTIVE_LENSES.A11Y]: 'The rendered UI passes an accessibility scan and stays keyboard-reachable with correct roles and labels — no new accessibility regression.',
+  [PERSPECTIVE_LENSES.VISUAL]: 'The rendered UI matches its target/baseline design in both light and dark themes — no unintended visual drift.',
+  [PERSPECTIVE_LENSES.PERF]: 'The page stays within its load budget — the change adds no new render-blocking cost or hot-path regression.',
+});
+
+/** The pre-registered expectation for one lens (#2638) — its `LENS_EXPECTATIONS` entry, or a neutral fallback for a
+ *  lens with no registered bar (so `materializeRoster`'s `charterForLens` never yields an empty string). Pure. */
+export function expectationForLens(lens) {
+  return LENS_EXPECTATIONS[lens] || `hold the "${lens}" bar for this change`;
+}
+
+/**
+ * Is an item's care level high enough to pre-register a jury charter (#2638)? Pure. True for elevated/high (at or
+ * above `JURY_CHARTER_CARE_FLOOR`), false for low/none. Throws on an unknown care level (same discipline as
+ * `panelRigorForCareLevel`) so a typo'd band surfaces loudly rather than silently skipping the charter.
+ * @param {'none'|'low'|'elevated'|'high'} careLevel
+ * @returns {boolean}
+ */
+export function shouldRegisterJury(careLevel) {
+  const idx = CARE_LEVEL_ORDER.indexOf(careLevel);
+  if (idx === -1) {
+    throw new Error(`shouldRegisterJury: unknown care-level "${careLevel}" — must be one of ${CARE_LEVEL_ORDER.join(', ')}`);
+  }
+  return idx >= CARE_LEVEL_ORDER.indexOf(JURY_CHARTER_CARE_FLOOR);
+}
+
+/**
+ * @typedef {Object} JuryCharter
+ * @property {string} careLevel - the item's care band the charter was built for.
+ * @property {boolean} registered - true when the jury was pre-registered (care ≥ floor); false when skipped below it.
+ * @property {string} [reason] - why the charter was skipped (present only when `registered` is false).
+ * @property {Array<{id: string, lens: string, method?: string, expectation: string}>} jurors - the provisional
+ *   jury; each juror's `expectation` is its pre-registered bar. Empty when the charter was skipped.
+ */
+
+/**
+ * Build the PROVISIONAL jury charter for an item at prepare/claim time (#2638) — the pre-registered jury + each
+ * juror's up-front expectation the human aligns on BEFORE any code is written. Pure. Care-gated: below the
+ * `JURY_CHARTER_CARE_FLOOR` (low/none) it returns an un-registered charter carrying the skip reason (it does NOT
+ * throw on a below-floor band — the caller renders the skip note); at/above it, the provisional roster is derived
+ * from the SAME `resolveJuryPlan` → `materializeRoster` the open-time jury uses, with each juror's charter set to
+ * its `expectationForLens` bar. PROVISIONAL because it binds against the item's PREDICTED touch-set (`changedFiles`,
+ * from the item's `scope:`), not a real diff — #2636 re-binds and re-aligns against the actual diff at open.
+ * @param {{careLevel: string, changedFiles?: string[]}} o - `careLevel` is a `CARE_LEVELS` value; `changedFiles` is
+ *   the item's predicted touch-set (repo-relative paths from its `scope:`). An unknown care-level throws (via
+ *   `shouldRegisterJury`).
+ * @returns {JuryCharter}
+ */
+export function buildJuryCharter({ careLevel, changedFiles = [] } = {}) {
+  if (!shouldRegisterJury(careLevel)) {
+    return {
+      careLevel,
+      registered: false,
+      reason: `care "${careLevel}" is below the "${JURY_CHARTER_CARE_FLOOR}" floor — no jury pre-registered (the up-front alignment cost isn't earned)`,
+      jurors: [],
+    };
+  }
+  const plan = resolveJuryPlan({ careLevel, changedFiles });
+  // Reuse the open-time materializer with the expectation as the juror charter, then surface it under the
+  // item's own vocabulary (`expectation`) — the field the human aligns on and the juror is later held to.
+  const jurors = materializeRoster(plan, { charterForLens: expectationForLens })
+    .map(({ charter, ...rest }) => ({ ...rest, expectation: charter }));
+  return { careLevel, registered: true, jurors };
+}
+
+/**
+ * Render a jury charter (#2638) as the markdown ARTIFACT embedded on the item body at prepare time — what the human
+ * reads to align on the review bar. Pure. A skipped (below-floor) charter renders one italic note naming the care
+ * level; a registered charter renders a heading, the care band, and a table of
+ * juror | lens | grounding method | pre-registered expectation. The `#2638` marker in the heading lets a later pass
+ * (open-time re-alignment) find and refresh the block.
+ * @param {JuryCharter} charter
+ * @returns {string} markdown.
+ */
+export function renderJuryCharter(charter) {
+  const c = charter || {};
+  if (!c.registered) {
+    return `_No review jury pre-registered — care level \`${c.careLevel ?? '(unknown)'}\` is below the \`${JURY_CHARTER_CARE_FLOOR}\` floor (#2638)._`;
+  }
+  const rows = (Array.isArray(c.jurors) ? c.jurors : []).map(
+    (j) => `| ${j.id} | ${j.lens} | ${j.method ?? '—'} | ${j.expectation} |`,
+  );
+  return [
+    '### Review jury (provisional — pre-registered #2638)',
+    '',
+    `Care level: \`${c.careLevel}\`. This jury binds against the item's predicted scope and is re-checked against the real diff at PR open.`,
+    '',
+    '| juror | lens | grounding method | pre-registered expectation |',
+    '| --- | --- | --- | --- |',
+    ...rows,
+  ].join('\n');
 }
