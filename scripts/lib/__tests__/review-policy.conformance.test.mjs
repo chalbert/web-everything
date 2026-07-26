@@ -28,6 +28,7 @@ import {
   POLICY_CARE_BAND_NAMES,
   POLICY_DISPOSITION,
   POLICY_DISPOSITION_OVERRIDABLE_KEYS,
+  POLICY_LAND_MODE,
   derivePolicyDisposition,
   resolveDispositionConfig,
 } from '../review-policy.mjs';
@@ -231,6 +232,29 @@ describe('disposition-config conformance — the FF3 knobs load, validate, and m
     expect(g.resolutionMode).toBe(POLICY_DISPOSITION.resolutionMode.value);
     expect(g.lensWeights.default).toBe(POLICY_DISPOSITION.lensWeights.default);
     expect(g.lensWeights.values).toEqual(POLICY_DISPOSITION.lensWeights.values);
+  });
+
+  // landMode (#2675) — the GLOBAL auto-land operating mode. Carries prose, is a valid mode, DEFAULTS to shadow,
+  // and is GLOBAL-only: absent from the override allow-list and identical across every band / any override.
+  it('the landMode knob carries prose and its value is one of shadow | enforce', () => {
+    expect(POLICY_DISPOSITION.landMode.description.trim().length).toBeGreaterThan(0);
+    expect(['shadow', 'enforce']).toContain(POLICY_DISPOSITION.landMode.value);
+  });
+
+  it('landMode DEFAULTS to shadow (the ratified default until a separate flip ruling, #2675)', () => {
+    expect(POLICY_DISPOSITION.landMode.value).toBe('shadow');
+    expect(POLICY_LAND_MODE).toBe('shadow');
+  });
+
+  it('landMode is GLOBAL-only — never overridable and constant across bands', () => {
+    // NOT in the per-decision override allow-list (a system-wide stance, not a per-PR knob).
+    expect([...POLICY_DISPOSITION_OVERRIDABLE_KEYS]).not.toContain('landMode');
+    // resolveDispositionConfig surfaces the same global landMode regardless of band or override.
+    expect(resolveDispositionConfig().landMode).toBe(POLICY_LAND_MODE);
+    for (const name of POLICY_CARE_BAND_NAMES) {
+      expect(resolveDispositionConfig({ band: name }).landMode).toBe(POLICY_LAND_MODE);
+    }
+    expect(resolveDispositionConfig({ override: { resolutionMode: 'accept-best' } }).landMode).toBe(POLICY_LAND_MODE);
   });
 
   it('a per-decision override wins over the global default (decision > global)', () => {

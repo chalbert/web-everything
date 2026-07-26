@@ -54,6 +54,12 @@ const VALID_ROSTER_TIMING_MODES = new Set(['up-front', 'incremental']);
 const VALID_RESOLUTION_MODES = new Set(['accept-best', 'present-unless-all-agree']);
 const DISPOSITION_KNOB_KEYS = ['lensWeights', 'dissentThreshold', 'resolutionMode'];
 
+// The auto-land seam's operating modes (#2675). `shadow` = observe-only (log the intended disposition, write no
+// label, merge nothing — a human still clears); `enforce` = a clean auto-dispose writes review:accepted and the
+// drain lands it. GLOBAL-only knob (not band/decision-overridable) — a system-wide stance, so it is validated
+// here and read straight from the global default, never merged through the override precedence.
+const VALID_LAND_MODES = new Set(['shadow', 'enforce']);
+
 /**
  * Validate the disposition-config knob shape (#2651) — shared by the global default block and each optional
  * per-band override (a band override is PARTIAL: any knob it omits inherits the global default). `require` gates
@@ -168,6 +174,12 @@ function validateContract(c) {
   if (!disp || typeof disp !== 'object') fail('missing careJury.disposition');
   if (typeof disp.description !== 'string' || !disp.description.trim()) fail('careJury.disposition has no description prose');
   validateDispositionKnobs(disp, fail, 'careJury.disposition', true);
+  // landMode (#2675) — the GLOBAL-only auto-land operating mode. A { value, description } wrapper like the other
+  // global knobs; its value must be one of VALID_LAND_MODES. Validated here (not in validateDispositionKnobs) because
+  // it is global-only: a band/decision override may never set it, so it must stay OUT of the shared knob validator.
+  if (!disp.landMode || typeof disp.landMode !== 'object') fail('careJury.disposition.landMode must be a { value, description } object');
+  if (!VALID_LAND_MODES.has(disp.landMode.value)) fail(`careJury.disposition.landMode.value must be one of ${[...VALID_LAND_MODES].join(', ')}`);
+  if (typeof disp.landMode.description !== 'string' || !disp.landMode.description.trim()) fail('careJury.disposition.landMode has no description prose');
   const ov = disp.override;
   if (!ov || typeof ov !== 'object') fail('careJury.disposition.override must be an object');
   if (typeof ov.description !== 'string' || !ov.description.trim()) fail('careJury.disposition.override has no description prose');
@@ -246,6 +258,12 @@ export const POLICY_DISPOSITION = REVIEW_POLICY.careJury.disposition;
  *  The privacy/authority boundary for `resolveDispositionConfig`: an override naming any other key is rejected. Frozen. */
 export const POLICY_DISPOSITION_OVERRIDABLE_KEYS = Object.freeze([...REVIEW_POLICY.careJury.disposition.override.overridableKeys]);
 
+/** The GLOBAL auto-land operating mode (#2675) — `shadow` (observe-only, the ratified default) or `enforce` (a clean
+ *  auto-dispose writes review:accepted so the drain merges it). GLOBAL-only: NOT in POLICY_DISPOSITION_OVERRIDABLE_KEYS,
+ *  so no band or decision may override it; flipping it to `enforce` is a separate one-line ruling (a diff to the
+ *  policy contract → human-gated). The auto-land seam (auto-land-seam.mjs) reads this via resolveDispositionConfig. */
+export const POLICY_LAND_MODE = REVIEW_POLICY.careJury.disposition.landMode.value;
+
 /**
  * The CONFIG half of the resolver-spined F3 shape (#2651) — resolve the EFFECTIVE disposition config for one review
  * subject by merging the three precedence layers the contract declares: per-decision override > per-band override >
@@ -256,7 +274,7 @@ export const POLICY_DISPOSITION_OVERRIDABLE_KEYS = Object.freeze([...REVIEW_POLI
  * @param {{ band?: string, override?: {lensWeights?: object, dissentThreshold?: number, resolutionMode?: string} }} o
  *   `band` names a care band whose optional per-band override narrows the global default; `override` is the
  *   per-decision override (only `POLICY_DISPOSITION_OVERRIDABLE_KEYS` keys honoured — an unknown key throws).
- * @returns {{ lensWeights: {default: number, values: object}, dissentThreshold: number, resolutionMode: string }}
+ * @returns {{ lensWeights: {default: number, values: object}, dissentThreshold: number, resolutionMode: string, landMode: string }}
  */
 export function resolveDispositionConfig({ band, override } = {}) {
   const g = REVIEW_POLICY.careJury.disposition;
@@ -264,6 +282,9 @@ export function resolveDispositionConfig({ band, override } = {}) {
   let lensWeights = { default: g.lensWeights.default, values: { ...g.lensWeights.values } };
   let dissentThreshold = g.dissentThreshold.value;
   let resolutionMode = g.resolutionMode.value;
+  // landMode is GLOBAL-only (#2675) — never merged through the band/decision precedence below; the auto-land seam
+  // reads the resolved config, so it rides along here, but its value is always the single global stance.
+  const landMode = g.landMode.value;
   // Layer 2 — per-band override (partial; a band omits the disposition key entirely when it inherits everything).
   if (band !== undefined) {
     if (!CARE_BAND_NAMES.includes(band)) throw new Error(`resolveDispositionConfig: unknown care band "${band}"`);
@@ -288,7 +309,7 @@ export function resolveDispositionConfig({ band, override } = {}) {
     if (override.dissentThreshold !== undefined) dissentThreshold = override.dissentThreshold;
     if (override.resolutionMode !== undefined) resolutionMode = override.resolutionMode;
   }
-  return { lensWeights, dissentThreshold, resolutionMode };
+  return { lensWeights, dissentThreshold, resolutionMode, landMode };
 }
 
 /** Merge a partial lens-weight override onto a resolved `{ default, values }` — a bare lens→weight map (or a
