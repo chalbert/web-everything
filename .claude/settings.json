@@ -39,6 +39,10 @@
           {
             "type": "command",
             "command": "node scripts/backlog-guard.mjs --pre"
+          },
+          {
+            "type": "command",
+            "command": "node scripts/guard-backward-edge.mjs"
           }
         ]
       },
