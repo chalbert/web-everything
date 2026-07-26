@@ -140,7 +140,36 @@ automatically, so you read that returned report directly; nothing can lose it in
   Re-run the review after any nontrivial fix, until a pass comes back clean (or with only
   dismissed-with-reason findings). **Only then** proceed to the PR.
 
-### 7. Commit on the lane's current branch + publish HEAD to the `lane/...` ref + open the PR (label green ONLY after `test` passes)
+### 7. Visual self-review — render the surface, READ the screenshot, diff it against the baseline (UI-locus items ONLY)
+
+Step 6 proves the **diff** is correct; it does **not** prove the **rendered surface looks right**. Code-correct-but-visually-off is exactly how the console-board cluster (#2587 / #2588 / #2604 / #2660) shipped — a large visual delta from its design mock that no code review caught. So **for a UI-locus item** — one that renders a surface a human looks at (a `plateau-app` or `frontierui` page / board / panel / console) — add a **visual** self-review AFTER the code review of step 6 and BEFORE the PR, enforcing the SAME converge-before-PR discipline the code review does. **A non-UI item — a script, a doc, a standard definition, a skill/brief edit — has no rendered surface; it SKIPS this step and goes straight to step 8.**
+
+1. **Render + screenshot the built surface.** Capture the surface against the running dev server with the #2670
+   Playwright harness (`plateau-app:tests/visual/capture.mjs`; regenerate a baseline set with
+   `render-baselines.mjs`). Do **not** kill or restart a dev server you did not start — detect the running
+   instance (`plateau-app` on `:4000`) and capture against THAT, or let the harness serve.
+2. **READ the screenshot yourself — you are sighted.** Read the captured PNG and *look at it*. This by-eye pass
+   is the review that ALWAYS runs, baseline or not: is the layout, spacing, colour, and content what the spec /
+   design mock describes? A comparator can only measure drift from a target; only your eye catches "the target
+   itself is wrong".
+3. **Run the #2670 comparator against the committed baseline.** Call `compareToBaseline({ shotPath, baselinePath })`
+   from `we:scripts/lib/visual-comparator.mjs` — the ONE shared diff engine (#96) — against the surface's
+   committed baseline PNG (they live at `plateau-app:tests/visual/baselines/<surface>.png` — e.g.
+   `baselines/board.png` / `baselines/console-grammar.png`). It returns
+   `region-shift` findings (each with a bounding box, so you know WHERE it drifted) plus a scalar `delta`;
+   `{ match: false, … }` is a real visual regression, not noise (the engine is tolerant of antialiasing / hinting).
+4. **Iterate to visual convergence.** Fix the surface in the lane and re-capture until the comparator matches
+   AND your by-eye pass is clean — the same "converge before the PR" step 6 already enforces. A visual delta you
+   cannot self-clear (a genuine design call that needs a human) escalates like any step-6 finding: open the PR
+   parked `review:human` (*Escalations* #3).
+
+**No committed baseline? By-eye pass only — a DOCUMENTED skip, never a false-fail.** `compareToBaseline` returns
+`{ skipped: true, match: null, … }` when the baseline PNG is absent (the enabler is operator-provided baselines,
+exported from the design artifact). A brand-new surface with no target must **not** red the gate just because
+nobody has drawn its baseline yet — you STILL Read the screenshot and do the by-eye pass (2), and note the
+documented skip on the automated diff. The automated layer only bites once a baseline is committed.
+
+### 8. Commit on the lane's current branch + publish HEAD to the `lane/...` ref + open the PR (label green ONLY after `test` passes)
 
 Commit only this item's files (explicit paths, never `git add -A`; one commit) on the lane's **current branch**
 (its local `main`) — do **NOT** `git checkout -b lane/...`; the single-branch hook blocks branch creation even
@@ -148,7 +177,7 @@ inside a lane clone. You never create the `lane/...` branch locally: `pr-land` *
 for you via `--ref=... --sha=HEAD`. Then open the PR through the canonical producer — **never a hand-rolled
 `gh pr create`** (that skips the #2307 producer review-labeling). **Cross-locus item?** This step opens a
 **couple** — two PRs, impl-first / WE-last, manifest on the WE PR — see *Cross-locus items — the two-PR couple*
-below in place of the single-PR steps 7–9:
+below in place of the single-PR steps 8–10:
 
 ```bash
 # Write the commit message to a file, then commit -F it. Do NOT put the message
@@ -185,7 +214,7 @@ Open the PR **parked** instead — `--label=review:human` (STOPS at open, no aut
 **unlabelled** (`--no-wait`) on a red gate — ONLY when an *Escalations* condition below applies. Do **NOT**
 blanket-park a clean, reviewed PR "so a human can see it".
 
-### 8. Append a structured learnings entry to the session drop-box (#2614)
+### 9. Append a structured learnings entry to the session drop-box (#2614)
 
 Append **exactly one** structured, generalized-lesson entry to the session drop-box — a friction hit, a missing
 convention, a doc/skill gap, or an improvement idea from building this item. The drop-box (#2614) is
@@ -210,11 +239,11 @@ generalize it and retry; do **not** try to force it through. Skip this step only
 generalizable friction. Distributed capture (every agent, cheaply, in the moment); the `/closing-session` sweep
 curates centrally.
 
-### 9. EXIT — do not merge, do not release, do not wait
+### 10. EXIT — do not merge, do not release, do not wait
 
 **Stop here.** Do NOT run `gh pr merge`. Do NOT run a drain. Do NOT `release` the lane — the resident drain
 daemon lands the PR. The **merge watcher** (`scripts/conveyor/pr-watch.mjs <pr-number>`) is spawned by the
-**conveyor skill, not by you**, on the PR number `pr-land` reported for this item in step 7; its process exit
+**conveyor skill, not by you**, on the PR number `pr-land` reported for this item in step 8; its process exit
 (merged / parked / closed) wakes the main session and re-dispatches the freed lane. Your OWN process EXIT is the
 signal you are done. Return a one-line result to the conveyor: `#{{ITEM_NUM}} → PR #<n> (ready-to-merge |
 escalated <label> | gate-red)`. **A red gate / red CI is NOT watcher-visible** (it reads only state/labels) —
@@ -228,8 +257,8 @@ Most items are single-locus: build **and** resolve both land in WE — one lane,
 **always** lives in WE (#96). Such an item can't ship as one PR: it fans out into a **couple** — TWO coupled
 PRs, one per repo — that the drain lands in order (impl-first, WE-last). This surfaced in #2539 (a `frontierui` impl PR plus its WE
 PR): the delivery agent expected one PR and had no brief for the fan-out. **When your item's locus is not
-`we`, use this in place of the single-PR steps 7–9** (steps 1–6 are unchanged; run the impl repo's locus gate
-in step 5).
+`we`, use this in place of the single-PR steps 8–10** (steps 1–7 are unchanged — a cross-locus item with a UI
+surface still gets the step-7 visual self-review; run the impl repo's locus gate in step 5).
 
 - **One agent, two lanes, two PRs.** You still own ONE item. Acquire a SECOND lane for the impl repo — the
   pool is repo-parameterized (`node scripts/lane-pool.mjs acquire --repo=<impl-checkout> …`) — do the impl
@@ -292,9 +321,9 @@ and dilutes what `review:human` means.
 2. **Gate red** — `check:standards` (or the locus gate) fails from your own work, OR the PR's `test` check ends
    red. The PR is left **unlabelled** (never `ready-to-merge`); report the failing check and stop. Do not weaken
    or delete a test to go green.
-3. **A review finding that needs human judgment** — the step-6 adversarial review surfaced an issue you could
-   not safely self-clear (you fixed what you could to convergence; this one needs a human call). Open the PR
-   parked `review:human` (`--label=review:human`).
+3. **A review finding that needs human judgment** — the step-6 adversarial code review (or the step-7 visual
+   self-review, for a UI item) surfaced an issue you could not safely self-clear (you fixed what you could to
+   convergence; this one needs a human call). Open the PR parked `review:human` (`--label=review:human`).
 4. **Genuine uncertainty** — you are not confident the change is right and want a human eye before it lands.
    Park it `review:human`. (Uncertainty is a *good reason*; "so a human can see a clean change" is not.)
 5. **`review:changes`** — a human bounced a prior version of this diff. As a fresh delivery agent you normally
