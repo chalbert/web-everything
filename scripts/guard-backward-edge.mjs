@@ -10,11 +10,16 @@
  * static FUI import?" is fully script-decidable, so per the hookable-vs-judgment rule (#51) it belongs in a
  * deterministic write-time hook, here.
  *
- * SCOPE: only `src/**` WE package source (`.ts/.tsx/.js/.mjs/.cjs/.cts/.mts`). `demos/**` are runtime
- * pages that legitimately load FUI cross-origin (mode-C) and are NOT scanned. A cross-origin dynamic
- * `import('https://frontierui.dev/…')` is a RUNTIME edge (allowed) and never matches — the detector keys on
- * the BARE `@frontierui`/`frontierui/` specifier, not a URL. Comments/strings are stripped first, so a
- * commented-out or documented mention never denies (mirrors the real chrome.js JSDoc reference).
+ * SCOPE: only WE package source under `src/`, and never a `demos/` subtree — not even a `src/` dir nested
+ * inside `demos/` (demos are runtime pages that legitimately load FUI cross-origin, mode-C).
+ * A cross-origin dynamic `import('https://frontierui.dev/…')` is a RUNTIME edge (allowed) and never matches —
+ * the detector keys on the BARE `@frontierui`/`frontierui/` specifier, not a URL.
+ *
+ * MATCH is STATEMENT-anchored: an `import`/`export` at line-start (any of side-effect `import '…'`, default,
+ * named, namespace, or a multi-line import), plus `require()`/`import()` of the bare specifier. Anchoring on a
+ * line-leading keyword means a specifier that merely appears inside a STRING LITERAL is NOT matched — so this
+ * DENY hook never false-denies on `const s = "… from '@frontierui/x'"`. Comments are stripped first, so a
+ * commented-out or documented mention (the real chrome.js JSDoc reference) never denies either.
  *
  * Protocol (mirrors scripts/backlog-guard.mjs): reads the PreToolUse event JSON on stdin, computes the
  * PROPOSED post-edit content without writing it, and denies via exit 2 + stderr. Fails OPEN on any
@@ -23,23 +28,29 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-// WE package source only; demos/ load FUI cross-origin at runtime and are out of scope.
+// WE package source = repo `src/**`, but NEVER a `demos/` subtree (demos load FUI cross-origin at runtime,
+// so a nested `demos/**/src/` is out of scope too).
 const WE_SRC_RE = /(?:^|\/)src\/.+\.(?:ts|tsx|js|mjs|cjs|cts|mts)$/;
+export function isWeSource(file) { return WE_SRC_RE.test(file) && !/\/demos\//.test(file); }
 
 // Strip comments first so a commented-out / documented mention never denies; the `:` guard preserves
 // `https://` inside string literals.
 function stripComments(s) {
   return s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 }
-// `from '@frontierui…'` (unanchored → catches multiline imports); require()/import() of the BARE
-// specifier (a `.import(` method call is excluded via the [^.\w] guard). A URL specifier never matches.
-const RE_FROM = /\bfrom[ \t]*['"]@?frontierui(?:\/|['"])/;
+// STATEMENT-anchored: a line-leading `import`/`export`, then `[^'"]*` reaches the FIRST quote after the
+// keyword — so this catches side-effect (`import '…'`), default, named, namespace AND multi-line imports,
+// while a specifier inside a STRING LITERAL (never at statement-start) is left alone (no false-DENY). The
+// require()/import() call form matches the bare specifier (a `.import(` method call is excluded). A URL
+// specifier never matches.
+const RE_IMPORT = /^[ \t]*import\b[^'"]*['"]@?frontierui(?:\/|['"])/m;
+const RE_EXPORT = /^[ \t]*export\b[^'"]*\bfrom[ \t]*['"]@?frontierui(?:\/|['"])/m;
 const RE_CALL = /(?:^|[^.\w])(?:require|import)[ \t]*\([ \t]*['"]@?frontierui(?:\/|['"])/;
 
 /** PURE detector — true iff the source text contains a static FUI module edge. */
 export function hasBackwardEdge(text) {
   const c = stripComments(text);
-  return RE_FROM.test(c) || RE_CALL.test(c);
+  return RE_IMPORT.test(c) || RE_EXPORT.test(c) || RE_CALL.test(c);
 }
 
 /** Compute post-edit content without writing it (Write → content; Edit → apply old→new). */
@@ -61,7 +72,7 @@ if (process.argv[1] && realpathSafe(process.argv[1]) === realpathSafe(fileURLToP
   let ev;
   try { ev = JSON.parse(readFileSync(0, 'utf8') || '{}'); } catch { process.exit(0); }
   const file = ev?.tool_input?.file_path;
-  if (!file || !WE_SRC_RE.test(file)) process.exit(0);
+  if (!file || !isWeSource(file)) process.exit(0);
 
   const text = proposedContent(ev);
   if (hasBackwardEdge(text)) {
