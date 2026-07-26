@@ -175,6 +175,27 @@ output is the rewritten body, not a message:
    separately-prioritized build). The screen is mandatory on every fork — no leverage exception — because
    these two framing flaws are what a same-session skeptic is structurally blind to.
 
+6. **Pre-register the review jury — early human alignment (#2638, care-gated).** A settled #2636 design call:
+   for an **elevated/high-care** item, author a *provisional* review jury onto the body **before any code is
+   written**, so the human aligns on the review bar up front and the pre-registered expectations kill post-hoc
+   goalpost-moving (a juror can't invent a new bar at review time that was never registered). This reuses the
+   SAME care dial that sizes review rigor, so **skip it for `low`/`none` care** — aligning every juror up front
+   is real cost that only an elevated/high change earns. Mechanics (all pure, from `we:scripts/lib/review-core.mjs`):
+   - **Estimate the care band** from the item's escalation-predictive signals — a scope touching statute /
+     gate-self is `high`, system-machinery / cross-repo is `elevated`, a routine change is `low`/`none` (the
+     same signals `deriveCareLevel` reads; you don't have a diff yet, so estimate from the item's nature).
+   - **Build + render the charter:** `buildJuryCharter({ careLevel, changedFiles })` — pass the item's **predicted
+     touch-set** (the repo-relative paths implied by its `scope:`) as `changedFiles`, so a UI-file scope earns the
+     a11y + visual seats a script-only scope does not. It derives the provisional roster from the same
+     `resolveJuryPlan` the open-time jury uses and attaches each juror's up-front **expectation** (the concrete bar,
+     single-sourced in `LENS_EXPECTATIONS`). Below the floor it returns an un-registered charter with the skip
+     reason — that is expected, not an error.
+   - **Embed it:** append `renderJuryCharter(charter)`'s markdown to the item body (a `### Review jury (provisional
+     — pre-registered #2638)` block for a registered charter, or the one-line skip note below the floor). The
+     charter is **provisional** — it binds against the predicted scope now and #2636 re-checks it against the real
+     diff at PR open (drift past registration re-triggers alignment), so don't over-invest: it is the bar to align
+     on, not a contract.
+
 ## Close out — stamp prepared in-lane, land one PR, release the hold
 
 A prepared decision is **still open** — the call hasn't been made. So `prepare-stamp` (not `resolve`) and
