@@ -156,6 +156,28 @@ export async function watchPr({ pollOnce, sleep, now, intervalMs, deadlineMs, lo
   }
 }
 
+/**
+ * #2667 — on MERGE, auto-release the item's lane lease in EVERY pool it acquired. Delegates to the pool's own
+ * cross-pool release-by-session (`lane-pool.mjs release --all-pools --session=<slug>`): the lease markers carry
+ * the owning session (stamped at acquire/dispatch time), so a by-session sweep clears a cross-locus couple's WE
+ * lane AND plateau-app lane in one call — no separate `(pool, lane)` ledger needed (the markers ARE that record).
+ * BEST-EFFORT: a release failure is logged and NEVER changes the merge exit code (the merge is the truth; the
+ * lease cleanup is secondary, and the periodic lease-reaper is the backstop for anything this misses).
+ */
+function releaseSessionAcrossPools(execFileSync, session, log) {
+  const lanePoolCli = new URL('../lane-pool.mjs', import.meta.url);
+  try {
+    const out = execFileSync('node', [fileURLToPath(lanePoolCli), 'release', '--all-pools', `--session=${session}`], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    log(`  ● auto-released lease(s) for session "${session}" across pools on merge`);
+    if (out && out.trim()) log(out.trim());
+  } catch (e) {
+    log(`  ⚠ auto-release for session "${session}" failed (harmless — the lease-reaper is the backstop): ${String(e?.message || e).split('\n')[0]}`);
+  }
+}
+
 async function main(argv) {
   const { execFileSync } = await import('node:child_process');
 
@@ -172,7 +194,7 @@ async function main(argv) {
 
   const prNumber = positionals[0] ?? flags.pr;
   if (prNumber == null || !/^\d+$/.test(String(prNumber))) {
-    log('usage: pr-watch.mjs <pr-number> [--interval=20] [--timeout-min=30] [--repo=owner/name] [--json]');
+    log('usage: pr-watch.mjs <pr-number> [--interval=20] [--timeout-min=30] [--repo=owner/name] [--release-session=<slug>] [--json]');
     process.exit(EXIT_ERROR);
   }
 
@@ -191,6 +213,13 @@ async function main(argv) {
   log(`watching PR #${prNumber} (poll ${intervalMs / 1000}s · deadline ${deadlineMs / 60_000}min) …`);
   const code = await watchPr({ pollOnce, sleep, now: Date.now, intervalMs, deadlineMs, log });
 
+  // #2667 — on MERGE, auto-release the item's lane lease in every pool it acquired (opt-in via
+  // --release-session=<slug>). A non-merge exit (parked / closed / timeout) never releases — a still-open lane
+  // is still in use. Runs BEFORE the JSON emit + exit so the release completes while this process is alive.
+  if (code === EXIT_MERGED && typeof flags['release-session'] === 'string' && flags['release-session']) {
+    releaseSessionAcrossPools(execFileSync, flags['release-session'], log);
+  }
+
   if (flags.json) {
     const outcome =
       code === EXIT_MERGED ? 'merged'
@@ -203,7 +232,7 @@ async function main(argv) {
 }
 
 // Run the IO shell only when invoked directly — never on import (keeps the pure core side-effect-free).
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   main(process.argv.slice(2));
 }
