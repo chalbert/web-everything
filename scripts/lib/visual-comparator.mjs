@@ -3,7 +3,7 @@
  *
  * THE SHARED PRIMITIVE. This is the ONE callable comparator both review layers consume: the build-time visual
  * self-review (Layer 1, #2672) and the jury's visual lens (Layer 2, #2671, via `design-pixels-adapter.mjs`'s
- * `screenshot-vs-target` method, currently DEFERRED until this lands). Constellation single-impl (#96): there is
+ * `screenshot-vs-target` method, wired to this comparator by #2671). Constellation single-impl (#96): there is
  * exactly ONE diff engine — no second implementation in the adapter, no third in a Playwright reporter. Both
  * layers import `compareToBaseline` from here.
  *

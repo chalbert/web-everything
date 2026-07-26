@@ -5,6 +5,9 @@
  *   #2656 F2 `SUBJECT_ADAPTER_CONTRACT` and drives `resolveAdapterRoster` exactly like the reference adapter.
  */
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   DESIGN_PIXEL_LENSES,
   DESIGN_PIXEL_LENS_SET,
@@ -13,13 +16,26 @@ import {
   DESIGN_PIXEL_METHOD_REGISTRY,
   DESIGN_PIXEL_DEFERRED_METHODS,
   DESIGN_PIXEL_LENS_DEFAULT_METHOD,
+  DESIGN_PIXEL_METHOD_RUNNERS,
   isDesignPixelMethodDeferred,
   classifyDesignTouchSet,
   designMethodsForLens,
+  groundVisualLens,
+  runnerForDesignMethod,
   buildDesignMandate,
   DESIGN_PIXELS_ADAPTER,
 } from '../design-pixels-adapter.mjs';
 import { validateSubjectAdapter, resolveAdapterRoster } from '../jury-core.mjs';
+import { writePng } from '../png-io.mjs';
+
+/** Build a solid-colour RGBA image of a given size — a minimal fixture the comparator can diff. */
+function solid(width, height, [r, g, b, a = 255]) {
+  const data = new Uint8Array(width * height * 4);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = a;
+  }
+  return { width, height, data };
+}
 
 describe('the #2576 design lens-set (#2657)', () => {
   it('is exactly usability / visual / a11y / design-systems', () => {
@@ -48,15 +64,17 @@ describe('the grounding-method registry + the DEFERRED screenshot method (#2657)
     });
   });
 
-  it('registers screenshot-vs-target as DEFERRED (registered for provenance, not callable yet)', () => {
+  it('registers screenshot-vs-target as CALLABLE — no longer deferred once the comparator wired in (#2671)', () => {
     const screenshot = DESIGN_PIXEL_METHOD_REGISTRY.find((m) => m.id === DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET);
-    expect(screenshot.deferred).toBe(true);
-    expect(screenshot.deferredReason).toMatch(/visual-diff/i);
-    expect(DESIGN_PIXEL_DEFERRED_METHODS.has(DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET)).toBe(true);
-    expect(isDesignPixelMethodDeferred(DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET)).toBe(true);
+    expect(screenshot.deferred).toBe(false);
+    expect(screenshot).not.toHaveProperty('deferredReason');
+    expect(DESIGN_PIXEL_DEFERRED_METHODS.has(DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET)).toBe(false);
+    expect(isDesignPixelMethodDeferred(DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET)).toBe(false);
   });
 
-  it('the callable methods (heuristic-review, axe-scan) are NOT deferred', () => {
+  it('no method is deferred today — every registered method is callable (#2671)', () => {
+    expect(DESIGN_PIXEL_DEFERRED_METHODS.size).toBe(0);
+    for (const m of DESIGN_PIXEL_METHOD_REGISTRY) expect(m.deferred).toBe(false);
     expect(isDesignPixelMethodDeferred(DESIGN_PIXEL_METHODS.HEURISTIC_REVIEW)).toBe(false);
     expect(isDesignPixelMethodDeferred(DESIGN_PIXEL_METHODS.AXE_SCAN)).toBe(false);
     expect(isDesignPixelMethodDeferred('bogus')).toBe(false);
@@ -110,18 +128,103 @@ describe('buildDesignMandate — framed on the shared subject-neutral skeleton (
     expect(m).toContain('RENDERED design');
   });
 
-  it('the visual lens notes the DEFERRED screenshot grounding (judge by eye, no automated diff)', () => {
+  it('the visual lens notes the automated grounding + the by-eye fallback on a missing baseline (#2671)', () => {
     const m = buildDesignMandate({ lens: 'visual' });
-    expect(m).toMatch(/screenshot-vs-target grounding is NOT available/i);
+    expect(m).toMatch(/automated screenshot-vs-target diff grounds this lens/i);
     expect(m).toMatch(/by eye/i);
+    expect(m).toMatch(/skip/i);
   });
 
-  it('the deferred-visual note fires when the lens is named via `mandate` too (reference-adapter shape)', () => {
+  it('the visual-grounding note fires when the lens is named via `mandate` too (reference-adapter shape)', () => {
     // buildMandate/buildPanelMandate carry the lens as `mandate` — the note must not be silently dropped.
-    expect(buildDesignMandate({ mandate: 'visual' })).toMatch(/screenshot-vs-target grounding is NOT available/i);
-    expect(buildDesignMandate({ mandate: ['visual'] })).toMatch(/screenshot-vs-target grounding is NOT available/i);
+    expect(buildDesignMandate({ mandate: 'visual' })).toMatch(/automated screenshot-vs-target diff grounds/i);
+    expect(buildDesignMandate({ mandate: ['visual'] })).toMatch(/automated screenshot-vs-target diff grounds/i);
     // a non-visual lens named either way carries NO such note
-    expect(buildDesignMandate({ mandate: 'usability' })).not.toMatch(/screenshot-vs-target grounding is NOT/i);
+    expect(buildDesignMandate({ mandate: 'usability' })).not.toMatch(/automated screenshot-vs-target diff grounds/i);
+  });
+});
+
+describe('groundVisualLens — the callable form wiring in the shared comparator (#2671)', () => {
+  it('a matching shot vs baseline → grounded, match true, no findings', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dp-visual-'));
+    try {
+      const img = solid(32, 32, [10, 120, 200]);
+      const shotPath = join(dir, 'shot.png');
+      const baselinePath = join(dir, 'baseline.png');
+      writePng(shotPath, img);
+      writePng(baselinePath, img);
+      const g = groundVisualLens({ shotPath, baselinePath });
+      expect(g.method).toBe(DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET);
+      expect(g.grounded).toBe(true);
+      expect(g.byEye).toBe(false);
+      expect(g.skipped).toBe(false);
+      expect(g.match).toBe(true);
+      expect(g.delta).toBe(0);
+      expect(g.findings).toEqual([]);
+      expect(g.dimensions).toEqual({ shot: [32, 32], baseline: [32, 32] });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a drifted shot → grounded, match false, carries the comparator findings', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dp-visual-'));
+    try {
+      const shotPath = join(dir, 'shot.png');
+      const baselinePath = join(dir, 'baseline.png');
+      writePng(baselinePath, solid(32, 32, [10, 120, 200]));
+      writePng(shotPath, solid(32, 32, [220, 40, 40])); // a whole-canvas recolour
+      const g = groundVisualLens({ shotPath, baselinePath });
+      expect(g.grounded).toBe(true);
+      expect(g.byEye).toBe(false);
+      expect(g.match).toBe(false);
+      expect(g.delta).toBeGreaterThan(0);
+      expect(g.findings.length).toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a MISSING baseline → documented skip → ungrounded, by-eye fallback preserved (never a fail)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dp-visual-'));
+    try {
+      const shotPath = join(dir, 'shot.png');
+      writePng(shotPath, solid(16, 16, [0, 0, 0]));
+      const g = groundVisualLens({ shotPath, baselinePath: join(dir, 'nope.png') });
+      expect(g.grounded).toBe(false); // no baseline → the automated diff could not run
+      expect(g.byEye).toBe(true);     // the juror falls back to a by-eye judgment
+      expect(g.skipped).toBe(true);
+      expect(g.match).toBeNull();     // a skip makes NO claim — not a false-fail
+      expect(g.findings.some((f) => f.kind === 'baseline-missing')).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('threshold options pass straight through to the comparator', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dp-visual-'));
+    try {
+      const shotPath = join(dir, 'shot.png');
+      const baselinePath = join(dir, 'baseline.png');
+      writePng(baselinePath, solid(32, 32, [10, 120, 200]));
+      writePng(shotPath, solid(32, 32, [220, 40, 40]));
+      // a wide-open tolerance + threshold makes even a full recolour a match — proving opts reach the engine
+      const g = groundVisualLens({ shotPath, baselinePath, pixelTolerance: 255, cellThreshold: 1000 });
+      expect(g.grounded).toBe(true);
+      expect(g.match).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('runnerForDesignMethod resolves ONLY the in-process method; out-of-process methods → null', () => {
+    expect(runnerForDesignMethod(DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET)).toBe(groundVisualLens);
+    expect(DESIGN_PIXEL_METHOD_RUNNERS[DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET]).toBe(groundVisualLens);
+    // heuristic-review + axe-scan are grounded out of process (subagent / axe tool) — no in-process runner
+    expect(runnerForDesignMethod(DESIGN_PIXEL_METHODS.HEURISTIC_REVIEW)).toBeNull();
+    expect(runnerForDesignMethod(DESIGN_PIXEL_METHODS.AXE_SCAN)).toBeNull();
+    expect(runnerForDesignMethod('bogus')).toBeNull();
+    expect(Object.isFrozen(DESIGN_PIXEL_METHOD_RUNNERS)).toBe(true);
   });
 });
 
@@ -155,8 +258,9 @@ describe('DESIGN_PIXELS_ADAPTER — conforms to the F2 contract + drives the sea
     expect(bySeat.a11y.attachedBy).toBe('touch-set');
     expect(bySeat.visual.methods).toEqual([DESIGN_PIXEL_METHODS.SCREENSHOT_VS_TARGET]);
     expect(bySeat.usability.methods).toEqual([DESIGN_PIXEL_METHODS.HEURISTIC_REVIEW]);
-    // the visual seat's recorded method is deferred — provenance is complete, the runner must guard before calling
-    expect(isDesignPixelMethodDeferred(bySeat.visual.methods[0])).toBe(true);
+    // the visual seat's recorded method is CALLABLE (#2671) — the runner resolves an in-process runner for it
+    expect(isDesignPixelMethodDeferred(bySeat.visual.methods[0])).toBe(false);
+    expect(runnerForDesignMethod(bySeat.visual.methods[0])).toBe(groundVisualLens);
   });
 
   it('INVARIANT: every mandatory lens is present in the roster resolved for a REAL design review', () => {
