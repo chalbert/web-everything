@@ -28,7 +28,7 @@
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
  *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`.
  *   node scripts/lane-pool.mjs release (--lane=N | --all) [--session=<slug>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one)
- *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s)
+ *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s); #2350 REFUSES a reserved lane (even --all/--force) — deliberate teardown is `remove --lane=N --release-reserved`
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
  *   node scripts/lane-pool.mjs unmap   (--item=NNN[,…] | --lane=N | --all)   # drop lane-ports registry entries
  *
@@ -817,7 +817,19 @@ function resolveBaseRef(dir, ref, laneNum) {
   );
 }
 
+// #2350 (review:changes on #745) — `--release-reserved` is the ONE deliberate un-reserve, and it is
+// single-lane BY CONTRACT: un-reserving (or removing) the memory lane is a specific, named act, never a side
+// effect of a bulk `--all` sweep. Reject the combination so `release --all --release-reserved` (and, with the
+// remove-guard escape hatch, `remove --all --release-reserved`) can never set `bypassOwnership` for EVERY
+// reserved lease and silently drop the memory lane — require an explicit single `--lane=N`.
+function assertReleaseReservedScoped() {
+  if (flags['release-reserved'] && flags.all) {
+    fail('--release-reserved may not be combined with --all — it is the deliberate single-lane un-reserve; pass an explicit --lane=N');
+  }
+}
+
 function cmdRelease(repo) {
+  assertReleaseReservedScoped();
   const session = defaultSession();
   const force = !!flags.force;
   let targets;
@@ -897,12 +909,27 @@ function cmdPath(repo) {
 }
 
 function cmdRemove(repo) {
+  assertReleaseReservedScoped();
   let targets;
   if (flags.all) targets = existingLanes(repo);
   else if (flags.lane !== undefined) targets = [Number(flags.lane)];
   else return fail('remove needs --lane=N or --all');
-  unmapLanes(repo, targets); // a torn-down lane must stop receiving proxied page requests (#2139)
-  for (const n of targets) {
+  // #2350 (review:changes on #745) — `remove` does an unconditional `rmSync(dir, {recursive,force})`, which
+  // would destroy a RESERVED memory lane, its `agent-memory-src`, and all accrued memory — the exact wipe
+  // #2350 exists to prevent. So a reserved lane is off-limits to `remove` the same way it is to
+  // `refresh`/`release`: skipped (loud), never torn down. The ONE escape hatch is the deliberate
+  // `--release-reserved` (single-lane; see assertReleaseReservedScoped). This runs REGARDLESS of any --force:
+  // a reserved lane's whole point is to survive routine `remove --all` pool teardown.
+  const removable = targets.filter((n) => {
+    const lease = readLease(laneDir(repo, n));
+    if (isReservedLease(lease) && !flags['release-reserved']) {
+      log(`  lane-${n}: ${describeLease(lease)} — a PERMANENT reserved lane; remove refuses it. Pass --release-reserved --lane=${n} to deliberately tear it down.`);
+      return false;
+    }
+    return true;
+  });
+  unmapLanes(repo, removable); // a torn-down lane must stop receiving proxied page requests (#2139); a skipped reserved lane still serves
+  for (const n of removable) {
     const dir = laneDir(repo, n);
     if (existsSync(dir)) {
       rmSync(dir, { recursive: true, force: true });

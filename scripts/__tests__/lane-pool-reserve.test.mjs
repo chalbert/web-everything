@@ -171,6 +171,65 @@ describe('lane-pool #2350 — PERMANENT reserved lane', () => {
     const reacq = runPool(['acquire', '--lane=1', '--session=consumer', '--no-reset', ...COMMON()]);
     expect(reacq.code).toBe(0);
   });
+
+  // #2350 (review:changes on #745) — `remove` teardown must NOT wipe a reserved memory lane.
+  it('remove --all leaves a reserved lane (its dir + accrued content) intact', () => {
+    const lanePath = provision(2);
+    const lane = reserveLane1(lanePath);
+    writeFileSync(join(lane, 'memory-write.txt'), 'live memory\n'); // the kind of write the memory-lane accrues
+
+    const r = runPool(['remove', '--all', ...COMMON()]);
+    expect(r.code).toBe(0);
+    expect(r.out + r.err).toMatch(/PERMANENT reserved lane/);
+    // lane-1 (reserved) survives, content and lease intact; lane-2 (ordinary) is torn down.
+    expect(existsSync(lane)).toBe(true);
+    expect(readFileSync(join(lane, 'memory-write.txt'), 'utf8')).toContain('live memory');
+    expect(JSON.parse(readFileSync(LEASE_FILE(lane), 'utf8')).reserved).toBe(true);
+    expect(existsSync(lanePath(2))).toBe(false);
+  });
+
+  it('remove --lane=N REFUSES a reserved lane; its dir + content survive', () => {
+    const lanePath = provision(1);
+    const lane = reserveLane1(lanePath);
+    writeFileSync(join(lane, 'memory-write.txt'), 'live memory\n');
+
+    const r = runPool(['remove', '--lane=1', ...COMMON()]);
+    expect(r.code).toBe(0);
+    expect(r.out + r.err).toMatch(/PERMANENT reserved lane/);
+    expect(existsSync(lane)).toBe(true);
+    expect(readFileSync(join(lane, 'memory-write.txt'), 'utf8')).toContain('live memory');
+  });
+
+  it('remove --lane=N --release-reserved is the deliberate teardown escape hatch (single-lane)', () => {
+    const lanePath = provision(1);
+    const lane = reserveLane1(lanePath);
+
+    const r = runPool(['remove', '--lane=1', '--release-reserved', ...COMMON()]);
+    expect(r.code).toBe(0);
+    expect(existsSync(lane)).toBe(false); // deliberately torn down
+  });
+
+  // #2350 (review:changes on #745) — `--release-reserved` is single-lane BY CONTRACT: never a bulk `--all` act.
+  it('release --all --release-reserved is REJECTED (must name an explicit --lane); the reserved lease survives', () => {
+    const lanePath = provision(1);
+    const lane = reserveLane1(lanePath);
+
+    const r = runPool(['release', '--all', '--release-reserved', ...COMMON()]);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toMatch(/--release-reserved may not be combined with --all/);
+    expect(existsSync(LEASE_FILE(lane))).toBe(true); // NOT un-reserved
+    expect(JSON.parse(readFileSync(LEASE_FILE(lane), 'utf8')).reserved).toBe(true);
+  });
+
+  it('remove --all --release-reserved is REJECTED (single-lane teardown only); the reserved lane survives', () => {
+    const lanePath = provision(1);
+    const lane = reserveLane1(lanePath);
+
+    const r = runPool(['remove', '--all', '--release-reserved', ...COMMON()]);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toMatch(/--release-reserved may not be combined with --all/);
+    expect(existsSync(lane)).toBe(true); // NOT torn down
+  });
 });
 
 describe('lane-pool #2350 — reserved lease decision core (pure)', () => {
