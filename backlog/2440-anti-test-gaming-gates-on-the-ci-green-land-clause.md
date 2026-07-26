@@ -7,6 +7,10 @@ status: open
 blockedBy: ["2439"]
 dateOpened: "2026-07-11"
 tags: []
+scope:
+  - we:scripts/lib/
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/
 ---
 
 # Anti-test-gaming gates on the CI-green land clause
