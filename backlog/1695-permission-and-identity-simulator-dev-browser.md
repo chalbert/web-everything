@@ -7,6 +7,8 @@ locus: plateau-app
 humanGate: { kind: review, short: "Interactively verify the role/permission preview + contract-diff in the running dev-browser app.", what: "Acceptance is 'preview the LIVE app as any declared role/permission set and diff the rendered surface against the contract' — a live dev-browser surface whose verification is hands-on interaction in the running app (select a role → observe the re-rendered app → confirm the contract diff), not a headless unit check a serial batch can perform. The data blocker is clear: webidentity exists (#1060/#1061) and the webpermissions contract #1699 is now RESOLVED (the body's 'blocked by #1699' note is stale), so the declared roles/scopes are available — the residual is the interactive build-and-verify in a dev-browser session. Needs a focused session driving the running app." }
 dateOpened: "2026-06-23"
 tags: []
+scope:
+  - plateau:packages/dev-browser/src/
 ---
 
 # Permission and identity simulator (dev browser)
