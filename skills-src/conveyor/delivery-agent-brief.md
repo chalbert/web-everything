@@ -40,7 +40,7 @@ diff to convergence with an adversarial subagent**, open a PR (`ready-to-merge`,
 ```bash
 export LANE_SESSION={{SESSION_SLUG}}
 LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-delivery \
-  --session={{SESSION_SLUG}} --scope={{SCOPE}}) && cd "$LANE"
+  --session={{SESSION_SLUG}} --scope={{SCOPE}} --item={{ITEM_NUM}}) && cd "$LANE"
 ```
 
 - `--lane={{LANE}}` takes the exact lane the dispatch plan assigned (it was in the free-lane set at plan time).
@@ -48,6 +48,13 @@ LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-del
 - `--scope={{SCOPE}}` declares this lane's predicted file-scope into the lease marker. It is **advisory** — it
   NEVER gates the acquire (the whole-clone lease is the real lock), but the scope-lease collector reads it so
   the dispatch plan won't launch an overlapping sibling. All work happens in `$LANE`, never the primary.
+- `--item={{ITEM_NUM}}` records **this lane → this item** into the primary checkout's lane-ports registry
+  (`we:.claude/lane-ports.json`), the SAME map `conveyor-state.mjs`'s health-stall scan reverse-derives lane→num
+  from (#2616). A delivery agent leases its OWN lane and claims its OWN item, so nothing else maps it — without
+  this flag the registry stays `{}`, no lane carries a num, and `assessHealth` is permanently `ok` (a stalled
+  lane never alarms). It runs at acquire time in the primary checkout (not the lane clone), so the main-session
+  tick reads it; the entry is cleared when the lane is next reset/recycled. Advisory — a write hiccup never fails
+  the acquire.
 
 ### 2. Claim the item (the claim rides the PR — never left `active` on main)
 

@@ -127,6 +127,26 @@ export function itemNumFromRef(ref) {
 }
 
 /**
+ * Reverse the lane-ports registry (`{ "<num>": { lane, port?, repo? } }`, #2139/#2616) into the `{ [lane]: num }`
+ * lookup the lanes/health scan keys on — each entry that carries a `lane` becomes `lane → num`. Pure: it takes the
+ * ALREADY-PARSED registry object (the IO shell's {@link laneItemMap} reads the file). A missing / non-object /
+ * array registry, or an entry with no `lane`, contributes nothing (→ {} — a missing mapping never fabricates a
+ * lane→num). If two nums claim one lane (a stale entry a reset should have cleared), the LAST wins — deterministic;
+ * the acquire reset/unmap path keeps the registry 1:1 per lane in practice.
+ * @param {Record<string, {lane?:*}>|null|undefined} reg
+ * @returns {Record<string, string>}
+ */
+export function reverseLaneItemMap(reg) {
+  const map = {};
+  if (reg && typeof reg === 'object' && !Array.isArray(reg)) {
+    for (const [num, entry] of Object.entries(reg)) {
+      if (entry && entry.lane != null) map[entry.lane] = num;
+    }
+  }
+  return map;
+}
+
+/**
  * Distill a `gh pr` `statusCheckRollup` array into ONE CI token: `pass` (all complete & successful), `fail` (any
  * definitively-failed check), `pending` (any still-running / queued check, none failed), or `none` (no checks).
  * A definitively-red conclusion wins over pending; pending wins over pass. Never throws on a malformed rollup.
@@ -547,16 +567,14 @@ function findDaemonCli() {
   return null;
 }
 
-/** The lane → item-num map, reverse-derived from the lane-ports registry (`{ "<num>": { lane, port, repo } }`). */
+/** The lane → item-num map, reverse-derived from the lane-ports registry (`{ "<num>": { lane, port, repo } }`).
+ *  The registry is POPULATED by `lane-pool.mjs acquire --item=<num>` (#2616) — a delivery agent's own lease records
+ *  its item→lane there — so this map is non-empty during live conveyor work and the health-stall scan can flag a
+ *  genuinely stalled lane. (Before #2616 nothing wrote it, so it stayed `{}`, no lane carried a num, and the scan
+ *  was permanently inert — `assessHealth` always `ok`; the silent hole this closed.) The pure reverse is
+ *  {@link reverseLaneItemMap}; this IO wrapper just reads + parses the registry file. */
 function laneItemMap() {
-  const reg = readJsonFile(LANE_PORTS_PATH, {});
-  const map = {};
-  if (reg && typeof reg === 'object') {
-    for (const [num, entry] of Object.entries(reg)) {
-      if (entry && entry.lane != null) map[entry.lane] = num;
-    }
-  }
-  return map;
+  return reverseLaneItemMap(readJsonFile(LANE_PORTS_PATH, {}));
 }
 
 // ── best-effort delivery-agent transcript scan (health) — the IO half of the stall check ─────────────────────
@@ -567,9 +585,10 @@ function laneItemMap() {
 // LIMITS (best-effort by design — the PURE assessHealth verdict is the tested contract; this shell scan only
 // supplies its `lastActivity` inputs, and a miss degrades to the conservative "no transcript ⇒ never a stall"):
 //   • MAP: no reliable lane→session-uuid map exists, so a lane is matched by its item `#num` scraped from the
-//     transcript. That number comes from `.claude/lane-ports.json` (`{ "<num>": { lane } }`). That registry is
-//     `{}` today, so NO lane carries a num and the whole scan is INERT until it is populated — the health verdict
-//     then simply reports `ok` (nothing to flag), never a false warn.
+//     transcript. That number comes from `.claude/lane-ports.json` (`{ "<num>": { lane } }`), which
+//     `lane-pool.mjs acquire --item=<num>` POPULATES when a delivery agent leases its lane (#2616) — so a live
+//     conveyor lane carries a num and this scan is ACTIVE. When the registry is empty (no acquire recorded a num
+//     — a stale or hand-run lane), the scan degrades to the conservative `ok` (nothing to flag), never a false warn.
 //   • TAIL: only the last TAIL_BYTES of each transcript is read, so an item id stated ONLY in a session's opening
 //     prompt (never restated) can be missed. Acceptable — a live delivery agent restates its item id as it works.
 //   • WINDOW: ACTIVITY_WINDOW_MS is kept FAR PAST the stall threshold on purpose. A lane silent LONGER than the

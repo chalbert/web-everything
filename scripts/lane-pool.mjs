@@ -26,7 +26,7 @@
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
  *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
- *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`.
+ *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`.
  *   node scripts/lane-pool.mjs release (--lane=N | --all | --all-pools --session=<slug>) [--session=<slug>] [--pool=<name>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one); #2667 --all-pools --session sweeps EVERY pool under POOL_ROOT and releases that session's leases (cross-locus couple cleanup in one call), and --pool=<name> selects a pool by dir-name (no checkout path needed)
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s); #2350 REFUSES a reserved lane (even --all/--force) — deliberate teardown is `remove --lane=N --release-reserved`
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
@@ -355,6 +355,25 @@ function unmapLanes(repo, lanes) {
   for (const num of dropped) delete entries[num];
   writePortRegistry(repo, entries);
   log(`  unmapped item(s) ${dropped.join(', ')} (lane ${lanes.join(', ')}) from ${registryPath(repo)}`);
+}
+
+// #2616 — the SHARED registry writer both `map` (the #2139 review-proxy) and acquire-time population use: record
+// item(s) → this lane in the PRIMARY checkout's lane-ports registry. `port` is the lane's page-port when the pool
+// has a PORT_BANDS entry (what the #2139 proxy forwards on); it is OMITTED for a band-less pool, because the #2616
+// health-stall scan reverse-derives lane→num from `{ lane }` alone and needs no port. Each item id is normalized
+// so the key matches the `#num` forms conveyor-state's `itemNumFromRef` / transcript scan recognize: a numeric run
+// via `String(Number())` (drops leading zeros); a JIT `x…` slug LOWER-CASED (the scan's `#num` match is
+// case-sensitive and generated slugs are lowercase, so an upper/mixed-case `--item` must fold to lowercase or it
+// would key an entry no transcript ever matches). Returns the resolved port (or null) for the caller's log line.
+function registerItemsToLane(repo, n, items) {
+  const port = lanePagePort(repo, n);
+  const entries = readPortRegistry(repo);
+  for (const raw of items) {
+    const key = /^\d+$/.test(raw) ? String(Number(raw)) : raw.toLowerCase();
+    entries[key] = port === null ? { lane: n, repo: repo.name } : { port, lane: n, repo: repo.name };
+  }
+  writePortRegistry(repo, entries);
+  return port;
 }
 
 // Lane indices on disk under a pool DIR, sorted by index (the primitive both the repo-scoped `existingLanes`
@@ -824,6 +843,31 @@ function cmdAcquire(repo) {
   }
   writeLaneEnv(repo, chosen);
   if (!flags['no-install']) ensureDeps(dir);
+  // #2616 — record this lane's item → lane mapping in the PRIMARY checkout's lane-ports registry (the SAME
+  // registry #2139's `map` writes and conveyor-state's health-stall scan reverse-derives lane→num from). A
+  // conveyor delivery agent acquires its OWN lane and claims its OWN item, so nothing else calls `map` for it —
+  // without this the registry stays `{}`, no lane carries a num, and the stall scan is permanently INERT
+  // (`assessHealth` always `ok`, a stalled lane never surfaced). Runs HERE, after the reset's
+  // `unmapLanes(chosen)`, so the fresh entry is never immediately cleared; the pre-map `unmapLanes` drops any
+  // stale item still pointing at this lane (needed on the `--no-reset` path, where the reset's unmap did not run)
+  // so lane→num stays 1:1. A band-less pool records `{ lane }` (no page port) — all the health scan needs.
+  // Wrapped so a registry-write hiccup can NEVER fail the acquire (advisory, like the scope-overlap check above),
+  // and the map log rides stderr so `--json`-less stdout stays the clean lane path (the `LANE=$(…)` contract).
+  if (flags.item !== undefined) {
+    const items = String(flags.item)
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => /^\d+$/.test(s) || /^x[a-z0-9]{5,7}$/i.test(s));
+    if (items.length) {
+      try {
+        unmapLanes(repo, [chosen]); // drop any stale item→this-lane entry first (a no-op right after a reset unmap)
+        registerItemsToLane(repo, chosen, items);
+        log(`  mapped item(s) ${items.join(', ')} → lane-${chosen} in ${registryPath(repo)} (#2616 health-stall map)`);
+      } catch (e) {
+        log(`  ⚠ could not record item→lane map (#2616) — the health-stall scan may stay inert for lane-${chosen} (${e.message})`);
+      }
+    }
+  }
   // NOTE: do NOT re-run ensureRepoSiblings here. It resolves each sibling's primary from the *reference*
   // checkout's parent — correct only when run from the primary; run from INSIDE a lane (a consumer's cwd) it
   // mis-points the shared pool-root sibling clones at itself. The pool-root siblings are a provision/refresh
@@ -1030,9 +1074,7 @@ function cmdMap(repo) {
   if (items.length === 0) fail('map needs --item=NNN[,NNN…]');
   const port = lanePagePort(repo, n);
   if (port === null) fail(`pool "${repo.name}" has no PORT_BANDS entry — no page port to map`);
-  const entries = readPortRegistry(repo);
-  for (const num of items) entries[String(Number(num))] = { port, lane: n, repo: repo.name };
-  writePortRegistry(repo, entries);
+  registerItemsToLane(repo, n, items);
   log(`mapped ${items.join(', ')} → lane-${n} (port ${port}) in ${registryPath(repo)}`);
 }
 
