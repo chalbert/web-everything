@@ -6,6 +6,8 @@ parent: "2505"
 status: open
 tags: [plateau-loop, console, backlog-view, program-view, triage]
 dateOpened: "2026-07-22"
+scope:
+  - plateau-app:src/backlog-view/
 ---
 
 # Backlog screen: gating-status lens + authored blockedReason — show why an item is stuck, grouped by area
