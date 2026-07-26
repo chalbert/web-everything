@@ -1,10 +1,11 @@
 ---
+bornAs: xhptp3x
 kind: story
 size: 5
 parent: "2606"
 status: open
 dateOpened: "2026-07-26"
-relatedTo: ["xgb22vy", "2619", "2560", "2592", "2594"]
+relatedTo: ["2678", "2619", "2560", "2592", "2594"]
 scope:
   - we:scripts/readiness/scope-lease.mjs
   - we:scripts/readiness/scope-lease-collect.mjs
@@ -29,11 +30,11 @@ A declared scope like `we:scripts`, `we:scripts/lib/`, or `plateau-app:src/backl
 
 ## Why the god-files matter first
 
-Finer leases only pay off if the files are small. The six god-files named in the small-files decision (#xgb22vy) — `we:scripts/merge-ai-prs.mjs` (2242), `we:scripts/check-standards-rules.mjs` (2194), `we:scripts/check-standards.mjs` (1675), `we:scripts/lib/review-core.mjs` (1252), `we:scripts/backlog.mjs` (1058), `we:scripts/lane-pool.mjs` (1001) — are the first split targets that make file-level leases effective: a file-level lease on a 2000-line file everyone edits still serializes everyone. This story pairs with #xgb22vy (split the god-files) and with upstream scope authoring #2619 (predict the narrow `scope:` at readiness).
+Finer leases only pay off if the files are small. The six god-files named in the small-files decision (#2678) — `we:scripts/merge-ai-prs.mjs` (2242), `we:scripts/check-standards-rules.mjs` (2194), `we:scripts/check-standards.mjs` (1675), `we:scripts/lib/review-core.mjs` (1252), `we:scripts/backlog.mjs` (1058), `we:scripts/lane-pool.mjs` (1001) — are the first split targets that make file-level leases effective: a file-level lease on a 2000-line file everyone edits still serializes everyone. This story pairs with #2678 (split the god-files) and with upstream scope authoring #2619 (predict the narrow `scope:` at readiness).
 
 ## Relationships
 
 - **Parent #2606** — the delivery-throughput program (north star: maximize safe parallelism); this is a parallelism lever within it.
 - **#2560 / #2592 / #2594** — the scope-lease engine (resolved data-model slice #2592 and observer slice #2594); this extends that engine to file granularity, it does not replace it.
 - **#2619** — author predicted scope in the readiness flow; narrower prediction there is the upstream half of this story.
-- **#xgb22vy** — the small-files decision; its god-file splits are what make finer leases actually parallelize.
+- **#2678** — the small-files decision; its god-file splits are what make finer leases actually parallelize.

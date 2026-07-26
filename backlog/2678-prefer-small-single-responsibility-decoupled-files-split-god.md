@@ -1,8 +1,9 @@
 ---
+bornAs: xgb22vy
 kind: decision
 status: open
 dateOpened: "2026-07-26"
-relatedTo: ["x4ttbgl", "xhptp3x"]
+relatedTo: ["2677", "2679"]
 tags: [decision, authoring, files, throughput, scope-lease, parallelism]
 ---
 
@@ -16,7 +17,7 @@ Files should be **small, single-responsibility, and decoupled**. When a file gro
 
 ## Why it is a throughput lever
 
-The scope-lease engine (#2560) keeps unrelated lanes apart by the files they touch. But a lease is only as fine as the files are small. When one file carries many responsibilities, **every** item that touches **any** of them declares a scope over that file — so they serialize against each other even with zero real overlap. A god-file is a single lock point that defeats lease granularity. Splitting god-files is therefore the enabler that makes finer-grained leases (#xhptp3x) actually deliver parallelism, not just narrower strings.
+The scope-lease engine (#2560) keeps unrelated lanes apart by the files they touch. But a lease is only as fine as the files are small. When one file carries many responsibilities, **every** item that touches **any** of them declares a scope over that file — so they serialize against each other even with zero real overlap. A god-file is a single lock point that defeats lease granularity. Splitting god-files is therefore the enabler that makes finer-grained leases (#2679) actually deliver parallelism, not just narrower strings.
 
 ## Evidence — current lock-points (line counts 2026-07-26)
 
@@ -40,5 +41,5 @@ This is a default, not a hard cap. **Cohesion matters more than line count**: do
 
 ## Relationships
 
-- **#xhptp3x** — finer scope-lease granularity: this decision is the enabler that makes file-level leases pay off; the six god-files above are its first split targets.
-- **#x4ttbgl** — the conveyor orchestration epic: same throughput program, the structural (files) counterpart to the orchestration (sessions) work.
+- **#2679** — finer scope-lease granularity: this decision is the enabler that makes file-level leases pay off; the six god-files above are its first split targets.
+- **#2677** — the conveyor orchestration epic: same throughput program, the structural (files) counterpart to the orchestration (sessions) work.
