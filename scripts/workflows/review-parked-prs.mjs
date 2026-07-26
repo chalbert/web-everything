@@ -47,7 +47,7 @@ export const meta = {
     + 'lens: correctness/security/simplicity/standards-conformance — correctness and security are mandatory) '
     + 'judges one shared diff snapshot, then a reduce step shells the shared review core (review-core-cli '
     + 'reduce/comment) to a verdict + disposition + rendered comment body. Returns a ledger of '
-    + '{ pr, repo, disposition, verdict, commentBody } — it NEVER applies a label, posts a comment, or merges '
+    + '{ pr, repo, disposition, verdict, lensVerdicts, commentBody } — it NEVER applies a label, posts a comment, or merges '
     + '(the operator decides what a verdict does; the "decisions stay in the loop" boundary of epic #2418). '
     + 'Reviews the agent-clearable review:pending class ONLY — a review:human PR (its labels re-fetched fresh on '
     + 'every path) is filtered out and never touched (INVARIANT 2). A mandatory reviewer that fails to run '
@@ -244,7 +244,9 @@ const LENS_SCHEMA = {
   },
 };
 
-// What the REDUCE agent returns — the panel verdict + disposition + rendered comment body, all from the CLI.
+// What the REDUCE agent returns — the panel verdict + per-lens verdicts + disposition + rendered comment body,
+// all from the CLI. `lensVerdicts` (the reduce step already computes it internally, #2500) is now SURFACED so the
+// #2486 console can render the per-lens breakdown, not just the reduced panel verdict.
 const VERDICT_SCHEMA = {
   type: 'object',
   required: ['verdict', 'commentBody'],
@@ -256,6 +258,13 @@ const VERDICT_SCHEMA = {
       additionalProperties: true,
       properties: { mode: { type: 'string' }, autoLand: { type: 'boolean' } },
       description: 'from deriveReviewDisposition over the escalation reasons; null when there are none',
+    },
+    lensVerdicts: {
+      type: ['object', 'null'],
+      additionalProperties: { type: 'string' },
+      description: 'per-lens verdict map (lens → accept | changes | needs-human | unknown), one key per lens that '
+        + 'ran plus "unknown" for any mandatory/advisory lens that failed to run; the reduce step computes this '
+        + 'internally and it is now surfaced for the #2486 per-lens console view (#2500)',
     },
     commentBody: { type: 'string', description: 'the markdown PR-comment body from review-core-cli comment' },
     notes: { type: 'string' },
@@ -419,7 +428,8 @@ function reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, humanR
     '   reduced verdict verbatim, not a re-derivation). Run  node scripts/review-core-cli.mjs comment',
     '   --file=payloadB  → its stdout is the markdown comment body.',
     '',
-    'Return { verdict: <step-4 panel verdict>, disposition: <step-4 disposition or null>, commentBody: <step 5> }.',
+    'Return { verdict: <step-4 panel verdict>, disposition: <step-4 disposition or null>, lensVerdicts: <the',
+    'step-1 lensVerdicts map — every lens, with "unknown" for any that failed to run>, commentBody: <step 5> }.',
     'Return ONLY the structured object.',
   ].join('\n');
 }
@@ -502,6 +512,9 @@ async function reducePanelVerdict(panel) {
   let verdict = (r && r.verdict) || (degrade ? 'needs-human' : 'unknown');
   let disposition = (r && r.disposition) || null;
   const commentBody = (r && r.commentBody) || '';
+  // #2500 — surface the per-lens verdict map the reduce step already computes (empty {} if the reduce agent
+  // itself failed, mirroring the commentBody='' fallback). This is what the #2486 console renders per-lens.
+  const lensVerdicts = (r && r.lensVerdicts && typeof r.lensVerdicts === 'object') ? r.lensVerdicts : {};
 
   // SAFETY NET — a degraded panel is needs-human with a human disposition regardless of what the reduce agent
   // returned (a missing-signal PR must go to a human, never auto-land).
@@ -511,7 +524,7 @@ async function reducePanelVerdict(panel) {
   }
 
   log(`  ${prTag(panel)}: verdict ${verdict}${disposition ? `, disposition ${disposition.mode} (autoLand=${disposition.autoLand})` : ''}.`);
-  return { pr, repo, disposition, verdict, commentBody };
+  return { pr, repo, disposition, verdict, lensVerdicts, commentBody };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -563,7 +576,9 @@ log(`Done: ${list.length} verdict(s) produced. This workflow RETURNS the verdict
   + 'NO comment, and merged NOTHING. The operator decides what each verdict does (epic #2418 boundary).');
 
 // The workflow RETURNS the ledger and nothing else acts on it (INVARIANT 2 + "decisions stay in the loop").
-// Each entry: { pr, repo, disposition, verdict, commentBody }.
+// Each entry: { pr, repo, disposition, verdict, lensVerdicts, commentBody } (#2500 surfaced lensVerdicts — the
+// per-lens verdict map the reduce already computed — for the #2486 console; persisting the ledger to a
+// panel-reachable .drain-daemon/ artifact is the plateau-app half of #2500).
 return {
   ledger: list,
   reviewed: list.length,
