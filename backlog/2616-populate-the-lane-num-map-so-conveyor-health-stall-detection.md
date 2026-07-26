@@ -6,6 +6,12 @@ parent: "2612"
 status: open
 dateOpened: "2026-07-22"
 tags: [plateau-loop, conveyor, health, lane]
+scope:
+  - we:scripts/lane-pool.mjs
+  - we:scripts/backlog.mjs
+  - we:scripts/readiness/
+  - we:scripts/__tests__/
+  - we:skills-src/conveyor/
 ---
 
 # Populate the lane→num map so conveyor health-stall detection works
