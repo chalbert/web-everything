@@ -2,10 +2,12 @@
 bornAs: xrv47p7
 kind: story
 size: 5
-status: open
+status: resolved
 blockedBy: ["2670"]
 scope: ["we:skills-src/conveyor/"]
 dateOpened: "2026-07-26"
+dateStarted: "2026-07-26"
+dateResolved: "2026-07-26"
 tags: []
 ---
 
@@ -31,6 +33,17 @@ A surface with NO committed baseline still gets the agent's by-eye pass — no f
 Enabler dependency (explicit): baseline mock PNGs must be committed — operator-provided, exported from the design artifact. Without a baseline the check can only fall back to by-eye; the automated layer only bites once baselines exist.
 
 blockedBy: the Card-1 comparator (#2670) — this layer has nothing to call until the shared primitive exists.
+
+## Progress
+
+- Added step 7 "Visual self-review" to `we:skills-src/conveyor/delivery-agent-brief.md` (the `.claude/skills`
+  copy is a symlink to `skills-src`, so one edit covers both). It sits AFTER the code self-review (step 6) and
+  BEFORE the PR: render the built surface with the #2670 Playwright harness, screenshot it, Read the screenshot
+  by eye (agents are sighted), run `compareToBaseline` from `we:scripts/lib/visual-comparator.mjs` against the
+  committed baseline, and iterate to visual convergence. Scoped to UI-locus items only — non-UI items skip it.
+  No committed baseline → by-eye pass only, with the comparator's documented skip on the automated diff.
+- Renumbered the former steps 7/8/9 → 8/9/10 and updated every step cross-reference (cross-locus section,
+  merge-watcher note, Escalations #3).
 
 ## Relates to
 
