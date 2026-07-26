@@ -1,4 +1,5 @@
 ---
+bornAs: x70mipy
 kind: epic
 shortTitle: "Plateau design-studio product loop"
 parent: "2445"
