@@ -5,6 +5,7 @@ kind: story
 size: 2
 parent: "2555"
 status: open
+blockedBy: ["2551"]
 dateOpened: "2026-07-20"
 tags: [plateau-loop, console, console-board, decision-surface, write-seam, slice-2555]
 scope:
