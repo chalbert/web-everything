@@ -2,8 +2,10 @@
 bornAs: xpat265
 kind: task
 parent: "2445"
-status: open
+status: resolved
 dateOpened: "2026-07-14"
+dateStarted: "2026-07-26"
+dateResolved: "2026-07-26"
 tags: [plateau-loop, console, review-pipeline]
 scope:
   - we:scripts/workflows/review-parked-prs.mjs
