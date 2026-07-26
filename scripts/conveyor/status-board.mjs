@@ -22,10 +22,16 @@
  *   ◐  preparing   — scope being shaped: a lane still declaring scope, or a cleared item with no predicted scope
  *   ‖  paused      — a lane auto-paused on a scope breach (two lanes drifted onto one path)
  *   ⏸  parked      — held for human review (a lane's PR, or a NEEDS-YOU parked PR)
+ *   ⊘  infra-blocked — a lane paused on a degraded OUTSIDE dependency (e.g. GitHub); the conveyor auto-retries
  *   →  ready       — cleared & ready; launches on the next free lane
  *   ⛔  blocked     — cleared but waiting on another item to land
  *   ·  waiting     — cleared but not launchable now (no free lane)
  *   ⚠  attention   — a health warning, or a cleared id that is not a ready build-queue row
+ *
+ * #2660 — an `infra-blocked` lane (an outside dependency is degraded, the conveyor auto-retrying) reads
+ *   DISTINCT from a review-park (⏸) and a stall (a ⚠ health warning): its own ⊘ marker, the failure CLASS +
+ *   retry attempt + next-retry countdown on its RUNNING row, and — so a widespread outage reads as ONE event,
+ *   not N alarms — a single collapsed OUTAGE banner that groups every lane down on the SAME cause.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -42,11 +48,16 @@ export const MARKERS = Object.freeze({
   preparing: '◐',
   paused: '‖',
   parked: '⏸',
+  infra: '⊘', // #2660 infra-blocked — a lane paused on a degraded outside dependency, auto-retrying
   ready: '→',
   blocked: '⛔',
   waiting: '·',
   attention: '⚠',
 });
+
+/** #2660 — how the text mirror tells the operator to nudge a retry by hand (the resume affordance). The board
+ *  (plateau-app) carries the operable Resume button; the mirror is read-only, so it names the path in words. */
+const RESUME_HINT = 'lane board ▸ Resume, or the next tick auto-retries';
 
 /** The review-park labels a PR can carry — a hard human-only gate that surfaces in NEEDS YOU. */
 const REVIEW_LABELS = ['review:human', 'review:pending', 'review:changes'];
@@ -65,22 +76,38 @@ function reviewLabelOf(labels) {
 }
 
 /**
+ * #2660 — the infra-blocked detail on a lane (an OUTSIDE dependency is degraded and the conveyor is
+ * auto-retrying), or null. Shape `{ cause, attempt, nextRetrySec }`, read DEFENSIVELY: a partial / absent value
+ * (or an empty cause) is "not infra", so the state (#2641 / a later outage-detection slice) can fill it
+ * incrementally without ever making this renderer throw. The `cause` is the failure CLASS ("GitHub outage").
+ * @param {{infra?:{cause?:string, attempt?:number, nextRetrySec?:number}}} lane
+ * @returns {{cause:string, attempt?:number, nextRetrySec?:number}|null}
+ */
+export function infraOf(lane) {
+  const i = lane && typeof lane.infra === 'object' && lane.infra ? lane.infra : null;
+  return i && typeof i.cause === 'string' && i.cause ? i : null;
+}
+
+/**
  * The state marker for one active lane, derived from the lane row × the PRs (NOT re-derived from raw leases):
- *   paused-breach (a non-empty breach set) ▸ review-parked (its PR carries a review label) ▸ preparing-scope
- *   (leased but no predicted scope declared yet) ▸ building (the normal case). First match wins.
- * @param {{lease?:string[], breach?:string[], num?:*}} lane
+ *   paused-breach (a non-empty breach set) ▸ infra-blocked (a degraded outside dependency, auto-retrying) ▸
+ *   review-parked (its PR carries a review label) ▸ preparing-scope (leased but no predicted scope declared
+ *   yet) ▸ building (the normal case). First match wins. Infra sits just under a local scope-breach (which is
+ *   actionable now) but ABOVE a review-park, so a lane paused on GitHub never mis-reads as "held for review".
+ * @param {{lease?:string[], breach?:string[], num?:*, infra?:object}} lane
  * @param {Map<string,object>} prByNum  item-num → PR row
- * @returns {'paused'|'parked'|'preparing'|'building'}
+ * @returns {'paused'|'infra'|'parked'|'preparing'|'building'}
  */
 export function laneMarker(lane, prByNum) {
   if (arr(lane?.breach).length) return 'paused';
+  if (infraOf(lane)) return 'infra';
   const pr = lane?.num != null ? prByNum.get(numKey(lane.num)) : null;
   if (pr && reviewLabelOf(pr.labels)) return 'parked';
   if (arr(lane?.lease).length === 0) return 'preparing';
   return 'building';
 }
 
-const LANE_STATE_WORD = { building: 'building', preparing: 'preparing-scope', paused: 'paused-breach', parked: 'review-parked' };
+const LANE_STATE_WORD = { building: 'building', preparing: 'preparing-scope', paused: 'paused-breach', parked: 'review-parked', infra: 'infra-blocked' };
 
 /** The human word for the daemon section: the `"unavailable"` sentinel, else resident / absent. */
 function daemonWord(daemon) {
@@ -153,13 +180,43 @@ export function renderBoard(state) {
 
   const blocks = [header];
 
+  // ── OUTAGE: #2660 — the single collapsed banner. A widespread outage must read as ONE event, not N alarms,
+  //    so every infra-blocked lane is grouped by its failure CAUSE and each cause renders EXACTLY ONE banner
+  //    ("outside dependency degraded — N lanes waiting on <cause>") carrying the worst (max) retry attempt,
+  //    the soonest (min) countdown, and one resume hint. Placed right under the header so an outage is the
+  //    first thing an operator sees. No infra lane → no block (an idle/clean board is untouched). ──
+  const infraLanes = laneRows.filter((l) => l.marker === 'infra');
+  if (infraLanes.length) {
+    const byCause = new Map();
+    for (const l of infraLanes) {
+      const i = infraOf(l);
+      const g = byCause.get(i.cause) ?? { n: 0, attempt: 0, next: Infinity };
+      g.n += 1;
+      if (Number.isFinite(i.attempt)) g.attempt = Math.max(g.attempt, i.attempt);
+      if (Number.isFinite(i.nextRetrySec)) g.next = Math.min(g.next, i.nextRetrySec);
+      byCause.set(i.cause, g);
+    }
+    const lines = ['OUTAGE'];
+    for (const [cause, g] of byCause) {
+      const next = Number.isFinite(g.next) ? ` · next retry in ${Math.max(0, Math.round(g.next))}s` : '';
+      lines.push(`  ${MARKERS.infra} outside dependency degraded — ${g.n} lane${g.n === 1 ? '' : 's'} waiting on ${cause} · retrying (attempt ${g.attempt}${next})`);
+      lines.push(`    resume: ${RESUME_HINT}`);
+    }
+    blocks.push(lines.join('\n'));
+  }
+
   if (laneRows.length) {
     const lines = ['RUNNING'];
     for (const l of laneRows) {
       const who = l.num != null ? hash(l.num) : l.session ? String(l.session) : '(unclaimed)';
       let extra = '';
       if (l.marker === 'paused') extra = ` (breach on ${arr(l.breach).length} path${arr(l.breach).length === 1 ? '' : 's'})`;
-      else if (l.marker === 'parked') {
+      else if (l.marker === 'infra') {
+        // the failure CLASS + retry attempt + next-retry countdown, so an infra pause never reads as a stall.
+        const i = infraOf(l);
+        const next = Number.isFinite(i.nextRetrySec) ? ` · next ${Math.max(0, Math.round(i.nextRetrySec))}s` : '';
+        extra = ` (${i.cause} · retry ${Number.isFinite(i.attempt) ? i.attempt : '?'}${next})`;
+      } else if (l.marker === 'parked') {
         const pr = prByNum.get(numKey(l.num));
         if (pr?.prNumber != null) extra = ` (PR #${pr.prNumber})`;
       }
