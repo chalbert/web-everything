@@ -8,15 +8,18 @@
  *          paragraph (mirrors firstParagraph in src/_data/backlog.js, #745) — a body that leads with
  *          `**Label:**`, a heading, or a list derives an EMPTY summary; so does a stray body added to
  *          a frontmatter-only `relatedReport` pointer. Both hard-error the gate. Also denies the
- *          retired `childlessReason/unsplittableReason: undecided` sentinels.
+ *          retired `childlessReason/unsplittableReason: undecided` sentinels, AND a `Write` that
+ *          hand-creates a NEW numeric-`NNN`-prefixed file — new items must be minted via `scaffold`
+ *          (collision-free hash id `xNNNNNN`); a hand-picked NNN races concurrent sessions into a
+ *          duplicate id (#2288/#2323).
  *   default (PostToolUse Edit|Write, WARN via exit 2): a `kind: story` carrying a `size` that also
  *          has children (some other item's `parent:`) double-counts in the burndown — a case the gate
  *          only flags for sized epics, not stories.
  *
  * Fails open on unparseable input / non-backlog paths.
  */
-import { readFileSync, readdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { idFromName } from './backlog/id.mjs';
 
@@ -74,6 +77,14 @@ if (!file || !BACKLOG_RE.test(file)) process.exit(0);
 
 // ── PreToolUse GATE: deny edits that would land an empty summary or a retired sentinel ──
 if (argv.includes('--pre')) {
+  // A brand-new backlog file must be minted by `scaffold` (collision-free hash id xNNNNNN), never
+  // hand-authored with a numeric NNN- prefix (races concurrent sessions → duplicate ids, #2288/#2323).
+  // Only a Write that CREATES a numeric-prefixed file not yet on disk is the footgun; editing a landed
+  // NNN item, or writing a scaffold-minted xNNNNNN file, is fine.
+  const idTok = (file.match(BACKLOG_RE) || [])[1] || '';
+  if (ev.tool_name === 'Write' && /^\d+$/.test(idTok) && !existsSync(file))
+    deny(`new backlog file "${basename(file)}" is hand-numbered — mint items with \`node scripts/backlog.mjs scaffold "<title>"\`, which assigns a collision-free hash id (xNNNNNN). Hand-picking an NNN races concurrent sessions and mints duplicate ids (#2288/#2323). Run scaffold, then edit the file it creates.`);
+
   const text = proposedContent(ev);
   if (!text.trim()) process.exit(0); // empty proposal — nothing to judge
   const { fm, body } = split(text);
