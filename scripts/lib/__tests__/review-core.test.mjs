@@ -61,6 +61,12 @@ import {
   critiqueRosterCompleteness,
   buildRosterCritiqueMandate,
   applyRosterCritique,
+  JURY_CHARTER_CARE_FLOOR,
+  LENS_EXPECTATIONS,
+  expectationForLens,
+  shouldRegisterJury,
+  buildJuryCharter,
+  renderJuryCharter,
 } from '../review-core.mjs';
 import { validateSubjectAdapter, resolveAdapterRoster } from '../jury-core.mjs';
 
@@ -1119,5 +1125,95 @@ describe('applyRosterCritique — fold surfaced gaps back onto the roster (#2637
     const augmented = applyRosterCritique(plan, [PERSPECTIVE_LENSES.PERF]);
     expect(augmented.lenses.map((l) => l.lens)).toContain(PERSPECTIVE_LENSES.PERF);
     expect(plan.lenses).toHaveLength(before); // input untouched
+  });
+});
+
+describe('shouldRegisterJury — the care gate on the prepare-time charter (#2638)', () => {
+  it('registers only for elevated/high (at or above the floor), skips low/none', () => {
+    expect(shouldRegisterJury('none')).toBe(false);
+    expect(shouldRegisterJury('low')).toBe(false);
+    expect(shouldRegisterJury('elevated')).toBe(true);
+    expect(shouldRegisterJury('high')).toBe(true);
+  });
+  it('the floor is elevated', () => {
+    expect(JURY_CHARTER_CARE_FLOOR).toBe('elevated');
+  });
+  it('throws on an unknown care-level rather than silently skipping', () => {
+    expect(() => shouldRegisterJury('critical')).toThrow(/unknown care-level/);
+  });
+});
+
+describe('LENS_EXPECTATIONS / expectationForLens — the pre-registered bar per lens (#2638)', () => {
+  it('carries a non-empty expectation for every seatable lens (panel + perspective)', () => {
+    for (const lens of [...PANEL_LENSES, ...Object.values(PERSPECTIVE_LENSES)]) {
+      expect(typeof LENS_EXPECTATIONS[lens]).toBe('string');
+      expect(LENS_EXPECTATIONS[lens].length).toBeGreaterThan(0);
+      expect(expectationForLens(lens)).toBe(LENS_EXPECTATIONS[lens]);
+    }
+  });
+  it('falls back to a neutral bar for an unregistered lens (never an empty string)', () => {
+    expect(expectationForLens('made-up-lens')).toContain('made-up-lens');
+  });
+  it('is frozen — the wording is a single-sourced commitment', () => {
+    expect(Object.isFrozen(LENS_EXPECTATIONS)).toBe(true);
+  });
+});
+
+describe('buildJuryCharter — the provisional prepare-time jury (#2638)', () => {
+  it('skips below the floor, returning an un-registered charter with a reason (never throws)', () => {
+    for (const careLevel of ['none', 'low']) {
+      const charter = buildJuryCharter({ careLevel, changedFiles: ['src/components/Btn.tsx'] });
+      expect(charter.registered).toBe(false);
+      expect(charter.jurors).toEqual([]);
+      expect(charter.reason).toMatch(/below the/);
+      expect(charter.careLevel).toBe(careLevel);
+    }
+  });
+  it('registers the real roster for elevated, each juror carrying its pre-registered expectation', () => {
+    const charter = buildJuryCharter({ careLevel: 'elevated', changedFiles: ['scripts/lib/x.mjs'] });
+    expect(charter.registered).toBe(true);
+    // script-only diff → the four static lenses, one juror each (elevated jurorsPerLens = 1)
+    const lenses = charter.jurors.map((j) => j.lens);
+    expect(lenses).toEqual([...PANEL_LENSES]);
+    for (const juror of charter.jurors) {
+      expect(juror.expectation).toBe(LENS_EXPECTATIONS[juror.lens]);
+      expect(juror.charter).toBeUndefined(); // surfaced under the item's own `expectation` vocabulary
+      expect(juror.id).toBe(`${juror.lens}#1`);
+    }
+  });
+  it('binds against the predicted touch-set — a UI diff earns a11y + visual seats', () => {
+    const charter = buildJuryCharter({ careLevel: 'elevated', changedFiles: ['src/components/Btn.tsx'] });
+    const lenses = charter.jurors.map((j) => j.lens);
+    expect(lenses).toContain(PERSPECTIVE_LENSES.A11Y);
+    expect(lenses).toContain(PERSPECTIVE_LENSES.VISUAL);
+    const a11y = charter.jurors.find((j) => j.lens === PERSPECTIVE_LENSES.A11Y);
+    expect(a11y.method).toBe(REVIEW_METHODS.AXE_SCAN);
+  });
+  it('materializes the diverse jury for high care — two jurors per lens', () => {
+    const charter = buildJuryCharter({ careLevel: 'high', changedFiles: ['scripts/lib/x.mjs'] });
+    const correctness = charter.jurors.filter((j) => j.lens === 'correctness');
+    expect(correctness.map((j) => j.id)).toEqual(['correctness#1', 'correctness#2']);
+  });
+  it('delegates the unknown-care-level throw to shouldRegisterJury', () => {
+    expect(() => buildJuryCharter({ careLevel: 'critical' })).toThrow(/unknown care-level/);
+  });
+});
+
+describe('renderJuryCharter — the markdown artifact embedded on the item (#2638)', () => {
+  it('renders a one-line skip note for an un-registered charter', () => {
+    const md = renderJuryCharter(buildJuryCharter({ careLevel: 'low' }));
+    expect(md).toContain('No review jury pre-registered');
+    expect(md).toContain('`low`');
+    expect(md).toContain('#2638');
+    expect(md).not.toContain('| juror |');
+  });
+  it('renders a heading, care band, and a juror/lens/method/expectation table when registered', () => {
+    const charter = buildJuryCharter({ careLevel: 'elevated', changedFiles: ['src/components/Btn.tsx'] });
+    const md = renderJuryCharter(charter);
+    expect(md).toContain('### Review jury (provisional — pre-registered #2638)');
+    expect(md).toContain('Care level: `elevated`');
+    expect(md).toContain('| juror | lens | grounding method | pre-registered expectation |');
+    // every juror's expectation text is present in the rendered table
+    for (const juror of charter.jurors) expect(md).toContain(juror.expectation);
   });
 });
