@@ -6,6 +6,7 @@ buildQueued: true
 parent: "2636"
 status: open
 blockedBy: ["2639"]
+relatedTo: ["2500"]
 scope: ["we:scripts/lib/", "we:scripts/conveyor/", "we:skills-src/conveyor/"]
 dateOpened: "2026-07-23"
 tags: []
@@ -20,3 +21,12 @@ Make the jury observable — this is what turns the conveyor improvement that st
 **Guardrail — the fold is written once, never two copies.** There must be exactly ONE fold module (in the WE core, [we:scripts/lib/](scripts/lib/)); the conveyor and the plateau-app console both call it. A second copy of the fold logic in either consumer is a bug. `we:scripts/workflows/review-parked-prs.mjs` already *returns a ledger and nothing else* — evolve it to append events to the durable log, and pipe the shared fold's output into the conveyor loop ([we:scripts/conveyor/](scripts/conveyor/), `we:skills-src/conveyor/`) so an operator sees what the jury is, is doing, and has found.
 
 **Size grows accordingly** — bumped 5 → 8: this is no longer an in-memory ledger return but a durable event log plus a shared fold with two consumers. Depends on the convergence loop producing the round-by-round events.
+
+## Reconcile with #2500 (ratified: KEEP #2500)
+
+This story is the durable-ledger successor to #2500's persist path — but it is **not** a second, parallel
+ledger. Ratified reconciliation: #2641 **REPLACES** #2500's persist path (the `review-parked-prs` ledger
+persistence) while **REUSING #2500's widened `lensVerdicts` shape** (the per-lens verdict map #2500 adds to
+the ledger event). Build #2641's durable on-disk event log to carry that same widened `lensVerdicts` shape,
+so there is exactly ONE ledger — do not stand up a parallel second ledger alongside #2500. #2500 itself is
+left untouched.
