@@ -93,6 +93,13 @@ export const TRUST_CHAIN = [
     homes: ['scripts/lib/review-policy.mjs'],
   },
   {
+    role: 'disposition-land-seam',
+    file: 'disposition-land-seam.mjs',
+    tier: 'policy',
+    desc: 'the seam that wires the #2652 disposition judge into the review land path (#2674) — decideDispositionLabel turns a parked PR\'s jury verdict into a LABEL intent (auto-dispose → auto-clear/accept, escalate/red-refuted/gate-self → keep parked review:human). It DECIDES whether a PR auto-clears or goes to a human, so it is the disposition-to-label router — leash-defining policy tier: an agent may not clear an edit to its own auto-dispose leash. It is decision-only (returns an intent, applies nothing — #2675 applies it behind shadow mode)',
+    homes: ['scripts/lib/disposition-land-seam.mjs'],
+  },
+  {
     role: 'policy-conformance',
     file: 'review-policy.conformance.test.mjs',
     tier: 'policy',
