@@ -2,10 +2,12 @@
 bornAs: x28wmm7
 kind: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["2670"]
 scope: ["we:scripts/lib/"]
 dateOpened: "2026-07-26"
+dateStarted: "2026-07-26"
+dateResolved: "2026-07-26"
 tags: []
 ---
 
