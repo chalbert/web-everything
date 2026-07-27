@@ -286,7 +286,10 @@ const VERDICT_SCHEMA = {
       type: ['object', 'null'],
       additionalProperties: true,
       properties: { mode: { type: 'string' }, autoLand: { type: 'boolean' } },
-      description: 'from deriveReviewDisposition over the escalation reasons; null when there are none',
+      description: 'from deriveReviewDisposition over the escalation reasons; null when there are none — or when '
+        + 'none is RECOGNIZED (the CLI drops retired/unknown reason tokens leniently rather than throwing, #2632, '
+        + 'so a legacy PR whose escalation block still lists a retired reason like the review-sampling floor no '
+        + 'longer crashes this workflow)',
     },
     lensVerdicts: {
       type: ['object', 'null'],
@@ -501,8 +504,9 @@ function reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, humanR
     '3. Write payloadA = { "lensVerdicts": <step 1>, "findings": <step 2>, "humanRequired": ' + (humanRequired ? 'true' : 'false') + ',',
     '   "reasons": <the escalation reasons array> } — but OMIT the "reasons" key entirely if that array is empty.',
     `4. Run  node scripts/review-core-cli.mjs reduce --file=payloadA --round=${round} --roundCap=${roundCap} --json`,
-    '   → read `.verdict` (the PANEL verdict), `.disposition` (absent when there are no reasons → treat as null),',
-    '   and `.outcome` (land | continue | escalate — the negotiation step from deriveNegotiationOutcome).',
+    '   → read `.verdict` (the PANEL verdict), `.disposition` (absent when there are no reasons — or when none is',
+    '   RECOGNIZED, since the CLI drops retired/unknown reason tokens leniently rather than throwing, #2632 → treat',
+    '   as null), and `.outcome` (land | continue | escalate — the negotiation step from deriveNegotiationOutcome).',
     '5. Write payloadB = payloadA PLUS "verdict": <the step-4 panel verdict> (so the comment headline uses the',
     '   reduced verdict verbatim, not a re-derivation). Run  node scripts/review-core-cli.mjs comment',
     '   --file=payloadB  → its stdout is the markdown comment body.',
