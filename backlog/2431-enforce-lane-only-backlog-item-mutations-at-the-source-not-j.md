@@ -5,6 +5,9 @@ status: open
 dateOpened: "2026-07-11"
 relatedTo: ["2302", "2339", "2219", "104", "883"]
 tags: [guard, lane-isolation, backlog-cli, enforce-at-source]
+scope:
+  - we:scripts/backlog.mjs
+  - we:scripts/backlog/__tests__/primary-write-guard.test.mjs
 ---
 
 # Enforce lane-only backlog item-mutations at the source, not just the Bash-tool hook
