@@ -1,32 +1,81 @@
 ---
 name: conveyor
-description: Operate the conveyor from a live main session — a chained-sleep tick loop that dispatches scope-disjoint backlog items into the lane pool as background delivery agents, watches their PRs, and surfaces escalations, while the chat stays conversational. Use when the operator wants to "run the conveyor", "start the conveyor", "keep delivering backlog items in the background", or operate the interim swimlane-progression loop (#2612). NOT for landing PRs (the resident drain daemon does that) and NOT for one item (that is /batch or a solo lane).
+description: Operate the conveyor from a live main session — start the singleton-locked headless runner that drives the mechanized tick (dispatch, watch, the deterministic cleanup passes) with no model context, and handle only the judgment it surfaces (readiness discussion, escalation review, ratifying, the operator conversation). Use when the operator wants to "run the conveyor", "start the conveyor", "keep delivering backlog items in the background", or operate the interim swimlane-progression loop (#2612). NOT for landing PRs (the resident drain daemon does that) and NOT for one item (that is /batch or a solo lane).
 ---
 
-# Conveyor — main-session lane operator (#2613, epic #2612)
+# Conveyor — main-session judgment layer over a headless runner (#2703, epic #2677/#2612)
 
-The interim swimlane-progression loop, run from a live session: the main session operates a conveyor of
-background delivery agents across the lane pool. It **dispatches** scope-disjoint backlog items, **watches**
-their PRs, and **surfaces** escalations — while the chat stays a normal readiness conversation. It runs now
-because the product conveyor (the #2527 console board) is not built yet and one-story-at-a-time delivery is
-too slow.
+The interim swimlane-progression loop. It has **two planes** since #2703 retired the main-session serial tick
+loop:
+
+- **The mechanical plane — a singleton-locked HEADLESS RUNNER** (`skills-src/conveyor/runner.mjs`, #2702). It
+  drives the whole per-tick cycle — read state → plan the dispatch → step every guard/TTL/re-dispatch/watcher-arm
+  /idle-stop decision through the tick core → run the deterministic cleanup passes — with **no model context per
+  tick**. It **decides dispatch and watch**; it **never merges** and **never self-clears a human review**. It
+  does not itself spawn LLM agents — it **surfaces** its already-filtered dispatch/watch decisions.
+- **The judgment plane — THIS main session.** It **starts and supervises** the runner, then handles only the
+  genuine judgment the runner can't: the readiness/operator conversation, clearing items for build, reviewing an
+  escalation (`/review`), ratifying a prepared decision, surfacing a cleared epic for `/slice`, and — as the
+  **interim bridge** until the headless agent-runner backend lands (below) — spawning, **on demand**, the LLM
+  agents the runner surfaced. The chat stays a normal readiness conversation; the mechanical tick runs off in the
+  runner.
+
+This is the ratified **mechanics-not-per-lane-agent** split
+([we:docs/agent/platform-decisions.md#conveyor-orchestration-mechanics-not-per-lane-agent](../../docs/agent/platform-decisions.md#conveyor-orchestration-mechanics-not-per-lane-agent),
+#2701): driving one lane through dispatch → watch → release → tick is **pure deterministic mechanics stepped by a
+headless runner**, not a per-lane LLM agent that re-derives the loop each tick. It runs now because the product
+conveyor (the #2527 console board) is not built yet and one-story-at-a-time delivery is too slow.
+
+> **The main session no longer runs the tick (#2703).** Before #2703 this main session *was* the tick loop — it
+> chained a background `sleep`, shelled the state read + dispatch plan + tick core each beat, threaded the guard
+> bookkeeping through its own context, ran the cleanup passes, and armed the watchers. **All of that is now the
+> runner's job.** The main session **starts** the runner and then does judgment only. If you find yourself
+> shelling `conveyor-state` / `dispatch-plan` / `tick-core` on a timer, threading `nextState`, or arming a
+> `sleep` heartbeat from this session, that is the retired serial loop — stop; the runner owns it.
+
+> **Interim bridge — the main session spawns the runner's surfaced agents ON DEMAND, until the headless backend
+> lands (a DEGRADED interim, named honestly).** The runner spends no model context, so it **surfaces** (never
+> spawns) the delivery / prepare / fix / CI-heal agents. Spawning an LLM agent needs a harness; the
+> backend-agnostic **CLI agent-runner**
+> ([we:docs/agent/platform-decisions.md#agent-runner-cli-backend](../../docs/agent/platform-decisions.md#agent-runner-cli-backend))
+> that would let the runner spawn them itself, headlessly, is a **separate, later slice — not built in #2703**
+> (whose scope is this doc only). So be clear-eyed about the interim: the runner drives the whole **mechanical**
+> plane autonomously (state read, guards, the cleanup passes, the status line), but **automatic per-tick
+> agent-spawning is not wired yet**, and neither is the reverse channel that would feed observed agent returns
+> back into the runner's guards (`runner.mjs` folds no such signal today). Two consequences to state plainly:
+>   - **Read the surface as structured JSON.** Launch the runner with `--json` (§2) so each tick prints the
+>     already-filtered `{ dispatch: { builds, prepareScope, … }, armWatchers, notes, statusLine }` — the bare
+>     runner prints only human counts, not the `{num, lane}` entries the judgment layer spawns from. The runner's
+>     surface is the ONLY correct source of the guard-filtered launch list: an on-demand `dispatch-plan` /
+>     `conveyor-state` read is UNFILTERED (it hasn't been through the in-flight guards, whose bookkeeping lives in
+>     the runner's process, §5), and this session must not re-shell `tick-core` on a timer (that is the retired
+>     serial loop).
+>   - **The bridge is on-demand, not a chat loop.** A backgrounded runner notifies this session on its *exit*,
+>     not per tick, so there is **no** automatic per-tick wake into the chat — reintroducing one would BE the
+>     retired serial loop. Until the headless backend lands, the judgment layer reads the runner's latest surfaced
+>     decisions and spawns the surfaced agents when it engages (an operator turn, a review, a completed agent's
+>     return). This is **not** re-running the loop: the runner did all the planning, guard math, TTLs,
+>     re-dispatch gating, and cleanup passes; the main session only *executes* the already-decided spawns and does
+>     the genuine judgment. When the headless backend lands, agent-spawning (and the return-fold) moves into the
+>     runner and this bridge retires.
 
 > **THIN BY CONSTRUCTION — every decision with a right answer is a script call, per
 > [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)
-> (#2607).** This skill carries the **orchestration and the judgment only** — the readiness discussion,
-> supervising a build, reviewing an escalation. It NEVER re-derives a dispatch plan, a state read, a watcher
-> verdict, or an idle clock in prose: those are the tested scripts below, and this skill shells them. If a rule
-> here reads as "compute X from the queue / leases / lanes", it is a bug — that computation belongs in a script.
+> (#2607).** The judgment plane carries the **judgment only** — the readiness discussion, spawning a surfaced
+> build, reviewing an escalation. It NEVER re-derives a dispatch plan, a state read, a watcher verdict, a guard,
+> or an idle clock in prose: those are the runner's, decided by the tested scripts below. If a rule here reads as
+> "compute X from the queue / leases / lanes", it is a bug — that computation belongs in the runner, in a script.
 
-The three scripts this skill shells (do not reimplement any of them):
+The runner and the scripts it (and the on-demand judgment surfaces) shell — do not reimplement any of them:
 
 | Script | What it decides (deterministically) |
 |---|---|
-| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health, infraBlocked }`. Every tick STARTS here. |
+| `node skills-src/conveyor/runner.mjs` | **The singleton-locked HEADLESS RUNNER (#2702)** — the mechanical plane. The main session STARTS this (background); it then drives the whole per-tick cycle with **no model context**: it shells `tick-core` (bookkeeping in on STDIN, `{ decisions, nextState }` out), threads `nextState` forward UNCHANGED, runs the two deterministic passes (§4b/§4c), emits the status line, and **surfaces** the dispatch/watch decisions for the judgment layer to execute. Its singleton right is held by `runner-lock.mjs` (a machine-global TTL lease — a second launch that finds a LIVE runner stands down). It **never merges** and **never self-clears a human review**. |
+| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health, infraBlocked }`. The runner's every tick STARTS here (via `tick-core`); the judgment layer reads it on demand (status board, `/review` context). |
 | `node scripts/conveyor/infra-blocked.mjs retry` | **The infra-blocked recovery pass (#2659)** — one idempotent resume pass: for each item whose lane ref was PUSHED but whose PR-open failed on an outside dependency (a GitHub outage), it correlates GitHub status, resume-opens the PR once infra recovers (via `pr-land` — never a local merge), backs off on failure, and surfaces at the attempt cap. |
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
 | `node scripts/conveyor/tick-core.mjs` (stdin ⇽ bookkeeping) | **The MECHANIZED tick core (#2699)** — the whole per-tick state machine in one call: it shells `conveyor-state` + `dispatch-plan` + the free-lane picker, takes your in-session guard/watcher bookkeeping on STDIN, and returns `{ decisions, nextState }`. `decisions` = `{ spawnBuilds, spawnPrepareScope, spawnPrepareDecision, spawnFixes, spawnCiHeals, armWatchers, retireGuards, idleStop, statusLine, notes }`; `nextState` = the next tick's bookkeeping. The FOUR guards (build, prepare, fix, CI-heal), their retirement (claim/return/TTL/PR-terminal/CI-recovery), the union re-dispatch gate, watcher arming, and idle-stop are all DECIDED here — you EXECUTE the decisions and carry `nextState` forward, you never re-derive a guard rule in prose. |
-| `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR. Its process EXIT is the wake signal; the exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
+| `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR, now the OPTIONAL merge-time fast-path for lease release (§4); the runner is self-clocked, so this is no longer the loop's wake. Its exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
 
 > **Auto-prepare for unscoped items (#2613, corrected design — Nicolas, 2026-07-22).** Predicted `scope:` is
 > authored UPSTREAM at readiness; the dispatcher only READS it — it never probes for scope at dispatch and
@@ -83,10 +132,10 @@ the pool size to `N` and takes the defaults for the rest.
 - **Pool size** — the max parallel lanes (the launch budget). Ensure the pool is provisioned to it:
   `node scripts/lane-pool.mjs provision --count=<N> --acquirable`. `freeSlots` in the state read is how many
   of those are currently free.
-- **Per-program conflict policy** (§3i) — what to do when a newly-queued item overlaps a running lane's scope:
+- **Per-program conflict policy** — what to do when a newly-queued item overlaps a running lane's scope:
   **wait** (default — hold it behind the lane, the dispatch plan already does this), **ask** (surface it and
   let the operator decide), or **force** (launch anyway — rarely wanted; two lanes on one path is a merge
-  hazard). This only changes how you present a `held: "overlaps lane-N"` entry; it never changes the plan.
+  hazard). This only changes how you present a `held: "overlaps lane-N"` entry (§3); it never changes the plan.
 - **Idle-stop window** — how long the queue stays empty with no operator feedback before the conveyor stops
   itself (default **15 min**).
 
@@ -121,48 +170,73 @@ State plainly to the operator, once, at start:
 > shared artifact from this session's conveyor queue — whether the two should reconcile is the open decision
 > filed under #2612.
 
-Then launch the first tick (§2).
+Then start the headless runner (§2).
 
-## 2. The tick loop (chained-sleep heartbeat)
+## 2. Start the runner — it IS the tick loop now (#2702/#2703)
 
-**The clock is a chained background `sleep`, NOT `ScheduleWakeup`.** `ScheduleWakeup` does not fire mid-run in
-this VS Code extension; a backgrounded shell command's **exit** rides the task-notification wake path (the same
-one that works for a completed background task), so it re-invokes this loop reliably. Each tick:
+**The main session does NOT run the tick.** It launches the singleton-locked headless runner as a background
+process, and from then on the runner drives every beat with no model context. Start it once:
 
-1. **Read the whole picture (one call):**
-   ```bash
-   node scripts/readiness/conveyor-state.mjs --json
-   ```
-   → `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health, infraBlocked }`. Do not eyeball four commands; this is the one read.
+```bash
+node skills-src/conveyor/runner.mjs --json   # run_in_background: true — the mechanical plane's whole lifetime
+```
 
-2. **Plan the dispatch (one call):**
-   ```bash
-   node scripts/readiness/dispatch-plan.mjs --json
-   ```
-   → `{ launch: [{num, lane}], held: [{num, reason}] }`. This is THE dispatcher — the queue × active scope-leases
-   × free lanes decision. Do not re-derive it; read it. (It shells the same build-queue, scope-lease, and pool
-   pickers under the hood, so its inputs match the state read above.)
+`--json` makes each tick print its already-filtered surface as one JSON line
+(`{ tick, statusLine, notes, dispatch: { builds, prepareScope, prepareDecision, fixes, ciHeals }, armWatchers }`)
+— the structured record the judgment-layer bridge spawns from (§3). Without it the runner prints human count
+lines only, with no `{num, lane}` entries to act on.
 
-2b. **Plan the whole tick (one call) — the MECHANIZED core decides every guard (#2699).**
-   ```bash
-   echo "$BOOKKEEPING" | node scripts/conveyor/tick-core.mjs
-   ```
-   `tick-core.mjs` re-shells the state read + dispatch plan + free-lane picker under the hood and takes your
-   in-session **bookkeeping** on STDIN (`{ bookkeeping: { tick, buildGuards, prepareGuards, fixGuards,
-   fixAttempts, ciHealGuards, ciHealAttempts, watched, launchedNums }, signals: { returnedBuildNums },
-   lastOperatorTurn }` — carried forward from the previous tick's `nextState`, `{}` on the first tick). It returns
-   `{ decisions: { spawnBuilds, spawnPrepareScope, spawnPrepareDecision, spawnFixes, spawnCiHeals, armWatchers,
-   retireGuards, idleStop, statusLine, notes }, nextState }`. **Steps 3–5 below EXECUTE those decisions; you never re-derive a
-   guard, a TTL, a re-dispatch gate, or the idle clock in prose — the core already applied all of them.** The
-   guard sections further down DOCUMENT what the core encodes (so the semantics stay legible); they are not a
-   second place to compute them. Carry `nextState` into the next tick's STDIN unchanged.
+- **Singleton-locked — a second launch is safe and stands down.** `runner.mjs` acquires the machine-global
+  runner lease (`runner-lock.mjs`) at startup; if a LIVE runner already holds it, the new launch NO-OPs (exit 0,
+  "another conveyor runner holds the singleton lease; standing down"). So starting the conveyor when one is
+  already running never double-drives — the lock is the cross-process guard the in-session dispatch guard can't
+  see. The runner heartbeats the lease every tick and releases it at exit; a crashed runner's stale lease is
+  reclaimable via the TTL, so a fresh `/conveyor` restarts cleanly.
+- **The runner is self-clocked (no chained `sleep` from this session).** It sleeps ~120 s between ticks
+  internally (just under the 5-min prompt-cache window — a legacy of the chained-sleep heartbeat this retired).
+  It re-reads fresh state every tick, so it does **not** depend on a `pr-watch` exit or a `ScheduleWakeup` to
+  advance. The old main-session chained-`sleep` heartbeat is **gone** (#2703).
+- **The runner spends NO model context.** Every guard, TTL, re-dispatch gate, watcher-arm, and idle-stop is the
+  tick core's; the runner threads the core's `nextState` forward unchanged and surfaces the decisions.
 
-   > **The bookkeeping is SESSION-EPHEMERAL — it rides STDIN, never a repo file (SKILL §5, memory rule 105).**
-   > It is which background jobs you launched, not item state; the board stays the single truth. `tick-core`
-   > reads it in and returns the updated `nextState`, so the whole guard/watcher ledger lives in THIS session's
-   > context and is threaded through each tick — no parallel on-disk store is ever created.
+**What the runner does each tick — for reference (you do NOT run these; the runner does).** The steps below
+DOCUMENT the mechanical tick the runner owns, so the semantics stay legible and the judgment layer knows what a
+surfaced decision means. They are **not** a checklist for this session to execute on a timer.
 
-3. **Spawn ONE background delivery agent per `decisions.spawnBuilds` entry.** The core has ALREADY filtered
+1. **Read the whole picture (one call):** `node scripts/readiness/conveyor-state.mjs --json`
+   → `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health, infraBlocked }`.
+
+2. **Plan the dispatch (one call):** `node scripts/readiness/dispatch-plan.mjs --json`
+   → `{ launch: [{num, lane}], held: [{num, reason}] }`. THE dispatcher — the queue × active scope-leases ×
+   free lanes decision. (It shells the same build-queue, scope-lease, and pool pickers under the hood, so its
+   inputs match the state read above.)
+
+2b. **Plan the whole tick (one call) — the MECHANIZED core decides every guard (#2699).** The runner shells
+   `tick-core.mjs`, piping the previous tick's `nextState` (its process-ephemeral **bookkeeping** — `{ tick,
+   buildGuards, prepareGuards, fixGuards, fixAttempts, ciHealGuards, ciHealAttempts, watched, launchedNums }`,
+   plus `signals`, `{}` on the first tick) in on STDIN. `tick-core` re-shells the state read + dispatch plan +
+   free-lane picker under the hood and returns `{ decisions: { spawnBuilds, spawnPrepareScope,
+   spawnPrepareDecision, spawnFixes, spawnCiHeals, armWatchers, retireGuards, idleStop, statusLine, notes },
+   nextState }`. The runner surfaces `decisions` and carries `nextState` into the next tick's STDIN **unchanged**
+   — it never re-derives a guard, a TTL, a re-dispatch gate, or the idle clock. The guard sections further down
+   DOCUMENT what the core encodes (so the semantics stay legible); they are not a second place to compute them.
+
+   > **The bookkeeping is PROCESS-EPHEMERAL — it lives in the RUNNER's process, threaded through STDIN, never a
+   > repo file (SKILL §5, memory rule 105).** It is which background jobs the runner surfaced, not item state; the
+   > board stays the single truth. `tick-core` reads it in and returns the updated `nextState`, which the runner
+   > threads into the next tick — so the whole guard/watcher ledger lives in the runner's memory, not this
+   > session's, and no parallel on-disk store is ever created. (Before #2703 this ledger lived in the main
+   > session's context; retiring the serial loop moved it into the runner.)
+
+**What the JUDGMENT LAYER does with the surface.** The runner emits its per-tick `--json` surface (the status
+line + the already-filtered `dispatch` / `armWatchers` decisions + the `notes`). Until the headless agent-runner
+backend lands (intro bridge callout), the main session reads that surface and executes it **on demand** —
+spawning each surfaced agent and handling each surfaced escalation per §3 below — when it engages, NOT on a
+per-tick chat loop (there is no automatic per-tick wake; reintroducing one would be the retired serial loop). It
+performs **no** guard math, TTL, or planning of its own — the runner already did all of it; the judgment layer
+only spawns and judges.
+
+3. **Spawn ONE background delivery agent per surfaced `decisions.spawnBuilds` entry.** The core has ALREADY filtered
    `plan.launch` through the *In-flight dispatch guard* (dropping any launch whose `num` **or** assigned `lane`
    is held by a still-pending spawned agent) and recorded the new guard entries in `nextState.buildGuards` — so
    you just spawn each `{num, lane}` it returns, no guard math of your own:
@@ -216,73 +290,69 @@ one that works for a completed background task), so it re-invokes this loop reli
      NOT retire its guard** (it returns at PR-open, mid-flight — several ticks before the PR merges); the core has
      no return path for a prepare guard at all.
 
-4. **Spawn a merge watcher per `decisions.armWatchers` entry — the core scoped it to items THIS conveyor
-   launched.** `state.prs` is built from `gh pr list` **repo-wide**, so it also carries PRs from other sessions /
-   humans. `tick-core` has ALREADY filtered it to OPEN PRs whose `num` this conveyor dispatched this session
-   (`nextState.launchedNums` — builds AND prepares), dropped the ones you already watch, and pruned the watched
-   set to the currently-open conveyor PRs (`nextState.watched`). Each `decisions.armWatchers` entry is a
+4. **The watch is the runner's — it surfaces `decisions.armWatchers`, scoped to items THIS conveyor launched.**
+   `state.prs` is built from `gh pr list` **repo-wide**, so it also carries PRs from other sessions / humans.
+   `tick-core` has ALREADY filtered it to OPEN PRs whose `num` this conveyor dispatched this session
+   (`nextState.launchedNums` — builds AND prepares), dropped the already-watched ones, and pruned the watched set
+   to the currently-open conveyor PRs (`nextState.watched`). Each `decisions.armWatchers` entry is a
    `{ pr, releaseSession }` pair — the core already derived the `--release-session` slug (`conveyor-<num>` for a
-   build PR, `prepare-<num>` / `prepare-decision-<num>` for a prepare PR). So you just spawn one background watcher
-   per entry, passing that slug, whose **exit** wakes this loop:
+   build PR, `prepare-<num>` / `prepare-decision-<num>` for a prepare PR). **The runner is self-clocked — it does
+   NOT depend on a `pr-watch` exit to advance** (it re-reads fresh `state.prs` every tick and surfaces terminal
+   PRs itself, §3). So a `pr-watch` process is now only the FAST-path for merge-time lease release, not the loop's
+   wake; the judgment-layer bridge may spawn one per surfaced entry, but the runner's own per-tick **lease-reaper
+   (§4c)** is the guaranteed backstop:
    ```bash
-   node scripts/conveyor/pr-watch.mjs <pr> --release-session=<releaseSession>   # run_in_background: true
+   node scripts/conveyor/pr-watch.mjs <pr> --release-session=<releaseSession>   # optional fast-path
    ```
-   The board (`state.prs`) is the source of truth for which PRs exist; the watcher just wakes you the instant one
-   reaches a terminal state. Scoping to conveyor-launched nums keeps an unrelated PR's stray `review:*` label from
-   waking the loop with a spurious "PR #N needs review".
-   - **`--release-session` wires in the ghost-lease auto-release (#2667/#2700).** On the watcher's **merge** exit
-     (and ONLY on merge — a park / close / timeout leaves the still-in-use lane held), pr-watch runs
+   - **`--release-session` wires in the ghost-lease auto-release (#2667/#2700).** On a **merge** exit (and ONLY on
+     merge — a park / close / timeout leaves the still-in-use lane held), pr-watch runs
      `lane-pool release --all-pools --session=<slug>`, which hands that item's lane lease back in EVERY pool it
-     acquired AND resets the freed clone to origin/main — the exact manual recipe (`release --lane=N
-     --session=conveyor-<num>` + `git reset --hard origin/main`) this mechanizes. It is best-effort: a release
-     hiccup never changes the merge outcome, because the per-tick **lease-reaper (§4c)** is the catch-all backstop
-     for anything auto-release misses (a fix lease, a dead agent that never opened a PR, a merge whose main
-     session was down).
+     acquired AND resets the freed clone to origin/main. It is best-effort: a release hiccup never changes the
+     merge outcome, because the runner's per-tick **lease-reaper (§4c)** is the catch-all backstop for anything it
+     misses (a fix lease, a dead agent that never opened a PR, a merge that landed while nothing was watching).
    - **Prepare-scope PRs are watched the same way** (their `num` was dispatched this session too). When a prepare
-     PR **merges** (watcher exit `0`), the item now carries committed `scope:`, so the very next tick's
-     `dispatch-plan` sees it as scoped and launches it to **BUILD** — the auto-prepare → build handoff. The prepare
-     PR reaching a terminal state (merged / closed / failed) is a prepare-guard RETIREMENT trigger (see the prepare
-     guard below) — but the prepare **Agent returning is NOT**, because it returns at PR-open, several ticks before
-     the PR lands.
+     PR **merges**, the item now carries committed `scope:`, so the very next tick's `dispatch-plan` sees it as
+     scoped and the runner surfaces it to **BUILD** — the auto-prepare → build handoff. The prepare PR reaching a
+     terminal state (merged / closed / failed) is a prepare-guard RETIREMENT trigger (see the prepare guard
+     below) — but the prepare **Agent returning is NOT**, because it returns at PR-open, several ticks before the
+     PR lands.
 
-4b. **Run the infra-blocked recovery pass — auto-retry/resume any pushed-but-unopened work (#2659).** A delivery
-   or prepare agent that BUILT successfully and PUSHED its `lane/*` ref, but whose PR-open then failed on an
-   OUTSIDE dependency (a GitHub partial outage, a network fault), returns `blocked-on-infra` — its built work is
-   pushed and RECORDED, but no PR exists yet to watch. Each tick, run ONE recovery pass:
-   ```bash
-   node scripts/conveyor/infra-blocked.mjs retry
-   ```
-   It is the deterministic core (the tick is the loop clock — the pass does ONE round, no internal busy-loop): for
-   each recorded item it correlates GitHub status (a real outage vs a one-off), and, once the backoff has elapsed,
-   **resume-opens the PR from the recorded ref via `pr-land` — never a local merge** (the drain stays the sole
-   writer to `main`, memory rule 104). On failure it backs off (exponential, capped); at the attempt cap it stops
-   auto-retrying and **surfaces** the item for the operator. `state.infraBlocked` (and the ⊘ marker / collapsed
-   **OUTAGE** banner on the status board) shows what is blocked and why — see §3f. `pr-land` records the block
-   automatically at the failed open, so a conveyor-launched delivery/prepare agent's `blocked-on-infra` return
-   needs no extra bookkeeping from you; just note it in the tick line.
+4b. **The runner runs the infra-blocked recovery pass each tick — auto-retry/resume any pushed-but-unopened work
+   (#2659).** A delivery or prepare agent that BUILT successfully and PUSHED its `lane/*` ref, but whose PR-open
+   then failed on an OUTSIDE dependency (a GitHub partial outage, a network fault), returns `blocked-on-infra` —
+   its built work is pushed and RECORDED, but no PR exists yet to watch. The runner runs ONE recovery pass per
+   tick (`node scripts/conveyor/infra-blocked.mjs retry`) as a best-effort mechanical pass — the tick is the loop
+   clock, so the pass does ONE round, no internal busy-loop. For each recorded item it correlates GitHub status (a
+   real outage vs a one-off), and, once the backoff has elapsed, **resume-opens the PR from the recorded ref via
+   `pr-land` — never a local merge** (the drain stays the sole writer to `main`, memory rule 104). On failure it
+   backs off (exponential, capped); at the attempt cap it stops auto-retrying and **surfaces** the item for the
+   operator. `state.infraBlocked` (and the ⊘ marker / collapsed **OUTAGE** banner on the status board) shows what
+   is blocked and why — see §3f. `pr-land` records the block automatically at the failed open, so a
+   conveyor-launched agent's `blocked-on-infra` return needs no extra bookkeeping.
 
-4c. **Run the lease-reaper — the periodic ghost-lease backstop (#2667/#2700).** Merge-time auto-release (§4's
-   `--release-session`) is the FAST path: it frees an item's lane the instant its PR merges. But it can't catch
-   everything — a delivery agent that **died mid-build** (an API death) never opened a PR to merge, a **fix**
-   lease (`fix-<num>`) rides a different session than the one the watcher releases, and a merge whose **main
-   session was down** when it landed released nothing. So each tick, run ONE reaper pass as the catch-all:
-   ```bash
-   node scripts/conveyor/lease-reaper.mjs   # best-effort; a gh-unavailable run degrades to the TTL-stale axis
-   ```
-   It walks **every** lane pool and reclaims an orphan lease on any of its axes — the item's PR reached a terminal
+4c. **The runner runs the lease-reaper each tick — the periodic ghost-lease backstop (#2667/#2700).** Merge-time
+   auto-release (§4's `--release-session`) is the FAST path: it frees an item's lane the instant its PR merges.
+   But it can't catch everything — a delivery agent that **died mid-build** (an API death) never opened a PR to
+   merge, a **fix** lease (`fix-<num>`) rides a different session than the one the watcher releases, and a merge
+   that landed while nothing was watching released nothing. So the runner runs ONE reaper pass per tick as the
+   catch-all (`node scripts/conveyor/lease-reaper.mjs`; a gh-unavailable run degrades to the TTL-stale axis). It
+   walks **every** lane pool and reclaims an orphan lease on any of its axes — the item's PR reached a terminal
    state (merged / closed, matched by head ref `lane/<num>-*`), or the lease outlived its TTL (the zero-IO
    dead-agent backstop) — delegating each reclamation to `lane-pool release --force` (so the reserved-memory-lane
-   protection lives in ONE place; the reaper never rm's a marker itself). Like the §4b recovery pass, the tick is
-   the loop clock — one round per tick, no internal busy-loop. It is best-effort: a stuck lane is logged and
-   skipped, and its exit never gates the tick. A freed lane is picked up by the very next tick's `dispatch-plan`.
+   protection lives in ONE place; the reaper never rm's a marker itself). Like the §4b pass, the tick is the loop
+   clock — one round per tick, no internal busy-loop. It is best-effort: a stuck lane is logged and skipped, and
+   its exit never gates the tick. A freed lane is picked up by the very next tick's `dispatch-plan`.
 
-5. **Post `decisions.statusLine`, then start the next tick.** The core already built the terse one-line status
-   from the tick read + the live bookkeeping (counts of building / preparing / fixing / healing / queued / parked +
-   the health verdict, with `· N infra-blocked` and a `⚠ lane-N` warn suffix appended when they apply) and gathered
-   the per-tick surfaces in `decisions.notes` (a TTL re-dispatch warning, a `needs-slice` epic §3d, a prepared
-   `decision-ready` §3e). Post that line (plus any notes) — do not recompute the counts. If `decisions.idleStop`
-   is true, STOP the loop (§6) instead of arming the next tick. Per the operator's progress-tracking preference
-   the checklist is the channel and prose stays quiet — one line per tick, e.g.:
+5. **The runner emits `decisions.statusLine` and arms its OWN next tick.** The core builds the terse one-line
+   status from the tick read + the live bookkeeping (counts of building / preparing / fixing / healing / queued /
+   parked + the health verdict, with `· N infra-blocked` and a `⚠ lane-N` warn suffix appended when they apply)
+   and gathers the per-tick surfaces in `decisions.notes` (a TTL re-dispatch warning, a `needs-slice` epic §3d, a
+   prepared `decision-ready` §3e). The runner emits that line + notes each tick; if `decisions.idleStop` is true it
+   STOPS itself (§6) instead of sleeping. **The main session does NOT arm a `sleep` heartbeat** — the runner is
+   self-clocked (§2). The judgment layer surfaces the runner's status line / notes to the operator only when they
+   carry something the operator must act on (a park to `/review`, an epic to `/slice`, a capped infra-block). Per
+   the operator's progress-tracking preference the checklist is the channel and prose stays quiet — the runner's
+   one line per tick reads, e.g.:
    > `conveyor · N building · N preparing · N fixing · N healing · N queued · N parked · health ok` — add
    > `· N infra-blocked` when `state.infraBlocked` is non-empty (pushed-but-unopened work the §4b pass is
    > auto-retrying; flag a capped/exhausted one for the operator) — where **`N preparing`**
@@ -292,13 +362,11 @@ one that works for a completed background task), so it re-invokes this loop reli
    > when `state.health.verdict === 'warn'`; add `⚠ N auto-preparing scope: #A #B` when `state.unshaped` is
    > non-empty, so the operator sees those cleared items are being scoped now (a prepare agent per item) and will
    > build once their scope lands — see the auto-prepare callout above.
-   Then arm the next tick — this is the heartbeat:
-   ```
-   Bash({ command: "sleep 120", run_in_background: true })
-   ```
-   Its exit (~120s, just under the 5-min prompt-cache window so ticks stay cheap) re-invokes this loop at step 1.
+   The runner then sleeps ~120 s (just under the 5-min prompt-cache window) and steps the next tick. That
+   self-clocked sleep REPLACES the retired main-session chained-`sleep` heartbeat (#2703) — the main session arms
+   nothing.
 
-> **On-demand board — the fuller status view.** The per-tick line above stays the routine channel. When the
+> **On-demand board — the fuller status view.** The runner's per-tick line is the routine channel. When the
 > operator asks "status" (or you want a fuller look on a slower beat), print the compact text board instead:
 > ```bash
 > node scripts/conveyor/status-board.mjs
@@ -307,8 +375,8 @@ one that works for a completed background task), so it re-invokes this loop reli
 > (`conveyor-state.mjs --json`, env-inherited so `CONVEYOR_QUEUE_FILE` still points at the session sidecar) —
 > a header count line plus **RUNNING** (each active lane + its state marker), **QUEUE** (each cleared item and
 > WHY it waits), and **NEEDS YOU** (parked PRs with their `/review N` action). It invents no state and makes no
-> decision; it only formats the read. Keep the terse one-liner for the heartbeat and reach for the board on
-> demand — do not replace one with the other.
+> decision; it only formats the read. Keep the runner's terse tick line as the routine channel and reach for the
+> board on demand — do not replace one with the other.
 
 > **On-demand jury tree — what the review jury is/does/found (#2641).** When the operator asks "what is the jury
 > doing?" (or you want to see WHY a parked PR is being held), print the live jury tree:
@@ -330,10 +398,11 @@ one that works for a completed background task), so it re-invokes this loop reli
 > (`decisions` / `nextState`) and execute it. The pure functions and their unit proofs live in
 > `scripts/conveyor/tick-core.mjs` + `scripts/conveyor/__tests__/tick-core.test.mjs`.
 
-**In-flight dispatch guard (the one bit of ephemeral bookkeeping).** Between spawning a delivery agent and that
-agent acquiring its lane + claiming the item, the item is still in the queue and its lane still reads free — so
-a naive next tick could double-dispatch it. The core keeps an in-session list of guard entries, one per spawned
-agent: `{ num, lane, spawnedTick }`. On each tick it **filters `plan.launch`** (`filterLaunches`) to drop any
+**In-flight dispatch guard (the one bit of ephemeral bookkeeping — held in the runner's process, #2703).**
+Between a delivery agent being surfaced/spawned and that agent acquiring its lane + claiming the item, the item
+is still in the queue and its lane still reads free — so a naive next tick could double-dispatch it. The core
+keeps a list of guard entries (threaded through the runner's `nextState`, one per spawned agent):
+`{ num, lane, spawnedTick }`. On each tick it **filters `plan.launch`** (`filterLaunches`) to drop any
 entry whose `num` **OR** whose assigned `lane` matches a live guard entry — the contended resource is the LANE,
 not just the item, so both must be excluded (else tick N launches `{num:100, lane:4}`, 100 is slow to acquire,
 and tick N+1 re-assigns lane 4 to a different top-of-queue `num` while agent A is still starting — two agents
@@ -369,9 +438,13 @@ burned lanes). The prepare guard therefore has its OWN rules:
 its own, above, and in particular does NOT retire on Agent-return):
 
 1. **Claimed → the agent got going.** When the item shows as claimed in `conveyor-state` — its lane appears in
-   `state.lanes` (leased) or it has left `state.queue` — drop the entry. This is the normal path.
+   `state.lanes` (leased) or it has left `state.queue` — drop the entry. This is the normal path, and in the
+   headless-runner model (#2703) it is the LOAD-BEARING one: the runner reads it off each tick's fresh state.
 2. **Agent completed / errored** — when the delivery `Agent` returns (any result, including an escalation),
-   drop its entry.
+   drop its entry. **Note (#2703):** this return-fold requires observing an agent's completion. The headless
+   runner spawns no LLM agents (it surfaces them; the bridge spawns), so it observes no return and folds no such
+   signal today — build guards retire via the CLAIMED path (1) and the TTL backstop (3). When the headless
+   agent-runner backend lands and the runner spawns agents itself, its observed returns feed this path.
 3. **TTL EXPIRY (the required backstop).** If an entry is still pending after **N ticks (default 3, ≈ 6 min)**
    without ever showing as claimed, **DROP it and let it re-dispatch**, and surface a one-line note the first
    time (`⚠ #<num> never claimed after <N> ticks — re-dispatching`). This covers an agent that **died after
@@ -393,33 +466,40 @@ its own, above, and in particular does NOT retire on Agent-return):
 > false-positive on a legitimately-quiet but live agent. The guard **TTLs (build rule 3, prepare TTL-to-first-PR,
 > fix TTL) stay the re-dispatch backstop** — health informs the reclaim + the operator, it never overrides them.
 
-This is process bookkeeping — which agents you launched — not a state store: the board stays the single truth
-(see *State*).
+This is process bookkeeping — which agents the runner surfaced — not a state store: the board stays the single
+truth (see *State*).
 
-## 3. On a watcher exit (the wake)
+## 3. How PR outcomes are handled — the runner surfaces, judgment stays main-session
 
-A `pr-watch.mjs` process exiting re-invokes you with its exit code. Branch on it (these are the script's
-contract — do not re-derive the verdict; the watcher already classified the PR):
+The runner is self-clocked (§2), so it does NOT wait on a `pr-watch` exit to advance — it re-reads fresh
+`state.prs` every tick and classifies each conveyor-launched PR's outcome itself, surfacing the ones that need
+action. (An optional `pr-watch` fast-path, §4, still gives a snappier merge-time lease release, and `pr-watch`
+exit codes carry the SAME contract — `0` merged · `2` parked · `4` closed · `3` timeout · `1` error.) Branch on
+the outcome — do not re-derive the verdict; the runner/watcher already classified the PR:
 
-- **`0` merged** — the resident drain landed it; the lane is now free. Drop it from your watched set; the next
-  tick's `dispatch-plan` fills the freed lane. Nothing else to do.
-- **`2` parked** — the PR carries a review label. **Which label decides the branch** (`pr-watch` exits `2` for
-  all three; re-read the PR's labels from a fresh `state.prs` row — or `gh pr view <N> --json labels` — to tell
-  them apart, #2630):
-  - **`review:changes`** — a human bounced this diff and asked for a fix. **Auto-re-dispatch a fix agent into
-    the PR's lane** (§3c below) — do NOT just surface it. The repair is script-shaped (reuse the ref, apply the
-    finding, re-push, re-arm review); the fix agent does it and hands the PR back `review:pending`.
-  - **`review:human` / `review:pending`** — an independent human verdict is owed. Surface in chat: **"PR #N
+- **merged (watcher `0`)** — the resident drain landed it; the lane is now free (auto-release / the reaper freed
+  the lease). It drops from the watched set; the next tick's `dispatch-plan` fills the freed lane. Nothing else.
+- **parked (watcher `2`)** — the PR carries a review label. **Which label decides the branch** (`pr-watch` exits
+  `2` for all three; the runner reads the label off the fresh `state.prs` row — or `gh pr view <N> --json
+  labels` — to tell them apart, #2630):
+  - **`review:changes`** — a human bounced this diff and asked for a fix. The runner surfaces `spawnFixes` and
+    the bridge **re-dispatches a fix agent into the PR's lane** (§3c below) — this is NOT just surfaced to the
+    operator. The repair is script-shaped (reuse the ref, apply the finding, re-push, re-arm review); the fix
+    agent does it and hands the PR back `review:pending`. The runner **never** self-clears the review label.
+  - **`review:human` / `review:pending`** — an independent human verdict is owed. The runner surfaces it as a
+    note; the judgment layer surfaces in chat: **"PR #N
     (#`<num>`) needs review — run `/review N`."** Do **NOT** auto-land it and do **NOT** auto-fix it: a human
     review park is a hard human-only gate. The lane stays held until the review resolves.
 
-  Either way the PR stays OPEN, so the next tick's step-4 re-arms a watcher on it — a re-armed `review:pending`
-  (after a fix) or a fresh human bounce wakes the loop again.
-- **`4` closed** — the PR was closed without merging (a human abandoned it). Surface as an **anomaly to
-  investigate** — do NOT run `/review` (a label swap can't land a closed PR). Note the stranded lane.
-- **`3` timeout** — the wall-clock budget elapsed with the PR still pending. Re-arm a watcher on it, or flag a
-  possibly-stuck lane for the operator if it keeps timing out.
-- **`1` error** — bad arguments / the watcher couldn't run. Report it; re-spawn with a correct PR number.
+  Either way the PR stays OPEN, so the runner keeps surfacing it each tick — a re-armed `review:pending` (after a
+  fix) or a fresh human bounce is re-classified on the next tick's state read.
+- **closed (watcher `4`)** — the PR was closed without merging (a human abandoned it). The runner surfaces it as
+  an **anomaly to investigate** — do NOT run `/review` (a label swap can't land a closed PR). Note the stranded
+  lane (the reaper reclaims its lease off the terminal-state axis).
+- **timeout (watcher `3`)** — the fast-path watcher's wall-clock budget elapsed with the PR still pending; the
+  runner keeps re-reading it each tick regardless. Flag a possibly-stuck lane for the operator if it persists.
+- **error (watcher `1`)** — bad arguments / the watcher couldn't run. Report it; a correct fast-path watcher can
+  be re-spawned, but the runner's per-tick state read still covers the PR.
 
 ### 3c. Auto-re-dispatch a `review:changes` bounce — spawn ONE fix agent into the PR's lane (#2630)
 
@@ -650,15 +730,16 @@ state** the conveyor owns end-to-end:
 - **Nothing you do by hand.** `pr-land` records it, the §4b pass drives it, the board surfaces it. Surface a
   capped/exhausted item to the operator (like a park), and otherwise let the loop resume it.
 
-## 4. Landing is the drain daemon's job — the conveyor NEVER merges
+## 4. Landing is the drain daemon's job — neither the runner nor this session ever merges
 
 Delivery agents stop at `ready-to-merge` — but only **after** each has reviewed its own diff to convergence
 (step above) and `pr-land --label-on-green` confirms the `test` check. The **resident drain daemon**
 (`plateau:tools/drain-daemon/`) is the single landing serializer: it auto-lands green couples and parks
-escalations `review:human` for review in this main session. This skill **never runs `gh pr merge` and never
-runs a drain.** `state.daemon` reports the daemon's residency; if it reads `"unavailable"`, tell the operator
-the resident drain is absent (escalations still park, but nothing auto-lands until it — or a manual `/drain` —
-runs).
+escalations `review:human` for review in this main session. **The runner decides dispatch and watch; it never
+merges and never self-clears a human review.** This skill (the judgment plane) likewise **never runs `gh pr
+merge` and never runs a drain** — the drain daemon is the sole writer to `main` (memory rule 104). `state.daemon`
+reports the daemon's residency; if it reads `"unavailable"`, tell the operator the resident drain is absent
+(escalations still park, but nothing auto-lands until it — or a manual `/drain` — runs).
 
 **Escalation discipline — `review:human` is a good-reason hold, not a default.** Because every delivery agent
 runs the adversarial review before opening its PR, a **clean, reviewed, non-statute PR with a green `test`
@@ -668,8 +749,8 @@ judgment**, or **genuine uncertainty** — and **never blanket-park** a clean PR
 (over-parking makes the human the bottleneck the conveyor exists to remove and dilutes the label). Whether to
 escalate is **judgment**, kept with the agent rather than a script
 ([we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
-A parked PR waking this loop (watcher exit `2`) is handled as in §3 by its label: a `review:human` /
-`review:pending` park is surfaced for `/review` (never auto-landed); a `review:changes` bounce is
+A parked PR the runner surfaces (§3) is handled by its label: a `review:human` / `review:pending` park is
+surfaced for `/review` in this session (never auto-landed — a human-only gate); a `review:changes` bounce is
 auto-re-dispatched to a fix agent (§3c) that repairs and re-arms it — but the fix agent still **never
 self-clears** the review, so the re-armed PR returns to `review:pending` for a human (or the AI-review pass) to
 verdict, never straight to `review:accepted`.
@@ -680,9 +761,10 @@ Everything the conveyor and its agents do flows through the **normal verbs**: `a
 in the `lane/<num>` branch → `pr-land` → the daemon merges → resolve. Those are **exactly** the channels the
 plateau lane board reads (`claimed.session`, `queued.lane`, `pr.state`+`ci`, the scope-lease collect). So the
 board reflects conveyor state **for free**, and `conveyor-state.mjs` reads that same truth. **Never keep a
-parallel state store of item / claim / PR / resolve state** — the only in-session bookkeeping allowed is
-ephemeral *process* tracking: which delivery / prepare-scope / prepare-decision / fix / CI-heal `Agent`s and which
-`pr-watch` processes you have spawned (the in-flight dispatch guard, the prepare-scope guard, the
+parallel state store of item / claim / PR / resolve state** — the only bookkeeping allowed is ephemeral
+*process* tracking, and since #2703 it lives in the **runner's** process (threaded through `nextState`, not this
+session's context): which delivery / prepare-scope / prepare-decision / fix / CI-heal `Agent`s and which
+`pr-watch` processes were spawned (the in-flight dispatch guard, the prepare-scope guard, the
 **decision-prepare guard** (§3e), the in-flight **fix-guard ENTRY** (§3c), the in-flight **CI-heal-guard ENTRY**
 (§3c-ci), and the watched-PR set). The two attempt counters (`fixAttempts` / `ciHealAttempts`) are session
 overlays whose durable floor is the PR's own re-arm / CI-heal comments — the count IS PR state, not a parallel
@@ -697,12 +779,14 @@ re-arm comment per completed auto-fix — so it survives a restart with no paral
 mechanized guard also keeps is a within-session *overlay* over that durable count (it only adds coverage for a fix
 agent that died before posting its re-arm comment); the durable comment thread is the source of truth.
 
-## 6. Idle-stop (the conveyor's lifetime = the session's)
+## 6. Idle-stop (the runner stops itself; a fresh `/conveyor` restarts it)
 
-Stop on two signals only: the **queue is empty** (no `buildQueued` items in `state.queue`, no in-flight
-lanes/PRs) **AND** there has been **no operator feedback for the configured idle window** (default 15 min —
-measure from the last chat turn). When both hold, **announce it and STOP the tick loop** (do not arm another
-`sleep`). The conveyor does not outlive its purpose; a fresh `/conveyor` restarts it.
+Idle-stop is the tick core's decision (`decisions.idleStop`) and the **runner** acts on it — the main session
+arms no `sleep` to stop. Two signals only: the **queue is empty** (no `buildQueued` items in `state.queue`, no
+in-flight lanes/PRs) **AND** there has been **no operator feedback for the configured idle window** (default
+15 min — measured from the last chat turn). When both hold, the runner STOPS its loop and releases its singleton
+lease (it also stops on a lost lease or a spent `--max-ticks` budget). Announce the stop to the operator. The
+conveyor does not outlive its purpose; a fresh `/conveyor` starts a new runner.
 
 > `state.queue`'s `buildQueued` now reflects the SESSION-LOCAL conveyor queue (`.conveyor/queue.json`, #2613),
 > so `state.queue.filter(buildQueued)` is exactly what the operator cleared this session — the reliable
@@ -717,7 +801,8 @@ measure from the last chat turn). When both hold, **announce it and STOP the tic
 
 ## 7. Final ledger (on stop)
 
-When the loop stops — idle-stop, or the operator ends it — post one final ledger from the last state read:
+When the runner stops — idle-stop, lease-loss, or the operator ends it — post one final ledger from the last
+state read:
 
 > **delivered** (merged this session) · **parked** (PRs awaiting `/review`, with numbers) · **stranded** (lanes
 > whose PR closed/timed-out and need a look).
@@ -729,16 +814,20 @@ force-released, so the operator decides.
 
 ## The split, restated (why this skill is safe to keep thin)
 
-Per #deterministic-core-thin-judgment, the line is:
+Per #deterministic-core-thin-judgment (#2607) and its child #conveyor-orchestration-mechanics-not-per-lane-agent
+(#2701), the line runs between **two planes**:
 
-- **Scripts (deterministic, tested — this skill only shells them):** the tick state read, the dispatch plan,
-  the **mechanized tick core** (#2699 — `scripts/conveyor/tick-core.mjs`: the three guards + their retirement,
-  the union re-dispatch gate, watcher arming, and idle-stop, all decided in one pure call the skill executes,
-  never re-derives), the merge-watcher verdict, the idle-clock inputs, the health/stall scan, the
+- **The mechanical plane — the HEADLESS RUNNER + the scripts it shells (deterministic, tested; no model context
+  per tick):** the runner (`skills-src/conveyor/runner.mjs`, #2702) stepping the **mechanized tick core** (#2699
+  — `scripts/conveyor/tick-core.mjs`: the guards + their retirement, the union re-dispatch gate, watcher arming,
+  and idle-stop, all decided in one pure call the runner threads forward, never re-derives), over the tick state
+  read, the dispatch plan, the merge-watcher verdict, the idle-clock inputs, the health/stall scan, and the
   **infra-blocked classify + backoff + resume decision** (#2659 — what counts as a retryable outage, the retry
   schedule, and when to resume vs surface are all in `scripts/conveyor/infra-blocked.mjs`, never re-derived in
-  prose). Same inputs → same output.
-- **Judgment (stays with the operator + the agents — this skill's real content):** the readiness discussion,
+  prose). Same inputs → same output. Since #2703 this whole plane is the runner's, not the main session's — the
+  serial main-session tick loop is retired.
+- **The judgment plane (stays with the operator + this main session + the agents — this skill's real content):**
+  the readiness discussion,
   clearing items for build, supervising a build, **each prepare-scope agent's touch-set prediction**, **each
   delivery agent's adversarial review of its own diff**, **each fix agent's application of the reviewer's
   finding** (the repair itself — routed by the deterministic exit-2 label, but the fix is judgment), the
@@ -750,5 +839,7 @@ Per #deterministic-core-thin-judgment, the line is:
   `state.unshaped` → prepare scope (unscoped, §3b); `held: needs-slice` / `state.needsSlice` → surface for
   `/slice` (an epic container, §3d); `held: needs-decision` / `state.decisions` → prepare-or-present a decision
   (§3e — an UNPREPARED one spawns a prepare-decision agent; a PREPARED one is surfaced/presented for ratify, no
-  agent). The skill just spawns the matching agent (or, for an epic or a prepared decision, surfaces it — no
-  agent). The one judgment that stays human throughout: **ratifying** a presented decision (never autonomous).
+  agent). The runner surfaces the matching decision and — until the headless agent-runner backend lands — the
+  judgment-layer bridge spawns the matching agent (or, for an epic or a prepared decision, surfaces it — no
+  agent). Starting/supervising the runner is itself part of this plane. The one judgment that stays human
+  throughout: **ratifying** a presented decision (never autonomous).

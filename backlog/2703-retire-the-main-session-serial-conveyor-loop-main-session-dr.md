@@ -3,10 +3,11 @@ bornAs: xuqbux7
 kind: story
 size: 3
 parent: "2677"
-status: open
+status: resolved
 blockedBy: ["2699", "2702"]
 scope: ["we:skills-src/conveyor/SKILL.md"]
 dateOpened: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 
