@@ -12,8 +12,10 @@ scope:
   - we:scripts/conveyor/__tests__/status-board.test.mjs
   - we:scripts/conveyor/tick-core.mjs
   - we:scripts/conveyor/__tests__/tick-core.test.mjs
-status: open
+status: resolved
 dateOpened: "2026-07-24"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: [conveyor, health, infra]
 ---
 
