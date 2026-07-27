@@ -54,5 +54,5 @@ Delivered as a 4th conveyor guard — the **CI-heal guard**, the CI-axis sibling
 - `we:skills-src/conveyor/SKILL.md` — new **§3c-ci** rule + updated §1/§2/§5 (decisions, bookkeeping, status line, briefs list, state-store paragraph).
 - Tests: `we:scripts/conveyor/__tests__/tick-core.test.mjs` (+CI-heal guard cases) and `we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs` (new).
 
-**BEHIND branch is dormant** until the PR row carries `mergeStateStatus` — that field lives in `we:scripts/readiness/conveyor-state.mjs` (out of this item's scope), so it is tracked by the follow-up task `#xhs7qbv` (blockedBy 2666). The red-CI trigger — which is how the observed #743 incident actually manifested (`test: FAILURE`) — is fully live.
+**BEHIND branch is dormant** until the PR row carries `mergeStateStatus` — that field lives in `we:scripts/readiness/conveyor-state.mjs` (out of this item's scope), so it is tracked by the follow-up task `#2738` (blockedBy 2666). The red-CI trigger — which is how the observed #743 incident actually manifested (`test: FAILURE`) — is fully live.
 
