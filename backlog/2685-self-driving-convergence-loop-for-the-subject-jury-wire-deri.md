@@ -3,9 +3,11 @@ bornAs: xvwmwkx
 kind: story
 size: 5
 parent: "2649"
-status: open
+status: resolved
 scope: ["we:skills-src/jury/", "we:scripts/lib/jury-core.mjs", "we:scripts/lib/__tests__/jury-core.test.mjs"]
 dateOpened: "2026-07-26"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 
