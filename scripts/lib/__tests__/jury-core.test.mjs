@@ -24,6 +24,10 @@ import {
   validateSubjectAdapter,
   buildSubjectMandate,
   resolveAdapterRoster,
+  deriveNegotiationOutcome,
+  NEGOTIATION_OUTCOMES,
+  NEGOTIATION_ROUND_CAP,
+  VERDICTS,
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
@@ -193,6 +197,38 @@ describe('normalizeJuryEvent', () => {
     ];
     const kept = log.map(normalizeJuryEvent).filter(Boolean);
     expect(kept.map((e) => e.type)).toEqual(['roster-picked', 'round-advanced']);
+  });
+});
+
+describe('deriveNegotiationOutcome — the subject-jury self-driving loop\'s continue/escalate decision (#2685)', () => {
+  // The #2685 self-driving convergence loop (`we:skills-src/jury/subject-jury.workflow.js`) must NOT hand-roll the
+  // continue-vs-escalate call — that mechanical decision is single-sourced HERE and reached each round through the
+  // reduce CLI's `.outcome` (`review-core-cli reduce --round --roundCap`, which returns `deriveNegotiationOutcome`
+  // verbatim). These pin the exact routing the loop relies on, so a drift in the function is caught, not the harness.
+  it('an `accept` verdict LANDS the loop (the panel converged) at any round', () => {
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.ACCEPT, round: 1, roundCap: 3 })).toBe(NEGOTIATION_OUTCOMES.LAND);
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.ACCEPT, round: 3, roundCap: 3 })).toBe(NEGOTIATION_OUTCOMES.LAND);
+  });
+
+  it('a `changes` verdict UNDER the round cap CONTINUES (an editor fold + another panel)', () => {
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: 1, roundCap: 3 })).toBe(NEGOTIATION_OUTCOMES.CONTINUE);
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: 2, roundCap: 3 })).toBe(NEGOTIATION_OUTCOMES.CONTINUE);
+  });
+
+  it('a `changes` verdict AT the round cap ESCALATES (stuck — did not converge in N rounds)', () => {
+    // The harness floors its per-run cap at the care band's `plan.rounds`; low care = cap 1 → one panel, then escalate.
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: 1, roundCap: 1 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: 3, roundCap: 3 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+  });
+
+  it('a `needs-human` verdict ESCALATES on ANY round — no round budget clears a mandatory-lens/conflict escalation', () => {
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.NEEDS_HUMAN, round: 1, roundCap: 3 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.NEEDS_HUMAN, round: 3, roundCap: 3 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+  });
+
+  it('defaults its cap to NEGOTIATION_ROUND_CAP when the caller passes none (the engine hard budget)', () => {
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: NEGOTIATION_ROUND_CAP - 1 })).toBe(NEGOTIATION_OUTCOMES.CONTINUE);
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: NEGOTIATION_ROUND_CAP })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
   });
 });
 
