@@ -3,7 +3,19 @@ bornAs: xs1ja7d
 kind: story
 size: 5
 parent: "2612"
-scope: ["we:scripts/conveyor/", "we:skills-src/conveyor/"]
+scope:
+  - we:scripts/conveyor/queue-store.mjs
+  - we:scripts/conveyor/__tests__/queue-store.test.mjs
+  - we:scripts/conveyor/status-board.mjs
+  - we:scripts/conveyor/__tests__/status-board.test.mjs
+  - we:scripts/conveyor/infra-blocked.mjs
+  - we:scripts/conveyor/__tests__/infra-blocked.test.mjs
+  - we:scripts/readiness/conveyor-state.mjs
+  - we:scripts/readiness/__tests__/conveyor-state.test.mjs
+  - we:scripts/pr-land.mjs
+  - we:scripts/__tests__/pr-land.test.mjs
+  - we:skills-src/conveyor/SKILL.md
+  - we:skills-src/conveyor/delivery-agent-brief.md
 status: open
 dateOpened: "2026-07-24"
 tags: [conveyor, infra, resilience]

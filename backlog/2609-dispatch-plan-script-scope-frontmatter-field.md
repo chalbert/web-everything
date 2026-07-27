@@ -7,9 +7,11 @@ status: open
 dateOpened: "2026-07-22"
 tags: [conveyor, readiness, script, scope-lease]
 scope:
-  - we:scripts/readiness/
+  - we:scripts/readiness/dispatch-plan.mjs
+  - we:scripts/readiness/__tests__/dispatch-plan.test.mjs
   - we:scripts/check-backlog-item.mjs
   - we:scripts/check-standards-rules.mjs
+  - we:scripts/__tests__/check-standards-rules.test.mjs
   - we:docs/agent/backlog-workflow.md
 ---
 
