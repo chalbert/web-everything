@@ -48,6 +48,7 @@
  *   node scripts/pr-land.mjs --ref=lane/2153-… --base=main --method=merge # method ∈ merge|squash|rebase (default merge; the drain wants --no-ff history)
  *   node scripts/pr-land.mjs --ref=lane/… --label-on-green                 # PRODUCER mode (#2199): open, WAIT for required checks, label ready-to-merge ONLY when green, hand merge to the drain
  *   node scripts/pr-land.mjs --ref=lane/… --no-wait                       # open the PR UNLABELLED, don't wait/merge (CI unconfirmed — the drain won't collect it until labelled)
+ *   node scripts/pr-land.mjs --ref=lane/… --park=review:human            # PARK mode (#2622): open the PR WITH the review label already on it and STOP (no wait, no ready-to-merge, no drain) — the first-class held-for-review open, replacing the hash-stranding `gh pr create` bypass
  *   node scripts/pr-land.mjs --ref=lane/… --dry-run                       # print the exact gh command sequence, execute nothing
  *   node scripts/pr-land.mjs --ref=lane/… --fallback-git                  # on gh failure / unmergeable, local git-merge + push instead
  *   node scripts/pr-land.mjs --ref=lane/… --no-heal                       # skip the post-land id-collision self-heal (#2071)
@@ -66,7 +67,7 @@
  * whatever session shape (`/pr`, solo `#2123` lane, batch closeout, `/workflow`) produced the PR. `--no-label`
  * opts a PR out; label-apply is best-effort and never fails the land.
  *
- * Exit codes: 0 = merged (or opened --no-wait / labelled-on-green / dry-run OK); 2 = required check RED (nothing merged);
+ * Exit codes: 0 = merged (or opened --no-wait / opened --park / labelled-on-green / dry-run OK); 2 = required check RED (nothing merged);
  * 3 = unmergeable / gh error / push failed / EMPTY DESCRIPTION (#2324 — nothing merged; recoverable — rebase the
  * ref and re-run, or pass --fallback-git; an empty-body refusal is fixed by editing the PR body and re-running);
  * 4 = BLOCKED-ON-INFRA (#2659) — the lane ref was PUSHED but `gh pr create` failed on an OUTSIDE dependency (a
@@ -167,21 +168,54 @@ const LABEL_ON_GREEN = !!flags['label-on-green'];
 // ── PURE helpers (unit-tested in scripts/__tests__/pr-land.test.mjs) ──────────────────────────────────
 
 /**
- * Resolve the producer's land plan from the wait/label flags (#2199, #2290). Pure. pr-land NEVER merges any
- * more — the drain is the sole writer to main — so `mergeWhenGreen` is always false; the label is NEVER applied
- * before the required checks are green. The three modes:
+ * Resolve the producer's land plan from the wait/label flags (#2199, #2290, #2622). Pure. pr-land NEVER merges
+ * any more — the drain is the sole writer to main — so `mergeWhenGreen` is always false; the label is NEVER
+ * applied before the required checks are green. The four modes:
  *   - `land`           (default): wait for required checks → label when green → TRIGGER a single-couple fast
  *     drain (`triggerDrain`) so /pr feels instant. Does NOT merge here.
  *   - `label-on-green` (`--label-on-green`): wait → label when green → STOP. Pure producer: does not trigger a
  *     drain (a batch/workflow closeout runs the standalone drain over the whole set).
  *   - `open-only`      (`--no-wait`, no label-on-green): open, do NOT wait, do NOT label → left for a drain
  *     that re-checks (an UNLABELLED PR — the label lander won't collect it until something labels it).
- * @returns {{waitForChecks:boolean, labelWhenGreen:boolean, mergeWhenGreen:boolean, triggerDrain:boolean, mode:string}}
+ *   - `park`           (`--park=review:human|review:pending`): open WITH the review label already on it and
+ *     STOP — no green-wait, no `ready-to-merge`, no drain trigger (a parked PR is meant to sit for review, #2622).
+ *     Park composes the `open-only` open semantics (no wait, no landing label) WITH the caller-chosen review
+ *     label applied at open. It takes PRECEDENCE over `labelOnGreen`/`wait` — a held-for-review PR must never
+ *     also carry the auto-land signal. `park` is the ALREADY-VALIDATED label string (see `resolveParkLabel`).
+ * @returns {{waitForChecks:boolean, labelWhenGreen:boolean, mergeWhenGreen:boolean, triggerDrain:boolean, mode:string, parkLabel?:string}}
  */
-export function planPrLand({ wait, labelOnGreen } = {}) {
+export function planPrLand({ wait, labelOnGreen, park } = {}) {
+  if (park) return { waitForChecks: false, labelWhenGreen: false, mergeWhenGreen: false, triggerDrain: false, mode: 'park', parkLabel: park };
   if (labelOnGreen) return { waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: false, triggerDrain: false, mode: 'label-on-green' };
   if (!wait) return { waitForChecks: false, labelWhenGreen: false, mergeWhenGreen: false, triggerDrain: false, mode: 'open-only' };
   return { waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: false, triggerDrain: true, mode: 'land' };
+}
+
+/** The review labels `--park` may open a PR with — the deliberately-held-for-review set (#2622). A parked PR
+ *  is one a producer wants a human/independent review on BEFORE it lands, so only the two "not yet cleared"
+ *  labels are valid park targets: `review:human` (a human must clear it) and `review:pending` (an independent
+ *  review is owed). Sourced from `REVIEW_LABELS` so the names never drift from the escalation module. */
+export const PARK_LABELS = Object.freeze([REVIEW_LABELS.human, REVIEW_LABELS.pending]);
+
+/**
+ * #2622 — validate + resolve the `--park=<label>` value. Pure. `--park` opens a PR already carrying a review
+ * label and holds it (no wait/land), the first-class replacement for the `gh pr create` bypass an agent used to
+ * reach for when it needed a PARKED PR (that bypass skipped pr-land's producer land-prep and could strand a new
+ * item's hash id). Only the two held-for-review labels are valid (`PARK_LABELS`); anything else is a fail-fast
+ * (the CLI turns `ok:false` into an error emit BEFORE any push/create, never a silently-ignored flag).
+ *   - flag absent (`undefined`/`false`)      → `{ park: false }` (not a park run).
+ *   - flag present, valid label              → `{ park: true, ok: true, label }`.
+ *   - flag present, missing/invalid value    → `{ park: true, ok: false, reason }`.
+ * @param {string|boolean|undefined} park  the raw `flags.park` (a string value, `true` for a bare `--park`, or undefined)
+ * @returns {{park:boolean, ok?:boolean, label?:string, reason?:string}}
+ */
+export function resolveParkLabel(park) {
+  if (park == null || park === false) return { park: false };
+  const label = park === true ? '' : String(park);
+  if (!PARK_LABELS.includes(label)) {
+    return { park: true, ok: false, reason: `--park must be one of ${PARK_LABELS.join(' | ')} (got ${label ? `"${label}"` : '(no value)'}) — the review label a parked, held-for-review PR opens with (#2622)` };
+  }
+  return { park: true, ok: true, label };
 }
 
 /**
@@ -465,6 +499,7 @@ function runCli() {
     if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
     else {
       const tag = result.merged ? '✓ merged' : result.reason === 'dry-run' ? '· dry-run' : result.reason === 'opened' ? '· opened (no-wait)'
+        : result.reason === 'parked' ? '· parked (review — held, not landed)'
         : result.reason === 'enqueued' ? '✓ enqueued (drain lands it)' : result.reason === 'labelled-on-green' ? '✓ labelled (drain lands it)'
         : result.reason === 'blocked-on-infra' ? '⊘ infra-blocked (recorded — auto-retry/resume)' : '✗ not merged';
       process.stderr.write(`pr-land [${result.repo}] ${tag}: ${result.detail}\n`);
@@ -504,9 +539,18 @@ function runCli() {
 
   if (!REF) emit({ repo: REPO, merged: false, reason: 'no-ref', detail: 'pass --ref=lane/<name> (the head ref to land onto ' + BASE + ')' }, 3);
   if (!/^lane\//.test(REF)) emit({ repo: REPO, merged: false, reason: 'bad-ref', detail: `--ref="${REF}" must be a lane/* ref (the #1934 guard carve-out) — never a local branch` }, 3);
+  // #2622 — `--park=<review:human|review:pending>`: open the PR with that review label already on it and STOP
+  // (no green-wait, no ready-to-merge, no drain trigger). The first-class way to open a deliberately-held-for-
+  // review PR through the producer, so an agent no longer reaches for `gh pr create` (which skips pr-land's
+  // land-prep and can strand a new item's hash id). Resolved HERE (inside runCli) — not at module scope — so its
+  // `resolveParkLabel` call sees the already-initialised `PARK_LABELS` const (a module-scope call would hit its
+  // temporal dead zone). An invalid `--park` value is a fail-fast BEFORE any push/create, never a silent no-op.
+  const PARK = resolveParkLabel(flags.park);
+  if (PARK.park && !PARK.ok) emit({ repo: REPO, merged: false, reason: 'bad-park', detail: PARK.reason }, 3);
 
-  // #2199 — resolve the land plan up front (wait/label/merge sequencing) so the dry-run plan reflects it too.
-  const PLAN = planPrLand({ wait: WAIT, labelOnGreen: LABEL_ON_GREEN });
+  // #2199/#2622 — resolve the land plan up front (wait/label/merge/park sequencing) so the dry-run plan reflects
+  // it too. A validated `--park` label takes precedence over wait/label-on-green (see planPrLand).
+  const PLAN = planPrLand({ wait: WAIT, labelOnGreen: LABEL_ON_GREEN, park: PARK.ok ? PARK.label : null });
 
   // 1. Resolve the SOURCE commit to publish (the lane clone's HEAD, or an explicit --sha). No local
   //    branch is created (that's guarded) — the lane model pushes `<source>:lane/<n>` straight to origin.
@@ -527,9 +571,14 @@ function runCli() {
         `node scripts/lint-locus-prefix.mjs --range=${REMOTE}/${BASE}..${refSha}   # #2331 producer locus-prefix re-check (fail fast on the #2170 review-append leak) — CI is not the first to catch it`,
         `git push ${REMOTE} ${SRC}:refs/heads/${REF}   # publish the lane clone's ${SRC} (${refSha.slice(0, 8)}) to the lane ref`,
         prCreateBodyGuard(BODY).ok ? `gh ${createArgs.join(' ')}` : `REFUSE (if no PR exists yet): ${prCreateBodyGuard(BODY).reason}  # #2332 fail-fast — an existing PR for this head is exempt`,
-        PLAN.waitForChecks ? 'poll: gh pr view <pr> mergeStateStatus + gh pr checks <pr> --required  (wait until green; abort on red)' : '(--no-wait: skip check-wait, leave for a later drain pass)',
+        PLAN.waitForChecks ? 'poll: gh pr view <pr> mergeStateStatus + gh pr checks <pr> --required  (wait until green; abort on red)'
+          : PLAN.mode === 'park' ? '(--park: skip check-wait — the PR is HELD for review, not landed by this run)'
+          : '(--no-wait: skip check-wait, leave for a later drain pass)',
         // #2199 — the label is applied ONLY after the required checks are green, never eagerly at open.
-        LABEL && PLAN.labelWhenGreen ? `gh pr edit <pr> --add-label ${LABEL}   # #2196 label — applied ONLY once required checks pass (#2199)` : (PLAN.mode === 'open-only' ? '(--no-wait: PR opened UNLABELLED — CI not confirmed green; use --label-on-green)' : '(--no-label)'),
+        LABEL && PLAN.labelWhenGreen ? `gh pr edit <pr> --add-label ${LABEL}   # #2196 label — applied ONLY once required checks pass (#2199)`
+          : PLAN.mode === 'park' ? `gh pr edit <pr> --add-label ${PLAN.parkLabel}   # #2622 PARK — the review label applied AT OPEN; the PR is HELD (no ready-to-merge, no wait, no drain)`
+          : PLAN.mode === 'open-only' ? '(--no-wait: PR opened UNLABELLED — CI not confirmed green; use --label-on-green)'
+          : '(--no-label)',
         // #2307 — score the SAME deterministic rubric the drain uses and apply review:human/review:pending
         // AT OPEN when it escalates, so a PR needing review is never indistinguishable from a plain ready PR.
         PLAN.labelWhenGreen ? 'score scoreEscalation(net-diff, .lane-manifest.json) → gh pr edit <pr> --add-label review:human|review:pending (#2307, only when it escalates)' : null,
@@ -537,6 +586,7 @@ function runCli() {
         // single-couple fast drain so /pr stays instant; --label-on-green stops (a standalone drain lands it).
         PLAN.triggerDrain
           ? `node scripts/merge-ai-prs.mjs --only=<pr> --label=${LABEL || 'ready-to-merge'} --this-repo   # #2290 single-couple FAST DRAIN (the drain lands it — pr-land never merges)`
+          : PLAN.mode === 'park' ? '(--park: STOP — the PR is HELD review:*; a human clears it via /review, then the drain lands it)'
           : '(label-on-green: STOP after labelling — the standalone drain lands it; no direct merge here)',
         FALLBACK_GIT ? `fallback on failure (BREAK-GLASS only, WE_MERGE_BREAK_GLASS=1): git merge --no-ff ${REMOTE}/${REF} + push ${REMOTE} ${BASE}` : null,
       ].filter(Boolean),
@@ -690,6 +740,28 @@ function runCli() {
   if (PLAN.mode === 'open-only') {
     if (!AS_JSON && LABEL) process.stderr.write(`pr-land [${REPO}] · #${prNum} opened UNLABELLED (--no-wait): use --label-on-green so the ${LABEL} label is applied only when required checks pass; the drain's ci-lifecycle reconcile labels its checking/ci:failed/blocked state on its next sweep (#2421)\n`);
     emit({ repo: REPO, merged: false, reason: 'opened', pr: Number(prNum), ref: REF, label: null, labelApplied: false, detail: `opened self-approved PR #${prNum} for ${REF} (--no-wait, no ready-to-merge label yet — CI not confirmed green; the drain's ci-lifecycle reconcile covers its checking/ci:failed/blocked state, #2421)` }, 0);
+  }
+
+  // #2622 — PARK mode (`--park=review:human|review:pending`): the PR is open (through the SAME producer create
+  // path above — locus-prefix re-check, body guard, manifest embed, JIT/#2288 land-prep — never a `gh pr create`
+  // bypass). Apply the caller-chosen review label AT OPEN (the #2307 determinism, caller-chosen rather than
+  // rubric-scored) and STOP: no green-wait, no `ready-to-merge` (PLAN.labelWhenGreen is false → applyLabel and
+  // the escalation-scorer below never run), no drain trigger. A parked PR is meant to sit for review; the drain
+  // numbers any born-as-hash item AT LAND once a human clears the review — the SAME footing as an auto-landing
+  // PR (numbering stays JIT, never minted early on the branch, which would defeat parallel-lane collision
+  // avoidance). Provision the label on demand (mirrors the escalation-label path) so a fresh repo has it.
+  if (PLAN.mode === 'park') {
+    const parkLabel = PLAN.parkLabel;
+    const meta = REVIEW_LABEL_META[parkLabel];
+    let parkApplied = false;
+    try { ghC(['label', 'create', parkLabel, '--color', meta.color, '--description', meta.description]); } catch { /* already exists — fine */ }
+    try { ghC(['pr', 'edit', String(prNum), '--add-label', parkLabel]); parkApplied = true; }
+    catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply park label "${parkLabel}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — the PR IS open; set the label by hand\n`); }
+    emit({
+      repo: REPO, merged: false, reason: 'parked', pr: Number(prNum), ref: REF,
+      label: null, labelApplied: false, reviewLabel: parkLabel, reviewLabelApplied: parkApplied,
+      detail: `opened self-approved PR #${prNum} for ${REF} PARKED ${parkLabel} (${parkApplied ? `labelled ${parkLabel}` : 'label apply FAILED — set it by hand'}) — held for review, NOT waited/labelled ready-to-merge/landed; the drain numbers any born-as-hash item at land once a human clears the review`,
+    }, 0);
   }
 
   // 4. Wait until GitHub itself says the PR is ready, then merge. We gate on the AUTHORITATIVE
