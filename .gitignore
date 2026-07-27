@@ -61,6 +61,10 @@ commitment-policy/**/*.d.ts
 # and the shared fold (we:scripts/lib/jury-ledger.mjs) reconstructs the live jury tree the conveyor + #2642
 # console render. Operational observability state (the #2612 single source of truth), machine-local, never committed.
 .conveyor/jury/
+# Durable per-fork MICRO-DECISION log (#2665) — one .jsonl per review subject; the read port appends a record
+# per human action on a fork (challenge/ask/annotate) and the surface fold reconstructs it, mirroring the jury
+# sidecar above. Operational state (machine-local), recreated on demand, never committed.
+.conveyor/micro-decisions/
 # Per-session runtime bookkeeping (TTL'd, machine-local) — tooling recreates on demand (#952).
 # SoT relocated to skills-src/ (#2266), so ignore the real path; capacity.json is durable calibration → stays tracked.
 skills-src/batch-backlog-items/claims.json
