@@ -184,9 +184,22 @@ output is the rewritten body, not a message:
    - **Estimate the care band** from the item's escalation-predictive signals — a scope touching statute /
      gate-self is `high`, system-machinery / cross-repo is `elevated`, a routine change is `low`/`none` (the
      same signals `deriveCareLevel` reads; you don't have a diff yet, so estimate from the item's nature).
-   - **Build + render the charter:** `buildJuryCharter({ careLevel, changedFiles })` — pass the item's **predicted
-     touch-set** (the repo-relative paths implied by its `scope:`) as `changedFiles`, so a UI-file scope earns the
-     a11y + visual seats a script-only scope does not. It derives the provisional roster from the same
+   - **Run the touch-set probe (#2619) — it feeds the charter AND scopes any buildable child. This probe is
+     NOT care-gated — run it even at `low`/`none` care** (only the jury build/render/embed below is skipped
+     below the floor; a child still needs a scope regardless of the decision's care band). Predict the
+     coarse, repo-qualified, prefix-shaped touch-set of the work this decision authorizes (narrowest prefix
+     that still covers it — a whole directory `we:scripts/readiness/` when the work spans it, a single file
+     `we:scripts/backlog.mjs` when it doesn't; #2679). This touch-set does double duty: it is the
+     `changedFiles` the charter reads (next bullet), and — since a *decision* is ratified, never dispatched to
+     build, so it carries **no** build-`scope:` of its own — it seeds the **`scope:` of each buildable child**
+     the close-out carves off this fork (close-out step 1). When a fork carves *several* children, give each
+     child only **its own slice** of the touch-set, not the whole set onto every child — identical scopes
+     would make the children mutually overlap and serialize (the exact opposite of the parallelization goal,
+     #2609). Those children then arrive at Definition of Ready already scoped, no auto-prepare round-trip.
+     Don't stamp `scope:` onto the decision item itself.
+   - **Build + render the charter:** `buildJuryCharter({ careLevel, changedFiles })` — pass that predicted
+     touch-set as `changedFiles`, so a UI-file touch-set earns the
+     a11y + visual seats a script-only one does not. It derives the provisional roster from the same
      `resolveJuryPlan` the open-time jury uses and attaches each juror's up-front **expectation** (the concrete bar,
      single-sourced in `LENS_EXPECTATIONS`). Below the floor it returns an un-registered charter with the skip
      reason — that is expected, not an error.
@@ -207,7 +220,11 @@ land the `preparedDate` via the lane→PR; `resolve` is the *decision* turn's jo
    question. A fork you couldn't shape that way is un-prepared, not "deferred": either shape it (it almost
    always can be — even a naming/ownership/scope call gets researched options + a default; see #009's
    "mint `webpush` vs fold the protocol into an existing project" fork), or carve it to a child item that
-   is *itself* prepared and rewrite the parent fork to "→ delegated to #NNN (prepared)". A body still
+   is *itself* prepared and rewrite the parent fork to "→ delegated to #NNN (prepared)". **A buildable child
+   you carve off is scaffolded WITH its predicted `scope:`** — pass that child's slice of the #2619 touch-set
+   as `scaffold --scope=<coarse,prefix,shaped>` (run the step-6 probe here if the care-gated jury step was
+   skipped — the probe itself is not care-gated), so the child arrives at DoR already scoped rather than
+   forcing a downstream auto-prepare. A body still
    carrying a bare "needs a human call" / "confirm X" / "TBD" / slash-name (`webpush`/`webpermissions`)
    fork is not prepared — do not stamp it. **Scan the *whole body*, not just the `## Fork N` headings, for
    a live choice left as prose** (*backlog-workflow.md → no live choice may sit outside a `## Fork N`*):
