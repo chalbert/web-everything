@@ -5,6 +5,12 @@ size: 5
 status: open
 dateOpened: "2026-07-10"
 tags: []
+scope:
+  - we:scripts/readiness/lane-partition.mjs
+  - we:scripts/readiness/__tests__/
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/
+  - we:skills-src/drain/SKILL.md
 ---
 
 # Drain-side RUN_TOOLING guard: land run-tooling items last + the RUN_TOOLING vocabulary/drift-test (steady-state residual of #2077)
