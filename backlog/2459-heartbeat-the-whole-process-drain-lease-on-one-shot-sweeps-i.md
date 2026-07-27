@@ -5,6 +5,9 @@ size: 2
 status: open
 dateOpened: "2026-07-12"
 tags: []
+scope:
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
 ---
 
 # Heartbeat the whole-process drain lease on one-shot sweeps in merge-ai-prs
