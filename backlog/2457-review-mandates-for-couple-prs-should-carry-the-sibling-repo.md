@@ -5,6 +5,15 @@ relatedTo: ["2285"]
 status: open
 dateOpened: "2026-07-12"
 tags: []
+scope:
+  - we:scripts/lib/review-core.mjs
+  - we:scripts/lib/__tests__/review-core.test.mjs
+  - we:scripts/review-core-cli.mjs
+  - we:scripts/__tests__/review-core-cli.test.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:scripts/workflows/review-parked-prs.mjs
+  - we:skills-src/drain/SKILL.md
 ---
 
 # Review mandates for couple PRs should carry the sibling repo/ref from the lane manifest
