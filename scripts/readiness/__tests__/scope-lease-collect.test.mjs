@@ -383,6 +383,50 @@ describe('END-TO-END (pure) — collectSnapshot → liveScopePicture', () => {
     expect(picture.overlaps).toEqual([]);
     expect(picture.clean).toBe(true);
   });
+
+  it('FILE-GRANULAR declared scopes sharing a directory do NOT false-serialize (WE #2679)', () => {
+    // Two lanes declare NARROW file-level scopes (from `acquire --scope=`) that merely share `we:scripts/`.
+    // Under file granularity they run in parallel — the #2673/console-board false positive is gone.
+    const poolStatus = {
+      lanes: [
+        laneRow(1, { predictedScope: ['we:scripts/guard-backward-edge.mjs'] }),
+        laneRow(2, { predictedScope: ['we:scripts/lib/pr-merge-gate.mjs'] }),
+      ],
+    };
+    const observedByLane = { 1: ['we:scripts/guard-backward-edge.mjs'], 2: ['we:scripts/lib/pr-merge-gate.mjs'] };
+    const leases = collectSnapshot({ poolStatus, observedForLane: (l) => observedByLane[l.lane] });
+    const picture = liveScopePicture({ leases });
+    expect(picture.overlaps).toEqual([]);
+    expect(picture.clean).toBe(true);
+    expect(picture.breachedLanes).toEqual([]); // observed ⊆ file-level predicted ⇒ no false breach
+  });
+
+  it('a genuine same-file dependency still contends through the collector (WE #2679) — #2440↔#2669', () => {
+    const shared = 'we:scripts/lib/pr-merge-gate.mjs';
+    const poolStatus = {
+      lanes: [laneRow(1, { predictedScope: [shared] }), laneRow(2, { predictedScope: [shared] })],
+    };
+    const observedByLane = { 1: [shared], 2: [shared] };
+    const leases = collectSnapshot({ poolStatus, observedForLane: (l) => observedByLane[l.lane] });
+    const picture = liveScopePicture({ leases });
+    expect(picture.overlaps).toHaveLength(1);
+    expect(picture.clean).toBe(false);
+  });
+
+  it('a BROAD directory declaration still serializes work under it (correct overlap preserved, WE #2679)', () => {
+    // Lane-1 genuinely spans the whole `we:scripts` subtree; lane-2 touches a file under it ⇒ they contend.
+    const poolStatus = {
+      lanes: [
+        laneRow(1, { predictedScope: ['we:scripts/'] }),
+        laneRow(2, { predictedScope: ['we:scripts/backlog.mjs'] }),
+      ],
+    };
+    const observedByLane = { 1: ['we:scripts/a.mjs'], 2: ['we:scripts/backlog.mjs'] };
+    const leases = collectSnapshot({ poolStatus, observedForLane: (l) => observedByLane[l.lane] });
+    const picture = liveScopePicture({ leases });
+    expect(picture.overlaps).toHaveLength(1);
+    expect(picture.clean).toBe(false);
+  });
 });
 
 describe('breachSig — order-independent breach-set signature (WE #2598)', () => {

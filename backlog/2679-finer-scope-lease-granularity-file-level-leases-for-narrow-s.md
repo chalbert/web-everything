@@ -3,8 +3,10 @@ bornAs: xhptp3x
 kind: story
 size: 5
 parent: "2606"
-status: open
+status: resolved
 dateOpened: "2026-07-26"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 relatedTo: ["2678", "2619", "2560", "2592", "2594"]
 scope:
   - we:scripts/readiness/scope-lease.mjs
@@ -31,6 +33,28 @@ A declared scope like `we:scripts`, `we:scripts/lib/`, or `plateau-app:src/backl
 ## Why the god-files matter first
 
 Finer leases only pay off if the files are small. The six god-files named in the small-files decision (#2678) — `we:scripts/merge-ai-prs.mjs` (2242), `we:scripts/check-standards-rules.mjs` (2194), `we:scripts/check-standards.mjs` (1675), `we:scripts/lib/review-core.mjs` (1252), `we:scripts/backlog.mjs` (1058), `we:scripts/lane-pool.mjs` (1001) — are the first split targets that make file-level leases effective: a file-level lease on a 2000-line file everyone edits still serializes everyone. This story pairs with #2678 (split the god-files) and with upstream scope authoring #2619 (predict the narrow `scope:` at readiness).
+
+## Progress
+
+- **File-granularity lease matchers (done).** `we:scripts/readiness/scope-lease.mjs` now classifies each scope
+  entry by granularity (`isSubtreeEntry`): a SUBTREE (glob, or a trailing-slash / bare directory) leases the
+  whole tree, a FILE (an extension-bearing path) leases only that one path. `coversFile` and
+  `scopeEntriesOverlap` are granularity-aware: two DISJOINT files sharing a directory no longer contend
+  (the #2673 / console-board false positive), while a glob/directory declaration — and a genuine same-file
+  dependency like #2440↔#2669 — still serializes. The classifier is conservative (a directory-ancestor
+  fallback) so finer granularity never MISSES a real overlap; it can only err toward over-serializing. This
+  also fixes a latent breach over-match where a file entry wrongly "covered" a synthetic subtree beneath it.
+- **Advisory, not a new lock.** This refines the resolution of the SAME §3i-A4 Fork 1 advisory signal — the
+  whole-clone lease stays the only real lock; per-file *locks* remain rejected.
+- **Collector (done).** `we:scripts/readiness/scope-lease-collect.mjs` passes each lane's declared scope through
+  at its authored granularity, so narrow file scopes flow into breach/overlap at file granularity end-to-end
+  (proven by new collector tests through the real observer).
+- **Tests (done).** Extended `we:scripts/readiness/__tests__/scope-lease.test.mjs` (classifier +
+  file-granularity overlap/coverage/breach, the named #2673 / #2440↔#2669 cases, the safety fallback) and
+  `we:scripts/readiness/__tests__/scope-lease-collect.test.mjs` (file-granular declared scopes don't
+  false-serialize; broad declarations still do).
+- **Deferred (out of scope):** narrower scope AUTHORING in the readiness flow is #2619 (the upstream half);
+  splitting the god-files that make finer leases pay off is #2678.
 
 ## Relationships
 
