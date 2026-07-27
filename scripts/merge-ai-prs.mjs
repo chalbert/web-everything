@@ -113,6 +113,7 @@ import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bor
 import { withNumberingLock, withLandWriteLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2683) the merge-write mutex (withLandWriteLock, same lock key) + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
 import { extractManifestFromBody, manifestAuditLine, asItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
+import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.mjs'; // #2681 — the RED-MAIN dispatch-freeze the sole writer consults (stop-the-line while main is red)
 // #2399 — the ONE remote-manifest `gh api` argv, shared with `/finish` (lane-resume) so the two readers never
 // drift. Re-exported to keep this file's public surface (and its tests' import site) stable.
 import { remoteManifestApiArgs } from './lib/remote-manifest.mjs';
@@ -2237,6 +2238,34 @@ function runCli() {
     for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0)); // → triggers the exit handler → frees the lease
   }
 
+  // ── RED-MAIN dispatch-freeze (#2681) — the sole writer STOPS THE LINE while main is red ─────────────────────
+  // Diff-driven shrink (#2681) can let a PR land green while a test outside its selected set is red against the
+  // merged tree; the post-land full-suite backstop then reds main. Under the sole writer that is a GLOBAL red —
+  // every subsequent land builds on a broken tree. So before landing anything, consult the durable red-main
+  // freeze marker (raised by red-main-remediation.mjs on a post-land red). A live freeze ⇒ refuse to land and
+  // surface the stop-the-line, symmetric to the duplicate-id-on-main hard stop below. `--no-red-main-freeze`
+  // (or WE_MERGE_BREAK_GLASS) is the documented admin bypass. Absent marker ⇒ this is a no-op (the default, and
+  // the ONLY state while the shrink flag is off), so it changes nothing about today's landing behaviour.
+  // Consulted BEFORE the one-shot land AND at the top of every WATCH pass (a freeze can be raised MID-watch, so
+  // like the dup-id stop below it must be re-checked each pass — reading `redMainFreezeStop()` per pass).
+  const redMainBypass = !!flags['no-red-main-freeze'] || process.env.WE_MERGE_BREAK_GLASS === '1';
+  const redMainFreezeStop = () => {
+    if (redMainBypass || !isDispatchFrozen()) return null;
+    const fr = readFreeze();
+    return {
+      marker: fr,
+      detail: `main is RED (red-main dispatch-freeze active${fr?.reason ? `: ${fr.reason}` : ''}) — the drain lands NOTHING until main is green again. Revert-to-green${fr?.mergeSha ? ` (revert ${fr.mergeSha})` : ''}, then \`node scripts/readiness/red-main-remediation.mjs unfreeze\` (#2681).`,
+    };
+  };
+  const emitRedMainStop = (stop) => {
+    if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, ...(WATCH ? { watch: true } : {}), stopped: 'red-main-freeze', detail: stop.detail, marker: stop.marker }) + '\n');
+    else process.stderr.write(`merge-ai-prs · STOP-THE-LINE — ${stop.detail}\n`);
+  };
+  {
+    const stop = redMainFreezeStop();
+    if (stop) { emitRedMainStop(stop); process.exit(5); } // distinct from empty (0), merge-fail (2), dup-id (3): a red-main stop-the-line
+  }
+
   // ── Driver — one sweep (the /drain one-shot + /merge bare), or the `--watch` monitor (`/drain watch`) ──────
   if (!WATCH) {
     let { result, failedMerges, duplicateIdsOnMain } = sweepOnce();
@@ -2267,8 +2296,16 @@ function runCli() {
   let batchFeedAbsentWarned = false; // #2330 — emit the "feed absent ⇒ inert" note at most once
   let lastFailed = [];
   let lastDup = [];
+  let redMainStopped = false; // #2681 — a freeze raised MID-watch stops the line this pass
   for (let pass = 1; ; pass++) {
     if (leaseHeld) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { scope: leaseScope }); // #2395 — keep the whole-process lease alive across a long watch (an `under-lease` child never heartbeats — its parent daemon owns that); #2458 re-supply the scope so it survives the heartbeat rewrite
+    // #2681 — RE-CHECK the red-main dispatch-freeze EVERY pass: a post-land red can be raised DURING a running
+    // watch (the resident drain daemon is a long-lived `--watch`), and stop-the-line must catch it, not just a
+    // freeze that predated process start. Symmetric to the dup-id stop below — break and surface with exit 5.
+    {
+      const stop = redMainFreezeStop();
+      if (stop) { emitRedMainStop(stop); redMainStopped = true; break; }
+    }
     // #2395 — wall-clock lifetime cap: hard-stop a `--max-runtime-min` watch so an inert `--until-batches-idle`
     // (no batch feed present) can never poll forever. The deferred sweep is the backstop for anything unlanded.
     if (MAX_RUNTIME_MS != null && Date.now() - watchStartedAt >= MAX_RUNTIME_MS) {
@@ -2334,6 +2371,8 @@ function runCli() {
     sleepSync(INTERVAL * 1000);
   }
   if (!AS_JSON) process.stderr.write(`watch: stopped after ${passes.length} pass(es); merged ${allMerged.length} PR(s) total.\n`);
+  // A red-main freeze already emitted its own stop payload (above) — don't double-emit; just exit 5.
+  if (redMainStopped) process.exit(5);
   if (AS_JSON) process.stdout.write(JSON.stringify({ ok: lastDup.length === 0, watch: true, label, interval: INTERVAL, maxIdle: MAX_IDLE, passes: passes.length, merged: allMerged, lastFailed, ...(lastDup.length ? { duplicateIdsOnMain: lastDup } : {}) }) + '\n');
   process.exit(lastDup.length ? 3 : (lastFailed.length ? 2 : 0));
 }
