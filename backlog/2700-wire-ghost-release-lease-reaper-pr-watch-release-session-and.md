@@ -1,9 +1,10 @@
 ---
+bornAs: xbb1ku5
 kind: story
 size: 3
 parent: "2677"
 status: open
-blockedBy: ["xyp63w5"]
+blockedBy: ["2699"]
 scope: ["we:skills-src/conveyor/SKILL.md", "we:scripts/conveyor/"]
 dateOpened: "2026-07-27"
 tags: []
