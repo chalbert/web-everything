@@ -6,6 +6,12 @@ status: open
 blockedBy: ["2394", "2395", "2396"]
 dateOpened: "2026-07-10"
 tags: []
+scope:
+  - we:skills-src/batch-backlog-items/SKILL.md
+  - we:skills-src/batch-backlog-items/parallel-execute.workflow.js
+  - we:skills-src/drain/SKILL.md
+  - we:skills-src/finish/SKILL.md
+  - we:docs/agent/backlog-workflow.md
 ---
 
 # Document overlap-stacked serial batches end-to-end
