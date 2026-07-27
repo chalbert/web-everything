@@ -38,6 +38,7 @@
  *   cat result.json | node scripts/review-core-cli.mjs comment            # the full PR-comment markdown body
  *   node scripts/review-core-cli.mjs comment --file=result.json --json     # { markdown } on stdout
  *   node scripts/review-core-cli.mjs rigor --reasons='blast-radius (x),size (500 …)'  # care-level + panel rigor (#2567)
+ *   cat invite.json | node scripts/review-core-cli.mjs invite --json       # juror-invite-on-discovery delta (#2640)
  *
  * `reduce` input (JSON, from --file or stdin) is the option bag `reduceReview` consumes — any subset of:
  *   { findings, humanRequired, lensVerdicts, mandatoryLenses, conflict, reason, reasons, round, roundCap, phase }
@@ -70,6 +71,7 @@ import {
   buildValidatorMandate,
   careLevelFromReasons,
   panelRigorFromReasons,
+  deriveJurorInvite,
 } from './lib/review-core.mjs';
 import { renderPanelComment } from './lib/review-render.mjs';
 
@@ -298,8 +300,9 @@ function main(argv) {
   if (subcommand === 'mandate') return runMandate(flags, asJson);
   if (subcommand === 'comment') return runComment(flags, asJson);
   if (subcommand === 'rigor') return runRigor(flags, asJson);
+  if (subcommand === 'invite') return runInvite(flags, asJson);
   return fail(
-    'usage: review-core-cli.mjs <reduce|mandate|comment|rigor> [flags] — see the header for options',
+    'usage: review-core-cli.mjs <reduce|mandate|comment|rigor|invite> [flags] — see the header for options',
     2,
   );
 }
@@ -402,6 +405,44 @@ function runRigor(flags, asJson) {
   process.stdout.write(
     `care-level: ${careLevel}   rounds: ${rigor.rounds}   jurorsPerLens: ${rigor.jurorsPerLens}   `
     + `lenses: ${rigor.lenses.join(', ') || '(none)'}   aggregation: ${rigor.aggregation}\n`,
+  );
+  return process.exit(0);
+}
+
+/**
+ * #2640 — the `invite` subcommand: given a mid-review juror's grounded discovery, print the jury-growth DELTA
+ * (`deriveJurorInvite` — the care recompute + delta). The review-parked-prs convergence loop (#2639) shells this
+ * BEFORE spawning the invited juror so the growth decision (raise care → recompute rigor → spawn only the delta,
+ * bounded by the per-care-band ceiling) is single-sourced, never re-derived in the sandbox. Input comes from a
+ * JSON `{careLevel, seatedLenses, jurorsPerLens, invitedLens, citedFinding}` on --file/stdin (the injection-safe
+ * path — `citedFinding` is untrusted PR text), with `--flag` overrides for ergonomics.
+ */
+function runInvite(flags, asJson) {
+  let json = null;
+  try { json = readJsonInput(flags); } catch { json = null; }
+  const input = (json && typeof json === 'object' && !Array.isArray(json)) ? { ...json } : {};
+  if (typeof flags.careLevel === 'string') input.careLevel = flags.careLevel;
+  if (typeof flags.invitedLens === 'string') input.invitedLens = flags.invitedLens;
+  if (typeof flags.citedFinding === 'string') input.citedFinding = flags.citedFinding;
+  if (flags.jurorsPerLens != null) input.jurorsPerLens = Number(flags.jurorsPerLens);
+  if (typeof flags.seatedLenses === 'string') input.seatedLenses = flags.seatedLenses.split(',').map((s) => s.trim()).filter(Boolean);
+
+  let result;
+  try {
+    result = deriveJurorInvite(input);
+  } catch (e) {
+    return fail(String(e && e.message || e), 1);
+  }
+
+  if (asJson) {
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return process.exit(0);
+  }
+  const added = result.addedLenses.map((a) => `${a.lens}+${a.addedJurors}(${a.kind})`).join(', ') || '(none)';
+  process.stdout.write(
+    `invite: ${result.accepted ? 'ACCEPTED' : `rejected (${result.reason})`}   `
+    + `care: ${result.fromCareLevel} → ${result.toCareLevel}   jurorsPerLens: ${result.jurorsPerLens}   `
+    + `delta: ${added}\n`,
   );
   return process.exit(0);
 }
