@@ -208,7 +208,7 @@ not watching. The plan is made real by a tracked monitor that watches the signal
   merge-commit preserving the signed SHA + **Fork 2 default (b)** per-step CAS / idempotent guards, plus the
   batching rider (co-ships with require-up-to-date when the gate opens). The two hardest calls are already ruled
   here, so the build slice #2683 arrives at Definition of Ready, not re-litigation.
-- **The MECHANISM that fires it:** the tracked tripwire item **#x955xwn** ("Un-gate tripwire: fire the #2692
+- **The MECHANISM that fires it:** the tracked tripwire item **#2740** ("Un-gate tripwire: fire the #2692
   event-driven merge-queue build when Lever-0 shows sustained landing-queue saturation", `blockedBy: #2680`,
   which is resolved → ready to build once this call is ratified). It reads #2680's saturation metric and, on a
   sustained k>1-behind-writer trip, surfaces/queues #2683 to the conveyor automatically. The deferral thus
@@ -218,5 +218,5 @@ not watching. The plan is made real by a tracked monitor that watches the signal
 
 Outer escalation: `we:reports/2026-07-26-conveyor-per-item-latency.md` §5. Deep design + 10-round evidence:
 `we:reports/2026-07-27-lever-c-landing-merge-queue-design.md`. Slice #2683 is the build; this decision gates it.
-The tracked tripwire that un-defers it is **#x955xwn** (reads #2680's saturation metric, fires #2683 on sustained
+The tracked tripwire that un-defers it is **#2740** (reads #2680's saturation metric, fires #2683 on sustained
 k>1-behind-writer). Program #2606 / epic #2612. The convergence loop's own mechanization is #xvwmwkx.
