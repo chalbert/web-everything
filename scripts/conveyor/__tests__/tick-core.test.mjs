@@ -213,6 +213,40 @@ describe('planFixSpawns — in-flight test + retry cap across bounce cycles (SKI
     expect(r.notes[0]).toMatchObject({ kind: 'fix-exhausted', pr: 99, attempts: DEFAULT_FIX_RETRY_CAP });
     expect(r.fixAttempts[99]).toBe(DEFAULT_FIX_RETRY_CAP); // not bumped past the cap
   });
+
+  // #2643 — the cap must SURVIVE a conveyor restart. On a fresh conveyor the in-session `fixAttempts` map is EMPTY,
+  // so the cap binds only if it reads the DURABLE floor (`prRearmCounts`) derived from the PR's re-arm comments.
+  it('binds the cap from the DURABLE floor alone when the in-session tally was wiped by a restart', () => {
+    const r = planFixSpawns({
+      prs: [changesPr(99, 40)], launchedNums: [40],
+      fixAttempts: {},                         // restart wiped the session tally
+      prRearmCounts: { 99: DEFAULT_FIX_RETRY_CAP }, // but the PR carries 3 durable re-arm comments
+      availableLanes: [5], tick: 0,
+    });
+    expect(r.spawns).toEqual([]); // cap binds → no re-fix from zero
+    expect(r.notes[0]).toMatchObject({ kind: 'fix-exhausted', pr: 99, attempts: DEFAULT_FIX_RETRY_CAP });
+  });
+
+  it('binds on max(in-session, durable) and re-seeds the in-session tally off the durable floor on the first spawn', () => {
+    // Post-restart: in-session 0, durable 2 → attempts=2 (< cap) → spawn, and the bumped tally re-seeds to 3.
+    const r = planFixSpawns({
+      prs: [changesPr(99, 40)], launchedNums: [40], fixAttempts: {}, prRearmCounts: { 99: 2 },
+      availableLanes: [5], tick: 0,
+    });
+    expect(r.spawns).toEqual([{ pr: 99, num: 40, lane: 5 }]);
+    expect(r.fixAttempts[99]).toBe(3); // re-primed from the durable floor, not 1
+  });
+
+  it('a died-before-rearm fix (no durable comment) still terminates via the in-session tally', () => {
+    // The fix agent died before posting a re-arm comment, so the durable floor is 0; the in-session tally (which
+    // bumps at spawn) is what carries it to the cap. max(3, 0) = 3 → surfaced, not re-fixed.
+    const r = planFixSpawns({
+      prs: [changesPr(99, 40)], launchedNums: [40], fixAttempts: { 99: DEFAULT_FIX_RETRY_CAP }, prRearmCounts: { 99: 0 },
+      availableLanes: [5], tick: 9,
+    });
+    expect(r.spawns).toEqual([]);
+    expect(r.notes[0]).toMatchObject({ kind: 'fix-exhausted', pr: 99 });
+  });
 });
 
 describe('retireFixGuards + clearTerminalFixAttempts — entry vs. counter lifetimes (SKILL §3c)', () => {

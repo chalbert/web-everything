@@ -67,7 +67,12 @@
  *      the retry cap (`fixRetryCap`, default 3 — surfaced for `/review`), else spawns + bumps the counter.
  *      {@link retireFixGuards} retires the ENTRY when the PR no longer carries `review:changes` (re-armed /
  *      terminal) or on TTL (`fixTtlTicks`, default 5) — NOT the counter, which {@link clearTerminalFixAttempts}
- *      drops only when the PR leaves the open set.
+ *      drops only when the PR leaves the open set. Because `fixAttempts` is in-session process state, it does NOT
+ *      survive a conveyor restart; the cap therefore also reads a DURABLE floor `prRearmCounts[pr]` derived from
+ *      the PR's own re-arm comments (`countRearmComments` — one comment per completed auto-fix, #2643), and binds
+ *      on `max(in-session, durable)`. The durable floor is the restart-surviving source of truth (no parallel
+ *      state store, #2612 — the count IS PR state); the in-session tally is the overlay that additionally counts
+ *      a fix agent that died before re-arming (which leaves no comment for the floor to see).
  *
  * WATCHER ARMING (§4): {@link armWatchers} arms one watcher per OPEN PR whose `num` this conveyor DISPATCHED
  *   this session (`launchedNums` — builds AND prepares) that is not already watched, and prunes the watched set
@@ -268,18 +273,27 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], liv
 /**
  * PLAN the fix-agent spawns for `review:changes` bounces (SKILL §3c). For every OPEN `state.prs` row that this
  * conveyor launched (`num` ∈ `launchedNums`) and carries `review:changes`: skip if a live fix-guard ENTRY
- * already exists for the PR (the in-flight test); else if the PR has reached the retry cap (`fixAttempts[pr] >=
- * retryCap`) surface it for `/review` (no spawn); else spawn a fix agent on a free lane, record a new entry, and
- * BUMP the attempt counter. Pure — returns the spawns, new entries, the bumped counter map, consumed lanes, and
- * the surface notes; mutates no input.
+ * already exists for the PR (the in-flight test); else if the PR has reached the retry cap surface it for
+ * `/review` (no spawn); else spawn a fix agent on a free lane, record a new entry, and BUMP the attempt counter.
  *
- * @param {{ prs?:object[], launchedNums?:Array<*>, liveFixGuards?:object[], fixAttempts?:object, retryCap?:number, availableLanes?:Array<*>, tick:number }} ctx
+ * The cap is checked against `max(in-session fixAttempts[pr], durable prRearmCounts[pr])` (#2643). The in-session
+ * `fixAttempts` map does NOT survive a conveyor restart, so on a fresh conveyor it starts empty and the cap would
+ * never bind — the very unbounded fix↔bounce loop the cap exists to prevent. `prRearmCounts` is the DURABLE floor
+ * derived from the PR's own re-arm comments (`countRearmComments`, one per completed auto-fix): it restores the
+ * count after a restart, and the in-session map stays as the within-session overlay that also counts a fix agent
+ * that DIED before re-arming (which posts no comment, so the durable floor can't see it — that TTL-backstop case
+ * still terminates at the human via the in-session tally). Because the bump seeds off the max, the in-session map
+ * is re-primed from the durable floor on the first post-restart spawn. Pure — returns the spawns, new entries, the
+ * bumped counter map, consumed lanes, and the surface notes; mutates no input.
+ *
+ * @param {{ prs?:object[], launchedNums?:Array<*>, liveFixGuards?:object[], fixAttempts?:object, prRearmCounts?:object, retryCap?:number, availableLanes?:Array<*>, tick:number }} ctx
  * @returns {{ spawns:Array<{pr:number, num:*, lane:*}>, newGuards:Array<object>, fixAttempts:object, consumedLanes:Array<*>, notes:Array<object> }}
  */
-export function planFixSpawns({ prs = [], launchedNums = [], liveFixGuards = [], fixAttempts = {}, retryCap = DEFAULT_FIX_RETRY_CAP, availableLanes = [], tick = 0 } = {}) {
+export function planFixSpawns({ prs = [], launchedNums = [], liveFixGuards = [], fixAttempts = {}, prRearmCounts = {}, retryCap = DEFAULT_FIX_RETRY_CAP, availableLanes = [], tick = 0 } = {}) {
   const launched = new Set((Array.isArray(launchedNums) ? launchedNums : []).map(normNum));
   const guardedPrs = new Set((Array.isArray(liveFixGuards) ? liveFixGuards : []).map((g) => Number(g.pr)));
   const nextAttempts = { ...(fixAttempts && typeof fixAttempts === 'object' ? fixAttempts : {}) };
+  const durable = prRearmCounts && typeof prRearmCounts === 'object' ? prRearmCounts : {};
   const lanes = [...(Array.isArray(availableLanes) ? availableLanes : [])];
   const spawns = [];
   const newGuards = [];
@@ -292,7 +306,10 @@ export function planFixSpawns({ prs = [], launchedNums = [], liveFixGuards = [],
     const pr = Number(p.prNumber);
     if (!pr) continue;
     if (guardedPrs.has(pr)) continue; // a fix agent for this PR is already live
-    const attempts = Number(nextAttempts[pr]) || 0;
+    // The DURABLE re-arm-comment count is the restart-surviving floor; the in-session tally the within-session
+    // overlay (it alone catches a fix that died before posting a re-arm comment). The cap binds on whichever is
+    // higher, so a restart can never reset a PR that already burned its attempts (#2643).
+    const attempts = Math.max(Number(nextAttempts[pr]) || 0, Number(durable[pr]) || 0);
     if (attempts >= retryCap) {
       notes.push({ kind: 'fix-exhausted', num: p.num, pr, attempts, text: `PR #${pr} (#${p.num}) bounced ${attempts}× — auto-fix exhausted, run /review ${pr}` });
       continue;
@@ -485,12 +502,13 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
  *     fixAttempts?:object, watched?:Array<number>, launchedNums?:Array<*>,
  *   },
  *   signals?: { returnedBuildNums?:Array<*> },  // async events the shell folds in (Agent returns)
+ *   prRearmCounts?: object,              // DURABLE per-PR re-arm-comment counts { [pr]: n } — the restart-surviving retry-cap floor (#2643); the IO shell derives it via `countRearmComments`
  *   config?: { buildTtlTicks?:number, prepareTtlTicks?:number, fixTtlTicks?:number, fixRetryCap?:number, idleWindowMs?:number },
  *   now?: number|null, lastOperatorTurn?: number|null,
  * }} input
  * @returns {{ decisions:object, nextState:object }}
  */
-export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, config = {}, now = null, lastOperatorTurn = null } = {}) {
+export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, config = {}, now = null, lastOperatorTurn = null } = {}) {
   const cfg = {
     buildTtlTicks: config.buildTtlTicks ?? DEFAULT_BUILD_TTL_TICKS,
     prepareTtlTicks: config.prepareTtlTicks ?? DEFAULT_PREPARE_TTL_TICKS,
@@ -541,7 +559,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   ]));
 
   // 6. FIX spawns — conveyor-launched `review:changes` PRs, gated by in-flight test + retry cap; consume lanes.
-  const fixPlan = planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, retryCap: cfg.fixRetryCap, availableLanes, tick });
+  const fixPlan = planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, prRearmCounts, retryCap: cfg.fixRetryCap, availableLanes, tick });
   const liveFixGuards = [...fix.live, ...fixPlan.newGuards];
 
   // 7. WATCHERS — one per open conveyor-launched PR; prune to currently-open conveyor PRs.
@@ -663,7 +681,31 @@ async function main(argv) {
     .filter((n) => n != null)
     .sort((a, b) => a - b);
 
-  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, config, now: Date.now(), lastOperatorTurn });
+  // DURABLE retry-cap floor (#2643): for each OPEN `review:changes` PR, read its re-arm comments off the PR and
+  // count them (`countRearmComments`). This is the restart-surviving source of truth for "how many times this PR
+  // was auto-fixed" — the in-session `fixAttempts` map is gone after a restart, so without this the cap could
+  // never bind on a fresh conveyor. Only `review:changes` PRs are read (rare), so it adds no per-tick gh cost in
+  // the common case; a comment read that fails is best-effort (floor 0 — the in-session tally still guards).
+  const { countRearmComments } = await import('./rearm-review.mjs');
+  const prRearmCounts = {};
+  for (const p of Array.isArray(state?.prs) ? state.prs : []) {
+    const labels = Array.isArray(p?.labels) ? p.labels : [];
+    if (!p?.prNumber || !labels.includes('review:changes')) continue;
+    // Best-effort, NON-fatal (unlike `runJson`, which exits the tick on error): a single PR's comment read must
+    // never kill the whole tick — on failure the floor stays unset (0) and the in-session tally still binds.
+    // Thread `--repo` exactly as the state read does (line above): without it, `gh pr view` resolves the repo from
+    // cwd, so in explicit-`--repo` mode every read would 404 → floor 0 → the durable cap silently drops (the very
+    // restart bug this fixes, re-exposed for that invocation).
+    const prViewArgs = ['pr', 'view', String(p.prNumber), '--json', 'comments'];
+    if (typeof flags.repo === 'string') { prViewArgs.push(`--repo=${flags.repo}`); }
+    try {
+      const raw = execFileSync('gh', prViewArgs,
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
+      prRearmCounts[p.prNumber] = countRearmComments(JSON.parse(raw)?.comments);
+    } catch { /* leave the floor unset — the in-session tally still guards the cap */ }
+  }
+
+  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, config, now: Date.now(), lastOperatorTurn });
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');
   process.exit(0);
 }

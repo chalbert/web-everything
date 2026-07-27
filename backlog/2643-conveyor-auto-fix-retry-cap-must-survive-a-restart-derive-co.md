@@ -3,9 +3,11 @@ bornAs: x0gf9jy
 kind: story
 size: 3
 parent: "2612"
-status: open
+status: resolved
 scope: ["we:skills-src/conveyor/SKILL.md", "we:scripts/conveyor/rearm-review.mjs", "we:scripts/conveyor/__tests__/rearm-review.test.mjs"]
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 

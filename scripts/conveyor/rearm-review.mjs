@@ -29,6 +29,39 @@ import { decideSetLabel, runReviewLabelCli, presentRemoveLabels } from '../revie
 export { presentRemoveLabels };
 
 /**
+ * we:scripts/conveyor/rearm-review.mjs#REARM_COMMENT_MARKER — the stable FIRST LINE of the durable re-arm comment.
+ * It is single-sourced HERE and used two ways: the CLI POSTS a comment starting with it on every re-arm, and
+ * {@link countRearmComments} MATCHES it to recover the attempt count from the PR (#2643). Build and count share
+ * ONE marker so they can never drift. Treat this line as fixed: changing it orphans the count on every open fix
+ * PR's existing history (an already-burned PR would read as zero attempts again — the very reset #2643 fixes).
+ */
+export const REARM_COMMENT_MARKER = '🔧 conveyor fix — re-armed for re-review';
+
+/**
+ * we:scripts/conveyor/rearm-review.mjs#countRearmComments — the DURABLE, restart-surviving auto-fix attempt count
+ * for a PR (#2643). Every completed auto-fix cycle posts exactly ONE re-arm comment (first line
+ * {@link REARM_COMMENT_MARKER}), so counting those comments recovers "how many times this PR was auto-fixed and
+ * re-armed" from the PR ITSELF — the retry cap then binds even after a conveyor restart wipes the in-session
+ * `fixAttempts` map (the exact unbounded fix↔bounce loop #2643 exists to prevent). This keeps NO parallel state
+ * store (#2612 invariant): the count IS PR state, read back off the durable comment thread the re-arm swap already
+ * writes through the board's normal verbs. Pure — the caller passes the PR's `comments` exactly as
+ * `gh pr view <pr> --json comments` returns them (`[{ body }]`); a bare-string array is tolerated too. A comment
+ * is counted only when the marker is its leading line (`trimStart().startsWith`), so a human QUOTING the re-arm
+ * comment in a reply never inflates the count.
+ * @param {Array<{body?:string}|string>|null|undefined} comments
+ * @returns {number} the number of conveyor re-arm comments on the PR (0 for a non-array / empty input)
+ */
+export function countRearmComments(comments) {
+  if (!Array.isArray(comments)) return 0;
+  let n = 0;
+  for (const c of comments) {
+    const body = typeof c === 'string' ? c : c?.body;
+    if (typeof body === 'string' && body.trimStart().startsWith(REARM_COMMENT_MARKER)) n += 1;
+  }
+  return n;
+}
+
+/**
  * we:scripts/conveyor/rearm-review.mjs#decideRearm — the PURE re-arm decision. Now a THIN alias over the shared
  * `decideSetLabel({ to: 'rearm' })` (#2644): given the PR's OBSERVED labels, return the label swap that hands a
  * repaired `review:changes` bounce back for re-review. Kept as a named export so callers/tests read the intent
@@ -59,9 +92,11 @@ if (IS_CLI) {
     defaultActor: 'conveyor fix agent',
     repoOptional: true, // the fix agent runs inside its WE lane clone, so a missing --repo derives from cwd.
     usage: 'usage: rearm-review.mjs <pr> [--repo=<owner/name>] [--actor=<name>]  (pr must be a positive integer)',
-    // The DURABLE re-arm comment — a readable record that the bounce was repaired and re-armed (not a silent flip).
+    // The DURABLE re-arm comment — a readable record that the bounce was repaired and re-armed (not a silent
+    // flip), AND the durable tally `countRearmComments` reads back to survive a restart (#2643). Its first line
+    // MUST be `REARM_COMMENT_MARKER` (single-sourced) so posting and counting can never drift.
     buildComment: ({ actor, decision }) => [
-      '🔧 conveyor fix — re-armed for re-review',
+      REARM_COMMENT_MARKER,
       '',
       `The \`review:changes\` bounce was repaired and re-pushed by ${actor}; the PR is re-armed \`review:pending\`` +
         ` (an independent re-review is owed).${decision.keepsHuman ? ' `review:human` is kept — a gate-self edit stays human-ceremony-only.' : ''}`,
