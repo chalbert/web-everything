@@ -6,6 +6,10 @@ relatedTo: ["2216", "2189", "2199"]
 status: open
 dateOpened: "2026-07-13"
 tags: [lane, pr-flow, drain, ci]
+scope:
+  - we:skills-src/batch-backlog-items/parallel-execute.workflow.js
+  - we:skills-src/batch-backlog-items/SKILL.md
+  - we:scripts/__tests__/parallel-execute-workflow.test.mjs
 ---
 
 # Wire #2216's label reconciler into the parallel-execute Finalize — a labelled:false PR the drain can't see
