@@ -31,5 +31,3 @@ Locus plateau-app (impl); resolve lands in WE (cross-locus couple).
 ## Progress
 - Built in a plateau-app lane clone against the running dev server; visual self-reviewed vs the committed
   `board.png` baseline (light + dark) with the #2670 comparator to convergence.
-</content>
-</invoke>
