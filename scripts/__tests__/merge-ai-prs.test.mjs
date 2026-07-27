@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -206,6 +206,63 @@ describe('merge-ai-prs — planLabelDrain blockedBy ordering (#2188)', () => {
   it('sorts numeric items by number, and hash items after every numbered item (tie-break by PR#)', () => {
     const { ready } = planLabelDrain([cand(3, 'xuj0wtn'), cand(2, 2201), cand(4, 'xiea3rt'), cand(1, 2199)]);
     expect(ready.map((c) => c.num)).toEqual([1, 2, 3, 4]); // 2199, 2201, then hashes by PR# (3 before 4)
+  });
+});
+
+describe('merge-ai-prs — #2683 matchesOnlyTarget (the --only fast-drain repo-scoped target)', () => {
+  it('number mismatch never matches', () => {
+    expect(matchesOnlyTarget({ prNumber: 9, onlyPr: '12', repo: null, onlyRepo: null, isLocal: true, repoCount: 1 })).toBe(false);
+  });
+  it('--only-repo scopes to that exact repo (pr-watch sibling-PR case)', () => {
+    expect(matchesOnlyTarget({ prNumber: 12, onlyPr: '12', repo: 'o/frontierui', onlyRepo: 'o/frontierui', isLocal: false, repoCount: 3 })).toBe(true);
+    expect(matchesOnlyTarget({ prNumber: 12, onlyPr: '12', repo: 'o/plateau-app', onlyRepo: 'o/frontierui', isLocal: false, repoCount: 3 })).toBe(false);
+  });
+  it('legacy /pr: --this-repo (repoCount 1, cwd repo) matches without --only-repo', () => {
+    expect(matchesOnlyTarget({ prNumber: 12, onlyPr: '12', repo: null, onlyRepo: null, isLocal: true, repoCount: 1 })).toBe(true);
+  });
+  it('legacy /finish REMOTE lane: --repos=<remoteslug> (repoCount 1, non-local) STILL matches (regression guard)', () => {
+    // /finish fires `--only=42 --repos=chalbert/frontierui` with NO --only-repo; a local-only default would have
+    // filtered the remote target out and merged nothing.
+    expect(matchesOnlyTarget({ prNumber: 42, onlyPr: '42', repo: 'chalbert/frontierui', onlyRepo: null, isLocal: false, repoCount: 1 })).toBe(true);
+  });
+  it('multi-repo default sweep, no --only-repo → disambiguate to the LOCAL repo only', () => {
+    expect(matchesOnlyTarget({ prNumber: 12, onlyPr: '12', repo: 'o/web-everything', onlyRepo: null, isLocal: true, repoCount: 3 })).toBe(true);
+    expect(matchesOnlyTarget({ prNumber: 12, onlyPr: '12', repo: 'o/frontierui', onlyRepo: null, isLocal: false, repoCount: 3 })).toBe(false);
+  });
+});
+
+describe('merge-ai-prs — #2683 extraOpenItems (the --only fast drain orders like the full sweep)', () => {
+  const cand = (num, item, blockedBy = [], decision = 'merge') => ({ num, item, blockedBy, decision });
+  const sc = (num, item, stackParents = [], { blockedBy = [] } = {}) => ({ num, item, blockedBy, stackParents, decision: 'merge' });
+
+  it('DEFERS a narrowed --only target whose blockedBy sibling is open ONLY via extraOpenItems', () => {
+    // The fast-drain candidate list is narrowed to the target (#2 → item 2200 blockedBy 2199); the blocker 2199
+    // is NOT in the candidate set. Without extraOpenItems it reads as landed and the target lands EARLY (the AC1
+    // bug); feeding the sibling's still-open item in defers it — never landed ahead of its dependency.
+    const early = planLabelDrain([cand(2, 2200, [2199])]);
+    expect(early.ready.map((c) => c.num)).toEqual([2]); // the pre-#2683 hole: lands early
+
+    const gated = planLabelDrain([cand(2, 2200, [2199])], { extraOpenItems: [2199] });
+    expect(gated.ready).toEqual([]);
+    expect(gated.deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199] }]);
+  });
+
+  it('FREES the target once its blocker is no longer an open sibling (blocker landed)', () => {
+    const freed = planLabelDrain([cand(2, 2200, [2199])], { extraOpenItems: [1234] }); // 2199 not open anymore
+    expect(freed.ready.map((c) => c.num)).toEqual([2]);
+  });
+
+  it('a stackParent that is a still-open sibling defers the --only target via extraOpenItems', () => {
+    // A numeric stackParent absent from the candidate set would read as landed (proof source 4); listing it as an
+    // open sibling in extraOpenItems flips it back to "still open → defer" (proof source 2).
+    const gated = planLabelDrain([sc(5, 'xchild0', [2201])], { extraOpenItems: [2201] });
+    expect(gated.ready).toEqual([]);
+    expect(gated.deferred).toEqual([{ num: 5, item: 'xchild0', waitOn: [2201] }]);
+  });
+
+  it('extraOpenItems tolerates a Set, hash ids, and null entries', () => {
+    const gated = planLabelDrain([cand(2, 'x5lail9', ['xiea3rt'])], { extraOpenItems: new Set(['xiea3rt', null]) });
+    expect(gated.deferred).toEqual([{ num: 2, item: 'x5lail9', waitOn: ['xiea3rt'] }]);
   });
 });
 
