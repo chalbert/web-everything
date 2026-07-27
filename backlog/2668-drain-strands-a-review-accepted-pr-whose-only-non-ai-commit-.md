@@ -6,6 +6,9 @@ status: active
 dateOpened: "2026-07-26"
 dateStarted: "2026-07-26"
 tags: []
+scope:
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
 ---
 
 # Drain strands a review-accepted PR whose only non-AI commit is the drain's own rebase — never certified into the queue
