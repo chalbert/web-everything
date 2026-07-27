@@ -7,6 +7,8 @@ status: open
 blockedBy: ["2619"]
 dateOpened: "2026-07-22"
 tags: [conveyor, readiness, scope, backfill]
+scope:
+  - we:backlog/
 ---
 
 # Backfill scope on the current dev-ready backlog items
