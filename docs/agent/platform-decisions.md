@@ -2917,7 +2917,7 @@ ride).
 
 ### Conveyor per-lane orchestration is mechanics + a headless runner, not a per-lane agent — novelty escalates {#conveyor-orchestration-mechanics-not-per-lane-agent}
 
-**Ratified 2026-07-27 (operator; #2701, bornAs xyr248a).** The [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment)
+**Ratified 2026-07-27 (operator; #2701, bornAs 2701).** The [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment)
 split, applied to the conveyor's **own** per-lane orchestration. Driving one lane through its cycle —
 dispatch → watch → release → tick, plus the guard bookkeeping — is **pure deterministic mechanics stepped by a
 headless runner**, not a per-lane LLM agent that re-derives the loop each tick. Three clauses:
@@ -2938,7 +2938,7 @@ headless runner**, not a per-lane LLM agent that re-derives the loop each tick. 
    mechanics genuinely don't cover **escalates to the main-session judgment layer**, exactly as the parent
    statute escalates novelty — the runner never improvises a ruling.
 
-**Lineage:** #2701 (ratified 2026-07-27, operator; bornAs xyr248a; the DEFER-the-boundary fork de-buried from
+**Lineage:** #2701 (ratified 2026-07-27, operator; bornAs 2701; the DEFER-the-boundary fork de-buried from
 central fork #2677). A **child application** of [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment)
 (#2607) — it extends that split from delivery-loop machinery in general to the conveyor's per-lane orchestration
 in particular; it does **not** re-declare or compete with it. Governs the per-lane orchestrator slice #2702 (now
