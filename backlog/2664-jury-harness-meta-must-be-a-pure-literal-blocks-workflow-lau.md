@@ -4,8 +4,9 @@ kind: story
 size: 3
 parent: "2649"
 scope: ["we:skills-src/jury/"]
-status: open
+status: resolved
 dateOpened: "2026-07-25"
+dateResolved: "2026-07-25"
 tags: [jury, harness, dogfood]
 ---
 

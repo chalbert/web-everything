@@ -30,3 +30,4 @@ Backlog Workflow & Item State cluster — open a leaf with `node scripts/memory-
 - 109. Resolve Epic By Parent Edges — list children by `parent:` (grep), not body's "N children"; #658
 - 137. Migration Carve: Recoverable vs Lossy — additive cap + blockedBy child=sequencing; flatten=loss; #1866
 - 145. Search Backlog Before Filing — grep backlog/ before `scaffold`; the watch pre-files gap cards, so it may already exist (dup'd #2485/#2484); #2489/#2495
+- [Resolve-on-land or conveyor re-dispatches](resolve-on-land-or-conveyor-redispatches.md) — a MERGED card left `status:open` looks like fresh work; the conveyor re-launches it. Land should flip the born-hash's card to resolved; a resolve-sweep is the manual backstop. Verify the born-hash actually landed (a branch name is not proof); never resolve an epic on one child, or a decision on a prep-packet. #2609/#2611/#2614/#2664
