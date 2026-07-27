@@ -1117,6 +1117,226 @@ export function applyRosterCritique(plan, gaps = [], { resolveMethods } = {}) {
 
 /**
  * ============================================================================
+ * JUROR-INVITE-ON-DISCOVERY — grow the jury mid-review, only with reason (#2640, under jury cluster #2636).
+ * ============================================================================
+ *
+ * A juror mid-review can DISCOVER a failure axis no seated lens fully guards — the classic case is a correctness
+ * reviewer noticing a security hole, but it generalizes: any juror that finds concrete evidence of an UNGUARDED
+ * (or under-staffed) axis can INVITE another lens/method onto the panel. This is the run-TIME counterpart to the
+ * prepare-time roster critic (#2637, which red-teams completeness BEFORE the fan-out): #2637 asks "is the roster
+ * complete for what this subject IS?"; this asks "did a juror find something mid-review that PROVES the roster is
+ * missing a seat?". The model is the three-step the spec names — the discovery RAISES the care level → RECOMPUTE
+ * the rigor at the raised band → spawn only the DELTA (the seats the raised band earns that are not already
+ * sitting) — so a jury that grows does so through the SAME care→rigor dial (`raiseCareForDiscovery` →
+ * `panelRigorForCareLevel`) everything else uses, never an ad-hoc "add a reviewer" path.
+ *
+ * Three guardrails keep it growing ONLY WITH REASON (the spec's own list):
+ *   1. CITE THE FINDING — an invite must carry the finding that justifies it (`citedFinding`); an ungrounded
+ *      invite is rejected (`reason: 'ungrounded'`). Growth is always anchored to concrete evidence, never a hunch.
+ *   2. SPENDS A ROUND-TRIP, NEVER RESETS THE COUNTER — an accepted invite costs one negotiation round and the
+ *      caller advances the round counter FORWARD (it is never reset). `spendsRound` is always `true` to say so.
+ *      A chain of invites therefore cannot dodge the round cap by restarting the budget — N invites cost N rounds
+ *      against the SAME `roundCap`, and the caller escalates once the cap is hit (the loop enforces the advance;
+ *      this pure fn only states the contract).
+ *   3. THE PER-CARE-BAND CEILING BOUNDS TOTAL JURORS — `raiseCareForDiscovery` caps the raise at
+ *      `INVITE_CARE_CEILING` (the top band), so `jurorsPerLens` can never exceed the high band's dial, and the
+ *      lens set is drawn from a FINITE vocabulary. Total jurors is therefore bounded no matter how many invites
+ *      fire — once at the ceiling an invite that adds no new lens is a no-op (`atCeiling: true`, not accepted).
+ *
+ * PURE (the care recompute + the delta). SPAWNING the invited juror is the CALLER's action — the review-parked-prs
+ * convergence loop (#2639) does that; this module only decides WHETHER the invite is grounded and, if so, WHAT
+ * delta to spawn (the same judgment/derivation split every builder in this module keeps).
+ */
+
+/** The care band an invite can never raise past (#2640) — the top of `CARE_LEVEL_ORDER`. This IS the per-care-band
+ *  juror ceiling (guardrail 3): since `panelRigorForCareLevel` dials `jurorsPerLens` off the band and
+ *  `raiseCareForDiscovery` caps every raise here, no chain of invites can grow the per-lens jury past this band's
+ *  dial. A tuning knob (exported, not a scattered literal). */
+export const INVITE_CARE_CEILING = CARE_LEVELS.HIGH;
+
+/**
+ * Raise the care level one band for a discovery (#2640), capped at `INVITE_CARE_CEILING`. Pure. A juror's
+ * discovery of an unguarded/under-staffed failure axis bumps care up exactly one band (`none → low → elevated →
+ * high`) and NEVER past `high` — that cap is guardrail 3 (the per-care-band juror ceiling). Throws on an unknown
+ * care level (same discipline as `panelRigorForCareLevel`) so a typo surfaces loudly rather than silently
+ * skipping the raise.
+ * @param {'none'|'low'|'elevated'|'high'} careLevel
+ * @returns {'low'|'elevated'|'high'}
+ */
+export function raiseCareForDiscovery(careLevel) {
+  const idx = CARE_LEVEL_ORDER.indexOf(careLevel);
+  if (idx === -1) {
+    throw new Error(`raiseCareForDiscovery: unknown care-level "${careLevel}" — must be one of ${CARE_LEVEL_ORDER.join(', ')}`);
+  }
+  const ceilingIdx = CARE_LEVEL_ORDER.indexOf(INVITE_CARE_CEILING);
+  return CARE_LEVEL_ORDER[Math.min(idx + 1, ceilingIdx)];
+}
+
+/**
+ * @typedef {Object} InviteDelta
+ * @property {string} lens - the lens the added seat(s) judge under.
+ * @property {string|null} method - the lens's default grounding method id (`LENS_DEFAULT_METHOD`), or null if none.
+ * @property {number} addedJurors - how many NEW jurors this seat spawns (a whole new lens seats the full per-lens
+ *   count; an already-seated lens gains only the raised band's per-lens increase).
+ * @property {'new-lens'|'more-jurors'} kind - whether the delta seats a lens the roster lacked, or extra jurors on
+ *   an already-seated lens.
+ */
+
+/**
+ * @typedef {Object} JurorInvite
+ * @property {boolean} accepted - true iff the invite is grounded, names a known lens, AND yields a non-empty delta.
+ * @property {string|null} reason - why an invite was rejected (`ungrounded` | `unknown-lens` | `at-ceiling`), else null.
+ * @property {string|null} citedFinding - the finding the invite cited (guardrail 1), echoed for the audit trail.
+ * @property {string} fromCareLevel - the care band before the raise.
+ * @property {string} toCareLevel - the care band after the raise (capped at `INVITE_CARE_CEILING`).
+ * @property {number} jurorsPerLens - the per-lens juror count the raised band dials (the per-lens ceiling).
+ * @property {InviteDelta[]} addedLenses - the DELTA to spawn; empty when the invite adds nothing (already at the ceiling).
+ * @property {string[]} seatedLenses - the resulting roster lens set (current ∪ invited), de-duplicated.
+ * @property {boolean} atCeiling - true when no delta could be added (the ceiling is already fully seated).
+ * @property {true} spendsRound - always true (guardrail 2): the caller MUST advance the round counter and never reset it.
+ */
+
+/**
+ * Derive the jury-growth DELTA for a mid-review juror invite (#2640) — the pure "care recompute + delta" half of
+ * juror-invite-on-discovery. Pure. Applies the three guardrails above and returns a `JurorInvite`:
+ *   • Guardrail 1 (CITE THE FINDING): a missing/blank `citedFinding` → `{ accepted:false, reason:'ungrounded' }`.
+ *   • The invited lens must be a known lens in the vocabulary (`availableLenses`, default `ROSTER_CRITIQUE_LENSES`)
+ *     — an out-of-vocabulary "lens" has no grounding method and no seat → `{ accepted:false, reason:'unknown-lens' }`.
+ *   • Guardrail 3 (CEILING): the raised band is `raiseCareForDiscovery(careLevel)` (capped at `INVITE_CARE_CEILING`);
+ *     `jurorsPerLens` is that band's dial. The DELTA is a newly-invited lens (seating the full per-lens count) plus,
+ *     when the raised band's per-lens dial ROSE, the increase on each already-seated lens. When the delta is empty
+ *     (an at-ceiling invite for a lens already fully seated) → `{ accepted:false, reason:'at-ceiling', atCeiling:true }`.
+ *   • Guardrail 2 (ROUND): `spendsRound` is always true — the caller advances the round and never resets it (a
+ *     contract this pure fn states; the loop enforces it).
+ * The recompute (`fromCareLevel`/`toCareLevel`/`jurorsPerLens`) rides EVERY return path — even a rejection — so a
+ * caller can see where the ceiling sat regardless of the outcome.
+ * @param {{careLevel: string, seatedLenses?: string[], jurorsPerLens?: number, invitedLens?: string,
+ *   citedFinding?: string, availableLenses?: string[]}} o - `careLevel` is a `CARE_LEVELS` value (an unknown one
+ *   throws — via `panelRigorForCareLevel` when `jurorsPerLens` is omitted, else via `raiseCareForDiscovery`);
+ *   `seatedLenses` is the roster's current lens set; `jurorsPerLens` is the
+ *   current per-lens juror count (defaults to the current band's dial if omitted); `invitedLens` is the axis the
+ *   discovery earns; `citedFinding` is the grounding.
+ * @returns {JurorInvite}
+ */
+export function deriveJurorInvite({ careLevel, seatedLenses = [], jurorsPerLens, invitedLens, citedFinding, availableLenses = ROSTER_CRITIQUE_LENSES } = {}) {
+  const cited = typeof citedFinding === 'string' ? citedFinding.trim() : '';
+  const seated = rosterLensList(seatedLenses);
+  const currentPerLens = Number.isInteger(jurorsPerLens) && jurorsPerLens > 0
+    ? jurorsPerLens
+    : panelRigorForCareLevel(careLevel).jurorsPerLens;
+
+  // The raised band + its dial — computed up front so every return path (even a rejection) carries the recompute.
+  // `raiseCareForDiscovery` throws on an unknown care level (loud, not silent).
+  const toCareLevel = raiseCareForDiscovery(careLevel);
+  const raisedPerLens = panelRigorForCareLevel(toCareLevel).jurorsPerLens;
+
+  const base = {
+    citedFinding: cited || null,
+    fromCareLevel: careLevel,
+    toCareLevel,
+    jurorsPerLens: raisedPerLens,
+    seatedLenses: seated,
+    spendsRound: true,
+  };
+
+  // Guardrail 1 — CITE THE FINDING. An ungrounded invite never grows the jury.
+  if (!cited) return { ...base, accepted: false, reason: 'ungrounded', addedLenses: [], atCeiling: false };
+
+  // The invited lens must be a known lens (else no grounding method, no seat).
+  const vocab = (Array.isArray(availableLenses) && availableLenses.length) ? availableLenses : ROSTER_CRITIQUE_LENSES;
+  const lens = typeof invitedLens === 'string' ? invitedLens.trim() : '';
+  if (!lens || !vocab.includes(lens)) {
+    return { ...base, accepted: false, reason: 'unknown-lens', addedLenses: [], atCeiling: false };
+  }
+
+  // The DELTA (guardrail 3 bounds it): a newly-invited lens seats the full per-lens count; each already-seated
+  // lens gains ONLY the increase if the raised band's dial rose (never a re-seat of jurors it already has).
+  const seatedSet = new Set(seated);
+  const addedLenses = [];
+  if (!seatedSet.has(lens)) {
+    addedLenses.push({ lens, method: LENS_DEFAULT_METHOD[lens] ?? null, addedJurors: raisedPerLens, kind: 'new-lens' });
+  }
+  const bump = raisedPerLens - currentPerLens;
+  if (bump > 0) {
+    for (const l of seated) {
+      addedLenses.push({ lens: l, method: LENS_DEFAULT_METHOD[l] ?? null, addedJurors: bump, kind: 'more-jurors' });
+    }
+  }
+  const resultSeated = seatedSet.has(lens) ? seated : [...seated, lens];
+
+  // Guardrail 3 — nothing to add means the ceiling is already fully seated (an at-`high` invite for a lens that is
+  // already sitting at the band's full juror count): a no-op, not a growth.
+  if (!addedLenses.length) {
+    return { ...base, accepted: false, reason: 'at-ceiling', addedLenses: [], atCeiling: true, seatedLenses: resultSeated };
+  }
+  return { ...base, accepted: true, reason: null, addedLenses, atCeiling: false, seatedLenses: resultSeated };
+}
+
+/**
+ * ============================================================================
+ * THE JUROR-INVITE LOOP GUARDS — grow-only, gate-self hardening (#2640).
+ * ============================================================================
+ *
+ * `deriveJurorInvite` above is grow-only BY CONSTRUCTION (its `seatedLenses` is `current ∪ invited` and its
+ * `jurorsPerLens` is the raised band's dial ≥ current). But the parked-PR review loop
+ * (`we:scripts/workflows/review-parked-prs.mjs`) runs the CLI inside an AGENT — a harness sandbox that cannot
+ * `import` this module — and an agent's ECHO of the growth cannot be trusted (a prompt-injected/misbehaving invite
+ * agent could echo a SHRUNK roster/count and drop the mandatory correctness/security lenses, letting a diff land
+ * with no security review). These three pure guards are the SPEC the loop enforces from its OWN state to neutralize
+ * a bad echo. They live here (tested) and are MIRRORED inline in the sandbox loop (which cannot import them) — the
+ * same "mirror a tested literal/shape, no import in the sandbox" pattern the loop already uses for the ceiling.
+ */
+
+/**
+ * Grow-only ROSTER union (#2640) — the next active roster is ALWAYS a SUPERSET of the current one: current lenses ∪
+ * the invited lens ∪ any echoed added lenses, de-duplicated. So no seated lens (least of all a mandatory one) can be
+ * dropped mid-loop, whatever a shrunk/echoed roster claims. Pure.
+ * @param {string[]} currentLenses - the roster the loop currently seats.
+ * @param {string} invitedLens - the lens the accepted invite earns.
+ * @param {string[]} [addedLenses] - lens names the invite agent echoed as added (advisory — only ever grows).
+ * @returns {string[]} the grow-only union.
+ */
+export function growOnlyRoster(currentLenses = [], invitedLens = '', addedLenses = []) {
+  const cur = Array.isArray(currentLenses) ? currentLenses.filter((l) => typeof l === 'string' && l) : [];
+  const added = Array.isArray(addedLenses) ? addedLenses.filter((l) => typeof l === 'string' && l) : [];
+  const inv = typeof invitedLens === 'string' && invitedLens ? [invitedLens] : [];
+  return [...new Set([...cur, ...inv, ...added])];
+}
+
+/**
+ * Grow-only per-lens JUROR count (#2640) — floor an accepted invite's per-lens count at the CURRENT count (an invite
+ * may only GROW the panel, never shrink it) and cap it at the ceiling. So an echoed `1` cannot shrink a 2-juror
+ * panel. Pure.
+ * @param {number} current - the current per-lens juror count.
+ * @param {number} proposed - the count the invite agent echoed.
+ * @param {number} ceiling - the per-care-band ceiling (top band's dial). In the loop `ceiling >= current` always (the
+ *   current count is dialed off a care band at or below the top), so the floor is never overridden by the cap.
+ * @returns {number} `min(ceiling, max(current, proposed))` — floored at `current` (never below it while
+ *   `ceiling >= current`) and capped at `ceiling`.
+ */
+export function floorGrowOnlyJurors(current, proposed, ceiling) {
+  const cur = Number.isFinite(Number(current)) && Number(current) >= 1 ? Math.floor(Number(current)) : 1;
+  const prop = Number.isFinite(Number(proposed)) && Number(proposed) >= 1 ? Math.floor(Number(proposed)) : cur;
+  const cap = Number.isFinite(Number(ceiling)) && Number(ceiling) >= 1 ? Math.floor(Number(ceiling)) : cur;
+  return Math.min(cap, Math.max(cur, prop));
+}
+
+/**
+ * The MANDATORY lenses ABSENT from a round's results (#2640) — a mandatory lens degrades the round to needs-human if
+ * it is not PRESENT-and-OK, whether it ran-and-errored OR was never scheduled at all. Keying the safety net on
+ * failed-lenses alone missed the never-scheduled case (a shrunk roster that never ran a mandatory lens saw zero
+ * failures and could reduce to accept → land). Deriving from the OK set closes that. Pure.
+ * @param {string[]} ranOkLenses - the lenses that RAN and produced a verdict this round.
+ * @param {string[]} [mandatory] - the mandatory lens set (default the core `MANDATORY_LENSES`).
+ * @returns {string[]} the mandatory lenses absent from `ranOkLenses`.
+ */
+export function absentMandatoryLenses(ranOkLenses = [], mandatory = MANDATORY_LENSES) {
+  const ranSet = new Set(Array.isArray(ranOkLenses) ? ranOkLenses.filter((l) => typeof l === 'string' && l) : []);
+  return (Array.isArray(mandatory) ? mandatory : []).filter((l) => !ranSet.has(l));
+}
+
+/**
+ * ============================================================================
  * THE PREPARE-TIME JURY CHARTER — pre-register the jury + expectations (#2638, under jury cluster #2636).
  * ============================================================================
  *

@@ -67,8 +67,17 @@ import {
   shouldRegisterJury,
   buildJuryCharter,
   renderJuryCharter,
+  INVITE_CARE_CEILING,
+  raiseCareForDiscovery,
+  deriveJurorInvite,
+  growOnlyRoster,
+  floorGrowOnlyJurors,
+  absentMandatoryLenses,
 } from '../review-core.mjs';
 import { validateSubjectAdapter, resolveAdapterRoster } from '../jury-core.mjs';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 describe('normalizeFinding', () => {
   it('accepts a well-formed raw finding, coercing types', () => {
@@ -1227,5 +1236,197 @@ describe('renderJuryCharter — the markdown artifact embedded on the item (#263
     expect(md).toContain('| juror | lens | grounding method | pre-registered expectation |');
     // every juror's expectation text is present in the rendered table
     for (const juror of charter.jurors) expect(md).toContain(juror.expectation);
+  });
+});
+
+describe('raiseCareForDiscovery — the discovery bumps care one band, capped at the ceiling (#2640)', () => {
+  it('raises exactly one band', () => {
+    expect(raiseCareForDiscovery('none')).toBe('low');
+    expect(raiseCareForDiscovery('low')).toBe('elevated');
+    expect(raiseCareForDiscovery('elevated')).toBe('high');
+  });
+  it('caps at INVITE_CARE_CEILING (high) — a raise can never exceed the top band (guardrail 3)', () => {
+    expect(INVITE_CARE_CEILING).toBe('high');
+    expect(raiseCareForDiscovery('high')).toBe('high');
+  });
+  it('throws loudly on an unknown care level', () => {
+    expect(() => raiseCareForDiscovery('critical')).toThrow(/unknown care-level/);
+  });
+});
+
+describe('deriveJurorInvite — grow the jury only with reason (#2640)', () => {
+  const panel = ['correctness', 'security', 'simplicity', 'standards-conformance'];
+
+  it('GUARDRAIL 1 — rejects an ungrounded invite (no cited finding), never growing the jury', () => {
+    const r = deriveJurorInvite({ careLevel: 'elevated', seatedLenses: panel, jurorsPerLens: 1, invitedLens: 'security' });
+    expect(r.accepted).toBe(false);
+    expect(r.reason).toBe('ungrounded');
+    expect(r.addedLenses).toEqual([]);
+    // the recompute still rides the rejection so a caller can see where the ceiling sat
+    expect(r.toCareLevel).toBe('high');
+    expect(r.spendsRound).toBe(true);
+  });
+
+  it('rejects an invite naming a lens outside the vocabulary', () => {
+    const r = deriveJurorInvite({ careLevel: 'low', invitedLens: 'telepathy', citedFinding: 'x' });
+    expect(r.accepted).toBe(false);
+    expect(r.reason).toBe('unknown-lens');
+    expect(r.addedLenses).toEqual([]);
+  });
+
+  it('a grounded invite raises care → recomputes rigor → spawns the extra-juror DELTA on each seated lens', () => {
+    const r = deriveJurorInvite({ careLevel: 'elevated', seatedLenses: panel, jurorsPerLens: 1, invitedLens: 'security', citedFinding: 'unsanitized shell arg' });
+    expect(r.accepted).toBe(true);
+    expect(r.reason).toBeNull();
+    expect(r.fromCareLevel).toBe('elevated');
+    expect(r.toCareLevel).toBe('high');
+    expect(r.jurorsPerLens).toBe(2); // the high-band dial
+    // security was already seated → the delta is +1 juror on each seated lens (elevated 1 → high 2), never a re-seat
+    expect(r.addedLenses.every((a) => a.kind === 'more-jurors' && a.addedJurors === 1)).toBe(true);
+    expect(r.addedLenses.map((a) => a.lens).sort()).toEqual([...panel].sort());
+    expect(r.citedFinding).toBe('unsanitized shell arg');
+  });
+
+  it('a NEW lens the roster lacked is seated at the full per-lens count, grounded by its default method', () => {
+    const r = deriveJurorInvite({ careLevel: 'high', seatedLenses: ['correctness', 'security'], jurorsPerLens: 2, invitedLens: 'a11y', citedFinding: 'renders a focus trap' });
+    expect(r.accepted).toBe(true);
+    const added = r.addedLenses.find((a) => a.lens === 'a11y');
+    expect(added).toMatchObject({ kind: 'new-lens', addedJurors: 2, method: 'axe-scan' });
+    expect(r.seatedLenses).toContain('a11y');
+  });
+
+  it('GUARDRAIL 3 — an at-ceiling invite for an already-seated lens adds nothing (atCeiling, not accepted)', () => {
+    const r = deriveJurorInvite({ careLevel: 'high', seatedLenses: panel, jurorsPerLens: 2, invitedLens: 'security', citedFinding: 'x' });
+    expect(r.accepted).toBe(false);
+    expect(r.reason).toBe('at-ceiling');
+    expect(r.atCeiling).toBe(true);
+    expect(r.addedLenses).toEqual([]);
+    expect(r.toCareLevel).toBe('high'); // capped — cannot raise past the ceiling
+  });
+
+  it('GUARDRAIL 2 — spendsRound is always true (the caller advances the counter, never resets it)', () => {
+    for (const care of ['low', 'elevated', 'high']) {
+      expect(deriveJurorInvite({ careLevel: care, invitedLens: 'security', citedFinding: 'y' }).spendsRound).toBe(true);
+    }
+  });
+
+  it('throws on an unknown care level (via raiseCareForDiscovery)', () => {
+    expect(() => deriveJurorInvite({ careLevel: 'critical', invitedLens: 'security', citedFinding: 'y' })).toThrow(/unknown care-level/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The juror-invite LOOP GUARDS (#2640) — the grow-only spec the parked-PR review loop enforces from its OWN state
+// so a prompt-injected/misbehaving invite agent's ECHO cannot SHRINK the panel or drop the mandatory
+// correctness/security lenses (the gate-self shrink-hole the review found). These pure guards are the SINGLE SOURCE
+// the sandbox loop mirrors (it cannot import them). The mirror is asserted by the source-regression suite below.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('juror-invite loop guards — grow-only, gate-self hardening (#2640)', () => {
+  const PANEL = ['correctness', 'security', 'simplicity', 'standards-conformance'];
+  const CEILING = 2;
+
+  describe('growOnlyRoster — the next roster is always a SUPERSET (never a replace)', () => {
+    it('a shrunk echoed roster CANNOT drop correctness/security — union keeps the current panel', () => {
+      // The exact attack: an invite agent echoes addedLenses = ['simplicity'] hoping to REPLACE the roster.
+      const next = growOnlyRoster(PANEL, 'simplicity', ['simplicity']);
+      expect(next).toEqual(expect.arrayContaining(['correctness', 'security']));
+      // every current lens survives — the result is a superset of the current roster
+      for (const l of PANEL) expect(next).toContain(l);
+    });
+
+    it('seats the invited lens on top of the current roster', () => {
+      const next = growOnlyRoster(['correctness', 'security'], 'a11y', []);
+      expect(next).toEqual(expect.arrayContaining(['correctness', 'security', 'a11y']));
+    });
+
+    it('de-duplicates and ignores empty/non-string entries', () => {
+      const next = growOnlyRoster(['correctness', 'security', 'security'], '', ['', null, 'simplicity']);
+      expect(next.filter((l) => l === 'security')).toHaveLength(1);
+      expect(next).toContain('simplicity');
+      expect(next).not.toContain('');
+    });
+  });
+
+  describe('floorGrowOnlyJurors — an accepted invite may only GROW the per-lens count, never shrink it', () => {
+    it('an echoed 1 CANNOT shrink a 2-juror panel (floored at the current count)', () => {
+      expect(floorGrowOnlyJurors(2, 1, CEILING)).toBe(2);
+    });
+
+    it('a legitimate growth passes through, capped at the ceiling', () => {
+      expect(floorGrowOnlyJurors(1, 2, CEILING)).toBe(2);
+      expect(floorGrowOnlyJurors(1, 9, CEILING)).toBe(2); // ceiling caps an over-echoed count
+    });
+
+    it('a garbage/zero/NaN echoed count never drops below the current count', () => {
+      expect(floorGrowOnlyJurors(2, 0, CEILING)).toBe(2);
+      expect(floorGrowOnlyJurors(2, NaN, CEILING)).toBe(2);
+      expect(floorGrowOnlyJurors(2, -5, CEILING)).toBe(2);
+    });
+  });
+
+  describe('absentMandatoryLenses — degrade when a mandatory lens is ABSENT, not only when it ran-and-failed', () => {
+    it('a mandatory lens that NEVER RAN (not scheduled) is reported absent → the round must degrade', () => {
+      // The shrink attack lands a round that only ran the simplicity lens: no mandatory lens ever ran.
+      const absent = absentMandatoryLenses(['simplicity']);
+      expect(absent).toEqual(expect.arrayContaining(['correctness', 'security']));
+    });
+
+    it('a mandatory lens that ran-and-errored (not in the OK set) is reported absent', () => {
+      // security ran but failed → it is not in ranOkLenses → still absent → degrade.
+      expect(absentMandatoryLenses(['correctness', 'simplicity'])).toEqual(['security']);
+    });
+
+    it('all mandatory lenses present-and-ok → nothing absent → no degrade', () => {
+      expect(absentMandatoryLenses(PANEL)).toEqual([]);
+      expect(absentMandatoryLenses(['correctness', 'security'])).toEqual([]);
+    });
+  });
+
+  // The END-TO-END shrink attack, composed through the three guards exactly as the loop applies them: an accepted
+  // invite echoing { jurorsPerLens: 1, seatedLenses/addedLenses: ['simplicity'] } against a 2-juror full panel.
+  it('END-TO-END — the echoed shrink { jurorsPerLens:1, added:[simplicity] } cannot shrink or drop mandatory lenses', () => {
+    const current = PANEL;
+    const currentPerLens = 2;
+    const echoed = { jurorsPerLens: 1, addedLenses: [{ lens: 'simplicity' }] };
+    const echoedAdded = echoed.addedLenses.map((a) => a.lens);
+
+    const grownSeated = growOnlyRoster(current, 'simplicity', echoedAdded);
+    const grownPerLens = floorGrowOnlyJurors(currentPerLens, echoed.jurorsPerLens, CEILING);
+
+    // panel did NOT shrink
+    expect(grownPerLens).toBe(2);
+    for (const l of ['correctness', 'security']) expect(grownSeated).toContain(l);
+
+    // and even if a subsequent round somehow ran only 'simplicity', the absent-mandatory guard degrades it
+    expect(absentMandatoryLenses(['simplicity'])).toEqual(expect.arrayContaining(['correctness', 'security']));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE-REGRESSION — the sandbox review loop (review-parked-prs.mjs) is NOT importable (a harness body with a
+// top-level return + no exports), so its grow-only guards cannot be exercised directly. These assertions read the
+// source and prove the shrink-hole stays closed: the loop must MIRROR the tested guards, never regress to trusting
+// the invite agent's echoed roster/count. If someone reintroduces a `Math.min`-only clamp or a roster REPLACE, one
+// of these fails loudly. (#2640, gate-self)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('review-parked-prs.mjs — the sandbox mirrors the grow-only guards (source regression, #2640)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '../../workflows/review-parked-prs.mjs'), 'utf8');
+
+  it('floors jurorsPerLens at the current count (Math.max), not a Math.min-only clamp', () => {
+    // grow-only floor: an accepted invite can only raise the per-lens count.
+    expect(src).toMatch(/Math\.max\(jurorsPerLens,/);
+  });
+
+  it('UNIONs the roster on invite (never a bare replace that could drop mandatory lenses)', () => {
+    // the loop grows activeLenses by unioning with the current roster, never reassigning it to the echoed set
+    expect(src).toMatch(/activeLenses = \[\.\.\.new Set\(\[\.\.\.activeLenses,/);
+    // and the roster derived in applyJurorInvite is itself a union built from the current seated set
+    expect(src).toMatch(/new Set\(\[\.\.\.seatedLenses, invite\.lens,/);
+  });
+
+  it('degrades on an ABSENT mandatory lens (derives from the OK set, not only failed lenses)', () => {
+    expect(src).toMatch(/absentMandatory\s*=\s*MANDATORY_LENSES\.filter\(\(l\)\s*=>\s*!okLensSet\.has\(l\)\)/);
+    expect(src).toMatch(/const degrade = absentMandatory\.length > 0/);
   });
 });
