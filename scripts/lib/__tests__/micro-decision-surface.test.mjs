@@ -5,9 +5,23 @@
  *   the auto-cleared partition + counts, and that the module CONSUMES the #2652 judge rather than re-deriving
  *   contention. Pure module — plain unit assertions, no I/O.
  */
-import { describe, it, expect } from 'vitest';
-import { classifyForkContention, buildMicroDecisionQueue } from '../micro-decision-surface.mjs';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  classifyForkContention,
+  buildMicroDecisionQueue,
+  microDecisionSubjectKey,
+  validateMicroDecisionRecord,
+  foldMicroDecisionRecords,
+  appendMicroDecisionRecord,
+  readMicroDecisionRecord,
+  buildSurfaceFromDisk,
+  MICRO_RECORD_KINDS,
+} from '../micro-decision-surface.mjs';
 import { resolveDispositionConfig } from '../review-policy.mjs';
+import { subjectSlug } from '../jury-ledger.mjs';
 import { VERDICTS, MANDATORY_LENSES } from '../jury-core.mjs';
 
 // --- ledger builders (mirror disposition-judge.test.mjs) -------------------------------------------------------
@@ -205,5 +219,135 @@ describe('buildMicroDecisionQueue', () => {
     });
     expect(allClean.contestedCount).toBe(0);
     expect(allClean.autoClearedCount).toBe(2);
+  });
+});
+
+// --- #2665 read-port wiring + durable challenge/question record ------------------------------------------------
+
+describe('microDecisionSubjectKey', () => {
+  it('is a stable, reversible-ish `repo#decision#forkN` key', () => {
+    expect(microDecisionSubjectKey('webeverything', '2665', 3)).toBe('webeverything#2665#fork3');
+  });
+  it('survives subjectSlug intact (no internal whitespace/dash to collapse)', () => {
+    const key = microDecisionSubjectKey('webeverything', '2665', 3);
+    expect(subjectSlug(key)).toBe(key);
+  });
+  it('falls back for empty inputs (never a bare `##fork0` collision on undefined)', () => {
+    expect(microDecisionSubjectKey('', '', undefined)).toBe('webeverything#decision#fork0');
+  });
+});
+
+describe('validateMicroDecisionRecord', () => {
+  it('accepts a challenge with text', () => {
+    const { ok, record } = validateMicroDecisionRecord({ kind: 'challenge', forkN: 1, text: '  too cautious  ' });
+    expect(ok).toBe(true);
+    expect(record).toMatchObject({ kind: 'challenge', forkN: 1, text: 'too cautious' });
+  });
+  it('accepts a withdraw with no text', () => {
+    const { ok, record } = validateMicroDecisionRecord({ kind: 'withdraw', forkN: 2 });
+    expect(ok).toBe(true);
+    expect(record).not.toHaveProperty('text');
+  });
+  it('rejects an unknown kind, a missing forkN, and empty challenge text', () => {
+    expect(validateMicroDecisionRecord({ kind: 'delete', forkN: 1 }).ok).toBe(false);
+    expect(validateMicroDecisionRecord({ kind: 'question', text: 'x' }).ok).toBe(false);
+    expect(validateMicroDecisionRecord({ kind: 'challenge', forkN: 1, text: '   ' }).ok).toBe(false);
+  });
+  it('rejects over-length text (durable-log hygiene)', () => {
+    expect(validateMicroDecisionRecord({ kind: 'challenge', forkN: 1, text: 'x'.repeat(2001) }).ok).toBe(false);
+  });
+});
+
+describe('foldMicroDecisionRecords', () => {
+  it('is pending on an empty stream', () => {
+    expect(foldMicroDecisionRecords([])).toEqual({ status: 'pending' });
+  });
+  it('latest-wins: a later question supersedes an earlier challenge', () => {
+    const folded = foldMicroDecisionRecords([
+      { kind: 'challenge', forkN: 1, text: 'wrong call' },
+      { kind: 'question', forkN: 1, text: 'does (b) cover read-time?' },
+    ]);
+    expect(folded.status).toBe('asked');
+    expect(folded.question).toBe('does (b) cover read-time?');
+    expect(folded.challenge).toBe('wrong call'); // prior text kept so a switch-back restores it
+  });
+  it('a withdraw reopens to pending', () => {
+    const folded = foldMicroDecisionRecords([
+      { kind: 'challenge', forkN: 1, text: 'wrong call' },
+      { kind: 'withdraw', forkN: 1 },
+    ]);
+    expect(folded.status).toBe('pending');
+  });
+});
+
+describe('durable record store + buildSurfaceFromDisk (fs shell)', () => {
+  let root; let juryDir; let microDir;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'md-'));
+    juryDir = join(root, 'jury');
+    microDir = join(root, 'micro');
+    mkdirSync(juryDir, { recursive: true });
+    mkdirSync(microDir, { recursive: true });
+    process.env.CONVEYOR_JURY_DIR = juryDir;
+    process.env.CONVEYOR_MICRO_DIR = microDir;
+  });
+  afterEach(() => {
+    delete process.env.CONVEYOR_JURY_DIR;
+    delete process.env.CONVEYOR_MICRO_DIR;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('appends + reads back a durable challenge (round-trip)', () => {
+    const key = microDecisionSubjectKey('webeverything', '2665', 1);
+    const r = appendMicroDecisionRecord(key, { kind: MICRO_RECORD_KINDS.CHALLENGE, forkN: 1, text: 'over-cautious' });
+    expect(r.ok).toBe(true);
+    expect(r.record.at).toBeTruthy(); // stamped
+    expect(readMicroDecisionRecord(key)).toMatchObject({ status: 'challenged', challenge: 'over-cautious' });
+  });
+
+  it('a rejected record is never written', () => {
+    const key = microDecisionSubjectKey('webeverything', '2665', 1);
+    const r = appendMicroDecisionRecord(key, { kind: 'bogus', forkN: 1 });
+    expect(r.ok).toBe(false);
+    expect(readMicroDecisionRecord(key)).toEqual({ status: 'pending' });
+  });
+
+  it('buildSurfaceFromDisk folds each fork\'s jury ledger + merges its durable record', () => {
+    // Fork 1: a clean jury ledger on disk → auto-cleared. Fork 2: no ledger → fail-closed contested.
+    const cleanLedger = cleanDiverseLedger();
+    const key1 = microDecisionSubjectKey('webeverything', '2665', 1);
+    writeFileSync(join(juryDir, `${subjectSlug(key1)}.jsonl`), cleanLedger.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    // Durable challenge on the contested fork 2.
+    const key2 = microDecisionSubjectKey('webeverything', '2665', 2);
+    appendMicroDecisionRecord(key2, { kind: 'challenge', forkN: 2, text: 'disputed' });
+
+    const dto = buildSurfaceFromDisk({
+      repo: 'webeverything', decisionKey: '2665', decisionId: '2665-x', decisionNum: '2665', decisionTitle: 'T',
+      forks: [ { n: 1, question: 'Clean' }, { n: 2, question: 'No ledger' } ],
+    });
+    expect(dto.autoCleared.map((f) => f.n)).toEqual([1]);
+    expect(dto.contested.map((f) => f.n)).toEqual([2]);
+    const fork2 = dto.contested.find((f) => f.n === 2);
+    expect(fork2.recordStatus).toBe('challenged');
+    expect(fork2.recordedChallenge).toBe('disputed');
+  });
+
+  it('buildSurfaceFromDisk never throws on a decision with no forks', () => {
+    const dto = buildSurfaceFromDisk({ repo: 'webeverything', decisionKey: '2665', forks: [] });
+    expect(dto.contested).toEqual([]);
+    expect(dto.forkCount).toBe(0);
+  });
+
+  it('a WITHDRAWN fork ships NO recorded text on the DTO (never resurrects a withdrawn challenge)', () => {
+    const key = microDecisionSubjectKey('webeverything', '2665', 2);
+    appendMicroDecisionRecord(key, { kind: 'challenge', forkN: 2, text: 'disputed' });
+    appendMicroDecisionRecord(key, { kind: MICRO_RECORD_KINDS.WITHDRAW, forkN: 2 });
+    const dto = buildSurfaceFromDisk({
+      repo: 'webeverything', decisionKey: '2665', decisionId: '2665-x', decisionNum: '2665', decisionTitle: 'T',
+      forks: [{ n: 2, question: 'No ledger' }],
+    });
+    const fork2 = dto.contested.find((f) => f.n === 2);
+    expect(fork2.recordStatus).toBeUndefined();
+    expect(fork2.recordedChallenge).toBeUndefined();
   });
 });

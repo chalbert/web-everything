@@ -3,7 +3,7 @@ bornAs: xeq9sha
 kind: story
 size: 5
 parent: "2577"
-status: open
+status: resolved
 blockedBy: ["2650"]
 scope:
   - we:scripts/lib/micro-decision-surface.mjs
@@ -11,6 +11,8 @@ scope:
   - plateau-app:vite.config.mts
   - plateau-app:src/backlog-view/
 dateOpened: "2026-07-25"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 
