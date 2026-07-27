@@ -68,6 +68,8 @@
  *   node scripts/merge-ai-prs.mjs                       # merge every qualifying AI PR (green + cleanly mergeable)
  *   node scripts/merge-ai-prs.mjs --pr=12               # consider ONLY PR #12 (still subject to every gate)
  *   node scripts/merge-ai-prs.mjs --only=12 --label=ready-to-merge --this-repo # #2290 single-couple FAST DRAIN (what /pr + /finish shell to stay instant)
+ *   node scripts/merge-ai-prs.mjs --only=12 --label=ready-to-merge          # #2683 fast drain, target = the LOCAL repo's PR #12; the full constellation is listed for cross-repo blockedBy ordering context
+ *   node scripts/merge-ai-prs.mjs --only=12 --only-repo=owner/frontierui --label=ready-to-merge # #2683 fast drain whose target PR #12 lives in a SIBLING repo (still ordered against the whole constellation)
  *   node scripts/merge-ai-prs.mjs --base=main           # restrict to PRs targeting <base> (default: any)
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # the /drain role: scope to producer-completed PRs, merge in blockedBy order
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run # print the blockedBy-ordered merge plan, merge NOTHING
@@ -108,7 +110,7 @@ import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBase
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor } from './lane-drain.mjs';
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
-import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime
+import { withNumberingLock, withLandWriteLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2683) the merge-write mutex (withLandWriteLock, same lock key) + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
 import { extractManifestFromBody, manifestAuditLine, asItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
 // #2399 — the ONE remote-manifest `gh api` argv, shared with `/finish` (lane-resume) so the two readers never
@@ -199,6 +201,26 @@ export function applyEscalationRelief(gate, { relieved = false } = {}) {
   }
   if (gate.applyLabel !== REVIEW_LABELS.pending) return { waive: false };
   return { waive: true, reason: 'per-PR --no-review-escalation relief — agent-reviewable review:pending waived to a merge (#2423)' };
+}
+
+/**
+ * #2683 — does this PR match the `--only=<pr>` fast-drain TARGET? Pure. PR numbers are per-repo, so a bare
+ * `--only=12` on the default constellation scope must not match a same-numbered PR in a sibling repo. Rules
+ * (first match wins):
+ *   - number mismatch → never.
+ *   - `--only-repo=<slug>` given → the PR's repo must equal it (the explicit sibling-PR case, e.g. pr-watch).
+ *   - else a SINGLE-repo sweep (`repoCount === 1`: `--this-repo` → the cwd repo, OR `--repos=<one>` → one
+ *     explicit slug) → match (the legacy `/pr` + `/finish` callers, which scope the sweep and pass NO
+ *     `--only-repo`; without this branch a `--repos=<remoteslug>` `/finish` would filter its own target out).
+ *   - else (a multi-repo default sweep with no `--only-repo`) → match ONLY the local/cwd repo (disambiguate).
+ * @param {{prNumber:(number|string), onlyPr:(number|string), repo:(string|null), onlyRepo:(string|null), isLocal:boolean, repoCount:number}} o
+ * @returns {boolean}
+ */
+export function matchesOnlyTarget({ prNumber, onlyPr, repo, onlyRepo, isLocal, repoCount } = {}) {
+  if (String(prNumber) !== String(onlyPr)) return false;
+  if (onlyRepo) return repo === onlyRepo;
+  if (repoCount === 1) return true;
+  return !!isLocal;
 }
 
 /** An anthropic/Claude identity on a commit author (the `Co-Authored-By: Claude …` trailer gh surfaces as an
@@ -514,10 +536,10 @@ export function joinImplToCouples(verdicts) {
  * the legacy unordered sweep when nothing carries a manifest.
  *
  * @param {Array<{num:number, item:(number|string|null), blockedBy:Array<number|string>, stackParents?:Array<number|string>, decision:'merge'|'skip'}>} candidates
- * @param {{landedThisPass?:Set, provenOnMain?:Set}} [proof]  positive proof-of-land sets (both `asItemId`-keyed)
+ * @param {{landedThisPass?:Set, provenOnMain?:Set, extraOpenItems?:Iterable<number|string>}} [proof]  positive proof-of-land sets (both `asItemId`-keyed)
  * @returns {{ready:Array, deferred:Array<{num,item,waitOn:Array<number|string>}>}}  ready is ordered (item asc, then PR#).
  */
-export function planLabelDrain(candidates, { landedThisPass = new Set(), provenOnMain = new Set() } = {}) {
+export function planLabelDrain(candidates, { landedThisPass = new Set(), provenOnMain = new Set(), extraOpenItems = null } = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
   // Every candidate still in play keeps its item "open" — a red/skip blocker must still defer its dependents,
   // so the open set is ALL candidate items, not just the mergeable ones. (A merged item is removed by the
@@ -529,6 +551,15 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
   // EVERY hash `blockedBy` edge would spuriously resolve `openItems.has(NaN)` → true against ANY other open
   // hash item, not just its actual blocker (defers/frees the wrong item).
   const openItems = new Set(list.map((c) => c.item).filter((x) => x != null).map(asItemId));
+  // #2683 — `extraOpenItems` unions in the items of open PRs OUTSIDE the candidate `list`. This is what makes a
+  // `--only=<pr>` FAST DRAIN (whose candidate list is NARROWED to the single target PR) order IDENTICALLY to the
+  // full sweep: without it the target's `blockedBy`/`stackParents` edges pointing at a still-open SIBLING PR
+  // would resolve against an `openItems` that only knows the target's own item → the edge reads as "landed" and
+  // the target lands EARLY (AC1). Feeding the full open-PR item set (from the pass's `collectOpenPrContext`) in
+  // here defers the target whenever a blocker is still open — never lands it ahead of its dependency. A superset
+  // is safe: it can only ADD a defer, never drop one (the safe direction). Empty/absent on the full sweep, where
+  // the candidate list already IS the full set.
+  if (extraOpenItems) for (const it of extraOpenItems) { if (it != null) openItems.add(asItemId(it)); }
   // #2393 — is a `stackParent` PROVEN LANDED? POSITIVE proof by identity (F5), NEVER ref-absence:
   //   1. landed THIS run  — the caller adds the item on its WE-carrier merge (aligned with `bornAs`, which is
   //      stamped only at the WE land, so a green impl PR of a red couple never counts its parent "landed").
@@ -1152,6 +1183,13 @@ function runCli() {
   // single-couple FAST DRAIN that /pr (pr-land) and /finish (lane-resume) shell so they still feel instant
   // while the drain stays the sole writer to main. Same gated land path as a full sweep, just number-filtered.
   const onlyPr = flags.only != null ? String(flags.only) : (flags.couple != null ? String(flags.couple) : (flags.pr != null ? String(flags.pr) : null));
+  // #2683 — the target repo for `--only=<pr>`. PR numbers are per-repo (WE #12 ≠ FUI #12), so a bare `--only=12`
+  // on the DEFAULT constellation scope would match a same-numbered PR in EVERY repo. `--only-repo=<slug>` names
+  // the ONE repo the target lives in; absent, the target defaults to the LOCAL (cwd) repo. The full REPOS scope
+  // is still listed for the cross-repo ordering context (`collectOpenPrContext` → `extraOpenItems`), so the fast
+  // drain sequences blockedBy against the whole constellation while merging exactly one PR. Legacy `/pr`+`/finish`
+  // callers pass `--only=<n> --this-repo` (REPOS=[cwd], no `--only-repo`) → the single cwd PR, unchanged.
+  const onlyRepo = typeof flags['only-repo'] === 'string' && flags['only-repo'].trim() ? flags['only-repo'].trim() : null;
   const base = typeof flags.base === 'string' ? flags.base : null;
   // #2188 — the drain↔/merge convergence: `--label ready-to-merge` scopes the sweep to producer-completed PRs
   // (the F1 signal), so this ONE lander serves both `/merge` (bare = every AI PR) and `/drain` (label-scoped +
@@ -1327,6 +1365,19 @@ function runCli() {
     return null;
   };
 
+  // #2683 — the per-PR IDEMPOTENCY probe for the merge-write critical section. Re-reads the PR's CURRENT state
+  // SERVER-SIDE right before the `gh pr merge` (inside the serial-writer mutex): a PR a CONCURRENT lander (a
+  // resident-daemon 60s sweep, or another fast drain) already merged reads MERGED here → the caller makes it a
+  // safe NO-OP instead of a double `gh pr merge`. Best-effort: a gh miss returns false (proceed to attempt — gh
+  // itself refuses an already-merged PR, so a probe hiccup can never CAUSE a double-land, only fail to short it).
+  const isPrAlreadyMerged = (repo, num) => {
+    try {
+      const out = execFileSync('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json', 'state,mergedAt'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      const j = JSON.parse(out || '{}');
+      return String(j.state || '').toUpperCase() === 'MERGED' || !!j.mergedAt;
+    } catch { return false; }
+  };
+
   // #2421 — ONE unfiltered per-repo PR listing + manifest read, shared by BOTH the cross-repo "is this backlog
   // item still open" set the `blocked` branch of `lifecycleLabelFromCiTruth` needs, AND the reconcile below —
   // instead of each independently re-listing + re-reading manifests for the SAME open-PR set (2x the `gh pr
@@ -1454,7 +1505,12 @@ function runCli() {
     try { prs = JSON.parse(execFileSync('gh', listArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
     catch (e) { fail('gh-error', `gh pr list${repo ? ` --repo ${repo}` : ''} failed (${String(e.message || e).split('\n')[0]}) — is gh authenticated?`, 3); }
 
-    if (onlyPr) prs = prs.filter((p) => String(p.number) === onlyPr);
+    // #2683 — the `--only` target is repo-scoped (see `matchesOnlyTarget`): `--only-repo=<slug>` names the repo;
+    // a single-repo sweep (`--this-repo` / `--repos=<one>` — the legacy `/pr`+`/finish` callers) matches its one
+    // repo; a multi-repo default sweep with no `--only-repo` disambiguates to the LOCAL repo. This narrows the
+    // MERGE candidate set to the one target PR (the fast-drain contract) while the full REPOS listing above still
+    // feeds the cross-repo ordering context below.
+    if (onlyPr) prs = prs.filter((p) => matchesOnlyTarget({ prNumber: p.number, onlyPr, repo, onlyRepo, isLocal: isLocalRepo(repo), repoCount: REPOS.length }));
     // Attach each PR's commits (per-PR fetch avoids the node-cap overflow of asking for them in the list).
     for (const p of prs) {
       try { p.commits = JSON.parse(execFileSync('gh', ['pr', 'view', String(p.number), ...repoFlag(repo), '--json', 'commits'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').commits || []; }
@@ -1513,6 +1569,14 @@ function runCli() {
   // parent's WE side lands — never on a green impl PR of an otherwise-broken couple). Threaded into every
   // planLabelDrain call this pass so a chain lands in order.
   const landedThisPass = new Set();
+  // #2683 — the cross-item ORDERING CONTEXT for a `--only` FAST DRAIN. The candidate `verdicts` were narrowed to
+  // the single target PR above, so on their own `planLabelDrain` would see only the target's item as "open" and
+  // land it even if a `blockedBy`/`stackParents` sibling is still unlanded. Feeding the full open-PR item set
+  // (`collectOpenPrContext` — every open PR across the swept repos, unfiltered by `--only`) as `extraOpenItems`
+  // makes the target order IDENTICALLY to the full sweep: it defers whenever a blocker is still open, never
+  // early. `null` on a full sweep (the candidate list already IS the full set). Populated whenever RECONCILE ran
+  // (the `--label`-scoped fast drain the daemon/pr-watch fire); an empty context degrades to today's behaviour.
+  const orderExtraOpenItems = onlyPr ? openPrContext.openItems : null;
   // #2222 — PRE-CHECK id-collision self-heal, retained here (THE drain, the sole writer to main, #2290) as a
   // DORMANT BACKSTOP under JIT numbering (#2288/#2291): a new item is now born hash-keyed, so a lane's NEW item
   // reusing a base `NNN` should be unrepresentable pre-land — this stays a cheap no-op on the common path, kept
@@ -1898,7 +1962,7 @@ function runCli() {
   if (DRY_RUN) {
     // Report the planned first-pass order (blockedBy + #2393 stackParents-honoured) without merging. Nothing has
     // landed this run, so `landedThisPass` is empty — the plan reflects only prior-session `bornAs` proof.
-    const plan = planLabelDrain(verdicts, { landedThisPass, provenOnMain });
+    const plan = planLabelDrain(verdicts, { landedThisPass, provenOnMain, extraOpenItems: orderExtraOpenItems });
     deferred = plan.deferred;
     if (!AS_JSON) {
       process.stderr.write(`  merge order: ${plan.ready.map((c) => repoTag(c.repo) + c.num + (c.item ? `→${c.item}` : '')).join(' → ') || '(none ready)'}\n`);
@@ -1913,7 +1977,7 @@ function runCli() {
     // collide in the cascade bookkeeping.
     const sameCand = (a, b) => a.num === b.num && a.repo === b.repo;
     for (;;) {
-      const plan = planLabelDrain(remaining, { landedThisPass, provenOnMain });
+      const plan = planLabelDrain(remaining, { landedThisPass, provenOnMain, extraOpenItems: orderExtraOpenItems });
       deferred = plan.deferred;
       if (!plan.ready.length) break;
       let progressed = false;
@@ -1942,7 +2006,27 @@ function runCli() {
           // #2290 — the drain is the SOLE writer to main: the one `gh pr merge` now routes through the shared
           // gate (caller 'drain' — the only caller the gate permits). Behaviour is identical to the prior
           // inline call (`gh pr merge <n> [--repo …] --merge --delete-branch`, throw on a non-zero gh exit).
-          mergePr({ pr: c.num, repo: c.repo, method: 'merge', caller: 'drain' });
+          // #2683 — the write is now SERIALIZED by the serial-writer mutex (drain-lock, shared with the numbering
+          // section) and GUARDED by a per-PR idempotency re-check. The mutex is the ONLY lock a `--only` fast drain
+          // shares with a concurrent resident-daemon sweep (the fast drain bypasses the whole-process lease), so
+          // it is what serializes the actual merge write, not just NNN allocation. Inside the lock, the re-check
+          // makes a PR another lander already merged a safe no-op — never a double `gh pr merge`.
+          const landLock = withLandWriteLock(() => {
+            if (isPrAlreadyMerged(c.repo, c.num)) return { skipped: 'already-merged' };
+            mergePr({ pr: c.num, repo: c.repo, method: 'merge', caller: 'drain' });
+            return { merged: true };
+          });
+          if (landLock.contended && !AS_JSON) process.stderr.write(`  ⚠ merge-write mutex not acquired (held by ${landLock.heldBy || '?'}) — merged under the per-PR idempotency guard instead (#2683)\n`);
+          if (landLock.result && landLock.result.skipped === 'already-merged') {
+            // A concurrent lander already merged this PR. Treat it as landed for THIS pass's ordering bookkeeping
+            // (item leaves the open set → dependents free) but do NOT add it to `merged`: the lander that actually
+            // ran `gh pr merge` owns the post-land numbering / derived-regen / main-sync. Idempotent no-op.
+            remaining = remaining.filter((x) => !sameCand(x, c));
+            if (c.hasManifest && c.item != null) landedThisPass.add(asItemId(c.item));
+            progressed = true;
+            if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} already merged by a concurrent lander — idempotent no-op (#2683)\n`);
+            continue;
+          }
           merged.push({ num: c.num, repo: c.repo }); progressed = true;
           remaining = remaining.filter((x) => !sameCand(x, c)); // merged → item leaves the open set (frees dependents)
           // #2393 — a WE-carrier merge (the PR carrying its OWN manifest = the resolve carrier + where `bornAs`
@@ -1954,6 +2038,19 @@ function runCli() {
           if (!AS_JSON) process.stderr.write(`  ✓ merged ${repoTag(c.repo)}${c.num}${c.item ? ` (#${c.item})` : ''}\n`);
         } catch (e) {
           const detail = String(e.message || e).split('\n')[0];
+          // #2683 — CONTENDED-FALLBACK idempotency recovery. If the merge write raced past the mutex (the
+          // never-hang fallback ran `fn` un-locked) and LOST to a concurrent lander, `gh pr merge` throws here on
+          // an already-merged PR. Re-probe: if it is now MERGED, this is the SAME safe idempotent no-op as the
+          // in-lock pre-check — record it as landed for the ordering bookkeeping instead of a spurious
+          // `failedMerges` (the other lander owns the post-land numbering/regen). Only a merge failure on a PR
+          // that is genuinely still open is a real fault below.
+          if (isPrAlreadyMerged(c.repo, c.num)) {
+            remaining = remaining.filter((x) => !sameCand(x, c));
+            if (c.hasManifest && c.item != null) landedThisPass.add(asItemId(c.item));
+            progressed = true;
+            if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} merged by a concurrent lander during a contended write — idempotent no-op (#2683)\n`);
+            continue;
+          }
           const cc = remaining.find((x) => sameCand(x, c)); if (cc) cc.decision = 'skip'; // stays blocking its dependents; not retried this pass
           // #2198 — a PR we JUST rebuilt (rebase-drop) has a new head, so CI (`test`) is re-running; an immediate
           // merge is EXPECTED to bounce on pending checks. That is not a hard failure — the watch re-sweeps and
