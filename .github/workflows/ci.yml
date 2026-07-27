@@ -9,7 +9,13 @@ name: CI
 #
 # Scope: the fast deterministic lanes + the visual-regression guard (#2177), split across parallel jobs
 # so the correctness lane doesn't wait on the slower build/browser steps:
-#   job `test`  — unit suite + coverage (80% bar) + repo health gate. The fast correctness lane.
+#   job `test-shard` — the 2000+ vitest suite split across N runners (`vitest run --shard=i/N`, #2682),
+#                 each emitting a partial coverage report. A matrix job, so its own check names are
+#                 `test-shard (1..N)`, NOT a required check.
+#   job `test`  — THE required aggregating check: fans in every shard's coverage, applies the 80% bar
+#                 (#2082) to the COMBINED result, and runs the repo health gate (check:standards,
+#                 unsharded). Sharding the suite cut this lane's wall-clock without weakening the bar —
+#                 every test still runs, just split across runners (#2682).
 #   job `smoke` — deploy smoke (build:docs, #2220) + the deterministic Playwright interaction lane (#2070,
 #                 self-contained against a static fixture server, no app build). Runs concurrently with
 #                 `test`; both moved OFF `test`'s critical path here, so branch protection must require
@@ -49,8 +55,27 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  # Sharded unit suite (#2682). The 2000+ vitest suite runs split across N parallel runners
+  # (`vitest run --shard=i/N`) to cut the `test` gate's wall-clock. Each shard runs WITH coverage but
+  # with its per-shard thresholds disabled (`test:coverage:shard`) — a single shard exercises only
+  # ~1/N of the tests, so no shard could meet the 80% bar alone — and uploads its partial
+  # coverage-final.json. The `test` job below fans them back in and applies the bar to the COMBINED
+  # result, so the split changes only WHERE tests run, never WHETHER coverage gates. Sharding is by test
+  # FILE, so every file (incl. the poolMatchGlobs singleFork one) lands in exactly one shard.
+  test-shard:
     runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel sibling shards when one fails — the `test` aggregator reports the combined red, and
+      # cancelling would hide which other shards also failed.
+      fail-fast: false
+      matrix:
+        # N shards. Keep this list's LENGTH in lockstep with the `--expect=N` in the `test` job below
+        # (the shard divisor itself is derived from the matrix via `strategy.job-total`, so only the
+        # --expect guard is hand-synced). More shards = more fixed per-runner setup (~25s each) for less
+        # marginal wall-clock; 4 balances parallelism against that setup tax.
+        # NOTE: `strategy.job-total` (used as the shard divisor below) counts ALL matrix combinations, so
+        # this matrix must stay SINGLE-DIMENSION — adding a second axis would break the `i/N` divisor.
+        shard: [1, 2, 3, 4]
     steps:
       # Sibling layout under $GITHUB_WORKSPACE so WE's `../frontierui` resolves — both the vitest/vite
       # `@frontierui/*` alias (dev/test-time; `we:vitest.config.ts` → `../frontierui/plugs`) AND the pinned
@@ -89,9 +114,86 @@ jobs:
         working-directory: web-everything
         run: npm ci
 
-      - name: Unit suite + coverage (80% bar, #2082)
+      # `strategy.job-total` = the matrix length, so the divisor stays correct if the shard list changes.
+      - name: Unit suite shard ${{ matrix.shard }}/${{ strategy.job-total }} (coverage, no per-shard bar)
         working-directory: web-everything
-        run: npm run test:coverage
+        run: npm run test:coverage:shard -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+      # Upload this shard's partial coverage for the `test` job to merge. `if-no-files-found: error`
+      # turns a missing report into a red shard (not a silent under-count) — the merge's --expect guard
+      # is the second line of defence.
+      - name: Upload shard coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: web-everything/coverage/coverage-final.json
+          if-no-files-found: error
+
+  # Aggregating gate (#2682) — THE required `test` status check. Branch protection still requires `test`
+  # (this job) + `smoke`, so the required-check contract is UNCHANGED by the shard split. It fans in every
+  # shard's coverage, applies the #2082 80% bar to the COMBINED result, and runs the repo health gate
+  # (check:standards — unsharded and fast, it doesn't touch the test partition).
+  #
+  # Runs even when a shard failed (`if: !cancelled()`), and its first step fails the job unless EVERY
+  # shard succeeded: a required check that is SKIPPED (the default when a `needs` dep fails) can be
+  # mis-read by branch protection as satisfied, which would let a broken shard merge green. Failing
+  # explicitly makes `test` a real red instead.
+  test:
+    needs: test-shard
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on shard results
+        run: |
+          if [ "${{ needs.test-shard.result }}" != "success" ]; then
+            echo "One or more test shards did not succeed (test-shard result: ${{ needs.test-shard.result }})."
+            exit 1
+          fi
+
+      # Same sibling layout as the shards — check:standards shells out to FUI's render CLI.
+      - name: Checkout WE
+        uses: actions/checkout@v4
+        with:
+          path: web-everything
+      - name: Checkout FUI (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: chalbert/frontierui
+          token: ${{ secrets.FUI_READ_TOKEN }}
+          path: frontierui
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web-everything/package-lock.json
+            frontierui/package-lock.json
+
+      - name: Install + build FUI tools
+        working-directory: frontierui
+        run: |
+          npm ci
+          npm run build:tools
+
+      - name: Install
+        working-directory: web-everything
+        run: npm ci
+
+      # Each shard artifact lands in its own subdir (no merge-multiple), so coverage-final.json names
+      # don't collide; the merge script walks the tree recursively.
+      - name: Download shard coverage
+        uses: actions/download-artifact@v4
+        with:
+          path: web-everything/coverage-shards
+          pattern: coverage-shard-*
+
+      # Merge the partial shard reports and enforce the 80% bar on the combined coverage (#2082).
+      # --expect=N must equal the matrix shard count above — it fails loud if a shard's report is
+      # missing, so a dropped shard can never under-count coverage into a false green.
+      - name: Merge coverage + enforce 80% bar (#2082)
+        working-directory: web-everything
+        run: npm run coverage:merge -- coverage-shards --threshold=80 --expect=4
 
       - name: Repo health gate
         working-directory: web-everything
