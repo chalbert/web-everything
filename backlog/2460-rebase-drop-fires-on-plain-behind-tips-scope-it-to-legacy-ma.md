@@ -5,6 +5,11 @@ size: 3
 status: open
 dateOpened: "2026-07-12"
 tags: []
+scope:
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:scripts/lib/rebase-drop-manifest.mjs
+  - we:scripts/lib/__tests__/rebase-drop-manifest.test.mjs
 ---
 
 # rebase-drop fires on plain BEHIND tips — scope it to legacy manifest conflicts, stop fabricating commits
