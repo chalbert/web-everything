@@ -7,6 +7,13 @@ status: open
 priority: low
 dateOpened: "2026-07-11"
 tags: []
+scope:
+  - we:scripts/drain-push-at-close.mjs
+  - we:scripts/__tests__/drain-push-at-close.test.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:skills-src/drain/SKILL.md
+  - we:skills-src/batch-backlog-items/SKILL.md
 ---
 
 # Push-at-close drain: prompt exit when no batch feed (avoid full max-runtime idle poll)
