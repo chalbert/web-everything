@@ -5,7 +5,7 @@
  *   when the range is gap-free. `rng` is injected so the choice is deterministic under test.
  */
 import { describe, it, expect } from 'vitest';
-import { nextNum, pad3, slugify } from '../scaffold.mjs';
+import { nextNum, pad3, slugify, normalizeScope, renderItem } from '../scaffold.mjs';
 
 describe('nextNum — random free-in-range allocation (#2292)', () => {
   it('picks a GAP below max, not max+1 (cuts the two-lanes-same-NNN collision)', () => {
@@ -33,5 +33,37 @@ describe('slugify', () => {
   it('kebab-cases and trims to 60 chars', () => {
     expect(slugify('Hello, World! Foo')).toBe('hello-world-foo');
     expect(slugify('  --Edge__case--  ').replace(/^-+|-+$/g, '')).toBe('edge-case');
+  });
+});
+
+describe('normalizeScope — coarse, prefix-shaped touch-set the readiness flow authors (#2619)', () => {
+  it('trims each entry and drops empties/whitespace', () => {
+    expect(normalizeScope([' we:scripts/backlog/scaffold.mjs ', '', '   '])).toEqual([
+      'we:scripts/backlog/scaffold.mjs',
+    ]);
+  });
+  it('dedupes while preserving first-seen order (a set, not a sort)', () => {
+    expect(normalizeScope(['we:b', 'we:a', 'we:b', 'we:a'])).toEqual(['we:b', 'we:a']);
+  });
+  it('collapses entries that differ only by surrounding whitespace', () => {
+    expect(normalizeScope(['we:a', ' we:a '])).toEqual(['we:a']);
+  });
+  it('non-array / nullish → []', () => {
+    expect(normalizeScope(undefined)).toEqual([]);
+    expect(normalizeScope(null)).toEqual([]);
+    expect(normalizeScope('we:a')).toEqual([]);
+  });
+});
+
+describe('renderItem — predicted scope: frontmatter (#2619)', () => {
+  const base = { kind: 'story', size: 3, slug: 'x', title: 'X', today: '2026-07-27' };
+  it('emits an inline scope: array, normalized (deduped/trimmed) in author order', () => {
+    const out = renderItem({ ...base, scope: [' we:scripts/backlog/scaffold.mjs ', 'we:skills-src/split-backlog-item/', 'we:scripts/backlog/scaffold.mjs'] });
+    expect(out).toContain('scope: ["we:scripts/backlog/scaffold.mjs", "we:skills-src/split-backlog-item/"]');
+  });
+  it('omits scope: entirely when no touch-set is given (unscoped item)', () => {
+    expect(renderItem(base)).not.toContain('scope:');
+    expect(renderItem({ ...base, scope: [] })).not.toContain('scope:');
+    expect(renderItem({ ...base, scope: ['  '] })).not.toContain('scope:');
   });
 });
