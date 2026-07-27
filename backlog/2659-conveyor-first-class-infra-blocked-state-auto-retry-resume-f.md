@@ -16,8 +16,10 @@ scope:
   - we:scripts/__tests__/pr-land.test.mjs
   - we:skills-src/conveyor/SKILL.md
   - we:skills-src/conveyor/delivery-agent-brief.md
-status: open
+status: resolved
 dateOpened: "2026-07-24"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: [conveyor, infra, resilience]
 ---
 

@@ -68,8 +68,11 @@
  *
  * Exit codes: 0 = merged (or opened --no-wait / labelled-on-green / dry-run OK); 2 = required check RED (nothing merged);
  * 3 = unmergeable / gh error / push failed / EMPTY DESCRIPTION (#2324 — nothing merged; recoverable — rebase the
- * ref and re-run, or pass --fallback-git; an empty-body refusal is fixed by editing the PR body and re-running).
- * A non-zero exit means `main` was left UNTOUCHED.
+ * ref and re-run, or pass --fallback-git; an empty-body refusal is fixed by editing the PR body and re-running);
+ * 4 = BLOCKED-ON-INFRA (#2659) — the lane ref was PUSHED but `gh pr create` failed on an OUTSIDE dependency (a
+ * GitHub outage / network fault). NOT a hard fail: the pushed handle is recorded in the conveyor infra-blocked
+ * state, which auto-retries with backoff and resume-opens the PR once infra recovers (nothing is stranded; the
+ * drain stays the sole writer to main). A non-zero exit means `main` was left UNTOUCHED.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -89,6 +92,7 @@ import {
 import { resolveJuryPlan } from './lib/review-core.mjs'; // #2635 — recompute the jury roster from the REAL diff at PR-open
 import { POLICY_CARE_JURY } from './lib/review-policy.mjs'; // #2635 — the care→jury contract's roster-timing mode (knob #4)
 import { parseManifest, embedManifestInBody, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs'; // xnsk54v — manifest rides the PR body, not a tracked file
+import { classifyPrOpenFailure, recordInfraBlockIO, infraStorePath, primaryRootFromClone, originSlugOf } from './conveyor/infra-blocked.mjs'; // #2659 — a post-push PR-open failure on an outside dependency → the infra-blocked state (recorded for auto-retry/resume), not a hard fail
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -461,10 +465,41 @@ function runCli() {
     if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
     else {
       const tag = result.merged ? '✓ merged' : result.reason === 'dry-run' ? '· dry-run' : result.reason === 'opened' ? '· opened (no-wait)'
-        : result.reason === 'enqueued' ? '✓ enqueued (drain lands it)' : result.reason === 'labelled-on-green' ? '✓ labelled (drain lands it)' : '✗ not merged';
+        : result.reason === 'enqueued' ? '✓ enqueued (drain lands it)' : result.reason === 'labelled-on-green' ? '✓ labelled (drain lands it)'
+        : result.reason === 'blocked-on-infra' ? '⊘ infra-blocked (recorded — auto-retry/resume)' : '✗ not merged';
       process.stderr.write(`pr-land [${result.repo}] ${tag}: ${result.detail}\n`);
     }
     process.exit(exitCode);
+  }
+
+  // #2659 — a `gh pr create` failure AFTER the lane ref was already pushed (step 2) is the PRE-PR infra-failure
+  // case. If the error is a KNOWN-transient outside-dependency fault (a GitHub outage / network fault), the
+  // built + pushed work must NOT hard-fail: it lands in the conveyor INFRA-BLOCKED state (#2659), which records
+  // the resumable handle (ref/sha/base/body), auto-retries with backoff, and resume-opens the PR once infra
+  // recovers — the drain still lands it (pr-land never merges; nothing is stranded). A NON-transient error (a
+  // bad/empty body, auth, "a pull request already exists", validation) is NOT infra → the normal hard fail
+  // (ghFailed) applies, never a doomed retry loop.
+  function onCreateFailed(e) {
+    const errText = `${String(e?.message || e)}\n${String(e?.stderr || '')}`;
+    const { infra, cause } = classifyPrOpenFailure(errText);
+    if (!infra) return ghFailed(`gh pr create failed (${String(e?.message || e).split('\n')[0]})`);
+    // Record the pushed handle. pr-land runs in a LANE clone, so write the record into the PRIMARY checkout
+    // (where the /conveyor tick's retry pass reads) via the clone's git alternates; fall back to this checkout
+    // when not a lane clone (e.g. a direct /pr from the primary). Best-effort — a record hiccup never changes
+    // the already-diagnosed outcome; the emit below still surfaces the resume handle.
+    const itemNum = (REF.match(/^lane\/(x[a-z0-9]{5,7}|\d+)/i) || [])[1] || null;
+    let recorded = false;
+    try {
+      const root = primaryRootFromClone(REPO) || REPO;
+      recordInfraBlockIO({ num: itemNum, ref: REF, sha: refSha, base: BASE, repo: originSlugOf(REPO), cause, body: CREATE_BODY }, { path: infraStorePath(root) });
+      recorded = true;
+    } catch { /* best-effort */ }
+    emit({
+      repo: REPO, merged: false, reason: 'blocked-on-infra',
+      num: itemNum, ref: REF, sha: refSha, base: BASE, cause, recorded,
+      resumeHandle: { ref: REF, sha: refSha, base: BASE },
+      detail: `PR-open failed on an outside dependency (${cause}) — lane ref ${REF} is PUSHED and recorded in the conveyor infra-blocked state${recorded ? '' : ' (record write failed — resume by hand from the ref)'}; it auto-retries + resume-opens once infra recovers (${BASE} left untouched, nothing stranded)`,
+    }, 4);
   }
 
   if (!REF) emit({ repo: REPO, merged: false, reason: 'no-ref', detail: 'pass --ref=lane/<name> (the head ref to land onto ' + BASE + ')' }, 3);
@@ -544,7 +579,7 @@ function runCli() {
     const bodyGuard = prCreateBodyGuard(BODY);
     if (!bodyGuard.ok) emit({ repo: REPO, merged: false, reason: 'empty-body', detail: `${bodyGuard.reason} (head ${REF})` }, 3);
     try { const out = ghC(createArgs); prNum = (out.match(/\/pull\/(\d+)/) || [])[1] ?? null; }
-    catch (e) { return ghFailed(`gh pr create failed (${String(e.message || e).split('\n')[0]})`); }
+    catch (e) { return onCreateFailed(e); }
   } else if (LANE_MANIFEST) {
     // xnsk54v — an existing PR (a re-run, or one opened before the manifest was ready) may lack the manifest
     // block the drain reads. Best-effort embed it (idempotent — embedManifestInBody replaces in place); a gh

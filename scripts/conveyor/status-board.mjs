@@ -77,11 +77,12 @@ function reviewLabelOf(labels) {
 
 /**
  * #2660 — the infra-blocked detail on a lane (an OUTSIDE dependency is degraded and the conveyor is
- * auto-retrying), or null. Shape `{ cause, attempt, nextRetrySec }`, read DEFENSIVELY: a partial / absent value
- * (or an empty cause) is "not infra", so the state (#2641 / a later outage-detection slice) can fill it
- * incrementally without ever making this renderer throw. The `cause` is the failure CLASS ("GitHub outage").
- * @param {{infra?:{cause?:string, attempt?:number, nextRetrySec?:number}}} lane
- * @returns {{cause:string, attempt?:number, nextRetrySec?:number}|null}
+ * auto-retrying), or null. Shape `{ cause, attempt, nextRetrySec, capped }` (#2659 adds `capped` — once the
+ * retry-attempt cap is hit, auto-retry is exhausted and a human resumes), read DEFENSIVELY: a partial / absent
+ * value (or an empty cause) is "not infra", so the state can fill it incrementally without ever making this
+ * renderer throw. The `cause` is the failure CLASS ("GitHub outage").
+ * @param {{infra?:{cause?:string, attempt?:number, nextRetrySec?:number, capped?:boolean}}} lane
+ * @returns {{cause:string, attempt?:number, nextRetrySec?:number, capped?:boolean}|null}
  */
 export function infraOf(lane) {
   const i = lane && typeof lane.infra === 'object' && lane.infra ? lane.infra : null;
@@ -190,16 +191,22 @@ export function renderBoard(state) {
     const byCause = new Map();
     for (const l of infraLanes) {
       const i = infraOf(l);
-      const g = byCause.get(i.cause) ?? { n: 0, attempt: 0, next: Infinity };
+      const g = byCause.get(i.cause) ?? { n: 0, attempt: 0, next: Infinity, capped: 0 };
       g.n += 1;
       if (Number.isFinite(i.attempt)) g.attempt = Math.max(g.attempt, i.attempt);
       if (Number.isFinite(i.nextRetrySec)) g.next = Math.min(g.next, i.nextRetrySec);
+      if (i.capped) g.capped += 1; // #2659 — an attempt-capped lane is no longer auto-retrying
       byCause.set(i.cause, g);
     }
     const lines = ['OUTAGE'];
     for (const [cause, g] of byCause) {
-      const next = Number.isFinite(g.next) ? ` · next retry in ${Math.max(0, Math.round(g.next))}s` : '';
-      lines.push(`  ${MARKERS.infra} outside dependency degraded — ${g.n} lane${g.n === 1 ? '' : 's'} waiting on ${cause} · retrying (attempt ${g.attempt}${next})`);
+      // #2659 — when EVERY lane on this cause has hit the attempt cap, auto-retry is exhausted (a human must
+      // resume/re-open); until then it is still retrying with a countdown to the soonest retry.
+      const exhausted = g.capped === g.n;
+      const state = exhausted
+        ? `auto-retry exhausted (attempt ${g.attempt}) — resume by hand`
+        : `retrying (attempt ${g.attempt}${Number.isFinite(g.next) ? ` · next retry in ${Math.max(0, Math.round(g.next))}s` : ''})`;
+      lines.push(`  ${MARKERS.infra} outside dependency degraded — ${g.n} lane${g.n === 1 ? '' : 's'} waiting on ${cause} · ${state}`);
       lines.push(`    resume: ${RESUME_HINT}`);
     }
     blocks.push(lines.join('\n'));
@@ -213,9 +220,12 @@ export function renderBoard(state) {
       if (l.marker === 'paused') extra = ` (breach on ${arr(l.breach).length} path${arr(l.breach).length === 1 ? '' : 's'})`;
       else if (l.marker === 'infra') {
         // the failure CLASS + retry attempt + next-retry countdown, so an infra pause never reads as a stall.
+        // #2659 — once the attempt cap is hit, show "auto-retry exhausted" (a human resumes) instead of a countdown.
         const i = infraOf(l);
-        const next = Number.isFinite(i.nextRetrySec) ? ` · next ${Math.max(0, Math.round(i.nextRetrySec))}s` : '';
-        extra = ` (${i.cause} · retry ${Number.isFinite(i.attempt) ? i.attempt : '?'}${next})`;
+        const tail = i.capped
+          ? ' · auto-retry exhausted'
+          : Number.isFinite(i.nextRetrySec) ? ` · next ${Math.max(0, Math.round(i.nextRetrySec))}s` : '';
+        extra = ` (${i.cause} · retry ${Number.isFinite(i.attempt) ? i.attempt : '?'}${tail})`;
       } else if (l.marker === 'parked') {
         const pr = prByNum.get(numKey(l.num));
         if (pr?.prNumber != null) extra = ` (PR #${pr.prNumber})`;

@@ -40,6 +40,10 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { readQueueFile, resolveQueuePath, normNum } from '../conveyor/queue-store.mjs';
+// #2659 — the infra-blocked state: a delivery/prepare agent that PUSHED its lane ref but failed PR-open on an
+// outside dependency lands here (not a stall / gate-red). `deriveInfraByNum` is PURE (no fs/clock — it takes the
+// raw store + injected `now`), safe for the pure core; the IO shell reads the sidecar via `readInfraStore`.
+import { deriveInfraByNum, readInfraStore, resolveInfraStorePath } from '../conveyor/infra-blocked.mjs';
 // #2613 — the SAME empty-scope test the dispatcher uses (normScope([]) === [] ⇒ no usable scope), so the tick
 // picture's `unshaped` set and the dispatch plan's `unshaped-no-scope` holds can never disagree on what counts
 // as "no predicted scope". scope-lease.mjs is import-clean (no node built-ins), safe for the pure core.
@@ -230,6 +234,24 @@ export function shapeLanes({ poolStatus, scopePicture, laneItem } = {}) {
 }
 
 /**
+ * #2659 — attach the infra-blocked detail to each lane whose item is recorded infra-blocked. `infraByNum` is the
+ * `{ [normNum]: { cause, attempt, nextRetrySec, capped } }` map {@link deriveInfraByNum} produced from the store
+ * (with an injected clock). A lane with a matching `num` gains an `infra` field — exactly the shape
+ * `status-board.mjs`'s `infraOf` reads for its ⊘ marker + collapsed OUTAGE banner (#2660). A lane with no match
+ * is returned UNCHANGED (no `infra` key), so a clean tick's lanes stay byte-for-byte as before. Pure.
+ * @param {Array<{lane:*, num:*}>} lanes
+ * @param {Record<string, object>} infraByNum
+ * @returns {Array<object>}
+ */
+export function attachLaneInfra(lanes, infraByNum) {
+  const map = infraByNum && typeof infraByNum === 'object' ? infraByNum : {};
+  return (Array.isArray(lanes) ? lanes : []).map((l) => {
+    const detail = l && l.num != null ? map[normNum(l.num)] : undefined;
+    return detail ? { ...l, infra: detail } : l;
+  });
+}
+
+/**
  * Count FREE lanes in the pool — lanes that exist and hold no live lease (the conveyor's launch budget). A lane
  * with `leased === true` is occupied; a missing lane (`exists === false`) is not counted.
  * @param {{lanes?:object[]}|null|undefined} poolStatus
@@ -328,6 +350,10 @@ export function transcriptMentionsItem(text, num) {
 export function assessHealth({ lanes = [], now = 0, stallMs = DEFAULT_STALL_MS, errors = [] } = {}) {
   const stalled = [];
   for (const l of Array.isArray(lanes) ? lanes : []) {
+    // #2659 — an infra-blocked lane is DISTINCT from a stall: its agent exited (so its transcript goes silent)
+    // but the work is pushed + tracked by the infra state, which is auto-retrying. Skip it here so it surfaces
+    // as ⊘ infra-blocked / an OUTAGE banner, never a false ⚠ stall alarm.
+    if (l?.infra) continue;
     const last = l?.lastActivity;
     if (last == null) continue; // no transcript located → conservative (never a false stall)
     if (now - Number(last) > stallMs) {
@@ -444,10 +470,10 @@ export function deriveDecisions(buildQueue, clearedNums = null) {
  * @param {{
  *   buildQueue?:object|object[]|null, poolStatus?:object|null, scopePicture?:object|null, prList?:object[]|null,
  *   daemonReport?:object|null, queuedState?:object|null, laneItem?:Record<string,*>|null,
- *   laneActivity?:Record<string,number>|null, clearedNums?:Array<string|number>|null, now?:number,
- *   stallMs?:number, errors?:string[],
+ *   laneActivity?:Record<string,number>|null, clearedNums?:Array<string|number>|null,
+ *   infraBlocks?:object[]|null, now?:number, stallMs?:number, errors?:string[],
  * }} input
- * @returns {{queue:object[], clearedNotReady:Array<string|number>, unshaped:object[], needsSlice:object[], decisions:object[], lanes:object[], freeSlots:number, prs:object[], daemon:*, idle:object, health:object}}
+ * @returns {{queue:object[], clearedNotReady:Array<string|number>, unshaped:object[], needsSlice:object[], decisions:object[], lanes:object[], freeSlots:number, prs:object[], daemon:*, idle:object, health:object, infraBlocked:object[]}}
  */
 export function assembleConveyorState({
   buildQueue,
@@ -459,11 +485,16 @@ export function assembleConveyorState({
   laneItem,
   laneActivity,
   clearedNums = null,
+  infraBlocks = null,
   now,
   stallMs = DEFAULT_STALL_MS,
   errors = [],
 } = {}) {
-  const lanes = shapeLanes({ poolStatus, scopePicture, laneItem });
+  // #2659 — the infra-blocked state: attach each blocked item's `{ cause, attempt, nextRetrySec, capped }` to
+  // its lane (the ⊘ marker + OUTAGE banner status-board reads), and fold it into the health scan so an
+  // infra-blocked lane never reads as a stall. `deriveInfraByNum` is clock-injected (deterministic).
+  const infraByNum = deriveInfraByNum(Array.isArray(infraBlocks) ? infraBlocks : [], now);
+  const lanes = attachLaneInfra(shapeLanes({ poolStatus, scopePicture, laneItem }), infraByNum);
   const actMap = laneActivity && typeof laneActivity === 'object' ? laneActivity : {};
   const healthLanes = lanes.map((l) => ({
     ...l,
@@ -488,6 +519,10 @@ export function assembleConveyorState({
     daemon: shapeDaemon(daemonReport),
     idle: deriveIdle({ daemonReport, queuedState, now }),
     health: assessHealth({ lanes: healthLanes, now, stallMs, errors }),
+    // #2659 — the raw infra-blocked entries (pushed-but-unopened work, auto-retrying). Attached to lanes above
+    // for the board; emitted here in full so the /conveyor skill can surface a capped/surfaced block for the
+    // operator even if its lane's lease was somehow lost (defense — the record, not the lane, is the truth).
+    infraBlocked: Array.isArray(infraBlocks) ? infraBlocks : [],
   };
 }
 
@@ -745,6 +780,11 @@ function main(argv) {
   //     override) so the reader here can never diverge from the writer. A missing/corrupt sidecar degrades to [].
   const clearedNums = readQueueFile(resolveQueuePath()).map((e) => e.num);
 
+  // 5c. The infra-blocked state (#2659): items whose build succeeded + lane ref pushed, but whose PR-open failed
+  //     on an outside dependency (a GitHub outage). Read via the SAME script-location resolver pr-land writes to
+  //     (env override wins) so reader and writer never diverge. A missing/corrupt sidecar degrades to [].
+  const infraBlocks = readInfraStore(resolveInfraStorePath());
+
   // 6. Lane → item map + the best-effort transcript activity scan for the health verdict.
   const laneItem = laneItemMap();
   const lanesForActivity = shapeLanes({ poolStatus, scopePicture, laneItem });
@@ -760,6 +800,7 @@ function main(argv) {
     laneItem,
     laneActivity,
     clearedNums,
+    infraBlocks,
     now: nowMs,
     errors,
   });

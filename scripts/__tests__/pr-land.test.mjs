@@ -366,6 +366,21 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     expect(src).toMatch(/merge-ai-prs\.mjs/);
     expect(src).toMatch(/--only=/);
   });
+  it('#2659: a post-push PR-open failure on an outside dependency routes to the infra-blocked state, not a hard fail', () => {
+    // the create-fail catch routes through onCreateFailed (classify → record → blocked-on-infra), never straight
+    // to a hard ghFailed — so built + PUSHED work is never stranded on a transient GitHub/network fault.
+    expect(src).toMatch(/catch \(e\) \{ return onCreateFailed\(e\); \}/);
+    expect(src).toMatch(/function onCreateFailed/);
+    expect(src).toMatch(/classifyPrOpenFailure/);
+    // a NON-infra failure (bad body / auth / already-exists) still hard-fails via ghFailed — never a doomed loop.
+    expect(src).toMatch(/if \(!infra\) return ghFailed/);
+    // it records the RESUMABLE handle (into the primary store, via the clone's alternates) and emits
+    // blocked-on-infra (exit 4) with the resume handle so the conveyor can auto-retry/resume.
+    expect(src).toMatch(/recordInfraBlockIO/);
+    expect(src).toMatch(/primaryRootFromClone/);
+    expect(src).toMatch(/reason: 'blocked-on-infra'/);
+    expect(src).toMatch(/resumeHandle:/);
+  });
   it('#2290: the --fallback-git local merge is routed through the shared gate (break-glass only)', () => {
     // fallback-git is a write to main → it must assert the caller may merge (blocked unless break-glass).
     expect(src).toMatch(/assertMayMerge\(\{ caller: 'pr-land'/);

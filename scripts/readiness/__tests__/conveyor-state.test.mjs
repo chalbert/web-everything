@@ -29,6 +29,7 @@ import {
   deriveNeedsSlice,
   deriveDecisions,
   reverseLaneItemMap,
+  attachLaneInfra,
   DEFAULT_STALL_MS,
 } from '../conveyor-state.mjs';
 
@@ -385,6 +386,25 @@ describe('assessHealth — stalled-lane detection via transcript mtimes', () => 
   });
 });
 
+describe('attachLaneInfra — folds infra detail onto a lane by num (#2659)', () => {
+  it('attaches infra to a matching lane; leaves an unmatched lane byte-for-byte unchanged', () => {
+    const lanes = [{ lane: 1, num: '2659', session: 's', lease: [], breach: [] }, { lane: 2, num: '99', session: 's', lease: [], breach: [] }];
+    const by = { 2659: { cause: 'GitHub outage', attempt: 1, nextRetrySec: 30, capped: false } };
+    const out = attachLaneInfra(lanes, by);
+    expect(out[0].infra).toEqual(by['2659']);
+    expect(out[1]).toBe(lanes[1]); // unchanged reference — no infra key added
+    expect('infra' in out[1]).toBe(false);
+  });
+  it('padding/#-tolerant match; a null-num lane never matches; empty inputs → []', () => {
+    const lanes = [{ lane: 1, num: '02659' }, { lane: 3, num: null }];
+    const by = { 2659: { cause: 'x', attempt: 1, nextRetrySec: 0, capped: true } };
+    const out = attachLaneInfra(lanes, by);
+    expect(out[0].infra).toEqual(by['2659']);
+    expect('infra' in out[1]).toBe(false);
+    expect(attachLaneInfra([], {})).toEqual([]);
+  });
+});
+
 // ── END-TO-END (pure) — assembleConveyorState over three representative ticks ─────────────────────────────────
 describe('assembleConveyorState — the whole tick picture', () => {
   const now = 1_000_000_000_000;
@@ -477,6 +497,27 @@ describe('assembleConveyorState — the whole tick picture', () => {
     const s = assembleConveyorState(inputs);
     expect(s.health.verdict).toBe('warn');
     expect(s.health.errors).toEqual(['lane-pool status: spawn failed']);
+  });
+
+  it('INFRA-BLOCKED tick — a blocked item attaches infra to its lane, is NOT a stall, and surfaces in infraBlocked (#2659)', () => {
+    const inputs = baseInputs();
+    // lane-1 (mapped to #2611) is infra-blocked; its transcript is silent PAST the stall window — infra must win,
+    // so it NEVER reads as a stall (the whole point of the first-class state vs a stall/gate-red).
+    inputs.laneActivity = { 1: now - (DEFAULT_STALL_MS + 300_000) };
+    inputs.infraBlocks = [{ num: '2611', ref: 'lane/2611-conveyor-state', sha: 'abc', base: 'main', cause: 'GitHub outage', attempt: 2, nextRetryAt: new Date(now + 45_000).toISOString() }];
+    const s = assembleConveyorState(inputs);
+    // the lane carries the exact infra detail status-board reads (⊘ marker + OUTAGE banner).
+    expect(s.lanes[0].infra).toEqual({ cause: 'GitHub outage', attempt: 2, nextRetrySec: 45, capped: false });
+    // NOT a stall — the infra lane is excluded from the health scan.
+    expect(s.health.verdict).toBe('ok');
+    expect(s.health.stalled).toEqual([]);
+    // the raw entries are emitted whole for the /conveyor skill to surface.
+    expect(s.infraBlocked).toHaveLength(1);
+    expect(s.infraBlocked[0].num).toBe('2611');
+    // a NON-infra lane is unaffected — no infra key on a clean tick.
+    const clean = assembleConveyorState(baseInputs());
+    expect('infra' in clean.lanes[0]).toBe(false);
+    expect(clean.infraBlocked).toEqual([]);
   });
 });
 
