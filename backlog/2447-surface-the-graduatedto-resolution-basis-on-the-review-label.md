@@ -4,6 +4,26 @@ kind: task
 status: open
 dateOpened: "2026-07-11"
 tags: []
+scope:
+  - we:scripts/lib/review-core.mjs
+  - we:scripts/lib/review-render.mjs
+  - we:scripts/lib/review-escalation.mjs
+  - we:scripts/lib/__tests__/review-core.test.mjs
+  - we:scripts/lib/__tests__/review-render.test.mjs
+  - we:scripts/lib/__tests__/review-escalation.test.mjs
+  - we:scripts/review-core-cli.mjs
+  - we:scripts/__tests__/review-core-cli.test.mjs
+  - we:scripts/review-detail.mjs
+  - we:scripts/__tests__/review-detail.test.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:scripts/__tests__/merge-coverage.test.mjs
+  - we:scripts/readiness/lane-manifest.mjs
+  - we:scripts/readiness/__tests__/lane-manifest.test.mjs
+  - we:scripts/lane-manifest-write.mjs
+  - we:scripts/__tests__/lane-manifest-write.test.mjs
+  - we:skills-src/review/SKILL.md
+  - we:skills-src/merge/SKILL.md
 ---
 
 # Surface the graduatedTo resolution basis on the review/label surfaces so a valid dedup-resolve isn't misread as hollow
