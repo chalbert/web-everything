@@ -4,6 +4,22 @@ kind: story
 size: 8
 status: open
 blockedBy: []
+scope:
+  - we:scripts/lib/review-escalation.mjs
+  - we:scripts/lib/review-policy.mjs
+  - we:scripts/lib/review-core.mjs
+  - we:scripts/lib/jury-core.mjs
+  - we:scripts/lib/auto-land-seam.mjs
+  - we:scripts/lib/disposition-land-seam.mjs
+  - we:scripts/pr-land.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/review-set-label.mjs
+  - we:scripts/review-core-cli.mjs
+  - we:scripts/fetch-parked.mjs
+  - we:scripts/workflows/
+  - we:scripts/conveyor/
+  - we:scripts/__tests__/
+  - we:scripts/lib/__tests__/
 dateOpened: "2026-07-19"
 tags: []
 ---
