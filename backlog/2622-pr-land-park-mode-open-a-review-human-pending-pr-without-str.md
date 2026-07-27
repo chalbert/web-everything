@@ -4,6 +4,9 @@ kind: story
 size: 3
 parent: "2612"
 status: open
+scope:
+  - we:scripts/pr-land.mjs
+  - we:scripts/__tests__/pr-land.test.mjs
 dateOpened: "2026-07-23"
 tags: [plateau-loop, pr-land, drain, backlog, tooling]
 ---
