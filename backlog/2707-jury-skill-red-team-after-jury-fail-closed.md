@@ -4,6 +4,11 @@ kind: story
 size: 3
 parent: "2676"
 status: open
+scope:
+  - we:skills-src/jury/SKILL.md
+  - we:skills-src/jury/subject-jury.workflow.js
+  - we:scripts/lib/jury-core.mjs
+  - we:scripts/lib/__tests__/jury-core.test.mjs
 dateOpened: "2026-07-27"
 tags: []
 ---

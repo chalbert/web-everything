@@ -4,6 +4,9 @@ kind: story
 size: 2
 parent: "2612"
 status: open
+scope:
+  - we:scripts/backlog.mjs
+  - we:scripts/__tests__/backlog-cli-snapshot.test.mjs
 dateOpened: "2026-07-23"
 tags: [plateau-loop, conveyor, backlog, cli]
 ---
