@@ -74,6 +74,18 @@
  *      state store, #2612 — the count IS PR state); the in-session tally is the overlay that additionally counts
  *      a fix agent that died before re-arming (which leaves no comment for the floor to see).
  *
+ *   3b. CI-HEAL GUARD (§3c-ci, #2666) — the SIBLING of the fix guard, SAME entry+counter+cap+TTL shape, but its
+ *      trigger is a CI REGRESSION not a `review:changes` label: a conveyor PR that was GREEN AT OPEN
+ *      (`ready-to-merge` / a review park) but has since gone RED on a required check ({@link isRedCi}) or BEHIND +
+ *      parked ({@link isBehind} — the not-landable BEHIND case #2183 leaves unhealed). The delivery agent has long
+ *      exited and the drain skips a red-CI PR, so nothing heals it. {@link planCiHealSpawns} dispatches a CI-heal
+ *      agent that rebases + repairs ONLY the CI half and NEVER touches the review label. Its cap binds on
+ *      `max(in-session ciHealAttempts, durable prCiHealCounts)` — the durable floor from the PR's own CI-heal
+ *      comments (`countCiHealComments`, #2666 mirrors #2643), so a restart never resets a burned PR.
+ *      {@link retireCiHealGuards} retires the ENTRY on CI recovery / PR-terminal (`resolved`) or TTL; the counter
+ *      clears ONLY on PR-terminal ({@link clearTerminalCiHealAttempts}). `review:changes` PRs are EXCLUDED — the
+ *      fix loop (guard 3) already rebases them.
+ *
  * WATCHER ARMING (§4): {@link armWatchers} arms one watcher per OPEN PR whose `num` this conveyor DISPATCHED
  *   this session (`launchedNums` — builds AND prepares) that is not already watched, and prunes the watched set
  *   to the currently-open conveyor PRs (a merged/closed PR's watcher already exited). Scoping to conveyor-launched
@@ -107,10 +119,23 @@ export const DEFAULT_PREPARE_TTL_TICKS = 5;
 export const DEFAULT_FIX_TTL_TICKS = 5;
 /** Default per-PR auto-fix attempt cap before a bounce is surfaced for `/review` (SKILL §3c). */
 export const DEFAULT_FIX_RETRY_CAP = 3;
+/** Default TTL (in ticks) for the CI-HEAL guard's died-before-repush backstop (SKILL §3c-ci, #2666). */
+export const DEFAULT_CI_HEAL_TTL_TICKS = 5;
+/** Default per-PR CI-heal attempt cap before a red/BEHIND PR is surfaced for `/review` (SKILL §3c-ci, #2666). */
+export const DEFAULT_CI_HEAL_RETRY_CAP = 3;
 /** Default idle-stop window: queue-empty + no operator feedback for this long → stop (SKILL §6). */
 export const DEFAULT_IDLE_WINDOW_MS = 15 * 60 * 1000;
 /** The review label that routes a bounced PR to a fix agent (vs. a human-owned review park). */
 export const REVIEW_CHANGES_LABEL = 'review:changes';
+
+/** The labels that mark a conveyor PR as HAVING BEEN GREEN / CLEARED at open — `ready-to-merge` (pr-land applied
+ *  it only once `test` went green) or a human review park. A PR that carries one of these was healthy at open, so
+ *  a later red check / BEHIND is a REGRESSION to heal (#2666); a PR carrying NONE of them was never green (a
+ *  born-red build the delivery agent already escalated gate-red) and must NOT trip the CI-heal loop. */
+export const GREEN_AT_OPEN_LABELS = Object.freeze(['ready-to-merge', 'review:human', 'review:pending']);
+/** The human-owned review-park labels. A PR carrying one is NOT landable, so #2183's BEHIND-rebuild never fires
+ *  for it — the parked-and-BEHIND case this CI-heal loop covers (#2666). CI is repaired; the park label is NOT. */
+export const REVIEW_PARK_LABELS = Object.freeze(['review:human', 'review:pending']);
 
 /** True when a `state.prs` row is OPEN. `state.prs` is built from `gh pr list --state open`, so every row is
  *  open by construction; this tolerates a missing/blank `state` (→ open) and only rejects an explicit terminal
@@ -130,6 +155,62 @@ function openPrForNum(prs, num) {
 /** True when a `state.prs` row carries the `review:changes` label (a human bounce → route to a fix agent). */
 function hasReviewChanges(prRow) {
   return Array.isArray(prRow?.labels) && prRow.labels.includes(REVIEW_CHANGES_LABEL);
+}
+
+/** Lowercased label-name set for a `state.prs` row (labels are plain strings out of `shapePrs`; tolerate `{name}`). */
+function labelSet(labels) {
+  return new Set(
+    (Array.isArray(labels) ? labels : [])
+      .map((l) => (typeof l === 'string' ? l : l?.name))
+      .filter(Boolean)
+      .map((n) => String(n).toLowerCase()),
+  );
+}
+
+/** True when the PR's required-check rollup is DEFINITIVELY red (`ci === 'fail'` — `ciRollup` in conveyor-state.mjs
+ *  distills the whole rollup to `pass|fail|pending|none`; only `fail` is a settled red check the drain would skip). */
+function isRedCi(prRow) {
+  return String(prRow?.ci || '').toLowerCase() === 'fail';
+}
+
+/** True when the PR is BEHIND its base (`main` advanced under it). Read from `mergeStateStatus` — the gh field name
+ *  — so once conveyor-state.mjs shapes it onto the PR row this branch goes live; until then it is dormant (the field
+ *  is absent → always false), and the red-CI branch alone drives the loop. See the follow-up that populates it. */
+function isBehind(prRow) {
+  return String(prRow?.mergeStateStatus ?? prRow?.behind ?? '').toUpperCase() === 'BEHIND';
+}
+
+/** True when the PR carries a marker that it was GREEN / CLEARED at open (see {@link GREEN_AT_OPEN_LABELS}). */
+function wasGreenAtOpen(labels) {
+  const ls = labelSet(labels);
+  return GREEN_AT_OPEN_LABELS.some((l) => ls.has(l));
+}
+
+/** True when the PR is human-review-PARKED (`review:human` / `review:pending`) — not landable, so #2183's rebuild
+ *  never fires and its BEHIND stays unhealed (the case this loop covers, #2666). */
+function isReviewParked(labels) {
+  const ls = labelSet(labels);
+  return REVIEW_PARK_LABELS.some((l) => ls.has(l));
+}
+
+/**
+ * True when a `state.prs` row is a CI-HEAL TARGET (#2666) — a conveyor PR that was GREEN AT OPEN but has since
+ * regressed on the CI axis, and is NOT already owned by the `review:changes` fix loop. Two disjoint triggers:
+ *   • RED CI — a definitively-failed required check (`ci === 'fail'`) on a was-green PR. The drain skips a red check
+ *     regardless of landability, so nothing heals it; this is the dominant, observed case (a BEHIND branch whose
+ *     `test` job broke against the new main surfaces here as `ci: 'fail'`).
+ *   • BEHIND + PARKED — the base advanced (`mergeStateStatus === 'BEHIND'`) AND the PR is human-review-parked, so it
+ *     is NOT landable and #2183's BEHIND-rebuild never fires. (A LANDABLE BEHIND PR is #2183's job — deliberately
+ *     excluded here so the two loops never fight over the same rebuild.)
+ * A `review:changes` PR is EXCLUDED — the review-changes fix loop (§3c) already reconstitutes + rebases it.
+ */
+function isCiHealTarget(prRow) {
+  if (!prRow || !isOpenPr(prRow)) return false;
+  const labels = prRow.labels;
+  if (hasReviewChanges(prRow)) return false; // owned by the review:changes fix loop (§3c) — it already rebases
+  if (isRedCi(prRow) && wasGreenAtOpen(labels)) return true; // red required check on a PR that was green at open
+  if (isBehind(prRow) && isReviewParked(labels)) return true; // not-landable BEHIND — the case #2183 leaves unhealed
+  return false;
 }
 
 /** The set of item nums (normalized) that are cleared-for-build (`buildQueued`) in the tick's `state.queue`. */
@@ -381,6 +462,106 @@ export function clearTerminalFixAttempts(fixAttempts, prs) {
 }
 
 /**
+ * PLAN the CI-HEAL fix-agent spawns for conveyor PRs gone RED / BEHIND after a green open (SKILL §3c-ci, #2666).
+ * This is the SIBLING of {@link planFixSpawns}: same in-flight-entry + attempt-counter + retry-cap shape, but the
+ * trigger is a CI regression ({@link isCiHealTarget}) in place of a `review:changes` label, and the spawned agent
+ * repairs ONLY the CI half — it NEVER touches `review:human` / `review:pending` (the human gate stays). For every
+ * OPEN conveyor-launched PR (`num` ∈ `launchedNums`) that is a CI-heal target: skip if a live CI-heal entry already
+ * exists for the PR (in-flight test); else if it has reached the retry cap surface it for `/review` (no spawn); else
+ * spawn a CI-heal agent on a free lane, record an entry, and BUMP the attempt counter.
+ *
+ * The cap binds on `max(in-session ciHealAttempts[pr], durable prCiHealCounts[pr])` — the SAME restart-surviving
+ * design as the fix loop (#2643): the in-session map is wiped by a conveyor restart, so a DURABLE floor derived from
+ * the PR's own CI-heal comments (`countCiHealComments`, one per completed heal) restores the count and the cap can
+ * never reset a PR that already burned its attempts. Pure — returns the spawns, new entries, the bumped counter map,
+ * consumed lanes, and surface notes; mutates no input.
+ *
+ * @param {{ prs?:object[], launchedNums?:Array<*>, liveCiHealGuards?:object[], ciHealAttempts?:object, prCiHealCounts?:object, retryCap?:number, availableLanes?:Array<*>, tick:number }} ctx
+ * @returns {{ spawns:Array<{pr:number, num:*, lane:*, reason:string}>, newGuards:Array<object>, ciHealAttempts:object, consumedLanes:Array<*>, notes:Array<object> }}
+ */
+export function planCiHealSpawns({ prs = [], launchedNums = [], liveCiHealGuards = [], ciHealAttempts = {}, prCiHealCounts = {}, retryCap = DEFAULT_CI_HEAL_RETRY_CAP, availableLanes = [], tick = 0 } = {}) {
+  const launched = new Set((Array.isArray(launchedNums) ? launchedNums : []).map(normNum));
+  const guardedPrs = new Set((Array.isArray(liveCiHealGuards) ? liveCiHealGuards : []).map((g) => Number(g.pr)));
+  const nextAttempts = { ...(ciHealAttempts && typeof ciHealAttempts === 'object' ? ciHealAttempts : {}) };
+  const durable = prCiHealCounts && typeof prCiHealCounts === 'object' ? prCiHealCounts : {};
+  const lanes = [...(Array.isArray(availableLanes) ? availableLanes : [])];
+  const spawns = [];
+  const newGuards = [];
+  const consumedLanes = [];
+  const notes = [];
+
+  for (const p of Array.isArray(prs) ? prs : []) {
+    if (!isCiHealTarget(p)) continue;
+    if (!launched.has(normNum(p.num))) continue; // only PRs THIS conveyor launched
+    const pr = Number(p.prNumber);
+    if (!pr) continue;
+    if (guardedPrs.has(pr)) continue; // a CI-heal agent for this PR is already live
+    // DURABLE re-heal-comment count is the restart-surviving floor; the in-session tally the within-session overlay
+    // (it alone catches a heal that died before posting its comment). The cap binds on whichever is higher (#2643).
+    const attempts = Math.max(Number(nextAttempts[pr]) || 0, Number(durable[pr]) || 0);
+    if (attempts >= retryCap) {
+      notes.push({ kind: 'ci-heal-exhausted', num: p.num, pr, attempts, text: `PR #${pr} (#${p.num}) went red/BEHIND ${attempts}× — auto CI-heal exhausted, run /review ${pr}` });
+      continue;
+    }
+    if (lanes.length === 0) { notes.push({ kind: 'ci-heal-no-lane', num: p.num, pr, text: `no free lane to CI-heal PR #${pr}` }); continue; }
+    const lane = lanes.shift();
+    consumedLanes.push(lane);
+    guardedPrs.add(pr);
+    nextAttempts[pr] = attempts + 1;
+    const reason = isRedCi(p) ? 'red-ci' : 'behind';
+    spawns.push({ pr, num: p.num, lane, reason });
+    newGuards.push({ pr, num: p.num, lane, spawnedTick: tick });
+  }
+  return { spawns, newGuards, ciHealAttempts: nextAttempts, consumedLanes, notes };
+}
+
+/**
+ * RETIRE the in-flight CI-HEAL guard ENTRIES (SKILL §3c-ci — the ENTRY only, never the attempt counter). Mirrors
+ * {@link retireFixGuards}: an entry retires when its PR is no longer a CI-heal target ({@link isCiHealTarget} false —
+ * CI recovered to non-red / no-longer-BEHIND, or the PR went terminal — reason `resolved`) or on TTL (`ttlTicks`,
+ * the heal agent died before re-pushing — reason `ttl`, still gated by the retry cap on the next spawn so a
+ * repeatedly-dying heal still terminates at the human). The per-PR attempt counter is NOT cleared here (it clears
+ * only on PR-terminal, via {@link clearTerminalCiHealAttempts}). Pure.
+ * @param {Array<{pr:number, num:*, spawnedTick:number}>} ciHealGuards
+ * @param {{ prs?:object[], tick:number, ttlTicks?:number }} ctx
+ * @returns {{ live:Array<object>, retired:Array<{pr:number, num:*, reason:string, note?:boolean}> }}
+ */
+export function retireCiHealGuards(ciHealGuards, { prs = [], tick = 0, ttlTicks = DEFAULT_CI_HEAL_TTL_TICKS } = {}) {
+  const byPr = new Map();
+  for (const p of Array.isArray(prs) ? prs : []) if (p?.prNumber != null) byPr.set(Number(p.prNumber), p);
+  const live = [];
+  const retired = [];
+  for (const g of Array.isArray(ciHealGuards) ? ciHealGuards : []) {
+    if (!g || g.pr == null) continue;
+    const prRow = byPr.get(Number(g.pr));
+    const stillTarget = prRow && isCiHealTarget(prRow);
+    if (!stillTarget) { retired.push({ pr: Number(g.pr), num: g.num, reason: 'resolved' }); continue; }
+    if (tick - (g.spawnedTick ?? tick) >= ttlTicks) {
+      retired.push({ pr: Number(g.pr), num: g.num, reason: 'ttl', note: true });
+      continue;
+    }
+    live.push(g);
+  }
+  return { live, retired };
+}
+
+/**
+ * CLEAR the per-PR CI-heal attempt counter for PRs that have reached a TERMINAL state (mirrors
+ * {@link clearTerminalFixAttempts} — the counter clears ONLY on merge/close, NEVER on entry retirement). Pure.
+ * @param {object} ciHealAttempts  `{ [pr]: count }`
+ * @param {object[]} prs  the tick's `state.prs` (open PRs)
+ * @returns {object} the pruned counter map
+ */
+export function clearTerminalCiHealAttempts(ciHealAttempts, prs) {
+  const openPrs = new Set((Array.isArray(prs) ? prs : []).filter(isOpenPr).map((p) => Number(p.prNumber)));
+  const next = {};
+  for (const [pr, count] of Object.entries(ciHealAttempts && typeof ciHealAttempts === 'object' ? ciHealAttempts : {})) {
+    if (openPrs.has(Number(pr))) next[pr] = count;
+  }
+  return next;
+}
+
+/**
  * The lane-lease session slug that OWNS item `num`'s open PR — the `--release-session` a merge watcher passes to
  * `pr-watch.mjs` so that, the instant the PR MERGES, pr-watch auto-releases that session's lease(s) in EVERY pool
  * it acquired (`lane-pool release --all-pools --session=<slug>`, which also resets the freed clone to origin/main)
@@ -492,13 +673,14 @@ export function routeWatcherExit(code, labels = []) {
  *     only the spawn→claim window (a known undercount, not a miscount — no tick decision reads this line).
  *   • preparing — distinct live prepare-guard nums (scope + decision).
  *   • fixing — live fix-guard entries.
+ *   • healing — live CI-heal-guard entries (conveyor PRs gone red/BEHIND after open, #2666).
  *   • queued — cleared `buildQueued` rows NOT already in flight (building/preparing).
  *   • parked — distinct conveyor-launched OPEN PRs carrying any `review:*` label.
  *   • health — `state.health.verdict`; a `warn` appends the flagged lanes.
  *   • infra — `state.infraBlocked` count (only when non-empty).
  * @returns {string}
  */
-export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {}, infraBlocked = [], liveBuildGuards = [], livePrepareGuards = [], liveFixGuards = [], launchedNums = [] } = {}) {
+export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {}, infraBlocked = [], liveBuildGuards = [], livePrepareGuards = [], liveFixGuards = [], liveCiHealGuards = [], launchedNums = [] } = {}) {
   const prepareNums = new Set((Array.isArray(livePrepareGuards) ? livePrepareGuards : []).map((g) => normNum(g.num)));
   const buildGuardNums = new Set((Array.isArray(liveBuildGuards) ? liveBuildGuards : []).map((g) => normNum(g.num)));
   // Active build lanes = leased lanes whose item is NOT a live prepare (a prepare also leases a lane).
@@ -517,8 +699,9 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
       .map((p) => normNum(p.num)),
   );
   const fixing = (Array.isArray(liveFixGuards) ? liveFixGuards : []).length;
+  const healing = (Array.isArray(liveCiHealGuards) ? liveCiHealGuards : []).length;
   const verdict = health?.verdict === 'warn' ? 'warn' : 'ok';
-  let line = `conveyor · ${building.size} building · ${prepareNums.size} preparing · ${fixing} fixing · ${queued} queued · ${parked.size} parked · health ${verdict}`;
+  let line = `conveyor · ${building.size} building · ${prepareNums.size} preparing · ${fixing} fixing · ${healing} healing · ${queued} queued · ${parked.size} parked · health ${verdict}`;
   const infra = (Array.isArray(infraBlocked) ? infraBlocked : []).length;
   if (infra) line += ` · ${infra} infra-blocked`;
   if (verdict === 'warn') {
@@ -551,12 +734,14 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
  * }} input
  * @returns {{ decisions:object, nextState:object }}
  */
-export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, config = {}, now = null, lastOperatorTurn = null } = {}) {
+export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, config = {}, now = null, lastOperatorTurn = null } = {}) {
   const cfg = {
     buildTtlTicks: config.buildTtlTicks ?? DEFAULT_BUILD_TTL_TICKS,
     prepareTtlTicks: config.prepareTtlTicks ?? DEFAULT_PREPARE_TTL_TICKS,
     fixTtlTicks: config.fixTtlTicks ?? DEFAULT_FIX_TTL_TICKS,
     fixRetryCap: config.fixRetryCap ?? DEFAULT_FIX_RETRY_CAP,
+    ciHealTtlTicks: config.ciHealTtlTicks ?? DEFAULT_CI_HEAL_TTL_TICKS,
+    ciHealRetryCap: config.ciHealRetryCap ?? DEFAULT_CI_HEAL_RETRY_CAP,
     idleWindowMs: config.idleWindowMs ?? DEFAULT_IDLE_WINDOW_MS,
   };
   const tick = Number(bookkeeping.tick) || 0;
@@ -571,6 +756,8 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   });
   const fix = retireFixGuards(bookkeeping.fixGuards, { prs, tick, ttlTicks: cfg.fixTtlTicks });
   const fixAttempts = clearTerminalFixAttempts(bookkeeping.fixAttempts, prs);
+  const ciHeal = retireCiHealGuards(bookkeeping.ciHealGuards, { prs, tick, ttlTicks: cfg.ciHealTtlTicks });
+  const ciHealAttempts = clearTerminalCiHealAttempts(bookkeeping.ciHealAttempts, prs);
 
   // 2. FILTER plan.launch through the live build guard (num OR lane), then record a guard per new build.
   const launched = filterLaunches(plan.launch, build.live);
@@ -584,6 +771,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     ...liveBuildGuards.map((g) => String(g.lane)),
     ...prepare.live.map((g) => String(g.lane)),
     ...fix.live.map((g) => String(g.lane)),
+    ...ciHeal.live.map((g) => String(g.lane)),
   ]);
   let availableLanes = (Array.isArray(freeLanes) ? freeLanes : []).filter((l) => !takenLanes.has(String(l)));
 
@@ -604,6 +792,14 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // 6. FIX spawns — conveyor-launched `review:changes` PRs, gated by in-flight test + retry cap; consume lanes.
   const fixPlan = planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, prRearmCounts, retryCap: cfg.fixRetryCap, availableLanes, tick });
   const liveFixGuards = [...fix.live, ...fixPlan.newGuards];
+  const fixConsumed = new Set(fixPlan.consumedLanes.map(String));
+  availableLanes = availableLanes.filter((l) => !fixConsumed.has(String(l)));
+
+  // 6b. CI-HEAL spawns — conveyor-launched PRs gone RED / BEHIND after a green open (#2666). The SIBLING of the
+  //     fix loop: same entry + counter + cap shape, CI-regression trigger, and the heal repairs ONLY CI — never the
+  //     review label. Uses the lanes the builds/prepares/fixes did not take, gated by in-flight test + retry cap.
+  const ciHealPlan = planCiHealSpawns({ prs, launchedNums, liveCiHealGuards: ciHeal.live, ciHealAttempts, prCiHealCounts, retryCap: cfg.ciHealRetryCap, availableLanes, tick });
+  const liveCiHealGuards = [...ciHeal.live, ...ciHealPlan.newGuards];
 
   // 7. WATCHERS — one per open conveyor-launched PR; prune to currently-open conveyor PRs. Each armed entry
   //    carries the `releaseSession` slug pr-watch passes as `--release-session` (#2700 merge-time auto-release),
@@ -619,9 +815,11 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   for (const r of build.retired) if (r.note) notes.push({ kind: 'build-ttl', num: r.num, text: `⚠ #${r.num} never claimed after ${cfg.buildTtlTicks} ticks — re-dispatching` });
   for (const r of prepare.retired) if (r.note) notes.push({ kind: 'prepare-ttl', num: r.num, text: `⚠ prepare #${r.num} produced no PR in ${cfg.prepareTtlTicks} ticks — re-dispatching` });
   for (const r of fix.retired) if (r.note) notes.push({ kind: 'fix-ttl', num: r.num, text: `⚠ fix for PR carrying #${r.num} stalled ${cfg.fixTtlTicks} ticks — re-dispatch allowed` });
+  for (const r of ciHeal.retired) if (r.note) notes.push({ kind: 'ci-heal-ttl', num: r.num, text: `⚠ CI-heal for PR carrying #${r.num} stalled ${cfg.ciHealTtlTicks} ticks — re-dispatch allowed` });
   if (prep.scopeSpawns.length) notes.push({ kind: 'auto-preparing-scope', nums: prep.scopeSpawns.map((s) => s.num), text: `⚠ ${prep.scopeSpawns.length} auto-preparing scope: ${prep.scopeSpawns.map((s) => `#${s.num}`).join(' ')}` });
   notes.push(...prep.notes.map((n) => ({ kind: n.kind, num: n.num, text: n.text })));
   notes.push(...fixPlan.notes.map((n) => ({ kind: n.kind, num: n.num, pr: n.pr, text: n.text })));
+  notes.push(...ciHealPlan.notes.map((n) => ({ kind: n.kind, num: n.num, pr: n.pr, text: n.text })));
   for (const e of Array.isArray(needsSlice) ? needsSlice : []) notes.push({ kind: 'needs-slice', num: e.num, epicState: e.epicState, text: `⚠ epic #${e.num} needs slicing (/slice ${e.num})` });
   for (const d of Array.isArray(decisions) ? decisions : []) if (d?.prepared === true) notes.push({ kind: 'decision-ready', num: d.num, text: `⚖ decision #${d.num} ready to ratify (/next decision)` });
   // HEALTH — the stall scan is LIVE now (#2616 populates the lane→num map on `acquire --item`), so `state.health`
@@ -636,7 +834,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   }
 
   const statusLine = buildStatusLine({
-    queue, lanes, prs, health, infraBlocked, liveBuildGuards, livePrepareGuards, liveFixGuards, launchedNums,
+    queue, lanes, prs, health, infraBlocked, liveBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
   });
 
   return {
@@ -646,8 +844,9 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
       spawnPrepareScope: prep.scopeSpawns,
       spawnPrepareDecision: prep.decisionSpawns,
       spawnFixes: fixPlan.spawns,
+      spawnCiHeals: ciHealPlan.spawns,
       armWatchers: watch.arm,
-      retireGuards: { build: build.retired, prepare: prepare.retired, fix: fix.retired },
+      retireGuards: { build: build.retired, prepare: prepare.retired, fix: fix.retired, ciHeal: ciHeal.retired },
       idleStop: idle.stop,
       idle,
       statusLine,
@@ -659,6 +858,8 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
       prepareGuards: livePrepareGuards,
       fixGuards: liveFixGuards,
       fixAttempts: fixPlan.fixAttempts,
+      ciHealGuards: liveCiHealGuards,
+      ciHealAttempts: ciHealPlan.ciHealAttempts,
       watched: watch.nextWatched,
       launchedNums,
     },
@@ -742,10 +943,19 @@ async function main(argv) {
   // never bind on a fresh conveyor. Only `review:changes` PRs are read (rare), so it adds no per-tick gh cost in
   // the common case; a comment read that fails is best-effort (floor 0 — the in-session tally still guards).
   const { countRearmComments } = await import('./rearm-review.mjs');
+  const { countCiHealComments } = await import('./ci-heal-mark.mjs');
   const prRearmCounts = {};
+  const prCiHealCounts = {};
+  // ONE `gh pr view … --json comments` per PR that is EITHER a `review:changes` bounce (fix-loop floor, #2643) OR a
+  // CI-heal target (CI-heal floor, #2666). Both durable floors read the SAME comment thread, so a single read serves
+  // both counters — a red/BEHIND PR that is also `review:changes` is owned by the fix loop, but reading its comments
+  // once and counting both markers costs nothing extra. Both are RARE (a red / bounced PR), so this adds no per-tick
+  // gh cost in the common all-green case.
   for (const p of Array.isArray(state?.prs) ? state.prs : []) {
     const labels = Array.isArray(p?.labels) ? p.labels : [];
-    if (!p?.prNumber || !labels.includes('review:changes')) continue;
+    const wantsRearm = p?.prNumber && labels.includes('review:changes');
+    const wantsCiHeal = p?.prNumber && isCiHealTarget(p);
+    if (!wantsRearm && !wantsCiHeal) continue;
     // Best-effort, NON-fatal (unlike `runJson`, which exits the tick on error): a single PR's comment read must
     // never kill the whole tick — on failure the floor stays unset (0) and the in-session tally still binds.
     // Thread `--repo` exactly as the state read does (line above): without it, `gh pr view` resolves the repo from
@@ -756,11 +966,13 @@ async function main(argv) {
     try {
       const raw = execFileSync('gh', prViewArgs,
         { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
-      prRearmCounts[p.prNumber] = countRearmComments(JSON.parse(raw)?.comments);
+      const comments = JSON.parse(raw)?.comments;
+      if (wantsRearm) prRearmCounts[p.prNumber] = countRearmComments(comments);
+      if (wantsCiHeal) prCiHealCounts[p.prNumber] = countCiHealComments(comments);
     } catch { /* leave the floor unset — the in-session tally still guards the cap */ }
   }
 
-  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, config, now: Date.now(), lastOperatorTurn });
+  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, config, now: Date.now(), lastOperatorTurn });
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');
   process.exit(0);
 }

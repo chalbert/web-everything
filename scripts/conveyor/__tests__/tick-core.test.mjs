@@ -22,6 +22,9 @@ import {
   planFixSpawns,
   retireFixGuards,
   clearTerminalFixAttempts,
+  planCiHealSpawns,
+  retireCiHealGuards,
+  clearTerminalCiHealAttempts,
   armWatchers,
   releaseSessionForNum,
   assessIdleStop,
@@ -31,6 +34,7 @@ import {
   DEFAULT_BUILD_TTL_TICKS,
   DEFAULT_PREPARE_TTL_TICKS,
   DEFAULT_FIX_RETRY_CAP,
+  DEFAULT_CI_HEAL_RETRY_CAP,
 } from '../tick-core.mjs';
 
 // ── The in-flight dispatch (build) guard — filter by num OR lane ──────────────────────────────────────────────
@@ -274,6 +278,122 @@ describe('retireFixGuards + clearTerminalFixAttempts — entry vs. counter lifet
   });
 });
 
+// ── The CI-HEAL guard — green-at-open PR gone RED / BEHIND (SKILL §3c-ci, #2666) ──────────────────────────────────
+
+describe('planCiHealSpawns — trigger, exclusions, in-flight test + restart-surviving retry cap (SKILL §3c-ci)', () => {
+  // A conveyor PR that was GREEN AT OPEN (carries `ready-to-merge`) and has since gone RED on a required check.
+  const redPr = (pr, num, labels = ['ready-to-merge']) => ({ num, prNumber: pr, state: 'OPEN', ci: 'fail', labels });
+
+  it('spawns a CI-heal for a conveyor-launched was-green PR gone red-CI and bumps the counter', () => {
+    const r = planCiHealSpawns({ prs: [redPr(99, 40)], launchedNums: [40], availableLanes: [5], tick: 0 });
+    expect(r.spawns).toEqual([{ pr: 99, num: 40, lane: 5, reason: 'red-ci' }]);
+    expect(r.newGuards).toEqual([{ pr: 99, num: 40, lane: 5, spawnedTick: 0 }]);
+    expect(r.ciHealAttempts).toEqual({ 99: 1 });
+  });
+
+  it('does NOT heal a PR that was NEVER green at open (no ready-to-merge / review park) — the delivery agent escalated it', () => {
+    const r = planCiHealSpawns({ prs: [redPr(99, 40, [])], launchedNums: [40], availableLanes: [5], tick: 0 });
+    expect(r.spawns).toEqual([]);
+  });
+
+  it('does NOT heal a `review:changes` PR — the fix loop (§3c) owns it and already rebases', () => {
+    const r = planCiHealSpawns({ prs: [redPr(99, 40, ['review:changes', 'ready-to-merge'])], launchedNums: [40], availableLanes: [5], tick: 0 });
+    expect(r.spawns).toEqual([]);
+  });
+
+  it('does NOT heal a PR the conveyor did not launch', () => {
+    const r = planCiHealSpawns({ prs: [redPr(99, 40)], launchedNums: [], availableLanes: [5], tick: 0 });
+    expect(r.spawns).toEqual([]);
+  });
+
+  it('does NOT heal a green PR (ci !== fail and not BEHIND)', () => {
+    const r = planCiHealSpawns({ prs: [{ num: 40, prNumber: 99, state: 'OPEN', ci: 'pass', labels: ['ready-to-merge'] }], launchedNums: [40], availableLanes: [5], tick: 0 });
+    expect(r.spawns).toEqual([]);
+  });
+
+  it('heals a BEHIND + PARKED PR (the not-landable BEHIND case #2183 leaves), reason BEHIND', () => {
+    const r = planCiHealSpawns({
+      prs: [{ num: 40, prNumber: 99, state: 'OPEN', ci: 'pass', mergeStateStatus: 'BEHIND', labels: ['review:human'] }],
+      launchedNums: [40], availableLanes: [5], tick: 0,
+    });
+    expect(r.spawns).toEqual([{ pr: 99, num: 40, lane: 5, reason: 'behind' }]);
+  });
+
+  it('does NOT heal a BEHIND but LANDABLE PR (ready-to-merge, green) — that is #2183\'s job, not this loop', () => {
+    const r = planCiHealSpawns({
+      prs: [{ num: 40, prNumber: 99, state: 'OPEN', ci: 'pass', mergeStateStatus: 'BEHIND', labels: ['ready-to-merge'] }],
+      launchedNums: [40], availableLanes: [5], tick: 0,
+    });
+    expect(r.spawns).toEqual([]);
+  });
+
+  it('SKIPS a PR with a live CI-heal ENTRY (the in-flight test stops a duplicate heal on the same red episode)', () => {
+    const r = planCiHealSpawns({ prs: [redPr(99, 40)], launchedNums: [40], liveCiHealGuards: [{ pr: 99, num: 40 }], availableLanes: [5], tick: 1 });
+    expect(r.spawns).toEqual([]);
+  });
+
+  it('the retry cap BINDS from the persisted in-session counter — at cap it surfaces for /review, never re-heals', () => {
+    const r = planCiHealSpawns({ prs: [redPr(99, 40)], launchedNums: [40], ciHealAttempts: { 99: DEFAULT_CI_HEAL_RETRY_CAP }, availableLanes: [5], tick: 5 });
+    expect(r.spawns).toEqual([]);
+    expect(r.notes[0]).toMatchObject({ kind: 'ci-heal-exhausted', pr: 99, attempts: DEFAULT_CI_HEAL_RETRY_CAP });
+  });
+
+  it('binds the cap from the DURABLE floor alone when a restart wiped the in-session tally (#2666 mirrors #2643)', () => {
+    const r = planCiHealSpawns({
+      prs: [redPr(99, 40)], launchedNums: [40],
+      ciHealAttempts: {},                            // restart wiped the session tally
+      prCiHealCounts: { 99: DEFAULT_CI_HEAL_RETRY_CAP }, // but the PR carries 3 durable CI-heal comments
+      availableLanes: [5], tick: 0,
+    });
+    expect(r.spawns).toEqual([]);
+    expect(r.notes[0]).toMatchObject({ kind: 'ci-heal-exhausted', pr: 99, attempts: DEFAULT_CI_HEAL_RETRY_CAP });
+  });
+
+  it('binds on max(in-session, durable) and re-seeds the in-session tally off the durable floor on the first spawn', () => {
+    const r = planCiHealSpawns({
+      prs: [redPr(99, 40)], launchedNums: [40], ciHealAttempts: {}, prCiHealCounts: { 99: 2 },
+      availableLanes: [5], tick: 0,
+    });
+    expect(r.spawns).toEqual([{ pr: 99, num: 40, lane: 5, reason: 'red-ci' }]);
+    expect(r.ciHealAttempts[99]).toBe(3); // re-primed from the durable floor, not 1
+  });
+
+  it('surfaces a no-lane hold rather than dropping the heal', () => {
+    const r = planCiHealSpawns({ prs: [redPr(99, 40)], launchedNums: [40], availableLanes: [], tick: 0 });
+    expect(r.spawns).toEqual([]);
+    expect(r.notes[0]).toMatchObject({ kind: 'ci-heal-no-lane', pr: 99 });
+  });
+});
+
+describe('retireCiHealGuards + clearTerminalCiHealAttempts — entry vs. counter lifetimes (SKILL §3c-ci)', () => {
+  it('retires the ENTRY when CI recovered (ci no longer fail) — counter untouched', () => {
+    const { live, retired } = retireCiHealGuards([{ pr: 99, num: 40, spawnedTick: 0 }], {
+      prs: [{ num: 40, prNumber: 99, state: 'OPEN', ci: 'pass', labels: ['ready-to-merge'] }], tick: 1,
+    });
+    expect(live).toEqual([]);
+    expect(retired[0]).toMatchObject({ pr: 99, reason: 'resolved' });
+  });
+
+  it('keeps the ENTRY live while the PR is still red (mid-heal), retiring it only on recovery or TTL', () => {
+    const { live } = retireCiHealGuards([{ pr: 99, num: 40, spawnedTick: 0 }], {
+      prs: [{ num: 40, prNumber: 99, state: 'OPEN', ci: 'fail', labels: ['ready-to-merge'] }], tick: 1, ttlTicks: 5,
+    });
+    expect(live).toHaveLength(1);
+  });
+
+  it('retires the entry on TTL if the PR is still red past the backstop (still cap-gated on re-dispatch)', () => {
+    const { retired } = retireCiHealGuards([{ pr: 99, num: 40, spawnedTick: 0 }], {
+      prs: [{ num: 40, prNumber: 99, state: 'OPEN', ci: 'fail', labels: ['ready-to-merge'] }], tick: 5, ttlTicks: 5,
+    });
+    expect(retired[0]).toMatchObject({ pr: 99, reason: 'ttl', note: true });
+  });
+
+  it('the attempt counter SURVIVES entry retirement and clears ONLY when the PR leaves the open set', () => {
+    expect(clearTerminalCiHealAttempts({ 99: 2 }, [{ prNumber: 99, state: 'OPEN' }])).toEqual({ 99: 2 });
+    expect(clearTerminalCiHealAttempts({ 99: 2 }, [])).toEqual({});
+  });
+});
+
 // ── Watcher arming ────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('releaseSessionForNum — the merge-time auto-release slug per owning-agent kind (SKILL §4/§3, #2700)', () => {
@@ -405,6 +525,23 @@ describe('planTick — composes the tick and threads nextState', () => {
     expect(out.nextState.fixAttempts).toEqual({ 99: 1 });
   });
 
+  it('composes a CI-heal spawn for a green-at-open PR gone red, on a lane no build/prepare/fix took (#2666)', () => {
+    const out = planTick({
+      state: {
+        queue: [{ num: 10, buildQueued: true }],
+        prs: [{ num: 40, prNumber: 99, state: 'OPEN', ci: 'fail', labels: ['ready-to-merge'] }],
+        lanes: [], needsSlice: [], decisions: [],
+      },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, 5],
+      bookkeeping: { tick: 0, launchedNums: [40] }, // 40 is a conveyor-launched PR now gone red after open
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
+    expect(out.decisions.spawnCiHeals).toEqual([{ pr: 99, num: 40, lane: 5, reason: 'red-ci' }]);
+    expect(out.nextState.ciHealGuards).toEqual([{ pr: 99, num: 40, lane: 5, spawnedTick: 0 }]);
+    expect(out.nextState.ciHealAttempts).toEqual({ 99: 1 });
+  });
+
   it('retires a build guard via the lane-leased claim path — the guard drops out of nextState', () => {
     // Once the agent acquires its lane it shows leased in state.lanes; dispatch-plan then stops listing the
     // (now-claimed, off-queue) item, so plan.launch is empty. The guard must retire — not linger forever.
@@ -479,12 +616,14 @@ describe('buildStatusLine — the terse per-tick line (SKILL §5)', () => {
       liveBuildGuards: [{ num: 10, lane: 5 }],
       livePrepareGuards: [{ num: 20, lane: 6 }],
       liveFixGuards: [{ pr: 99, num: 13 }],
-      launchedNums: [10, 12, 13, 20],
+      liveCiHealGuards: [{ pr: 98, num: 14 }],
+      launchedNums: [10, 12, 13, 14, 20],
     });
-    // building = {10 (guard), 12 (active lane)} = 2; preparing = 1; fixing = 1; parked = 1 (#13).
+    // building = {10 (guard), 12 (active lane)} = 2; preparing = 1; fixing = 1; healing = 1; parked = 1 (#13).
     expect(line).toContain('2 building');
     expect(line).toContain('1 preparing');
     expect(line).toContain('1 fixing');
+    expect(line).toContain('1 healing');
     expect(line).toContain('1 parked');
     expect(line).toContain('health ok');
   });
