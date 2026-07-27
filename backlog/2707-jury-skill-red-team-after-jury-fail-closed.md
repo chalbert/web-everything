@@ -1,4 +1,5 @@
 ---
+bornAs: xkamotn
 kind: story
 size: 3
 parent: "2676"
