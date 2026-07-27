@@ -5,6 +5,15 @@ parent: "2445"
 status: open
 dateOpened: "2026-07-14"
 tags: [plateau-loop, drain-daemon, gate, infra]
+scope:
+  - plateau:tools/drain-daemon/
+  - plateau:tools/dev-panel/vite-plugin.ts
+  - plateau:tools/dev-panel/drain-daemon.html
+  - we:scripts/lib/gate-config.mjs
+  - we:scripts/lib/__tests__/gate-config.test.mjs
+  - we:scripts/readiness/conveyor-state.mjs
+  - we:scripts/conveyor/pr-watch.mjs
+  - we:skills-src/drain/SKILL.md
 ---
 
 # Rename drain-daemon files to unique basenames, then narrow their TRUST_CHAIN entries (follow-up to #2480)
