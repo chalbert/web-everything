@@ -7,6 +7,9 @@ status: open
 blockedBy: ["2661"]
 dateOpened: "2026-07-27"
 tags: []
+scope:
+  - we:scripts/conveyor/tick-core.mjs
+  - we:scripts/conveyor/__tests__/tick-core.test.mjs
 ---
 
 # Conveyor tick loop: emit ONE degraded-infra note from the clustered health signal
