@@ -10,8 +10,13 @@
  * static FUI import?" is fully script-decidable, so per the hookable-vs-judgment rule (#51) it belongs in a
  * deterministic write-time hook, here.
  *
- * SCOPE: only WE package source under `src/`, and never a `demos/` subtree — not even a `src/` dir nested
- * inside `demos/` (demos are runtime pages that legitimately load FUI cross-origin, mode-C).
+ * SCOPE: only WE's OWN package source under `src/`, and never a `demos/` subtree — not even a `src/` dir
+ * nested inside `demos/` (demos are runtime pages that legitimately load FUI cross-origin, mode-C).
+ * The scope is keyed on REPO IDENTITY, not the bare `/src/` path segment: the nearest `package.json` above
+ * the target must be `web-everything` (#2673). A WE-rooted agent editing another repo's checkout — e.g.
+ * `plateau-app:src/**` or `frontierui:src/**` — carries an absolute path with a `/src/` segment too, but a
+ * FUI import there is a NORMAL forward edge (plateau-app dogfoods FUI as the product layer), NOT the backward
+ * edge this guard blocks. Keying on `/src/` alone wrongly DENIED those edits (confirmed hits: #2604, #2660).
  * A cross-origin dynamic `import('https://frontierui.dev/…')` is a RUNTIME edge (allowed) and never matches —
  * the detector keys on the BARE `@frontierui`/`frontierui/` specifier, not a URL.
  *
@@ -27,11 +32,46 @@
  */
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
-// WE package source = repo `src/**`, but NEVER a `demos/` subtree (demos load FUI cross-origin at runtime,
-// so a nested `demos/**/src/` is out of scope too).
+// True iff `name` is the WE package or one of its in-repo sub-packages — the repo-identity the guard scopes
+// on (#2673). Only WE's own tree is WE source; a `plateau-app` / `frontierui` checkout is another repo
+// (forward edges). WE ships in-repo workspaces named `@webeverything/*` (webcases, contracts, …) — their
+// src/ is WE source too, so match the scope prefix, not just the bare root name.
+const WE_PKG_NAME = 'web-everything';
+export function isWePackageName(name) {
+  return name === WE_PKG_NAME || (typeof name === 'string' && name.startsWith('@webeverything/'));
+}
+
+// Repo identity of `file`: the `name` of the NEAREST package.json above it, or null if none is found. This is
+// what distinguishes WE's own `src/` from a sibling repo's `src/` that merely shares the path segment. Fails
+// SOFT — an unreadable/nameless package.json is skipped, an unfound one returns null (isWeSource then passes
+// through, keeping the guard's fail-open stance: it must never wedge the agent).
+export function repoNameFor(file) {
+  let dir = dirname(file);
+  for (let i = 0; i < 64; i++) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+      if (pkg && typeof pkg.name === 'string') return pkg.name;
+    } catch { /* no package.json here (or unparseable) — keep walking up */ }
+    const parent = dirname(dir);
+    if (parent === dir) break; // reached filesystem root
+    dir = parent;
+  }
+  return null;
+}
+
+// WE package source = WE's OWN `src/**`, but NEVER a `demos/` subtree (demos load FUI cross-origin at
+// runtime, so a nested `demos/**/src/` is out of scope too). The `/src/` path shape is necessary but NOT
+// sufficient — the file must ALSO live in the WE repo (repoName), so a sibling repo's `src/` (plateau-app /
+// frontierui) is not treated as WE source (#2673). The cheap path checks run FIRST; the package.json walk-up
+// is only reached for an actual in-scope `src/` path (this runs on every Edit/Write, so keep it lazy).
+// `repoName` is injectable for hermetic unit tests; pass `undefined` (the hook's path) to walk the disk.
 const WE_SRC_RE = /(?:^|\/)src\/.+\.(?:ts|tsx|js|mjs|cjs|cts|mts)$/;
-export function isWeSource(file) { return WE_SRC_RE.test(file) && !/\/demos\//.test(file); }
+export function isWeSource(file, repoName) {
+  if (!WE_SRC_RE.test(file) || /\/demos\//.test(file)) return false;
+  return isWePackageName(repoName === undefined ? repoNameFor(file) : repoName);
+}
 
 // Strip comments first so a commented-out / documented mention never denies; the `:` guard preserves
 // `https://` inside string literals.
