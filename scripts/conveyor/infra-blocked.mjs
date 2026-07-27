@@ -122,6 +122,31 @@ export function correlateCause(classified, githubStatus) {
 }
 
 /**
+ * Cluster same-cause external failures into ONE group per cause (#2661) — the "N lanes down on ONE outage is
+ * ONE degraded-infra signal, not N alarms" primitive. Takes members each carrying a `cause` (an already-classified
+ * / correlated failure class, e.g. "GitHub outage") plus an identity (`lane` / `num`); groups by the EXACT cause
+ * string, and returns one `{ cause, count, members }` per distinct cause. A blank/absent cause folds to `'infra'`
+ * so an un-labelled block never fragments the cluster. Deterministic order — most-affected cause first, then cause
+ * name (stable) — so the caller renders/notes the widest outage first. Pure: no fs / clock / network (the caller
+ * supplies already-refined causes; correlation against githubstatus happens upstream in {@link correlateCause}).
+ * @param {Array<{cause?:string, lane?:*, num?:*}>|null|undefined} members
+ * @returns {Array<{cause:string, count:number, members:Array<{lane:*, num:(string|null)}>}>}
+ */
+export function clusterByCause(members) {
+  const groups = new Map();
+  for (const m of Array.isArray(members) ? members : []) {
+    if (!m || typeof m !== 'object') continue;
+    const cause = String(m.cause || 'infra').trim() || 'infra';
+    if (!groups.has(cause)) groups.set(cause, []);
+    groups.get(cause).push({ lane: m.lane ?? null, num: m.num != null ? String(m.num) : null });
+  }
+  const out = [];
+  for (const [cause, list] of groups) out.push({ cause, count: list.length, members: list });
+  out.sort((a, b) => b.count - a.count || a.cause.localeCompare(b.cause));
+  return out;
+}
+
+/**
  * The backoff wait (ms) BEFORE the retry that follows a given failed attempt. `attempt` is 1-based (1 = the
  * initial failed open): wait = min(cap, base · factor^(attempt-1)). Deterministic (no jitter) so the retry
  * schedule is unit-testable; the conveyor tick's own cadence supplies the real-world spread.
