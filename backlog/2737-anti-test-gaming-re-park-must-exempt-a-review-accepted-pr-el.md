@@ -2,17 +2,16 @@
 bornAs: xdj48uy
 kind: task
 parent: "2410"
-status: resolved
+status: open
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs.test.mjs"]
+blockedBy: ["2409", "2416", "2502"]
 dateOpened: "2026-07-27"
-dateStarted: "2026-07-27"
-dateResolved: "2026-07-27"
 tags: []
 ---
 
 # anti-test-gaming re-park must exempt a review:accepted PR (else an accepted PR trips it forever)
 
-The drain's scanTestTampering re-park short-circuits before decideReviewGate, so a human-accepted PR whose own test fixtures contain skip/only/.each markers is re-parked every pass and never lands. Exempt review:accepted (accepted-wins-first, as decideReviewGate already does).
+The drain's scanTestTampering re-park short-circuits before decideReviewGate, so a human-accepted PR whose own test fixtures contain skip/only/.each markers is re-parked every pass and never lands. The exemption must be scoped to the reviewed DIFF (a SHA-pinned, human-applied accept), NOT to the presence of the `review:accepted` label — a label-keyed exemption reopens two trust-chain holes (see below), so this is blocked on #2409 + #2416 + #2502.
 
 ## The seam
 
@@ -31,29 +30,43 @@ markers as regression fixtures) trips the detector on **every** drain pass. So a
 park loop. #791 hit this: it was human-accepted, CI-green, cleanly mergeable, yet the daemon would never land it;
 it had to be merged by hand.
 
-## The fix
+## Why the first attempt was withdrawn (PR #809, `review:changes`)
 
-Before the test-gaming re-park (and the manifest-tamper re-park just above it, ~L1800–1827, which has the same
-shape), check for an existing `review:accepted` label and **skip the re-park** when present — the human already
-cleared this exact concern, same "accepted wins first" rule `decideReviewGate` encodes. A fresh `review:human`
-must never be stamped over a standing `review:accepted`. Add a regression test in
-`we:scripts/__tests__/merge-ai-prs.test.mjs`: a candidate carrying `review:accepted` whose diff trips
-`scanTestTampering` lands (merge), not parks.
+The first cut keyed the exemption on the **presence** of the `review:accepted` LABEL
+(`shouldReparkForScan({tripped, reviewAccepted}) = tripped && !reviewAccepted`, wired around BOTH pre-gate
+re-parks). Two independent reviews (the drain's advisory pass and the operator's `/review`) confirmed that
+reopens two trust-chain holes, because the label is not the diff:
 
-## Safety note
+- **Finding 1 — stale-accept + tamper-push.** `review:accepted` is not SHA-pinned and is not cleared on a new
+  push. Accept a benign diff, then push a `.skip`/`.only`/delete-test or manifest-weakening commit: the scan
+  trips but the exemption returns `false`, so the PR merges on the stale accept with no human look. Holds even
+  for a human-applied accept. The pre-#2737 behaviour re-parked it `review:human` every pass — that is exactly
+  the property the manifest-tamper docblock promises ("a post-review WEAKENING edit → re-park for a HUMAN look").
+- **Finding 2 — agent self-clear.** `we:scripts/lib/auto-land-seam.mjs` can apply `review:accepted` with NO
+  human on the agent-clearable `review:pending` track. A label-keyed exemption then lets an agent-applied accept
+  skip the deterministic anti-gaming / manifest-tamper backstop the scans exist to escalate — the agent panel
+  clearing a trust-chain concern for itself.
 
-This does **not** weaken the gate for un-cleared PRs — the scan still fires and parks `review:human` on any PR a
-human has **not** accepted. It only stops a second, redundant human-gate from being re-applied after a human has
-already judged the very same diff. Gate-self file (`we:scripts/merge-ai-prs.mjs`), so the fix itself lands
-through a `review:human` cycle.
+The blanket-label exemption was therefore **removed** (PR #809 restored to the pre-#2737 code): both scans again
+re-validate the CURRENT diff every drain pass, closing both findings and restoring the docblock property.
 
-## Progress
+## The correct fix (blocked — do not ship a label-keyed exemption)
 
-- Added exported pure helper `shouldReparkForScan({ tripped, reviewAccepted })` in `we:scripts/merge-ai-prs.mjs`
-  — a re-park fires only when a scan tripped AND no human has accepted the diff (accepted-wins-first, mirroring
-  `decideReviewGate`).
-- Wired both pre-gate re-parks to it: the anti-test-gaming re-park (#2440) and the manifest-tamper re-park just
-  above it (same short-circuit-before-`decideReviewGate` shape). A standing `review:accepted` now skips both, so
-  the PR falls through to `decideReviewGate`, which merges on the accepted label.
-- Regression tests in `we:scripts/__tests__/merge-ai-prs.test.mjs`: the accepted+tripped case does NOT re-park
-  and, via `decideReviewGate`, merges; the un-cleared+tripped case still re-parks (gate not weakened).
+The exemption must be scoped to the **diff**, not the label. That needs the accept-time SHA-record path:
+
+1. Record the reviewed head SHA when `review:accepted` is applied, and exempt ONLY when the current head SHA
+   equals the recorded reviewed SHA — any new push re-arms both scans (closes Finding 1). This is the property
+   of **#2409** (reviewed commit-set must match head) + **#2502** (emit/record the per-PR head SHA).
+2. Additionally gate the exemption on a **human-applied** accept — SHA-pin alone still exempts an AI-accept at
+   the same SHA (closes Finding 2). This is the property of **#2416** (honor `review:accepted` only when a human
+   applied it).
+
+Both closes require infrastructure those three items own; they are all still `open`. Shipping a standalone
+SHA-record here would conflict with them, so this item is **blocked on #2409 + #2416 + #2502** and should be
+picked up once they land (or fold into them).
+
+Note: #2669 already tightened `scanTestTampering` for `.skip.each` chains and `.test('literal')` method calls,
+but the scanner still reads raw diff text — a test file that ADDS a fixture line containing `it.skip(` as string
+DATA still trips it (verified). So the underlying false-positive re-park is real; it is a nuisance (a legit
+accepted PR needs a hand-merge), NOT a reason to reopen a trust-chain hole. The nuisance waits for the
+diff-scoped fix above.

@@ -105,7 +105,7 @@ import { resolve, join, dirname } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { rebaseDropContent } from './lib/rebase-drop-content.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
-import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel } from './lib/review-escalation.mjs';
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor } from './lane-drain.mjs';
@@ -719,18 +719,6 @@ export function shouldLabelOnGreen(pr, { requiredCheck = 'test', label = 'ready-
   // AI-trailer heuristic reads non-AI (e.g. the drain's own `drain: rebase …` commit stranded it). #2196/#2326
   if (!isAiGeneratedPr(pr) && !hasLabel(pr, REVIEW_LABELS.accepted)) return false;
   return isRequiredCheckGreen(pr, requiredCheck);     // label the instant the required check is green
-}
-
-/** #2737 — accepted-wins-first for the drain's two PRE-GATE re-parks (manifest-tamper + anti-test-gaming). Both
- *  scans `continue` BEFORE `decideReviewGate` — the one place that checks `review:accepted` FIRST and merges
- *  (review-escalation.mjs). Without this guard a PR a human ALREADY cleared, whose OWN diff keeps tripping a scan
- *  (a manifest baseline mismatch, or test fixtures carrying skip/only/.each as regression DATA — e.g. #2669),
- *  re-parks `review:human` every pass and NEVER lands (#791: accepted, CI-green, cleanly mergeable, hand-merged).
- *  A re-park fires only when the scan tripped AND a human has NOT already accepted this exact diff — the same
- *  "accepted wins first" rule decideReviewGate encodes. It does NOT weaken the gate: the scans still fire + park
- *  review:human on any PR a human has NOT accepted. Pure. @param {{tripped:boolean, reviewAccepted:boolean}} o */
-export function shouldReparkForScan({ tripped, reviewAccepted } = {}) {
-  return !!tripped && !reviewAccepted;
 }
 
 /** #2230 — should a `--label`-scoped ONE-SHOT drain re-poll once before concluding the queue is empty? GitHub's
@@ -1811,10 +1799,6 @@ function runCli() {
       // is null so the tampered body is (re-)captured as the baseline AND the diff fails open — a durable
       // bypass. The same code path can't tell a cache-loss re-sighting from a genuine first sighting without a
       // durable per-PR signal, so it is not defended here (see review-baseline-state.mjs's cache-loss residual).
-      // #2737 — accepted-wins-first: skip BOTH pre-gate re-parks below (manifest-tamper here, anti-test-gaming
-      // next) when a human has already cleared this PR, so the diff falls through to decideReviewGate and merges
-      // on the same "accepted wins first" rule (see shouldReparkForScan's docblock).
-      const reviewAccepted = hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted);
       const liveManifestValues = { hasManifest: !!v.hasManifest, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, blockedBy: v.blockedBy };
       const priorBaseline = getBaseline(baselineState, { repo: v.repo, num: v.num });
       if (!priorBaseline && !DRY_RUN) {
@@ -1822,7 +1806,7 @@ function runCli() {
         if (nextBaseline !== baselineState) { baselineState = nextBaseline; baselineStateChanged = true; }
       }
       const tamper = diffBaseline(priorBaseline, liveManifestValues);
-      if (shouldReparkForScan({ tripped: tamper.tampered, reviewAccepted })) {
+      if (tamper.tampered) {
         // A post-review WEAKENING edit — refuse the auto-land and re-park for a HUMAN look (a manifest tamper
         // is a trust-chain concern the agent panel must not clear for itself). `skip` keeps it out of the
         // merge cascade AND keeps it blocking its dependents; the durable comment records WHAT changed vs the
@@ -1850,14 +1834,11 @@ function runCli() {
       // trust-chain concern the agent panel must not clear for itself; a human clears a legit removal. Best-
       // effort like the manifest gate: only when a local/sibling clone is present to read the diff text (no
       // clone ⇒ no text ⇒ the scan is a no-op — the same fail-open the manifest baseline gate documents).
-      // #2737 — accepted-wins-first, short-circuited: an accepted PR is exempt from the re-park (below), so skip
-      // the whole scan for it — otherwise the repeated fetch+net-diff runs on EVERY drain pass for exactly the
-      // accepted-PR-that-keeps-tripping case this item targets, redundant work behind a guaranteed exemption.
-      if (v.headRef && (isLocalRepo(v.repo) || escCwd) && !reviewAccepted) {
+      if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
         const exec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts });
         const net = computeNetDiffText({ exec, rev: v.headRef, fetchExtraRefs: [v.headRef] });
         const gaming = scanTestTampering({ diffText: net.text });
-        if (net.scored && shouldReparkForScan({ tripped: gaming.tampered, reviewAccepted })) {
+        if (net.scored && gaming.tampered) {
           v.decision = 'skip';
           v.escalated = 'yes';
           v.humanRequired = true;

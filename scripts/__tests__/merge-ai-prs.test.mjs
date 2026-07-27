@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, shouldReparkForScan, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -553,35 +553,6 @@ describe('shouldLabelOnGreen (#2216 — post-CI reconcile labels a stranded gree
   });
   it('a non-AI PR that is NOT human-cleared (review:pending) is still not labelled', () => {
     expect(shouldLabelOnGreen(aiPr({ commits: [claudeCommit(), humanCommit], labels: [{ name: 'review:pending' }] }), {})).toBe(false);
-  });
-});
-
-describe('shouldReparkForScan (#2737 — accepted-wins-first exempts a review:accepted PR from the pre-gate re-parks)', () => {
-  it('scan tripped + NOT accepted → re-park (the gate still fires for an un-cleared PR)', () => {
-    expect(shouldReparkForScan({ tripped: true, reviewAccepted: false })).toBe(true);
-  });
-  it('scan tripped + review:accepted → do NOT re-park (a human already judged this exact diff — #791)', () => {
-    // The bug this fixes: an accepted, CI-green, cleanly-mergeable PR whose OWN test fixtures carry skip/only/.each
-    // as regression DATA (e.g. #2669) tripped scanTestTampering every drain pass and was re-parked review:human
-    // forever, never landing. Accepted must win first, exactly as decideReviewGate already does.
-    expect(shouldReparkForScan({ tripped: true, reviewAccepted: true })).toBe(false);
-  });
-  it('scan NOT tripped → never re-parks, accepted or not (no false-park)', () => {
-    expect(shouldReparkForScan({ tripped: false, reviewAccepted: false })).toBe(false);
-    expect(shouldReparkForScan({ tripped: false, reviewAccepted: true })).toBe(false);
-  });
-  it('missing args are treated as no-trip (fail-open, never a spurious park)', () => {
-    expect(shouldReparkForScan({})).toBe(false);
-    expect(shouldReparkForScan()).toBe(false);
-  });
-  it('a review:accepted candidate that trips the scan falls through to decideReviewGate → merge, not park', () => {
-    // The end-to-end assertion the spec asks for, expressed over the two pure gates that compose the path:
-    // (1) shouldReparkForScan short-circuits the re-park OFF for an accepted PR, so it is NOT parked here, and
-    // (2) decideReviewGate then MERGES it on the standing review:accepted label. Together: accepted + tripped → land.
-    const reviewAccepted = true;
-    expect(shouldReparkForScan({ tripped: true, reviewAccepted })).toBe(false); // (1) re-park skipped
-    const gate = decideReviewGate({ escalate: true, humanRequired: true, labels: [{ name: REVIEW_LABELS.accepted }] });
-    expect(gate.action).toBe('merge'); // (2) accepted wins → merge
   });
 });
 
