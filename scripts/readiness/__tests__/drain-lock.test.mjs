@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { readLockEntry } from '../file-locks.mjs';
 import {
   NUMBERING_LOCK_PATH, DRAIN_LEASE_PATH,
-  makeOwner, tryAcquireNumberingLock, releaseNumberingLockIfOwned, withNumberingLock,
+  makeOwner, tryAcquireNumberingLock, releaseNumberingLockIfOwned, withNumberingLock, withLandWriteLock,
   acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus,
 } from '../drain-lock.mjs';
 
@@ -74,6 +74,35 @@ describe('numbering-critical-section mutex — sole-serial-writer (#2391)', () =
     tryAcquireNumberingLock(root, 'B', { nowMs: T0 + 6 * MIN, leaseMinutes: 5 }); // B reclaims A's stale lock
     expect(releaseNumberingLockIfOwned(root, 'A')).toBe(false);                    // A's late release is a no-op
     expect(readLockEntry(root, NUMBERING_LOCK_PATH).owner).toBe('B');              // B's lock intact
+  });
+});
+
+describe('withLandWriteLock — the merge write shares the serial-writer mutex (#2683)', () => {
+  it('a merge write BLOCKS while a numbering section holds the SAME lock key (mutual exclusion across the two)', () => {
+    // A numbering land holds the mutex; a concurrent merge write must NOT proceed under the lock — they share
+    // NUMBERING_LOCK_PATH, so the merge is what a --only fast drain serializes against a resident-daemon sweep.
+    expect(tryAcquireNumberingLock(root, 'NUMBERING', { nowMs: T0, leaseMinutes: 5 }).ok).toBe(true);
+    let clock = T0;
+    const r = withLandWriteLock(() => 'merged', { lockRoot: root, waitMs: 500, pollMs: 100, leaseMinutes: 5, now: () => clock, sleep: () => { clock += 100; } });
+    expect(r.held).toBe(false);        // never seized while numbering held it
+    expect(r.heldBy).toBe('NUMBERING');
+    expect(r.contended).toBe(true);    // never-hang fallback — the merge still ran (fn), the idempotency guard is the backstop
+    expect(r.result).toBe('merged');
+    expect(readLockEntry(root, NUMBERING_LOCK_PATH).owner).toBe('NUMBERING'); // the fallback never stomped the holder
+  });
+
+  it('two merge writes serialize on the shared key and release after each section', () => {
+    const r1 = withLandWriteLock(() => 'A', { lockRoot: root, now: () => T0 });
+    expect(r1).toMatchObject({ held: true, contended: false, result: 'A' });
+    expect(readLockEntry(root, NUMBERING_LOCK_PATH)).toBeNull(); // released → the next writer can acquire
+    const r2 = withLandWriteLock(() => 'B', { lockRoot: root, now: () => T0 });
+    expect(r2).toMatchObject({ held: true, result: 'B' });
+  });
+
+  it('tags the owner "land" (diagnostics) while sharing the numbering lock key for exclusion', () => {
+    let seenOwner = null;
+    withLandWriteLock(() => { seenOwner = readLockEntry(root, NUMBERING_LOCK_PATH)?.owner; }, { lockRoot: root, now: () => T0 });
+    expect(seenOwner).toMatch(/:land$/); // makeOwner('land')
   });
 });
 
