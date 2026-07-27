@@ -2,9 +2,11 @@
 bornAs: xdj48uy
 kind: task
 parent: "2410"
-status: open
+status: resolved
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs.test.mjs"]
 dateOpened: "2026-07-27"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 
@@ -44,3 +46,14 @@ This does **not** weaken the gate for un-cleared PRs — the scan still fires an
 human has **not** accepted. It only stops a second, redundant human-gate from being re-applied after a human has
 already judged the very same diff. Gate-self file (`we:scripts/merge-ai-prs.mjs`), so the fix itself lands
 through a `review:human` cycle.
+
+## Progress
+
+- Added exported pure helper `shouldReparkForScan({ tripped, reviewAccepted })` in `we:scripts/merge-ai-prs.mjs`
+  — a re-park fires only when a scan tripped AND no human has accepted the diff (accepted-wins-first, mirroring
+  `decideReviewGate`).
+- Wired both pre-gate re-parks to it: the anti-test-gaming re-park (#2440) and the manifest-tamper re-park just
+  above it (same short-circuit-before-`decideReviewGate` shape). A standing `review:accepted` now skips both, so
+  the PR falls through to `decideReviewGate`, which merges on the accepted label.
+- Regression tests in `we:scripts/__tests__/merge-ai-prs.test.mjs`: the accepted+tripped case does NOT re-park
+  and, via `decideReviewGate`, merges; the un-cleared+tripped case still re-parks (gate not weakened).
