@@ -20,7 +20,7 @@ or more populated lane columns** before any strips.
 ## Measured evidence
 - v68 target: two full lane columns (`LANE-1 CONSOLE TREE`, `LANE-2 SHORT TITLES`) side by side, then 7
   collapsed strips.
-- Reworked build (PR #112 / plateau `xb5ma0r`, headless mount of `BOARD`/`POOL`/`SPANS` at 1440w): one wide
+- Reworked build (PR #112 / plateau `2736`, headless mount of `BOARD`/`POOL`/`SPANS` at 1440w): one wide
   "Core" column, then 9 strips (Review/Fan-out/Docs/Infra/CI-A/CI-B/Loop/Shipped/Explorer). The Review lane —
   which holds a rich four-card stack in the fixture — is hidden in a strip.
 - Root cause: the center's measured width is ~780px (the composer + glossary rail on the left and the
