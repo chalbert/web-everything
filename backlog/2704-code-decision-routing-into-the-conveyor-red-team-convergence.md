@@ -1,4 +1,5 @@
 ---
+bornAs: xurtg11
 kind: story
 size: 8
 parent: "2612"
@@ -39,7 +40,7 @@ to a human to ratify**. It does NOT:
 complexity/criticality — escalate to the human only if needed (genuine non-convergence)."
 
 This must be CODED into the conveyor's decision flow, not hand-run. It was hand-run ad-hoc via Workflow for the
-feature-tracker design and decision #xyr248a (the conveyor-orchestration-boundary decision) — which PROVES the
+feature-tracker design and decision #2701 (the conveyor-orchestration-boundary decision) — which PROVES the
 machinery works but also proves it is not yet WIRED into the conveyor.
 
 ## Proposed behaviour
