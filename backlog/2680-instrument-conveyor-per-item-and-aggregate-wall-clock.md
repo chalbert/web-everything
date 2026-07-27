@@ -3,10 +3,12 @@ bornAs: xfgacpz
 kind: story
 size: 3
 parent: "2612"
-status: open
+status: resolved
 relatedReport: reports/2026-07-26-conveyor-per-item-latency.md
 scope: ["we:scripts/readiness/conveyor-instrument.mjs", "we:scripts/readiness/__tests__/conveyor-instrument.test.mjs"]
 dateOpened: "2026-07-26"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 
@@ -55,3 +57,26 @@ Two corrections from the second design-jury round:
   **dispatch → first-commit span**; if the lane board doesn't already record that boundary, capturing it is in
   scope (a small signal, not a durable store). Without it the instrument returns the very ambiguity it exists to
   remove, so this is load-bearing, not optional.
+
+## Progress
+
+- Built `we:scripts/readiness/conveyor-instrument.mjs` — a pure-core / IO-shell instrument mirroring
+  `we:scripts/readiness/conveyor-state.mjs`. The pure core (`phaseAuthoring` / `phaseLand` / `phaseBreakdown` /
+  `poolSaturation` / `sumPhase` / `classifyRegime` / `instrumentConveyor`) takes injected ISO timestamps + plain
+  objects and returns the per-item + aggregate breakdown across the five phases (authoring, first-CI, poll-gap,
+  land-serialization, pool-saturation) plus a binding-regime verdict. The IO shell gathers records from the same
+  standard verbs the lane board reads (backlog loader + `gh` PR commit/CI/merge timestamps) — no parallel/durable
+  store.
+- Round-2 (authoring ambiguity): authoring is the dispatch→first-commit span, unobtainable from `gh` (a PR is
+  created after authoring). The shell reads it from a gitignored `we:.conveyor/dispatch-log.json` sidecar (the small
+  non-durable signal), populated by `mark-dispatch` / `mark-setup` capture verbs. When absent, authoring is null
+  with `reason:'no-dispatch-signal'` and the report sets `needsDispatchInstrumentation` — it surfaces the ambiguity
+  instead of fabricating a number. A measured term (first-CI / land-serialization) that wins while authoring is
+  entirely unseen is flagged provisional so authoring is never silently ruled out.
+- Round-4 (decomposition): the authoring span is decomposed into `setup` + `authoringNet` when a `mark-setup`
+  mid-span boundary is present; an UNDECOMPOSED authoring aggregate can never be classified `authoring-bound` (it
+  returns `authoring-bound-ambiguous`), so a coarse span cannot fire the wrong lever.
+- Round-2 (Lever D false-green): deliberately NOT produced here — that is a test-outcome fact owned by #2681.
+- Unit test `we:scripts/readiness/__tests__/conveyor-instrument.test.mjs` (28 cases) drives the pure core with plain
+  objects; smoke-ran the shell against live `gh` data (real first-CI + land split measured; authoring correctly
+  flagged unmeasured).
