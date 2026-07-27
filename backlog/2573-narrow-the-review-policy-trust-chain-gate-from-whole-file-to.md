@@ -5,6 +5,18 @@ kind: story
 size: 5
 status: open
 blockedBy: []
+scope:
+  - we:scripts/lib/gate-config.mjs
+  - we:scripts/lib/review-escalation.mjs
+  - we:scripts/lib/review-core.mjs
+  - we:scripts/lib/review-policy.mjs
+  - we:scripts/lib/review-policy.contract.json
+  - we:scripts/lib/__tests__/gate-config.test.mjs
+  - we:scripts/lib/__tests__/gate-invariants.test.mjs
+  - we:scripts/lib/__tests__/review-escalation.test.mjs
+  - we:scripts/lib/__tests__/review-policy.conformance.test.mjs
+  - we:skills-src/drain/SKILL.md
+  - we:skills-src/review/SKILL.md
 dateOpened: "2026-07-19"
 dateStarted: "2026-07-19"
 tags: []
