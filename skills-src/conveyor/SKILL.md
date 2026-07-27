@@ -25,7 +25,7 @@ The three scripts this skill shells (do not reimplement any of them):
 | `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health, infraBlocked }`. Every tick STARTS here. |
 | `node scripts/conveyor/infra-blocked.mjs retry` | **The infra-blocked recovery pass (#2659)** — one idempotent resume pass: for each item whose lane ref was PUSHED but whose PR-open failed on an outside dependency (a GitHub outage), it correlates GitHub status, resume-opens the PR once infra recovers (via `pr-land` — never a local merge), backs off on failure, and surfaces at the attempt cap. |
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
-| `node scripts/conveyor/tick-core.mjs` (stdin ⇽ bookkeeping) | **The MECHANIZED tick core (#2699)** — the whole per-tick state machine in one call: it shells `conveyor-state` + `dispatch-plan` + the free-lane picker, takes your in-session guard/watcher bookkeeping on STDIN, and returns `{ decisions, nextState }`. `decisions` = `{ spawnBuilds, spawnPrepareScope, spawnPrepareDecision, spawnFixes, armWatchers, retireGuards, idleStop, statusLine, notes }`; `nextState` = the next tick's bookkeeping. The three guards, their retirement (claim/return/TTL/PR-terminal), the union re-dispatch gate, watcher arming, and idle-stop are all DECIDED here — you EXECUTE the decisions and carry `nextState` forward, you never re-derive a guard rule in prose. |
+| `node scripts/conveyor/tick-core.mjs` (stdin ⇽ bookkeeping) | **The MECHANIZED tick core (#2699)** — the whole per-tick state machine in one call: it shells `conveyor-state` + `dispatch-plan` + the free-lane picker, takes your in-session guard/watcher bookkeeping on STDIN, and returns `{ decisions, nextState }`. `decisions` = `{ spawnBuilds, spawnPrepareScope, spawnPrepareDecision, spawnFixes, spawnCiHeals, armWatchers, retireGuards, idleStop, statusLine, notes }`; `nextState` = the next tick's bookkeeping. The FOUR guards (build, prepare, fix, CI-heal), their retirement (claim/return/TTL/PR-terminal/CI-recovery), the union re-dispatch gate, watcher arming, and idle-stop are all DECIDED here — you EXECUTE the decisions and carry `nextState` forward, you never re-derive a guard rule in prose. |
 | `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR. Its process EXIT is the wake signal; the exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
 
 > **Auto-prepare for unscoped items (#2613, corrected design — Nicolas, 2026-07-22).** Predicted `scope:` is
@@ -68,8 +68,10 @@ The three scripts this skill shells (do not reimplement any of them):
 The agent templates it instantiates: [`delivery-agent-brief.md`](delivery-agent-brief.md) (build a scoped
 item, #2608), [`prepare-scope-agent-brief.md`](prepare-scope-agent-brief.md) (author an unscoped item's
 `scope:`, #2613), [`prepare-decision-agent-brief.md`](prepare-decision-agent-brief.md) (prepare an unprepared
-decision's forks to "ready to ratify", #2647), and [`fix-agent-brief.md`](fix-agent-brief.md) (repair a
-`review:changes` bounce in its own lane and re-arm review, #2630).
+decision's forks to "ready to ratify", #2647), [`fix-agent-brief.md`](fix-agent-brief.md) (repair a
+`review:changes` bounce in its own lane and re-arm review, #2630), and
+[`fix-agent-ci-brief.md`](fix-agent-ci-brief.md) (rebase + repair a green-at-open PR gone red/BEHIND — CI only,
+never the review label, #2666).
 
 ---
 
@@ -147,10 +149,10 @@ one that works for a completed background task), so it re-invokes this loop reli
    ```
    `tick-core.mjs` re-shells the state read + dispatch plan + free-lane picker under the hood and takes your
    in-session **bookkeeping** on STDIN (`{ bookkeeping: { tick, buildGuards, prepareGuards, fixGuards,
-   fixAttempts, watched, launchedNums }, signals: { returnedBuildNums }, lastOperatorTurn }` — carried forward
-   from the previous tick's `nextState`, `{}` on the first tick). It returns
-   `{ decisions: { spawnBuilds, spawnPrepareScope, spawnPrepareDecision, spawnFixes, armWatchers, retireGuards,
-   idleStop, statusLine, notes }, nextState }`. **Steps 3–5 below EXECUTE those decisions; you never re-derive a
+   fixAttempts, ciHealGuards, ciHealAttempts, watched, launchedNums }, signals: { returnedBuildNums },
+   lastOperatorTurn }` — carried forward from the previous tick's `nextState`, `{}` on the first tick). It returns
+   `{ decisions: { spawnBuilds, spawnPrepareScope, spawnPrepareDecision, spawnFixes, spawnCiHeals, armWatchers,
+   retireGuards, idleStop, statusLine, notes }, nextState }`. **Steps 3–5 below EXECUTE those decisions; you never re-derive a
    guard, a TTL, a re-dispatch gate, or the idle clock in prose — the core already applied all of them.** The
    guard sections further down DOCUMENT what the core encodes (so the semantics stay legible); they are not a
    second place to compute them. Carry `nextState` into the next tick's STDIN unchanged.
@@ -275,17 +277,18 @@ one that works for a completed background task), so it re-invokes this loop reli
    skipped, and its exit never gates the tick. A freed lane is picked up by the very next tick's `dispatch-plan`.
 
 5. **Post `decisions.statusLine`, then start the next tick.** The core already built the terse one-line status
-   from the tick read + the live bookkeeping (counts of building / preparing / fixing / queued / parked + the
-   health verdict, with `· N infra-blocked` and a `⚠ lane-N` warn suffix appended when they apply) and gathered
+   from the tick read + the live bookkeeping (counts of building / preparing / fixing / healing / queued / parked +
+   the health verdict, with `· N infra-blocked` and a `⚠ lane-N` warn suffix appended when they apply) and gathered
    the per-tick surfaces in `decisions.notes` (a TTL re-dispatch warning, a `needs-slice` epic §3d, a prepared
    `decision-ready` §3e). Post that line (plus any notes) — do not recompute the counts. If `decisions.idleStop`
    is true, STOP the loop (§6) instead of arming the next tick. Per the operator's progress-tracking preference
    the checklist is the channel and prose stays quiet — one line per tick, e.g.:
-   > `conveyor · N building · N preparing · N fixing · N queued · N parked · health ok` — add `· N infra-blocked`
-   > when `state.infraBlocked` is non-empty (pushed-but-unopened work the §4b pass is auto-retrying; flag a
-   > capped/exhausted one for the operator) — where **`N preparing`**
-   > is the count of prepare-scope agents in flight (auto-preparing unscoped items' scope) and **`N fixing`** is
-   > the count of fix agents in flight (repairing `review:changes` bounces, §3c). Add `⚠` + the flagged lanes
+   > `conveyor · N building · N preparing · N fixing · N healing · N queued · N parked · health ok` — add
+   > `· N infra-blocked` when `state.infraBlocked` is non-empty (pushed-but-unopened work the §4b pass is
+   > auto-retrying; flag a capped/exhausted one for the operator) — where **`N preparing`**
+   > is the count of prepare-scope agents in flight (auto-preparing unscoped items' scope), **`N fixing`** is
+   > the count of fix agents in flight (repairing `review:changes` bounces, §3c), and **`N healing`** is the count
+   > of CI-heal agents in flight (rebasing + repairing green-at-open PRs gone red/BEHIND, §3c-ci). Add `⚠` + the flagged lanes
    > when `state.health.verdict === 'warn'`; add `⚠ N auto-preparing scope: #A #B` when `state.unshaped` is
    > non-empty, so the operator sees those cleared items are being scoped now (a prepare agent per item) and will
    > build once their scope lands — see the auto-prepare callout above.
@@ -476,12 +479,56 @@ Its rules — two suppressions and one cap:
   counter did NOT reset), so a repeatedly-dying fix still terminates at the human. Clear `fixAttempts[pr]` only
   when the PR reaches a terminal state (merged / closed).
 
-> **Red gate / red CI is NOT watcher-visible.** `pr-watch` reads only `state,mergedAt,labels`, so a gate-red or
-> red-CI PR reads as `pending`. That escalation surfaces via the **delivery / fix agent's one-line return** (the
-> #2608 / #2630 briefs), not the watcher — when a delivery or fix `Agent` completes with `… gate-red` /
-> `fix escalated <reason>` / `escalated <label>`, surface that in chat. Never assume the watcher caught a red
-> build. (A fix agent that hits a red gate or an ambiguous finding leaves the PR `review:changes` and does NOT
-> re-arm — so it re-enters the fix path on a later tick unless the retry cap has been reached.)
+> **Red gate / red CI is NOT watcher-visible AT OPEN.** `pr-watch` reads only `state,mergedAt,labels`, so a
+> gate-red or born-red PR reads as `pending`. A build that is red AT OPEN surfaces via the **delivery / fix agent's
+> one-line return** (the #2608 / #2630 briefs), not the watcher — when a delivery or fix `Agent` completes with
+> `… gate-red` / `fix escalated <reason>` / `escalated <label>`, surface that in chat. But a PR that was **green at
+> open and went red LATER** is a different case the watcher also can't see — that is what §3c-ci auto-heals off the
+> tick's state read (`state.prs[].ci`), not the watcher. (A fix agent that hits a red gate or an ambiguous finding
+> leaves the PR `review:changes` and does NOT re-arm — so it re-enters the fix path on a later tick unless the
+> retry cap has been reached.)
+
+### 3c-ci. Auto-heal a green-at-open PR gone RED / BEHIND — spawn ONE CI-heal agent into the PR's lane (#2666)
+
+§3c repairs a PR a **human** bounced (`review:changes`). This rule repairs a PR **CI** broke: a conveyor PR that
+was **green at pr-land** but has since gone **red on a required check** (`state.prs[].ci === 'fail'`) or **BEHIND +
+parked**. The dominant cause is `main` advancing under the branch — a sibling scope PR lands, the branch falls
+BEHIND, and its `test` job breaks against the new main (a flake is the other cause). Nothing else heals it: the
+**delivery agent has long exited** (one agent = one item = one PR), and the **drain skips a red-CI PR**. #2183
+rebuilds a BEHIND but **landable** PR, but a PR **parked** `review:human` / `review:pending` is NOT landable, so
+#2183 never fires for it. So the conveyor auto-dispatches a **CI-heal agent** — the CI-axis SIBLING of the §3c fix
+agent — **UNLESS** the *in-flight test* or the *retry cap* suppresses it. The mechanized tick decides all of this;
+you EXECUTE `decisions.spawnCiHeals`.
+
+- **The trigger — a CI regression, not a label** ({@link tick-core.mjs `isCiHealTarget`}). An OPEN
+  conveyor-launched PR (`num` ∈ `launchedNums`) that was **green at open** (carries `ready-to-merge` or a review
+  park) and is now either **red-CI** (`ci === 'fail'`) or **BEHIND + review-parked** (the not-landable case #2183
+  leaves; a BEHIND-but-landable PR is left to #2183). A **`review:changes`** PR is EXCLUDED — the §3c fix loop owns
+  it and already rebases. A PR that was **never green** (no such label — a born-red build the delivery agent
+  escalated) is EXCLUDED, so this never double-handles a gate-red escalation.
+- **What the CI-heal agent does — repair ONLY CI, never the review label.** Instantiate
+  [`fix-agent-ci-brief.md`](fix-agent-ci-brief.md) — substitute `{{ITEM_NUM}}`=`num`, `{{PR_NUM}}`=`prNumber`,
+  `{{LANE_REF}}`=the head ref, `{{LANE}}`=the picked lane, `{{SESSION_SLUG}}`=`ci-heal-<num>`, `{{SCOPE}}`=the
+  item's `scope:`, `{{REASON}}`=`red-ci`/`behind` — and spawn it as ONE background `Agent`. It acquires a lane on
+  the pushed ref, **rebases onto current `main`**, diagnoses + repairs the failing check, re-pushes HEAD to the
+  same `lane/*` ref, then posts a **durable CI-heal comment** (`scripts/conveyor/ci-heal-mark.mjs`) and exits. It
+  **NEVER** touches `review:human` / `review:pending` / `review:changes` / `ready-to-merge` — **only CI is
+  repaired**. After the heal the PR lands exactly as its label already said: `ready-to-merge` lands once re-run CI
+  is green (the drain); a parked PR still awaits its human `/review`.
+- **The CI-heal guard — its own bookkeeping, the SAME two-piece shape as the §3c fix guard (do NOT conflate the
+  two counters).** A `{ pr, num, spawnedTick }` **in-flight ENTRY** keyed by PR number ("a CI-heal agent for this
+  PR is live now"), plus a **per-PR attempt counter** `ciHealAttempts[pr]` that SURVIVES entry retirement. The cap
+  binds on `max(in-session ciHealAttempts, durable prCiHealCounts)` — the durable floor derived from the PR's own
+  **CI-heal comments** (`countCiHealComments`, one per completed heal), so a conveyor restart that wipes the
+  in-session tally can never reset a PR that already burned its attempts (the #2643 design applied to the CI axis).
+  These are SEPARATE from the fix loop's `fixGuards` / `fixAttempts` — a red PR is not a bounced PR.
+- **Two suppressions and one cap** (mirroring §3c): (1) **in-flight test** — skip a PR with a live CI-heal ENTRY
+  (a second red read on the same episode must not spawn a duplicate heal on a second burned lane); (2) **retry
+  cap** (default 3) — at cap, **stop auto-healing** and surface for `/review` (`⚠ PR #N (#<num>) went red/BEHIND
+  <k>× — auto CI-heal exhausted, run /review N`); a genuinely-broken diff needs a human, never an unbounded
+  heal↔red flap. **Retire the ENTRY** (not the counter) when CI recovers (`ci` no longer `fail` / no longer
+  BEHIND) or the PR goes terminal (`resolved`), or on **TTL** (default 5 ticks — the heal agent died before
+  re-pushing; still cap-gated on re-dispatch). Clear `ciHealAttempts[pr]` only on PR-terminal.
 
 ### 3d. Surface every cleared epic for `/slice` — a cleared epic is a slice trigger, not a dead end (#2645)
 
@@ -621,9 +668,12 @@ in the `lane/<num>` branch → `pr-land` → the daemon merges → resolve. Thos
 plateau lane board reads (`claimed.session`, `queued.lane`, `pr.state`+`ci`, the scope-lease collect). So the
 board reflects conveyor state **for free**, and `conveyor-state.mjs` reads that same truth. **Never keep a
 parallel state store of item / claim / PR / resolve state** — the only in-session bookkeeping allowed is
-ephemeral *process* tracking: which delivery / prepare-scope / prepare-decision / fix `Agent`s and which
+ephemeral *process* tracking: which delivery / prepare-scope / prepare-decision / fix / CI-heal `Agent`s and which
 `pr-watch` processes you have spawned (the in-flight dispatch guard, the prepare-scope guard, the
-**decision-prepare guard** (§3e), the in-flight **fix-guard ENTRY** (§3c), and the watched-PR set). That
+**decision-prepare guard** (§3e), the in-flight **fix-guard ENTRY** (§3c), the in-flight **CI-heal-guard ENTRY**
+(§3c-ci), and the watched-PR set). The two attempt counters (`fixAttempts` / `ciHealAttempts`) are session
+overlays whose durable floor is the PR's own re-arm / CI-heal comments — the count IS PR state, not a parallel
+store. That
 is not item state; it is which background jobs are live — the re-arm swap and every repair still flow through the
 board's normal verbs (`git push … lane/*` → `rearm-review.mjs` → the PR's labels → the daemon / `/review`).
 

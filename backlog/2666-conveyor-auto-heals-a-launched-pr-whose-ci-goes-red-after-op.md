@@ -2,10 +2,12 @@
 bornAs: xppjnof
 kind: story
 size: 5
-status: open
-blockedBy: ["2643"]
+status: resolved
+blockedBy: []
 scope: ["we:scripts/conveyor/", "we:skills-src/conveyor/"]
 dateOpened: "2026-07-26"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 
@@ -41,4 +43,16 @@ The conveyor (or the drain's watcher) detects a conveyor-launched PR that was **
 
 - **Review-convergence cluster** — #2630 (auto-re-dispatch a `review:changes` bounce into its lane; this is the sibling loop to mirror), #2635 (bind/reconcile the jury roster at PR-open), #2285 (negotiated agent review for the drain). This item extends that cluster with a **CI-health** trigger alongside the review-verdict trigger.
 - **#2183** (drain BEHIND-rebuild) — covers the **landable** BEHIND case; this item covers the **parked / not-landable** BEHIND case #2183 leaves unhealed (see *Why #2183 does NOT cover this*).
+
+## Progress
+
+Delivered as a 4th conveyor guard — the **CI-heal guard**, the CI-axis sibling of the `review:changes` fix guard (#2630):
+
+- `we:scripts/conveyor/tick-core.mjs` — `planCiHealSpawns` / `retireCiHealGuards` / `clearTerminalCiHealAttempts` + predicates (`isCiHealTarget` / `isRedCi` / `isBehind` / `wasGreenAtOpen` / `isReviewParked`), wired into `planTick` (new `spawnCiHeals` decision, `ciHealGuards` / `ciHealAttempts` bookkeeping, `healing` status-line segment). Trigger: a conveyor-launched PR that was **green at open** and is now **red-CI** (`ci === 'fail'`) or **BEHIND + parked**; `review:changes` PRs excluded (owned by #2630). Bounded by a retry cap on `max(in-session, durable)`.
+- `we:scripts/conveyor/ci-heal-mark.mjs` (new) — the durable CI-heal comment marker + `countCiHealComments`, the restart-surviving retry-cap floor (mirrors #2643). **No label swap** — CI is repaired, the review gate is not.
+- `we:skills-src/conveyor/fix-agent-ci-brief.md` (new) — the CI-heal agent brief: reconstitute the ref → rebase onto `main` → repair the failing check → re-push → post the CI-heal comment → **never touch the review label** → exit.
+- `we:skills-src/conveyor/SKILL.md` — new **§3c-ci** rule + updated §1/§2/§5 (decisions, bookkeeping, status line, briefs list, state-store paragraph).
+- Tests: `we:scripts/conveyor/__tests__/tick-core.test.mjs` (+CI-heal guard cases) and `we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs` (new).
+
+**BEHIND branch is dormant** until the PR row carries `mergeStateStatus` — that field lives in `we:scripts/readiness/conveyor-state.mjs` (out of this item's scope), so it is tracked by the follow-up task `#xhs7qbv` (blockedBy 2666). The red-CI trigger — which is how the observed #743 incident actually manifested (`test: FAILURE`) — is fully live.
 
