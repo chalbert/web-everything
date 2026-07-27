@@ -4,6 +4,17 @@ size: 3
 status: open
 dateOpened: "2026-07-10"
 tags: [gate, review, drain, gate-self]
+scope:
+  - we:scripts/lib/review-escalation.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/review-set-label.mjs
+  - we:scripts/__tests__/review-set-label.test.mjs
+  - we:scripts/lib/review-baseline-state.mjs
+  - we:scripts/lib/__tests__/review-escalation.test.mjs
+  - we:scripts/__tests__/review-escalation.test.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:scripts/lib/__tests__/review-baseline-state.test.mjs
+  - we:scripts/lib/__tests__/gate-invariants.test.mjs
 ---
 
 # Gate check: a PR's reviewed commit-set must match its head before review:accepted is honored
