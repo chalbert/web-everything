@@ -2,9 +2,11 @@
 bornAs: xyr248a
 kind: decision
 parent: "2677"
-status: open
+status: resolved
 relatedReport: reports/2026-07-27-conveyor-orchestration-boundary.md
 dateOpened: "2026-07-27"
+dateResolved: "2026-07-27"
+codifiedIn: "docs/agent/platform-decisions.md#conveyor-orchestration-mechanics-not-per-lane-agent"
 preparedDate: "2026-07-27"
 tags: []
 ---
@@ -13,9 +15,13 @@ tags: []
 
 Once the tick core is a mechanized, tested state machine ([#2699](/backlog/2699-mechanize-the-conveyor-tick-core-into-a-tested-state-machine/) + [#2700](/backlog/2700-wire-ghost-release-lease-reaper-pr-watch-release-session-and/), **both landed**), **how is each lane driven?** #2677 deferred exactly this: where the line falls between the deterministic mechanical core (dispatch / watch / release / tick / guards — reproducible, testable, product-ready with no session) and per-lane orchestrator autonomy. It gates the per-lane orchestrator slice (#2702 is `blockedBy` it), so that brief is written against a settled boundary.
 
-> **This card RECORDS an already-converged ruling — it is a fast ratification, not open research.** A multi-agent red-team convergence already ran this boundary in the operator's live session and reached **HIGH confidence, `escalate = NO`** (a clean convergence). It is surfaced for **explicit operator ratification anyway** because the ruling **overturns the operator's earlier lean toward the per-lane agent (Fork 1 (b))** — a converged ruling that reverses prior operator direction is not auto-applied. Full record + provenance: **`we:reports/2026-07-27-conveyor-orchestration-boundary.md`**. Convergence trace: hand-run ad-hoc via the Workflow orchestrator (not a persisted juror transcript); the fact that it ran is anchored on-disk by sibling **[#2704](/backlog/2704-code-decision-routing-into-the-conveyor-red-team-convergence/)** (resolved), which cites this exact decision as its worked example.
+> **RATIFIED by the operator on 2026-07-27 — Option A adopted (see the RATIFIED block below).** This card recorded an already-converged ruling: a multi-agent red-team convergence ran this boundary in the operator's live session and reached **HIGH confidence, `escalate = NO`** (a clean convergence). It was surfaced for **explicit operator ratification anyway** because the ruling **overturns the operator's earlier lean toward the per-lane agent (Fork 1 (b))** — a converged ruling that reverses prior operator direction is not auto-applied — and the operator has now ratified it. Full record + provenance: **`we:reports/2026-07-27-conveyor-orchestration-boundary.md`**. Convergence trace: hand-run ad-hoc via the Workflow orchestrator (not a persisted juror transcript); the fact that it ran is anchored on-disk by sibling **[#2704](/backlog/2704-code-decision-routing-into-the-conveyor-red-team-convergence/)** (resolved), which cites this exact decision as its worked example.
 
-## The ruling (what ratifying adopts)
+## RATIFIED — 2026-07-27 (operator)
+
+**Option A adopted.** Conveyor per-lane orchestration is **pure deterministic mechanics + a headless runner** driving the tick-core state machine — no per-lane LLM. **Option B (a per-lane conducting agent) is rejected**; **Option C (a single cross-lane supervisor) is deferred** behind a measured escalation-volume trigger. Rationale: the per-lane cycle is fully script-decidable, so mechanics give reproducibility, testability, a session-free product path, and O(1) cost, while B re-clones the central-session fragility N times at N× cost. Codified as the statute **[we:docs/agent/platform-decisions.md#conveyor-orchestration-mechanics-not-per-lane-agent](/docs/agent/platform-decisions/#conveyor-orchestration-mechanics-not-per-lane-agent)** — a child application of `#deterministic-core-thin-judgment` (#2607), reconciled by citation, not a competing statute.
+
+## The ruling (adopted)
 
 - **Fork 1 → (a): drive each lane with pure deterministic mechanics + a headless runner** advancing the tick-core state machine. No LLM in the per-lane driving loop. **The per-lane conducting agent (b) is rejected.**
 - **Fork 2 (escalation-triage supervisor) → not-yet:** defer a single cross-lane supervisor agent behind a measured escalation-volume trigger.
