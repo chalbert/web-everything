@@ -31,8 +31,10 @@
  *   # optional: --overrides='[{"op":"add","lens":"perf"}]'   (the F3 minimal ledger-trailed override layer)
  *
  * Output (JSON on stdout): {
- *   subject, careLevel, plan, mandatoryLenses, jurors: [{ id, lens, charter, method?, mandate }], rosterEvent
+ *   subject, subjectNoun, careLevel, plan, mandatoryLenses, jurors: [{ id, lens, charter, method?, mandate }], rosterEvent
  * }
+ * — `subjectNoun` is the adapter's canonical noun for its subject (`diff` / `rendered design` / `decision approach`),
+ *   so the harness frames its juror prompts from one source of truth (no re-hardcoded subject→noun map).
  * — `plan` is the `resolveAdapterRoster` output (dial + seats), `jurors` the materialized roster with each juror's
  * per-lens mandate attached, `rosterEvent` the schema-valid #2654 `roster-picked` event (the ledger seed), or null
  * when the roster is empty (care `none` / empty subject input → no jury).
@@ -61,7 +63,7 @@ const ADAPTERS = {
 };
 
 /** Parse `--k=v` / bare `--flag` argv into a plain object (matches review-core-cli's parser). Pure. */
-export function parseFlags(argv) {
+function parseFlags(argv) {
   const flags = {};
   for (const a of argv) {
     if (!a.startsWith('--')) continue;
@@ -79,11 +81,11 @@ export function parseFlags(argv) {
  * at this boundary, not deep in a fan-out.
  *
  * @param {{subject: string, careLevel: string, input?: *, overrides?: Array<{op:string,lens:string}>}} o
- * @returns {{subject: string, careLevel: string, plan: object, mandatoryLenses: string[],
+ * @returns {{subject: string, subjectNoun: string, careLevel: string, plan: object, mandatoryLenses: string[],
  *   jurors: Array<{id:string, lens:string, charter:string, method?:string, mandate:string}>,
  *   rosterEvent: object|null}}
  */
-export function resolveJuryRoster({ subject, careLevel, input, overrides = [] } = {}) {
+function resolveJuryRoster({ subject, careLevel, input, overrides = [] } = {}) {
   const adapter = ADAPTERS[subject];
   if (!adapter) {
     throw new Error(`resolve-roster: unknown subject "${String(subject)}" — must be one of ${Object.keys(ADAPTERS).join(', ')}`);
@@ -126,7 +128,13 @@ export function resolveJuryRoster({ subject, careLevel, input, overrides = [] } 
     ? [...adapter.mandatoryLenses]
     : [...MANDATORY_LENSES];
 
-  return { subject, careLevel, plan, mandatoryLenses, jurors: jurorsOut, rosterEvent };
+  // The adapter's OWN canonical noun for its subject (`diff` / `rendered design` / `decision approach`). Returned so
+  // the harness frames each juror prompt from ONE source of truth instead of re-hardcoding a subject→noun map that
+  // can drift (the code comment on the harness's old map already flagged the duplication). `subjectNoun` is a
+  // contract-OPTIONAL adapter field; fall back to the subject id when an adapter omits it.
+  const subjectNoun = typeof adapter.subjectNoun === 'string' && adapter.subjectNoun ? adapter.subjectNoun : subject;
+
+  return { subject, subjectNoun, careLevel, plan, mandatoryLenses, jurors: jurorsOut, rosterEvent };
 }
 
 /** The decision-prose subject frames its mandate around the proposed APPROACH prose; pull it from the input for
