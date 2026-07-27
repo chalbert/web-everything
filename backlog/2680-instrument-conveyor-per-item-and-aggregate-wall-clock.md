@@ -5,7 +5,7 @@ size: 3
 parent: "2612"
 status: open
 relatedReport: reports/2026-07-26-conveyor-per-item-latency.md
-scope: ["we:scripts/readiness/", "we:scripts/conveyor/"]
+scope: ["we:scripts/readiness/conveyor-instrument.mjs", "we:scripts/readiness/__tests__/conveyor-instrument.test.mjs"]
 dateOpened: "2026-07-26"
 tags: []
 ---

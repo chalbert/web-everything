@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "2649"
 status: open
-scope: ["we:skills-src/", "we:scripts/lib/"]
+scope: ["we:skills-src/jury/", "we:scripts/lib/jury-core.mjs", "we:scripts/lib/__tests__/jury-core.test.mjs"]
 dateOpened: "2026-07-26"
 tags: []
 ---

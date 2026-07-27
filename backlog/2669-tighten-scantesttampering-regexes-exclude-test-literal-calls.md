@@ -8,8 +8,8 @@ blockedBy: ["2440"]
 dateOpened: "2026-07-26"
 tags: []
 scope:
-  - we:scripts/lib/
-  - we:scripts/__tests__/
+  - we:scripts/lib/pr-merge-gate.mjs
+  - we:scripts/__tests__/pr-merge-gate.test.mjs
 ---
 
 # Tighten scanTestTampering regexes: exclude .test('literal') calls, catch .skip.each/.only.each

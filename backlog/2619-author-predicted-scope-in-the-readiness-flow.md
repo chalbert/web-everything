@@ -7,6 +7,11 @@ parent: "2612"
 status: open
 dateOpened: "2026-07-22"
 tags: [conveyor, readiness, scope, prepare]
+scope:
+  - we:skills-src/prepare-decision-item/
+  - we:skills-src/split-backlog-item/
+  - we:scripts/backlog/scaffold.mjs
+  - we:scripts/backlog/__tests__/scaffold.test.mjs
 ---
 
 # Author predicted scope in the readiness flow

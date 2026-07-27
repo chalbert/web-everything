@@ -5,6 +5,9 @@ status: open
 relatedTo: ["2455", "2396"]
 tags: [lane, drain, proof-of-land, bug]
 dateOpened: "2026-07-21"
+scope:
+  - we:scripts/lane-drain.mjs
+  - we:scripts/__tests__/lane-drain.test.mjs
 ---
 
 # Route lane-drain resolveReachable through the frontmatter-strict resolved-on-main reader
