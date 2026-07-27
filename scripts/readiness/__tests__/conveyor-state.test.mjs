@@ -276,16 +276,20 @@ describe('transcriptMentionsItem — ANCHORED item-id match (no #26-masks-#2611 
 });
 
 describe('shapePrs — gh pr list → the in-flight PR shape', () => {
-  it('maps num(from headRef)/prNumber/state/ci/labels', () => {
+  it('maps num(from headRef)/prNumber/state/ci/labels/mergeStateStatus', () => {
     const prs = shapePrs([
-      { number: 658, state: 'OPEN', headRefName: 'lane/2611-conveyor-state', statusCheckRollup: [{ conclusion: 'SUCCESS' }], labels: [{ name: 'review:human' }] },
+      { number: 658, state: 'OPEN', headRefName: 'lane/2611-conveyor-state', statusCheckRollup: [{ conclusion: 'SUCCESS' }], labels: [{ name: 'review:human' }], mergeStateStatus: 'BEHIND' },
     ]);
-    expect(prs).toEqual([{ num: '2611', prNumber: 658, state: 'OPEN', ci: 'pass', labels: ['review:human'] }]);
+    expect(prs).toEqual([{ num: '2611', prNumber: 658, state: 'OPEN', ci: 'pass', labels: ['review:human'], mergeStateStatus: 'BEHIND' }]);
   });
   it('tolerates a bare-string label array and a missing rollup', () => {
     expect(shapePrs([{ number: 1, headRefName: 'lane/5-x', labels: ['a'] }])[0]).toEqual({
-      num: '5', prNumber: 1, state: '', ci: 'none', labels: ['a'],
+      num: '5', prNumber: 1, state: '', ci: 'none', labels: ['a'], mergeStateStatus: '',
     });
+  });
+  it('carries mergeStateStatus through raw so the CI-heal BEHIND branch can read it (#2738)', () => {
+    expect(shapePrs([{ number: 9, headRefName: 'lane/3-x', mergeStateStatus: 'BEHIND' }])[0].mergeStateStatus).toBe('BEHIND');
+    expect(shapePrs([{ number: 9, headRefName: 'lane/3-x' }])[0].mergeStateStatus).toBe('');
   });
   it('null list → []', () => expect(shapePrs(null)).toEqual([]));
 });
@@ -506,7 +510,7 @@ describe('assembleConveyorState — the whole tick picture', () => {
     expect(s.queue[0]).toEqual({ num: '2611', rank: 1, buildQueued: true, openBlockers: [], scope: null, kind: null, epicState: null, prepared: false, preparedDate: null });
     expect(s.lanes).toEqual([{ lane: 1, num: '2611', session: 'sess-1', lease: ['we:scripts/readiness/conveyor-state.mjs'], breach: [] }]);
     expect(s.freeSlots).toBe(2);
-    expect(s.prs).toEqual([{ num: '2611', prNumber: 658, state: 'OPEN', ci: 'pass', labels: ['review:human'] }]);
+    expect(s.prs).toEqual([{ num: '2611', prNumber: 658, state: 'OPEN', ci: 'pass', labels: ['review:human'], mergeStateStatus: '' }]);
     expect(s.daemon).toEqual({ resident: true, lastPass: inputs.daemonReport.lastPass, parked: inputs.daemonReport.parkedNow });
     expect(s.idle).toEqual({ lastMerge: '2026-07-22T14:00:00Z', lastQueueAdd: '2026-07-22T14:30:00Z', now });
     expect(s.health).toEqual({ verdict: 'ok', stalled: [], degradedInfra: [], errors: [] });

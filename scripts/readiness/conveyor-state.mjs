@@ -185,9 +185,12 @@ export function ciRollup(statusCheckRollup) {
 }
 
 /**
- * Shape the in-flight PR section from `gh pr list --json number,state,statusCheckRollup,labels,headRefName`.
+ * Shape the in-flight PR section from
+ * `gh pr list --json number,state,statusCheckRollup,labels,headRefName,mergeStateStatus`.
+ * `mergeStateStatus` is carried through raw (e.g. `BEHIND`) so the tick's CI-heal loop can spot a
+ * not-landable BEHIND+parked PR (`tick-core.mjs` isBehind/isCiHealTarget, #2666/#2738).
  * @param {Array<object>|null|undefined} prList
- * @returns {Array<{num:(string|null), prNumber:(number|null), state:string, ci:string, labels:string[]}>}
+ * @returns {Array<{num:(string|null), prNumber:(number|null), state:string, ci:string, labels:string[], mergeStateStatus:string}>}
  */
 export function shapePrs(prList) {
   const rows = Array.isArray(prList) ? prList : [];
@@ -200,6 +203,8 @@ export function shapePrs(prList) {
     labels: Array.isArray(p?.labels)
       ? p.labels.map((l) => (typeof l === 'string' ? l : l?.name)).filter(Boolean)
       : [],
+    // Raw gh mergeable-state (e.g. `BEHIND`) — the CI-heal loop's BEHIND branch reads this (#2666/#2738).
+    mergeStateStatus: String(p?.mergeStateStatus || ''),
   }));
 }
 
@@ -773,7 +778,7 @@ async function main(argv) {
   // 3. In-flight lane PRs (this repo's open PRs).
   let prList;
   try {
-    const out = execFileSync('gh', ['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,state,statusCheckRollup,labels,headRefName'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
+    const out = execFileSync('gh', ['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,state,statusCheckRollup,labels,headRefName,mergeStateStatus'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
     prList = JSON.parse(out || '[]');
   } catch (e) {
     errors.push(`gh pr list: ${String(e.message || e).split('\n')[0]}`);
