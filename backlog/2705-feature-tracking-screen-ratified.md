@@ -17,3 +17,11 @@ The ratified interaction FRAME is MASTER-DETAIL (committee-chosen over expand-in
 BUILD-TIME CONDITIONS (not design flaws): back the rollup with the real feature tier (#2691) so epic point-totals reconcile to the feature total; velocity from #2686; forecast from #2687; design-increment filmstrip from #2688. Its full case space is specified by the case-taxonomy item (item 2 of this session, sibling to #2553). Blocked on #2691 (feature tier) — a read-only first slice over existing epic data (feature≈epic interim) can start before it lands; slice this epic next.
 
 Ratified in the feature-tracking-screen design session (committee → 10-juror jury → red-team → Round 2 → integration → frame committee → MASTER-DETAIL). Decision-view/trace artifact: https://claude.ai/code/artifact/ba98baf4-3430-47bd-b90b-386be86d529d · Live integrated page: https://claude.ai/code/artifact/d6816fec-3b87-4480-9cbb-0bb96e05a046
+
+## Acceptance policy
+
+Acceptance policy: a slice AUTO-LANDS when its machine gates are green (webcase conformance + visual-diff-to-baseline + behavioral gate + honest-number/forecast/a11y invariants) — no human implementation review. A slice that cannot pass its gates ESCALATES to the operator. Any time the built pixels DIVERGE from the ratified baseline, the visual-diff gate fails and surfaces the VISUAL DIFF to the operator to APPROVE (an intended design change → re-baseline, REFREEZE-style) or REJECT (drift → fix). The operator gates the DESIGN via visual diff, never the implementation.
+
+## Build slices
+
+This epic is sliced by the ratified feature-tracker build plan into 18 buildable slices (S0r, S0a, S0b, S0c, S1a, S1b, S2, S3, S4, S5, S6a, S6b, S7, S8, S9, S10, S11, S12) + one decision (DEC · thresholds/keyboard/forecast-projection, prepared) + one human-gated milestone (REFREEZE · #2691 feature-tier baseline refreeze). S0r + S0a are the build-slices that deliver #2709 (case taxonomy → webcases). Ordering is enforced by each slice's `blockedBy`; scope-disjointness by each slice's `scope`.
