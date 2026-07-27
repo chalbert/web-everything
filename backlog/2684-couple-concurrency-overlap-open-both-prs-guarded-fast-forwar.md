@@ -96,6 +96,6 @@ opportunistic bonus when the stack base is still main's tip. The earlier −48% 
   that resolves the impl lane's pushed tip to a pinned sha and hands it to `planCoupleOpen` (e2e-tested against
   real git). It emits the open-order + WE stack-base the couple opener needs.
 - **Deferred (out of #2684's file-scope):** actually opening the WE PR *stacked on the impl tip* lives in the
-  couple opener `we:scripts/pr-land.mjs`, which is **not** in this item's scope. Filed as **#xsk6c44**
+  couple opener `we:scripts/pr-land.mjs`, which is **not** in this item's scope. Filed as **#2744**
   (`blockedBy: 2684`, under #2612): wire `pr-land` to shell `lane-stack couple-open`. The decision logic and the
   drain-side guard delivered here are forward-compatible and fire the moment that wiring lands.

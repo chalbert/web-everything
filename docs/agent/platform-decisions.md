@@ -3005,7 +3005,7 @@ half authored once upstream; dispatch is the deterministic half that only consum
 
 ### Event-driven land is WAKE-only — one polling drain stays the sole writer; a webhook may wake it, never add a second writer; the merge-queue build defers behind measured saturation {#event-driven-land-is-wake-only}
 
-**Ratified 2026-07-27 (operator; #2692, bornAs xwysuk4).** How "event-driven land" (Lever C) may and may not be
+**Ratified 2026-07-27 (operator; #2692, bornAs 2692).** How "event-driven land" (Lever C) may and may not be
 built, on top of the sole-writer-to-`main` invariant ([#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism)).
 Four clauses:
 
@@ -3037,10 +3037,10 @@ Four clauses:
    route by stakes*, never *auto-execute*: the un-gate becomes visible and correctly-routed on measured evidence,
    and a human still owns the go on a high-stakes build.
 
-**Lineage:** #2692 (ratified 2026-07-27, operator; bornAs xwysuk4; ten-round high-care design-jury red-team,
+**Lineage:** #2692 (ratified 2026-07-27, operator; bornAs 2692; ten-round high-care design-jury red-team,
 `we:reports/2026-07-27-lever-c-landing-merge-queue-design.md`). **Closes the second-writer / fencing branch on the
 merits** (clause 1). WAKE ships now (clause 2) = #2605 (drain-daemon `/nudge` seam) + #2683 (conveyor fast-drain
-trigger, resolved) + the WAKE-remainder story `#xs9t6l5`. Deferred merge-queue build (clause 3) = slice #2683's
+trigger, resolved) + the WAKE-remainder story `#2743`. Deferred merge-queue build (clause 3) = slice #2683's
 successor, gated behind tripwire **#2740** reading #2680's `land-serialization` saturation metric, **routed** by
 **#2704** (clause 4). Program #2606 / epic #2612. Extends [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism)
 (sole-writer-to-`main`) and composes with
