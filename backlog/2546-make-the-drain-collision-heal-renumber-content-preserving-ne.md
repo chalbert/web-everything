@@ -5,6 +5,10 @@ size: 3
 status: open
 dateOpened: "2026-07-18"
 tags: []
+scope:
+  - we:scripts/backlog-renumber-collisions.mjs
+  - we:scripts/backlog/renumber-collisions.mjs
+  - we:scripts/backlog/__tests__/renumber-collisions.test.mjs
 ---
 
 # Make the drain collision-heal renumber content-preserving (never blank a file)
