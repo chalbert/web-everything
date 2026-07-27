@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "2527"
 status: open
-blockedBy: ["2703"]
+blockedBy: ["2703", "2626", "2642"]
 scope: ["we:scripts/conveyor/"]
 dateOpened: "2026-07-27"
 tags: []
@@ -18,4 +18,6 @@ On fire: stand up the shared durable store behind the existing store seam (the [
 
 **Runner-lease split (Fork 1(b) of #2626).** The runner lease [`we:skills-src/conveyor/runner-lock.mjs`](../skills-src/conveyor/runner-lock.mjs) (#2702) is NOT a blind stay-local: split it. Its machine-local process singleton ("two runners on my laptop") stays a local lock forever; its cross-actor single-writer arbitration ("who may write the shared operational state") becomes a DO lease **iff and when** the product runs runners on more than one host. Single-host product keeps it fully local.
 
-The other machine-local artifacts (advisory `we:.conveyor/*.lock`, `we:.claude/lane-ports.json`, the learnings drop-box) STAY local by nature and are out of scope. blockedBy #2703 so this cannot start until the session-free runner exists — until then the trigger has not fired and sidecars keep running. Ratifying #2626 makes this the tracked mechanism that un-defers the store build; nobody has to remember to look — the `blockedBy` edge is the tripwire.
+The other machine-local artifacts (advisory `we:.conveyor/*.lock`, `we:.claude/lane-ports.json`, the learnings drop-box) STAY local by nature and are out of scope.
+
+**Why the three blockers, not just #2703.** #2703 only rewrites the conveyor skill doc (`we:skills-src/conveyor/SKILL.md`) and stands up the *same-machine* headless runner — that runner still shares the operator's filesystem, so it can co-read the gitignored `we:.conveyor/` sidecar and the store trigger has NOT fired. This build must therefore also wait on (a) **#2626** — the decision that authorizes and classifies the migration; an un-gate story can't be actionable before its own decision is ratified — and (b) **#2642** (the juror console, the concrete out-of-process product surface #2626 names; #2527 the build endpoint is the parent). Only when a surface that does NOT share the operator's filesystem must read/write conveyor operational state has the trigger genuinely fired. Until all three clear, the deferral holds and sidecars keep running — nobody has to remember to look; the `blockedBy` edges are the tripwire.
