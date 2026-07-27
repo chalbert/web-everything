@@ -1,9 +1,10 @@
 ---
+bornAs: xz2y3i2
 kind: story
 size: 5
 parent: "2705"
 status: open
-blockedBy: ["xizryfp", "xmfb69v"]
+blockedBy: ["2718", "2719"]
 scope: ["plateau-app:src/feature-tracker/mount.ts", "plateau-app:src/feature-tracker/feature-tracker.css", "plateau-app:src/feature-tracker/scan.ts", "plateau-app:src/feature-tracker/scan.css", "plateau-app:src/feature-tracker/data.ts"]
 dateOpened: "2026-07-27"
 tags: []

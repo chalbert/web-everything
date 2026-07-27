@@ -1,9 +1,10 @@
 ---
+bornAs: x8itmee
 kind: story
 size: 3
 parent: "2705"
 status: open
-blockedBy: ["xz2y3i2"]
+blockedBy: ["2721"]
 scope: ["plateau-app:src/feature-tracker/states.ts", "plateau-app:src/feature-tracker/scan.ts"]
 dateOpened: "2026-07-27"
 tags: []

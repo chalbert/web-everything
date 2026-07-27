@@ -1,9 +1,10 @@
 ---
+bornAs: xwmr2vr
 kind: story
 size: 3
 parent: "2705"
 status: open
-blockedBy: ["xz2y3i2"]
+blockedBy: ["2721"]
 scope: ["plateau-app:src/feature-tracker/detail.ts", "plateau-app:src/feature-tracker/detail.css"]
 dateOpened: "2026-07-27"
 tags: []

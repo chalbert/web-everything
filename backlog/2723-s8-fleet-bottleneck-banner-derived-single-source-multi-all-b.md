@@ -1,9 +1,10 @@
 ---
+bornAs: xao3fqx
 kind: story
 size: 3
 parent: "2705"
 status: open
-blockedBy: ["xz2y3i2", "xizryfp"]
+blockedBy: ["2721", "2718"]
 scope: ["plateau-app:src/feature-tracker/banner.ts", "plateau-app:src/feature-tracker/banner.css"]
 dateOpened: "2026-07-27"
 tags: []

@@ -1,4 +1,5 @@
 ---
+bornAs: x10x41m
 kind: story
 size: 1
 parent: "2705"

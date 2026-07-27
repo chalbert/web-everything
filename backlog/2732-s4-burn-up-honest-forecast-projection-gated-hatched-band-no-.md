@@ -1,9 +1,10 @@
 ---
+bornAs: xxmgsqq
 kind: story
 size: 5
 parent: "2705"
 status: open
-blockedBy: ["xh6gf3t", "2687"]
+blockedBy: ["2727", "2687"]
 scope: ["plateau-app:src/feature-tracker/burnup.ts", "plateau-app:src/feature-tracker/burnup.css", "plateau-app:src/feature-tracker/forecast.ts"]
 dateOpened: "2026-07-27"
 tags: []

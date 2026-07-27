@@ -1,9 +1,10 @@
 ---
+bornAs: xojug01
 kind: story
 size: 3
 parent: "2705"
 status: open
-blockedBy: ["x06qgn8"]
+blockedBy: ["2717"]
 scope: ["plateau-app:src/feature-tracker/feature-tracking.mount-conformance.test.ts", "plateau-app:src/feature-tracker/ft-integrated-v3.annotated.html"]
 dateOpened: "2026-07-27"
 tags: []

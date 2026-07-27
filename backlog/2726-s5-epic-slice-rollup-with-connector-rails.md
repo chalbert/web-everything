@@ -1,9 +1,10 @@
 ---
+bornAs: x9cuge3
 kind: story
 size: 5
 parent: "2705"
 status: open
-blockedBy: ["xwmr2vr", "2691"]
+blockedBy: ["2725", "2691"]
 scope: ["plateau-app:src/feature-tracker/rollup.ts", "plateau-app:src/feature-tracker/rollup.css", "plateau-app:src/feature-tracker/read-model.ts"]
 dateOpened: "2026-07-27"
 tags: []

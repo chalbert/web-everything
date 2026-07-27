@@ -1,9 +1,10 @@
 ---
+bornAs: xh6gf3t
 kind: story
 size: 5
 parent: "2705"
 status: open
-blockedBy: ["xwmr2vr", "2686", "xmfb69v"]
+blockedBy: ["2725", "2686", "2719"]
 scope: ["plateau-app:src/feature-tracker/velocity.ts", "plateau-app:src/feature-tracker/velocity.css"]
 dateOpened: "2026-07-27"
 tags: []

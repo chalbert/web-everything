@@ -1,9 +1,10 @@
 ---
+bornAs: xvo15ow
 kind: story
 size: 5
 parent: "2705"
 status: open
-blockedBy: ["xwmr2vr", "xizryfp"]
+blockedBy: ["2725", "2718"]
 scope: ["plateau-app:src/feature-tracker/dag.ts", "plateau-app:src/feature-tracker/dag.css"]
 dateOpened: "2026-07-27"
 tags: []

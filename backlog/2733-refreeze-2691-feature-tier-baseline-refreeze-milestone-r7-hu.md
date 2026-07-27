@@ -1,9 +1,10 @@
 ---
+bornAs: x6x0kxz
 kind: story
 size: 2
 parent: "2705"
 status: open
-blockedBy: ["2691", "xz2y3i2", "xxmgsqq", "x9cuge3", "xvo15ow", "xao3fqx"]
+blockedBy: ["2691", "2721", "2732", "2726", "2729", "2723"]
 scope: ["plateau-app:tests/visual/baselines/", "plateau-app:src/feature-tracker/feature-tracking.baselines.ts"]
 dateOpened: "2026-07-27"
 tags: []

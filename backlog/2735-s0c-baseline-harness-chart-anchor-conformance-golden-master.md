@@ -1,9 +1,10 @@
 ---
+bornAs: xz7aent
 kind: story
 size: 3
 parent: "2705"
 status: open
-blockedBy: ["xojug01"]
+blockedBy: ["2720"]
 scope: ["plateau-app:tests/visual/baselines/", "plateau-app:src/feature-tracker/feature-tracking.baselines.ts", "plateau-app:src/feature-tracker/feature-tracking.golden.test.ts"]
 dateOpened: "2026-07-27"
 tags: []

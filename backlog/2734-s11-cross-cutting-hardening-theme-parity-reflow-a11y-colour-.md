@@ -1,9 +1,10 @@
 ---
+bornAs: xe0k9el
 kind: story
 size: 3
 parent: "2705"
 status: open
-blockedBy: ["xwmr2vr", "xh6gf3t", "xxmgsqq", "x9cuge3", "xx03ak0", "xk9mz2v", "xvo15ow", "xao3fqx", "x8itmee", "xpm9rzu"]
+blockedBy: ["2725", "2727", "2732", "2726", "2731", "2728", "2729", "2723", "2722", "2724"]
 scope: ["plateau-app:src/feature-tracker/feature-tracker.css", "plateau-app:src/feature-tracker/scan.css", "plateau-app:src/feature-tracker/detail.css", "plateau-app:src/feature-tracker/dag.css"]
 dateOpened: "2026-07-27"
 tags: []

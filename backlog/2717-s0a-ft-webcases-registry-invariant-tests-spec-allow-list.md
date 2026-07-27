@@ -1,9 +1,10 @@
 ---
+bornAs: x06qgn8
 kind: story
 size: 3
 parent: "2705"
 status: open
-blockedBy: ["x10x41m"]
+blockedBy: ["2716"]
 scope: ["plateau-app:src/feature-tracker/feature-tracking.webcases.ts", "plateau-app:src/feature-tracker/feature-tracking.webcases.test.ts"]
 dateOpened: "2026-07-27"
 tags: []

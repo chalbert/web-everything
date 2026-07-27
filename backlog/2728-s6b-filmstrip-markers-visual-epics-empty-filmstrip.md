@@ -1,9 +1,10 @@
 ---
+bornAs: xk9mz2v
 kind: story
 size: 3
 parent: "2705"
 status: open
-blockedBy: ["x9cuge3", "2688"]
+blockedBy: ["2726", "2688"]
 scope: ["plateau-app:src/feature-tracker/markers-filmstrip.ts", "plateau-app:src/feature-tracker/markers-filmstrip.css"]
 dateOpened: "2026-07-27"
 tags: []

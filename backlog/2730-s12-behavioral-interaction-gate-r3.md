@@ -1,9 +1,10 @@
 ---
+bornAs: x09lsj3
 kind: story
 size: 3
 parent: "2705"
 status: open
-blockedBy: ["xwmr2vr", "xvo15ow", "xao3fqx", "xpm9rzu"]
+blockedBy: ["2725", "2729", "2723", "2724"]
 scope: ["plateau-app:src/feature-tracker/feature-tracking.behavior.test.ts"]
 dateOpened: "2026-07-27"
 tags: []

@@ -1,9 +1,10 @@
 ---
+bornAs: xpm9rzu
 kind: story
 size: 3
 parent: "2705"
 status: open
-blockedBy: ["xz2y3i2", "xmfb69v"]
+blockedBy: ["2721", "2719"]
 scope: ["plateau-app:src/feature-tracker/scan-virtual.ts", "plateau-app:src/feature-tracker/scan.ts"]
 dateOpened: "2026-07-27"
 tags: []

@@ -1,9 +1,10 @@
 ---
+bornAs: xx03ak0
 kind: story
 size: 3
 parent: "2705"
 status: open
-blockedBy: ["x9cuge3"]
+blockedBy: ["2726"]
 scope: ["plateau-app:src/feature-tracker/markers-shiplog.ts", "plateau-app:src/feature-tracker/markers-shiplog.css"]
 dateOpened: "2026-07-27"
 tags: []

@@ -1,9 +1,10 @@
 ---
+bornAs: xizryfp
 kind: story
 size: 5
 parent: "2705"
 status: open
-blockedBy: ["x06qgn8"]
+blockedBy: ["2717"]
 scope: ["plateau-app:src/feature-tracker/read-model.ts", "plateau-app:src/feature-tracker/forecast.ts", "plateau-app:src/feature-tracker/read-model.test.ts", "plateau-app:src/feature-tracker/forecast.test.ts"]
 dateOpened: "2026-07-27"
 tags: []
