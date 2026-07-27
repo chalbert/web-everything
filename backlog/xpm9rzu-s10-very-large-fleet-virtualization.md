@@ -14,7 +14,7 @@ tags: []
 Windowed rendering for the large fleet, integrated with the DEC keyboard-model so arrow/Home/End nav + data-uc anchoring survive windowing and window-edge focus stays correct.
 
 ## Deliverable
-Windowed rendering for the large fleet, integrated with the DEC keyboard-model (roving-tabindex / aria-activedescendant) so arrow/Home/End nav + `data-uc` anchoring survive windowing (R8).
+Windowed rendering for the large fleet, integrated with the DEC keyboard-model (aria-activedescendant) so arrow/Home/End nav + `data-uc` anchoring survive windowing (R8).
 
 ## FT cases → rendered=yes
 S12.
