@@ -5,6 +5,11 @@ size: 3
 status: open
 dateOpened: "2026-07-12"
 tags: [lane, lane-pool, lease, tooling]
+scope:
+  - we:scripts/lane-pool.mjs
+  - we:scripts/lib/lane-lease.mjs
+  - we:scripts/__tests__/lane-pool-
+  - we:scripts/lib/__tests__/lane-lease.test.mjs
 ---
 
 # lane-pool acquire false-negative — stale-origin ahead lanes read as all-held; release ignores ownerSession
