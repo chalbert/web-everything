@@ -2,9 +2,11 @@
 bornAs: xwysuk4
 kind: decision
 parent: "2612"
-status: open
+status: resolved
 relatedReport: reports/2026-07-27-lever-c-landing-merge-queue-design.md
 dateOpened: "2026-07-26"
+dateResolved: "2026-07-27"
+codifiedIn: "docs/agent/platform-decisions.md#event-driven-land-is-wake-only"
 preparedDate: "2026-07-27"
 tags: []
 ---
@@ -20,6 +22,24 @@ This prep separated two things the original framing fused: (1) an **event drivin
 writer — sole-writer-safe, cheap, ship it — from (2) an **event driving a correct *land*** under branch protection —
 which is essentially **building a merge queue with sign-off integrity** (the T1/T4 forks below), a real deep problem to
 defer. That split is the whole decision.
+
+## Resolution — RATIFIED 2026-07-27 (operator)
+
+**Adopted position:** *keep the single polling drain as the sole writer*; ship the cheap event-driven **WAKE** now;
+**DEFER** the full event-driven **merge-queue build** behind the tracked measured-saturation tripwire **#2740**. The
+**second-writer / fencing** branch is **closed on the merits** (settled — do not reopen: no token-fenced `main`-write on
+GitHub, and dominated by supervising one live writer).
+
+**One-line rationale:** an event may *wake* the one writer cheaply and safely, but a *second* lander can't be made
+sole-writer-safe on GitHub — and the correctness build that would replace it is a full merge-queue, worth building only
+once measured `land-serialization` saturation proves the serial writer actually binds throughput.
+
+**Operator refinement (folded in):** the tripwire **SURFACES-AND-ROUTES**, it does **not** silent-fire an unattended
+build. On sustained saturation it flips/surfaces #2683's `buildQueued` **and routes the build through #2704's
+criticality decision-routing** (which may require operator confirm for a safety-critical merge-queue build) — the
+un-gate becomes visible and correctly-routed on measured evidence, never an autonomous execution.
+
+**Codified:** [we:docs/agent/platform-decisions.md#event-driven-land-is-wake-only](../docs/agent/platform-decisions.md#event-driven-land-is-wake-only).
 
 ## The crux — is event-driven land sole-writer-safe? (converged; do NOT revisit)
 
@@ -211,8 +231,11 @@ not watching. The plan is made real by a tracked monitor that watches the signal
 - **The MECHANISM that fires it:** the tracked tripwire item **#2740** ("Un-gate tripwire: fire the #2692
   event-driven merge-queue build when Lever-0 shows sustained landing-queue saturation", `blockedBy: #2680`,
   which is resolved → ready to build once this call is ratified). It reads #2680's saturation metric and, on a
-  sustained k>1-behind-writer trip, surfaces/queues #2683 to the conveyor automatically. The deferral thus
-  un-defers *itself* on measured saturation, rather than depending on someone remembering to look.
+  sustained k>1-behind-writer trip, **surfaces-and-routes** #2683: it flips/surfaces the `buildQueued` signal **and
+  routes the build through #2704's criticality decision-routing** (which may require operator confirm for a
+  safety-critical merge-queue build). It does **NOT** silently auto-execute the build. The deferral thus un-defers
+  *itself* — surfaced and correctly routed — on measured saturation, rather than depending on someone remembering to
+  look, while a human still owns the go on a high-stakes build.
 
 ## Lineage
 
