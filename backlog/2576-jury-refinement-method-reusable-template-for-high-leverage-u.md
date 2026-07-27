@@ -6,6 +6,9 @@ parent: "2577"
 status: open
 dateOpened: "2026-07-20"
 tags: []
+scope:
+  - we:docs/agent/
+  - we:AGENTS.md
 ---
 
 # Jury-refinement method — reusable template for high-leverage UI/design decisions
