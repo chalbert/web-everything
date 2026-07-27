@@ -67,6 +67,9 @@ import {
   shouldRegisterJury,
   buildJuryCharter,
   renderJuryCharter,
+  INVITE_CARE_CEILING,
+  raiseCareForDiscovery,
+  deriveJurorInvite,
 } from '../review-core.mjs';
 import { validateSubjectAdapter, resolveAdapterRoster } from '../jury-core.mjs';
 
@@ -1227,5 +1230,81 @@ describe('renderJuryCharter — the markdown artifact embedded on the item (#263
     expect(md).toContain('| juror | lens | grounding method | pre-registered expectation |');
     // every juror's expectation text is present in the rendered table
     for (const juror of charter.jurors) expect(md).toContain(juror.expectation);
+  });
+});
+
+describe('raiseCareForDiscovery — the discovery bumps care one band, capped at the ceiling (#2640)', () => {
+  it('raises exactly one band', () => {
+    expect(raiseCareForDiscovery('none')).toBe('low');
+    expect(raiseCareForDiscovery('low')).toBe('elevated');
+    expect(raiseCareForDiscovery('elevated')).toBe('high');
+  });
+  it('caps at INVITE_CARE_CEILING (high) — a raise can never exceed the top band (guardrail 3)', () => {
+    expect(INVITE_CARE_CEILING).toBe('high');
+    expect(raiseCareForDiscovery('high')).toBe('high');
+  });
+  it('throws loudly on an unknown care level', () => {
+    expect(() => raiseCareForDiscovery('critical')).toThrow(/unknown care-level/);
+  });
+});
+
+describe('deriveJurorInvite — grow the jury only with reason (#2640)', () => {
+  const panel = ['correctness', 'security', 'simplicity', 'standards-conformance'];
+
+  it('GUARDRAIL 1 — rejects an ungrounded invite (no cited finding), never growing the jury', () => {
+    const r = deriveJurorInvite({ careLevel: 'elevated', seatedLenses: panel, jurorsPerLens: 1, invitedLens: 'security' });
+    expect(r.accepted).toBe(false);
+    expect(r.reason).toBe('ungrounded');
+    expect(r.addedLenses).toEqual([]);
+    // the recompute still rides the rejection so a caller can see where the ceiling sat
+    expect(r.toCareLevel).toBe('high');
+    expect(r.spendsRound).toBe(true);
+  });
+
+  it('rejects an invite naming a lens outside the vocabulary', () => {
+    const r = deriveJurorInvite({ careLevel: 'low', invitedLens: 'telepathy', citedFinding: 'x' });
+    expect(r.accepted).toBe(false);
+    expect(r.reason).toBe('unknown-lens');
+    expect(r.addedLenses).toEqual([]);
+  });
+
+  it('a grounded invite raises care → recomputes rigor → spawns the extra-juror DELTA on each seated lens', () => {
+    const r = deriveJurorInvite({ careLevel: 'elevated', seatedLenses: panel, jurorsPerLens: 1, invitedLens: 'security', citedFinding: 'unsanitized shell arg' });
+    expect(r.accepted).toBe(true);
+    expect(r.reason).toBeNull();
+    expect(r.fromCareLevel).toBe('elevated');
+    expect(r.toCareLevel).toBe('high');
+    expect(r.jurorsPerLens).toBe(2); // the high-band dial
+    // security was already seated → the delta is +1 juror on each seated lens (elevated 1 → high 2), never a re-seat
+    expect(r.addedLenses.every((a) => a.kind === 'more-jurors' && a.addedJurors === 1)).toBe(true);
+    expect(r.addedLenses.map((a) => a.lens).sort()).toEqual([...panel].sort());
+    expect(r.citedFinding).toBe('unsanitized shell arg');
+  });
+
+  it('a NEW lens the roster lacked is seated at the full per-lens count, grounded by its default method', () => {
+    const r = deriveJurorInvite({ careLevel: 'high', seatedLenses: ['correctness', 'security'], jurorsPerLens: 2, invitedLens: 'a11y', citedFinding: 'renders a focus trap' });
+    expect(r.accepted).toBe(true);
+    const added = r.addedLenses.find((a) => a.lens === 'a11y');
+    expect(added).toMatchObject({ kind: 'new-lens', addedJurors: 2, method: 'axe-scan' });
+    expect(r.seatedLenses).toContain('a11y');
+  });
+
+  it('GUARDRAIL 3 — an at-ceiling invite for an already-seated lens adds nothing (atCeiling, not accepted)', () => {
+    const r = deriveJurorInvite({ careLevel: 'high', seatedLenses: panel, jurorsPerLens: 2, invitedLens: 'security', citedFinding: 'x' });
+    expect(r.accepted).toBe(false);
+    expect(r.reason).toBe('at-ceiling');
+    expect(r.atCeiling).toBe(true);
+    expect(r.addedLenses).toEqual([]);
+    expect(r.toCareLevel).toBe('high'); // capped — cannot raise past the ceiling
+  });
+
+  it('GUARDRAIL 2 — spendsRound is always true (the caller advances the counter, never resets it)', () => {
+    for (const care of ['low', 'elevated', 'high']) {
+      expect(deriveJurorInvite({ careLevel: care, invitedLens: 'security', citedFinding: 'y' }).spendsRound).toBe(true);
+    }
+  });
+
+  it('throws on an unknown care level (via raiseCareForDiscovery)', () => {
+    expect(() => deriveJurorInvite({ careLevel: 'critical', invitedLens: 'security', citedFinding: 'y' })).toThrow(/unknown care-level/);
   });
 });
