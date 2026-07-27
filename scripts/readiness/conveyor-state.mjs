@@ -43,7 +43,10 @@ import { readQueueFile, resolveQueuePath, normNum } from '../conveyor/queue-stor
 // #2659 — the infra-blocked state: a delivery/prepare agent that PUSHED its lane ref but failed PR-open on an
 // outside dependency lands here (not a stall / gate-red). `deriveInfraByNum` is PURE (no fs/clock — it takes the
 // raw store + injected `now`), safe for the pure core; the IO shell reads the sidecar via `readInfraStore`.
-import { deriveInfraByNum, readInfraStore, resolveInfraStorePath } from '../conveyor/infra-blocked.mjs';
+// #2661 — `correlateCause` refines an infra cause against a fetched githubstatus (a live outage vs a one-off) and
+// `clusterByCause` collapses same-cause blocks into ONE degraded-infra signal (not N stall alarms); both are PURE.
+// `fetchGithubStatus` is the IO-shell poll (best-effort, guarded) the health scan corroborates with.
+import { deriveInfraByNum, readInfraStore, resolveInfraStorePath, correlateCause, clusterByCause, fetchGithubStatus } from '../conveyor/infra-blocked.mjs';
 // #2613 — the SAME empty-scope test the dispatcher uses (normScope([]) === [] ⇒ no usable scope), so the tick
 // picture's `unshaped` set and the dispatch plan's `unshaped-no-scope` holds can never disagree on what counts
 // as "no predicted scope". scope-lease.mjs is import-clean (no node built-ins), safe for the pure core.
@@ -344,16 +347,32 @@ export function transcriptMentionsItem(text, num) {
  * mapping must never fabricate a stall. `errors` are collector-level read failures surfaced by the IO shell.
  * `verdict` is `warn` when anything is stalled OR any error was collected, else `ok`. The clock (`now`) and all
  * activity timestamps are passed IN — no `Date`/fs here (determinism).
- * @param {{lanes?:Array<{lane:*, num?:*, session?:*, lastActivity?:(number|null)}>, now?:number, stallMs?:number, errors?:string[]}} input
- * @returns {{verdict:'ok'|'warn', stalled:Array<{lane:*, num:*, session:*, idleS:number}>, errors:string[]}}
+ *
+ * #2661 — a WIDESPREAD external-infra failure is ONE signal, not N. An infra-blocked lane has a KNOWN external
+ * cause (recorded in the infra state, `l.infra.cause`); rather than dropping it (which surfaced it only via the
+ * board's OUTAGE banner, never the health verdict the tick loop reads), collect every infra lane and CLUSTER by
+ * cause into `degradedInfra` — so several lanes down on the SAME outage collapse into ONE `{ cause, count,
+ * members }` entry, not N stall alarms. A genuine per-lane STALL (a silent non-infra lane) still surfaces on its
+ * own in `stalled`. `degradedInfra` is ADDITIVE and does NOT flip `verdict` (kept `stalled`+`errors`-driven for
+ * consumer back-compat; the outage is its own distinct signal, read separately). When a fetched `githubStatus` is
+ * injected, each infra cause is refined against it via {@link correlateCause} (a live incident vs a one-off) —
+ * null-safe by construction, so a missing/failed poll NEVER cascades into a false or lost signal.
+ * @param {{lanes?:Array<{lane:*, num?:*, session?:*, lastActivity?:(number|null), infra?:{cause?:string}}>, now?:number, stallMs?:number, errors?:string[], githubStatus?:object|null}} input
+ * @returns {{verdict:'ok'|'warn', stalled:Array<{lane:*, num:*, session:*, idleS:number}>, degradedInfra:Array<{cause:string, count:number, members:Array<{lane:*, num:*}>}>, errors:string[]}}
  */
-export function assessHealth({ lanes = [], now = 0, stallMs = DEFAULT_STALL_MS, errors = [] } = {}) {
+export function assessHealth({ lanes = [], now = 0, stallMs = DEFAULT_STALL_MS, errors = [], githubStatus = null } = {}) {
   const stalled = [];
+  const infraMembers = [];
   for (const l of Array.isArray(lanes) ? lanes : []) {
-    // #2659 — an infra-blocked lane is DISTINCT from a stall: its agent exited (so its transcript goes silent)
-    // but the work is pushed + tracked by the infra state, which is auto-retrying. Skip it here so it surfaces
-    // as ⊘ infra-blocked / an OUTAGE banner, never a false ⚠ stall alarm.
-    if (l?.infra) continue;
+    // #2659/#2661 — an infra-blocked lane is DISTINCT from a stall: its agent exited (so its transcript goes
+    // silent) but the work is pushed + tracked by the infra state, which is auto-retrying. It never reads as a
+    // ⚠ stall; instead its KNOWN cause feeds the degraded-infra cluster below (ONE signal per outage cause).
+    if (l?.infra) {
+      // Refine the cause against a fetched githubstatus when injected (live outage vs one-off); null → the store
+      // cause as-is (already refined by infra-blocked's retry pass). correlateCause is null-safe → no cascade.
+      infraMembers.push({ lane: l.lane, num: l.num ?? null, cause: correlateCause(l.infra.cause, githubStatus) });
+      continue;
+    }
     const last = l?.lastActivity;
     if (last == null) continue; // no transcript located → conservative (never a false stall)
     if (now - Number(last) > stallMs) {
@@ -365,8 +384,10 @@ export function assessHealth({ lanes = [], now = 0, stallMs = DEFAULT_STALL_MS, 
       });
     }
   }
+  // Collapse same-cause infra blocks into ONE degraded-infra signal per cause (#2661).
+  const degradedInfra = clusterByCause(infraMembers);
   const errs = (Array.isArray(errors) ? errors : []).filter(Boolean).map(String);
-  return { verdict: stalled.length || errs.length ? 'warn' : 'ok', stalled, errors: errs };
+  return { verdict: stalled.length || errs.length ? 'warn' : 'ok', stalled, degradedInfra, errors: errs };
 }
 
 /**
@@ -471,7 +492,7 @@ export function deriveDecisions(buildQueue, clearedNums = null) {
  *   buildQueue?:object|object[]|null, poolStatus?:object|null, scopePicture?:object|null, prList?:object[]|null,
  *   daemonReport?:object|null, queuedState?:object|null, laneItem?:Record<string,*>|null,
  *   laneActivity?:Record<string,number>|null, clearedNums?:Array<string|number>|null,
- *   infraBlocks?:object[]|null, now?:number, stallMs?:number, errors?:string[],
+ *   infraBlocks?:object[]|null, githubStatus?:object|null, now?:number, stallMs?:number, errors?:string[],
  * }} input
  * @returns {{queue:object[], clearedNotReady:Array<string|number>, unshaped:object[], needsSlice:object[], decisions:object[], lanes:object[], freeSlots:number, prs:object[], daemon:*, idle:object, health:object, infraBlocked:object[]}}
  */
@@ -486,6 +507,7 @@ export function assembleConveyorState({
   laneActivity,
   clearedNums = null,
   infraBlocks = null,
+  githubStatus = null,
   now,
   stallMs = DEFAULT_STALL_MS,
   errors = [],
@@ -518,7 +540,7 @@ export function assembleConveyorState({
     prs: shapePrs(prList),
     daemon: shapeDaemon(daemonReport),
     idle: deriveIdle({ daemonReport, queuedState, now }),
-    health: assessHealth({ lanes: healthLanes, now, stallMs, errors }),
+    health: assessHealth({ lanes: healthLanes, now, stallMs, errors, githubStatus }),
     // #2659 — the raw infra-blocked entries (pushed-but-unopened work, auto-retrying). Attached to lanes above
     // for the board; emitted here in full so the /conveyor skill can surface a capped/surfaced block for the
     // operator even if its lane's lease was somehow lost (defense — the record, not the lane, is the truth).
@@ -694,7 +716,7 @@ function collectLaneActivity(lanes, nowMs) {
 }
 
 /** The IO shell: gather every raw collector output, then compose the pure picture and emit it. */
-function main(argv) {
+async function main(argv) {
   const flags = parseFlags(argv);
   const errors = [];
   const nowMs = Date.now();
@@ -785,6 +807,16 @@ function main(argv) {
   //     (env override wins) so reader and writer never diverge. A missing/corrupt sidecar degrades to [].
   const infraBlocks = readInfraStore(resolveInfraStorePath());
 
+  // 5d. #2661 — ONLY when work is infra-blocked, poll githubstatus.com ONCE to corroborate the failure class (a
+  //     live GitHub incident vs a one-off), so same-cause blocks cluster into ONE degraded-infra signal with an
+  //     accurate cause. DEFENSIVE by construction: a clean tick (no infra) skips the network entirely; the poll
+  //     is short-timeout + guarded, so its own failure returns `{reachable:false}`/null and NEVER cascades
+  //     (correlateCause is null-safe → the store cause is used as-is). A poll must never stall or red a tick.
+  let githubStatus = null;
+  if (Array.isArray(infraBlocks) && infraBlocks.length) {
+    try { githubStatus = await fetchGithubStatus(); } catch { githubStatus = null; }
+  }
+
   // 6. Lane → item map + the best-effort transcript activity scan for the health verdict.
   const laneItem = laneItemMap();
   const lanesForActivity = shapeLanes({ poolStatus, scopePicture, laneItem });
@@ -801,6 +833,7 @@ function main(argv) {
     laneActivity,
     clearedNums,
     infraBlocks,
+    githubStatus,
     now: nowMs,
     errors,
   });
@@ -819,5 +852,8 @@ function main(argv) {
 // Main-module detection — run the IO shell only when invoked directly, never on import (keeps the pure core
 // importable by the test with zero side effects).
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  main(process.argv.slice(2));
+  main(process.argv.slice(2)).catch((e) => {
+    process.stderr.write(`conveyor-state: ${String(e?.message || e)}\n`);
+    process.exit(1);
+  });
 }
