@@ -4,7 +4,7 @@ kind: story
 size: 8
 buildQueued: true
 parent: "2636"
-status: open
+status: resolved
 blockedBy: ["2639"]
 relatedTo: ["2500"]
 scope:
@@ -13,6 +13,8 @@ scope:
   - we:skills-src/conveyor/
   - we:scripts/workflows/review-parked-prs.mjs
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 
@@ -46,3 +48,22 @@ persistence) while **REUSING #2500's widened `lensVerdicts` shape** (the per-len
 the ledger event). Build #2641's durable on-disk event log to carry that same widened `lensVerdicts` shape,
 so there is exactly ONE ledger — do not stand up a parallel second ledger alongside #2500. #2500 itself is
 left untouched.
+
+## Progress
+
+Delivered (#2641):
+- **The ONE shared fold** — `we:scripts/lib/jury-ledger.mjs`: the durable append-only JSONL log (one file per
+  review subject under gitignored `.conveyor/jury/`), validate-before-write append, tolerant read, and
+  `foldJuryLedger(events)` — the single reconstruction of the live ledger (roster + each juror's charter, derived
+  status pending/running/found, findings, verdict, round) that BOTH the conveyor and the #2642 console call. Reuses
+  #2654's pure event vocabulary + `validateJuryEvent`; reconstructs #2500's widened `lensVerdicts` shape by
+  diversity-selection. No second parallel ledger.
+- **Conveyor live tree** — `we:scripts/conveyor/jury-tree.mjs`: a `/workflows`-style text tree renderer + on-demand
+  CLI that calls the shared fold and only formats (no re-implemented fold). Documented in the conveyor skill.
+- **review-parked-prs evolved** — `we:scripts/workflows/review-parked-prs.mjs` appends events to the durable log
+  per PR via a recorder agent that shells `jury-ledger record` (the CLI builds the events from the converged state
+  through the tested `buildReviewLedgerEvents`); best-effort, non-gating, no GitHub side effect (INVARIANT 2 intact).
+- `disposition-judge.reduceLedger` left as the pre-existing disposition PROJECTION (a different question over the
+  same log) with a reciprocal cross-ref note to keep the shared reduction rules in step.
+- Unit-tested (`we:scripts/lib/__tests__/jury-ledger.test.mjs`,
+  `we:scripts/conveyor/__tests__/jury-tree.test.mjs`); `check:standards` green.
