@@ -475,6 +475,18 @@ export function needsManifestStripBeforeMerge(v) {
 }
 
 /**
+ * #2684 — is this candidate a cross-locus couple's WE half that was OVERLAP-STACKED on its impl tip? Such a PR
+ * carries the couple manifest (`hasManifest` + `crossRepo`) AND a per-repo `base` sha (`v.base` — the impl tip
+ * it stacked on, from `manifestBaseForRepo`). Used ONLY to TAG which couple CI-concurrency regime the
+ * rebase-drop outcome realized (`current` = fast-forward skip, `rebased` = the re-CI fallback) — observability,
+ * never a control-flow gate: the git state itself is the guard (a superseded base makes the half BEHIND →
+ * `rebased` → re-CI, so it never lands on a base its CI never validated). A WE half opened off `main` (a serial
+ * couple) has no `base` → not stacked → untagged, unchanged path. Pure. */
+export function isStackedWeCoupleHalf(v) {
+  return !!v && !!v.hasManifest && !!v.crossRepo && typeof v.base === 'string' && /^[0-9a-f]{7,64}$/i.test(v.base);
+}
+
+/**
  * #2393 — the impl-PR→WE-manifest `laneRef` join. Pure. Closes the impl-orphan-always-ready hole: only a WE
  * lane carries a `.lane-manifest.json`, so a couple's IMPL PR (frontierui/plateau-app) — and any WE PR whose
  * manifest didn't parse — reads as a manifest-less ORPHAN, which `planLabelDrain` treats as always-ready. An
@@ -1631,6 +1643,19 @@ function runCli() {
       // landable but still CARRIES the manifest on its head (#2183 first-lander leak — a clean merge would
       // otherwise commit the transient file to `main`). Both cases route through the same plumbing.
       if (!isRebaseDropCandidate(v) && !needsManifestStripBeforeMerge(v)) continue;
+      // #2684 — is this a cross-locus couple's WE half that was overlap-stacked on its impl tip? For such a half
+      // the rebase-drop OUTCOME below already IS the couple CI-concurrency guard realized in git state — no
+      // separate override needed, and any override would be WRONG: reaching `current` is itself proof the tip is
+      // on current `origin/main` with a CI that validated `main + WE-delta`. So:
+      //   • `current` (tip already on main, manifest-free) = the FAST-FORWARD SKIP — the impl landed at the sha
+      //     the WE half stacked on, so its FIRST CI stays valid → it lands with NO re-CI (the whole #2684 win).
+      //   • `rebased` (it was BEHIND because the impl landed as a DIFFERENT sha — squash-merge / review:changes
+      //     re-stack / `main` advanced) = the FALLBACK — its tip is rebuilt onto `main` and `test` re-runs.
+      // The WE half therefore NEVER lands on a base its CI never validated: a superseded stacked base makes it
+      // BEHIND → `rebased` → re-CI (fail-safe). The pure MODEL of this decision — from injected shas — is
+      // `couple-plan.mjs`'s `decideWeReCi` (the SSOT, unit-tested); here we only TAG which regime the git state
+      // realized (`v.coupleReCi`, observability), with zero control-flow change from the pre-#2684 behaviour.
+      const stackedWeHalf = isStackedWeCoupleHalf(v);
       const laneRef = v.headRef;
       if (!laneRef) continue;
       // #2198/#2263 — rebase-drop is pure git plumbing (merge-tree/commit-tree/push): for the LOCAL clone's
@@ -1669,7 +1694,10 @@ function runCli() {
         if (r.healed && r.healed.length) v.collisionHealed = r.healed;
         if (contentResolved) v.contentRebaseDrop = r.mergedPaths;
         rebased.push(v.num);
-        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} rebased onto main${r.dropped || r.droppedManifest ? ' (manifest dropped)' : ''}${healTag}${contentTag}${cloneDir ? ` (via ${cloneDir})` : ''} → ${r.newCommit.slice(0, 9)}\n`);
+        // #2684 — a stacked WE half that was BEHIND (its impl landed as a different sha) is the FALLBACK regime:
+        // rebuilt onto main, `test` re-runs. Tag it for observability; control flow is unchanged.
+        if (stackedWeHalf) v.coupleReCi = 're-ci';
+        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} rebased onto main${r.dropped || r.droppedManifest ? ' (manifest dropped)' : ''}${healTag}${contentTag}${cloneDir ? ` (via ${cloneDir})` : ''}${stackedWeHalf ? ' [couple re-CI: stacked base superseded]' : ''} → ${r.newCommit.slice(0, 9)}\n`);
       } else if (r.action === 'current') {
         // IDEMPOTENCY (drain re-push churn bug) — the tip is ALREADY on main and manifest-free; rebaseDropManifest minted/pushed NOTHING. Treat
         // it as landable (proceed to merge) but do NOT count it as churn — no head SHA changed, so it must NOT
@@ -1677,7 +1705,11 @@ function runCli() {
         // fix: a green, on-main, manifest-free PR stops getting its head rewritten every drain pass.
         v.decision = 'merge';
         v.reason = `already up-to-date on main (manifest-free), required check green — landable`;
-        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} already current on main (manifest-free) — no rebuild needed\n`);
+        // #2684 — for a stacked WE couple half, `current` IS the FAST-FORWARD SKIP: the tip is on current main
+        // with a still-valid first CI, so it lands with NO re-CI (the win). Tag it; control flow is unchanged —
+        // landing a proven-on-main tip on its existing CI was always correct here.
+        if (stackedWeHalf) v.coupleReCi = 'ff-skip';
+        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} already current on main (manifest-free) — no rebuild needed${stackedWeHalf ? ' [couple FF-skip: WE re-CI skipped, first CI valid]' : ''}\n`);
       } else if (!AS_JSON) {
         process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} left skipped: ${r.reason}\n`);
       }

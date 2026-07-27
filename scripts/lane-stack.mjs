@@ -28,6 +28,7 @@
  *   node scripts/lane-stack.mjs apply-rebase --plan=<file> --id=2394 --onto=2391 --base=<frontier tip sha> [--repo=we]
  *   node scripts/lane-stack.mjs record --plan=<file> --id=2394 --base=<ref> --tip-ref=lane/<slug>-2394 [--repo=we]
  *   node scripts/lane-stack.mjs drop --plan=<file> --id=2394
+ *   node scripts/lane-stack.mjs couple-open --impl-repo=frontierui --impl-ref=lane/2684-fui [--impl-tip=<sha>] [--we-ref=lane/2684-we] [--json]  # #2684 cross-locus couple overlap-open order + WE stack-base (stateless)
  *
  * TRUST BOUNDARY (#2394 review round 2): every git-facing input is validated, never interpolated raw —
  *   • `--base` must resolve to a commit via `rev-parse --verify` behind `--end-of-options` (a `-`-prefixed
@@ -46,6 +47,7 @@ import { execFileSync } from 'node:child_process';
 import {
   createStackPlan, planNextItem, recheckAtPush, applyRebase, recordPushed, dropItem,
 } from './readiness/overlap-chain.mjs';
+import { planCoupleOpen } from './readiness/couple-plan.mjs'; // #2684 — the cross-locus couple's overlap-open order + WE stack-base (pure)
 import { CAPABILITY_MARKER_PATH, readCapabilityFromMain } from './readiness/drain-capability.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -68,7 +70,9 @@ function git(args, opts = {}) {
 }
 
 const planPath = typeof flags.plan === 'string' ? resolve(flags.plan) : null;
-if (!planPath) fail('pass --plan=<scratch plan file> (created by `init`, threaded through every seam)');
+// #2684 — `couple-open` is a STATELESS planning helper (the cross-locus couple's overlap-open order + WE
+// stack-base): it needs no scratch plan file, so it is exempt from the `--plan` requirement below.
+if (cmd !== 'couple-open' && !planPath) fail('pass --plan=<scratch plan file> (created by `init`, threaded through every seam)');
 
 function loadPlan() {
   let text;
@@ -264,6 +268,29 @@ switch (cmd) {
     emit({ ok: true, id, detail: `#${id} dropped (never pushed) — its declared files stay overlap-visible, no frontier change` }, 0);
     break;
   }
+  case 'couple-open': {
+    // #2684 — the cross-locus couple's OVERLAP-OPEN seam: decide open-order (impl-first, WE-last) + the WE
+    // half's stack-base so BOTH PRs open before either lands (overlapped first CI). Stateless — the mechanical
+    // boundary that resolves the impl lane's PUSHED tip to a PINNED sha and hands it to the pure planner
+    // (`couple-plan.mjs`), which owns the model (stack-vs-serial, the fail-safe). The couple opener (`pr-land`)
+    // shells this to learn WHERE to base the WE PR; the drain's impl-first/WE-last LAND order is untouched.
+    // The impl tip is a PINNED sha (never the mutable lane ref): pass `--impl-tip=<sha>` directly, or
+    // `--impl-ref=<ref>` to resolve it here via `rev-parse` (behind `--end-of-options`, same trust boundary as
+    // every other ref this CLI resolves). A ref that will not resolve ⇒ no pinned sha ⇒ the planner fail-safes
+    // to a plain (serial) WE open off main — never a stack on an unresolved base.
+    if (typeof flags['impl-repo'] !== 'string' || !flags['impl-repo']) fail('pass --impl-repo=<impl repo slug> (frontierui | plateau-app)');
+    let implTip = typeof flags['impl-tip'] === 'string' && flags['impl-tip'] ? flags['impl-tip'] : null;
+    if (!implTip && typeof flags['impl-ref'] === 'string' && flags['impl-ref']) implTip = resolveCommit(flags['impl-ref']);
+    const decision = planCoupleOpen({
+      implRepo: flags['impl-repo'],
+      weRepo: typeof flags['we-repo'] === 'string' && flags['we-repo'] ? flags['we-repo'] : 'we',
+      implRef: typeof flags['impl-ref'] === 'string' ? flags['impl-ref'] : undefined,
+      weRef: typeof flags['we-ref'] === 'string' ? flags['we-ref'] : undefined,
+      implTipSha: implTip || undefined,
+    });
+    emit({ ok: true, ...decision, detail: decision.reason }, 0);
+    break;
+  }
   default:
-    fail(`unknown command "${cmd || ''}" — one of: init | plan-item | recheck | apply-rebase | record | drop`);
+    fail(`unknown command "${cmd || ''}" — one of: init | plan-item | recheck | apply-rebase | record | drop | couple-open`);
 }

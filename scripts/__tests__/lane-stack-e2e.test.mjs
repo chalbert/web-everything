@@ -431,3 +431,36 @@ describe('lane-stack e2e (#2394) — capability gate', () => {
     expect(init.json.detail).toMatch(/fetch/);
   });
 });
+
+describe('lane-stack e2e (#2684) — couple-open overlap seam (impl-first, WE stacked)', () => {
+  it('resolves the impl lane tip via --impl-ref and stacks the WE half on that PINNED sha', () => {
+    // The impl "lane" is a pushed ref on origin; couple-open resolves it to a pinned sha for the WE stack base.
+    const laneRef = pushLane(primaryDir, '2684-fui'); // HEAD of the primary clone → lane/2684-fui on origin
+    const r = runStack(['couple-open', '--impl-repo=frontierui', '--impl-ref=origin/lane/2684-fui', '--we-ref=lane/2684-we'], primaryDir);
+    expect(r.code, r.err).toBe(0);
+    expect(r.json.weStacked, 'a cross-locus couple stacks the WE half on the impl tip').toBe(true);
+    expect(r.json.stackBase, 'stack base is the RESOLVED impl lane tip sha').toBe(laneRef);
+    expect(r.json.concurrent, 'both PRs open before either lands').toBe(true);
+    expect(r.json.openOrder.map((o) => o.role), 'impl-first / WE-last open order').toEqual(['impl', 'we']);
+  });
+
+  it('accepts an already-pinned --impl-tip sha without touching git', () => {
+    const r = runStack(['couple-open', '--impl-repo=plateau-app', '--impl-tip=' + mainSha0, '--we-ref=lane/2684-we'], primaryDir);
+    expect(r.code, r.err).toBe(0);
+    expect(r.json.stackBase).toBe(mainSha0);
+    expect(r.json.weStacked).toBe(true);
+  });
+
+  it('FAIL-SAFE: an unresolvable --impl-ref yields a plain (serial) WE open off main — never a stack on an unresolved base', () => {
+    const r = runStack(['couple-open', '--impl-repo=frontierui', '--impl-ref=refs/heads/does-not-exist', '--we-ref=lane/2684-we'], primaryDir);
+    expect(r.code, r.err).toBe(0);
+    expect(r.json.weStacked).toBe(false);
+    expect(r.json.stackBase).toBeNull();
+    expect(r.json.reason).toMatch(/no pinned impl tip sha/i);
+  });
+
+  it('requires --impl-repo (exit 3)', () => {
+    const r = runStack(['couple-open', '--impl-ref=HEAD'], primaryDir);
+    expect(r.code).toBe(3);
+  });
+});
