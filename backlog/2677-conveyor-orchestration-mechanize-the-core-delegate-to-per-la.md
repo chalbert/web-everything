@@ -28,12 +28,13 @@ The conveyor skill (#2612) runs from a live main session: it dispatches scope-di
 - **#2609** — the dispatch-plan script (`we:scripts/readiness/dispatch-plan.mjs`) + `scope:` field: the first deterministic orchestration primitive; the mechanized core extends this seam rather than re-deriving dispatch in prose.
 - The **per-item-overhead** work — the same throughput program's effort to cut the fixed cost each item pays; delegating per-lane orchestration is the structural version of that reduction.
 
-## Key design fork (resolve later, not here)
+## Key design fork — carved to its own decision card
 
-**How much of orchestration is pure mechanics vs. a per-lane agent?** The two halves push opposite ways: (a) wants as much as possible in a deterministic state machine (reproducible, testable, product-ready with no session); (b) wants a per-lane orchestrator with enough autonomy to run its lane. The line between "the mechanics decide it" and "the per-lane agent decides it" is the central open call — resolve it as a decision item before the delegate slice, so the per-lane brief is written against a settled boundary.
+**How much of orchestration is pure mechanics vs. a per-lane agent?** → **#xyr248a** (`kind:decision`). The two halves push opposite ways: (a) wants as much as possible in a deterministic state machine (reproducible, testable, product-ready with no session); (b) wants a per-lane orchestrator with enough autonomy to run its lane. The line between "the mechanics decide it" and "the per-lane agent decides it" is the central open call — it gates the per-lane orchestrator slice (#xoh0xzj is `blockedBy` it) so the per-lane brief is written against a settled boundary.
 
-## Likely slices
+## Slices (sliced 2026-07-26)
 
-- Extract the deterministic **tick / dispatch / watch / release / health** core into a tested state machine (the mechanized core; builds on #2609).
-- A **per-lane orchestrator brief** — the delegated agent that drives the mechanical core for one lane (blocked on the fork above).
-- **Retire the main-session serial loop** — once mechanics + per-lane orchestrators cover it, the main session drops to judgment + operator conversation only.
+- **#xyp63w5** — Mechanize the tick core into a tested state machine (dispatch orchestration + the three guards + watcher arming). The keystone MECHANIZE half (a); no blockers, batchable now. builds on #2609/#2607.
+- **#xbb1ku5** — Wire ghost-release (lease-reaper + `pr-watch --release-session`) and the now-live health/stall scan into the mechanical tick. Reconciles the deferred SKILL-wiring follow-ups of #2667 (mechanisms delivered) and #2616 (lane→num map populated → `assessHealth` now live). `blockedBy` #xyp63w5.
+- **#xoh0xzj** — Per-lane orchestrator: brief + runner driving the mechanical core for one lane (the DELEGATE half, b). `blockedBy` the boundary decision #xyr248a **and** the core #xyp63w5 — not batchable until #xyr248a ratifies.
+- **#xuqbux7** — Retire the main-session serial loop — main session drops to judgment + operator conversation only. `blockedBy` #xyp63w5 and #xoh0xzj (the epic's endpoint).
