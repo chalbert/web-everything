@@ -28,6 +28,8 @@ import {
   NEGOTIATION_OUTCOMES,
   NEGOTIATION_ROUND_CAP,
   VERDICTS,
+  redTeamRequired,
+  foldRedTeamVerdict,
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
@@ -394,6 +396,54 @@ describe('SUBJECT_ADAPTER_CONTRACT / validateSubjectAdapter — the subject-adap
     expect(validateSubjectAdapter({ ...stub, charterForLens: 'x' }).valid).toBe(false);
     expect(validateSubjectAdapter({ ...stub, subjectNoun: '  ' }).valid).toBe(false);
     expect(validateSubjectAdapter({ ...stub, mandatoryLenses: ['correctness'], subjectNoun: 'thing' }).valid).toBe(true);
+  });
+});
+
+describe('the mandatory post-jury red-team gate (#2707)', () => {
+  it('owes a red-team EXACTLY on a positive (accept) verdict', () => {
+    expect(redTeamRequired(VERDICTS.ACCEPT)).toBe(true);
+    // a verdict already bouncing / escalating has nothing to ratify → no red-team owed
+    expect(redTeamRequired(VERDICTS.CHANGES)).toBe(false);
+    expect(redTeamRequired(VERDICTS.NEEDS_HUMAN)).toBe(false);
+    expect(redTeamRequired('unknown')).toBe(false);
+    expect(redTeamRequired(undefined)).toBe(false);
+  });
+
+  it('ratifies ONLY a red-team that ran and found nothing', () => {
+    expect(foldRedTeamVerdict({ ran: true, findings: [] })).toBe(VERDICTS.ACCEPT);
+  });
+
+  it('bounces to changes when a red-team that ran broke the accept', () => {
+    expect(foldRedTeamVerdict({ ran: true, findings: [{ summary: 'an unhandled empty-input case' }] }))
+      .toBe(VERDICTS.CHANGES);
+  });
+
+  it('FAILS CLOSED — an unrun red-team NEVER ratifies (the fabricated-ratings guard)', () => {
+    // no signal is a FAILING signal: ran:false → needs-human regardless of (absent) findings, and even
+    // if a caller passed clean findings the humanRequired path wins (mirrors deriveVerdict).
+    expect(foldRedTeamVerdict({ ran: false, findings: [] })).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(foldRedTeamVerdict({ ran: false, findings: [{ summary: 'x' }] })).toBe(VERDICTS.NEEDS_HUMAN);
+    // defaults: no args ⇒ ran defaults false ⇒ needs-human (never a silent accept on an empty call)
+    expect(foldRedTeamVerdict()).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(foldRedTeamVerdict({})).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('resolves red-team findings marked fixed/no_change_needed, leaving only genuinely outstanding ones', () => {
+    expect(foldRedTeamVerdict({ ran: true, findings: [{ summary: 'addressed', outcome: 'fixed' }] }))
+      .toBe(VERDICTS.ACCEPT);
+    expect(foldRedTeamVerdict({ ran: true, findings: [
+      { summary: 'addressed', outcome: 'fixed' },
+      { summary: 'still broken' },
+    ] })).toBe(VERDICTS.CHANGES);
+  });
+
+  it('a red-team break feeds the SAME negotiation loop — changes continues under the cap, escalates at it', () => {
+    const broke = foldRedTeamVerdict({ ran: true, findings: [{ summary: 'real defect' }] });
+    expect(deriveNegotiationOutcome({ verdict: broke, round: 1, roundCap: 3 })).toBe(NEGOTIATION_OUTCOMES.CONTINUE);
+    expect(deriveNegotiationOutcome({ verdict: broke, round: 3, roundCap: 3 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+    // an unrun red-team (needs-human) always escalates, no round budget clears it
+    const unrun = foldRedTeamVerdict({ ran: false });
+    expect(deriveNegotiationOutcome({ verdict: unrun, round: 1, roundCap: 5 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
   });
 });
 

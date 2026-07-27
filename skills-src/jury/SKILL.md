@@ -36,7 +36,11 @@ Given a **subject** (`pr-diff` | `design-pixels` | `decision-prose`), a **care-l
 3. **Reduces the panel** to per-lens verdicts + one panel verdict via the shared review core
    (`review-core-cli reduce` — diversity-selection). A mandatory lens whose whole jury fails degrades the panel to
    `needs-human` (a jury that did not run never reads as accept).
-4. **Renders the verdict + the in-memory jury ledger** (the #2654 event stream) for you to read.
+4. **Red-teams a positive verdict before ratifying it** (#2707). A jury `accept` is a **proposal**, not an
+   auto-land: one adversarial red-team agent then actively tries to **break** it. A red-team that runs clean
+   ratifies the accept; one that finds a blocking issue bounces it (`changes`, folded into another round); one that
+   **does not run degrades to `needs-human`** — fail-closed, an unrun red-team never ratifies.
+5. **Renders the verdict + the in-memory jury ledger** (the #2654 event stream) for you to read.
 
 ## Run it
 
@@ -74,6 +78,23 @@ This skill (and its harness) **returns a verdict + a ledger and nothing else** �
 **no comment**, and **merges nothing**. What a verdict *does* is the caller's decision (the same "decisions stay in
 the loop" boundary `review-parked-prs` holds). Landing a PR is the drain's job; the interactive human verdict on a
 drain-parked PR is `/review`.
+
+## The mandatory post-jury red-team + fail-closed posture (#2707)
+
+Two safeguards keep a jury from **fabricating** a positive verdict — the failure the feature-tracking-screen
+design session hit, where a foreman synthesized ratings over a jury that produced no real signal:
+
+- **A positive verdict is red-teamed before it ratifies.** When the panel reaches `accept`, the harness runs one
+  **adversarial red-team** pass (the sequential `jury → red-team → Round 2` shape that session ratified) that
+  assumes the accept is wrong and hunts the reason it should not ship. Only a red-team that runs and **cannot**
+  break the accept lets the loop land. A red-team that finds a blocking issue turns the accept into `changes` (its
+  findings feed the same round loop); the round cap still bounds the negotiation. The two rules — *a red-team is
+  owed exactly on `accept`* and *how its result folds into the final verdict* — live in the engine
+  (`redTeamRequired` / `foldRedTeamVerdict` in `we:scripts/lib/jury-core.mjs`), never in this shell (F1).
+- **Every stage fails closed on missing signal.** No stage that returns an empty or failed result is ever read as
+  accept. A resolve that did not run, a mandatory lens whose whole jury failed, an editor fold that produced
+  nothing, and — now — a red-team that did not run **all degrade to `needs-human`**. The invariant is uniform: a
+  stage that produced no signal is treated as a *failing* signal, never a silent land.
 
 ## Deferred (not this slice)
 
