@@ -146,6 +146,56 @@ export function deriveNegotiationOutcome({ verdict, round, roundCap = NEGOTIATIO
 }
 
 /**
+ * ============================================================================
+ * THE MANDATORY POST-JURY RED-TEAM GATE (#2707).
+ * ============================================================================
+ *
+ * A positive panel verdict is a PROPOSAL, not a ratification. Before the convergence loop LANDS an `accept`, an
+ * adversarial RED-TEAM must actively try to BREAK it — and only a red-team that ran and could NOT break it
+ * ratifies the accept. This closes the exact gap the feature-tracking-screen design session hit: a "foreman"
+ * synthesizing a positive verdict over a jury that produced NO real signal, fabricating ratings out of nothing.
+ * The rule is FAIL-CLOSED on missing signal, the same posture the rest of the engine already takes (a dead
+ * mandatory lens degrades to needs-human): NO signal from the red-team is treated as a FAILING signal, never as a
+ * silent accept.
+ *
+ * Two pure rules — the SINGLE SOURCE the subject-jury harness's red-team stage enacts (it reaches them the same
+ * way the panel reduce reaches `deriveVerdict`/`deriveNegotiationOutcome`: mechanically, never re-deciding the
+ * semantics per caller — #51 / F1):
+ */
+
+/**
+ * Is a post-jury red-team OWED for this panel verdict? Pure. A red-team is required EXACTLY when the panel
+ * verdict is `accept` — a positive verdict is the only one that could be RATIFIED, so it is the only one that
+ * must first survive the adversary. A non-accept verdict is already bouncing (`changes`) or escalating
+ * (`needs-human`); there is nothing to ratify, so no red-team runs (running one would only add cost, never change
+ * the disposition). Mirrors `deriveNegotiationOutcome`'s "only accept lands" line — the red-team guards precisely
+ * that land path.
+ * @param {'accept'|'changes'|'needs-human'} verdict
+ * @returns {boolean}
+ */
+export function redTeamRequired(verdict) {
+  return verdict === VERDICTS.ACCEPT;
+}
+
+/**
+ * Fold a red-team's result into the FINAL (post-red-team) verdict. Pure, FAIL-CLOSED. Delegates to `deriveVerdict`
+ * with `humanRequired = !ran`, so the "no signal is a FAILING signal" invariant is the SAME one `deriveVerdict`
+ * already single-sources — a red-team is not a second verdict machine:
+ *   - the red-team did NOT run (`ran: false`) → `needs-human`, ALWAYS (an unrun red-team NEVER ratifies — this is
+ *     the fabricated-ratings guard; `humanRequired` wins over any finding count, exactly as in `deriveVerdict`).
+ *   - it ran and left OUTSTANDING findings → `changes` (the accept is broken; its findings feed the same round
+ *     loop, so a red-team break is negotiated like any other `changes`, bounded by the round cap).
+ *   - it ran CLEAN (no outstanding findings) → `accept` (RATIFIED — the positive verdict survived the adversary).
+ * The harness only ever calls this for a verdict `redTeamRequired` returned true on; a non-accept verdict never
+ * reaches the red-team.
+ * @param {{ran?: boolean, findings?: Finding[]|Array<object>}} [o]
+ * @returns {'accept'|'changes'|'needs-human'}
+ */
+export function foldRedTeamVerdict({ ran = false, findings = [] } = {}) {
+  return deriveVerdict({ findings, humanRequired: !ran });
+}
+
+/**
  * #2310 (v3, under epic #2285) — the MULTI-MANDATE REVIEWER PANEL. v2's single reviewer fans out into distinct
  * mandated lenses (the `/code-review` dimensions), each judging the SAME diff independently via `buildMandate`
  * (one subagent per lens, seeded with `buildPanelMandate`). The panel's combined verdict then drives the SAME
