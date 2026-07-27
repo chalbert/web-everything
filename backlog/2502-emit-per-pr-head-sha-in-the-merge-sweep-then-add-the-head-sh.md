@@ -5,6 +5,10 @@ parent: "2445"
 status: open
 dateOpened: "2026-07-14"
 tags: [plateau-loop, drain-daemon, observability]
+scope:
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - plateau:tools/drain-daemon/
 ---
 
 # Emit per-PR head SHA in the merge sweep, then add the head-SHA churn signal to the stuck detector (#2487 follow-on)
