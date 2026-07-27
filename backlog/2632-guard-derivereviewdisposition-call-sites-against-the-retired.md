@@ -3,9 +3,11 @@ bornAs: xnbbd6d
 kind: story
 size: 2
 parent: "2606"
-status: open
+status: resolved
 scope: ["we:scripts/review-core-cli.mjs", "we:scripts/workflows/review-parked-prs.mjs"]
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 

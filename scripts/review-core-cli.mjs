@@ -45,12 +45,15 @@
  *
  * `comment` input (JSON, from --file or stdin) is `{ findings, verdict, disposition }` (plus optional
  * `lensVerdicts` / `mandatoryLenses` / `lenses` / `heading` for the embedded verdict table). When `verdict` or
- * `disposition` is absent it is DERIVED from the findings (`deriveVerdict` / `deriveReviewDisposition` when a
- * `reason`/`reasons` set is supplied) — matching how `reduce` reads its input. Flags `--reason` / `--reasons`
+ * `disposition` is absent it is DERIVED from the findings (`deriveVerdict` / `deriveDispositionLenient` when a
+ * `reason`/`reasons` set is supplied — retired/unknown tokens dropped, never thrown, #2632) — matching how
+ * `reduce` reads its input. Flags `--reason` / `--reasons`
  * (comma-sep) override the JSON's fields, same as `reduce`.
  *
  * Exit codes: 0 = ok; 2 = usage error (unknown subcommand / bad flags / no input); 1 = a derivation threw
- * (e.g. an unknown escalation reason, a missing mandatory-lens verdict) — the message is printed as `{error}`.
+ * (e.g. a missing mandatory-lens verdict) — the message is printed as `{error}`. NOTE (#2632): a RETIRED or
+ * otherwise unrecognized escalation reason no longer throws — the disposition guard drops it and keeps the
+ * disposition from the recognized reasons (or omits it entirely when none is recognized).
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -88,6 +91,40 @@ export function parseFlags(argv) {
   return flags;
 }
 
+// ── lenient disposition guard (the retired/unknown-reason fix, #2632) ─────────────────────────────────
+/**
+ * Derive the review disposition, but DROP any reason token the core cannot canonicalize — keeping the
+ * disposition from the reasons it DOES recognize (#2632). `deriveReviewDisposition` is all-or-nothing: it
+ * throws `unknown reason(s)` on ANY unrecognized token. So a legacy PR whose `## Escalation reason` block still
+ * lists a RETIRED reason (`sampling floor (1-in-10)`, removed with the review-sampling floor in #2631) — or any
+ * future free-text reason a new escalation source stamps — would throw `unknown reason` straight through the
+ * review workflow, nulling a whole disposition that its OTHER, recognized reasons could still have produced.
+ *
+ * This guards BOTH call sites (`reduceReview`, `buildComment`) the SAME lenient way `careLevelFromReasons`
+ * already tolerates unknowns: an unrecognized reason contributes NOTHING rather than crashing. It partitions
+ * known from unknown WITHOUT re-implementing `canonicalizeReason` (private to review-core.mjs, the policy tier):
+ * a reason is "known" iff `deriveReviewDisposition({ reason })` does not throw for it alone. The strictest-wins
+ * precedence is preserved by the final combined call over just the recognized reasons.
+ *
+ * Returns `undefined` when NO reason is recognized (or none supplied) — the caller then behaves exactly as it
+ * does for the reasons-absent case (no disposition line), rather than surfacing a partial/garbage one.
+ * @param {{reason?: string, reasons?: string[]}} [o]
+ * @returns {{mode: string, autoLand: boolean}|undefined}
+ */
+export function deriveDispositionLenient({ reason, reasons } = {}) {
+  const raw = (Array.isArray(reasons) ? reasons : reason != null ? [reason] : []).filter(Boolean);
+  const known = raw.filter((r) => {
+    try {
+      deriveReviewDisposition({ reason: r });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!known.length) return undefined;
+  return deriveReviewDisposition({ reasons: known });
+}
+
 // ── PURE reduction layer (the testable core the 5× inline node -e calls collapse into) ────────────────
 /**
  * Reduce one review round's raw inputs into the derived contract, combining the pure fns from
@@ -99,7 +136,9 @@ export function parseFlags(argv) {
  *   - `verdict` — `derivePanelVerdict` when per-lens `lensVerdicts` are supplied (the v3 panel reduction),
  *     else `deriveVerdict` over the findings (+ `humanRequired`, which always wins).
  *   - `verdictTable` — the per-lens markdown table, only when `lensVerdicts` are supplied.
- *   - `disposition` — `deriveReviewDisposition` when a `reason`/`reasons` escalation set is supplied.
+ *   - `disposition` — `deriveDispositionLenient` (the #2632 guard over `deriveReviewDisposition`) when a
+ *     `reason`/`reasons` escalation set is supplied — retired/unknown tokens are dropped, never thrown; omitted
+ *     entirely when none is recognized.
  *   - `careLevel` / `rigor` — the advisory care-level and the panel rigor it dials (#2567), also only when a
  *     `reason`/`reasons` set is supplied (same trigger as `disposition`).
  *   - `outcome` — the next negotiation step (`deriveNegotiationOutcome`) or, when `phase: 'plan'`, the
@@ -139,7 +178,10 @@ export function reduceReview(input = {}) {
 
   const hasReasons = reason != null || (Array.isArray(reasons) && reasons.length > 0);
   if (hasReasons) {
-    out.disposition = deriveReviewDisposition({ reason, reasons });
+    // Lenient (#2632): drop any retired/unknown reason token, keep the disposition from the recognized ones.
+    // Omit the key entirely when none is recognized — matching the reasons-absent case, never a null disposition.
+    const disposition = deriveDispositionLenient({ reason, reasons });
+    if (disposition) out.disposition = disposition;
     // #2567 — the advisory care-level + the panel rigor it dials, from the SAME reason set (lenient: never throws).
     const reasonList = Array.isArray(reasons) ? reasons : (reason != null ? [reason] : []);
     out.careLevel = careLevelFromReasons(reasonList);
@@ -180,8 +222,9 @@ export function buildMandateText({ kind, lens, findings, round, roundCap } = {})
  * subcommand, #2432). Pure — no I/O, no dates. `verdict` and `disposition` are used as supplied; when either is
  * absent it is DERIVED from the same core fns `reduceReview` uses (so a raw findings dump renders a complete
  * comment): `verdict` from `deriveVerdict({findings, humanRequired})`, and `disposition` from
- * `deriveReviewDisposition` ONLY when a `reason`/`reasons` escalation set is supplied (there is no disposition
- * without one — it is left absent and the comment simply omits that line). Delegates the markdown to the pure
+ * `deriveDispositionLenient` (the #2632 guard over `deriveReviewDisposition`) ONLY when a `reason`/`reasons`
+ * escalation set is supplied — retired/unknown tokens are dropped, never thrown. The disposition line is omitted
+ * when no reason is supplied OR none is recognized. Delegates the markdown to the pure
  * `renderPanelComment` (`./lib/review-render.mjs`).
  * @param {{findings?: Array<object>, verdict?: string, disposition?: object|string, humanRequired?: boolean,
  *   reason?: string, reasons?: string[], lensVerdicts?: Object<string,string>, mandatoryLenses?: string[],
@@ -210,7 +253,9 @@ export function buildComment(input = {}) {
   let resolvedDisposition = disposition;
   if (resolvedDisposition == null) {
     const hasReasons = reason != null || (Array.isArray(reasons) && reasons.length > 0);
-    if (hasReasons) resolvedDisposition = deriveReviewDisposition({ reason, reasons });
+    // Lenient (#2632): a retired/unknown reason token is dropped, not thrown — the disposition line falls off only
+    // when NO reason is recognized (`deriveDispositionLenient` returns undefined), same as supplying no reasons.
+    if (hasReasons) resolvedDisposition = deriveDispositionLenient({ reason, reasons });
   }
 
   return renderPanelComment({
