@@ -4,6 +4,9 @@ kind: task
 status: open
 dateOpened: "2026-07-15"
 tags: []
+scope:
+  - plateau-app:conformance.html
+  - plateau-app:packages/core/src/conformance-engine/
 ---
 
 # plateau-app build is broken: conformance page references a missing entry module
