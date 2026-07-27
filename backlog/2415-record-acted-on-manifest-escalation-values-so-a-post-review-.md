@@ -5,6 +5,11 @@ parent: "2405"
 status: active
 dateOpened: "2026-07-10"
 tags: [gate, review, drain, gate-self]
+scope:
+  - we:scripts/readiness/lane-manifest.mjs
+  - we:scripts/readiness/__tests__/lane-manifest.test.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
 ---
 
 # Record acted-on manifest escalation values so a post-review PR-body edit is tamper-evident
