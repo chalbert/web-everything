@@ -64,16 +64,23 @@ export function isTestPath(path) {
   return /(^|\/)__tests__\/|\.(?:test|spec)\.[cm]?[jt]sx?$/.test(String(path || ''));
 }
 
-// A `.skip(`/`.only(` (or an `xit(`/`xdescribe(`/`fit(`/`fdescribe(`) CALL — the two ways a test is disabled or
-// narrowed-to so a failing sibling never runs. Anchored to the CALL form (a `(` must follow) and to the real
-// test callees so it can't false-positive on ordinary code: `.skip(`/`.only(` count only on `it`/`test`/
-// `describe` (never a variable named `context`/`suite`), and the bare Jasmine-style globals must be an
-// invocation NOT preceded by a `.` or word char — so `model.fit(`, `fitAffineCost(`, and `object-fit` never
-// match. `.todo` is deliberately NOT here: it marks an unwritten test, it does not hide a failing one.
-const SKIP_FOCUS_MARKER_RE = /\b(?:it|test|describe)\s*\.\s*(?:skip|only)\s*\(|(?<![.\w])(?:xit|xdescribe|xtest|fit|fdescribe)\s*\(/;
+// A `.skip`/`.only` (or an `xit(`/`xdescribe(`/`fit(`/`fdescribe(`) marker — the two ways a test is disabled or
+// narrowed-to so a failing sibling never runs. Anchored to the real test callees so it can't false-positive on
+// ordinary code: `.skip`/`.only` count only on `it`/`test`/`describe` (never a variable named `context`/`suite`),
+// and the bare Jasmine-style globals must be an invocation NOT preceded by a `.` or word char — so `model.fit(`,
+// `fitAffineCost(`, and `object-fit` never match. `.todo` is deliberately NOT here: it marks an unwritten test,
+// it does not hide a failing one. After `skip`/`only` we accept any of three tails so the parameterized and
+// line-wrapped forms can't slip past (#2669): the plain `(` CALL (`it.skip('…')`); a `.each` chain
+// (`it.skip.each([…])(…)` / `it.only.each\`…\``), which the old `\(`-only anchor let bypass the gate; and
+// end-of-line (`it.skip` with its `(` wrapped to the next line — the diff is scanned per-line so the `(` isn't
+// on this one). `skipSomething(` / `.only` mid-identifier still can't match (the tail must be `(`, `.each`, or EOL).
+const SKIP_FOCUS_MARKER_RE = /\b(?:it|test|describe)\s*\.\s*(?:skip|only)\s*(?:\.\s*each\b|\(|$)|(?<![.\w])(?:xit|xdescribe|xtest|fit|fdescribe)\s*\(/;
 // A test-case opener with a string title — `it('…'`, `test("…"` — used to COUNT cases so a net removal is
-// detectable. The string-title requirement keeps a bare identifier named `test` from counting.
-const TEST_CASE_OPENER_RE = /\b(?:it|test)\s*(?:\.\s*\w+\s*)?\(\s*['"`]/;
+// detectable. The string-title requirement keeps a bare identifier named `test` from counting, and the leading
+// `(?<![.\w])` (not preceded by a `.` or word char) keeps the `.test('literal')` METHOD-CALL form — an
+// `expect(RE.test('sample')).toBe(true)` assertion in a `*.test.mjs` file — from counting as a case opener, so
+// consolidating such assertions can't net a phantom removal that mis-parks the couple (#2669).
+const TEST_CASE_OPENER_RE = /(?<![.\w])(?:it|test)\s*(?:\.\s*\w+\s*)?\(\s*['"`]/;
 
 /**
  * Parse a unified `git diff` into per-file added/removed CONTENT lines + a `deleted` flag. Pure. Only the diff
