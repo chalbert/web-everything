@@ -4,6 +4,11 @@ kind: story
 size: 5
 parent: "2606"
 status: open
+scope:
+  - plateau:tools/drain-daemon/daemon.mjs
+  - plateau:tools/drain-daemon/cli.mjs
+  - plateau:tools/drain-daemon/lib.mjs
+  - plateau:tools/drain-daemon/lib.test.mjs
 dateOpened: "2026-07-22"
 tags: [plateau-loop, drain-daemon, drain, notifications, push]
 ---
