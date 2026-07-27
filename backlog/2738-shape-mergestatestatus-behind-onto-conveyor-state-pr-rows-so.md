@@ -5,6 +5,9 @@ status: open
 blockedBy: ["2666"]
 dateOpened: "2026-07-27"
 tags: []
+scope:
+  - we:scripts/readiness/conveyor-state.mjs
+  - we:scripts/readiness/__tests__/conveyor-state.test.mjs
 ---
 
 # Shape mergeStateStatus (BEHIND) onto conveyor-state PR rows so the CI-heal loop's BEHIND branch goes live
