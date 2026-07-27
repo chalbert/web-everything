@@ -5,6 +5,12 @@ size: 3
 status: open
 dateOpened: "2026-07-12"
 tags: [prepare, readiness, freshness, defer, tooling]
+scope:
+  - we:scripts/readiness/
+  - we:scripts/check-readiness.mjs
+  - we:.claude/skills/prepare-decision-item/SKILL.md
+  - we:scripts/backlog.mjs
+  - we:scripts/__tests__/backlog-cli-snapshot.test.mjs
 ---
 
 # /prepare candidate set must be origin-fresh and defer-aware
