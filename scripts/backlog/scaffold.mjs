@@ -36,6 +36,33 @@ export const slugify = (s) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
 
 /**
+ * Normalize a predicted touch-set into the coarse, prefix-shaped `scope:` the readiness flow authors (#2619)
+ * and the conveyor dispatcher reads (`scripts/readiness/dispatch-plan.mjs`, #2609): trim each entry, drop
+ * empties, and dedupe while preserving first-seen order. A LOCAL near-mirror of `normScope` in
+ * `scripts/readiness/scope-lease.mjs` (same dedupe + drop-empty contract, the same mirroring pattern
+ * `normScope` itself uses over `overlap-chain`'s `normFiles`) — kept local so this pure scaffold helper stays
+ * dependency-free. ONE intentional divergence: this helper ALSO trims each entry (author-time
+ * canonicalization at the write path), whereas `normScope` does not; the two never disagree downstream
+ * because what lands in the frontmatter is already trimmed, so `normScope` reads clean values. It
+ * deliberately does NOT sort (scope is an unordered set — author order is preserved) and does NOT invent
+ * granularity: coarsening a real path down to a prefix is the probe agent's JUDGMENT, authored upstream at
+ * readiness, never a mechanical rewrite here.
+ * @param {string[]} list  the predicted touch-set (repo-qualified path prefixes / files)
+ * @returns {string[]} deduped, trimmed, non-empty entries in first-seen order
+ */
+export function normalizeScope(list) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(list) ? list : []) {
+    const s = String(raw ?? '').trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+/**
  * Render a backlog item skeleton. Emits only the fields the validator needs (`kind`, `status`,
  * `size` when a story, `dateOpened`, optional `blockedBy`/`parent`), an H1 title, and a one-line
  * digest placeholder the caller is expected to replace. `check:standards` passes on the skeleton
@@ -51,6 +78,7 @@ export const slugify = (s) =>
  */
 export function renderItem(spec) {
   const { kind, size, title, today, blockedBy = [], parent, digest, scaffoldedBy, scope = [] } = spec;
+  const scopeEntries = normalizeScope(scope);
   const fm = ['---', `kind: ${kind}`];
   if (kind === 'story' || (kind === 'epic' && typeof size === 'number')) fm.push(`size: ${size}`);
   if (parent) fm.push(`parent: "${parent}"`);
@@ -64,8 +92,10 @@ export function renderItem(spec) {
     fm.push('status: open');
   }
   if (blockedBy.length) fm.push(`blockedBy: [${blockedBy.map((n) => `"${n}"`).join(', ')}]`);
-  // Optional predicted touch-set (#x53zzf9) — the conveyor dispatcher reads it to hold overlapping items apart.
-  if (scope.length) fm.push(`scope: [${scope.map((p) => `"${p}"`).join(', ')}]`);
+  // Optional predicted touch-set (#x53zzf9 mechanical support; #2619 readiness-flow authoring) — the conveyor
+  // dispatcher reads it to hold overlapping items apart. `normalizeScope` dedupes/trims so a repeated or
+  // whitespace-padded entry never lands in the frontmatter.
+  if (scopeEntries.length) fm.push(`scope: [${scopeEntries.map((p) => `"${p}"`).join(', ')}]`);
   fm.push(`dateOpened: "${today}"`, 'tags: []', '---', '');
   const lead = digest || 'TODO digest — one ≤100-word paragraph: what this item does and why (replace this line).';
   return `${fm.join('\n')}\n# ${title}\n\n${lead}\n`;

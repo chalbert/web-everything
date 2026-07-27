@@ -4,8 +4,10 @@ kind: story
 size: 5
 tier: pinned
 parent: "2612"
-status: open
+status: resolved
 dateOpened: "2026-07-22"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: [conveyor, readiness, scope, prepare]
 scope:
   - we:skills-src/prepare-decision-item/
@@ -35,3 +37,20 @@ time.
 
 Without this, every item is `needs-probe` and must be auto-prepared before it can build — the dispatcher has
 nothing scope-bearing to parallelize until scope is authored at readiness.
+
+## Progress
+
+Done. The readiness flow now authors predicted `scope:` at shape time:
+
+- `/split` — the work-investigation pass is named as the touch-set probe; each slice records its
+  `file:line`-citable touch-set, coarsened to the narrowest covering prefix, and the scaffold step authors it
+  via `--scope=`. Sub-epic slices stay scope-less (epics are held `needs-slice`, not by scope). The
+  could-split report table now shows each slice's predicted scope so the human sees it before approving.
+- `/prepare` — the (not care-gated) touch-set probe predicts the work a decision authorizes; it feeds the
+  jury charter's `changedFiles` and seeds the `scope:` of each buildable child carved at close-out (each child
+  gets its own slice, not the whole set). The decision item itself carries no build-`scope:`.
+- `we:scripts/backlog/scaffold.mjs` — added `normalizeScope` (dedupe + trim + drop-empty, order-preserving; a
+  local near-mirror of `we:scripts/readiness/scope-lease.mjs` `normScope`), used by `renderItem` so authored
+  `scope:` frontmatter is deterministic.
+- `we:scripts/backlog/__tests__/scaffold.test.mjs` — unit-proves `normalizeScope` and `renderItem`'s `scope:`
+  emit (normalized inline array; omitted entirely when unscoped).
