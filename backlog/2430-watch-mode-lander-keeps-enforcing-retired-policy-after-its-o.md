@@ -5,6 +5,9 @@ size: 3
 status: open
 dateOpened: "2026-07-11"
 tags: []
+scope:
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
 ---
 
 # watch-mode lander keeps enforcing retired policy after its own code changes on main — self-detect staleness and exit
