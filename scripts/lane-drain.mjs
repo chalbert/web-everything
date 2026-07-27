@@ -64,6 +64,9 @@ import { homedir, tmpdir } from 'node:os';
 import { parseQueued, isQueued, queuedNums } from './readiness/queued-state.mjs';
 import { parseManifest, validateManifest, orderedRepos, extractManifestFromBody, MANIFEST_FILENAME } from './readiness/lane-manifest.mjs';
 import { isHash, isNum, idFromName, applyLedger, swapHashes } from './backlog/id.mjs';
+// #2603 — the drain's resolve-reachable check reads `status:` FRONTMATTER-strict (see `resolveReachableFromBody`),
+// never loose over the whole body. `readField` parses only the first `---`…`---` block.
+import { readField } from './backlog/frontmatter.mjs';
 import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 dual-lock: numbering mutex + whole-process drain lease
 
 // ── flag parsing (mirrors pr-land.mjs / lane-review.mjs) ──────────────────────────────────────────────
@@ -224,6 +227,24 @@ function runCli() {
   return runDrainOne();
 }
 
+/**
+ * Is a queued couple's WE resolve reachable on origin/main? Reads `status:` FRONTMATTER-strict from the
+ * `origin/main:backlog/<num>-*.md` body — NOT a loose full-body regex (#2603). A backlog body can carry a
+ * column-0 `status: resolved` (e.g. a fenced frontmatter example); a loose read makes an OPEN item look
+ * resolved, and on the DRAIN (the merge path) that fails OPEN — a queued couple whose resolve did NOT flip
+ * `status` could have its queued marker cleared on the strength of a prose example. This is the same spoof
+ * class #2455 closed in lane-resume (`docIsResolved` / `resolvedOnMain`), now closed on the drain's reader too.
+ *
+ * @param {string|null} body  The `origin/main` file body, or `null` when it couldn't be fetched/shown.
+ * @returns {boolean|null}  `true`/`false` from the frontmatter `status`; `null` when `body` is absent
+ *   (couldn't determine — the caller treats null as advisory and still unqueues, false as a hard "not landed").
+ *   Fails CLOSED on the same inputs the loose read did: no frontmatter / unparseable → `false`, never a spoofed
+ *   `true`.
+ */
+export function resolveReachableFromBody(body) {
+  return body != null ? readField(body, 'status') === 'resolved' : null;
+}
+
 function runDrainOne() {
   const AS_JSON = !!flags.json;
   const DRY_RUN = !!flags['dry-run'];
@@ -304,7 +325,7 @@ function runDrainOne() {
   try {
     tryGit(['fetch', 'origin', '--quiet']);
     const path = (tryGit(['ls-files', `backlog/${num}-*.md`]) || '').split('\n').filter(Boolean)[0];
-    if (path) { const body = tryGit(['show', `origin/main:${path}`]); resolveReachable = body != null ? /^status:\s*resolved/m.test(body) : null; }
+    if (path) { const body = tryGit(['show', `origin/main:${path}`]); resolveReachable = resolveReachableFromBody(body); }
   } catch { resolveReachable = null; }
 
   // Gate the single clear point on the resolve actually being on main (review #3): if the check is

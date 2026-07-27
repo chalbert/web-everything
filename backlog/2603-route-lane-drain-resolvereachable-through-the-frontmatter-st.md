@@ -1,10 +1,12 @@
 ---
 bornAs: x7xs42w
 kind: task
-status: open
+status: resolved
 relatedTo: ["2455", "2396"]
 tags: [lane, drain, proof-of-land, bug]
 dateOpened: "2026-07-21"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 scope:
   - we:scripts/lane-drain.mjs
   - we:scripts/__tests__/lane-drain.test.mjs

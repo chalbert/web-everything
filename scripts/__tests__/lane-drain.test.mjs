@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { planDrain, buildPrLandArgs, planWatch, planPostDrain } from '../lane-drain.mjs';
+import { planDrain, buildPrLandArgs, planWatch, planPostDrain, resolveReachableFromBody } from '../lane-drain.mjs';
 import { buildManifest } from '../readiness/lane-manifest.mjs';
 
 const queued = (...nums) => ({ queued: nums.map((n) => ({ num: String(n).padStart(3, '0'), at: null })) });
@@ -197,6 +197,37 @@ describe('lane-drain planPostDrain (#2175 reopen-on-fail / manifest cleanup)', (
     expect(planPostDrain({ landed: false, reason: 'dry-run' })).toEqual({ deleteManifest: false, reopen: false });
     expect(planPostDrain({ landed: false, reason: 'plan-invalid' })).toEqual({ deleteManifest: false, reopen: false });
     expect(planPostDrain(null)).toEqual({ deleteManifest: false, reopen: false });
+  });
+});
+
+describe('lane-drain resolveReachableFromBody — frontmatter-strict resolve read (#2603)', () => {
+  const fm = (status) => `---\nbornAs: x7xs42w\nkind: task\nstatus: ${status}\n---\n\n# An item\n`;
+
+  it('reads a genuinely frontmatter-resolved item as resolved', () => {
+    expect(resolveReachableFromBody(fm('resolved'))).toBe(true);
+  });
+
+  it('reads a fenced-example SPOOF (OPEN item whose BODY carries a column-0 `status: resolved`) as NOT resolved', () => {
+    // The exact #2455/#2603 spoof: frontmatter says open, prose shows a fenced frontmatter example. The old
+    // loose `/^status:\s*resolved/m` over the full body matched the prose line and read TRUE (fails OPEN on
+    // the drain). The frontmatter-strict read only sees the real `status: open`.
+    const spoof = `---\nkind: task\nstatus: open\n---\n\nExample frontmatter you might write:\n\n\`\`\`\nstatus: resolved\n\`\`\`\n`;
+    // sanity: the loose reader this replaced WOULD have been fooled here
+    expect(/^status:\s*resolved/m.test(spoof)).toBe(true);
+    expect(resolveReachableFromBody(spoof)).toBe(false);
+  });
+
+  it('fails CLOSED on inputs with no readable status (no frontmatter / bad read → not resolved)', () => {
+    expect(resolveReachableFromBody('no frontmatter here\nstatus: resolved in prose\n')).toBe(false);
+    expect(resolveReachableFromBody(fm('open'))).toBe(false);
+    expect(resolveReachableFromBody('')).toBe(false);
+  });
+
+  it('returns null (couldn’t determine — advisory) when the body is absent', () => {
+    // A null body is git-show-failed, distinct from a hard "not resolved" false — the caller still unqueues on
+    // null (advisory) but never on false.
+    expect(resolveReachableFromBody(null)).toBe(null);
+    expect(resolveReachableFromBody(undefined)).toBe(null);
   });
 });
 
