@@ -3,9 +3,11 @@ bornAs: xzcx25r
 kind: story
 size: 2
 parent: "2410"
-status: open
+status: resolved
 blockedBy: ["2440"]
 dateOpened: "2026-07-26"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 scope:
   - we:scripts/lib/pr-merge-gate.mjs
