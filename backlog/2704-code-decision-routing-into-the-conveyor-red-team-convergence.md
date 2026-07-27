@@ -3,8 +3,10 @@ bornAs: xurtg11
 kind: story
 size: 8
 parent: "2612"
-status: open
+status: resolved
 dateOpened: "2026-07-27"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 scope: ["we:scripts/conveyor", "we:scripts/lib", "we:scripts/readiness"]
 tags: [conveyor, decision, jury, red-team, design-committee, disposition, auto-dispose, shadow]
 relatedTo: ["2647", "2652", "2675", "2649", "2657", "2639", "2676", "2677"]
@@ -88,6 +90,24 @@ On a cleared decision, the conveyor:
 
 It is an efficiency / autonomy lever: it removes the human-in-the-loop for clear decisions, keeping the human
 for genuine contention only.
+
+## Progress
+
+- PURE core `we:scripts/lib/decision-routing.mjs` — the deterministic router + disposer:
+  - `classifyDecisionCriticality` reuses `deriveCareLevel` (#2567) — the SAME care-level signal the jury's
+    care→rigor dial and the producer escalation rubric read; no new score invented.
+  - `routeDecision` — bounded (none/low care) → red-team convergence; complex (≥ elevated) or critical
+    (`humanRequired` / high care) → design committee. Carries the #2657 decision-prose mandatory lenses.
+  - `disposeDecisionRuling` / `decideDecisionDisposition` — extend the #2652 disposition judge (`disposeVerdict`)
+    from PR-review to a decision card, applied SHADOW-first behind the #2675 `LAND_MODES` knob: a clean
+    convergence RATIFIES (in shadow: logs the would-ratify, apply:false; in enforce: apply:true); genuine
+    non-convergence / contested / gate-self / judge-error ESCALATES. Fail-closed throughout.
+  - `planDecision` — route + (optional, when a ledger is supplied) dispose in one call.
+- THIN shell `we:scripts/conveyor/decision-route.mjs` — parses the signals, resolves the disposition config for
+  the land mode, prints the plan. OBSERVE-ONLY by construction: never mutates backlog state (the shadow→enforce
+  flip stays a separate later ruling).
+- Tests: `we:scripts/lib/__tests__/decision-routing.test.mjs` (27) + `we:scripts/conveyor/__tests__/decision-route.test.mjs` (8).
+- Reuse honored: no second jury (#2649), judge (#2652), auto-land engine (#2675), or prose adapter (#2657) built.
 
 ## Acceptance
 
