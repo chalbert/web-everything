@@ -5,6 +5,16 @@ status: open
 parent: "2405"
 dateOpened: "2026-07-10"
 tags: [gate, review, drain, gate-self, review-escalation]
+scope:
+  - we:scripts/review-set-label.mjs
+  - we:scripts/lib/review-escalation.mjs
+  - we:scripts/lib/gate-config.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:skills-src/review/SKILL.md
+  - we:skills-src/drain/SKILL.md
+  - we:scripts/lib/__tests__/
+  - we:scripts/__tests__/review-set-label.test.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
 ---
 
 # Gate: honor `review:accepted` only when a human applied it — nothing enforces "a `review:human` gate-self PR is never agent-cleared"
