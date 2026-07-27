@@ -314,16 +314,32 @@ function transition(v) {
   if (v === 'claim') {
     const claimedStatus = as === 'preparing' ? 'preparing' : 'active';
     const verbWord = claimedStatus === 'preparing' ? 'prepping' : 'claimed';
-    // The hard-stop ("claim turn ends here") guards the /decision two-go arc: claim and ratify are two
-    // distinct turns so a present+discuss can't collapse into a commit, and a concurrent session can't be
-    // raced. /prepare has no such arc — prep is autonomous agent work (research + authoring, no ruling),
-    // so a `preparing` claim flows straight into the passes in the same turn. Emit the stop only for the
-    // decision claim (#1397).
-    const tail = claimedStatus === 'preparing'
-      ? `\n\n${DIM}Proceed with the prep passes now — claiming and preparing are one turn (prep makes no ruling, so there is no two-go arc to split).${RST}`
-      : `\n\n${YEL}⏸ This is the claim turn — it ends here.${RST} Do NOT ground, present, or discuss the item's substance now. Stop, let the chat be renamed, and begin the work next turn (the claim and its substance are two distinct turns — collapsing them races concurrent sessions and skips the two-go arc).`;
-    ok({ verb: v, id, file: rel, slug, status: claimedStatus },
-      `${GRN}✓ ${verbWord}${RST} ${id} ${DIM}→ ${claimedStatus} (dateStarted ${today()})${RST}\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\`${tail}`);
+    const head = `${GRN}✓ ${verbWord}${RST} ${id} ${DIM}→ ${claimedStatus} (dateStarted ${today()})${RST}`;
+    // Background carve-out (#2621): a conveyor/background delivery agent claims non-interactively as its
+    // FIRST action and then does the readiness pre-check + build in the SAME turn — the two-turn "rename
+    // the chat, stop here" arc below is written for a human-driven /decision chat, and an agent obeying it
+    // literally would STALL waiting for a hand-off that never comes. Detect that context DETERMINISTICALLY
+    // (the conveyor's `conveyor-*` session-slug convention, or an explicit `--background` flag the agent
+    // passes) and, for the ACTIVE claim, replace the whole rename + stop block with a one-line "no stop"
+    // acknowledgement so the agent proceeds. Interactive human sessions — and the `preparing` claim, which
+    // already has no stop — are unchanged.
+    const background = claimedStatus === 'active'
+      && (argv.includes('--background') || (flag('session') ?? '').startsWith('conveyor-'));
+    let tailBlock;
+    if (background) {
+      tailBlock = `\n\n${DIM}claimed (background session — no stop); proceed with the readiness pre-check + build in the same turn.${RST}`;
+    } else {
+      // The hard-stop ("claim turn ends here") guards the /decision two-go arc: claim and ratify are two
+      // distinct turns so a present+discuss can't collapse into a commit, and a concurrent session can't be
+      // raced. /prepare has no such arc — prep is autonomous agent work (research + authoring, no ruling),
+      // so a `preparing` claim flows straight into the passes in the same turn. Emit the stop only for the
+      // decision claim (#1397).
+      const tail = claimedStatus === 'preparing'
+        ? `\n\n${DIM}Proceed with the prep passes now — claiming and preparing are one turn (prep makes no ruling, so there is no two-go arc to split).${RST}`
+        : `\n\n${YEL}⏸ This is the claim turn — it ends here.${RST} Do NOT ground, present, or discuss the item's substance now. Stop, let the chat be renamed, and begin the work next turn (the claim and its substance are two distinct turns — collapsing them races concurrent sessions and skips the two-go arc).`;
+      tailBlock = `\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\`${tail}`;
+    }
+    ok({ verb: v, id, file: rel, slug, status: claimedStatus, background }, `${head}${tailBlock}`);
   }
   if (v === 'resolve') {
     const g = flag('graduated-to');
