@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  normScope, coversFile, scopeEntriesOverlap, scopesOverlap,
+  normScope, isSubtreeEntry, coversFile, scopeEntriesOverlap, scopesOverlap,
   scopeLease, breachOf,
   overlapAtLaunch, OVERLAP_POLICIES,
   breachOutcome, BREACH_POLICIES, RETRY_BOUND, BREACH_ESCALATION_LADDER, ESCALATION_ROUTES,
@@ -21,6 +21,35 @@ describe('normScope — dedupe + stringify + drop empties', () => {
   it('non-array → []', () => {
     expect(normScope(undefined)).toEqual([]);
     expect(normScope('we:a')).toEqual([]);
+  });
+});
+
+describe('isSubtreeEntry — file-vs-subtree granularity classifier (WE #2679)', () => {
+  it('a bare directory (no extension on the last segment) is a SUBTREE', () => {
+    expect(isSubtreeEntry('we:scripts')).toBe(true);
+    expect(isSubtreeEntry('we:src/backlog-view')).toBe(true);
+  });
+  it('a trailing slash marks a SUBTREE explicitly', () => {
+    expect(isSubtreeEntry('we:scripts/lib/')).toBe(true);
+  });
+  it('a glob is a SUBTREE (spans many files)', () => {
+    expect(isSubtreeEntry('we:src/**')).toBe(true);
+    expect(isSubtreeEntry('we:src/*.ts')).toBe(true);
+    expect(isSubtreeEntry('we:src/a?.ts')).toBe(true);
+  });
+  it('an extension-bearing path is a FILE (leases only itself)', () => {
+    expect(isSubtreeEntry('we:scripts/backlog.mjs')).toBe(false);
+    expect(isSubtreeEntry('we:src/list.ts')).toBe(false);
+    expect(isSubtreeEntry('we:a/b/c.d.mjs')).toBe(false); // multi-dot → still a file
+  });
+  it('a dotfile is a FILE, not a subtree', () => {
+    expect(isSubtreeEntry('we:.gitignore')).toBe(false);
+    expect(isSubtreeEntry('we:scripts/.eslintrc.json')).toBe(false);
+  });
+  it('repo qualification does not change the classification', () => {
+    expect(isSubtreeEntry('frontierui:src/x')).toBe(true);
+    expect(isSubtreeEntry('frontierui:src/x.ts')).toBe(false);
+    expect(isSubtreeEntry('src/x.ts')).toBe(false); // unqualified ok too
   });
 });
 
@@ -46,6 +75,13 @@ describe('coversFile — repo-qualified module/glob coverage', () => {
     expect(coversFile('we:src/a?.ts', 'we:src/ab.ts')).toBe(true);
     expect(coversFile('we:src/a?.ts', 'we:src/a/.ts')).toBe(false);
   });
+  it('a FILE entry covers ONLY its exact path — never a synthetic subtree beneath it (WE #2679)', () => {
+    expect(coversFile('we:scripts/foo.mjs', 'we:scripts/foo.mjs')).toBe(true);
+    // the pre-#2679 latent over-match: a file entry no longer "covers" a deeper path under it.
+    expect(coversFile('we:scripts/foo.mjs', 'we:scripts/foo.mjs/x')).toBe(false);
+    // a file entry does not cover a sibling file in the same directory.
+    expect(coversFile('we:scripts/foo.mjs', 'we:scripts/bar.mjs')).toBe(false);
+  });
 });
 
 describe('scopeEntriesOverlap / scopesOverlap — module-pattern overlap (mirrors intersects)', () => {
@@ -65,6 +101,47 @@ describe('scopeEntriesOverlap / scopesOverlap — module-pattern overlap (mirror
     expect(scopesOverlap(['we:a', 'we:b'], ['we:c', 'we:b/x.ts'])).toBe(true);
     expect(scopesOverlap(['we:a', 'we:b'], ['we:c', 'we:d'])).toBe(false);
     expect(scopesOverlap([], ['we:a'])).toBe(false);
+  });
+});
+
+describe('file-level lease granularity — narrow scopes lease at FILE granularity (WE #2679)', () => {
+  it('two DISJOINT files that merely share a directory do NOT contend (the parallelism win)', () => {
+    // The #2673 false positive, narrowed to files: guard-hook work vs the scripts/lib cluster.
+    expect(scopeEntriesOverlap('we:scripts/guard-backward-edge.mjs', 'we:scripts/lib/pr-merge-gate.mjs')).toBe(false);
+    expect(scopeEntriesOverlap('we:scripts/backlog.mjs', 'we:scripts/lane-pool.mjs')).toBe(false);
+    // The console-board cluster, declared at file granularity, runs in parallel.
+    expect(scopeEntriesOverlap('plateau-app:src/backlog-view/board.ts', 'plateau-app:src/backlog-view/console.ts')).toBe(false);
+    expect(scopesOverlap(['we:scripts/a.mjs', 'we:scripts/b.mjs'], ['we:scripts/c.mjs'])).toBe(false);
+  });
+  it('a GENUINE same-file dependency still contends (correct overlap preserved) — e.g. #2440↔#2669', () => {
+    expect(scopeEntriesOverlap('we:scripts/lib/pr-merge-gate.mjs', 'we:scripts/lib/pr-merge-gate.mjs')).toBe(true);
+  });
+  it('a FILE contends with a SUBTREE (glob or directory) that COVERS it', () => {
+    expect(scopeEntriesOverlap('we:scripts/guard-backward-edge.mjs', 'we:scripts')).toBe(true);        // parent dir
+    expect(scopeEntriesOverlap('we:scripts/guard-backward-edge.mjs', 'we:scripts/')).toBe(true);       // trailing slash
+    expect(scopeEntriesOverlap('we:scripts/lib/pr-merge-gate.mjs', 'we:scripts/lib/*.mjs')).toBe(true); // glob
+    // …but not a sibling subtree it does not fall under.
+    expect(scopeEntriesOverlap('we:scripts/guard-backward-edge.mjs', 'we:scripts/lib/')).toBe(false);
+  });
+  it('SUBTREE ↔ SUBTREE still serializes a genuinely-spanning declaration (pre-#2679 behavior preserved)', () => {
+    expect(scopeEntriesOverlap('we:scripts', 'we:scripts/lib')).toBe(true);
+    expect(scopeEntriesOverlap('plateau-app:src/backlog-view/', 'plateau-app:src/backlog-view/')).toBe(true);
+  });
+  it('SAFETY: a directory-with-a-dot (misclassified as a file) never lets a real parent↔child overlap slip', () => {
+    // conservative fallback — errs toward over-serializing, never toward a missed conflict.
+    expect(scopeEntriesOverlap('we:src/foo.v2', 'we:src/foo.v2/bar.mjs')).toBe(true); // dotted-dir ↔ file child
+    // dotted-dir ↔ a GLOB of its children — the case a coverage-only test would miss (regression guard).
+    expect(scopeEntriesOverlap('we:.github', 'we:.github/**')).toBe(true);
+    expect(scopeEntriesOverlap('we:.github', 'we:.github/workflows/ci.yml')).toBe(true);
+    expect(scopeEntriesOverlap('we:src/foo.v2', 'we:src/foo.v2/*.mjs')).toBe(true);
+    // …but a dotted dir must NOT overlap an unrelated sibling.
+    expect(scopeEntriesOverlap('we:.github', 'we:.gitlab/**')).toBe(false);
+  });
+  it('breach detection is file-granular: an out-of-scope sibling file breaches a file-level lease', () => {
+    // predicted a single file; touching a DIFFERENT file in the same dir is a breach (not silently in-scope).
+    expect(breachOf(['we:scripts/foo.mjs'], ['we:scripts/foo.mjs', 'we:scripts/bar.mjs'])).toEqual(['we:scripts/bar.mjs']);
+    // a subtree predicted scope still absorbs everything under it (no false breach).
+    expect(breachOf(['we:scripts/'], ['we:scripts/foo.mjs', 'we:scripts/bar.mjs'])).toEqual([]);
   });
 });
 
