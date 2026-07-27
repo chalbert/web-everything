@@ -3,7 +3,9 @@ bornAs: x0sx61e
 kind: story
 size: 5
 parent: "2606"
-status: open
+status: resolved
+dateResolved: "2026-07-27"
+resolutionNote: "Delivered on plateau-app main via PR #113 (7f024b1). plateau-app:tools/drain-daemon/daemon.mjs carries the localhost push seam — POST /nudge (coalescing follow-up pass) and GET /events SSE lifecycle stream (pass-started, pr-merged, pr-parked, pass-done); plateau-app:tools/drain-daemon/cli.mjs adds the nudge + watch verbs. All four scope files present on main."
 scope:
   - plateau:tools/drain-daemon/daemon.mjs
   - plateau:tools/drain-daemon/cli.mjs
