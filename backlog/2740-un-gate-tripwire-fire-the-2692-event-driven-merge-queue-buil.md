@@ -7,6 +7,9 @@ blockedBy: ["2680"]
 status: open
 dateOpened: "2026-07-27"
 tags: [conveyor, delivery, drain, tripwire, undefer]
+scope:
+  - we:scripts/readiness/
+  - we:scripts/conveyor/
 ---
 
 # Un-gate tripwire: fire the #2692 event-driven merge-queue build when Lever-0 shows sustained landing-queue saturation
