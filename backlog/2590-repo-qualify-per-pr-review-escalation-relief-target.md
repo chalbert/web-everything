@@ -5,6 +5,9 @@ size: 2
 status: open
 dateOpened: "2026-07-20"
 tags: []
+scope:
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
 ---
 
 # repo-qualify the per-PR --no-review-escalation relief target so it can't waive the wrong repo's PR
