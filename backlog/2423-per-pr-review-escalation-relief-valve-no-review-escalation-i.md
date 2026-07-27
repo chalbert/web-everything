@@ -5,6 +5,13 @@ size: 3
 status: open
 dateOpened: "2026-07-10"
 tags: []
+scope:
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/lib/review-escalation.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:scripts/__tests__/review-escalation.test.mjs
+  - we:scripts/lib/__tests__/review-escalation.test.mjs
+  - we:skills-src/drain/SKILL.md
 ---
 
 # per-PR review-escalation relief valve — --no-review-escalation is pass-wide and unguards every unlabelled candidate
