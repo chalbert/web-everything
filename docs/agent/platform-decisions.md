@@ -2915,6 +2915,38 @@ ride).
 
 ---
 
+### Conveyor per-lane orchestration is mechanics + a headless runner, not a per-lane agent — novelty escalates {#conveyor-orchestration-mechanics-not-per-lane-agent}
+
+**Ratified 2026-07-27 (operator; #2701, bornAs xyr248a).** The [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment)
+split, applied to the conveyor's **own** per-lane orchestration. Driving one lane through its cycle —
+dispatch → watch → release → tick, plus the guard bookkeeping — is **pure deterministic mechanics stepped by a
+headless runner**, not a per-lane LLM agent that re-derives the loop each tick. Three clauses:
+
+1. **The per-lane driver is a headless runner over the tested tick-core state machine.** The whole per-lane
+   cycle is a reproducible state machine (`we:scripts` tick core) with unit tests; a lane is driven by a
+   **headless runner** that reads state and steps that machine — **no model context is spent per tick**. This is
+   the same "script-decidable → a deterministic tested script" clause of the parent statute, now naming the
+   conveyor's per-lane loop as script-decidable in full.
+2. **No per-lane conducting agent (Option B rejected).** Giving each lane its own always-on LLM "conductor"
+   that re-decides dispatch/watch/release every tick is rejected on the merits: it re-introduces exactly the
+   non-reproducible, untestable, latency-and-drift path the parent statute forbids, at N× the cost (one agent
+   per lane). Judgment in the loop is reserved for genuinely judgment-shaped work (scope prediction at
+   readiness, building the item, escalation review) — not for stepping a mechanical cycle.
+3. **A single supervisor is deferred behind a measured trigger (Option C), and genuine novelty escalates.**
+   A single cross-lane supervisor agent is **not** built now — it is deferred until a *measured* trigger shows
+   the headless runners need cross-lane coordination the mechanics can't express. Until then, a case the
+   mechanics genuinely don't cover **escalates to the main-session judgment layer**, exactly as the parent
+   statute escalates novelty — the runner never improvises a ruling.
+
+**Lineage:** #2701 (ratified 2026-07-27, operator; bornAs xyr248a; the DEFER-the-boundary fork de-buried from
+central fork #2677). A **child application** of [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment)
+(#2607) — it extends that split from delivery-loop machinery in general to the conveyor's per-lane orchestration
+in particular; it does **not** re-declare or compete with it. Governs the per-lane orchestrator slice #2702 (now
+a headless runner, singleton-locked, no per-lane LLM) and the main-session retirement #2703. Composes with
+[#agent-runner-cli-backend](#agent-runner-cli-backend) (the runner interface).
+
+---
+
 ### State lives where its nature dictates — transient intent goes session-local, durable readiness goes committed-upstream {#state-lives-where-its-nature-dictates}
 
 **Ratified 2026-07-22 (Nicolas, merit-based; #2615 + #2617).** *Where* a piece of state lives is
