@@ -25,6 +25,7 @@ The three scripts this skill shells (do not reimplement any of them):
 | `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health, infraBlocked }`. Every tick STARTS here. |
 | `node scripts/conveyor/infra-blocked.mjs retry` | **The infra-blocked recovery pass (#2659)** — one idempotent resume pass: for each item whose lane ref was PUSHED but whose PR-open failed on an outside dependency (a GitHub outage), it correlates GitHub status, resume-opens the PR once infra recovers (via `pr-land` — never a local merge), backs off on failure, and surfaces at the attempt cap. |
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
+| `node scripts/conveyor/tick-core.mjs` (stdin ⇽ bookkeeping) | **The MECHANIZED tick core (#2699)** — the whole per-tick state machine in one call: it shells `conveyor-state` + `dispatch-plan` + the free-lane picker, takes your in-session guard/watcher bookkeeping on STDIN, and returns `{ decisions, nextState }`. `decisions` = `{ spawnBuilds, spawnPrepareScope, spawnPrepareDecision, spawnFixes, armWatchers, retireGuards, idleStop, statusLine, notes }`; `nextState` = the next tick's bookkeeping. The three guards, their retirement (claim/return/TTL/PR-terminal), the union re-dispatch gate, watcher arming, and idle-stop are all DECIDED here — you EXECUTE the decisions and carry `nextState` forward, you never re-derive a guard rule in prose. |
 | `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR. Its process EXIT is the wake signal; the exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
 
 > **Auto-prepare for unscoped items (#2613, corrected design — Nicolas, 2026-07-22).** Predicted `scope:` is
@@ -140,9 +141,29 @@ one that works for a completed background task), so it re-invokes this loop reli
    × free lanes decision. Do not re-derive it; read it. (It shells the same build-queue, scope-lease, and pool
    pickers under the hood, so its inputs match the state read above.)
 
-3. **Spawn ONE background delivery agent per `launch` entry.** For each `{num, lane}` in `plan.launch` that the
-   *In-flight dispatch guard* (below) does not suppress — i.e. neither its `num` **nor** its assigned `lane` is
-   held by a still-pending spawned agent:
+2b. **Plan the whole tick (one call) — the MECHANIZED core decides every guard (#2699).**
+   ```bash
+   echo "$BOOKKEEPING" | node scripts/conveyor/tick-core.mjs
+   ```
+   `tick-core.mjs` re-shells the state read + dispatch plan + free-lane picker under the hood and takes your
+   in-session **bookkeeping** on STDIN (`{ bookkeeping: { tick, buildGuards, prepareGuards, fixGuards,
+   fixAttempts, watched, launchedNums }, signals: { returnedBuildNums }, lastOperatorTurn }` — carried forward
+   from the previous tick's `nextState`, `{}` on the first tick). It returns
+   `{ decisions: { spawnBuilds, spawnPrepareScope, spawnPrepareDecision, spawnFixes, armWatchers, retireGuards,
+   idleStop, statusLine, notes }, nextState }`. **Steps 3–5 below EXECUTE those decisions; you never re-derive a
+   guard, a TTL, a re-dispatch gate, or the idle clock in prose — the core already applied all of them.** The
+   guard sections further down DOCUMENT what the core encodes (so the semantics stay legible); they are not a
+   second place to compute them. Carry `nextState` into the next tick's STDIN unchanged.
+
+   > **The bookkeeping is SESSION-EPHEMERAL — it rides STDIN, never a repo file (SKILL §5, memory rule 105).**
+   > It is which background jobs you launched, not item state; the board stays the single truth. `tick-core`
+   > reads it in and returns the updated `nextState`, so the whole guard/watcher ledger lives in THIS session's
+   > context and is threaded through each tick — no parallel on-disk store is ever created.
+
+3. **Spawn ONE background delivery agent per `decisions.spawnBuilds` entry.** The core has ALREADY filtered
+   `plan.launch` through the *In-flight dispatch guard* (dropping any launch whose `num` **or** assigned `lane`
+   is held by a still-pending spawned agent) and recorded the new guard entries in `nextState.buildGuards` — so
+   you just spawn each `{num, lane}` it returns, no guard math of your own:
    - Resolve the item's spec path by **globbing `backlog/<num>-*.md`** (the plan returns only `{num, lane}`, not
      the slug), then read that file and its `scope:` frontmatter.
    - Instantiate [`delivery-agent-brief.md`](delivery-agent-brief.md) by substituting its placeholders:
@@ -158,28 +179,23 @@ one that works for a completed background task), so it re-invokes this loop reli
      gate is the deterministic core, the review is the judgment). Only then does it open the PR —
      `ready-to-merge` for a clean, reviewed, non-statute change, or parked `review:human` **only for good
      reason** (below) — and **exits without merging**.
-   - **Record a guard entry** for this spawn: `{ num, lane, spawnedTick: <this tick's count or timestamp> }`
-     (see the guard below).
+   - **The guard entry is already recorded** — `tick-core` put `{ num, lane, spawnedTick }` for each spawn in
+     `nextState.buildGuards` (see the guard below for what it encodes). You do not maintain it by hand.
 
-3b. **Auto-prepare every unscoped held item — spawn ONE background prepare-scope agent per `unshaped-no-scope`.**
-   The dispatcher NEVER launches an unscoped item to build; it holds it `unshaped-no-scope` (in `plan.held`) and
-   surfaces it in `state.unshaped`. For each such held item — **deciding to prepare vs to build is entirely the
-   dispatch plan's classification: a scoped item appears in `plan.launch` (step 3, build); an unscoped one appears
-   as `held: unshaped-no-scope` / `state.unshaped` (here, prepare)** — spawn ONE background prepare-scope agent,
-   **UNLESS a prepare for that `num` is already in flight** by the *prepare in-flight test* (the union rule — see
-   the prepare guard below): **skip** re-dispatch when EITHER a live prepare-guard entry exists for `num`, OR
-   `state.prs` already has an **OPEN PR for that `num`**. The second clause is what makes this safe: while the item
-   is still `unshaped-no-scope` it has **no** build PR (it was never built), so **any open PR for its `num` can only
-   be its in-flight prepare** — that alone blocks a second prepare even if the guard entry were somehow lost. Only
-   when NEITHER holds do you spawn:
+3b. **Auto-prepare every unscoped held item — spawn ONE background prepare-scope agent per
+   `decisions.spawnPrepareScope` entry.** The dispatcher NEVER launches an unscoped item to build; it holds it
+   `unshaped-no-scope` and surfaces it in `state.unshaped`. `tick-core` has ALREADY applied the *prepare in-flight
+   test* — the **union** re-dispatch gate: it skips any `num` for which EITHER a live prepare-guard entry exists
+   OR `state.prs` has an **OPEN PR for that `num`** (while the item is still `unshaped-no-scope` it has **no** build
+   PR, so any open PR for its `num` can only be its in-flight prepare — the backstop if the guard entry were lost)
+   — and it has already **picked each prepare's lane** from the free lanes MINUS this tick's builds MINUS every
+   guard-held lane (the same lane exclusion the build guard uses), recording the `{ num, kind:'prepare', lane }`
+   entry in `nextState.prepareGuards`. So you just spawn each `{num, lane}` the core returns. Deciding to prepare
+   vs to build is entirely the dispatch plan's classification the core reads (scoped → `spawnBuilds`; unscoped →
+   `spawnPrepareScope`). Each prepare is **parallel-safe** with every build and every other prepare — its
+   `--scope` is a single, distinct backlog file (`we:backlog/<num>-<slug>.md`), disjoint by construction. For each
+   `{num, lane}` in `decisions.spawnPrepareScope`:
    - Resolve the item's spec path by **globbing `backlog/<num>-*.md`** (this is the ONLY file the prepare edits).
-   - **Pick a prepare lane that no build or guard already owns this tick.** Take it from `freeSlots` / the free-lane
-     set MINUS the lanes this tick's `plan.launch` consumed (step 3's builds) MINUS every guard-held lane — mirror
-     the build-guard's lane exclusion, so a build and a prepare never race the same lane id this tick (atomic
-     `acquire` would fail one loud anyway — this just avoids the churn). A prepare's lane is its OWN, and it is
-     **parallel-safe** with every build and every other prepare, because each prepare's `--scope` is a single,
-     distinct backlog file (`we:backlog/<num>-<slug>.md`), disjoint by construction from any builder's code scope
-     and from every other prepare's file.
    - Instantiate [`prepare-scope-agent-brief.md`](prepare-scope-agent-brief.md) by substituting its four
      placeholders: `{{ITEM_NUM}}`=`num`, `{{ITEM_SPEC_PATH}}`=the globbed `backlog/<num>-<slug>.md`, `{{LANE}}`=the
      picked lane, `{{SESSION_SLUG}}`=`prepare-<num>`. Those four `{{DOUBLE_BRACE}}` tokens are the whole fill — do
@@ -191,23 +207,25 @@ one that works for a completed background task), so it re-invokes this loop reli
      a scope PR can still be human-routed when statute-touching or sampled). Only then does it open a one-file
      `ready-to-merge` PR (auto-lands — no review escalation unless the item is statute-touching), then **exits
      without merging**. When that PR lands the item is scoped and dispatches to **build** on a later tick.
-   - **Record a prepare-guard entry** `{ num, kind: 'prepare', spawnedTick }` — keyed by `num` (a prepare's lane is
-     incidental; the contended resource is the item's scope authorship). Its retirement is DIFFERENT from a build
-     guard's — see the prepare guard below. **Critically: a prepare Agent RETURNING does NOT retire its guard** (it
-     returns at PR-open, mid-flight — several ticks before the PR merges).
+   - **The prepare-guard entry is already recorded** — `tick-core` put `{ num, kind: 'prepare', lane, spawnedTick,
+     sawPr:false }` in `nextState.prepareGuards`, keyed by `num` (the contended resource is the item's scope
+     authorship; the lane is carried only for this tick's exclusion). Its retirement is DIFFERENT from a build
+     guard's and the core enforces it — see the prepare guard below. **Critically: a prepare Agent RETURNING does
+     NOT retire its guard** (it returns at PR-open, mid-flight — several ticks before the PR merges); the core has
+     no return path for a prepare guard at all.
 
-4. **Spawn a merge watcher per newly-opened PR — but ONLY for items THIS conveyor launched.** `state.prs` (each
-   row `{ num, prNumber, state, ci, labels }`) is built from `gh pr list` **repo-wide**, so it also carries PRs
-   from other sessions / humans. Filter it to rows whose `num` is one the conveyor dispatched this session
-   (a spawned/claimed item — keep a small in-session set of the nums you launched). For each such open PR you are
-   not already watching, spawn a background watcher whose **exit** wakes this loop:
+4. **Spawn a merge watcher per `decisions.armWatchers` entry — the core scoped it to items THIS conveyor
+   launched.** `state.prs` is built from `gh pr list` **repo-wide**, so it also carries PRs from other sessions /
+   humans. `tick-core` has ALREADY filtered it to OPEN PRs whose `num` this conveyor dispatched this session
+   (`nextState.launchedNums` — builds AND prepares), dropped the ones you already watch, and pruned the watched
+   set to the currently-open conveyor PRs (`nextState.watched`). So you just spawn a background watcher for each
+   `prNumber` in `decisions.armWatchers`, whose **exit** wakes this loop:
    ```bash
    node scripts/conveyor/pr-watch.mjs <prNumber>   # run_in_background: true
    ```
-   Track the small set of `prNumber`s you have a live watcher for (ephemeral process bookkeeping — see the note
-   under *State*). The board (`state.prs`) is the source of truth for which PRs exist; the watcher just wakes you
-   the instant one reaches a terminal state. Scoping to conveyor-launched nums keeps an unrelated PR's stray
-   `review:*` label from waking the loop with a spurious "PR #N needs review".
+   The board (`state.prs`) is the source of truth for which PRs exist; the watcher just wakes you the instant one
+   reaches a terminal state. Scoping to conveyor-launched nums keeps an unrelated PR's stray `review:*` label from
+   waking the loop with a spurious "PR #N needs review".
    - **Prepare-scope PRs are watched the same way** (their `num` was dispatched this session too). When a prepare
      PR **merges** (watcher exit `0`), the item now carries committed `scope:`, so the very next tick's
      `dispatch-plan` sees it as scoped and launches it to **BUILD** — the auto-prepare → build handoff. The prepare
@@ -231,8 +249,13 @@ one that works for a completed background task), so it re-invokes this loop reli
    automatically at the failed open, so a conveyor-launched delivery/prepare agent's `blocked-on-infra` return
    needs no extra bookkeeping from you; just note it in the tick line.
 
-5. **Post ONE terse status line, then start the next tick.** Per the operator's progress-tracking preference the
-   checklist is the channel and prose stays quiet — one line per tick, e.g.:
+5. **Post `decisions.statusLine`, then start the next tick.** The core already built the terse one-line status
+   from the tick read + the live bookkeeping (counts of building / preparing / fixing / queued / parked + the
+   health verdict, with `· N infra-blocked` and a `⚠ lane-N` warn suffix appended when they apply) and gathered
+   the per-tick surfaces in `decisions.notes` (a TTL re-dispatch warning, a `needs-slice` epic §3d, a prepared
+   `decision-ready` §3e). Post that line (plus any notes) — do not recompute the counts. If `decisions.idleStop`
+   is true, STOP the loop (§6) instead of arming the next tick. Per the operator's progress-tracking preference
+   the checklist is the channel and prose stays quiet — one line per tick, e.g.:
    > `conveyor · N building · N preparing · N fixing · N queued · N parked · health ok` — add `· N infra-blocked`
    > when `state.infraBlocked` is non-empty (pushed-but-unopened work the §4b pass is auto-retrying; flag a
    > capped/exhausted one for the operator) — where **`N preparing`**
@@ -259,13 +282,21 @@ one that works for a completed background task), so it re-invokes this loop reli
 > decision; it only formats the read. Keep the terse one-liner for the heartbeat and reach for the board on
 > demand — do not replace one with the other.
 
+> **The three guard blocks below DOCUMENT what `tick-core.mjs` (#2699) encodes — they are not a second place to
+> compute a guard.** The mechanized core (step 2b) applies every rule here and returns the filtered spawns +
+> `nextState`; these blocks stay so the semantics remain legible and reviewable. If you find yourself re-deriving
+> a TTL, a re-dispatch gate, or a retirement rule in prose, that is the bug #2699 closes — read the core's answer
+> (`decisions` / `nextState`) and execute it. The pure functions and their unit proofs live in
+> `scripts/conveyor/tick-core.mjs` + `scripts/conveyor/__tests__/tick-core.test.mjs`.
+
 **In-flight dispatch guard (the one bit of ephemeral bookkeeping).** Between spawning a delivery agent and that
 agent acquiring its lane + claiming the item, the item is still in the queue and its lane still reads free — so
-a naive next tick could double-dispatch it. Keep an in-session list of guard entries, one per spawned agent:
-`{ num, lane, spawnedTick }`. On each tick, **filter `plan.launch`** to drop any entry whose `num` **OR** whose
-assigned `lane` matches a live guard entry — the contended resource is the LANE, not just the item, so both must
-be excluded (else tick N launches `{num:100, lane:4}`, 100 is slow to acquire, and tick N+1 re-assigns lane 4 to
-a different top-of-queue `num` while agent A is still starting — two agents targeting lane 4).
+a naive next tick could double-dispatch it. The core keeps an in-session list of guard entries, one per spawned
+agent: `{ num, lane, spawnedTick }`. On each tick it **filters `plan.launch`** (`filterLaunches`) to drop any
+entry whose `num` **OR** whose assigned `lane` matches a live guard entry — the contended resource is the LANE,
+not just the item, so both must be excluded (else tick N launches `{num:100, lane:4}`, 100 is slow to acquire,
+and tick N+1 re-assigns lane 4 to a different top-of-queue `num` while agent A is still starting — two agents
+targeting lane 4).
 
 **The prepare guard is DIFFERENT bookkeeping — do not copy the build guard's retirement.** A prepare-scope agent
 (§3b) gets a `{ num, kind: 'prepare', spawnedTick }` entry, keyed by `num` (the contended resource is the item's
@@ -586,9 +617,12 @@ force-released, so the operator decides.
 Per #deterministic-core-thin-judgment, the line is:
 
 - **Scripts (deterministic, tested — this skill only shells them):** the tick state read, the dispatch plan,
-  the merge-watcher verdict, the idle-clock inputs, the health/stall scan, the **infra-blocked classify + backoff
-  + resume decision** (#2659 — what counts as a retryable outage, the retry schedule, and when to resume vs
-  surface are all in `scripts/conveyor/infra-blocked.mjs`, never re-derived in prose). Same inputs → same output.
+  the **mechanized tick core** (#2699 — `scripts/conveyor/tick-core.mjs`: the three guards + their retirement,
+  the union re-dispatch gate, watcher arming, and idle-stop, all decided in one pure call the skill executes,
+  never re-derives), the merge-watcher verdict, the idle-clock inputs, the health/stall scan, the
+  **infra-blocked classify + backoff + resume decision** (#2659 — what counts as a retryable outage, the retry
+  schedule, and when to resume vs surface are all in `scripts/conveyor/infra-blocked.mjs`, never re-derived in
+  prose). Same inputs → same output.
 - **Judgment (stays with the operator + the agents — this skill's real content):** the readiness discussion,
   clearing items for build, supervising a build, **each prepare-scope agent's touch-set prediction**, **each
   delivery agent's adversarial review of its own diff**, **each fix agent's application of the reviewer's
