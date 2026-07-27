@@ -3,11 +3,14 @@ bornAs: x2pgool
 kind: story
 size: 2
 parent: "2612"
-status: open
+status: resolved
 scope:
   - we:scripts/backlog.mjs
   - we:scripts/__tests__/backlog-cli-snapshot.test.mjs
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
+graduatedTo: "we:scripts/backlog.mjs"
 tags: [plateau-loop, conveyor, backlog, cli]
 ---
 
@@ -24,3 +27,15 @@ tags: [plateau-loop, conveyor, backlog, cli]
 In that mode, either omit the stop message entirely or replace it with a one-line "claimed (background session — no stop)" so the agent proceeds in the same turn. Interactive human sessions keep the current two-turn behaviour unchanged.
 
 Refs the conveyor delivery brief ([#2613](/backlog/2613-the-conveyor-skill-command/)).
+
+## Progress
+
+- Added a background carve-out to `claim` in `we:scripts/backlog.mjs`: for the **active** claim, when the
+  session is detected as background — a `--session=conveyor-*` slug (the conveyor's convention) or an
+  explicit `--background` flag — the two-turn "rename the chat / ⏸ stop here" block is replaced with a
+  one-line `claimed (background session — no stop)` acknowledgement so the agent proceeds in the same turn.
+  Interactive human sessions and the `--as=preparing` claim (which already has no stop) are unchanged.
+- The JSON payload now carries a `background` boolean for machine consumers.
+- Covered in `we:scripts/__tests__/backlog-cli-snapshot.test.mjs`: interactive keeps the stop + rename
+  prompt; `conveyor-*` and `--background` suppress it; a non-conveyor `--session` still stops (carve-out is
+  conveyor-only); and a `preparing` claim under a conveyor slug keeps its own prep message.

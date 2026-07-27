@@ -58,6 +58,16 @@ function run(args) {
   }
 }
 
+/** Run the real CLI WITHOUT `--json` to capture the human-readable stdout (the message text this file asserts on). */
+function runHuman(args) {
+  try {
+    const stdout = execFileSync('node', [BACKLOG_MJS(), ...args], { cwd: clone, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return { code: 0, stdout };
+  } catch (e) {
+    return { code: typeof e.status === 'number' ? e.status : 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
+  }
+}
+
 const item = (fields, body = '# Title\n\nBody.\n') =>
   `---\n${Object.entries(fields).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n\n${body}`;
 
@@ -71,6 +81,78 @@ describe('backlog.mjs CLI — ephemeral-clone integration smoke (#2273/#2274)', 
     expect(after).toContain('status: active');
     expect(after).toContain(`dateStarted: "${TODAY}"`);
     expect(after).toContain('# Title'); // body untouched
+  });
+
+  // #2621: the interactive two-turn "rename the chat / ⏸ stop here" message stalls a background delivery
+  // agent (no human to end the turn), so `claim` suppresses it for a conveyor/background session — detected
+  // by a `conveyor-*` session slug or an explicit `--background` flag. An item is claimable ONCE
+  // (open→active), so each case below uses a FRESH item and a single claim, asserting the human-readable
+  // stdout (the message text carries the signal) plus the machine-readable `background` field.
+
+  it('claim: an interactive session gets the two-turn stop message + rename prompt (#2621 baseline)', () => {
+    write('9020-int.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
+    const human = runHuman(['claim', '9020']);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain('claim turn — it ends here');
+    expect(human.stdout).toContain('Rename this chat');
+    expect(human.stdout).not.toContain('background session — no stop');
+    expect(read('9020-int.md')).toContain('status: active'); // it still really claims
+  });
+
+  it('claim: the JSON payload carries background=false for an interactive claim (#2621)', () => {
+    write('9024-int.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
+    const res = run(['claim', '9024']);
+    expect(res.code).toBe(0);
+    expect(res.json.ok).toBe(true);
+    expect(res.json.background).toBe(false);
+  });
+
+  it('claim: a conveyor session (--session=conveyor-*) suppresses the stop message (#2621)', () => {
+    write('9021-conv.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
+    const human = runHuman(['claim', '9021', '--session=conveyor-9021']);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain('background session — no stop');
+    expect(human.stdout).not.toContain('claim turn — it ends here');
+    expect(human.stdout).not.toContain('Rename this chat');
+    expect(read('9021-conv.md')).toContain('status: active'); // still really claims
+  });
+
+  it('claim: the JSON payload carries background=true for a conveyor claim (#2621)', () => {
+    write('9025-conv.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
+    const res = run(['claim', '9025', '--session=conveyor-9025']);
+    expect(res.code).toBe(0);
+    expect(res.json.background).toBe(true);
+  });
+
+  it('claim: an explicit --background flag suppresses the stop message (#2621)', () => {
+    write('9022-bg.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
+    const human = runHuman(['claim', '9022', '--background']);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain('background session — no stop');
+    expect(human.stdout).not.toContain('claim turn — it ends here');
+  });
+
+  it('claim: a NON-conveyor --session does NOT suppress the stop message (carve-out is conveyor-only, #2621)', () => {
+    write('9023-batch.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
+    const human = runHuman(['claim', '9023', '--session=batch-abc']);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain('claim turn — it ends here');
+    expect(human.stdout).not.toContain('background session — no stop');
+  });
+
+  it('claim --as=preparing under a conveyor session keeps the prep (non-stop) message, NOT the background line (#2621)', () => {
+    // The carve-out is gated on `claimedStatus === 'active'`, so a `preparing` claim is never treated as
+    // background — it already flows in one turn and must keep its own prep guidance, even under a conveyor slug.
+    write('9026-prep.md', item({ kind: 'decision', status: 'open', dateOpened: '"2026-07-01"' }));
+    const human = runHuman(['claim', '9026', '--as=preparing', '--session=conveyor-9026']);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain('claiming and preparing are one turn');
+    expect(human.stdout).not.toContain('background session — no stop');
+    expect(human.stdout).not.toContain('claim turn — it ends here');
+    write('9027-prep.md', item({ kind: 'decision', status: 'open', dateOpened: '"2026-07-01"' }));
+    const res = run(['claim', '9027', '--as=preparing', '--session=conveyor-9027']);
+    expect(res.code).toBe(0);
+    expect(res.json.background).toBe(false); // preparing is never background
   });
 
   it('claim: refused on a non-open item, exit 1, file left untouched', () => {
