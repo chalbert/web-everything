@@ -63,6 +63,35 @@ describe('decideSetLabel — changes (a bounce lands nothing)', () => {
   });
 });
 
+describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRearm)', () => {
+  const changes = [{ name: REVIEW_LABELS.changes }, { name: 'ready-to-merge' }];
+  const humanChanges = [{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.changes }];
+
+  it('re-arms a review:changes bounce → review:pending, dropping review:changes', () => {
+    const d = decideSetLabel({ to: 'rearm', currentLabels: changes });
+    expect(d.allowed).toBe(true);
+    expect(d.addLabel).toBe(REVIEW_LABELS.pending);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes]);
+    expect(d.keepsHuman).toBe(false);
+  });
+
+  it('NEVER emits review:accepted and NEVER removes review:human (the #2630 invariant)', () => {
+    const d = decideSetLabel({ to: 'rearm', currentLabels: humanChanges });
+    expect(d.allowed).toBe(true);
+    expect(d.addLabel).toBe(REVIEW_LABELS.pending);
+    expect(d.addLabel).not.toBe(REVIEW_LABELS.accepted);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes]);
+    expect(d.removeLabels).not.toContain(REVIEW_LABELS.human);
+    expect(d.keepsHuman).toBe(true);
+  });
+
+  it('refuses (idempotent no-op) when there is no review:changes to re-arm', () => {
+    expect(decideSetLabel({ to: 'rearm', currentLabels: pending }).allowed).toBe(false);
+    expect(decideSetLabel({ to: 'rearm', currentLabels: human }).allowed).toBe(false);
+    expect(decideSetLabel({ to: 'rearm', currentLabels: [] }).allowed).toBe(false);
+  });
+});
+
 describe('presentRemoveLabels — intersect the decision removals with the labels actually present', () => {
   it('a removeLabel NOT in currentLabels is not passed through (never handed to gh)', () => {
     // changes wants to drop [pending, accepted], but the PR only carries pending → accepted must not survive.
