@@ -3,6 +3,9 @@ kind: task
 status: open
 dateOpened: "2026-07-09"
 tags: []
+scope:
+  - plateau:conformance.html
+  - plateau:vite.config.mts
 ---
 
 # plateau conformance build entry references an embed file deleted by #2341
