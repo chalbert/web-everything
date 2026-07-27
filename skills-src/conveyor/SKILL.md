@@ -310,6 +310,19 @@ one that works for a completed background task), so it re-invokes this loop reli
 > decision; it only formats the read. Keep the terse one-liner for the heartbeat and reach for the board on
 > demand — do not replace one with the other.
 
+> **On-demand jury tree — what the review jury is/does/found (#2641).** When the operator asks "what is the jury
+> doing?" (or you want to see WHY a parked PR is being held), print the live jury tree:
+> ```bash
+> node scripts/conveyor/jury-tree.mjs            # every logged subject
+> node scripts/conveyor/jury-tree.mjs --subject=we#123   # one PR
+> ```
+> It renders a `/workflows`-style tree per review subject — the roster, each juror's charter, its derived status
+> (◷ pending · ⟳ running · ✓ found), its findings, its verdict, and the round — by folding the **durable
+> append-only jury log** the review-pipeline writes (`.conveyor/jury/<subject>.jsonl`). It calls the ONE shared
+> fold in `we:scripts/lib/jury-ledger.mjs` (the SAME fold the #2642 plateau-app console reads — never a second
+> copy) and only formats the result; it is the #2612 single source of truth for the jury, not a parallel store.
+> An idle conveyor with no logged jury run prints one honest note.
+
 > **The three guard blocks below DOCUMENT what `tick-core.mjs` (#2699) encodes — they are not a second place to
 > compute a guard.** The mechanized core (step 2b) applies every rule here and returns the filtered spawns +
 > `nextState`; these blocks stay so the semantics remain legible and reviewable. If you find yourself re-deriving

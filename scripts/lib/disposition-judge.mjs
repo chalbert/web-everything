@@ -73,6 +73,13 @@ function isFindingOutstanding(finding) {
 /**
  * Reduce a raw jury ledger (the append-only `jury-core` event stream) to the state the disposition judge reads.
  * Pure — never throws (a malformed event is skipped, mirroring the never-throw contract of `validateJuryEvent`).
+ *
+ * DISTINCT FROM `jury-ledger.foldJuryLedger` (#2641): that folds the SAME log into the OBSERVABILITY tree (roster
+ * + per-juror status / charter / findings), a DIFFERENT question with a DIFFERENT output shape. This is the
+ * disposition PROJECTION (jurorId→lens + strictest per-lens verdict + outstanding findings) — two views over one
+ * immutable log, not two logs. They deliberately SHARE the same reduction rules (latest-verdict-wins by round,
+ * finding-supersede by [juror, anchor, summary], per-lens diversity-selection); if you change a rule in ONE, keep
+ * the OTHER in step so the disposition never diverges from the tree the operator sees.
  * Each juror's LATEST verdict (highest round it emitted a verdict in) is its current verdict; each lens's verdict
  * is the STRICTEST among its jurors (diversity-selection, #2567 — one juror wanting changes carries the lens).
  * @param {Array<object>} ledger - the append-only jury-ledger events (#2654 shape).
