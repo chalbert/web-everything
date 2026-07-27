@@ -235,4 +235,25 @@ describe('infra-blocked (#2660) — outside-dependency outage', () => {
     const board = renderBoard(cleanState([{ lane: 1, num: '2530', session: 's', lease: ['we:a'], breach: [] }]));
     expect(board).not.toContain('OUTAGE');
   });
+
+  // #2659 — once the retry-attempt cap is hit, auto-retry is EXHAUSTED: the board must stop saying "retrying"
+  // (a countdown implies it's still trying) and tell the operator to resume by hand.
+  it('an attempt-capped (exhausted) infra lane reads "auto-retry exhausted", not a countdown', () => {
+    const capped = { lane: 1, num: '2700', session: 'conveyor-2700', lease: ['we:a'], breach: [], infra: { cause: 'GitHub outage', attempt: 6, nextRetrySec: null, capped: true } };
+    const board = renderBoard(cleanState([capped]));
+    // OUTAGE banner: exhausted, no "next retry in" countdown.
+    expect(board).toContain('auto-retry exhausted (attempt 6) — resume by hand');
+    expect(board).not.toContain('next retry in');
+    // RUNNING row: the ⊘ marker + "auto-retry exhausted", never a "next Ns" countdown.
+    expect(board).toContain(`${MARKERS.infra} #2700 infra-blocked (GitHub outage · retry 6 · auto-retry exhausted)`);
+  });
+
+  it('a MIX of retrying + capped lanes on one cause still reads "retrying" (some are live)', () => {
+    const board = renderBoard(cleanState([
+      infraLane(1, '2700', 'GitHub outage', 6, null), // (attempt/next only; not capped without the flag)
+      { lane: 2, num: '2701', session: 'c', lease: ['we:b'], breach: [], infra: { cause: 'GitHub outage', attempt: 3, nextRetrySec: 40, capped: false } },
+    ]));
+    expect(board).toContain('retrying (attempt 6'); // not exhausted — one lane is still live
+    expect(board).not.toContain('auto-retry exhausted');
+  });
 });

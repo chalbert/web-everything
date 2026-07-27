@@ -43,6 +43,13 @@ commitment-policy/**/*.d.ts
 # authoring measurable (dispatch → first-commit stamps the `gh`/backlog verbs cannot see). Machine-local,
 # recreated on demand by `conveyor-instrument.mjs mark-dispatch`/`mark-setup`; never committed, like queue.json.
 .conveyor/dispatch-log.json
+# Session-local conveyor INFRA-BLOCKED state (#2659) — a delivery/prepare agent that PUSHED its lane ref but
+# hit a PR-open failure on an outside dependency (a GitHub outage) records the resumable handle here; the
+# conveyor auto-retries + resume-opens once infra recovers. Operational recovery state, never committed.
+.conveyor/infra-blocked.json
+# …and its advisory lock (serializes concurrent record/retry writes) — ephemeral (created+unlinked per
+# critical section), but ignore it so a crashed holder's leftover lock never shows as an untracked file.
+.conveyor/*.lock
 # Per-session runtime bookkeeping (TTL'd, machine-local) — tooling recreates on demand (#952).
 # SoT relocated to skills-src/ (#2266), so ignore the real path; capacity.json is durable calibration → stays tracked.
 skills-src/batch-backlog-items/claims.json

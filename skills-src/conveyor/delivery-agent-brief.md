@@ -212,6 +212,13 @@ idempotent (it targets the existing PR and applies the label, never a duplicate)
 - End the commit message with:
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
 - If the PR's CI ends up red, it is left **unlabelled** — that is an escalation (below), not a land.
+- **`blocked-on-infra` (exit 4) — the ref PUSHED but PR-open failed on an outside dependency (#2659).** If
+  `pr-land` pushed your `lane/*` ref but then `gh pr create` failed on a GitHub outage / network fault, it exits
+  `blocked-on-infra` (exit 4) — **NOT gate-red, NOT a park**. Your built work is pushed and `pr-land` has already
+  recorded the resumable handle in the conveyor infra-blocked state, which auto-retries with backoff and
+  resume-opens the PR once infra recovers (the drain still lands it — nothing merges locally). This is **not**
+  something you fix or retry yourself: **return `blocked-on-infra` and EXIT** (see *Escalations* #6). Do NOT loop
+  `pr-land` by hand, do NOT `--fallback-git`, do NOT re-push.
 
 **Which label — escalate `review:human` by good reason ONLY.** The escalation call is **judgment**, not a
 script ([#deterministic-core-thin-judgment](../../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
@@ -253,8 +260,9 @@ daemon lands the PR. The **merge watcher** (`scripts/conveyor/pr-watch.mjs <pr-n
 **conveyor skill, not by you**, on the PR number `pr-land` reported for this item in step 8; its process exit
 (merged / parked / closed) wakes the main session and re-dispatches the freed lane. Your OWN process EXIT is the
 signal you are done. Return a one-line result to the conveyor: `#{{ITEM_NUM}} → PR #<n> (ready-to-merge |
-escalated <label> | gate-red)`. **A red gate / red CI is NOT watcher-visible** (it reads only state/labels) —
-your one-line RETURN is the only signal that surfaces it, so always report it explicitly.
+escalated <label> | gate-red | blocked-on-infra)`. **A red gate / red CI is NOT watcher-visible** (it reads
+only state/labels), and **`blocked-on-infra` has no PR to watch at all** — your one-line RETURN is the only
+signal that surfaces either, so always report it explicitly.
 
 ## Cross-locus items — the two-PR couple (impl-first / WE-last)
 
@@ -339,12 +347,22 @@ and dilutes what `review:human` means.
    into that PR's lane to repair it and re-arm review — see
    [`fix-agent-brief.md`](fix-agent-brief.md) (#2630); that is the repair path, not this build arc. Repair
    before any land; the fix agent never self-clears the review, so a still-red fix stays parked.
+6. **Blocked-on-infra — the ref PUSHED but PR-open failed on an OUTSIDE dependency (#2659).** `pr-land` pushed
+   your `lane/*` ref but `gh pr create` then failed on a transient outside fault (a GitHub outage / network
+   fault), so it exited `blocked-on-infra` (exit 4). This is **its own outcome** — NOT gate-red, NOT a park, and
+   NOT a `not-ready` stop (you already BUILT). Your work is pushed and `pr-land` has already recorded the
+   resumable handle in the conveyor infra-blocked state, which auto-retries with backoff and resume-opens the PR
+   once infra recovers (the drain lands it — nothing merges locally, nothing is stranded). **Do not fix, retry,
+   `--fallback-git`, or re-push it yourself** — just RETURN `#{{ITEM_NUM}} → blocked-on-infra (<cause>)` and EXIT.
+   There is no PR yet to watch, so your one-line return is the only signal; the conveyor's recovery pass (§4b)
+   drives it from here.
 
-In every **post-build** escalation case (1–5) the outcome is the same: **the daemon parks the PR `review:human`
-(or leaves it unlabelled on a red gate), and it is reviewed in the main session** (`/review`). The **pre-build**
-case (0) has no PR to park — you return the claim to the pool and surface the `not-ready` reason, and the
-conveyor routes it to the operator. Either way you surface the reason in your one-line return and exit — you
-never merge, never override, never self-clear a review, and never build a card that failed the readiness gate.
+In every **post-build PR** escalation case (1–5) the outcome is the same: **the daemon parks the PR
+`review:human` (or leaves it unlabelled on a red gate), and it is reviewed in the main session** (`/review`). The
+**pre-build** case (0) has no PR to park — you return the claim to the pool and surface the `not-ready` reason.
+The **infra** case (6) has no PR yet either — the built + pushed work is recorded and auto-retried by the
+conveyor. Either way you surface the reason in your one-line return and exit — you never merge, never override,
+never self-clear a review, and never build a card that failed the readiness gate.
 
 ## Guardrails (the non-negotiables)
 

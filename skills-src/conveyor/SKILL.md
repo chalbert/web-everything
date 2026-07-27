@@ -22,7 +22,8 @@ The three scripts this skill shells (do not reimplement any of them):
 
 | Script | What it decides (deterministically) |
 |---|---|
-| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health }`. Every tick STARTS here. |
+| `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health, infraBlocked }`. Every tick STARTS here. |
+| `node scripts/conveyor/infra-blocked.mjs retry` | **The infra-blocked recovery pass (#2659)** — one idempotent resume pass: for each item whose lane ref was PUSHED but whose PR-open failed on an outside dependency (a GitHub outage), it correlates GitHub status, resume-opens the PR once infra recovers (via `pr-land` — never a local merge), backs off on failure, and surfaces at the attempt cap. |
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
 | `node scripts/conveyor/pr-watch.mjs <pr>` | **The merge watcher** — one background process per in-flight PR. Its process EXIT is the wake signal; the exit CODE is the outcome (merged 0 · error 1 · parked 2 · timeout 3 · closed 4). |
 
@@ -129,7 +130,7 @@ one that works for a completed background task), so it re-invokes this loop reli
    ```bash
    node scripts/readiness/conveyor-state.mjs --json
    ```
-   → `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health }`. Do not eyeball four commands; this is the one read.
+   → `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health, infraBlocked }`. Do not eyeball four commands; this is the one read.
 
 2. **Plan the dispatch (one call):**
    ```bash
@@ -214,9 +215,27 @@ one that works for a completed background task), so it re-invokes this loop reli
      guard below) — but the prepare **Agent returning is NOT**, because it returns at PR-open, several ticks before
      the PR lands.
 
+4b. **Run the infra-blocked recovery pass — auto-retry/resume any pushed-but-unopened work (#2659).** A delivery
+   or prepare agent that BUILT successfully and PUSHED its `lane/*` ref, but whose PR-open then failed on an
+   OUTSIDE dependency (a GitHub partial outage, a network fault), returns `blocked-on-infra` — its built work is
+   pushed and RECORDED, but no PR exists yet to watch. Each tick, run ONE recovery pass:
+   ```bash
+   node scripts/conveyor/infra-blocked.mjs retry
+   ```
+   It is the deterministic core (the tick is the loop clock — the pass does ONE round, no internal busy-loop): for
+   each recorded item it correlates GitHub status (a real outage vs a one-off), and, once the backoff has elapsed,
+   **resume-opens the PR from the recorded ref via `pr-land` — never a local merge** (the drain stays the sole
+   writer to `main`, memory rule 104). On failure it backs off (exponential, capped); at the attempt cap it stops
+   auto-retrying and **surfaces** the item for the operator. `state.infraBlocked` (and the ⊘ marker / collapsed
+   **OUTAGE** banner on the status board) shows what is blocked and why — see §3f. `pr-land` records the block
+   automatically at the failed open, so a conveyor-launched delivery/prepare agent's `blocked-on-infra` return
+   needs no extra bookkeeping from you; just note it in the tick line.
+
 5. **Post ONE terse status line, then start the next tick.** Per the operator's progress-tracking preference the
    checklist is the channel and prose stays quiet — one line per tick, e.g.:
-   > `conveyor · N building · N preparing · N fixing · N queued · N parked · health ok` — where **`N preparing`**
+   > `conveyor · N building · N preparing · N fixing · N queued · N parked · health ok` — add `· N infra-blocked`
+   > when `state.infraBlocked` is non-empty (pushed-but-unopened work the §4b pass is auto-retrying; flag a
+   > capped/exhausted one for the operator) — where **`N preparing`**
    > is the count of prepare-scope agents in flight (auto-preparing unscoped items' scope) and **`N fixing`** is
    > the count of fix agents in flight (repairing `review:changes` bounces, §3c). Add `⚠` + the flagged lanes
    > when `state.health.verdict === 'warn'`; add `⚠ N auto-preparing scope: #A #B` when `state.unshaped` is
@@ -473,6 +492,28 @@ Now, each tick, for every item in `state.decisions`, route by its `prepared` fla
     (idempotent; re-presenting each tick is correct — a standing "ready to ratify" signal). Only the *prepare*
     half (above) spawns an agent and carries a guard.
 
+### 3f. Infra-blocked — a first-class state for a PRE-PR infra failure (#2659)
+
+Between "the agent built + pushed its ref" and "the PR is open" there is a real failure window: `gh pr create`
+can fail on an **outside dependency** (a GitHub partial outage — grounded in the 2026-07-24 incident that blocked
+#2654's PR-open — or a network fault). That built + pushed work is **not** a review-park, a stall, or gate-red,
+and the PR watcher can't see it (no PR exists). Before #2659 it was silently stranded. Now it is a **first-class
+state** the conveyor owns end-to-end:
+
+- **Recorded, never lost.** `pr-land` detects a KNOWN-transient PR-open failure (a GitHub 5xx / rate-limit /
+  network fault — a genuine error like a bad body or "already exists" is NOT infra and still hard-fails, never a
+  doomed retry) and records the **resumable handle** (the pushed `lane/*` ref + its tip + base + body) into the
+  conveyor infra-blocked sidecar. It exits `blocked-on-infra` (exit 4), leaving `main` untouched.
+- **Auto-retried + resume-opened.** The §4b recovery pass owns an idempotent exponential-backoff retry loop:
+  once GitHub recovers it resume-opens the PR **from the recorded ref via `pr-land`** (which never merges — the
+  drain lands it). At the attempt cap it stops and surfaces.
+- **Reads DISTINCT from a stall or a review-park.** An infra-blocked lane shows the ⊘ marker with its failure
+  class + retry attempt + countdown, and a widespread outage collapses into ONE **OUTAGE** banner (not N alarms).
+  It is excluded from the stall/health scan, so it never mis-reads as a hung lane. When auto-retry is exhausted
+  (the cap), the board reads "auto-retry exhausted — resume by hand" so the operator knows to intervene.
+- **Nothing you do by hand.** `pr-land` records it, the §4b pass drives it, the board surfaces it. Surface a
+  capped/exhausted item to the operator (like a park), and otherwise let the loop resume it.
+
 ## 4. Landing is the drain daemon's job — the conveyor NEVER merges
 
 Delivery agents stop at `ready-to-merge` — but only **after** each has reviewed its own diff to convergence
@@ -545,7 +586,9 @@ force-released, so the operator decides.
 Per #deterministic-core-thin-judgment, the line is:
 
 - **Scripts (deterministic, tested — this skill only shells them):** the tick state read, the dispatch plan,
-  the merge-watcher verdict, the idle-clock inputs, the health/stall scan. Same inputs → same output, always.
+  the merge-watcher verdict, the idle-clock inputs, the health/stall scan, the **infra-blocked classify + backoff
+  + resume decision** (#2659 — what counts as a retryable outage, the retry schedule, and when to resume vs
+  surface are all in `scripts/conveyor/infra-blocked.mjs`, never re-derived in prose). Same inputs → same output.
 - **Judgment (stays with the operator + the agents — this skill's real content):** the readiness discussion,
   clearing items for build, supervising a build, **each prepare-scope agent's touch-set prediction**, **each
   delivery agent's adversarial review of its own diff**, **each fix agent's application of the reviewer's
