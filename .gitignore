@@ -47,6 +47,13 @@ commitment-policy/**/*.d.ts
 # hit a PR-open failure on an outside dependency (a GitHub outage) records the resumable handle here; the
 # conveyor auto-retries + resume-opens once infra recovers. Operational recovery state, never committed.
 .conveyor/infra-blocked.json
+# False-green evidence sidecar (#2681) — the diff-driven test-selection shadow full-suite compare records each
+# sample (was a full-suite failure OUTSIDE the shrink's selected set?) here. Ephemeral measure-mode evidence the
+# eventual default-on decision reads; machine/CI-local, recreated on demand, never committed.
+.conveyor/false-green-log.json
+# Red-main dispatch-freeze marker (#2681) — present ⇒ the sole writer STOPS THE LINE (main is red). Operational
+# stop-the-line state raised/lifted by red-main-remediation.mjs; machine-local, never committed.
+.conveyor/red-main-freeze.json
 # …and its advisory lock (serializes concurrent record/retry writes) — ephemeral (created+unlinked per
 # critical section), but ignore it so a crashed holder's leftover lock never shows as an untracked file.
 .conveyor/*.lock
