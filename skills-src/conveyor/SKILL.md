@@ -395,8 +395,10 @@ it (both below). When neither suppresses:
   review** (`review:changes → review:pending` via `scripts/conveyor/rearm-review.mjs`) and exits. It **NEVER**
   self-clears the human review label — the human (or the drain's AI-review convergence pass) re-verdicts the
   re-armed PR.
-- **Record a fix-guard entry** `{ pr: prNumber, num, spawnedTick }` AND **bump a separate per-PR attempt
-  counter** `fixAttempts[prNumber] += 1` (see the fix guard below — the two are DISTINCT state). The PR stays
+- **Record a fix-guard entry** `{ pr: prNumber, num, spawnedTick }` AND **bump the per-PR attempt counter**
+  (the within-session overlay — see the fix guard below; the entry and the counter are DISTINCT state, and the
+  counter's durable source of truth is the PR's re-arm comments, not this overlay). The spawned fix agent posts
+  the durable re-arm comment when it re-arms, which is what the count reads back after a restart. The PR stays
   OPEN, so step 4 keeps a watcher on it — when the fix re-arms it to `review:pending`, that exit `2` routes to
   the `review:human`/`review:pending` branch (surface for `/review`), not back into auto-fix.
 
@@ -405,12 +407,21 @@ retirement, and do NOT conflate the two).** A fix dispatch tracks:
 
 1. **An in-flight guard entry** `{ pr, num, spawnedTick }` keyed by the **PR number** — "a fix agent for this PR
    is live right now." It is retired (see below) the moment the PR is no longer awaiting an in-flight repair.
-2. **A per-PR attempt counter** `fixAttempts[pr]` — "how many auto-fixes this PR has cost in total." It is a
-   SEPARATE longer-lived tally that **survives the guard-entry retirement** and is cleared **only when the PR is
-   terminal** (merged / closed). Keeping it off the guard entry is the whole point: a human bounce → fix →
-   re-arm → human bounces AGAIN is a NEW `review:changes` with NO live guard entry, so if the count lived on the
-   entry it would reset to 1 each cycle and the cap below would never bind. The counter must persist across
-   fix↔bounce cycles or the loop is unbounded.
+2. **A per-PR attempt counter** — "how many auto-fixes this PR has cost in total." It is a SEPARATE longer-lived
+   tally that **survives the guard-entry retirement**. Keeping it off the guard entry is the whole point: a human
+   bounce → fix → re-arm → human bounces AGAIN is a NEW `review:changes` with NO live guard entry, so if the count
+   lived on the entry it would reset to 1 each cycle and the cap below would never bind. The counter must persist
+   across fix↔bounce cycles or the loop is unbounded.
+   **The DURABLE count derives from the PR itself, not from in-session memory (#2643).** Each completed auto-fix
+   posts exactly one re-arm comment (`rearm-review.mjs`, marker `🔧 conveyor fix — re-armed for re-review`), so
+   the count is **`countRearmComments(pr.comments)`** — read back off the PR's own comment thread. This is the
+   restart-surviving source of truth: a session-side `fixAttempts[pr]` map would start EMPTY on a fresh / restarted
+   conveyor, and the next bounce would auto-fix from zero — the cap would never bind (the exact unbounded fix↔bounce
+   loop it exists to prevent, and a parallel state store §5 forbids). The mechanized guard binds the cap on
+   **`max(in-session tally, durable re-arm count)`**: the durable count is authoritative and restart-surviving; the
+   in-session tally is a within-session overlay that ALSO catches a fix agent that **died before re-arming** (it
+   posts no comment, so the durable floor can't see it — but the TTL-backstop case must still terminate at the
+   human). The tally clears on PR-terminal, and the durable comments become moot once the PR leaves the open set.
 
 Its rules — two suppressions and one cap:
 
@@ -418,11 +429,13 @@ Its rules — two suppressions and one cap:
   already exists for it. This is essential: right after you spawn the fix agent, step 4 re-arms a watcher on the
   still-`review:changes` PR (the agent hasn't re-armed yet), so the watcher exits `2` again almost immediately —
   the entry is what stops that second exit-2 from spawning a duplicate fix on a second burned lane.
-- **Retry cap (default 3 auto-fix attempts per PR).** BEFORE spawning, check `fixAttempts[pr]` (piece 2). Once it
-  has reached **3**, **stop auto-fixing** this PR and surface it for `/review` instead
-  (`⚠ PR #N (#<num>) bounced <k>× — auto-fix exhausted, run /review N`). Because the counter persists across
-  cycles, this binds even when each cycle is a fresh human bounce with no live entry — a finding the auto-fixer
-  can't satisfy in a few passes needs a human; never loop a fix↔bounce cycle unboundedly.
+- **Retry cap (default 3 auto-fix attempts per PR).** BEFORE spawning, check the attempt count (piece 2) —
+  `max(in-session tally, countRearmComments(pr.comments))`. Once it has reached **3**, **stop auto-fixing** this PR
+  and surface it for `/review` instead (`⚠ PR #N (#<num>) bounced <k>× — auto-fix exhausted, run /review N`).
+  Because the count persists across cycles AND survives a restart (it derives from the PR's durable re-arm
+  comments), this binds even when each cycle is a fresh human bounce with no live entry, and even when a restart
+  wiped the in-session tally — a finding the auto-fixer can't satisfy in a few passes needs a human; never loop a
+  fix↔bounce cycle unboundedly.
 - **Retire the in-flight guard ENTRY (piece 1) two ways — NOT the attempt counter:** (1) **Re-armed / resolved**
   — a fresh `state.prs` read shows the PR no longer carries `review:changes` (it re-armed to `review:pending`, or
   merged/closed). Drop the ENTRY; **leave `fixAttempts[pr]` intact** (it only clears on PR-terminal). (2) **TTL
@@ -578,9 +591,16 @@ board reflects conveyor state **for free**, and `conveyor-state.mjs` reads that 
 parallel state store of item / claim / PR / resolve state** — the only in-session bookkeeping allowed is
 ephemeral *process* tracking: which delivery / prepare-scope / prepare-decision / fix `Agent`s and which
 `pr-watch` processes you have spawned (the in-flight dispatch guard, the prepare-scope guard, the
-**decision-prepare guard** (§3e), the **fix guard** (§3c), and the watched-PR set). That
+**decision-prepare guard** (§3e), the in-flight **fix-guard ENTRY** (§3c), and the watched-PR set). That
 is not item state; it is which background jobs are live — the re-arm swap and every repair still flow through the
 board's normal verbs (`git push … lane/*` → `rearm-review.mjs` → the PR's labels → the daemon / `/review`).
+
+The **auto-fix retry count** is the case that proves the rule (#2643): "how many times this PR was auto-fixed" is
+**PR state, not process state**, so it must NOT live in a session-side map (a restart would wipe it and the cap
+would silently stop binding). It **derives from the PR itself** — `countRearmComments(pr.comments)`, one durable
+re-arm comment per completed auto-fix — so it survives a restart with no parallel store. The in-session tally the
+mechanized guard also keeps is a within-session *overlay* over that durable count (it only adds coverage for a fix
+agent that died before posting its re-arm comment); the durable comment thread is the source of truth.
 
 ## 6. Idle-stop (the conveyor's lifetime = the session's)
 
