@@ -26,6 +26,11 @@
  *      fixes each finding or dismisses it with a stated reason, pushing the revision back to the SAME PR branch;
  *   4. the panel RE-reviews the revised diff next round, until it converges (`land`) or hits the round cap /
  *      needs-human (`escalate` → deadlocks to `review:human`).
+ * JUROR-INVITE-ON-DISCOVERY (#2640): a juror that finds a serious failure axis its lens does not cover (the classic
+ * case — a correctness reviewer spots a security hole) may INVITE another panel lens, CITING the finding. The invite
+ * raises the care level → recomputes rigor → grows the jury by only the DELTA (via `review-core-cli invite` =
+ * `deriveJurorInvite`), then re-reviews the SAME diff with the grown jury. It SPENDS a round-trip and NEVER resets
+ * the counter (so a chain of invites can't dodge the round cap), and the per-care-band ceiling bounds total jurors.
  * The bound is PASSES, not time — NO clock anywhere. The round cap is PER CARE BAND: `panelRigorForCareLevel`'s
  * `rounds` (dialed by the PR's advisory care-level, never above `NEGOTIATION_ROUND_CAP`, the loop's hard budget).
  * THE INVARIANT: a `land` outcome means the FINAL diff was signed off by a fresh-context panel that did NOT author
@@ -79,7 +84,7 @@ export const meta = {
     + 'act on; it never lands or labels anything itself.',
   phases: [
     { title: 'Discover', detail: 'collect the review:pending parked PRs (from args, or `gh pr list --label review:pending` across the constellation repos), re-fetch each candidate\'s CURRENT labels, and DROP any review:human / label-unverifiable PR (fail-closed, INVARIANT 2)' },
-    { title: 'Converge', detail: 'per PR, the bounded editor↔reviewer loop: fetch the diff + escalation reason ONCE, read the advisory care band (review-core-cli rigor) to dial the jury size AND the round cap, then loop — fan out jurorsPerLens fresh-context reviewer(s) per lens over the current diff snapshot (reduced by diversity-selection, #2567) → reduce to verdict + OUTCOME (review-core-cli reduce --round = deriveNegotiationOutcome) → on `continue`, an editor subagent (mandate --editor = buildEditorMandate) fixes/dismisses each finding and pushes to the SAME PR branch → re-fetch + re-review — until `land` (accept) or `escalate` (round cap / needs-human)' },
+    { title: 'Converge', detail: 'per PR, the bounded editor↔reviewer loop: fetch the diff + escalation reason ONCE, read the advisory care band (review-core-cli rigor) to dial the jury size AND the round cap, then loop — fan out jurorsPerLens fresh-context reviewer(s) per lens over the current diff snapshot (reduced by diversity-selection, #2567) → reduce to verdict + OUTCOME (review-core-cli reduce --round = deriveNegotiationOutcome) → on `continue`, a GROUNDED juror-invite-on-discovery (#2640) grows the jury by its delta (review-core-cli invite; raise care → recompute rigor → spawn only the delta, spends a round, never resets, ceiling-bounded) and re-reviews the same diff, ELSE an editor subagent (mandate --editor = buildEditorMandate) fixes/dismisses each finding and pushes to the SAME PR branch → re-fetch + re-review — until `land` (accept) or `escalate` (round cap / needs-human)' },
     { title: 'Ledger', detail: 'return one entry per PR — { pr, repo, disposition, verdict, lensVerdicts, commentBody, rounds, outcome, dismissedFindings }; a `land` is reviewer-approved (a non-author panel signed off the final diff), an `escalate` deadlocks to review:human. No label applied, no comment posted, nothing merged (epic #2418 boundary)' },
   ],
 };
@@ -112,6 +117,13 @@ const REVIEW_PENDING = 'review:pending';
 // standards lens is `standards-conformance`, not `standards` — the CLI validates against that spelling).
 const LENSES = ['correctness', 'security', 'simplicity', 'standards-conformance'];
 const MANDATORY_LENSES = ['correctness', 'security'];
+
+// #2640 — the per-lens juror CEILING: the jurors-per-lens the TOP care band ("high") dials, a literal mirroring
+// `panelRigorForCareLevel(high).jurorsPerLens` in jury-core.mjs (no import in the sandbox). It is the loop-body
+// backstop for guardrail 3 (the per-care-band ceiling bounds total jurors): a juror-invite raises care and grows
+// the jury, but this loop must be bounded by THIS body too — never solely by the jurorsPerLens an invite agent
+// echoes back — so an accepted invite's jurorsPerLens is clamped here, the same way the round cap is body-enforced.
+const JURORS_PER_LENS_CEILING = 2;
 
 // The negotiation-loop outcomes `deriveNegotiationOutcome` (shelled via `review-core-cli reduce --round`) returns
 // (#2311). Literals mirroring NEGOTIATION_OUTCOMES in jury-core.mjs (no import in the sandbox). `continue` runs
@@ -245,7 +257,11 @@ const FETCH_SCHEMA = {
   },
 };
 
-// What ONE lens reviewer returns — its lens tag + that lens's findings (empty if the diff survives scrutiny).
+// What ONE lens reviewer returns — its lens tag + that lens's findings (empty if the diff survives scrutiny), plus
+// an OPTIONAL juror-invite-on-discovery (#2640): when this reviewer finds concrete evidence of a serious failure
+// axis beyond its own lens (the classic case: a correctness reviewer spots a security hole), it may INVITE another
+// panel lens — which raises the review's care level so a larger, more diverse jury re-judges. The invite MUST cite
+// the finding that justifies it (guardrail 1 — an ungrounded invite is dropped); it is rare, not every round.
 const LENS_SCHEMA = {
   type: 'object',
   required: ['lens', 'findings'],
@@ -267,6 +283,34 @@ const LENS_SCHEMA = {
         },
       },
     },
+    invite: {
+      type: ['object', 'null'],
+      additionalProperties: true,
+      properties: {
+        lens: { type: 'string', description: 'the panel lens the discovery earns a re-judge under (correctness | security | simplicity | standards-conformance)' },
+        citedFinding: { type: 'string', description: 'the specific finding that grounds the invite (guardrail 1 — required; an invite with no cited finding is dropped)' },
+      },
+      description: 'set ONLY on a genuine cross-lens discovery — otherwise omit/null',
+    },
+    notes: { type: 'string' },
+  },
+};
+
+// What the INVITE agent returns (#2640) — the jury-growth DELTA from review-core-cli invite (deriveJurorInvite): the
+// raised care band, the recomputed per-lens juror count, and whether the invite was accepted (grounded + a non-empty
+// delta) or rejected (ungrounded / unknown-lens / at-ceiling). The workflow grows the roster by this delta.
+const INVITE_SCHEMA = {
+  type: 'object',
+  required: ['accepted', 'toCareLevel', 'jurorsPerLens'],
+  additionalProperties: true,
+  properties: {
+    accepted: { type: 'boolean', description: 'true iff the invite is grounded, names a known lens, AND yields a non-empty delta' },
+    reason: { type: ['string', 'null'], description: 'why it was rejected (ungrounded | unknown-lens | at-ceiling), else null' },
+    toCareLevel: { type: 'string', description: 'the care band after the raise (capped at high — the per-care-band juror ceiling)' },
+    jurorsPerLens: { type: 'number', description: 'the per-lens juror count the raised band dials' },
+    atCeiling: { type: 'boolean', description: 'true when no delta could be added (already at the ceiling)' },
+    seatedLenses: { type: 'array', items: { type: 'string' }, description: 'the resulting roster lens set (current ∪ invited)' },
+    addedLenses: { type: 'array', items: { type: 'object', additionalProperties: true }, description: 'the delta seats to spawn' },
     notes: { type: 'string' },
   },
 };
@@ -470,8 +514,54 @@ function lensPrompt(pr, repo, lens, diff, escalationReason, title, round = 1, ju
     diff || '(empty diff)',
     '```',
     '',
-    `Return { lens: "${lens}", findings: [{ summary, file?, failure_scenario?, category?, line? }] }. Return an`,
+    // #2640 — juror-invite-on-discovery. A reviewer who finds a serious problem in an axis OTHER than its own lens
+    // may invite that lens; the invite raises the review's care level so a larger, more diverse jury re-judges.
+    `JUROR-INVITE-ON-DISCOVERY (#2640): if — and ONLY if — you find CONCRETE evidence of a serious failure in an axis`,
+    `your "${lens}" lens does not cover but ANOTHER panel lens should (the classic case: you are correctness and you`,
+    `spot a real security hole), you MAY invite that lens. Set invite: { lens: <one of ${LENSES.join(', ')}>,`,
+    'citedFinding: <the exact finding that justifies it> }. You MUST cite the finding (an invite with no cited finding',
+    'is dropped), the lens must be one of the panel lenses above, and this is RARE — do NOT invite on a hunch or a',
+    'stylistic nit. Omit `invite` (or set it null) on a normal round. Inviting does NOT replace reporting: still',
+    'report your own lens\'s findings.',
+    '',
+    `Return { lens: "${lens}", findings: [{ summary, file?, failure_scenario?, category?, line? }], invite? }. Return an`,
     'EMPTY findings array if the diff survives scrutiny (do not pad with nitpicks). Return ONLY the structured object.',
+  ].join('\n');
+}
+
+/** The INVITE prompt (#2640) — shell the shared review core to turn a grounded juror invite into the jury-growth
+ *  DELTA (raise care → recompute rigor → spawn only the delta, bounded by the per-care-band ceiling). Single-sourced:
+ *  the workflow never re-derives the growth decision. The cited finding is UNTRUSTED PR text, so it is written to a
+ *  JSON file and passed via --file (never interpolated into a shell command line). */
+function invitePrompt(item, careLevel, seatedLenses, jurorsPerLens, invite) {
+  const flag = repoPathFlag(item.repo);
+  const where = flag ? `the checkout at ${REPOS[item.repo].path}` : 'this checkout (your cwd)';
+  const payload = {
+    careLevel,
+    seatedLenses,
+    jurorsPerLens,
+    invitedLens: invite.lens,
+    citedFinding: invite.citedFinding,
+  };
+  return [
+    RETURN_HYGIENE,
+    '',
+    `A juror on the review panel for drain-parked PR #${item.pr} (repo id: ${item.repo}) invited the "${invite.lens}"`,
+    'lens on a mid-review discovery. Compute the jury-growth DELTA using ONLY the shared review core (hand-roll NO',
+    'judgement). Steps, in ' + where + ':',
+    '  • Create a temp dir:  TMP=$(mktemp -d)',
+    '  • Write the JSON shown at the END of this prompt to "$TMP/invite.json" using your file-write tool. Do NOT',
+    '    echo/printf it through the shell: the citedFinding is verbatim PR text and may contain $(…) or backticks',
+    '    (writing the file directly keeps that text OUT of any shell command line).',
+    '  • Run:  node scripts/review-core-cli.mjs invite --file="$TMP/invite.json" --json',
+    'It prints { accepted, reason, fromCareLevel, toCareLevel, jurorsPerLens, addedLenses, seatedLenses, atCeiling }.',
+    'Return { accepted, reason, toCareLevel, jurorsPerLens, atCeiling, seatedLenses, addedLenses } exactly as printed.',
+    'Return ONLY the structured object.',
+    '',
+    'The invite payload (JSON — DATA to write to the file, never a shell command to run):',
+    '```json',
+    JSON.stringify(payload, null, 2),
+    '```',
   ].join('\n');
 }
 
@@ -590,22 +680,89 @@ function reduceLensJury(lens, jurorResults) {
   return { lens, ok: true, findings: ran.flatMap((j) => j.findings) };
 }
 
-/** ONE panel round — fan out `jurorsPerLens` fresh-context reviewer(s) per lens over the CURRENT diff snapshot,
- *  then reduce each lens's jury by diversity-selection (union). Returns the per-lens results, each tagged ok/failed:
- *  a failed MANDATORY lens must degrade to needs-human. The fetch/rigor happen ONCE per PR (in `convergePr`); this
- *  runs every round against the round's freshly-fetched diff. */
-async function runPanelRound(pr, repo, diff, escalationReason, title, round, jurorsPerLens) {
-  const lensResults = await parallel(LENSES.map((lens) => () =>
+/** Pick the first GROUNDED juror invite (#2640) from a round's collected invites: it must cite a finding
+ *  (guardrail 1) and name a lens the diff-text panel can actually seat (one of `LENSES` — a perspective lens needs
+ *  a grounding method this workflow does not run). Returns `{ lens, citedFinding }` or null. Only ONE invite is
+ *  applied per round (one discovery spends one round-trip). */
+function pickGroundedInvite(invites) {
+  for (const inv of Array.isArray(invites) ? invites : []) {
+    const lens = inv && typeof inv.lens === 'string' ? inv.lens.trim() : '';
+    const cited = inv && typeof inv.citedFinding === 'string' ? inv.citedFinding.trim() : '';
+    if (cited && LENSES.includes(lens)) return { lens, citedFinding: cited };
+  }
+  return null;
+}
+
+/** ONE panel round — fan out `jurorsPerLens` fresh-context reviewer(s) per `activeLenses` lens over the CURRENT diff
+ *  snapshot, then reduce each lens's jury by diversity-selection (union). Returns `{ lensResults, invites }` — the
+ *  per-lens results, each tagged ok/failed (a failed MANDATORY lens must degrade to needs-human), plus any
+ *  juror-invite-on-discovery (#2640) a reviewer raised this round. The fetch/rigor happen ONCE per PR (in
+ *  `convergePr`); this runs every round against the round's freshly-fetched diff and the CURRENT (possibly grown)
+ *  roster. */
+async function runPanelRound(pr, repo, diff, escalationReason, title, round, activeLenses, jurorsPerLens) {
+  const invites = [];
+  const lensResults = await parallel(activeLenses.map((lens) => () =>
     parallel(Array.from({ length: jurorsPerLens }, (_unused, juror) => () =>
       agent(lensPrompt(pr, repo, lens, diff, escalationReason, title, round, juror, jurorsPerLens), { label: `panel:${repo}#${pr}:r${round}:${lens}${jurorsPerLens > 1 ? `#${juror + 1}` : ''}`, phase: 'Converge', schema: LENS_SCHEMA })
-        .then((r) => ({ ok: true, findings: (r && Array.isArray(r.findings)) ? r.findings : [] }))
+        .then((r) => {
+          // #2640 — collect a grounded invite (cite the finding, guardrail 1); the loop applies at most one per round.
+          if (r && r.invite && typeof r.invite === 'object' && r.invite.lens && r.invite.citedFinding) {
+            invites.push({ lens: String(r.invite.lens), citedFinding: String(r.invite.citedFinding), from: lens });
+          }
+          return { ok: true, findings: (r && Array.isArray(r.findings)) ? r.findings : [] };
+        })
         .catch(() => {
           log(`  ${repo}#${pr}: round ${round} — the ${lens} reviewer${jurorsPerLens > 1 ? ` (juror ${juror + 1}/${jurorsPerLens})` : ''} FAILED to run.`);
           return { ok: false, findings: [] };
         }),
     )).then((jurors) => reduceLensJury(lens, jurors)),
   ));
-  return lensResults;
+  return { lensResults, invites };
+}
+
+/** Apply a grounded juror invite (#2640) — shell the shared review core (`review-core-cli invite` =
+ *  `deriveJurorInvite`) via the invite agent to get the jury-growth DELTA (raise care → recompute rigor → spawn only
+ *  the delta, bounded by the per-care-band ceiling).
+ *
+ *  TRUST BOUNDARY (gate-self fix, #2640): `deriveJurorInvite` is GROW-ONLY by construction — its `seatedLenses` is
+ *  `current ∪ invited` (a superset) and its `jurorsPerLens` is the raised band's dial (≥ current). But the sandbox
+ *  cannot `import` the pure core (see the header) — the CLI runs inside an AGENT, and an agent's ECHO cannot be
+ *  trusted to have preserved that grow-only shape (a prompt-injected/misbehaving invite agent could echo
+ *  `{ jurorsPerLens: 1, seatedLenses: ['simplicity'] }` and SHRINK the panel, dropping the mandatory
+ *  correctness/security lenses). So we do NOT take the echoed roster/count as authoritative; we RE-DERIVE the
+ *  grow-only result from the loop's OWN known inputs (`seatedLenses`, `jurorsPerLens`, `invite.lens`) and apply the
+ *  same invariants the pure core guarantees:
+ *    • `seatedLenses` result = `current ∪ {invite.lens} ∪ echoed-added` — a SUPERSET of the current roster, so a
+ *      seated (esp. mandatory) lens can never be dropped, whatever the echo says.
+ *    • `jurorsPerLens` result = `min(CEILING, max(current, echoed))` — floored at the current count (grow-only) and
+ *      capped at the ceiling. An echoed `1` cannot shrink a 2-juror panel.
+ *  The echo is thus advisory ONLY (accept/reject + the ceiling-bounded target); the grow-only property is enforced
+ *  here from state the attacker does not control. Returns the normalized delta, or null if the agent could not run
+ *  (the caller then falls through to a normal editor round). */
+async function applyJurorInvite(item, careLevel, seatedLenses, jurorsPerLens, invite) {
+  const r = await agent(invitePrompt(item, careLevel, seatedLenses, jurorsPerLens, invite), { label: `invite:${prTag(item)}`, phase: 'Converge', schema: INVITE_SCHEMA }).catch(() => null);
+  if (!r) return null;
+  // Re-derive the roster as a GROW-ONLY union from KNOWN loop inputs — never the echoed seatedLenses verbatim. The
+  // current roster is always ⊆ the result, so no lens (least of all a mandatory one) can be dropped by the echo.
+  // MIRRORS the tested spec `growOnlyRoster` in review-core.mjs (the sandbox cannot import it).
+  const echoedAdded = Array.isArray(r.addedLenses)
+    ? r.addedLenses.map((a) => (a && typeof a.lens === 'string' ? a.lens.trim() : '')).filter(Boolean)
+    : [];
+  const grownSeated = [...new Set([...seatedLenses, invite.lens, ...echoedAdded])];
+  // Floor at the CURRENT per-lens count (grow-only) and cap at the ceiling — an echoed count may only GROW the
+  // panel, never shrink it (parity with the round-cap body backstop). max(current, …) is the shrink-hole floor.
+  // MIRRORS the tested spec `floorGrowOnlyJurors(current, echoed, ceiling)` in review-core.mjs.
+  const echoedPerLens = (Number.isFinite(Number(r.jurorsPerLens)) && Number(r.jurorsPerLens) >= 1) ? Math.floor(Number(r.jurorsPerLens)) : jurorsPerLens;
+  const grownPerLens = Math.min(JURORS_PER_LENS_CEILING, Math.max(jurorsPerLens, echoedPerLens));
+  return {
+    accepted: r.accepted === true,
+    reason: (typeof r.reason === 'string' && r.reason) ? r.reason : null,
+    toCareLevel: (typeof r.toCareLevel === 'string' && r.toCareLevel) ? r.toCareLevel : careLevel,
+    jurorsPerLens: grownPerLens,
+    seatedLenses: grownSeated,
+    atCeiling: r.atCeiling === true,
+    addedLenses: Array.isArray(r.addedLenses) ? r.addedLenses : [],
+  };
 }
 
 /** Reduce ONE panel round to a verdict + disposition + comment + the negotiation OUTCOME, via the review-core CLI
@@ -615,10 +772,17 @@ async function runPanelRound(pr, repo, diff, escalationReason, title, round, jur
  *  round revises against. */
 async function reducePanelRound(pr, repo, lensResults, escalationReason, fetchOk, round, roundCap) {
   const failedLenses = lensResults.filter((r) => !r.ok).map((r) => r.lens);
-  const failedMandatory = failedLenses.filter((l) => MANDATORY_LENSES.includes(l));
-  const degrade = failedMandatory.length > 0 || !fetchOk;
+  // ABSENT, not just failed (gate-self fix, #2640): a mandatory lens degrades the round if it is not PRESENT-and-OK
+  // in the results — whether it ran-and-errored OR was never scheduled at all (dropped from the roster). Keying the
+  // safety net on `failedLenses` alone missed the never-scheduled case, so a shrunk roster with no mandatory lens
+  // scheduled saw zero failures and could reduce to accept → land with NO correctness/security review. Deriving from
+  // the OK set (present ∧ ran) closes that: a mandatory lens absent for ANY reason → degrade to needs-human.
+  // MIRRORS the tested spec `absentMandatoryLenses(ranOkLenses)` in review-core.mjs.
+  const okLensSet = new Set(lensResults.filter((r) => r.ok).map((r) => r.lens));
+  const absentMandatory = MANDATORY_LENSES.filter((l) => !okLensSet.has(l));
+  const degrade = absentMandatory.length > 0 || !fetchOk;
   if (degrade) {
-    const why = !fetchOk ? 'the diff could not be fetched' : `mandatory reviewer(s) failed to run: ${failedMandatory.join(', ')}`;
+    const why = !fetchOk ? 'the diff could not be fetched' : `mandatory reviewer(s) absent (did not run/not scheduled): ${absentMandatory.join(', ')}`;
     log(`  ${repo}#${pr}: round ${round} DEGRADING to needs-human — ${why} (a reviewer that did not run NEVER reads as accept).`);
   }
 
@@ -685,7 +849,14 @@ async function convergePr(item) {
     log(`  ${prTag(item)}: FETCH failed${fetched && fetched.error ? ` (${fetched.error})` : ''} — no diff to judge; this PR degrades to needs-human.`);
   }
 
-  const { careLevel, jurorsPerLens, roundCap } = await careRigorFor(item, escalationReason);
+  // The roster is MUTABLE across rounds — a juror-invite-on-discovery (#2640) can grow it mid-loop (raise care →
+  // recompute rigor → spawn the delta). It starts at the PR's care-dialed size and only ever grows, bounded by the
+  // per-care-band ceiling. `roundCap` is FIXED at loop start (an invite spends rounds against it, never extends it).
+  let careLevel = null;
+  let jurorsPerLens = null;
+  let roundCap = null;
+  ({ careLevel, jurorsPerLens, roundCap } = await careRigorFor(item, escalationReason));
+  let activeLenses = [...LENSES];
   log(`  ${prTag(item)}: care=${careLevel}, ${jurorsPerLens} juror(s)/lens, roundCap=${roundCap}${escalationReason.length ? `; escalated for ${escalationReason.join('; ')}` : ''}.`);
 
   const dismissedFindings = [];
@@ -693,7 +864,7 @@ async function convergePr(item) {
   let last = null;
 
   while (true) {
-    const lensResults = await runPanelRound(pr, repo, diff, escalationReason, title, round, jurorsPerLens);
+    const { lensResults, invites } = await runPanelRound(pr, repo, diff, escalationReason, title, round, activeLenses, jurorsPerLens);
     const ran = lensResults.filter((r) => r.ok).map((r) => `${r.lens}:${r.findings.length}`).join(', ');
     const failed = lensResults.filter((r) => !r.ok).map((r) => r.lens);
     log(`  ${prTag(item)}: round ${round} panel — ran [${ran || 'none'}]${failed.length ? `; FAILED [${failed.join(', ')}]` : ''}.`);
@@ -711,6 +882,45 @@ async function convergePr(item) {
 
     // `land` (accept) or `escalate` (deadlock / needs-human) → the loop is done for this PR.
     if (last.outcome !== OUTCOME_CONTINUE) break;
+
+    // #2640 — JUROR-INVITE-ON-DISCOVERY. Before an editor round, if a juror surfaced a GROUNDED discovery of a
+    // failure axis this roster under-guards, GROW the jury by the delta (care recompute, single-sourced via the
+    // CLI) and re-review the SAME diff with the grown roster — the discovery deserves a fresh, larger jury before
+    // an editor revises. The invite SPENDS this round-trip and NEVER resets the counter (`round` advances below);
+    // a chain of invites is therefore hard-bounded by the same `roundCap`, and the grown jury is bounded by the
+    // per-care-band ceiling (an `at-ceiling` invite adds nothing and falls through to the editor round).
+    const invite = pickGroundedInvite(invites);
+    if (invite) {
+      const grown = await applyJurorInvite(item, careLevel, activeLenses, jurorsPerLens, invite);
+      if (grown && grown.accepted && grown.addedLenses.length) {
+        careLevel = grown.toCareLevel;
+        jurorsPerLens = grown.jurorsPerLens;
+        // GROW-ONLY (gate-self fix, #2640): UNION the current roster with the grown set — NEVER replace it. Replacing
+        // would let a shrunk/echoed roster DROP the mandatory correctness/security lenses mid-loop; a union can only
+        // add. Keep only lenses the diff-text panel can seat (a perspective lens needs a grounding method not run
+        // here) — but a mandatory lens, always seatable, can never be filtered out of the current roster.
+        // MIRRORS the tested spec `growOnlyRoster` in review-core.mjs (union, never replace).
+        const grownSeatable = grown.seatedLenses.filter((l) => LENSES.includes(l));
+        activeLenses = [...new Set([...activeLenses, ...grownSeatable])];
+        log(`  ${prTag(item)}: round ${round} JUROR INVITE (${invite.from} → ${invite.lens}, cited: "${invite.citedFinding.slice(0, 80)}") accepted — care→${careLevel}, ${jurorsPerLens} juror(s)/lens; re-reviewing with the grown jury (spends a round, does NOT reset the counter).`);
+        round += 1;
+        // The grown jury lives under the SAME round cap — an invite cannot dodge it by restarting the budget.
+        if (round > roundCap) {
+          log(`  ${prTag(item)}: the invite would exceed the round cap (${roundCap}) — escalating (deadlock → review:human).`);
+          last = { ...last, outcome: OUTCOME_ESCALATE, verdict: 'needs-human', disposition: { mode: 'human', autoLand: false } };
+          break;
+        }
+        // Re-fetch the CURRENT diff (no editor this pass — the grown jury re-judges the same code) and re-review.
+        fetched = await agent(fetchPrompt(pr, repo, round), { label: `fetch:${prTag(item)}:r${round}`, phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
+        diff = (fetched && typeof fetched.diff === 'string') ? fetched.diff : diff;
+        fetchOk = !!(fetched && !fetched.error && diff.length > 0);
+        if (!fetchOk) log(`  ${prTag(item)}: round ${round} re-fetch failed — the round will degrade to needs-human.`);
+        continue;
+      }
+      if (grown && !grown.accepted) {
+        log(`  ${prTag(item)}: round ${round} juror invite (${invite.from} → ${invite.lens}) NOT applied (${grown.reason || 'no delta'}) — proceeding to the editor round.`);
+      }
+    }
 
     // `continue` → an editor round revises the diff, then the next round re-reviews the revision.
     const edit = await editorRound(pr, repo, last.findings, round, roundCap);
