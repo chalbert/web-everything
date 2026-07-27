@@ -170,6 +170,71 @@ describe('pr-merge-gate — scanTestTampering (#2440 the deterministic gate)', (
     expect(scanTestTampering({ diffText: bare }).findings[0].kind).toBe('test-skipped');
     expect(scanTestTampering({ diffText: method }).tampered).toBe(false);
   });
+  it('catches an ADDED .skip.each / .only.each parameterized marker (#2669 — old \\( -only anchor let it bypass)', () => {
+    const skipEach = 'diff --git a/x.test.mjs b/x.test.mjs\n@@\n+  it.skip.each([[1], [2]])(\'flaky %s\', () => {});';
+    const onlyEach = 'diff --git a/x.test.mjs b/x.test.mjs\n@@\n+  test.only.each([[1]])(\'just this\', () => {});';
+    const onlyEachTpl = 'diff --git a/x.test.mjs b/x.test.mjs\n@@\n+  describe.only.each`a | b`(\'tpl\', () => {});';
+    expect(scanTestTampering({ diffText: skipEach }).findings[0].kind).toBe('test-skipped');
+    expect(scanTestTampering({ diffText: onlyEach }).findings[0].kind).toBe('test-skipped');
+    expect(scanTestTampering({ diffText: onlyEachTpl }).findings[0].kind).toBe('test-skipped');
+  });
+  it('catches a line-wrapped .skip whose ( wrapped to the next line (#2669 — diff scans per-line)', () => {
+    // A prettier-wrapped `it.skip(\n  'name', …)` leaves `it.skip` alone on the added line; the old
+    // `(`-must-follow anchor missed it. `it.skip` at end-of-line now reads as the skip it is.
+    const wrapped = 'diff --git a/x.test.mjs b/x.test.mjs\n@@\n+  it.skip';
+    expect(scanTestTampering({ diffText: wrapped }).findings[0].kind).toBe('test-skipped');
+  });
+  it('does NOT false-positive on a `.skip`-prefixed identifier or non-test dotted call (#2669 regression)', () => {
+    // The widened skip/only tail (`.each` | `(` | EOL) must not read `obj.skipList(` or a `.only` chained
+    // off a non-test callee as a skip marker.
+    const diff = [
+      'diff --git a/scripts/__tests__/x.test.mjs b/scripts/__tests__/x.test.mjs',
+      '@@',
+      "+  it('adds real coverage', () => {",
+      '+    const rows = query.skipList(3);',
+      '+    const first = list.only;',
+      '+    expect(rows.length).toBe(first);',
+      '+  });',
+    ].join('\n');
+    expect(scanTestTampering({ diffText: diff }).tampered).toBe(false);
+  });
+  it('does NOT count a .test(\'literal\') assertion as a test-case opener (#2669 — false-positive removal)', () => {
+    // Consolidating inline `RE.test('sample')` assertions in a *.test.mjs file is a legitimate refactor that
+    // nets a removal of `.test('…')` method calls. The old opener regex counted those as removed `it(`/`test(`
+    // cases and mis-parked the couple review:human. The `.test('…')` method-call form must not count.
+    const diff = [
+      'diff --git a/scripts/__tests__/regex.test.mjs b/scripts/__tests__/regex.test.mjs',
+      '@@',
+      "-    expect(RE.test('alpha')).toBe(true);",
+      "-    expect(RE.test('beta')).toBe(true);",
+      "-    expect(RE.test('gamma')).toBe(false);",
+      "+    for (const [s, want] of cases) expect(RE.test(s)).toBe(want);",
+    ].join('\n');
+    expect(scanTestTampering({ diffText: diff }).tampered).toBe(false);
+  });
+  it('still counts genuine it(\'…\')/test(\'…\') openers after excluding the .test() method form (#2669)', () => {
+    // The exclusion must be surgical: a real removed `it('…')` / `test('…')` opener still counts, even amid
+    // `.test('…')` assertions on the same removed lines.
+    const diff = [
+      'diff --git a/scripts/__tests__/x.test.mjs b/scripts/__tests__/x.test.mjs',
+      '@@',
+      "-  it('case one', () => { expect(RE.test('a')).toBe(true); });",
+      "-  test('case two', () => { expect(RE.test('b')).toBe(false); });",
+      "+  it('merged', () => {});",
+    ].join('\n');
+    const r = scanTestTampering({ diffText: diff });
+    expect(r.tampered).toBe(true);
+    expect(r.findings.some((f) => f.kind === 'tests-removed')).toBe(true);
+  });
+  it('keeps common non-skip lines clean despite the widened end-of-line tail (#2669 residual boundary)', () => {
+    // The `$` tail catches a line-wrapped bare `it.skip`, so its false-positive surface is a line ENDING
+    // exactly at `.skip`/`.only`. The common terminated reference and any mid-line string stay clean — the
+    // safe-direction residual (over-park at most, never a missed tamper) documented in the spec.
+    const terminatedRef = 'diff --git a/x.test.mjs b/x.test.mjs\n@@\n+  const focused = test.only;';
+    const midLineString = 'diff --git a/x.test.mjs b/x.test.mjs\n@@\n+  const note = \'todo: drop the it.skip before merge\';';
+    expect(scanTestTampering({ diffText: terminatedRef }).tampered).toBe(false);
+    expect(scanTestTampering({ diffText: midLineString }).tampered).toBe(false);
+  });
   it('flags NET removal of test cases (removed openers exceed added)', () => {
     const diff = [
       'diff --git a/scripts/__tests__/x.test.mjs b/scripts/__tests__/x.test.mjs',
