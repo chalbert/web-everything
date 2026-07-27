@@ -1,4 +1,5 @@
 ---
+bornAs: xzb1yg6
 kind: story
 size: 2
 parent: "2555"

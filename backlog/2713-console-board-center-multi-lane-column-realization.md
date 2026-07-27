@@ -1,4 +1,5 @@
 ---
+bornAs: xm5ik4u
 kind: story
 size: 5
 parent: "2555"

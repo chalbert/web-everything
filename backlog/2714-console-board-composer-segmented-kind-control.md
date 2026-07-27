@@ -1,4 +1,5 @@
 ---
+bornAs: xpawa1p
 kind: story
 size: 2
 parent: "2555"
