@@ -194,8 +194,29 @@ _Each buildable child carved off (the A2 stopgap; the #2683 merge-queue build) t
   lock, as the correctness layer?
 - **throughput:** is `require-up-to-date` shipped with batching when Lever 0 shows saturation (no O(n²) livelock)?
 
+## Undefer plan (this deferral has a tripwire, it is NOT open-ended)
+
+This is a **validation gate**, not a merit fork — so the "defer" is only legitimate with a concrete, tracked
+plan to un-defer. Lever 0 (#2680, **resolved**) already *instruments* the trigger signal; but instrumenting is
+not watching. The plan is made real by a tracked monitor that watches the signal and fires the build:
+
+- **Un-gate CONDITION (measurable):** **k > 1 ready PRs queued behind the sole serial writer, sustained across
+  the measured window** — not a one-off spike — as reported by the Lever-0 instrument
+  (`we:scripts/readiness/conveyor-instrument.mjs`, #2680): its `land-serialization` phase + ready-PRs-behind-writer
+  depth. Below k>1, or a single-tick burst, the polling drain stays and the build stays deferred.
+- **Un-gate ACTION (what fires):** build the deferred merge-queue layer = **Fork 1 default (c)** speculative
+  merge-commit preserving the signed SHA + **Fork 2 default (b)** per-step CAS / idempotent guards, plus the
+  batching rider (co-ships with require-up-to-date when the gate opens). The two hardest calls are already ruled
+  here, so the build slice #2683 arrives at Definition of Ready, not re-litigation.
+- **The MECHANISM that fires it:** the tracked tripwire item **#x955xwn** ("Un-gate tripwire: fire the #2692
+  event-driven merge-queue build when Lever-0 shows sustained landing-queue saturation", `blockedBy: #2680`,
+  which is resolved → ready to build once this call is ratified). It reads #2680's saturation metric and, on a
+  sustained k>1-behind-writer trip, surfaces/queues #2683 to the conveyor automatically. The deferral thus
+  un-defers *itself* on measured saturation, rather than depending on someone remembering to look.
+
 ## Lineage
 
 Outer escalation: `we:reports/2026-07-26-conveyor-per-item-latency.md` §5. Deep design + 10-round evidence:
 `we:reports/2026-07-27-lever-c-landing-merge-queue-design.md`. Slice #2683 is the build; this decision gates it.
-Program #2606 / epic #2612. The convergence loop's own mechanization is #xvwmwkx.
+The tracked tripwire that un-defers it is **#x955xwn** (reads #2680's saturation metric, fires #2683 on sustained
+k>1-behind-writer). Program #2606 / epic #2612. The convergence loop's own mechanization is #xvwmwkx.
