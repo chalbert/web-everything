@@ -3003,6 +3003,52 @@ half authored once upstream; dispatch is the deterministic half that only consum
 
 ---
 
+### Event-driven land is WAKE-only — one polling drain stays the sole writer; a webhook may wake it, never add a second writer; the merge-queue build defers behind measured saturation {#event-driven-land-is-wake-only}
+
+**Ratified 2026-07-27 (operator; #2692, bornAs xwysuk4).** How "event-driven land" (Lever C) may and may not be
+built, on top of the sole-writer-to-`main` invariant ([#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism)).
+Four clauses:
+
+1. **Landing stays ONE logical writer — a single polling drain.** An event or webhook (a PR reaching ready, a
+   `POST /nudge`) may **WAKE** that one daemon so it lands sooner; it may **never** add a second writer or a fence.
+   The **second-writer / fencing-failover / borrow-the-lease** path is **closed on the merits — do not reopen**: it
+   is *unbuildable-safely on GitHub* (the merge-API `sha` guards the PR *head*, not base `main`; there is no
+   token-fenced main-write) **and** dominated by simply supervising one live writer. A wake signal is never a
+   trusted land order — the daemon's own pre-land gate is still re-derived server-side
+   (`we:scripts/lib/pr-merge-gate.mjs`); authority does not move earlier just because the trigger does.
+
+2. **The cheap WAKE ships now, independent of everything below.** Shorten the drain poll default (60s → ~5–10s,
+   one constant) and fire the daemon's `/nudge` on a PR-reaching-ready event. One constant plus one event wire —
+   **no second writer, no transaction question.** The interval floor **stays** (push is an accelerator, not a
+   replacement — #2605). Tracked as the WAKE-remainder story (built on the #2605 `/nudge` seam and the #2683
+   conveyor fast-drain trigger).
+
+3. **The full event-driven MERGE-QUEUE build is DEFERRED, not cancelled, behind a MEASURED saturation trigger.**
+   The deep build — speculative merge-commit preserving the signed-off SHA, per-step CAS/idempotent
+   transaction-tail guards, and the batching rider — is a real merge-queue-with-sign-off-integrity, not a quick
+   lever. It waits on **measured `land-serialization` saturation** (#2680's metric: **k > 1 ready PRs queued behind
+   the sole writer, sustained over the window** — not a one-off spike). Until the trigger fires, the deferral is
+   legitimate; the ruled defaults are pre-attached so no re-litigation is needed when it does.
+
+4. **The tripwire SURFACES-AND-ROUTES — it never silent-fires an unattended build.** On sustained saturation the
+   tripwire (#2740) **surfaces / flips #2683's `buildQueued`** *and* **routes the build through the criticality
+   decision-routing (#2704, `we:scripts/lib/decision-routing.mjs`)** — which may require **operator confirm** for a
+   safety-critical merge-queue build. It does **not** autonomously execute the build. "Plan to undefer" means *auto-surface +
+   route by stakes*, never *auto-execute*: the un-gate becomes visible and correctly-routed on measured evidence,
+   and a human still owns the go on a high-stakes build.
+
+**Lineage:** #2692 (ratified 2026-07-27, operator; bornAs xwysuk4; ten-round high-care design-jury red-team,
+`we:reports/2026-07-27-lever-c-landing-merge-queue-design.md`). **Closes the second-writer / fencing branch on the
+merits** (clause 1). WAKE ships now (clause 2) = #2605 (drain-daemon `/nudge` seam) + #2683 (conveyor fast-drain
+trigger, resolved) + the WAKE-remainder story `#xs9t6l5`. Deferred merge-queue build (clause 3) = slice #2683's
+successor, gated behind tripwire **#2740** reading #2680's `land-serialization` saturation metric, **routed** by
+**#2704** (clause 4). Program #2606 / epic #2612. Extends [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism)
+(sole-writer-to-`main`) and composes with
+[#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (the wake/land mechanics are script-decidable;
+the high-stakes un-gate stays a routed judgment call).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
