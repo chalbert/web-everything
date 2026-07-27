@@ -17,3 +17,15 @@ The DELEGATE half of #2677(b): a **headless runner** (under `we:skills-src/conve
 Build conditions from #2701: (1) durable guard state surviving a runner restart — delivered in #2699; (2) a **singleton lock** on the runner so two runners never double-dispatch the same lane/item (mirrors the drain daemon's sole-writer discipline) — the one net-new build condition.
 
 Still BLOCKED only on #2699 (the mechanical core the runner drives must exist first); the #2701 boundary is now ratified, so the framing is settled.
+
+## Scope note (kept dir-level — justified; #2619 finer-lease)
+
+Kept at `we:skills-src/conveyor/` on purpose rather than forced to a speculative file list. The build creates NEW
+files (the headless runner + its singleton-lock module + its test), and this item is still **blocked on #2699**, so
+predicting their exact filenames now would be a guess — and a scope narrower than the real touch-set breaches at build
+time. `we:skills-src/conveyor/` is already a small, focused dir (the conveyor skill briefs), and nothing but the
+in-flight #2641 shares it, so this item is already scope-disjoint from the other queued items (#2665, #2707, #2684,
+#2661) at the dir level — narrowing would buy no extra parallelism. The runner *drives* the #2699 tick-core
+(`we:scripts/conveyor/tick-core.mjs`) by importing it read-only, so tick-core is deliberately NOT in scope (scope is
+the write-set, not the import graph). Re-narrow to the concrete new filenames once #2699 lands and the runner's files
+are known.

@@ -7,7 +7,11 @@ parent: "2636"
 status: open
 blockedBy: ["2639"]
 relatedTo: ["2500"]
-scope: ["we:scripts/lib/", "we:scripts/conveyor/", "we:skills-src/conveyor/"]
+scope:
+  - we:scripts/lib/
+  - we:scripts/conveyor/
+  - we:skills-src/conveyor/
+  - we:scripts/workflows/review-parked-prs.mjs
 dateOpened: "2026-07-23"
 tags: []
 ---
@@ -21,6 +25,18 @@ Make the jury observable — this is what turns the conveyor improvement that st
 **Guardrail — the fold is written once, never two copies.** There must be exactly ONE fold module (in the WE core, [we:scripts/lib/](scripts/lib/)); the conveyor and the plateau-app console both call it. A second copy of the fold logic in either consumer is a bug. `we:scripts/workflows/review-parked-prs.mjs` already *returns a ledger and nothing else* — evolve it to append events to the durable log, and pipe the shared fold's output into the conveyor loop ([we:scripts/conveyor/](scripts/conveyor/), `we:skills-src/conveyor/`) so an operator sees what the jury is, is doing, and has found.
 
 **Size grows accordingly** — bumped 5 → 8: this is no longer an in-memory ledger return but a durable event log plus a shared fold with two consumers. Depends on the convergence loop producing the round-by-round events.
+
+## Scope note (kept dir-level — justified; #2619 finer-lease)
+
+This item is deliberately **kept dir-level**, not forced to file granularity: it is an inherently cross-cutting
+integration — a durable append-only event log, ONE shared fold module, and TWO consumers (the conveyor tick and the
+#2642 console). It legitimately spans `we:scripts/lib/` (the single shared fold, a new module), `we:scripts/conveyor/`
+(the loop that renders the `/workflows`-style tree), and `we:skills-src/conveyor/` (the operator-facing surface).
+`we:scripts/workflows/review-parked-prs.mjs` is **added** to the scope: the story explicitly evolves that file to
+append events to the durable log, and the prior scope silently omitted `we:scripts/workflows/` (an under-scope the
+build would have breached). Because this hub holds `we:scripts/lib/` and `we:scripts/conveyor/` whole, the narrowed
+sibling items (#2665, #2707, #2684, #2661, #2702) serialize BEHIND it while it builds, then parallelize among
+themselves once it lands. Only broadened here (never narrowed) so the in-flight build's lease is undisturbed.
 
 ## Reconcile with #2500 (ratified: KEEP #2500)
 
