@@ -6,6 +6,10 @@ status: open
 blockedBy: [2376, 2377]
 dateOpened: "2026-07-09"
 tags: []
+scope:
+  - we:tests/a11y/sitemap-routes.ts
+  - we:tests/a11y/rendered-site-a11y.spec.ts
+  - we:tests/a11y/__tests__/sitemap-routes.test.ts
 ---
 
 # Promote measured-green a11y routes + add the self-announcing drain trigger
