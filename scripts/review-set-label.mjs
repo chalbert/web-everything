@@ -1,15 +1,17 @@
 /**
- * review-set-label.mjs — swap a PARKED PR's review label, INVARIANT-2 guarded (#2470, increment 2 of 2).
- *
- * The WRITE half of the Plateau Loop review console. A PURE `decideSetLabel` decides the label swap for a
- * reviewer verdict (`accepted` / `changes`), and a thin `gh`-shelling CLI applies it and posts a durable
- * verdict comment. Single-sourced in WE (Native-First / zero standard-impl here — this is a definition + write
- * tool, not product code) so the plateau console shells it rather than re-implementing how a verdict lands.
+ * review-set-label.mjs — swap a PR's review label, INVARIANT-2 guarded (#2470, increment 2 of 2). Also the
+ * SINGLE HOME of the shared review-label CLI harness (#2644): a PURE `decideSetLabel` decides the swap for a
+ * reviewer verdict (`accepted` / `changes`) OR the fix-agent re-arm (`rearm`), and a thin `runReviewLabelCli`
+ * does the `gh` observe→edit→comment→re-read arc. The conveyor's `rearm-review.mjs` is now a THIN shim over
+ * both (it used to clone this file byte-for-byte). Single-sourced in WE (Native-First / zero standard-impl here
+ * — this is a definition + write tool, not product code) so the plateau console and the conveyor fix agent both
+ * shell/import it rather than re-implementing how a label swap lands.
  *
  * INVARIANT 2 (the whole point): a `review:human` PR is NEVER cleared to `review:accepted` by anything but a
  * human's /review ceremony. `decideSetLabel` REFUSES `to==='accepted'` when the PR carries `review:human`
  * (`gate-self` is human-ceremony-only). The refusal lives in the PURE core so it is unbypassable — the CLI
- * cannot route around it. Do NOT weaken it.
+ * cannot route around it. Do NOT weaken it. The `rearm` target carries the sibling #2630 invariant: an auto-fix
+ * re-arms `review:changes → review:pending` but NEVER emits `review:accepted` and NEVER removes `review:human`.
  *
  * Split mirrors `we:scripts/review-detail.mjs`: a PURE decider that takes the already-observed labels and
  * returns the swap, plus a thin impure CLI that does the `gh` calls and prints. REUSES
@@ -24,21 +26,54 @@ import { join } from 'node:path';
 import { REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
 
 /**
- * we:scripts/review-set-label.mjs#decideSetLabel — the PURE verdict-label decision. Given the target verdict
- * `to` and the PR's OBSERVED labels, return the label swap. INVARIANT 2 is enforced HERE (unbypassable): an
- * `accepted` verdict on a `review:human` PR is REFUSED — only a human's /review ceremony may clear the human
- * gate. A `changes` verdict is always allowed (a bounce lands nothing) and NEVER removes `review:human`.
- * @param {{to:('accepted'|'changes'), currentLabels?:Array}} o - `currentLabels` is the observed label array
- *   (string or `{name}` shape, per `hasReviewLabel`).
- * @returns {{allowed:boolean, addLabel:string, removeLabels:string[], reason:string}}
+ * we:scripts/review-set-label.mjs#decideSetLabel — the PURE verdict-label decision. Given the target `to` and
+ * the PR's OBSERVED labels, return the label swap. Three targets, each with its invariant enforced HERE
+ * (unbypassable): the reviewer verdicts `accepted` / `changes`, and the conveyor fix-agent `rearm` (#2644, was
+ * `decideRearm`). Every return carries `keepsHuman` — whether the swap leaves `review:human` in place.
+ *   • `accepted` — INVARIANT 2: REFUSED on a `review:human` PR (only a human's /review may clear the gate);
+ *     otherwise adds `review:accepted`, drops the parked `review:pending`.
+ *   • `changes` — always allowed (a bounce lands nothing); adds `review:changes`, drops `review:pending` AND a
+ *     stale `review:accepted`, but NEVER `review:human`.
+ *   • `rearm` — the #2630 invariant: ONLY a live `review:changes` is re-armable (idempotent — a second call
+ *     refuses cleanly); the swap is ALWAYS `review:changes → review:pending`, NEVER `review:accepted`, and
+ *     NEVER removes `review:human`. The strongest thing an auto-fix can do is re-arm the review, never clear it.
+ * @param {{to:('accepted'|'changes'|'rearm'), currentLabels?:Array}} o - `currentLabels` is the observed label
+ *   array (string or `{name}` shape, per `hasReviewLabel`).
+ * @returns {{allowed:boolean, addLabel:string, removeLabels:string[], keepsHuman:boolean, reason:string}}
  */
 export function decideSetLabel({ to, currentLabels = [] } = {}) {
-  // we:scripts/review-set-label.mjs#decideSetLabel — only the two reviewer verdicts are valid targets.
-  if (to !== 'accepted' && to !== 'changes') {
-    throw new Error(`decideSetLabel: unknown verdict '${to}' — expected 'accepted' or 'changes'`);
+  // we:scripts/review-set-label.mjs#decideSetLabel — only the three verdict targets are valid.
+  if (to !== 'accepted' && to !== 'changes' && to !== 'rearm') {
+    throw new Error(`decideSetLabel: unknown verdict '${to}' — expected 'accepted', 'changes', or 'rearm'`);
   }
 
   const isHuman = hasReviewLabel(currentLabels, REVIEW_LABELS.human);
+
+  // we:scripts/review-set-label.mjs#decideSetLabel — rearm (#2644, folded in from the old conveyor decideRearm).
+  // The conveyor fix agent hands a repaired review:changes bounce back for re-review. ONLY a live review:changes
+  // is re-armable (idempotent no-op otherwise — what makes a second call after the swap safe). The swap is ALWAYS
+  // changes→pending, NEVER adds review:accepted, and NEVER removes review:human — the #2630 invariant, enforced
+  // HERE in the pure core so the CLI cannot route around it.
+  if (to === 'rearm') {
+    if (!hasReviewLabel(currentLabels, REVIEW_LABELS.changes)) {
+      return {
+        allowed: false,
+        addLabel: '',
+        removeLabels: [],
+        keepsHuman: isHuman,
+        reason: 'no review:changes label — nothing to re-arm (the PR is not a bounce awaiting repair)',
+      };
+    }
+    return {
+      allowed: true,
+      addLabel: REVIEW_LABELS.pending,
+      removeLabels: [REVIEW_LABELS.changes],
+      keepsHuman: isHuman,
+      reason: isHuman
+        ? 're-armed — review:changes→review:pending; review:human KEPT (gate-self stays human-ceremony-only)'
+        : 're-armed — review:changes→review:pending; drain AI-review (or a human) re-verdicts',
+    };
+  }
 
   // we:scripts/review-set-label.mjs#decideSetLabel — INVARIANT 2: never clear review:human to accepted here.
   if (to === 'accepted' && isHuman) {
@@ -46,6 +81,7 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
       allowed: false,
       addLabel: '',
       removeLabels: [],
+      keepsHuman: isHuman,
       reason: 'gate-self: review:human is human-ceremony-only — clear via /review in a session',
     };
   }
@@ -57,6 +93,7 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
       allowed: true,
       addLabel: REVIEW_LABELS.accepted,
       removeLabels: [REVIEW_LABELS.pending],
+      keepsHuman: isHuman,
       reason: 'accepted — reviewer accepted; drain may merge',
     };
   }
@@ -69,6 +106,7 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
     allowed: true,
     addLabel: REVIEW_LABELS.changes,
     removeLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.accepted],
+    keepsHuman: isHuman,
     reason: 'changes — author lane fixes hot-context and re-pushes',
   };
 }
@@ -86,51 +124,89 @@ export function presentRemoveLabels(removeLabels, currentLabels) {
   return (Array.isArray(removeLabels) ? removeLabels : []).filter((l) => hasReviewLabel(currentLabels, l));
 }
 
-// we:scripts/review-set-label.mjs — allow importing the pure decider without running the CLI (the test file
-// imports this module). The standard main check used in `we:scripts/review-detail.mjs`.
-const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
-if (IS_CLI) runCli();
+/**
+ * we:scripts/review-set-label.mjs#runReviewLabelCli — the SHARED review-label CLI harness (#2644). Both this
+ * file's reviewer-verdict CLI and the conveyor `rearm-review.mjs` run this SAME observe→decide→edit→comment→
+ * re-read arc against `gh`; only three things differ and they arrive as config (exactly the deltas #2644 names):
+ *   • `defaultActor` — who the durable comment is attributed to;
+ *   • `buildComment({ to, actor, decision }) => string` — the comment body;
+ *   • `repoOptional` — when true a missing `--repo` is derived from the cwd repo (`gh repo view`; the fix agent
+ *     runs inside its own lane clone, so cwd IS the PR's repo); when false `--repo` is required.
+ * `fixedTo` pins the verdict (rearm) or, when null, the harness parses + validates `--to` (accepted/changes).
+ * The printed payload shapes stay the caller's, via `successResult`/`refusalResult`. Impure (shells gh); the
+ * PURE `decideSetLabel` above owns every invariant, so this harness only moves bytes. Fails closed — every input
+ * is validated BEFORE any gh mutation, and any gh error exits non-zero without a partial swap.
+ * @param {{argv?:string[], fixedTo?:string|null, defaultActor:string, repoOptional?:boolean, usage:string,
+ *   buildComment:(o:{to:string,actor:string,decision:object})=>string,
+ *   successResult:(o:{pr:number,to:string,decision:object,labels:string[]})=>object,
+ *   refusalResult:(o:{pr:number,decision:object})=>object}} cfg
+ */
+export function runReviewLabelCli({
+  argv = process.argv.slice(2),
+  fixedTo = null,
+  defaultActor,
+  repoOptional = false,
+  usage,
+  buildComment,
+  successResult,
+  refusalResult,
+} = {}) {
+  let repo = (argv.find((a) => a.startsWith('--repo=')) || '').slice('--repo='.length);
+  const actorArg = (argv.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length);
+  const actor = actorArg || defaultActor;
+  const pr = argv.find((a) => /^\d+$/.test(a));
+  const to = fixedTo || (argv.find((a) => a.startsWith('--to=')) || '').slice('--to='.length);
 
-function runCli() {
-  const args = process.argv.slice(2);
-  const repo = (args.find((a) => a.startsWith('--repo=')) || '').slice('--repo='.length);
-  const to = (args.find((a) => a.startsWith('--to=')) || '').slice('--to='.length);
-  const actorArg = (args.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length);
-  const actor = actorArg || 'loop-console operator';
-  const pr = args.find((a) => /^\d+$/.test(a));
-
-  // we:scripts/review-set-label.mjs#runCli — validate every input BEFORE any `gh` call (fail closed).
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — validate every input BEFORE any gh call (fail closed).
+  const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
   if (!pr || !/^\d+$/.test(pr) || Number(pr) <= 0) {
-    fail('usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes [--actor=<name>]  (pr must be a positive integer)');
+    fail(usage);
   }
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+  // A PRESENT --repo is ALWAYS validated up front (a typo fails closed before any gh call), whether or not
+  // --repo is optional. An ABSENT --repo fails here only when it is REQUIRED; when optional it is derived below.
+  if (repo ? !REPO_RE.test(repo) : !repoOptional) {
     fail('invalid --repo — expected <owner/name>');
   }
-  if (to !== 'accepted' && to !== 'changes') {
+  if (!fixedTo && to !== 'accepted' && to !== 'changes') {
     fail("invalid --to — expected 'accepted' or 'changes'");
   }
 
-  // we:scripts/review-set-label.mjs#runCli — observe the PR's current labels (the I/O boundary).
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — --repo optional: default to the cwd repo (the fix agent
+  // runs inside its WE lane clone, so the current repo IS the PR's repo). Derived once, up front.
+  if (repoOptional && !repo) {
+    try {
+      repo = execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
+        encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
+      }).trim();
+    } catch (e) {
+      fail(ghErr(e, 'gh repo view failed (pass --repo=<owner/name> explicitly)'), 1);
+    }
+    if (!REPO_RE.test(repo)) {
+      fail('invalid --repo — expected <owner/name>');
+    }
+  }
+
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — observe the PR's current labels (the I/O boundary).
   let currentLabels;
   try {
-    const out = execFileSync('gh', [
+    const parsed = JSON.parse(execFileSync('gh', [
       'pr', 'view', pr, '--repo', repo, '--json', 'labels',
-    ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-    const parsed = JSON.parse(out);
+    ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
     currentLabels = Array.isArray(parsed.labels) ? parsed.labels : [];
   } catch (e) {
     fail(ghErr(e, 'gh pr view failed'), 1);
   }
 
-  // we:scripts/review-set-label.mjs#runCli — the PURE decision. A refusal (INVARIANT 2) exits non-zero.
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — the PURE decision. A refusal (INVARIANT 2, or nothing to
+  // re-arm) changes NOTHING and exits non-zero.
   const decision = decideSetLabel({ to, currentLabels });
   if (!decision.allowed) {
-    process.stdout.write(`${JSON.stringify({ error: decision.reason })}\n`);
+    process.stdout.write(`${JSON.stringify(refusalResult({ pr: Number(pr), decision }))}\n`);
     process.exit(1);
   }
 
-  // we:scripts/review-set-label.mjs#runCli — apply the swap: add the verdict label, remove the stale ones
-  // (argv array, no shell). Intersect the decision's removals with the labels the PR ACTUALLY carries so
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — apply the swap: add the verdict label, remove the stale
+  // ones (argv array, no shell). Intersect the decision's removals with the labels the PR ACTUALLY carries so
   // `gh pr edit --remove-label` is never handed an absent label (which errors).
   const removals = presentRemoveLabels(decision.removeLabels, currentLabels);
   const editArgs = ['pr', 'edit', pr, '--repo', repo, '--add-label', decision.addLabel];
@@ -141,17 +217,11 @@ function runCli() {
     fail(ghErr(e, 'gh pr edit failed'), 1);
   }
 
-  // we:scripts/review-set-label.mjs#runCli — post a DURABLE verdict comment. Write the body to a temp file to
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — post a DURABLE comment. Write the body to a temp file to
   // dodge shell-quoting pitfalls (emoji/newlines), then `--body-file`.
-  const header = to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested';
-  const body = [
-    header,
-    '',
-    `Recorded by ${actor} via the Plateau Loop review console.`,
-  ].join('\n');
-  const tmp = join(tmpdir(), `review-set-label-${pr}-${Date.now()}.md`);
+  const tmp = join(tmpdir(), `review-label-${pr}-${Date.now()}.md`);
   try {
-    writeFileSync(tmp, body, 'utf8');
+    writeFileSync(tmp, buildComment({ to, actor, decision }), 'utf8');
     execFileSync('gh', ['pr', 'comment', pr, '--repo', repo, '--body-file', tmp], {
       encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
     });
@@ -161,8 +231,8 @@ function runCli() {
     try { unlinkSync(tmp); } catch { /* best-effort cleanup */ }
   }
 
-  // we:scripts/review-set-label.mjs#runCli — re-read the labels so the printed result reflects the true
-  // post-swap state (tolerant: fall back to a locally-derived set if the re-read fails).
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — re-read the labels so the printed result reflects the
+  // true post-swap state (tolerant: fall back to a locally-derived set if the re-read fails).
   let newLabels;
   try {
     const out = execFileSync('gh', ['pr', 'view', pr, '--repo', repo, '--json', 'labels'], {
@@ -176,8 +246,26 @@ function runCli() {
     newLabels = [...new Set([...names, decision.addLabel])];
   }
 
-  process.stdout.write(`${JSON.stringify({ ok: true, pr: Number(pr), to, labels: newLabels })}\n`);
+  process.stdout.write(`${JSON.stringify(successResult({ pr: Number(pr), to, decision, labels: newLabels }))}\n`);
   process.exit(0);
+}
+
+// we:scripts/review-set-label.mjs — allow importing the pure decider + shared harness without running the CLI
+// (the test file and rearm-review.mjs import this module). The standard main check used in review-detail.mjs.
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
+if (IS_CLI) {
+  runReviewLabelCli({
+    defaultActor: 'loop-console operator',
+    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes [--actor=<name>]  (pr must be a positive integer)',
+    // we:scripts/review-set-label.mjs — the reviewer-verdict comment (the delta from the rearm caller's body).
+    buildComment: ({ to, actor }) => [
+      to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested',
+      '',
+      `Recorded by ${actor} via the Plateau Loop review console.`,
+    ].join('\n'),
+    successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
+    refusalResult: ({ decision }) => ({ error: decision.reason }),
+  });
 }
 
 /** we:scripts/review-set-label.mjs#fail — print a machine-readable error and exit non-zero. */
