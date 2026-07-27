@@ -4,7 +4,17 @@ kind: story
 size: 5
 parent: "2612"
 status: open
-scope: ["we:scripts/lane-resume.mjs", "we:scripts/readiness/", "we:scripts/lib/rebase-drop-manifest.mjs"]
+scope:
+  - we:scripts/readiness/couple-plan.mjs
+  - we:scripts/readiness/__tests__/couple-plan.test.mjs
+  - we:scripts/lane-stack.mjs
+  - we:scripts/__tests__/lane-stack-e2e.test.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:scripts/lane-resume.mjs
+  - we:scripts/__tests__/lane-resume.test.mjs
+  - we:scripts/lib/rebase-drop-manifest.mjs
+  - we:scripts/lib/__tests__/rebase-drop-manifest.test.mjs
 dateOpened: "2026-07-26"
 tags: []
 ---
@@ -37,6 +47,18 @@ breaks in the common cases. So the skip is **gated**, with a clean fallback:
   skip-vs-rebase verdict from injected SHAs; unit-tested.
 - Both PRs open before either lands (parallel first CI); the drain's impl-first/WE-last land order is untouched.
 - No configuration in which the WE half lands on a base its CI never validated — the guard is fail-safe to rebase.
+
+## Scope note (file-level rescope, #2619 finer-lease)
+
+Narrowed from the whole `we:scripts/readiness/` dir to the specific couple machinery: the new pure planner
+`we:scripts/readiness/couple-plan.mjs` (+ test); the overlap-open wiring in `we:scripts/lane-stack.mjs` (the
+#2393 overlap-stacking CLI that opens both PRs before either lands); the drain consumer `we:scripts/merge-ai-prs.mjs`
+(which reads the skip-vs-rebase verdict — its `planLabelDrain` *ordering* is unchanged, but the re-CI *decision*
+is edited); the BEHIND/rebase fallback path `we:scripts/lib/rebase-drop-manifest.mjs`; and `we:scripts/lane-resume.mjs`
+(stuck-couple takeover). This is genuinely couple-machinery-wide but no longer leases the entire 30-file
+`we:scripts/readiness/` dir, so it stops colliding with sibling readiness items (e.g. #2661's
+`we:scripts/readiness/conveyor-state.mjs`). Each named file carries its own test file in scope (an edit to a
+`*.test.mjs` outside scope would breach).
 
 **Savings are best-case, not headline:** the robust win is the overlapped first CIs (always); the FF-skip is an
 opportunistic bonus when the stack base is still main's tip. The earlier −48% figure is withdrawn as best-case.
