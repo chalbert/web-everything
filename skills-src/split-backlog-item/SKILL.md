@@ -39,14 +39,22 @@ not split* with the unblocking action, and move on.
    it. Grep/Explore the subsystem(s) the item touches (files, call sites, registries, fixtures) and find
    where the seams *actually* fall, not where the body's framing implies. Each proposed slice's named
    files must be `file:line`-citable from what you read and its `size` re-estimated against the real
-   surface. For an unsliced epic, its body's decomposition is the *seed*, not the answer — verify each
+   surface. **This investigation *is* the touch-set probe (#2619)** — the `file:line`-citable files a slice
+   names are exactly its predicted `scope:`. Record each slice's touch-set now, coarsened to the narrowest
+   prefix that still covers it (a whole directory `we:scripts/readiness/` when a slice spans it; a single
+   file `we:scripts/backlog.mjs` when it doesn't — narrow scope lets scope-disjoint slices run in parallel
+   instead of serializing on a shared directory, #2679), so the scaffold step of *Executing a split* (step 2)
+   can author it onto the scaffolded slice. A slice you cannot name a plausible touch-set for is under-investigated — go
+   back to the code, don't scaffold it unscoped (an unscoped item can never dispatch to build — the
+   conveyor holds it `unshaped-no-scope`, #2609). For an unsliced epic, its body's decomposition is the *seed*, not the answer — verify each
    slice against the tree. If the work can't be investigated to that depth (surface doesn't exist yet,
    scope unknown until a foundational piece lands) → **could not split**, action: *land/investigate
    foundational slice A first*. Never propose slices "straight from the body" — that's guessing the seams.
 3. **Apply the split-safety rubric to each** (all five must hold — *backlog-workflow.md → The
    split-safety rubric*). Any failure → **could not split**.
 4. **Write the report** `reports/<YYYY-MM-DD>-backlog-split-analysis.md` — two tables: could-split (per
-   candidate: proposed slices with re-estimated `size`/`workItem`, the slice DAG, which are batchable) and
+   candidate: proposed slices with re-estimated `size`/`workItem`, **each slice's predicted `scope:`
+   touch-set** (#2619), the slice DAG, which are batchable) and
    could-not-split (per candidate: *which rubric condition failed* + the specific unblocking action that
    would make it splittable later — *resolve decision X*, *land foundational slice A first*, *author shared
    fixture F*, *re-scope as an unstoried epic until Y ships*). The report is produced even when zero items
@@ -73,9 +81,16 @@ A single "go" authorizes the splits you presented. Per approved item, mechanical
    `check:standards` errors), refresh the digest only if needed, and go straight to scaffolding its child
    slices.
 2. **Scaffold each slice:** `node scripts/backlog.mjs scaffold --type=… --workitem=story|task
-   [--size=…] --title="…" --parent=<NNN> [--blocked-by=<NNN>,…] --digest="…"`. **Sub-epic slice** (roadmap
-   mode): scaffold `--workitem=epic` with **no `--size`**, and seed its body with the row's design lineage
-   so it's a real future `/slice` candidate, not an empty shell. `--parent` rolls it under
+   [--size=…] --title="…" --parent=<NNN> [--blocked-by=<NNN>,…] --scope=<coarse,prefix,shaped>
+   --digest="…"`. **Author the slice's predicted `scope:` here (#2619)** — pass the touch-set you recorded
+   in step-2 of *Quick path* as `--scope=` (comma-joined, repo-qualified prefixes, e.g.
+   `--scope=we:scripts/readiness/,we:scripts/backlog.mjs`). The scaffold writes it onto the slice's
+   frontmatter so it arrives at Definition of Ready already scoped — the human reviewing the split sees each
+   slice's predicted touch-set, and the conveyor dispatcher (#2609) can parallelize the slices without an
+   auto-prepare round-trip. **Sub-epic slice** (roadmap
+   mode): scaffold `--workitem=epic` with **no `--size`** and **no `--scope`** (an epic is decomposed, never
+   built directly — the dispatcher holds it `needs-slice`, not by scope), and seed its body with the row's
+   design lineage so it's a real future `/slice` candidate, not an empty shell. `--parent` rolls it under
    the epic; `--blocked-by` lays the DAG edges; write a real per-slice digest (it's the loader's
    `summary`).
 3. **Gate:** `npm run check:standards` green (it errors on a storied epic that kept a `size`, an
