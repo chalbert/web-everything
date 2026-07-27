@@ -3,10 +3,12 @@ bornAs: xoh0xzj
 kind: story
 size: 5
 parent: "2677"
-status: open
+status: resolved
 blockedBy: ["2699"]
 scope: ["we:skills-src/conveyor/"]
 dateOpened: "2026-07-27"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 
@@ -29,3 +31,33 @@ in-flight #2641 shares it, so this item is already scope-disjoint from the other
 (`we:scripts/conveyor/tick-core.mjs`) by importing it read-only, so tick-core is deliberately NOT in scope (scope is
 the write-set, not the import graph). Re-narrow to the concrete new filenames once #2699 lands and the runner's files
 are known.
+
+## Progress
+
+Built the singleton-locked headless runner over the #2699 tick core (three new files under
+`we:skills-src/conveyor/`, all in scope):
+
+- **`we:skills-src/conveyor/runner-lock.mjs`** — the singleton lock (the one net-new build condition from
+  #2701). A machine-global, TTL-leased sole-driver right mirrored from the drain daemon's whole-process lease
+  (`we:scripts/readiness/drain-lock.mjs`), built on the shared atomic `O_EXCL` + TTL primitive
+  (`we:scripts/readiness/file-locks.mjs`) — never a fork. A second runner launch NO-OPS on a live lease; a
+  stale (crashed-runner) lease is reclaimed via the TTL; heartbeat/release fence on ownership. This enforces
+  #2701's SINGLETON runner (no per-lane conductor, Option B rejected) so two runners never double-dispatch the
+  same lane/item.
+- **`we:skills-src/conveyor/runner.mjs`** — the headless, no-LLM runner: a pure-core / IO-shell split (mirrored
+  from the tick core). The pure core (`runLoop`, `carryForward`, `shouldStop`, `tickSurface`) STEPS the
+  tick-core state machine and threads its `nextState` forward UNCHANGED — the thin-shell invariant: it
+  re-derives NO guard/TTL/watcher (the core owns all of it). It spends no model context per tick and SURFACES
+  the tick's dispatch/watch decisions for the main-session judgment layer to execute (#2701 clause 3), rather
+  than spawning LLM agents itself. The IO shell shells `we:scripts/conveyor/tick-core.mjs`, runs the
+  deterministic no-LLM passes (infra-blocked recovery, lease-reaper, best-effort), heartbeats the singleton
+  lease, and stops on the core's idle-stop / a `--once` budget / a lost lease.
+- **`we:skills-src/conveyor/__tests__/runner.test.mjs`** — unit proof of both subjects (singleton no-op /
+  stale-reclaim / fencing, and the loop's carry-forward / stop / surface / lease-loss control flow).
+  `we:vitest.config.ts` gains one include glob so `skills-src/**/__tests__` tests are discovered by the `test`
+  CI check (the only out-of-`scope` touch — a one-line test-discovery enabler, not a policy/gate-self path).
+
+Deliberately NOT done (out of scope, later slices): retiring the main-session serial loop (#2703, blocked on
+this) and wiring headless LLM agent-spawning via the CLI agent-runner backend (`#agent-runner-cli-backend`).
+The existing build/prepare/fix/CI-heal guard semantics are PRESERVED verbatim — they live in the tick core; the
+runner alters none of them.
