@@ -47,6 +47,17 @@
  *   total-attempt counter. Faithful per-retry counting needs an orchestrator build-iteration signal (none yet);
  *   this is the honest edge-driven approximation until that hook exists.
  *
+ * FILE-LEVEL LEASE GRANULARITY (WE #2679): the breach + overlap matchers this collector composes
+ *   (`breachOf` here; `scopesOverlap`/`overlapAtLaunch` in the observer) are now GRANULARITY-AWARE. A lane that
+ *   declares a NARROW file-level `predictedScope` (via `acquire --scope=we:path/to/file.mjs`) leases at FILE
+ *   granularity: a sibling lane touching a DISJOINT file that merely shares the same directory no longer
+ *   false-overlaps it, so both dispatch in parallel. A lane declaring a BROAD subtree (a glob, or a
+ *   bare/trailing-slash directory) still leases the whole tree, so a genuinely-spanning declaration — or a real
+ *   same-file dependency — still serializes. This is a pure refinement of the SAME advisory signal (§3i-A4 Fork 1
+ *   — the whole-clone lease remains the only real lock); the collector's own logic is unchanged, it simply
+ *   passes each lane's declared scope through at its authored granularity. Authoring `scope:` as narrowly as
+ *   correctness allows is the upstream half (#2619, in the readiness flow).
+ *
  * COMPOSES, NEVER REINVENTS: `normScope` (dedupe/normalize repo-qualified paths) and `porcelainFiles` (parse
  *   `git status --porcelain`, rename-aware) and `repoKeyFromSlug` (origin slug → repo key) and `liveScopePicture`
  *   (the observer itself) are all IMPORTED. This module adds only the pool-walk + git-read IO and the pure glue.

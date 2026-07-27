@@ -7,7 +7,10 @@
  *   plus its unit proof.
  *
  * THE §3i MODEL (kept faithful):
- *   • PREDICTED scope = module/glob-level, authored by the prepare agent at plan time (advisory — see below).
+ *   • PREDICTED scope = module/glob-level OR file-level, authored by the prepare agent at plan time (advisory —
+ *     see below). Each entry is classified by GRANULARITY ({@link isSubtreeEntry}): a SUBTREE (glob, or a
+ *     trailing-slash / bare directory) leases the whole tree; a FILE (an extension-bearing path) leases only
+ *     that one path. See the #2679 note below.
  *   • OBSERVED scope  = file-level, the lane's live `git diff --name-only` set (the CLI supplies it).
  *   • BREACH          = observed files that fall OUTSIDE the predicted scope (a generalized set difference:
  *     "outside" is decided by pattern coverage, since predicted entries are module/globs, not exact paths).
@@ -15,11 +18,26 @@
  *       overlap-at-launch  ∈ { wait (default), ask, force }         → {@link overlapAtLaunch}
  *       breach-mid-build   ∈ { pause, park, resolve-at-drain }      → {@link breachOutcome}
  *
+ * FILE-LEVEL LEASE GRANULARITY (WE #2679 — a parallelism lever under the throughput program #2606):
+ *   The coverage/overlap matchers are GRANULARITY-AWARE. A NARROW scope (one that names specific files) leases
+ *   at FILE granularity, so two lanes touching DISJOINT files that merely share a directory no longer serialize
+ *   on that shared prefix — the exact false positive #2673/#2679 hit (`we:scripts` over-serializing unrelated
+ *   `we:scripts/...` work). A BROAD scope (a glob or a bare/trailing-slash directory) still leases the whole
+ *   subtree, so a genuinely-spanning declaration — or a real same-file dependency like #2440↔#2669 both editing
+ *   `we:scripts/lib/pr-merge-gate.mjs` — still contends, correctly. The classifier is conservative: it only
+ *   calls a path a FILE when it is confidently file-shaped, and the matchers keep a directory-ancestor fallback,
+ *   so finer granularity NEVER misses a real overlap (it can only ever err toward over-serializing). This
+ *   REFINES the ADVISORY signal's resolution; it is NOT a per-file LOCK — reconcile with Fork 1 below.
+ *   (The upstream half — authoring `scope:` as narrowly as correctness allows — is #2619, in the readiness flow.)
+ *
  * §3i-A4 (RATIFIED 2026-07-20) — what this module encodes verbatim:
  *   • Fork 1: the ENFORCEMENT UNIT is the whole-clone lease (`lane-pool.mjs` acquire/release + the `.lane-lease`
  *     marker in `../lib/lane-lease.mjs`). Predicted file-scope is an ADVISORY breach signal, NOT a second lock;
  *     git is the ground-truth conflict detector at drain. So everything here is advisory scheduling data — it
- *     never gates a write on its own. Per-file leases were rejected.
+ *     never gates a write on its own. Per-file leases were rejected AS A LOCK — and they remain rejected as a
+ *     lock. #2679's file granularity is a finer resolution of this SAME advisory signal (which sibling to hold
+ *     back at launch / which breach to flag), never a second enforcement unit; the whole-clone lease stays the
+ *     one and only real lock.
  *   • Fork 2: A4's default transition is RETRY-IN-PLACE / re-plan within scope (drop the out-of-scope edit,
  *     finish the in-lease work). Its escalation ladder = widen-lease → hand-off-to-cross-lane → bounce/quarantine
  *     ({@link BREACH_ESCALATION_LADDER}). Retry bound (jury amendment): the escalation trigger is a TOTAL attempt
@@ -59,13 +77,48 @@ function splitRepo(s) {
   return i < 0 ? [null, str] : [str.slice(0, i), str.slice(i + 1)];
 }
 
-/** Turn a repo-relative predicted pattern into a coverage test over a repo-relative observed path.
- *  Two shapes, per §3i "predicted scope is module/glob-level":
+/**
+ * Classify a scope entry's GRANULARITY (WE #2679 — file-level leases for narrow scopes). A scope entry is
+ * either a SUBTREE (it leases a whole directory tree — the coarse, prefix-holding form) or a FILE (it leases
+ * exactly one path — the fine, narrow form that lets scope-disjoint work merely SHARING a directory run in
+ * parallel instead of serializing on the shared prefix). This distinction is the crux of #2679: a narrow scope
+ * must lease at file granularity, not hold the whole subtree it happens to sit under.
+ *
+ * An entry is a SUBTREE when it is EXPLICITLY directory- or pattern-shaped:
+ *   • a trailing slash (`we:scripts/lib/`) — the explicit "this whole directory" marker; OR
+ *   • a glob (`*` / `?`, e.g. `we:src/**` or `we:src/*.ts`) — a pattern spanning many files; OR
+ *   • a bare last segment with NO file extension (`we:src/backlog-view`, `we:scripts`) — the module-level
+ *     reading of a directory-ish entry (§3i's implicit "module-level" form, kept faithful).
+ * Otherwise the entry names a FILE: its last segment carries an extension (`we:scripts/backlog.mjs`,
+ * `we:src/list.ts`, or a dotfile like `we:.gitignore`) — and it leases ONLY that exact path.
+ *
+ * CONSERVATIVE BY CONSTRUCTION — the classifier only calls a path a FILE when it is confidently file-shaped (an
+ * extension on its last segment). It CANNOT tell a dotted DIRECTORY (`.github`, `src/foo.v2`) with no trailing
+ * slash from a dotfile (`.gitignore`) by name alone, so such a directory is misclassified as a FILE. Two guards
+ * keep that safe:
+ *   • OVERLAP detection ({@link scopeEntriesOverlap}) keeps a `segmentRelated` directory-ancestor fallback on
+ *     the literal roots, so a misclassified dotted directory vs a glob/file BENEATH it still contends — overlap
+ *     detection never misses a real parent↔child conflict (the "preserve correct overlap detection" invariant).
+ *   • BREACH detection ({@link coversFile}) treats a FILE entry as its exact path only, so a dotted directory
+ *     declared as PREDICTED scope may over-flag its own children as out-of-scope breaches. That is the SAFE
+ *     direction (a false breach at worst triggers a needless retry-in-place/pause, never a missed conflict) and
+ *     the price of removing the pre-#2679 file-as-prefix over-match; declare such a directory WITH a trailing
+ *     slash (`.github/`) to lease it as a subtree and avoid the false breach.
+ */
+export function isSubtreeEntry(entry) {
+  const [, p] = splitRepo(entry);
+  if (p.endsWith('/')) return true; // explicit directory marker
+  if (/[*?]/.test(p)) return true; // a glob spans many files
+  const seg = p.slice(p.lastIndexOf('/') + 1); // the last path segment
+  return !/\.[^./]+$/.test(seg); // no extension on the last segment ⇒ a bare directory (subtree)
+}
+
+/** Coverage test for a SUBTREE entry (a glob pattern, or a bare/trailing-slash directory prefix) over a
+ *  repo-relative observed path. Two shapes, per §3i "predicted scope is module/glob-level":
  *    • GLOB (contains `*`/`?`): `**` = any chars incl `/`; `*` = any chars except `/`; `?` = one non-`/`.
- *    • MODULE PREFIX (no wildcard): matches the exact path OR anything UNDER it (`src/backlog-view` covers
- *      `src/backlog-view/foo.ts`). This is the module-level reading of a bare directory-ish entry — the one
- *      design call §3i leaves implicit (it says "module-level" but never fixes the string form). */
-function patternTest(patternPath) {
+ *    • DIRECTORY PREFIX (no wildcard): matches the exact path OR anything UNDER it (`src/backlog-view` covers
+ *      `src/backlog-view/foo.ts`). A trailing slash is just the directory marker and is stripped first. */
+function subtreeTest(patternPath) {
   const p = patternPath.replace(/\/$/, ''); // a trailing slash is just a directory marker
   if (/[*?]/.test(p)) {
     const rx = '^' + p
@@ -80,31 +133,64 @@ function patternTest(patternPath) {
   return (f) => f === p || f.startsWith(p + '/');
 }
 
-/** Does a predicted scope entry cover an observed file? Both repo-qualified; the repo must match first (a
- *  `we:` lease never covers a `frontierui:` file — the constellation-disjointness `filesOf` relies on). */
+/** Does a predicted scope entry COVER an observed file? Both repo-qualified; the repo must match first (a
+ *  `we:` lease never covers a `frontierui:` file — the constellation-disjointness `filesOf` relies on).
+ *  Granularity-aware (WE #2679):
+ *    • a SUBTREE entry covers the exact path OR anything UNDER it (glob → its pattern; bare dir → prefix);
+ *    • a FILE entry covers ONLY its exact path — it does NOT synthesize a subtree beneath a file. This removes
+ *      the pre-#2679 latent over-match where a file entry `foo.mjs` wrongly "covered" a deeper `foo.mjs/x`,
+ *      which mattered for breach detection ({@link scopeLease}/{@link breachOf}). */
 export function coversFile(pattern, file) {
   const [pr, pp] = splitRepo(pattern);
   const [fr, fp] = splitRepo(file);
   if (pr !== fr) return false;
-  return patternTest(pp)(fp);
+  if (isSubtreeEntry(pattern)) return subtreeTest(pp)(fp);
+  return fp === pp; // FILE entry — exact path only, never a synthetic subtree
 }
 
-/** The literal (wildcard-free) leading path of a pattern — its "module root". Used to decide pattern↔pattern
- *  overlap at LAUNCH, when only predicted (glob) scope exists on both sides and neither is an exact file. */
+/** The literal (wildcard-free) leading path of a pattern — its "module root". Used to decide SUBTREE↔SUBTREE
+ *  overlap at LAUNCH, when only predicted (glob/dir) scope exists on both sides and neither is an exact file. */
 function litRoot(pattern) {
   const [r, p] = splitRepo(pattern);
   const lit = p.match(/^[^*?]*/)[0].replace(/\/$/, '');
   return [r, lit];
 }
 
-/** Do two predicted scope entries overlap? Same repo AND one module-root is a path-segment prefix of the
- *  other (or equal). MIRRORS `overlap-chain.intersects` (list-membership overlap) generalized to module
- *  patterns — see the file header for why exact-set `intersects`/`disjoint` under-matches here. */
+/** Path-segment relation on two repo-relative literal paths: EQUAL, or one is a directory ANCESTOR of the
+ *  other (`a/b` ↔ `a/b/c`), or either side is empty (a leading-wildcard glob root that spans everything). This
+ *  is the ONLY relation that can hold between a directory and something inside it, and it is the safety net that
+ *  guarantees overlap detection NEVER misses a real parent↔child conflict — whatever the granularity classifier
+ *  decided about a dotted-directory name (`.github`, `src/foo.v2`). It is NEVER true for two genuinely-distinct
+ *  files (a real file can never be a path-segment ancestor of another path). */
+function segmentRelated(a, b) {
+  const x = a.replace(/\/$/, '');
+  const y = b.replace(/\/$/, '');
+  return x === y || x.startsWith(y + '/') || y.startsWith(x + '/') || x === '' || y === '';
+}
+
+/** Do two scope entries overlap (their leases contend)? Same repo first, then GRANULARITY-AWARE (WE #2679):
+ *    • FILE ↔ FILE       → contend ONLY if they name the same path. Disjoint files under a shared directory do
+ *                          NOT contend — the parallelism this story unlocks.
+ *    • FILE ↔ SUBTREE    → contend if the subtree COVERS the file ({@link coversFile}).
+ *    • SUBTREE ↔ SUBTREE → contend if their module-roots are in a path-segment relation — the pre-#2679
+ *                          behavior, preserved so a genuinely-spanning declaration still serializes.
+ *  Implemented as coverage-in-either-direction ({@link coversFile}, at each entry's authored granularity) OR a
+ *  {@link segmentRelated} fallback on the wildcard-free ROOTS. The fallback is what makes finer granularity
+ *  SAFE: it catches every genuine parent↔child overlap the coverage test can't (a directory declared without a
+ *  trailing slash — dotted or not — vs a glob/file beneath it), so the classifier can only ever err toward
+ *  OVER-serializing, never toward a missed conflict. MIRRORS `overlap-chain.intersects` (list-membership
+ *  overlap) generalized to module patterns — see the file header for why exact-set `intersects`/`disjoint`
+ *  under-matches here. */
 export function scopeEntriesOverlap(x, y) {
-  const [rx, px] = litRoot(x);
-  const [ry, py] = litRoot(y);
-  if (rx !== ry) return false;
-  return px === py || px.startsWith(py + '/') || py.startsWith(px + '/') || px === '' || py === '';
+  const [rx] = splitRepo(x);
+  const [ry] = splitRepo(y);
+  if (rx !== ry) return false; // different repos never contend
+  // Coverage handles FILE-in-SUBTREE + glob matches at the authored granularity (and same-file/exact for two
+  // files); the segment-ancestor fallback on the literal roots catches directory↔child overlaps coverage misses.
+  if (coversFile(x, y) || coversFile(y, x)) return true;
+  const [, rootX] = litRoot(x);
+  const [, rootY] = litRoot(y);
+  return segmentRelated(rootX, rootY);
 }
 
 /** Do two predicted scopes (arrays of module/glob entries) overlap at all? */
