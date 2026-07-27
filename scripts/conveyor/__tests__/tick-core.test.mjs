@@ -23,6 +23,7 @@ import {
   retireFixGuards,
   clearTerminalFixAttempts,
   armWatchers,
+  releaseSessionForNum,
   assessIdleStop,
   routeWatcherExit,
   buildStatusLine,
@@ -275,13 +276,29 @@ describe('retireFixGuards + clearTerminalFixAttempts — entry vs. counter lifet
 
 // ── Watcher arming ────────────────────────────────────────────────────────────────────────────────────────────
 
+describe('releaseSessionForNum — the merge-time auto-release slug per owning-agent kind (SKILL §4/§3, #2700)', () => {
+  it('derives the build lease by default, and the prepare/decision lease when a live prepare guard holds the num', () => {
+    const buildOnly = new Map();
+    expect(releaseSessionForNum(40, buildOnly)).toBe('conveyor-40');
+    expect(releaseSessionForNum(40, new Map([['40', 'prepare']]))).toBe('prepare-40');
+    expect(releaseSessionForNum(40, new Map([['40', 'prepare-decision']]))).toBe('prepare-decision-40');
+    // A missing / non-Map lookup degrades to the build session (never throws).
+    expect(releaseSessionForNum(40, undefined)).toBe('conveyor-40');
+  });
+});
+
 describe('armWatchers — one watcher per conveyor-launched OPEN PR (SKILL §4)', () => {
   const pr = (num, prNumber) => ({ num, prNumber, state: 'OPEN', labels: [] });
 
-  it('arms a watcher only for a PR whose num this conveyor launched', () => {
+  it('arms a watcher (with its build release-session) only for a PR whose num this conveyor launched', () => {
     const r = armWatchers([pr(40, 99), pr(41, 100)], [40], []);
-    expect(r.arm).toEqual([99]);
+    expect(r.arm).toEqual([{ pr: 99, releaseSession: 'conveyor-40' }]);
     expect(r.nextWatched).toEqual([99]);
+  });
+
+  it('tags a prepare PR with its prepare release-session (from the live prepare guard), not the build one', () => {
+    const r = armWatchers([pr(41, 100)], [41], [], [{ num: 41, kind: 'prepare' }]);
+    expect(r.arm).toEqual([{ pr: 100, releaseSession: 'prepare-41' }]);
   });
 
   it('does not re-arm a PR already watched, and prunes a watched PR that has left the open set', () => {
@@ -410,6 +427,31 @@ describe('planTick — composes the tick and threads nextState', () => {
     });
     expect(idle.decisions.idleStop).toBe(true);
     expect(idle.decisions.statusLine).toContain('conveyor ·');
+  });
+
+  it('arms a watcher carrying the item build release-session for an open conveyor-launched PR (#2700)', () => {
+    const out = planTick({
+      state: { queue: [], lanes: [], prs: [{ num: 40, prNumber: 99, state: 'OPEN', labels: [] }] },
+      plan: { launch: [] },
+      bookkeeping: { tick: 2, launchedNums: [40], watched: [] },
+    });
+    expect(out.decisions.armWatchers).toEqual([{ pr: 99, releaseSession: 'conveyor-40' }]);
+    expect(out.nextState.watched).toEqual([99]);
+  });
+
+  it('consumes state.health as a backstop — a stalled lane surfaces as an actionable note (#2616/#2700)', () => {
+    const out = planTick({
+      state: {
+        queue: [], lanes: [{ lane: 4, num: 10 }], prs: [],
+        health: { verdict: 'warn', stalled: [{ lane: 4, num: 10, idleS: 240 }] },
+      },
+      plan: { launch: [] },
+      bookkeeping: { tick: 5 },
+    });
+    expect(out.decisions.notes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'lane-stalled', num: 10, lane: 4 }),
+    ]));
+    expect(out.decisions.statusLine).toContain('health warn');
   });
 
   it('surfaces a needs-slice epic and a prepared decision as notes (no agent, no guard)', () => {

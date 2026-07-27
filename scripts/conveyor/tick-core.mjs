@@ -77,7 +77,17 @@
  * WATCHER ARMING (§4): {@link armWatchers} arms one watcher per OPEN PR whose `num` this conveyor DISPATCHED
  *   this session (`launchedNums` — builds AND prepares) that is not already watched, and prunes the watched set
  *   to the currently-open conveyor PRs (a merged/closed PR's watcher already exited). Scoping to conveyor-launched
- *   nums keeps an unrelated PR's stray `review:*` label from waking the loop.
+ *   nums keeps an unrelated PR's stray `review:*` label from waking the loop. Each armed entry carries the
+ *   `releaseSession` slug ({@link releaseSessionForNum}) the watcher passes as `--release-session`, so on MERGE
+ *   pr-watch auto-releases that item's lane lease(s) across pools — the ghost-lease reclamation #2667 built and
+ *   #2700 wires in (the periodic lease-reaper, SKILL §4c, is the catch-all backstop for what auto-release misses).
+ *
+ * HEALTH / STALL BACKSTOP (§2): `state.health` is now LIVE — #2616 populates the lane→num map on
+ *   `acquire --item`, so `conveyor-state`'s stall scan flags a genuinely silent lane rather than always reading
+ *   `ok`. {@link planTick} CONSUMES that verdict as a real backstop: `buildStatusLine` shows the `⚠ lane-N` warn
+ *   and each stalled lane becomes an actionable `lane-stalled` note, so the per-tick lease-reaper reclaims the
+ *   stalled lease and the operator sees it. It never auto-re-dispatches a guard on a stall (the 3-min threshold is
+ *   far below a guard's spawn-to-death TTL — the guard TTLs remain the re-dispatch backstop, un-regressed).
  *
  * IDLE-STOP (§6): {@link assessIdleStop} stops ONLY when the queue is empty (no cleared `buildQueued` rows, no
  *   in-flight lanes, no open conveyor PRs) AND there has been no operator feedback for `idleWindowMs` (default
@@ -371,29 +381,62 @@ export function clearTerminalFixAttempts(fixAttempts, prs) {
 }
 
 /**
+ * The lane-lease session slug that OWNS item `num`'s open PR — the `--release-session` a merge watcher passes to
+ * `pr-watch.mjs` so that, the instant the PR MERGES, pr-watch auto-releases that session's lease(s) in EVERY pool
+ * it acquired (`lane-pool release --all-pools --session=<slug>`, which also resets the freed clone to origin/main)
+ * — the ghost-lease reclamation #2667 delivered but #2700 wires into the tick. Pure — derived from the num and
+ * whether a LIVE prepare guard still holds it:
+ *   • a `prepare-decision` guard → `prepare-decision-<num>` (the decision-prepare agent's session, SKILL §3e);
+ *   • a `prepare` (scope) guard  → `prepare-<num>` (the scope-prepare agent's session, SKILL §3b);
+ *   • otherwise                  → `conveyor-<num>` (the build/delivery agent's session, SKILL §3).
+ * A prepare guard stays LIVE from spawn until its scope PR merges, so an OPEN prepare PR always still carries its
+ * guard — the kind lookup is reliable for exactly the window a watcher is armed. A fix lease (`fix-<num>`) and any
+ * lease this single slug misses (e.g. a build lease still held under a since-merged sibling) ride the periodic
+ * lease-reaper backstop (`lease-reaper.mjs`, run each tick, SKILL §4c) — auto-release is the fast path, the reaper
+ * the catch-all, exactly as #2667 designed them.
+ * @param {*} num  the item number the PR belongs to (raw — a hashed `xNNNNNN` id keeps its form in the slug).
+ * @param {Map<string,string>} prepareKindByNum  normNum → prepare-guard `kind` for the live prepare guards.
+ * @returns {string}
+ */
+export function releaseSessionForNum(num, prepareKindByNum) {
+  const kind = prepareKindByNum instanceof Map ? prepareKindByNum.get(normNum(num)) : undefined;
+  if (kind === 'prepare-decision') return `prepare-decision-${num}`;
+  if (kind === 'prepare') return `prepare-${num}`;
+  return `conveyor-${num}`;
+}
+
+/**
  * ARM a merge watcher per newly-opened conveyor-launched PR (SKILL §4) and prune the watched set. A watcher is
  * armed for an OPEN `state.prs` row whose `num` this conveyor DISPATCHED this session (`launchedNums` — builds
- * AND prepares) that is not already in `watched`. The next watched set is exactly the currently-open
- * conveyor-launched PRs (a merged/closed PR's watcher has already exited, so it drops out). Pure.
+ * AND prepares) that is not already in `watched`. Each armed entry carries the `releaseSession` slug pr-watch
+ * passes as `--release-session` (#2700 — merge-time ghost-lease auto-release; see {@link releaseSessionForNum}).
+ * The next watched set is exactly the currently-open conveyor-launched PRs (a merged/closed PR's watcher has
+ * already exited, so it drops out). Pure.
  * @param {object[]} prs  the tick's `state.prs`
  * @param {Array<*>} launchedNums  the item nums this conveyor dispatched this session
  * @param {Array<number>} watched  the PR numbers with a live watcher
- * @returns {{ arm:Array<number>, nextWatched:Array<number> }}
+ * @param {Array<{num:*, kind?:string}>} livePrepareGuards  live prepare guards — supply each armed PR's owning session kind
+ * @returns {{ arm:Array<{pr:number, releaseSession:string}>, nextWatched:Array<number> }}
  */
-export function armWatchers(prs, launchedNums, watched) {
+export function armWatchers(prs, launchedNums, watched, livePrepareGuards = []) {
   const launched = new Set((Array.isArray(launchedNums) ? launchedNums : []).map(normNum));
   const already = new Set((Array.isArray(watched) ? watched : []).map(Number));
+  const prepareKindByNum = new Map(
+    (Array.isArray(livePrepareGuards) ? livePrepareGuards : [])
+      .filter((g) => g && g.num != null)
+      .map((g) => [normNum(g.num), g.kind || 'prepare']),
+  );
   const openConveyorPrs = (Array.isArray(prs) ? prs : [])
-    .filter((p) => p && isOpenPr(p) && launched.has(normNum(p.num)) && Number(p.prNumber))
-    .map((p) => Number(p.prNumber));
+    .filter((p) => p && isOpenPr(p) && launched.has(normNum(p.num)) && Number(p.prNumber));
   const seen = new Set();
   const nextWatched = [];
   const arm = [];
-  for (const pr of openConveyorPrs) {
+  for (const p of openConveyorPrs) {
+    const pr = Number(p.prNumber);
     if (seen.has(pr)) continue; // a num with two open PRs → watch each once
     seen.add(pr);
     nextWatched.push(pr);
-    if (!already.has(pr)) arm.push(pr);
+    if (!already.has(pr)) arm.push({ pr, releaseSession: releaseSessionForNum(p.num, prepareKindByNum) });
   }
   return { arm, nextWatched };
 }
@@ -562,8 +605,10 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const fixPlan = planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, prRearmCounts, retryCap: cfg.fixRetryCap, availableLanes, tick });
   const liveFixGuards = [...fix.live, ...fixPlan.newGuards];
 
-  // 7. WATCHERS — one per open conveyor-launched PR; prune to currently-open conveyor PRs.
-  const watch = armWatchers(prs, launchedNums, bookkeeping.watched);
+  // 7. WATCHERS — one per open conveyor-launched PR; prune to currently-open conveyor PRs. Each armed entry
+  //    carries the `releaseSession` slug pr-watch passes as `--release-session` (#2700 merge-time auto-release),
+  //    derived from the live prepare guards (a prepare PR's session differs from a build PR's).
+  const watch = armWatchers(prs, launchedNums, bookkeeping.watched, livePrepareGuards);
 
   // 8. IDLE-STOP — queue-empty AND no operator feedback for the window.
   const idle = assessIdleStop({ queue, lanes, prs, launchedNums, now, lastOperatorTurn, idleWindowMs: cfg.idleWindowMs });
@@ -579,6 +624,16 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   notes.push(...fixPlan.notes.map((n) => ({ kind: n.kind, num: n.num, pr: n.pr, text: n.text })));
   for (const e of Array.isArray(needsSlice) ? needsSlice : []) notes.push({ kind: 'needs-slice', num: e.num, epicState: e.epicState, text: `⚠ epic #${e.num} needs slicing (/slice ${e.num})` });
   for (const d of Array.isArray(decisions) ? decisions : []) if (d?.prepared === true) notes.push({ kind: 'decision-ready', num: d.num, text: `⚖ decision #${d.num} ready to ratify (/next decision)` });
+  // HEALTH — the stall scan is LIVE now (#2616 populates the lane→num map on `acquire --item`), so `state.health`
+  // flags a genuinely stalled lane instead of always reading `ok`. Surface each stalled lane as an actionable note
+  // (the status line already shows the aggregate `⚠ lane-N` warn): the per-tick lease-reaper (SKILL §4c) reclaims
+  // the stalled lane's lease on its TTL-stale axis, so the health verdict is now a real backstop, not the inert
+  // signal the SKILL used to forbid relying on. This SURFACES + RECLAIMS; it never auto-re-dispatches a guard —
+  // the stall threshold (3 min) is far shorter than a guard's spawn-to-death TTL, so acting on it as a re-dispatch
+  // trigger would false-positive on a legitimately-quiet live agent (the guard TTLs stay the re-dispatch backstop).
+  for (const s of Array.isArray(health?.stalled) ? health.stalled : []) {
+    notes.push({ kind: 'lane-stalled', num: s.num, lane: s.lane, idleS: s.idleS, text: `⚠ lane-${s.lane} (#${s.num}) stalled ${s.idleS}s — the lease-reaper reclaims its lease once it passes the reaper TTL; investigate if it recurs` });
+  }
 
   const statusLine = buildStatusLine({
     queue, lanes, prs, health, infraBlocked, liveBuildGuards, livePrepareGuards, liveFixGuards, launchedNums,
