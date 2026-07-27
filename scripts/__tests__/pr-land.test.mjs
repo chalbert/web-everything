@@ -7,8 +7,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile } from '../pr-land.mjs';
-import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
+import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, PARK_LABELS } from '../pr-land.mjs';
+import { REVIEW_LABELS, REVIEW_LABEL_META } from '../lib/review-escalation.mjs';
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
   it('a policy-core diff (edits the leash-defining trust chain) → review:human, applied', () => {
@@ -263,6 +263,52 @@ describe('planPrLand — label only after CI green (#2199), never merges (#2290)
   });
 });
 
+describe('resolveParkLabel + planPrLand park mode — #2622 held-for-review open', () => {
+  it('PARK_LABELS is exactly the two held-for-review labels (sourced from REVIEW_LABELS, no drift)', () => {
+    expect(PARK_LABELS).toEqual([REVIEW_LABELS.human, REVIEW_LABELS.pending]);
+  });
+  it('flag absent → not a park run', () => {
+    expect(resolveParkLabel(undefined)).toEqual({ park: false });
+    expect(resolveParkLabel(false)).toEqual({ park: false });
+    expect(resolveParkLabel(null)).toEqual({ park: false });
+  });
+  it('a valid held-for-review label resolves ok', () => {
+    expect(resolveParkLabel('review:human')).toEqual({ park: true, ok: true, label: REVIEW_LABELS.human });
+    expect(resolveParkLabel('review:pending')).toEqual({ park: true, ok: true, label: REVIEW_LABELS.pending });
+  });
+  it('a bare --park (no value → true) is a validation failure, not a silent pass', () => {
+    const r = resolveParkLabel(true);
+    expect(r.park).toBe(true);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/no value/);
+  });
+  it('an off-list label (even a real non-held review label) is rejected', () => {
+    for (const bad of ['review:accepted', 'review:changes', 'ready-to-merge', 'redteam:accepted', 'nonsense']) {
+      const r = resolveParkLabel(bad);
+      expect(r.ok).toBe(false);
+      expect(r.reason).toMatch(/--park must be one of/);
+    }
+  });
+  it('park mode: open with the review label, do NOT wait/label-ready/merge/trigger a drain', () => {
+    const p = planPrLand({ wait: true, labelOnGreen: false, park: REVIEW_LABELS.pending });
+    expect(p.mode).toBe('park');
+    expect(p.parkLabel).toBe(REVIEW_LABELS.pending);
+    expect(p.waitForChecks).toBe(false);   // held for review — never waited/landed by this run
+    expect(p.labelWhenGreen).toBe(false);  // NEVER applies ready-to-merge
+    expect(p.mergeWhenGreen).toBe(false);
+    expect(p.triggerDrain).toBe(false);
+  });
+  it('park takes precedence over --label-on-green and --no-wait (a held PR must not carry the auto-land signal)', () => {
+    expect(planPrLand({ wait: true, labelOnGreen: true, park: REVIEW_LABELS.human }).mode).toBe('park');
+    expect(planPrLand({ wait: false, labelOnGreen: true, park: REVIEW_LABELS.human }).mode).toBe('park');
+  });
+  it('no park label → the ordinary wait/label/open-only modes are unchanged', () => {
+    expect(planPrLand({ wait: true, labelOnGreen: false, park: null }).mode).toBe('land');
+    expect(planPrLand({ wait: true, labelOnGreen: true, park: null }).mode).toBe('label-on-green');
+    expect(planPrLand({ wait: false, labelOnGreen: false, park: null }).mode).toBe('open-only');
+  });
+});
+
 describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', () => {
   const src = readFileSync(resolve(process.cwd(), 'scripts/pr-land.mjs'), 'utf8');
   it('#2199: the label is applied only after the green-wait — never eagerly at PR open', () => {
@@ -285,6 +331,26 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
   it('retains a git-merge fallback (#2138 Fork 5 (a))', () => {
     expect(src).toMatch(/fallback-git/);
     expect(src).toMatch(/merge', '--no-ff'/);
+  });
+  it('#2622: --park opens the review label at open then STOPS — before the wait loop, no ready-to-merge/drain', () => {
+    // The park branch exists and emits the `parked` outcome without waiting.
+    expect(src).toMatch(/if \(PLAN\.mode === 'park'\)/);
+    expect(src).toMatch(/reason: 'parked'/);
+    // An invalid --park value is a fail-fast BEFORE any push/create (never a silently-ignored flag).
+    expect(src).toMatch(/reason: 'bad-park'/);
+    // The park branch is placed BEFORE the check-wait loop (so it never waits/labels ready-to-merge).
+    expect(src.indexOf("PLAN.mode === 'park'")).toBeLessThan(src.indexOf('// 4. Wait until GitHub'));
+    // An invalid --park fails fast BEFORE the lane-ref push / PR create — never after touching origin.
+    expect(src.indexOf("reason: 'bad-park'")).toBeLessThan(src.indexOf('Publish the source commit to the lane ref'));
+    // The plan is built with the validated park label threaded in.
+    expect(src).toMatch(/park: PARK\.ok \? PARK\.label : null/);
+  });
+  it('#2622: every PARK_LABELS value has REVIEW_LABEL_META (so the park label provision never crashes on undefined)', () => {
+    for (const label of PARK_LABELS) {
+      expect(REVIEW_LABEL_META[label]).toBeDefined();
+      expect(REVIEW_LABEL_META[label].color).toBeTruthy();
+      expect(REVIEW_LABEL_META[label].description).toBeTruthy();
+    }
   });
   it('self-heals id collisions AFTER the merge, non-destructively, without ever failing the land (#2071)', () => {
     expect(src).toMatch(/function runHeal/);                      // the heal step exists
