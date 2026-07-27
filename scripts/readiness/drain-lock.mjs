@@ -11,10 +11,16 @@
  * a latent duplicate-numbering race the #2318 tripwire only catches AFTER it lands. This module closes it.
  *
  * TWO LOCKS, distinct lifetimes:
- *   1. NUMBERING-CRITICAL-SECTION MUTEX — a short-lived, TTL-bounded lock wrapping ONLY the number+publish
- *      step at each land call site ({@link withNumberingLock}). Held for the seconds the numbering+push
- *      takes; a crashed holder expires by the (short) TTL so the section never wedges. Enforces the
- *      sole-serial-writer invariant: at most one process assigns an NNN at a time.
+ *   1. SERIAL-WRITER-TO-MAIN MUTEX (a.k.a. the numbering-critical-section mutex) — a short-lived, TTL-bounded
+ *      lock the land call sites take around the two writes that MUST be single-writer: the `gh pr merge`
+ *      itself ({@link withLandWriteLock}) AND the number+publish step ({@link withNumberingLock}). Both share
+ *      ONE lock key ({@link NUMBERING_LOCK_PATH}), so a merge and a numbering run in DIFFERENT processes are
+ *      mutually exclusive — held for the seconds each takes; a crashed holder expires by the (short) TTL so the
+ *      section never wedges. #2683 widened this from numbering-only to the merge write too: a `--only=<pr>`
+ *      FAST DRAIN bypasses the whole-process lease (below), so this mutex is the ONLY thing serializing its
+ *      `gh pr merge` against a concurrent resident-daemon sweep — the numbering mutex alone (pre-#2683) guarded
+ *      only NNN allocation, leaving two processes free to race the actual merge write. Enforces the
+ *      sole-serial-writer invariant: at most one process writes to main (merge OR NNN) at a time.
  *   2. WHOLE-PROCESS DRAIN LEASE — a distinct lock held for a drain run's FULL lifetime
  *      ({@link acquireDrainLease}/{@link heartbeatDrainLease}/{@link releaseDrainLease}). A second drain
  *      launch that finds a LIVE lease no-ops (its work is already being done); a STALE lease (a crashed
@@ -128,6 +134,21 @@ export function withNumberingLock(fn, {
   } finally {
     if (held) releaseNumberingLockIfOwned(lockRoot, owner);
   }
+}
+
+/**
+ * #2683 — run `fn` (a single `gh pr merge` write) inside the SERIAL-WRITER-TO-MAIN critical section. A thin
+ * wrapper over {@link withNumberingLock} that shares the SAME lock key ({@link NUMBERING_LOCK_PATH}) so the
+ * merge write and the numbering step are mutually exclusive across processes — the invariant the fast-drain
+ * (`--only=<pr>`, which bypasses the whole-process drain lease) relies on to serialize its merge against a
+ * concurrent resident-daemon sweep. Owner is tagged `land` (vs `numbering`) for diagnostics only; the lock key,
+ * not the owner, is what provides the mutual exclusion. Same reclaim-aware spin + never-hang fallback contract
+ * as {@link withNumberingLock}: a live holder blocking past the budget runs `fn` WITHOUT the lock and reports
+ * `contended:true` (the caller's per-PR idempotency re-check is the backstop against a double-attempt).
+ * @returns {{ result: any, held: boolean, contended: boolean, heldBy: string|null, reason: string }}
+ */
+export function withLandWriteLock(fn, opts = {}) {
+  return withNumberingLock(fn, { owner: makeOwner('land'), ...opts });
 }
 
 // ── (2) whole-process drain lease ────────────────────────────────────────────────
