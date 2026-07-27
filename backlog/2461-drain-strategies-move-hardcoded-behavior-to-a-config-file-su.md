@@ -5,6 +5,24 @@ size: 5
 status: open
 dateOpened: "2026-07-12"
 tags: []
+scope:
+  # WE lander + new declared drain-strategy config layer
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:scripts/lib/drain-config.mjs
+  - we:scripts/lib/__tests__/drain-config.test.mjs
+  - we:drain.config.json
+  - we:drain.config.schema.json
+  # trust-chain roster: register the new lander-governing config artifact
+  - we:scripts/lib/gate-config.mjs
+  - we:scripts/lib/__tests__/gate-config.test.mjs
+  # plateau drain-daemon (reads config → pass-arg strategy) + dev-panel loop UI surface (#2454)
+  - plateau:tools/drain-daemon/lib.mjs
+  - plateau:tools/drain-daemon/lib.test.mjs
+  - plateau:tools/drain-daemon/daemon.mjs
+  - plateau:tools/drain-daemon/cli.mjs
+  - plateau:tools/dev-panel/vite-plugin.ts
+  - plateau:tools/dev-panel/drain-daemon.html
 ---
 
 # drain strategies: move hardcoded behavior to a config file surfaced in the plateau loop UI
