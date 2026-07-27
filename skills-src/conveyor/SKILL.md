@@ -218,14 +218,24 @@ one that works for a completed background task), so it re-invokes this loop reli
    launched.** `state.prs` is built from `gh pr list` **repo-wide**, so it also carries PRs from other sessions /
    humans. `tick-core` has ALREADY filtered it to OPEN PRs whose `num` this conveyor dispatched this session
    (`nextState.launchedNums` — builds AND prepares), dropped the ones you already watch, and pruned the watched
-   set to the currently-open conveyor PRs (`nextState.watched`). So you just spawn a background watcher for each
-   `prNumber` in `decisions.armWatchers`, whose **exit** wakes this loop:
+   set to the currently-open conveyor PRs (`nextState.watched`). Each `decisions.armWatchers` entry is a
+   `{ pr, releaseSession }` pair — the core already derived the `--release-session` slug (`conveyor-<num>` for a
+   build PR, `prepare-<num>` / `prepare-decision-<num>` for a prepare PR). So you just spawn one background watcher
+   per entry, passing that slug, whose **exit** wakes this loop:
    ```bash
-   node scripts/conveyor/pr-watch.mjs <prNumber>   # run_in_background: true
+   node scripts/conveyor/pr-watch.mjs <pr> --release-session=<releaseSession>   # run_in_background: true
    ```
    The board (`state.prs`) is the source of truth for which PRs exist; the watcher just wakes you the instant one
    reaches a terminal state. Scoping to conveyor-launched nums keeps an unrelated PR's stray `review:*` label from
    waking the loop with a spurious "PR #N needs review".
+   - **`--release-session` wires in the ghost-lease auto-release (#2667/#2700).** On the watcher's **merge** exit
+     (and ONLY on merge — a park / close / timeout leaves the still-in-use lane held), pr-watch runs
+     `lane-pool release --all-pools --session=<slug>`, which hands that item's lane lease back in EVERY pool it
+     acquired AND resets the freed clone to origin/main — the exact manual recipe (`release --lane=N
+     --session=conveyor-<num>` + `git reset --hard origin/main`) this mechanizes. It is best-effort: a release
+     hiccup never changes the merge outcome, because the per-tick **lease-reaper (§4c)** is the catch-all backstop
+     for anything auto-release misses (a fix lease, a dead agent that never opened a PR, a merge whose main
+     session was down).
    - **Prepare-scope PRs are watched the same way** (their `num` was dispatched this session too). When a prepare
      PR **merges** (watcher exit `0`), the item now carries committed `scope:`, so the very next tick's
      `dispatch-plan` sees it as scoped and launches it to **BUILD** — the auto-prepare → build handoff. The prepare
@@ -248,6 +258,21 @@ one that works for a completed background task), so it re-invokes this loop reli
    **OUTAGE** banner on the status board) shows what is blocked and why — see §3f. `pr-land` records the block
    automatically at the failed open, so a conveyor-launched delivery/prepare agent's `blocked-on-infra` return
    needs no extra bookkeeping from you; just note it in the tick line.
+
+4c. **Run the lease-reaper — the periodic ghost-lease backstop (#2667/#2700).** Merge-time auto-release (§4's
+   `--release-session`) is the FAST path: it frees an item's lane the instant its PR merges. But it can't catch
+   everything — a delivery agent that **died mid-build** (an API death) never opened a PR to merge, a **fix**
+   lease (`fix-<num>`) rides a different session than the one the watcher releases, and a merge whose **main
+   session was down** when it landed released nothing. So each tick, run ONE reaper pass as the catch-all:
+   ```bash
+   node scripts/conveyor/lease-reaper.mjs   # best-effort; a gh-unavailable run degrades to the TTL-stale axis
+   ```
+   It walks **every** lane pool and reclaims an orphan lease on any of its axes — the item's PR reached a terminal
+   state (merged / closed, matched by head ref `lane/<num>-*`), or the lease outlived its TTL (the zero-IO
+   dead-agent backstop) — delegating each reclamation to `lane-pool release --force` (so the reserved-memory-lane
+   protection lives in ONE place; the reaper never rm's a marker itself). Like the §4b recovery pass, the tick is
+   the loop clock — one round per tick, no internal busy-loop. It is best-effort: a stuck lane is logged and
+   skipped, and its exit never gates the tick. A freed lane is picked up by the very next tick's `dispatch-plan`.
 
 5. **Post `decisions.statusLine`, then start the next tick.** The core already built the terse one-line status
    from the tick read + the live bookkeeping (counts of building / preparing / fixing / queued / parked + the
@@ -335,15 +360,22 @@ its own, above, and in particular does NOT retire on Agent-return):
    without ever showing as claimed, **DROP it and let it re-dispatch**, and surface a one-line note the first
    time (`⚠ #<num> never claimed after <N> ticks — re-dispatching`). This covers an agent that **died after
    spawn but before claiming** (a crash during `acquire`/`npm`, a lost background task, a lost lane race): path
-   (1) never fires and path (2)'s health backstop is currently inert (see below), so without the TTL the `num`
-   would sit guarded **forever** and that one item would silently stop delivering for the whole session.
+   (1) never fires, and the health/stall scan (now live — below) still can't see this window either, because a
+   lane isn't leased or lane→num-mapped until the agent *acquires*, so a die-before-acquire lane never reaches
+   `state.lanes` for the scan to flag. Without the TTL the `num` would sit guarded **forever** and that one item
+   would silently stop delivering for the whole session. (Once the agent *does* acquire, this guard retires
+   `claimed`; a stall AFTER that point is the reaper's + the operator's to reclaim, not this guard's — see below.)
 
-> **Do NOT rely on `state.health` as the guard backstop.** The stall scan is **dormant** today: it maps a lane
-> to its item via `.claude/lane-ports.json`, which is `{}` (nothing in the acquire path populates it yet), so
-> `conveyor-state`'s health scan never flags a stalled lane and `state.health` reads `ok` regardless. The **TTL
-> (rule 3) is the real backstop** until that lane→num mapping exists (populating it is a separate follow-up — do
-> not build it here). Still surface `state.health.verdict === 'warn'` when it does fire, but never make the guard
-> depend on it.
+> **`state.health` is LIVE now — it is a real backstop, no longer inert (#2616/#2700).** `lane-pool acquire
+> --item=<num>` populates the lane→num map (`.claude/lane-ports.json`) that `conveyor-state`'s stall scan keys on,
+> so the scan flags a genuinely stalled lane (a leased lane whose delivery-agent transcript has gone silent past
+> the threshold) and `state.health.verdict` reads `warn`. `tick-core` CONSUMES that verdict: the status line shows
+> the `⚠ lane-N` warn and each stalled lane becomes a `lane-stalled` note, and the **per-tick lease-reaper (§4c)**
+> reclaims the stalled lane's lease on its TTL-stale axis. So health SURFACES the stall and the reaper RECLAIMS it
+> — that is the backstop. **What it does NOT do is auto-re-dispatch a guard on a stall:** the stall threshold
+> (≈3 min) is far shorter than a guard's spawn-to-death TTL, so treating a stall as a re-dispatch trigger would
+> false-positive on a legitimately-quiet but live agent. The guard **TTLs (build rule 3, prepare TTL-to-first-PR,
+> fix TTL) stay the re-dispatch backstop** — health informs the reclaim + the operator, it never overrides them.
 
 This is process bookkeeping — which agents you launched — not a state store: the board stays the single truth
 (see *State*).
