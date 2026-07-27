@@ -244,3 +244,78 @@ describe('scope: must be repo-qualified', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// ── scope defaults to FILE-LEVEL — a bare directory scope is FLAGGED unless justified (#2739) ──
+// Mirrors the inline check-standards.mjs branch (§6d-sexies) that WARNS on a repo-qualified scope prefix ending
+// in `/` (a whole-directory lease) unless the item carries a `scopeRationale:` note or is already resolved. Same
+// mirror pattern as `classifyScope` above: the script isn't importable, so we re-express the decision as a pure
+// `dirLevelScopeFinding` and pin it with the requested unit cases plus a standing false-positive corpus guard.
+describe('scope defaults to file-level — dir-level scope flagged unless justified', () => {
+  const matter = require('gray-matter');
+  const SCOPE_REPO_PREFIX_RE = /^(?:we|fui|plateau|webeverything|frontierui|plateau-app):/;
+
+  /**
+   * Pure mirror of the inline warn: returns the repo-qualified dir-level entries (prefix ending in `/`) that
+   * would be FLAGGED for `item`, or `[]` when the item is exempt (resolved, or carries a non-empty
+   * scopeRationale) or is entirely file-level. A bare (non-repo-qualified) entry is NOT counted here — it is a
+   * separate hard error (classifyScope → 'bare'), so it never double-signals as a dir-level finding.
+   */
+  const dirLevelScopeFinding = (item) => {
+    const scope = item?.scope;
+    if (!Array.isArray(scope)) return [];
+    if (item?.status === 'resolved') return [];
+    const rationale = typeof item?.scopeRationale === 'string' ? item.scopeRationale.trim() : '';
+    if (rationale) return [];
+    return scope.filter((p) => typeof p === 'string' && SCOPE_REPO_PREFIX_RE.test(p) && p.endsWith('/'));
+  };
+
+  it('flags a bare directory scope entry (prefix ending in "/")', () => {
+    expect(dirLevelScopeFinding({ status: 'open', scope: ['we:scripts/readiness/'] }))
+      .toEqual(['we:scripts/readiness/']);
+    // Only the dir-level entries are returned; a file-level sibling in the same array is left alone.
+    expect(dirLevelScopeFinding({ status: 'open', scope: ['we:scripts/check-standards.mjs', 'we:scripts/conveyor/'] }))
+      .toEqual(['we:scripts/conveyor/']);
+  });
+
+  it('does NOT flag an all-file-level scope', () => {
+    expect(dirLevelScopeFinding({ status: 'open', scope: ['we:scripts/check-standards.mjs', 'we:scripts/__tests__/check-standards.test.mjs'] }))
+      .toEqual([]);
+  });
+
+  it('clears the flag when a non-empty scopeRationale justifies the directory span', () => {
+    expect(dirLevelScopeFinding({ status: 'open', scope: ['we:scripts/readiness/'], scopeRationale: 'integration item — rewires every reader in the module' }))
+      .toEqual([]);
+    // A whitespace-only rationale is not a justification.
+    expect(dirLevelScopeFinding({ status: 'open', scope: ['we:scripts/readiness/'], scopeRationale: '   ' }))
+      .toEqual(['we:scripts/readiness/']);
+  });
+
+  it('skips resolved items (their scope is historical — no author will re-scope them)', () => {
+    expect(dirLevelScopeFinding({ status: 'resolved', scope: ['we:scripts/readiness/'] })).toEqual([]);
+  });
+
+  it('does not double-signal a bare (non-repo-qualified) dir entry — that is the separate hard error', () => {
+    expect(dirLevelScopeFinding({ status: 'open', scope: ['scripts/readiness/'] })).toEqual([]);
+  });
+
+  it('never flags an item whose scope is already file-level or justified across the REAL backlog', () => {
+    // False-positive guard: assert the finding only ever lands on an UNjustified, non-resolved, dir-level
+    // scope — i.e. every flagged item really does carry a `/`-terminated entry, no rationale, and isn't
+    // resolved. This is the soundness invariant (it never fires on a file-level or justified item), the same
+    // standing-corpus discipline the repo-qualified guard above uses — NOT an assertion of zero findings (the
+    // finer-lease debt is exactly what the warning surfaces, so real dir-scoped items legitimately match).
+    const dir = join(ROOT, 'backlog');
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.md'))) {
+      let data;
+      try { data = matter(readFileSync(join(dir, file), 'utf8')).data; } catch { continue; }
+      if (data?.scope === undefined) continue;
+      const finding = dirLevelScopeFinding(data);
+      if (finding.length) {
+        expect(data.status, `${file} flagged but resolved`).not.toBe('resolved');
+        const rationale = typeof data.scopeRationale === 'string' ? data.scopeRationale.trim() : '';
+        expect(rationale, `${file} flagged but carries a scopeRationale`).toBe('');
+        for (const entry of finding) expect(entry.endsWith('/'), `${file}: ${entry}`).toBe(true);
+      }
+    }
+  });
+});
