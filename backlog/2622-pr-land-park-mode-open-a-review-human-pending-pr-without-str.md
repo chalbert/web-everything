@@ -3,11 +3,13 @@ bornAs: x5wqget
 kind: story
 size: 3
 parent: "2612"
-status: open
+status: resolved
 scope:
   - we:scripts/pr-land.mjs
   - we:scripts/__tests__/pr-land.test.mjs
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: [plateau-loop, pr-land, drain, backlog, tooling]
 ---
 
@@ -25,3 +27,14 @@ Give [`we:scripts/pr-land.mjs`](../scripts/pr-land.mjs) a first-class **park mod
 **Not urgent — a polish, not a hole.** The drain's land-numbering (per [#2288](/backlog/2288-jit-backlog-numbering-drain-assigns-the-nnn-at-land-from-a-h/)) already **auto-heals** a stranded hash at the next land, and the number-stranded heal (#2319) mops up any that slip through. So this only removes the **transient red gate** between the `gh pr create` park and the next drain pass — it makes the clean path the easy path rather than fixing a permanent failure.
 
 Refs [#2319](/backlog/2319-number-the-stranded-hash-id-s-already-on-main-add-a-hash-on-/), [#2288](/backlog/2288-jit-backlog-numbering-drain-assigns-the-nnn-at-land-from-a-h/), [#2307](/backlog/2307-producer-tags-the-review-escalation-label-at-pr-open-determi/).
+
+## Progress
+
+Done. `we:scripts/pr-land.mjs` now has a first-class `--park=<review:human|review:pending>` mode:
+
+- **`resolveParkLabel(park)`** (pure, exported) validates the flag against `PARK_LABELS` — the two held-for-review labels (`review:human`, `review:pending`), sourced from `REVIEW_LABELS` so the names never drift. A missing/off-list value is a **fail-fast** (`reason: 'bad-park'`, exit 3) *before* any push/create — never a silently-ignored flag.
+- **`planPrLand`** gained a fourth mode, `park`: it composes the `--no-wait` open semantics (no green-wait, no `ready-to-merge`, no drain trigger) **with** the caller-chosen review label applied at open. Park **takes precedence** over `--label-on-green`/`--no-wait` (a held PR must never also carry the auto-land signal).
+- The PR is opened through the **same producer create path** the normal modes use (locus-prefix re-check, `prCreateBodyGuard`, manifest embed, derived title) — the land-prep the `gh pr create` bypass skipped. The drain still JIT-numbers any born-as-hash item **at land** once a human clears the review, the same footing as an auto-landing PR (numbering stays deferred per #2288 — never minted early on the branch, which would defeat parallel-lane collision avoidance).
+- Emits `reason: 'parked'` (exit 0), with `reviewLabel`/`reviewLabelApplied` in the JSON. Dry-run plan renders park-aware lines.
+
+Tests in `we:scripts/__tests__/pr-land.test.mjs`: `resolveParkLabel` (valid/absent/bare/off-list), `planPrLand` park mode + precedence, and a source-level guard that the park branch sits before the wait loop and never labels ready-to-merge. Full `check:standards` green.
