@@ -178,6 +178,46 @@ fields `merge-ai-prs.mjs` already returns, see `## Run it` above) and post its o
 line(s) — this is the ONE place that wording is templated, so a plain one-shot pass, a `--watch` loop's final
 pass, and a batch-closeout drain all report the same way.
 
+## Stacked-chain couples — the proof-of-land gate (#2387)
+
+A serial `/batch` may hand this drain an **overlap-stacked chain**: item N+1's lane was cut from item N's
+**pushed tip** because they share files, so their PRs must land **in order**. The transport above is
+**unchanged** — the ordering is enforced by a positive, **identity-based proof-of-land gate** read off each
+PR's manifest, never by ref-absence:
+
+- A stacked PR's `.lane-manifest.json` carries **`stackParents`** (an `asItemId` list — the frontier-tip
+  item(s) its lane was cut from / merged onto) plus a per-repo **`base`** SHA. `blockedBy` stays the hard
+  *semantic* edge; `stackParents` is the *lineage* edge.
+- **Gate a couple READY only when every `stackParent` is proven landed** — either **landed this same pass**
+  (the in-memory set) **or `bornAs`-proven on `main`**. A parent that is neither is a **DEFER**, not a skip.
+  **Never read a missing ref as "landed"** — this is a *positive* gate by construction (the #2387 F5
+  stowaway defense: salvaging a tail past an unlanded parent would drag the parent's unreviewed code onto
+  `main` under the child's number).
+- **`bornAs: <hash>` is the landed proof.** At land the numbering routine stamps `bornAs: <birth-hash>` on
+  the item's frontmatter and **excludes it from the blind hash→NNN rewrite** (the one-line guard in
+  [we:scripts/backlog/id.mjs](../../../scripts/backlog/id.mjs)) — so it survives on `main` as the durable,
+  cross-clone, renumber-immune birth record every clone reads; `landedNumberFor(hash)` resolves it. (Not
+  excluding it is a permanent-strand deadlock — the parent's proof would be rewritten to a number the child's
+  recorded parent never matches.) `bornAs`-on-`main` is the **sole** cross-clone landed proof; the local
+  `id-ledger.json` is numbering bookkeeping only, and `bornAs` derives one-directionally from it so they
+  cannot diverge.
+- **Couple-granular.** The gate is evaluated at couple granularity via the impl-PR→WE-manifest `laneRef`
+  join, so a manifest-less impl PR inherits its couple's `stackParents` and is never independently "ready"
+  ahead of its couple.
+
+Because a landed parent is an ancestor of `main`, git auto-computes it as the merge-base and the stacked
+child lands **three-way-clean** through the **unchanged** rebase-drop rebuild (#2198) — no `--merge-base`
+override. A **broken parent** (red `test` / bounced `review:changes`) **defers its true overlap-descendants**
+while disjoint siblings land normally; the tail is rebuilt by [`/finish`](../finish/SKILL.md)'s stack-repair.
+Full end-to-end narrative — overlap-stacking, the `actual ⊆ declared` producer contract, the capability-marker
+rollout, push-at-close: *[docs/agent/backlog-workflow.md → Overlap-stacked serial batches](../../../docs/agent/backlog-workflow.md)*.
+
+**Two locks (#2391), not one.** The drain holds a **whole-process lease** (`O_EXCL` + TTL) for its lifetime
+(the daemon note at the top of this skill) **and** a distinct fine **numbering-critical-section mutex** around
+*number + publish* at every land call site. They are separate on purpose: the lease delivers "exactly one
+drain," the mutex enforces "sole serial writer to `main`" (no two lands race to `max+1` and mint a duplicate
+`NNN`). Push-at-close checks the **lease**.
+
 ## Auto-review the parked PRs (#2285 v1 + v2)
 
 The #2171/#2262 review-escalation gate **parks** a blast-radius PR (`review:pending`) and waits for an

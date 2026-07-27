@@ -35,6 +35,14 @@ export const meta = {
 // becomes ONE PR per repo; the WE PR BODY carries the item's lane manifest (#2163, moved off the tree in
 // xnsk54v) so the drain lands the couple impl-first/WE-last in cross-item blockedBy order.
 //
+// NO OVERLAP-STACKING — the parallel path is siblings + deferred, by construction (#2387). The serial /batch
+// overlap-stacks: item N+1's lane is cut from item N's PUSHED TIP when their files overlap, so a shared-file
+// merge is resolved once IN-SESSION and the drain lands a clean chain. Parallel has NO such predecessor — its
+// lanes run CONCURRENTLY, so there is no pushed tip to stack on; every item is its OWN sibling off origin/main,
+// and the drain absorbs any overlap as a rebase-retry at LAND time (git is the arbiter there). Both paths share
+// the ONE drain engine and the SAME proof-of-land gate; overlap-stacking is a serial-only optimization, never
+// wired here. Full contrast: docs/agent/backlog-workflow.md → Overlap-stacked serial batches.
+//
 // THE READY-TO-MERGE SIGNAL (#2183 F1 = a PR LABEL). Each opened PR is labelled `ready-to-merge` (created once
 // in Provision). This is the forward signal the drain↔/merge convergence (#2188) will discover by. As an
 // interim so the EXISTING drain works today, Finalize also writes a LOCAL (uncommitted) `queued.json` entry
