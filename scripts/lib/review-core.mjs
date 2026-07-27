@@ -1274,6 +1274,69 @@ export function deriveJurorInvite({ careLevel, seatedLenses = [], jurorsPerLens,
 
 /**
  * ============================================================================
+ * THE JUROR-INVITE LOOP GUARDS — grow-only, gate-self hardening (#2640).
+ * ============================================================================
+ *
+ * `deriveJurorInvite` above is grow-only BY CONSTRUCTION (its `seatedLenses` is `current ∪ invited` and its
+ * `jurorsPerLens` is the raised band's dial ≥ current). But the parked-PR review loop
+ * (`we:scripts/workflows/review-parked-prs.mjs`) runs the CLI inside an AGENT — a harness sandbox that cannot
+ * `import` this module — and an agent's ECHO of the growth cannot be trusted (a prompt-injected/misbehaving invite
+ * agent could echo a SHRUNK roster/count and drop the mandatory correctness/security lenses, letting a diff land
+ * with no security review). These three pure guards are the SPEC the loop enforces from its OWN state to neutralize
+ * a bad echo. They live here (tested) and are MIRRORED inline in the sandbox loop (which cannot import them) — the
+ * same "mirror a tested literal/shape, no import in the sandbox" pattern the loop already uses for the ceiling.
+ */
+
+/**
+ * Grow-only ROSTER union (#2640) — the next active roster is ALWAYS a SUPERSET of the current one: current lenses ∪
+ * the invited lens ∪ any echoed added lenses, de-duplicated. So no seated lens (least of all a mandatory one) can be
+ * dropped mid-loop, whatever a shrunk/echoed roster claims. Pure.
+ * @param {string[]} currentLenses - the roster the loop currently seats.
+ * @param {string} invitedLens - the lens the accepted invite earns.
+ * @param {string[]} [addedLenses] - lens names the invite agent echoed as added (advisory — only ever grows).
+ * @returns {string[]} the grow-only union.
+ */
+export function growOnlyRoster(currentLenses = [], invitedLens = '', addedLenses = []) {
+  const cur = Array.isArray(currentLenses) ? currentLenses.filter((l) => typeof l === 'string' && l) : [];
+  const added = Array.isArray(addedLenses) ? addedLenses.filter((l) => typeof l === 'string' && l) : [];
+  const inv = typeof invitedLens === 'string' && invitedLens ? [invitedLens] : [];
+  return [...new Set([...cur, ...inv, ...added])];
+}
+
+/**
+ * Grow-only per-lens JUROR count (#2640) — floor an accepted invite's per-lens count at the CURRENT count (an invite
+ * may only GROW the panel, never shrink it) and cap it at the ceiling. So an echoed `1` cannot shrink a 2-juror
+ * panel. Pure.
+ * @param {number} current - the current per-lens juror count.
+ * @param {number} proposed - the count the invite agent echoed.
+ * @param {number} ceiling - the per-care-band ceiling (top band's dial). In the loop `ceiling >= current` always (the
+ *   current count is dialed off a care band at or below the top), so the floor is never overridden by the cap.
+ * @returns {number} `min(ceiling, max(current, proposed))` — floored at `current` (never below it while
+ *   `ceiling >= current`) and capped at `ceiling`.
+ */
+export function floorGrowOnlyJurors(current, proposed, ceiling) {
+  const cur = Number.isFinite(Number(current)) && Number(current) >= 1 ? Math.floor(Number(current)) : 1;
+  const prop = Number.isFinite(Number(proposed)) && Number(proposed) >= 1 ? Math.floor(Number(proposed)) : cur;
+  const cap = Number.isFinite(Number(ceiling)) && Number(ceiling) >= 1 ? Math.floor(Number(ceiling)) : cur;
+  return Math.min(cap, Math.max(cur, prop));
+}
+
+/**
+ * The MANDATORY lenses ABSENT from a round's results (#2640) — a mandatory lens degrades the round to needs-human if
+ * it is not PRESENT-and-OK, whether it ran-and-errored OR was never scheduled at all. Keying the safety net on
+ * failed-lenses alone missed the never-scheduled case (a shrunk roster that never ran a mandatory lens saw zero
+ * failures and could reduce to accept → land). Deriving from the OK set closes that. Pure.
+ * @param {string[]} ranOkLenses - the lenses that RAN and produced a verdict this round.
+ * @param {string[]} [mandatory] - the mandatory lens set (default the core `MANDATORY_LENSES`).
+ * @returns {string[]} the mandatory lenses absent from `ranOkLenses`.
+ */
+export function absentMandatoryLenses(ranOkLenses = [], mandatory = MANDATORY_LENSES) {
+  const ranSet = new Set(Array.isArray(ranOkLenses) ? ranOkLenses.filter((l) => typeof l === 'string' && l) : []);
+  return (Array.isArray(mandatory) ? mandatory : []).filter((l) => !ranSet.has(l));
+}
+
+/**
+ * ============================================================================
  * THE PREPARE-TIME JURY CHARTER — pre-register the jury + expectations (#2638, under jury cluster #2636).
  * ============================================================================
  *

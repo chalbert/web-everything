@@ -721,20 +721,45 @@ async function runPanelRound(pr, repo, diff, escalationReason, title, round, act
 }
 
 /** Apply a grounded juror invite (#2640) — shell the shared review core (`review-core-cli invite` =
- *  `deriveJurorInvite`) to get the jury-growth DELTA (raise care → recompute rigor → spawn only the delta, bounded
- *  by the per-care-band ceiling). Single-sourced: the growth decision is never re-derived here. Returns the
- *  normalized delta, or null if the agent could not run (the caller then falls through to a normal editor round). */
+ *  `deriveJurorInvite`) via the invite agent to get the jury-growth DELTA (raise care → recompute rigor → spawn only
+ *  the delta, bounded by the per-care-band ceiling).
+ *
+ *  TRUST BOUNDARY (gate-self fix, #2640): `deriveJurorInvite` is GROW-ONLY by construction — its `seatedLenses` is
+ *  `current ∪ invited` (a superset) and its `jurorsPerLens` is the raised band's dial (≥ current). But the sandbox
+ *  cannot `import` the pure core (see the header) — the CLI runs inside an AGENT, and an agent's ECHO cannot be
+ *  trusted to have preserved that grow-only shape (a prompt-injected/misbehaving invite agent could echo
+ *  `{ jurorsPerLens: 1, seatedLenses: ['simplicity'] }` and SHRINK the panel, dropping the mandatory
+ *  correctness/security lenses). So we do NOT take the echoed roster/count as authoritative; we RE-DERIVE the
+ *  grow-only result from the loop's OWN known inputs (`seatedLenses`, `jurorsPerLens`, `invite.lens`) and apply the
+ *  same invariants the pure core guarantees:
+ *    • `seatedLenses` result = `current ∪ {invite.lens} ∪ echoed-added` — a SUPERSET of the current roster, so a
+ *      seated (esp. mandatory) lens can never be dropped, whatever the echo says.
+ *    • `jurorsPerLens` result = `min(CEILING, max(current, echoed))` — floored at the current count (grow-only) and
+ *      capped at the ceiling. An echoed `1` cannot shrink a 2-juror panel.
+ *  The echo is thus advisory ONLY (accept/reject + the ceiling-bounded target); the grow-only property is enforced
+ *  here from state the attacker does not control. Returns the normalized delta, or null if the agent could not run
+ *  (the caller then falls through to a normal editor round). */
 async function applyJurorInvite(item, careLevel, seatedLenses, jurorsPerLens, invite) {
   const r = await agent(invitePrompt(item, careLevel, seatedLenses, jurorsPerLens, invite), { label: `invite:${prTag(item)}`, phase: 'Converge', schema: INVITE_SCHEMA }).catch(() => null);
   if (!r) return null;
+  // Re-derive the roster as a GROW-ONLY union from KNOWN loop inputs — never the echoed seatedLenses verbatim. The
+  // current roster is always ⊆ the result, so no lens (least of all a mandatory one) can be dropped by the echo.
+  // MIRRORS the tested spec `growOnlyRoster` in review-core.mjs (the sandbox cannot import it).
+  const echoedAdded = Array.isArray(r.addedLenses)
+    ? r.addedLenses.map((a) => (a && typeof a.lens === 'string' ? a.lens.trim() : '')).filter(Boolean)
+    : [];
+  const grownSeated = [...new Set([...seatedLenses, invite.lens, ...echoedAdded])];
+  // Floor at the CURRENT per-lens count (grow-only) and cap at the ceiling — an echoed count may only GROW the
+  // panel, never shrink it (parity with the round-cap body backstop). max(current, …) is the shrink-hole floor.
+  // MIRRORS the tested spec `floorGrowOnlyJurors(current, echoed, ceiling)` in review-core.mjs.
+  const echoedPerLens = (Number.isFinite(Number(r.jurorsPerLens)) && Number(r.jurorsPerLens) >= 1) ? Math.floor(Number(r.jurorsPerLens)) : jurorsPerLens;
+  const grownPerLens = Math.min(JURORS_PER_LENS_CEILING, Math.max(jurorsPerLens, echoedPerLens));
   return {
     accepted: r.accepted === true,
     reason: (typeof r.reason === 'string' && r.reason) ? r.reason : null,
     toCareLevel: (typeof r.toCareLevel === 'string' && r.toCareLevel) ? r.toCareLevel : careLevel,
-    // Clamp to [1, JURORS_PER_LENS_CEILING] — guardrail 3 is enforced in the pure core, but the loop body must not
-    // trust an invite agent's echoed count to have honoured the ceiling (parity with the round-cap body backstop).
-    jurorsPerLens: (Number.isFinite(Number(r.jurorsPerLens)) && Number(r.jurorsPerLens) >= 1) ? Math.min(JURORS_PER_LENS_CEILING, Math.floor(Number(r.jurorsPerLens))) : jurorsPerLens,
-    seatedLenses: Array.isArray(r.seatedLenses) ? r.seatedLenses : seatedLenses,
+    jurorsPerLens: grownPerLens,
+    seatedLenses: grownSeated,
     atCeiling: r.atCeiling === true,
     addedLenses: Array.isArray(r.addedLenses) ? r.addedLenses : [],
   };
@@ -747,10 +772,17 @@ async function applyJurorInvite(item, careLevel, seatedLenses, jurorsPerLens, in
  *  round revises against. */
 async function reducePanelRound(pr, repo, lensResults, escalationReason, fetchOk, round, roundCap) {
   const failedLenses = lensResults.filter((r) => !r.ok).map((r) => r.lens);
-  const failedMandatory = failedLenses.filter((l) => MANDATORY_LENSES.includes(l));
-  const degrade = failedMandatory.length > 0 || !fetchOk;
+  // ABSENT, not just failed (gate-self fix, #2640): a mandatory lens degrades the round if it is not PRESENT-and-OK
+  // in the results — whether it ran-and-errored OR was never scheduled at all (dropped from the roster). Keying the
+  // safety net on `failedLenses` alone missed the never-scheduled case, so a shrunk roster with no mandatory lens
+  // scheduled saw zero failures and could reduce to accept → land with NO correctness/security review. Deriving from
+  // the OK set (present ∧ ran) closes that: a mandatory lens absent for ANY reason → degrade to needs-human.
+  // MIRRORS the tested spec `absentMandatoryLenses(ranOkLenses)` in review-core.mjs.
+  const okLensSet = new Set(lensResults.filter((r) => r.ok).map((r) => r.lens));
+  const absentMandatory = MANDATORY_LENSES.filter((l) => !okLensSet.has(l));
+  const degrade = absentMandatory.length > 0 || !fetchOk;
   if (degrade) {
-    const why = !fetchOk ? 'the diff could not be fetched' : `mandatory reviewer(s) failed to run: ${failedMandatory.join(', ')}`;
+    const why = !fetchOk ? 'the diff could not be fetched' : `mandatory reviewer(s) absent (did not run/not scheduled): ${absentMandatory.join(', ')}`;
     log(`  ${repo}#${pr}: round ${round} DEGRADING to needs-human — ${why} (a reviewer that did not run NEVER reads as accept).`);
   }
 
@@ -863,9 +895,13 @@ async function convergePr(item) {
       if (grown && grown.accepted && grown.addedLenses.length) {
         careLevel = grown.toCareLevel;
         jurorsPerLens = grown.jurorsPerLens;
-        // Only lenses the diff-text panel can seat (a perspective lens needs a grounding method not run here).
-        const nextLenses = grown.seatedLenses.filter((l) => LENSES.includes(l));
-        activeLenses = nextLenses.length ? nextLenses : activeLenses;
+        // GROW-ONLY (gate-self fix, #2640): UNION the current roster with the grown set — NEVER replace it. Replacing
+        // would let a shrunk/echoed roster DROP the mandatory correctness/security lenses mid-loop; a union can only
+        // add. Keep only lenses the diff-text panel can seat (a perspective lens needs a grounding method not run
+        // here) — but a mandatory lens, always seatable, can never be filtered out of the current roster.
+        // MIRRORS the tested spec `growOnlyRoster` in review-core.mjs (union, never replace).
+        const grownSeatable = grown.seatedLenses.filter((l) => LENSES.includes(l));
+        activeLenses = [...new Set([...activeLenses, ...grownSeatable])];
         log(`  ${prTag(item)}: round ${round} JUROR INVITE (${invite.from} → ${invite.lens}, cited: "${invite.citedFinding.slice(0, 80)}") accepted — care→${careLevel}, ${jurorsPerLens} juror(s)/lens; re-reviewing with the grown jury (spends a round, does NOT reset the counter).`);
         round += 1;
         // The grown jury lives under the SAME round cap — an invite cannot dodge it by restarting the budget.
