@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -677,6 +677,30 @@ describe('isRebaseDropCandidate (#2198 — the manifest-wall rescue gate)', () =
   it('a BLOCKED/DRAFT state is NOT a candidate (branch-protection / human concern, not a manifest wall)', () => {
     const blocked = classifyPr(aiPr({ number: 12, mergeable: 'MERGEABLE', mergeStateStatus: 'BLOCKED' }), {});
     expect(isRebaseDropCandidate(blocked)).toBe(false);
+  });
+});
+
+describe('#2684 — isStackedWeCoupleHalf (which manifest PRs get the couple re-CI regime tag)', () => {
+  const SHA_A = 'a'.repeat(40);
+
+  it('recognises a stacked WE couple half (manifest + cross-repo + a base sha)', () => {
+    expect(isStackedWeCoupleHalf({ num: 1, hasManifest: true, crossRepo: true, base: SHA_A })).toBe(true);
+  });
+  it('a WE half opened off main (no base sha) is NOT stacked → untagged, unchanged path', () => {
+    expect(isStackedWeCoupleHalf({ hasManifest: true, crossRepo: true, base: undefined })).toBe(false);
+  });
+  it('a single-locus (non-crossRepo) manifest PR is not a stacked couple half', () => {
+    expect(isStackedWeCoupleHalf({ hasManifest: true, crossRepo: false, base: SHA_A })).toBe(false);
+  });
+  it('a manifest-less orphan / impl PR is not a stacked couple half', () => {
+    expect(isStackedWeCoupleHalf({ hasManifest: false, crossRepo: true, base: SHA_A })).toBe(false);
+  });
+  it('an invalid base sha is rejected (never trusted as a stack base)', () => {
+    expect(isStackedWeCoupleHalf({ hasManifest: true, crossRepo: true, base: 'not-a-sha' })).toBe(false);
+  });
+  it('a null/undefined candidate is safely not-stacked', () => {
+    expect(isStackedWeCoupleHalf(null)).toBe(false);
+    expect(isStackedWeCoupleHalf(undefined)).toBe(false);
   });
 });
 

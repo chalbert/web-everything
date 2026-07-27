@@ -3,7 +3,7 @@ bornAs: xxj54sw
 kind: story
 size: 5
 parent: "2612"
-status: open
+status: resolved
 scope:
   - we:scripts/readiness/couple-plan.mjs
   - we:scripts/readiness/__tests__/couple-plan.test.mjs
@@ -16,6 +16,8 @@ scope:
   - we:scripts/lib/rebase-drop-manifest.mjs
   - we:scripts/lib/__tests__/rebase-drop-manifest.test.mjs
 dateOpened: "2026-07-26"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 
@@ -70,3 +72,30 @@ opportunistic bonus when the stack base is still main's tip. The earlier −48% 
   same event that guts the FF-skip. So the "robust, always-true" framing overstates it: quantify B's benefit
   against the **observed impl-bounce rate** (from #2680), and treat the overlapped first CI as a win *conditional*
   on impl not bouncing, not a guarantee.
+
+## Progress
+
+- **Pure planner shipped** — `we:scripts/readiness/couple-plan.mjs` (unit-tested). `planCoupleOpen` decides the
+  overlap-open order (impl-first / WE-last) + the WE half's stack-base; `decideWeReCi` is the GUARDED
+  skip-vs-rebase verdict. It is **fail-safe to `rebase`**: it returns `ff-skip` ONLY on positive proof of a
+  clean fast-forward (landed impl sha == the sha the WE half stacked on == current main). Squash-merge,
+  `review:changes` re-stack, main-advanced, or any missing/malformed sha all fall back to rebase + re-CI. This
+  module is the single source of truth (#96) for the decision — no config lands the WE half on a base its CI
+  never validated (DoD 3).
+- **Drain realizes the guard in git, and tags the regime** — in `we:scripts/merge-ai-prs.mjs` the guard is
+  ALREADY enforced by the existing rebase-drop machinery: a stacked WE half whose impl landed as a clean
+  fast-forward is on current `main` → `current` → lands on its first CI, no re-CI (the FF-skip win); a
+  superseded base (squash / `review:changes` re-stack / main advanced) makes it BEHIND → `rebased` → rebuilt +
+  re-CI (the fail-safe). The re-CI *decision* is thus the existing `current`-vs-`rebased` outcome — no override
+  is added (an early attempt to force a rebuild from the *recorded* manifest base was a review-caught bug: the
+  recorded base ≠ the tip's location after any prior-pass rebase, so it would permanently skip valid, CI-current
+  halves). The only #2684 edit is a zero-control-flow-change observability tag (`v.coupleReCi = 'ff-skip'|'re-ci'`
+  via the unit-tested pure `isStackedWeCoupleHalf`) plus a drain-log annotation. `planLabelDrain` merge ORDERING
+  is untouched (DoD: only the *CI* is de-serialized).
+- **Overlap-open seam shipped** — `we:scripts/lane-stack.mjs couple-open` is the stateless mechanical boundary
+  that resolves the impl lane's pushed tip to a pinned sha and hands it to `planCoupleOpen` (e2e-tested against
+  real git). It emits the open-order + WE stack-base the couple opener needs.
+- **Deferred (out of #2684's file-scope):** actually opening the WE PR *stacked on the impl tip* lives in the
+  couple opener `we:scripts/pr-land.mjs`, which is **not** in this item's scope. Filed as **#xsk6c44**
+  (`blockedBy: 2684`, under #2612): wire `pr-land` to shell `lane-stack couple-open`. The decision logic and the
+  drain-side guard delivered here are forward-compatible and fire the moment that wiring lands.
