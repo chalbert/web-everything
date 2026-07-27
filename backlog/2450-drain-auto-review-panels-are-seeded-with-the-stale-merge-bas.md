@@ -5,6 +5,13 @@ status: open
 dateOpened: "2026-07-12"
 tags: [review, drain, panel, net-diff]
 relatedTo: ["1821", "2373", "2336", "2310"]
+scope:
+  - we:scripts/lib/review-core.mjs
+  - we:scripts/lib/__tests__/review-core.test.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:skills-src/drain/SKILL.md
+  - we:.claude/skills/drain/SKILL.md
 ---
 
 # Drain auto-review panels are seeded with the stale merge-base diff — phantom scope-creep findings burn negotiation rounds
