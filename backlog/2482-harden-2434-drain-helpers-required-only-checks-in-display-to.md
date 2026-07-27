@@ -5,6 +5,13 @@ parent: "2418"
 status: open
 dateOpened: "2026-07-13"
 tags: []
+scope:
+  - we:scripts/fetch-parked.mjs
+  - we:scripts/pr-state.mjs
+  - we:scripts/wait-green.mjs
+  - we:scripts/__tests__/fetch-parked.test.mjs
+  - we:scripts/__tests__/pr-state.test.mjs
+  - we:scripts/__tests__/wait-green.test.mjs
 ---
 
 # Harden #2434 drain helpers: required-only checks in display token, arg validation
