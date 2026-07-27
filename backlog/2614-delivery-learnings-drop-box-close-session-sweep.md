@@ -3,8 +3,9 @@ bornAs: xzabmtp
 kind: story
 size: 3
 parent: "2612"
-status: open
+status: resolved
 dateOpened: "2026-07-22"
+dateResolved: "2026-07-22"
 tags: [conveyor, agent-memory, learnings]
 ---
 
