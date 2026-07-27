@@ -5,6 +5,10 @@ kind: task
 status: open
 dateOpened: "2026-07-20"
 tags: []
+scope:
+  - we:scripts/
+  - we:package.json
+  - we:.githooks/
 ---
 
 # Deploy sync for skills-src to the deployed skills dir (a skill fix isn't live until the copy syncs)
