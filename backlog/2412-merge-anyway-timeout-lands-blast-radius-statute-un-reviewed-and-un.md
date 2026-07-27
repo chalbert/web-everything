@@ -5,6 +5,23 @@ status: open
 relatedTo: ["2410", "2409", "2406", "2403", "2313", "2307", "2281", "2262", "2171", "2398", "2285"]
 dateOpened: "2026-07-10"
 tags: [gate, review, drain, merge-anyway, traceability]
+scope:
+  - we:scripts/lib/review-escalation.mjs
+  - we:scripts/lib/__tests__/review-escalation.test.mjs
+  - we:scripts/lib/review-core.mjs
+  - we:scripts/lib/__tests__/review-core.test.mjs
+  - we:scripts/lib/review-policy.mjs
+  - we:scripts/lib/review-policy.contract.json
+  - we:scripts/lib/__tests__/review-policy.conformance.test.mjs
+  - we:scripts/lib/gate-config.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:scripts/lib/pr-merge-gate.mjs
+  - we:scripts/__tests__/pr-merge-gate.test.mjs
+  - we:scripts/check-review-gate.mjs
+  - we:scripts/__tests__/check-review-gate.test.mjs
+  - we:scripts/lib/__tests__/gate-invariants.test.mjs
+  - we:.github/workflows/
 ---
 
 # Escalated blast-radius/statute parks can auto-land un-reviewed on timeout — and not every merge path leaves a trace
