@@ -3,9 +3,11 @@ bornAs: xyp63w5
 kind: story
 size: 5
 parent: "2677"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/", "we:scripts/readiness/", "we:skills-src/conveyor/SKILL.md"]
 dateOpened: "2026-07-27"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 ---
 
