@@ -9,7 +9,7 @@
  *   themselves are proved in `scripts/lib/__tests__/review-core.test.mjs`; we only pin that the CLI wires them.
  */
 import { describe, it, expect } from 'vitest';
-import { parseFlags, reduceReview, buildMandateText, buildComment } from '../review-core-cli.mjs';
+import { parseFlags, reduceReview, buildMandateText, buildComment, deriveDispositionLenient } from '../review-core-cli.mjs';
 import {
   VERDICTS,
   NEGOTIATION_OUTCOMES,
@@ -122,8 +122,24 @@ describe('reduceReview — disposition (escalation reasons)', () => {
     expect(r.disposition).toBeUndefined();
   });
 
-  it('propagates an unknown-reason error from the pure derivation', () => {
-    expect(() => reduceReview({ reason: 'not-a-real-reason' })).toThrow(/unknown reason/);
+  it('#2632 — a lone retired/unknown reason is DROPPED (no throw), disposition omitted', () => {
+    // The retired review-sampling floor token (removed in #2631) and any other unrecognized reason must not
+    // throw `unknown reason` through the review workflow — the guard drops it, leaving no disposition.
+    expect(() => reduceReview({ reason: 'sampling floor (1-in-10)' })).not.toThrow();
+    const r = reduceReview({ reason: 'sampling floor (1-in-10)' });
+    expect(r.disposition).toBeUndefined();
+  });
+
+  it('#2632 — a known reason alongside a retired one keeps the KNOWN reason’s disposition', () => {
+    const r = reduceReview({ reasons: ['non-convergence', 'sampling floor (1-in-10)'] });
+    expect(r.disposition).toEqual({ mode: 'human', autoLand: false });
+  });
+
+  it('#2632 — strictest-wins precedence survives a dropped unknown reason', () => {
+    // gate-self (converge/no-autoland) is stricter than a bare blast-radius (converge/autoland); the retired
+    // token drops out and the strictest recognized reason still wins.
+    const r = reduceReview({ reasons: ['blast-radius (a.mjs)', 'sampling floor (1-in-10)', 'gate-self'] });
+    expect(r.disposition).toEqual({ mode: 'converge', autoLand: false });
   });
 
   it('#2567 — also carries the advisory careLevel + rigor from the reason set', () => {
@@ -137,6 +153,32 @@ describe('reduceReview — disposition (escalation reasons)', () => {
     const r = reduceReview({ findings: [] });
     expect(r.careLevel).toBeUndefined();
     expect(r.rigor).toBeUndefined();
+  });
+});
+
+describe('deriveDispositionLenient — the #2632 retired/unknown-reason guard', () => {
+  it('passes a recognized reason straight through', () => {
+    expect(deriveDispositionLenient({ reason: 'gate-self' })).toEqual({ mode: 'converge', autoLand: false });
+  });
+
+  it('drops a lone retired/unknown reason → undefined (no throw)', () => {
+    expect(deriveDispositionLenient({ reason: 'sampling floor (1-in-10)' })).toBeUndefined();
+    expect(deriveDispositionLenient({ reasons: ['totally-made-up'] })).toBeUndefined();
+  });
+
+  it('returns undefined for no reasons (never throws on empty input)', () => {
+    expect(deriveDispositionLenient({})).toBeUndefined();
+    expect(deriveDispositionLenient({ reasons: [] })).toBeUndefined();
+  });
+
+  it('keeps the disposition from the recognized reasons when mixed with unknowns', () => {
+    expect(deriveDispositionLenient({ reasons: ['sampling floor (1-in-10)', 'non-convergence'] }))
+      .toEqual({ mode: 'human', autoLand: false });
+  });
+
+  it('preserves strictest-wins across the surviving recognized reasons', () => {
+    expect(deriveDispositionLenient({ reasons: ['blast-radius (a.mjs)', 'gate-self', 'retired-token'] }))
+      .toEqual({ mode: 'converge', autoLand: false });
   });
 });
 
@@ -227,6 +269,12 @@ describe('buildComment — the comment subcommand glue (renders via renderPanelC
 
   it('leaves the disposition line off when neither disposition nor reasons are supplied', () => {
     const md = buildComment({ findings: [] });
+    expect(md).not.toContain('**Disposition:**');
+  });
+
+  it('#2632 — a retired/unknown reason is dropped: renders (no throw), disposition line off', () => {
+    expect(() => buildComment({ findings: [{ summary: 'x' }], reasons: ['sampling floor (1-in-10)'] })).not.toThrow();
+    const md = buildComment({ findings: [{ summary: 'x' }], reasons: ['sampling floor (1-in-10)'] });
     expect(md).not.toContain('**Disposition:**');
   });
 });
