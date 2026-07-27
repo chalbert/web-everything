@@ -283,6 +283,79 @@ jobs:
         env:
           WE_INTERACTION_ONLY: "1"
 
+  # Diff-driven test-selection MEASURE lane (#2681). The SHADOW full-suite compare that produces the false-green
+  # signal the eventual default-on shrink reads — a false-green is a full-suite failure that fell OUTSIDE what
+  # `vitest related` on the PR's diff would have run. This job is EVIDENCE-GATHERING, never a gate:
+  #   • OFF BY DEFAULT (`if:` below) — runs only on manual dispatch or when the repo var
+  #     `WE_MEASURE_TEST_SELECTION == '1'` is set. This is the DoD's "flag-gated; NOT defaulted until the measured
+  #     false-green rate is acceptable": the required `test`/`smoke` gates and the `push:[main]` full-suite
+  #     backstop are UNCHANGED; nothing here can block a merge (its own result is not a required check).
+  #   • It runs the FULL suite once with the json reporter (the shadow full run), computes the diff-driven
+  #     selection decision off the PINNED merge-base, and records whether any full-suite failure escaped the
+  #     selected set — the false-green sample — as an artifact. `continue-on-error` so even a red shadow run only
+  #     records; it never reds CI.
+  # Widen the shrink allow-list / flip the default only once this lane's recorded false-green rate is acceptable.
+  test-selection-measure:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.WE_MEASURE_TEST_SELECTION == '1' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      # Same sibling layout as `test` — the unit suite needs the FUI sibling for the `@frontierui/*` alias.
+      # fetch-depth: 0 so `git merge-base origin/main HEAD` has the history the pinned-base diff needs (#2681).
+      - name: Checkout WE
+        uses: actions/checkout@v4
+        with:
+          path: web-everything
+          fetch-depth: 0
+      - name: Checkout FUI (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: chalbert/frontierui
+          token: ${{ secrets.FUI_READ_TOKEN }}
+          path: frontierui
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web-everything/package-lock.json
+            frontierui/package-lock.json
+
+      - name: Install + build FUI tools
+        working-directory: frontierui
+        run: |
+          npm ci
+          npm run build:tools
+
+      - name: Install
+        working-directory: web-everything
+        run: npm ci
+
+      # The shadow FULL run — the whole unit suite with the json reporter, so the measure step has per-file
+      # pass/fail. `|| true`: a red shadow run must still record (the false-green signal LIVES in a red full run).
+      - name: Shadow full-suite run (json report)
+        working-directory: web-everything
+        run: npx vitest run --reporter=json --outputFile=vitest-full.json || true
+
+      # Record the false-green sample: decide off the diff, compare against the shadow full run's failures, append.
+      - name: Record false-green signal (#2681)
+        working-directory: web-everything
+        run: node scripts/readiness/test-selection.mjs --measure --vitest-json=vitest-full.json
+        env:
+          # Evaluate the decision AS IF the shrink were on, so the measure reflects what shrink WOULD do —
+          # without any real gate depending on it (this job gates nothing).
+          WE_DIFF_TEST_SELECTION: "1"
+          WE_FALSE_GREEN_LOG: false-green-log.json
+
+      - name: Upload false-green sample
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: false-green-signal
+          path: web-everything/false-green-log.json
+          if-no-files-found: warn
+
   # Visual-regression guard (#2177 / #1966). Builds the docs site (same sibling layout as deploy.yml)
   # and runs `check:visual` against committed -chromium-linux baselines. Separate job so its ~2–3 min
   # build cost doesn't slow the fast `test` job. Runs on the same events (push/PR/dispatch).
