@@ -32,6 +32,9 @@ import {
   attachLaneInfra,
   DEFAULT_STALL_MS,
 } from '../conveyor-state.mjs';
+// #2661 — the same-cause collapse primitive, unit-tested directly for its guards (the assessHealth tests above
+// only exercise it through well-formed lane inputs).
+import { clusterByCause } from '../../conveyor/infra-blocked.mjs';
 
 describe('shapeQueue — ready/queued build-queue rows → the tick queue shape', () => {
   it('maps num/rank/buildQueued and defaults openBlockers/scope defensively', () => {
@@ -370,7 +373,7 @@ describe('assessHealth — stalled-lane detection via transcript mtimes', () => 
   const now = 1_000_000_000_000;
   it('ok when no lane is past the stall threshold', () => {
     const lanes = [{ lane: 1, num: '2611', lastActivity: now - 10_000 }];
-    expect(assessHealth({ lanes, now })).toEqual({ verdict: 'ok', stalled: [], errors: [] });
+    expect(assessHealth({ lanes, now })).toEqual({ verdict: 'ok', stalled: [], degradedInfra: [], errors: [] });
   });
   it('warn + a stalled entry when a lane is silent past stallMs', () => {
     const lanes = [{ lane: 1, num: '2611', session: 's1', lastActivity: now - (DEFAULT_STALL_MS + 60_000) }];
@@ -382,7 +385,83 @@ describe('assessHealth — stalled-lane detection via transcript mtimes', () => 
     expect(assessHealth({ lanes: [{ lane: 1, num: '2611', lastActivity: null }], now }).verdict).toBe('ok');
   });
   it('collector errors alone make the verdict warn', () => {
-    expect(assessHealth({ lanes: [], now, errors: ['lane-pool status: boom'] })).toEqual({ verdict: 'warn', stalled: [], errors: ['lane-pool status: boom'] });
+    expect(assessHealth({ lanes: [], now, errors: ['lane-pool status: boom'] })).toEqual({ verdict: 'warn', stalled: [], degradedInfra: [], errors: ['lane-pool status: boom'] });
+  });
+});
+
+describe('assessHealth — widespread external-infra failure clusters into ONE degraded-infra signal (#2661)', () => {
+  const now = 1_000_000_000_000;
+  const infraLane = (lane, num, cause) => ({ lane, num, infra: { cause, attempt: 1, nextRetrySec: 30, capped: false } });
+
+  it('several lanes down on ONE cause collapse to a single degraded-infra entry — NOT N stall alarms', () => {
+    const lanes = [infraLane(1, '2611', 'GitHub outage'), infraLane(2, '2612', 'GitHub outage'), infraLane(3, '2613', 'GitHub outage')];
+    const h = assessHealth({ lanes, now });
+    expect(h.stalled).toEqual([]); // an infra lane is NEVER a stall alarm
+    expect(h.degradedInfra).toEqual([
+      { cause: 'GitHub outage', count: 3, members: [{ lane: 1, num: '2611' }, { lane: 2, num: '2612' }, { lane: 3, num: '2613' }] },
+    ]);
+    // additive — degraded-infra does NOT flip the verdict (the outage is its own distinct signal).
+    expect(h.verdict).toBe('ok');
+  });
+
+  it('distinct causes stay distinct; most-affected cause is ordered first (deterministic)', () => {
+    const lanes = [infraLane(1, '11', 'network'), infraLane(2, '22', 'GitHub outage'), infraLane(3, '33', 'GitHub outage')];
+    const h = assessHealth({ lanes, now });
+    expect(h.degradedInfra.map((g) => [g.cause, g.count])).toEqual([['GitHub outage', 2], ['network', 1]]);
+  });
+
+  it('a genuine per-lane STALL still surfaces on its own alongside an unrelated outage cluster', () => {
+    const lanes = [
+      infraLane(1, '2611', 'GitHub outage'),
+      infraLane(2, '2612', 'GitHub outage'),
+      { lane: 3, num: '2613', session: 's3', lastActivity: now - (DEFAULT_STALL_MS + 90_000) }, // a real stall
+    ];
+    const h = assessHealth({ lanes, now });
+    expect(h.verdict).toBe('warn'); // the genuine stall makes it warn
+    expect(h.stalled).toEqual([{ lane: 3, num: '2613', session: 's3', idleS: Math.round((DEFAULT_STALL_MS + 90_000) / 1000) }]);
+    expect(h.degradedInfra).toEqual([{ cause: 'GitHub outage', count: 2, members: [{ lane: 1, num: '2611' }, { lane: 2, num: '2612' }] }]);
+  });
+
+  it('an injected githubStatus REFINES the cause; a live incident groups every lane under "GitHub outage"', () => {
+    // Two lanes recorded with DIFFERENT raw classes; a live major incident correlates both to "GitHub outage".
+    const lanes = [infraLane(1, '11', 'network'), infraLane(2, '22', 'GitHub outage')];
+    const h = assessHealth({ lanes, now, githubStatus: { reachable: true, indicator: 'major' } });
+    expect(h.degradedInfra).toEqual([{ cause: 'GitHub outage', count: 2, members: [{ lane: 1, num: '11' }, { lane: 2, num: '22' }] }]);
+  });
+
+  it('a null / failed githubStatus never cascades — the store cause is used as-is (no false or lost signal)', () => {
+    const lanes = [infraLane(1, '11', 'GitHub outage'), infraLane(2, '22', 'GitHub outage')];
+    expect(assessHealth({ lanes, now, githubStatus: null }).degradedInfra).toEqual([
+      { cause: 'GitHub outage', count: 2, members: [{ lane: 1, num: '11' }, { lane: 2, num: '22' }] },
+    ]);
+    // an unreachable status page (our OWN connectivity is the suspect) downgrades a "GitHub outage" base to
+    // "network" via correlateCause — but both lanes downgrade identically, so it stays ONE cluster (count 2).
+    const unreachable = assessHealth({ lanes, now, githubStatus: { reachable: false } }).degradedInfra;
+    expect(unreachable).toEqual([{ cause: 'network', count: 2, members: [{ lane: 1, num: '11' }, { lane: 2, num: '22' }] }]);
+  });
+});
+
+describe('clusterByCause — the same-cause collapse primitive (#2661), direct guards', () => {
+  it('null / non-array / empty input → []', () => {
+    expect(clusterByCause(null)).toEqual([]);
+    expect(clusterByCause(undefined)).toEqual([]);
+    expect(clusterByCause('nope')).toEqual([]);
+    expect(clusterByCause([])).toEqual([]);
+  });
+  it('non-object members are skipped; a blank / absent cause folds to "infra"', () => {
+    const out = clusterByCause([null, 42, { lane: 1, num: 7 }, { lane: 2, num: 8, cause: '   ' }]);
+    expect(out).toEqual([{ cause: 'infra', count: 2, members: [{ lane: 1, num: '7' }, { lane: 2, num: '8' }] }]);
+  });
+  it('groups by exact cause, orders most-affected first then cause name, stringifies num, null-safe lane/num', () => {
+    const out = clusterByCause([
+      { lane: 3, num: 30, cause: 'network' },
+      { lane: 1, num: 10, cause: 'GitHub outage' },
+      { lane: 2, cause: 'GitHub outage' }, // no num → null
+    ]);
+    expect(out).toEqual([
+      { cause: 'GitHub outage', count: 2, members: [{ lane: 1, num: '10' }, { lane: 2, num: null }] },
+      { cause: 'network', count: 1, members: [{ lane: 3, num: '30' }] },
+    ]);
   });
 });
 
@@ -430,7 +509,7 @@ describe('assembleConveyorState — the whole tick picture', () => {
     expect(s.prs).toEqual([{ num: '2611', prNumber: 658, state: 'OPEN', ci: 'pass', labels: ['review:human'] }]);
     expect(s.daemon).toEqual({ resident: true, lastPass: inputs.daemonReport.lastPass, parked: inputs.daemonReport.parkedNow });
     expect(s.idle).toEqual({ lastMerge: '2026-07-22T14:00:00Z', lastQueueAdd: '2026-07-22T14:30:00Z', now });
-    expect(s.health).toEqual({ verdict: 'ok', stalled: [], errors: [] });
+    expect(s.health).toEqual({ verdict: 'ok', stalled: [], degradedInfra: [], errors: [] });
   });
 
   it('SIDECAR-QUEUE tick — clearedNums flips queue.buildQueued to the session-local conveyor queue (#2613)', () => {
@@ -511,6 +590,8 @@ describe('assembleConveyorState — the whole tick picture', () => {
     // NOT a stall — the infra lane is excluded from the health scan.
     expect(s.health.verdict).toBe('ok');
     expect(s.health.stalled).toEqual([]);
+    // #2661 — instead of being dropped, the infra lane surfaces as ONE degraded-infra cluster keyed on its cause.
+    expect(s.health.degradedInfra).toEqual([{ cause: 'GitHub outage', count: 1, members: [{ lane: 1, num: '2611' }] }]);
     // the raw entries are emitted whole for the /conveyor skill to surface.
     expect(s.infraBlocked).toHaveLength(1);
     expect(s.infraBlocked[0].num).toBe('2611');
