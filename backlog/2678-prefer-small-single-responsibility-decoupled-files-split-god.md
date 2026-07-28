@@ -1,8 +1,10 @@
 ---
 bornAs: xgb22vy
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-07-26"
+dateResolved: "2026-07-28"
+codifiedIn: "docs/agent/platform-decisions.md#small-file-preference"
 preparedDate: "2026-07-28"
 relatedTo: ["2677", "2679", "2625", "2405", "2606"]
 tags: [decision, authoring, files, throughput, scope-lease, parallelism]
@@ -10,7 +12,13 @@ tags: [decision, authoring, files, throughput, scope-lease, parallelism]
 
 # Prefer small, single-responsibility, decoupled files; split god-files
 
-Adopt "prefer small, single-responsibility, decoupled files" as a platform authoring rule, so delivery agents split large files along their responsibility seams by default. **This is primarily a conveyor-throughput lever, not tidiness:** the scope-lease engine holds lanes apart by the files they touch, so one large file that many items edit is a single lock point forcing them to build **one-at-a-time**. Splitting it into small modules lets those items touch *disjoint* files and build in **parallel**. **OPEN, not yet ratified** — on ratify it codifies into [we:docs/agent/platform-decisions.md](../docs/agent/platform-decisions.md) and sets `codifiedIn`.
+Adopt "prefer small, single-responsibility, decoupled files" as a platform authoring rule, so delivery agents split large files along their responsibility seams by default. **This is primarily a conveyor-throughput lever, not tidiness:** the scope-lease engine holds lanes apart by the files they touch, so one large file that many items edit is a single lock point forcing them to build **one-at-a-time**. Splitting it into small modules lets those items touch *disjoint* files and build in **parallel**.
+
+## RULING — RATIFIED 2026-07-28 (operator)
+
+**Fork 1 — enforcement — ruled (b) SOFT-WARN gate.** Adopt the small-file preference as a platform authoring rule, enforced by a **soft-warn** gate in `check:standards`: it **warns** (never errors, never denies the write) on a file that is **both** oversized **and** scope-collision-heavy, keyed on a **size + collision composite** (not raw line count), with a `// @cohesive: <reason>` escape-hatch comment that silences the warning for a legitimately-cohesive large file. Option **(c) hard-deny is REJECTED** as a footgun on high-churn files (a blocking gate on the busiest files denies the very edits that would split them). Option **(a) guideline-only is REJECTED** as too weak to change default behavior.
+
+Codified as statute at [we:docs/agent/platform-decisions.md#small-file-preference](../docs/agent/platform-decisions.md#small-file-preference) (`codifiedIn` set on resolve). Follow-on stories filed, all `blockedBy` #2678: the soft-warn gate implementation, and the ranked god-file split stories (merge-ai-prs first, then review-core, then review-escalation) — ranked by the scope-collision counts recorded below.
 
 ## Why it is a throughput lever (the central motivation)
 
