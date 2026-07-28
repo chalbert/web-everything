@@ -4,6 +4,10 @@ kind: story
 size: 3
 parent: "2562"
 status: open
+scope:
+  - plateau-app:src/backlog-view/proof-tiers.ts
+  - plateau-app:src/backlog-view/proof-tiers.css
+  - plateau-app:src/backlog-view/proof-tiers.test.ts
 dateOpened: "2026-07-28"
 tags: []
 ---
