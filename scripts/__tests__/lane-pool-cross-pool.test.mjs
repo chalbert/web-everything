@@ -124,6 +124,68 @@ describe('lane-pool #2667 — release --all-pools --session sweeps every pool', 
   });
 });
 
+describe('lane-pool #2748 — release --all-pools --item sweeps every pool BY ITEM (drain release-on-land)', () => {
+  it('releases every lease whose session ENCODES the item number, in both pools; leaves others held', () => {
+    const a1 = acquire('poolA', 1, 'conveyor-9999'); // couple's WE half
+    const b1 = acquire('poolB', 1, 'conveyor-9999'); // couple's impl half (different pool)
+    const a2 = acquire('poolA', 2, 'conveyor-8888'); // an unrelated item's live lease
+
+    const r = runPool(['release', '--all-pools', '--item=9999', '--json']);
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.out);
+    expect(out.item).toBe(9999);
+    expect(out.released).toBe(2);
+    const byPool = Object.fromEntries(out.pools.map((p) => [p.pool, p.lanes]));
+    expect(byPool.poolA).toEqual([1]);
+    expect(byPool.poolB).toEqual([1]);
+    expect(existsSync(LEASE_FILE(a1))).toBe(false);
+    expect(existsSync(LEASE_FILE(b1))).toBe(false);
+    expect(existsSync(LEASE_FILE(a2))).toBe(true); // item #8888 untouched
+  });
+
+  it('matches an UNPADDED session number numerically (--item=99 ↔ conveyor-99)', () => {
+    const a1 = acquire('poolA', 1, 'conveyor-99');
+    const r = runPool(['release', '--all-pools', '--item=99', '--json']);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out).released).toBe(1);
+    expect(existsSync(LEASE_FILE(a1))).toBe(false);
+  });
+
+  it('also matches a fix-<num> / retry-suffix session for the same item', () => {
+    const a1 = acquire('poolA', 1, 'fix-7777');
+    const b1 = acquire('poolB', 1, 'conveyor-7777b'); // retry suffix collapses to 7777
+    const r = runPool(['release', '--all-pools', '--item=7777', '--json']);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out).released).toBe(2);
+    expect(existsSync(LEASE_FILE(a1))).toBe(false);
+    expect(existsSync(LEASE_FILE(b1))).toBe(false);
+  });
+
+  it('NEVER releases a reserved lane in the by-item sweep', () => {
+    const resv = runPool(['acquire', '--reserve', '--lane=2', '--session=conveyor-9999', '--purpose=memory', ...POOL('poolB')]);
+    expect(resv.code).toBe(0);
+    acquire('poolA', 1, 'conveyor-9999');
+    const r = runPool(['release', '--all-pools', '--item=9999', '--json']);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out).released).toBe(1); // only the ordinary poolA lane
+    expect(existsSync(LEASE_FILE(lanePath('poolB', 2)))).toBe(true); // reserved survives
+  });
+
+  it('--item with neither a match → released:0, no error', () => {
+    acquire('poolA', 1, 'conveyor-9999');
+    const r = runPool(['release', '--all-pools', '--item=1234', '--json']);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out).released).toBe(0);
+    expect(existsSync(LEASE_FILE(lanePath('poolA', 1)))).toBe(true);
+  });
+
+  it('--session and --item together is rejected (pick one selector)', () => {
+    const r = runPool(['release', '--all-pools', '--session=conveyor-9999', '--item=9999']);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toMatch(/not both/);
+  });
+});
+
 describe('lane-pool #2667 — --pool=<name> selects a pool by dir-name (no checkout path)', () => {
   it('release --pool=<name> --lane=N targets that pool, not the cwd\'s', () => {
     const b1 = acquire('poolB', 1, 'sess-x');
