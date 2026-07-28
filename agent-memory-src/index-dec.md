@@ -46,3 +46,4 @@ Decisions & Forks cluster — open a leaf with `node scripts/memory-resolve.mjs 
 - [Codify-instruction is not the ratify go](codify-instruction-is-not-the-ratify-go.md) — "codify/rewrite the decision" = do the authoring, stay un-resolved; wait for explicit ratify go; #1989
 - [Prep amendments least-verified at ratify](prep-amendments-least-verified-at-ratify.md) — ratify skeptic grounds prep amendments' premises + cross-element composition vs live tree; #2089
 - [/prepare all parallel fan-out](prepare-all-parallel-fanout.md) — one Agent per decision; disjoint files → collision-free; orchestrator centralizes gate/stamp/release; 5/5 2026-07-01
+- [Contract-split for tier-ownership decisions](contract-split-for-tier-ownership-decisions.md) — engine-tier the impl, policy-tier a *.contract.json for the definition; the default path for "who owns this gate", micro-decision suited to on-card surfacing (#2625/#2577)
