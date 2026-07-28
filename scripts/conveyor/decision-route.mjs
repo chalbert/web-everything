@@ -15,24 +15,45 @@
  *
  * OBSERVE-ONLY BY CONSTRUCTION (shadow-first, the ratified default). This shell NEVER mutates backlog state — it
  * does not ratify a decision, even when the plan's `apply` is true (`enforce`). Acting on an `enforce` ratify plan
- * is a deliberately SEPARATE, later-gated seam (the shadow→enforce flip is its own one-line ruling, #2704 (c)); the
- * shell only ever COMPUTES and REPORTS the plan, so running it can never auto-ratify anything.
+ * is a deliberately SEPARATE, later-gated seam; the shell only ever COMPUTES and REPORTS the plan, so running it can
+ * never auto-ratify anything.
+ *
+ * THE SHADOW→ENFORCE FLIP (#2754). The flip #2704 left as "a separate later ruling" is now DEFINED and GATED in the
+ * pure core (`resolveLandMode` / `computeAgreementMetric`): the effective land mode is `enforce` ONLY when the
+ * operator has armed it (global `landMode: enforce`) AND a confidence metric — N consecutive shadow-vs-human matches
+ * with zero divergence over the trailing M decided decisions — is green. This shell wires that in: it reads the
+ * shadow-vs-human AGREEMENT LEDGER (`--agreement-file`, or a stdin `agreement`) and threads it into `planDecision`,
+ * so the reported disposition already reflects the gated mode. The agreement ledger is DATA, never a mode override —
+ * the operator ceiling still comes only from the global config; the metric can only hold the mode DOWN or (when
+ * armed) let it through. The metric is READABLE WITHOUT A SESSION here: run with just `--agreement-file` for the
+ * "how many consecutive matches, zero divergences?" answer and the resolved flip state.
  *
  * Usage (CLI):
  *   node scripts/conveyor/decision-route.mjs [--blast-radius] [--size=<lines>] [--cross-repo] [--dismissed=<n>] \
  *        [--human-required] [--gate-self] [--statute] [--non-convergence] \
- *        [--ledger-file=<path>] [--band=<care-band>] [--json]
- *   echo '{"signals":{"blastRadius":true},"humanRequired":false,"ledger":[…]}' \
+ *        [--ledger-file=<path>] [--agreement-file=<path>] [--band=<care-band>] [--json]
+ *   # session-free flip metric only (no decision ledger needed):
+ *   node scripts/conveyor/decision-route.mjs --agreement-file=<path> [--json]
+ *   # append one decided decision's shadow-vs-human outcome to the agreement ledger:
+ *   node scripts/conveyor/decision-route.mjs --record --shadow=<ratify|escalate> --human=<ratify|escalate>
+ *   echo '{"signals":{"blastRadius":true},"ledger":[…],"agreement":[…]}' \
  *        | node scripts/conveyor/decision-route.mjs --stdin [--json]
  *
  * The `signals` are the SAME `scoreEscalation` signals the producer escalation rubric reads (#2567) — no new score
  * is invented. A `--ledger-file` (or a stdin `ledger`) is the process's #2654 jury-ledger event stream; without it
  * the shell reports only the ROUTE (the process has not run yet), and the caller runs the routed process, then
- * re-invokes with the ledger to get the DISPOSITION.
+ * re-invokes with the ledger to get the DISPOSITION. The `--agreement-file` is the shadow-vs-human agreement ledger
+ * (an array of `recordShadowOutcome` records) the #2754 flip metric reads.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { planDecision, DECISION_PROCESSES, RULING_ACTIONS } from '../lib/decision-routing.mjs';
+import {
+  planDecision,
+  computeAgreementMetric,
+  recordShadowOutcome,
+  DECISION_PROCESSES,
+  RULING_ACTIONS,
+} from '../lib/decision-routing.mjs';
 import { resolveDispositionConfig } from '../lib/review-policy.mjs';
 
 /** Parse `--flag` / `--flag=value` argv into a flat map (value `true` for a bare flag). Pure. */
@@ -80,8 +101,34 @@ export function buildInputs(f, payload = {}) {
   };
 }
 
+/** Read + JSON-parse a file, exiting(2) with a friendly message on any error. Optionally require an array. */
+function readJsonFile(path, label, { requireArray = false } = {}) {
+  let data;
+  try { data = JSON.parse(readFileSync(path, 'utf8')); } catch (e) {
+    console.error(`decision-route: could not read ${label} (${e.message})`);
+    process.exit(2);
+  }
+  if (requireArray && !Array.isArray(data)) {
+    console.error(`decision-route: ${label} must be a JSON array`);
+    process.exit(2);
+  }
+  return data;
+}
+
 function main(argv) {
   const f = parseArgs(argv);
+
+  // --record: append-one helper (#2754). Print ONE shadow-vs-human outcome record the caller pipes into the
+  // agreement ledger. Pure/side-effect-free — the shell prints, the caller persists (keeps observe-only intact).
+  if (f.record) {
+    const rec = recordShadowOutcome({
+      shadowAction: f.shadow === true ? undefined : f.shadow,
+      humanAction: f.human === true ? undefined : f.human,
+    });
+    console.log(JSON.stringify(rec));
+    process.exit(0);
+  }
+
   let payload = {};
   if (f.stdin) {
     try { payload = JSON.parse(readFileSync(0, 'utf8')); } catch (e) {
@@ -94,15 +141,19 @@ function main(argv) {
   // A ledger from a --ledger-file overrides / supplies the process's rendered jury ledger.
   let ledger = inputs.ledger;
   if (f['ledger-file'] && typeof f['ledger-file'] === 'string') {
-    try { ledger = JSON.parse(readFileSync(f['ledger-file'], 'utf8')); } catch (e) {
-      console.error(`decision-route: could not read --ledger-file (${e.message})`);
-      process.exit(2);
-    }
+    ledger = readJsonFile(f['ledger-file'], '--ledger-file');
+  }
+
+  // The shadow-vs-human AGREEMENT LEDGER (#2754) — DATA the flip metric reads (never a mode override). A
+  // --agreement-file wins over a stdin `agreement` array.
+  let agreement = Array.isArray(payload.agreement) ? payload.agreement : null;
+  if (f['agreement-file'] && typeof f['agreement-file'] === 'string') {
+    agreement = readJsonFile(f['agreement-file'], '--agreement-file', { requireArray: true });
   }
 
   // Resolve the disposition config only when we have a ledger to dispose (it carries the global shadow/enforce
-  // landMode — the ONLY source of the mode; never an input override). A bad band fails loud here at the impure
-  // boundary, never inside the pure core.
+  // landMode — the ONLY source of the operator CEILING; never an input override). A bad band fails loud here at the
+  // impure boundary, never inside the pure core.
   let config;
   let mode;
   if (Array.isArray(ledger)) {
@@ -113,6 +164,18 @@ function main(argv) {
     mode = config.landMode; // shadow by default (the ratified stance) — global-only, never overridable
   }
 
+  // #2754 SESSION-FREE METRIC: an --agreement-file with NO decision ledger reports just the flip state. This is the
+  // "how many consecutive matches, zero divergences?" answer, readable without a session.
+  if (Array.isArray(agreement) && !Array.isArray(ledger)) {
+    const metric = computeAgreementMetric(agreement, {});
+    if (f.json) {
+      console.log(JSON.stringify({ metric }));
+    } else {
+      console.log([`flip-metric: ${metric.answer}`, `  trigger: N=${metric.N} consecutive matches, 0 divergences over the last M=${metric.M}`].join('\n'));
+    }
+    process.exit(0);
+  }
+
   const plan = planDecision({
     signals: inputs.signals,
     humanRequired: inputs.humanRequired,
@@ -120,6 +183,7 @@ function main(argv) {
     config,
     dispositionSignals: inputs.dispositionSignals,
     mode,
+    agreementRecords: Array.isArray(agreement) ? agreement : null,
   });
 
   // Emit the shadow/enforce observation to stderr (the ledger stream) — kept off stdout so --json stays clean.
@@ -130,6 +194,9 @@ function main(argv) {
   } else {
     const r = plan.route;
     const lines = [`process: ${r.process} (${r.reason})`, ...r.trail.map((t) => `  ${t}`)];
+    if (plan.landMode) {
+      lines.push(`land-mode: ${plan.landMode.mode} (${plan.landMode.reason})`, ...plan.landMode.trail.map((t) => `  ${t}`));
+    }
     if (plan.disposition) {
       const d = plan.disposition;
       lines.push(`disposition: ${d.action} [${d.mode}]${d.apply ? ' — APPLY' : ''} (${d.reason})`, `  ${d.observation}`);
