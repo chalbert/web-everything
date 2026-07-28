@@ -6,6 +6,11 @@ status: open
 blockedBy: ["2368"]
 dateOpened: "2026-07-09"
 tags: []
+scope:
+  - frontierui:plugs/webdirectives/ssr/jvm/src/main/java/com/frontierui/webdirectives/ssr/JvmServerRenderer.java
+  - frontierui:plugs/webdirectives/ssr/jvm/src/main/java/com/frontierui/webdirectives/ssr/Renderers.java
+  - frontierui:plugs/webdirectives/ssr/jvm/src/main/java/com/frontierui/webdirectives/ssr/HtmlParse.java
+  - frontierui:plugs/webdirectives/ssr/jvm/src/test/java/com/frontierui/webdirectives/ssr/ConformanceHarness.java
 ---
 
 # JVM SSR renderer: for-each directive (keyed + empty + count/key-hash state tokens)
