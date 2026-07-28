@@ -3,6 +3,10 @@ bornAs: xgl2ptq
 kind: story
 size: 2
 status: open
+scope:
+  - we:scripts/backlog/batch-scaffold.mjs
+  - we:scripts/backlog/__tests__/batch-scaffold.test.mjs
+  - we:scripts/backlog.mjs
 dateOpened: "2026-07-18"
 tags: []
 ---
