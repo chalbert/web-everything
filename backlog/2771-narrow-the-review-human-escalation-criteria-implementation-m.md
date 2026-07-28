@@ -21,7 +21,7 @@ Both recommended defaults adopted. **Fork A → (b):** policy-tier *derivation C
 
 Retained invariant (the only one #2501 Fork C keeps): the final landed diff is signed off by an agent that did NOT author it (#2439); diversity-selection aggregation; non-convergence hard-escalates to a human.
 
-**Codified in** [`#review-human-declarative-leash-only`](../docs/agent/platform-decisions.md#review-human-declarative-leash-only). **Implementation follow-on:** `xfpxbji` "Implement the narrowed review:human rubric" (`blockedBy` this decision) — scaffolded, not built here.
+**Codified in** [`#review-human-declarative-leash-only`](../docs/agent/platform-decisions.md#review-human-declarative-leash-only). **Implementation follow-on:** `2785` "Implement the narrowed review:human rubric" (`blockedBy` this decision) — scaffolded, not built here.
 
 ## Grounding digest
 
