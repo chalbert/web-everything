@@ -1,9 +1,10 @@
 ---
+bornAs: xbadbhx
 kind: story
 size: 3
 parent: "2356"
 status: open
-blockedBy: ["x2evydc"]
+blockedBy: ["2755"]
 dateOpened: "2026-07-28"
 tags: []
 ---

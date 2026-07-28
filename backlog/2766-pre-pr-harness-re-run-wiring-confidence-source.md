@@ -1,9 +1,10 @@
 ---
+bornAs: xvqid81
 kind: story
 size: 3
 parent: "2562"
 status: open
-blockedBy: ["xh6xpm4"]
+blockedBy: ["2760"]
 dateOpened: "2026-07-28"
 tags: []
 ---
