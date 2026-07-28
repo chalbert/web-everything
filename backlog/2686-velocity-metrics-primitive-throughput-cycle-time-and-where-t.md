@@ -6,6 +6,9 @@ parent: "2505"
 status: open
 dateOpened: "2026-07-26"
 tags: []
+scope:
+  - we:scripts/readiness/velocity-metrics.mjs
+  - we:scripts/readiness/__tests__/velocity-metrics.test.mjs
 ---
 
 # Velocity metrics primitive — throughput, cycle-time, and where-the-time-goes from item timestamps
