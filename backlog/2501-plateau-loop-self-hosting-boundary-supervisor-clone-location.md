@@ -2,8 +2,11 @@
 bornAs: xeccleu
 kind: decision
 parent: "2445"
-status: open
+status: resolved
 dateOpened: "2026-07-14"
+dateStarted: "2026-07-28"
+dateResolved: "2026-07-28"
+codifiedIn: "docs/agent/platform-decisions.md#drain-daemon-self-hosting-boundary"
 preparedDate: "2026-07-14"
 relatedReport: reports/2026-07-14-plateau-loop-self-hosting-boundary.md
 tags: [plateau-loop, drain-daemon, self-hosting, supervisor, self-update]
@@ -12,6 +15,18 @@ tags: [plateau-loop, drain-daemon, self-hosting, supervisor, self-update]
 # Plateau Loop self-hosting boundary — supervisor clone location, reload primitive, and self-source exclusion
 
 The #2468 supervisor epic's real owed work is **self-update-then-reload**: today the resident drain daemon runs its own source from the user's PRIMARY plateau-app checkout and never self-updates, so every daemon change needs a manual `git pull` + a `restart` — defeating unattended-for-weeks residency. Building the self-update chain (slices L1→L2→L3) is gated on three COUPLED design calls that define the daemon's self-hosting boundary. Each fork states options, tradeoffs, and a **bold default**, grounded in the real daemon source and the WE trust-chain gate, with prior art in the [Plateau Loop self-hosting boundary](/research/plateau-loop-self-hosting-boundary/) research topic.
+
+## Ruling — RATIFIED 2026-07-27 (operator)
+
+Codified in [we:docs/agent/platform-decisions.md#drain-daemon-self-hosting-boundary](../docs/agent/platform-decisions.md#drain-daemon-self-hosting-boundary).
+
+| Fork | Ruling |
+|---|---|
+| **A · supervisor clone location** | **(a) A DEDICATED single-lane plateau-app clone** — provision a `plateau-app-drain-daemon` pool (`--count=1`) mirroring `we-drain-daemon`; `install()` resolves `daemonPath`/`workingDir` to that clone; self-update is the same `fetch` + `reset --hard origin/main` + `clean -fdq` already run on the WE clone, primary tree untouched. (b) run-from-primary rejected on the forced invariant. |
+| **B · reload primitive** | **(a) `process.exit(0)` + launchd `KeepAlive` relaunch** — reuse the existing `releaseAndExit(0)` clean-shutdown path (SIGTERM the in-flight child, release the lease, exit) and let KeepAlive relaunch on the new code; fire only between passes. The operator `restart` (`bootout`+`bootstrap`) is external-only and unusable for self-reload; `kickstart -k` is redundant, exec-in-place discards supervision. |
+| **C · self-source review** | **OPERATOR-MODIFIED — graduated committee, no always-human, independence required.** Daemon self-update changes are **NOT** special-cased to always-human review and **NOT** promoted to the policy tier. They go through the **SAME size/complexity-scaled review committee** (jury / producer review rubric) as any other change. The ONE retained invariant: the review must be **INDEPENDENT** — the self-updating daemon and its authoring agent may never self-approve their own daemon-code change (the #809-class self-approval hole). |
+
+**Fork C supersedes the preview's recommendation.** The preview default was "rely on #2480's engine-tier escalation + a light in-daemon assertion," with the always-human policy-tier promotion as the escalation alternative. The operator ruled neither: no always-human gate, no policy-tier promotion — the standard graduated committee applies, and the only special rule is independence (no self-approval). Operator's words (2026-07-27): *"I do not want to human review every daemon change; use a good review committee depending on the size and complexity of change, like for other changes."* The existing `TRUST_CHAIN` engine-tier escalation (independent adversarial panel) and the daemon's "never self-clear its own parked review" behavior already realize independence; a directory-keyed (not basename-keyed) in-daemon deferral tripwire remains a sound implementation detail but is not the binding rule.
 
 ## Where the daemon runs from today (the grounding)
 
