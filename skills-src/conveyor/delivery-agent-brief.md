@@ -114,6 +114,14 @@ built (this is the one pre-build stop; see *Escalations*).
 Do the actual work in `$LANE`: implement `{{ITEM_SPEC_PATH}}`, keep `## Progress` synced, capture any
 leftover work as new backlog items (`scaffold` with `blockedBy` + a digest) rather than half-doing them.
 
+- **Prefer small, single-responsibility, decoupled files; split god-files along their seams** (statute:
+  [we:docs/agent/platform-decisions.md#small-file-preference](../../../docs/agent/platform-decisions.md#small-file-preference), #2678). This is a throughput default, not tidiness: a file
+  many items must touch is a single scope-lease lock that serializes all of them. When your work would grow a
+  file into (or deeper into) a god-file, split it along genuine responsibility seams instead. **Cohesion
+  outranks line count** — never fragment a truly single-responsibility file just to hit a number; if a large
+  file is genuinely cohesive, mark it `// @cohesive: <reason>` to silence the soft-warn. `check:standards`
+  only *warns* (never blocks) on the size+collision composite, so this never gates your land.
+
 ### 5. Run the gate GREEN (in the item's own locus)
 
 A WE item's gate is `npm run check:standards`. For a cross-locus item, run **that** locus's gate
