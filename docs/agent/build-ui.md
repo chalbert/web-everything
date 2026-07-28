@@ -18,7 +18,7 @@ not appearance — it cannot see that two states are indistinguishable, that a g
 or that dark mode is unreadable. The value of this method is the *sighted* loop: render every state, screenshot
 it, and review the image. Source review is not a substitute for looking.
 
-## The method (six phases, in order)
+## The method (seven phases, in order)
 
 ### 1. Model the domain — axes → matrix → the one live-action rule
 
@@ -28,6 +28,13 @@ the **one live-action rule** that governs each state — the single thing the UI
 must show, per cell. The matrix is the spec's skeleton; the live-action rule is what keeps the UI from being a
 decorative dashboard. A state with no live-action rule is either dead or mis-modelled — merge or drop it.
 
+**Enumerate the unhappy path, not just the happy one.** The error, empty, loading, and latency states are
+real cells of the matrix — and they are exactly the ones a happy-path enumeration silently drops, because they
+are the states nobody enjoys drawing. A feature that only models "data loaded, everything fine" ships a design
+that has never confronted its own failure modes. Then **run a completeness-critic over the enumeration**: a
+fresh agent whose only job is to name what axis, state, or failure mode is missing (not to praise what's
+there). An enumeration nobody adversarially checked is a guess wearing a matrix's clothes.
+
 ### 2. Mock before build — self-contained HTML, real data shapes
 
 Do **not** build in the real app first. Author a **single self-contained HTML file** (inline CSS/JS, no build
@@ -35,6 +42,12 @@ step) that renders the matrix from phase 1, populated with **real data shapes** 
 fields, not lorem. A throwaway mock is cheap to iterate, has no framework friction, and forces you to confront
 the real data early. This is where the design actually happens; the app build (which lives in the impl repo,
 never WE — WE holds zero implementation) comes *after* the mock is ruled and frozen.
+
+**When you iterate, refine the last ratified artifact — do not rebuild from the spec.** Regenerating a fresh
+mock from the written spec each round throws away every pixel-level decision the prior round already ratified —
+the spacing that finally read right, the glyph that won, the tuned hierarchy — and quietly reintroduces bugs
+already fixed. Edit the ratified artifact *forward* so craft accretes across rounds instead of resetting to
+zero. The spec is the record of what was decided; it is not a regeneration seed.
 
 ### 3. Review the pixels, not the source — screenshot matrix × both themes → PNGs to reviewers
 
@@ -49,7 +62,13 @@ fails in dark is a failing design, not a passing one with a caveat.
 When the design has a genuine fork (which glyph family, whether a rule is transient or persistent, one layout
 vs another), do **not** decide it inline. Build a **decision-explainer artifact**: the competing options
 rendered **side by side in option panes**, an **honest counter-argument** for each (the real case *against* the
-one you prefer, not a strawman), and **one recommendation**. That artifact is the ruling channel — the decision
+one you prefer, not a strawman), and **one recommendation**.
+
+**Decide the fork on built, rendered candidates — never on a prose description of them.** Each option in the
+explainer is an *actual rendered candidate you can look at*, not a paragraph arguing for a design you never
+built. A fork argued in prose is ruled on imagination, and imagination hides the very failure the pixels would
+have shown — the option that "sounds cleaner" often looks worse the moment it exists. Build both sides, then
+look. If you never rendered the losing option, you did not rule the fork; you guessed it. That artifact is the ruling channel — the decision
 is ruled from a lane against the explainer, never ratified inline (*backlog-workflow.md → Never take an
 unprepared decision*), and the ruling is recorded in the design doc so it is cite-able (the console's live at
 `plateau-app:docs/backlog-console-design.md`).
@@ -78,11 +97,25 @@ prose port-note that drifts. That port was just run for the console taxonomy (#2
 state's design by its case id, and drift is caught by the test — the design is a spec, not a memory. This is the
 durability payoff (#2559 G5): the method *and* the decision survive the session.
 
-### 6. Converge — alternating-lens fresh reviewers, two clean rounds, every edit assert-verified
+### 6. Integrate — compose the parts into one operable page, reviewed at full scale
+
+A UI is not the sum of its parts, and a part that passes in isolation can fail the moment it shares a screen.
+Once the parts are ruled and frozen, **compose them into one operable page** — the real chrome, the real shell,
+every part wired together at production scale and populated with the full matrix, not a gallery of isolated
+components. Then run an **integration-only review**: fresh reviewers judge the *assembled* page, and only the
+assembly — does the hierarchy still hold when every part is present at once, do the parts fight for the same
+attention, does the whole read as one product or as a bag of panels bolted together. Integration routinely
+surfaces **whole-page forks the part-level review could not see** — the frame itself (master-detail vs stacked
+vs split) is decided *here*, on the assembled page. Rule each such fork the phase-4 way (built candidates, honest
+counter-argument, one recommendation) and loop the new ruling back through the webcase port. A part that scored
+well alone and fails in the assembled page is a failing part — the page is the unit that ships.
+
+### 7. Converge — alternating-lens fresh reviewers, two clean rounds, every edit assert-verified
 
 Iterate to convergence: spawn **fresh-context reviewers with alternating lenses** (e.g. hierarchy/polish one
 round, accessibility/state-distinguishability the next) and keep going until **two consecutive rounds come back
-clean**. Fresh context each round is the point — a reviewer who has seen the prior round rationalizes it. And
+clean — on the integrated page at full scale, not just the isolated parts**. Fresh context each round is the
+point — a reviewer who has seen the prior round rationalizes it. And
 **every fixture edit is assert-verified**: after each change to a webcase, re-run the conformance test so a
 grammar edit can never silently break the spec. One clean round is luck; two in a row from distinct lenses is
 convergence.
@@ -109,6 +142,15 @@ The build-UI work is edit-action work, so it obeys the standard delivery discipl
   a footnote.
 - **The counter-argument must be real.** A decision-explainer whose counter-argument is a strawman is a
   rationalization with extra steps. State the honest case against your own recommendation.
+- **A fork is ruled on built candidates.** If you never rendered the option you rejected, you did not rule the
+  fork — you imagined it. Build both sides, then look.
+- **Enumerate the unhappy path.** A matrix that only models the happy path hides its hardest states. Error,
+  empty, loading, and latency are cells, not extras — and a fresh completeness-critic checks the list for what's
+  missing before you trust it.
+- **Refine the ratified artifact, don't rebuild it.** Regenerating from the spec each round discards ratified
+  craft and reintroduces fixed bugs. Edit the last ratified artifact forward.
+- **The page is the unit, not the part.** A part that passes alone but fails in the assembled page at full scale
+  is a failing part. Integrate and review the whole before you call any of it done.
 - **WE holds zero implementation.** The UI impl lives in the product repo (plateau-app); WE owns the *method*
   (this doc), the reference model, and the machine-checkable spec — not the app code (memory rule 6, #1282).
 
@@ -116,6 +158,11 @@ The build-UI work is edit-action work, so it obeys the standard delivery discipl
 
 - Worked example: Plateau-Loop backlog console — epic #2505; the mock-before-build seed #2565; the
   graduate-to-webcases port #2578; design record `plateau-app:docs/backlog-console-design.md`.
+- Second worked example (proved the integration phase, decide-on-built-candidates, refine-from-ratified, the
+  completeness-critic, and the unhappy-path enumeration): the Plateau-Loop **feature-tracking screen** —
+  committee → 10-juror jury → red-team → Round 2 → **integration** → **master-detail** frame (#2708, under the
+  design-studio product-loop epic #2676). #2708 carries the decision/trace artifact and the live integrated
+  page. Its lesson for a *new* surface: build it *into* the established product chrome, not beside it.
 - Rubric the pixel review scores against: *vision-tiers.md → Design-critique rubric* (#1034), driven by
   `skills-src/review-design`.
 - The fork-ruling technique (plugs into phase 4): the jury-refinement method (#2576, parent epic #2577
