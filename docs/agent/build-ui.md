@@ -82,7 +82,8 @@ just "pick one"; when the best option scores below threshold, **flag it weak and
 rather than settling. Truth-check the live surface each round (collision / duplicate detection, state-vs-action
 distinctness). The jury *proposes*; the human *disposes* — no self-ruling. Gate the full machinery by
 blast-radius: the heavy jury for a durable high-fan-out call, a light pass for a one-off. This method owns its
-own home (#2576, under the Plateau-Ruler epic #2577) — link to it here, don't duplicate its operational detail.
+own home — **[jury-refinement-method.md](jury-refinement-method.md)** (#2576, under the Plateau-Ruler epic
+#2577) — read it there; this section only names the technique, it doesn't duplicate the operational detail.
 
 ### 5. Graduate to webcases — durable, cite-able, machine-checkable
 
@@ -165,7 +166,8 @@ The build-UI work is edit-action work, so it obeys the standard delivery discipl
   page. Its lesson for a *new* surface: build it *into* the established product chrome, not beside it.
 - Rubric the pixel review scores against: *vision-tiers.md → Design-critique rubric* (#1034), driven by
   `skills-src/review-design`.
-- The fork-ruling technique (plugs into phase 4): the jury-refinement method (#2576, parent epic #2577
-  "Plateau Ruler") — multi-lens jury, per-option 1–5 ratings, weak-flag→candidate-search, human-gate; how the
-  §6e icon grammar was ruled.
+- The fork-ruling technique (plugs into phase 4): the jury-refinement method —
+  [jury-refinement-method.md](jury-refinement-method.md) (#2576, parent epic #2577 "Plateau Ruler") —
+  multi-lens jury, per-option 1–5 ratings, weak-flag→candidate-search, human-gate; how the §6e icon grammar
+  was ruled.
 - Delivery discipline: *backlog-workflow.md → Working an item* (lane→PR, the arc, the write-seam).
