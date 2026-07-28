@@ -3,11 +3,13 @@ bornAs: xtzhhcu
 kind: story
 size: 5
 parent: "2612"
-status: open
+status: resolved
 blockedBy: ["2647"]
 scope:
   - plateau:src/backlog-view/
 dateOpened: "2026-07-23"
+dateStarted: "2026-07-28"
+dateResolved: "2026-07-28"
 tags: []
 ---
 
