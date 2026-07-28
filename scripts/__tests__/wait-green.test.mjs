@@ -4,7 +4,28 @@
  *   and unit-tested here against fixtures, no gh, no clock.
  */
 import { describe, it, expect } from 'vitest';
-import { waitVerdict } from '../wait-green.mjs';
+import { waitVerdict, numericFlag } from '../wait-green.mjs';
+
+describe('numericFlag — finite-or-default flag parse (#2482 finding 2)', () => {
+  it('parses a finite numeric string', () => {
+    expect(numericFlag('1200', 600)).toBe(1200);
+    expect(numericFlag('30', 15)).toBe(30);
+  });
+
+  it('falls back on a non-finite parse (the operator-typo case that used to hang)', () => {
+    expect(numericFlag('abc', 600)).toBe(600);   // Number('abc') === NaN → default (no forever-poll)
+    expect(numericFlag('abc', 15)).toBe(15);      // → default (no setTimeout(NaN) busy-loop)
+    expect(numericFlag(undefined, 600)).toBe(600); // absent flag
+    expect(numericFlag('Infinity', 600)).toBe(600); // Infinity is not finite → default
+  });
+
+  it('falls back on a non-positive value too — the other busy-loop / immediate-timeout inputs', () => {
+    expect(numericFlag('0', 15)).toBe(15);   // 0 interval → setTimeout(0) busy-loop → default
+    expect(numericFlag('', 15)).toBe(15);     // Number('') === 0 → default
+    expect(numericFlag('-5', 15)).toBe(15);   // negative → setTimeout(<0) fires immediately → default
+    expect(numericFlag('-5', 600)).toBe(600); // negative timeout → immediate exit-3 → default
+  });
+});
 
 describe('waitVerdict', () => {
   it('passed → exit 0, done (regardless of elapsed)', () => {

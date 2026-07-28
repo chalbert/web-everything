@@ -88,6 +88,64 @@ export function rollupToCheckRows(rollup) {
   });
 }
 
+/**
+ * Filter normalized check rows to just the REQUIRED set (#2482). Pure. WHY: the `checks=` token must answer the
+ * question a reviewer actually has — "would pr-land merge this?" — and pr-land gates on `gh pr checks --required`
+ * (required checks only), NOT the full rollup. `requiredNames` is the required-check name list (from
+ * `gh pr checks --required --json name`); when it is a NON-array (the required set couldn't be determined — a
+ * transient gh error), we CANNOT honestly narrow, so we keep every row (the historical all-checks behaviour —
+ * conservative, over-reports red, never under-reports). An EMPTY array means "this PR has zero required checks" →
+ * filters to `[]` → `classifyChecks`' no-checks `passed` default.
+ * @param {Array<{name:string, bucket:string}>} rows - `rollupToCheckRows` output
+ * @param {string[]|null|undefined} requiredNames
+ * @returns {Array<{name:string, bucket:string}>}
+ */
+export function filterToRequired(rows, requiredNames) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!Array.isArray(requiredNames)) return list; // unknown required set → keep all checks (unchanged behaviour)
+  const req = new Set(requiredNames.map(String));
+  return list.filter((r) => req.has(String((r && r.name) || '')));
+}
+
+/**
+ * Recover the check rows from a (possibly non-zero) `gh pr checks …` invocation (#2482). Pure. `gh pr checks`
+ * exits NON-zero in two different situations that must be told apart:
+ *   - checks still PENDING / a check FAILED — gh prints the JSON rows to stdout anyway → recover & classify them.
+ *   - the PR has genuinely ZERO required checks — gh prints `no checks reported …` to stderr, no JSON → `[]`
+ *     (which `classifyChecks` reads as the no-checks `passed` default, so a no-required-checks PR is green rather
+ *     than a forever-pending wait — #2482 finding 3).
+ * Anything else (a real gh / network error) is `unknown` — the caller keeps waiting / falls back to all-checks.
+ * @param {{stdout?:string, stderr?:string, message?:string}} o
+ * @returns {{rows:Array}|{unknown:true}}
+ */
+export function recoverCheckRows({ stdout, stderr, message } = {}) {
+  const out = String(stdout || '').trim();
+  if (out.startsWith('[')) {
+    try { return { rows: JSON.parse(out) }; } catch { /* not valid JSON — fall through */ }
+  }
+  if (/no checks reported/i.test(`${stderr || ''}\n${message || ''}`)) return { rows: [] };
+  return { unknown: true };
+}
+
+/**
+ * Resolve a PR's REQUIRED-check name list via `gh pr checks --required --json name` (#2482). Impure only in the
+ * injected `runGh` runner (so it is unit-testable with a stub); the interpretation is the pure `recoverCheckRows`.
+ * Returns the name array (possibly `[]` for a no-required-checks PR), or `undefined` when the required set can't
+ * be determined (a transient gh error) so the caller falls back to the historical all-checks display.
+ * @param {(args:string[])=>string} runGh
+ * @param {number|string} num
+ * @returns {string[]|undefined}
+ */
+export function resolveRequiredNames(runGh, num) {
+  const names = (rows) => (Array.isArray(rows) ? rows.map((r) => r && r.name).filter(Boolean) : undefined);
+  try {
+    return names(JSON.parse(runGh(['pr', 'checks', String(num), '--required', '--json', 'name'])));
+  } catch (e) {
+    const rec = recoverCheckRows({ stdout: e && e.stdout, stderr: e && e.stderr, message: e && e.message });
+    return rec.rows ? names(rec.rows) : undefined;
+  }
+}
+
 /** The review class a PR's labels put it in — reuses the ratified `REVIEW_LABELS` (never re-hardcodes the
  *  strings). Pure. `human` (a human must clear it) wins over `pending` (an independent review is owed). */
 export function reviewClassFromLabels(labels) {
@@ -100,21 +158,26 @@ export function reviewClassFromLabels(labels) {
  * The PURE per-PR bundle assembler (#2434). Takes an already-parsed `gh pr view … --json` object and the raw
  * `gh pr diff` text, returns the stable contract reviewers read. Never throws on a missing field — an absent
  * rollup → `checks.status:'passed'` (classifyChecks' no-checks default), absent labels → `[]`, etc.
- * @param {{view: object, diff?: string}} o
+ * The `checks` token is over the REQUIRED set when `requiredNames` is supplied (so it matches what pr-land waits
+ * for — #2482); with no `requiredNames` it degrades to the full rollup (the historical all-checks behaviour), and
+ * `checksScope` records which (`'required'` vs `'all'`) so a consumer knows exactly what the token covers.
+ * @param {{view: object, diff?: string, requiredNames?: string[]|null}} o
  * @returns {{number:number, title:string, body:string, files:Array, state:string,
- *   checks:{status:string, reason:string}, diff:string, labels:string[], reviewClass:string,
+ *   checks:{status:string, reason:string}, checksScope:string, diff:string, labels:string[], reviewClass:string,
  *   headRefName:string, mergeable:string}}
  */
-export function assembleParked({ view, diff } = {}) {
+export function assembleParked({ view, diff, requiredNames } = {}) {
   const v = view || {};
   const labels = labelNames(v.labels);
+  const checkRows = filterToRequired(rollupToCheckRows(v.statusCheckRollup), requiredNames);
   return {
     number: Number(v.number) || 0,
     title: String(v.title || ''),
     body: typeof v.body === 'string' ? v.body : '',
     files: Array.isArray(v.files) ? v.files : [],
     state: String(v.state || ''),
-    checks: classifyChecks(rollupToCheckRows(v.statusCheckRollup)),
+    checks: classifyChecks(checkRows),
+    checksScope: Array.isArray(requiredNames) ? 'required' : 'all',
     diff: typeof diff === 'string' ? diff : '',
     labels,
     reviewClass: reviewClassFromLabels(labels),
@@ -139,7 +202,9 @@ function runCli() {
     process.exit(2);
   }
 
-  const gh = (ghArgs) => execFileSync('gh', ghArgs, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const gh = (ghArgs) => execFileSync('gh', ghArgs, {
+    cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+  });
 
   const out = nums.map((num) => {
     try {
@@ -149,7 +214,10 @@ function runCli() {
       ]));
       let diff = '';
       try { diff = gh(['pr', 'diff', num]); } catch { diff = ''; } // a diff hiccup must not drop the whole entry
-      return assembleParked({ view, diff });
+      // Narrow the `checks=` token to the REQUIRED set so it matches what pr-land waits for (#2482); a gh hiccup
+      // here yields `undefined` → assembleParked falls back to the all-checks display (never drops the entry).
+      const requiredNames = resolveRequiredNames(gh, num);
+      return assembleParked({ view, diff, requiredNames });
     } catch (e) {
       const msg = String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean).pop() || 'gh pr view failed';
       return { number: Number(num) || 0, error: msg };

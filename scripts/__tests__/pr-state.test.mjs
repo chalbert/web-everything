@@ -28,6 +28,19 @@ const failView = {
   title: 'a broken PR',
 };
 
+// A PR whose REQUIRED check (test) is green but a NON-required (optional) check is red — pr-land would merge it.
+const optionalRedView = {
+  number: 481,
+  state: 'OPEN',
+  mergeable: 'MERGEABLE',
+  mergeStateStatus: 'CLEAN',
+  statusCheckRollup: [
+    { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { __typename: 'CheckRun', name: 'lint', status: 'COMPLETED', conclusion: 'FAILURE' },
+  ],
+  title: 'required green, optional red',
+};
+
 describe('prStateRecord', () => {
   it('distills the view, with the checks token from classifyChecks over the rollup', () => {
     expect(prStateRecord(greenView)).toEqual({
@@ -36,6 +49,7 @@ describe('prStateRecord', () => {
       mergeable: 'MERGEABLE',
       mergeStateStatus: 'CLEAN',
       checks: 'passed',
+      checksScope: 'all', // no requiredNames → historical all-checks scope
       title: 'scripts: drain helpers',
     });
   });
@@ -48,7 +62,24 @@ describe('prStateRecord', () => {
     const r = prStateRecord({});
     expect(r.number).toBe(0);
     expect(r.checks).toBe('passed'); // no rollup → classifyChecks no-checks default
+    expect(r.checksScope).toBe('all');
     expect(() => prStateRecord()).not.toThrow();
+  });
+
+  it('with requiredNames, the token reflects the REQUIRED set only (#2482) — optional red is ignored', () => {
+    const r = prStateRecord(optionalRedView, ['test']);
+    expect(r.checks).toBe('passed');       // required (test) is green — pr-land would merge it
+    expect(r.checksScope).toBe('required');
+  });
+
+  it('without requiredNames, the same PR over-reports the optional red (all-checks fallback)', () => {
+    expect(prStateRecord(optionalRedView).checks).toBe('failed');
+  });
+
+  it('requiredNames=[] (a no-required-checks PR) reads as passed', () => {
+    const r = prStateRecord(failView, []);
+    expect(r.checks).toBe('passed');
+    expect(r.checksScope).toBe('required');
   });
 });
 
@@ -61,5 +92,10 @@ describe('formatPrStateLine', () => {
   it('renders a red/conflicting PR', () => {
     expect(formatPrStateLine(failView))
       .toBe('#480 OPEN mergeable=CONFLICTING checks=failed mss=DIRTY  a broken PR');
+  });
+
+  it('narrows the checks token to the required set when requiredNames is supplied (#2482)', () => {
+    expect(formatPrStateLine(optionalRedView, ['test']))
+      .toBe('#481 OPEN mergeable=MERGEABLE checks=passed mss=CLEAN  required green, optional red');
   });
 });
