@@ -30,23 +30,30 @@ import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { classifyChecks } from './pr-land.mjs';
-import { rollupToCheckRows } from './fetch-parked.mjs';
+import { rollupToCheckRows, filterToRequired, resolveRequiredNames } from './fetch-parked.mjs';
 
 /**
  * The PURE structured state record for one PR (#2434). Distills a parsed `gh pr view … --json` object into the
  * fields the display line + `--json` array carry. The `checks` token comes from the SHARED `classifyChecks` over
- * the rollup normalized by `rollupToCheckRows` — the single green/red truth. Never throws on a missing field.
+ * the rollup normalized by `rollupToCheckRows` — the single green/red truth. When `requiredNames` is supplied the
+ * token is narrowed to the REQUIRED set (so it matches what pr-land waits for — #2482); with none it degrades to
+ * the full rollup (historical all-checks behaviour), and `checksScope` (`'required'`/`'all'`) records which.
+ * Never throws on a missing field.
  * @param {object} view - parsed `gh pr view <n> --json number,state,mergeable,mergeStateStatus,statusCheckRollup,title`
- * @returns {{number:number, state:string, mergeable:string, mergeStateStatus:string, checks:string, title:string}}
+ * @param {string[]|null} [requiredNames] - the PR's required-check names (from `gh pr checks --required --json name`)
+ * @returns {{number:number, state:string, mergeable:string, mergeStateStatus:string, checks:string,
+ *   checksScope:string, title:string}}
  */
-export function prStateRecord(view) {
+export function prStateRecord(view, requiredNames) {
   const v = view || {};
+  const checkRows = filterToRequired(rollupToCheckRows(v.statusCheckRollup), requiredNames);
   return {
     number: Number(v.number) || 0,
     state: String(v.state || ''),
     mergeable: String(v.mergeable || ''),
     mergeStateStatus: String(v.mergeStateStatus || ''),
-    checks: classifyChecks(rollupToCheckRows(v.statusCheckRollup)).status,
+    checks: classifyChecks(checkRows).status,
+    checksScope: Array.isArray(requiredNames) ? 'required' : 'all',
     title: String(v.title || ''),
   };
 }
@@ -55,10 +62,11 @@ export function prStateRecord(view) {
  * The PURE one-line display for a PR's state (#2434), e.g.
  *   `#472 OPEN mergeable=MERGEABLE checks=passed mss=CLEAN  scripts: drain helpers`
  * @param {object} view - the parsed `gh pr view` object (see `prStateRecord`).
+ * @param {string[]|null} [requiredNames] - the PR's required-check names (narrows the `checks=` token — #2482).
  * @returns {string}
  */
-export function formatPrStateLine(view) {
-  const r = prStateRecord(view);
+export function formatPrStateLine(view, requiredNames) {
+  const r = prStateRecord(view, requiredNames);
   return `#${r.number} ${r.state} mergeable=${r.mergeable} checks=${r.checks} mss=${r.mergeStateStatus}  ${r.title}`;
 }
 
@@ -79,15 +87,20 @@ function runCli() {
     process.exit(2);
   }
 
+  const gh = (ghArgs) => execFileSync('gh', ghArgs, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+
   const records = [];
   const lines = [];
   for (const num of nums) {
     try {
-      const view = JSON.parse(execFileSync('gh', [
+      const view = JSON.parse(gh([
         'pr', 'view', num, '--json', 'number,state,mergeable,mergeStateStatus,statusCheckRollup,title',
-      ], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim());
-      records.push(prStateRecord(view));
-      lines.push(formatPrStateLine(view));
+      ]).trim());
+      // Narrow the `checks=` token to the REQUIRED set so it matches what pr-land waits for (#2482); a gh hiccup
+      // here yields `undefined` → the record falls back to the all-checks display.
+      const requiredNames = resolveRequiredNames(gh, num);
+      records.push(prStateRecord(view, requiredNames));
+      lines.push(formatPrStateLine(view, requiredNames));
     } catch (e) {
       const msg = String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean).pop() || 'gh pr view failed';
       records.push({ number: Number(num) || 0, error: msg });

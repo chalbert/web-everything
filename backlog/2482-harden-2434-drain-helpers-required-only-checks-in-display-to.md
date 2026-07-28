@@ -2,8 +2,10 @@
 bornAs: xqwdyl8
 kind: task
 parent: "2418"
-status: open
+status: resolved
 dateOpened: "2026-07-13"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 scope:
   - we:scripts/fetch-parked.mjs
