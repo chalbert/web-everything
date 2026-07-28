@@ -591,6 +591,69 @@ describe('planTick — composes the tick and threads nextState', () => {
     expect(out.decisions.statusLine).toContain('health warn');
   });
 
+  it('emits ONE degraded-infra note PER cluster (cause + affected-lane count), distinct from a per-lane stall (#2741/#2661)', () => {
+    const out = planTick({
+      state: {
+        queue: [], lanes: [], prs: [],
+        health: {
+          verdict: 'warn',
+          stalled: [{ lane: 7, num: 70, idleS: 300 }],
+          degradedInfra: [
+            { cause: 'GitHub outage', count: 3, members: [{ lane: 1, num: 11 }, { lane: 2, num: 12 }, { lane: 3, num: 13 }] },
+            { cause: 'npm registry outage', count: 1, members: [{ lane: 4, num: 14 }] },
+          ],
+        },
+      },
+      plan: { launch: [] },
+      bookkeeping: { tick: 2 },
+    });
+    const infra = out.decisions.notes.filter((n) => n.kind === 'degraded-infra');
+    // ONE note per CLUSTER — two causes → exactly two notes, NOT one per affected lane (would be 4).
+    expect(infra).toHaveLength(2);
+    expect(infra).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'degraded-infra', cause: 'GitHub outage', count: 3 }),
+      expect.objectContaining({ kind: 'degraded-infra', cause: 'npm registry outage', count: 1 }),
+    ]));
+    // The multi-lane cluster pluralizes; the single-lane one does not.
+    expect(infra.find((n) => n.cause === 'GitHub outage').text).toContain('3 lanes waiting on GitHub outage');
+    expect(infra.find((n) => n.cause === 'npm registry outage').text).toContain('1 lane waiting on npm registry outage');
+    // Distinct from the per-lane stall note — the genuine stall still surfaces on its own.
+    expect(out.decisions.notes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'lane-stalled', num: 70, lane: 7 }),
+    ]));
+  });
+
+  it('emits NO degraded-infra note when the cluster list is empty OR absent', () => {
+    const empty = planTick({
+      state: { queue: [], lanes: [], prs: [], health: { verdict: 'ok', stalled: [], degradedInfra: [] } },
+      plan: { launch: [] },
+      bookkeeping: { tick: 0 },
+    });
+    expect(empty.decisions.notes.filter((n) => n.kind === 'degraded-infra')).toHaveLength(0);
+    // A health verdict with NO degradedInfra field at all (older reader / pre-#2661 shape) must not throw or fabricate.
+    const absent = planTick({
+      state: { queue: [], lanes: [], prs: [], health: { verdict: 'ok', stalled: [] } },
+      plan: { launch: [] },
+      bookkeeping: { tick: 0 },
+    });
+    expect(absent.decisions.notes.filter((n) => n.kind === 'degraded-infra')).toHaveLength(0);
+  });
+
+  it('falls back to members length when a cluster omits count (defensive — malformed input never renders "undefined lanes")', () => {
+    const out = planTick({
+      state: {
+        queue: [], lanes: [], prs: [],
+        health: { verdict: 'warn', stalled: [], degradedInfra: [{ cause: 'GitHub outage', members: [{ lane: 1, num: 11 }, { lane: 2, num: 12 }] }] },
+      },
+      plan: { launch: [] },
+      bookkeeping: { tick: 0 },
+    });
+    const note = out.decisions.notes.find((n) => n.kind === 'degraded-infra');
+    expect(note).toMatchObject({ kind: 'degraded-infra', cause: 'GitHub outage', count: 2 });
+    expect(note.text).toContain('2 lanes waiting on GitHub outage');
+    expect(note.text).not.toContain('undefined');
+  });
+
   it('surfaces a needs-slice epic and a prepared decision as notes (no agent, no guard)', () => {
     const out = planTick({
       state: { queue: [], needsSlice: [{ num: 50, epicState: 'unsliced' }], decisions: [{ num: 60, prepared: true }], lanes: [], prs: [] },
