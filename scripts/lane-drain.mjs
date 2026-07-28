@@ -31,6 +31,16 @@
  * drain pass to retry (the drain-side of the #2072 closeout). Housekeeping publishes via the SANCTIONED
  * `push-if-green.mjs` helper — never a raw main push (the #2172 transport contract).
  *
+ * ON-LAND CLEANUP (#2748): the drain's terminal land event is the AUTHORITATIVE, universal owner of post-land
+ * cleanup — it fires for EVERY land path (conveyor delivery agent, solo `/pr`, `/finish`), not just a
+ * conveyor-armed watcher. On a landed couple the drain (a) OWNS the `active`/`open`→`resolved` card flip
+ * (`resolveLandedItem`) when the producer didn't pre-author it — kept WE-last + frontmatter-strict so a failed
+ * impl half never false-resolves (#96) — and (b) RELEASES the item's lane lease in every pool it held
+ * (`releaseItemLeases` → `lane-pool release --all-pools --item`), so a finished lane never lingers as a ghost.
+ * The no-land-event orphan (an agent that died before opening a PR) is covered by the pool's own acquire-native
+ * reaper (`lane-pool reapDeadLeasesInPool`, also #2748) — together they retire the "cleanup hangs off the
+ * delivery agent's exit" coupling behind the ghost-lane / stale-card / wasted-re-dispatch bug family.
+ *
  * The pure planners (`planDrain`, `planWatch`, `planPostDrain`, `buildPrLandArgs`) are unit-tested in
  * scripts/__tests__/lane-drain.test.mjs; the CLI owns git/pr-land/backlog at its boundary (mirrors
  * pr-land.mjs / lane-review.mjs).
@@ -391,16 +401,20 @@ function runDrainOne() {
   }
 
   // Every repo landed (WE last) → confirm the WE resolve is reachable on origin/main, then clear the queued
-  // marker. The resolve lives in backlog/<num>-<slug>.md; find the slug from the local tree, then read that
-  // path off the freshly-fetched origin/main (git show needs the exact path — no globs).
-  const gitC = (a) => execFileSync('git', a, { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-  const tryGit = (a) => { try { return gitC(a); } catch { return null; } };
-  let resolveReachable = null;
-  try {
-    tryGit(['fetch', 'origin', '--quiet']);
-    const path = (tryGit(['ls-files', `backlog/${num}-*.md`]) || '').split('\n').filter(Boolean)[0];
-    if (path) { const body = tryGit(['show', `origin/main:${path}`]); resolveReachable = resolveReachableFromBody(body); }
-  } catch { resolveReachable = null; }
+  // marker. The resolve lives in backlog/<num>-<slug>.md; readResolveReachable finds the slug + reads `status:`
+  // frontmatter-strict off the freshly-fetched origin/main.
+  let resolveReachable = readResolveReachable(CWD, num);
+
+  // #2748 — RESOLVE-ON-LAND: if the card is NOT already resolved after the WE merge (the producer did not
+  // pre-author the flip), the DRAIN owns the flip NOW, off its terminal land event, then re-reads. WE-last
+  // ordering means we only get here after impl merged, so this can never false-resolve a failed impl half
+  // (#96). A flip that REFUSES (decision-needs-codifiedTo / epic-open-child / illegal status) leaves
+  // resolveReachable false → the existing reopen-on-fail path below handles it exactly as before.
+  let resolveOwnedByDrain = false;
+  if (resolveReachable === false) {
+    const flip = resolveLandedItem(CWD, num);
+    if (flip.flipped) { resolveOwnedByDrain = true; resolveReachable = readResolveReachable(CWD, num); }
+  }
 
   // Gate the single clear point on the resolve actually being on main (review #3): if the check is
   // EXPLICITLY false (WE merged but the resolve is somehow not reachable), do NOT unqueue — leave it queued
@@ -421,7 +435,13 @@ function runDrainOne() {
   const assigned = (numberedList.find((a) => a.hash === num) || {}).nnn || null;
   const alsoNumbered = numberedList.filter((a) => a.hash !== num);
 
-  emit({ landed: true, reason: 'landed', num, assignedNum: assigned, alsoNumbered, landedRepos: landed, unqueued: fin.unqueued, manifestDeleted: fin.manifestDeleted, mainPushed: fin.pushed, resolveReachable, detail: `landed #${num}${assigned ? ` → #${assigned} (JIT numbered)` : ''} across ${landed.join(' → ')} (impl-first/WE-last)${fin.unqueued ? ', unqueued' : ' (unqueue failed — clear it manually)'}${fin.manifestDeleted ? ', manifest cleaned' : ''}${alsoNumbered.length ? `, +${alsoNumbered.length} leftover(s) numbered (${alsoNumbered.map((a) => '#' + a.nnn).join(', ')})` : ''}${fin.pushed ? ', main published' : ''}` }, 0);
+  // #2748 — RELEASE-ON-LAND: with the couple landed + resolved + unqueued, hand its lane lease back in EVERY
+  // pool it held. The item may have JIT-numbered from a hash (assigned) — release by the LANDED number the
+  // owning session encodes (assigned ?? num), so a conveyor-<num> lease matches. Best-effort, post-land.
+  const released = releaseItemLeases(CWD, assigned || num);
+  const releasedCount = released ? released.released : 0;
+
+  emit({ landed: true, reason: 'landed', num, assignedNum: assigned, alsoNumbered, landedRepos: landed, unqueued: fin.unqueued, manifestDeleted: fin.manifestDeleted, mainPushed: fin.pushed, resolveReachable, resolveOwnedByDrain, releasedLeases: releasedCount, detail: `landed #${num}${assigned ? ` → #${assigned} (JIT numbered)` : ''} across ${landed.join(' → ')} (impl-first/WE-last)${resolveOwnedByDrain ? ', resolve flipped by drain (#2748)' : ''}${fin.unqueued ? ', unqueued' : ' (unqueue failed — clear it manually)'}${fin.manifestDeleted ? ', manifest cleaned' : ''}${releasedCount ? `, released ${releasedCount} lease(s)` : ''}${alsoNumbered.length ? `, +${alsoNumbered.length} leftover(s) numbered (${alsoNumbered.map((a) => '#' + a.nnn).join(', ')})` : ''}${fin.pushed ? ', main published' : ''}` }, 0);
 }
 
 // ── watch/drain — the outer monitor loop (#2173) ───────────────────────────────────────────────────────
@@ -776,6 +796,54 @@ function reopenStrandedItem(CWD, num) {
     if (quietGit(CWD, ['commit', '-m', `drain: reopen stranded #${num} after failed land (#2175)`, '--', path]) != null) pushed = publishMain(CWD);
   }
   return { reopened: true, pushed };
+}
+
+// #2748 — is the item's WE resolve reachable on origin/main RIGHT NOW? Fetches, finds the backlog file, reads
+// `status:` FRONTMATTER-strict (via resolveReachableFromBody). Extracted so the drain can read it BEFORE and
+// AFTER an on-land flip (below). Returns true/false, or null when the body can't be fetched (couldn't tell).
+function readResolveReachable(CWD, num) {
+  const tg = (a) => { try { return execFileSync('git', a, { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); } catch { return null; } };
+  tg(['fetch', 'origin', '--quiet']);
+  const path = (tg(['ls-files', `backlog/${num}-*.md`]) || '').split('\n').filter(Boolean)[0];
+  if (!path) return null;
+  return resolveReachableFromBody(tg(['show', `origin/main:${path}`]));
+}
+
+// #2748 — RESOLVE-ON-LAND: the DRAIN owns the `active`/`open`→`resolved` card flip, hung off its terminal land
+// event rather than depending on the producer having pre-authored it into the WE lane commit (the solo /pr,
+// /finish, or missed-authoring case). Runs ONLY after every ref (impl-first, WE-last) has merged, so WE-last
+// ordering still guarantees a failed impl half can never reach a resolve (#96). A card ALREADY `resolved` (the
+// producer authored it — the prior common path) is a NO-OP; an `active`/`open` card is flipped via
+// `backlog.mjs resolve` (legal from either — see applyTransition; a kind:decision missing --codified-to, or an
+// epic with open children, correctly REFUSES → the caller falls back to the reopen path). Frontmatter-strict
+// throughout (#2603). Mirrors reopenStrandedItem's transport: it runs in the drain's LANE clone, so the backlog
+// write-guard permits the mutation (same as the reopen path). Best-effort. Returns { flipped, alreadyResolved }.
+function resolveLandedItem(CWD, num) {
+  syncMain(CWD); // reconcile against merged origin/main before reading/writing the card's status
+  const path = (quietGit(CWD, ['ls-files', `backlog/${num}-*.md`]) || '').split('\n').filter(Boolean)[0];
+  if (!path) return { flipped: false, alreadyResolved: false };
+  let body = null;
+  try { body = readFileSync(join(CWD, path), 'utf8'); } catch { body = null; }
+  if (body != null && readField(body, 'status') === 'resolved') return { flipped: false, alreadyResolved: true }; // producer authored it — nothing to do
+  try { execFileSync('node', ['scripts/backlog.mjs', 'resolve', num], { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch { return { flipped: false, alreadyResolved: false }; } // illegal from-status / decision-needs-codifiedTo / epic-open-child / guard → leave it (caller reopens)
+  // Scope the commit to ONLY this item's backlog file (explicit `-- <path>`) — never a bare commit that would
+  // absorb a foreign staged hunk (the shared-index commit race, as finalizeLand/reopenStrandedItem guard).
+  if (quietGit(CWD, ['commit', '-m', `drain: resolve #${num} on land (#2748)`, '--', path]) != null) publishMain(CWD);
+  return { flipped: true, alreadyResolved: false };
+}
+
+// #2748 — RELEASE-ON-LAND: hand the item's lane lease back to the pool in EVERY pool it was acquired in (a
+// cross-locus couple holds a lane in the WE pool AND the impl pool), off the DRAIN's terminal land event. This
+// is the UNIVERSAL cleanup point — it fires no matter WHO opened the PR (conveyor delivery agent, solo /pr,
+// /finish), because the drain is the one serial merger common to every land path, so it kills the ghost-lane /
+// wasted-re-dispatch family at its shared root (no longer hung off the delivery agent's exit or a conveyor-only
+// watcher). Reuses lane-pool's by-ITEM sweep (#2748) — the drain has the item number, not the exact session
+// slug. Best-effort: a release hiccup is reported, never unwinds a green land. Returns { released, pools } | null.
+function releaseItemLeases(CWD, num) {
+  const args = ['scripts/lane-pool.mjs', 'release', '--all-pools', `--item=${Number(num)}`, '--json'];
+  try { return JSON.parse(execFileSync('node', args, { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()); }
+  catch (e) { try { return JSON.parse(String(e.stdout || '').trim()); } catch { return null; } }
 }
 
 function runWatch({ follow }) {
