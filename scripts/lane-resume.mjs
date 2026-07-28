@@ -47,7 +47,11 @@ import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 // greps origin/main's backlog for the birth-hash record, `isHash`/`asItemId` are the shared id semantics the
 // drain's own proof-of-land gate uses (numeric NNN = post-land by JIT numbering, #2288). All import-safe
 // (CLI-guarded modules already in this file's import graph via merge-ai-prs).
-import { landedNumberFor } from './lane-drain.mjs';
+// #2410 slice D — the required-`test`-green classifier is single-sourced in lane-drain.mjs (the drain family's
+// ONE reader of a required-check conclusion). lane-resume routes BOTH its `landDecision` gate and `classifyLane`'s
+// `testRed` signal through it, RETIRING lane-resume's own hand-rolled FAIL list (the separate red-CI strand the
+// #2410 capstone folds into the unified land condition). Import-safe (lane-drain is CLI-guarded).
+import { landedNumberFor, requiredCheckState } from './lane-drain.mjs';
 import { isHash } from './backlog/id.mjs';
 import { asItemId } from './readiness/lane-manifest.mjs';
 // #2396 — a broken stacked LINK is a lane the finisher must repair before its overlap-descendants can be
@@ -114,7 +118,10 @@ export function classifyLane(pr, resolvedItems) {
   // its breakage and its stacked descendants would stay 'ready' and land past the unrepaired parent.
   const stackParents = pr.stackParents || [];
   const reviewChanges = pr.reviewChanges === true;
-  const testRed = Boolean(pr.testConclusion) && String(pr.testConclusion).toUpperCase() === 'FAILURE';
+  // #2410 slice D — the broken-link signal is now the single-sourced `red` state (any definitive failing
+  // conclusion — FAILURE / CANCELLED / TIMED_OUT / …), not a hand-rolled FAILURE-only check, so a cancelled or
+  // timed-out required check is correctly treated as a lane bug too. `pending`/`green`/absent → not red.
+  const testRed = requiredCheckState(pr.testConclusion) === 'red';
   const base = { num: pr.num, item: pr.item ?? null, repos: pr.repos || [], blockedBy, stackParents, reviewChanges, testRed, crossRepo };
 
   // BLOCKED wins: a finisher cannot land a lane whose blocker isn't on main yet (impl-first / dep-first).
@@ -387,13 +394,16 @@ export function rebuildDescendant({ laneRef, ontoSha, run = gitRunner, ...rest }
  *   'not-green' — required `test` not reported / still pending → wait (no land yet).
  *   'clean'     — test green + mergeable → `gh pr merge` directly.
  *   'rebuild'   — test green but CONFLICTING/DIRTY/BEHIND → rebase-drop the manifest, then merge.
+ * #2410 slice D — the required-`test` classification (red / not-green / green) is single-sourced through
+ * `requiredCheckState` (lane-drain.mjs), retiring lane-resume's own FAIL list (the strand the capstone folds into
+ * the unified land condition). The mergeable/rebuild half stays here (it is lane-resume-specific).
  * @param {{mergeable:string, mergeState:string, testConclusion:string|null}} sig
  */
 export function landDecision({ mergeable, mergeState, testConclusion } = {}) {
-  const test = String(testConclusion || '').toUpperCase();
-  const FAIL = ['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ERROR', 'ACTION_REQUIRED', 'STARTUP_FAILURE'];
-  if (FAIL.includes(test)) return { action: 'red', reason: `required \`test\` check is ${test.toLowerCase()}` };
-  if (test !== 'SUCCESS') return { action: 'not-green', reason: `required \`test\` check not green (${test.toLowerCase() || 'none'})` };
+  const state = requiredCheckState(testConclusion);
+  const test = String(testConclusion || '').toLowerCase();
+  if (state === 'red') return { action: 'red', reason: `required \`test\` check is ${test}` };
+  if (state !== 'green') return { action: 'not-green', reason: `required \`test\` check not green (${test || 'none'})` };
   const m = String(mergeable || '').toUpperCase();
   const s = String(mergeState || '').toUpperCase();
   if (m === 'CONFLICTING' || s === 'DIRTY' || s === 'BEHIND') return { action: 'rebuild', reason: `test green but not up-to-date (mergeable=${m || '?'} state=${s || '?'}) — rebase-drop the manifest` };

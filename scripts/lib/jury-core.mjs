@@ -131,17 +131,30 @@ export const NEGOTIATION_OUTCOMES = Object.freeze({
  *
  *   - the round's verdict is `needs-human` → `escalate`, ALWAYS (a revision that itself touches the
  *     auto-review trust chain is the v1 conflict-of-interest case — no round budget saves it).
- *   - `accept` → `land` (the invariant holds: the final diff was accepted by a non-author reviewer).
+ *   - `accept` AND the required `test` check is green → `land` (the FULL bar holds: the final diff was
+ *     accepted by a non-author reviewer AND CI is green).
+ *   - `accept` but the required `test` is NOT green → NOT landable. The CI-green land clause (#2410 slice D,
+ *     capstone of epic #2410) folds required-`test`-green into the land condition as a DETERMINISTIC clause of
+ *     the unified bar — retiring the separate red-CI strand (`we:scripts/lane-resume.mjs`'s hand-rolled
+ *     required-`test` FAIL list) so CI-green is ONE clause, not a parallel path. An `accept` over a red/pending
+ *     required test is a reviewed-but-broken diff (the panel missed a defect CI caught); it re-enters the round
+ *     loop like a `changes` — `continue` under the cap, `escalate` at it — and never silently lands.
  *   - `changes` and `round < roundCap` → `continue` (another editor↔reviewer round).
  *   - `changes` and `round >= roundCap` → `escalate` (non-convergence; surfaced to `review:human` same as v1's
  *     conflict-of-interest path, so the operator sees ONE escalation shape regardless of why it escalated).
  *
- * @param {{verdict: 'accept'|'changes'|'needs-human', round: number, roundCap?: number}} o
+ * `requiredTestGreen` DEFAULTS to `true`, so every pre-#2410 caller (which passes no CI signal) is byte-stable:
+ * an `accept` still lands. The clause only ever BLOCKS a land when a caller EXPLICITLY reports the required test
+ * as not-green (`requiredTestGreen !== true` — so a red, pending, or unknown/`null` state all fail closed). The
+ * caller owns mapping its CI state to this boolean (green ⇒ `true`; red OR pending/unknown ⇒ not green), keeping
+ * this reducer subject-agnostic (it never parses a GitHub conclusion string itself).
+ *
+ * @param {{verdict: 'accept'|'changes'|'needs-human', round: number, roundCap?: number, requiredTestGreen?: boolean}} o
  * @returns {'continue'|'land'|'escalate'}
  */
-export function deriveNegotiationOutcome({ verdict, round, roundCap = NEGOTIATION_ROUND_CAP }) {
+export function deriveNegotiationOutcome({ verdict, round, roundCap = NEGOTIATION_ROUND_CAP, requiredTestGreen = true }) {
   if (verdict === VERDICTS.NEEDS_HUMAN) return NEGOTIATION_OUTCOMES.ESCALATE;
-  if (verdict === VERDICTS.ACCEPT) return NEGOTIATION_OUTCOMES.LAND;
+  if (verdict === VERDICTS.ACCEPT && requiredTestGreen === true) return NEGOTIATION_OUTCOMES.LAND;
   return round < roundCap ? NEGOTIATION_OUTCOMES.CONTINUE : NEGOTIATION_OUTCOMES.ESCALATE;
 }
 
