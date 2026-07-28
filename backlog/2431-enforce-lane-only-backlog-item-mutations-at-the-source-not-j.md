@@ -1,8 +1,10 @@
 ---
 bornAs: x1vw9g7
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-11"
+dateResolved: "2026-07-28"
+resolutionNote: "Delivered on main by 51b25a26 (guard: enforce lane-only backlog item-mutations at the source, #x1vw9g7): we:scripts/backlog.mjs now imports laneGuardDecision/resolveReal from we:scripts/guard-lane.mjs and denies item-mutation verbs whose target card realpath resolves under a primary checkout; numbering-repair + drain JIT-numbering stay allowed; unit test we:scripts/backlog/__tests__/primary-write-guard.test.mjs present on main. Resolve-on-land straggler flipped by resolve-sweep."
 relatedTo: ["2302", "2339", "2219", "104", "883"]
 tags: [guard, lane-isolation, backlog-cli, enforce-at-source]
 scope:
