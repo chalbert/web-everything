@@ -1,5 +1,5 @@
 ---
-name: contract-split-for-tier-ownership-decisions
+name: contract-split-for-tier-ownership
 description: For "which trust tier owns a gate/definition" decisions, the ratified default is contract-split — engine-tier the impl code, policy-tier a *.contract.json for the definition; these are micro-decisions suited to on-card surfacing in the future UI
 metadata:
   type: reference
