@@ -348,11 +348,17 @@ with `check:standards --local --files=…` (#1937 best-effort fast-fail), resolv
 per repo, and **opens a
 ready-to-merge PR per ref** via `pr-land --label-on-green --manifest-file=…` (embeds the manifest in the WE PR
 body, waits for required checks, labels only when green —
-#2199) → **finalize** writes a local (uncommitted)
+#2199) → **finalize** first **reconciles any `labelled:false` PR** (#2478/#2216 — a lane's `--label-on-green`
+wait can outlast its required checks: pr-land returns `check-timeout` and leaves the PR **open but unlabelled**,
+and the drain filters by the `ready-to-merge` **label**, so a green-eventually PR is **invisible** to it and
+strands — observed as WE #450 for #2453): for each such PR whose checks have **since** gone green it re-runs
+`pr-land --label-on-green` (which **labels without merging** — pure producer, no drain), and any PR still not
+green is reported as a definite **`carried-for-label`** outcome so `/resume` picks it up (never a silent drop).
+Then finalize writes a local (uncommitted)
 `queued.json` signal per PR'd item (so the same checkout won't re-offer them, and the existing `/drain` can
-land them today). It returns `{ ledger, itemsWorked, prsOpened, prUrls, queued, crossRepoItems,
-reposProvisioned, probeFailures, … }` — **no landed state**; the result is a set of **open ready-to-merge
-PRs** a separate drain lands.
+land them today). It returns `{ ledger, itemsWorked, prsOpened, prUrls, queued, reconciledLabels,
+carriedForLabel, crossRepoItems, reposProvisioned, probeFailures, … }` — **no landed state**; the result is a
+set of **open ready-to-merge PRs** a separate drain lands.
 
 **Cross-repo lanes — the constellation (#96: WE → frontierui → plateau-app).** A single item's impl can span
 repos. The backlog item + its resolve **always live in WE**; the light probe reports any **non-WE repos** it
