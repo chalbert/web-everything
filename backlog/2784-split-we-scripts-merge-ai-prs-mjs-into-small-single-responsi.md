@@ -1,4 +1,5 @@
 ---
+bornAs: xx6k50a
 kind: story
 size: 5
 status: open
