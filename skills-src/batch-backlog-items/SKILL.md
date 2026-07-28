@@ -165,6 +165,13 @@ only**, for calibration — never as a continue/stop gate.)
 
 ## Overlap-stacked serial batch (#2394 — serial `/batch` only)
 
+> **The end-to-end narrative lives in the doc** —
+> [docs/agent/backlog-workflow.md → *Overlap-stacked serial batches*](../../../docs/agent/backlog-workflow.md)
+> covers overlap-stacking, the declared-locus + `actual ⊆ declared` contract, the `bornAs` proof-of-land +
+> single-source contract, the two-lock model, the capability-marker rollout, push-at-close, and the
+> partial-batch repair path. This section is the **operational seam-wiring** only; if the *method* changes,
+> edit that doc.
+
 **Why:** N serial items used to become N siblings off one base, so the deferred drain re-resolved every
 overlap conflict blind, with no context. Now only items whose **declared** file-sets actually overlap
 stack — each based on its predecessor's **pushed tip** — while provably-disjoint items stay plain
