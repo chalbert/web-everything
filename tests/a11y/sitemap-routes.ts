@@ -20,11 +20,24 @@ import { execSync } from 'node:child_process';
 export const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] as const;
 
 /**
- * The build-blocking route set — seeded with the 10 routes #793/#805 cleaned and flipped to enforce
- * (all 10 catalog index surfaces). A derived route is build-blocking iff it appears here; everything
- * else auto-derivation surfaces is warn-only until individually promoted. (#774 forced invariant.)
+ * The build-blocking route set — a derived route is build-blocking iff it appears here; everything
+ * else auto-derivation surfaces is warn-only until individually promoted. (#774 forced invariant —
+ * an explicit set, never auto-derived, so enforcement is never silently un-earned.)
+ *
+ * PROMOTION (#2378, per #867 Fork 1 = decoupled): a scope-C route enters this set the moment it
+ * measures green (0 WCAG A/AA violations), regardless of FUI-conversion state. The block below is the
+ * 33 routes that measured green in a fresh full-set enforce run on 2026-07-28 (`A11Y_ENFORCE=1`
+ * over the live sitemap: 43 derived, 33 green, 10 red). The 10 seed surfaces #793/#805 earned are
+ * inside this green set — nothing was un-earned. Promotion is a hand set-edit after a fresh
+ * measurement, never runtime auto-derivation of enforcement.
+ *
+ * Still warn-only (red at this measurement — remediate then promote, per spin-off #2): /assets/visual-diff-surface-demo/,
+ * /backlog/001-resource-specs-and-plans/, /blocks/action-button/, /capabilities/adapters/base-select/,
+ * /cases/accordion/01-standard/, /compat/, /demos/analytics-conformance-demo/, /module-resolution/,
+ * /plugs/customattribute/, /semantics/.
  */
 export const ENFORCED_ROUTES: ReadonlySet<string> = new Set([
+  // The 10 #793/#805-earned index surfaces (all measured green).
   '/',
   '/intents/',
   '/blocks/',
@@ -35,6 +48,30 @@ export const ENFORCED_ROUTES: ReadonlySet<string> = new Set([
   '/governance/',
   '/research/',
   '/backlog/',
+  // Promoted 2026-07-28 (#2378): measured green in the same enforce run.
+  '/adapters/declarative-component/',
+  '/author/',
+  '/conformance/',
+  '/design-systems/',
+  '/governance/cla/',
+  '/intents/access-control/',
+  '/mission/',
+  '/plugs/',
+  '/presets/',
+  '/privacy/',
+  '/project-lifecycle/',
+  '/projects/range-anchor/',
+  '/research/a11y-gate-route-auto-derivation/',
+  '/resources/',
+  '/resources/cache/',
+  '/rules/',
+  '/rules/backlog-workflow/',
+  '/specs/',
+  '/specs/plugs/customnoderegistry/',
+  '/states/',
+  '/states/schemas/',
+  '/validation-rules/',
+  '/web-contexts/',
 ]);
 
 const withSlash = (p: string): string => (p.endsWith('/') ? p : `${p}/`);
@@ -67,11 +104,21 @@ export function deriveScopeCRoutes(paths: string[]): string[] {
 }
 
 /**
+ * The 11ty origin the derived set is read from — the SAME env-driven port the spec's baseURL pins
+ * (#2167: `WE_ELEVENTY_PORT`, default 8080), so a lane clone derives from its OWN sitemap, not main's
+ * :8080. Without this the fetch in a lane hits the wrong port and fails, so `gatedRoutes()` collapses
+ * to its `ENFORCED_ROUTES` fallback: the per-route gate silently shrinks to the enforced seed (the
+ * warn-only routes are never exercised) and the #867 drain trigger sees an empty derived set, so it
+ * can never observe the milestone in a lane. Default 8080 unchanged — main/CI behavior is identical.
+ */
+export const ELEVENTY_ORIGIN = `http://localhost:${process.env.WE_ELEVENTY_PORT ?? '8080'}`;
+
+/**
  * Fetch /sitemap.xml from the running dev origin and return its `<loc>` pathnames. Uses the same
  * HTTP origin the Playwright lane already hits (the dev server is up via playwright.config `webServer`).
  * Returns [] on any failure so the caller can fall back to the enforced seed rather than crash.
  */
-export function fetchSitemapPaths(origin = 'http://localhost:8080'): string[] {
+export function fetchSitemapPaths(origin = ELEVENTY_ORIGIN): string[] {
   try {
     const xml = execSync(`curl -fsS --max-time 10 ${origin}/sitemap.xml`, { encoding: 'utf8' });
     return [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => {
@@ -94,4 +141,36 @@ export function fetchSitemapPaths(origin = 'http://localhost:8080'): string[] {
 export function gatedRoutes(origin?: string): string[] {
   const derived = deriveScopeCRoutes(fetchSitemapPaths(origin));
   return derived.length ? derived : [...ENFORCED_ROUTES];
+}
+
+/**
+ * The derived (scope-C) routes NOT yet in `enforced` — i.e. the routes still riding the warn-only rung
+ * of the ratchet. Empty ⇒ every derived route is enforced ⇒ the ratchet has drained. Pure over its
+ * inputs (sorted derived → sorted pending) so the drain trigger can't drift run-to-run. (#2378/#867.)
+ */
+export function pendingWarnOnlyRoutes(
+  derived: readonly string[],
+  enforced: ReadonlySet<string> = ENFORCED_ROUTES,
+): string[] {
+  return derived.filter((path) => !enforced.has(path));
+}
+
+/**
+ * The #867 Fork-2 self-announcing drain trigger predicate: `true` iff every derived scope-C route is
+ * enforced (no warn-only route remains), which is the milestone at which the #867 (b) endgame flip is
+ * due — invert to enforce-by-default with an explicit `WARN_ROUTES` opt-out (see backlog/867 Fork 2 +
+ * spin-off #5). A red *enforced* lane already went unnoticed for a week, so the lane carries a
+ * meta-assertion (rendered-site-a11y.spec.ts) that FAILS with "drain complete — execute the #867 flip"
+ * once this returns `true`, so the milestone can't rot unnoticed.
+ *
+ * `derived` MUST be the freshly-DERIVED set, never `gatedRoutes()`: gatedRoutes' sitemap-fetch-fail
+ * fallback is `[...ENFORCED_ROUTES]`, which is drained by construction — feeding it here would
+ * false-fire the trigger whenever the server is unreachable. An empty `derived` (fetch failed) is
+ * therefore treated as NOT-drained (indeterminate), never as a completed drain.
+ */
+export function isDrainComplete(
+  derived: readonly string[],
+  enforced: ReadonlySet<string> = ENFORCED_ROUTES,
+): boolean {
+  return derived.length > 0 && pendingWarnOnlyRoutes(derived, enforced).length === 0;
 }
