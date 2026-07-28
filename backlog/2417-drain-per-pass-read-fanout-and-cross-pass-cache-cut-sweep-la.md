@@ -1,10 +1,12 @@
 ---
 kind: task
-status: open
+status: resolved
 priority: low
 relatedTo: ["2257", "2287", "2194", "2262"]
 tags: [lane, drain, merge-queue, perf]
 dateOpened: "2026-07-10"
+dateStarted: "2026-07-28"
+dateResolved: "2026-07-28"
 scope:
   - we:scripts/merge-ai-prs.mjs
   - we:scripts/__tests__/merge-ai-prs.test.mjs
