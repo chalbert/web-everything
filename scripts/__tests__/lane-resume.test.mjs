@@ -57,6 +57,13 @@ describe('lane-resume — classifyLane (#2200)', () => {
     expect(v.disposition).toBe('blocked'); // blockedBy still owns the disposition …
     expect(v.testRed).toBe(true);          // … but the broken-link signal survives for markStackDescendantsBlocked
   });
+
+  it('a non-FAILURE definitive red conclusion (CANCELLED/TIMED_OUT) is also test-red now (#2410 single-sourced classifier)', () => {
+    // Before #2410 slice D, classifyLane only treated FAILURE as red; the single-sourced requiredCheckState reads
+    // the full FAIL set, so a cancelled/timed-out required check is correctly a lane bug too.
+    expect(classifyLane(lane({ testConclusion: 'CANCELLED' }), resolved).disposition).toBe('test-red');
+    expect(classifyLane(lane({ testConclusion: 'TIMED_OUT' }), resolved).testRed).toBe(true);
+  });
 });
 
 describe('lane-resume — orderByBlockedBy (#2200)', () => {
@@ -99,6 +106,11 @@ describe('lane-resume — landDecision (#2202)', () => {
   it('test green but CONFLICTING/DIRTY/BEHIND → rebuild (rebase-drop the manifest)', () => {
     expect(landDecision({ mergeable: 'CONFLICTING', mergeState: 'DIRTY', testConclusion: 'SUCCESS' }).action).toBe('rebuild');
     expect(landDecision({ mergeable: 'MERGEABLE', mergeState: 'BEHIND', testConclusion: 'SUCCESS' }).action).toBe('rebuild');
+  });
+  it('the full FAIL set (not just FAILURE) reads as red — single-sourced through requiredCheckState (#2410)', () => {
+    for (const c of ['CANCELLED', 'TIMED_OUT', 'ERROR', 'ACTION_REQUIRED', 'STARTUP_FAILURE']) {
+      expect(landDecision({ mergeable: 'MERGEABLE', mergeState: 'CLEAN', testConclusion: c }).action).toBe('red');
+    }
   });
 });
 

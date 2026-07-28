@@ -8,7 +8,11 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { planDrain, buildPrLandArgs, planWatch, planPostDrain, resolveReachableFromBody } from '../lane-drain.mjs';
+import {
+  planDrain, buildPrLandArgs, planWatch, planPostDrain, resolveReachableFromBody,
+  requiredCheckState, isRequiredTestGreen, convergenceLoopEnabled, convergenceEligible,
+  CONVERGENCE_LOOP_DEFAULT_ENABLED, REQUIRED_CHECK_FAIL_CONCLUSIONS,
+} from '../lane-drain.mjs';
 import { buildManifest } from '../readiness/lane-manifest.mjs';
 
 const queued = (...nums) => ({ queued: nums.map((n) => ({ num: String(n).padStart(3, '0'), at: null })) });
@@ -228,6 +232,58 @@ describe('lane-drain resolveReachableFromBody — frontmatter-strict resolve rea
     // null (advisory) but never on false.
     expect(resolveReachableFromBody(null)).toBe(null);
     expect(resolveReachableFromBody(undefined)).toBe(null);
+  });
+});
+
+describe('lane-drain requiredCheckState — the single-sourced required-`test` classifier (#2410 slice D)', () => {
+  it('SUCCESS → green (landable)', () => {
+    expect(requiredCheckState('SUCCESS')).toBe('green');
+    expect(requiredCheckState('success')).toBe('green'); // case-insensitive
+    expect(isRequiredTestGreen('SUCCESS')).toBe(true);
+  });
+  it('every definitive FAIL conclusion → red (never land)', () => {
+    for (const c of REQUIRED_CHECK_FAIL_CONCLUSIONS) {
+      expect(requiredCheckState(c)).toBe('red');
+      expect(isRequiredTestGreen(c)).toBe(false);
+    }
+  });
+  it('anything else (null / pending / neutral / in-progress) → pending, and NOT green (fails closed)', () => {
+    for (const c of [null, undefined, '', 'PENDING', 'NEUTRAL', 'IN_PROGRESS', 'QUEUED']) {
+      expect(requiredCheckState(c)).toBe('pending');
+      expect(isRequiredTestGreen(c)).toBe(false);
+    }
+  });
+});
+
+describe('lane-drain convergence loop switch — off by default, opt-in, scoped to small/non-security (#2410 slice D)', () => {
+  it('is OFF by default (no flag, no env)', () => {
+    expect(CONVERGENCE_LOOP_DEFAULT_ENABLED).toBe(false);
+    expect(convergenceLoopEnabled({})).toBe(false);
+    expect(convergenceLoopEnabled()).toBe(false);
+  });
+  it('an explicit --converge flag turns it on; --converge=false forces it off (flag wins over env)', () => {
+    expect(convergenceLoopEnabled({ flag: true })).toBe(true);
+    expect(convergenceLoopEnabled({ flag: false, env: '1' })).toBe(false); // explicit off beats env-on
+  });
+  it('the WE_CONVERGENCE_LOOP env turns it on when no flag is given', () => {
+    for (const v of ['1', 'true', 'on', 'YES']) expect(convergenceLoopEnabled({ env: v })).toBe(true);
+    for (const v of ['0', 'false', 'off', '']) expect(convergenceLoopEnabled({ env: v })).toBe(false);
+  });
+  it('a disabled loop is never eligible, whatever the diff', () => {
+    const r = convergenceEligible({ enabled: false, signals: {} });
+    expect(r.eligible).toBe(false);
+    expect(r.reasons[0]).toMatch(/off by default/);
+  });
+  it('an enabled loop over a small non-security diff IS eligible', () => {
+    expect(convergenceEligible({ enabled: true, signals: {} }).eligible).toBe(true);
+    expect(convergenceEligible({ enabled: true, signals: { dismissedFindings: 1, crossRepo: true } }).eligible).toBe(true); // those aren't the scoped-out set
+  });
+  it('a security (blast-radius / gate-self / statute) or a large (size) diff is scoped OUT even when enabled', () => {
+    for (const sig of ['blastRadius', 'gateSelf', 'statute', 'size']) {
+      const r = convergenceEligible({ enabled: true, signals: { [sig]: true } });
+      expect(r.eligible).toBe(false);
+      expect(r.reasons.join(' ')).toMatch(new RegExp(sig));
+    }
   });
 });
 

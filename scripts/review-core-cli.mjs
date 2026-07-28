@@ -144,11 +144,13 @@ export function deriveDispositionLenient({ reason, reasons } = {}) {
  *   - `careLevel` / `rigor` — the advisory care-level and the panel rigor it dials (#2567), also only when a
  *     `reason`/`reasons` set is supplied (same trigger as `disposition`).
  *   - `outcome` — the next negotiation step (`deriveNegotiationOutcome`) or, when `phase: 'plan'`, the
- *     plan-handshake step (`derivePlanOutcome`), only when a `round` is supplied — derived from `verdict`.
+ *     plan-handshake step (`derivePlanOutcome`), only when a `round` is supplied — derived from `verdict`. When
+ *     `requiredTestGreen` is supplied (#2410 slice D) it folds the CI-green land clause into that step — an
+ *     `accept` over a not-green required `test` yields `continue`/`escalate`, never `land`.
  *
  * @param {{findings?: Array<object>, humanRequired?: boolean, lensVerdicts?: Object<string,string>,
  *   mandatoryLenses?: string[], conflict?: boolean, reason?: string, reasons?: string[],
- *   round?: number, roundCap?: number, phase?: 'negotiation'|'plan'}} [input]
+ *   round?: number, roundCap?: number, requiredTestGreen?: boolean, phase?: 'negotiation'|'plan'}} [input]
  * @returns {{findings: object[], findingsCount: number, verdict: string, verdictTable?: string,
  *   disposition?: {mode: string, autoLand: boolean}, outcome?: string}}
  */
@@ -163,6 +165,7 @@ export function reduceReview(input = {}) {
     reasons,
     round,
     roundCap,
+    requiredTestGreen,
     phase = 'negotiation',
   } = input || {};
 
@@ -192,6 +195,11 @@ export function reduceReview(input = {}) {
 
   if (round != null) {
     const args = { verdict: out.verdict, round: Number(round), roundCap };
+    // #2410 slice D — fold the CI-green land clause through: when the caller supplies `requiredTestGreen`, pass it
+    // to `deriveNegotiationOutcome` so an `accept` over a red/pending required `test` does NOT land (it re-enters
+    // the loop). Omitting it keeps the pre-#2410 land-on-accept behaviour (the reducer defaults it to green). The
+    // plan handshake has no diff yet, so it never carries a CI clause.
+    if (phase !== 'plan' && requiredTestGreen !== undefined) args.requiredTestGreen = requiredTestGreen;
     out.outcome = phase === 'plan' ? derivePlanOutcome(args) : deriveNegotiationOutcome(args);
   }
 
@@ -320,6 +328,9 @@ function runReduce(flags, asJson) {
   const input = { ...json };
   if (flags.round != null) input.round = Number(flags.round);
   if (flags.roundCap != null) input.roundCap = Number(flags.roundCap);
+  // #2410 slice D — the CI-green clause as a flag: `--required-test-green` (green) / `--required-test-green=false`
+  // (red/pending → an accept won't land). Ergonomic override on top of the JSON option bag, same as round/roundCap.
+  if (flags['required-test-green'] != null) input.requiredTestGreen = flags['required-test-green'] !== 'false';
   if (typeof flags.phase === 'string') input.phase = flags.phase;
   if (typeof flags.reason === 'string') input.reason = flags.reason;
   if (typeof flags.reasons === 'string') input.reasons = flags.reasons.split(',').map((s) => s.trim()).filter(Boolean);
