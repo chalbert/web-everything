@@ -4,6 +4,7 @@ kind: decision
 parent: "2505"
 status: open
 dateOpened: "2026-07-26"
+preparedDate: "2026-07-28"
 relatedReport: reports/2026-07-28-feature-tier-above-epic.md
 tags: [backlog, taxonomy, data-model, hierarchy, tooling]
 ---
