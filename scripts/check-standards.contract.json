@@ -1,0 +1,68 @@
+{
+  "contract": "check-standards-definition-of-green",
+  "version": 1,
+  "summary": "The check:standards gate's DEFINITION OF GREEN as an explicit, machine-diffable CONTRACT (#2769, executing the #2625 contract-split ruling, fork (d), under the #2564 spec-based-programming line and the #2445 two-tier trust chain). The gate's IMPLEMENTATION — the ~3900 lines of imperative rules in scripts/check-standards.mjs + scripts/check-standards-rules.mjs — stays in the ENGINE tier (a behaviour-preserving refactor is agent-clearable). What moves here, as DATA not code, is the small set of knobs that DECIDE PASS-VS-FAIL: (1) the per-rule ENFORCEMENT flags — the *_ENFORCED booleans that decide whether a rule's finding is a hard ERROR (fails the gate) or merely a WARNING (does not), and (2) the semantic THRESHOLDS — the tunable numbers/allowed-sets a finding is measured against. The gate's meta-rule is fixed: check-standards.mjs exits non-zero iff there is at least one ERROR; WARNINGS never fail the gate. So flipping any enforcement flag from true to false, or loosening a threshold, is a REAL WEAKENING of the gate — it demotes a hard failure to advisory. Because every such knob is declared HERE and its value is pinned to the impl by the conformance suite (check-standards.conformance.test.mjs), 'did the definition of green change?' collapses to 'did this file change?' — a deterministic yes/no. This contract's basename is registered on the trust-chain POLICY tier (scripts/lib/gate-config.mjs), so a diff to it forces review:human (an agent may not clear an edit to its own leash, #2285); a behaviour-preserving impl edit that keeps the conformance suite green does not. Precedent: scripts/lib/review-policy.contract.json (#2566/#2564). Per #2564 a spec is a schema skeleton + a first-class prose layer in one artifact: the machine-checkable shape is the fields below, the MEANING is the 'description' prose on each entry. NOTE ON SINGLE-SOURCING: unlike review-policy (where the impl imports the numbers from the contract), this contract MIRRORS the impl's exported constants and the conformance suite PINS the two equal — because the #2769 scope deliberately does not edit the engine files. The guarantee is identical: the impl and the contract cannot diverge silently (divergence turns the suite red), so a weakening edit to the engine forces a matching contract edit → the policy tier → review:human.",
+  "enforcement": {
+    "description": "The per-rule ENFORCEMENT switches — for each rule that is enforced behind a named flag, whether its finding is emitted as a hard ERROR (fails check:standards) or suppressed/demoted to a WARNING. Each key mirrors a boolean constant exported from scripts/check-standards-rules.mjs (named in `impl`); the conformance suite asserts `value` equals that live constant, so flipping the flag in the engine without editing this file turns the suite red. Flipping any true to false is a definition-of-green weakening (a hard gate error becomes advisory) — the exact change #2625 requires a human to clear.",
+    "flags": {
+      "composeTraits": {
+        "value": false,
+        "impl": "COMPOSE_TRAITS_ENFORCED",
+        "description": "Whether a block's composesBehaviors entry that references an unsatisfied required trait is an ERROR. Currently WARN-FIRST (false, #937): flips to error once the deny-list is curated and false-positive-free. Raising it to true STRENGTHENS the gate; the flag exists so that flip is a deliberate, human-gated edit here."
+      },
+      "exportShape": {
+        "value": true,
+        "impl": "EXPORT_SHAPE_ENFORCED",
+        "description": "Whether contract-vs-barrel export-shape drift on a block is a hard ERROR (#927, enforced since #1206). true today — flipping to false would let a block's public export surface silently drift from its contract without failing the gate."
+      },
+      "navActiveState": {
+        "value": true,
+        "impl": "NAV_ACTIVE_STATE_ENFORCED",
+        "description": "Whether a template that omits the required nav active-state a11y markup is a hard ERROR. true — flipping to false demotes an accessibility regression to a warning."
+      },
+      "renderersPublish": {
+        "value": true,
+        "impl": "RENDERERS_PUBLISH_ENFORCED",
+        "description": "Whether a renderer leaking into a published @webeverything exports map is a hard ERROR (#964). true — flipping to false would let renderers enter the published surface without failing the gate."
+      },
+      "referenceRuntimeForms": {
+        "value": true,
+        "impl": "REFERENCE_RUNTIME_FORMS_ENFORCED",
+        "description": "Whether a serve() form outside the frozen reference-runtime catalog is a hard ERROR (#964). true — flipping to false unfreezes the ratified form set."
+      },
+      "plugUnpluggedTest": {
+        "value": true,
+        "impl": "PLUG_UNPLUGGED_TEST_ENFORCED",
+        "description": "Whether a plug missing either the plugged- or unplugged-mode test is a hard ERROR. true — flipping to false lets a plug ship a mode with no test."
+      },
+      "repoLocusPrefix": {
+        "value": true,
+        "impl": "REPO_LOCUS_PREFIX_ENFORCED",
+        "description": "Whether a doc reference lacking a required <repo>: locus prefix is a hard ERROR. true — flipping to false demotes an un-prefixed (silently-unmatched-by-scope-lease) locus to a warning."
+      },
+      "blockImplDrift": {
+        "value": true,
+        "impl": "BLOCK_IMPL_DRIFT_ENFORCED",
+        "description": "Whether a moved/deleted FUI block implementation (contract points at a missing impl) is a hard ERROR (#926). true — flipping to false lets a block's impl vanish without failing the gate."
+      },
+      "plugDrift": {
+        "value": true,
+        "impl": "PLUG_DRIFT_ENFORCED",
+        "description": "Whether WE↔FUI plug shared-core drift is a hard ERROR (#1309). true — flipping to false lets the WE and FUI copies of a plug's shared core diverge silently."
+      }
+    }
+  },
+  "thresholds": {
+    "description": "The semantic THRESHOLDS — the tunable numbers/allowed-sets a finding is measured against, extracted out of the impl. Each key mirrors a constant exported from scripts/check-standards-rules.mjs (named in `impl`); the conformance suite pins `value` equal to that live constant. These are care-level tuning knobs (loose to start, tightened from data); a loosening is a definition-of-green change and lives only here.",
+    "digestMaxWords": {
+      "value": 100,
+      "impl": "DIGEST_MAX_WORDS",
+      "description": "The maximum word count for a backlog item's digest (lead paragraph) before check:standards WARNS — the one-glance-selection budget. Raising it loosens the readability bar."
+    },
+    "allowedSizes": {
+      "value": [1, 2, 3, 5, 8, 13],
+      "impl": "FIB",
+      "description": "The allowed values for a backlog item's `size` field (the Fibonacci rule-set). A size outside this set is a hard ERROR. Adding a value (e.g. 21) or dropping the constraint loosens what the gate accepts."
+    }
+  }
+}
