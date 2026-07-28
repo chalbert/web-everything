@@ -5,6 +5,9 @@ parent: "2360"
 status: open
 dateOpened: "2026-07-10"
 tags: []
+scope:
+  - frontierui:plugs/webdirectives/ssr/net/
+  - frontierui:.github/workflows/ci.yml
 ---
 
 # Native .NET SSR renderer foundation + if/switch directives
