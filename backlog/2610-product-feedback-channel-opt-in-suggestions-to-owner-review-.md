@@ -27,4 +27,15 @@ Per the console design record (plateau:docs/backlog-console-design.md): the **cl
 
 ## Slicing
 
-Unsliced on purpose: the epic exists to anchor the seams and the privacy statute-shape now; it gets sliced when the product conveyor work (#2527) reaches the multi-tenant stage.
+Sliced 2026-07-28 into three independently-deliverable stories along the pipeline, with the capture schema
+as the foundation (it must be tenant-ready from day one, so it defines the shape the review and routing
+slices read):
+
+1. **Opt-in capture** *(foundation)* — client-side suggestion capture over a minimal-by-construction,
+   tenant-ready schema, the deterministic scrub gate at the SEND seam (deny-on-hit, the `learnings-drop`
+   `validateEntry` precedent), and the verbatim payload preview. Defines the schema the rest read.
+2. **Owner-review screen** — the multi-tenant triage screen reusing the ratified console grammar (closed
+   verdict vocab, queue-with-peek, triage stepper, dedup-before-review). `blockedBy` opt-in capture.
+3. **Routing accepted suggestions** — route an accepted suggestion into the learnings intake (red-team →
+   lane → PR), the multi-tenant generalization of the single-tenant close-session sweep. `blockedBy`
+   owner-review (it acts on reviewed/accepted items).

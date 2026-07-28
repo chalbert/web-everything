@@ -1,7 +1,6 @@
 ---
 bornAs: xrpeaug
 kind: epic
-size: 13
 parent: "2527"
 status: open
 priority: low
@@ -49,3 +48,17 @@ them now would be speculative; capturing them now keeps the eventual SaaS turn f
 Split into the 6 slices above (or a refined set) with each a batchable, independently-deliverable story;
 readiness/ordering of the split respects the `2 → {1,4,6}` dependency (metering first). No slice is built
 under this epic until it is un-deferred and prioritized.
+
+## Slices
+Sliced 2026-07-28 into a refined set of **three** stories, folding the 6 requirement areas per the
+`2 → {1,4,6}` dependency (metering is the foundation). Each child carries `priority: low` — still deferred,
+out of auto-select, per the epic's "no slice built until un-deferred" rule.
+
+1. **Cost-metering & attribution (foundation)** — replace the unreliable counter with a durable per-build
+   cost record attributed to tenant + item + run (req 2), folding model-tier cost policy (req 4) and the
+   audit/billing log (req 6), both of which read metering. *Blocks budget-gate.*
+2. **Build-control: approval, roles & circuit-breakers** — a permissioned multi-user build gate generalizing
+   the single-operator `buildQueued` clear into owner/admin/member roles + approval + delegation (req 3),
+   plus global/per-tenant kill-switches and runaway auto-pause (req 5). Independent of metering.
+3. **Per-tenant budget-gate** — spend + build-count quotas enforced *before* a build starts (req 1).
+   `blockedBy` cost-metering: a spend quota needs the trustworthy metered record first.

@@ -2,7 +2,6 @@
 bornAs: x2rfm5x
 shortTitle: "Agent-supervision surface"
 kind: epic
-size: 8
 parent: "2527"
 status: open
 tags: [plateau-loop, console, supervision, steer, forensics, epic]
@@ -28,3 +27,16 @@ diagnose a running or dead build. Serves G1 (steer + review at the point of work
 ## Acceptance
 An operator can steer a running build, watch its live output, and — for a stalled/failed lane — see a
 post-mortem before choosing a recovery verb. Wires to the real runner + lane state ([#2552]).
+
+## Slices
+Sliced 2026-07-28 into three independently-deliverable stories (the four scope items above fold into three
+surfaces; take-over/release rides the post-hoc review surface). No hard foundation edge — each is a
+separate route on the `backlog-api` plugin plus a module under `plateau:src/backlog-view/`, so they
+serialize on that shared file rather than on a work dependency.
+
+1. **Steer composer** — the running-agent steer UI + `POST /build/steer` endpoint (runner `steer()` already
+   exists; UI + route are the work).
+2. **Live output tail** — expose `runner.observe()` over SSE and render the reasoning/tool/validation stream
+   with the plan-todo checklist live.
+3. **Post-hoc review (forensics + take-over)** — the post-mortem detail surface for stalled/failed/orphaned
+   lanes (last state, diff-so-far, why-it-stalled) plus assume/hand-back a build, holding the lane.
