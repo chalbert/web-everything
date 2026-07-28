@@ -154,6 +154,42 @@ export const TRUST_CHAIN = [
     desc: 'the drain-daemon pure logic (WE #2480) — buildPassArgs() constructs the merge-sweep argv (label + --under-lease) and buildSetLabelArgs() constructs the review-clear argv (--to=accepted clears the parked gate so the drain may merge); a change to either invocation builder is gate-deciding. Engine tier — the WE child scripts stay the rubric/disposition authority. NB: generic basename (see note above)',
     homes: ['plateau-app/tools/drain-daemon/lib.mjs'],
   },
+  // ── the check:standards GATE — its definition-of-green split into policy vs engine (WE #2769, #2625 fork (d)) ──
+  // The repo-health gate (`npm run check:standards`) is itself trust-chain machinery: its rules decide whether a
+  // change may land at all. #2625 ruled it should split like the auto-review gate — the IMPLEMENTATION stays
+  // ENGINE tier (a behaviour-preserving refactor of the ~3900 lines of rules is agent-clearable) while its
+  // DEFINITION OF GREEN moves into a POLICY-tier contract, so a REAL weakening of the gate (flip a *_ENFORCED
+  // flag, loosen a threshold) forces review:human but routine rule churn does not. The contract mirrors the
+  // engine's exported constants and the conformance suite pins the two equal (the engine files are out of #2769's
+  // scope, so the contract does not import from them — the pin is the guarantee they cannot diverge silently).
+  {
+    role: 'check-standards-policy',
+    file: 'check-standards.contract.json',
+    tier: 'policy',
+    desc: 'the check:standards DEFINITION-OF-GREEN contract (#2769) — the machine-diffable spec that OWNS the gate\'s per-rule enforcement flags (error vs warn) and semantic thresholds. A diff here IS a definition-of-green change ("did the gate weaken?" is deterministic — did this file change), so it forces review:human',
+    homes: ['scripts/check-standards.contract.json'],
+  },
+  {
+    role: 'check-standards-conformance',
+    file: 'check-standards.conformance.test.mjs',
+    tier: 'policy',
+    desc: 'the conformance suite (#2769) pinning every contract knob to its live engine constant (and guarding that no *_ENFORCED knob escapes the contract) — the bridge that makes an engine refactor agent-clearable (green) and a definition change human-gated (red forces a contract edit); weakening an assertion here is itself a definition-of-green change (the closure)',
+    homes: ['scripts/lib/__tests__/check-standards.conformance.test.mjs'],
+  },
+  {
+    role: 'check-standards-engine',
+    file: 'check-standards.mjs',
+    tier: 'engine',
+    desc: 'the check:standards entry impl — orchestrates the rule run and OWNS the gate\'s meta-rule (exit non-zero iff any ERROR; WARNINGS never fail). It realizes the definition of green but does not DEFINE it (that is the contract), so it is engine tier: a change still escalates and runs the full panel, but a behaviour-preserving refactor is agent-clearable; a definition change turns the conformance suite red and pulls in a policy-tier contract edit. Anchored by an explicit roster entry, not the incidental ^scripts/ blast-radius regex',
+    homes: ['scripts/check-standards.mjs'],
+  },
+  {
+    role: 'check-standards-rules',
+    file: 'check-standards-rules.mjs',
+    tier: 'engine',
+    desc: 'the check:standards rules impl — the pure rule functions and the enforcement/threshold constants the contract mirrors. Engine tier for the same reason as the entry impl: an edit escalates + runs the panel and a behaviour-preserving refactor is agent-clearable, but changing a *_ENFORCED flag or a threshold diverges from the contract (conformance red) and forces the matching policy-tier edit → review:human',
+    homes: ['scripts/check-standards-rules.mjs'],
+  },
   {
     role: 'roster-config',
     file: 'gate-config.mjs',
