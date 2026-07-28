@@ -1,0 +1,77 @@
+<h2>The Question</h2>
+
+<p>The ratified Plateau feature-tracking screen
+(<a href="/backlog/2705-feature-tracking-screen-ratified/">#2705</a>) rolls up
+<code>slice → epic → feature</code>. But the Web Everything backlog has <strong>no tier above
+epic</strong>: <code>kind ∈ story | epic | task | decision</code> (the single-axis end state of
+<a href="/backlog/466-collapse-backlog-type-workitem-into-one-kind-axis-retire-the/">#466</a>; SoT
+<code>scripts/check-standards-rules.mjs:40</code>), and the largest grouping is <code>epic</code>.
+Decision <a href="/backlog/2691-define-a-feature-tier-above-epic-deterministic-feature-epic-/">#2691</a>
+asks: add a <strong>feature</strong> tier, and if so how — (a) <strong>derive</strong> a feature from
+<code>parent</code> chains, (b) a new <code>kind: feature</code> node, or (c) an explicit grouping
+field on epics — such that the rollup is <em>deterministic</em>.</p>
+
+<h2>Why derive-from-chains cannot be deterministic (the live tree)</h2>
+
+<p>Measured over <code>backlog/*.md</code> (2717 items, 205 epics):</p>
+<ul>
+  <li><strong>Epics nest.</strong> 88 epics carry a <code>parent</code>; <strong>81 of those parents
+  are themselves <code>kind: epic</code></strong>. The <code>parent</code> chain reaches
+  <strong>depth 5</strong>.</li>
+  <li><strong>Roots are uneven and huge.</strong> 105 distinct roots over open items; the largest,
+  <code>#2445</code>, has <strong>87 descendants</strong>, the next 20. Neither "root" nor "top epic"
+  (124 of them) is a curated product grouping.</li>
+  <li><strong>The screen wants separate rows.</strong> <code>#2505</code> and <code>#2527</code> are
+  distinct feature rows in the ratified mock, yet both roll up to <code>#2445</code> — so
+  "feature = epics reachable from a root" folds them into <strong>one 87-item mega-feature</strong>.
+  That is the red-team's "grouped under different roots" instability restated: structure-only
+  derivation has no stable feature identity.</li>
+</ul>
+
+<h2>How mature trackers model the tier above epic</h2>
+
+<table>
+  <thead><tr><th>Tracker</th><th>Tier above epic</th><th>How it is modelled</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Jira</strong> (Advanced Roadmaps)</td><td>Initiative (Theme above that)</td>
+      <td>An issue <em>type</em> in the one type enum — each hierarchy level is a type; the parent
+      link is the relation.</td></tr>
+    <tr><td><strong>Linear</strong></td><td>Initiative → Project → Issue</td>
+      <td>A distinct first-class entity; projects join by explicit membership.</td></tr>
+    <tr><td><strong>Shortcut</strong></td><td>Milestone/Objective → Epic → Story</td>
+      <td>A distinct object above epic; epics belong by explicit reference.</td></tr>
+    <tr><td><strong>Azure DevOps</strong></td><td>(Epic is top; "Feature" is <em>below</em> epic)</td>
+      <td>Fixed <code>Epic &gt; Feature &gt; Story</code> ladder — a naming caveat: "Feature" is below
+      epic here.</td></tr>
+    <tr><td><strong>GitHub</strong> (sub-issues, GA 2025)</td><td>no fixed tier names</td>
+      <td>Arbitrary nesting via sub-issue links; hierarchy is derived from the link graph, with
+      <em>no</em> named "feature" level.</td></tr>
+    <tr><td><strong>Asana</strong></td><td>Portfolio</td>
+      <td>A separate grouping container over projects.</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Cross-tool invariant:</strong> the tier above epic is an <strong>explicitly-marked
+node</strong> — its own type/level or its own entity — <em>never</em> "whichever ancestor a walk
+reaches." Trackers that expose deep arbitrary nesting (GitHub) deliberately decline to name a fixed
+"feature" level, precisely because a derived level is ambiguous. This mirrors <a
+href="/backlog/466-collapse-backlog-type-workitem-into-one-kind-axis-retire-the/">#466</a> one tier
+up: hierarchy-role rides the <strong>single structural axis</strong>, not a re-derivation (a) and not a
+parallel field (c).</p>
+
+<h2>What this grounds for #2691</h2>
+
+<ul>
+  <li><strong>Option (b) — explicit <code>kind: feature</code></strong> — extends the same one axis
+  #466 established and matches every tracker's explicit-node invariant.</li>
+  <li><strong>Deterministic feature→epic rule:</strong> epic <em>E</em>'s feature is its
+  <strong>nearest <code>kind: feature</code> ancestor along <code>parent</code></strong>; if none,
+  <em>E</em> is <strong>Unassigned</strong>. A total, deterministic function — it handles epics that
+  do not share an immediate parent (they can still share a nearer feature ancestor) and the
+  <code>#2445</code> mega-root (a feature is a marked node, not the top root).</li>
+  <li><strong>Native-first / zero new required fields:</strong> feature assignment is opt-in; a
+  feature-less epic rolls into "Unassigned" — no forced backfill of the 124 top epics.</li>
+  <li><strong>Adding the kind is a gated operation:</strong> the kind-vocabulary drift guard
+  (<code>scripts/check-standards.mjs</code> §10) forces every kind-filter list in
+  <code>src/backlog.njk</code> to cover <code>feature</code>, or its items render but stay invisible.</li>
+</ul>

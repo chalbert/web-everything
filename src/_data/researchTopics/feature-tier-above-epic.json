@@ -1,0 +1,20 @@
+{
+  "id": "feature-tier-above-epic",
+  "title": "A tier above epic — explicit `kind: feature` node vs derived-from-parent-chains",
+  "status": "open",
+  "summary": "Grounds backlog decision #2691 — the ratified feature-tracking screen (#2705) rolls up slice→epic→feature, but the backlog has no tier above epic (kind ∈ story|epic|task|decision; SoT check-standards-rules.mjs:40). Surveys how mature trackers model the tier above epic and finds a hard cross-tool invariant: that tier is an EXPLICITLY-MARKED node — Jira Initiative (a level in the one issue-type enum), Linear Initiative (a first-class entity), Shortcut Milestone, Asana Portfolio — NEVER 'whichever ancestor a graph walk reaches'. Trackers that expose deep arbitrary nesting (GitHub sub-issues, GA 2025) deliberately do NOT name a fixed 'feature' level, precisely because a derived level is ambiguous. Grounded against the live tree: the `parent` chain is deep (max depth 5) and multi-level (81 of 88 parented epics have an epic parent), with 105 uneven roots (largest #2445 = 87 descendants) — so 'feature = epics reachable from a root' is non-deterministic and would collapse the screen's separate feature rows (#2505/#2527) into one 87-item mega-feature. This confirms and strengthens #2691's option (b) (explicit `kind: feature`) over (a) derive-from-chains and (c) a parallel grouping field, and mirrors #466's single-`kind`-axis ruling one tier up: hierarchy-role rides the one structural axis, not a re-derivation and not a second field. Deterministic rule: epic E's feature = its nearest `kind: feature` ancestor along `parent`; none ⇒ Unassigned (a total function, native-first, zero new required fields). Azure DevOps naming caveat: it uses 'Feature' BELOW epic — #2691 fixes 'feature' as the top grouping (≈ Jira Initiative). Internal backlog tooling; no project-facing standard or lock-in.",
+  "dateOpened": "2026-07-28",
+  "lastReviewed": "2026-07-28",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "backlog",
+    "taxonomy",
+    "tooling",
+    "convention",
+    "issue-tracker",
+    "data-model",
+    "hierarchy"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}
