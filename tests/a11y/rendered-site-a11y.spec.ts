@@ -16,14 +16,24 @@
 
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { gatedRoutes, ENFORCED_ROUTES, WCAG_TAGS } from './sitemap-routes';
+import {
+  gatedRoutes,
+  ENFORCED_ROUTES,
+  WCAG_TAGS,
+  deriveScopeCRoutes,
+  fetchSitemapPaths,
+  isDrainComplete,
+  pendingWarnOnlyRoutes,
+  ELEVENTY_ORIGIN,
+} from './sitemap-routes';
 
 // Hit the WE-docs origin directly (11ty :8080), not the Vite dev server (:3000) whose root serves the demo
 // launcher shell rather than the docs home. The catalog routes proxy identically either way; pinning :8080
 // keeps `/` the real docs home (#763: "WE-docs URLs (:8080 here, proxied via :3000)").
 // #2167: env-ize the port off WE_ELEVENTY_PORT (as vite.config.mts reads, #1997) so a lane hits its OWN
-// 11ty server, not main's :8080. Default unchanged.
-test.use({ baseURL: `http://localhost:${process.env.WE_ELEVENTY_PORT ?? '8080'}` });
+// 11ty server, not main's :8080. Default unchanged. Single source of truth with the sitemap fetch:
+// ELEVENTY_ORIGIN (sitemap-routes.ts) is the SAME env-driven origin the derived set is read from.
+test.use({ baseURL: ELEVENTY_ORIGIN });
 
 const ENFORCE_ALL = process.env.A11Y_ENFORCE === '1';
 
@@ -57,3 +67,33 @@ for (const path of gatedRoutes()) {
     }
   });
 }
+
+// #867 Fork-2 self-announcing drain trigger — the rider pulled FORWARD into the promotion spin-off #2378.
+// When every derived scope-C route is enforced (no warn-only rung left), the ratchet has DRAINED and the
+// #867 (b) endgame flip is due: invert to enforce-by-default with an explicit WARN_ROUTES opt-out, make a
+// sitemap-fetch failure hard-fail, and rewrite the "FORCED INVARIANT (#774)" headers with the supersession
+// lineage (that inversion is spin-off #5's job, NOT this test's). This meta-check is the forcing function:
+// the whole (b) case rests on the milestone being NOTICED, and a red *enforced* lane already went unnoticed
+// for a week — so once drained, FAIL the lane loudly with "drain complete — execute the #867 flip" rather
+// than let the milestone rot. Until then it asserts the count of warn-only routes still to drain (green).
+//
+// Reads the freshly-DERIVED set directly (not gatedRoutes(), whose fetch-fail fallback == ENFORCED_ROUTES
+// would look drained). A sitemap-fetch failure yields an empty derived set → treated as NOT-drained
+// (indeterminate), so a server hiccup can never false-fire the trigger.
+test('WE-docs a11y · #867 drain trigger — flip to enforce-by-default when the ratchet drains', async () => {
+  const derived = deriveScopeCRoutes(fetchSitemapPaths());
+  const pending = pendingWarnOnlyRoutes(derived);
+
+  console.info(
+    `[a11y drain] ${ENFORCED_ROUTES.size} enforced · ${derived.length} derived · ` +
+      `${pending.length} warn-only remaining${pending.length ? `: ${pending.join(', ')}` : ''}`,
+  );
+
+  expect(
+    isDrainComplete(derived),
+    `drain complete — execute the #867 flip: all ${derived.length} derived scope-C route(s) are now ` +
+      `enforced, so the a11y ratchet has drained. Invert the gate to enforce-by-default with an explicit ` +
+      `WARN_ROUTES opt-out set, hard-fail on sitemap-fetch failure, and rewrite the "FORCED INVARIANT ` +
+      `(#774)" headers with the supersession lineage — see backlog/867 Fork 2 (b) / spin-off #5.`,
+  ).toBe(false);
+});
