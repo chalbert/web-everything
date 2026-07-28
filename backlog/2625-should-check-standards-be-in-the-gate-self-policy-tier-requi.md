@@ -5,7 +5,7 @@ parent: "2445"
 status: resolved
 dateOpened: "2026-07-23"
 dateResolved: "2026-07-28"
-graduatedTo: xty5asq
+graduatedTo: 2769
 codifiedIn: "docs/agent/platform-decisions.md#contract-split-for-tier-ownership"
 preparedDate: "2026-07-28"
 tags: [plateau-loop, governance, gate, trust-chain]
@@ -21,7 +21,7 @@ Operator ruled **fork (d) — contract-split** (the option the raw a/b fork miss
 
 **Codified as a REUSABLE precedent** (the operator's key point — "exactly the path to take in similar decisions"): for *any* "which trust tier owns X" decision where X is a gate/validator/definition an agent could weaken then self-clear, the **default path is contract-split** — engine-tier the impl code, policy-tier a `we:*.contract.json` for the definition. Statute: [we:docs/agent/platform-decisions.md#contract-split-for-tier-ownership](../docs/agent/platform-decisions.md#contract-split-for-tier-ownership). These are small, patterned micro-decisions well suited to on-card surfacing in the future decision UI ([#2577](/backlog/2577-)) rather than a full prepare/preview cycle.
 
-**Graduation (follow-on impl):** the actual extraction — mint `we:scripts/check-standards.contract.json`, register it `tier: 'policy'` + both `.mjs` files `tier: 'engine'` in `we:scripts/lib/gate-config.mjs`, and add the conformance suite — is impl work tracked as its own child item [#xty5asq](/backlog/xty5asq-) (`graduatedTo`); this decision ratifies the *approach*, not the code.
+**Graduation (follow-on impl):** the actual extraction — mint `we:scripts/check-standards.contract.json`, register it `tier: 'policy'` + both `.mjs` files `tier: 'engine'` in `we:scripts/lib/gate-config.mjs`, and add the conformance suite — is impl work tracked as its own child item [#2769](/backlog/2769-) (`graduatedTo`); this decision ratifies the *approach*, not the code.
 
 ## Grounding — the real machinery (concrete refs)
 
