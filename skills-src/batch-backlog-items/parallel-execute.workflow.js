@@ -6,7 +6,7 @@ export const meta = {
     { title: 'Probe', detail: 'light: detect the non-WE constellation repos each item spans (for pool provisioning + per-repo PRs)' },
     { title: 'Provision', detail: 'provision a lane pool PER affected repo + ensure the ready-to-merge label exists (NO pre-claim, NO base ref, NO commit to main)' },
     { title: 'Lanes', detail: 'one agent per item in its coupled clone: claim-in-lane → work → resolve → manifest to scratch → push lane/<n> per repo → open a ready-to-merge PR per ref (manifest in the WE PR body)' },
-    { title: 'Finalize', detail: 'record a local (uncommitted) ready-to-merge signal per PR’d item so the same checkout does not re-offer it; NO integrate, NO drain launch' },
+    { title: 'Finalize', detail: 'reconcile any labelled:false PR (#2216: label it once green, else carry it as carried-for-label for /resume) + record a local (uncommitted) ready-to-merge signal per PR’d item so the same checkout does not re-offer it; NO integrate, NO drain launch' },
   ],
 };
 
@@ -551,6 +551,14 @@ const ledger = [];
 const prUrls = [];
 const toQueue = []; // { num, weRef } — items with an open WE PR (get a local queued.json entry so the same
                     // checkout won't re-offer them AND the existing drain can land them)
+// #2478/#2216 — LABELLED:FALSE PRs the drain can't see. A lane opens its PR with `pr-land --label-on-green`:
+// it waits for the required checks and labels `ready-to-merge` ONLY when green. If the checks OUTLAST that wait
+// the lane reports labelled:false (pr-land's check-timeout) — the PR is OPEN + green-eventually but UNLABELLED,
+// and the drain filters by the label, so it is INVISIBLE and strands until a human relabels it (observed: WE
+// #450 for #2453). This is #2216's liveness reconcile, previously unwired in the parallel path. Finalize now
+// reconciles each such PR (label it once its checks are green) or carries it as a DEFINITE `carried-for-label`
+// outcome for /resume — never a silent drop.
+const toReconcile = []; // { num, repo, ref, pr, url, _entry, _pr } per OPEN PR a lane left labelled:false
 for (let i = 0; i < results.length; i++) {
   const cr = results[i];
   const it = workItems[i];
@@ -562,7 +570,11 @@ for (let i = 0; i < results.length; i++) {
   for (const p of prs) if (p.url) prUrls.push(p.url);
   if (cr && cr.status === 'pr-open' && wePr) {
     toQueue.push({ num, weRef: wePr.ref });
-    ledger.push({ num, status: 'pr-open', cost: cr.cost, lane: laneLabel, repos: prs.map((p) => p.repo), prs, resolveCommit: cr.resolveCommit, changedFiles: cr.changedFiles });
+    const entry = { num, status: 'pr-open', cost: cr.cost, lane: laneLabel, repos: prs.map((p) => p.repo), prs, resolveCommit: cr.resolveCommit, changedFiles: cr.changedFiles };
+    ledger.push(entry);
+    // Any opened PR the lane could NOT label (labelled:false) is a drain-invisible strand — queue it for the
+    // #2216 reconcile below. `!p.labelled` also catches an un-reported labelled state (treat unknown as unsafe).
+    for (const p of prs) if (p.pr && !p.labelled) toReconcile.push({ num, repo: p.repo, ref: p.ref, pr: p.pr, url: p.url, _entry: entry, _pr: p });
   } else {
     ledger.push({ num, status: 'carried', drop: cr ? (cr.drop || 'no-we-pr') : 'no-result', cost: cr && cr.cost, lane: laneLabel });
   }
@@ -570,6 +582,69 @@ for (let i = 0; i < results.length; i++) {
 
 const prsOpened = ledger.filter((l) => l.status === 'pr-open').length;
 log(`Fan-out complete: ${prsOpened}/${workItems.length} item(s) are now OPEN ready-to-merge PR(s); ${workItems.length - prsOpened} carried. ZERO commits to main; no drain launched.`);
+
+// ── #2478 — LABEL RECONCILE (#2216's liveness reconcile, wired into the parallel Finalize) ──────────────────
+// For every PR a lane left labelled:false whose required checks have SINCE gone green, re-run
+// `pr-land --label-on-green` — which LABELS ready-to-merge and STOPS (pure producer: it never merges, never
+// integrates, never launches a drain — planPrLand's label-on-green plan is mergeWhenGreen:false/triggerDrain:
+// false). Any PR still not green (red, or checks still pending) is recorded as a definite `carried-for-label`
+// outcome so /resume picks it up. Finalize's contract is intact: no commit to main, no merge, no drain launch.
+const reconciledLabels = []; // pr nums Finalize labelled this run
+const carriedForLabel = [];  // { num, repo, pr, url, reason } — still unlabelled (not green), carried for /resume
+if (toReconcile.length) {
+  const implPaths = Object.fromEntries(Object.entries(REPOS).filter(([k]) => k !== 'we').map(([k, v]) => [k, v.path]));
+  log(`#2216 label reconcile: ${toReconcile.length} PR(s) came up labelled:false (check-timeout) — labelling the now-green ones, carrying the rest for /resume…`);
+  const res = await agent(
+    [
+      RETURN_HYGIENE, ``,
+      `#2478/#2216 LABEL RECONCILE. Some /workflow lanes OPENED a PR but could NOT apply the \`${READY_LABEL}\``,
+      `label: their \`pr-land --label-on-green\` wait outlasted the required checks (check-timeout), so the PR is`,
+      `OPEN but UNLABELLED — and the drain filters by that label, so it can NEVER see it. For EACH PR below, LABEL`,
+      `it IFF its required checks have SINCE gone green. Do NOT merge, do NOT integrate, do NOT launch a drain, do`,
+      `NOT touch any PR not listed here.`,
+      ``,
+      `PRs (JSON): ${JSON.stringify(toReconcile.map((r) => ({ num: r.num, repo: r.repo, ref: r.ref, pr: r.pr, url: r.url })))}.`,
+      `The WE repo's checkout is ${PRIMARY_ROOT}; impl-repo checkout paths: ${JSON.stringify(implPaths)}.`,
+      ``,
+      `For EACH PR, from its repo's checkout dir:`,
+      `1. Read its required-check state — \`gh pr view <pr> --json statusCheckRollup\` (or \`gh pr checks <pr>\`).`,
+      `2. If the required \`test\` check is GREEN now: run pr-land in label-on-green mode — WE:`,
+      `   \`node scripts/pr-land.mjs --ref=<ref> --label-on-green --json\` (from ${PRIMARY_ROOT}); impl repo <r>:`,
+      `   \`node scripts/pr-land.mjs --repo=<path> --ref=<ref> --label-on-green --json\`. This LABELS ready-to-merge`,
+      `   and STOPS — it never merges (pure producer) and is idempotent on an already-labelled PR. Record <pr>`,
+      `   under \`labelled\`.`,
+      `3. If the check is RED or still PENDING (not green yet): do NOT label — record { pr, reason } under`,
+      `   \`carried\` (reason "check-red" | "still-pending"). It rides forward for /resume; never a silent drop.`,
+      ``,
+      `Return { labelled: [pr nums you labelled], carried: [{ pr, reason }] }.`,
+    ].join('\n'),
+    {
+      label: 'finalize:label-reconcile', phase: 'Finalize',
+      schema: {
+        type: 'object', required: ['labelled'], additionalProperties: true,
+        properties: {
+          labelled: { type: 'array', items: { type: 'number' } },
+          carried: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { pr: { type: 'number' }, reason: { type: 'string' } } } },
+        },
+      },
+    },
+  ).catch(() => null);
+  const labelledSet = new Set((res && Array.isArray(res.labelled) ? res.labelled : []).map(Number));
+  const carriedFromStep = res && Array.isArray(res.carried) ? res.carried : [];
+  for (const r of toReconcile) {
+    if (labelledSet.has(Number(r.pr))) {
+      r._pr.labelled = true; // the ledger now reflects the reconciled label (the drain can see it)
+      reconciledLabels.push(r.pr);
+    } else {
+      const c = carriedFromStep.find((x) => Number(x.pr) === Number(r.pr));
+      const reason = (c && c.reason) || (res ? 'not-green' : 'reconcile-step-failed');
+      carriedForLabel.push({ num: r.num, repo: r.repo, pr: r.pr, url: r.url, reason });
+      (r._entry.carriedForLabel = r._entry.carriedForLabel || []).push({ repo: r.repo, pr: r.pr, reason });
+    }
+  }
+  if (reconciledLabels.length) log(`  🏷 reconciled ${reconciledLabels.length} now-green PR(s) → ${READY_LABEL}: ${reconciledLabels.map((n) => '#' + n).join(', ')}.`);
+  if (carriedForLabel.length) log(`  ⚠ ${carriedForLabel.length} PR(s) STILL unlabelled (not green) — carried-for-label for /resume: ${carriedForLabel.map((c) => '#' + c.pr + ' (' + c.reason + ')').join(', ')}.`);
+}
 
 // Record the local (uncommitted) ready-to-merge signal per PR'd item: `backlog.mjs queue` writes queued.json
 // so (a) the SAME checkout's next readiness pack won't re-offer the item (offline, Rule #105) and (b) the
@@ -601,7 +676,8 @@ if (toQueue.length) {
 
 const resolvedCost = ledger.filter((l) => l.status === 'pr-open').reduce((s, l) => s + (Number(l.cost) || 0), 0);
 const reposProvisioned = Object.keys(lanePools).filter((r) => (lanePools[r] || []).length > 0);
-log(`Parallel batch (PR-fan-out) done: ${prsOpened} open ready-to-merge PR(s), ${crossRepoCount} cross-repo, ${queued.length} marked ready-to-merge locally. Land them anytime with \`node scripts/lane-drain.mjs drain\` (or \`/merge\`) — the producer neither launched nor waited on a drain.`);
+const reconcileTail = toReconcile.length ? ` #2216 reconcile: ${reconciledLabels.length} labelled, ${carriedForLabel.length} carried-for-label.` : '';
+log(`Parallel batch (PR-fan-out) done: ${prsOpened} open ready-to-merge PR(s), ${crossRepoCount} cross-repo, ${queued.length} marked ready-to-merge locally.${reconcileTail} Land them anytime with \`node scripts/lane-drain.mjs drain\` (or \`/merge\`) — the producer neither launched nor waited on a drain.`);
 
 return {
   // No integration branch, no landed state — the result is a set of OPEN ready-to-merge PRs a drain lands.
@@ -610,10 +686,12 @@ return {
   prsOpened,
   prUrls,
   queued,                      // items given a local (uncommitted) ready-to-merge signal
+  reconciledLabels,            // #2478/#2216 — PRs Finalize labelled that a lane had left labelled:false (check-timeout)
+  carriedForLabel,             // #2478 — PRs STILL unlabelled (not green): a definite carried outcome for /resume, never a silent drop
   crossRepoItems: crossRepoCount,
   reposProvisioned,
   probeFailures,
   pointsSpent: resolvedCost,
   budgetPoints,
-  note: 'PR-FAN-OUT producer (#2183/#2189): every worked item is an OPEN ready-to-merge PR; ZERO commits to main; no inline integrate; the drain was neither launched nor awaited. Lane refs are PRESERVED (the PRs point at them).',
+  note: 'PR-FAN-OUT producer (#2183/#2189): every worked item is an OPEN ready-to-merge PR; ZERO commits to main; no inline integrate; the drain was neither launched nor awaited. Lane refs are PRESERVED (the PRs point at them). #2478/#2216: Finalize reconciles any labelled:false PR (label it once green) or carries it as carried-for-label for /resume — so no green-but-unlabelled PR is left invisible to the label-filtered drain.',
 };

@@ -3,8 +3,10 @@ bornAs: x9qfgz9
 kind: story
 size: 3
 relatedTo: ["2216", "2189", "2199"]
-status: open
+status: resolved
 dateOpened: "2026-07-13"
+dateStarted: "2026-07-28"
+dateResolved: "2026-07-28"
 tags: [lane, pr-flow, drain, ci]
 scope:
   - we:skills-src/batch-backlog-items/parallel-execute.workflow.js
