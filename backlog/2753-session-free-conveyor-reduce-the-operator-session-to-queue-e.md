@@ -1,4 +1,5 @@
 ---
+bornAs: xthv8dq
 kind: epic
 status: open
 dateOpened: "2026-07-28"
@@ -44,8 +45,8 @@ The open items below, in dependency order, are what still stands between "serial
 
 Two mechanizations on the critical path were un-owned; this epic files them as children:
 
-- **Shadow→enforce flip for decision auto-ratification** (child xu92z8m). #2704 mechanized decision auto-disposition/auto-ratify but runs **shadow-only** — nothing tracks turning it on. Without the flip, ratification still needs a human in the loop, so a session can't fully leave.
-- **Mechanize epic-resolve-on-last-child out of the session** (child xfwy6v3). Today `/resolve` for an epic is a session-run skill; the runner/drain should resolve an epic when its final child lands.
+- **Shadow→enforce flip for decision auto-ratification** (child 2754). #2704 mechanized decision auto-disposition/auto-ratify but runs **shadow-only** — nothing tracks turning it on. Without the flip, ratification still needs a human in the loop, so a session can't fully leave.
+- **Mechanize epic-resolve-on-last-child out of the session** (child 2752). Today `/resolve` for an epic is a session-run skill; the runner/drain should resolve an epic when its final child lands.
 
 ## Ownership note — sequences, does not duplicate
 

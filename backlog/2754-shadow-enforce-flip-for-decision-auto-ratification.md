@@ -1,7 +1,8 @@
 ---
+bornAs: xu92z8m
 kind: story
 size: 3
-parent: "xthv8dq"
+parent: "2753"
 status: open
 dateOpened: "2026-07-28"
 scope: ["we:scripts/lib/decision-routing.mjs", "we:scripts/conveyor/decision-route.mjs"]

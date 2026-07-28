@@ -1,7 +1,8 @@
 ---
+bornAs: xfwy6v3
 kind: story
 size: 3
-parent: "xthv8dq"
+parent: "2753"
 status: open
 dateOpened: "2026-07-28"
 scope: ["we:scripts/conveyor/pr-watch.mjs", "we:scripts/backlog.mjs"]
