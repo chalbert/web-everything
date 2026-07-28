@@ -2,9 +2,11 @@
 kind: story
 size: 3
 parent: "777"
-status: open
+status: resolved
 blockedBy: [2376, 2377]
 dateOpened: "2026-07-09"
+dateStarted: "2026-07-28"
+dateResolved: "2026-07-28"
 tags: []
 scope:
   - we:tests/a11y/sitemap-routes.ts
