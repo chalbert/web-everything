@@ -353,3 +353,41 @@ describe('INVARIANT 8 — an empty PR body never lands', () => {
     expect(v.decision).toBe('skip');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// INVARIANT 9 — a stale review:accepted NEVER auto-merges THROUGH decideReviewGate (#2409). A review:accepted
+// verdict vouches ONLY for the tree the reviewer looked at. If the head has advanced past the reviewed
+// commit-set, the acceptance is stale and this gate must NOT land it — no matter the escalation state, the
+// human signal, or any other label. (This is the PR #368 hole: a second, unrelated commit honoured under an
+// accept that named only the first.) SCOPE (honest): this pins the label-scoped DRAIN path, which routes
+// through decideReviewGate. The bare `/merge` orphan-sweep path clears on the review:accepted LABEL alone via
+// hasUnclearedReviewLabel (no SHA context) and is a documented residual, NOT covered by this invariant.
+// The complementary property — an accept whose head STILL matches always merges — is pinned too, so the gate
+// can never over-park (invalidate a legitimately-fresh accept). Proven over the full cross-product of inputs.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('INVARIANT 9 — a stale review:accepted never auto-merges (#2409)', () => {
+  const extraLabels = powerset([REVIEW_LABELS.pending, REVIEW_LABELS.human]);
+  const cases = product(
+    [false, true], // escalate
+    [false, true], // humanRequired
+  );
+  it('accepted + head ADVANCED past the reviewed SHA ⇒ never merges, for every input arrangement', () => {
+    for (const [escalate, humanRequired] of cases) {
+      for (const extra of extraLabels) {
+        const labels = [...extra, REVIEW_LABELS.accepted];
+        const g = decideReviewGate({ escalate, humanRequired, labels, acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb' });
+        expect(AUTO_MERGE_ACTIONS).not.toContain(g.action);
+        expect(g.staleAcceptance).toBe(true);
+      }
+    }
+  });
+  it('accepted + head STILL matches the reviewed SHA ⇒ always merges (never over-parks a fresh accept)', () => {
+    for (const [escalate, humanRequired] of cases) {
+      for (const extra of extraLabels) {
+        const labels = [...extra, REVIEW_LABELS.accepted];
+        const g = decideReviewGate({ escalate, humanRequired, labels, acceptedSha: 'abc1234', headSha: 'abc1234' });
+        expect(g.action).toBe('merge');
+      }
+    }
+  });
+});
