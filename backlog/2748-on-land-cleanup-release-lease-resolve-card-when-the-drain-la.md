@@ -1,4 +1,5 @@
 ---
+bornAs: xpi7v5m
 kind: story
 size: 5
 parent: "2606"
