@@ -3047,6 +3047,33 @@ successor, gated behind tripwire **#2740** reading #2680's `land-serialization` 
 [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (the wake/land mechanics are script-decidable;
 the high-stakes un-gate stays a routed judgment call).
 
+### A constellation repo owes the drain a green required check named `test` {#repo-drain-check-contract}
+
+The boundary contract between a constellation repo (web-everything / frontierui / plateau-app) and the
+merge-queue drain is exactly one thing: **the repo exposes a green required check named `test`.** The drain
+consumes only the check's **name + conclusion** — `isRequiredCheckGreen(pr, 'test')`
+([`we:scripts/merge-ai-prs.mjs:207-213`](../../scripts/merge-ai-prs.mjs)) finds the status-rollup entry named
+`test` and lands the PR iff its conclusion is `SUCCESS`. **How** a repo turns that check green — which CI job
+shape produces it — is **repo-private impl, invisible across the repo↔drain boundary:** the drain never
+inspects the job's steps, only its name and result. So the contract is met by *any* green check named `test`,
+and what WE ratifies is the **contract**, never a particular job shape. frontierui satisfies it via its landed
+[`fui:.github/workflows/ci.yml`](../../../frontierui/.github/workflows/ci.yml) `test` job — a **tokenless**
+sibling-checkout of *public* WE, then `build:tools`/`build:packages` + `test:unit` + `check:standards`, green
+on FUI PR #24 — which is **one valid impl** of the contract, not the contract itself. A scoped no-sibling job
+(a `test` job behind an exclude list) would be an inferior-on-merit but equally-**valid** impl; the drain
+cannot tell the two apart. **Accepted, symmetric caveat:** a repo whose `test` job builds against the WE
+sibling pins no `ref`, so WE-`main` drift can turn the check red for unrelated reasons. Making the `test` check
+GitHub-*required* via branch protection is a separate credentialed step (#2246); this rule governs only the
+name+conclusion contract the drain matches — **not** the CI job shape, which stays repo-private.
+
+**Lineage:** #2315 (ratified 2026-07-28, operator; prepared 2026-07-09). A one-off CI-transport ratify,
+reframed at the fresh-context screen from FUI's *job shape* to the repo↔drain **boundary contract** (the job
+shape is FUI-private impl the drain can't see). Ratifies shipped, proven code (green on FUI PR #24). Composes
+with [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) (the drain is the sole `main` writer) and
+[#primary-read-only-lanes-only](#primary-read-only-lanes-only) (the lane→PR transport the check gates);
+complementary to #2246 (branch protection makes the check GitHub-*required*). Two follow-ups filed separately:
+a deferred `classifyPr` "no-check vs red" reporting split, and authoring the missing maas authoring artifact.
+
 ---
 
 ### Drain-daemon self-hosting boundary — its own source runs from a dedicated clone, reloads via clean-exit + KeepAlive, and self-updates through the same graduated review as any change, only with independent (never self-) approval {#drain-daemon-self-hosting-boundary}
