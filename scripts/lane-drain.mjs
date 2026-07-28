@@ -80,6 +80,15 @@ for (const a of argv) {
 }
 const expandHome = (p) => (p && p.startsWith('~') ? p.replace(/^~/, homedir()) : p);
 
+// #2410 slice D — map the parsed `--converge` flag (+ `WE_CONVERGENCE_LOOP` env) into the off-by-default
+// convergence-loop switch via the pure, single-sourced `convergenceLoopEnabled` predicate (defined below in the
+// PURE helpers; called lazily from `runWatch` so it never hits the temporal dead zone at module load). `--converge`
+// turns the unified loop on, `--converge=false` forces it off, else it falls back to the env and finally OFF.
+const convergeSwitch = () => convergenceLoopEnabled({
+  flag: flags.converge === true ? true : (flags.converge === 'false' ? false : undefined),
+  env: process.env.WE_CONVERGENCE_LOOP,
+});
+
 // Per-repo landing config (mirrors REPOS in the orchestrator): where each repo's checkout lives (WE = the
 // drain's cwd = primary) and its own gate. pr-land runs gh/git in `path`; the PR's required CI check is the
 // per-repo landing authority (#1937), so the drain does not re-run the gate itself.
@@ -90,6 +99,71 @@ export const DRAIN_REPOS = {
 };
 
 // ── PURE helpers (unit-tested in scripts/__tests__/lane-drain.test.mjs) ────────────────────────────────
+
+// ── #2410 slice D — required-`test`-green: the ONE classifier + the off-by-default convergence switch ──────
+//
+// The drain family reads a GitHub required-check conclusion into land-relevant state in exactly ONE place here,
+// so the "test-red strand" is single-sourced: BOTH the convergence loop's land clause (via the boolean
+// `deriveNegotiationOutcome` consumes) and `lane-resume`'s `landDecision` route through this, retiring
+// lane-resume's own hand-rolled FAIL list (its separate red-CI strand). `green` = the required check succeeded
+// (landable); `red` = a definitive failing conclusion (a real bug — never land); `pending` = not-yet-reported /
+// neutral (wait, don't land yet).
+
+/** The definitive FAILING conclusions of a required check (a `red` state — never land). Single-sourced so
+ *  lane-resume no longer keeps its own copy (the retired strand). */
+export const REQUIRED_CHECK_FAIL_CONCLUSIONS = Object.freeze([
+  'FAILURE', 'CANCELLED', 'TIMED_OUT', 'ERROR', 'ACTION_REQUIRED', 'STARTUP_FAILURE',
+]);
+
+/** Classify a required-check conclusion string into land-relevant state. Pure. `green` = SUCCESS; `red` = a
+ *  definitive failure; `pending` = anything else (not reported / neutral / in-progress). */
+export function requiredCheckState(conclusion) {
+  const c = String(conclusion || '').toUpperCase();
+  if (c === 'SUCCESS') return 'green';
+  if (REQUIRED_CHECK_FAIL_CONCLUSIONS.includes(c)) return 'red';
+  return 'pending';
+}
+
+/** Is a required-check conclusion GREEN? The boolean the convergence loop's CI-green land clause consumes
+ *  (`deriveNegotiationOutcome({ requiredTestGreen })`). Pure — only an explicit SUCCESS is green (red AND pending
+ *  are both not-green, so the clause fails closed on an undetermined check). */
+export const isRequiredTestGreen = (conclusion) => requiredCheckState(conclusion) === 'green';
+
+/** The unified convergence loop (epic #2410) is OFF BY DEFAULT — it ships behind an opt-in switch, scoped to
+ *  small/non-security diffs first (graduating per-repo on a clean track record). */
+export const CONVERGENCE_LOOP_DEFAULT_ENABLED = false;
+
+/** The `scoreEscalation` signals that make a diff INELIGIBLE for the off-by-default convergence auto-land: any
+ *  security/high-trust signal (`blast-radius` / `gate-self` / `statute`) → NOT "non-security"; a `size` signal →
+ *  NOT "small". A scoped-out diff still gets reviewed — it is only kept out of the loop's auto-land path (a human
+ *  gates it), the deliberate "small/non-security first" rollout. */
+export const CONVERGENCE_INELIGIBLE_SIGNALS = Object.freeze(['blastRadius', 'gateSelf', 'statute', 'size']);
+
+/** Is the convergence loop enabled? Pure. An explicit `flag` wins (`true` = on, `false` = off — the CLI maps
+ *  `--converge` → `true` and `--converge=false` → `false`); else the `WE_CONVERGENCE_LOOP` env (`1`/`true`/`on`/
+ *  `yes` = on); else OFF (the #2410 off-by-default rollout). Kept a pure predicate so the gate is single-sourced +
+ *  testable, not re-derived per caller.
+ *  @param {{flag?: boolean, env?: string}} [o]
+ *  @returns {boolean} */
+export function convergenceLoopEnabled({ flag, env } = {}) {
+  if (flag === true) return true;
+  if (flag === false) return false;
+  if (env != null && ['1', 'true', 'on', 'yes'].includes(String(env).trim().toLowerCase())) return true;
+  return CONVERGENCE_LOOP_DEFAULT_ENABLED;
+}
+
+/** Is this diff ELIGIBLE for the convergence loop's auto-land? Pure. It must be `enabled` AND fire none of the
+ *  `CONVERGENCE_INELIGIBLE_SIGNALS` (small + non-security). `signals` is a `scoreEscalation` signals object.
+ *  Returns `{ eligible, reasons }` (reasons name WHY it was held back), so a caller surfaces the scope-out.
+ *  @param {{enabled?: boolean, signals?: object}} [o]
+ *  @returns {{eligible: boolean, reasons: string[]}} */
+export function convergenceEligible({ enabled = false, signals = {} } = {}) {
+  if (!enabled) return { eligible: false, reasons: ['convergence loop disabled (off by default — opt in with --converge / WE_CONVERGENCE_LOOP=1)'] };
+  const s = signals || {};
+  const blocking = CONVERGENCE_INELIGIBLE_SIGNALS.filter((sig) => s[sig]);
+  if (blocking.length) return { eligible: false, reasons: blocking.map((sig) => `${sig} — scoped out (small/non-security diffs first, #2410)`) };
+  return { eligible: true, reasons: [] };
+}
 
 /**
  * Plan a single couple's drain from its manifest + the current queued state. Pure — decides ORDER,
@@ -829,6 +903,7 @@ function runWatch({ follow }) {
     ok: true,
     mode: follow ? 'watch' : 'drain',
     dryRun: DRY_RUN,
+    convergenceLoop: convergeSwitch(), // #2410 slice D — off-by-default; observable in the drain result (loop execution graduates per-repo)
     fullyDrained,
     landed,
     landedButQueued,

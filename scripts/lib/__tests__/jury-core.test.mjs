@@ -232,6 +232,34 @@ describe('deriveNegotiationOutcome — the subject-jury self-driving loop\'s con
     expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: NEGOTIATION_ROUND_CAP - 1 })).toBe(NEGOTIATION_OUTCOMES.CONTINUE);
     expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: NEGOTIATION_ROUND_CAP })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
   });
+
+  // #2410 slice D (capstone) — the CI-green land clause is folded into the land condition. `requiredTestGreen`
+  // defaults to true so every pre-#2410 caller stays byte-stable; it only BLOCKS a land when explicitly not-green.
+  describe('CI-green land clause (#2410 slice D — required-`test`-green folded into the land condition)', () => {
+    it('omitting requiredTestGreen is byte-stable — an accept still LANDS (default green)', () => {
+      expect(deriveNegotiationOutcome({ verdict: VERDICTS.ACCEPT, round: 1, roundCap: 3 })).toBe(NEGOTIATION_OUTCOMES.LAND);
+    });
+
+    it('accept + required test GREEN → LAND (the full bar holds)', () => {
+      expect(deriveNegotiationOutcome({ verdict: VERDICTS.ACCEPT, round: 1, roundCap: 3, requiredTestGreen: true })).toBe(NEGOTIATION_OUTCOMES.LAND);
+    });
+
+    it('accept but required test NOT green re-enters the loop like a `changes` — CONTINUE under the cap', () => {
+      expect(deriveNegotiationOutcome({ verdict: VERDICTS.ACCEPT, round: 1, roundCap: 3, requiredTestGreen: false })).toBe(NEGOTIATION_OUTCOMES.CONTINUE);
+    });
+
+    it('accept but required test NOT green ESCALATES at the cap (reviewed-but-red never silently lands)', () => {
+      expect(deriveNegotiationOutcome({ verdict: VERDICTS.ACCEPT, round: 3, roundCap: 3, requiredTestGreen: false })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+    });
+
+    it('fails CLOSED on an unknown (null) CI state — an accept over an undetermined test does NOT land', () => {
+      expect(deriveNegotiationOutcome({ verdict: VERDICTS.ACCEPT, round: 1, roundCap: 3, requiredTestGreen: null })).toBe(NEGOTIATION_OUTCOMES.CONTINUE);
+    });
+
+    it('a red required test never overrides a `needs-human` escalate (needs-human still wins)', () => {
+      expect(deriveNegotiationOutcome({ verdict: VERDICTS.NEEDS_HUMAN, round: 1, roundCap: 3, requiredTestGreen: false })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+    });
+  });
 });
 
 describe('resolveRoster — the stateless roster-recompute spine (#2655, F3)', () => {
