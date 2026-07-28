@@ -4,6 +4,10 @@ kind: story
 size: 5
 parent: "2356"
 status: open
+scope:
+  - frontierui:plugs/webdirectives/ssr/go/
+  - frontierui:.github/workflows/ci.yml
+scopeRationale: "Greenfield: stands up a whole new language subtree (frontierui:plugs/webdirectives/ssr/go/) from scratch — a genuinely dir-spanning build whose exact file set is created here, so a file-level enumeration would under-scope and breach the lease. Mirrors the .NET foundation #2383 scope. The only shared-file touch is frontierui:.github/workflows/ci.yml (adds the Go conformance-harness CI step, alongside the existing JVM step)."
 dateOpened: "2026-07-28"
 tags: []
 ---
