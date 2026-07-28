@@ -146,6 +146,14 @@ function main() {
 
   // Execute the refile: write every touched/new file, then unlink each yielded old file. fs ops — the
   // guard-bash `git mv`/`rm` block is on SHELL commands, not this sanctioned script's fs writes.
+  // #2546 — last-line data-loss backstop: `planRenumber` already asserts every write is content-preserving,
+  // but validate the whole write set is non-empty BEFORE touching disk (a pre-pass, so the abort is truly
+  // "nothing written" — never a partial refile) even if a future plan path slips a corrupt/empty write past.
+  for (const w of plan.writes) {
+    if (!w.text || w.text.length === 0) {
+      throw new Error(`refusing to blank ${w.name} — empty rewrite content (data loss). No file written. (#2546)`);
+    }
+  }
   for (const w of plan.writes) writeFileSync(join(DIR, w.name), w.text);
   for (const d of plan.deletes) {
     // Only unlink the old yielded file if its new file was actually written (never orphan-delete).
