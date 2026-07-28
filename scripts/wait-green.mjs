@@ -34,6 +34,26 @@ import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { classifyChecks } from './pr-land.mjs';
+import { recoverCheckRows } from './fetch-parked.mjs';
+
+/**
+ * Parse a positive-numeric CLI flag, falling back to a default when the parse is NOT a finite number > 0 (#2482
+ * finding 2). Pure. The flags this guards (`--timeout`/`--interval`) are wall-clock durations — only a positive
+ * finite value is meaningful, and every non-positive input is a hang or a busy-loop we must not let through:
+ *   - `--timeout=abc` / absent → `NaN` (`Number('abc')`, `Number(undefined)`) → `elapsed >= NaN` is always false,
+ *     so a stuck-pending PR would poll forever → fall back.
+ *   - `--interval=abc` → `NaN` → `setTimeout(r, NaN)` busy-loops → fall back.
+ *   - `--interval=0` / `--interval=` (empty → `Number('')===0`) / `--interval=-5` → `setTimeout(r, ≤0)` fires
+ *     immediately → the SAME gh-hammering busy-loop, just via a different bad input → fall back.
+ * `Number.isFinite` also rejects `Infinity`.
+ * @param {string|undefined} raw
+ * @param {number} dflt
+ * @returns {number}
+ */
+export function numericFlag(raw, dflt) {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : dflt;
+}
 
 /**
  * The PURE terminal-verdict map (#2434). Given the current required-check `classifyChecks` status and the
@@ -65,8 +85,8 @@ function runCli() {
   };
   const repoFlag = flagVal('repo');
   const cwd = repoFlag ? resolve(expandHome(repoFlag)) : process.cwd();
-  const timeout = Number(flagVal('timeout') ?? 600);
-  const interval = Number(flagVal('interval') ?? 15);
+  const timeout = numericFlag(flagVal('timeout'), 600);   // #2482: a non-finite typo falls back, never hangs
+  const interval = numericFlag(flagVal('interval'), 15);  // #2482: a non-finite typo falls back, never busy-loops
   const asJson = args.includes('--json');
   const pr = args.find((a) => /^\d+$/.test(a));
 
@@ -87,12 +107,14 @@ function runCli() {
       ], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]');
       return { checkStatus: classifyChecks(rows).status, rows };
     } catch (e) {
-      // `gh pr checks` exits non-zero when checks are still pending OR on a real error; it prints the rows to
-      // stdout in the pending case. Recover the rows from stdout when present, else treat as pending.
-      const stdout = String((e && e.stdout) || '').trim();
-      if (stdout.startsWith('[')) {
-        try { const rows = JSON.parse(stdout); return { checkStatus: classifyChecks(rows).status, rows }; } catch { /* fall through */ }
-      }
+      // `gh pr checks` exits non-zero in three shapes, told apart by the SHARED `recoverCheckRows` (#2482):
+      //   - checks still pending → gh prints the JSON rows to stdout → classify them (keeps polling).
+      //   - genuinely NO required checks → gh prints "no checks reported" to stderr → `[]` → classifyChecks
+      //     reads that as `passed` (exit 0), instead of the old catch that mislabelled it `pending` and waited
+      //     out the full timeout to exit 3 (#2482 finding 3).
+      //   - a real gh / network error → `unknown` → treat as pending (a flaky call must not read as red).
+      const rec = recoverCheckRows({ stdout: e && e.stdout, stderr: e && e.stderr, message: e && e.message });
+      if (rec.rows) return { checkStatus: classifyChecks(rec.rows).status, rows: rec.rows };
       return { checkStatus: 'pending', rows: [], ghError: String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean).pop() };
     }
   }
