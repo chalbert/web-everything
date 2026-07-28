@@ -271,18 +271,191 @@ export function disposeDecisionRuling({ ledger = [], config, signals = {}, manda
   return { ...plan, verdict };
 }
 
+// ====================================================================================================================
+// THE SHADOW→ENFORCE FLIP (#2754, child of #2753). #2704 above runs the disposer SHADOW-first: a converged ruling
+// yields `apply:false` (the would-ratify is LOGGED, a human still confirms). #2704 deliberately left the flip to
+// `enforce` as "a separate later ruling." THIS is that ruling — the decision-flow analog of the #2675 PR-review
+// shadow→enforce seam, and it deliberately mirrors that shape rather than inventing a new one. It does NOT build a
+// second disposer or auto-ratify engine; it DEFINES *when* the existing `decideDecisionDisposition` above is allowed
+// to flip `apply:false → apply:true`, gated on a concrete, tracked confidence metric read off a shadow-vs-human
+// agreement ledger. The flip is mechanical once the gate is green; a single divergence resets it and holds shadow.
+// ====================================================================================================================
+
+/**
+ * The per-decision shadow-vs-human outcome (#2754). A frozen enum. Each DECIDED decision, once a human has ruled,
+ * gets one record: did the shadow disposer's would-ratify action MATCH the human's actual ruling, or DIVERGE?
+ */
+export const SHADOW_OUTCOMES = Object.freeze({
+  MATCH: 'match',           // the shadow would-ratify action equals the human's ruling action (agreement)
+  DIVERGENCE: 'divergence', // the shadow action ≠ the human ruling (or the record is malformed) — resets the streak
+});
+
+/**
+ * THE UN-DEFER TRIGGER (#2754) — the concrete, tracked gate the flip is defined behind, NOT an open-ended "later."
+ * A frozen tuning knob kept here so a re-tune is one edit + a test. The enforce-flip fires once `N` consecutive
+ * shadow auto-ratifications match the human ruling with ZERO divergence over the trailing window of `M` decided
+ * decisions. A single divergence (shadow would-ratify ≠ human ruling) resets the streak and blocks the flip until it
+ * rebuilds — the confidence bar is AGREEMENT, not volume alone. Starting proposal per the item: N = 20, M = 20.
+ */
+export const ENFORCE_FLIP_TRIGGER = Object.freeze({
+  N: 20, // consecutive most-recent matches (0 divergences) required to arm the flip
+  M: 20, // trailing window of decided decisions the "zero divergences" bar is measured over
+});
+
+/**
+ * @typedef {Object} ShadowOutcomeRecord
+ * @property {'ratify'|'escalate'|null} shadowAction - the shadow disposer's action (null if the input was malformed).
+ * @property {'ratify'|'escalate'|null} humanAction - the human's actual ruling action (null if malformed).
+ * @property {'match'|'divergence'} outcome - MATCH iff both actions are valid and equal; else DIVERGENCE (fail-closed).
+ * @property {boolean} match - convenience boolean mirror of `outcome === 'match'`.
+ */
+
+/** A valid ruling action is exactly one of the two `RULING_ACTIONS`. Pure. */
+function isRulingAction(a) {
+  return a === RULING_ACTIONS.RATIFY || a === RULING_ACTIONS.ESCALATE;
+}
+
+/**
+ * RECORD one decided decision's shadow-vs-human outcome (#2754) — the metric's ground-truth event. PURE, fail-closed.
+ * `match` is CLASS AGREEMENT on the disposition action: the shadow disposer's would-ratify action equals the human's
+ * actual ruling action. The strictest safe predicate for a sensitive auto-ratify flip — it counts BOTH "shadow would
+ * ratify but the human escalated" AND "shadow escalated but the human ratified" as divergences (either disagreement
+ * erodes confidence in letting the shadow run unattended). A malformed / partial input can NEVER inflate the streak:
+ * an unrecognized action on either side yields a DIVERGENCE, never a match.
+ * @param {{ shadowAction?: string, humanAction?: string }} o - the shadow disposer's action and the human's ruling
+ *   action, each a `RULING_ACTIONS` value. (Convenience: `shadowPlan`/`humanPlan` objects are also accepted and their
+ *   `.action` read, so a caller can pass the `decideDecisionDisposition` plan directly.)
+ * @returns {ShadowOutcomeRecord}
+ */
+export function recordShadowOutcome({ shadowAction, humanAction, shadowPlan, humanPlan } = {}) {
+  const sa = isRulingAction(shadowAction) ? shadowAction
+    : (shadowPlan && typeof shadowPlan === 'object' && isRulingAction(shadowPlan.action) ? shadowPlan.action : null);
+  const ha = isRulingAction(humanAction) ? humanAction
+    : (humanPlan && typeof humanPlan === 'object' && isRulingAction(humanPlan.action) ? humanPlan.action : null);
+  const match = sa !== null && ha !== null && sa === ha;
+  return Object.freeze({
+    shadowAction: sa,
+    humanAction: ha,
+    outcome: match ? SHADOW_OUTCOMES.MATCH : SHADOW_OUTCOMES.DIVERGENCE,
+    match,
+  });
+}
+
+/** Does a ledger record count as a MATCH? Fail-closed: anything not unambiguously a match is a divergence. Pure. */
+function recordIsMatch(r) {
+  if (!r || typeof r !== 'object') return false;
+  if (r.outcome === SHADOW_OUTCOMES.DIVERGENCE) return false; // an explicit divergence never counts, even if contradictory
+  return r.match === true || r.outcome === SHADOW_OUTCOMES.MATCH;
+}
+
+/**
+ * @typedef {Object} AgreementMetric
+ * @property {number} consecutiveMatches - matches counted from the NEWEST record backwards until the first divergence.
+ * @property {number} divergencesInWindow - divergences among the trailing `windowSize` records.
+ * @property {number} windowSize - how many records the window actually held (min(records.length, M)).
+ * @property {number} decided - total decided decisions on the ledger.
+ * @property {number} N - the required consecutive-match count.
+ * @property {number} M - the trailing window the zero-divergence bar is measured over.
+ * @property {boolean} flipReady - the GATE: `consecutiveMatches >= N && divergencesInWindow === 0`.
+ * @property {string} answer - a session-free, human-readable answer to "how many consecutive matches, 0 divergences?"
+ */
+
+/**
+ * COMPUTE the named confidence metric (#2754) — "how many consecutive shadow-vs-human MATCHES, with ZERO divergences,
+ * over the last M decided decisions?" PURE, readable WITHOUT a session (a script/CLI reads the ledger and answers).
+ * This is the gate the flip is defined behind. Two conditions, both explicit so `M` is meaningful even when it equals
+ * `N`: (1) the most-recent `consecutiveMatches` streak reaches `N`; (2) the trailing `M`-record window holds ZERO
+ * divergences. A single divergence anywhere in the streak resets condition 1; a divergence anywhere in the window
+ * fails condition 2 — either blocks the flip.
+ * @param {Array<ShadowOutcomeRecord>} records - the shadow-vs-human agreement ledger, oldest→newest.
+ * @param {{ N?: number, M?: number }} [trigger] - defaults to `ENFORCE_FLIP_TRIGGER`.
+ * @returns {AgreementMetric}
+ */
+export function computeAgreementMetric(records = [], { N = ENFORCE_FLIP_TRIGGER.N, M = ENFORCE_FLIP_TRIGGER.M } = {}) {
+  const list = Array.isArray(records) ? records : [];
+  let consecutiveMatches = 0;
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (recordIsMatch(list[i])) consecutiveMatches++;
+    else break;
+  }
+  const window = M > 0 ? list.slice(-M) : [];
+  const divergencesInWindow = window.reduce((n, r) => n + (recordIsMatch(r) ? 0 : 1), 0);
+  const flipReady = consecutiveMatches >= N && divergencesInWindow === 0;
+  const answer = `${consecutiveMatches}/${N} consecutive matches, ${divergencesInWindow} divergence(s) in the last ${window.length}/${M} decided → ${flipReady ? 'FLIP-READY (enforce armed)' : 'below trigger (holds shadow)'}`;
+  return { consecutiveMatches, divergencesInWindow, windowSize: window.length, decided: list.length, N, M, flipReady, answer };
+}
+
+/**
+ * @typedef {Object} LandModeResolution
+ * @property {'shadow'|'enforce'} mode - the EFFECTIVE land mode to feed the #2704 disposer.
+ * @property {AgreementMetric} metric - the confidence metric that gated the decision (always computed, always readable).
+ * @property {string} reason - a machine token: `metric-green`, `metric-below-trigger`, `operator-shadow-ceiling`, or
+ *   `metric-green-but-operator-shadow` (the metric would flip but the operator knob is holding it observe-only).
+ * @property {string[]} trail - a human-readable why.
+ */
+
+/**
+ * RESOLVE the effective land mode from the confidence metric (#2754) — THE FLIP, defined as one gated ruling. PURE.
+ * The metric is the AUTOMATIC trigger: `enforce` iff `metric.flipReady`. The operator's global `landMode` knob
+ * (#2675, resolved from the disposition config) is a fail-safe CEILING — it can only ever hold the mode DOWN to
+ * `shadow`, NEVER force `enforce` past a red metric. This mirrors `planDecision`'s `humanRequired` floor: a knob may
+ * add safety, never remove it. Net effect: shipping with the ratified default (`configMode: shadow`) keeps production
+ * observe-only and changes NOTHING today; once the operator ARMS the flip (`configMode: enforce`), the metric decides
+ * moment-to-moment — enforce only while the streak holds, and it auto-drops back to shadow the instant a divergence
+ * resets the counter. That is the "one-line ruling gated on the metric, blocked by any divergence."
+ * @param {{ records?: Array<ShadowOutcomeRecord>, configMode?: string, trigger?: {N?:number,M?:number} }} o -
+ *   `records` is the shadow-vs-human agreement ledger; `configMode` is the resolved global `landMode` (`shadow` |
+ *   `enforce`; anything else → shadow); `trigger` overrides N/M for a re-tune/test.
+ * @returns {LandModeResolution}
+ */
+export function resolveLandMode({ records = [], configMode, trigger } = {}) {
+  const metric = computeAgreementMetric(records, trigger || {});
+  const ceiling = configMode === LAND_MODES.ENFORCE ? LAND_MODES.ENFORCE : LAND_MODES.SHADOW;
+  // The operator knob is a fail-safe ceiling: an un-armed (shadow) global stance holds observe-only regardless of how
+  // green the metric is — the flip requires BOTH the operator arming it AND the metric earning it.
+  if (ceiling === LAND_MODES.SHADOW) {
+    return {
+      mode: LAND_MODES.SHADOW,
+      metric,
+      reason: metric.flipReady ? 'metric-green-but-operator-shadow' : 'operator-shadow-ceiling',
+      trail: [
+        metric.answer,
+        metric.flipReady
+          ? 'metric is FLIP-READY, but the operator landMode is shadow (un-armed) — held observe-only (arm with landMode: enforce).'
+          : 'operator landMode is shadow and the metric is below trigger — observe-only.',
+      ],
+    };
+  }
+  // Operator has ARMED enforce — the metric is now the moment-to-moment gate.
+  return metric.flipReady
+    ? { mode: LAND_MODES.ENFORCE, metric, reason: 'metric-green', trail: [metric.answer, 'operator armed + metric FLIP-READY → ENFORCE (auto-ratify, no human in the loop).'] }
+    : { mode: LAND_MODES.SHADOW, metric, reason: 'metric-below-trigger', trail: [metric.answer, 'operator armed but the metric is below trigger → held SHADOW until the streak rebuilds.'] };
+}
+
 /**
  * ROUTE + DISPOSE in one call (#2704) — the whole deterministic core of the operator's ruling for one decision.
  * PURE. Always returns the ROUTE (which process to run). If a jury LEDGER from that process is supplied, it ALSO
  * returns the DISPOSITION plan (ratify shadow-first / escalate); with no ledger yet (the process has not run) the
  * disposition is null and the caller runs the routed process first, then calls back with its ledger. This is the
  * one function the shell shells per decision.
+ * When `agreementRecords` is supplied, the effective land `mode` is RESOLVED through the #2754 shadow→enforce flip
+ * (`resolveLandMode`): the passed `mode` becomes the operator CEILING, and the confidence metric gates whether it may
+ * actually reach `enforce`. With no `agreementRecords`, the passed `mode` is used directly (backward-compatible) —
+ * a caller that has already resolved the mode does not have to re-supply the ledger.
  * @param {{ signals?: object, humanRequired?: boolean, ledger?: Array<object>|null, config?: object,
- *   dispositionSignals?: object, mandatoryLenses?: string[], mode?: string }} o
- * @returns {{ route: DecisionRoutePlan, disposition: (ReturnType<typeof disposeDecisionRuling>|null) }}
+ *   dispositionSignals?: object, mandatoryLenses?: string[], mode?: string,
+ *   agreementRecords?: Array<ShadowOutcomeRecord>|null, trigger?: {N?:number,M?:number} }} o
+ * @returns {{ route: DecisionRoutePlan, disposition: (ReturnType<typeof disposeDecisionRuling>|null),
+ *   landMode: (LandModeResolution|null) }}
  */
-export function planDecision({ signals = {}, humanRequired = false, ledger = null, config, dispositionSignals, mandatoryLenses, mode } = {}) {
+export function planDecision({ signals = {}, humanRequired = false, ledger = null, config, dispositionSignals, mandatoryLenses, mode, agreementRecords = null, trigger } = {}) {
   const route = routeDecision({ signals, humanRequired });
+  // #2754 FLIP: when an agreement ledger is supplied, the metric gates the mode (the passed `mode` is the operator
+  // ceiling). This is the ONE place the flip is applied in the core — mechanical once the gate is green.
+  const landMode = Array.isArray(agreementRecords)
+    ? resolveLandMode({ records: agreementRecords, configMode: mode, trigger })
+    : null;
+  const effectiveMode = landMode ? landMode.mode : mode;
   let disposition = null;
   if (Array.isArray(ledger) && config) {
     // HARD-INVARIANT SAFETY — thread the routing `humanRequired` into the judge's hard-escalate signals so a
@@ -296,8 +469,8 @@ export function planDecision({ signals = {}, humanRequired = false, ledger = nul
       config,
       signals: { ...ds, humanRequired: humanRequired === true || ds.humanRequired === true },
       mandatoryLenses: mandatoryLenses ?? route.mandatoryLenses,
-      mode,
+      mode: effectiveMode,
     });
   }
-  return { route, disposition };
+  return { route, disposition, landMode };
 }
