@@ -2,9 +2,12 @@
 bornAs: xrnzdxw
 kind: decision
 parent: "2612"
-status: open
+status: resolved
 relatedReport: reports/2026-07-28-main-session-build-guard.md
 dateOpened: "2026-07-28"
+dateStarted: "2026-07-28"
+dateResolved: "2026-07-28"
+codifiedIn: "docs/agent/platform-decisions.md#primary-read-only-lanes-only"
 preparedDate: "2026-07-28"
 relatedTo: ["2123", "2302", "883", "2677", "2607"]
 tags: [conveyor, main-session, enforcement, hook, pretooluse, guard, decision]
@@ -20,6 +23,39 @@ misses — it only sees the Edit/Write *tools*, not a `node` script that writes 
 **judgment** half (the wide "you're doing mechanical work, delegate it" surface) with **enforcement-by-absence**
 (#2677) plus a **warn-level nudge**. Full grounding + the skeptic/screen record:
 **[we:reports/2026-07-28-main-session-build-guard.md](../reports/2026-07-28-main-session-build-guard.md)**.
+
+## RULING — RATIFIED 2026-07-28 (operator)
+
+The operator ratified the skeptic-corrected recommended default, unchanged across all three forks:
+
+- **Fork 1 → (a) + (b):** a hard `PreToolUse(Bash)` **tree-write backstop** for the script-decidable half,
+  **plus** enforcement-by-absence (#2677) as the primary lever for the judgment half. The no-hard-gate branch
+  (leaving the `fs`-write-to-primary hole open) is rejected.
+- **Fork 2 → (a) blacklist.** The backstop is a **4th arm on [we:scripts/guard-bash.mjs](../scripts/guard-bash.mjs)'s
+  existing banned-command table** (allow-by-default, deny an enumerable set of primary-tree-writing build
+  invocations). No whitelist — it can't identify the main session (the discriminator resets, #2335) and would
+  strangle the wide operator surface.
+- **Fork 3 → split by layer.** **Hard-deny** the primary-tree-write (a genuine script-decidable invariant, same
+  class as [we:scripts/guard-lane.mjs](../scripts/guard-lane.mjs)'s edit-deny), with the loud
+  `MAIN_SESSION_BUILD_OK=1` sanctioned escape. **Warn** (never deny) the residual behavioral norm ("this session
+  should have delegated") — a hard-deny there would false-wedge the operator and kill a delivery subagent whose
+  bare verify reports primary cwd.
+
+**Keys on the TREE-WRITE, not on session identity.** This is the load-bearing correction:
+[we:scripts/guard-bash.mjs](../scripts/guard-bash.mjs) (#2335) resets reported Bash cwd to primary between tool
+calls, so a cwd/identity gate would wrongly wedge a delegated subagent's lane-scoped build. The backstop protects
+the primary *tree* — sound for any session (main or subagent; both build in a lane). The un-decidable "am I the
+main session" half stays judgment: absence + warn, never a hard gate on an uncomputable predicate.
+
+**Codification (no new statute anchor).** Folds under the existing
+[we:docs/agent/platform-decisions.md#primary-read-only-lanes-only](../docs/agent/platform-decisions.md#primary-read-only-lanes-only)
+as its **4th guard arm** (`codifiedIn` set there on resolve), with
+[#deterministic-core-thin-judgment](../docs/agent/platform-decisions.md#deterministic-core-thin-judgment) (#2607)
+cited for the motive that authorizes the absence + warn treatment of the judgment half.
+
+**Impl follow-on filed (scaffold, not built):** implement the tree-write backstop in
+[we:scripts/guard-bash.mjs](../scripts/guard-bash.mjs) (the 4th banned-arm + the warn-on-should-delegate),
+`blockedBy` this resolved decision.
 
 > **PREPARED, NOT RULED (2026-07-28).** Three forks, each with a bold recommended default, a run skeptic, and a
 > fresh-context screen. `/next decision` ratifies or overrides. Enforcement is **settled** (relying on model
