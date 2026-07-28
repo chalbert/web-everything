@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -1727,5 +1727,95 @@ describe('#2409 — the stale re-park label swap is ADD-FIRST / REMOVE-LAST', ()
   it('removes review:accepted exactly once in the park path (no duplicate swap)', () => {
     const occurrences = src.split("'--remove-label', REVIEW_LABELS.accepted").length - 1;
     expect(occurrences).toBe(1);
+  });
+});
+
+describe('#2417 — per-pass read fan-out (bounded pool)', () => {
+  it('mapWithConcurrency preserves input order and runs with a bounded number in flight', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const fn = async (n) => {
+      inFlight++; peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 1));
+      inFlight--;
+      return n * 2;
+    };
+    const out = await mapWithConcurrency([1, 2, 3, 4, 5, 6, 7], 3, fn);
+    expect(out).toEqual([2, 4, 6, 8, 10, 12, 14]); // input order preserved
+    expect(peak).toBeLessThanOrEqual(3);           // never more than `limit` concurrent
+    expect(peak).toBeGreaterThan(1);               // and it DID run some in parallel
+  });
+
+  it('mapWithConcurrency degrades safely on an empty list and a limit below 1', async () => {
+    expect(await mapWithConcurrency([], 4, async () => 1)).toEqual([]);
+    expect(await mapWithConcurrency([1, 2], 0, async (n) => n)).toEqual([1, 2]); // clamps to ≥1 worker
+  });
+
+  it('fans out every PR through fetchOne once on a cold first pass', async () => {
+    const calls = [];
+    const cache = new Map();
+    const prs = [{ repo: 'we', number: 1, sha: 'a' }, { repo: 'we', number: 2, sha: 'b' }, { repo: 'fui', number: 1, sha: 'c' }];
+    const reads = await fetchPrReadsCached(prs, {
+      cache,
+      keyOf: (p) => `${p.repo}::${p.number}`,
+      shaOf: (p) => p.sha,
+      fetchOne: async (p) => { calls.push(`${p.repo}::${p.number}`); return { commits: [p.number] }; },
+    });
+    expect(calls.sort()).toEqual(['fui::1', 'we::1', 'we::2']); // all three fetched once
+    expect(reads.get('we::1').value).toEqual({ commits: [1] });
+    expect(reads.get('we::1').cached).toBe(false);
+  });
+});
+
+describe('#2417 — cross-pass cache reuses unchanged-SHA reads under --watch', () => {
+  it('does NOT re-fetch a PR whose head SHA is unchanged on a second pass, but DOES re-fetch a changed SHA', async () => {
+    const cache = new Map();
+    let fetches = 0;
+    const run = (prs) => fetchPrReadsCached(prs, {
+      cache,
+      keyOf: (p) => `${p.repo}::${p.number}`,
+      shaOf: (p) => p.sha,
+      fetchOne: async (p) => { fetches++; return { commits: [p.sha] }; },
+    });
+
+    // Pass 1 (cold): both PRs fetched.
+    await run([{ repo: 'we', number: 1, sha: 'aaa' }, { repo: 'we', number: 2, sha: 'bbb' }]);
+    expect(fetches).toBe(2);
+
+    // Pass 2: PR#1 unchanged (reused, NO fetch), PR#2 rebuilt its tip (changed SHA → re-fetched).
+    const pass2 = await run([{ repo: 'we', number: 1, sha: 'aaa' }, { repo: 'we', number: 2, sha: 'ccc' }]);
+    expect(fetches).toBe(3);                       // exactly ONE new fetch (PR#2), NOT two
+    expect(pass2.get('we::1').cached).toBe(true);  // PR#1 served from cache
+    expect(pass2.get('we::2').cached).toBe(false); // PR#2 re-fetched
+    expect(pass2.get('we::2').value).toEqual({ commits: ['ccc'] });
+  });
+
+  it('evicts a PR that dropped out of the pass so the cache tracks the live open set (bounded growth)', async () => {
+    const cache = new Map();
+    const opts = (prs) => fetchPrReadsCached(prs, {
+      cache,
+      keyOf: (p) => `${p.repo}::${p.number}`,
+      shaOf: (p) => p.sha,
+      fetchOne: async () => ({ ok: true }),
+    });
+    await opts([{ repo: 'we', number: 1, sha: 'a' }, { repo: 'we', number: 2, sha: 'b' }]);
+    expect(cache.size).toBe(2);
+    await opts([{ repo: 'we', number: 1, sha: 'a' }]); // PR#2 landed/closed → gone from the pass
+    expect(cache.size).toBe(1);
+    expect(cache.has('we::2')).toBe(false);
+  });
+
+  it('a null head SHA always misses (never serves a stale read when the key is unknowable)', async () => {
+    const cache = new Map();
+    let fetches = 0;
+    const run = (prs) => fetchPrReadsCached(prs, {
+      cache,
+      keyOf: (p) => `${p.repo}::${p.number}`,
+      shaOf: (p) => p.sha,
+      fetchOne: async () => { fetches++; return {}; },
+    });
+    await run([{ repo: 'we', number: 1, sha: null }]);
+    await run([{ repo: 'we', number: 1, sha: null }]);
+    expect(fetches).toBe(2); // no SHA ⇒ cannot prove unchanged ⇒ re-fetch each pass
   });
 });
