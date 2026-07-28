@@ -21,6 +21,16 @@
  * double-merges. Best-effort: a fire failure just falls back to the daemon's ≤60s sweep. Disable with
  * `--no-fast-drain`.
  *
+ * ON-LAND CLEANUP (the drain-side, session-free post-merge passes). On a MERGE exit this watcher runs the
+ * cleanup that must leave the session (epic #2753's "a session does only queue + expose-state"): (a) the
+ * #2667/#2700 lease-release across pools ({@link releaseSessionAcrossPools}, opt-in via `--release-session`),
+ * and (b) #2752 epic-resolve-on-last-child ({@link resolveEpicOnLand}) — when the child story this PR
+ * delivered was its parent epic's LAST open child, it resolves the umbrella (`graduatedTo: none`) via
+ * `backlog.mjs resolve-parent` and lands the splice on the SANCTIONED gated `push-if-green` transport. Both
+ * are best-effort and NEVER change the merge exit code. The child ref for (b) rides the existing
+ * `--release-session=conveyor-<ref>` wire (or an explicit `--resolve-epic-of=<ref>`); disable with
+ * `--no-resolve-epic`. A blocked/untriaged epic is ESCALATED (logged for the operator), never auto-closed.
+ *
  * Scripted per [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment] (#2607): the
  * state→decision rule is script-decidable (a gh PR json → one of three verdicts), so it lives here as a PURE,
  * unit-tested function — never a policy the conveyor skill re-derives in prose each tick.
@@ -263,6 +273,88 @@ function releaseSessionAcrossPools(execFileSync, session, log) {
   }
 }
 
+/** First line of an error's message — the terse form used across the best-effort on-land passes. */
+const firstLine = (e) => String(e?.message || e).split('\n')[0];
+
+/** The repo root + on-land CLI paths, module-relative (so the pass works whatever the conveyor's cwd is).
+ *  Factored out as a default-param provider so the unit test can inject dummy paths and never trigger this. */
+function defaultOnLandPaths() {
+  return {
+    weRoot: fileURLToPath(new URL('../../', import.meta.url)), // scripts/conveyor/ → repo root
+    backlogCli: fileURLToPath(new URL('../backlog.mjs', import.meta.url)),
+    pushCli: fileURLToPath(new URL('../push-if-green.mjs', import.meta.url)),
+  };
+}
+
+/**
+ * #2752 — the conveyor's `--release-session` slug is `conveyor-<ref>`, where `<ref>` is the delivered item's
+ * NNN (or a provisional `xNNNNNN` hash the drain JIT-numbers at land). Pull that ref out so the on-land
+ * epic-resolve pass can ride the EXISTING `--release-session` wire with NO conveyor-skill change — the moment
+ * this lands, every `pr-watch <pr> --release-session=conveyor-<num>` the conveyor already spawns also
+ * mechanizes epic-resolve-on-last-child. A non-conveyor slug (or none) yields null; then the pass runs only
+ * if an explicit `--resolve-epic-of=<ref>` was passed. Pure — exported for the unit test.
+ * @param {string|undefined} slug
+ * @returns {string|null}
+ */
+export function deriveChildRefFromSession(slug) {
+  const m = typeof slug === 'string' ? slug.match(/^conveyor-(\d+|x[0-9a-z]+)$/i) : null;
+  return m ? m[1] : null;
+}
+
+/**
+ * #2752 — on MERGE, mechanize EPIC-RESOLVE-ON-LAST-CHILD: when the child story this PR delivered was its
+ * parent epic's LAST open child, resolve the umbrella in the on-land cleanup — no session. This is the
+ * epic-level sibling of the #2667/#2700 lease-release pass ({@link releaseSessionAcrossPools}) above: the same
+ * drain-side on-land cleanup home the card names, wired to the same `--release-session` merge event. Steps —
+ * ALL best-effort, a failure NEVER changes the merge exit code (the merge is the truth; the operator
+ * `/resolve` is the backstop for anything this misses):
+ *   1. `git pull --ff-only` — sync local main to the just-merged origin/main so the child's landed resolve AND
+ *      its siblings' current statuses are visible to `resolve-parent`'s `parent:`-edge enumeration. Checking
+ *      against FRESH main (not the child's stale lane, which can't see its siblings) is the whole reason this
+ *      runs on-land. If the ff-only pull FAILS (a dirty/diverged primary tree) the pass ABORTS — writing on an
+ *      un-synced `main` risks a resolve commit that can't ff-publish and strands a diverging commit; skipping
+ *      is always safe (the operator `/resolve` is the backstop).
+ *   2. `backlog.mjs resolve-parent <childRef> --json` — the pure verdict + (on a clean all-children-resolved
+ *      close) the frontmatter splice, reusing the #658 no-open-slice enumeration. EDIT-ONLY: it never commits.
+ *   3. On `resolved`: commit the epic card via an EXPLICIT pathspec (never `git add -A` — mirrors the drain's
+ *      finalizeLand, so a concurrent session's staged hunks are never swept in) and publish via the SANCTIONED
+ *      gated `push-if-green.mjs --assume-green` (#2172 transport — never a raw `main` push; main's CI already
+ *      gated the couple). On `escalate`: log a one-line operator notice — a blocked/untriaged tail must NOT
+ *      auto-close. On `skip`: nothing (the common "not the last child").
+ * @param {typeof import('node:child_process').execFileSync} execFileSync  injected so the unit test drives it with no git
+ * @param {string} childRef  the delivered child item's ref (NNN, or a provisional hash resolve-parent maps)
+ * @param {(m:string)=>void} log
+ * @param {{weRoot:string, backlogCli:string, pushCli:string}} [paths]  the repo root + CLI paths; defaults are
+ *   derived from this module's URL (module-relative, so it works whatever the conveyor's cwd) — injected only
+ *   in the unit test, so it never evaluates `fileURLToPath(import.meta.url)` under the test module transform.
+ */
+export function resolveEpicOnLand(execFileSync, childRef, log, paths = defaultOnLandPaths()) {
+  const { weRoot, backlogCli, pushCli } = paths;
+  const run = (cmd, args) => execFileSync(cmd, args, { cwd: weRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  // 1. sync local main. If the ff-only pull FAILS (a dirty/diverged primary tree), ABORT the whole pass — do
+  //    NOT proceed. Acting on an un-synced tree risks writing a resolve commit on a `main` that is BEHIND
+  //    origin, which then can't ff-publish and strands a diverging commit on the shared checkout. Skipping is
+  //    always safe: the epic just isn't closed this land, and the next clean land / the operator `/resolve`
+  //    is the backstop. (Stricter than the drain's own best-effort syncMain — this pass has no land to unwind
+  //    if it bails, so it bails rather than risk the primary tree.)
+  try { run('git', ['pull', '--ff-only']); }
+  catch (e) { log(`  ⚠ epic-resolve: main sync failed — skipping (a dirty/diverged tree; the operator /resolve is the backstop): ${firstLine(e)}`); return; }
+  // 2. the verdict + splice.
+  let verdict = null;
+  try { verdict = JSON.parse(String(run('node', [backlogCli, 'resolve-parent', String(childRef), '--json'])).trim()); }
+  catch (e) { log(`  ⚠ epic-resolve: resolve-parent failed (harmless — the operator /resolve is the backstop): ${firstLine(e)}`); return; }
+  if (!verdict || verdict.ok === false) { log(`  ⚠ epic-resolve: ${verdict && verdict.error ? verdict.error : 'no verdict returned'}`); return; }
+  if (verdict.action === 'escalate') { log(`  ⚠ epic ${verdict.epic}: last child ${verdict.child} landed but it carries a judgment marker (${verdict.reason}) — needs a human /resolve, NOT auto-closed (#2752)`); return; }
+  if (verdict.action !== 'resolved') { log(`  ● epic-resolve: nothing to do (${verdict.reason})`); return; }
+  // 3. commit the epic card (explicit pathspec) + publish via the gated transport.
+  try {
+    run('git', ['add', '--', verdict.file]);
+    run('git', ['commit', '-m', `drain: resolve epic ${verdict.epic} on last-child ${verdict.child} land (#2752)`, '--', verdict.file]);
+  } catch (e) { log(`  ⚠ epic-resolve: commit of ${verdict.file} failed: ${firstLine(e)}`); return; }
+  try { run('node', [pushCli, '--assume-green', '--json']); log(`  ● resolved epic ${verdict.epic} on last-child land + published (#2752)`); }
+  catch (e) { log(`  ⚠ epic-resolve: publish failed (the commit is local — a re-drain / the operator publishes it): ${firstLine(e)}`); }
+}
+
 async function main(argv) {
   const { execFileSync } = await import('node:child_process');
 
@@ -279,7 +371,7 @@ async function main(argv) {
 
   const prNumber = positionals[0] ?? flags.pr;
   if (prNumber == null || !/^\d+$/.test(String(prNumber))) {
-    log('usage: pr-watch.mjs <pr-number> [--interval=20] [--timeout-min=30] [--repo=owner/name] [--check=test] [--no-fast-drain] [--release-session=<slug>] [--json]');
+    log('usage: pr-watch.mjs <pr-number> [--interval=20] [--timeout-min=30] [--repo=owner/name] [--check=test] [--no-fast-drain] [--release-session=<slug>] [--resolve-epic-of=<childRef>] [--no-resolve-epic] [--json]');
     process.exit(EXIT_ERROR);
   }
 
@@ -321,6 +413,18 @@ async function main(argv) {
   // is still in use. Runs BEFORE the JSON emit + exit so the release completes while this process is alive.
   if (code === EXIT_MERGED && typeof flags['release-session'] === 'string' && flags['release-session']) {
     releaseSessionAcrossPools(execFileSync, flags['release-session'], log);
+  }
+
+  // #2752 — on MERGE, mechanize epic-resolve-on-last-child (the epic-level sibling of the lease-release
+  // above). The delivered child item's ref comes from --resolve-epic-of=<ref>, else is derived from the
+  // conveyor's --release-session=conveyor-<ref> slug (so it rides the EXISTING conveyor wire with no skill
+  // change). Disable with --no-resolve-epic. Only on a MERGE exit — a park/close/timeout means the child
+  // never landed, so there is no last-child close to make. Best-effort: never changes the exit code.
+  if (code === EXIT_MERGED && !flags['no-resolve-epic']) {
+    const childRef = (typeof flags['resolve-epic-of'] === 'string' && flags['resolve-epic-of'])
+      ? flags['resolve-epic-of']
+      : deriveChildRefFromSession(flags['release-session']);
+    if (childRef) resolveEpicOnLand(execFileSync, childRef, log);
   }
 
   if (flags.json) {
