@@ -3,9 +3,11 @@ bornAs: xya9syb
 kind: story
 size: 2
 parent: "2606"
-status: open
+status: resolved
 blockedBy: ["2661"]
 dateOpened: "2026-07-27"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 scope:
   - we:scripts/conveyor/tick-core.mjs
