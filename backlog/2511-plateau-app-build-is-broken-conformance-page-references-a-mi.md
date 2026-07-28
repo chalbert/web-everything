@@ -1,8 +1,10 @@
 ---
 bornAs: xqfq9a3
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-15"
+dateResolved: "2026-07-27"
+resolutionNote: "Fixed on plateau-app main by 5d6cff2 (#2507): plateau-app:conformance.html script entry repointed to plateau-app:packages/core/src/conformance-engine/conformanceEmbed.ts, which exists on main (created by #2341, 1b78f55). vite:build-html now resolves the entry, so the e2e build gate is green."
 tags: []
 scope:
   - plateau-app:conformance.html
