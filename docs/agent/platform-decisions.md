@@ -3051,7 +3051,7 @@ the high-stakes un-gate stays a routed judgment call).
 
 ### Drain-daemon self-hosting boundary — its own source runs from a dedicated clone, reloads via clean-exit + KeepAlive, and self-updates through the same graduated review as any change, only with independent (never self-) approval {#drain-daemon-self-hosting-boundary}
 
-**Ratified 2026-07-27 (operator; #2501, bornAs xeccleu).** How the resident drain daemon may safely
+**Ratified 2026-07-27 (operator; #2501, bornAs 2501).** How the resident drain daemon may safely
 **self-update-then-reload** without ever `reset --hard`-ing the user's primary tree. Three coupled clauses,
 built on the sole-writer-to-`main` invariant ([#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism)) and the
 isolated-clone rule ([#pool-siblings-real-built-clones](#pool-siblings-real-built-clones)):
@@ -3091,7 +3091,7 @@ isolated-clone rule ([#pool-siblings-real-built-clones](#pool-siblings-real-buil
    daemon's pass is never the one to land it remains a sound belt-and-braces implementation detail, but the
    binding rule is the graduated-committee-with-independence above, not any single guard.
 
-**Lineage:** #2501 (ratified 2026-07-27, operator; bornAs xeccleu; prep
+**Lineage:** #2501 (ratified 2026-07-27, operator; bornAs 2501; prep
 `we:reports/2026-07-14-plateau-loop-self-hosting-boundary.md`, research `/research/plateau-loop-self-hosting-boundary/`).
 Parent epic #2468 (drain-daemon supervisor). Fork A reuses the `we-drain-daemon` clone pattern and honors
 #2197/#2123 (a drain runs from an isolated clean clone, never a user tree). Fork C's independence invariant is the
