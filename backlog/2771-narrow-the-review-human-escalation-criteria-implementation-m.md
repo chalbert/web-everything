@@ -2,16 +2,26 @@
 bornAs: xopxdeu
 kind: decision
 parent: "2405"
-status: open
+status: resolved
 scaffoldedBy: "file-prep-decision"
 dateScaffolded: "2026-07-28"
 dateOpened: "2026-07-28"
+dateResolved: "2026-07-28"
+codifiedIn: "docs/agent/platform-decisions.md#review-human-declarative-leash-only"
 preparedDate: "2026-07-28"
 relatedTo: ["2501", "2625", "2307", "2636", "2563", "2445", "2573", "2566"]
 tags: [review, escalation, review-human, trust-chain, gate-self, statute, codification, governance]
 ---
 
 # Narrow the review:human escalation criteria — implementation must not bounce to the human
+
+## Ruling — ratified 2026-07-28 (operator): adopt **b + c**
+
+Both recommended defaults adopted. **Fork A → (b):** policy-tier *derivation CODE* routes to the sized independent committee (review-to-convergence, no self-approval), NOT always-`review:human`; `review:human` is reserved for the **declarative leash** — the contract (`we:review-policy.contract.json`), the roster (`we:gate-config.mjs`), the invariant/conformance suites — a raw NEW statute rule, or an un-ratified decision. **Fork B → (c):** a PR that *resolves a `kind:decision` + sets `codifiedIn`* (codifying an already-ruled decision, wording approved live) is NOT re-bounced to `review:human`; detected script-decidably from the resolve+`codifiedIn` diff shape, not a raw "touches `we:platform-decisions.md`" test.
+
+Retained invariant (the only one #2501 Fork C keeps): the final landed diff is signed off by an agent that did NOT author it (#2439); diversity-selection aggregation; non-convergence hard-escalates to a human.
+
+**Codified in** [`#review-human-declarative-leash-only`](../docs/agent/platform-decisions.md#review-human-declarative-leash-only). **Implementation follow-on:** `xfpxbji` "Implement the narrowed review:human rubric" (`blockedBy` this decision) — scaffolded, not built here.
 
 ## Grounding digest
 
