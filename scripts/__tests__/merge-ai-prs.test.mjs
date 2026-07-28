@@ -1643,6 +1643,15 @@ describe('#2423 per-PR --no-review-escalation relief valve', () => {
       const mergeGate = decideReviewGate({ escalate: false, labels: [] });
       expect(applyEscalationRelief(mergeGate, { relieved: true }).waive).toBe(false);
     });
+    it('#2409 — a STALE-acceptance re-park is NEVER waived, even though it carries review:pending', () => {
+      // The head advanced past the reviewed SHA → decideReviewGate re-parks review:pending WITH staleAcceptance.
+      // The pending-relief valve must refuse it: "review never arrived" and "head moved past review" are
+      // different concerns, and only the former is waivable.
+      const stalePark = decideReviewGate({ escalate: true, humanRequired: false, labels: [{ name: REVIEW_LABELS.accepted }], acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb' });
+      expect(stalePark.applyLabel).toBe(REVIEW_LABELS.pending); // looks like a pending park…
+      expect(stalePark.staleAcceptance).toBe(true);             // …but it is the #2409 outcome
+      expect(applyEscalationRelief(stalePark, { relieved: true }).waive).toBe(false);
+    });
   });
 
   describe('a scoped =<pr#> relieves ONE PR while the rest of the pass stays gated', () => {
