@@ -11,11 +11,16 @@ import {
   DECISION_PROCESSES,
   RULING_ACTIONS,
   COMPLEXITY_CARE_FLOOR,
+  SHADOW_OUTCOMES,
+  ENFORCE_FLIP_TRIGGER,
   classifyDecisionCriticality,
   routeDecision,
   decideDecisionDisposition,
   disposeDecisionRuling,
   planDecision,
+  recordShadowOutcome,
+  computeAgreementMetric,
+  resolveLandMode,
 } from '../decision-routing.mjs';
 import { DISPOSITIONS } from '../disposition-judge.mjs';
 import { LAND_MODES } from '../auto-land-seam.mjs';
@@ -248,5 +253,175 @@ describe('planDecision — route + (optional) dispose in one call', () => {
       ledger: cleanDiverseLedger(), config: DEFAULT_CONFIG, mode: LAND_MODES.ENFORCE,
     });
     expect(disposition.action).toBe(RULING_ACTIONS.ESCALATE);
+  });
+});
+
+// ================================================================================================================
+// #2754 — the shadow→enforce flip: per-decision shadow-vs-human outcome, the confidence metric, and the gated flip.
+// ================================================================================================================
+
+const { RATIFY, ESCALATE } = RULING_ACTIONS;
+/** N MATCH records (default) — the newest-first streak the flip reads. */
+function matches(n, action = RATIFY) { return Array.from({ length: n }, () => recordShadowOutcome({ shadowAction: action, humanAction: action })); }
+const DIVERGE = recordShadowOutcome({ shadowAction: RATIFY, humanAction: ESCALATE });
+
+describe('#2754 shadow-vs-human outcome record', () => {
+  it('the outcome enum names exactly match/divergence, frozen', () => {
+    expect(SHADOW_OUTCOMES).toEqual({ MATCH: 'match', DIVERGENCE: 'divergence' });
+    expect(Object.isFrozen(SHADOW_OUTCOMES)).toBe(true);
+  });
+
+  it('equal valid actions → MATCH (class agreement), both ratify and both escalate', () => {
+    expect(recordShadowOutcome({ shadowAction: RATIFY, humanAction: RATIFY }).outcome).toBe(SHADOW_OUTCOMES.MATCH);
+    expect(recordShadowOutcome({ shadowAction: ESCALATE, humanAction: ESCALATE }).match).toBe(true);
+  });
+
+  it('disagreement in EITHER direction → DIVERGENCE (strictest safe predicate)', () => {
+    expect(recordShadowOutcome({ shadowAction: RATIFY, humanAction: ESCALATE }).outcome).toBe(SHADOW_OUTCOMES.DIVERGENCE);
+    expect(recordShadowOutcome({ shadowAction: ESCALATE, humanAction: RATIFY }).outcome).toBe(SHADOW_OUTCOMES.DIVERGENCE);
+  });
+
+  it('a malformed/partial input can NEVER inflate the streak — it fails closed to DIVERGENCE', () => {
+    expect(recordShadowOutcome({ shadowAction: RATIFY }).outcome).toBe(SHADOW_OUTCOMES.DIVERGENCE); // human missing
+    expect(recordShadowOutcome({ shadowAction: 'bogus', humanAction: RATIFY }).match).toBe(false);
+    expect(recordShadowOutcome({}).outcome).toBe(SHADOW_OUTCOMES.DIVERGENCE);
+    expect(recordShadowOutcome().outcome).toBe(SHADOW_OUTCOMES.DIVERGENCE);
+  });
+
+  it('accepts the disposition PLAN objects directly (reads .action)', () => {
+    const rec = recordShadowOutcome({ shadowPlan: { action: RATIFY }, humanPlan: { action: RATIFY } });
+    expect(rec.match).toBe(true);
+  });
+
+  it('the record is frozen', () => {
+    expect(Object.isFrozen(recordShadowOutcome({ shadowAction: RATIFY, humanAction: RATIFY }))).toBe(true);
+  });
+});
+
+describe('#2754 computeAgreementMetric — the named confidence gate', () => {
+  it('the starting trigger is N=20, M=20, frozen', () => {
+    expect(ENFORCE_FLIP_TRIGGER).toEqual({ N: 20, M: 20 });
+    expect(Object.isFrozen(ENFORCE_FLIP_TRIGGER)).toBe(true);
+  });
+
+  it('an empty ledger is below trigger', () => {
+    const m = computeAgreementMetric([]);
+    expect(m.consecutiveMatches).toBe(0);
+    expect(m.flipReady).toBe(false);
+  });
+
+  it('exactly N consecutive matches, zero divergences → FLIP-READY', () => {
+    const m = computeAgreementMetric(matches(20));
+    expect(m.consecutiveMatches).toBe(20);
+    expect(m.divergencesInWindow).toBe(0);
+    expect(m.flipReady).toBe(true);
+  });
+
+  it('N-1 matches is NOT ready (the bar is strict)', () => {
+    expect(computeAgreementMetric(matches(19)).flipReady).toBe(false);
+  });
+
+  it('a single divergence resets the consecutive streak (newest-first) and blocks the flip', () => {
+    // 20 old matches, then one divergence, then 19 fresh matches → streak only 19, and the window holds the divergence.
+    const ledger = [...matches(20), DIVERGE, ...matches(19)];
+    const m = computeAgreementMetric(ledger, { N: 20, M: 20 });
+    expect(m.consecutiveMatches).toBe(19); // reset by the divergence
+    expect(m.flipReady).toBe(false);
+  });
+
+  it('a divergence WITHIN the trailing window fails the zero-divergence bar even if the recent streak is long', () => {
+    // custom small trigger: N=3, M=5. Newest 3 are matches (streak ok) but a divergence sits inside the last 5.
+    const ledger = [...matches(2), DIVERGE, ...matches(3)];
+    const m = computeAgreementMetric(ledger, { N: 3, M: 5 });
+    expect(m.consecutiveMatches).toBe(3);
+    expect(m.divergencesInWindow).toBe(1);
+    expect(m.flipReady).toBe(false); // condition (2) fails
+  });
+
+  it('a malformed record in the streak breaks it (fail-closed)', () => {
+    const ledger = [...matches(20), { junk: true }];
+    expect(computeAgreementMetric(ledger).consecutiveMatches).toBe(0);
+  });
+
+  it('answers the "how many consecutive matches, zero divergences" question in plain text', () => {
+    expect(computeAgreementMetric(matches(20)).answer).toMatch(/20\/20 consecutive matches, 0 divergence/);
+  });
+});
+
+describe('#2754 resolveLandMode — the gated flip (operator ceiling × metric)', () => {
+  it('operator un-armed (shadow) holds SHADOW even with a green metric', () => {
+    const r = resolveLandMode({ records: matches(20), configMode: LAND_MODES.SHADOW });
+    expect(r.mode).toBe(LAND_MODES.SHADOW);
+    expect(r.reason).toBe('metric-green-but-operator-shadow');
+    expect(r.metric.flipReady).toBe(true);
+  });
+
+  it('an unknown/typo operator mode fails closed to the shadow ceiling', () => {
+    expect(resolveLandMode({ records: matches(20), configMode: 'ENFORCE!' }).mode).toBe(LAND_MODES.SHADOW);
+    expect(resolveLandMode({ records: matches(20) }).mode).toBe(LAND_MODES.SHADOW); // undefined
+  });
+
+  it('operator ARMED + metric green → ENFORCE', () => {
+    const r = resolveLandMode({ records: matches(20), configMode: LAND_MODES.ENFORCE });
+    expect(r.mode).toBe(LAND_MODES.ENFORCE);
+    expect(r.reason).toBe('metric-green');
+  });
+
+  it('operator armed but metric below trigger → held SHADOW until the streak rebuilds', () => {
+    const r = resolveLandMode({ records: matches(19), configMode: LAND_MODES.ENFORCE });
+    expect(r.mode).toBe(LAND_MODES.SHADOW);
+    expect(r.reason).toBe('metric-below-trigger');
+  });
+
+  it('a single divergence in an armed+green run drops it back to SHADOW (the block)', () => {
+    const ledger = [...matches(20), DIVERGE];
+    expect(resolveLandMode({ records: ledger, configMode: LAND_MODES.ENFORCE }).mode).toBe(LAND_MODES.SHADOW);
+  });
+});
+
+describe('#2754 planDecision — the flip mechanically gates the disposer', () => {
+  it('armed + metric green → the converged ruling actually RATIFIES (apply:true)', () => {
+    const { disposition, landMode } = planDecision({
+      signals: {}, ledger: cleanDiverseLedger(), config: DEFAULT_CONFIG,
+      mode: LAND_MODES.ENFORCE, agreementRecords: matches(20),
+    });
+    expect(landMode.mode).toBe(LAND_MODES.ENFORCE);
+    expect(disposition.action).toBe(RULING_ACTIONS.RATIFY);
+    expect(disposition.apply).toBe(true);
+  });
+
+  it('armed but a divergence blocks it → shadow, so apply stays false (would-ratify only)', () => {
+    const { disposition, landMode } = planDecision({
+      signals: {}, ledger: cleanDiverseLedger(), config: DEFAULT_CONFIG,
+      mode: LAND_MODES.ENFORCE, agreementRecords: [...matches(20), DIVERGE],
+    });
+    expect(landMode.mode).toBe(LAND_MODES.SHADOW);
+    expect(disposition.apply).toBe(false);
+  });
+
+  it('operator ceiling is fail-safe: even a green metric cannot force enforce past a shadow config', () => {
+    const { disposition, landMode } = planDecision({
+      signals: {}, ledger: cleanDiverseLedger(), config: DEFAULT_CONFIG,
+      mode: LAND_MODES.SHADOW, agreementRecords: matches(20),
+    });
+    expect(landMode.mode).toBe(LAND_MODES.SHADOW);
+    expect(disposition.apply).toBe(false);
+  });
+
+  it('no agreementRecords → backward-compatible: passed mode is used directly, landMode null', () => {
+    const { disposition, landMode } = planDecision({
+      signals: {}, ledger: cleanDiverseLedger(), config: DEFAULT_CONFIG, mode: LAND_MODES.ENFORCE,
+    });
+    expect(landMode).toBeNull();
+    expect(disposition.apply).toBe(true); // unchanged #2704 behavior
+  });
+
+  it('the flip NEVER overrides the hard humanRequired invariant, even armed+green', () => {
+    const { disposition } = planDecision({
+      humanRequired: true, ledger: cleanDiverseLedger(), config: DEFAULT_CONFIG,
+      mode: LAND_MODES.ENFORCE, agreementRecords: matches(20),
+    });
+    expect(disposition.action).toBe(RULING_ACTIONS.ESCALATE);
+    expect(disposition.apply).toBe(false);
   });
 });
