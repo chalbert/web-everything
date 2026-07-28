@@ -1,8 +1,10 @@
 ---
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-07-06"
+dateResolved: "2026-07-28"
+codifiedIn: "docs/agent/platform-decisions.md#repo-drain-check-contract"
 preparedDate: "2026-07-09"
 tags: [ci, drain, frontierui, constellation]
 ---
@@ -16,6 +18,25 @@ tags: [ci, drain, frontierui, constellation]
 > premise "frontierui has no CI check at all" is stale as of 2026-07-06. The prepared call is a **ratify of the
 > boundary contract** (FUI exposes a green required check named `test`), which the landed sibling-checkout
 > workflow already satisfies — plus one follow-up (option b) and one artifact follow-up to file, not resolve.
+
+## Ruling — RATIFIED 2026-07-28 (operator)
+
+**Fork 1, recommended default — ratified.** The boundary contract between a constellation repo and the drain is
+ratified: **a constellation repo owes the drain a green required check named `test`.** The drain consumes only
+the check's **name + conclusion** via `isRequiredCheckGreen(pr, 'test')` (`we:scripts/merge-ai-prs.mjs:207-213`);
+**how** the repo turns that check green (which CI job shape) is repo-private impl, invisible across the
+repo↔drain boundary. frontierui already satisfies the contract via its landed sibling-checkout
+`fui:.github/workflows/ci.yml` `test` job (tokenless public-WE checkout, green on FUI PR #24) — one valid impl,
+not the contract itself. The scoped-no-sibling alternative is inferior-on-merit but equally valid; the drain
+can't tell them apart. **This ratifies shipped, proven code.** Accepted symmetric caveat: FUI's WE checkout
+pins no `ref`, so WE-`main` drift can turn the check red for unrelated reasons.
+
+**Codified in** [`we:docs/agent/platform-decisions.md#repo-drain-check-contract`](../docs/agent/platform-decisions.md#repo-drain-check-contract)
+(the statute rule). **Two follow-ups filed separately** (not resolved here, not bundled): (a) a **deferred**
+`classifyPr` split of "no `test` check configured" vs "check ran red" (reporting-only, fail-closed;
+maturityGated on a second CI-less constellation repo actually being queued to drain); (b) author + commit
+`we:src/_data/authorModeSource.json` (+ the webtheme vector source) so the two skipped maas
+`functionalAuthoringForm` describes run.
 
 ## Grounding digest
 
