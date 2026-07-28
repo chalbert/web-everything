@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseBacklogFilename, findCollisions, pickYielder, allocateFreeNum, rewriteRefs, planRenumber,
+  assertContentPreserved,
 } from '../renumber-collisions.mjs';
 
 const mk = (num, slug, body = '', ordinal = 0) => ({
@@ -196,5 +197,56 @@ describe('planRenumber', () => {
     const newNums = plan.collisions.map((c) => c.newNum);
     expect(new Set(newNums).size).toBe(2); // distinct
     expect(newNums).toEqual(['2070', '2071']);
+  });
+
+  it('CONTENT-PRESERVING (#2546): a renumber keeps every authored body byte, only the ref changes', () => {
+    // The #558 land BLANKED files while rewriting cross-refs — the damage was data loss, not the collision.
+    // A real renumber must re-file the yielder AND rewrite an inbound ref while preserving ALL prose.
+    const body = 'A long authored body.\n\nSecond paragraph with detail worth keeping.\nSee #2068 for context.';
+    const files = [
+      mk('2068', 'early', 'first authored item', 100),
+      mk('2068', 'gate', 'later, yields', 200),
+      { name: '1500-ref.md', ordinal: 50, text: `---\nkind: story\n---\n\n# ref\n\n${body}\n` },
+    ];
+    const plan = planRenumber(files); // does NOT throw — every write is content-preserving
+    const ref = plan.writes.find((w) => w.name === '1500-ref.md');
+    // the ONLY change is the ref swap; every other authored byte survives verbatim
+    expect(ref.text).toBe(files[2].text.replace('#2068', '#2069'));
+    expect(ref.text).toContain('Second paragraph with detail worth keeping.');
+    // the yielded file is re-filed with its full body intact
+    const yielded = plan.writes.find((w) => w.name === '2069-gate.md');
+    expect(yielded.text).toContain('later, yields');
+    expect(yielded.text.length).toBeGreaterThan(0);
+  });
+});
+
+describe('assertContentPreserved (#2546 — the blank-on-rewrite backstop)', () => {
+  const moves = [{ oldNum: '2068', newNum: '2069', slug: 'gate' }];
+  const original = '---\nkind: story\n---\n\n# gate\n\nAuthored body.\nSee #2068 and /backlog/2068-gate/.\n';
+
+  it('passes when only the intended ref changed (the correct rewrite)', () => {
+    const good = rewriteRefs(original, '2068', '2069', 'gate');
+    expect(() => assertContentPreserved(original, good, moves, '2069-gate.md')).not.toThrow();
+  });
+
+  it('REPRODUCES the #558 blank-on-rewrite: a non-empty file rewritten to EMPTY fails loudly', () => {
+    expect(() => assertContentPreserved(original, '', moves, '2069-gate.md'))
+      .toThrow(/EMPTY content|blank/i);
+  });
+
+  it('fails loudly when the rewrite drops authored content (partial / corrupt write)', () => {
+    // ref swapped correctly, but the second content line was lost — a data delta beyond the ref swap.
+    const corrupt = '---\nkind: story\n---\n\n# gate\n\nSee #2069 and /backlog/2069-gate/.\n';
+    expect(() => assertContentPreserved(original, corrupt, moves, '2069-gate.md'))
+      .toThrow(/BEYOND the intended|corruption/i);
+  });
+
+  it('fails loudly when a NON-reference byte is altered (silent body edit)', () => {
+    const tampered = rewriteRefs(original, '2068', '2069', 'gate').replace('Authored body.', 'Tampered body.');
+    expect(() => assertContentPreserved(original, tampered, moves, '2069-gate.md')).toThrow(/#2546/);
+  });
+
+  it('an empty source is allowed to stay empty (no false-fail on a genuinely empty input)', () => {
+    expect(() => assertContentPreserved('', '', moves, 'x.md')).not.toThrow();
   });
 });

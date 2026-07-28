@@ -2,8 +2,10 @@
 bornAs: xgagt89
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-07-18"
+dateStarted: "2026-07-27"
+dateResolved: "2026-07-27"
 tags: []
 scope:
   - we:scripts/backlog-renumber-collisions.mjs

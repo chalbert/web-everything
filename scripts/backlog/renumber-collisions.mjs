@@ -196,6 +196,59 @@ function escapeRe(s) {
 }
 
 /**
+ * CONTENT-PRESERVATION GUARD (#2546) — a renumber must ONLY swap references; it must NEVER lose authored
+ * body content. The #558 land BLANKED 6 files while rewriting cross-refs — the real damage was DATA LOSS,
+ * not the collision. This asserts a rewritten file is byte-identical to its source EXCEPT the intended id
+ * swap, and THROWS (fails loudly, so the CLI writes nothing) on any other delta. A bug in the rewrite can
+ * then never silently ship an empty or partially-rewritten file: a safe renumber loses no authored content,
+ * even when hand-numbering or concurrent births slip past the gate.
+ *
+ * The check is INDEPENDENT of how `newText` was produced — it does not trust the rewrite. It masks every
+ * intended reference occurrence in BOTH texts down to one shared sentinel — the OLD id's ref shapes in the
+ * source, the NEW id's ref shapes in the result — then requires the masked skeletons to be byte-identical.
+ * A blanked or truncated result yields a shorter (or empty) skeleton that cannot match the source's, so it
+ * is caught. This leans on the module's standing invariant that a yielded id's NEW number is FRESH
+ * (`allocateFreeNum`/`allocateGapId` pick an unused id), so masking the new number can only hit the
+ * occurrences THIS renumber created — never a pre-existing reference — which keeps the mask exact.
+ */
+const CONTENT_SENTINEL = '  REF  ';
+
+/** Mask every intended-ref occurrence of each move's id (old side or new side) down to one sentinel. */
+function maskRefs(text, moves, useNew) {
+  let out = text;
+  for (const mv of moves) {
+    out = rewriteRefs(out, useNew ? mv.newNum : mv.oldNum, CONTENT_SENTINEL, mv.slug);
+  }
+  return out;
+}
+
+/**
+ * Throw unless `newText` is `originalText` with ONLY the intended id references swapped. Guards the two
+ * ways a rewrite can lose data: (1) a non-empty source rewritten to EMPTY (the literal #558 blanking), and
+ * (2) any non-reference byte that differs between source and result (a partial / corrupt rewrite).
+ * @param {string} originalText  the file's content BEFORE the rewrite
+ * @param {string} newText       the content the plan would write
+ * @param {{oldNum:string,newNum:string,slug?:string}[]} moves  every move applied this run
+ * @param {string} [name]        the file name, for the loud error message
+ */
+export function assertContentPreserved(originalText, newText, moves, name = '<file>') {
+  if (originalText.length > 0 && newText.length === 0) {
+    throw new Error(
+      `renumber-collisions: refusing to write ${name} — the rewrite produced EMPTY content ` +
+      `(this would blank an authored file and lose data). Nothing written. (#2546)`,
+    );
+  }
+  const skeletonOld = maskRefs(originalText, moves, false);
+  const skeletonNew = maskRefs(newText, moves, true);
+  if (skeletonOld !== skeletonNew) {
+    throw new Error(
+      `renumber-collisions: refusing to write ${name} — the rewrite changed content BEYOND the intended ` +
+      `id swap (a non-reference byte differs). This is corruption, not a renumber. Nothing written. (#2546)`,
+    );
+  }
+}
+
+/**
  * Build the full renumber PLAN for a backlog state. Given every file (name + text + landing ordinal)
  * and the batch base ids, returns for each colliding NEW-item id the yielder that moves, its fresh id,
  * the new filename, and the corpus-wide reference rewrites — plus the yielder's OWN content re-filed
@@ -266,6 +319,9 @@ export function planRenumber(files, { baseNums = [], ontoNames = [] } = {}) {
   // (e.g. main's `#2295` legitimately `blockedBy: [2294]` pointing at the real keeper #2294 must stay put, even
   // though this run also yields a DIFFERENT, unrelated new item away from #2294).
   const contentByName = new Map(files.map((f) => [f.name, f.text]));
+  // Snapshot the pre-rewrite content, keyed by name — the content-preservation guard (#2546) diffs every
+  // write against this ORIGINAL, so a rewrite that blanks/corrupts a file is caught before the plan returns.
+  const originalByName = new Map(files.map((f) => [f.name, f.text]));
   const renamed = new Map(); // oldName -> newName (for the yielded files)
   for (const mv of moves) renamed.set(mv.oldName, mv.newName);
 
@@ -284,11 +340,18 @@ export function planRenumber(files, { baseNums = [], ontoNames = [] } = {}) {
   const writes = [];
   for (const name of touched) {
     const finalName = renamed.get(name) || name;
-    writes.push({ name: finalName, text: contentByName.get(name) });
+    const text = contentByName.get(name);
+    // #2546 — a rewrite must ONLY swap refs; refuse to emit a blanked/corrupted file (fail loudly).
+    assertContentPreserved(originalByName.get(name), text, moves, finalName);
+    writes.push({ name: finalName, text });
   }
   // A yielded file whose OWN content had no inbound ref still must be re-filed under its new name.
   for (const mv of moves) {
-    if (!touched.has(mv.oldName)) writes.push({ name: mv.newName, text: contentByName.get(mv.oldName) });
+    if (!touched.has(mv.oldName)) {
+      const text = contentByName.get(mv.oldName);
+      assertContentPreserved(originalByName.get(mv.oldName), text, moves, mv.newName); // #2546
+      writes.push({ name: mv.newName, text });
+    }
   }
   const deletes = moves.map((m) => m.oldName);
 
