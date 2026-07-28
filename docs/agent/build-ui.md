@@ -18,7 +18,17 @@ not appearance — it cannot see that two states are indistinguishable, that a g
 or that dark mode is unreadable. The value of this method is the *sighted* loop: render every state, screenshot
 it, and review the image. Source review is not a substitute for looking.
 
-## The method (seven phases, in order)
+## The method (an optional Phase 0, then seven phases in order)
+
+### 0. (Optional) Requirements committee — persona needs, builder-challenged
+
+For a **net-new product surface** (skip it for a small tweak), open before you model anything with a **requirements
+committee**: a panel **skewed toward the consumers** of the surface — one user persona at minimum, usually several
+(the roles who will live in it) — plus a few **builder-experts to challenge and integrate** the asks into something
+feasible. Each persona states its jobs-to-be-done, its single most-frequent action, must-see vs collapse, and
+deal-breakers; the builders red-team for feasibility and over-ask. The output is the requirements brief phase 1
+models from — and those **same user personas sit on the design jury later** (phases 3/6/7), so the pixels are judged
+by the people who will use them, not only by craft lenses. (Proven on the delivery-workspace design, #2676.)
 
 ### 1. Model the domain — axes → matrix → the one live-action rule
 
@@ -121,6 +131,13 @@ point — a reviewer who has seen the prior round rationalizes it. And
 grammar edit can never silently break the spec. One clean round is luck; two in a row from distinct lenses is
 convergence.
 
+Two failure modes ride every convergence loop — guard both. **Silent loss:** a round's reviewers verify *that
+round's* fix-list; none is asked "what did we lose?", so a clean redesign can quietly drop features the design was
+already ruled to keep. Before you call it converged, run a **completeness-critic that diffs the result against the
+prior ratified artifact and the endorsed forks-to-keep** — not just this round's findings. **Faked convergence:** a
+single author reviewing their own work once is a draft, not convergence — run the fresh-lens rounds; escalate to the
+human only when the panel is genuinely stuck, or to ratify the converged result.
+
 ## The repo hooks this rides on (non-negotiable)
 
 The build-UI work is edit-action work, so it obeys the standard delivery discipline — none of this is optional:
@@ -152,6 +169,28 @@ The build-UI work is edit-action work, so it obeys the standard delivery discipl
   craft and reintroduces fixed bugs. Edit the last ratified artifact forward.
 - **The page is the unit, not the part.** A part that passes alone but fails in the assembled page at full scale
   is a failing part. Integrate and review the whole before you call any of it done.
+- **Convergence can strip value — diff against the last ratified artifact.** A clean redesign can silently drop
+  features the earlier design was *ruled to keep*; the round's reviewers only check the round's fix-list, so nobody
+  notices. The completeness-critic runs at convergence too, comparing to the **prior ratified artifact and the
+  endorsed forks** — not only the current round's findings. (Caught live: a converged lane board that dropped v68's
+  delivery-horizon and size-as-height encoding — features an earlier jury had named "worth keeping.")
+- **Self-review is not convergence.** Fresh-context reviewers reaching two clean rounds is convergence; you looking
+  at your own work is a draft — you rationalize your own pixels and miss your own bugs (even a wrong screenshot).
+  Escalate to the human only when the panel is stuck or to ratify — don't hand every fork back, and never label a
+  fast single pass "converged."
+- **A frame fork may be zoom levels, not rivals.** When the panel splits on the whole-page frame, test whether the
+  options are *complementary zooms/modes of one surface* before ruling one out — often the answer is "both, linked"
+  (a zoomed-out map and a zoomed-in cockpit sharing one shell), not "pick one."
+- **Shared chrome is single-source.** A shell/header used by more than one surface changes in ONE place — a chrome
+  change is a *cross-surface* change: update every surface and re-verify together, and freeze the shell as its own
+  conformance webcase so a change that breaks a surface fails a check. Inline-copying the chrome per screen
+  guarantees drift (a dropped logo, a mismatched toggle).
+- **Conform to the ratified visual grammar.** Once a glyph / colour / motion grammar is ruled (the per-state icon
+  manifest, the colour-per-class ruling, the motion ruling), the surfaces must *use it* — ad-hoc chips and colours
+  that ignore the ruled grammar are an un-graduated draft. The completeness-critic checks grammar conformance too.
+- **Version every iteration; review across the width range.** Keep each iteration as a labelled version (stable link
+  + history + rollback; the durable diff lands in git). And a review is themes × **breakpoints** — a design fixed at
+  one width is half-reviewed; design responsive and look narrow *and* wide.
 - **WE holds zero implementation.** The UI impl lives in the product repo (plateau-app); WE owns the *method*
   (this doc), the reference model, and the machine-checkable spec — not the app code (memory rule 6, #1282).
 
