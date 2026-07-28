@@ -105,7 +105,7 @@ import { resolve, join, dirname } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { rebaseDropContent } from './lib/rebase-drop-content.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
-import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel } from './lib/review-escalation.mjs';
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor } from './lane-drain.mjs';
@@ -197,6 +197,12 @@ export function parseNoReviewEscalation(argv, name = 'no-review-escalation') {
 export function applyEscalationRelief(gate, { relieved = false } = {}) {
   if (!relieved || !gate) return { waive: false };
   if (gate.action !== 'park') return { waive: false }; // merge / wait-author (review:changes) — nothing waivable
+  // #2409 — a stale-acceptance re-park (the head advanced past the reviewed commit) is NOT a "review never
+  // arrived" pending park; it is a different concern (the accepted tree is no longer the landing tree). The
+  // pending-relief valve must NEVER waive it, even though it carries review:pending — a fresh look is required.
+  if (gate.staleAcceptance) {
+    return { waive: false, reason: 'stale acceptance (#2409) — head advanced past the reviewed commit; not waivable by the pending-relief valve' };
+  }
   if (gate.humanRequired || gate.applyLabel === REVIEW_LABELS.human) {
     return { waive: false, reason: 'review:human is human-only — never waivable by a per-PR relief valve (#2285)' };
   }
@@ -1888,7 +1894,23 @@ function runCli() {
           continue;
         }
       }
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels });
+      // #2409 — the reviewed-commit gate. A `review:accepted` verdict only vouches for the tree the reviewer
+      // looked at (the head SHA `review-set-label.mjs` stamped into the accept comment). Before the land cascade
+      // honours the accept, read that reviewed SHA back plus the PR's LIVE head, and hand both to
+      // `decideReviewGate` — it refuses to merge a stale acceptance whose head advanced past the reviewed tree
+      // (the PR #368 hole). Fetched LAZILY, only for a PR that actually carries `review:accepted` (a small
+      // subset), so the common non-accepted candidate pays no extra gh hop. Any fetch miss → both SHAs stay
+      // null → the gate fails OPEN (never blocks a land on a transient read failure).
+      let acceptedSha = null;
+      let liveHeadSha = null;
+      if (hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
+        try {
+          const d = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'headRefOid,comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
+          liveHeadSha = typeof d.headRefOid === 'string' ? d.headRefOid : null;
+          acceptedSha = parseReviewedSha(d.comments || []);
+        } catch { /* fetch miss → SHAs null → gate fails open */ }
+      }
+      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha });
       v.escalated = score.escalate ? 'yes' : 'no';
       // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
       // makes an already-applied review:human label win even when a rebase narrows the diff back to
@@ -1908,6 +1930,17 @@ function runCli() {
       } else if (gate.action === 'park' || gate.action === 'wait-author') {
         v.decision = 'skip';
         v.reason = gate.reason + (score.reasons.length ? ` [${score.reasons.join('; ')}]` : '');
+        // #2409 — a stale-acceptance re-park carries its reason on `gate.reason` (the head-advanced-past-reviewed
+        // message), NOT on the fresh-diff `score.reasons`. PREPEND it (not either/or): the ride-in commit can
+        // ALSO produce fresh escalation reasons (it may touch a blast-radius path), and the operator needs BOTH
+        // — WHY the accept was invalidated AND what the new commit tripped — on the durable body/comment/log.
+        const parkReasons = gate.staleAcceptance ? [gate.reason, ...score.reasons] : score.reasons;
+        // #2409 — drop the now-stale review:accepted alongside applying the re-park label, so the PR never
+        // carries both accepted AND pending/human. Best-effort (matches the label-apply posture below); only
+        // when the PR actually still carries it.
+        if (gate.staleAcceptance && !DRY_RUN && hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
+          try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--remove-label', REVIEW_LABELS.accepted], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+        }
         // #2307 — a PR the PRODUCER already labelled at PR-open (or a prior drain pass already caught) is
         // already-scored: this pass is an idempotent backstop/reconcile, not the first applier, so skip the
         // redundant `gh pr edit --add-label` call when the verdict label is already present (never a
@@ -1939,20 +1972,20 @@ function runCli() {
           let liveBody = '';
           try { liveBody = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').body || ''; } catch { /* fetch miss — augment from empty, still best-effort */ }
           if (!bodyHasEscalationReason(liveBody)) {
-            const newBody = liveBody + buildEscalationReasonBlock(score.reasons);
+            const newBody = liveBody + buildEscalationReasonBlock(parkReasons);
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--body', newBody], { stdio: ['ignore', 'ignore', 'pipe'] }); }
-            catch { if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} could not write the review:human escalation reason into the PR body (#2324) — add it by hand: ${score.reasons.join('; ')}\n`); }
+            catch { if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} could not write the review:human escalation reason into the PR body (#2324) — add it by hand: ${parkReasons.join('; ')}\n`); }
             // Verify the write actually landed (never trust the edit call's exit code alone — gh can succeed
             // against a stale body if two edits race). A miss is loud, not silent.
             let verified = false;
             try { verified = bodyHasEscalationReason(JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').body || ''); } catch { /* verify miss — reported below as unverified */ }
-            if (!verified && !AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} review:human body still missing the escalation reason after the write (#2324) — verify by hand: ${score.reasons.join('; ')}\n`);
+            if (!verified && !AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} review:human body still missing the escalation reason after the write (#2324) — verify by hand: ${parkReasons.join('; ')}\n`);
           }
         }
         // #2285 v1 — the skill's auto-review step consumes this: humanRequired PRs are left for the operator,
         // the rest are eligible for a fresh-context adversarial review subagent.
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: score.reasons });
-        if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}${gate.humanRequired ? ', HUMAN required' : ', agent-reviewable'}): ${score.reasons.join('; ')}\n`);
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: parkReasons });
+        if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}${gate.humanRequired ? ', HUMAN required' : ', agent-reviewable'}): ${parkReasons.join('; ')}\n`);
       } else if (score.escalate && !AS_JSON) {
         process.stderr.write(`  ✓ ${repoTag(v.repo)}${v.num} escalation cleared (${gate.reason})\n`);
       }

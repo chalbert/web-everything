@@ -23,7 +23,7 @@ import { resolve } from 'node:path';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
+import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker } from './lib/review-escalation.mjs';
 
 /**
  * we:scripts/review-set-label.mjs#decideSetLabel — the PURE verdict-label decision. Given the target `to` and
@@ -137,7 +137,7 @@ export function presentRemoveLabels(removeLabels, currentLabels) {
  * PURE `decideSetLabel` above owns every invariant, so this harness only moves bytes. Fails closed — every input
  * is validated BEFORE any gh mutation, and any gh error exits non-zero without a partial swap.
  * @param {{argv?:string[], fixedTo?:string|null, defaultActor:string, repoOptional?:boolean, usage:string,
- *   buildComment:(o:{to:string,actor:string,decision:object})=>string,
+ *   buildComment:(o:{to:string,actor:string,decision:object,headSha:string})=>string,
  *   successResult:(o:{pr:number,to:string,decision:object,labels:string[]})=>object,
  *   refusalResult:(o:{pr:number,decision:object})=>object}} cfg
  */
@@ -186,13 +186,18 @@ export function runReviewLabelCli({
     }
   }
 
-  // we:scripts/review-set-label.mjs#runReviewLabelCli — observe the PR's current labels (the I/O boundary).
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — observe the PR's current labels + head SHA (the I/O
+  // boundary). #2409 — `headRefOid` is the tree the reviewer is looking at RIGHT NOW; on an `accepted` verdict
+  // the reviewer-verdict comment stamps it (`buildReviewedShaMarker`) so the drain can refuse to honour the
+  // acceptance later if the head advances past it. One extra json field on the existing call — no extra gh hop.
   let currentLabels;
+  let headSha = '';
   try {
     const parsed = JSON.parse(execFileSync('gh', [
-      'pr', 'view', pr, '--repo', repo, '--json', 'labels',
+      'pr', 'view', pr, '--repo', repo, '--json', 'labels,headRefOid',
     ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
     currentLabels = Array.isArray(parsed.labels) ? parsed.labels : [];
+    headSha = typeof parsed.headRefOid === 'string' ? parsed.headRefOid : '';
   } catch (e) {
     fail(ghErr(e, 'gh pr view failed'), 1);
   }
@@ -221,7 +226,7 @@ export function runReviewLabelCli({
   // dodge shell-quoting pitfalls (emoji/newlines), then `--body-file`.
   const tmp = join(tmpdir(), `review-label-${pr}-${Date.now()}.md`);
   try {
-    writeFileSync(tmp, buildComment({ to, actor, decision }), 'utf8');
+    writeFileSync(tmp, buildComment({ to, actor, decision, headSha }), 'utf8');
     execFileSync('gh', ['pr', 'comment', pr, '--repo', repo, '--body-file', tmp], {
       encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
     });
@@ -258,10 +263,15 @@ if (IS_CLI) {
     defaultActor: 'loop-console operator',
     usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes [--actor=<name>]  (pr must be a positive integer)',
     // we:scripts/review-set-label.mjs — the reviewer-verdict comment (the delta from the rearm caller's body).
-    buildComment: ({ to, actor }) => [
+    // #2409 — on `accepted`, stamp the reviewed head SHA (`buildReviewedShaMarker`, a machine-readable marker)
+    // so the drain can later refuse to honour the acceptance if the head advanced past the reviewed tree. The
+    // marker is omitted on `changes`, and when the head SHA is unavailable (empty → '' from the builder), the
+    // gate simply fails open — never a garbage marker.
+    buildComment: ({ to, actor, headSha }) => [
       to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested',
       '',
       `Recorded by ${actor} via the Plateau Loop review console.`,
+      ...(to === 'accepted' && buildReviewedShaMarker(headSha) ? ['', buildReviewedShaMarker(headSha)] : []),
     ].join('\n'),
     successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
     refusalResult: ({ decision }) => ({ error: decision.reason }),
