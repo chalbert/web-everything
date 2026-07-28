@@ -420,6 +420,79 @@ export function hasReviewLabel(labels, label) {
 }
 
 /**
+ * #2409 — the machine-readable marker that records WHICH commit-set a `review:accepted` verdict actually
+ * covered. `review-set-label.mjs` stamps it into the durable accept comment at the moment it applies
+ * `review:accepted`, capturing the PR's head SHA THEN (the tree the reviewer looked at). The drain reads it
+ * back at land (`parseReviewedSha`) and refuses to honour a stale acceptance whose head has since advanced.
+ * A comment marker (not the local baseline cache) is the right home: acceptance and the drain can run on
+ * different machines, and the accept is a discrete, durable, cross-machine event — unlike the machine-scoped
+ * first-drain-sighting baseline.
+ */
+export const REVIEWED_SHA_MARKER = 'reviewed-sha';
+const REVIEWED_SHA_RE = new RegExp(`<!--\\s*${REVIEWED_SHA_MARKER}:\\s*([0-9a-fA-F]{7,40})\\s*-->`, 'g');
+
+/** Build the reviewed-commit marker line for a full/abbrev git SHA. Pure. Non-hex/empty input → '' (nothing
+ *  to stamp — the gate then fails OPEN, never on a garbage marker). */
+export function buildReviewedShaMarker(sha) {
+  const s = typeof sha === 'string' ? sha.trim() : '';
+  return /^[0-9a-fA-F]{7,40}$/.test(s) ? `<!-- ${REVIEWED_SHA_MARKER}: ${s.toLowerCase()} -->` : '';
+}
+
+/**
+ * Extract the reviewed SHA a `review:accepted` verdict covered from a PR's comments. Given the raw
+ * `gh pr view --json comments` array (tolerant of a missing/odd shape), return the SHA of the LATEST marker
+ * (most recent accept wins — a re-accept after a fix stamps a fresh SHA), or `null` when none is present
+ * (accept predates this gate, or was applied out-of-band → the gate fails OPEN). Pure — no I/O.
+ *
+ * RESIDUAL (be honest — this is a trust signal): the marker is an ordinary PR comment, and this parse takes
+ * the latest marker from ANY author. An actor who can comment on a PR that already carries `review:accepted`
+ * could post a marker matching the current head and forge "coverage," defeating the gate for a ride-in commit.
+ * Accepted under the single-tenant constellation trust model (the same posture as the sibling gates' fail-open
+ * residuals); a hardened home would bind the marker to the label-applying actor / an immutable check-run, not a
+ * free-form comment. Not defended here.
+ */
+export function parseReviewedSha(comments) {
+  let latest = null;
+  for (const c of Array.isArray(comments) ? comments : []) {
+    const body = c && typeof c.body === 'string' ? c.body : '';
+    if (!body) continue;
+    let m;
+    REVIEWED_SHA_RE.lastIndex = 0;
+    while ((m = REVIEWED_SHA_RE.exec(body)) !== null) latest = m[1].toLowerCase();
+  }
+  return latest;
+}
+
+/**
+ * #2409 — does a `review:accepted` verdict still cover the PR's LIVE head? Pure. The acceptance only vouches
+ * for the tree the reviewer looked at; a commit that rode in AFTER accept is NOT covered (this is exactly the
+ * PR #368 hole — a second, unrelated commit honoured under an accept that named only the first).
+ *   • Either SHA unknown (no recorded reviewed SHA, or the head couldn't be read) → `{ covers: true }` — fails
+ *     OPEN, so this gate NEVER mass-re-parks accepts made before it shipped, and never blocks on a fetch miss.
+ *     (Mirrors the sibling manifest-baseline gate's fail-open-on-missing posture.)
+ *   • SHAs match (prefix-compare, tolerant of abbreviation) → `{ covers: true }`.
+ *   • Head advanced past the reviewed SHA → `{ covers: false, reason }` — a STALE acceptance; the drain
+ *     refuses the auto-land and re-parks for a fresh look.
+ * The gate keys on head-SHA IDENTITY, so ANY head change re-parks — including a benign rebase-onto-main /
+ * force-push of an already-accepted branch that adds no review-worthy content. That is stricter than the
+ * motivating "an unrelated commit rode in" case, but defensible: a rebase DOES change the tree, and the
+ * re-park self-corrects on a fresh accept. We prefer the false-park over honouring an accept against a tree the
+ * reviewer never saw.
+ * @param {{acceptedSha?:string|null, headSha?:string|null}} o
+ */
+export function acceptanceCoversHead({ acceptedSha = null, headSha = null } = {}) {
+  const a = typeof acceptedSha === 'string' ? acceptedSha.trim().toLowerCase() : '';
+  const h = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
+  if (!a || !h) return { covers: true, reason: '' };
+  const n = Math.min(a.length, h.length);
+  if (n >= 7 && (a.startsWith(h) || h.startsWith(a))) return { covers: true, reason: '' };
+  return {
+    covers: false,
+    reason: `head advanced to ${h.slice(0, 12)} past the reviewed commit ${a.slice(0, 12)} — the acceptance did not cover the current tree`,
+  };
+}
+
+/**
  * #2366 — the HARD REFUSAL a merge step must apply on ANY path that does NOT run the full escalation rubric
  * this pass (chiefly the bare `/merge` orphan sweep — `REVIEW_ESCALATION` is `--label`-gated in
  * `merge-ai-prs.mjs`, so a bare sweep never calls `decideReviewGate` at all). WITHOUT this, a concurrent lander
@@ -517,11 +590,33 @@ export function bodyHasEscalationReason(body) {
  * `/drain` with `--no-review-escalation` (see `hasUnclearedReviewLabel`'s `allowPending`) — never an auto-land.
  * @param {{escalate:boolean, humanRequired?:boolean, labels?:Array}} o
  */
-export function decideReviewGate({ escalate, humanRequired = false, labels = [] } = {}) {
+export function decideReviewGate({ escalate, humanRequired = false, labels = [], acceptedSha = null, headSha = null } = {}) {
   // A reviewer verdict (whoever applied it — for a human-gated PR only a human can) always wins, and is checked
   // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
   // merge; review:changes → the author lane fixes + re-pushes.
-  if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) return { action: 'merge', reason: 'review:accepted — reviewer accepted, merge' };
+  if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) {
+    // #2409 — the acceptance only vouches for the tree the reviewer looked at. Before honouring it, confirm the
+    // PR's live head still IS that tree. If a commit rode in AFTER accept (the PR #368 hole), the acceptance is
+    // STALE: refuse the auto-land and re-park for a FRESH look instead of merging an unreviewed commit under a
+    // stale accept. Fails OPEN when either SHA is unknown (accept predates this gate / applied out-of-band / a
+    // head-read miss) so it never mass-re-parks pre-gate accepts and never blocks on a transient fetch miss.
+    const fresh = acceptanceCoversHead({ acceptedSha, headSha });
+    if (!fresh.covers) {
+      // Re-park for a fresh review: review:pending re-arms an agent panel; a gate-self/human-gated PR (fresh
+      // humanRequired score, or a sticky review:human still present) re-parks review:human — only a human may
+      // re-clear it. The drain drops the now-stale review:accepted alongside applying this label (see
+      // merge-ai-prs.mjs). staleAcceptance flags this as the #2409 outcome for the drain's comment + label swap.
+      const toHuman = humanRequired || hasReviewLabel(labels, REVIEW_LABELS.human);
+      return {
+        action: 'park',
+        reason: `review:accepted is STALE — ${fresh.reason}; re-parking for a fresh review`,
+        applyLabel: toHuman ? REVIEW_LABELS.human : REVIEW_LABELS.pending,
+        staleAcceptance: true,
+        humanRequired: !!toHuman,
+      };
+    }
+    return { action: 'merge', reason: 'review:accepted — reviewer accepted, merge' };
+  }
   // wait-author STILL carries humanRequired: a gate-self PR (fresh score OR a sticky review:human label) that
   // also carries review:changes must NOT be reported to the caller as humanRequired:false — the caller keys the
   // drain's auto-review routing on this field (#2365), and false there lets an agent panel clear a gate-self edit
