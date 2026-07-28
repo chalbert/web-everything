@@ -3181,6 +3181,44 @@ precedent, "exactly the path to take in similar decisions," a micro-decision "ea
 policy) · #809 (the self-approval hole this closes) · #2577 (the decision-surface work that should
 host this class inline). Parent #2445.
 
+### Prefer small, single-responsibility, decoupled files; split god-files — soft-warn on a size+collision composite, never deny {#small-file-preference}
+
+**Files should be small, single-responsibility, and decoupled; when a file grows into a god-file — many
+responsibilities, a wide surface many items must touch — the default is to split it along its
+responsibility seams.** This is a *throughput* lever, not tidiness: the scope-lease engine (#2560) keeps
+unrelated lanes apart by the files they touch, but a lease is only as fine as the files are small. One
+file carrying many responsibilities is a single lock point — **every** item that touches **any** of them
+declares a scope over it, so they serialize against each other even with zero real overlap. Splitting
+god-files is the enabler that makes finer-grained leases (#2679) actually deliver parallelism. Delivery
+agents apply this as a standing authoring default when they build, not as a special project.
+
+**Cohesion outranks line count — the rule is a default, not a cap.** Do not fragment a genuinely
+single-responsibility file into a scatter of tiny coupled files just to hit a number; over-fragmentation
+trades a wide lock for a diffuse surface with hidden cross-file coupling. Split only where the
+responsibilities are genuinely separable *and* the split aids parallelism.
+
+**Enforcement is a soft-warn gate, keyed on a size+collision composite — never a hard deny.** `check:standards`
+**warns** (never errors, never denies the write) on a file that is *both* oversized *and*
+scope-collision-heavy — the signal is the **composite** (large **and** touched by many items' scopes), not
+raw line count, so a big-but-cohesive file that nothing else contends for stays quiet. A `// @cohesive: <reason>`
+escape-hatch comment in the file silences the warning for a legitimately-cohesive large file (the author
+asserts the seams aren't real). The two rejected alternatives fix the shape of the rule: a **hard deny**
+(fork-1 option c) is rejected as a *footgun on high-churn files* — the god-files are exactly the
+highest-traffic files, and a blocking gate there would deny the very edits that split them; a
+**guideline-only** note (option a) is rejected as too weak to change default behavior. Warn-not-deny keeps
+the pressure visible and steady without ever blocking a legitimate edit. Kin to
+[#blast-radius-advisory-care-not-a-gate](#blast-radius-advisory-care-not-a-gate) (advisory signal, not a
+park-gate) and [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (the composite +
+escape-hatch are script-decidable; the cohesion judgment stays with the author).
+
+**Lineage:** #2678 (ratified 2026-07-28, operator — fork 1 ruled **(b) soft-warn gate**: size+collision
+composite, `// @cohesive:` escape hatch, warn-not-deny; option (c) hard-deny rejected as a high-churn
+footgun, option (a) guideline-only rejected as too weak). Enabler for finer scope-lease granularity
+#2679; first split targets are the god-files ranked by scope-collision frequency (`scripts/merge-ai-prs.mjs`,
+`scripts/lib/review-core.mjs`, `scripts/lib/review-escalation.mjs`, …). Throughput program #2606; sibling
+#2677 (conveyor orchestration). Reflected in the delivery-agent brief
+(`we:.claude/skills/conveyor/delivery-agent-brief.md`).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
