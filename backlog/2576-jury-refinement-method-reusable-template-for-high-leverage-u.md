@@ -3,8 +3,10 @@ bornAs: xe8m4lm
 kind: story
 size: 5
 parent: "2577"
-status: open
+status: resolved
 dateOpened: "2026-07-20"
+dateStarted: "2026-07-28"
+dateResolved: "2026-07-28"
 tags: []
 scope:
   - we:docs/agent/
