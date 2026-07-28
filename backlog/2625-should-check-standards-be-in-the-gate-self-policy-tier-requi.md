@@ -2,8 +2,11 @@
 bornAs: xhwmho9
 kind: decision
 parent: "2445"
-status: open
+status: resolved
 dateOpened: "2026-07-23"
+dateResolved: "2026-07-28"
+graduatedTo: xty5asq
+codifiedIn: "docs/agent/platform-decisions.md#contract-split-for-tier-ownership"
 preparedDate: "2026-07-28"
 tags: [plateau-loop, governance, gate, trust-chain]
 ---
@@ -11,6 +14,14 @@ tags: [plateau-loop, governance, gate, trust-chain]
 # Should check-standards be in the gate-self / policy tier (require review:human)?
 
 Editing the repo-health gate [we:scripts/check-standards.mjs](../scripts/check-standards.mjs) (and its rule pack [we:scripts/check-standards-rules.mjs](../scripts/check-standards-rules.mjs)) today scores only **blast-radius** → `review:pending`: it escalates and runs an elevated-care panel, but a converged **agent** may clear it — no human needed. So an agent can soften the gate that defines "green" and self-clear. Should the gate join the **policy tier**, forcing `review:human`? Grounded in the real trust-chain machinery, prep finds the title bundles **two** questions — one already settled (a red gate already hard-blocks merge), one a genuine four-option placement fork whose best answer is a **contract-split**, not a blunt tier flip.
+
+## Decision (2026-07-28) — RATIFIED: (d) contract-split
+
+Operator ruled **fork (d) — contract-split** (the option the raw a/b fork missed and prep surfaced). **Keep BOTH `check-standards` `.mjs` files** (the impl `we:scripts/check-standards.mjs` + the rule pack `we:scripts/check-standards-rules.mjs`) in the **ENGINE tier** — agent-clearable, so the repo's two most-churned files (79 + 57 commits/yr) are not stranded behind a human. **Move the *definition of green*** into a **POLICY-tier `we:scripts/check-standards.contract.json`**, mirroring the ratified `we:scripts/lib/review-policy.contract.json` / loader split. A conformance suite pins impl↔contract, so a behaviour-preserving impl refactor stays agent-clearable while a genuine weakening of the definition trips the policy path → `review:human`. This closes the "an agent weakens the gate then self-clears" ([#809](/backlog/809-)-class self-approval) hole **without** over-gating the hot impl files.
+
+**Codified as a REUSABLE precedent** (the operator's key point — "exactly the path to take in similar decisions"): for *any* "which trust tier owns X" decision where X is a gate/validator/definition an agent could weaken then self-clear, the **default path is contract-split** — engine-tier the impl code, policy-tier a `we:*.contract.json` for the definition. Statute: [we:docs/agent/platform-decisions.md#contract-split-for-tier-ownership](../docs/agent/platform-decisions.md#contract-split-for-tier-ownership). These are small, patterned micro-decisions well suited to on-card surfacing in the future decision UI ([#2577](/backlog/2577-)) rather than a full prepare/preview cycle.
+
+**Graduation (follow-on impl):** the actual extraction — mint `we:scripts/check-standards.contract.json`, register it `tier: 'policy'` + both `.mjs` files `tier: 'engine'` in `we:scripts/lib/gate-config.mjs`, and add the conformance suite — is impl work tracked as its own child item [#xty5asq](/backlog/xty5asq-) (`graduatedTo`); this decision ratifies the *approach*, not the code.
 
 ## Grounding — the real machinery (concrete refs)
 
