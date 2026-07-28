@@ -98,7 +98,8 @@
  * Exit codes: 0 = swept (merged 0+ qualifying PRs, none failed); 2 = at least one merge attempt FAILED
  * (surfaced); 3 = bad input / `gh` unavailable.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, realpathSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, join, dirname } from 'node:path';
@@ -1190,11 +1191,78 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.trunc(ms)));
 }
 
+const execFileP = promisify(execFile);
+
+/**
+ * #2417 — bounded-concurrency async map. Runs `fn` over `items` with at most `limit` invocations in flight
+ * at once, returning results in INPUT ORDER. The drain's per-pass candidate reads (`gh pr view --json commits`
+ * + the manifest probe) are read-only, touch nothing on main, and have no ordering constraint, so a pool cuts
+ * a ~N-PR / 3-repo sweep from ~N serial `gh` round-trips to ⌈N/limit⌉ waves — WITHOUT touching the strictly
+ * serial `blockedBy`-ordered merge cascade downstream (that stays byte-for-byte the same, deliberately). Pure:
+ * no gh/git coupling here, so it is unit-tested directly.
+ */
+export async function mapWithConcurrency(items, limit, fn) {
+  const list = Array.isArray(items) ? items : [...items];
+  const results = new Array(list.length);
+  const width = Math.max(1, Math.min(Math.trunc(limit) || 1, list.length || 1));
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < list.length; i = next++) results[i] = await fn(list[i], i);
+  };
+  await Promise.all(Array.from({ length: width }, worker));
+  return results;
+}
+
+/**
+ * #2417 — cross-pass read cache for the drain's per-PR candidate reads, keyed on `(repo, number, headSha)`.
+ * Under `--watch` the sweep re-runs every `--interval`s FOREVER; a PR whose head SHA is UNCHANGED since the
+ * previous pass reuses its cached commits/manifest instead of re-issuing the reads every pass. A changed SHA
+ * (rebase-drop rebuilt the conflicting tip, or the producer pushed a fix) MISSES the cache and re-fetches —
+ * the only reads that must be fresh. PRs absent from the current pass's set are evicted so a long-lived watch's
+ * cache tracks the live open set (bounded growth, never a leak).
+ *
+ * The fetch fans out through `mapWithConcurrency`. Pure + injectable — `keyOf` / `shaOf` / `fetchOne` are
+ * supplied by the caller (the sweep wires them to gh), so the cache + fan-out is unit-testable with a fetch
+ * counter, proving an unchanged-SHA PR is NOT re-fetched on a second pass (the #2417 acceptance).
+ *
+ * #2417 review — optional `isDegraded(value)` guards the cross-pass cache against LATCHING an error-path read.
+ * When it returns truthy (a swallowed gh error left a spurious `[]`/`null`), the read is used for THIS pass but
+ * NOT cached, so the next pass re-fetches instead of serving the degraded read for the whole head-SHA lifetime.
+ *
+ * @returns {Promise<Map<string,{sha:string|null,value:any,cached:boolean}>>} key → the (possibly cached) read.
+ */
+export async function fetchPrReadsCached(prs, { cache, keyOf, shaOf, fetchOne, isDegraded, concurrency = 8 } = {}) {
+  const present = new Set();
+  const entries = await mapWithConcurrency(prs, concurrency, async (p) => {
+    const key = keyOf(p);
+    const sha = shaOf(p);
+    present.add(key);
+    const hit = cache.get(key);
+    if (hit && sha != null && hit.sha === sha) return [key, { sha, value: hit.value, cached: true }];
+    const value = await fetchOne(p);
+    // #2417 review — only cache a GENUINELY-SUCCESSFUL read. When `isDegraded(value)` (a swallowed gh error left a
+    // spurious `[]` commits / `null` manifest), skip `cache.set` so this pass still USES the best-effort value but
+    // the next pass RE-FETCHES — otherwise a transient failure latches a degraded read for the head-SHA lifetime
+    // (a latched-liveness regression under `--watch`). Safety is unaffected: the degraded value is the same
+    // conservative no-op it was before; only its persistence changes.
+    if (!(typeof isDegraded === 'function' && isDegraded(value))) cache.set(key, { sha, value });
+    return [key, { sha, value, cached: false }];
+  });
+  for (const k of [...cache.keys()]) if (!present.has(k)) cache.delete(k); // evict PRs no longer in this pass
+  return new Map(entries);
+}
+
+/** #2417 — a minimal in-process async mutex (serialize a fragile section that a fan-out would otherwise race). */
+function makeAsyncMutex() {
+  let tail = Promise.resolve();
+  return { run(fn) { const r = tail.then(() => fn()); tail = r.catch(() => {}); return r; } };
+}
+
 // ── CLI boundary ───────────────────────────────────────────────────────────────────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-if (IS_CLI) runCli();
+if (IS_CLI) runCli().catch((e) => { process.stderr.write(`merge-ai-prs ✗ ${String(e && e.stack || e)}\n`); process.exit(1); });
 
-function runCli() {
+async function runCli() {
   const AS_JSON = !!flags.json;
   const DRY_RUN = !!flags['dry-run'];
   const REQUIRED = typeof flags.check === 'string' ? flags.check : 'test';
@@ -1350,16 +1418,40 @@ function runCli() {
   // `.lane-manifest.json` off the head ref for lanes queued BEFORE the cutover. Only a WE PR carries one; an
   // orphan/impl PR has none → null → always ready (the legacy unordered behaviour). Best-effort throughout: a
   // fetch/parse miss degrades to no-manifest, never throws.
-  const readManifestFromPrBody = (repo, headRef) => {
+  // #2417 review — returns `{ manifest, degraded }`. `degraded:true` means the gh read THREW (a swallowed
+  // transient failure), NOT a confirmed "no manifest" — so the caller can decline to cache the spurious null and
+  // re-fetch next `--watch` pass instead of latching a degraded read for the head-SHA lifetime. A successful read
+  // that legitimately finds no manifest block returns `{ manifest: null, degraded: false }` (a genuine answer).
+  const readManifestFromPrBody = async (repo, headRef) => {
     try {
-      const out = execFileSync('gh', ['pr', 'list', '--head', headRef, '--state', 'open', ...repoFlag(repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-      return extractManifestFromBody(JSON.parse(out || '[]')?.[0]?.body);
-    } catch { return null; } // gh absent / no open PR for the ref / no block → fall through to the ref file
+      const { stdout } = await execFileP('gh', ['pr', 'list', '--head', headRef, '--state', 'open', ...repoFlag(repo), '--json', 'body'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      return { manifest: extractManifestFromBody(JSON.parse(stdout || '[]')?.[0]?.body), degraded: false };
+    } catch { return { manifest: null, degraded: true }; } // gh threw → degraded → fall through to the ref file
   };
-  const readPrManifest = (repo, headRef) => {
-    if (!headRef) return null;
-    const fromPr = readManifestFromPrBody(repo, headRef);
-    if (fromPr) return fromPr;
+  // #2417 — the LOCAL legacy git-fetch fallback (below) writes/reads `FETCH_HEAD`, which is process-global: two
+  // concurrent `git fetch` in the same clone would clobber each other's `FETCH_HEAD`. So it runs under a mutex —
+  // the pool fans out the SAFE gh-network reads (PR-body + remote-api manifests) concurrently, and the rare
+  // pre-PR-body-cutover git fallback is serialized. It is a fallback (~every current lane rides the PR-BODY
+  // manifest), so serializing it costs ~nothing while keeping the fan-out correct.
+  const legacyGitManifestMutex = makeAsyncMutex();
+  const readLegacyLocalManifest = (headRef) => legacyGitManifestMutex.run(() => {
+    try { execFileSync('git', ['fetch', 'origin', headRef, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may be local */ }
+    for (const rev of ['FETCH_HEAD', `origin/${headRef}`, headRef]) {
+      try {
+        const m = JSON.parse(execFileSync('git', ['show', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+        if (m && m.item != null) return m;
+      } catch { /* try next rev */ }
+    }
+    return null;
+  });
+  // #2417 review — returns `{ manifest, degraded }`. `degraded:true` marks a null that came from a swallowed gh
+  // error (a transient failure we couldn't distinguish from truth), so `fetchPrReadsCached` skips caching it and
+  // the next `--watch` pass re-fetches instead of latching the degraded read for the head-SHA lifetime. A null
+  // from a SUCCESSFUL read (no manifest on the ref — the common orphan/impl case) is `degraded:false`: cache it.
+  const readPrManifest = async (repo, headRef) => {
+    if (!headRef) return { manifest: null, degraded: false };
+    const fromPr = await readManifestFromPrBody(repo, headRef);
+    if (fromPr.manifest) return { manifest: fromPr.manifest, degraded: false };
     // ── Legacy fallback: the tree-committed manifest (lanes queued before the PR-body cutover). ──
     if (!isLocalRepo(repo)) {
       // #2257 — a remote-repo PR has no local clone to `git show`; read the manifest off its head ref via the
@@ -1368,20 +1460,37 @@ function runCli() {
       // #2399 — `remoteManifestApiArgs` (shared, `scripts/lib/remote-manifest.mjs`) makes the `--method GET`
       // explicit; one argv for both the drain and lane-resume so the readers never drift.
       try {
-        const b64 = execFileSync('gh', remoteManifestApiArgs(repo, headRef), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-        if (b64) { const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); if (m && m.item != null) return m; }
-      } catch { /* no manifest on this ref */ }
-      return null;
+        const { stdout } = await execFileP('gh', remoteManifestApiArgs(repo, headRef), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+        const b64 = (stdout || '').trim();
+        if (b64) { const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); if (m && m.item != null) return { manifest: m, degraded: false }; }
+        return { manifest: null, degraded: false }; // API read SUCCEEDED → confirmed no manifest, not degraded
+      } catch { return { manifest: null, degraded: true }; } // API read threw → degraded → re-fetch next pass
     }
-    try { execFileSync('git', ['fetch', 'origin', headRef, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may be local */ }
-    for (const rev of ['FETCH_HEAD', `origin/${headRef}`, headRef]) {
-      try {
-        const txt = execFileSync('git', ['show', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-        const m = JSON.parse(txt);
-        if (m && m.item != null) return m;
-      } catch { /* try next rev */ }
-    }
-    return null;
+    const legacy = await readLegacyLocalManifest(headRef);
+    if (legacy) return { manifest: legacy, degraded: false };
+    // Local git fallback found nothing. Post-cutover lanes carry the manifest in the PR BODY (not the tree), so a
+    // null here after the PR-body gh read THREW is a spurious degrade — surface `fromPr.degraded` so it re-fetches.
+    return { manifest: null, degraded: fromPr.degraded };
+  };
+  // #2417 — a PR's HEAD SHA cache key. `gh pr list --json headRefOid` supplies it in the SAME list call (no
+  // extra round-trip); a PR whose SHA is unchanged since the previous `--watch` pass reuses its cached reads.
+  const prCacheKey = (repo, num) => `${repo || 'cwd'}::${num}`;
+  const prHeadSha = (p) => p.headRefOid || null;
+  // Cross-pass read caches (live for the whole runCli lifetime, so a `--watch` loop reuses them each pass, like
+  // `ensuredLabels` above). Two independent caches for the two deliberately-independent listings (#2421): the
+  // unfiltered open-PR context, and the (possibly `--label`-scoped) merge-candidate sweep.
+  const ctxReadCache = new Map();   // collectOpenPrContext: (repo, num, sha) → { manifest, commits }
+  const sweepReadCache = new Map(); // the merge-candidate loop: (repo, num, sha) → { commits, manifest }
+  // #2417 review — returns `{ commits, degraded }`. `degraded:true` means the gh read THREW (a swallowed transient
+  // failure): the empty `[]` is a fallback, not a confirmed "no commits", so `fetchPrReadsCached` declines to cache
+  // it and re-fetches next `--watch` pass rather than latching an empty read for the head-SHA lifetime. Behaviour
+  // THIS pass is unchanged — the caller still sees `[]` (⇒ isAiGeneratedPr → false → skipped, never merged on
+  // missing data); a genuinely-empty successful read returns `{ commits: [], degraded: false }` and DOES cache.
+  const fetchPrCommits = async (repo, num) => {
+    try {
+      const { stdout } = await execFileP('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json', 'commits'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      return { commits: JSON.parse(stdout.trim() || '{}').commits || [], degraded: false };
+    } catch { return { commits: [], degraded: true }; } // gh threw → degraded → re-fetch next pass
   };
 
   // #2683 — the per-PR IDEMPOTENCY probe for the merge-write critical section. Re-reads the PR's CURRENT state
@@ -1406,22 +1515,42 @@ function runCli() {
   // because this listing (like #2216's `reconcileGreenLabels` before it) is deliberately UNFILTERED-by-label,
   // so it must not depend on the (possibly `--label`-scoped) `verdicts` collected later this pass. Best-effort
   // throughout — a gh miss for one repo contributes nothing from that repo, never throws.
-  const collectOpenPrContext = () => {
+  const collectOpenPrContext = async () => {
     const prsByRepo = new Map();
     const openItems = new Set();
     const manifestByPr = new Map();
-    for (const repo of REPOS) {
-      let open = [];
-      try { open = JSON.parse(execFileSync('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100', '--json', 'number,title,labels,statusCheckRollup,headRefName'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
-      catch { /* this repo's listing failed — the mint loop still runs (idempotent); its reconcile loop below sees no PRs */ }
-      prsByRepo.set(repo, open);
-      for (const p of open) {
-        const m = readPrManifest(repo, p.headRefName);
-        manifestByPr.set(`${repo || 'cwd'}::${p.number}`, m);
-        if (m && m.item != null) openItems.add(asItemId(m.item));
-      }
+    const commitsByPr = new Map();
+    // #2417 — list all repos CONCURRENTLY (was one-at-a-time). Each is an independent read; a failed listing
+    // still contributes nothing from that repo (the mint loop stays idempotent), exactly as before.
+    const listings = await mapWithConcurrency(REPOS, REPOS.length, async (repo) => {
+      try {
+        const { stdout } = await execFileP('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100', '--json', 'number,title,labels,statusCheckRollup,headRefName,headRefOid'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+        return [repo, JSON.parse(stdout.trim() || '[]')];
+      } catch { return [repo, []]; }
+    });
+    // #2417 — fan out the per-PR manifest + commits reads across ALL repos' open PRs at once (bounded pool),
+    // cached across `--watch` passes on unchanged head SHA. `commits` is read HERE (once) so the reconcile pass
+    // reuses it instead of its own serial per-PR `gh pr view --json commits` (the #2421 double-read, collapsed).
+    const flat = [];
+    for (const [repo, open] of listings) { prsByRepo.set(repo, open); for (const p of open) flat.push({ repo, p }); }
+    const reads = await fetchPrReadsCached(flat, {
+      cache: ctxReadCache,
+      keyOf: ({ repo, p }) => prCacheKey(repo, p.number),
+      shaOf: ({ p }) => prHeadSha(p),
+      isDegraded: (v) => !!v?.degraded, // #2417 review — an error-path read is NOT cached (re-fetches next pass)
+      fetchOne: async ({ repo, p }) => {
+        const [manifestRes, commitsRes] = await Promise.all([readPrManifest(repo, p.headRefName), fetchPrCommits(repo, p.number)]);
+        return { manifest: manifestRes.manifest, commits: commitsRes.commits, degraded: manifestRes.degraded || commitsRes.degraded };
+      },
+    });
+    for (const [repo, open] of listings) for (const p of open) {
+      const key = prCacheKey(repo, p.number);
+      const { manifest = null, commits = [] } = reads.get(key)?.value || {};
+      manifestByPr.set(key, manifest);
+      commitsByPr.set(key, commits);
+      if (manifest && manifest.item != null) openItems.add(asItemId(manifest.item));
     }
-    return { prsByRepo, openItems, manifestByPr };
+    return { prsByRepo, openItems, manifestByPr, commitsByPr };
   };
 
   // #2421 — POST-CI TOTAL CI-LIFECYCLE LABEL RECONCILE, generalizing #2216's green-only `reconcileGreenLabels`
@@ -1458,8 +1587,11 @@ function runCli() {
     }
     const reconciled = [];
     for (const p of open) {
-      let commits = [];
-      try { commits = JSON.parse(execFileSync('gh', ['pr', 'view', String(p.number), ...repoFlag(repo), '--json', 'commits'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').commits || []; } catch { continue; }
+      // #2417 — reuse the commits read `collectOpenPrContext` already fanned out + cached this pass (was a
+      // serial per-PR `gh pr view --json commits` here — the #2421 double-read, now collapsed). A PR missing
+      // from the map (its context read failed) is skipped, same as the old per-PR fetch-error `continue`.
+      const commits = ctx.commitsByPr?.get(`${repo || 'cwd'}::${p.number}`);
+      if (commits == null) continue;
       const withCommits = { ...p, commits };
       let touched = false;
       // ── The legacy #2216 branch: green-but-unlabelled → ready-to-merge (label lander's collection signal),
@@ -1502,7 +1634,7 @@ function runCli() {
 
   // ── ONE sweep pass — reconcile labels → list → classify → cascade-merge → sync. Returns the pass result (no
   // emit/exit), so the watch loop can call it repeatedly. A gh-list failure still hard-fails (bad env).
-  const sweepOnce = () => {
+  const sweepOnce = async () => {
   // #2257 — collect + classify across EVERY repo in the sweep set into ONE global candidate list. PR numbers
   // are per-repo (WE #10 ≠ FUI #10), so each verdict carries its own `repo` + head ref instead of a
   // number-keyed cross-repo map. The single list is what lets the cascade honour cross-repo `blockedBy`.
@@ -1511,37 +1643,57 @@ function runCli() {
   // #2421 — the shared open-PR listing + manifest reads + cross-repo item-openness set the reconcile below
   // needs, computed ONCE for this pass (RECONCILE-gated — same cost profile as the reconcile it feeds: free on
   // a bare, unlabelled sweep).
-  const openPrContext = RECONCILE ? collectOpenPrContext() : { prsByRepo: new Map(), openItems: new Set(), manifestByPr: new Map() };
-  for (const repo of REPOS) {
-    reconciledLabels.push(...reconcileCiLifecycleLabels(repo, openPrContext)); // #2421 (generalizes #2216) — total ci-lifecycle relabel first
-    // List open PRs WITHOUT commits (commits×authors×limit overflows GitHub's GraphQL node cap), then fetch each
-    // candidate's commits per-PR — the rollup + mergeable come from the list; commits (the AI gate) come per PR.
+  const openPrContext = RECONCILE ? await collectOpenPrContext() : { prsByRepo: new Map(), openItems: new Set(), manifestByPr: new Map(), commitsByPr: new Map() };
+  // #2417 — list ALL repos CONCURRENTLY up front (was one `gh pr list` per repo, serial, interleaved with the
+  // per-repo processing below). A single repo's list failure is a bad-env hard-fail (exit 3), preserved — but
+  // now surfaced after the concurrent batch instead of mid-loop. The rollup + mergeable come from the list;
+  // commits (the AI gate) are fetched per-PR below (asking for them in the list overflows GitHub's node cap).
+  const listOne = async (repo) => {
     const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100',
-      '--json', 'number,title,body,headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
+      '--json', 'number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
     if (base) listArgs.push('--base', base);
     if (label) listArgs.push('--label', label);
-    let prs;
-    try { prs = JSON.parse(execFileSync('gh', listArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
-    catch (e) { fail('gh-error', `gh pr list${repo ? ` --repo ${repo}` : ''} failed (${String(e.message || e).split('\n')[0]}) — is gh authenticated?`, 3); }
-
-    // #2683 — the `--only` target is repo-scoped (see `matchesOnlyTarget`): `--only-repo=<slug>` names the repo;
-    // a single-repo sweep (`--this-repo` / `--repos=<one>` — the legacy `/pr`+`/finish` callers) matches its one
-    // repo; a multi-repo default sweep with no `--only-repo` disambiguates to the LOCAL repo. This narrows the
-    // MERGE candidate set to the one target PR (the fast-drain contract) while the full REPOS listing above still
-    // feeds the cross-repo ordering context below.
-    if (onlyPr) prs = prs.filter((p) => matchesOnlyTarget({ prNumber: p.number, onlyPr, repo, onlyRepo, isLocal: isLocalRepo(repo), repoCount: REPOS.length }));
-    // Attach each PR's commits (per-PR fetch avoids the node-cap overflow of asking for them in the list).
+    try { const { stdout } = await execFileP('gh', listArgs, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); return { repo, prs: JSON.parse(stdout.trim() || '[]') }; }
+    catch (e) { return { repo, err: String(e.message || e).split('\n')[0] }; }
+  };
+  const listings = await mapWithConcurrency(REPOS, REPOS.length, listOne);
+  const listErr = listings.find((l) => l.err);
+  if (listErr) fail('gh-error', `gh pr list${listErr.repo ? ` --repo ${listErr.repo}` : ''} failed (${listErr.err}) — is gh authenticated?`, 3);
+  // #2683 — the `--only` target is repo-scoped (see `matchesOnlyTarget`): `--only-repo=<slug>` names the repo;
+  // a single-repo sweep (`--this-repo` / `--repos=<one>` — the legacy `/pr`+`/finish` callers) matches its one
+  // repo; a multi-repo default sweep with no `--only-repo` disambiguates to the LOCAL repo. This narrows the
+  // MERGE candidate set to the one target PR (the fast-drain contract) while the full REPOS listing still feeds
+  // the cross-repo ordering context below.
+  const prsByRepo = new Map(listings.map(({ repo, prs }) =>
+    [repo, onlyPr ? prs.filter((p) => matchesOnlyTarget({ prNumber: p.number, onlyPr, repo, onlyRepo, isLocal: isLocalRepo(repo), repoCount: REPOS.length })) : prs]));
+  // #2417 — fan out the per-PR commits + manifest reads across EVERY candidate PR at once (bounded pool),
+  // cached across `--watch` passes on unchanged head SHA — was one serial `gh pr view --json commits` + one
+  // serial manifest probe per PR, one repo at a time (~2×N serial `gh` round-trips a pass). The merge cascade
+  // downstream is UNCHANGED and stays strictly serial (#2417 explicitly keeps the sole-writer loop serial).
+  const sweepFlat = [];
+  for (const repo of REPOS) for (const p of (prsByRepo.get(repo) || [])) sweepFlat.push({ repo, p });
+  const sweepReads = await fetchPrReadsCached(sweepFlat, {
+    cache: sweepReadCache,
+    keyOf: ({ repo, p }) => prCacheKey(repo, p.number),
+    shaOf: ({ p }) => prHeadSha(p),
+    isDegraded: (v) => !!v?.degraded, // #2417 review — an error-path read is NOT cached (re-fetches next pass)
+    fetchOne: async ({ repo, p }) => {
+      const [commitsRes, manifestRes] = await Promise.all([fetchPrCommits(repo, p.number), readPrManifest(repo, p.headRefName)]);
+      return { commits: commitsRes.commits, manifest: manifestRes.manifest, degraded: commitsRes.degraded || manifestRes.degraded };
+    },
+  });
+  for (const repo of REPOS) {
+    reconciledLabels.push(...reconcileCiLifecycleLabels(repo, openPrContext)); // #2421 (generalizes #2216) — total ci-lifecycle relabel first
+    const prs = prsByRepo.get(repo) || [];
     for (const p of prs) {
-      try { p.commits = JSON.parse(execFileSync('gh', ['pr', 'view', String(p.number), ...repoFlag(repo), '--json', 'commits'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').commits || []; }
-      catch { p.commits = []; } // no commits ⇒ isAiGeneratedPr → false → skipped (never merged on missing data)
-    }
-    for (const p of prs) {
+      const read = sweepReads.get(prCacheKey(repo, p.number))?.value || {};
+      p.commits = read.commits || [];
       const v = classifyPr(p, { requiredCheck: REQUIRED });
       v.repo = repo;               // null (local clone) or a slug — routes the merge/view/edit + the git-side gate
       v.headRef = p.headRefName;
       // #2188: attach the manifest (backlog `item` + cross-item `blockedBy`) so the GLOBAL cascade honours
       // cross-repo dependencies. Only a WE lane carries one; the rest degrade to no-manifest → always ready.
-      const m = readPrManifest(repo, p.headRefName);
+      const m = read.manifest ?? null;
       // #2388 — `asItemId` (not a bare `Number()`) keeps a hash-keyed item (e.g. `x5lail9`, JIT numbering
       // #2288) as its own distinct string; the legacy fallback path below reads a raw un-normalized manifest
       // off `git show`/`gh api` (bypassing `buildManifest`'s own `asItemId` pass), so this coercion is still
@@ -2338,14 +2490,14 @@ function runCli() {
 
   // ── Driver — one sweep (the /drain one-shot + /merge bare), or the `--watch` monitor (`/drain watch`) ──────
   if (!WATCH) {
-    let { result, failedMerges, duplicateIdsOnMain } = sweepOnce();
+    let { result, failedMerges, duplicateIdsOnMain } = await sweepOnce();
     // #2230 — the label index lags the producer's label write, so a one-shot fired right after labelling can see
     // the just-labelled PR as absent. Re-poll ONCE after a short delay before concluding the queue is empty.
     // Fail-soft: a still-empty re-poll is a legitimate empty queue, not an error.
     if (shouldRepollForLabelLag({ label, found: result.considered, expect: EXPECT, retried: false })) {
       if (!AS_JSON) process.stderr.write(`  · ${result.considered} labelled candidate(s)${EXPECT ? ` (< expected ${EXPECT})` : ''} — re-polling once in ${REPOLL_SEC}s (label index may lag the producer's label write)…\n`);
       sleepSync(REPOLL_SEC * 1000);
-      ({ result, failedMerges, duplicateIdsOnMain } = sweepOnce());
+      ({ result, failedMerges, duplicateIdsOnMain } = await sweepOnce());
     }
     if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
     // #2318 — a duplicate id surviving on main is a LOUD failure (exit 3), distinct from a merge failure (exit 2):
@@ -2383,7 +2535,7 @@ function runCli() {
       break;
     }
     if (!AS_JSON) process.stderr.write(`── pass ${pass} ──\n`);
-    const { result, merged, failedMerges, pendingRebased, deferred, duplicateIdsOnMain } = sweepOnce();
+    const { result, merged, failedMerges, pendingRebased, deferred, duplicateIdsOnMain } = await sweepOnce();
     passes.push(result);
     allMerged.push(...merged);
     lastFailed = failedMerges;
@@ -2417,7 +2569,7 @@ function runCli() {
         // final PR. So re-poll ONCE (same defense as the one-shot path) and only exit if the queue is STILL empty.
         if (!AS_JSON) process.stderr.write(`  · batch idle + queue empty — confirming in ${REPOLL_SEC}s (label index may lag the final PR's label)…\n`);
         sleepSync(REPOLL_SEC * 1000);
-        const confirm = sweepOnce();
+        const confirm = await sweepOnce();
         passes.push(confirm.result);
         allMerged.push(...confirm.merged);
         lastFailed = confirm.failedMerges;
