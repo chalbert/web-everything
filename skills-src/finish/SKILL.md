@@ -85,7 +85,9 @@ defer), and `unknown` (recompute mergeability and re-run). It reads each lane's 
    `rebuild <ref> --onto=<repaired-tip-sha>`: exit 0 = fast-forwarded (push happened; land it normally);
    `guided-conflict` = that ONE descendant overlaps the fix — resolve it in that descendant's clone WITH the
    manifest topology, never force-resolve. `deferred` entries wait for a later pass (never past an unlanded
-   parent).
+   parent). **Why the tail defers, why absence is never read as landed (the stowaway defense), and how
+   `bornAs`-on-`main` proves land** — the full stacked-batch lifecycle is in
+   *[docs/agent/backlog-workflow.md → Overlap-stacked serial batches](../../../docs/agent/backlog-workflow.md)*.
 
 ### The one knob — how autonomous on a red test
 
