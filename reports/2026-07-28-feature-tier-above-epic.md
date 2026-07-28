@@ -67,5 +67,3 @@ title fixes "feature = the top grouping the tracker rolls up to," which we honou
    matches every surveyed tracker's "explicitly-marked tier" invariant. The deterministic rule is then
    trivial and total: **epic E's feature = its nearest `kind: feature` ancestor along `parent`; none ⇒
    Unassigned.** Adding the kind is a gated operation (drift guard §10) with a known checklist.
-</content>
-</invoke>
