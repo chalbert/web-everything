@@ -1935,12 +1935,6 @@ function runCli() {
         // ALSO produce fresh escalation reasons (it may touch a blast-radius path), and the operator needs BOTH
         // — WHY the accept was invalidated AND what the new commit tripped — on the durable body/comment/log.
         const parkReasons = gate.staleAcceptance ? [gate.reason, ...score.reasons] : score.reasons;
-        // #2409 — drop the now-stale review:accepted alongside applying the re-park label, so the PR never
-        // carries both accepted AND pending/human. Best-effort (matches the label-apply posture below); only
-        // when the PR actually still carries it.
-        if (gate.staleAcceptance && !DRY_RUN && hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
-          try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--remove-label', REVIEW_LABELS.accepted], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
-        }
         // #2307 — a PR the PRODUCER already labelled at PR-open (or a prior drain pass already caught) is
         // already-scored: this pass is an idempotent backstop/reconcile, not the first applier, so skip the
         // redundant `gh pr edit --add-label` call when the verdict label is already present (never a
@@ -1963,6 +1957,17 @@ function runCli() {
             const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} escalation reason stamped on PR\n`);
           }
+        }
+        // #2409 — drop the now-stale review:accepted, ADD-FIRST / REMOVE-LAST: only AFTER the re-park label
+        // (gate.applyLabel) has been applied above. The order matters because BOTH `gh pr edit` calls are
+        // best-effort (errors swallowed). Removing accepted FIRST risked leaving the PR with NO review label if
+        // the add then threw (transient gh/network): next pass `hasReviewLabel(accepted)` is false, the
+        // reviewed-SHA staleness check is skipped, and a de-escalated ride-in commit auto-lands — the exact hole
+        // #2409 closes. Add-first/remove-last means a partial failure instead leaves review:accepted in place,
+        // which safely RE-TRIGGERS the stale check next pass rather than yielding a bare mergeable PR. Only when
+        // the PR actually still carries accepted.
+        if (gate.staleAcceptance && !DRY_RUN && hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
+          try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--remove-label', REVIEW_LABELS.accepted], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
         }
         // #2324 (guarantee 2) — a `review:human` park must STATE the escalation reason IN THE PR BODY, so the
         // operator opening it sees why a human is required without re-deriving it from the rubric. Augment

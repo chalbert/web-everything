@@ -5,6 +5,9 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
@@ -1698,5 +1701,31 @@ describe('#2423 per-PR --no-review-escalation relief valve', () => {
       expect(out[0].waived).toBe(false);
       expect(out[0].applyLabel).toBe(REVIEW_LABELS.human);
     });
+  });
+});
+
+describe('#2409 — the stale re-park label swap is ADD-FIRST / REMOVE-LAST', () => {
+  // The re-park swap lives in runCli's imperative park branch: it shells `gh pr edit` to apply the re-park
+  // label AND to drop the now-stale review:accepted. BOTH calls are best-effort (errors swallowed), so ORDER
+  // is the safety property — the pure gate functions above cannot express it. If the accepted label were
+  // removed FIRST and the add then threw (transient gh/network), the PR would carry NO review label: next pass
+  // `hasReviewLabel(accepted)` is false, the reviewed-SHA staleness check is skipped, and a de-escalated
+  // ride-in commit auto-lands (the exact hole #2409 closes). Add-first/remove-last means a partial failure
+  // leaves review:accepted in place, which safely re-triggers the stale check. This asserts that ordering at
+  // the source level (the only observable seam for an inline, side-effecting gh sequence).
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
+
+  it('applies the re-park label (add) before removing review:accepted', () => {
+    const addIdx = src.indexOf("'--add-label', gate.applyLabel");
+    const removeStaleIdx = src.indexOf("'--remove-label', REVIEW_LABELS.accepted");
+    expect(addIdx).toBeGreaterThan(-1);      // the re-park add call is present
+    expect(removeStaleIdx).toBeGreaterThan(-1); // the stale-accepted remove call is present
+    // REMOVE-LAST: the stale-accepted drop must appear AFTER the re-park add in source order.
+    expect(removeStaleIdx).toBeGreaterThan(addIdx);
+  });
+
+  it('removes review:accepted exactly once in the park path (no duplicate swap)', () => {
+    const occurrences = src.split("'--remove-label', REVIEW_LABELS.accepted").length - 1;
+    expect(occurrences).toBe(1);
   });
 });
