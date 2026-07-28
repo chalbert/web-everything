@@ -3049,6 +3049,62 @@ the high-stakes un-gate stays a routed judgment call).
 
 ---
 
+### Drain-daemon self-hosting boundary — its own source runs from a dedicated clone, reloads via clean-exit + KeepAlive, and self-updates through the same graduated review as any change, only with independent (never self-) approval {#drain-daemon-self-hosting-boundary}
+
+**Ratified 2026-07-27 (operator; #2501, bornAs xeccleu).** How the resident drain daemon may safely
+**self-update-then-reload** without ever `reset --hard`-ing the user's primary tree. Three coupled clauses,
+built on the sole-writer-to-`main` invariant ([#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism)) and the
+isolated-clone rule ([#pool-siblings-real-built-clones](#pool-siblings-real-built-clones)):
+
+1. **Supervisor clone location — a DEDICATED single-lane plateau-app clone (Fork A).** The daemon's OWN source
+   runs from a provisioned `plateau-app-drain-daemon` pool (`--count=1`), mirroring the already-shipped
+   `we-drain-daemon` clone pattern. `install()` resolves the launchd plist's `daemonPath`/`workingDir` to that
+   clone, not `dirname(import.meta.url)`; self-update is then the SAME `fetch` + `reset --hard origin/main` +
+   `clean -fdq` the daemon already runs on its WE clone, applied to its own source — the user's primary tree is
+   never touched. Running from primary (b) is **closed on the forced invariant**: a self-update `reset --hard`
+   would clobber the user's uncommitted work, so "self-update" and "run from primary" cannot coexist.
+
+2. **Reload primitive — `process.exit(0)` + launchd `KeepAlive` relaunch (Fork B).** After the clone updates,
+   the daemon resumes on the new code by calling its existing clean-shutdown path (`releaseAndExit(0)` — SIGTERM
+   the in-flight child, release the drain lease, then exit) and letting launchd's `RunAtLoad + KeepAlive`
+   relaunch it from the updated clone. The reload fires only BETWEEN passes (the loop's delay window), never
+   mid-pass; GitHub is the source of truth, so unlanded `ready-to-merge` PRs ride the next pass. The operator
+   `restart` primitive (`launchctl bootout` + `bootstrap`) is **external-only and unusable for self-reload** — a
+   self-issued `bootout` kills the daemon before `bootstrap` runs. `kickstart -k` (b) is redundant with KeepAlive
+   (its SIGTERM runs the same clean handler) and exec-in-place (c) discards supervision; (a) wins on simplicity.
+
+3. **Self-source review — the SAME size/complexity-graduated committee as any change, with the ONE retained
+   invariant that the review is INDEPENDENT (Fork C, OPERATOR-MODIFIED).** A PR that changes the daemon's own
+   source (`tools/drain-daemon/`) is **NOT** special-cased to always-human review, and is **NOT** promoted to the
+   policy tier. It goes through the **standard size/complexity-scaled review committee** — the jury / producer
+   review rubric — exactly like any other change. The single special rule: the review must be **INDEPENDENT** —
+   the self-updating daemon and its authoring agent may **never self-approve their own daemon-code change** (the
+   #809-class self-approval hole). Operationally this is already largely honored: the daemon **never self-clears
+   its own parked reviews** (it surfaces them for a separate session), and daemon source sits in `TRUST_CHAIN`
+   ([we:scripts/lib/gate-config.mjs](../../scripts/lib/gate-config.mjs)) at `tier: 'engine'`, so every self-source
+   PR escalates to an independent adversarial panel ([we:scripts/lib/review-escalation.mjs](../../scripts/lib/review-escalation.mjs)).
+   Independence — not a human tier and not blanket escalation — is the invariant that closes the self-approval
+   hole. **Superseded the preview's Fork-C default** (rely on #2480 + a light in-daemon assertion) and **rejected**
+   the always-human policy-tier alternative — the operator's words (2026-07-27): *"I do not want to human review
+   every daemon change; use a good review committee depending on the size and complexity of change, like for other
+   changes."* A directory-keyed (never basename-keyed) in-daemon tripwire that DEFERS a self-source PR so THIS
+   daemon's pass is never the one to land it remains a sound belt-and-braces implementation detail, but the
+   binding rule is the graduated-committee-with-independence above, not any single guard.
+
+**Lineage:** #2501 (ratified 2026-07-27, operator; bornAs xeccleu; prep
+`we:reports/2026-07-14-plateau-loop-self-hosting-boundary.md`, research `/research/plateau-loop-self-hosting-boundary/`).
+Parent epic #2468 (drain-daemon supervisor). Fork A reuses the `we-drain-daemon` clone pattern and honors
+#2197/#2123 (a drain runs from an isolated clean clone, never a user tree). Fork C's independence invariant is the
+#809-class self-approval rule applied to daemon self-update, composing with the existing #2445/#456 two-tier
+trust-chain (engine = agent-clearable on a converged independent panel) and #2480 (daemon source registered in
+`TRUST_CHAIN`) — it **rejects** promoting daemon source to the policy tier. Concurrent self-lane-edit exclusion
+(#2077-style) stays deferred to #2444/#2418 (no self-edit scheduler exists in phase 1). Extends
+[#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism), [#pool-siblings-real-built-clones](#pool-siblings-real-built-clones),
+and [#agent-convergence-independent-validation](#agent-convergence-independent-validation) (independence rests on a
+distinct validator, never peer/self agreement).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
