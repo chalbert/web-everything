@@ -2,9 +2,12 @@
 bornAs: x1gvvdx
 kind: epic
 parent: "2636"
-status: open
+status: resolved
 scope: ["we:scripts/lib/", "we:scripts/conveyor/", "we:skills-src/"]
 dateOpened: "2026-07-24"
+dateResolved: "2026-07-28"
+graduatedTo: none
+resolutionNote: "all 9 child stories resolved; the subject-agnostic jury-core engine, adapters, thin /jury skill and workflow are delivered (F1/F2/F3 shipped)."
 relatedReport: "reports/2026-07-24-backlog-split-analysis.md"
 tags: []
 ---
