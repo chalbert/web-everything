@@ -1,9 +1,10 @@
 ---
+bornAs: x6yjnex
 kind: story
 size: 3
 parent: "2610"
 status: open
-blockedBy: ["xwtpi80"]
+blockedBy: ["2776"]
 scope: ["we:scripts/conveyor/", "we:scripts/memory-reflect.mjs", "we:scripts/pr-land.mjs"]
 dateOpened: "2026-07-28"
 tags: []

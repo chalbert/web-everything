@@ -1,4 +1,5 @@
 ---
+bornAs: xyo1vaf
 kind: story
 size: 8
 priority: low

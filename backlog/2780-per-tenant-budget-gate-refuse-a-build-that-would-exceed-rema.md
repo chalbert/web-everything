@@ -1,10 +1,11 @@
 ---
+bornAs: xgko7dt
 kind: story
 size: 5
 priority: low
 parent: "2531"
 status: open
-blockedBy: ["xyo1vaf"]
+blockedBy: ["2779"]
 scope: ["plateau:src/build-runner/build-action.ts"]
 dateOpened: "2026-07-28"
 tags: []

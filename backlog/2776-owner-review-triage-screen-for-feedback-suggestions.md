@@ -1,9 +1,10 @@
 ---
+bornAs: xwtpi80
 kind: story
 size: 5
 parent: "2610"
 status: open
-blockedBy: ["xhwesfo"]
+blockedBy: ["2774"]
 scope: ["plateau:src/backlog-view/", "we:scripts/lib/", "we:scripts/conveyor/learnings-dedup.mjs", "plateau:src/mock-server/server.ts"]
 dateOpened: "2026-07-28"
 tags: []
