@@ -37,17 +37,19 @@ describe('writeBacklogMd enforces lane-isolation at the source (item x1vw9g7)', 
     expect(WRITE_SRC).toMatch(/laneGuardDecision\(resolveReal\(abs\), ROOT\)/);
   });
 
-  it('DENIES (die) on a primary target, before it writes the file', () => {
+  it('DENIES (die) on a primary target, before it delegates to the writer', () => {
+    // The actual writeFileSync now lives in the unguarded writer writeBacklogMd DELEGATES to (below); the
+    // guard must run before that delegation, so no guarded caller can reach the write without passing it.
     const guardAt = WRITE_SRC.search(/laneGuardDecision\(/);
-    const writeAt = WRITE_SRC.indexOf('writeFileSync(');
+    const delegateAt = WRITE_SRC.indexOf('writeBacklogMdUnguarded(');
     expect(guardAt).toBeGreaterThanOrEqual(0);
-    expect(writeAt).toBeGreaterThan(guardAt); // guard runs BEFORE the write
+    expect(delegateAt).toBeGreaterThan(guardAt); // guard runs BEFORE the (delegated) write
     // the guard's truthy decision must feed a die(...) — a refusal, not a warning
     expect(WRITE_SRC).toMatch(/if \(laneGuardDecision\(resolveReal\(abs\), ROOT\)\) \{[\s\S]*?die\(/);
     expect(WRITE_SRC).toMatch(/There is no override/); // matches guard-bash's now-unconditional denial (#2339)
   });
 
-  it('is the SOLE card writer, and the numbering-repair path is intentionally NOT routed through it', () => {
+  it('the guarded writer is the SOLE path for the interactive verbs; numbering + on-land resolve-parent are the deliberate carve-outs', () => {
     // number-stranded / drain JIT-numbering legitimately rewrite cards in the primary/land checkout, so they
     // must use a separate writer (numberPendingHashes) and stay unaffected by this guard.
     expect(SRC).toMatch(/numberPendingHashes/);
@@ -55,6 +57,20 @@ describe('writeBacklogMd enforces lane-isolation at the source (item x1vw9g7)', 
     const nsEnd = SRC.indexOf('\nfunction ', nsStart + 1);
     const NS_SRC = SRC.slice(nsStart, nsEnd === -1 ? undefined : nsEnd);
     expect(NS_SRC).not.toMatch(/writeBacklogMd\(/); // numbering does NOT go through the guarded writer
+
+    // #2752 carve-out: the drain-side on-land `resolve-parent` splice runs ON primary (post-land), so it too
+    // writes via writeBacklogMdUnguarded — the SAME sanctioned bypass as numbering. Pin that the bypass stays
+    // SCOPED: the interactive status verb (transition, i.e. claim/resolve/release) still routes through the
+    // GUARDED writeBacklogMd, and resolveParent is the only status verb using the unguarded writer.
+    const trStart = SRC.indexOf('function transition(');
+    const trEnd = SRC.indexOf('\nfunction ', trStart + 1);
+    const TR_SRC = SRC.slice(trStart, trEnd === -1 ? undefined : trEnd);
+    expect(TR_SRC).toMatch(/writeBacklogMd\(/); // interactive verbs stay guarded
+    expect(TR_SRC).not.toMatch(/writeBacklogMdUnguarded\(/);
+    const rpStart = SRC.indexOf('function resolveParent(');
+    const rpEnd = SRC.indexOf('\nfunction ', rpStart + 1);
+    const RP_SRC = SRC.slice(rpStart, rpEnd === -1 ? undefined : rpEnd);
+    expect(RP_SRC).toMatch(/writeBacklogMdUnguarded\(/); // the on-land carve-out
   });
 
   // Executable contract the wiring depends on (belt-and-suspenders with guard-lane.test.mjs): a primary
