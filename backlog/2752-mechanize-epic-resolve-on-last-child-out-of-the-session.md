@@ -3,8 +3,10 @@ bornAs: xfwy6v3
 kind: story
 size: 3
 parent: "2753"
-status: open
+status: resolved
 dateOpened: "2026-07-28"
+dateResolved: "2026-07-28"
+graduatedTo: none
 scope: ["we:scripts/conveyor/pr-watch.mjs", "we:scripts/backlog.mjs"]
 relatedTo: ["2606", "2700"]
 tags: [conveyor, drain, resolve, epic, session-free]
