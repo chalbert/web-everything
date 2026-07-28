@@ -2,7 +2,6 @@
 bornAs: x66ywyw
 shortTitle: "Proof-production backend"
 kind: epic
-size: 8
 parent: "2527"
 status: open
 blockedBy: ["2561"]
@@ -32,3 +31,12 @@ claimed. Blocked on the spec-schema fork F3 ([#2561]).
 A card's spec-proven fraction reflects harness-verified criteria only; each carries a provenance tier and a
 deep-linked evidence artifact; agent-asserted-only criteria are visibly distinguished and cannot satisfy a
 gate that requires a higher tier. The board's proof rows ([#2555]) consume this.
+
+## Sliced (2026-07-27)
+One story per provenance tier plus the pre-PR harness wiring, per the Scope above. A foundational slice
+stands up the tier spine (the three-tier enum + the per-criterion tier field + the review-surface tier
+badge + the per-requirement proof bundle deep-link + the gate min-tier knob), shipping the `agent-asserted`
+base tier. Two tier-producer slices fan out behind it — `agent-authored, harness-replayed` (the replay
+engine) and `harness-owned probe` (the top rung) — then the pre-PR harness re-run wiring + confidence
+source lands on the replay engine. DAG: foundation → {replayed tier, probe tier}; pre-PR wiring →
+replayed tier.
