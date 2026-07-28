@@ -1,12 +1,21 @@
 ---
-kind: story
-size: 3
+kind: epic
 parent: "872"
 status: open
 humanGate: { kind: setup, short: "Run the one-time npm publish of @webeverything/contracts (npm login, then push a contracts-v* tag to fire the CI pipeline).", what: "A human runs the one-time npm publish ceremony for `@webeverything/contracts`: `npm version <x>` in `contracts/`, then push the `contracts-v*` tag so the #877 CI pipeline (we:.github/workflows/publish-contracts.yml) runs `npm publish --provenance` with `secrets.NPM_TOKEN`. Not agent-executable — `npm whoami` → E401 (no creds), `npm view @webeverything/contracts` → E404 (org unpublished), and an agent never pushes tags. Once the version is on the registry, the remaining half is agent-doable: swap FUI's vite-alias + tsconfig path-map (frontierui/vite.config.mts:222, fui:frontierui/tsconfig.json:51) for a pinned `@webeverything/contracts` dependencies entry." }
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
 tags: []
+scope:
+  # First-real-publish half — bump the package off the placeholder and advance the release baseline
+  # (owner/CI-gated: the release-please Release PR merge, pinned Release-As: 0.1.0).
+  - we:contracts/package.json
+  - we:.release-please-manifest.json
+  # Consumer-migration half (agent-doable) — swap FUI off the #878 dev-time path-mapping/alias to the
+  # pinned published @webeverything/contracts dep.
+  - fui:frontierui/package.json
+  - fui:frontierui/tsconfig.json
+  - fui:frontierui/vite.config.mts
 ---
 
 # First real publish of @webeverything/contracts + migrate a consumer from dev path-mapping to the pinned published dep
