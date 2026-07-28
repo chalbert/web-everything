@@ -1,9 +1,12 @@
 ---
 bornAs: xpex0n8
 kind: epic
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-07-18"
+dateResolved: "2026-07-28"
+graduatedTo: none
+resolutionNote: "all 4 child stories resolved (scale-ruler, semantic-zoom, progress.secondaryTrack, swimlane); each #2533-graduated primitive now has an FUI block — epic acceptance met."
 tags:
   - frontier-ui
   - implementation

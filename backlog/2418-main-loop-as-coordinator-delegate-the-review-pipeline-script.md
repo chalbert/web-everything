@@ -2,8 +2,11 @@
 bornAs: xq5aks4
 kind: epic
 parent: "2445"
-status: open
+status: resolved
 dateOpened: "2026-07-10"
+dateResolved: "2026-07-28"
+graduatedTo: none
+resolutionNote: "all 7 child slices resolved (review-core CLI, comment renderer, review-parked-prs Workflow, session/notice renderers, fetch/state helpers, closing-session introspection step); delegate/script/template shape delivered. The uncarved who-cleared strand is a deliberate deferral tracked by open #2416."
 relatedReport: reports/2026-07-11-backlog-split-analysis.md
 tags: [drain, review, agent-meta, efficiency, tooling]
 ---
