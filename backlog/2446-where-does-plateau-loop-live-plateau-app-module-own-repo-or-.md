@@ -6,6 +6,7 @@ size: 3
 status: open
 priority: low
 dateOpened: "2026-07-11"
+preparedDate: "2026-07-28"
 researchTopic: delivery-coordinator-placement
 relatedReport: reports/2026-07-12-delivery-coordinator-placement.md
 tags: [plateau-loop, constellation, placement]
@@ -13,51 +14,207 @@ tags: [plateau-loop, constellation, placement]
 
 # Where does Plateau Loop live — plateau-app module, own repo, or product line inside Plateau
 
-Constellation placement for the coordinator: inside plateau-app (tools/ sibling of dev-panel), a fourth repo, or the core of the Plateau product itself. Weighs repo-constellation rules (WE zero-impl), multi-project registry needs, and later SaaS packaging.
+Constellation placement for the coordinator: inside plateau-app (a `tools/` sibling of the
+dev-panel), a fourth constellation repo, or the core of the Plateau product itself. Weighs the
+repo-constellation rules (WE zero-impl), multi-project registry needs, and later SaaS packaging.
 
-> **Deferred (2026-07-11 red team — operator call).** Ratifying placement now would decide the biggest
-> question with the least information. The phase-1 resident drain daemon
-> ([#2449](/backlog/2449-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)) starts
-> **provisionally in plateau-app** next to the dev-panel (the #1565/#1579 devtools-are-Plateau-owned
-> priors) — cheap to move while small, and explicitly *without prejudice* to this call. Prepare/ratify
-> once the daemon's operating evidence shows whether the extraction wants to grow. Two red-team notes
-> for the eventual forks: weigh SaaS packaging lightly (speculative product framing shouldn't inflate an
-> internal-tooling decision), and every option must carry the gate-self re-anchoring cost
-> ([#2448](/backlog/2448-re-anchor-the-gate-self-trust-chain-when-the-delivery-engine/)).
-> `priority: low`: pickable, out of auto-select.
-
-> **Prep assessment (2026-07-12, `/prepare all`):** the operator defer above is honored — not prepared,
-> no `preparedDate`. The prior-art half that does *not* depend on daemon evidence is banked at
-> [/research/delivery-coordinator-placement/](/research/delivery-coordinator-placement/) (bors/homu,
-> Prow, Zuul, productized merge queues, AI-fleet coordinators, and the self-hosting
-> deployed-instance/source split), so the eventual prep starts warm. Three red-team findings the
-> eventual forks must carry: (1) the survey supports **staged placement** at least as strongly as
-> own-repo-now — read as dynamics, Prow ran ~8 years inside a coordinated infra repo and split only on
-> external adoption, which matches the provisional plateau-app start above; (2) an eventual own-repo
-> ratification must carry explicit amendments to `#devtools-placement`, `#constellation-placement`, and
-> `#pool-siblings-real-built-clones` (`we:docs/agent/platform-decisions.md` — all three currently speak
-> plateau-app / three-member vocabulary); (3) [#1747](/backlog/1747-decide-the-plateau-explorer-product-surface-to-fui-explorer-/)
-> (the whole explorer engine relocated *into* plateau-app) is the nearest in-kind precedent and belongs
-> in any reconciliation alongside #1565/#1579. Un-defer trigger: [#2449](/backlog/2449-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)'s
-> operating evidence.
-
-## The question
+## Digest
 
 The parent epic ([#2445](/backlog/2445-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/))
-extracts the delivery machinery (lane pool, pr-land, drain, review contracts, backlog CLI —
-today all under `we:scripts/`) into a resident coordinator managing multiple projects. WE
-holds zero implementation by statute, so the engine must move out. Where to?
+extracts the delivery machinery — lane/worktree pool, `pr-land`, the drain, review contracts, the
+backlog CLI — into a resident coordinator managing a registry of projects (WE, FUI, plateau-app).
+Today that **engine core** is ~4,600 lines of already-repo-parameterized Node under WE's scripts dir
+(`we:scripts/merge-ai-prs.mjs` 2448 lines, `we:scripts/pr-land.mjs` 1015, `we:scripts/lane-pool.mjs`
+1124), keyed by a hardcoded three-name registry (`CONSTELLATION_REPO_NAMES` at
+`we:scripts/merge-ai-prs.mjs:826`). **WE holds zero implementation by statute
+([#constellation-placement](../docs/agent/platform-decisions.md#constellation-placement) rule 1, #1282),
+so the engine cannot stay in WE** — that is the forced invariant, not a live option.
 
-## Options (unprepared — forks to be authored by /prepare)
+Two pieces move on different tests, and keeping them separate is what un-tangles this call:
 
-- **plateau-app module** — lands next to the proven UI↔CLI bridge (`plateau:tools/dev-panel/`,
-  the spec-explorer plugin; #1565/#1579 already ruled devtools are Plateau-owned). Cheapest
-  start; risks entangling coordinator lifecycle with the app product.
-- **Own repo (fourth constellation member)** — clean self-hosting story (the Loop improves
-  itself in a lane and reloads without touching other products), clean SaaS packaging;
-  costs constellation overhead (CI, drain parity #2241, one more checkout).
-- **Core of the Plateau product** — "Plateau Loop" as a product line: the coordinator IS
-  Plateau's delivery surface. Strongest product framing; largest scope commitment.
+- **The operator-facing console** (the `plateau:tools/dev-panel/drain-daemon.html` surface + its
+  observability) is a human-run *inspect/operate* surface, which
+  [#devtools-placement](../docs/agent/platform-decisions.md#devtools-placement) (#1565/#1579) routes
+  to **plateau-app** — and it is *already there*. This is not in dispute.
+- **The engine core** (lane pool + drain + PR-lander) is *shared infrastructure reusable against every
+  constellation repo* — the question the single fork below decides.
 
-Related priors: #1565 (devtool placement), #1579 (dev-panel relocation), #2241
-(constellation transport parity), the cross-repo tool-engine/product-boundary research topic.
+There is **one real fork** (the engine core's canonical home); the migration *timing* is not a second
+fork — with cost removed it collapses to "when do we pay the move," pure prioritization — so it is folded
+into the recommended default as a **staged rollout with a named trigger**, not ratified separately.
+
+## Un-defer (2026-07-28)
+
+The 2026-07-11 operator defer set the un-defer trigger as *"[#2449](/backlog/2449-ship-the-phase-1-resident-drain-daemon-merge-queue-only/)'s
+operating evidence"*, reviewed under
+[#2456](/backlog/2456-review-the-drain-daemon-s-first-weeks-of-operating-evidence/).
+That evidence now exists — **and its shape matters, read precisely.** #2456's interim review (26.1 h /
+633 passes) reports the extraction grew **+2137 lines across 8 commits, all observability**, landing in
+**plateau-app** while **the drain core stayed single-sourced in `we:scripts/`**. So the window shows
+**the console/observability wanting to live in plateau-app** (confirming the split above) and that **the
+extraction wants to grow at all** (validating the #2445 thesis) — it does **not** measure where the
+*engine core* belongs, because the core did not move in that window. The core's canonical home is
+therefore settled by the statute + prior-art survey below, not by this operating window.
+
+**Scope note (honest):** #2456 also says its multi-week *unattended-autonomy* gate is **not** met and
+explicitly blocks preparing **[#2444](/backlog/2444-decide-the-phase-1-agent-runner-the-runner-that-spawns-and-s/)**
+(the agent-runner) until it is. That gate governs #2444's runtime-stability question, **not** placement.
+Preparing #2446 does **not** un-defer #2444.
+
+## Fork 1 — What is the extracted engine core's canonical home?
+
+<!-- glance table -->
+
+| Option | Canonical home | Verdict |
+|--------|----------------|---------|
+| (a) | plateau-app `tools/` module (permanent) | rejected — coordinated-subject coupling |
+| **(b)** | **own fourth repo, reached via a staged rollout** | **default** |
+| (c) | core of the Plateau product | rejected — severable, → #554 |
+
+*Fork exists because:* the engine core's canonical home is exactly one repo — (a), (b), (c) genuinely
+cannot coexist, a real either/or. The **excluded** branch is "stay in `we:scripts/`":
+[#constellation-placement](../docs/agent/platform-decisions.md#constellation-placement) rule 1 (#1282)
+forbids WE hosting delivery runtime, so staying-in-WE is broken, not an option.
+
+- **(a) plateau-app module, as the permanent home** — cheapest, and it is where the phase-1 daemon and
+  console already sit. **Rejected as the *canonical* home** on two grounds the prior-art survey and
+  statute make dispositive: (1) the engine coordinates **plateau-app itself** (one of its three
+  registry members), so hosting it there makes plateau-app both **host and coordinated subject** — its
+  release cadence would gate a coordinator that also lands WE and FUI, the version-lock the survey's
+  "a coordinator spanning N repos structurally cannot version-lock with any one of them" line warns
+  against; (2) **no** coordinator in the survey (bors → rust-lang/bors, Prow → kubernetes-sigs/prow,
+  Zuul) lives inside a product repo it coordinates. plateau-app remains the right home for the
+  **console** (a per-consumer operator surface), not the engine.
+- **(b) own fourth repo, reached staged** *(default)* — the neutral home that is **not itself a
+  coordinated subject**: the clean self-hosting story (the Loop lands its own PR, redeploys, resumes
+  from persisted state — a solved non-problem: bors-ng / Prow-Tide / Zuul all land into their own
+  source and decouple the deployed instance from the tree) and clean SaaS packaging. **Rolled out
+  staged**, not paid now (the trigger below) — so its costs (a new constellation member: CI, drain/PR
+  transport parity [#2241](/backlog/2241-constellation-ci-pr-merge-parity-bring-frontierui-plateau-ap/),
+  one more pool checkout; and the statute amendments below) land only when a real requirement forces
+  them.
+- **(c) core of the Plateau product** — "Plateau Loop" as a product line. **Rejected**: every
+  productized coordinator (GitHub merge queue, Mergify, Graphite) was *born* standalone as a business
+  commitment, never grown from an internal module, and homu.io shows the product bet dies without a
+  committed operator. Productization is severable from placement and belongs to the parked hosted-suite
+  trigger ([#554](/backlog/554-plateau-hosted-saas-product-suite-shell-multi-product-accoun/)). Weigh
+  SaaS lightly here (the 2026-07-11 red-team's instruction).
+
+**Default: (b) own repo as the canonical home, reached via a staged rollout.** The engine core is
+shared infra reusable across all three repos; its neutral home is the one repo that is not itself a
+coordinated subject. Staging keeps it cheap now (see below). The honest tension the decider resolves:
+the **letter** of [#reusable-neutral-home](../docs/agent/platform-decisions.md#reusable-neutral-home)
+names *plateau* as the neutral home, but its **principle** ("reusable against every implementer →
+neutral home; fix the surface, not the home — never relocate shared infra to satisfy a single
+consumer") points at the own repo *here*, because plateau-app is a coordinated subject of this tool and
+so is not neutral relative to it (see the statute reconciliation below). A decider who reads #1788
+literally, or who judges the coordinated-subject coupling tolerable, can override to (a).
+
+Skeptic: SURVIVES-WITH-AMENDMENT (default flipped (a)→(b) during prep). The pass-4 skeptic landed
+three hits, all folded in: (1) **statute-overlap** — it found the **uncited** #1788 collision; the
+original (a)-default's "collides with no anchor" claim was false and is withdrawn (reconciled below).
+(2) **citation-scope** — #devtools-placement was authored for human *inspect/switch/explore/configure*
+surfaces (its own examples: dev-panel, explorer chrome, configurators), which **reach the console but
+not an autonomous merge daemon**; the citation is downgraded to authority over the *console* only.
+(3) **merit/evidence** — the +2137-line growth measured the console, not the engine core (corrected in
+Un-defer above). The residual attack (b) beat: own-repo's real costs are deferred by staging, so the
+flip does not pay a premature migration.
+
+Screen: flagged(prio) → fixed. The pass-5 fresh-context screen cleared the home fork on both questions
+(no impl-detail smuggled onto the standard side; a real merit difference — coordinated-subject coupling
+vs an independent lifecycle — survives even free-to-maintain) but flagged the **old separate now-vs-
+staged fork as prioritization in fork costume** (with cost removed it is pure timing). Fix applied: that
+fork is **dissolved**; staging is folded into the (b) default's rollout as the trigger-criteria, not a
+ratifiable binary.
+
+## Staged rollout — the default's mechanism (not a separate fork)
+
+The engine core stays co-located with the console in plateau-app **now** (the operator's without-
+prejudice phase-1 start), and graduates to its own repo **on the first trigger to fire**. This is the
+*dynamics* reading of the survey (Prow ran ~8 years inside `kubernetes/test-infra` — a repo it itself
+coordinated — and split only when external orgs adopted it; Zuul likewise) and the standing
+most-flexible-default house rule ("ship the cheapest correct mechanism now; the richer mode is opt-in
+later"). Graduation triggers:
+
+- (i) a **fourth** coordinated repo joins the registry — the engine then serves >1 product and cannot
+  version-lock with any one; **or**
+- (ii) an **external adopter / SaaS commitment** lands (the #554 trigger fires); **or**
+- (iii) **proactive co-tenancy guard** — graduate the moment the engine's CI / release needs *diverge*
+  from plateau-app's, **before** a co-tenancy incident, not after. (Sharpened from a reactive
+  "wait for an incident" trigger per the skeptic: for merge/release infra the incident that would fire
+  a reactive trigger *is a corrupted release* — the wrong risk posture for the one system whose job is
+  to land code safely.)
+
+**Cost note the timing carries (skeptic-corrected):** staging is *not* free relative to own-repo-now.
+Gate-self re-anchoring ([#2448](/backlog/2448-re-anchor-the-gate-self-trust-chain-when-the-delivery-engine/):
+the trust-chain path literals that guard the `review:human` invariant) is paid **at each hop** the core
+moves — so a WE→plateau-app→own-repo staged path re-anchors more than once, where own-repo-now pays it
+once. This is bounded and mechanical and does **not** flip the default (the 8-year in-repo precedent
+outweighs it), but it is a genuine timing cost, not a fork-neutral one.
+
+## Statute reconciliation (required — this decision sets `codifiedIn`)
+
+The (b) default writes a rule on turf **two** existing anchors already govern by different tests; both
+are reconciled here so ratification inherits no unresolved conflict:
+
+- [#reusable-neutral-home](../docs/agent/platform-decisions.md#reusable-neutral-home) (#1788) — "reusable
+  against every implementer → the neutral home; the per-implementer piece is the **thin adapter**, never
+  the generic engine." **Composition:** the two rules agree once the console/engine split is applied —
+  the **engine core** is the generic shared infra → neutral home (the own repo, which is not a
+  coordinated subject); the **console** is the per-consumer thin surface → plateau-app. #1788's example
+  says "(plateau)" because in its authoring context (the conformance runner) plateau is a *non-subject*;
+  here plateau-app *is* a coordinated subject, so a (b) ruling must **amend #1788** to record that the
+  neutral home is "the member that is not itself coordinated," which for a delivery coordinator is the
+  own repo, not plateau.
+- [#devtools-placement](../docs/agent/platform-decisions.md#devtools-placement) (#1565/#1579) —
+  **unchanged and honored**: it keeps routing the *console* to plateau-app. It simply does not reach the
+  autonomous engine (citation-scope, above).
+
+An own-repo *ruling* (when a trigger fires) additionally needs vocabulary amendments to
+[#constellation-placement](../docs/agent/platform-decisions.md#constellation-placement) and
+[#pool-siblings-real-built-clones](../docs/agent/platform-decisions.md#pool-siblings-real-built-clones)
+(the latter hardcodes `frontierui`/`plateau-app` as the pool siblings), and must fold in
+[#1747](/backlog/1747-decide-the-plateau-explorer-product-surface-to-fui-explorer-/)
+(the whole explorer engine relocated *into* plateau-app — the nearest in-kind precedent). This decision
+sets `codifiedIn` to the [#devtools-placement](../docs/agent/platform-decisions.md#devtools-placement)
+anchor (the standing home of this turf) and records the #1788 amendment above.
+
+## What physically moves (grounding the placement)
+
+- **Now (staged interim):** the engine core graduates from `we:scripts/` into `plateau:tools/` beside
+  the existing `plateau:tools/drain-daemon/`; `CONSTELLATION_REPO_NAMES`
+  (`we:scripts/merge-ai-prs.mjs:826`) is unchanged; the pool `siblingClone*` resolution
+  (`we:scripts/merge-ai-prs.mjs:869`) keeps its current `frontierui`/`plateau-app` shape.
+- **On graduation (own repo):** adds a fourth name to `CONSTELLATION_REPO_NAMES`, provisions a fourth
+  pool clone, and edits the anchors named in the reconciliation — the concrete diff staging defers.
+
+### Review jury (provisional — pre-registered #2638)
+
+Care level: `high` (statute-touching + cross-repo delivery machinery). This jury binds against the
+item's predicted scope (`we:scripts/merge-ai-prs.mjs`, `we:scripts/pr-land.mjs`,
+`we:scripts/lane-pool.mjs`, `we:docs/agent/platform-decisions.md`, `plateau:tools/drain-daemon/`) and
+is re-checked against the real diff at PR open.
+
+| juror | lens | grounding method | pre-registered expectation |
+| --- | --- | --- | --- |
+| correctness#1 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| correctness#2 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| security#1 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| security#2 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| simplicity#1 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| simplicity#2 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+| standards-conformance#2 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+
+## Delegation
+
+Neither the fork nor the staged rollout carves a new buildable child — the actual extraction/move is
+already epic
+[#2445](/backlog/2445-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/)'s
+in-flight slice work (e.g. the orchestrator-as-Node-fanout #2469, the multi-project registry #2472).
+This decision only *authorizes the canonical home + rollout*; the move rides those existing items.
+
+Related priors: #1565 (devtool placement), #1579 (dev-panel relocation), #1747 (explorer engine
+relocated into plateau-app), #2241 (constellation transport parity), #2448 (gate-self re-anchoring),
+#554 (hosted-suite / SaaS trigger), #1788 (reusable → neutral home), and the
+[delivery-coordinator-placement](/research/delivery-coordinator-placement/) research topic.
