@@ -718,6 +718,29 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
     const bare = scope.filter((p) => !SCOPE_REPO_PREFIX_RE.test(p));
     if (bare.length)
       err(`Backlog item "${id}" scope has non-repo-qualified entr${bare.length > 1 ? 'ies' : 'y'} ${JSON.stringify(bare)} — every scope entry must carry a <repo>: locus prefix (e.g. "we:src/backlog-view/", "fui:plugs/…", "plateau:…"), NOT a bare path. A bare path is rejected by the write-time locus-prefix hook (#883) and, unqualified, the scope-lease engine (readiness/scope-lease.mjs) reads its repo as null so it never matches an observed we:-qualified file — the lane's overlap is silently never detected and two overlapping lanes could both launch.`);
+
+    // ── Scope defaults to FILE-LEVEL — flag a bare DIRECTORY scope unless justified (#2739) ──
+    // The #2619/#2679 finer-lease principle: a lane's scope-lease should cover the SPECIFIC files it writes, not
+    // a whole directory. A dir-level entry — a repo-qualified prefix ending in `/` with no filename (e.g.
+    // "we:scripts/readiness/") — re-creates the coarse cross-item serialization finer leases removed: a whole
+    // wave of file-disjoint items stalls behind one broad dir-scope (the rescope-wave2 pass had to hand-narrow
+    // #2665/#2684/#2661 from whole dirs down to the files each build touches). So FLAG a dir-level scope at
+    // authoring time and steer it to file-level — narrow to the specific files, OR record a short
+    // `scopeRationale:` note (a genuinely dir-spanning / inherently cross-cutting item is the deliberate,
+    // justified exception, not the silent default). Absent that note, dir-level is the finding.
+    //
+    // SOUNDNESS (never push toward UNDER-scope): this is a WARNING, never an error. A scope NARROWER than the
+    // real write-set breaches the lease at build time — strictly worse than a coarse scope — so the remedy is
+    // ALWAYS "narrow to the files you actually write, never fewer" OR "justify with a scopeRationale", never
+    // "drop files to look file-level". Erroring here would also red the gate on the whole existing dir-scoped
+    // corpus and pressure authors to under-scope; a warning surfaces the finer-lease debt without either hazard.
+    // Resolved items are historical (no author will re-scope a shipped item), so they are skipped.
+    const scopeRationale = typeof raw?.scopeRationale === 'string' ? raw.scopeRationale.trim() : '';
+    if (raw?.status !== 'resolved' && !scopeRationale) {
+      const dirs = scope.filter((p) => typeof p === 'string' && SCOPE_REPO_PREFIX_RE.test(p) && p.endsWith('/'));
+      if (dirs.length)
+        warn(`Backlog item "${id}" has directory-level scope entr${dirs.length > 1 ? 'ies' : 'y'} ${JSON.stringify(dirs)} (a repo-qualified prefix ending in "/") — scope defaults to FILE-LEVEL (#2739/#2679). A bare directory scope re-creates the coarse serialization finer leases removed: file-disjoint items stall behind one broad dir-scope. NARROW it to the specific files this item writes (never fewer than the real write-set — an under-scope breaches the lease at build time), OR, if the item genuinely spans the directory / is inherently cross-cutting, add a short \`scopeRationale:\` note stating why and this flag clears.`);
+    }
   }
 }
 
