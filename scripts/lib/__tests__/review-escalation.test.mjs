@@ -21,6 +21,9 @@ import {
   deriveCareLevel,
   reconcileRoster,
   ROSTER_TIMING,
+  buildReviewedShaMarker,
+  parseReviewedSha,
+  acceptanceCoversHead,
 } from '../review-escalation.mjs';
 
 describe('isBlastRadiusPath', () => {
@@ -241,6 +244,83 @@ describe('decideReviewGate — the non-blocking review gate', () => {
   });
   it('review:human LABEL + review:changes → wait-author (a reviewer bounce still routes to the author lane)', () => {
     expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human, REVIEW_LABELS.changes] }).action).toBe('wait-author');
+  });
+
+  // #2409 — the reviewed-commit gate: a review:accepted verdict only covers the tree the reviewer looked at.
+  describe('#2409 — review:accepted is honoured only when the head still matches the reviewed commit', () => {
+    const accepted = [{ name: REVIEW_LABELS.accepted }];
+    it('accepted + head STILL matches the reviewed SHA → merge', () => {
+      const g = decideReviewGate({ escalate: true, labels: accepted, acceptedSha: 'abc1234def', headSha: 'abc1234def' });
+      expect(g.action).toBe('merge');
+    });
+    it('accepted + head ADVANCED past the reviewed SHA → park (re-park, NEVER merge)', () => {
+      const g = decideReviewGate({ escalate: true, labels: accepted, acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb' });
+      expect(g.action).toBe('park');
+      expect(g.staleAcceptance).toBe(true);
+      expect(g.applyLabel).toBe(REVIEW_LABELS.pending);
+      expect(g.reason).toMatch(/stale/i);
+    });
+    it('a stale acceptance on a gate-self/human PR re-parks review:human, not pending', () => {
+      const g = decideReviewGate({ escalate: true, humanRequired: true, labels: accepted, acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb' });
+      expect(g.action).toBe('park');
+      expect(g.applyLabel).toBe(REVIEW_LABELS.human);
+      expect(g.humanRequired).toBe(true);
+      // a sticky review:human label reaches the same outcome even with a fresh humanRequired:false score
+      const g2 = decideReviewGate({ escalate: true, humanRequired: false, labels: [...accepted, { name: REVIEW_LABELS.human }], acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb' });
+      expect(g2.applyLabel).toBe(REVIEW_LABELS.human);
+    });
+    it('FAILS OPEN — no recorded reviewed SHA (accept predates the gate / applied out-of-band) → merge', () => {
+      expect(decideReviewGate({ escalate: true, labels: accepted }).action).toBe('merge');
+      expect(decideReviewGate({ escalate: true, labels: accepted, headSha: 'abc1234' }).action).toBe('merge');
+    });
+    it('FAILS OPEN — head SHA unreadable (fetch miss) → merge', () => {
+      expect(decideReviewGate({ escalate: true, labels: accepted, acceptedSha: 'abc1234', headSha: null }).action).toBe('merge');
+    });
+  });
+});
+
+describe('#2409 — reviewed-SHA marker helpers', () => {
+  it('buildReviewedShaMarker round-trips through parseReviewedSha', () => {
+    const marker = buildReviewedShaMarker('ABC123def456');
+    expect(marker).toBe('<!-- reviewed-sha: abc123def456 -->');
+    expect(parseReviewedSha([{ body: `✅ accepted\n\n${marker}` }])).toBe('abc123def456');
+  });
+  it('buildReviewedShaMarker rejects a non-hex / empty SHA (→ empty, gate then fails open)', () => {
+    expect(buildReviewedShaMarker('')).toBe('');
+    expect(buildReviewedShaMarker('not-a-sha')).toBe('');
+    expect(buildReviewedShaMarker('abc')).toBe(''); // too short (< 7)
+  });
+  it('parseReviewedSha returns the LATEST marker (a re-accept after a fix stamps a fresh SHA)', () => {
+    const comments = [
+      { body: `first\n${buildReviewedShaMarker('1111111')}` },
+      { body: 'a plain comment, no marker' },
+      { body: `re-accept\n${buildReviewedShaMarker('2222222')}` },
+    ];
+    expect(parseReviewedSha(comments)).toBe('2222222');
+  });
+  it('parseReviewedSha tolerates a missing/odd comments shape → null', () => {
+    expect(parseReviewedSha(undefined)).toBe(null);
+    expect(parseReviewedSha([])).toBe(null);
+    expect(parseReviewedSha([{ body: 'no marker here' }, {}, null])).toBe(null);
+  });
+});
+
+describe('#2409 — acceptanceCoversHead', () => {
+  it('equal SHAs cover the head', () => {
+    expect(acceptanceCoversHead({ acceptedSha: 'deadbeef', headSha: 'deadbeef' }).covers).toBe(true);
+  });
+  it('prefix match (abbreviated vs full) still covers', () => {
+    expect(acceptanceCoversHead({ acceptedSha: 'deadbee', headSha: 'deadbeefcafe0123' }).covers).toBe(true);
+  });
+  it('a different head is NOT covered (stale), with a reason naming both', () => {
+    const r = acceptanceCoversHead({ acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb' });
+    expect(r.covers).toBe(false);
+    expect(r.reason).toMatch(/advanced/i);
+  });
+  it('either SHA missing → fails OPEN (covers:true)', () => {
+    expect(acceptanceCoversHead({ acceptedSha: null, headSha: 'abc1234' }).covers).toBe(true);
+    expect(acceptanceCoversHead({ acceptedSha: 'abc1234', headSha: '' }).covers).toBe(true);
+    expect(acceptanceCoversHead({}).covers).toBe(true);
   });
 });
 
