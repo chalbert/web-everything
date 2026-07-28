@@ -3105,6 +3105,57 @@ distinct validator, never peer/self agreement).
 
 ---
 
+### "Which trust tier owns X" defaults to a contract-split — engine-tier the impl, policy-tier a `*.contract.json` for the definition {#contract-split-for-tier-ownership}
+
+**The reusable pattern (this is the ruling's point, not the one gate).** For *any* "which trust tier
+owns X" decision where **X is a gate, validator, or definition an agent could quietly weaken and then
+self-clear** (the [#809](/backlog/809-)-class self-approval hole — an autonomous builder softening the
+very thing that judges its work, with no independent human in the loop), the **default path is
+CONTRACT-SPLIT**:
+
+1. **Keep the implementation code in the ENGINE tier** — agent-clearable. This is deliberately where
+   the repo's *hottest, most-churned* files live; the code still ALWAYS escalates (gets an independent
+   review) and a converged verdict may land it, so it is protected, just not stranded behind a human.
+2. **Move the DEFINITION — what counts as green / valid — into a POLICY-tier `*.contract.json`**, a
+   small, rarely-edited data file. A diff to it trips the policy-tier path test and forces
+   `review:human`; a conformance suite proves the impl realizes the contract, so a behaviour-preserving
+   impl refactor stays green and agent-clearable while a *definition* change goes red → forces a
+   contract edit → a human. The split isolates **exactly** the part that must not be self-weakened, and
+   nothing else.
+
+**Why this beats promoting the whole gate to policy/always-human.** An always-human promotion of the
+entire gate **over-gates** the churny impl (a human on every routine lint/rule tweak) and — per the
+#2625 skeptic — has **no real review-clearance conflict-of-interest** for a conformance gate: unlike
+the trust-chain *lander* ([#2448](/backlog/2448-)) whose engine an agent-reviewer would be policing as
+its own leash, a conformance gate's impl is ordinary code. So the minimal, correct cut is the split,
+not the blanket promotion. It closes the hole **without** the friction (unlike a full-policy promotion)
+and **without** leaving it open (unlike status-quo blast-radius, where protection is incidental to a
+path regex).
+
+**How to apply.** For the next "which tier owns this gate/definition" fork, **propose contract-split
+first** and cite this rule — it should resolve fast (a small, patterned micro-decision, not fresh
+research). These rulings are good candidates to surface **inline on the item card** in the future
+decision UI ([#2577](/backlog/2577-)) rather than run through a full prepare/preview cycle.
+
+**Precedent this generalizes.** The already-ratified `review-policy.contract.json` / loader split —
+the review-escalation policy extracted into a machine-diffable contract with a conformance suite
+([#2566](/backlog/2566-) under spec-based programming [#2564](/backlog/2564-),
+[#spec-is-schema-human-gates-spec](#spec-is-schema-human-gates-spec)) — is the first instance; the
+`check:standards` gate ([#2625](/backlog/2625-)) is the second, and the one that generalized it into
+this default. Kin to [#blast-radius-advisory-care-not-a-gate](#blast-radius-advisory-care-not-a-gate)
+(the gate fires on a *spec* change, not any path touch) and
+[#deterministic-core-thin-judgment](#deterministic-core-thin-judgment).
+
+**Lineage:** #2625 (ratified 2026-07-28, operator — fork (d) contract-split, the option the raw a/b
+fork missed and prep surfaced; the operator's explicit instruction was to codify it as a *reusable*
+precedent, "exactly the path to take in similar decisions," a micro-decision "easily brought forward
+… on card in the future UI") · precedent #2566/#2564 (`review-policy.contract.json` split) · #2448
+(the lander's engine-tier ruling that boomerangs the axis-2 precedent toward the split, not blanket
+policy) · #809 (the self-approval hole this closes) · #2577 (the decision-surface work that should
+host this class inline). Parent #2445.
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
