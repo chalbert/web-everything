@@ -5,40 +5,35 @@ size: 5
 parent: "2555"
 status: open
 dateOpened: "2026-07-27"
-tags: [plateau-loop, console, console-board, center, lane-windowing, v68-convergence, slice-2555]
+tags: [plateau-loop, console, console-board, center, lane-windowing, canonical-2554, slice-2555]
 ---
 
-# Console board center realizes v68 multi-lane columns (not one)
+# Console board center realizes ≥2 multi-lane columns at the ratified width
 
-The center EXECUTION PLAN is the headline of the v68 mock: several lanes stand side by side as full columns,
-each a stack of sized cells rising to the delivery horizon, with the lanes that don't fit collapsed to strips.
-Measured against the ratified baseline (`plateau-app:tests/visual/baselines/board.png`, v68) with the
-`BOARD`/`POOL`/`SPANS` fixtures mounted at 1440w, the reworked board realizes only **one** full lane column
-("Core"); the second card-bearing lane ("Review", four live cards) collapses to a 30px strip. v68 shows **two
-or more populated lane columns** before any strips.
+The center EXECUTION PLAN is the headline: several lanes stand side by side as full columns, the rest collapse
+to strips, no sideways scroll. The reworked board realizes only **one** full column; a card-bearing "Review"
+lane collapses to a strip. The intent (≥2 columns, card-priority windowing, no sideways scroll) is
+canon-aligned — but the **method was stale**. Re-anchored 2026-07-28 off the v68 pixel baseline onto §6/#2554.
 
-## Measured evidence
-- v68 target: two full lane columns (`LANE-1 CONSOLE TREE`, `LANE-2 SHORT TITLES`) side by side, then 7
-  collapsed strips.
-- Reworked build (PR #112 / plateau `2736`, headless mount of `BOARD`/`POOL`/`SPANS` at 1440w): one wide
-  "Core" column, then 9 strips (Review/Fan-out/Docs/Infra/CI-A/CI-B/Loop/Shipped/Explorer). The Review lane —
-  which holds a rich four-card stack in the fixture — is hidden in a strip.
-- Root cause: the center's measured width is ~780px (the composer + glossary rail on the left and the
-  ready-to-queue rail on the right eat ~580px of the 1440). `computeCapacity(11 lanes, ~780, laneMin 232)`
-  returns 1 — two 232px columns plus 9 strips plus arrows overrun 780px. So the multi-lane machinery is
-  present in code (windowing, strips, horizon all work) but does not visually realize the v68 center at the
-  target width. This is the biggest center-realization gap.
+## Canonical alignment (what changed)
+- **Hold column width at the ratified ~300px** (`center-multi-lane`). The stale plan narrowed `laneMin` (232)
+  *below* 300 to fit two columns — that drives width the **wrong** way. Reach ≥2 columns instead by **trimming
+  the side rails** (composer/legend left, ready-queue right) and/or the strip+arrow reserve in
+  `computeCapacity` — never by shrinking the column.
+- **Re-anchor acceptance** from `plateau-app:tests/visual/baselines/board.png` (v68) + its 0.09 delta to the
+  canonical §6/#2554 reference; regenerate the baseline ([#xg4lsxj]) before measuring delta.
 
-## Scope
-- Prioritize lanes **with live card stacks / active work** into the window; never collapse a lane that holds a
-  card stack while placeholder-only lanes stay windowed. (Windowing today is purely positional — first-N — so
-  a card-bearing lane past the capacity edge disappears.)
-- Re-proportion so **at least two full lane columns** show at 1440w: revisit `laneMin` (232 may be too wide for
-  the real center width), the rail widths, and/or the strip/arrow reserve in `computeCapacity`, so the mock's
-  two-columns-plus-strips composition is reachable.
-- Keep the no-horizontal-scroll + resize-aware guarantees intact; verify at 1280 / 1440 / 1680.
+## Scope (kept — aligned)
+- Prioritize lanes **with live card stacks / active work** into the window; never collapse a card-bearing lane
+  while placeholder-only lanes stay windowed (an additive, canon-aligned refinement of the strip-collapse rule).
+- Reach **≥2 full ~300px lane columns** at 1440w by re-proportioning the rails / strip reserve — not `laneMin`.
+- Keep the no-horizontal-scroll + resize-aware guarantees; verify at 1280 / 1440 / 1680 (vertical-strip
+  collapse, never page widening).
+- Vertical crossing + history within a column is [#xgcfeto]; this story owns the **columns**.
 
 ## Acceptance
-Mounting `BOARD`/`POOL`/`SPANS` at 1440w renders **≥2 full lane columns** (both card-bearing lanes visible as
-columns, not strips), matching the v68 composition; the light comparator delta drops from the measured 0.09,
-and the center region-shifts in the structural grid clear. No horizontal scroll at any width.
+Mounting `BOARD`/`POOL`/`SPANS` at 1440w renders **≥2 fixed-width (~300px) lane columns** with vertical
+separators (both card-bearing lanes visible as columns, not strips), remaining lanes collapsed to strips, and a
+single dashed lev-colored delivery horizon across all lanes — matching the canonical §6/#2554 artifact (not
+"the v68 composition"). No horizontal scroll at any width. `plateau-app` `npm test` + `we:` `check:standards`
+pass.

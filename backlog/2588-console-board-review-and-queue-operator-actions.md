@@ -67,6 +67,20 @@ finished work — reviewing never leaves the board. The create/decide write affo
 - **Hover verbs** — the per-cell hover-verb overlay (the full verb set needs a machine-readable per-UC verb list
   in the taxonomy; and it reworks the existing always-visible verb button #2587/#2582 depend on).
 
+## Canonical conformance (2026-07-28, §6/#2554)
+The design-alignment committee verdict on this slice was **aligned** (it anchors to design-record §3i v19–v21,
+not the superseded v68 baseline). Four minor items pin it fully on-spec:
+- **Ready-card grammar (`rq-card-grammar`).** Each ready card carries a top row: a circle-plus **(+)
+  add-to-queue** button, the `⠿` drag grip, the `#id`, and an **open/merged status tag** — then title, then the
+  `⚡` leverage row. Add the (+) button and status tag (drag-onto-lane stays, but is not the only add path).
+- **Drag-fit color is transient, not a state color.** The green/amber dragover highlight must read as a
+  transient cue, not the fixed state palette (green=delivered, amber=human). Prefer the canonical
+  primary-outline flash so it can't collide with `tokens-state-color-map` ([#xzpkd8q]).
+- **One primary `.act` button (`card-action-button`).** The primary action stays a single blue icon-led `.act`
+  button matching the state (e.g. "Review PR"); bounce / take-over are secondary **neutral-outlined** buttons.
+- Anchor acceptance to the canonical §6/#2554 ratified grammar (palette, card box, ready-queue), not only
+  design-record §3i.
+
 ## Out of scope (other slices)
 - Opening a decision from a lane, the new-work composer, and the new-spec→constitution loop → [#2587]
   (the create/decide write affordances). Cell rendering → [#2584].
@@ -77,6 +91,8 @@ finished work — reviewing never leaves the board. The create/decide write affo
 - A finished build opens a review `<dialog>` **over the board** with spec-proven rows + deep-linked
   evidence, the visual diff, auto-review findings, and on-merge effects; merge / bounce / take-over each
   fire through the lane→PR + drain write seam (never `main` directly).
-- Hover verbs appear without reflow per the (status+flags) rule and never trigger the cell's zoom; bounce is
-  a neutral-outlined button.
+- Hover verbs appear without reflow per the (status+flags) rule and never trigger the cell's zoom; the primary
+  action is a single blue icon-led `.act` button, bounce / take-over are secondary neutral-outlined buttons.
+- Ready cards carry the (+) add-to-queue button, drag grip, `#id`, and open/merged status tag; the drag-fit
+  highlight is a transient primary-outline flash, not a state color.
 - Both themes render; `plateau-app`'s `npm test` + `we:` `check:standards` pass.
