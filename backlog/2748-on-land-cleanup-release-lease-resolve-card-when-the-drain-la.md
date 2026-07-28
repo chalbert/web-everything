@@ -4,8 +4,9 @@ kind: story
 size: 5
 parent: "2606"
 relatedTo: ["2745"]
-status: open
+status: resolved
 dateOpened: "2026-07-28"
+dateResolved: "2026-07-28"
 scope:
   - we:scripts/lane-drain.mjs
   - we:scripts/lane-pool.mjs

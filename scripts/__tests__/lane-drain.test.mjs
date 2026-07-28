@@ -308,6 +308,48 @@ describe('lane-drain reopen-on-fail contract guard (source-level, #2175)', () =>
   });
 });
 
+describe('lane-drain on-land cleanup contract guard (source-level, #2748)', () => {
+  const src = readFileSync(resolve(process.cwd(), 'scripts/lane-drain.mjs'), 'utf8');
+
+  it('RELEASE-ON-LAND: releases the item lease across every pool via lane-pool by-item, on the success path', () => {
+    expect(src).toMatch(/releaseItemLeases/);
+    // the by-ITEM cross-pool sweep (#2748), not a by-session call the drain can't key without the slug
+    expect(src).toMatch(/'release', '--all-pools', `--item=\$\{Number\(num\)\}`/);
+    // it is invoked only AFTER finalizeLand (the success reconcile), never on a failed/not-ready path
+    const finIdx = src.indexOf('const fin = finalizeLand(CWD, num)');
+    const relIdx = src.indexOf('releaseItemLeases(CWD,');
+    expect(finIdx).toBeGreaterThan(-1);
+    expect(relIdx).toBeGreaterThan(finIdx);
+  });
+
+  it('RESOLVE-ON-LAND: the drain owns the flip, kept WE-last + frontmatter-strict, only when not pre-resolved', () => {
+    expect(src).toMatch(/resolveLandedItem/);
+    // flips via backlog.mjs resolve (legal from active OR open) — no --force that would resolve an epic over kids
+    expect(src).toMatch(/'resolve', num\b/);
+    expect(src).not.toMatch(/'resolve', num, '--force'/);
+    // the flip is attempted ONLY when the card is not already resolved (guards the prior producer-authored path)
+    const flipGuard = src.indexOf('if (resolveReachable === false)');
+    const flipCall = src.indexOf('resolveLandedItem(CWD, num)');
+    expect(flipGuard).toBeGreaterThan(-1);
+    expect(flipCall).toBeGreaterThan(flipGuard);
+  });
+
+  it('resolve-on-land runs AFTER every ref merged (WE-last), so a failed impl half never false-resolves (#96)', () => {
+    // the resolve flip lives below the impl-first/WE-last merge loop, not inside/above it
+    const mergeLoop = src.indexOf('for (const step of plan.steps)');
+    const flipCall = src.indexOf('resolveLandedItem(CWD, num)');
+    expect(mergeLoop).toBeGreaterThan(-1);
+    expect(flipCall).toBeGreaterThan(mergeLoop);
+    // still reads status FRONTMATTER-strict (never a loose body read) for the reachability gate
+    expect(src).toMatch(/resolveReachableFromBody/);
+  });
+
+  it('every on-land cleanup commit is scoped to an explicit -- <pathspec> (shared-index-race guard)', () => {
+    const commitCalls = src.match(/\['commit', '-m',[^\]]*\]/g) || [];
+    for (const c of commitCalls) expect(c).toMatch(/'--'/);
+  });
+});
+
 describe('lane-drain whole-process lease heartbeat (#2453 — per-couple, not just per-pass)', () => {
   const src = readFileSync(resolve(process.cwd(), 'scripts/lane-drain.mjs'), 'utf8');
   it('heartbeats the lease inside the per-couple drain loop, not only at the top of a watch pass', () => {

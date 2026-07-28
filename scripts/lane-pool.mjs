@@ -26,8 +26,8 @@
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
  *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
- *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`.
- *   node scripts/lane-pool.mjs release (--lane=N | --all | --all-pools --session=<slug>) [--session=<slug>] [--pool=<name>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one); #2667 --all-pools --session sweeps EVERY pool under POOL_ROOT and releases that session's leases (cross-locus couple cleanup in one call), and --pool=<name> selects a pool by dir-name (no checkout path needed)
+ *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`.
+ *   node scripts/lane-pool.mjs release (--lane=N | --all | --all-pools (--session=<slug> | --item=<num>)) [--session=<slug>] [--pool=<name>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one); #2667 --all-pools --session sweeps EVERY pool under POOL_ROOT and releases that session's leases (cross-locus couple cleanup in one call), and --pool=<name> selects a pool by dir-name (no checkout path needed); #2748 --all-pools --item=<num> is the by-ITEM sweep the drain's release-on-land uses (matches every lease whose session encodes that item number — needs no exact slug)
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s); #2350 REFUSES a reserved lane (even --all/--force) — deliberate teardown is `remove --lane=N --release-reserved`
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
  *   node scripts/lane-pool.mjs unmap   (--item=NNN[,…] | --lane=N | --all)   # drop lane-ports registry entries
@@ -89,6 +89,13 @@ import {
 // at acquire. normScope normalizes the declared `--scope`; candidateLaunch is the pure overlap-at-launch query.
 import { normScope } from './readiness/scope-lease.mjs';
 import { candidateLaunch } from './readiness/scope-lease-live.mjs';
+// #2748 — REUSE the standalone reaper's PURE core so the "provably-dead lease" verdict is SINGLE-SOURCED with
+// `scripts/conveyor/lease-reaper.mjs` (the acquire-native backstop must agree with the periodic reaper, never
+// fork its logic). Importing lease-reaper is side-effect-free — its IO shell is gated on the main-module check —
+// and forms no cycle (lease-reaper imports only `lib/lane-lease.mjs`, never lane-pool). `readField` reads the
+// frontmatter-strict `status:` for the offline item-resolved reap axis (#2603 spoof-safe reader).
+import { classifyReap, reapPlan, prStatesFromList, itemNumFromSession } from './conveyor/lease-reaper.mjs';
+import { readField } from './backlog/frontmatter.mjs';
 
 // #2560 — `--scope=a,b,c` → a normalized, repo-qualified array (empty when the flag is absent/blank).
 const parseScopeFlag = (v) => (typeof v === 'string' && v ? normScope(v.split(',')) : []);
@@ -700,6 +707,68 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
   return false; // a LIVE lease held by another session — this lane is taken, even with --force
 }
 
+// #2748 — the acquire-native reaper pass. Reclaims a PROVABLY-DEAD lease in `repo`'s pool before a fresh
+// acquire selects a lane. "Provably dead" = a POSITIVE death signal, never absence-of-activity (the #2267
+// data-loss hazard): the lease's item PR is merged/closed (the live gh axis), OR the item card reads
+// `status: resolved` on origin/main (the offline axis — resolution is MONOTONIC, so a stale local read only
+// MISSES a reap, never wrongly reaps). The reap VERDICT is the standalone reaper's own pure `classifyReap`
+// (via `reapPlan`), so this backstop and the periodic reaper can never disagree — and reserved (permanent
+// memory) leases are excluded by `classifyReap` on every axis. TTL-stale reclamation is deliberately LEFT to
+// acquire's existing path (`tryClaimLane` reclaims a >TTL lease for THIS session, unchanged) — this pass only
+// acts on the NEW terminal axes, so it never changes TTL semantics. Everything is best-effort: a gh/git/fs
+// hiccup degrades the axis and leaves the lease in place, never blocks the acquire. Returns the reaped indices.
+function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
+  if (flags['no-reap']) return [];
+  const candidates = [];
+  for (const n of existingLanes(repo)) {
+    const dir = laneDir(repo, n);
+    const lease = readLease(dir);
+    if (lease) candidates.push({ lane: n, dir, lease });
+  }
+  if (candidates.length === 0) return [];
+  // PR-terminal axis (best-effort, one `gh pr list`): a merged/closed PR whose head ref `lane/<num>-*` maps
+  // to a lease's item is a positive death signal. Degrades to OFF (null) if gh is absent / not a GitHub repo.
+  let prStates = null;
+  try {
+    // `timeout` bounds the worst case: a slow/hung/unauthenticated gh must NEVER stall a dispatch acquire —
+    // it degrades the PR axis to OFF (the offline item-resolved axis + TTL still apply), never blocks.
+    const out = execFileSync('gh', ['pr', 'list', '--state', 'all', '--limit', '400', '--json', 'number,state,mergedAt,headRefName'], { cwd: repo.referencePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000 });
+    prStates = prStatesFromList(JSON.parse(out));
+  } catch { prStates = null; }
+  // Item-resolved axis (OFFLINE): read the pool's origin/<branch> backlog listing ONCE, then answer
+  // "is item <num>'s card status:resolved?" frontmatter-strict. No fetch — a stale read is safe (monotonic).
+  const backlogListing = (tryGit(['ls-tree', '-r', '--name-only', `origin/${repo.branch}`, '--', 'backlog/'], repo.referencePath) || '').split('\n').filter(Boolean);
+  const itemResolvedOnMain = (num) => {
+    if (!num) return false;
+    const path = backlogListing.find((p) => new RegExp(`^backlog/0*${num}-`).test(p));
+    if (!path) return false;
+    const body = tryGit(['show', `origin/${repo.branch}:${path}`], repo.referencePath);
+    return body != null && readField(body, 'status') === 'resolved';
+  };
+  const signalsFor = (c) => {
+    const num = itemNumFromSession(c.lease?.session);
+    let prState = prStates && num ? (prStates.get(num) ?? null) : null;
+    // Item-resolved is a terminal death signal too — but NEVER override a live (open) PR, mirroring the
+    // reaper's "open wins" safety (a same-number retry PR still in flight must not be reaped, #2267).
+    if (prState !== 'open' && prState !== 'merged' && prState !== 'closed' && itemResolvedOnMain(num)) prState = 'merged';
+    return { prState, pidAlive: null }; // the pid axis is dormant under today's lease schema (see lease-reaper.pidAliveForLease)
+  };
+  const { reap } = reapPlan(candidates, { nowMs, ttlMs, signalsFor });
+  const reaped = [];
+  for (const c of reap) {
+    // Only the NEW terminal axes here — leave 'ttl-stale' to acquire's existing reclaim path. 'reserved' can
+    // never appear in `reap` (classifyReap short-circuits it), so no memory lane is ever collected.
+    if (c.reason !== 'pr-merged' && c.reason !== 'pr-closed') continue;
+    try {
+      rmSync(LEASE_MARKER(c.dir), { force: true });
+      unmapLanes(repo, [c.lane]); // a reaped ghost no longer renders its dead item (#2139)
+      log(`  reaped lane-${c.lane} before acquire (${c.reason}; was ${describeLease(c.lease)}) — ghost lease reclaimed (#2748)`);
+      reaped.push(c.lane);
+    } catch { /* best-effort — a failed reclaim just leaves the lane held (acquire falls through to the next free lane) */ }
+  }
+  return reaped;
+}
+
 function cmdAcquire(repo) {
   // #2386 — `--base` and `--no-reset` are mutually exclusive: `--base=<ref>` means "reset this clone to <ref>",
   // and `--no-reset` skips the reset entirely. Honoring both would skip the reset yet still report the base as
@@ -719,6 +788,12 @@ function cmdAcquire(repo) {
   const session = defaultSession();
   const nowMs = Date.now();
   const ttlMs = ttlMsFromFlags();
+  // #2748 — REAPER BACKSTOP, native to acquire. BEFORE selecting a lane, reclaim any PROVABLY-DEAD ghost lease
+  // in this pool — a lease whose item has merged/resolved, or whose PR is merged/closed — so a finished-but-
+  // -unreleased lane (a dead agent's lingering lease that the drain's release-on-land could NOT clear, because
+  // no land event ever fired for it) never blocks a fresh dispatch. This makes the pool ACT on the exact ghost
+  // the conveyor board's health scan only FLAGS (#2616/#2700). Best-effort; `--no-reap` opts out (tests).
+  reapDeadLeasesInPool(repo, nowMs, ttlMs);
   // #2560 — the ADVISORY predicted file-scope this acquire declares (empty when no `--scope`). Persisted into the
   // marker (via tryClaimLane) AND used for the strictly-non-blocking overlap warning below. It NEVER gates.
   const declaredScope = parseScopeFlag(flags.scope);
@@ -918,12 +993,30 @@ function assertReleaseReservedScoped() {
 // `--all`. Reserved (permanent memory) leases are always skipped — a sweep never un-reserves.
 function cmdReleaseAllPools() {
   const session = flags.session || process.env.LANE_SESSION || null;
-  if (!session) {
-    fail('release --all-pools requires --session=<slug> — it releases THAT session\'s leases in every pool; a blanket cross-pool release is deliberately not offered');
+  // #2748 — a by-ITEM selector generalizes the #2667 by-session sweep so the DRAIN can release an item's lease
+  // across every pool at LAND WITHOUT knowing the exact session slug: it matches every lease whose session
+  // ENCODES this item number (`conveyor-<num>` / `fix-<num>` / `prepare-<num>` — the same trailing-number rule
+  // the reaper's `itemNumFromSession` uses), compared NUMERICALLY so `--item=99` matches `conveyor-99`. This is
+  // the universal cleanup key the drain owns: it already has the item number at land (from the queued manifest),
+  // for every land path (conveyor / solo /pr / /finish), whereas the exact session slug it does not.
+  const itemFlag = flags.item !== undefined ? String(flags.item).trim() : null;
+  const wantItem = itemFlag != null && itemFlag !== '' ? Number(itemFlag) : null;
+  if (!session && wantItem == null) {
+    fail('release --all-pools requires --session=<slug> or --item=<num> — it releases THAT session\'s (or item\'s) leases in every pool; a blanket cross-pool release is deliberately not offered');
+  }
+  if (session && wantItem != null) {
+    fail('release --all-pools takes --session OR --item, not both — pick the one selector for the targeted cross-pool release');
   }
   if (flags.all) {
-    fail('release --all-pools --all is not allowed — cross-pool release is BY SESSION (targeted); pass --session=<slug> alone');
+    fail('release --all-pools --all is not allowed — cross-pool release is BY SESSION / BY ITEM (targeted); pass --session=<slug> or --item=<num> alone');
   }
+  // The selector predicate: by exact session (#2667) or by encoded item number (#2748).
+  const selects = (lease) => {
+    if (session) return leaseOwnedBy(lease, session); // only THIS session's leases — never a foreign one
+    const n = itemNumFromSession(lease.session);       // by-item: the lease's session encodes this item number
+    return n != null && Number(n) === wantItem;
+  };
+  const selectorLabel = session ? `session "${session}"` : `item #${wantItem}`;
   const pools = existingPools();
   const perPool = [];
   let released = 0;
@@ -934,7 +1027,7 @@ function cmdReleaseAllPools() {
       const dir = join(poolDir, `lane-${n}`);
       const lease = readLease(dir);
       if (!lease) continue;
-      if (!leaseOwnedBy(lease, session)) continue; // only THIS session's leases — never a foreign one
+      if (!selects(lease)) continue; // only the selected session's / item's leases — never a foreign one
       if (isReservedLease(lease)) {
         // A reserved lane owned by this session is still off-limits to a bulk sweep (its whole point is to
         // survive routine release); un-reserving stays the deliberate single-lane `--release-reserved` act.
@@ -948,8 +1041,8 @@ function cmdReleaseAllPools() {
     }
     if (lanes.length) perPool.push({ pool: name, lanes });
   }
-  if (released === 0) log(`  no leases held by session "${session}" in any pool (${pools.length} pool(s) scanned)`);
-  if (flags.json) process.stdout.write(JSON.stringify({ session, released, pools: perPool }, null, 2) + '\n');
+  if (released === 0) log(`  no leases held by ${selectorLabel} in any pool (${pools.length} pool(s) scanned)`);
+  if (flags.json) process.stdout.write(JSON.stringify({ session: session || null, item: wantItem, released, pools: perPool }, null, 2) + '\n');
 }
 
 function cmdRelease(repo) {
