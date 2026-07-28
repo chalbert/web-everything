@@ -832,6 +832,20 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   for (const s of Array.isArray(health?.stalled) ? health.stalled : []) {
     notes.push({ kind: 'lane-stalled', num: s.num, lane: s.lane, idleS: s.idleS, text: `⚠ lane-${s.lane} (#${s.num}) stalled ${s.idleS}s — the lease-reaper reclaims its lease once it passes the reaper TTL; investigate if it recurs` });
   }
+  // DEGRADED-INFRA — the clustered outage signal #2661 collapsed onto `state.health.degradedInfra`: ONE entry per
+  // shared external cause ({ cause, count, members }), so several lanes down on the SAME outage read as ONE event,
+  // not N alarms. Surface ONE note PER CLUSTER (cause + affected-lane count) — distinct from the per-lane
+  // `lane-stalled` note above: an infra-blocked lane is NOT a stall (its work is pushed + auto-retrying, #2659),
+  // and the whole point of the cluster is that the operator sees the outage once, not once per waiting lane. This
+  // is the tick-note half of the same signal the status board already renders as its #2660 OUTAGE banner. Purely
+  // ADDITIVE — degradedInfra does not flip `verdict`, so this never changes idle-stop or the health warn.
+  for (const c of Array.isArray(health?.degradedInfra) ? health.degradedInfra : []) {
+    if (!c || !c.cause) continue;
+    // #2661 guarantees a numeric `count`; fall back to the members length (then 0) so a malformed cluster never
+    // renders "undefined lanes" — defensive only, the input contract makes the fallback unreachable today.
+    const count = Number.isFinite(c.count) ? c.count : (Array.isArray(c.members) ? c.members.length : 0);
+    notes.push({ kind: 'degraded-infra', cause: c.cause, count, text: `⚠ outside dependency degraded — ${count} lane${count === 1 ? '' : 's'} waiting on ${c.cause} (auto-retrying)` });
+  }
 
   const statusLine = buildStatusLine({
     queue, lanes, prs, health, infraBlocked, liveBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
