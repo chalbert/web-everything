@@ -2,8 +2,11 @@
 bornAs: xkypxl6
 kind: epic
 parent: "2505"
-status: open
+status: resolved
 dateOpened: "2026-07-14"
+dateResolved: "2026-07-28"
+graduatedTo: none
+resolutionNote: "all 4 child stories resolved (write-seam+resolve, claim/release, priority, launch decision); the UI write half is delivered."
 tags: [plateau-loop, console, backlog-ui]
 ---
 

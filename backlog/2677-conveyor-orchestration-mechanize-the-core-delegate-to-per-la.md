@@ -2,8 +2,11 @@
 bornAs: x4ttbgl
 kind: epic
 parent: "2612"
-status: open
+status: resolved
 dateOpened: "2026-07-26"
+dateResolved: "2026-07-28"
+graduatedTo: none
+resolutionNote: "all 5 child slices resolved (mechanized tick core, ghost-release+health wiring, boundary decision, per-lane runner, serial-loop retirement); the epic's endpoint is reached."
 relatedTo: ["2607", "2609"]
 tags: [conveyor, orchestration, throughput, delivery, mechanics, epic]
 ---
