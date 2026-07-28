@@ -16,6 +16,7 @@
  * Usage:
  *   node scripts/backlog.mjs claim   <NNN> [--as=preparing] [--force]  # open    → active (or preparing, for /prepare) + dateStarted=today; prints rename slug. Refuses if the item's own file is dirty (claim-first guard); --force overrides
  *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X] [--codified-to=Y] [--force]  # active → resolved + dateResolved=today (+ graduatedTo); a kind:decision REQUIRES --codified-to=<doc#anchor|one-off> (#911 gate); an epic with open children is refused unless --force (#658 no-open-slice guard)
+ *   node scripts/backlog.mjs resolve-parent <childNNN> [--json]  # #2752 drain-side ON-LAND pass: if <childNNN>'s parent EPIC now has every parent:-edge child resolved AND no judgment marker, splice it resolved+graduatedTo=none (mechanizes /resolve-on-last-child); a blocked/untriaged tail ESCALATEs (never auto-closes); a standing program / open-children / non-epic is a no-op. EDIT-ONLY — the caller lands + publishes it
  *   node scripts/backlog.mjs release <NNN>                       # active|preparing → open (abandon/redirect; stamps untouched)
  *   node scripts/backlog.mjs retype  <NNN> [--to=<kind>] [--size=N] [--status=parked]  # SANCTIONED pack-phase flag-fix — retype a mis-flagged item / bump size / park it through the CLI instead of a raw primary-tree Edit (no LANE_GUARD_OFF). Frontmatter-only (#2123)
  *   node scripts/backlog.mjs yield    <NNN-slug>                 # move a LOCAL-ONLY NNN collision to the next free number (the guard's "a new item takes the next free number; yield this one"). Refuses a git-tracked file — NNN is immutable
@@ -35,6 +36,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { applyTransition, applySettle, readField, setFrontmatterField, removeFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
+import { planEpicResolveOnLand, hasBlockedBy } from './backlog/epic-resolve.mjs';
 import { parseCostTokens, formatCostTokens } from './backlog/cost-rates.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { nextHash, normalizeId, idFromName, isHash, slugFromName } from './backlog/id.mjs';
@@ -44,7 +46,7 @@ import { parseQueued, emptyQueuedState, isQueued, queuedNums, addQueued, removeQ
 import { parseHolds, emptyHoldState, isHeld, heldBy, heldNums, addHold, removeHold, pruneExpired as pruneHolds, leaseUntilIso, serializeHolds, DEFAULT_LEASE_MINUTES } from './readiness/prepare-hold-state.mjs';
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
-import { numberPendingHashes } from './lane-drain.mjs';
+import { numberPendingHashes, landedNumberFor } from './lane-drain.mjs';
 import { laneGuardDecision, resolveReal } from './guard-lane.mjs';
 import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig, orderQueueDetailed } from './lib/build-queue.mjs';
 
@@ -111,9 +113,11 @@ function writeBacklogMd(abs, rel, content) {
   // three `cost` stamps left uncommitted in primary). EVERY card-content mutation
   // (cost/claim/resolve/release/scaffold/settle/retype/yield/prepare-stamp) funnels through this one
   // writer; the drain's JIT-numbering + `number-stranded` use a SEPARATE writer (numberPendingHashes) and
-  // are intentionally unaffected. Reuse guard-lane's realpath classification so there is a single source of
-  // truth for "is this path a primary checkout"; ignore its message (that guard's LANE_GUARD_OFF escape does
-  // NOT apply here — #2219/#2339 ratified nothing ever splices to primary, so this denial has no override).
+  // are intentionally unaffected — as is the drain-side on-land `resolve-parent` splice (#2752), which
+  // writes via writeBacklogMdUnguarded below for the SAME reason (a mechanized lander runs on primary, not
+  // a session). Reuse guard-lane's realpath classification so there is a single source of truth for "is
+  // this path a primary checkout"; ignore its message (that guard's LANE_GUARD_OFF escape does NOT apply
+  // here — #2219/#2339 ratified nothing ever splices to primary, so this denial has no override).
   if (laneGuardDecision(resolveReal(abs), ROOT)) {
     die(`backlog item-mutation BLOCKED — "${rel}" resolves under the shared PRIMARY checkout. Every card ` +
         `mutation (cost/claim/resolve/release/scaffold/settle/retype/yield/prepare-stamp) must run in a LANE ` +
@@ -122,6 +126,20 @@ function writeBacklogMd(abs, rel, content) {
         `(workflow/subagent/cron/headless) are covered too, not just the PreToolUse(Bash) hook. cd into a ` +
         `lane clone (~/workspace/.lanes/<repo>/lane-N) and run it there. There is no override.`);
   }
+  writeBacklogMdUnguarded(abs, rel, content);
+}
+
+/**
+ * The card writer WITHOUT the primary-checkout lane guard — the sanctioned drain-side on-land splice path
+ * (mirrors why `numberPendingHashes` uses its own writer). The lane guard exists to keep INTERACTIVE /
+ * session card mutations out of the primary tree (#2302/#104); the mechanized LANDER is the deliberate
+ * carve-out — it runs ON primary, post-land, syncs to origin/main, splices a deterministic frontmatter-only
+ * change, and publishes via the same gated transport pr-land uses. So `resolve-parent` (#2752) writes
+ * through here, exactly as JIT-numbering does. Still runs the locus-prefix content scan — that is
+ * content-hygiene (#883), orthogonal to lane isolation, and a frontmatter-only splice never trips it, so it
+ * is a cheap belt-and-braces check, never a blocker on the resolve path.
+ */
+function writeBacklogMdUnguarded(abs, rel, content) {
   const findings = scanRepoLocusPrefixes([{ file: rel, content }]);
   if (findings.length) {
     const { count, sample } = findings[0];
@@ -166,6 +184,10 @@ function openChildrenOf(padded) {
   }
   return open;
 }
+
+// The epic-resolve-on-last-child DECISION (#2752) is a pure core — it lives in ./backlog/epic-resolve.mjs
+// (mirroring frontmatter.mjs / scaffold.mjs), unit-tested with no CLI; the `resolve-parent` verb below wires
+// fs + the splice around it.
 
 /**
  * Diagnose a not-found item before dying. A missing local file has two very different causes — the item
@@ -1023,8 +1045,77 @@ function numberStranded() {
   else console.log(`number-stranded: numbered ${r.assigned.length} (${r.committed ? 'committed' : 'NOT committed'}) — ${summary}`);
 }
 
+/**
+ * `resolve-parent <childRef>` (#2752) — the drain-side ON-LAND epic-resolve pass, mechanizing what the
+ * `/resolve` skill does by hand when an epic's last child closes. Given a child that JUST resolved on land
+ * (its resolve is already on this checkout — the caller `syncMain`s first), read its `parent` edge and the
+ * parent epic's signals, run the pure {@link planEpicResolveOnLand} verdict, and:
+ *   - `resolve`  → splice the epic to `resolved` + `graduatedTo: none` (the same transition `/resolve` runs),
+ *                  writing via the UNGUARDED drain-side writer (this runs on primary, post-land — the same
+ *                  carve-out JIT-numbering uses). Emits `{ action:'resolved', epic, file }`.
+ *   - `escalate` → writes NOTHING; emits `{ action:'escalate', epic, reason }` so the caller (pr-watch) can
+ *                  surface it — the epic's blocked/untriaged tail needs a human `/resolve`, never an auto-close.
+ *   - `skip`     → writes nothing; emits `{ action:'skip', reason }` (no parent, not-an-epic, already
+ *                  resolved, a standing program, or still has open children — the common "not the last child").
+ * EDIT-ONLY, like every verb here — it never commits or publishes; the caller lands the splice via the
+ * sanctioned gated transport (pr-land / push-if-green), exactly as the drain lands JIT-numbering.
+ * Idempotent: a second call after the epic is already resolved returns `skip: already-resolved`, so two
+ * sibling lands racing the same epic never double-write (and a ff-only publish drops the loser's push).
+ */
+function resolveParent() {
+  // A landed item is NUMBERED on main; the conveyor may hand us its birth-hash (a provisional `xNNNNNN`
+  // dispatched pre-numbering, #2288). If the raw ref is a hash with no matching file on disk, map it to the
+  // NNN it landed as via the `bornAs` proof-of-land (#2392) before resolving the file — so the on-land pass
+  // works whether the child landed as a number or was JIT-numbered at land. A numeric ref falls straight through.
+  let childRef = positional[0];
+  const rawId = idFromName(childRef || '');
+  if (rawId && isHash(rawId) && files().every((f) => !f.startsWith(`${rawId}-`))) {
+    const nnn = landedNumberFor(rawId, ROOT);
+    if (nnn) childRef = nnn;
+  }
+  const childFile = resolveFile(childRef);
+  const childAbs = join(DIR, childFile);
+  const childContent = readFileSync(childAbs, 'utf8');
+  const parentRef = readField(childContent, 'parent');
+
+  // Resolve the parent epic's file + signals (best-effort — a missing/re-pointed parent is a `skip`, never a throw).
+  let parentFile = null, parentContent = null, parentPadded = null;
+  if (parentRef) {
+    parentPadded = normalizeId(idFromName(parentRef) || parentRef);
+    const matches = files().filter((f) => f.startsWith(`${parentPadded}-`));
+    if (matches.length === 1) { parentFile = matches[0]; parentContent = readFileSync(join(DIR, parentFile), 'utf8'); }
+  }
+  const verdict = planEpicResolveOnLand({
+    hasParent: !!parentRef,
+    parentFound: !!parentContent,
+    kind: parentContent ? readField(parentContent, 'kind') : undefined,
+    status: parentContent ? (readField(parentContent, 'status') || 'open') : undefined,
+    hasBlockedBy: parentContent ? hasBlockedBy(parentContent) : false,
+    childlessReason: parentContent ? readField(parentContent, 'childlessReason') : undefined,
+    ongoing: parentContent ? readField(parentContent, 'ongoing') === 'true' : false,
+    openChildrenCount: parentPadded ? openChildrenOf(parentPadded).length : 0,
+  });
+  const epicId = parentFile ? parentFile.replace(/\.md$/, '') : (parentRef ? `#${parentPadded}` : null);
+
+  if (verdict.action === 'resolve') {
+    const rel = `backlog/${parentFile}`;
+    const res = applyTransition(parentContent, 'resolve', { today: today(), graduatedTo: 'none' });
+    if (res.error) die(`resolve-parent: epic ${epicId} — ${res.error}`);
+    writeBacklogMdUnguarded(join(DIR, parentFile), rel, res.content);
+    ok({ verb: 'resolve-parent', action: 'resolved', epic: epicId, file: rel, child: childFile.replace(/\.md$/, ''), reason: verdict.reason },
+      `${GRN}✓ resolved epic${RST} ${epicId} ${DIM}→ resolved (graduatedTo none) — last child ${idFromName(childFile)} landed (#2752)${RST}`);
+  }
+  if (verdict.action === 'escalate') {
+    ok({ verb: 'resolve-parent', action: 'escalate', epic: epicId, child: childFile.replace(/\.md$/, ''), reason: verdict.reason },
+      `${YEL}⚠ epic ${epicId} needs a human /resolve${RST} ${DIM}— its last tracked child landed but it carries a judgment marker (${verdict.reason}); NOT auto-closing over a possibly-undelivered tail (#2752)${RST}`);
+  }
+  ok({ verb: 'resolve-parent', action: 'skip', epic: epicId, child: childFile.replace(/\.md$/, ''), reason: verdict.reason },
+    `${DIM}resolve-parent: nothing to do (${verdict.reason})${RST}`);
+}
+
 switch (verb) {
   case 'claim': case 'resolve': case 'release': transition(verb); break;
+  case 'resolve-parent': resolveParent(); break;
   case 'number-stranded': numberStranded(); break;
   case 'retype': retype(); break;
   case 'prioritize': prioritize(); break;
@@ -1050,6 +1141,7 @@ switch (verb) {
     console.error(`${BLD}backlog.mjs${RST} — mechanical backlog-status CLI\n` +
       `  ${GRN}claim${RST} <NNN> [--as=preparing] [--force]   open → active (or preparing, /prepare) + dateStarted; refuses on a dirty item file (claim-first), --force overrides\n` +
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X] [--codified-to=Y] [--force]   active → resolved + dateResolved (decision REQUIRES --codified-to=<doc#anchor|one-off>; an epic with open children is refused unless --force)\n` +
+      `  ${GRN}resolve-parent${RST} <childNNN>   #2752 on-land: auto-resolve the child's parent EPIC iff every parent:-edge child is resolved + no judgment marker (else escalate/no-op); EDIT-ONLY\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
       `  ${GRN}retype${RST} <NNN> [--to=story|epic|task|decision] [--size=N] [--status=parked]   sanctioned pack-phase flag-fix (no LANE_GUARD_OFF); frontmatter-only\n` +
       `  ${GRN}prioritize${RST} <NNN> [--to=low|--clear]   set or clear the item's \`priority\` frontmatter (the field readiness/batch ranks by); frontmatter-only\n` +
