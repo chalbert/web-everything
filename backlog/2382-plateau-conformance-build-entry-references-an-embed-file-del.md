@@ -1,7 +1,9 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-09"
+dateResolved: "2026-07-27"
+resolutionNote: "Fixed on plateau-app main by 5d6cff2 (#2507): plateau-app:conformance.html entry repointed from the deleted plateau-app:src/conformance-engine/conformanceEmbed.ts to the extracted plateau-app:packages/core/src/conformance-engine/conformanceEmbed.ts (created by #2341, 1b78f55). Build no longer fails resolving the entry. Same break as #2511 (older plateau: alias); the module now exists on main."
 tags: []
 scope:
   - plateau:conformance.html
