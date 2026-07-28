@@ -69,3 +69,33 @@ describe('parallel-execute workflow — #2429 self-excluding pr-land wait', () =
     expect(SRC).not.toMatch(/pgrep\s+-f\s+["'][^"'\n]*pr-land/);
   });
 });
+
+describe('parallel-execute workflow — #2478/#2216 Finalize label reconcile', () => {
+  it('collects every OPEN PR a lane left labelled:false into a reconcile set', () => {
+    expect(SRC).toMatch(/#2478/);
+    expect(SRC).toMatch(/#2216/);
+    expect(SRC).toMatch(/const toReconcile\s*=/);
+    // detection: an opened PR (has a pr number) the lane could NOT label (labelled:false / unknown)
+    expect(SRC).toMatch(/p\.pr\s*&&\s*!p\.labelled/);
+  });
+
+  it('has a Finalize label-reconcile agent step that labels the now-green ones via pr-land --label-on-green', () => {
+    expect(SRC).toMatch(/finalize:label-reconcile/);
+    expect(SRC).toMatch(/LABEL RECONCILE/);
+    // it uses the pure-producer label path (labels, never merges) — not a merge/drain
+    expect(SRC).toMatch(/--label-on-green/);
+  });
+
+  it('keeps Finalize a pure producer — the reconcile never merges, integrates, or launches a drain', () => {
+    // the reconcile prompt must forbid the landing ops (the #2183 producer contract holds through the fix)
+    expect(SRC).toMatch(/Do NOT merge, do NOT integrate, do NOT launch a drain/);
+  });
+
+  it('carries a still-unlabelled (not-green) PR as a definite carried-for-label outcome for /resume — never a silent drop', () => {
+    expect(SRC).toMatch(/carried-for-label/);
+    expect(SRC).toMatch(/const carriedForLabel\s*=/);
+    // both outcomes ride out in the return object so /resume can pick up the strand
+    expect(SRC).toMatch(/reconciledLabels,/);
+    expect(SRC).toMatch(/carriedForLabel,/);
+  });
+});
