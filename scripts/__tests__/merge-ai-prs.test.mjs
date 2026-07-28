@@ -1818,4 +1818,43 @@ describe('#2417 — cross-pass cache reuses unchanged-SHA reads under --watch', 
     await run([{ repo: 'we', number: 1, sha: null }]);
     expect(fetches).toBe(2); // no SHA ⇒ cannot prove unchanged ⇒ re-fetch each pass
   });
+
+  it('does NOT cache an error-path (degraded) read — the next pass re-fetches and self-heals', async () => {
+    // #2417 review — a swallowed gh error yields a spurious `{ commits: [], degraded: true }`. Even though the
+    // head SHA is UNCHANGED, that degraded read must not latch: caching it would serve the empty/degraded read
+    // for the whole head-SHA lifetime under `--watch` instead of self-healing when gh recovers next pass.
+    const cache = new Map();
+    let ghUp = false; // gh is DOWN on pass 1 (throws → degraded), UP from pass 2
+    let fetches = 0;
+    const run = (prs) => fetchPrReadsCached(prs, {
+      cache,
+      keyOf: (p) => `${p.repo}::${p.number}`,
+      shaOf: (p) => p.sha,
+      isDegraded: (v) => !!v?.degraded,
+      fetchOne: async () => {
+        fetches++;
+        return ghUp ? { commits: ['c1'], degraded: false } : { commits: [], degraded: true };
+      },
+    });
+    const pr = [{ repo: 'we', number: 1, sha: 'aaa' }]; // SHA is stable across all three passes
+
+    // Pass 1 (gh down): fetched, degraded → used this pass but NOT cached.
+    const p1 = await run(pr);
+    expect(fetches).toBe(1);
+    expect(p1.get('we::1').value).toEqual({ commits: [], degraded: true }); // best-effort value THIS pass
+    expect(cache.has('we::1')).toBe(false);                                 // degraded read was NOT cached
+
+    // Pass 2 (gh recovered): unchanged SHA still RE-FETCHES (the degraded read never latched) and self-heals.
+    ghUp = true;
+    const p2 = await run(pr);
+    expect(fetches).toBe(2);                                                // re-fetched despite unchanged SHA
+    expect(p2.get('we::1').cached).toBe(false);
+    expect(p2.get('we::1').value).toEqual({ commits: ['c1'], degraded: false });
+    expect(cache.has('we::1')).toBe(true);                                  // the good read IS cached now
+
+    // Pass 3 (still up, unchanged SHA): NOW served from cache (a genuine successful read latches correctly).
+    const p3 = await run(pr);
+    expect(fetches).toBe(2);                                                // no new fetch — cache hit
+    expect(p3.get('we::1').cached).toBe(true);
+  });
 });

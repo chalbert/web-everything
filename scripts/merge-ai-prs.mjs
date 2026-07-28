@@ -1225,9 +1225,13 @@ export async function mapWithConcurrency(items, limit, fn) {
  * supplied by the caller (the sweep wires them to gh), so the cache + fan-out is unit-testable with a fetch
  * counter, proving an unchanged-SHA PR is NOT re-fetched on a second pass (the #2417 acceptance).
  *
+ * #2417 review — optional `isDegraded(value)` guards the cross-pass cache against LATCHING an error-path read.
+ * When it returns truthy (a swallowed gh error left a spurious `[]`/`null`), the read is used for THIS pass but
+ * NOT cached, so the next pass re-fetches instead of serving the degraded read for the whole head-SHA lifetime.
+ *
  * @returns {Promise<Map<string,{sha:string|null,value:any,cached:boolean}>>} key → the (possibly cached) read.
  */
-export async function fetchPrReadsCached(prs, { cache, keyOf, shaOf, fetchOne, concurrency = 8 } = {}) {
+export async function fetchPrReadsCached(prs, { cache, keyOf, shaOf, fetchOne, isDegraded, concurrency = 8 } = {}) {
   const present = new Set();
   const entries = await mapWithConcurrency(prs, concurrency, async (p) => {
     const key = keyOf(p);
@@ -1236,7 +1240,12 @@ export async function fetchPrReadsCached(prs, { cache, keyOf, shaOf, fetchOne, c
     const hit = cache.get(key);
     if (hit && sha != null && hit.sha === sha) return [key, { sha, value: hit.value, cached: true }];
     const value = await fetchOne(p);
-    cache.set(key, { sha, value });
+    // #2417 review — only cache a GENUINELY-SUCCESSFUL read. When `isDegraded(value)` (a swallowed gh error left a
+    // spurious `[]` commits / `null` manifest), skip `cache.set` so this pass still USES the best-effort value but
+    // the next pass RE-FETCHES — otherwise a transient failure latches a degraded read for the head-SHA lifetime
+    // (a latched-liveness regression under `--watch`). Safety is unaffected: the degraded value is the same
+    // conservative no-op it was before; only its persistence changes.
+    if (!(typeof isDegraded === 'function' && isDegraded(value))) cache.set(key, { sha, value });
     return [key, { sha, value, cached: false }];
   });
   for (const k of [...cache.keys()]) if (!present.has(k)) cache.delete(k); // evict PRs no longer in this pass
@@ -1409,11 +1418,15 @@ async function runCli() {
   // `.lane-manifest.json` off the head ref for lanes queued BEFORE the cutover. Only a WE PR carries one; an
   // orphan/impl PR has none → null → always ready (the legacy unordered behaviour). Best-effort throughout: a
   // fetch/parse miss degrades to no-manifest, never throws.
+  // #2417 review — returns `{ manifest, degraded }`. `degraded:true` means the gh read THREW (a swallowed
+  // transient failure), NOT a confirmed "no manifest" — so the caller can decline to cache the spurious null and
+  // re-fetch next `--watch` pass instead of latching a degraded read for the head-SHA lifetime. A successful read
+  // that legitimately finds no manifest block returns `{ manifest: null, degraded: false }` (a genuine answer).
   const readManifestFromPrBody = async (repo, headRef) => {
     try {
       const { stdout } = await execFileP('gh', ['pr', 'list', '--head', headRef, '--state', 'open', ...repoFlag(repo), '--json', 'body'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-      return extractManifestFromBody(JSON.parse(stdout || '[]')?.[0]?.body);
-    } catch { return null; } // gh absent / no open PR for the ref / no block → fall through to the ref file
+      return { manifest: extractManifestFromBody(JSON.parse(stdout || '[]')?.[0]?.body), degraded: false };
+    } catch { return { manifest: null, degraded: true }; } // gh threw → degraded → fall through to the ref file
   };
   // #2417 — the LOCAL legacy git-fetch fallback (below) writes/reads `FETCH_HEAD`, which is process-global: two
   // concurrent `git fetch` in the same clone would clobber each other's `FETCH_HEAD`. So it runs under a mutex —
@@ -1431,10 +1444,14 @@ async function runCli() {
     }
     return null;
   });
+  // #2417 review — returns `{ manifest, degraded }`. `degraded:true` marks a null that came from a swallowed gh
+  // error (a transient failure we couldn't distinguish from truth), so `fetchPrReadsCached` skips caching it and
+  // the next `--watch` pass re-fetches instead of latching the degraded read for the head-SHA lifetime. A null
+  // from a SUCCESSFUL read (no manifest on the ref — the common orphan/impl case) is `degraded:false`: cache it.
   const readPrManifest = async (repo, headRef) => {
-    if (!headRef) return null;
+    if (!headRef) return { manifest: null, degraded: false };
     const fromPr = await readManifestFromPrBody(repo, headRef);
-    if (fromPr) return fromPr;
+    if (fromPr.manifest) return { manifest: fromPr.manifest, degraded: false };
     // ── Legacy fallback: the tree-committed manifest (lanes queued before the PR-body cutover). ──
     if (!isLocalRepo(repo)) {
       // #2257 — a remote-repo PR has no local clone to `git show`; read the manifest off its head ref via the
@@ -1445,11 +1462,15 @@ async function runCli() {
       try {
         const { stdout } = await execFileP('gh', remoteManifestApiArgs(repo, headRef), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
         const b64 = (stdout || '').trim();
-        if (b64) { const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); if (m && m.item != null) return m; }
-      } catch { /* no manifest on this ref */ }
-      return null;
+        if (b64) { const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); if (m && m.item != null) return { manifest: m, degraded: false }; }
+        return { manifest: null, degraded: false }; // API read SUCCEEDED → confirmed no manifest, not degraded
+      } catch { return { manifest: null, degraded: true }; } // API read threw → degraded → re-fetch next pass
     }
-    return await readLegacyLocalManifest(headRef);
+    const legacy = await readLegacyLocalManifest(headRef);
+    if (legacy) return { manifest: legacy, degraded: false };
+    // Local git fallback found nothing. Post-cutover lanes carry the manifest in the PR BODY (not the tree), so a
+    // null here after the PR-body gh read THREW is a spurious degrade — surface `fromPr.degraded` so it re-fetches.
+    return { manifest: null, degraded: fromPr.degraded };
   };
   // #2417 — a PR's HEAD SHA cache key. `gh pr list --json headRefOid` supplies it in the SAME list call (no
   // extra round-trip); a PR whose SHA is unchanged since the previous `--watch` pass reuses its cached reads.
@@ -1460,11 +1481,16 @@ async function runCli() {
   // unfiltered open-PR context, and the (possibly `--label`-scoped) merge-candidate sweep.
   const ctxReadCache = new Map();   // collectOpenPrContext: (repo, num, sha) → { manifest, commits }
   const sweepReadCache = new Map(); // the merge-candidate loop: (repo, num, sha) → { commits, manifest }
+  // #2417 review — returns `{ commits, degraded }`. `degraded:true` means the gh read THREW (a swallowed transient
+  // failure): the empty `[]` is a fallback, not a confirmed "no commits", so `fetchPrReadsCached` declines to cache
+  // it and re-fetches next `--watch` pass rather than latching an empty read for the head-SHA lifetime. Behaviour
+  // THIS pass is unchanged — the caller still sees `[]` (⇒ isAiGeneratedPr → false → skipped, never merged on
+  // missing data); a genuinely-empty successful read returns `{ commits: [], degraded: false }` and DOES cache.
   const fetchPrCommits = async (repo, num) => {
     try {
       const { stdout } = await execFileP('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json', 'commits'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-      return JSON.parse(stdout.trim() || '{}').commits || [];
-    } catch { return []; } // no commits ⇒ isAiGeneratedPr → false → skipped (never merged on missing data)
+      return { commits: JSON.parse(stdout.trim() || '{}').commits || [], degraded: false };
+    } catch { return { commits: [], degraded: true }; } // gh threw → degraded → re-fetch next pass
   };
 
   // #2683 — the per-PR IDEMPOTENCY probe for the merge-write critical section. Re-reads the PR's CURRENT state
@@ -1511,9 +1537,10 @@ async function runCli() {
       cache: ctxReadCache,
       keyOf: ({ repo, p }) => prCacheKey(repo, p.number),
       shaOf: ({ p }) => prHeadSha(p),
+      isDegraded: (v) => !!v?.degraded, // #2417 review — an error-path read is NOT cached (re-fetches next pass)
       fetchOne: async ({ repo, p }) => {
-        const [manifest, commits] = await Promise.all([readPrManifest(repo, p.headRefName), fetchPrCommits(repo, p.number)]);
-        return { manifest, commits };
+        const [manifestRes, commitsRes] = await Promise.all([readPrManifest(repo, p.headRefName), fetchPrCommits(repo, p.number)]);
+        return { manifest: manifestRes.manifest, commits: commitsRes.commits, degraded: manifestRes.degraded || commitsRes.degraded };
       },
     });
     for (const [repo, open] of listings) for (const p of open) {
@@ -1649,9 +1676,10 @@ async function runCli() {
     cache: sweepReadCache,
     keyOf: ({ repo, p }) => prCacheKey(repo, p.number),
     shaOf: ({ p }) => prHeadSha(p),
+    isDegraded: (v) => !!v?.degraded, // #2417 review — an error-path read is NOT cached (re-fetches next pass)
     fetchOne: async ({ repo, p }) => {
-      const [commits, manifest] = await Promise.all([fetchPrCommits(repo, p.number), readPrManifest(repo, p.headRefName)]);
-      return { commits, manifest };
+      const [commitsRes, manifestRes] = await Promise.all([fetchPrCommits(repo, p.number), readPrManifest(repo, p.headRefName)]);
+      return { commits: commitsRes.commits, manifest: manifestRes.manifest, degraded: commitsRes.degraded || manifestRes.degraded };
     },
   });
   for (const repo of REPOS) {
