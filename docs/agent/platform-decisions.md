@@ -75,7 +75,18 @@ the primary tree), `guard-bash.mjs` (PreToolUse Bash — an agent-typed direct `
 allowed; `MAIN_PUSH_OK=1` overrides), and a git `pre-push` hook for script-internal pushes (#2217). Ruled #2203
 after a `/workflow` scaffolded items + direct-pushed them to `main`, landing an ungated `check:standards` error
 that stalled the queue. (The one structural need — publishing scaffolded items so lanes can claim them — routes
-through a gated lane→PR, #2215, never a direct push.)
+through a gated lane→PR, #2215, never a direct push.) **4th arm (#2749, ratified 2026-07-28):** `guard-bash.mjs`
+also denies a **build that writes the shared primary tree** — an `npm run build`, an `fs`-writing generator
+script, or a redirect/`tee`/`sed -i` into a primary path, run at primary cwd. This closes the hole the
+Edit/Write-tool guard (`guard-lane.mjs`) never sees: a `node` script that writes the tree via `fs` bypasses the
+Edit/Write tools entirely. The backstop keys on the **tree-write**, never on session identity — so it is sound
+for *any* session (main or a delivery subagent; both build in a lane, never in the primary), and it cannot wedge
+a subagent's lane-scoped `check:standards` (which writes no primary tree). `MAIN_SESSION_BUILD_OK=1` is the loud
+sanctioned one-off escape, mirroring `MAIN_PUSH_OK` / `LANE_GUARD_OFF`. The un-script-decidable half —
+"this session is doing mechanical work it should have delegated" — has **no reliable ambient discriminator**
+(reported Bash cwd resets to primary between calls, #2335), so it stays judgment per
+[#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (#2607): enforced by absence (#2677) and
+a **warn** nudge, never a hard gate on an uncomputable predicate.
 
 ### Constellation placement {#constellation-placement}
 
