@@ -23,9 +23,9 @@ the ratified grammar + the taxonomy spec ([#2553]) + the visual/scale forks ([#2
 > committee reviewed every open child against it (2026-07-28) and
 > found most children still measured against v68 — several diverging from canon. Outcome: the seven build
 > slices were re-anchored off v68, two ([#2712], [#2714]) **reversed** where they contradicted canon, and the
-> unowned foundation was filed as new children — the card-grammar core [#x4jvp33], the token foundation
-> [#xzpkd8q], Lane pool [#x5njzar], header [#x8qkx4a], legend [#xgmio7d], center crossing/history [#xgcfeto],
-> cross-cutting behaviors [#x9hg7qz], and the baseline-retirement task [#xg4lsxj] (regen from the artifact,
+> unowned foundation was filed as new children — the card-grammar core [#2789], the token foundation
+> [#2795], Lane pool [#2790], header [#2791], legend [#2794], center crossing/history [#2793],
+> cross-cutting behaviors [#2792], and the baseline-retirement task [#2796] (regen from the artifact,
 > retire v68). Land the card-grammar + token foundations first.
 
 Sub-slices (split into stories as scheduled; two are already split out as children):

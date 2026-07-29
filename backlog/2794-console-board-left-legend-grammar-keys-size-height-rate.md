@@ -1,4 +1,5 @@
 ---
+bornAs: xgmio7d
 kind: story
 size: 2
 parent: "2555"
@@ -23,8 +24,8 @@ Render the canonical "How this board works" legend panel on the left rail. The c
   - `strips ‹›` — lanes that don't fit collapse — board never scrolls sideways
   (`legend-grammar-keys`)
 - **Size→height rate** — state the ~9 min/pt rule that maps size points to cell height, so the geometry is
-  legible (`legend-size-rate`). This is the human-readable half of the ruler [#x4jvp33]/center deliver.
-- Panel chrome matches the canonical panel grammar (grip · title · collapse · menu — shares [#x9hg7qz]).
+  legible (`legend-size-rate`). This is the human-readable half of the ruler [#2789]/center deliver.
+- Panel chrome matches the canonical panel grammar (grip · title · collapse · menu — shares [#2792]).
 
 ## Where the code goes (locus)
 `plateau-app:src/backlog-view/lane-board.ts` left-rail legend render.

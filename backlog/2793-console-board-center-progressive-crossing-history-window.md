@@ -1,9 +1,10 @@
 ---
+bornAs: xgcfeto
 kind: story
 size: 5
 parent: "2555"
 status: open
-blockedBy: ["x4jvp33"]
+blockedBy: ["2789"]
 dateOpened: "2026-07-28"
 tags: [plateau-loop, console, console-board, center, delivery-horizon, conveyor, canonical-2554, slice-2555]
 ---
@@ -27,7 +28,7 @@ crossing/history behavior has no owner.
 - **Delivered window** — the delivered pile sits directly on the active zone and extends up into a masked
   fade; windowed so it never grows unbounded (`center-delivered-window`).
 - **Greyed history** — merged/delivered cells above the horizon are demoted: greyed, low-attention,
-  single-line (`center-greyed-history`, reads [#x4jvp33] deliver state).
+  single-line (`center-greyed-history`, reads [#2789] deliver state).
 - **Idle-lane placeholder** — a lane with no active work shows the dashed idle-card, not an empty column
   (`center-idle-lane`).
 - **One horizon across all lanes** at a single fixed y (coordinate with [#2715] horizon label /

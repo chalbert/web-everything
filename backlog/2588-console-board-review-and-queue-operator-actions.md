@@ -75,7 +75,7 @@ not the superseded v68 baseline). Four minor items pin it fully on-spec:
   `⚡` leverage row. Add the (+) button and status tag (drag-onto-lane stays, but is not the only add path).
 - **Drag-fit color is transient, not a state color.** The green/amber dragover highlight must read as a
   transient cue, not the fixed state palette (green=delivered, amber=human). Prefer the canonical
-  primary-outline flash so it can't collide with `tokens-state-color-map` ([#xzpkd8q]).
+  primary-outline flash so it can't collide with `tokens-state-color-map` ([#2795]).
 - **One primary `.act` button (`card-action-button`).** The primary action stays a single blue icon-led `.act`
   button matching the state (e.g. "Review PR"); bounce / take-over are secondary **neutral-outlined** buttons.
 - Anchor acceptance to the canonical §6/#2554 ratified grammar (palette, card box, ready-queue), not only

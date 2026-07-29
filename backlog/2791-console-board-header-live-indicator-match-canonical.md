@@ -1,4 +1,5 @@
 ---
+bornAs: x8qkx4a
 kind: story
 size: 2
 parent: "2555"
@@ -16,7 +17,7 @@ Build the canonical header and the attention-strip live indicator. The committee
 - **Header left**: brand mark + wordmark, `Constellation / Plateau Loop` breadcrumb, and the subtitle
   ("the execution plan — click a build to inspect; map / gated / timeline fold below") (`header-brand-breadcrumb`).
 - **Header right pill cluster**: the `reference` pill (this board IS the state reference — see [#2715]), the
-  lane-count pill (`lanes N · X◧ Y⚠`), the zoom (`− +`) control, the **theme toggle** (reads [#xzpkd8q]
+  lane-count pill (`lanes N · X◧ Y⚠`), the zoom (`− +`) control, the **theme toggle** (reads [#2795]
   persistence), and the overflow `···` menu (`header-right-pills`).
 - **Live indicator**: the attention strip's right-aligned `live · updated just now` text with a green status
   dot; `aria-live` polite on the strip (`attn-live-indicator`).

@@ -40,5 +40,5 @@ The composer's first-glance face matches the **ratified** §6/#2554 composer gra
 `composer-lane-pr-foot` specKeys): KIND dropdown (default "story"), Title, two-up size + blockedBy, Create
 draft, the "files a born-open item" hint and "files via lane → PR · never writes main" footer. This is a
 structural/spec assertion against the ratified grammar (not a pixel diff against v68
-`plateau-app:tests/visual/baselines/board.png`), so it is checkable now and does not wait on the [#xg4lsxj]
+`plateau-app:tests/visual/baselines/board.png`), so it is checkable now and does not wait on the [#2796]
 baseline flip. Both themes; `plateau-app` `npm test` + `we:` `check:standards` pass.

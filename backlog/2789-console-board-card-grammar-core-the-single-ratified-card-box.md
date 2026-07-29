@@ -1,4 +1,5 @@
 ---
+bornAs: x4jvp33
 kind: story
 size: 5
 parent: "2555"
@@ -33,11 +34,11 @@ from. Left unbuilt, each downstream story invents its own card chrome and they d
   past the horizon), `human` (amber, "waiting on you"), `fail` (red), `wait` (waypoints, "waits #id",
   waits-purple — the canonical treatment for a multi-lease waiter), `queue` (muted qcard) — each with its
   ratified glyph + accent (`card-states`).
-- Height encodes size intrinsically (see [#xgmio7d] legend rate); this story delivers the box, not the ruler.
+- Height encodes size intrinsically (see [#2794] legend rate); this story delivers the box, not the ruler.
 
 ## Where the code goes (locus)
 Extends the card renderer under `plateau-app:src/backlog-view/` (the cells [#2584] renders), sourced from
-`plateau-app:src/backlog-view/card-taxonomy.webcases.ts`. Reads the token foundation [#xzpkd8q] for the
+`plateau-app:src/backlog-view/card-taxonomy.webcases.ts`. Reads the token foundation [#2795] for the
 state→color map + sprite.
 
 ## Acceptance

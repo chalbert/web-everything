@@ -4,7 +4,7 @@ kind: story
 size: 3
 parent: "2555"
 status: open
-blockedBy: ["x4jvp33"]
+blockedBy: ["2789"]
 dateOpened: "2026-07-27"
 tags: [plateau-loop, console, console-board, cross-lane-spans, dag, canonical-2554, slice-2555]
 ---
@@ -21,9 +21,9 @@ the committee found that inverts the canonical wait-card grammar (a card **is** 
 - **No span band.** Drop the docked full-width `CROSS-LANE SPANS` region; canon is fixed ~300px columns + one
   horizon, nothing docked below (`center-multi-lane`).
 - **One box, not a bar.** A full-width span bar is a second box grammar; canon mandates the ONE ratified card
-  box for all cards ([#x4jvp33] `card-single-box`). Express the waiter as the `wait` card variant.
+  box for all cards ([#2789] `card-single-box`). Express the waiter as the `wait` card variant.
 - **Waits = purple, not teal.** A normal (waiting) span colored teal reads as *leverage*; the fixed state→color
-  map puts wait = waits purple ([#xzpkd8q] `tokens-state-color-map`). A forced/degraded waiter is amber only if
+  map puts wait = waits purple ([#2795] `tokens-state-color-map`). A forced/degraded waiter is amber only if
   it is genuinely the human/degraded state.
 
 ## Scope
@@ -36,13 +36,13 @@ the committee found that inverts the canonical wait-card grammar (a card **is** 
   as a new spec decision that adds a `span-region` specKey to the canonical checklist first — not a v68 bugfix.
 
 ## Where the code goes (locus)
-`plateau-app:src/backlog-view/lane-board.ts` (the existing `SPANS` render) reusing the [#x4jvp33] card box.
+`plateau-app:src/backlog-view/lane-board.ts` (the existing `SPANS` render) reusing the [#2789] card box.
 
 ## Acceptance
 A multi-lease waiter renders as the single ratified `wait` card (waits-purple, waypoints, "waits #id", inline
 lane chips), with a human/amber forced variant — no full-width docked span bar. Judged against the
 **ratified** §6/#2554 wait-card grammar (binding now); the canonical **visual baseline** that supersedes v68
-`plateau-app:tests/visual/baselines/board.png` is the *pending* pixel oracle [#xg4lsxj] freezes, so the
-baseline comparison is **gated on that flip** — until [#xg4lsxj] lands, verify against the ratified grammar +
+`plateau-app:tests/visual/baselines/board.png` is the *pending* pixel oracle [#2796] freezes, so the
+baseline comparison is **gated on that flip** — until [#2796] lands, verify against the ratified grammar +
 fixtures, not against a canonical baseline that does not yet exist. Both themes; `plateau-app` `npm test` +
 `we:` `check:standards` pass.

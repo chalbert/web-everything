@@ -1,4 +1,5 @@
 ---
+bornAs: x5njzar
 kind: story
 size: 3
 parent: "2555"
@@ -20,10 +21,10 @@ a **regression** — the OFF-LANE POOL *is* the canonical Lane pool under a diff
 
 ## Scope
 - **Panel chrome** matching every canonical panel: grip · title ("Lane pool") · count ("N/M filled · X%") ·
-  collapse · menu (`pool-panel-chrome`, shares [#x9hg7qz] panel-consistency).
+  collapse · menu (`pool-panel-chrome`, shares [#2792] panel-consistency).
 - **Per-lane composition stack** — each lane a compact vertical stack whose segments show its fill/composition
   (delivered / build / fail / human / review / queue), sized by proportion (`pool-chip-stack`).
-- **Stack segment colors** drawn from the ratified state→color map (`pool-stack-colors`, reads [#xzpkd8q]).
+- **Stack segment colors** drawn from the ratified state→color map (`pool-stack-colors`, reads [#2795]).
 - **Status dot** per lane (build / stall / fail / degraded / review / idle); **idle lanes dashed**
   (`pool-status-dot`).
 - **Scroll-to-lane** — clicking a pool chip scrolls/flashes its lane column in the center (a primary-outline

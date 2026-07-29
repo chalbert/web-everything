@@ -4,7 +4,7 @@ kind: story
 size: 3
 parent: "2555"
 status: open
-blockedBy: ["xzpkd8q"]
+blockedBy: ["2795"]
 dateOpened: "2026-07-27"
 tags: [plateau-loop, console, console-board, dark-theme, a11y, canonical-2554, slice-2555]
 ---
@@ -21,7 +21,7 @@ dark is **not** "judged by eye" — the canonical §6/#2554 artifact **specifies
   artifact ships both themes.
 - **The dark set must carry the palette custom props**, not only surface/border/text: `--deliver/-bg`,
   `--lev/-bg`, `--waits/-bg`, `--human/-bg`, `--fail/-bg`, `--primary`, `--grad` — else state colors inherit
-  light values on dark. This is the same token layer [#xzpkd8q] establishes; this story delivers the board's
+  light values on dark. This is the same token layer [#2795] establishes; this story delivers the board's
   consumption of it in dark and its coverage across every `.lb-*` surface.
 - **Light non-regression is measured against the canonical light spec**, not "matches v68".
 
@@ -34,14 +34,14 @@ dark is **not** "judged by eye" — the canonical §6/#2554 artifact **specifies
   criterion tied to the state colors, not eyeballed.
 
 ## Where the code goes (locus)
-`plateau-app:src/backlog-view/lane-board.css` dark override (consuming [#xzpkd8q]).
+`plateau-app:src/backlog-view/lane-board.css` dark override (consuming [#2795]).
 
 ## Acceptance
 A dark mount at 1440w renders every board surface dark with AA-legible text and correct grammar colors — no
 white cards/rails/cells, no light-valued state color on dark. Light rendering matches the canonical light token
 spec. Judged against the **ratified** §6/#2554 token grammar (binding now — tokens + WCAG-AA, checkable
 without a pixel baseline). The canonical **visual baseline** that supersedes v68
-`plateau-app:tests/visual/baselines/board.png` is the *pending* pixel oracle [#xg4lsxj] freezes, so any
-baseline (light-regression) comparison is **gated on that flip**; until [#xg4lsxj] lands, verify against the
+`plateau-app:tests/visual/baselines/board.png` is the *pending* pixel oracle [#2796] freezes, so any
+baseline (light-regression) comparison is **gated on that flip**; until [#2796] lands, verify against the
 token spec, not against a canonical baseline that does not yet exist. Both themes; `plateau-app` `npm test` +
 `we:` `check:standards` pass.

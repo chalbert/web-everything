@@ -1,4 +1,5 @@
 ---
+bornAs: xzpkd8q
 kind: story
 size: 5
 parent: "2555"
@@ -37,7 +38,7 @@ light values on dark. The canonical artifact **specifies** both themes explicitl
 
 ## Where the code goes (locus)
 `plateau-app:src/backlog-view/lane-board.css` token layer (the board's scoped override), reading base tokens
-from `plateau-app:src/styles/theme.css`. Consumed by [#x4jvp33] (card grammar) and every `.lb-*` surface.
+from `plateau-app:src/styles/theme.css`. Consumed by [#2789] (card grammar) and every `.lb-*` surface.
 
 ## Acceptance
 Both themes resolve every board surface AND state color from this one token layer — no white cards on dark, no

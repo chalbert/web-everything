@@ -1,4 +1,5 @@
 ---
+bornAs: x9hg7qz
 kind: story
 size: 3
 parent: "2555"
@@ -9,20 +10,20 @@ tags: [plateau-loop, console, console-board, scope-lease, a11y, canonical-2554, 
 
 # Console board cross-cutting behaviors — breach/rival/sticky/panel-consistency
 
-Deliver the canonical cross-cutting behaviors the legend [#xgmio7d] promises but no surface yet enforces. The
+Deliver the canonical cross-cutting behaviors the legend [#2794] promises but no surface yet enforces. The
 committee found `xcut-breach`, `xcut-rival`, `xcut-sticky`, and `xcut-panel-consistency` **UNOWNED** (`xcut-lease`
 is covered by [#2589]/[#2712]; `xcut-windowing` by [#2713]).
 
 ## Scope
 - **Scope breach** — a build that wrote outside its lease renders as a **paused human card** (amber) carrying a
-  **Resolve** action, resolved at drain (`xcut-breach`; reads [#x4jvp33] human state + [#2551] inspector deep-link).
+  **Resolve** action, resolved at drain (`xcut-breach`; reads [#2789] human state + [#2551] inspector deep-link).
 - **✕ rival** — two lanes touching the same files with **no dependency** are marked rivals: "same files, no
   dependency — order is your choice", surfaced so the operator sequences them (`xcut-rival`).
 - **Sticky chrome** — the left + right side columns are sticky, and lane headers stay pinned as the center
   scrolls (`xcut-sticky`).
 - **Panel consistency** — every panel (new-work, legend, lane pool, ready-queue) shares one chrome grammar:
-  grip · title · count · collapse · menu (`xcut-panel-consistency` — the shared seam [#x5njzar]/[#xgmio7d]/
-  [#x8qkx4a] all conform to).
+  grip · title · count · collapse · menu (`xcut-panel-consistency` — the shared seam [#2790]/[#2794]/
+  [#2791] all conform to).
 
 ## Where the code goes (locus)
 `plateau-app:src/backlog-view/lane-board.ts` panel + lane-header render;

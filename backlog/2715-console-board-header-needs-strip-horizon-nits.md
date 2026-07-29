@@ -23,13 +23,13 @@ folding away two first-class canonical regions.
   canonical `center-single-horizon`, not the v68 label text.
 - **Below-board chrome — REVERSED.** The original nit offered to fold/hide the `OFF-LANE POOL` and the
   `All card-states — reference` disclosure to match v68's framing. **Do not fold them.** Canon makes the Lane
-  pool a first-class region ([#x5njzar]) and this board **is** the state reference (the header `reference`
-  pill, [#x8qkx4a]). Conform their naming/chrome to canon instead of reconciling them away.
+  pool a first-class region ([#2790]) and this board **is** the state reference (the header `reference`
+  pill, [#2791]). Conform their naming/chrome to canon instead of reconciling them away.
 
 ## Acceptance
 The needs-strip shows no false warning cue **and no pulse** at a 0 count; the delivery-horizon line carries one
 mono lev-colored label at a single fixed y across all lanes; the Lane pool and card-states reference are
 **retained** and conformed to canon (not hidden). Judged against the **ratified** §6/#2554 grammar (binding
-now); any pixel comparison is **gated on** the [#xg4lsxj] baseline flip that retires v68
+now); any pixel comparison is **gated on** the [#2796] baseline flip that retires v68
 `plateau-app:tests/visual/baselines/board.png` — not measured against a canonical baseline that does not yet
 exist. Both themes; `plateau-app` `npm test` + `we:` `check:standards` pass.

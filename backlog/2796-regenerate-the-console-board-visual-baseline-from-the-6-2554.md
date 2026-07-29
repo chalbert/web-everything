@@ -1,8 +1,9 @@
 ---
+bornAs: xg4lsxj
 kind: task
 parent: "2555"
 status: open
-blockedBy: ["x4jvp33", "xzpkd8q"]
+blockedBy: ["2789", "2795"]
 dateOpened: "2026-07-28"
 tags: [plateau-loop, console, console-board, visual-baseline, gate, canonical-2554, slice-2555]
 ---
@@ -21,8 +22,8 @@ the right target.
 
 ## Sequencing (why blockedBy the foundations)
 Do **not** flip the oracle before the board renders to canon — a canonical baseline against a not-yet-canonical
-board reds the whole visual gate mid-flight. Land the card-grammar core [#x4jvp33] and the token foundation
-[#xzpkd8q] first (both themes), then regenerate. Center-realization stories ([#2713], [#xgcfeto]) should be
+board reds the whole visual gate mid-flight. Land the card-grammar core [#2789] and the token foundation
+[#2795] first (both themes), then regenerate. Center-realization stories ([#2713], [#2793]) should be
 in place or the regenerated regions accepted as intentionally-red-until-built.
 
 ## Scope

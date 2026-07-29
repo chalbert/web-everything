@@ -21,7 +21,7 @@ canon-aligned — but the **method was stale**. Re-anchored 2026-07-28 off the v
   the side rails** (composer/legend left, ready-queue right) and/or the strip+arrow reserve in
   `computeCapacity` — never by shrinking the column.
 - **Re-anchor acceptance** from `plateau-app:tests/visual/baselines/board.png` (v68) + its 0.09 delta to the
-  canonical §6/#2554 reference; regenerate the baseline ([#xg4lsxj]) before measuring delta.
+  canonical §6/#2554 reference; regenerate the baseline ([#2796]) before measuring delta.
 
 ## Scope (kept — aligned)
 - Prioritize lanes **with live card stacks / active work** into the window; never collapse a card-bearing lane
@@ -29,13 +29,13 @@ canon-aligned — but the **method was stale**. Re-anchored 2026-07-28 off the v
 - Reach **≥2 full ~300px lane columns** at 1440w by re-proportioning the rails / strip reserve — not `laneMin`.
 - Keep the no-horizontal-scroll + resize-aware guarantees; verify at 1280 / 1440 / 1680 (vertical-strip
   collapse, never page widening).
-- Vertical crossing + history within a column is [#xgcfeto]; this story owns the **columns**.
+- Vertical crossing + history within a column is [#2793]; this story owns the **columns**.
 
 ## Acceptance
 Mounting `BOARD`/`POOL`/`SPANS` at 1440w renders **≥2 fixed-width (~300px) lane columns** with vertical
 separators (both card-bearing lanes visible as columns, not strips), remaining lanes collapsed to strips, and a
 single dashed lev-colored delivery horizon across all lanes — matching the **ratified** §6/#2554 grammar
-(binding now, not "the v68 composition"). The pixel-**delta** comparison is **gated on** [#xg4lsxj]
+(binding now, not "the v68 composition"). The pixel-**delta** comparison is **gated on** [#2796]
 regenerating the baseline (retiring v68), per the scope note above — not measured against a canonical baseline
 that does not yet exist. No horizontal scroll at any width. `plateau-app` `npm test` + `we:` `check:standards`
 pass.
