@@ -5,27 +5,31 @@ size: 2
 parent: "2555"
 status: open
 dateOpened: "2026-07-27"
-tags: [plateau-loop, console, console-board, header, needs-strip, delivery-horizon, a11y, v68-convergence, slice-2555]
+tags: [plateau-loop, console, console-board, header, needs-strip, delivery-horizon, a11y, canonical-2554, slice-2555]
 ---
 
-# Console board header/needs-strip/horizon convergence nits
+# Console board needs-strip + horizon convergence nits (canonical)
 
-A cluster of small, region-local convergence nits found measuring the reworked board against v68. Each is
-low-risk polish; grouped because they are all header / needs-strip / horizon chrome.
+A cluster of small, region-local convergence nits. Re-anchored 2026-07-28 off the v68 baseline onto the
+canonical §6/#2554 artifact. Two of the three original nits align; the third was **reversed** — it proposed
+folding away two first-class canonical regions.
 
-## Measured evidence + scope
-- **Zero-count stalled pill (a11y — color-only cue)**: the needs-strip renders `0 stalled` with the amber `⚠`
-  warning treatment even at count 0, so colour signals "attention" when there is none. Drop the warning
-  cue (neutral treatment) when the count is 0 — don't rely on colour alone to say "fine".
-- **Delivery-horizon label (visual)**: v68 labels the dashed horizon line
-  (`delivery horizon — work rises past the line at merge`). The reworked build draws the dashed line but no
-  label. Add the horizon label so the line reads as the delivery horizon, not an arbitrary divider.
-- **Below-board chrome vs v68 framing (visual)**: the reworked build adds an `OFF-LANE POOL` section and an
-  `All 37 card-states — reference` disclosure below the board that v68's framing doesn't include. Reconcile:
-  either fold them behind a disclosure / move them so the at-a-glance board matches the v68 composition, or
-  confirm they are intended below-the-fold and keep them out of the primary frame.
+## Nits
+- **Zero-count stalled pill (a11y — keep, tightened).** The needs-strip renders `0 stalled` with the amber `⚠`
+  treatment even at count 0 — color signals "attention" when there is none. Drop the warning cue (neutral
+  treatment) at count 0, **and** suppress the ⚠ we-breathe pulse (`attn-stalled-pulse`), not just the color.
+- **Delivery-horizon label (keep, canonical wording).** The dashed horizon line carries no label. Add **one
+  mono, lev-colored label** on the single dashed "stop" line that spans all lanes at one fixed y — per the
+  canonical `center-single-horizon`, not the v68 label text.
+- **Below-board chrome — REVERSED.** The original nit offered to fold/hide the `OFF-LANE POOL` and the
+  `All card-states — reference` disclosure to match v68's framing. **Do not fold them.** Canon makes the Lane
+  pool a first-class region ([#x5njzar]) and this board **is** the state reference (the header `reference`
+  pill, [#x8qkx4a]). Conform their naming/chrome to canon instead of reconciling them away.
 
 ## Acceptance
-The needs-strip shows no false warning cue at a 0 count; the delivery-horizon line carries its v68 label; the
-below-board sections no longer intrude on the v68 at-a-glance framing. Judged against
-`plateau-app:tests/visual/baselines/board.png`.
+The needs-strip shows no false warning cue **and no pulse** at a 0 count; the delivery-horizon line carries one
+mono lev-colored label at a single fixed y across all lanes; the Lane pool and card-states reference are
+**retained** and conformed to canon (not hidden). Judged against the **ratified** §6/#2554 grammar (binding
+now); any pixel comparison is **gated on** the [#xg4lsxj] baseline flip that retires v68
+`plateau-app:tests/visual/baselines/board.png` — not measured against a canonical baseline that does not yet
+exist. Both themes; `plateau-app` `npm test` + `we:` `check:standards` pass.
