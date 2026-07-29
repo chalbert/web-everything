@@ -18,6 +18,16 @@ the ratified grammar + the taxonomy spec ([#2553]) + the visual/scale forks ([#2
 (review/prioritize/launch/steer/review at scale), G3 (parallel lanes), G4 (attention-first + time-as-geometry
 + leverage). Started: plateau-app #69 dogfoods `we-section-card` as the base cell.
 
+> **Canonical target update (2026-07-28).** The ratified reference is now the **§6/#2554 canonical lane-board
+> artifact**, which **supersedes the v68 `board.png`** render as the pass/fail oracle. A design-alignment
+> committee reviewed every open child against it (2026-07-28) and
+> found most children still measured against v68 — several diverging from canon. Outcome: the seven build
+> slices were re-anchored off v68, two ([#2712], [#2714]) **reversed** where they contradicted canon, and the
+> unowned foundation was filed as new children — the card-grammar core [#x4jvp33], the token foundation
+> [#xzpkd8q], Lane pool [#x5njzar], header [#x8qkx4a], legend [#xgmio7d], center crossing/history [#xgcfeto],
+> cross-cutting behaviors [#x9hg7qz], and the baseline-retirement task [#xg4lsxj] (regen from the artifact,
+> retire v68). Land the card-grammar + token foundations first.
+
 Sub-slices (split into stories as scheduled; two are already split out as children):
 - **Board shell + lane windowing** — lanes = agent slots, sticky headers, collapse-to-strips + paginate, NO
   horizontal scroll, resize-aware (cite the `windowed-collection` dimension from #2523).
