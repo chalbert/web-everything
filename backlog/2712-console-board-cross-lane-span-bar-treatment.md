@@ -40,6 +40,9 @@ the committee found that inverts the canonical wait-card grammar (a card **is** 
 
 ## Acceptance
 A multi-lease waiter renders as the single ratified `wait` card (waits-purple, waypoints, "waits #id", inline
-lane chips), with a human/amber forced variant — no full-width docked span bar. Checked against the canonical
-§6/#2554 artifact; [#xg4lsxj] retires the v68 oracle. Both themes; `plateau-app` `npm test` + `we:`
-`check:standards` pass.
+lane chips), with a human/amber forced variant — no full-width docked span bar. Judged against the
+**ratified** §6/#2554 wait-card grammar (binding now); the canonical **visual baseline** that supersedes v68
+`plateau-app:tests/visual/baselines/board.png` is the *pending* pixel oracle [#xg4lsxj] freezes, so the
+baseline comparison is **gated on that flip** — until [#xg4lsxj] lands, verify against the ratified grammar +
+fixtures, not against a canonical baseline that does not yet exist. Both themes; `plateau-app` `npm test` +
+`we:` `check:standards` pass.

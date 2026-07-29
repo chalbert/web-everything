@@ -36,7 +36,9 @@ dropdown + size is *canon-correct*; this story now conforms the composer to cano
 `plateau-app:src/backlog-view/lane-board.ts` new-work composer render.
 
 ## Acceptance
-The composer's first-glance face matches the canonical §6/#2554 artifact: KIND dropdown (default "story"),
-Title, two-up size + blockedBy, Create draft, the "files a born-open item" hint and "files via lane → PR ·
-never writes main" footer. Checked against the canonical artifact — not `plateau-app:tests/visual/baselines/board.png`
-(v68). Both themes; `plateau-app` `npm test` + `we:` `check:standards` pass.
+The composer's first-glance face matches the **ratified** §6/#2554 composer grammar (the `composer-fields` +
+`composer-lane-pr-foot` specKeys): KIND dropdown (default "story"), Title, two-up size + blockedBy, Create
+draft, the "files a born-open item" hint and "files via lane → PR · never writes main" footer. This is a
+structural/spec assertion against the ratified grammar (not a pixel diff against v68
+`plateau-app:tests/visual/baselines/board.png`), so it is checkable now and does not wait on the [#xg4lsxj]
+baseline flip. Both themes; `plateau-app` `npm test` + `we:` `check:standards` pass.

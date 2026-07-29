@@ -29,6 +29,7 @@ folding away two first-class canonical regions.
 ## Acceptance
 The needs-strip shows no false warning cue **and no pulse** at a 0 count; the delivery-horizon line carries one
 mono lev-colored label at a single fixed y across all lanes; the Lane pool and card-states reference are
-**retained** and conformed to canon (not hidden). Checked against the canonical §6/#2554 artifact — not
-`plateau-app:tests/visual/baselines/board.png` (v68). Both themes; `plateau-app` `npm test` + `we:`
-`check:standards` pass.
+**retained** and conformed to canon (not hidden). Judged against the **ratified** §6/#2554 grammar (binding
+now); any pixel comparison is **gated on** the [#xg4lsxj] baseline flip that retires v68
+`plateau-app:tests/visual/baselines/board.png` — not measured against a canonical baseline that does not yet
+exist. Both themes; `plateau-app` `npm test` + `we:` `check:standards` pass.

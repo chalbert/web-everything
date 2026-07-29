@@ -39,6 +39,9 @@ single-bar / always-on-height rules).
 
 ## Acceptance
 A populated building cell carries its `Σ/ETA` label (and optional sub-steps) inside the ONE ratified card box,
-with a **single** state-colored progress bar and height that tracks size by default. Checked against the
-canonical §6/#2554 artifact — **not** `plateau-app:tests/visual/baselines/board.png` (v68), which
-[#xg4lsxj] retires. Both themes; `plateau-app` `npm test` + `we:` `check:standards` pass.
+with a **single** state-colored progress bar and height that tracks size by default. Judged against the
+**ratified** §6/#2554 card grammar (binding now). The canonical **visual baseline** that supersedes v68
+`plateau-app:tests/visual/baselines/board.png` is the *pending* pixel oracle [#xg4lsxj] freezes, so the
+baseline comparison is **gated on that flip** — until [#xg4lsxj] lands, verify against the ratified grammar +
+fixtures (v68-divergent regions expected-red), not against a canonical baseline that does not yet exist. Both
+themes; `plateau-app` `npm test` + `we:` `check:standards` pass.

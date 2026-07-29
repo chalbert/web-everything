@@ -39,5 +39,9 @@ dark is **not** "judged by eye" — the canonical §6/#2554 artifact **specifies
 ## Acceptance
 A dark mount at 1440w renders every board surface dark with AA-legible text and correct grammar colors — no
 white cards/rails/cells, no light-valued state color on dark. Light rendering matches the canonical light token
-spec. Checked against the canonical §6/#2554 artifact (both themes); [#xg4lsxj] retires the v68 oracle.
-`plateau-app` `npm test` + `we:` `check:standards` pass.
+spec. Judged against the **ratified** §6/#2554 token grammar (binding now — tokens + WCAG-AA, checkable
+without a pixel baseline). The canonical **visual baseline** that supersedes v68
+`plateau-app:tests/visual/baselines/board.png` is the *pending* pixel oracle [#xg4lsxj] freezes, so any
+baseline (light-regression) comparison is **gated on that flip**; until [#xg4lsxj] lands, verify against the
+token spec, not against a canonical baseline that does not yet exist. Both themes; `plateau-app` `npm test` +
+`we:` `check:standards` pass.

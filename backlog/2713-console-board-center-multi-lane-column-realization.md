@@ -34,6 +34,8 @@ canon-aligned — but the **method was stale**. Re-anchored 2026-07-28 off the v
 ## Acceptance
 Mounting `BOARD`/`POOL`/`SPANS` at 1440w renders **≥2 fixed-width (~300px) lane columns** with vertical
 separators (both card-bearing lanes visible as columns, not strips), remaining lanes collapsed to strips, and a
-single dashed lev-colored delivery horizon across all lanes — matching the canonical §6/#2554 artifact (not
-"the v68 composition"). No horizontal scroll at any width. `plateau-app` `npm test` + `we:` `check:standards`
+single dashed lev-colored delivery horizon across all lanes — matching the **ratified** §6/#2554 grammar
+(binding now, not "the v68 composition"). The pixel-**delta** comparison is **gated on** [#xg4lsxj]
+regenerating the baseline (retiring v68), per the scope note above — not measured against a canonical baseline
+that does not yet exist. No horizontal scroll at any width. `plateau-app` `npm test` + `we:` `check:standards`
 pass.
