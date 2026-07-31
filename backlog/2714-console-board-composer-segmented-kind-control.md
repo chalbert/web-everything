@@ -3,12 +3,16 @@ bornAs: xpawa1p
 kind: story
 size: 2
 parent: "2555"
-status: open
+status: resolved
 dateOpened: "2026-07-27"
+dateResolved: "2026-07-31"
+scope: ["plateau-app:src/backlog-view/lane-board.ts", "plateau-app:src/backlog-view/lane-board.css"]
 tags: [plateau-loop, console, console-board, composer, new-work, canonical-2554, slice-2555]
 ---
 
 # Console board new-work composer conforms to the canonical §6/#2554 face
+
+**Delivered in [chalbert/plateau-app#120](https://github.com/chalbert/plateau-app/pull/120).**
 
 **Reversed 2026-07-28.** The original story chased the v68 mock and proposed *removing* the very controls the
 canonical §6/#2554 composer ratifies — replacing the `KIND` dropdown with a segmented toggle and moving `size`
