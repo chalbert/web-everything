@@ -6,6 +6,11 @@ parent: "2555"
 status: open
 dateOpened: "2026-07-28"
 tags: [plateau-loop, console, console-board, tokens, theme, a11y, canonical-2554, foundation, slice-2555]
+scope:
+  - plateau:src/backlog-view/lane-board.css
+  - plateau:src/backlog-view/lane-board.ts
+  - plateau:src/backlog-view/lane-board.test.ts
+  - plateau:src/backlog-view/console-glyphs.ts
 ---
 
 # Console board token foundation — §6/#2554 palette, state→color map, sprite, motion, theme-persist
