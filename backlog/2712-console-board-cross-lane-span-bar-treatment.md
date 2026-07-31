@@ -3,12 +3,16 @@ bornAs: xhxrsur
 kind: story
 size: 3
 parent: "2555"
-status: open
+status: resolved
 dateOpened: "2026-07-27"
+dateResolved: "2026-07-31"
+scope: ["plateau-app:src/backlog-view/lane-board.ts", "plateau-app:src/backlog-view/lane-board.css"]
 tags: [plateau-loop, console, console-board, cross-lane-spans, dag, v68-convergence, slice-2555]
 ---
 
 # Console board cross-lane spans dock as full-width span bars
+
+Delivered in [chalbert/plateau-app#123](https://github.com/chalbert/plateau-app/pull/123).
 
 A cross-lane span is an item that waits on more than one lease, so it can't sit in a single column and docks
 below the board. v68 renders these as **full-width tinted span bars** with the lanes it waits on named inline
