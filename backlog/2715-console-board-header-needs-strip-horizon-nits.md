@@ -3,8 +3,10 @@ bornAs: xzb1yg6
 kind: story
 size: 2
 parent: "2555"
-status: open
+status: resolved
 dateOpened: "2026-07-27"
+dateResolved: "2026-07-31"
+scope: ["plateau-app:src/backlog-view/lane-board.ts", "plateau-app:src/backlog-view/lane-board.css"]
 tags: [plateau-loop, console, console-board, header, needs-strip, delivery-horizon, a11y, canonical-2554, slice-2555]
 ---
 
@@ -33,3 +35,7 @@ mono lev-colored label at a single fixed y across all lanes; the Lane pool and c
 now); any pixel comparison is **gated on** the [#2796] baseline flip that retires v68
 `plateau-app:tests/visual/baselines/board.png` — not measured against a canonical baseline that does not yet
 exist. Both themes; `plateau-app` `npm test` + `we:` `check:standards` pass.
+
+## Delivery
+
+Delivered in chalbert/plateau-app#122.
