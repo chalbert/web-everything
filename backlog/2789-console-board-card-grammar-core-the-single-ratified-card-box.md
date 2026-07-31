@@ -6,6 +6,14 @@ parent: "2555"
 status: open
 dateOpened: "2026-07-28"
 tags: [plateau-loop, console, console-board, card-grammar, canonical-2554, foundation, slice-2555]
+scope:
+  - plateau-app:src/backlog-view/
+  - plateau-app:docs/backlog-console-design.md
+scopeRationale: >
+  The card box is the shared primitive every file in plateau-app:src/backlog-view/ renders through:
+  the taxonomy registry, its docs viewer, the live-preview stylesheet, the real board renderer plus
+  its stylesheet, and the state glyphs all change together when the ratified box grammar changes —
+  this item is inherently directory-wide, not a narrow file-level edit.
 ---
 
 # Console board card-grammar core — the single ratified card box + full state set
