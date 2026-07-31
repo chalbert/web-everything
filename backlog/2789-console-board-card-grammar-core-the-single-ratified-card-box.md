@@ -3,8 +3,10 @@ bornAs: x4jvp33
 kind: story
 size: 5
 parent: "2555"
-status: open
+status: resolved
 dateOpened: "2026-07-28"
+dateResolved: "2026-07-31"
+graduatedTo: none
 tags: [plateau-loop, console, console-board, card-grammar, canonical-2554, foundation, slice-2555]
 scope:
   - plateau-app:src/backlog-view/
