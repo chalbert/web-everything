@@ -3,13 +3,24 @@ bornAs: xhxrsur
 kind: story
 size: 3
 parent: "2555"
-status: open
+status: resolved
 blockedBy: ["2789"]
 dateOpened: "2026-07-27"
+dateResolved: "2026-07-31"
+scope:
+  - plateau-app:src/backlog-view/lane-board.ts
+  - plateau-app:src/backlog-view/lane-board.css
 tags: [plateau-loop, console, console-board, cross-lane-spans, dag, canonical-2554, slice-2555]
 ---
 
 # Console board multi-lease waiters render as the ratified single-box `wait` card
+
+Delivered in [chalbert/plateau-app#123](https://github.com/chalbert/plateau-app/pull/123) — the PR title is
+stale (leftover "cross-lane span bar" wording from a bad dispatch brief), but the merged code delivers the
+reversed requirement: `spanToCard`/`renderSpanCards` in `plateau-app:src/backlog-view/lane-board.ts` render a
+multi-lease waiter as the single ratified `wait` card (waits-purple, waypoints, inline `⌃` lease chips), and
+`plateau-app:src/backlog-view/cross-lane-spans.ts` records the docked `.lb-spandock` bar as superseded — no
+span bar ships.
 
 An item that waits on more than one lease can't sit in a single column. **Reversed 2026-07-28** off the
 superseded v68 baseline: the canonical §6/#2554 board has **no docked full-width "cross-lane spans" band** —
