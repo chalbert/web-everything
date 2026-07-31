@@ -3,8 +3,10 @@ bornAs: xzpkd8q
 kind: story
 size: 5
 parent: "2555"
-status: open
+status: resolved
 dateOpened: "2026-07-28"
+dateResolved: "2026-07-31"
+graduatedTo: none
 tags: [plateau-loop, console, console-board, tokens, theme, a11y, canonical-2554, foundation, slice-2555]
 scope:
   - plateau-app:src/backlog-view/lane-board.css
@@ -14,6 +16,15 @@ scope:
 ---
 
 # Console board token foundation — §6/#2554 palette, state→color map, sprite, motion, theme-persist
+
+> **DELIVERED — plateau-app PR #118.** This slice's full scope landed in
+> `plateau-app:src/backlog-view/lane-board.css` (the token layer: `--deliver/-bg`, `--lev/-bg`, `--waits/-bg`,
+> `--human/-bg`, `--fail/-bg`, `--primary`, `--grad`, both light and an explicit `[data-theme="dark"]` +
+> `prefers-color-scheme: dark` override) plus `plateau-app:src/backlog-view/lane-board.ts` and
+> `plateau-app:src/backlog-view/console-glyphs.ts` (icon sprite, motion set, `prefers-reduced-motion` guard,
+> `pl:theme` persistence). Merged via
+> [chalbert/plateau-app#118](https://github.com/chalbert/plateau-app/pull/118) (merge commit `1eb15df8`,
+> 2026-07-31).
 
 Establish the ratified color/motion token foundation the whole board reads from. Today only accents darken in
 dark mode and [#2711] treats dark as "judged by eye" — because there is no single token layer that both themes
