@@ -3,8 +3,10 @@ bornAs: xpawa1p
 kind: story
 size: 2
 parent: "2555"
-status: open
+status: resolved
 dateOpened: "2026-07-27"
+dateStarted: "2026-07-31"
+dateResolved: "2026-07-31"
 tags: [plateau-loop, console, console-board, composer, new-work, canonical-2554, slice-2555]
 ---
 
@@ -42,3 +44,11 @@ draft, the "files a born-open item" hint and "files via lane → PR · never wri
 structural/spec assertion against the ratified grammar (not a pixel diff against v68
 `plateau-app:tests/visual/baselines/board.png`), so it is checkable now and does not wait on the [#2796]
 baseline flip. Both themes; `plateau-app` `npm test` + `we:` `check:standards` pass.
+
+## Delivered
+STEP 0 audit found the KIND control was already the ratified `<select>` dropdown (default "story") — no
+segmented toggle was ever built, so nothing to revert there. The genuine gap: the in-face two-up row paired
+`parent` + `blockedBy` instead of `size` + `blockedBy #`. Fixed in `plateau-app:src/backlog-view/composer.ts`
+(moved `size` into the two-up row, demoted `parent` to its own row below) + a new structural assertion test in
+`plateau-app:src/backlog-view/composer.test.ts` locking the canonical face in place. Verified both themes on a
+scratch dev port screenshot (never touched the running :4000 server). `plateau-app` PR #120.
