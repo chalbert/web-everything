@@ -3,9 +3,13 @@ bornAs: x8qkx4a
 kind: story
 size: 2
 parent: "2555"
-status: open
+status: resolved
 dateOpened: "2026-07-28"
+dateResolved: "2026-07-31"
 tags: [plateau-loop, console, console-board, header, attention-strip, canonical-2554, slice-2555]
+scope:
+  - plateau-app:src/backlog-view/lane-board.ts
+  - plateau-app:src/backlog-view/lane-board.css
 ---
 
 # Console board header + live indicator match canonical
@@ -29,3 +33,6 @@ Build the canonical header and the attention-strip live indicator. The committee
 The header renders brand + breadcrumb + subtitle + the full right pill cluster, and the attention strip carries
 the live/updated indicator + green dot, matching the canonical §6/#2554 artifact. Both themes; `plateau-app`
 `npm test` + `we:` `check:standards` pass.
+
+## Delivery
+Header brand mark and wordmark alignment implemented in [chalbert/plateau-app#119](https://github.com/chalbert/plateau-app/pull/119); right-pill cluster and live indicator already conforming via #2789/#2795.
