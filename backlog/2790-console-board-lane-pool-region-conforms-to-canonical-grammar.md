@@ -3,12 +3,18 @@ bornAs: x5njzar
 kind: story
 size: 3
 parent: "2555"
-status: open
+status: resolved
 dateOpened: "2026-07-28"
+dateResolved: "2026-07-31"
+scope:
+  - plateau-app:src/backlog-view/lane-board.ts
+  - plateau-app:src/backlog-view/lane-board.css
 tags: [plateau-loop, console, console-board, lane-pool, canonical-2554, slice-2555]
 ---
 
 # Console board Lane pool region conforms to canonical grammar
+
+Delivered in [chalbert/plateau-app#121](https://github.com/chalbert/plateau-app/pull/121).
 
 The board already renders an `OFF-LANE POOL` section below the board (noted in [#2715]). The canonical artifact
 makes it a **first-class Lane pool region** at the top of the board — not a below-the-fold afterthought to fold
