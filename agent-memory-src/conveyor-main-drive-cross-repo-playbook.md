@@ -1,0 +1,19 @@
+---
+name: conveyor-main-drive-cross-repo-playbook
+description: "Operating the conveyor from a live main session with heavy delegation: main is a THIN dispatcher (not a persistent operator-subagent); build agents hang at the gate → finalize-from-lane; console-board impl is cross-repo (plateau-app) so it needs a separate WE resolve; read the card body before briefing. Recall when running/continuing the conveyor, delivering console-board (#2555) items, or a build agent stalls."
+metadata:
+  node_type: memory
+  type: feedback
+---
+
+Running the conveyor from a live main session, delegating every buildable/coordinating task, learned delivering the §6/#2554 console-board children of epic #2555 (#2789/#2795/#2791/#2794/#2714/#2790/#2715/#2712 landed in one session).
+
+**Main is a THIN dispatcher — do NOT stand up a persistent "operator" subagent.** A general-purpose subagent driving the tick loop cost ~90k tokens per tick and its self-heartbeat did not reliably re-invoke it (subagent background-sleep/child-completion does not wake it the way it wakes main). Worker/watcher completions notify MAIN. So: main reads `dispatch-plan.mjs`, spawns workers, arms `pr-watch`, resolves — spawning is the sanctioned "dispatch" role; only *building* must be delegated. Maintain the in-flight guard yourself (a fresh `dispatch-plan` re-suggests an item you already spawned — it has no memory).
+
+**Build agents (delivery-agent-brief) hang at the GATE step** by running `npm run test` in the background and waiting for a notification that never wakes; they also hang by spawning a self-review subagent and foreground-waiting on it. Every dispatch brief MUST say: *run the gate BLOCKING (invoke directly, read output), never background-and-wait; self-review INLINE, never spawn+wait.* Even so some Sonnet builds still hang. Recovery loses nothing: the agent's work is committed or uncommitted in its lane clone — kill it, hand that exact lane to a **finalizer** agent (gate blocking + inline review + commit/push + PR). This worked every time.
+
+**Console-board impl is CROSS-REPO.** Code lands in **plateau-app** — a separate lane pool (`.lanes/plateau-app/lane-N`) and a separate GitHub repo (`chalbert/plateau-app`), while the backlog card lives in web-everything. A merged cross-repo impl PR does NOT auto-resolve the WE card → dispatch a **separate WE resolve PR** (flip status + `dateResolved` + `scope:` + delivery note anchoring the plateau-app PR; parent epic rollup only when all children resolved). Resolves are mechanical → **Haiku is adequate and ~4× cheaper** (~20–50k vs ~90k on Sonnet). Run `pr-land.mjs` from INSIDE the lane clone with `--repo` omitted (it takes a filesystem path, not an owner/repo slug).
+
+**Why:** the operator wants maximum delegation on a token budget; these are the failure modes that quietly waste tokens or strand work.
+
+**How to apply:** [[drain-gated-build-review-resolve-loop]] is the general cadence; this is the main-driven cross-repo specialization. Before briefing ANY item, **read the card body — never trust the filename slug**: slugs don't update when a card is reversed/re-anchored (#2712's slug still said "cross-lane span bar" but the card was reversed 2026-07-28 to "render waiters as the single `wait` card, drop the span band"; the build agent read the card and built correctly despite my backwards brief). A held lane lease WITH an open PR for that num is NOT a ghost — prepare/build agents hold their lane until merge; only reap if there's no open PR AND the agent is dead. Stale agent output-mtime ≠ hung (could be a long blocking gate) — **nudge and wait a short window** (check the mtime advances) before killing. Keep STEP-0 "verify the behavior on main, not that the card exists" — the existing shell already implements many region stories, so a dispatch often resolves cheaply as already-delivered.
