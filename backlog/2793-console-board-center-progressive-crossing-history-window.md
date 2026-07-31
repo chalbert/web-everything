@@ -3,13 +3,30 @@ bornAs: xgcfeto
 kind: story
 size: 5
 parent: "2555"
-status: open
+status: resolved
 blockedBy: ["2789"]
 dateOpened: "2026-07-28"
+dateStarted: "2026-07-31"
+dateResolved: "2026-07-31"
+graduatedTo: none
 tags: [plateau-loop, console, console-board, center, delivery-horizon, conveyor, canonical-2554, slice-2555]
 ---
 
 # Console board center — progressive-crossing history window
+
+> **DELIVERED — plateau-app PR [#126](https://github.com/chalbert/plateau-app/pull/126).** Two genuine gaps
+> remained against the canonical §6/#2554 center: `center-delivered-window`'s past-band clip is now a soft
+> `mask-image` fade instead of a hard cut (still a fixed 52px window — never unbounded), and
+> `center-idle-lane` now renders one dashed `idle — no active work` card (`renderIdleCard` in
+> `plateau-app:src/backlog-view/lane-board.ts`) where a lane has no active work, instead of a blank column —
+> plus a `boardSummary` fix so an idle lane never inflates the ◇ active-lane count. `center-greyed-history`
+> was tightened to guarantee single-line (also hides `.lb-markers`/`.lb-substeps`/`.lb-infra-detail`, not
+> just title/sub/bar). Verified already-conformant, no change needed: `center-canvas-no-box` (`.lb-center`
+> carries no border/box-shadow), `center-progressive-crossing` (`Card.merged` + `cardGeometry` already
+> cross cards at merge), and `center-single-horizon` (the fixed-height past band + uniform sticky heads
+> already align one horizon across lanes; `#2586`/`#2789`/`#2795`/`#2713`/`#2715` had already landed the
+> rest). Both themes reviewed by eye against the `?demo=1` fixture board (light + dark); `plateau-app npm
+> test` green (119 files / 1680 tests) plus the `#2670` visual harness (4/4 green).
 
 Realize the canonical center's time axis: the delivered pile crossing a single delivery horizon, with a faded
 day-folded history window. This is distinct from [#2713] (which realizes ≥2 lane *columns*) — this story owns
