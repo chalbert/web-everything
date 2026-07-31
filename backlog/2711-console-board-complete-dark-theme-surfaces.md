@@ -3,13 +3,17 @@ bornAs: xe9sz76
 kind: story
 size: 3
 parent: "2555"
-status: open
+status: resolved
 blockedBy: ["2795"]
 dateOpened: "2026-07-27"
+dateResolved: "2026-07-31"
+scope: ["plateau-app:src/backlog-view/lane-board.css"]
 tags: [plateau-loop, console, console-board, dark-theme, a11y, canonical-2554, slice-2555]
 ---
 
 # Console board dark theme skins card/rail/cell surfaces, not just accents
+
+**Resolved 2026-07-31** — Delivered by plateau-app#2795: the complete dark override + palette layer landed; no separate build needed.
 
 Mounted in dark at 1440w, only the **accents** darken — every **surface** (lane cells, cards, composer +
 glossary rail, ready-to-queue cards, off-lane pool) stays white on a near-black page. Re-anchored 2026-07-28:
