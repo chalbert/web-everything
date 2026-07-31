@@ -3,8 +3,11 @@ bornAs: xm5ik4u
 kind: story
 size: 5
 parent: "2555"
-status: open
+status: resolved
 dateOpened: "2026-07-27"
+dateResolved: "2026-07-31"
+graduatedTo: none
+scope: ["plateau-app:src/backlog-view/lane-board.ts", "plateau-app:src/backlog-view/lane-board.css"]
 tags: [plateau-loop, console, console-board, center, lane-windowing, canonical-2554, slice-2555]
 ---
 
@@ -39,3 +42,7 @@ single dashed lev-colored delivery horizon across all lanes — matching the **r
 regenerating the baseline (retiring v68), per the scope note above — not measured against a canonical baseline
 that does not yet exist. No horizontal scroll at any width. `plateau-app` `npm test` + `we:` `check:standards`
 pass.
+
+## Resolved (2026-07-31)
+
+Delivered via [chalbert/plateau-app#124](https://github.com/chalbert/plateau-app/pull/124) — ≥2 300px lane columns via rail-trimming, no horizontal scroll; 2 cols at 1440w, 3 at 1680w; laneMin held at 300px; 1674 tests green.
