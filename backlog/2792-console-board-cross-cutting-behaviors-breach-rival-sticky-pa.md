@@ -67,4 +67,4 @@ STEP-0 audit against fresh `plateau-app` `origin/main` found the four behaviors 
   have regressed a jury-ratified rule that postdates this item's authoring (the spec text is stale
   carry-forward from the pre-#2574 v15-era mock). Scope-breach ships exactly as `#2574` already ratified —
   no code change. The genuine remaining work (wiring `policy=ask` live + the amber Resolve card) is filed
-  separately as [#xzjfj4u] so it isn't lost, and stays open/unblocking.
+  separately as [#2797] so it isn't lost, and stays open/unblocking.

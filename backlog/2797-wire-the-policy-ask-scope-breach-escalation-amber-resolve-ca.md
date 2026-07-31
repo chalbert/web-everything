@@ -1,4 +1,5 @@
 ---
+bornAs: xzjfj4u
 kind: story
 size: 3
 parent: "2555"
