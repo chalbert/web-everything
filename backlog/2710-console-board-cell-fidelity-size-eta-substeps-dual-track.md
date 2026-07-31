@@ -3,9 +3,13 @@ bornAs: x3j6tmw
 kind: story
 size: 5
 parent: "2555"
-status: open
+status: resolved
 blockedBy: ["2789"]
 dateOpened: "2026-07-27"
+dateStarted: "2026-07-31"
+dateResolved: "2026-07-31"
+graduatedTo: none
+scope: ["plateau-app:src/backlog-view/lane-board.ts", "plateau-app:src/backlog-view/lane-board.css", "plateau-app:src/backlog-view/conveyor.ts"]
 tags: [plateau-loop, console, console-board, card-fidelity, canonical-2554, slice-2555]
 ---
 
@@ -45,3 +49,32 @@ with a **single** state-colored progress bar and height that tracks size by defa
 baseline comparison is **gated on that flip** — until [#2796] lands, verify against the ratified grammar +
 fixtures (v68-divergent regions expected-red), not against a canonical baseline that does not yet exist. Both
 themes; `plateau-app` `npm test` + `we:` `check:standards` pass.
+
+## Resolution (2026-07-31) — plateau-app #125
+
+A step-0 audit against fresh `plateau-app` main found the single progress bar was **already canon**: [#2789]
+gates the one 6px bar on the `build` state-bucket, not touched here beyond a doc-comment reference. The
+genuine gap was narrower than the v68-re-anchor framing implied: height and the `Σ n · ≈Nm` size/ETA label
+were still gated behind the `▤ sized` toggle (default OFF), fighting the "height encodes size always, not on
+a toggle" rule.
+
+Delivered in `plateau-app:src/backlog-view/conveyor.ts` + `plateau-app:src/backlog-view/lane-board.ts`
+(+ `plateau-app:src/backlog-view/lane-board.css`, + tests):
+- `cardGeometry()` now computes `heightPx`/`chip`/`oversize` in **every** mode — only the vertical offset
+  (rise-by-progress in `flow` vs pinned-to-0 + queue order in `sized`) still differs by mode. Kept the
+  `flow`/`sized` mode distinction itself (a separate, already-ratified #2586/§3i-v28 delivery-horizon
+  feature, not itself in this item's scope) — only removed what fought canon: the mode-gating on
+  height/chip.
+- `renderCard()` applies `min-height` + renders `.lb-sizechip` whenever cell geometry exists, unconditional
+  on mode; still suppressed for a merged/past card (fixed-height clipped past band, pre-existing guard).
+- New optional `Card.subSteps` renders short sub-step rows inside the SAME ratified box for a building card
+  that carries them, gated on the same `build` bucket as the progress bar — additive, one demo fixture card
+  proves the mechanism (no live backlog data source for sub-steps yet; out of this item's scope to invent
+  one).
+
+Verified: `plateau-app npm run test` 119 files / 1680 tests green. Visual self-review (flow + sized mode,
+light + dark theme) on a scratch dev port confirms single bar, height-tracks-size, and the Σ/ETA + sub-steps
+rendering inside the one box, by eye. No committed canonical baseline yet ([#2796] pending, per this item's
+own acceptance text) — a documented skip, not a false-fail. `plateau-app` PR
+[#125](https://github.com/chalbert/plateau-app/pull/125), `ready-to-merge`. No new entity spawned — this
+extended the existing #2789 renderer in place.
