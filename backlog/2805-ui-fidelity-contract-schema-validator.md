@@ -3,8 +3,9 @@ bornAs: xpcdbsy
 kind: story
 size: 5
 parent: "2804"
-status: open
+status: active
 dateOpened: "2026-08-01"
+dateStarted: "2026-08-01"
 tags: [plateau-loop, conveyor, ui-fidelity, we, slice-uifg]
 ---
 
