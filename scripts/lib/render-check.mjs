@@ -21,6 +21,8 @@
  * @module render-check
  */
 
+import { isRouteAffectingChange } from './route-import-graph.mjs';
+
 /** FUI's dark default card tokens (fui:plugs/webtheme/defaultTheme.ts) — the exact bytes that leak
  * into the WE consumer when the light override is missing. Used by the harness's `--simulate-regression`
  * mode and the spec's negative fixture to reproduce the known-bad state through the REAL `.fui-card`
@@ -103,22 +105,34 @@ export function classifyCardSurface(cssColor) {
 }
 
 /**
- * Repo-qualified visual-touch predicate (#2078, folded into #2000). Decides whether a batch lane's
- * changed-file set warrants the render check on the **WE** consumer. Two triggers:
- *   1. The lane edits a WE presentation surface — `*.njk`, `*.css`, or `src/_includes/**` templates.
- *   2. The lane edits a FUI theme/token source — `plugs/webtheme/**` (`defaultTheme`, `legacyAliases`,
- *      `LEGACY_ALIASES`) — because WE consumes FUI theming cross-origin (#96) and the FUI lane's own
- *      `check:standards` never paints. A FUI theme edit ⇒ render the WE consumer, not (only) FUI.
- * Repo-qualify by passing each file with its repo, e.g. `{ repo: 'frontierui', path: 'plugs/webtheme/defaultTheme.ts' }`
- * or a bare WE-relative string (repo defaults to 'we').
+ * Repo-qualified presentation predicate (#2078/#2000, widened dependency-aware in #2802). Decides
+ * whether a batch lane's changed-file set is UI-affecting. Two independent mechanisms — a file trips the
+ * predicate if EITHER fires:
+ *
+ * **1. Path-regex (the surface a file LOOKS like):**
+ *   - WE presentation surface — `*.njk`, `*.css`, or `src/_includes/**` templates.
+ *   - FUI theme/token source — `plugs/webtheme/**` (`defaultTheme`, `legacyAliases`, `LEGACY_ALIASES`) —
+ *     because WE consumes FUI theming cross-origin (#96) and the FUI lane's own `check:standards` never
+ *     paints. A FUI theme edit ⇒ render the WE consumer, not (only) FUI.
+ *
+ * **2. Route import-graph (the surface a file RENDERS THROUGH), when `opts.routeGraph` is supplied:**
+ *   A change to ANY module a real route transitively renders through — its data mappers and store
+ *   included — is UI-affecting for that route, even when the file is a plain `.ts` data module no
+ *   path-regex would flag. This is the console-board dodge: `plateau-app:src/backlog-view/lane-board-data.ts`
+ *   emptied the board yet matches no presentation path. See `route-import-graph.mjs`.
+ *
+ * Backward-compatible: called with no `opts` (or no `routeGraph`), only the path-regex runs — the
+ * historical behavior. Repo-qualify each file as `{ repo, path }`, a `repo:path` string, or a bare
+ * WE-relative string (repo defaults to 'we').
  * @param {Array<string | {repo?: string, path: string}>} files
+ * @param {{ routeGraph?: { routeEntries?: Record<string, string[]>, graph?: Map<string, Iterable<string>> | Record<string, Iterable<string>> } }} [opts]
  * @returns {boolean}
  */
-export function isVisualTouch(files) {
+export function isVisualTouch(files, opts = {}) {
   if (!Array.isArray(files)) return false;
-  return files.some((f) => {
-    const repo = typeof f === 'string' ? 'we' : (f.repo || 'we');
-    const path = typeof f === 'string' ? f : f.path;
+  const pathHit = files.some((f) => {
+    const repo = typeof f === 'string' ? (f.includes(':') ? f.slice(0, f.indexOf(':')) : 'we') : (f.repo || 'we');
+    const path = typeof f === 'string' ? (f.includes(':') ? f.slice(f.indexOf(':') + 1) : f) : f.path;
     if (typeof path !== 'string') return false;
     if (repo === 'we') {
       return /\.njk$/.test(path) || /\.css$/.test(path) || /^src\/_includes\//.test(path);
@@ -128,4 +142,7 @@ export function isVisualTouch(files) {
     }
     return false;
   });
+  if (pathHit) return true;
+  if (opts.routeGraph) return isRouteAffectingChange(files, opts.routeGraph);
+  return false;
 }
