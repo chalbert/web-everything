@@ -1,16 +1,16 @@
 ---
 bornAs: x9kptqv
 kind: story
-size: 5
+size: 8
 parent: "2527"
 status: open
 dateOpened: "2026-08-01"
-tags: [ratify-gate, provenance, check-standards, hooks, drain]
+tags: [ratify-gate, provenance, check-standards, hooks, drain, citation-verification]
 ---
 
-# Ratify-gate + provenance hooks — make the unreconciled-resolve + PR-number-as-#NNN + hash-slug-drift failures script-decidable
+# Ratify-gate + provenance hooks — make the unreconciled-resolve + PR-number-as-#NNN + hash-slug-drift + unresolved-citation failures script-decidable
 
-Review-bounce failures from #957/#959 become deterministic gates: (1a) a resolve that leaves its own narrative artifacts (PR body, report) contradicting the diff, and (1b) a same-day multi-fork resolve carrying no explicit ratify marker; (2) an #NNN cross-ref citing an implausible/unrelated item or a PR number; (3) a hash slug cited outside backlog+docs that the at-land rewrite never heals; (4) findBadBodyLinks missing bare hash-slug links. Per #51 (hookable-vs-judgment): script-decidable tells → hook, judgment stays in context.
+Review-bounce failures from #957/#959 become deterministic gates: (1a) a resolve that leaves its own narrative artifacts (PR body, report) contradicting the diff, and (1b) a same-day multi-fork resolve carrying no explicit ratify marker; (2) an #NNN cross-ref citing an implausible/unrelated item or a PR number; (3) a hash slug cited outside backlog+docs that the at-land rewrite never heals; (4) findBadBodyLinks missing bare hash-slug links; (5) a `we:path:line` code reference that resolves to no such file or an out-of-range line, plus a symbol-anchored citation convention that keeps a cite pinned to a function/const name instead of a brittle line number. Per #51 (hookable-vs-judgment): script-decidable tells → hook, judgment stays in context. **These are all one gate family — "a reference asserted without resolving it against the source" — surfaced across the #957 round-1 and round-2 bounces (see [The unifying root class](#the-unifying-root-class-a-reference-asserted-without-resolving-it)).**
 
 ## Why this exists
 
@@ -21,6 +21,18 @@ The #957 and #959 ratification reviews **bounced** on distinct failures, each of
 The judgment — *is this the right ruling? is this the right provenance?* — stays in context where it belongs. What moves to a hook is only the mechanical tell: a resolve whose narrative artifacts still assert the prior answer, a same-day multi-fork resolve with no ratify marker, a `#NNN` pointing at an implausible item, an un-rewritten hash slug, a link the link-checker's regex can't see.
 
 Sibling context: this is the enforcement companion to the review-hardening work in [#2563](/backlog/2563-blast-radius-is-advisory-care-level-not-a-park-gate-converge-/) (advisory care-level, not a park gate) and [#2439](/backlog/2439-independent-hardened-validator-redteam-accepted-acceptance-l/) (independent hardened validator + `redteam:accepted`). Those hardened *how review runs*; this hardens *what the gate catches before review even starts*.
+
+### The unifying root class: "a reference asserted without resolving it"
+
+The #957 review bounced **twice** on the same shape, and it is the shape every gate below shares: **a reference is asserted in prose without being resolved against the source it points at.** An `#NNN`, a `we:path:line` locus, a hash slug, a count "N statutes" — each is a *claim about the source* that a machine can *check against the source*. When the author writes the claim from memory and never resolves it, the claim drifts, and the drift outlives the session as cite-able statute (rule #25 — provenance is the statute layer).
+
+The bounces are its recurring instances:
+- **Round 1** surfaced the `#NNN` mis-cite ("carved from #955" landing on an unrelated resolved polyglot-sandbox decision — gate 2) and the hash-slug drift (gate 3/4).
+- **Round 2** surfaced two more of the *same* class: a wrong `we:path:line` pointer — `applyLedger` cited at `we:scripts/lane-drain.mjs:596` when it is **defined** at `we:scripts/backlog/id.mjs:144` and only **called** at `we:scripts/lane-drain.mjs:641` (gate 5) — and a **mislabeled count**, research-topic counts described as "statute/anchor" counts (the judgment case in §7).
+
+Because the family is one root class, most of it is **script-decidable** (#51-style hookable): resolving a citation against its target is exactly what a machine does better than a reviewer, who cannot hold every line number and item subject in memory. The gate lives where the source is, so it keeps working after the PR is gone. The one member that is *not* fully deterministic — a count whose *label* is wrong even though the number is right — stays a documented judgment case (§7), because deciding whether "5 research topics" was *meant* to be "5 statutes" needs the author's intent, not just the file.
+
+**This story already contains a live instance of gate 5/6:** gate 3 below cites "`applyLedger` / `numberPendingHashes` (`we:scripts/lane-drain.mjs:566`)" — but `applyLedger` is only *imported and called* in `we:scripts/lane-drain.mjs`; it is **defined** in `we:scripts/backlog/id.mjs:144`. Line 566 is `numberPendingHashes`, not `applyLedger`. A symbol-anchored cite (§6) — `we:scripts/backlog/id.mjs#applyLedger` — would have survived; the bare `:566` did not. The gate must reproduce on its own item body.
 
 ## The gates
 
@@ -62,7 +74,7 @@ This is the whole-item-integrity rule (`we:docs/agent/backlog-workflow.md:294`) 
 
 ### 3. Hash-slug drift outside the at-land rewrite scope
 
-**The tell.** `applyLedger` / `numberPendingHashes` (`we:scripts/lane-drain.mjs:566`) rewrites hash→NNN **only** in `we:backlog/*.md` + `we:docs/agent/*.md`. A hash slug (`xNNNNNN`) cited from **anywhere else** never self-heals → **dead link post-land**.
+**The tell.** `numberPendingHashes` (`we:scripts/lane-drain.mjs#numberPendingHashes`) — via the numbering brain `applyLedger` it calls (`we:scripts/backlog/id.mjs#applyLedger`) — rewrites hash→NNN **only** in `we:backlog/*.md` + `we:docs/agent/*.md`. A hash slug (`xNNNNNN`) cited from **anywhere else** never self-heals → **dead link post-land**.
 
 Three such dirs all appeared in #957:
 - `we:reports/`
@@ -85,6 +97,32 @@ This is the *most likely* link to go stale: a hash-slug link is by definition to
 
 **Mechanism.** Extend the `findBadBodyLinks` target-matching so the bare hash-slug form (`[..](xNNNNNN-slug.md)`, with the same optional `./`, `../`, `backlog/` prefixes and `#anchor` suffix as the numbered form) is also caught. This closes the loop with gate 3: gate 3 heals or errors on the hash slug at land; gate 4 makes the link-checker able to *see* it in the meantime.
 
+### 5. `we:path:line` reference resolution — a cited locus must resolve to a real file + in-range line
+
+**The tell.** A `we:<path>:<line>` code-locus citation (or its `plateau:` / `fui:` in-repo forms — see below) whose `<path>` names **no such file**, or whose `<line>` is **past the end of the file**. This is the exact round-2 finding made mechanical: `applyLedger` was cited at `we:scripts/lane-drain.mjs:596`, a line where `applyLedger` does not appear — it is defined at `we:scripts/backlog/id.mjs:144` and called at `we:scripts/lane-drain.mjs:641`. A reviewer had to open the file to catch it; `check:standards` can resolve it for free.
+
+**Scope of what's checkable.** The prefix already tells the gate *which repo* to resolve against (rule from `we:docs/agent/conventions.md:56` — the repo-locus convention). For **in-repo `we:` citations the check is fully deterministic**: the file is in this working tree, so a dangling path or an out-of-range line is a hard error. For **cross-repo `fui:` / `plateau:` citations** the target isn't in this checkout, so path/line existence can't be resolved here — those stay unchecked by this gate (a sibling repo's own gate would resolve them), and the gate must **not** false-positive on a `fui:`/`plateau:` locus. A line *range* (`we:foo.mjs:164-194`) resolves on its start and end bounds.
+
+**Why it's a gate, not judgment.** Whether the cited line is the *right* place to point is judgment; whether the file exists and the line is within it is two `fs.stat` + line-count comparisons. It reproduces its own instance: the pre-fix `we:scripts/lane-drain.mjs:596` cite must fail this gate; the corrected `we:scripts/backlog/id.mjs:144` must pass.
+
+**Mechanism.** A `check:standards` rule (in `we:scripts/check-standards-rules.mjs`) that scans `backlog/*.md`, `reports/*.md`, and `docs/agent/*.md` for `we:<path>:<line>` (and `:<start>-<end>`) tokens, resolves in-repo `we:` targets against the tree, and errors on a missing file or a line beyond EOF. Cross-repo prefixes are recognized and skipped, never errored. This rides alongside the existing locus-prefix linter (`we:scripts/lint-locus-prefix.mjs`) — that gate proves the prefix is *present*; this one proves the target it names actually *resolves*.
+
+### 6. Symbol-anchored citation convention — prefer a symbol name over a brittle line number
+
+**The problem.** A `we:path:line` cite is correct only until the file is edited; then every downstream line number silently drifts (the round-2 `:596` was very likely a once-correct line that moved). A citation to a **symbol** — a function or `const` name — survives edits, because the symbol moves *with* its definition. The convention should make the symbol form the authored default for code definitions, and lint a bare `:line` cite of a definition when a symbol anchor is available.
+
+**The convention (to document in `we:docs/agent/conventions.md`, the repo-locus section at `:56`).** When citing the **definition** of a named export/function/const, prefer the symbol-anchor form — `we:scripts/backlog/id.mjs#applyLedger` — over `we:scripts/backlog/id.mjs:144`. Line refs stay legitimate for pointing *inside* a body (a specific statement, a regex, a comment) where no symbol names the exact spot; the convention targets *definition* cites, which are the ones that drift hardest and matter most (a definition is the thing most often cited as statute).
+
+**The lint (script-decidable half).** A `check:standards` warning that, for a `we:<path>:<line>` cite whose `<line>` lands on a top-level `export function <name>` / `export const <name>` / `function <name>` declaration in the resolved file, suggests the `#<name>` symbol form. Starts warn-level (it's a convention nudge, not a correctness error like gate 5) and can tighten. The symbol-anchor form itself must also *resolve* — `#applyLedger` is only valid if that symbol is defined in the named file — so gate 5's resolver is extended to accept and verify the `#symbol` anchor as an alternative to `:line`.
+
+**Reproduces on this item.** The gate-3 `we:scripts/lane-drain.mjs:566` cite of `applyLedger` (which is *defined* in `we:scripts/backlog/id.mjs`) is both a gate-5 error (wrong file for that symbol) and a gate-6 case (should be a `#applyLedger` symbol anchor). Landing this story includes correcting that cite so the item passes its own gates.
+
+### 7. Count / label matches its source — documented judgment case (no deterministic form yet)
+
+**The tell (round-2, finding 2).** A stated **count with a label** — "N statutes", "N anchors", "5 codified rules" — where the *number* was produced by counting one thing but the *label* names another (the round-2 instance: research-topic counts described as "statute/anchor" counts). The number can be exactly right while the label is wrong.
+
+**Why this one stays judgment, not a gate.** Verifying it requires knowing *what the author meant to count* — was "5" meant as 5 research topics (correct label) or 5 statutes (wrong)? That intent isn't in the file; only the author has it. A machine can count rows in a source, but it cannot know which noun the sentence *should* have used, so there is no non-brittle greppable tell. Per #51 this is exactly the judgment half: it stays in the reviewer's context and in this documented note, **not** in a hook — unless a later, genuinely deterministic form appears (e.g. a count written as `count(researchTopics)=5` that the gate could re-derive from the named source). Recorded here so the reviewer knows to check label-against-source on count claims, and so a future deterministic form has a home.
+
 ## Acceptance
 
 Each failure becomes a **deterministic gate error that reproduces its real instance** — a test/fixture that fails today and passes once the gate lands:
@@ -94,14 +132,19 @@ Each failure becomes a **deterministic gate error that reproduces its real insta
 2. A `#NNN` citing a PR number → hard error; a `#NNN` whose target kind/title is implausible for the citing sentence → flagged (reproduces the "carved from #955" → unrelated polyglot-sandbox mis-cite).
 3. A hash slug cited from `we:reports/`, `we:src/_data/researchTopics/`, or `we:src/_includes/research-descriptions/` either self-heals at land (scope widened) or is a hard error before land (reproduces the #957 dead-link-post-land).
 4. A `[..](xNNNNNN-slug.md)` link is caught by `findBadBodyLinks` (reproduces the invisible pre-renumber link).
+5. An in-repo `we:<path>:<line>` cite whose file is missing or whose line is past EOF → hard error (reproduces the round-2 `we:scripts/lane-drain.mjs:596` mis-cite of `applyLedger`, which is defined at `we:scripts/backlog/id.mjs:144`); the corrected cite passes. A `fui:` / `plateau:` cross-repo locus is recognized and **not** errored (its target isn't in this checkout).
+6. A `we:<path>:<line>` cite landing on a top-level `export function` / `export const` / `function` definition → warned toward the `we:<path>#<symbol>` symbol-anchor form; the `#<symbol>` form is accepted by gate 5's resolver and verified to exist in the named file. This story's own gate-3 cite of `applyLedger` is corrected to the symbol form as part of landing.
+7. **(judgment, not a gate)** A count whose *label* misnames what was counted (round-2's research-topic counts labeled "statute/anchor") is recorded as a documented reviewer-check in §7 — no hook, because verifying the label needs author intent, not just the source. No fixture; it stays context until a deterministic form appears.
 
-`check:standards` stays at 0 errors on the current tree after the gates land (they fire only on the bad shapes above).
+`check:standards` stays at 0 errors on the current tree after the gates land (they fire only on the bad shapes above) — including on **this item's own body**, once the gate-3 `applyLedger` cite is corrected to `we:scripts/backlog/id.mjs#applyLedger`.
 
 ## References
 
 - **[#51](/backlog/)** — hookable-vs-judgment rule: script-decidable → hook, judgment stays in context. Each of these is a mechanical tell, so each is a hook.
 - **[#2563](/backlog/2563-blast-radius-is-advisory-care-level-not-a-park-gate-converge-/)** — review escalation / advisory care-level. Sibling review-hardening.
 - **[#2439](/backlog/2439-independent-hardened-validator-redteam-accepted-acceptance-l/)** — independent hardened validator + `redteam:accepted`. Sibling validator-hardening.
-- Surfaced by the **#957 / #959 ratification review bounces** — the failures this story hooks. Note #959's bounce was a **false positive** caused by an unreconciled resolve (gate 1a), not by a self-ratify; the accept verdict on PR #959 withdraws that finding.
+- Surfaced by the **#957 / #959 ratification review bounces** — the failures this story hooks. The **#957 round-1** bounce surfaced gates 2–4 (the `#NNN` mis-cite + hash-slug drift); the **#957 round-2** bounce surfaced gates 5–6 (the `we:scripts/lane-drain.mjs:596` mis-cite of `applyLedger`) and the §7 label-vs-source judgment case. Note #959's bounce was a **false positive** caused by an unreconciled resolve (gate 1a), not by a self-ratify; the accept verdict on PR #959 withdraws that finding. All are one root class — "a reference asserted without resolving it against the source" (see [The unifying root class](#the-unifying-root-class-a-reference-asserted-without-resolving-it)).
+- **[#25](/backlog/)** — provenance = the statute layer: a wrong cite (`#NNN`, `we:path:line`, count) is a wrong law citation that outlives the session. This is why the citation-resolution family is worth a gate.
 - **[#2801](/backlog/2801-productized-design-source-home-locked-in-code-target-referen/)** — the decision whose resolve exposed gate 1a; its report carries the same prevention analysis.
-- Code loci: `we:scripts/check-standards-rules.mjs` (gates 1a, 1b, 2, 4 and the 3-error-form), `we:scripts/check-standards.mjs`, `we:scripts/lane-drain.mjs` (`numberPendingHashes`/`applyLedger`, gate 3-heal-form; PR-body check for gate 1a), and a `PreToolUse` write gate on `we:backlog/*.md` (gate 1b write-time form).
+- **`we:docs/agent/conventions.md`** — the repo-locus code-path reference convention (`we:` / `fui:` / `plateau:` prefixes, line refs) this story's gates 5–6 extend from "the prefix is present" to "the target resolves + prefer a symbol anchor". Enforced today by `we:scripts/lint-locus-prefix.mjs` (prefix-present); gate 5 adds a resolver alongside it.
+- Code loci: `we:scripts/check-standards-rules.mjs` (gates 1a, 1b, 2, 4, the 3-error-form, and the gate-5 `we:path:line` resolver + gate-6 symbol-anchor lint), `we:scripts/check-standards.mjs`, `we:scripts/lane-drain.mjs` (`numberPendingHashes`, gate 3-heal-form; PR-body check for gate 1a — note the numbering brain `applyLedger` it calls is *defined* in `we:scripts/backlog/id.mjs#applyLedger`), `we:scripts/lint-locus-prefix.mjs` (the prefix gate the gate-5 resolver rides alongside), `we:docs/agent/conventions.md` (gate-6 convention text), and a `PreToolUse` write gate on `we:backlog/*.md` (gate 1b write-time form).
