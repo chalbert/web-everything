@@ -1,4 +1,5 @@
 ---
+bornAs: xisgzfz
 kind: story
 size: 5
 parent: "2527"
