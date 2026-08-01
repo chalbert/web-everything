@@ -2533,6 +2533,33 @@ baselines remain in-repo, *if* in-PR image-diff review proves too coarse in prac
 **graduate baselines off committed PNG** when git churn weighs (#1967). Both are opt-in later moves, not the
 default now.
 
+### Design-source home + locked in-code target reference {#design-source-locked-in-code-target}
+
+**Ratified 2026-08-01 (#2801).** Productizes RRFC INVARIANT A's target registry. Composes the
+[UI-Fidelity Gate epic #2804](/backlog/2804-ui-fidelity-gate-real-route-conformance-born-with-contract-t/) and its
+INVARIANT A — the target is registry-anchored + content-hashed. Four ruled points:
+
+- **Canonical stored form = the in-code artifact, the sole content-hashed canon.** `contentHash` is `sha256`
+  over the in-code target artifact's canonical bytes — the *only* hashed anchor the approval token signs. A
+  rendered baseline PNG is a **non-canonical, advisory** product-repo artifact feeding the tolerance-compared
+  perceptual layer — **never** a hash anchor, **never** in WE (a hash over pixels isn't a stable identity, and
+  committing product screenshots to WE breaches WE-holds-zero, MEMORY #6).
+- **External-source import→freeze = normalize to one source-agnostic in-code artifact + provenance, and archive
+  the raw native payload.** Every source materializes the *same* canonical in-code artifact; the raw native
+  import payload (e.g. Figma node JSON + fetched PNG) is archived as an **opaque, non-canonical** provenance blob
+  for lossless offline re-normalization — never a second per-source target kind the gate reads. **Figma is a
+  swappable importer that pins `?version`, not a target kind.**
+- **Version-minting authority = a minter-agnostic WE contract.** WE owns the identity *mechanism* — id scheme
+  (`registryId@vN`), hash rule, append-only ledger, token-over-hash — and any client mints (design-studio #2676
+  is one client, not the owner). A product-owned minting authority is rejected as a layer leak that forecloses
+  every other minter.
+- **Interactions gate on assertability.** Gate deterministic post-interaction states **now** through the boolean
+  floor — focus / `focus-visible`, `aria-*` flips, disabled / loading / error states after an event. Motion /
+  timing / prototype feel stays **advisory** (no deterministic oracle; blocking would rot).
+
+**Honest caveat:** forks 3–4 leave build details for implementation — the exact append-only ledger format (fork
+3) and the post-event assertion-harness reach (fork 4) are settled downstream, not by this statute.
+
 ### Skill/memory replay substrate — an ephemeral throwaway clone, never the shared lane pool {#skill-memory-replay-substrate}
 
 The skill/memory validation suite (#2268) replays a **mutating** script/skill case inside an **ephemeral

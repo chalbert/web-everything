@@ -2,9 +2,11 @@
 bornAs: x6dpgdu
 kind: decision
 parent: "2527"
-status: open
+status: resolved
 dateOpened: "2026-08-01"
+dateResolved: "2026-08-01"
 preparedDate: "2026-08-01"
+codifiedIn: docs/agent/platform-decisions.md#design-source-locked-in-code-target
 relatedReport: reports/2026-08-01-design-source-home-locked-target.md
 tags: [plateau-loop, conveyor, ui-fidelity, design-source, decision]
 ---
@@ -20,6 +22,28 @@ Storybook `play`-function interaction tests). Each fork carries a **bold recomme
 sets the *productized* form of RRFC INVARIANT A's registry — not whether to lock (that is settled). It extends
 the target-registry slice [#2806](/backlog/2806-target-registry-approval-token-perceptual-distance-floor/)
 under the UI-Fidelity Gate epic [#2804](/backlog/2804-ui-fidelity-gate-real-route-conformance-born-with-contract-t/).
+
+## Ruling (2026-08-01)
+
+**RATIFIED — all four fork defaults accepted.** Codified at
+[`we:docs/agent/platform-decisions.md#design-source-locked-in-code-target`](/docs/agent/platform-decisions.md#design-source-locked-in-code-target).
+The four ratified defaults, exactly as prepared:
+
+1. **Canonical stored form (Fork 1 (c)).** The in-code artifact is the *sole* content-hashed canon
+   (`contentHash` = `sha256` over its canonical bytes — the only anchor the approval token signs); the rendered
+   baseline is a **non-canonical, advisory** product-repo artifact for the tolerance-compared perceptual layer —
+   **never** a hash anchor, **never** in WE.
+2. **External-source import→freeze (Fork 2 (c)).** Normalize every source into one source-agnostic in-code
+   artifact + provenance, **and** archive the raw native payload (opaque, non-canonical) for lossless offline
+   re-normalization. **Figma is a swappable importer that pins `?version`, not a target kind.**
+3. **Version-minting authority (Fork 3 (b)).** A **minter-agnostic WE contract** owns version identity — id
+   scheme + hash rule + append-only ledger + token-over-hash; any client mints, design-studio #2676 is a
+   *client, not the owner*.
+4. **Interactions gated on assertability (Fork 4 (c)).** Gate deterministic post-interaction states *now* —
+   focus / `aria-*` flips / loading-error — via the boolean floor; motion / timing stays **advisory**.
+
+**Honest caveat:** forks 3–4 leave build details for implementation — the exact append-only ledger format
+(fork 3) and the assertion-harness reach (fork 4) are settled downstream, not by this ruling.
 
 ## The need (unchanged from capture)
 - **A real design-source home** to save and render UI design iterations — versions, history, side-by-side
