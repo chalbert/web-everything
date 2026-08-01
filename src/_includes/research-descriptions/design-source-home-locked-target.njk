@@ -1,0 +1,169 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The <a href="/backlog/2804-ui-fidelity-gate-real-route-conformance-born-with-contract-t/">UI-Fidelity Gate</a>
+  (RRFC) locks every UI story to a <strong>registry-anchored, content-hashed design target</strong> so a
+  <strong>perceptual-distance oracle</strong> — compare a build screenshot to the frozen target — can gate
+  whether the built UI actually matches the design (INVARIANT A). Today that target is a throwaway
+  <strong>claude.ai artifact</strong> link: fine to bootstrap, not a productized home. This topic surveys the
+  prior art for the <em>productized</em> form and feeds decision
+  <a href="/backlog/2801-productized-design-source-home-locked-in-code-target-referen/">#2801</a>: what a locked
+  target is <strong>made of</strong>, how an <strong>external source (Figma)</strong> is imported and
+  <strong>frozen</strong>, where the <strong>versioning surface</strong> lives, and whether
+  <strong>interactions</strong> are checkable or advisory.
+</p>
+
+<h2>Bottom line</h2>
+<p>
+  Every piece has strong prior art, and the cross-industry pattern is one thing: <strong>freeze to an in-repo
+  artifact</strong> — design-token JSON, or a committed accepted image — that is <strong>content-keyed</strong>
+  and diffed by a <strong>threshold oracle</strong>. You never point the oracle at a live URL. Figma gives a real
+  version-pinning primitive (the <code>version</code> id), so you can fetch an immutable render — but the durable
+  lock is the committed artifact, not the Figma link.
+</p>
+
+<h2>1 · Design source-of-truth systems</h2>
+
+<h3>Figma REST API — pin, render, freeze, notify</h3>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Endpoint / feature</th><th>What it gives you</th><th>Immutable in-code artifact?</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET /v1/files/:key</code> (and <code>/nodes?ids=</code>)</td><td>Full node tree; accepts a <code>?version=&lt;id&gt;</code> param — "omitting gets the current version." The pin to an immutable historical state.</td><td>Pinning yes; permanence is on you (Figma hosts it)</td></tr>
+    <tr><td><code>GET /v1/images/:key?ids=&amp;format=&amp;scale=&amp;version=</code></td><td>Renders a node to png/jpg/svg/pdf and returns a JSON map of node-id → <strong>Figma-CDN URL</strong>. Those URLs are <strong>ephemeral</strong> (community-reported ~30-day expiry) — download the bytes, don't keep the URL.</td><td>Only after you pull + commit the bytes</td></tr>
+    <tr><td><code>GET /v1/files/:key/versions</code></td><td>Paginated named-version history — <code>{id, created_at, label, description, user}</code>. Named versions are the pinnable units.</td><td>Identifies the pin</td></tr>
+    <tr><td>Webhooks v2 — <code>FILE_VERSION_UPDATE</code> vs <code>FILE_UPDATE</code></td><td><code>FILE_VERSION_UPDATE</code> fires only when a <em>named version</em> is created (low-noise "a new locked candidate exists"); <code>FILE_UPDATE</code> fires on any edit (debounced ~30 min).</td><td>Drift <em>notification</em>, not an update</td></tr>
+    <tr><td>Dev Mode / Code Connect</td><td>Dev Mode extracts <strong>visual properties only</strong> (CSS/Swift/XML values, no structure/logic). Code Connect <strong>maps</strong> a Figma component to your <em>real</em> production component via a CLI-published config in your repo — it does not generate code.</td><td>Tokens/props yes; not a full artifact on its own</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  <strong>Gotcha for the build:</strong> version-pinned image renders can <code>400</code>
+  ("must provide either user_id or plan_key") with plan/org access tokens — test the token type early. And the
+  <code>versions</code> object field list, while widely reported, should be confirmed against the OpenAPI spec
+  before coding.
+</p>
+
+<h3>Design-token pipelines — the canonical "decision → diffable in-repo artifact" move</h3>
+<p>
+  The <strong>W3C Design Tokens Community Group (DTCG) format</strong> — JSON where each token carries
+  <code>$value</code> / <code>$type</code> / <code>$description</code> / <code>$extensions</code> — reached its
+  <strong>first stable v1 in Oct 2025</strong>. <strong>Style Dictionary v4</strong> has first-class DTCG support
+  (tokens JSON → transforms → platform outputs: CSS custom properties, iOS/Android, JSON).
+  <strong>Tokens Studio</strong> authors tokens inside Figma and exports DTCG JSON or syncs to a Git repo. This is
+  the strongest model of a design decision serialized as a <strong>diffable, versioned, in-repo</strong> artifact
+  — tool-independent by design, so the <em>code</em> is the source of truth, not the tool. See also
+  <a href="/research/design-token-theming-system/">Unified design-token / theming system</a>.
+</p>
+
+<h3>Locked visual baselines — Chromatic / Percy / jest-image-snapshot</h3>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Tool</th><th>Baseline model</th><th>Diff oracle</th><th>Where the baseline lives</th></tr></thead>
+  <tbody>
+    <tr><td>Chromatic</td><td>Snapshot per <strong>story × viewport × browser × mode</strong>; <strong>Accept</strong> promotes to baseline (branch-scoped; promotes to main on merge). TurboSnap keys off the Git dep graph + commit SHA.</td><td>Color distance in <strong>YIQ</strong> space, default threshold <strong>0.063</strong></td><td><strong>Server-side</strong> (hosted, approvable)</td></tr>
+    <tr><td>Percy</td><td>Diff vs the <strong>latest approved build on the base branch</strong>; approve updates the baseline.</td><td>Pixel diff, per-snapshot / group / build approval</td><td><strong>Server-side</strong></td></tr>
+    <tr><td><code>jest-image-snapshot</code></td><td>Baseline PNGs <strong>committed in-repo</strong> under <code>__image_snapshots__</code>; update on demand.</td><td>pixelmatch threshold</td><td><strong>In-repo</strong> (closest to our design)</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  Chromatic/Percy <em>prove</em> the accept-to-promote model but keep identity <strong>server-side</strong>, keyed
+  to story-id + viewport + branch + commit — not a content-hashed file in-tree. Our design puts the frozen mock
+  <strong>in-code</strong> with a content hash, which is closer to the <code>jest-image-snapshot</code> committed
+  model, and more auditable.
+</p>
+
+<h2>2 · Freezing an external source into an in-code artifact</h2>
+<p>Three exhaustive "freeze" strategies exist; mature tooling does all three:</p>
+<ol>
+  <li><strong>Frozen render (PNG) + metadata</strong> — pull <code>GET /v1/images/:key?ids=…&amp;version=&lt;id&gt;</code>,
+    store bytes + <code>{fileKey, nodeId, versionId, lastModified}</code>. This is the oracle target.</li>
+  <li><strong>Export to code / tokens</strong> — Dev Mode (visual props), Code Connect (maps to your code),
+    token exporters (DTCG JSON). Third-party figma-to-code plugins are lossy/advisory.</li>
+  <li><strong>Both</strong> — the PNG is the perceptual oracle; the tokens/code are the buildable spec.</li>
+</ol>
+<p>
+  <strong>Content-addressing is the immutability primitive.</strong> Git is a content-addressable store — an
+  object's id is <code>sha</code> over its content, so identical content ⇒ identical hash and any drift changes
+  the hash. Package lockfiles store a per-artifact <code>integrity</code> hash to pin + verify a resolved
+  artifact. Our "registry-anchored, content-hashed design target" is the design-world analogue of a
+  <strong>lockfile entry</strong>: <code>{registryId, versionId, sha256(mockBytes)}</code>. Commit the artifact,
+  record its hash, and the oracle never depends on a live URL.
+</p>
+
+<h2>3 · The oracle / perceptual distance</h2>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Technique</th><th>How</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr><td><strong>pixelmatch</strong></td><td>Per-pixel color distance in YIQ + anti-aliasing detector + threshold (0–1)</td><td>Deterministic diff; sensitive to font-hinting/subpixel across OS/browser (false positives)</td></tr>
+    <tr><td><strong>SSIM</strong></td><td>Structural similarity over local windows (luminance/contrast/structure); <code>&gt;0.99</code> ≈ no visible change for UI</td><td>Good perceptual-distance <strong>floor</strong> — tolerant to non-structural noise</td></tr>
+    <tr><td><strong>pHash</strong></td><td>2D DCT on a 32×32 grayscale → 64-bit fingerprint; compare by Hamming distance</td><td>Cheap <strong>pre-filter</strong> only; misses small-but-real changes. A <em>perceptual</em> hash of the rendered image — DISTINCT from the <em>cryptographic</em> content hash locking the mock bytes. You want both.</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  This grounds the RRFC's split: a <strong>cryptographic</strong> content hash locks the target's identity; a
+  <strong>perceptual</strong> metric (pixelmatch/SSIM) supplies the tolerance floor. The RRFC ratified
+  oracle-tightness <strong>B</strong> — the boolean floor gates, the perceptual pixel-diff rides above as
+  advisory.
+</p>
+
+<h2>4 · Versioning &amp; iteration UI</h2>
+<p>
+  <strong>Figma version history</strong> (named checkpoints = pinnable units, and the
+  <code>FILE_VERSION_UPDATE</code> trigger) and <strong>Figma Branching</strong> (Org/Enterprise: branch off
+  main, review <strong>side-by-side / overlay</strong>, merge with an extra version checkpoint) are the native
+  "author iterations, then promote one" model — the niche <strong>Abstract</strong> pioneered for Sketch/Figma
+  and Figma largely absorbed. <strong>Chromatic build history</strong> numbers every CI build against a commit
+  SHA + branch; baselines inherit along Git ancestry.
+</p>
+<p>
+  <strong>Mapping to <code>registryId@vN</code> + content hash:</strong> the durable identity should be
+  <em>your</em> composite key — <code>registryId@vN</code> (registry-stable) + <code>sha256(frozenBytes)</code>
+  (machine-verifiable) — annotated with the Figma provenance <code>{fileKey, nodeId, figmaVersionId}</code>.
+  Chromatic/Percy prove the model but keep identity server-side; the in-repo content hash is the auditable
+  version of the same idea. Append-only + immutable mirrors the
+  <a href="/research/">research registry's</a> own Obsoletes/Obsoleted-by supersession model.
+</p>
+
+<h2>5 · Interactions / prototypes — checkable or advisory?</h2>
+<p>
+  <strong>Figma prototypes are advisory by design.</strong> Prototype flows (interaction arrows, transitions,
+  smart-animate) are for playback + feedback, not machine-checkable specs. The REST API exposes some metadata
+  (<code>prototypeStartNodeID</code>, transition properties) but <strong>no first-class API returns an
+  executable, assertable interaction contract</strong>; newer exports (dotLottie/MP4/GIF) preserve
+  <em>animation</em>, not <em>testable behavior</em>.
+</p>
+<p>
+  The <strong>checkable</strong> prior art is <strong>Storybook interaction tests</strong>: a <code>play</code>
+  async callback runs after mount, drives the component with <code>userEvent</code>, and asserts with
+  <code>expect</code> (from <code>storybook/test</code>), in a real browser in CI. The lesson for our gate:
+  keep the <em>pixel</em> oracle (frozen mock + perceptual distance) separate from any <em>interaction</em>
+  oracle, and enforce interactions only by <strong>transcribing them into real assertions</strong> — for us,
+  folding an interaction's <strong>end-states</strong> into the frozen static webcase floor the RRFC already
+  gates — rather than trying to make a Figma prototype the checker.
+</p>
+
+<h2>Recommendations fed to decision #2801</h2>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Fork</th><th>Recommended default</th><th>Grounded in</th></tr></thead>
+  <tbody>
+    <tr><td>1 · Stored form</td><td><strong>In-code artifact is the sole content-hashed canon</strong>; the rendered baseline is a non-canonical, tolerance-compared product-repo artifact for the advisory perceptual layer (never hashed, never in WE)</td><td>DTCG in-code source · Git/lockfile content-addressing · a render is NOT byte-deterministic, so it can't be a hashed anchor · jest-image-snapshot committed baseline (product-side) · perceptual diff is advisory (oracle-tightness B)</td></tr>
+    <tr><td>2 · Import → freeze</td><td><strong>Normalize</strong> every source into one source-agnostic in-code artifact + provenance, <strong>and archive the raw native payload</strong> (opaque, non-canonical) for lossless offline re-normalization; Figma is an importer that pins <code>?version</code> and freezes the bytes</td><td>Freeze-to-in-repo consensus · ephemeral CDN URLs force byte-download · single-substrate contract avoids per-source lock-in · re-fetch from Figma is unreliable (versions can be dropped)</td></tr>
+    <tr><td>3 · Version-minting authority</td><td><strong>A minter-agnostic WE contract</strong> (id scheme + hash rule + append-only ledger + token-over-hash); any client mints, the studio <a href="/backlog/2676-plateau-design-studio-request-a-screen-change-ai-design-comm/">#2676</a> is one minter-client (the human UI folds there — product-internal, not the identity owner)</td><td>Minting contract identity from a product surface locks out other minters (FUI/CI) · impl-is-not-a-standard · WE holds zero implementation · Chromatic/Percy keep identity server-side (the anti-pattern to avoid)</td></tr>
+    <tr><td>4 · Interactions (the cut)</td><td><strong>Cut on assertability</strong>: gate deterministic post-interaction states (focus / <code>aria-*</code> flips / loading-error) now via the boolean floor; motion/timing/prototype-feel stays advisory</td><td>Figma prototypes advisory · Storybook <code>play</code> = deterministic post-event assertion · ratified oracle-tightness B (gate boolean-deterministic; perceptual advisory) · a11y states are the highest-value deterministic checks</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision it prepares: <a href="/backlog/2801-productized-design-source-home-locked-in-code-target-referen/">#2801 — Productized design-source home + locked in-code target reference</a>.</li>
+  <li>Epic: <a href="/backlog/2804-ui-fidelity-gate-real-route-conformance-born-with-contract-t/">#2804 — UI-Fidelity Gate</a>; launch registry slice <a href="/backlog/2806-target-registry-approval-token-perceptual-distance-floor/">#2806</a>; schema slice <a href="/backlog/2805-ui-fidelity-contract-schema-validator/">#2805</a>.</li>
+  <li>Product surface it folds into: <a href="/backlog/2676-plateau-design-studio-request-a-screen-change-ai-design-comm/">#2676 — Plateau design-studio loop</a>.</li>
+  <li>Neighboring research: <a href="/research/design-token-theming-system/">Unified design-token / theming system</a>; <a href="/research/annotated-visual-diff-surface/">Annotated visual-diff surface</a>.</li>
+</ul>
+{% endraw %}
