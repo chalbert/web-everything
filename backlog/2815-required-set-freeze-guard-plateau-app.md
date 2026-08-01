@@ -1,10 +1,11 @@
 ---
+bornAs: xmye7gb
 kind: story
 size: 3
-parent: "xnu179a"
+parent: "2804"
 status: open
 dateOpened: "2026-08-01"
-blockedBy: ["xvbh2rb"]
+blockedBy: ["2811"]
 tags: [plateau-loop, conveyor, ui-fidelity, plateau-app, slice-uifg]
 ---
 

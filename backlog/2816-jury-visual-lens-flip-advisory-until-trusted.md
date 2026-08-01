@@ -1,10 +1,11 @@
 ---
+bornAs: xs10rd7
 kind: story
 size: 3
-parent: "xnu179a"
+parent: "2804"
 status: open
 dateOpened: "2026-08-01"
-blockedBy: ["x0xhe5k"]
+blockedBy: ["2812"]
 tags: [plateau-loop, conveyor, ui-fidelity, we, jury, slice-uifg]
 ---
 

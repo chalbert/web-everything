@@ -1,10 +1,11 @@
 ---
+bornAs: xmllmw4
 kind: story
 size: 5
-parent: "xnu179a"
+parent: "2804"
 status: open
 dateOpened: "2026-08-01"
-blockedBy: ["xscdebo"]
+blockedBy: ["2809"]
 tags: [plateau-loop, conveyor, ui-fidelity, plateau-app, slice-uifg]
 ---
 

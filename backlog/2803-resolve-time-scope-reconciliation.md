@@ -1,10 +1,11 @@
 ---
+bornAs: xbgtqkm
 kind: story
 size: 5
-parent: "xnu179a"
+parent: "2804"
 status: open
 dateOpened: "2026-08-01"
-blockedBy: ["xf72eqi"]
+blockedBy: ["2802"]
 tags: [plateau-loop, conveyor, ui-fidelity, we, slice-uifg]
 ---
 

@@ -1,10 +1,11 @@
 ---
+bornAs: xphltws
 kind: story
 size: 3
-parent: "xnu179a"
+parent: "2804"
 status: open
 dateOpened: "2026-08-01"
-blockedBy: ["xpcdbsy", "xf72eqi"]
+blockedBy: ["2805", "2802"]
 tags: [plateau-loop, conveyor, ui-fidelity, we, slice-uifg]
 ---
 

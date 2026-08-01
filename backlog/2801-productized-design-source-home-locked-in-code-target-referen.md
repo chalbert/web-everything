@@ -1,4 +1,5 @@
 ---
+bornAs: x6dpgdu
 kind: decision
 parent: "2527"
 status: open
@@ -11,7 +12,7 @@ tags: [plateau-loop, conveyor, ui-fidelity, design-source, decision]
 Captured 2026-08-01 (resolve later). The UI-Fidelity Gate (RRFC) assumes every UI story references a
 **registry-anchored, locked design target**. Today that target is a **claude.ai artifact** we author to explore a
 design — good enough to bootstrap, but not the productized home. This decision is what replaces it once we
-productize. It extends the RRFC target-registry slice (filed as `x8fptpl` under the UI-Fidelity Gate epic, PR
+productize. It extends the RRFC target-registry slice (filed as `2806` under the UI-Fidelity Gate epic, PR
 [#947](https://github.com/chalbert/web-everything/pull/947)).
 
 ## The need
