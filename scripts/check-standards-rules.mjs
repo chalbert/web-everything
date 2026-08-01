@@ -13,6 +13,8 @@
  * feed (#095/#196/#197) and the human output are unchanged.
  */
 
+import { validateFidelityContract } from './lib/fidelity-contract.mjs';
+
 // Backlog operational axis (not the implementation lifecycle) + agile sizing — see
 // docs/agent/backlog-workflow.md. Exported so the script and the tests share one definition.
 // `preparing` (#375) — a decision being researched by /prepare: non-open + in-flight (drops from
@@ -253,6 +255,17 @@ export function validateBacklogItem(item, ctx) {
   // Resolution date is what the burndown plots — required once resolved.
   if (item.status === 'resolved' && !item.dateResolved)
     err(`Backlog item "${item.id}" is resolved but has no dateResolved — the burndown needs the resolution date`);
+
+  // UI-fidelity contract shape (#2805, epic #2804) — a UI item is born carrying a `fidelity:` block naming
+  // its real assembled route, host shell, frozen webcase required-set, data seeds (empty+overflow
+  // mandatory), themes, registry-anchored target, and baseline template. WE validates the SHAPE only
+  // (never boots the product — MEMORY #6); the real route table + render live in the product repo. Any
+  // item that authors the block gets it gated here.
+  if (item.fidelity !== undefined) {
+    const fc = validateFidelityContract(item.fidelity, { id: item.id });
+    for (const e of fc.errors) err(e.message, e.descriptor);
+    for (const w of fc.warnings) warn(w.message, w.descriptor);
+  }
 
   return { errors, warnings };
 }
