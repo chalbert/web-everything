@@ -82,4 +82,12 @@ describe('isVisualTouch (repo-qualified predicate, #2078 folded into #2000)', ()
     expect(isVisualTouch(null)).toBe(false);
     expect(isVisualTouch([{ repo: 'we' }])).toBe(false);
   });
+  it('widened (#2802): a data-layer file a route renders through fires ONLY with the route graph', () => {
+    const dataFile = 'plateau-app:src/backlog-view/lane-board-data.ts';
+    // No route graph → path-regex only → a .ts data module misses (backward-compatible).
+    expect(isVisualTouch([dataFile])).toBe(false);
+    // With a route graph whose /console-board closure contains the file → UI-affecting.
+    const routeGraph = { routeEntries: { '/console-board': [dataFile] }, graph: new Map([[dataFile, []]]) };
+    expect(isVisualTouch([dataFile], { routeGraph })).toBe(true);
+  });
 });
