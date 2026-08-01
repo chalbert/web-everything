@@ -4,6 +4,7 @@ kind: decision
 parent: "2527"
 status: open
 dateOpened: "2026-08-01"
+preparedDate: "2026-08-01"
 relatedReport: reports/2026-08-01-design-source-home-locked-target.md
 tags: [plateau-loop, conveyor, ui-fidelity, design-source, decision]
 ---
