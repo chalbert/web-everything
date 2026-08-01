@@ -1,8 +1,17 @@
 # Productized design-source home + locked in-code target reference — decision prep (#2801)
 
 **Point:** Prepared decision #2801 to Definition of Ready — four forks with bold, adversarially-attacked
-defaults, grounded in a published `/research/` prior-art survey; `preparedDate` set so readiness tags it
-`✓ ready to ratify`. Not ruled — prepare only.
+defaults, grounded in a published `/research/` prior-art survey — and the operator **RATIFIED it the same day
+(2026-08-01)**. The four fork *directions* are accepted; the item is **resolved + codified** at
+`we:docs/agent/platform-decisions.md#design-source-locked-in-code-target` (statute states direction only) and the
+`we:AGENTS.md` inventory is regenerated. The security-bearing trust-model *mechanics* are deliberately **not**
+codified in statute — they are deferred to the target-registry slice #2806 as seven security requirements.
+
+> **Note (post-review correction).** An earlier version of this report said "Not ruled — prepare only". That was
+> wrong: the operator did ratify (the diff-only reviewer could not see the ratification in chat). The ratify
+> commit also baked the full trust-model *mechanics* into binding statute — a broken model the reviewer correctly
+> flagged. This report + the statute are corrected: the ratification is truthfully evidenced, and the statute now
+> codifies **direction only**, deferring the mechanics to #2806.
 
 ---
 
@@ -28,7 +37,8 @@ maps to `registryId@vN` + `contentHash`, (4) whether interactions become checkab
 4. **Interactions** — **cut on assertability**: gate deterministic post-interaction states (focus / `aria-*`
    flips / loading-error) now via the boolean floor; motion/timing stays advisory.
 
-`preparedDate` set; **not ruled** — ratification is `/next decision`'s job.
+`preparedDate` set **and ratified same-day (2026-08-01)** by the operator — the item is resolved + codified
+(direction only; mechanics → #2806).
 
 ## Key Findings
 
@@ -59,7 +69,35 @@ maps to `registryId@vN` + `contentHash`, (4) whether interactions become checkab
 
 | File | Action |
 |---|---|
-| `we:backlog/2801-productized-design-source-home-locked-in-code-target-referen.md` | Rewritten to the prepared-decision shape (4 forks, glance table, classification, `preparedDate`) |
+| `we:backlog/2801-productized-design-source-home-locked-in-code-target-referen.md` | Prepared-decision shape (4 forks, glance table, classification) **+ resolved: `status: resolved`, `dateResolved`/`codifiedIn`, re-parented to #2804, `## Ruling — RATIFIED`** |
+| `we:docs/agent/platform-decisions.md` | **New statute `#design-source-locked-in-code-target`** — the four ruled *directions* (mechanics deferred to #2806) |
+| `we:backlog/2806-target-registry-approval-token-perceptual-distance-floor.md` | **Seven security requirements added** (the deferred trust-model mechanics) |
+| `we:AGENTS.md` | Inventory regenerated (research-topic count) |
 | `we:src/_data/researchTopics/design-source-home-locked-target.json` | New research registry entry |
 | `we:src/_includes/research-descriptions/design-source-home-locked-target.njk` | New research write-up |
 | `we:reports/2026-08-01-design-source-home-locked-target.md` | This report |
+
+## How this is prevented next time
+
+The first ratify commit shipped a broken trust model into binding statute and left three narrative artifacts
+(PR body, this report, the item) disagreeing with the diff. Named mechanisms, not "be more careful":
+
+- **Same-day `preparedDate == dateResolved` on a `kind: decision` item → a write-time gate.** This is
+  script-decidable (two frontmatter dates on one item), so per the hookable-vs-judgment rule it belongs in a
+  hook (`check:standards` / a PreToolUse write gate), not model recall. It would have forced the ratify to be a
+  distinct, deliberate step. *(The gate must allow a legitimate same-day ratify — so it should escalate for an
+  explicit ratify marker, not hard-block.)*
+- **Refuse `status: resolved` on a decision item still carrying live-fork tells.** "≥2 coherent named branches,
+  a confidence score, or a `SURVIVES-WITH-AMENDMENT` skeptic" are greppable in the item's own `## Fork` sections.
+  A gate that blocks resolve while those tells are present catches a self-ratify at write-time.
+- **Codify direction, not mechanics — a statute-scope check.** A statute section that prescribes a *token /
+  signing / ledger / canonicalization* mechanism (security-bearing detail) rather than a direction is a smell;
+  those belong on the owning slice as requirements. Here the fix routed the seven mechanics to #2806.
+- **Whole-item integrity across narratives.** The ratify commit updated the diff but not the PR body or report.
+  A resolve of a decision should reconcile *every* place the prior answer appears in the same turn — a checklist
+  (item + statute + report + PR body + research page) the resolve step must tick.
+- **De-duplicate the restated ruling.** The same ruling lived in four artifacts and drifted. The durable form is
+  one canonical statement (the statute) that the others *point at*, not re-state — reducing drift surface.
+
+The durable hooks (same-day-ratify gate; live-fork-tell resolve gate; statute-scope check) are being filed
+separately as backlog items.

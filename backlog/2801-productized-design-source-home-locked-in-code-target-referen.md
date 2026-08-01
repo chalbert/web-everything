@@ -1,7 +1,7 @@
 ---
 bornAs: x6dpgdu
 kind: decision
-parent: "2527"
+parent: "2804"
 status: resolved
 dateOpened: "2026-08-01"
 dateResolved: "2026-08-01"
@@ -25,25 +25,39 @@ under the UI-Fidelity Gate epic [#2804](/backlog/2804-ui-fidelity-gate-real-rout
 
 ## Ruling (2026-08-01)
 
-**RATIFIED — all four fork defaults accepted.** Codified at
-[`we:docs/agent/platform-decisions.md#design-source-locked-in-code-target`](/docs/agent/platform-decisions.md#design-source-locked-in-code-target).
-The four ratified defaults, exactly as prepared:
+**RATIFIED by the operator on 2026-08-01 — all four fork *directions* accepted.** Resolved + codified at
+[`we:docs/agent/platform-decisions.md#design-source-locked-in-code-target`](/rules/platform-decisions/#design-source-locked-in-code-target)
+(served form; the `codifiedIn:` frontmatter holds the doc source-of-truth path). The statute codifies the four
+**ruled directions only**; the security-bearing **mechanics** are deliberately deferred to the target-registry
+slice [#2806](/backlog/2806-target-registry-approval-token-perceptual-distance-floor/) (see the caveat). The four
+ratified directions, as prepared:
 
-1. **Canonical stored form (Fork 1 (c)).** The in-code artifact is the *sole* content-hashed canon
-   (`contentHash` = `sha256` over its canonical bytes — the only anchor the approval token signs); the rendered
-   baseline is a **non-canonical, advisory** product-repo artifact for the tolerance-compared perceptual layer —
-   **never** a hash anchor, **never** in WE.
+1. **Canonical stored form (Fork 1 (c)).** The in-code artifact is the *sole* content-hashed canon (the content
+   hash is over its canonical bytes); the rendered *design-target* baseline is a **non-canonical, advisory**
+   product-repo artifact for the tolerance-compared perceptual layer — **never** a hash anchor, **never** in WE
+   *as a design target*. (This is orthogonal to the [`#visual-regression-substrate`](/rules/platform-decisions/#visual-regression-substrate)
+   committed `-linux` baseline PNGs, which **are** WE's in-repo regression substrate — see Fork 1 for how the two
+   baselines compose.) The exact canonicalization + hashing rule is a #2806 mechanic, not fixed by this ruling.
 2. **External-source import→freeze (Fork 2 (c)).** Normalize every source into one source-agnostic in-code
    artifact + provenance, **and** archive the raw native payload (opaque, non-canonical) for lossless offline
-   re-normalization. **Figma is a swappable importer that pins `?version`, not a target kind.**
-3. **Version-minting authority (Fork 3 (b)).** A **minter-agnostic WE contract** owns version identity — id
-   scheme + hash rule + append-only ledger + token-over-hash; any client mints, design-studio #2676 is a
-   *client, not the owner*.
+   re-normalization. **Figma is a swappable importer that pins `?version`, not a target kind.** What "frozen" must
+   *guarantee* (no live/expiring subresources; raw-payload redaction) is a #2806 mechanic.
+3. **Version-minting authority (Fork 3 (b)).** A **minter-agnostic WE contract** owns version identity — the id
+   scheme `registryId@vN` and the direction that any *authorized* client mints; design-studio #2676 is a *client,
+   not the owner*. The ledger format, the authorization predicate, and how a version is signed are #2806
+   mechanics, not fixed by this ruling.
 4. **Interactions gated on assertability (Fork 4 (c)).** Gate deterministic post-interaction states *now* —
    focus / `aria-*` flips / loading-error — via the boolean floor; motion / timing stays **advisory**.
 
-**Honest caveat:** forks 3–4 leave build details for implementation — the exact append-only ledger format
-(fork 3) and the assertion-harness reach (fork 4) are settled downstream, not by this ruling.
+**Honest caveat — the trust-model mechanics are #2806's, not this ruling's.** This decision ratifies *direction*;
+it deliberately does **not** codify the token / authorization / keyed-signing / tamper-evidence / canonicalization
+/ freeze / PII-redaction mechanics. Those are listed as seven security requirements on
+[#2806](/backlog/2806-target-registry-approval-token-perceptual-distance-floor/) (which closes INVARIANT A's
+circular oracle): the mint needs an authorization predicate (not self-issuable); the digest is an *integrity
+digest, not authenticity* (align with #2809); the token binds `registryId`+`@vN`+`authoredInCommit`; the ledger
+needs tamper-evidence; "frozen" forbids live/expiring subresources; `sha256` needs a canonicalization rule; the
+raw payload needs redaction/PII handling + a `sourceHash` binding. #2806 designs the secure mechanism; this
+statute states the direction.
 
 ## The need (unchanged from capture)
 - **A real design-source home** to save and render UI design iterations — versions, history, side-by-side
@@ -124,15 +138,25 @@ image is not part of the hashed contract. Canonical = in-code (the "ideally in-c
 diffability); the render is a product build-output, never the identity, never in WE.
 
 ```yaml
-# registry entry (WE-validated contract; the product produces the render)
+# registry entry — shape aligned with the shipped #2805 validator (we:scripts/lib/fidelity-contract.mjs):
+# registryId is the combined id@version, and `baseline` is a sibling block (NOT a `version` field, NOT
+# `advisoryBaselines`).
 target:
-  registryId: "console-board"
-  version: 3                       # registryId@v3
-  contentHash: "sha256:9f2c…"      # over canonicalArtifact bytes ONLY — the token signs THIS
+  registryId: "mock:console-board@v3"   # id@version combined — the identity, exactly as #2805 validates
+  contentHash: "sha256:9f2c…"           # over canonicalArtifact's canonical bytes (canonicalization rule = #2806)
+  authoredInCommit: "<sha>"             # the third target field #2805 requires
   canonicalArtifact: "plateau:src/design-targets/console-board/v3/target.html"  # in-code, diffable — the canon
-  advisoryBaselines:               # NON-canonical, product-repo, tolerance-compared, NOT hashed, NOT in WE
-    template: "plateau:tests/visual/baselines/console-board/v3/{seed}.{theme}.png"
+baseline:                               # NON-canonical, product-repo, tolerance-compared, NOT hashed, NOT in WE
+  template: "plateau:tests/visual/baselines/console-board/{seed}.{theme}"
 ```
+
+**How this baseline composes with the sibling `#visual-regression-substrate` statute.** That statute rules
+committed `-linux` baseline PNGs **are** WE's in-repo visual-regression substrate; this fork rules the rendered
+baseline is **never** in WE. No contradiction — they are *different baselines*: the **regression** baseline
+proves WE's own visual gate does not drift (WE-owned, in-repo), while this **design-target** baseline is the
+product's rendered reference a conformance oracle tolerance-compares a build against (product-owned, per
+seed×theme). The design target's *canon* is the in-code artifact; its rendered baseline lives product-side, so
+neither statute puts a product design-target screenshot into WE.
 
 **Skeptic:** SURVIVES-WITH-AMENDMENT — the attack (correct, folded in): a rendered baseline is **not
 byte-deterministic** (font hinting, anti-aliasing, GPU/CPU raster, CPU arch all move pixels — the very reason
@@ -271,8 +295,13 @@ the neutral contract layer, the studio is one client") **and** flagged `impl + p
 (surface-placement is product-internal, and version-identity is the same either way so the delta was effort).
 **Both are folded in by the reframe above:** the minting **mechanism** moved to a WE contract (fixes the layer
 leak + the impl flag) and is now ruled on **lock-in merit** (fixes the prio flag); the surface **placement** is
-demoted to a settled, reversible recommendation. Statute-overlap: sets no `codifiedIn` here (mechanism is #2806's
-schema territory), so no `we:docs/agent/platform-decisions.md` anchor collision. **Skeptic:**
+demoted to a settled, reversible recommendation. Statute-overlap (checked on ratification): this direction **is**
+codified — the item's `codifiedIn` points at
+`we:docs/agent/platform-decisions.md#design-source-locked-in-code-target`, and that statute states Fork 3's
+*direction* (minter-agnostic WE contract owns identity). The overlap grep against the adjacent
+`#visual-regression-substrate` anchor was run and reconciled (see Fork 1's baseline-composition note); the
+security-bearing **mechanics** (ledger format, authorization predicate, signing) are deliberately **not** in the
+statute — they are deferred to #2806, so there is no mechanism-level statute duplication. **Skeptic:**
 SURVIVES-WITH-AMENDMENT (mechanism → WE contract, studio → one minter). **Screen:** flagged(impl+prio) → fixed
 by re-layering the contract to WE and demoting the UI-placement to a recommendation.
 
@@ -351,7 +380,7 @@ flagged(prio) → fixed by re-deriving the cut on merit (deterministic → gate;
   ([#2806](/backlog/2806-target-registry-approval-token-perceptual-distance-floor/)) and schema
   ([#2805](/backlog/2805-ui-fidelity-contract-schema-validator/), resolved) prove the artifact-as-target path
   is the bottleneck — this is the decision's own "Not now" gate, not a DAG edge to add now.
-- **Re-home:** on ratification, this item should re-parent from #2527 under the UI-Fidelity Gate epic
+- **Re-home:** done on ratification — `parent` re-parented from #2527 to the UI-Fidelity Gate epic
   [#2804](/backlog/2804-ui-fidelity-gate-real-route-conformance-born-with-contract-t/) (its natural home).
 - **Spin-off builds (post-ratification, `blockedBy` this decision):** (i) WE — extend the registry schema with
   `canonicalArtifact` + `source` provenance + the append-only `@vN` ledger + minter-agnostic token issuance (WE
