@@ -55,6 +55,19 @@ For each finding — or each clustered *class* of findings, at **every severity*
 
 The prevention block rides the existing verdict → disposition path (`deriveNegotiationOutcome` / `deriveReviewDisposition` / the panel-verdict reduction), so it is transported by the machinery that already exists rather than a parallel side-channel.
 
+## The prevention is a negotiation, and acceptance is gated on capture
+
+Prevention introspection is **not a one-sided reviewer note.** It is a **negotiation between creator and reviewer** that must *converge*, and PR acceptance is **gated on the agreed prevention being captured** — not on the reviewer merely having written prevention down.
+
+1. **Negotiation / convergence, not a monologue.** The reviewer *proposes* the prevention for each finding — `{ class, why-the-author-erred, gate-or-process fix, route }` — and the **creator responds**: agrees, refines the mechanism (a better hook, a narrower lint), or argues on the merits why a gate isn't warranted. The two **converge on "everything that could reasonably be done to prevent this class from recurring."** This is not new machinery: it **composes with the existing panel↔editor↔re-review convergence loop (#2437)** — the *same* back-and-forth, applied to the **prevention**, not just to the fix.
+2. **Acceptance gate — accept only once the agreed prevention is captured.** The reviewer **accepts the PR only after all the agreed prevention is done**, which **normally means it is FILED as a future backlog item** (a hook / gate / process story) — *not* necessarily built in this PR. A finding whose agreed prevention is **neither built nor filed blocks acceptance.** This directly closes the **"unfiled intention" gap**: the introspection can *name* a guard and still lose it if nothing forces the filing. Worked instance — the **#957 round-2 citation-verification gate** that the introspection *named* but left **unfiled** must, under this rule, be **filed before accept.**
+
+## Lens-by-class — pick the lenses by the finding-classes, not a fixed set
+
+A review — and a self-review — must **select its lenses by the item's finding-classes**, not run one fixed lens set. A cross-ref-dense **statute / decision** item needs a **provenance** lens; a **UI** item needs the **visual** lens. Running the wrong lens set is itself a preventable gap: **missing a class because the wrong lens ran** is a hole in the floor exactly like a missing gate.
+
+Worked instance: the **#957 round-2 provenance nits slipped** because the ratified self-review floor ran only the **`correctness`** lens — a **lens mismatch, not a round-count problem.** Adding rounds would not have caught them; running the **provenance lens on a provenance-dense item** would. The review's own lens set is therefore a thing prevention introspection generalizes and guards. This carries to the **self-review floor** too: a self-review owes lens-by-class selection, not a fixed `correctness`-only pass.
+
 ## Mandatory + inherited
 
 - The requirement lives **once**, in the shared core / the mandate `buildMandate` (and `buildPanelMandate`) hands to reviewers, and in the verdict contract they reduce to.
@@ -70,6 +83,7 @@ The prevention block rides the existing verdict → disposition path (`deriveNeg
 ## Cross-references
 
 - **#2325** — the shared review core this extends (the one engine; the single place to add the field).
+- **#2437** — the panel↔editor↔re-review convergence loop the prevention negotiation composes with (same machinery, applied to the prevention).
 - **#51** — hookable-vs-judgment: the rule that decides *guard* (script-decidable → hook) vs *working-style note* (judgment).
 - **#2821** — the ratify-gate + provenance-hooks story: the first hooks this generation would have produced automatically (produced by hand on the PR #957/#959 bounces, landed via PR #961).
 - **#2818** — per-step pipeline transparency (the ledger this composes with, not duplicates; landed via PR #954).
@@ -85,4 +99,7 @@ The prevention block rides the existing verdict → disposition path (`deriveNeg
 - A class that **recurs** across reviews and still has no gate is flagged as an **owed** guard (escalated past "proposed") — a hole in the deterministic floor, not a fresh idea.
 - The four recent cosmetic classes — stale merge-base hunk, YAML-drift-from-validator-schema, renumbered dead link, overclaiming comment surviving a rename — are each named as *nit → gate* worked examples the mechanism should have caught.
 - Routed outputs land in the existing funnels — proposed hooks to the backlog, working-style corrections to agent memory — carried by the disposition / ledger, not a parallel channel.
+- The prevention is **negotiated to convergence**, not one-sided: the reviewer proposes it per finding, the creator responds (agree / refine the mechanism / argue on the merits why no gate), and the two converge on "everything that could reasonably be done to prevent this class from recurring" — riding the existing #2437 convergence loop.
+- Acceptance is **gated on capture**: the reviewer accepts the PR only once every agreed prevention is **built or filed** as a backlog item (a hook / gate / process story — normally filed, not built here). A finding whose agreed prevention is **neither built nor filed blocks acceptance** — closing the unfiled-intention gap (e.g. the #957 round-2 citation-verification gate the introspection named must be filed before accept).
+- Lenses are **selected by the item's finding-classes** (a provenance lens for a cross-ref-dense statute/decision item, the visual lens for a UI item), for review AND self-review — a fixed lens set is not enough. Missing a class because the wrong lens ran (e.g. the #957 round-2 provenance nits under a `correctness`-only floor) is a flaggable, preventable gap, not a round-count problem.
 - The transparency ledger (backlog #2818, PR #954) surfaces the light metric: the share of a review's findings that became (or could become) a deterministic check, and the human-nit rate over time — the signal the floor is doing its job.
