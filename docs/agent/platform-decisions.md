@@ -2533,6 +2533,51 @@ baselines remain in-repo, *if* in-PR image-diff review proves too coarse in prac
 **graduate baselines off committed PNG** when git churn weighs (#1967). Both are opt-in later moves, not the
 default now.
 
+### Design-source home + locked in-code target reference {#design-source-locked-in-code-target}
+
+**Ratified 2026-08-01 (#2801).** Productizes RRFC INVARIANT A's target registry. Composes the
+[UI-Fidelity Gate epic #2804](/backlog/2804-ui-fidelity-gate-real-route-conformance-born-with-contract-t/) and its
+INVARIANT A — the target is registry-anchored + content-hashed. This statute rules **four directions only**; the
+security-bearing *mechanics* are explicitly deferred to the target-registry slice #2806 (see "Deferred to #2806"
+below). Four ruled directions:
+
+- **Canonical stored form = the in-code artifact, the sole content-hashed canon.** The identity is a content hash
+  over the in-code target artifact's canonical bytes — the in-code artifact is the single source of truth. A
+  rendered baseline PNG is a **non-canonical, advisory** product-repo artifact feeding the tolerance-compared
+  perceptual layer — **never** a hash anchor, **never** in WE as a *design target* (a hash over pixels isn't a
+  stable identity, and committing product screenshots to WE breaches WE-holds-zero, MEMORY #6). *(This is the
+  design-target baseline, and does not touch the [visual-regression substrate](#visual-regression-substrate)'s
+  committed `-linux` baseline PNGs, which **are** WE's in-repo regression substrate — the two compose: the
+  regression baseline proves WE's own gate does not drift; the design-target baseline is the product's rendered
+  reference for a conformance oracle, and lives product-side. Different baselines, different repos.)* The exact
+  canonicalization + hashing rule is a #2806 mechanic, not fixed here.
+- **External-source import→freeze = normalize to one source-agnostic in-code artifact + provenance, and archive
+  the raw native payload.** Every source materializes the *same* canonical in-code artifact; the raw native
+  import payload (e.g. Figma node JSON + fetched PNG) is archived as an **opaque, non-canonical** provenance blob
+  for lossless offline re-normalization — never a second per-source target kind the gate reads. **Figma is a
+  swappable importer that pins `?version`, not a target kind.** What "frozen" must *guarantee* (no live/expiring
+  subresources; redaction of the raw payload) is a #2806 mechanic, not asserted here.
+- **Version-minting authority = a minter-agnostic WE contract.** WE owns the identity *mechanism* — the id scheme
+  `registryId@vN` and the direction that any authorized client (not one product surface) can mint; design-studio
+  #2676 is one client, not the owner. A product-owned minting authority is rejected as a layer leak that
+  forecloses every other minter. The ledger format, the authorization predicate, and how a version is signed are
+  #2806 mechanics, not fixed here.
+- **Interactions gate on assertability.** Gate deterministic post-interaction states **now** through the boolean
+  floor — focus / `focus-visible`, `aria-*` flips, disabled / loading / error states after an event. Motion /
+  timing / prototype feel stays **advisory** (no deterministic oracle; blocking would rot).
+
+**Deferred to #2806 (INVARIANT A) — the secure mechanism, not this statute.** This statute states *direction*;
+the [target-registry slice #2806](/backlog/2806-target-registry-approval-token-perceptual-distance-floor/) owns
+the token / authorization / keyed-signing / tamper-evidence / canonicalization / freeze / PII-redaction
+**mechanics** and lists them as security requirements. Deliberately **not** ruled here (an earlier draft baked in
+a self-issuable token, "the token signs the hash", append-only-ledger internals, and a "frozen" guarantee — a
+broken trust model this statute must not codify): the mint needs an **authorization predicate** (not
+self-issuable); the digest is an **integrity digest, not authenticity** (align with #2809 — an unkeyed sha256
+over public inputs proves neither); the token must **bind `registryId` + `@vN` + `authoredInCommit`** (not the
+bare content hash); the ledger needs **tamper-evidence**; "frozen" must **forbid live/expiring subresources**;
+`sha256` needs a **canonicalization rule**; the raw payload needs **redaction/PII handling + a `sourceHash`
+binding**. #2806 designs these; the statute only fixes the four directions above.
+
 ### Skill/memory replay substrate — an ephemeral throwaway clone, never the shared lane pool {#skill-memory-replay-substrate}
 
 The skill/memory validation suite (#2268) replays a **mutating** script/skill case inside an **ephemeral
