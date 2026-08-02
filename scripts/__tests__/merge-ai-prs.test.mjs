@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -415,7 +415,10 @@ describe('merge-ai-prs — #xq985wu decouple merge-ordering from the ready-to-me
 
   it('AC1 mirror: the SAME dependent is READY once the blocker is absent from BOTH the candidate list AND extraOpenItems (truly landed)', () => {
     // Proves the defer above comes from open-SET membership, not from nothing: drop 2199 from the open set and
-    // the dependent frees. (The extraOpenItems still carries the dependent's own item — a self-edge is a no-op.)
+    // the dependent frees. (The extraOpenItems still carries the dependent's OWN item 2200, but that is already
+    // in `openItems` via the candidate-seeding line — the redundancy is harmless because the dependent has no
+    // self-`blockedBy` edge; a genuine self-`blockedBy` would be a PERMANENT self-defer, not a no-op, and is
+    // rejected upstream by check-standards.mjs / check-backlog-item.mjs.)
     const freed = planLabelDrain([cand(2, 2200, [2199])], { extraOpenItems: new Set([2200]) });
     expect(freed.ready.map((c) => c.num)).toEqual([2]);
     expect(freed.deferred).toEqual([]);
@@ -446,6 +449,90 @@ describe('merge-ai-prs — #xq985wu decouple merge-ordering from the ready-to-me
     const rhs = m[1];
     expect(rhs).toContain('openPrContext.openItems'); // sourced from the label-blind full-open set
     expect(rhs).not.toContain('onlyPr'); // NOT conditioned on the --only fast-drain flag
+  });
+});
+
+// #999 / xq985wu review — the LIVENESS regression the one-liner introduced. Decoupling ordering onto the
+// FROZEN full-open superset (`orderExtraOpenItems`, snapshot BEFORE any merge, never updated) is only safe if
+// the `blockedBy` path honours a proven-landed item the SAME way `stackParents` already does. Before the fix
+// `blockWait` consulted `openItems` ONLY, so an item that was landed THIS pass (`landedThisPass`) or proven on
+// main in a prior session (`provenOnMain`) but still present in the frozen `openItems` kept deferring its
+// dependents forever. These are the CAPTURED PREVENTIONS (contract tests at the seam where the bug lives).
+describe('merge-ai-prs — #999/xq985wu liveness: blockWait honors landed-proof (F1/F2)', () => {
+  const cand = (num, item, blockedBy = [], decision = 'merge') => ({ num, item, blockedBy, decision });
+
+  // F1 — the in-pass cascade must free a `blockedBy` dependent the SAME pass its blocker lands. `landedThisPass`
+  // carries the just-merged blocker; the frozen `extraOpenItems` superset still names both. Before the fix the
+  // dependent deferred (one-link-per-pass); after, it is ready — mirroring `stackProven`'s landedThisPass-first
+  // precedence. This is the asymmetry the review caught: `stackParents` checked landedThisPass BEFORE openItems,
+  // `blockedBy` never did.
+  it('F1: a dependent whose blocker landed THIS pass is READY even while the frozen superset still names it', () => {
+    const plan = planLabelDrain([cand(2, 200, [100])], { landedThisPass: new Set([100]), extraOpenItems: new Set([100, 200]) });
+    expect(plan.ready.map((c) => c.num)).toEqual([2]);
+    expect(plan.deferred).toEqual([]);
+  });
+
+  // F2 — a stale/abandoned/draft/human/impl-half PR still NAMING a LANDED item keeps it in `openItems` forever.
+  // `provenOnMain` (the `bornAs`-on-main proof, already wired into `stackParents`) must also clear a `blockedBy`
+  // edge: an item present in BOTH `extraOpenItems` and `provenOnMain` is landed, so the dependent is READY.
+  it('F2: an item in BOTH extraOpenItems and provenOnMain is proven landed → dependent READY, not deferred', () => {
+    const plan = planLabelDrain([cand(2, 200, [100])], { provenOnMain: new Set([100]), extraOpenItems: new Set([100, 200]) });
+    expect(plan.ready.map((c) => c.num)).toEqual([2]);
+    expect(plan.deferred).toEqual([]);
+  });
+
+  // F2 negative control — a blocker that is open and has NO landed-proof still defers (the fix must not read
+  // absence-of-proof as landed; it only clears the edge on POSITIVE proof, mirroring the stowaway guard).
+  it('F2 control: an open blocker with no landed-proof still DEFERS the dependent', () => {
+    const plan = planLabelDrain([cand(2, 200, [100])], { extraOpenItems: new Set([100, 200]) });
+    expect(plan.ready).toEqual([]);
+    expect(plan.deferred).toEqual([{ num: 2, item: 200, waitOn: [100] }]);
+  });
+
+  // Cascade-level test — the seam NO original AC touched. Faithfully simulates the real cascade's freeing
+  // bookkeeping (scripts/merge-ai-prs.mjs ~2321-2409): re-plan with the SAME frozen `extraOpenItems` superset
+  // each inner iteration, and on each "merge" add the item to `landedThisPass` + drop it from `remaining` — the
+  // ONLY thing stubbed is the `gh pr merge` write. Before the fix A lands but B never frees within the pass
+  // (one-link-per-pass, deferred non-empty at fixed-point); after, BOTH land in one pass, deferred empty.
+  it('Cascade: A(ready) + B(blockedBy[A]) BOTH land in one pass, not one-link-per-pass', () => {
+    const A = cand(1, 100, []);
+    const B = cand(2, 200, [100]);
+    // The frozen superset the cascade passes UNCHANGED across inner iterations (snapshot before any merge).
+    const extraOpenItems = new Set([100, 200]);
+    const landedThisPass = new Set();
+    let remaining = [A, B].map((v) => ({ ...v }));
+    const merged = [];
+    let lastDeferred = [];
+    // mirrors the real `for (;;)` cascade loop + its per-merge bookkeeping
+    for (let guard = 0; guard < 10; guard++) {
+      const plan = planLabelDrain(remaining, { landedThisPass, extraOpenItems });
+      lastDeferred = plan.deferred;
+      if (!plan.ready.length) break;
+      for (const c of plan.ready) {
+        merged.push(c.num);
+        landedThisPass.add(c.item); // real cascade: landedThisPass.add(asItemId(c.item)) on a WE-carrier merge
+        remaining = remaining.filter((x) => x.num !== c.num);
+      }
+    }
+    expect(merged.sort((a, b) => a - b)).toEqual([1, 2]); // both landed
+    expect(lastDeferred).toEqual([]); // nothing left deferred at the fixed point
+    expect(remaining).toEqual([]); // the dependent did NOT survive to a second pass
+  });
+});
+
+// #999 / xq985wu F3 — the `--limit` on `collectOpenPrContext`'s per-repo listing is now a MERGE-SAFETY input:
+// that listing is the sole ordering source on a full sweep, so a SILENTLY truncated page (newest-first) drops
+// the OLDEST open PRs — exactly the long-lived held blockers — and a dependent then reads the missing edge as
+// landed and merges EARLY. A full page (`count >= limit`) must be flagged DEGRADED, not silently trusted.
+describe('merge-ai-prs — #999/xq985wu F3 truncated open-PR listing is flagged degraded', () => {
+  it('a listing at exactly the cap is degraded; below the cap is not', () => {
+    expect(isDegradedOpenPrListing(OPEN_PR_LIST_LIMIT, OPEN_PR_LIST_LIMIT)).toBe(true); // full page → truncation possible
+    expect(isDegradedOpenPrListing(OPEN_PR_LIST_LIMIT + 5, OPEN_PR_LIST_LIMIT)).toBe(true); // over-full (defensive)
+    expect(isDegradedOpenPrListing(OPEN_PR_LIST_LIMIT - 1, OPEN_PR_LIST_LIMIT)).toBe(false); // room to spare → complete
+    expect(isDegradedOpenPrListing(0, OPEN_PR_LIST_LIMIT)).toBe(false);
+  });
+  it('the cap was raised off the old silent 100 (raising alone does not retire the class; the flag does)', () => {
+    expect(OPEN_PR_LIST_LIMIT).toBeGreaterThan(100);
   });
 });
 
