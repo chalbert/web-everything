@@ -219,6 +219,61 @@ describe('merge-ai-prs — #2820 hold-integrity: an unsatisfied review hold bloc
     expect(v.reviewHeld).toBe(true);
     expect(v.reason).toMatch(/unsatisfied review hold/);
   });
+
+  // #2820-review-fix (finding 3) — `reviewHeld` means the hold is the SOLE blocker: it is true ONLY on an
+  // otherwise-landable PR. A PR that is ALSO red / unmergeable / bodyless keeps its more actionable reason and is
+  // NOT reviewHeld, so it never leaks into the passes gated on reviewHeld (the escalation pass, the id-collision
+  // heal). The hold is checked LAST — a hard AND on ready-to-merge still (no held PR ever reaches `merge`), but
+  // the more-actionable skip reason wins when several blockers are true at once.
+  it('a red-CI PR carrying review:changes is NOT reviewHeld — the CI reason wins over the hold (finding 3)', () => {
+    const v = classifyPr(aiPr({ statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }], labels: [rtm, { name: REVIEW_LABELS.changes }] }));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(false);                 // NOT the operative blocker → never enters the downstream passes
+    expect(v.reason).toMatch(/required check "test" is not green/);
+    expect(v.reason).not.toMatch(/unsatisfied review hold/);
+  });
+
+  it('a CONFLICTING PR carrying review:human is NOT reviewHeld — the mergeability reason wins (finding 3)', () => {
+    const v = classifyPr(aiPr({ mergeable: 'CONFLICTING', labels: [rtm, { name: REVIEW_LABELS.human }] }));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(false);
+    expect(v.reason).toMatch(/not mergeable/);
+  });
+
+  it('a bodyless PR carrying review:pending is NOT reviewHeld — the empty-description reason wins (finding 3)', () => {
+    const v = classifyPr(aiPr({ body: '   ', labels: [rtm, { name: REVIEW_LABELS.pending }] }));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(false);
+    expect(v.reason).toMatch(/empty\/whitespace description/);
+  });
+});
+
+// #2820-review-fix (finding 2) — decideReviewGate's DEAD ZONE: review:pending had no branch, so a PR whose fresh
+// score de-escalated (rebase below threshold, or a best-effort signal miss) fell through to `!escalate` → merge.
+// Combined with classifyPr's hold-skip that stranded the PR: skipped every pass AND absent from parked. The fix
+// makes review:pending sticky on the LABEL (mirroring the #2362 human-sticky gate) — it parks agent-reviewable.
+describe('merge-ai-prs — #2820-review-fix (finding 2): review:pending is sticky, never the merge dead zone', () => {
+  it('a de-escalated review:pending PR PARKS agent-reviewable, not merge', () => {
+    const g = decideReviewGate({ escalate: false, humanRequired: false, labels: [{ name: REVIEW_LABELS.pending }] });
+    expect(g.action).toBe('park');
+    expect(g.applyLabel).toBe(REVIEW_LABELS.pending);
+    expect(g.humanRequired).toBe(false);
+  });
+
+  it('the per-PR relief valve still frees that exact pending park (the escape hatch is intact)', () => {
+    const g = decideReviewGate({ escalate: false, humanRequired: false, labels: [{ name: REVIEW_LABELS.pending }] });
+    expect(applyEscalationRelief(g, { relieved: true }).waive).toBe(true);
+  });
+
+  it('a real verdict still wins over the sticky pending: review:changes → wait-author, review:human → park human', () => {
+    expect(decideReviewGate({ escalate: false, labels: [{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.changes }] }).action).toBe('wait-author');
+    expect(decideReviewGate({ escalate: false, labels: [{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.human }] }).humanRequired).toBe(true);
+    expect(decideReviewGate({ escalate: false, labels: [{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }] }).action).toBe('merge');
+  });
+
+  it('no review label + de-escalated still merges — the fix is a no-op for the common path', () => {
+    expect(decideReviewGate({ escalate: false, labels: [] }).action).toBe('merge');
+  });
 });
 
 describe('merge-ai-prs — planLabelDrain blockedBy ordering (#2188)', () => {

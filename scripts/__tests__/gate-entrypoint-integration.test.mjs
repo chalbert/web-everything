@@ -179,4 +179,74 @@ describe('the real drain entrypoint consults the gate before merging', () => {
     expect(p302).toBeTruthy();
     expect(p302.humanRequired).toBe(false); // review:changes is agent-reviewable (author lane fixes) — not human-only
   });
+
+  // #2820-review-fix (finding 1) — the bare `--no-review-escalation` escape hatch. classifyPr's hold-skip was
+  // threaded ONLY from the per-PR relief set, so a BARE flag ({passWide:true, prs:[]}) left allowPendingReview
+  // false for every PR and the held review:pending PR was skipped BEFORE the !REVIEW_ESCALATION backstop (which
+  // only downgrades merge→skip) could honour the waiver — the documented x30jq9n stuck-park exit was dead. The
+  // pass-wide waiver is now threaded into classifyPr (gated on !!label, mirroring the backstop's allowPending).
+  it('#2820-review-fix (finding 1): a bare --no-review-escalation LANDS a green review:pending PR (the escape hatch lives)', () => {
+    const fixture = {
+      _id: 'escape-hatch',
+      prs: [
+        { number: 401, title: 'green, parked pending, no reviewer coming', body: 'a real summary', headRefName: 'lane/h', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:pending' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/r.md', additions: 2, deletions: 0 }] },
+        { number: 402, title: 'reviewer-rejected — NEVER waived by the flag', body: 'a real summary', headRefName: 'lane/j', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:changes' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/t.md', additions: 1, deletions: 0 }] },
+      ],
+    };
+    const r = runDrain(fixture, ['--label=ready-to-merge', '--no-reconcile-labels', '--no-review-escalation']);
+
+    // the operator override lands the stuck pending PR — the whole point of the escape hatch
+    expect(nums(r.toMerge)).toContain(401);
+    // but review:changes stays held even under the bare flag (the predicate never waives changes/human)
+    expect(nums(r.toMerge)).not.toContain(402);
+    expect(nums(r.merged)).not.toContain(402);
+  });
+
+  // #2820-review-fix (finding 2) — a green review:pending leaf whose fresh score DE-ESCALATES (a small backlog
+  // leaf) must still PARK (agent-reviewable), never fall into decideReviewGate's old `!escalate`→merge dead zone
+  // where classifyPr's hold-skip stranded it: skipped every pass AND absent from `parked`, so no reviewer is ever
+  // dispatched. The sticky-pending branch keeps it in `parked` with a release path.
+  it('#2820-review-fix (finding 2): a de-escalated review:pending leaf PARKS agent-reviewable, never the merge dead zone', () => {
+    const fixture = {
+      _id: 'pending-parks',
+      prs: [
+        { number: 501, title: 'green pending leaf, fresh score de-escalated', body: 'a real summary', headRefName: 'lane/i', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:pending' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/s.md', additions: 1, deletions: 0 }] },
+      ],
+    };
+    const r = runDrain(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    expect(nums(r.toMerge)).not.toContain(501);
+    expect(nums(r.merged)).not.toContain(501);
+    const p501 = r.parked.find((p) => Number(p.num) === 501);
+    expect(p501).toBeTruthy();
+    expect(p501.humanRequired).toBe(false);
+  });
+
+  // #2820-review-fix (finding 3) — a held PR that is ALSO unlandable for a more actionable reason (red CI) must
+  // NOT be treated as `reviewHeld`: it keeps the CI reason and is a plain SKIP, never routed into the escalation
+  // pass (and its mutating gates: #2414 baseline capture, the test-gaming review:human stamp). A green held PR
+  // still parks (previous cases); this pins that the red one does not.
+  it('#2820-review-fix (finding 3): a red-CI review:changes PR is a plain SKIP (CI reason), not parked into the mutating gates', () => {
+    const RED = [{ name: 'test', conclusion: 'FAILURE', status: 'COMPLETED' }];
+    const fixture = {
+      _id: 'red-held',
+      prs: [
+        { number: 601, title: 'red CI + review:changes, mid-fix', body: 'a real summary', headRefName: 'lane/k', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: RED,
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:changes' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/u.md', additions: 1, deletions: 0 }] },
+      ],
+    };
+    const r = runDrain(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    expect(nums(r.toMerge)).not.toContain(601);
+    expect(nums(r.merged)).not.toContain(601);
+    expect(nums(r.skipped)).toContain(601);                       // plain skip for the CI reason…
+    expect(r.parked.find((p) => Number(p.num) === 601)).toBeFalsy(); // …NOT routed through the escalation/parking path
+  });
 });

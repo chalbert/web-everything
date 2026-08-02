@@ -446,30 +446,38 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
   // hold predicate: true iff review:changes / review:human (or, unless relieved, review:pending) is present AND
   // review:accepted is NOT. This is the durable half of the fix — the merge predicate ANDs review-satisfied with
   // ready-to-merge, so no downstream ci-lifecycle re-add of `ready-to-merge` can slip a held PR through.
-  const reviewHeld = hasUnclearedReviewLabel(pr?.labels, { allowPending: allowPendingReview });
+  const reviewUncleared = hasUnclearedReviewLabel(pr?.labels, { allowPending: allowPendingReview });
   const heldLabel = hasLabel(pr, REVIEW_LABELS.changes) ? REVIEW_LABELS.changes
     : hasLabel(pr, REVIEW_LABELS.human) ? REVIEW_LABELS.human
       : REVIEW_LABELS.pending;
   let decision = 'merge';
+  // #2820-review-fix (finding 3) — `reviewHeld` means the review hold is the OPERATIVE blocker: the PR is
+  // otherwise fully landable (certified, green, cleanly mergeable, real body) and ONLY the uncleared review label
+  // stops it. It is set true inside the else-if chain BELOW, reached only after the CI / mergeability / landable /
+  // body clauses all pass — so a red-CI, CONFLICTING, or bodyless PR that merely happens to carry a review label
+  // is NOT `reviewHeld` and keeps its more actionable reason. That matters because `reviewHeld` is what admits a
+  // PR into the downstream passes gated on it (the escalation pass, the id-collision heal): those must only ever
+  // see a PR the hold ALONE is holding, never one already unlandable for a different reason (finding 3 / 4).
+  let reviewHeld = false;
   let reason = certifyLabel
     ? `producer-certified (label "${trustLabel}"), required check green, cleanly mergeable`
     : humanCleared
       ? 'human-cleared (review:accepted), required check green, cleanly mergeable'
       : 'AI-generated, required check green, cleanly mergeable';
   if (!certified) { decision = 'skip'; reason = `not AI-generated (a commit lacks the Co-Authored-By: Claude trailer), no "${trustLabel}" label, and not human-cleared (review:accepted)`; }
-  // #2820 — the review hold is checked right after certification (a held PR that could otherwise merge is ALWAYS
-  // certified — it carries `ready-to-merge` — so this ordering never lets a held PR slip past on the earlier
-  // uncertified branch) and BEFORE the CI/mergeability checks, so WE #956's exact state (`ready-to-merge` +
-  // `review:changes`, green, cleanly mergeable) is refused HERE with the hold surfaced as the auditable reason. A
-  // PR with no review label is never held, so this branch is a no-op for the common case.
-  else if (reviewHeld) { decision = 'skip'; reason = `unsatisfied review hold ("${heldLabel}") present without review:accepted — refusing to merge regardless of "${trustLabel}" (#2820)`; }
   else if (!testGreen) { decision = 'skip'; reason = `required check "${requiredCheck}" is not green`; }
   else if (mergeable !== 'MERGEABLE') { decision = 'skip'; reason = `not mergeable (mergeable=${mergeable || 'UNKNOWN'})`; }
   else if (!landableState) { decision = 'skip'; reason = `merge state ${state || 'UNKNOWN'} (BEHIND⇒needs rebase, DIRTY/BLOCKED/DRAFT⇒not landable) — left for its author`; }
   // #2324 — refuse to land a PR with an empty/whitespace description, same rule pr-land.mjs enforces before
-  // labelling (PR #206 landed bodyless). Checked LAST so the earlier, more actionable reasons (uncertified /
-  // red / unmergeable) still win when several are true at once.
+  // labelling (PR #206 landed bodyless). Checked before the review hold so the more actionable reasons win.
   else if (!hasNonEmptyBody(pr?.body)) { decision = 'skip'; reason = 'empty/whitespace description — refusing to land it (add a real summary of what changed and why; #2324)'; }
+  // #2820 — the review hold is checked LAST, on an OTHERWISE-LANDABLE PR (every clause above passed): WE #956's
+  // exact state (`ready-to-merge` + `review:changes`, green, cleanly mergeable) is refused HERE with the hold as
+  // the auditable reason, while a red / unmergeable / bodyless held PR keeps its more actionable reason. This is
+  // still a hard AND on ready-to-merge — no path lets a held PR reach `merge` — but only when the hold is the SOLE
+  // blocker does it flag `reviewHeld`, so the downstream passes see the hold in isolation. No review label ⇒ never
+  // held ⇒ a no-op for the common case (#2820-review-fix finding 3 — "checked LAST so earlier reasons win").
+  else if (reviewUncleared) { decision = 'skip'; reviewHeld = true; reason = `unsatisfied review hold ("${heldLabel}") present without review:accepted — refusing to merge regardless of "${trustLabel}" (#2820)`; }
   return { num, title, decision, reason, aiGenerated, certifyLabel, humanCleared, reviewHeld, testGreen, state, mergeable };
 }
 
@@ -1712,10 +1720,18 @@ async function runCli() {
     for (const p of prs) {
       const read = sweepReads.get(prCacheKey(repo, p.number))?.value || {};
       p.commits = read.commits || [];
-      // #2820 — thread the #2423 per-PR relief set so a PR the operator named in `--no-review-escalation=<pr#>`
-      // may still merge past `review:pending` (the hold predicate honours `allowPending` for it); a NON-relieved
-      // review:pending — and ALWAYS review:changes / review:human — stays held here, before the escalation pass.
-      const v = classifyPr(p, { requiredCheck: REQUIRED, allowPendingReview: escalationRelief.prs.includes(Number(p.number)) });
+      // #2820 — thread BOTH forms of the #2423 review-escalation waiver into the hold predicate:
+      //   • per-PR (`--no-review-escalation=<pr#>`): the named PR may merge past `review:pending`.
+      //   • pass-wide bare (`--no-review-escalation`, `passWide`): the legacy operator override. #2820-review-fix
+      //     (finding 1) — WITHOUT this, a bare flag parses to `{ passWide:true, prs:[] }`, so `allowPendingReview`
+      //     was false for EVERY PR and `classifyPr` skipped a `review:pending` PR with `reviewHeld` BEFORE the
+      //     `!REVIEW_ESCALATION` backstop could honour the waiver — the backstop only downgrades merge→skip, so it
+      //     could never re-admit an already-skipped PR. The escape hatch (`--label ... --no-review-escalation` to
+      //     land a green pending PR with no reviewer coming) was dead. Gating the pass-wide waiver on `!!label`
+      //     mirrors the backstop's own `allowPending = !!label`: a truly-bare `/merge` sweep (no `--label`) has no
+      //     verdict owner, so it still refuses `review:pending`. `review:changes` / `review:human` stay held
+      //     regardless (the predicate never waives them), matching the backstop's human-only / rejected refusals.
+      const v = classifyPr(p, { requiredCheck: REQUIRED, allowPendingReview: escalationRelief.prs.includes(Number(p.number)) || (escalationRelief.passWide && !!label) });
       v.repo = repo;               // null (local clone) or a slug — routes the merge/view/edit + the git-side gate
       v.headRef = p.headRefName;
       // #2188: attach the manifest (backlog `item` + cross-item `blockedBy`) so the GLOBAL cascade honours
@@ -1791,7 +1807,13 @@ async function runCli() {
       // Only a certified candidate that is NOT already landable is worth healing — a red required check is the
       // symptom of the collision. A landable PR has no collision (it passed `ids must be unique`); skip it.
       const certified = !!(v.certifyLabel || v.aiGenerated);
-      if (!certified || v.decision === 'merge') continue;
+      // #2820-review-fix (finding 4) — also skip a `reviewHeld` PR. Post-#2820, a held PR is `decision:'skip'`
+      // while still GREEN and landable (the hold is its ONLY blocker — `reviewHeld` is set precisely then), so it
+      // no longer satisfies the `=== 'merge'` guard and would wrongly enter the heal. Healing force-pushes the
+      // lane/* ref (renumbers the NNN), moving the head out from under an active reviewer and invalidating any
+      // #2409 acceptance stamped against the old SHA. The heal's premise ("a red required check is the symptom")
+      // never held for a green-held PR: it has no collision to heal. Excluding `reviewHeld` restores that premise.
+      if (!certified || v.decision === 'merge' || v.reviewHeld) continue;
       if (!isLocalRepo(v.repo) || !v.headRef) continue;
       // #2276 — a rebase-drop candidate (stale-green + BEHIND/CONFLICTING) is healed INSIDE the rebase-drop
       // rebuild below (one rebuilt tip drops the manifest AND renumbers), so skip it here to avoid a double

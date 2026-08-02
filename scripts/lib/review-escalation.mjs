@@ -632,6 +632,20 @@ export function decideReviewGate({ escalate, humanRequired = false, labels = [],
   if (humanRequired || hasReviewLabel(labels, REVIEW_LABELS.human)) {
     return { action: 'park', reason: 'human-gated (review:human) — only a human may clear it', applyLabel: REVIEW_LABELS.human, humanRequired: true };
   }
+  // #2820-review-fix (finding 2) — review:pending is STICKY on the LABEL too, mirroring the #2362 human-sticky
+  // gate above. A PR already parked under review:pending stays parked until a verdict label arrives, EVEN IF this
+  // pass's fresh score de-escalated it (a rebase dropped it below the size threshold, or a best-effort signal read
+  // missed and defaulted to no-escalate). Without this branch a de-escalated pending PR falls through to the
+  // `!escalate` merge return below — the DEAD ZONE that, combined with classifyPr's #2820 hold-skip, strands the
+  // PR: it is `decision:'skip'` (never merged) yet the gate says `merge` (so neither the park nor the wait-author
+  // branch fires in the drain), so it is skipped every pass AND absent from `parked` — no reviewer is ever
+  // dispatched and review:accepted can never arrive. Parking here keeps it in `parked` (agent-reviewable) so the
+  // hold has a release. The per-PR relief valve still frees it: this is the exact agent-reviewable pending park
+  // (`action:'park'`, `applyLabel:review:pending`, `humanRequired:false`, no staleAcceptance) applyEscalationRelief
+  // waives. Checked BEFORE `!escalate` so the sticky label wins; AFTER accepted/changes/human so a real verdict wins.
+  if (hasReviewLabel(labels, REVIEW_LABELS.pending)) {
+    return { action: 'park', reason: 'review:pending — awaiting an independent review', applyLabel: REVIEW_LABELS.pending, humanRequired: false };
+  }
   if (!escalate) return { action: 'merge', reason: 'no escalation signal — merge immediately' };
   // Agent-reviewable escalation, no verdict yet → park alive and wait for the verdict label. No timeout
   // (x30jq9n): landing unreviewed code on a clock is never the right failure mode; a stuck park is handled by
