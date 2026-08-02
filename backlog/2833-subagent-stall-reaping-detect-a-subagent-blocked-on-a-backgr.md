@@ -70,7 +70,7 @@ structurally blocked, not just discouraged in the delivery brief's prose.
 
 This PR delivers the **"synchronous checks (remove the footgun)"** acceptance criterion and the write-time guard
 against backgrounding it. It does **NOT** deliver the other two ACs, which are tracked as a follow-up under the
-conveyor epic in **#xw2ivof**:
+conveyor epic in **#2881**:
 
 - the **harness/orchestrator reap-or-resume backstop** — detecting a subagent blocked on a never-advancing
   background wait past a threshold and reaping (fail + reclaim its lane) or resuming it; and
