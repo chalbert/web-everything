@@ -1,0 +1,123 @@
+{% raw %}
+<h2>Question</h2>
+<p>
+  The conveyor's build lanes run a mandatory always-on adversarial self-review on their own diff before
+  opening a PR (delivery-agent brief step 6, plus a step-7 visual pass for UI items). Story
+  <a href="/backlog/2819-review-fix-convergence-runs-in-the-warm-build-lane-daemon-is/">#2819</a> asks
+  whether that self-review should stay <strong>always-on</strong> or become <strong>care-level-scaled</strong>
+  like the escalation rubric. Three options: <em>(a)</em> a mandatory full pass on every build; <em>(b)</em>
+  care-scaled only; <em>(c)</em> hybrid — a light always-on floor plus depth scaled by care-level. What does the
+  prior art on risk-based review gating say, and what is the failure mode of a review that flakes and gets
+  ignored?
+</p>
+
+<h2>Recommendation — hybrid with a non-zero floor (option c)</h2>
+<p>
+  Two <em>independent</em> bodies of prior art point the same way, and together they form a <strong>two-sided
+  clamp</strong> that makes (c) the only survivor rather than a mushy compromise:
+</p>
+<ol>
+  <li><strong>Nobody who ships fast runs <em>zero</em> review.</strong> Every mature high-throughput pipeline
+  keeps a non-zero floor on every change and scales <em>depth / who</em> above it — never a branch that reaches
+  zero scrutiny. A care dial that maps a "trivial" change to no review is the outlier, and it is the exact hole
+  #2819 was opened to close (a leaf edit whose under-specified brief hid an edge case). This kills option (b)'s
+  zero branch.</li>
+  <li><strong>A heavy pass on trivial changes destroys itself.</strong> The best-documented failure mode of
+  over-broad gating is <strong>flake-and-mute</strong>: a check that fires frequent low-value findings trains
+  the reviewer to wave it through, so the rare high-value finding is waved through too. This kills option (a)'s
+  uniform-heavy branch — the floor must be <em>light and high-signal</em>, not maximal.</li>
+</ol>
+<p>
+  So the floor is <em>non-zero</em> and <em>light</em>, and the depth <em>above</em> the floor is a config
+  dimension that reuses the existing care dial.
+</p>
+
+<h2>Where review is always-on vs risk-triggered</h2>
+<table>
+  <thead>
+    <tr><th>System</th><th>Always-on floor</th><th>Risk-triggered depth</th><th>Ever zero?</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Google — change-based review + readability</td><td>every change needs at least one reviewer LGTM</td><td>readability reviewer; more eyes for sensitive dirs; OWNERS depth by path</td><td><strong>No</strong> — nothing lands unreviewed</td></tr>
+    <tr><td>CODEOWNERS / branch protection (GitHub/GitLab)</td><td>required reviewers on protected paths</td><td>extra required reviewers on sensitive globs</td><td>No for protected paths</td></tr>
+    <tr><td>Risk-based testing (ISTQB)</td><td>baseline smoke on everything</td><td>test effort prioritized by risk exposure</td><td>baseline stays</td></tr>
+    <tr><td>Coverity / deep static analysis</td><td>fast incremental scan per change</td><td>full deep scan nightly / on risky modules</td><td>incremental stays</td></tr>
+    <tr><td>CodeRabbit / Graphite Diamond (AI review)</td><td>runs on <strong>every</strong> PR</td><td>path filters + config tune depth / noise</td><td>review runs always; <em>findings</em> filtered</td></tr>
+    <tr><td>GCP Change Risk / risk-based IaC review</td><td>risk score computed on all changes</td><td>high score gets more scrutiny, human desk</td><td>score computed on all</td></tr>
+  </tbody>
+</table>
+<p>
+  The uniform pattern: risk <strong>prioritizes and deepens</strong> review; it does not <strong>switch it
+  off</strong>. The one place ownership-based hard gating is correct (CODEOWNERS on sensitive paths) is a floor
+  <em>raised higher</em>, never a floor of zero. This matches the constellation's own
+  <a href="/backlog/2563-blast-radius-is-advisory-care-level-not-a-park-gate-converge-/">#2563</a> ruling: a
+  computed risk score is <em>advisory</em> (dial the rigor), path / ownership sensitivity is a <em>gate</em> —
+  but neither drops below a baseline.
+</p>
+
+<h2>The flake-and-mute failure mode (the argument against uniform-heavy)</h2>
+<p>
+  A review signal that fires often but rarely matters gets <strong>muted</strong>, and the mute is
+  indiscriminate — it silences the high-value findings alongside the noise:
+</p>
+<ul>
+  <li><strong>Flaky-test quarantine</strong> (Google, Spotify, Dropbox writeups): tests that cry wolf get
+  <code>@Ignore</code>d / quarantined; quarantine is sticky and quietly hides real regressions later.</li>
+  <li><strong>Alert fatigue</strong> (SOC / security-ops literature): high false-positive alert streams
+  measurably lower analyst catch-rate on the true positives — the operator stops looking at the channel, not
+  just the noise.</li>
+  <li><strong>Normalization of deviance</strong> (Vaughan, <em>The Challenger Launch Decision</em>): repeated
+  low-consequence warnings recalibrate the team to treat the warning class as ignorable — the mechanism by
+  which a heavy, mostly-empty gate becomes background noise.</li>
+  <li><strong>Rubber-stamp review</strong> (large-scale mining-software-repositories code-review studies):
+  reviewers asked to review everything at uniform depth spend near-zero attention on the many trivial diffs,
+  and that low-attention habit bleeds into the diffs that needed attention.</li>
+</ul>
+<p>
+  Applied here: an agent forced to run a full adversarial pass on a one-line doc edit learns the pass is theater
+  and rubber-stamps it — then rubber-stamps the pass on the blast-radius change too. <strong>A light floor
+  preserves signal; a heavy floor spends it.</strong> This is the merit defect that survives a <em>zero-cost</em>
+  thought experiment: even if review compute were free, uniform-full is <em>worse</em>, not equal, because it
+  dilutes attention.
+</p>
+
+<h2>Web-standards / platform alignment</h2>
+<p>
+  There is no W3C / WHATWG surface for review gating (it is process, not a browser standard), so this is an
+  internal governance policy, not a Web Everything standard. The relevant native-first analogue is
+  <strong>progressive enhancement of scrutiny</strong>: a cheap baseline everyone gets, enriched where the input
+  warrants — mirroring how the platform layers capability rather than gating all-or-nothing.
+</p>
+
+<h2>Layer and citation-scope — why a distinct table, not panelRigorForCareLevel</h2>
+<p>
+  The self-review is <strong>Layer 1</strong> — author-run, in the warm build lane
+  (<a href="/backlog/2672-build-time-visual-self-review-for-ui-items-delivery-agent-sc/">#2672</a>). The
+  care-scaled <code>panelRigorForCareLevel</code> dial governs <strong>Layer 2</strong> — the downstream
+  <em>independent</em> review panel
+  (<a href="/backlog/2567-demote-scored-escalation-signals-to-advisory-care-level-scal/">#2567</a>), and it maps
+  <code>none → { rounds: 0, lenses: [], jurorsPerLens: 0 }</code>, i.e. zero. Two consequences for the
+  decision:
+</p>
+<ul>
+  <li>Citing #2567 as <em>authority</em> to scale the author's own self-review overreaches — that table was
+  built for a different layer. It is cited as <em>pattern precedent</em> only; the self-review earns a
+  <em>distinct</em> <code>selfReviewDepthForCareLevel</code> clamped to a non-zero floor.</li>
+  <li>Per <a href="/backlog/2439-independent-hardened-validator-redteam-accepted-acceptance-l/">#2439</a> a
+  builder may not <em>clear</em> its own diff, so the floor is a non-clearing <strong>fix</strong> pass (it
+  converges nits pre-PR while the lane is warm), never a clearance guarantee — #2819 already established this
+  ("this pass fixes, it does not accept"). The separate <code>none → 0</code> zero-coverage on the
+  <em>independent</em> Layer-2 panel is a real adjacent issue but belongs to #2567 / #2563, not this decision.</li>
+</ul>
+
+<h2>How the research reshaped the forks</h2>
+<p>
+  Going in, the framing was "always-on vs scaled" as a cost tradeoff. The survey reshaped it into a
+  <strong>two-sided clamp</strong> and <strong>split the decision cleanly</strong>: the non-zero floor is a
+  governance <em>invariant</em> (the one genuine ratifiable line), while the depth dial above it is a
+  <em>config dimension</em> (<code>#config-extends-platform-default</code>) — a throughput knob a repo tunes.
+  That split is what lets (c) survive both the "it's just a config knob" challenge (the floor's <em>existence</em>
+  is the ratifiable part) and the "light floor is theater" challenge (light = one fast high-signal pass on
+  correctness plus the one lens the diff earns, not a scaled-down copy of the deep pass).
+</p>
+{% endraw %}
