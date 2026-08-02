@@ -1590,12 +1590,19 @@ async function runCli() {
   // `lifecycleLabelFromCiTruth` says it should be in — self-healing (runs every drain pass + `--watch`
   // interval), never a per-check-tick `pr-land` write. `ready-to-merge` keeps being applied by the EXISTING
   // mechanism below (unchanged — the `label` var, `shouldLabelOnGreen`) and is deliberately EXCLUDED from the
-  // `owned` set this reconcile add/removes: stripping it here would drop a still-open, merely-reordered PR out
-  // of the SAME PASS's `--label`-scoped `verdicts` listing (built right after this returns), which derives
-  // `planLabelDrain`'s cross-item `openItems` set — a same-pass hazard that could let a PR blockedBy THIS one
-  // wrongly read it as landed. So `ready-to-merge`'s presence/absence — the landing-gate signal #2183 F1 /
-  // #2138 F4 depend on — is left to the pre-existing mechanic entirely; only `checking` / `ci:failed` /
-  // `blocked` are added/removed here. A PR can therefore legitimately carry BOTH `ready-to-merge` AND `blocked`
+  // `owned` set this reconcile add/removes: only `checking` / `ci:failed` / `blocked` are added/removed here.
+  // #xq985wu — HAZARD NOTE (ordering side, now RESOLVED): stripping `ready-to-merge` here would drop a
+  // still-open, merely-reordered PR out of the SAME PASS's `--label`-scoped `verdicts` listing (built right
+  // after this returns). BEFORE #xq985wu the cross-item `openItems` set `planLabelDrain` orders by derived
+  // SOLELY from that scoped listing on a full sweep, so such a strip could let a PR `blockedBy` the dropped one
+  // wrongly read it as landed and land EARLY. #xq985wu DECOUPLED ordering from the `--label` scope: the ordering
+  // context (`orderExtraOpenItems`, below) is now ALWAYS the label-BLIND full-open item set from
+  // `collectOpenPrContext`, so a stripped-but-still-open PR stays in the open set and keeps deferring its
+  // dependents regardless of its `ready-to-merge` label. That makes stripping `ready-to-merge` from a held PR
+  // SAFE for ORDERING — the strip itself is #984/#2832's job (NOT done here; this reconcile still leaves
+  // `ready-to-merge` alone, and it keeps being applied by the EXISTING mechanism below — the `label` var,
+  // `shouldLabelOnGreen`). So `ready-to-merge`'s presence/absence — the landing-gate signal #2183 F1 /
+  // #2138 F4 depend on — is left to the pre-existing mechanic entirely. A PR can therefore legitimately carry BOTH `ready-to-merge` AND `blocked`
   // at once (green, but still waiting on an item) — informative, not a merge-safety issue (the drain's
   // `blockedBy` defer already gates on the manifest directly, never on this label). Best-effort throughout — a
   // gh miss never fails the drain. Returns the reconciled PR numbers (for the pass summary), reported ONLY when
@@ -1783,14 +1790,20 @@ async function runCli() {
   // parent's WE side lands — never on a green impl PR of an otherwise-broken couple). Threaded into every
   // planLabelDrain call this pass so a chain lands in order.
   const landedThisPass = new Set();
-  // #2683 — the cross-item ORDERING CONTEXT for a `--only` FAST DRAIN. The candidate `verdicts` were narrowed to
-  // the single target PR above, so on their own `planLabelDrain` would see only the target's item as "open" and
-  // land it even if a `blockedBy`/`stackParents` sibling is still unlanded. Feeding the full open-PR item set
-  // (`collectOpenPrContext` — every open PR across the swept repos, unfiltered by `--only`) as `extraOpenItems`
-  // makes the target order IDENTICALLY to the full sweep: it defers whenever a blocker is still open, never
-  // early. `null` on a full sweep (the candidate list already IS the full set). Populated whenever RECONCILE ran
-  // (the `--label`-scoped fast drain the daemon/pr-watch fire); an empty context degrades to today's behaviour.
-  const orderExtraOpenItems = onlyPr ? openPrContext.openItems : null;
+  // #2683/#xq985wu — the cross-item ORDERING CONTEXT for EVERY pass. `planLabelDrain` derives its cross-item
+  // `openItems` set from the candidate `verdicts`, but those are `--label ready-to-merge`-SCOPED — so a PR that
+  // is still open yet absent from the scoped list (a `--only` narrow, OR #984/#2832 having stripped
+  // `ready-to-merge` from a merely-reordered held PR) would be invisible to the ordering gate, and a dependent
+  // `blockedBy` it would resolve the edge as "landed" and land EARLY. Feeding the label-BLIND full open-PR item
+  // set (`collectOpenPrContext` — every open PR across the swept repos, UNFILTERED by `--only` AND by `--label`)
+  // as `extraOpenItems` DECOUPLES ordering from the label scope (#xq985wu): the order derives from what is
+  // actually open, not from which PRs carry `ready-to-merge`. A superset is safe by construction (see
+  // `planLabelDrain`: it can only ADD a defer, never drop one). Populated whenever RECONCILE ran (the
+  // `--label`-scoped drain the daemon/pr-watch/full sweep fire); when it did not (the label-less orphan sweep)
+  // `openPrContext.openItems` is an empty Set, which degrades to today's behaviour (the candidate list already
+  // IS the full open set when unfiltered). This is what makes #984/#2832's strip of `ready-to-merge` from a held
+  // PR SAFE — see the `collectOpenPrContext` note above.
+  const orderExtraOpenItems = openPrContext.openItems; // label-blind full-open set feeds ordering on every pass, not just --only (#xq985wu)
   // #2222 — PRE-CHECK id-collision self-heal, retained here (THE drain, the sole writer to main, #2290) as a
   // DORMANT BACKSTOP under JIT numbering (#2288/#2291): a new item is now born hash-keyed, so a lane's NEW item
   // reusing a base `NNN` should be unrepresentable pre-land — this stays a cheap no-op on the common path, kept
