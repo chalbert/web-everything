@@ -3,11 +3,12 @@ bornAs: xvbh2rb
 kind: story
 size: 8
 parent: "2804"
-status: open
+status: active
 blockedBy: ["2809", "2810"]
 scope:
   - plateau-app:tests/visual/real-route-fidelity.spec.ts
 dateOpened: "2026-08-01"
+dateStarted: "2026-08-02"
 tags: [plateau-loop, conveyor, ui-fidelity, plateau-app, render-slice, human-verify, slice-uifg]
 ---
 
