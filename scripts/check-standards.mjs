@@ -59,6 +59,10 @@ import {
   strandedHashesOnMain,
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
 } from './check-standards-rules.mjs';
+import {
+  buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
+  countSourceLines, CITATION_GATES_ENFORCED,
+} from './lib/citation-check.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -1028,6 +1032,64 @@ try {
     const descriptor = { kind: 'repo-locus', file: finding.file };
     if (REPO_LOCUS_PREFIX_ENFORCED) err(msg, descriptor);
     else warn(msg, descriptor);
+  }
+}
+
+// ── 6f-ii. CITATION-VERIFICATION gate family (#2821, proven subset) ───────────────────────────────
+// "A reference asserted without resolving it against the source it points at" (#2821, the #957 root
+// class). Three deterministic checks, each reproducing a real #957 review-bounce instance the pure core
+// (scripts/lib/citation-check.mjs) resolves against the source:
+//   • anchor-authority (#2821 gate 10, the 11-vs-1 core): a platform-decisions `#anchor` attributed to an
+//     `#NNN` that is NOT its codifiedIn owner — the `#2439`-vs-`#2398` class 6 review rounds missed.
+//   • gate 5: a `we:<path>:<line>` locus that resolves to no file / a line past EOF (`fui:`/`plateau:`
+//     cross-repo loci are recognised and skipped — not in this checkout).
+//   • gate 3: a `xNNNNNN` hash-slug cited outside the at-land rewrite scope (reports/, the two research
+//     dirs), which never self-heals → dead link post-land.
+// WARN-level for now (CITATION_GATES_ENFORCED=false) — the historical corpus carries many pre-gate hits;
+// see the flag's TODO. The fs reads live here; all resolution logic is the pure core.
+{
+  const anchorOwners = buildAnchorOwners(backlog);
+  const emit = CITATION_GATES_ENFORCED ? err : warn;
+  const relExists = (p) => existsSync(join(ROOT, p));
+  const relLineCount = (p) => { try { return countSourceLines(readFileSync(join(ROOT, p), 'utf8')); } catch { return null; } };
+  // Scan the same widened scope as gate 2/3 (#957 round 7): backlog + docs/agent + reports + the two
+  // src/ research dirs (the latter render on the public /research/ page).
+  const scanFiles = [];
+  const pushDir = (dir, exts) => {
+    const abs = join(ROOT, dir);
+    if (!existsSync(abs)) return;
+    for (const f of readdirSync(abs)) if (exts.some((e) => f.endsWith(e)))
+      scanFiles.push({ rel: `${dir}${f}`, content: readFileSync(join(abs, f), 'utf8') });
+  };
+  pushDir('backlog/', ['.md']);
+  pushDir('docs/agent/', ['.md']);
+  pushDir('reports/', ['.md']);
+  pushDir('src/_data/researchTopics/', ['.json']);
+  pushDir('src/_includes/research-descriptions/', ['.njk']);
+
+  for (const { rel, content } of scanFiles) {
+    for (const f of findAnchorRulingMismatches(content, anchorOwners)) {
+      const ownerList = f.owners.map((n) => `#${n}`).join(', ');
+      emit(`${rel}: anchor \`#${f.anchor}\` is attributed to #${f.citedNum}, but that anchor's ruling ` +
+        `authorities (its codifiedIn / graduatedTo owners) are ${ownerList} — a wrong law citation that ` +
+        `outlives the session (#25/#2821 gate 10). Cite one of ${ownerList} for the ruling, or name the ` +
+        `build slice explicitly if you mean the implementation. Near: "${f.context}"`,
+        { kind: 'citation-anchor-authority', file: rel });
+    }
+    for (const f of findDanglingLoci(content, { fileExists: relExists, lineCount: relLineCount })) {
+      emit(`${rel}: code-locus \`${f.locus}\` does not resolve — ${f.reason === 'missing-file'
+        ? 'no such file in this checkout' : `line ${f.line} is past end-of-file`} (#2821 gate 5). Fix the ` +
+        `path/line, or use a \`we:<path>#<symbol>\` anchor for a definition. (\`fui:\`/\`plateau:\` loci ` +
+        `are cross-repo and not checked here.)`,
+        { kind: 'citation-locus-resolution', file: rel });
+    }
+    for (const f of findOutOfScopeHashSlugs(content, rel)) {
+      emit(`${rel}: hash-slug \`${f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-…​.md`}\` is cited ` +
+        `outside the at-land rewrite scope (backlog/ + docs/agent/ only) — numberPendingHashes never ` +
+        `rewrites it, so it dangles permanently once the item lands with a real NNN (#2821 gate 3). Name ` +
+        `the epic/item in prose, or cite its resolved #NNN.`,
+        { kind: 'citation-hash-slug-scope', file: rel });
+    }
   }
 }
 

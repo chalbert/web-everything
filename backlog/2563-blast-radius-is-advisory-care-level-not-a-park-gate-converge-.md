@@ -89,7 +89,7 @@ the runner-converges-daemon-lands split and the separate-runner placement are **
   audit sample (the option, enabled when direct oversight stops scaling). What is fixed is that the axis is
   **not nothing**; the *mechanism* (manual vs sampled) and the sample rate are config. See Fork 2.
 - **The conflict-of-interest invariant is absolute.** A landed PR is accepted by an actor that did not author
-  the fix (`#agent-convergence-independent-validation`, #2439). No knob relaxes it.
+  the fix (`#agent-convergence-independent-validation`, #2398). No knob relaxes it.
 - **Non-convergence hard-escalates to a human.** Round-cap / mandate-conflict → `review:human`, unchanged
   (`DEADLOCK_REASONS`, `we:scripts/lib/review-core.mjs:455`).
 - **One shared core.** The settings panel, the drain, the scheduled runner, and `/review` all read the *same*
