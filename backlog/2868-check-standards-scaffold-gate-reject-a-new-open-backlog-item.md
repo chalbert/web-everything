@@ -1,4 +1,5 @@
 ---
+bornAs: xudl8rm
 kind: task
 status: open
 dateOpened: "2026-08-02"
@@ -18,14 +19,14 @@ and either collide at merge or leave a twin open forever.
 
 During the human `/review` of PR #985 (the `we:scripts/lib/jury-ledger.mjs`
 NUL-byte fix), a new item `xb3f7kq` was filed for a `check:standards`
-control-byte gate that was **already open as #2836** (`bornAs: xjdkuu0`, parent
+control-byte gate that was **already open as #2836** (`bornAs: 2836`, parent
 2527). Both cite `we:scripts/lib/jury-ledger.mjs` and share the title tokens
 control / NUL / byte / check-standards. The duplicate was removed on that PR;
 this item captures the prevention so the recurrence is script-caught, not
 review-caught.
 
-**Why recall failed (blameless):** the sibling was minted as hash `xjdkuu0` and
-JIT-renamed to `2836-…` at land, so an author who remembers "I filed xjdkuu0"
+**Why recall failed (blameless):** the sibling was minted as hash `2836` and
+JIT-renamed to `2836-…` at land, so an author who remembers "I filed 2836"
 finds no such file and concludes nothing was filed. JIT numbering defeats the
 hash-recall lookup that would otherwise surface the twin.
 
@@ -41,7 +42,7 @@ hash-recall lookup that would otherwise surface the twin.
    duplicate-subject-matter collision, so a dup that lands by another route
    (hand-authored file, not via scaffold) is still caught at gate time.
 4. **`bornAs:` back-index in scaffold.** scaffold also searches the `bornAs:`
-   hash back-index (#2836 carries `bornAs: xjdkuu0`), so a hash-recall lookup for
+   hash back-index (#2836 carries `bornAs: 2836`), so a hash-recall lookup for
    a JIT-renamed item resolves to its landed `NNNN-…` file instead of coming up
    empty.
 
