@@ -510,7 +510,7 @@ export function isRebaseDropCandidate(v) {
  * whole mechanism.
  */
 export function needsManifestStripBeforeMerge(v) {
-  return !!v && v.decision === 'merge' && !!v.hasManifest;
+  return !!v && v.decision === 'merge' && !!v.hasManifest; // @merge-gate-exempt a held PR must NEVER be manifest-stripped (a force-push mutation); reviewHeld PRs are excluded here on purpose
 }
 
 /**
@@ -632,7 +632,7 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
   const ready = [];
   const deferred = [];
   for (const c of list) {
-    if (c.decision !== 'merge') continue;
+    if (c.decision !== 'merge') continue; // @merge-gate-exempt builds the merge-ORDERING lists (ready/deferred); a held PR is `skip` and correctly not ordered for landing — it must not join the merge cascade
     const blockWait = (Array.isArray(c.blockedBy) ? c.blockedBy : []).map(asItemId).filter((b) => openItems.has(b));
     const stackWait = (Array.isArray(c.stackParents) ? c.stackParents : []).map(asItemId).filter((sp) => !stackProven(sp));
     const waitOn = [...new Set([...blockWait, ...stackWait])];
@@ -1941,7 +1941,7 @@ async function runCli() {
   if (!REVIEW_ESCALATION) {
     const allowPending = !!label; // `--label ... --no-review-escalation`: explicit operator override, honor review:pending
     for (const v of verdicts) {
-      if (v.decision !== 'merge') continue;
+      if (v.decision !== 'merge') continue; // @merge-gate-exempt DOWNGRADE-only backstop (merge→skip); a held PR is already `skip`, so it needs no reviewHeld branch — re-admitting it here could only wrongly merge it
       if (hasUnclearedReviewLabel(v.prLabels, { allowPending })) {
         v.decision = 'skip';
         v.reason = allowPending
@@ -1972,7 +1972,16 @@ async function runCli() {
     if (!DRY_RUN) {
       // #2257 — a multi-repo sweep scores candidates from several repos in one pass; a label lives per-repo on
       // GitHub, so mint it in EVERY repo actually carrying a candidate this pass (not just the local repo).
-      const escalationRepos = new Set(verdicts.filter((v) => v.decision === 'merge').map((v) => v.repo || null));
+      // #2820-review-fix (round-2 finding, the FIFTH `!== 'merge'` site) — this mint set MUST use the SAME
+      // predicate the per-verdict escalation loop below now uses (`|| v.reviewHeld`). Post-#2820 a green held PR
+      // is `decision:'skip'` (not `'merge'`), so keying only on `=== 'merge'` dropped its repo out of the mint
+      // loop — yet the loop below DOES process it (via `|| v.reviewHeld`) and can try to apply a review label that
+      // was never `gh label create`d. In a repo where only `review:pending` was ever minted, the failed
+      // `--add-label review:human` (test-gaming / manifest / fresh-score human escalation) lands in a swallowed
+      // catch: the PR reports `humanRequired:true` in JSON but carries only `review:pending` on GitHub, and
+      // `review-parked-prs.mjs` then treats it as agent-clearable and auto-accepts a PR a human was required to
+      // clear. Minting for held PRs too keeps every verdict label present before any escalation pass applies one.
+      const escalationRepos = new Set(verdicts.filter((v) => v.decision === 'merge' || v.reviewHeld).map((v) => v.repo || null));
       for (const repo of escalationRepos) {
         for (const [name, meta] of Object.entries(REVIEW_LABEL_META)) {
           const ensureKey = `${repo || 'cwd'}::${name}`;
@@ -2139,6 +2148,12 @@ async function runCli() {
         // leave v.decision === 'merge' → falls through to the land cascade below.
       } else if (gate.action === 'park' || gate.action === 'wait-author') {
         v.decision = 'skip';
+        // #2820-review-fix (de-dup) — this branch OWNS the PR's durable drain comment: an agent-reviewable park
+        // stamps its own `park` comment below, a human park carries the reason in its #2324 body block. Mark it so
+        // the final skip-stamp loop does NOT also post a byte-identical `skip` comment. The old `escalated==='yes'`
+        // proxy missed a DE-ESCALATED sticky park (`score.escalate` false → `escalated:'no'`, e.g. the #2820 sticky
+        // review:pending or a de-escalated review:human), which then got BOTH a `park` and a `skip` comment.
+        v.reviewParked = true;
         v.reason = gate.reason + (score.reasons.length ? ` [${score.reasons.join('; ')}]` : '');
         // #2409 — a stale-acceptance re-park carries its reason on `gate.reason` (the head-advanced-past-reviewed
         // message), NOT on the fresh-diff `score.reasons`. PREPEND it (not either/or): the ride-in commit can
@@ -2212,17 +2227,19 @@ async function runCli() {
     if (baselineStateChanged && !DRY_RUN) { try { writeFileSync(REVIEW_BASELINE_STATE_PATH, serializeBaselineState(baselineState)); } catch { /* best-effort local cache */ } }
   }
 
-  const toMerge = verdicts.filter((v) => v.decision === 'merge');
+  const toMerge = verdicts.filter((v) => v.decision === 'merge'); // @merge-gate-exempt the FINAL set actually merged; a held PR is `decision:'skip'` and MUST be excluded here — this is the hard AND that never lands a held PR
   const skipped = verdicts.filter((v) => v.decision === 'skip');
 
   // #2313 — stamp the *why* onto every OTHER final skip too (a real non-manifest conflict, a red required
   // check, an unlandable merge state, …), not only the review-escalation park path above. Excludes: verdicts
-  // already commented via the park path (`v.escalated === 'yes'`, kind 'park' above); a collision-heal in
-  // flight (`v.collisionHealed` — self-fixing, CI is re-running on the renumbered tip, nothing for a human to
-  // act on yet); an uncertified PR (not a producer PR the drain owns — never comment on an unrelated human PR).
+  // already commented via the park path (`v.reviewParked` — the park/wait-author branch owns the durable comment;
+  // #2820-review-fix widened this from the old `escalated==='yes'` proxy, which double-commented a de-escalated
+  // sticky park); a collision-heal in flight (`v.collisionHealed` — self-fixing, CI is re-running on the
+  // renumbered tip, nothing for a human to act on yet); an uncertified PR (not a producer PR the drain owns —
+  // never comment on an unrelated human PR).
   if (!DRY_RUN) {
     for (const v of skipped) {
-      if (v.escalated === 'yes' || v.collisionHealed) continue;
+      if (v.escalated === 'yes' || v.reviewParked || v.collisionHealed) continue;
       if (!(v.certifyLabel || v.aiGenerated)) continue;
       // xnsk54v follow-up — mirror the park path: record the acted-on manifest values into the durable skip
       // comment for a manifest-carrying PR (tamper-evidence), leaving orphan/impl skip comments unchanged.
@@ -2232,6 +2249,7 @@ async function runCli() {
   }
 
   if (!AS_JSON) {
+    // @merge-gate-exempt human-readable one-line-per-verdict log only (no control flow); a held PR prints as `· skip` with its hold reason, which is correct
     for (const v of verdicts) process.stderr.write(`  ${v.decision === 'merge' ? '→ merge' : '· skip '} ${repoTag(v.repo)}${v.num} ${v.item ? `(#${v.item}${v.blockedBy.length ? ` ⤳ ${v.blockedBy.join(',')}` : ''}) ` : ''}${v.decision === 'skip' ? `(${v.reason})` : ''} — ${v.title}\n`);
     process.stderr.write(`${DRY_RUN ? 'DRY-RUN: ' : ''}${toMerge.length} AI PR(s) to merge${label ? ` (label "${label}")` : ''}, ${skipped.length} skipped.\n`);
   }
