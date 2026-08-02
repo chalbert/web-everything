@@ -74,6 +74,8 @@ This is the whole-item-integrity rule (`we:docs/agent/backlog-workflow.md:294`) 
 
 **Mechanism.** A `check:standards` rule that, for each `#NNN` cross-ref, resolves the target and checks (a) it is a real backlog item (not a PR number), and (b) its kind/title is plausible for the citing sentence. Level (a) is a hard error; level (b) can start as a warning and tighten.
 
+**Scan scope — beyond `backlog/` + `docs/agent/` (surfaced by #957 round 7).** A `#NNN` is cite-able provenance wherever it is written, and the two dirs the at-land rewriter covers are **not** the two dirs a `#NNN` appears in. #957's final round left a wrong `#2439` in `we:src/_includes/research-descriptions/risk-based-care-scaled-review-gating.njk` and `we:src/_data/researchTopics/risk-based-care-scaled-review-gating.json` — the `.njk` **renders on the public `/research/` page** — after the same mis-cite had been swept out of the item and the statute. So this gate scans `we:backlog/`, `we:docs/agent/`, **`we:reports/`, `we:src/_data/researchTopics/`, and `we:src/_includes/research-descriptions/`** — the same scope gap that made gate 3 necessary, here for `#NNN` rather than hash slugs.
+
 ### 3. Hash-slug drift outside the at-land rewrite scope
 
 **The tell.** `numberPendingHashes` (`we:scripts/lane-drain.mjs#numberPendingHashes`) — via the numbering brain `applyLedger` it calls (`we:scripts/backlog/id.mjs#applyLedger`) — rewrites hash→NNN **only** in `we:backlog/*.md` + `we:docs/agent/*.md`. A hash slug (`xNNNNNN`) cited from **anywhere else** never self-heals → **dead link post-land**.
@@ -153,13 +155,47 @@ This is the *most likely* link to go stale: a hash-slug link is by definition to
 - **[#2771]** (`#review-human-declarative-leash-only`, ratified 2026-07-28): its Lineage names implementation follow-on **[#2785]** (`blockedBy` #2771), still `open` → marker fires. Today's `scoreEscalation` returns `humanRequired` for derivation code precisely because #2785 has not landed — the exact gap that misled #957 round 4.
 - **`#build-lane-self-review-non-zero-floor`** (the #957 anchor, ratified 2026-08-01): its Layer-1 `selfReviewDepthForCareLevel` build slice is **unfiled** → marker fires (a ratified rule whose code does not yet exist at all). Filing that slice and naming it in the anchor's Lineage both clears the marker and closes the provenance gap.
 
+### 10. Anchor-authority resolution — a citation attached to a `#anchor` must name that anchor's `codifiedIn` owner (surfaced by #957 rounds 5 + 7)
+
+**The tell.** A sentence that cites a platform-decisions anchor **and** attributes it to an `#NNN` — the
+`(#NNN, #anchor-name)` / "`#anchor-name` (#NNN, that …)" shape — where the `#NNN` is **not** the item whose
+front-matter `codifiedIn` points at `we:docs/agent/platform-decisions.md#<that-anchor>`.
+
+**Why this is the one worth building.** It is the only defect in the whole #957 bounce that **recurred**, and the
+only one that ever reached the **statute layer**. The same wrong pair — `#agent-convergence-independent-validation`
+attributed to **`#2439`** when its ruling decision is **`#2398`** — was found in `we:docs/agent/platform-decisions.md`
+at round 5 and again, four rounds later, in the two research files at round 7. `#2439` is a `kind: story` build
+slice under epic #2410; `we:backlog/2398-….md` is the decision carrying the anchor's `codifiedIn`. Gate 2 does
+**not** catch it: `#2439` resolves to a real item whose title (*independent hardened validator*) is entirely
+plausible for a sentence about not clearing your own diff — it passes a plausibility check while being the wrong
+authority.
+
+**Why it's script-decidable.** The anchor→ruling mapping is not a recall, it is a **lookup**: exactly one backlog
+item carries `codifiedIn` for a given anchor, and `we:scripts/validate-rules-anchors.cjs` already resolves the
+`we:docs/agent/<doc>.md#<anchor>` form. Comparing the cited `#NNN` against that owner is a set membership test with
+no judgment in it. This is the general shape the rest of #2821 keeps circling: existing gates ask *"does this
+reference resolve?"*; this one asks *"does it resolve to the **right** thing for what the sentence claims about
+it?"* — relationship correctness, not existence.
+
+**Mechanism.** A `check:standards` rule that, for each `#anchor-name` cited alongside an `#NNN`, resolves the
+anchor's `codifiedIn` owner and hard-errors when the cited `#NNN` differs. A citation of the anchor's
+**implementation slice** stays legal when it is spelled as such (naming the build story, not the ruling) — the
+error is attributing the **ruling** to a non-ruling item. Runs over the same widened scope as gate 2.
+
+**Real instances it must reproduce.**
+- `we:docs/agent/platform-decisions.md` (#957 round 5, **corrected**): `#agent-convergence-independent-validation`
+  attributed to `#2439` → must **fire**; the corrected `#2398` form must **pass**.
+- `we:src/_includes/research-descriptions/risk-based-care-scaled-review-gating.njk` and
+  `we:src/_data/researchTopics/risk-based-care-scaled-review-gating.json` (#957 round 7, **still uncorrected on
+  main** — accepted as a follow-up): same wrong pair → must **fire**. Fixing these two is the fixture.
+
 ## Acceptance
 
 Each failure becomes a **deterministic gate error that reproduces its real instance** — a test/fixture that fails today and passes once the gate lands:
 
 1. **(1a)** A `kind: decision` flipping to `resolved` while its `relatedReport` / PR body still says "not ruled" / "prepare only" / "awaiting ratification" → gate error (reproduces PR #959's unreconciled resolve). Passing requires reconciling every artifact in the same turn.
    **(1b)** A same-day (`preparedDate == dateResolved`) `kind: decision` with a **live fork** (≥2 `## Fork` branches **AND/OR** a confidence score **AND/OR** a `SURVIVES-WITH-AMENDMENT` skeptic — any one suffices) flipping to `resolved` **and carrying no ratify marker** → gate error. Passing requires the collapse-to-one-branch condition or a recorded ratify marker. Two fixtures: the **corrected** #2801 (records "RATIFIED by the operator on 2026-08-01") and the **corrected #957 item** `xgtiq7f` (records `ratifiedBy:` + a `## Ruling` naming the operator) must both pass; the pre-correction `xgtiq7f` (same-day, live fork, no marker) must fire — a legitimate same-day ratify is never blocked, but an unrecorded one always escalates.
-2. A `#NNN` citing a PR number → hard error; a `#NNN` whose target kind/title is implausible for the citing sentence → flagged (reproduces the "carved from #955" → unrelated polyglot-sandbox mis-cite).
+2. A `#NNN` citing a PR number → hard error; a `#NNN` whose target kind/title is implausible for the citing sentence → flagged (reproduces the "carved from #955" → unrelated polyglot-sandbox mis-cite). The scan covers `we:backlog/`, `we:docs/agent/`, `we:reports/`, `we:src/_data/researchTopics/`, and `we:src/_includes/research-descriptions/` — a `#NNN` left in the two `src/` dirs (which render on the public `/research/` page) must fire, reproducing #957 round 7.
 3. A hash slug cited from `we:reports/`, `we:src/_data/researchTopics/`, or `we:src/_includes/research-descriptions/` either self-heals at land (scope widened) or is a hard error before land (reproduces the #957 dead-link-post-land).
 4. A `[..](xNNNNNN-slug.md)` link is caught by `findBadBodyLinks` (reproduces the invisible pre-renumber link).
 5. An in-repo `we:<path>:<line>` cite whose file is missing or whose line is past EOF → hard error (reproduces the round-2 `we:scripts/lane-drain.mjs:596` mis-cite of `applyLedger`, which is defined at `we:scripts/backlog/id.mjs:144`); the corrected cite passes. A `fui:` / `plateau:` cross-repo locus is recognized and **not** errored (its target isn't in this checkout).
@@ -167,6 +203,8 @@ Each failure becomes a **deterministic gate error that reproduces its real insta
 7. **(judgment, not a gate)** A count whose *label* misnames what was counted (round-2's research-topic counts labeled "statute/anchor") is recorded as a documented reviewer-check in §7 — no hook, because verifying the label needs author intent, not just the source. No fixture; it stays context until a deterministic form appears.
 8. A `kind: decision` whose predicted touch-set names a **declarative-leash** file (`we:review-policy.contract.json`, the roster in `we:scripts/lib/gate-config.mjs`, the invariant/conformance suites) while declaring less than `review:human` → gate error, keyed off the [#2771] statute (not the `tier:` field). The corrected #957 item `xgtiq7f` (derivation-code touch, `elevated`/committee per #2771) must **pass**; a policy-contract touch declaring `elevated` must **fire**. (This retracts and replaces the round-4 form that keyed off `tier: 'policy'` and would have forced derivation code to `high`.)
 9. A ratified `we:docs/agent/platform-decisions.md` anchor whose Lineage names an implementation follow-on still `status: open` → renders a "ruled, not yet implemented" marker on the statute (reproduces [#2771] via open [#2785], and the #957 `#build-lane-self-review-non-zero-floor` anchor whose build slice is unfiled). The marker clears when the follow-on resolves.
+
+10. A `#anchor-name` cited alongside an `#NNN` that is **not** the anchor's `codifiedIn` owner → hard error. Fixtures: `#agent-convergence-independent-validation` attributed to `#2439` must **fire** (the anchor's ruling is `#2398`), the corrected `#2398` form must **pass**, and the two still-uncorrected #957 research files (`we:src/_includes/research-descriptions/risk-based-care-scaled-review-gating.njk`, `we:src/_data/researchTopics/risk-based-care-scaled-review-gating.json`) must **fire** until fixed. Gate 2's plausibility check demonstrably does **not** catch this shape — `#2439` is a real, topically plausible item — so gate 10 is additive, not a special case of gate 2.
 
 `check:standards` stays at 0 errors on the current tree after the gates land (they fire only on the bad shapes above) — including on **this item's own body**, once the gate-3 `applyLedger` cite is corrected to `we:scripts/backlog/id.mjs#applyLedger`.
 
