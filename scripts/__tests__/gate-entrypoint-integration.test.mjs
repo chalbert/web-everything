@@ -43,12 +43,21 @@ if (a[0] === 'pr' && a[1] === 'comment' && process.env.GATE_COMMENT_LOG) {
   fs.appendFileSync(process.env.GATE_COMMENT_LOG, JSON.stringify({ num: a[2], head: String((bi >= 0 && a[bi + 1]) || '').split('\\n')[0] }) + '\\n');
   process.exit(0);
 }
+// A flagged PR's '--body' edit FAILS (non-zero) — models a gh write that does not land (#2820 round-4 attest-by-
+// verified regression test). Label edits (--add-label/--remove-label) still succeed; only the body write fails.
+if (a[0] === 'pr' && a[1] === 'edit' && a.includes('--body')) {
+  const pr = fx.prs.find((p) => String(p.number) === String(a[2]));
+  if (pr && pr._editBodyFail) { process.stderr.write('forced body-edit failure\\n'); process.exit(1); }
+}
 if (a[0] === 'pr' && a[1] === 'list') out(fx.prs);
 if (a[0] === 'pr' && a[1] === 'view') {
   const pr = fx.prs.find((p) => String(p.number) === String(a[2])) || {};
   if (fields.includes('commits')) out({ commits: pr._commits || [] });
   if (fields.includes('files')) out({ files: pr._files || [] });
   if (fields.includes('body')) out({ body: pr.body || '' });
+  // #2409 reviewed-SHA staleness read: return the live head plus a reviewed-sha marker comment. When the fixture's
+  // _reviewedSha differs from _headRefOid the accept is STALE (re-park); no marker → gate fails open.
+  if (fields.includes('headRefOid')) out({ headRefOid: pr._headRefOid || '', comments: pr._reviewedSha ? [{ body: '<!-- reviewed-sha: ' + pr._reviewedSha + ' -->' }] : [] });
   if (fields.includes('comments')) out({ comments: [] });
   out({});
 }
@@ -317,5 +326,40 @@ describe('the real drain entrypoint consults the gate before merging', () => {
     // The agent review:pending park still posts its own PARK comment — and only that one (the round-2 de-dup goal
     // — no byte-identical skip on top — is preserved by the corrected exclusion).
     expect(comments.find((c) => c.num === '702').head).toContain('drain-park-reason');
+  });
+
+  // #2820-review-fix (round-4 finding) — `durableRecorded` must be attested by the VERIFIED effect of the #2324
+  // body write, NOT by merely HAVING COMPUTED the escalation block. A stale-acceptance review:human re-park writes
+  // its "why" only into the PR body; when that `gh pr edit --body` write does not land, nothing was recorded. The
+  // round-3 code set the flag from the computed block, so `reviewParked` went true and the final skip-stamp was
+  // SUPPRESSED — the PR ended the pass with NO durable record at all (a regression vs main, which still fired the
+  // skip fallback). Keying the flag off the existing `verified` re-fetch restores it: an unconfirmed write leaves
+  // the flag false, so the skip loop stamps exactly one durable record. (The general class is swept by #2857.)
+  it('#2820-review-fix (round 4): a stale-acceptance review:human re-park whose body write FAILS still ends the pass with exactly one durable record', () => {
+    const fixture = {
+      _id: 'attest-verified',
+      prs: [
+        {
+          number: 801,
+          title: 'stale-acceptance review:human re-park (body edit forced to fail)',
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:accepted' }, { name: 'review:human' }],
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          body: 'a real summary', _commits: AI_COMMIT,
+          _files: [{ path: 'backlog/w.md', additions: 1, deletions: 0 }], // benign fresh diff → escalated:'no' → the skip loop is eligible to stamp
+          _headRefOid: 'deadbeef',    // live head …
+          _reviewedSha: 'cafef00d',   // … advanced past the reviewed SHA → review:accepted is STALE → re-park review:human
+          _editBodyFail: true,        // force the #2324 body write to fail so `verified` stays false
+        },
+      ],
+    };
+    const { result, comments } = runDrainLive(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    // Held — never lands, and re-parked HUMAN (a stale acceptance re-parks to review:human).
+    expect(nums(result.toMerge)).toEqual([]);
+    expect(result.parked.find((p) => Number(p.num) === 801)?.humanRequired).toBe(true);
+    // The regression guard: with the body write unconfirmed, the skip-stamp fallback fires — so the PR carries
+    // EXACTLY ONE durable record of why it was not landed (before the fix it carried zero).
+    expect(comments.filter((c) => c.num === '801').length).toBe(1);
+    expect(comments.find((c) => c.num === '801').head).toContain('drain-skip-reason');
   });
 });

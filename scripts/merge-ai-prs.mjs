@@ -2209,7 +2209,6 @@ async function runCli() {
           // to embed: `buildEscalationReasonBlock([])` is '' (a DE-ESCALATED human park has no fresh reasons), so
           // that case records NOTHING here and must NOT suppress the skip-stamp below (finding-1, round 3).
           const reasonBlock = buildEscalationReasonBlock(parkReasons);
-          if (reasonBlock) durableRecorded = true;
           let liveBody = '';
           try { liveBody = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').body || ''; } catch { /* fetch miss — augment from empty, still best-effort */ }
           if (!bodyHasEscalationReason(liveBody)) {
@@ -2221,6 +2220,15 @@ async function runCli() {
             let verified = false;
             try { verified = bodyHasEscalationReason(JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').body || ''); } catch { /* verify miss — reported below as unverified */ }
             if (!verified && !AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} review:human body still missing the escalation reason after the write (#2324) — verify by hand: ${parkReasons.join('; ')}\n`);
+            // #2820-review-fix (round 4) — attest the durable record from the VERIFIED effect of the body write,
+            // NOT from merely HAVING COMPUTED the block: an unconfirmed edit (gh exit lies / a racing write) must
+            // leave `durableRecorded` false so the skip loop still stamps the reason — otherwise the PR ends the
+            // pass with NO record at all (a regression vs main). #2857 sweeps this attest-by-effect class.
+            if (reasonBlock) durableRecorded = verified;
+          } else if (reasonBlock) {
+            // The #2324 block is already durably in the body from a prior pass — the record exists; setting the
+            // flag here keeps the skip loop from re-stamping a duplicate (round-3 dedup preserved).
+            durableRecorded = true;
           }
         }
         // #2820-review-fix (finding-1, round 3) — suppress the final skip-stamp ONLY when this branch actually
