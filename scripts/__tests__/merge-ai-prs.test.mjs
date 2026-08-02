@@ -151,6 +151,131 @@ describe('merge-ai-prs — label-conditional AI gate (#2195, blockedBy #2196)', 
   });
 });
 
+describe('merge-ai-prs — #2820 hold-integrity: an unsatisfied review hold blocks merge regardless of ready-to-merge', () => {
+  const rtm = { name: 'ready-to-merge' };
+  // An otherwise-perfectly-landable PR (AI, green, cleanly mergeable, real body, ready-to-merge): the ONLY
+  // variable across these cases is the review label, so a `skip` proves the hold is what refused it — nothing else.
+  const readyPr = (labels) => aiPr({ labels });
+
+  it('SKIPS ready-to-merge + review:changes — the exact WE #956 state (the hold that must hold)', () => {
+    const v = classifyPr(readyPr([rtm, { name: REVIEW_LABELS.changes }]));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(true);
+    expect(v.certifyLabel).toBe(true);            // ready-to-merge IS present — proves the AND, not an OR
+    expect(v.reason).toMatch(/unsatisfied review hold/);
+    expect(v.reason).toMatch(/review:changes/);
+    expect(v.reason).toMatch(/#2820/);
+  });
+
+  it('SKIPS review:human + ready-to-merge — a human-only gate is never cleared by ready-to-merge', () => {
+    const v = classifyPr(readyPr([rtm, { name: REVIEW_LABELS.human }]));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(true);
+    expect(v.reason).toMatch(/unsatisfied review hold/);
+    expect(v.reason).toMatch(/review:human/);
+  });
+
+  it('SKIPS review:pending + ready-to-merge (not relieved) — an owed independent review still holds', () => {
+    const v = classifyPr(readyPr([rtm, { name: REVIEW_LABELS.pending }]));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(true);
+    expect(v.reason).toMatch(/review:pending/);
+  });
+
+  it('MERGES ready-to-merge + review:accepted — a satisfied review clears the hold', () => {
+    const v = classifyPr(readyPr([rtm, { name: REVIEW_LABELS.accepted }]));
+    expect(v.decision).toBe('merge');
+    expect(v.reviewHeld).toBe(false);
+    expect(v.reason).toMatch(/producer-certified/);
+  });
+
+  it('MERGES ready-to-merge alone (no review label at all) — unchanged pre-#2820 behaviour', () => {
+    const v = classifyPr(readyPr([rtm]));
+    expect(v.decision).toBe('merge');
+    expect(v.reviewHeld).toBe(false);
+  });
+
+  it('review:accepted WINS over a coexisting review:changes (matches decideReviewGate: the reviewer verdict wins)', () => {
+    const v = classifyPr(readyPr([rtm, { name: REVIEW_LABELS.changes }, { name: REVIEW_LABELS.accepted }]));
+    expect(v.decision).toBe('merge');
+    expect(v.reviewHeld).toBe(false);
+  });
+
+  it('allowPendingReview (the #2423 per-PR relief valve) waives review:pending to a merge…', () => {
+    const v = classifyPr(readyPr([rtm, { name: REVIEW_LABELS.pending }]), { allowPendingReview: true });
+    expect(v.decision).toBe('merge');
+    expect(v.reviewHeld).toBe(false);
+  });
+
+  it('…but relief NEVER waives review:changes or review:human (still held even when relieved)', () => {
+    expect(classifyPr(readyPr([rtm, { name: REVIEW_LABELS.changes }]), { allowPendingReview: true }).decision).toBe('skip');
+    expect(classifyPr(readyPr([rtm, { name: REVIEW_LABELS.human }]), { allowPendingReview: true }).decision).toBe('skip');
+  });
+
+  it('the hold refuses even a certified-via-AI PR carrying review:changes but NO ready-to-merge label', () => {
+    // AI-generated (every commit AI ⇒ certified without a label), green, mergeable — only the hold stops it.
+    const v = classifyPr(aiPr({ labels: [{ name: REVIEW_LABELS.changes }] }));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(true);
+    expect(v.reason).toMatch(/unsatisfied review hold/);
+  });
+
+  // #2820-review-fix (finding 3) — `reviewHeld` means the hold is the SOLE blocker: it is true ONLY on an
+  // otherwise-landable PR. A PR that is ALSO red / unmergeable / bodyless keeps its more actionable reason and is
+  // NOT reviewHeld, so it never leaks into the passes gated on reviewHeld (the escalation pass, the id-collision
+  // heal). The hold is checked LAST — a hard AND on ready-to-merge still (no held PR ever reaches `merge`), but
+  // the more-actionable skip reason wins when several blockers are true at once.
+  it('a red-CI PR carrying review:changes is NOT reviewHeld — the CI reason wins over the hold (finding 3)', () => {
+    const v = classifyPr(aiPr({ statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }], labels: [rtm, { name: REVIEW_LABELS.changes }] }));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(false);                 // NOT the operative blocker → never enters the downstream passes
+    expect(v.reason).toMatch(/required check "test" is not green/);
+    expect(v.reason).not.toMatch(/unsatisfied review hold/);
+  });
+
+  it('a CONFLICTING PR carrying review:human is NOT reviewHeld — the mergeability reason wins (finding 3)', () => {
+    const v = classifyPr(aiPr({ mergeable: 'CONFLICTING', labels: [rtm, { name: REVIEW_LABELS.human }] }));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(false);
+    expect(v.reason).toMatch(/not mergeable/);
+  });
+
+  it('a bodyless PR carrying review:pending is NOT reviewHeld — the empty-description reason wins (finding 3)', () => {
+    const v = classifyPr(aiPr({ body: '   ', labels: [rtm, { name: REVIEW_LABELS.pending }] }));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(false);
+    expect(v.reason).toMatch(/empty\/whitespace description/);
+  });
+});
+
+// #2820-review-fix (finding 2) — decideReviewGate's DEAD ZONE: review:pending had no branch, so a PR whose fresh
+// score de-escalated (rebase below threshold, or a best-effort signal miss) fell through to `!escalate` → merge.
+// Combined with classifyPr's hold-skip that stranded the PR: skipped every pass AND absent from parked. The fix
+// makes review:pending sticky on the LABEL (mirroring the #2362 human-sticky gate) — it parks agent-reviewable.
+describe('merge-ai-prs — #2820-review-fix (finding 2): review:pending is sticky, never the merge dead zone', () => {
+  it('a de-escalated review:pending PR PARKS agent-reviewable, not merge', () => {
+    const g = decideReviewGate({ escalate: false, humanRequired: false, labels: [{ name: REVIEW_LABELS.pending }] });
+    expect(g.action).toBe('park');
+    expect(g.applyLabel).toBe(REVIEW_LABELS.pending);
+    expect(g.humanRequired).toBe(false);
+  });
+
+  it('the per-PR relief valve still frees that exact pending park (the escape hatch is intact)', () => {
+    const g = decideReviewGate({ escalate: false, humanRequired: false, labels: [{ name: REVIEW_LABELS.pending }] });
+    expect(applyEscalationRelief(g, { relieved: true }).waive).toBe(true);
+  });
+
+  it('a real verdict still wins over the sticky pending: review:changes → wait-author, review:human → park human', () => {
+    expect(decideReviewGate({ escalate: false, labels: [{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.changes }] }).action).toBe('wait-author');
+    expect(decideReviewGate({ escalate: false, labels: [{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.human }] }).humanRequired).toBe(true);
+    expect(decideReviewGate({ escalate: false, labels: [{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }] }).action).toBe('merge');
+  });
+
+  it('no review label + de-escalated still merges — the fix is a no-op for the common path', () => {
+    expect(decideReviewGate({ escalate: false, labels: [] }).action).toBe('merge');
+  });
+});
+
 describe('merge-ai-prs — planLabelDrain blockedBy ordering (#2188)', () => {
   const cand = (num, item, blockedBy = [], decision = 'merge') => ({ num, item, blockedBy, decision });
 
