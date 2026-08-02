@@ -19,7 +19,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,12 +35,29 @@ const a = process.argv.slice(2);
 const ji = a.indexOf('--json');
 const fields = ji >= 0 ? String(a[ji + 1] || '') : '';
 function out(o) { process.stdout.write(JSON.stringify(o)); process.exit(0); }
+// Record every 'pr comment' the drain posts (only when a log path is set — dry-run runs never reach here, so the
+// default JSON-reading tests are unaffected). Used by the finding-1 non-dry-run test to prove which park kinds
+// get a durable skip/park comment.
+if (a[0] === 'pr' && a[1] === 'comment' && process.env.GATE_COMMENT_LOG) {
+  const bi = a.indexOf('--body');
+  fs.appendFileSync(process.env.GATE_COMMENT_LOG, JSON.stringify({ num: a[2], head: String((bi >= 0 && a[bi + 1]) || '').split('\\n')[0] }) + '\\n');
+  process.exit(0);
+}
+// A flagged PR's '--body' edit FAILS (non-zero) — models a gh write that does not land (#2820 round-4 attest-by-
+// verified regression test). Label edits (--add-label/--remove-label) still succeed; only the body write fails.
+if (a[0] === 'pr' && a[1] === 'edit' && a.includes('--body')) {
+  const pr = fx.prs.find((p) => String(p.number) === String(a[2]));
+  if (pr && pr._editBodyFail) { process.stderr.write('forced body-edit failure\\n'); process.exit(1); }
+}
 if (a[0] === 'pr' && a[1] === 'list') out(fx.prs);
 if (a[0] === 'pr' && a[1] === 'view') {
   const pr = fx.prs.find((p) => String(p.number) === String(a[2])) || {};
   if (fields.includes('commits')) out({ commits: pr._commits || [] });
   if (fields.includes('files')) out({ files: pr._files || [] });
   if (fields.includes('body')) out({ body: pr.body || '' });
+  // #2409 reviewed-SHA staleness read: return the live head plus a reviewed-sha marker comment. When the fixture's
+  // _reviewedSha differs from _headRefOid the accept is STALE (re-park); no marker → gate fails open.
+  if (fields.includes('headRefOid')) out({ headRefOid: pr._headRefOid || '', comments: pr._reviewedSha ? [{ body: '<!-- reviewed-sha: ' + pr._reviewedSha + ' -->' }] : [] });
   if (fields.includes('comments')) out({ comments: [] });
   out({});
 }
@@ -83,6 +100,28 @@ function runDrain(fixture, args) {
   });
   const line = stdout.trim().split('\n').filter(Boolean).pop(); // the last line is the JSON result
   return JSON.parse(line);
+}
+
+/** Run the REAL entrypoint NON-dry-run (so the skip/park COMMENT paths actually fire), with the whole-process
+ *  lease bypassed (`--no-drain-lease`, the documented tests/break-glass escape) and every `gh pr comment`
+ *  recorded. Returns `{ result, comments }`. Used only by the finding-1 test — a merge never happens because the
+ *  fixtures are all held/parked (empty `toMerge`), so the cascade is a no-op and nothing touches the real tree. */
+function runDrainLive(fixture, args) {
+  const fxPath = join(workDir, `fixture-${fixture._id}.json`);
+  const logPath = join(workDir, `comments-${fixture._id}.log`);
+  writeFileSync(fxPath, JSON.stringify(fixture));
+  writeFileSync(logPath, '');
+  const stdout = execFileSync('node', [SCRIPT, ...args, '--no-drain-lease', '--this-repo', '--json'], {
+    cwd: workDir,
+    env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GATE_FIXTURE: fxPath, GATE_COMMENT_LOG: logPath },
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const result = JSON.parse(stdout.trim().split('\n').filter(Boolean).pop());
+  const comments = existsSync(logPath)
+    ? readFileSync(logPath, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+    : [];
+  return { result, comments };
 }
 
 const nums = (arr) => (arr || []).map((x) => Number(x.num));
@@ -146,5 +185,181 @@ describe('the real drain entrypoint consults the gate before merging', () => {
 
     // the clean orphan with no review label still lands — the backstop only refuses un-cleared labels
     expect(nums(r.toMerge)).toContain(202);
+  });
+
+  // #2820-review-fix REGRESSION GUARD — the root cause of the earlier break was "a new not-merge decision
+  // (classifyPr's `reviewHeld` skip) SHORT-CIRCUITED an existing parking invariant": a review-held PR that used
+  // to be PARKED (with humanRequired) got silently bucketed as bare `skipped`, losing that signal. The invariant
+  // this guards: in a label-scoped drain, EVERY unsatisfied-review-hold PR that must-not-merge preserves its
+  // routing through decideReviewGate — it appears in `r.parked` (never merges, never merely vanishes into
+  // skipped-only), with humanRequired reflecting the hold's tier (review:human → true, review:changes → false).
+  // The #103 case above covers the human tier; this covers the non-human tier through the SAME parking path.
+  it('label-scoped drain: a review:changes leaf PARKS (wait-author, humanRequired:false) — the hold routing is preserved, not bare-skipped', () => {
+    const fixture = {
+      _id: 'changes-parks',
+      prs: [
+        { number: 301, title: 'clean leaf, no hold', body: 'a real summary', headRefName: 'lane/f', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/p.md', additions: 3, deletions: 0 }] },
+        { number: 302, title: 'leaf the reviewer bounced', body: 'a real summary', headRefName: 'lane/g', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:changes' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/q.md', additions: 2, deletions: 0 }] },
+      ],
+    };
+    const r = runDrain(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    // the un-held leaf still lands — the fix is a no-op for a PR with no review label
+    expect(nums(r.toMerge)).toContain(301);
+
+    // the review:changes leaf must NOT merge, and must be PARKED (its routing preserved), not silently bare-skipped
+    expect(nums(r.toMerge)).not.toContain(302);
+    expect(nums(r.merged)).not.toContain(302);
+    const p302 = r.parked.find((p) => Number(p.num) === 302);
+    expect(p302).toBeTruthy();
+    expect(p302.humanRequired).toBe(false); // review:changes is agent-reviewable (author lane fixes) — not human-only
+  });
+
+  // #2820-review-fix (finding 1) — the bare `--no-review-escalation` escape hatch. classifyPr's hold-skip was
+  // threaded ONLY from the per-PR relief set, so a BARE flag ({passWide:true, prs:[]}) left allowPendingReview
+  // false for every PR and the held review:pending PR was skipped BEFORE the !REVIEW_ESCALATION backstop (which
+  // only downgrades merge→skip) could honour the waiver — the documented x30jq9n stuck-park exit was dead. The
+  // pass-wide waiver is now threaded into classifyPr (gated on !!label, mirroring the backstop's allowPending).
+  it('#2820-review-fix (finding 1): a bare --no-review-escalation LANDS a green review:pending PR (the escape hatch lives)', () => {
+    const fixture = {
+      _id: 'escape-hatch',
+      prs: [
+        { number: 401, title: 'green, parked pending, no reviewer coming', body: 'a real summary', headRefName: 'lane/h', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:pending' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/r.md', additions: 2, deletions: 0 }] },
+        { number: 402, title: 'reviewer-rejected — NEVER waived by the flag', body: 'a real summary', headRefName: 'lane/j', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:changes' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/t.md', additions: 1, deletions: 0 }] },
+      ],
+    };
+    const r = runDrain(fixture, ['--label=ready-to-merge', '--no-reconcile-labels', '--no-review-escalation']);
+
+    // the operator override lands the stuck pending PR — the whole point of the escape hatch
+    expect(nums(r.toMerge)).toContain(401);
+    // but review:changes stays held even under the bare flag (the predicate never waives changes/human)
+    expect(nums(r.toMerge)).not.toContain(402);
+    expect(nums(r.merged)).not.toContain(402);
+  });
+
+  // #2820-review-fix (finding 2) — a green review:pending leaf whose fresh score DE-ESCALATES (a small backlog
+  // leaf) must still PARK (agent-reviewable), never fall into decideReviewGate's old `!escalate`→merge dead zone
+  // where classifyPr's hold-skip stranded it: skipped every pass AND absent from `parked`, so no reviewer is ever
+  // dispatched. The sticky-pending branch keeps it in `parked` with a release path.
+  it('#2820-review-fix (finding 2): a de-escalated review:pending leaf PARKS agent-reviewable, never the merge dead zone', () => {
+    const fixture = {
+      _id: 'pending-parks',
+      prs: [
+        { number: 501, title: 'green pending leaf, fresh score de-escalated', body: 'a real summary', headRefName: 'lane/i', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:pending' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/s.md', additions: 1, deletions: 0 }] },
+      ],
+    };
+    const r = runDrain(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    expect(nums(r.toMerge)).not.toContain(501);
+    expect(nums(r.merged)).not.toContain(501);
+    const p501 = r.parked.find((p) => Number(p.num) === 501);
+    expect(p501).toBeTruthy();
+    expect(p501.humanRequired).toBe(false);
+  });
+
+  // #2820-review-fix (finding 3) — a held PR that is ALSO unlandable for a more actionable reason (red CI) must
+  // NOT be treated as `reviewHeld`: it keeps the CI reason and is a plain SKIP, never routed into the escalation
+  // pass (and its mutating gates: #2414 baseline capture, the test-gaming review:human stamp). A green held PR
+  // still parks (previous cases); this pins that the red one does not.
+  it('#2820-review-fix (finding 3): a red-CI review:changes PR is a plain SKIP (CI reason), not parked into the mutating gates', () => {
+    const RED = [{ name: 'test', conclusion: 'FAILURE', status: 'COMPLETED' }];
+    const fixture = {
+      _id: 'red-held',
+      prs: [
+        { number: 601, title: 'red CI + review:changes, mid-fix', body: 'a real summary', headRefName: 'lane/k', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: RED,
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:changes' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/u.md', additions: 1, deletions: 0 }] },
+      ],
+    };
+    const r = runDrain(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    expect(nums(r.toMerge)).not.toContain(601);
+    expect(nums(r.merged)).not.toContain(601);
+    expect(nums(r.skipped)).toContain(601);                       // plain skip for the CI reason…
+    expect(r.parked.find((p) => Number(p.num) === 601)).toBeFalsy(); // …NOT routed through the escalation/parking path
+  });
+
+  // #2820-review-fix (round-3 finding 1) — the round-2 "de-dup" set `reviewParked = true` on ENTRY to the
+  // park/wait-author branch, which suppressed the final #2313 skip-stamp for two kinds that post NOTHING of their
+  // own: a `review:changes` wait-author (no `applyLabel`) and a de-escalated `review:human` park (empty reasons →
+  // `buildEscalationReasonBlock([]) === ''`). The fix tracks whether a durable record was ACTUALLY posted. This is
+  // the ONLY case that exercises the non-dry-run COMMENT paths, so it runs live (lease bypassed, merges nothing —
+  // every fixture PR is held, `toMerge` is empty), recording every `gh pr comment`.
+  // Scope: this covers the two kinds finding-1 restores (a NON-escalating review:changes wait-author, a
+  // de-escalated review:human park) plus the agent review:pending park (which must NOT double). It does NOT
+  // assert totality over ALL park kinds — an ESCALATING review:changes wait-author is separately/pre-existingly
+  // suppressed by the untouched `escalated==='yes'` skip-loop exclusion (out of finding-1's scope; see the code).
+  it('#2820-review-fix (finding 1): the two silenced park kinds regain their skip comment, and the agent park still posts exactly one (not doubled)', () => {
+    const green = { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN, body: 'a real summary', _commits: AI_COMMIT, _files: [{ path: 'backlog/u.md', additions: 1, deletions: 0 }] };
+    const fixture = {
+      _id: 'skip-stamp',
+      prs: [
+        { number: 701, title: 'review:changes wait-author', labels: [{ name: 'ready-to-merge' }, { name: 'review:changes' }], ...green },
+        { number: 702, title: 'review:pending agent park',  labels: [{ name: 'ready-to-merge' }, { name: 'review:pending' }], ...green },
+        { number: 703, title: 'review:human de-escalated leaf', labels: [{ name: 'ready-to-merge' }, { name: 'review:human' }], ...green },
+      ],
+    };
+    const { result, comments } = runDrainLive(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    // Nothing merged — all three are held.
+    expect(nums(result.toMerge)).toEqual([]);
+
+    // Each of THESE three PRs gets EXACTLY ONE comment — the two restored kinds are no longer silenced, and the
+    // agent park is not doubled. (Not a claim over all park kinds — see the scope note above.)
+    for (const n of ['701', '702', '703']) {
+      expect(comments.filter((c) => c.num === n).length).toBe(1);
+    }
+    // review:changes wait-author and the de-escalated review:human park post a SKIP stamp (their why, restored) —
+    // before the fix they posted nothing at all.
+    expect(comments.find((c) => c.num === '701').head).toContain('drain-skip-reason');
+    expect(comments.find((c) => c.num === '703').head).toContain('drain-skip-reason');
+    // The agent review:pending park still posts its own PARK comment — and only that one (the round-2 de-dup goal
+    // — no byte-identical skip on top — is preserved by the corrected exclusion).
+    expect(comments.find((c) => c.num === '702').head).toContain('drain-park-reason');
+  });
+
+  // #2820-review-fix (round-4 finding) — `durableRecorded` must be attested by the VERIFIED effect of the #2324
+  // body write, NOT by merely HAVING COMPUTED the escalation block. A stale-acceptance review:human re-park writes
+  // its "why" only into the PR body; when that `gh pr edit --body` write does not land, nothing was recorded. The
+  // round-3 code set the flag from the computed block, so `reviewParked` went true and the final skip-stamp was
+  // SUPPRESSED — the PR ended the pass with NO durable record at all (a regression vs main, which still fired the
+  // skip fallback). Keying the flag off the existing `verified` re-fetch restores it: an unconfirmed write leaves
+  // the flag false, so the skip loop stamps exactly one durable record. (The general class is swept by #2857.)
+  it('#2820-review-fix (round 4): a stale-acceptance review:human re-park whose body write FAILS still ends the pass with exactly one durable record', () => {
+    const fixture = {
+      _id: 'attest-verified',
+      prs: [
+        {
+          number: 801,
+          title: 'stale-acceptance review:human re-park (body edit forced to fail)',
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:accepted' }, { name: 'review:human' }],
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          body: 'a real summary', _commits: AI_COMMIT,
+          _files: [{ path: 'backlog/w.md', additions: 1, deletions: 0 }], // benign fresh diff → escalated:'no' → the skip loop is eligible to stamp
+          _headRefOid: 'deadbeef',    // live head …
+          _reviewedSha: 'cafef00d',   // … advanced past the reviewed SHA → review:accepted is STALE → re-park review:human
+          _editBodyFail: true,        // force the #2324 body write to fail so `verified` stays false
+        },
+      ],
+    };
+    const { result, comments } = runDrainLive(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    // Held — never lands, and re-parked HUMAN (a stale acceptance re-parks to review:human).
+    expect(nums(result.toMerge)).toEqual([]);
+    expect(result.parked.find((p) => Number(p.num) === 801)?.humanRequired).toBe(true);
+    // The regression guard: with the body write unconfirmed, the skip-stamp fallback fires — so the PR carries
+    // EXACTLY ONE durable record of why it was not landed (before the fix it carried zero).
+    expect(comments.filter((c) => c.num === '801').length).toBe(1);
+    expect(comments.find((c) => c.num === '801').head).toContain('drain-skip-reason');
   });
 });
