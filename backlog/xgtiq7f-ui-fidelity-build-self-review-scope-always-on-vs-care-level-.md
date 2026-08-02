@@ -17,12 +17,12 @@ tags: [conveyor, review, convergence, self-review, care-level, ui-fidelity, slic
 
 Every delegated build carries a non-zero self-review floor: even a `none`-care leaf edit gets one fast
 adversarial pass, so no build reaches the PR having run zero self-review. That floor is a non-clearing FIX pass
-([#2439]: the builder never clears its own diff); the visual floor stays locus-gated, not care-gated; and the
+([#2398]: the builder never clears its own diff); the visual floor stays locus-gated, not care-gated; and the
 depth above the floor is a config dimension, not a fork.
 
 **RATIFIED by the operator (Nicolas Gilbert) on 2026-08-01** — Fork 1 = **(c) hybrid** accepted. The
 **ratifiable core** is that non-zero floor. Codified as [`#build-lane-self-review-non-zero-floor`](../docs/agent/platform-decisions.md#build-lane-self-review-non-zero-floor),
-composing with — not altering — [#2563] and [#2439].
+composing with — not altering — [#2563] and [#2398].
 
 ## Grounding digest
 
@@ -61,7 +61,7 @@ rare high-value finding is waved through too.
 The decision splits, on the #2563 template, into a **fixed invariant** (the non-zero floor — the one
 ratifiable line), a **config dimension** (the depth *above* the floor — a throughput knob, not a fork), and
 **one genuine fork** (whether that floor exists at all — options (a)/(b)/(c)). What is *not* touched: the
-Layer-2 independent clear + land (unchanged), and #2439's non-author invariant (the self-review stays a
+Layer-2 independent clear + land (unchanged), and #2398's non-author invariant (the self-review stays a
 non-clearing fix pass).
 
 ## Recommended path at a glance
@@ -83,7 +83,7 @@ care). The Layer-2 `none → 0` zero-coverage on the *independent* panel is **ou
   value of a preference. It is what closes #2819's root cause (an under-specified-brief leaf edit whose hidden
   edge-case slipped because nothing looked adversarially before the PR), and it is what every fast-shipping
   pipeline in the survey does (risk deepens review, it never switches it off).
-- **The floor is a non-clearing FIX pass, not a clearance.** Per #2439 the builder may not clear its own diff;
+- **The floor is a non-clearing FIX pass, not a clearance.** Per #2398 the builder may not clear its own diff;
   the floor converges nits *pre-PR while the lane is warm* and hands a cleaner diff to the **independent**
   Layer-2 clear, which is unchanged. The floor never claims to be the safety net — it shrinks the post-hoc-nit
   rate cheaply.
@@ -102,7 +102,7 @@ conservative repo raises the floor or the per-band depth. The knob reuses the **
 ## Settled (not forks)
 
 - **Layer separation is fixed.** Self-review = Layer 1 (author-run, #2672); independent clear = Layer 2
-  (#2567/#2439). This decision governs only Layer 1's floor + depth. The Layer-2 panel's `none → 0` mapping is
+  (#2567/#2398). This decision governs only Layer 1's floor + depth. The Layer-2 panel's `none → 0` mapping is
   a separate concern under #2567.
 - **One shared care model.** `deriveCareLevel` stays the single source of the band; only the *depth table* the
   band feeds differs by layer (Layer 1 gets a floored table; Layer 2 keeps `panelRigorForCareLevel`).
@@ -147,7 +147,7 @@ non-zero floor**, derived on its own merits, rather than reusing the Layer-2 tab
 panelRigorForCareLevel('none');   // → { rounds: 0, lenses: [],           jurorsPerLens: 0 }   // ← the zero (b) inherits
 
 // Fork 1 (c) — a DISTINCT Layer-1 table, FLOORED. Same care band, own mapping; rounds never 0.
-export function selfReviewDepthForCareLevel(careLevel) {          // Layer 1: author-run FIX pass (#2672/#2439)
+export function selfReviewDepthForCareLevel(careLevel) {          // Layer 1: author-run FIX pass (#2672/#2398)
   const table = {
     none:     { rounds: 1, lenses: ['correctness'] },            // the LIGHT floor — one fast high-signal pass
     low:      { rounds: 1, lenses: ['correctness'] },
@@ -163,7 +163,7 @@ original naive "three co-equal options" framing and forced the restructure). (0)
 "(a)/(b)/(c) are three values of one knob → pure config dimension, nothing to ratify" is **half-right and
 adopted**: the **depth** is now a config dimension; what stays ratifiable is the **floor's existence** (like
 #2563 made the human-sample *rate* config but "the decorrelated axis is not nothing" a fixed invariant). (2)
-*Statute/layer* — the attack "a floor on the *author's* self-review mislocates the #2439 guarantee" is
+*Statute/layer* — the attack "a floor on the *author's* self-review mislocates the #2398 guarantee" is
 **reconciled**: the floor is explicitly a non-clearing *fix* pass (#2819's own framing), not a clearance, and the
 Layer-2 `none → 0` coverage hole is split out as a #2567 follow-on, not conflated. (3) *Citation-scope* — the
 attack "citing #2567 to scale self-review overreaches" is **adopted**: citation downgraded to precedent, a
@@ -193,8 +193,8 @@ industry's name for a heavy, mostly-empty gate getting muted along with its rare
 The decision turn set `codifiedIn` to the **new sibling anchor**
 `#build-lane-self-review-non-zero-floor` — the front-matter now carries exactly that value, and the anchor
 exists in `we:docs/agent/platform-decisions.md` in this diff. It **composes with**, and does not collide with,
-`#blast-radius-advisory-care-not-a-gate` (#2563) and `#agent-convergence-independent-validation` (#2439): #2563
-governs which signals route advisorily vs hard-gate a human on the **independent** review; #2439 governs that a
+`#blast-radius-advisory-care-not-a-gate` (#2563) and `#agent-convergence-independent-validation` (#2398): #2563
+governs which signals route advisorily vs hard-gate a human on the **independent** review; #2398 governs that a
 builder may not **clear** its own diff; this governs the **Layer-1 author-run fix pass's floor + depth**. Three
 different turfs, one anti-drift rule: the care *band* stays single-sourced in `deriveCareLevel` — this anchor
 adds only a **floored depth table** for Layer 1, it does not re-declare the band.
@@ -233,7 +233,7 @@ lens a citation-heavy prose diff earns — stays in context.
 ## Related
 
 Carved from [#2819] (its ratify-later open sub-point); under epic [#2804] (UI-Fidelity Gate). Reuses the
-care-level model [#2567], the non-author invariant [#2439], build-time self-review [#2672], and composes with
+care-level model [#2567], the non-author invariant [#2398], build-time self-review [#2672], and composes with
 [#2563]. **Gate-self note:** an implementing diff adds `selfReviewDepthForCareLevel` to
 `we:scripts/lib/review-core.mjs` — a change to **derivation code**, so it **rides the normal independent
 review**, not a human gate. Per [`#review-human-declarative-leash-only`](../docs/agent/platform-decisions.md#review-human-declarative-leash-only)
