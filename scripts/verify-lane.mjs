@@ -29,11 +29,11 @@
  * red) / `check` verdict not-ok; 3 = usage / git error (no marker written).
  */
 import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
+import { writeFileSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { VERIFY_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision } from './lib/lane-verify.mjs';
+import { VERIFY_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
 const flags = {};
@@ -50,7 +50,10 @@ const expandHome = (p) => (p && p.startsWith('~') ? join(homedir(), p.slice(1)) 
 const REPO = resolve(expandHome(flags.repo) || process.cwd());
 const GATE = typeof flags.gate === 'string' ? flags.gate : 'npm run test:unit && npm run check:standards';
 const AS_JSON = !!flags.json;
-const REQUIRE_VERIFIED = !!flags['require-verified'];
+// #2833 finding 5 — resolve the gate options through the SHARED resolver so `check` mode agrees with pr-land:
+// `--require-verified` OR `WE_REQUIRE_VERIFIED=1`, and the `WE_LAND_UNVERIFIED=1` break-glass. Previously `check`
+// read only `flags['require-verified']`, so the same env produced two different verdicts at the two call sites.
+const { requireVerified: REQUIRE_VERIFIED, breakGlass: VERIFY_BREAK_GLASS } = resolveVerifyOptions({ flags, env: process.env });
 const MODE = positionals[0] === 'check' ? 'check' : 'verify';
 
 const git = (args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -63,18 +66,10 @@ const tryGit = (args) => { try { return git(args); } catch { return null; } };
 const GIT_DIR = tryGit(['rev-parse', '--absolute-git-dir']) || join(REPO, '.git');
 const MARKER = join(GIT_DIR, VERIFY_FILENAME);
 
-function readMarker() {
-  if (!existsSync(MARKER)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(MARKER, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : { corrupt: true };
-  } catch {
-    // The marker EXISTS but is unparseable (corrupt/torn). Do NOT fold this into `absent` (null): the gate would
-    // then fail OPEN under the default mode — exactly backwards for a stall guard. Signal `corrupt` so the gate
-    // refuses (#2833 finding 5).
-    return { corrupt: true };
-  }
-}
+// #2833 finding 2 — the marker read is single-sourced in lane-verify.mjs (`readVerifyMarker`) so this writer and
+// pr-land's finish-guard can never drift. It resolves `<gitDir>/.lane-verify`, folds a valid-JSON non-object to
+// `{ corrupt: true }` (never `absent`, which would fail OPEN), and returns null only for a genuinely missing file.
+const readMarker = () => readVerifyMarker(GIT_DIR);
 function writeMarker(record) {
   // Atomic: write a temp sibling in the same git dir, then rename over the marker — so a concurrent reader
   // (pr-land's finish-guard) never observes a half-written file (#2833 finding 5). renameSync is atomic within a
@@ -96,14 +91,28 @@ if (!headSha) emit({ sha: null, status: 'error', reason: 'no-head', detail: `cou
 // ── `check` — READ-ONLY: report the finish-guard verdict for HEAD, run nothing. This is exactly the gate
 //    pr-land applies, exposed so a delivery step can pre-flight it (and so it is directly testable end-to-end).
 if (MODE === 'check') {
-  const breakGlass = process.env.WE_LAND_UNVERIFIED === '1';
-  const v = verifyGateDecision({ record: readMarker(), headSha, breakGlass, requireVerified: REQUIRE_VERIFIED });
+  const v = verifyGateDecision({ record: readMarker(), headSha, breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED });
   emit({ sha: headSha, status: v.status, reason: v.reason, ok: v.ok, detail: v.detail }, v.ok ? 0 : 2);
 }
 
 // ── `verify` — run the suites SYNCHRONOUSLY and record the outcome ───────────────────────────────────
 // 1. Stamp the `running` marker BEFORE the suites start, so a kill mid-run leaves a stranded (detectably
 //    unfinished) marker rather than nothing.
+//    #2833 finding 4: the same sha compare-and-set the FINISH write applies (below) must also guard the START
+//    write. Two overlapping runs share one clone's marker; without this, `verify-lane` for a NEW sha would
+//    overwrite an existing TERMINAL (`green`/`red`) record belonging to a DIFFERENT sha with a `running` marker
+//    — destroying a sibling run's recorded result before any CAS could protect it. Refuse to clobber a terminal
+//    record for a foreign sha (a `running`/absent/own-sha marker is fine to overwrite: re-verifying is legitimate).
+const preStart = readMarker();
+if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.status === 'red') && preStart.sha && preStart.sha !== headSha) {
+  emit(
+    {
+      sha: headSha, status: 'superseded', reason: 'superseded', exitCode: null,
+      detail: `refusing to START verification for ${headSha.slice(0, 8)}: the on-disk marker holds a terminal ${preStart.status} record for ${String(preStart.sha).slice(0, 8)} (an overlapping verify-lane run) — overwriting it with a running marker would destroy that result; no marker written for this run.`,
+    },
+    3,
+  );
+}
 writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString() }));
 
 // 2. Run the gate in the FOREGROUND, blocking until it exits (inherited stdio — the agent sees the output live).

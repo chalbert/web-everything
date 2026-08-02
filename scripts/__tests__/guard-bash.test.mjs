@@ -7,7 +7,47 @@ import { describe, it, expect } from 'vitest';
 import {
   decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd, resolveEffectiveCwd,
   laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
+  isVerificationRun, isBackgrounded, backgroundedVerificationReason,
 } from '../guard-bash.mjs';
+
+describe('guard-bash — backgrounded verification is denied (#2833 finding 3)', () => {
+  it('isVerificationRun matches the verification set (verify-lane / check:standards / test:unit), not a mention', () => {
+    expect(isVerificationRun('node scripts/verify-lane.mjs --gate="npm run check:standards"')).toBe(true);
+    expect(isVerificationRun('npm run check:standards')).toBe(true);
+    expect(isVerificationRun('npm run test:unit')).toBe(true);
+    expect(isVerificationRun('npm test')).toBe(true);
+    expect(isVerificationRun('pnpm run test:unit')).toBe(true);
+    // a mere mention is not a run
+    expect(isVerificationRun('echo "run check:standards later"')).toBe(false);
+    expect(isVerificationRun('grep check:standards docs/x.md')).toBe(false);
+    expect(isVerificationRun('git commit -m "wire verify-lane"')).toBe(false);
+  });
+  it('isBackgrounded: run_in_background param, a trailing &, and nohup/setsid/disown — but NOT && / redirections', () => {
+    expect(isBackgrounded('npm run check:standards', true)).toBe(true);          // the Bash tool param
+    expect(isBackgrounded('npm run check:standards &')).toBe(true);              // shell background operator
+    expect(isBackgrounded('nohup npm run test:unit')).toBe(true);
+    expect(isBackgrounded('setsid npm test')).toBe(true);
+    expect(isBackgrounded('npm run check:standards && echo done')).toBe(false);  // logical AND, not backgrounding
+    expect(isBackgrounded('npm run test:unit > log 2>&1')).toBe(false);          // fd redirection, not backgrounding
+    expect(isBackgrounded('npm run check:standards')).toBe(false);               // plain foreground
+  });
+  it('backgroundedVerificationReason fires only when BOTH a verification run AND backgrounded', () => {
+    expect(backgroundedVerificationReason('npm run check:standards', true)).toMatch(/SYNCHRONOUSLY in the FOREGROUND/);
+    expect(backgroundedVerificationReason('node scripts/verify-lane.mjs &')).toMatch(/#2833 subagent stall/);
+    // a foreground verification run → allowed
+    expect(backgroundedVerificationReason('npm run check:standards')).toBeNull();
+    expect(backgroundedVerificationReason('npm run check:standards', false)).toBeNull();
+    // a backgrounded NON-verification command → not our concern
+    expect(backgroundedVerificationReason('npm run dev &')).toBeNull();
+    expect(backgroundedVerificationReason('sleep 60 &', true)).toBeNull();
+  });
+  it('decide denies a backgrounded verification run (via the run_in_background ctx) and allows the foreground form', () => {
+    expect(decide('npm run check:standards', { runInBackground: true })).toMatch(/never backgrounded/);
+    expect(decide('node scripts/verify-lane.mjs --gate="npm run test:unit" &')).toMatch(/never backgrounded/);
+    expect(decide('npm run check:standards', { runInBackground: false })).toBeNull();
+    expect(decide('npm run check:standards')).toBeNull();
+  });
+});
 
 describe('guard-bash — primary-cwd backlog-mutation block (#2302)', () => {
   const P = ['/ws/webeverything', '/ws/frontierui'];

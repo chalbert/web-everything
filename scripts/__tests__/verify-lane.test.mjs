@@ -69,4 +69,22 @@ describe('verify-lane writer — overlapping-runs race (#2833 finding 1)', () =>
     expect(onDisk.sha).toBe(headSha()); // stamped the sha it actually verified
     expect(onDisk.status).toBe('green');
   });
+
+  it('the START write refuses to overwrite a terminal GREEN for a FOREIGN sha (#2833 finding 4)', () => {
+    // Before this run even begins, the marker on disk holds a terminal GREEN for a DIFFERENT sha Y (a sibling
+    // run's finished result). Starting a fresh verification for THIS head must NOT stamp a `running` marker over
+    // it — that would destroy the sibling's recorded green before any finish-write CAS could protect it. The
+    // start write applies the same sha compare-and-set: it refuses, writes nothing, and leaves green-Y intact.
+    const greenY = JSON.stringify({ sha: OTHER_SHA, status: 'green', startedAt: '2026-08-02T00:00:00.000Z', finishedAt: '2026-08-02T00:01:00.000Z', suites: 'gate', exitCode: 0 });
+    writeFileSync(marker(), greenY + '\n');
+
+    const { code, json } = runVerify('true'); // the suites would pass, but the run must never reach them
+
+    expect(code).toBe(3);
+    expect(json?.status).toBe('superseded');
+    // The marker on disk is STILL the terminal green for Y — never clobbered by a running marker for THIS head.
+    const onDisk = JSON.parse(readFileSync(marker(), 'utf8'));
+    expect(onDisk.sha).toBe(OTHER_SHA);
+    expect(onDisk.status).toBe('green');
+  });
 });

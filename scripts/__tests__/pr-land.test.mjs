@@ -349,8 +349,14 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     // The guard calls the shared pure decision core (never a re-implementation of the gate).
     expect(src).toMatch(/verifyGateDecision/);
     expect(src).toMatch(/from '\.\/lib\/lane-verify\.mjs'/);
+    // #2833 finding 2 — the marker read is SINGLE-SOURCED via `readVerifyMarker`, NEVER a hand-inlined JSON.parse
+    // of the marker here (pr-land's old inline parser caught only a throw, so a valid-JSON non-object slipped
+    // through as untracked and landed unverified). Source-contract: pr-land calls the shared reader, and contains
+    // no bare `JSON.parse(...VERIFY_FILENAME...)` / `JSON.parse(readFileSync(markerPath...))` of the marker.
+    expect(src).toMatch(/readVerifyMarker\(gitDir\)/);
+    expect(src).not.toMatch(/JSON\.parse\([^)]*VERIFY_FILENAME/);
+    expect(src).not.toMatch(/JSON\.parse\(readFileSync\(markerPath/);
     // It reads the HEAD's marker and refuses (non-ok) on the source commit BEFORE publishing to the lane ref.
-    expect(src).toMatch(/VERIFY_FILENAME/);
     expect(src).toMatch(/headSha: refSha/);
     // Anchor the ordering on a token unique to the guard BODY — NOT the bare identifier `verifyGateDecision`,
     // which also appears in the top-of-file ESM import (line ~98) and so ALWAYS sorts before the push, making the
@@ -360,8 +366,10 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     const GUARD_BODY = "this is #2833's stall guard";
     expect(src).toContain(GUARD_BODY);
     expect(src.indexOf(GUARD_BODY)).toBeLessThan(src.indexOf('Publish the source commit to the lane ref'));
-    // --require-verified / env demand a green; break-glass is the documented override.
-    expect(src).toMatch(/REQUIRE_VERIFIED = !!flags\['require-verified'\] \|\| process\.env\.WE_REQUIRE_VERIFIED === '1'/);
+    // #2833 finding 5 — the require-verified / break-glass options are resolved through the SHARED
+    // `resolveVerifyOptions` resolver (same as `verify-lane check`), never hand-inlined here, so the two entry
+    // points can never disagree on the same flag/env pair.
+    expect(src).toMatch(/resolveVerifyOptions\(\{ flags, env: process\.env \}\)/);
     expect(src).toMatch(/WE_LAND_UNVERIFIED/);
   });
   it('#2622: every PARK_LABELS value has REVIEW_LABEL_META (so the park label provision never crashes on undefined)', () => {

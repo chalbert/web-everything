@@ -62,4 +62,20 @@ marker is intrinsic to it; (c) the guard on `we:scripts/lane-pool.mjs` `release`
 — release is also the drain's benign post-land cleanup, so gating it would wedge the drain; `pr-land` is the SOLE
 WRITER TO MAIN and the true "delivered" gate. Harness/agent-runtime reaping of a stuck process is out of repo
 scope — this is the in-repo surface that makes the stall self-evident and refuses to let a half-verified lane
-deliver.
+deliver. The finish-guard is backed by a `PreToolUse(Bash)` guard (`we:scripts/guard-bash.mjs`) that DENIES a
+backgrounded verification-set run (`verify-lane`/`check:standards`/`test:unit`) at the source, so backgrounding is
+structurally blocked, not just discouraged in the delivery brief's prose.
+
+### Scope actually delivered vs deferred (narrowed on the #983 review)
+
+This PR delivers the **"synchronous checks (remove the footgun)"** acceptance criterion and the write-time guard
+against backgrounding it. It does **NOT** deliver the other two ACs, which are tracked as a follow-up under the
+conveyor epic in **#xw2ivof**:
+
+- the **harness/orchestrator reap-or-resume backstop** — detecting a subagent blocked on a never-advancing
+  background wait past a threshold and reaping (fail + reclaim its lane) or resuming it; and
+- the **regression** that reproduces a stalled build subagent and proves it is cleared automatically with its lane
+  freed.
+
+Both depend on agent-runtime capability that is largely out of in-repo scope (as noted above), so they are split
+off rather than claimed here.

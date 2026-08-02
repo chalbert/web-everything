@@ -130,9 +130,11 @@ gate is a hard stop (see *Escalations*). Then resolve:
 
 **Run the gate in the FOREGROUND and never background it.** Backgrounding your suite run and then yielding is
 the exact stall #2833 exists to kill: a run you walk away from leaves the lane half-verified but LOOKING done,
-and nothing reclaims it. The authoritative, marker-recording synchronous verification happens at step 8
-against your FINAL commit (via `scripts/verify-lane.mjs`); the gate here is the same suites, run green so you
-may resolve.
+and nothing reclaims it. This is no longer just guidance: a `PreToolUse(Bash)` guard (`we:scripts/guard-bash.mjs`,
+#2833 finding 3) **DENIES** a backgrounded verification-set run (`verify-lane` / `check:standards` / `test:unit`)
+— whether via the Bash `run_in_background` param or a shell `&`/`nohup` — so the footgun is structurally blocked,
+not merely discouraged. The authoritative, marker-recording synchronous verification happens at step 8 against
+your FINAL commit (via `scripts/verify-lane.mjs`); the gate here is the same suites, run green so you may resolve.
 
 ```bash
 npm run check:standards          # (or the item's locus gate) — FOREGROUND, blocking; never `&`/background-and-yield

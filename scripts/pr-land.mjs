@@ -76,7 +76,7 @@
  * drain stays the sole writer to main). A non-zero exit means `main` was left UNTOUCHED.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync, existsSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -95,7 +95,7 @@ import { POLICY_CARE_JURY } from './lib/review-policy.mjs'; // #2635 — the car
 import { parseManifest, embedManifestInBody, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs'; // xnsk54v — manifest rides the PR body, not a tracked file
 import { classifyPrOpenFailure, recordInfraBlockIO, infraStorePath, primaryRootFromClone, originSlugOf } from './conveyor/infra-blocked.mjs'; // #2659 — a post-push PR-open failure on an outside dependency → the infra-blocked state (recorded for auto-retry/resume), not a hard fail
 import { join } from 'node:path';
-import { VERIFY_FILENAME, verifyGateDecision } from './lib/lane-verify.mjs'; // #2833 — the lane-verification finish-guard: refuse to land a HEAD whose synchronous suite run never finished (or, under --require-verified, was never recorded green)
+import { verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs'; // #2833 — the lane-verification finish-guard: refuse to land a HEAD whose synchronous suite run never finished (or, under --require-verified, was never recorded green). readVerifyMarker/resolveVerifyOptions are the SHARED marker reader + option resolver (findings 2/5) both this gate and verify-lane use, so the two can never drift (readVerifyMarker owns the VERIFY_FILENAME path — no bare JSON.parse of the marker here).
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -126,8 +126,10 @@ const AS_JSON = !!flags.json;
 // skipped its synchronous suite run cannot deliver. An UNFINISHED (`running`) marker for that HEAD is refused
 // UNCONDITIONALLY (it is the exact observed stall — a backgrounded run that yielded mid-flight). The documented
 // break-glass WE_LAND_UNVERIFIED=1 overrides the whole gate (the PR still rides the required CI check).
-const REQUIRE_VERIFIED = !!flags['require-verified'] || process.env.WE_REQUIRE_VERIFIED === '1';
-const VERIFY_BREAK_GLASS = process.env.WE_LAND_UNVERIFIED === '1';
+// #2833 finding 5 — resolve through the SHARED resolver so this gate and `verify-lane check` agree on the same
+// flag/env pair (both call `resolveVerifyOptions`): `--require-verified` OR `WE_REQUIRE_VERIFIED=1`, plus the
+// `WE_LAND_UNVERIFIED=1` break-glass.
+const { requireVerified: REQUIRE_VERIFIED, breakGlass: VERIFY_BREAK_GLASS } = resolveVerifyOptions({ flags, env: process.env });
 const TITLE = typeof flags.title === 'string' ? flags.title : null;
 // Body precedence: --body-file (a path — robust for the multi-line body the #2170 lane review composes,
 // where the dismissed-findings block has newlines a CLI --body flag would mangle) wins over --body.
@@ -617,16 +619,14 @@ function runCli() {
   //     the documented break-glass. Runs AFTER the dry-run block (a dry run reports the plan without being gated)
   //     and BEFORE any push.
   {
-    let verifyRecord = null;
     // Resolve the marker in the REAL git dir (`.git` is a directory in a clone, a FILE in a worktree; #2833
-    // finding 4), and distinguish a present-but-unparseable marker (corrupt → refuse) from a missing one
-    // (absent → gate decides per --require-verified) so a torn marker never fails open (#2833 finding 5).
+    // finding 4) and read it through the SHARED reader `readVerifyMarker` (#2833 finding 2) — NEVER a hand-inlined
+    // JSON.parse here: pr-land's old inline parser caught only a throw, so a valid-JSON non-object (`null`/`"x"`/
+    // `[]`) slipped through as "no sha → untracked → land unverified". `readVerifyMarker` folds any such value to
+    // `{ corrupt: true }` (refused), distinguishes a torn marker (corrupt → refuse) from a missing one (absent →
+    // gate decides per --require-verified), and is the SAME read `verify-lane.mjs` performs.
     const gitDir = tryGit(['rev-parse', '--absolute-git-dir']) || join(REPO, '.git');
-    const markerPath = join(gitDir, VERIFY_FILENAME);
-    if (existsSync(markerPath)) {
-      try { verifyRecord = JSON.parse(readFileSync(markerPath, 'utf8')); }
-      catch { verifyRecord = { corrupt: true }; }
-    }
+    const verifyRecord = readVerifyMarker(gitDir);
     const gate = verifyGateDecision({ record: verifyRecord, headSha: refSha, breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED });
     if (!gate.ok) {
       emit({ repo: REPO, merged: false, reason: gate.reason, ref: REF, sha: refSha, verifyStatus: gate.status, detail: `refusing to land ${REF} — ${gate.detail} (${BASE} left untouched; this is #2833's stall guard)` }, 3);

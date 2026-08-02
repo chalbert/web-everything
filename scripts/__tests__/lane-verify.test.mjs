@@ -15,6 +15,8 @@ import {
   verifyFinishBody,
   isVerifyAbandoned,
   verifyGateDecision,
+  normalizeVerifyRecord,
+  resolveVerifyOptions,
 } from '../lib/lane-verify.mjs';
 
 const SHA = 'a'.repeat(40);
@@ -75,11 +77,25 @@ describe('verifyGateDecision — the finish-guard the delivery path applies (#28
     expect(v.detail).toMatch(/in-flight/);
   });
 
-  it('an ABANDONED running marker (past TTL) → refused, message says abandoned', () => {
-    const v = verifyGateDecision({ record: running, headSha: SHA, nowMs: T0 + min(DEFAULT_VERIFY_TTL_MINUTES + 5) });
+  it('an ABANDONED running marker (past TTL) under --require-verified → still refused (fail-closed), says abandoned', () => {
+    const v = verifyGateDecision({ record: running, headSha: SHA, nowMs: T0 + min(DEFAULT_VERIFY_TTL_MINUTES + 5), requireVerified: true });
     expect(v.ok).toBe(false);
     expect(v.reason).toBe('verify-unfinished');
     expect(v.detail).toMatch(/abandoned/);
+  });
+
+  // #2833 finding 1 — the TTL must actually GATE, not just re-word: a stranded (past-TTL) running marker must not
+  // wedge the CI-gated drain forever. THE PIN: running × past-TTL × requireVerified:false → ok (untracked).
+  it('finding 1: a PAST-TTL running marker + requireVerified:false → ok (untracked) — cannot wedge the CI-gated drain', () => {
+    const v = verifyGateDecision({ record: running, headSha: SHA, nowMs: T0 + min(DEFAULT_VERIFY_TTL_MINUTES + 5), requireVerified: false });
+    expect(v.ok).toBe(true);
+    expect(v.reason).toBe('untracked');
+  });
+  it('finding 1: a FRESH (in-flight) running marker + requireVerified:false → STILL refused (the exact live stall)', () => {
+    const v = verifyGateDecision({ record: running, headSha: SHA, nowMs: T0 + min(1), requireVerified: false });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe('verify-unfinished');
+    expect(v.detail).toMatch(/in-flight/);
   });
 
   it('a recorded RED result for THIS head under --require-verified → refused (fix + re-verify)', () => {
@@ -172,6 +188,44 @@ describe('verifyGateDecision — a corrupt marker refuses, never fails open (#28
   });
   it('break-glass still overrides a corrupt marker', () => {
     expect(verifyGateDecision({ record: { corrupt: true }, headSha: SHA, breakGlass: true }).ok).toBe(true);
+  });
+});
+
+describe('normalizeVerifyRecord — the SHARED normalizer both readers use (#2833 finding 2)', () => {
+  it('a valid-JSON NON-object (the finding-2 hole) folds to { corrupt: true } — never passes as absent', () => {
+    // null / a string / a number / an array are all valid JSON but not a verification record. pr-land used to
+    // catch only a throw, so these slipped through as "no sha → untracked → land unverified". Now they refuse.
+    for (const bad of [null, 'x', 42, [], [{ sha: 'a' }]]) {
+      expect(normalizeVerifyRecord(bad)).toEqual({ corrupt: true });
+    }
+  });
+  it('a plain object passes through untouched (field validation is the gate\'s job)', () => {
+    const rec = { sha: SHA, status: 'green', exitCode: 0 };
+    expect(normalizeVerifyRecord(rec)).toBe(rec);
+  });
+  it('a folded non-object is REFUSED by the gate (does not fail open)', () => {
+    expect(verifyGateDecision({ record: normalizeVerifyRecord('x'), headSha: SHA, requireVerified: false }).ok).toBe(false);
+    expect(verifyGateDecision({ record: normalizeVerifyRecord([]), headSha: SHA, requireVerified: false }).reason).toBe('verify-corrupt');
+  });
+});
+
+describe('resolveVerifyOptions — one flag/env resolver for BOTH entry points (#2833 finding 5)', () => {
+  it('--require-verified OR WE_REQUIRE_VERIFIED=1 → requireVerified true; WE_LAND_UNVERIFIED=1 → breakGlass', () => {
+    expect(resolveVerifyOptions({ flags: {}, env: {} })).toEqual({ requireVerified: false, breakGlass: false });
+    expect(resolveVerifyOptions({ flags: { 'require-verified': true }, env: {} })).toEqual({ requireVerified: true, breakGlass: false });
+    expect(resolveVerifyOptions({ flags: {}, env: { WE_REQUIRE_VERIFIED: '1' } })).toEqual({ requireVerified: true, breakGlass: false });
+    expect(resolveVerifyOptions({ flags: {}, env: { WE_LAND_UNVERIFIED: '1' } })).toEqual({ requireVerified: false, breakGlass: true });
+  });
+  it('the SAME flag/env pair yields IDENTICAL options at both call sites (they call one function)', () => {
+    // verify-lane `check` and pr-land both call resolveVerifyOptions with {flags, env}; identical input ⇒ identical
+    // output by construction. This pins that the resolution is single-sourced (finding 5: `check` used to ignore
+    // WE_REQUIRE_VERIFIED, so the same env produced two verdicts).
+    const flags = { 'require-verified': true };
+    const env = { WE_REQUIRE_VERIFIED: '1', WE_LAND_UNVERIFIED: '1' };
+    const atVerifyLane = resolveVerifyOptions({ flags, env });
+    const atPrLand = resolveVerifyOptions({ flags, env });
+    expect(atVerifyLane).toEqual(atPrLand);
+    expect(atVerifyLane).toEqual({ requireVerified: true, breakGlass: true });
   });
 });
 

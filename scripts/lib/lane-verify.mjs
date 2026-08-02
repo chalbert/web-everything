@@ -16,15 +16,65 @@
  *     verification is unfinished (`running` — the exact stall signature) or, under `--require-verified`, absent.
  *     A stranded/abandoned run can no longer masquerade as a delivered lane.
  *
- * This module is the DECISION half — no filesystem, no git, no clock (the caller passes `nowMs`) — so it is
- * unit-testable. `verify-lane.mjs` owns the IO half (git rev-parse, the synchronous suite run, the atomic
- * marker write) and `pr-land.mjs` calls `verifyGateDecision` at its finish-guard. Mirrors the split in
- * `scripts/lib/lane-lease.mjs`.
+ * This module is the DECISION half — the gate functions (`verifyGateDecision`, `isVerifyAbandoned`, the marker
+ * body builders) take no filesystem, no git, no clock (the caller passes `nowMs`), so they stay unit-testable.
+ * `verify-lane.mjs` owns the heavy IO (git rev-parse, the synchronous suite run) and `pr-land.mjs` calls
+ * `verifyGateDecision` at its finish-guard. Mirrors the split in `scripts/lib/lane-lease.mjs`.
+ *
+ * The ONE piece of IO that lives here is the SHARED marker reader (`readVerifyMarker` / its pure normalizer
+ * `normalizeVerifyRecord`): both entry points (`verify-lane.mjs`'s `readMarker` and `pr-land.mjs`'s finish-guard)
+ * read the exact same marker, and #2833 finding 2 was that they hand-inlined two *different* parsers — pr-land's
+ * caught only a throw, so a valid-JSON non-object (`null`/`"x"`/`[]`) slipped through as "no sha → untracked →
+ * land unverified". Single-sourcing the read here is the fix (a valid-JSON non-object normalizes to
+ * `{ corrupt: true }`, which the gate refuses). Likewise `resolveVerifyOptions` single-sources the
+ * `--require-verified`/`WE_REQUIRE_VERIFIED`/`WE_LAND_UNVERIFIED` flag+env resolution both entry points apply
+ * (#2833 finding 5 — `check` mode used to ignore `WE_REQUIRE_VERIFIED`, disagreeing with pr-land).
  */
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** The marker lives in the lane clone's `.git/` (like `.lane-lease`): never tracked, never `git clean`-ed,
  *  invisible to `git status`, one-per-lane. */
 export const VERIFY_FILENAME = '.lane-verify';
+
+/** Normalize a JSON-parsed marker payload to the shape the gate expects. Pure. A parsed value that is not a
+ *  plain object (an array, `null`, a string, a number — all VALID JSON) is NOT a verification record: fold it to
+ *  `{ corrupt: true }` so the gate refuses it, never treats it as `absent` and fails OPEN (#2833 finding 2/5). A
+ *  plain object passes through untouched (its fields are validated downstream by `verifyGateDecision`). */
+export function normalizeVerifyRecord(parsed) {
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : { corrupt: true };
+}
+
+/** Read + normalize the lane verification marker from a git dir. The SINGLE reader both entry points share
+ *  (#2833 finding 2): resolve `<gitDir>/.lane-verify`, and
+ *    - missing file            → `null`   (absent — the gate decides per `requireVerified`),
+ *    - present but unparseable  → `{ corrupt: true }` (torn/garbled — the gate refuses, never fails open),
+ *    - present valid non-object → `{ corrupt: true }` (via `normalizeVerifyRecord` — the finding-2 hole),
+ *    - present plain object     → the record as-is.
+ *  IO (fs read) — but the whole point is that the read is defined in exactly one place so the two callers can
+ *  never drift. `gitDir` is the ABSOLUTE git dir (`git rev-parse --absolute-git-dir`), correct for both a clone
+ *  (`.git` is a directory) and a worktree (`.git` is a file / relocated). */
+export function readVerifyMarker(gitDir) {
+  const markerPath = join(gitDir, VERIFY_FILENAME);
+  if (!existsSync(markerPath)) return null;
+  try {
+    return normalizeVerifyRecord(JSON.parse(readFileSync(markerPath, 'utf8')));
+  } catch {
+    return { corrupt: true };
+  }
+}
+
+/** Resolve the verification GATE options from an entry point's parsed flags + process env. Pure. The SINGLE
+ *  source both `verify-lane.mjs check` and `pr-land.mjs` call, so the two can never disagree (#2833 finding 5 —
+ *  `check` mode read only `flags['require-verified']` while pr-land also honoured `WE_REQUIRE_VERIFIED`, so the
+ *  same environment gave two verdicts). `requireVerified` = the `--require-verified` flag OR `WE_REQUIRE_VERIFIED=1`;
+ *  `breakGlass` = the documented `WE_LAND_UNVERIFIED=1` override. */
+export function resolveVerifyOptions({ flags = {}, env = {} } = {}) {
+  return {
+    requireVerified: !!flags['require-verified'] || env.WE_REQUIRE_VERIFIED === '1',
+    breakGlass: env.WE_LAND_UNVERIFIED === '1',
+  };
+}
 
 /** How long a `running` marker may sit before it reads as ABANDONED rather than still-in-flight. This only
  *  refines the human message (`abandoned` vs `in-flight`) — a `running` marker is "verification unfinished"
@@ -86,9 +136,12 @@ export function isVerifyAbandoned(record, nowMs, ttlMs = DEFAULT_VERIFY_TTL_MINU
  *   - `breakGlass` (env `WE_LAND_UNVERIFIED=1`) → ALWAYS ok, flagged. The deliberate documented override so a
  *     guard bug / a legitimately-CI-only land is never permanently wedged (house style: `WE_MERGE_BREAK_GLASS`).
  *   - a `green` record whose `sha` === `headSha` → ok (`verified`). The one clean pass.
- *   - a `running` record whose `sha` === `headSha` → NOT ok (`verify-unfinished`) — the EXACT observed stall: a
- *     verification was started for this commit and never finished. Refused REGARDLESS of `requireVerified`,
- *     because a half-run verification must never look complete. `isVerifyAbandoned` only colours the message.
+ *   - a `running` record whose `sha` === `headSha` → the EXACT observed stall: a verification was started for
+ *     this commit and never finished. A FRESH (in-flight) `running` marker is NOT ok (`verify-unfinished`) — a
+ *     half-run verification must never look complete. But a PAST-TTL `running` marker (the writer is presumed
+ *     gone) must not wedge the CI-gated drain forever: past-TTL AND `requireVerified` false ⇒ DEGRADE to the
+ *     non-blocking `untracked` verdict (the required CI check still gates the merge) — #2833 finding 1. Under
+ *     `requireVerified` it stays refused even when abandoned (the solo/conveyor build gate demands a real green).
  *   - a `red` record whose `sha` === `headSha`: refused (`verify-red`) ONLY under `requireVerified`; without it
  *     the marker is advisory and the record is allowed (`red-ci-gated`). This is the asymmetry between the two
  *     hazard classes — "never finished" (`running`) is always refused; "finished badly" (`red`) blocks only when
@@ -124,6 +177,18 @@ export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs 
   }
   if (matches && rec.status === 'running') {
     const abandoned = isVerifyAbandoned(rec, nowMs, ttlMs);
+    // #2833 finding 1 — the TTL must actually GATE, not just re-word. A stranded `running` marker that has
+    // outlived its TTL (the writer is presumed gone) must NOT wedge the CI-gated drain forever: past-TTL AND
+    // `requireVerified` false ⇒ DEGRADE to the non-blocking `untracked` verdict (the required GitHub check still
+    // gates the merge). Fail-CLOSED otherwise: a FRESH (in-flight) `running` marker is the exact observed stall
+    // and is always refused; and under `requireVerified` (the solo/conveyor build gate) even an abandoned run is
+    // refused — that flow demands a real local green, never a timed-out one.
+    if (abandoned && !requireVerified) {
+      return {
+        ok: true, status: 'untracked', reason: 'untracked',
+        detail: `verification for ${String(headSha).slice(0, 8)} was left UNFINISHED (a backgrounded run that never completed; started ${rec.startedAt || '?'}) and has outlived its TTL (${Math.round(ttlMs / 60_000)}m) — treating it as untracked so a stranded marker cannot wedge the CI-gated drain (#2833 finding 1); the PR's required CI check still gates the merge. Re-run \`node scripts/verify-lane.mjs\` to record a fresh green.`,
+      };
+    }
     return {
       ok: false, status: 'running', reason: 'verify-unfinished',
       detail: `verification for ${String(headSha).slice(0, 8)} is UNFINISHED (${abandoned ? 'abandoned — a backgrounded run that never completed' : 'still in-flight'}; started ${rec.startedAt || '?'}). A half-run verification must not look complete — re-run \`node scripts/verify-lane.mjs\` to completion (foreground, blocking) before landing.`,

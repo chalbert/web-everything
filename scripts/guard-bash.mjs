@@ -14,6 +14,10 @@
  *   • `git push` to a constellation `main` branch — strict lane-only enforcement (#2203): every change
  *     reaches main through a `lane/*` ref → PR → CI, so a DIRECT push bypasses the gate (observed
  *     2026-07-03: an ungated direct push landed a check:standards error on main). Escape: `MAIN_PUSH_OK=1`.
+ *   • a BACKGROUNDED verification-set run (`verify-lane` / `check:standards` / `test:unit`) — via the Bash
+ *     `run_in_background` param OR a shell `&`/nohup. Backgrounding the suite run then yielding is the exact
+ *     #2833 subagent stall (the lane sits mid-flight, produces nothing, never errors). Run it synchronously in
+ *     the foreground; no override.
  *   • a backlog item-mutation (claim/scaffold/…) run in a lane clone whose HEAD is BEHIND origin/main —
  *     a stale checkout runs stale `scripts/` against a stale backlog view (observed 2026-07-07: a lane
  *     19 commits behind ran the pre-#2288 "next free NNN" allocator and minted a colliding/low-gap
@@ -62,6 +66,47 @@ const BACKLOG_MUTATION = /\bnode\s+\S*backlog\.mjs\s+(?:claim|resolve|release|sc
 
 /** Does this segment INVOKE a backlog item-mutation subcommand? Pure (unit-tested). */
 export function isBacklogMutation(segment) { return BACKLOG_MUTATION.test(String(segment || '')); }
+
+// #2833 finding 3 — the VERIFICATION set that must never be backgrounded. The whole point of #2833 is that a
+// build subagent BACKGROUNDED its long verification and then yielded mid-run — the lane sat mid-flight, produced
+// nothing, and never errored, so nothing reclaimed it. The delivery brief only asks for this in PROSE; this hook
+// makes it structural. A command is a verification RUN when it actually invokes one of: `scripts/verify-lane.mjs`,
+// `check:standards`, or `test:unit` (via a package runner, or the bare `npm test` alias). Anchored to a runner /
+// the script path so a mere MENTION (grep/echo "check:standards") is not matched.
+const VERIFICATION_RUN =
+  /\bnode\s+\S*\bverify-lane\.mjs\b|\b(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b[^|;&]*\b(?:check:standards|test:unit)\b|\bnpm\s+(?:run\s+)?test\b/;
+
+/** Does this command INVOKE a member of the verification set (verify-lane / check:standards / test:unit)? Pure. */
+export function isVerificationRun(command) { return VERIFICATION_RUN.test(String(command || '')); }
+
+/**
+ * Is `command` being BACKGROUNDED? Pure. Two channels the #2833 stall can arrive through:
+ *   • the Bash tool's `run_in_background: true` parameter (the harness detaches it) — passed in as `runInBackground`;
+ *   • a shell background operator in the command text — a trailing/embedded `&` (NOT `&&`), or `nohup`/`setsid`/
+ *     `disown`. `&&`/`||` and redirections (`&>`, `2>&1`, `>&2`) are neutralized first so only a real background
+ *     `&` remains.
+ */
+export function isBackgrounded(command, runInBackground = false) {
+  if (runInBackground === true) return true;
+  let c = String(command || '');
+  if (/\b(?:nohup|setsid|disown)\b/.test(c)) return true;
+  c = c
+    .replace(/&&/g, ' ')            // logical AND — not backgrounding
+    .replace(/\|\|/g, ' ')          // logical OR
+    .replace(/[0-9]*>&[0-9-]*/g, '') // fd redirection: 2>&1, >&2, 1>&-
+    .replace(/&>/g, '');            // bash `&>file` combined redirect
+  return /&/.test(c);
+}
+
+/**
+ * The #2833 finding-3 deny reason: a verification-set command that is being backgrounded. Pure. Returns a reason
+ * string when BOTH true (it's a verification run AND it's backgrounded), else null. Checked at whole-command level
+ * (backgrounding is a property of the whole command / the tool param, which the per-segment split would lose).
+ */
+export function backgroundedVerificationReason(command, runInBackground = false) {
+  if (!isVerificationRun(command) || !isBackgrounded(command, runInBackground)) return null;
+  return 'the verification set (verify-lane / check:standards / test:unit) must run SYNCHRONOUSLY in the FOREGROUND — never backgrounded (run_in_background, a trailing `&`, nohup/setsid/disown). Backgrounding the suite run and then yielding is the EXACT #2833 subagent stall: the lane sits mid-flight, produces nothing, and never errors, so nothing reclaims it. Re-run it in the foreground and WAIT for it to exit before landing (`node scripts/verify-lane.mjs …`, blocking). There is no override — a synchronous run is the whole point.';
+}
 
 /**
  * Is `cwd` a constellation PRIMARY checkout (not a lane clone)? Pure. A lane clone lives under `/.lanes/` so
@@ -319,6 +364,11 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
  *  `foreignLiveLease` for the #2367 rule). */
 export function decide(command, ctx = {}) {
   if (!command) return null;
+  // #2833 finding 3 — whole-command check FIRST: backgrounding is a property of the whole command (a trailing `&`
+  // / the `run_in_background` tool param), which the per-segment split below would lose. Deny a backgrounded
+  // verification-set run before anything else.
+  const bg = backgroundedVerificationReason(command, ctx.runInBackground);
+  if (bg) return bg;
   for (const seg of String(command).split(/(?:&&|\|\||[;&|]|\n)+/)) {
     const r = reason(seg, ctx);
     if (r) return r;
@@ -380,9 +430,14 @@ if (IS_CLI) {
   let staleBehind = 0;
   let foreignLiveLease = false;
   let markedLeaseSlug = null;
+  let runInBackground = false;
   try {
     const ev = JSON.parse(readFileSync(0, 'utf8'));
     cmd = (ev.tool_input || {}).command || '';
+    // #2833 finding 3 — the Bash tool's own `run_in_background` param is the primary channel the stall arrives
+    // through (the harness detaches the process). Read it so a backgrounded verification run is denied even when
+    // the command text carries no `&`.
+    runInBackground = !!(ev.tool_input || {}).run_in_background;
     // #2367 — the DURABLE session identity. Key on `CLAUDE_CODE_SESSION_ID` (env) FIRST — the SAME source
     // `lane-pool.mjs acquire` stamps into the lease's `ownerSession`, so my own lease can never read as foreign
     // due to a string-source mismatch (r2 correctness fix). The hook payload's `session_id` is only a secondary
@@ -406,7 +461,7 @@ if (IS_CLI) {
     // something that LOOKS like a destructive git op. Every other Bash call skips it entirely.
     if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) ({ markedLeaseSlug, foreignLiveLease } = laneLeaseGuardCtx(cwd, mySessionId));
   } catch { process.exit(0); }
-  const r = decide(cmd, { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug });
+  const r = decide(cmd, { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, runInBackground });
   if (r) {
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Blocked: ' + r },
