@@ -2,10 +2,11 @@
 bornAs: xhrni4v
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateResolved: "2026-08-02"
 preparedDate: "2026-08-02"
-blockedBy: ["2785"]
+codifiedIn: "docs/agent/platform-decisions.md#human-is-principle-surface-not-path"
 tags: [governance, review-human, gate-self, principle-surface, stop-the-line, mechanization]
 ---
 

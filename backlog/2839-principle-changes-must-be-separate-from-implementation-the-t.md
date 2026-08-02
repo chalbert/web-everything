@@ -2,9 +2,11 @@
 bornAs: x84bjrx
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateResolved: "2026-08-02"
 preparedDate: "2026-08-02"
+codifiedIn: "docs/agent/platform-decisions.md#principle-and-impl-two-pr"
 tags: [governance, two-pr-rule, principle-surface, check-standards, write-gate, sequencing]
 ---
 
