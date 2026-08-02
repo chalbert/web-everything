@@ -3,7 +3,7 @@ bornAs: xmllmw4
 kind: story
 size: 5
 parent: "2804"
-status: open
+status: active
 blockedBy: ["2809"]
 scope:
   - plateau-app:tests/visual/geometry-theme.ts
