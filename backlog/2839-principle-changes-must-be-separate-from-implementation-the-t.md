@@ -129,6 +129,17 @@ action — **split the PR** — never by weakening a principle, so the escape ha
 not a bypass. The rename case is handled by the marked-hunk grain (a marker-comment-only touch that
 changes no rule text is not a statute-anchor edit).
 
+## Ruling — ratified 2026-08-02 (A)
+
+**Option A adopted, ratified by the operator (Nicolas Gilbert) on 2026-08-02.** A single diff may never touch
+both a principle surface and implementation code: the principle PR (human-ratified, `review:human`) lands
+FIRST, the impl PR (code + the enforcing invariant, committee-cleared) lands SECOND, and it must cite a
+`codifiedIn:` anchor already `status: resolved` on `main`. Codified in
+`we:docs/agent/platform-decisions.md#principle-and-impl-two-pr`, which cites #2840's canonical
+"principle surface" definition rather than restating one. The write-time `assertNotPrincipleAndImpl` gate is
+the follow-on `x3rm10e`. The Options table and Recommendation below are retained as the deliberation record;
+this ruling is the operative call.
+
 ## Options
 
 | Option | Shape | Verdict |
