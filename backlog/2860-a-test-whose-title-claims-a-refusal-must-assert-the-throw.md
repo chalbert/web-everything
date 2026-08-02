@@ -1,8 +1,9 @@
 ---
+bornAs: xasor4b
 kind: story
 size: 2
 parent: "2612"
-blockedBy: ["x2a76pj"]
+blockedBy: ["2859"]
 status: open
 dateOpened: "2026-08-02"
 tags: [testing, gate, check-standards, vitest, tech-debt]
@@ -46,7 +47,7 @@ signal is cheap and unambiguous — a title verb set on one side, an assertion f
    title like "refuses to include the flag" that legitimately asserts on a returned value is the case that decides
    whether the vocabulary needs narrowing or the rule needs an opt-out marker. Do not land a rule that forces
    authors to rename honest tests.
-3. **Fix the originating case** — but note it depends on #x2a76pj (a cross-repo argv guard must parse flags the
+3. **Fix the originating case** — but note it depends on #2859 (a cross-repo argv guard must parse flags the
    way the receiving CLI parses them): the assert in `buildPassArgs` is
    currently unreachable for every input, so there is no argument that makes it throw. Validating the
    caller-supplied `label` there is what gives this test a real `toThrow` case. Sequence that item first.

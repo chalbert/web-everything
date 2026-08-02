@@ -1,4 +1,5 @@
 ---
+bornAs: x2a76pj
 kind: story
 size: 2
 parent: "2612"
@@ -40,7 +41,7 @@ and at `:1334` decides `const RECONCILE = label && !flags['no-reconcile-labels']
 Both divergences matter more because of a third fact: `buildPassArgs` builds `argv` locally two lines above the
 assert, and that argv always carries a `--label=` token and never carries `--no-reconcile-labels`. So with the
 current construction the assert **cannot fire for any input**. Validating the caller-supplied `label` (divergence 2)
-is what makes it reachable — and is the precondition for #xasor4b (a test whose title claims a refusal must
+is what makes it reachable — and is the precondition for #2860 (a test whose title claims a refusal must
 assert the throw) having a real `toThrow` case to assert.
 
 ## What to do
