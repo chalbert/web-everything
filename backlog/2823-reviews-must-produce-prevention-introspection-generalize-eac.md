@@ -3,8 +3,9 @@ bornAs: xisgzfz
 kind: story
 size: 5
 parent: "2527"
-status: open
+status: active
 dateOpened: "2026-08-01"
+dateStarted: "2026-08-02"
 tags: []
 ---
 

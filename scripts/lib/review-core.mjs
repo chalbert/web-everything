@@ -64,6 +64,7 @@ import {
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
+  hasUncapturedPrevention,
   NEGOTIATION_ROUND_CAP,
   NEGOTIATION_OUTCOMES,
   deriveNegotiationOutcome,
@@ -101,6 +102,7 @@ export {
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
+  hasUncapturedPrevention,
   NEGOTIATION_ROUND_CAP,
   NEGOTIATION_OUTCOMES,
   deriveNegotiationOutcome,
@@ -889,17 +891,39 @@ export const REVIEW_NOTICE_EVENTS = Object.freeze({
 });
 
 /**
+ * #2823 — render the prevention-summary TAIL appended to an escalated notice. Pure. Returns `''` (byte-stable
+ * for every pre-#2823 caller) when there is nothing outstanding — no supplied finding names an uncaptured guard
+ * AND the verdict is not `prevention-outstanding`. Otherwise names the count and the guards owed, so the
+ * acceptance gate ("file before accept") rides the same line the operator already reads. The "outstanding"
+ * definition is the SINGLE-SOURCED `hasUncapturedPrevention`, so the notice and the verdict never disagree.
+ * @param {{findings?: Array<object>, verdict?: string}} [o]
+ * @returns {string}
+ */
+export function renderPreventionSummary({ findings = [], verdict } = {}) {
+  const outstanding = normalizeFindings(findings).filter(hasUncapturedPrevention);
+  if (!outstanding.length && verdict !== VERDICTS.PREVENTION_OUTSTANDING) return '';
+  if (!outstanding.length) return ' Prevention outstanding — file the named guard(s) before accept.';
+  const guards = outstanding.map((f) => f.prevention).join('; ');
+  const n = outstanding.length;
+  return ` Prevention outstanding — ${n} guard${n === 1 ? '' : 's'} must be filed before accept: ${guards}.`;
+}
+
+/**
  * Render the operator-facing escalation/clearance notice (#2433) — the short line `/drain` reports when a PR
  * parks/escalates, and `/review` reports after recording a human verdict. Distinct from the PR-COMMENT body
  * (`renderPanelVerdictTable` / #2432's `renderPanelComment`, posted to GitHub via `gh pr comment`) — this is
  * what the SESSION itself tells the operator in-chat. Pure; never posts anything.
+ * #2823 — the ESCALATED notice also carries a PREVENTION SUMMARY: when the verdict is `prevention-outstanding`
+ * or the supplied `findings` name guards that are neither captured nor filed, it appends "prevention outstanding
+ * — N guard(s) must be filed before accept: …" so the operator sees the acceptance gate in the same line, not
+ * only in the verdict token. Passing no `findings` (every existing caller) leaves the line byte-for-byte unchanged.
  * @param {{event: 'escalated'|'cleared', pr: number|string, repo?: string, verdict?: string,
  *   disposition?: {mode: 'converge'|'human', autoLand: boolean}, reasons?: string[],
- *   outcome?: 'accept'|'changes', actor?: string}} o — `outcome` is required (and strictly validated) for
- *   the `cleared` event; anything else throws rather than failing open to "accepted".
+ *   outcome?: 'accept'|'changes', actor?: string, findings?: Array<object>}} o — `outcome` is required (and
+ *   strictly validated) for the `cleared` event; anything else throws rather than failing open to "accepted".
  * @returns {string}
  */
-export function renderReviewNotice({ event, pr, repo, verdict, disposition, reasons = [], outcome, actor } = {}) {
+export function renderReviewNotice({ event, pr, repo, verdict, disposition, reasons = [], outcome, actor, findings = [] } = {}) {
   const tag = repo ? `${repo}#${pr}` : `#${pr}`;
   if (event === REVIEW_NOTICE_EVENTS.ESCALATED) {
     const reasonText = reasons.length ? ` (${reasons.join('; ')})` : '';
@@ -908,7 +932,7 @@ export function renderReviewNotice({ event, pr, repo, verdict, disposition, reas
       : disposition?.autoLand === false
         ? 'converged with an advisory fix — a human must still clear it (gate-self)'
         : 'escalated for review';
-    return `PR ${tag} ${modeText}${reasonText}. Verdict: ${verdict ?? '(pending)'}.`;
+    return `PR ${tag} ${modeText}${reasonText}. Verdict: ${verdict ?? '(pending)'}.${renderPreventionSummary({ findings, verdict })}`;
   }
   if (event === REVIEW_NOTICE_EVENTS.CLEARED) {
     if (outcome !== 'accept' && outcome !== 'changes') {

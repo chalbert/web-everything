@@ -40,15 +40,23 @@ import { CARE_LEVELS } from './review-escalation.mjs';
  * @property {number} [line] - 1-indexed line the finding anchors to.
  * @property {'CONFIRMED'|'PLAUSIBLE'} [verdict] - set when a verify pass ran; absent on inline-only reviews.
  * @property {'fixed'|'skipped'|'no_change_needed'} [outcome] - set only when RE-reporting after fixes were applied.
+ * @property {string} [rootCause] - #2823 blameless "why the CREATOR erred" chain (the authoring failure mode), not just what is wrong.
+ * @property {string} [prevention] - #2823 the cheapest durable guard that would have caught this CLASS (a deterministic gate preferred over a lens over a doc note).
+ * @property {boolean} [preventionCaptured] - #2823 true when the prevention already EXISTS as a gate or is filed; false ⇒ neither built nor filed ⇒ blocks a clean accept.
  */
 
-/** The three review dispositions (#2325) — a superset of what `/code-review` computes today (which renders
- *  findings only, no accept/changes call). `needs-human` is the #2285 conflict-of-interest escalation:
- *  humanRequired ALWAYS wins over any finding-derived disposition (see `deriveVerdict`). */
+/** The review verdicts (#2325). `needs-human` is the #2285 conflict-of-interest escalation: humanRequired
+ *  ALWAYS wins over any finding-derived disposition (see `deriveVerdict`). `prevention-outstanding` (#2823) is
+ *  the accept-gated-on-capture surface: every finding is resolved, but at least one names a PREVENTION guard
+ *  that is neither already captured (an existing gate) nor filed as a future item — so a CLEAN accept is
+ *  withheld ("file the guard before accept", closing the unfiled-intention gap). It behaves like `changes` in
+ *  the round loop (`deriveNegotiationOutcome` lands ONLY `accept`), so a prevention-outstanding verdict never
+ *  silently lands — it re-enters the loop until every guard is captured or filed. */
 export const VERDICTS = Object.freeze({
   ACCEPT: 'accept',
   CHANGES: 'changes',
   NEEDS_HUMAN: 'needs-human',
+  PREVENTION_OUTSTANDING: 'prevention-outstanding',
 });
 
 const VALID_VERDICT_TAGS = new Set(['CONFIRMED', 'PLAUSIBLE']);
@@ -72,6 +80,15 @@ export function normalizeFinding(raw) {
   if (raw.line != null && Number.isFinite(Number(raw.line))) out.line = Number(raw.line);
   if (raw.verdict && VALID_VERDICT_TAGS.has(String(raw.verdict))) out.verdict = String(raw.verdict);
   if (raw.outcome && VALID_OUTCOMES.has(String(raw.outcome))) out.outcome = String(raw.outcome);
+  // #2823 — the PREVENTION-INTROSPECTION fields, carried through the canonical shape so they survive into the
+  // verdict/notice (not just prose). `rootCause` = a blameless "why the CREATOR erred" chain; `prevention` = the
+  // cheapest durable guard that would have caught this CLASS (a `check:standards` gate preferred over a review
+  // lens over a doc note); `preventionCaptured` = whether that guard already EXISTS as a gate, or is filed —
+  // vs. neither (which blocks a clean accept, see `deriveVerdict`). Absent fields add NO key (old-shape findings
+  // unaffected). `preventionCaptured` is coerced to a strict boolean; it is only meaningful with a `prevention`.
+  if (raw.rootCause != null && String(raw.rootCause).trim()) out.rootCause = String(raw.rootCause).trim();
+  if (raw.prevention != null && String(raw.prevention).trim()) out.prevention = String(raw.prevention).trim();
+  if (raw.preventionCaptured != null) out.preventionCaptured = Boolean(raw.preventionCaptured);
   return out;
 }
 
@@ -96,16 +113,38 @@ export function normalizeFindings(rawList) {
  *   - otherwise: any finding still OUTSTANDING (no `outcome`, or `outcome: 'skipped'`) → `changes`.
  *     A first-pass review has no `outcome` yet, so ANY finding present outstands it; a RE-report after fixes
  *     (`outcome: 'fixed'|'no_change_needed'`) resolves that finding, leaving only genuinely unaddressed ones.
- *   - no outstanding findings → `accept`.
+ *   - all findings resolved BUT one still names an uncaptured, filable PREVENTION guard → `prevention-outstanding`
+ *     (#2823, the accept-gated-on-capture negotiation): a clean accept is withheld until the guard is captured or
+ *     filed. See `hasUncapturedPrevention`. This is the ONE place the acceptance gate is enforced, so every
+ *     surface that reduces to `deriveVerdict` inherits it — no reviewer can accept a finding whose guard evaporated.
+ *   - no outstanding findings AND no uncaptured prevention → `accept`.
  *
  * @param {{findings?: Finding[]|Array<object>, humanRequired?: boolean}} [o]
- * @returns {'accept'|'changes'|'needs-human'}
+ * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
 export function deriveVerdict({ findings = [], humanRequired = false } = {}) {
   if (humanRequired) return VERDICTS.NEEDS_HUMAN;
   const list = normalizeFindings(findings);
   const outstanding = list.filter((f) => f.outcome !== 'fixed' && f.outcome !== 'no_change_needed');
-  return outstanding.length > 0 ? VERDICTS.CHANGES : VERDICTS.ACCEPT;
+  if (outstanding.length > 0) return VERDICTS.CHANGES;
+  // #2823 — accept is GATED ON PREVENTION CAPTURE. Even with every finding resolved, a finding whose named
+  // prevention is neither already captured (an existing gate) nor filed as a future item withholds a clean
+  // accept — the reviewer accepts only once every reasonable prevention is captured or filed.
+  if (list.some(hasUncapturedPrevention)) return VERDICTS.PREVENTION_OUTSTANDING;
+  return VERDICTS.ACCEPT;
+}
+
+/**
+ * #2823 — does this finding carry a named PREVENTION guard that is NOT yet captured (neither an existing gate
+ * nor filed as a future item)? Pure. Such a finding blocks a clean `accept` (see `deriveVerdict`) until its
+ * guard is captured or filed. A finding with no `prevention` names no guard, so it never blocks — an old-shape
+ * finding (pre-#2823) is unaffected. This is the SINGLE definition of "prevention outstanding" every consumer
+ * (the verdict, the operator notice) shares, so the acceptance gate is decided once.
+ * @param {Finding|null|undefined} finding
+ * @returns {boolean}
+ */
+export function hasUncapturedPrevention(finding) {
+  return Boolean(finding && finding.prevention && finding.preventionCaptured !== true);
 }
 
 /**
@@ -202,7 +241,7 @@ export function redTeamRequired(verdict) {
  * The harness only ever calls this for a verdict `redTeamRequired` returned true on; a non-accept verdict never
  * reaches the red-team.
  * @param {{ran?: boolean, findings?: Finding[]|Array<object>}} [o]
- * @returns {'accept'|'changes'|'needs-human'}
+ * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
 export function foldRedTeamVerdict({ ran = false, findings = [] } = {}) {
   return deriveVerdict({ findings, humanRequired: !ran });
@@ -866,6 +905,20 @@ export function buildSubjectMandate({
     `Judge only: report concrete findings (${findingAnchor}, one-sentence summary, the failure scenario it causes) and`,
     'nothing about labels, merge policy, or who may clear this change — that is the caller\'s decision, not yours.',
     'Report an empty findings list if nothing survives scrutiny; do not pad with stylistic nitpicks.',
+    // #2823 — MANDATORY PREVENTION INTROSPECTION, single-sourced here so EVERY review surface that frames a
+    // mandate through this skeleton (the diff reviewer, the panel lenses, any future subject) inherits it — it
+    // cannot be skipped. Tuned per finding-class: a citation miscite earns a deterministic gate; a design-fidelity
+    // miss earns a render assertion; etc.
+    'PREVENTION INTROSPECTION (required, for EVERY finding you report — at every severity, nits included):',
+    'alongside the finding you MUST also answer three fields — (a) ROOT CAUSE (`rootCause`): a blameless "why"',
+    'chain for why the CREATOR got this wrong (the authoring failure mode), not merely what is wrong;',
+    '(b) PREVENTION (`prevention`): the cheapest DURABLE guard that would have caught this whole CLASS of defect,',
+    'tuned to the finding\'s class — preferring a DETERMINISTIC GATE (a `check:standards` rule / write-gate / lint)',
+    'over a review lens over a doc note; and (c) CAPTURE (`preventionCaptured`): whether that guard is already',
+    'CAPTURED as an existing gate (true) or must be FILED as a future backlog item (false).',
+    'A finding whose prevention is neither already captured nor filed BLOCKS acceptance — accept ONLY once every',
+    'finding\'s prevention is captured or filed. A script-decidable defect for which you propose no gate is an',
+    'INCOMPLETE review, not a clean one.',
   ].join(' ');
 }
 
