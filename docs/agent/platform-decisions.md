@@ -3306,6 +3306,34 @@ footgun, option (a) guideline-only rejected as too weak). Enabler for finer scop
 
 ---
 
+### Stop-the-line: the conveyor orchestrator never absorbs a non-mechanical case {#orchestrator-stops-line-never-absorbs}
+
+**Ratified 2026-08-02 by the operator (Nicolas Gilbert) (#xzc1sc5).** The conveyor orchestrator — the main session driving the mechanized delivery tick — is a **mechanical conveyor, not smart glue**. It must **never absorb a non-mechanical case to keep delivery moving**: quietly doing by hand the case the mechanic couldn't handle *feels* like progress but hides the gap and perpetuates manual operation. On any case the mechanic can't handle the orchestrator **stops the line (Andon)** — it HALTS that delivery, **FILES the gap as its own item**, and the class is **mechanized, or explicitly routed to a human** ([#human-required-is-judgment-only](#human-required-is-judgment-only)), before that class flows again. Rationale: hidden glue is invisible manual work that never gets automated because it never gets counted; accept a short-term slowdown (one stopped delivery) to buy long-term mechanical speed (the whole class runs itself next time). The mechanical clearers a stopped line hands off to are the [fix↔review convergence loop](#fix-review-convergence-independent-root-cause) and the [deterministic oracle](#deterministic-oracle-clears-slice); only genuine judgment goes to a human.
+
+---
+
+### Human-required means judgment, not convergent review {#human-required-is-judgment-only}
+
+**Ratified 2026-08-02 by the operator (Nicolas Gilbert) (#xzc1sc5).** A human gate is reserved for **genuine judgment** — ratifying a new policy/statute rule, or making a **novel design fork** where taste and irreversibility are in play (the same class the escalation rubric routes via [#review-human-declarative-leash-only](#review-human-declarative-leash-only)). It is **not** for **convergent review**: iterating on a reviewer's findings until the diff is clean is **MECHANICAL** — the criteria are known, the loop terminates, and no new judgment is created each round. Convergent fix/review therefore runs as the [fix↔review convergence loop](#fix-review-convergence-independent-root-cause), never as a standing human step. Treating convergent review as human work is exactly the "smart glue" a [stopped line](#orchestrator-stops-line-never-absorbs) is meant to eliminate: it converts a mechanizable loop into permanent manual labour. The test is "does clearing this require a *new* call a person alone can make?" — if yes, human; if it is only "apply the known bar until green," it is mechanical.
+
+---
+
+### Fix↔review convergence loop — independent reviewer, root-cause every round {#fix-review-convergence-independent-root-cause}
+
+**Ratified 2026-08-02 by the operator (Nicolas Gilbert) (#xzc1sc5).** The **mechanical clearer** for `review:pending` and non-judgment gate-self PRs — the loop [#human-required-is-judgment-only](#human-required-is-judgment-only) hands convergent review to instead of a person. Three invariants govern it:
+
+1. **Independence is architectural.** The review actor must be architecturally **INDEPENDENT** of the build actor — a **separate session or service**, not the same orchestrator wearing a reviewer hat. Same-orchestrator subagents do **NOT** count as independent (#2439 — the conflict-of-interest / non-author rule): they share the builder's priors, so their agreement is consensus, not validation. This is the same non-author invariant [`we:docs/agent/platform-decisions.md#agent-convergence-independent-validation`](#agent-convergence-independent-validation) (#2398) sets for the drain.
+2. **Every round addresses root cause.** Each pass **DIAGNOSES AND ADDRESSES THE ROOT CAUSE** (prevention-introspection — the #2823 discipline that every review round generalize its finding to the class), never a surface patch that leaves the defect class live.
+3. **Escalate only on judgment or deadlock.** The loop escalates to a human **ONLY** on **non-convergence** (the round cap is hit) or a **genuine-judgment finding** (a novel fork surfaces mid-review) — the [#human-required-is-judgment-only](#human-required-is-judgment-only) boundary. A clean convergence never touches a person.
+
+---
+
+### A slice with a deterministic oracle is cleared by the oracle, not a human {#deterministic-oracle-clears-slice}
+
+**Ratified 2026-08-02 by the operator (Nicolas Gilbert) (#xzc1sc5).** When a slice carries a **deterministic acceptance oracle** — a test whose green/red is unambiguous, e.g. the #2811 real-route render-slice conformance test — a **GREEN oracle mechanically clears the slice**. No human verification is owed once the oracle exists: verifying a deterministic pass/fail is not judgment ([#human-required-is-judgment-only](#human-required-is-judgment-only)), it is reading the result. The `human-verify` tag on such a slice applies **only until that oracle exists** — its purpose is to hold the slice while the acceptance criterion is still a matter of human eyeballing, and it retires the moment the criterion becomes a deterministic check. **Concrete precedent:** the console-board remediation (#2834) — flipping the #2811 real-route conformance oracle from RED to GREEN — cleared on that **green fidelity oracle**, not on a human sign-off. This is the mechanization endpoint a [stopped line](#orchestrator-stops-line-never-absorbs) drives toward: turn "a person must look" into "the oracle is green."
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
