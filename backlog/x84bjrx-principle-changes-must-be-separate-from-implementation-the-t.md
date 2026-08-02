@@ -10,18 +10,31 @@ tags: [governance, two-pr-rule, principle-surface, check-standards, write-gate, 
 # Principle changes must be separate from implementation — the two-PR rule
 
 **Principle statement.** A **principle change** and the **implementation** that carries it may not travel
-in the same diff. A single change either authors/weakens a **principle surface** — a statute anchor in
-`we:docs/agent/platform-decisions.md`, or a `@principle` / `@invariant`-marked assertion that encodes a
-guarantee — OR it changes implementation code. Never both. The principle PR is the **human** step
-(`review:human`, ratified by the operator); the implementation PR is the **mechanical** step (an agent
-lands code + the invariant test that ENFORCES the just-ratified principle). They land in that order, in
-two PRs.
+in the same diff. A single change either authors a new / weakens an existing **principle surface** — a
+statute anchor in `we:docs/agent/platform-decisions.md`, or a **pre-existing** `@principle` /
+`@invariant`-marked assertion that encodes a guarantee — OR it changes implementation code (which includes
+*adding* the enforcing invariant for an already-ratified principle). Never both. The principle PR is the
+**human** step (`review:human`, ratified by the operator); the implementation PR is the **mechanical** step
+(an agent lands code + the invariant test that ENFORCES the just-ratified principle). They land in that
+order, in two PRs.
+
+**Crucial grain — adding an enforcing invariant is implementation, not a principle touch.** The impl PR
+this rule prescribes = code + the newly-*added* `@principle`/`@invariant` marker+assertion that enforces
+the ratified anchor. That impl PR must NOT be refused as "both principle and impl." So the principle-surface
+half is scoped to the **pre-existing** marked assertion: *editing or removing* a guarantee that already
+exists on the base is the principle step; *adding* a brand-new marked assertion is impl. Without this grain
+the rule refuses its own prescribed impl PR (a hunk that adds `// @principle` + the assertion is trivially
+"a hunk inside a tagged block") — see the deadlock resolution below.
 
 This is the sequencing discipline the sibling gate-narrowing decision (`#xhrni4v`) depends on: `#xhrni4v`
 only lets behaviour-preserving impl go mechanical *because* a principle is ENCODED as an invariant — and
-that encoding must ride the impl PR, never smuggle into the ratification PR. This decision is itself
-authored under its own rule: it is a principle, so it lands in a decisions-only PR parked `review:human`
-alongside `#xhrni4v` and `#x2w4qbf`, with zero implementation.
+that encoding rides the impl PR (as impl), never smuggling a *principle edit* into the ratification PR.
+This decision is itself authored under its own rule: it is a principle, so it lands in a decisions-only PR
+parked `review:human` alongside `#xhrni4v` and `#x2w4qbf`, with zero implementation. The
+`#human-required-is-judgment-only` anchor it cites lands via `xzc1sc5` (PR #982), so that is a **hard
+land-order precondition** — #982 must land first or the lineage cite 404s. It is stated in prose, not
+`blockedBy` frontmatter, because `xzc1sc5`'s file is not yet in this tree and
+`we:scripts/check-backlog-item.mjs` would reject an unresolved target.
 
 ## Current state
 
@@ -58,13 +71,18 @@ A **write-time `check:standards` gate**, `assertNotPrincipleAndImpl(changedFiles
 (shift-left, per rule #43) and the whole-tree `check:standards` run (durable backstop):
 
 - **`principleTouch`** = any changed file/hunk that is a **principle surface**, reusing `#xhrni4v`'s
-  `isPrincipleSurface` detector: a statute-anchor edit in `we:docs/agent/platform-decisions.md`, OR an edit
-  to a `@principle` / `@invariant`-marked assertion.
+  `isPrincipleSurface` detector at its **pre-existing-guarantee grain**: a statute-anchor edit in
+  `we:docs/agent/platform-decisions.md`, OR an edit/removal of a `@principle` / `@invariant`-marked
+  assertion **that is present in the base version of the file**. It does NOT include *adding* a new marked
+  assertion (that is impl).
 - **`implTouch`** = any changed file that is executable/impl code (`.mjs` / `.ts` / `.cjs` / `.json`
-  config) and is NOT itself a principle surface this diff. A `@principle`-marked test file counts as
-  `principleTouch` only for the marked hunks; unmarked hunks in the same file count as `implTouch` — so the
-  test file that *adds* an invariant (unmarked-until-committed) rides the impl PR, and the diff that
-  *edits an existing marked* invariant is the principle PR.
+  config) OR a hunk that **adds** a new `@principle`/`@invariant` marker+assertion. An added marker+assertion
+  is impl because it *enforces* an already-ratified principle rather than authoring or weakening one — so the
+  test file that *adds* an invariant rides the impl PR (as `implTouch`), and only a diff that *edits an
+  existing marked* invariant is `principleTouch`. The distinction is computed from **base-vs-head**: marker
+  present in base and edited → principle; marker absent in base and added → impl. (The reviewer's
+  "(unmarked-until-committed)" carve-out was not realizable — the marker text is literally in the added
+  hunk — so it is replaced by this base-presence rule, which *is* deterministically computable.)
 - **REFUSE** (exit 2 on the write path; hard error on the tree path) iff `principleTouch && implTouch`.
   The message names both sides and points at the split: "principle surface `X` and impl `Y` in one diff —
   split into a ratification PR (principle only) and a follow-on impl PR."
@@ -73,9 +91,22 @@ A **write-time `check:standards` gate**, `assertNotPrincipleAndImpl(changedFiles
   of its ratified anchor is a hard error (`check:standards`), so impl can never precede the human ruling it
   enforces.
 
-The gate is a pure function over `{changedFiles, diffHunks}` — the same signal set `#xhrni4v`'s trigger
-and the existing locus-prefix write guard already consume — so it composes with them at one write-time
-seam, no new plumbing.
+**Deadlock resolution with `#xhrni4v` (the joint migration PR).** `#xhrni4v`'s impl PR both (i) edits the
+gate engine (`we:scripts/lib/gate-config.mjs` / `we:scripts/lib/review-escalation.mjs`) to compose the new
+`isPrincipleSurface` trigger and (ii) *adds* the first `@principle`-marked invariants. Under the corrected
+grain, **both halves are `implTouch`** — (i) is engine code, (ii) is *added* markers — so `principleTouch`
+is false and the PR is NOT refused. There is no "leave the path gate in the same diff that adds a marked
+invariant" gymnastic either: `#xhrni4v`'s declarative-leash floor is **pinned** (whole-file, permanent),
+not a per-file "until-encoded" floor, so files are never individually dropped from the gate. The two
+decisions, ratified together, therefore have an executable joint migration path — each principle is
+ratified in its `review:human` PR, and its enforcing invariant + engine wiring land in a following pure-impl
+PR the committee clears.
+
+Like `#xhrni4v`, this gate reads hunk **content** (`isPrincipleSurface` needs base-vs-head), so it shares
+that decision's **diff-content plumbing precondition** — the base/head signal must be threaded into the
+`PreToolUse(Edit|Write)` hook and the tree run. It is a pure function over `{changedFiles, diffHunks}` once
+that plumbing exists, and then composes with `#xhrni4v`'s trigger and the locus-prefix write guard at one
+write-time seam.
 
 ## RISK
 

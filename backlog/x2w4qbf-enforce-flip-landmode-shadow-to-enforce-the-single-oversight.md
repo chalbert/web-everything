@@ -18,7 +18,21 @@ decision and logs it, but a human still clears every `review:pending` PR.
 
 This is a principle, so it lands in a decisions-only PR parked `review:human` alongside `#xhrni4v` and
 `#x84bjrx`; the code that reads the flip predicate is a follow-on impl PR under the two-PR rule
-(`#x84bjrx`).
+(`#x84bjrx`). The `#human-required-is-judgment-only` anchor it composes lands via `xzc1sc5` (PR #982), so
+that is a **hard land-order precondition** — #982 must land first or the lineage cite 404s. It is stated in
+prose, not `blockedBy` frontmatter, because `xzc1sc5`'s file is not yet in this tree and
+`we:scripts/check-backlog-item.mjs` would reject an unresolved target.
+
+**Coupling to `#xhrni4v` (load-bearing).** This decision's headline safeguard — "the flip edit is itself
+`review:human`" — holds **only** because `landMode` lives in `we:scripts/lib/review-policy.contract.json`,
+whose basename is in the policy-core / declarative-leash set, so editing it is path-gated to a human.
+`#xhrni4v` narrows that gate. The two decisions are safe together **only** because `#xhrni4v`'s corrected
+design **pins** the declarative-leash files (contract, roster, suites) to the human gate as whole files,
+permanently — it does *not* narrow them to marker-grain. Ratifying these together therefore keeps the flip
+edit human-gated. If `#xhrni4v` were adopted in a form that let the contract leave the path gate, this
+safeguard would evaporate and the single most oversight-reducing edit in the system would become
+agent-clearable — so this decision explicitly **depends on `#xhrni4v`'s leash pin** (see its item 3 /
+`isDeclarativeLeashPath`).
 
 ## Current state
 
@@ -32,7 +46,20 @@ standing human work on a loop the seam is built to mechanize.
 A separate, related flip already has its readiness metric built: `computeAgreementMetric` /
 `resolveLandMode` (`we:scripts/lib/decision-routing.mjs#resolveLandMode`) with `ENFORCE_FLIP_TRIGGER`
 (N = 20 consecutive shadow-vs-human matches, M = 20 trailing window, 0 divergences). That is the model this
-decision reuses for the REVIEW seam's flip — the machinery is proven, only the gate conditions are new.
+decision reuses for the REVIEW seam's flip — but the *metric* is proven, not the *plumbing it needs here*.
+Two gaps must be closed by the impl, and this decision names them as preconditions rather than pretending
+they exist:
+
+- **No durable review-seam ledger.** `recordShadowOutcome` / `ShadowOutcomeRecord` in
+  `we:scripts/lib/decision-routing.mjs` are the **decision-routing** ledger — a different seam. The review
+  auto-land seam `we:scripts/lib/auto-land-seam.mjs#applyAutoLand` only **emits an observation line to
+  stderr**; it persists nothing. So there is no `reviewShadowLedger` for `computeAgreementMetric` to read.
+  A persistence layer — auto-clear-vs-human outcomes written as `ShadowOutcomeRecord[]` to a durable store —
+  is a prerequisite of condition (c), not a given.
+- **(a)/(b) are remote CI state, not a working-tree read.** "Conformance test GREEN on `main`" is a
+  build-status fact, not something a pure function or a `check:standards` run over the local tree can
+  derive. The predicate reads them as an **impure CI-status probe**, or the write gate degrades to a
+  file-exists check that passes vacuously — which is explicitly rejected below.
 
 ## The change
 
@@ -51,22 +78,36 @@ when ALL** of:
 
 ## Mechanical enforcement design (the concrete gate)
 
-The flip is NOT a free-text toggle a session can set. It is gated by a pure predicate + a write gate:
+The flip is NOT a free-text toggle a session can set. It is gated by a readiness predicate + a write gate.
+The predicate is **not a pure function** — it reads remote CI state and a persisted ledger — so it is
+specified honestly as a **precondition-checked gate**, and its two data dependencies (below) are named
+preconditions of the impl PR:
 
-- **`enforceFlipReady()`** — a pure function (home: `we:scripts/lib/decision-routing.mjs`, beside the
-  existing `resolveLandMode`) returning `{ ready, reasons }`, `ready` iff **all three** hold:
-  - **(a)** the `#2820` merge-hold conformance test is GREEN on `main` (the merge gate refuses
-    `ready-to-merge` when a `review:*` hold label is present) — a deterministic test read, not a claim.
-  - **(b)** the `#2823` prevention-field conformance test is GREEN on `main` (the shared review core emits
-    the required prevention block per finding-class) — likewise a test read.
-  - **(c)** `computeAgreementMetric(reviewShadowLedger).flipReady === true` — the review-seam shadow ledger
-    (a `ShadowOutcomeRecord[]` of auto-clear-vs-human outcomes, the same record shape
-    `we:scripts/lib/decision-routing.mjs#computeAgreementMetric` already consumes) meets N/M with 0
-    divergences.
+- **`enforceFlipReady({ ciStatus, reviewShadowLedger })`** — home: `we:scripts/lib/decision-routing.mjs`,
+  beside the existing `resolveLandMode`. It is pure over its **injected inputs** (the CI-status object and
+  the ledger array), but those inputs are gathered impurely by the caller. Returns `{ ready, reasons }`,
+  `ready` iff **all three** hold:
+  - **(a)** the injected `ciStatus` shows the `#2820` merge-hold conformance test GREEN on `main` (the merge
+    gate refuses `ready-to-merge` when a `review:*` hold label is present). The caller fetches this via a
+    **CI-status probe** — an impure read, NOT a working-tree or file-exists check (a file-exists check would
+    pass vacuously once the test file exists, so a regression that reddens the test would not re-refuse the
+    flip — the failure the reviewer flagged, explicitly avoided).
+  - **(b)** the injected `ciStatus` shows the `#2823` prevention-field conformance test GREEN on `main` (the
+    shared review core emits the required prevention block per finding-class) — likewise a live CI-status
+    probe.
+  - **(c)** `computeAgreementMetric(reviewShadowLedger).flipReady === true` — where `reviewShadowLedger` is a
+    **durable** `ShadowOutcomeRecord[]` of review auto-clear-vs-human outcomes. This ledger **does not exist
+    yet** (the review seam only logs to stderr — see Current state) and is a precondition: the impl must add
+    the persistence layer that writes each shadow-mode review outcome as a `ShadowOutcomeRecord` the same
+    shape `we:scripts/lib/decision-routing.mjs#computeAgreementMetric` consumes. Without it, (c) has no
+    records and the gate never opens — fail-safe, but it means the ledger build is real impl scope, not a
+    reuse.
 - **The flip itself is a policy-spec change → `review:human`.** Setting `landMode: enforce` in the `#2651`
-  disposition config is an edit to the declarative leash (the policy contract), so it is already
-  human-gated by `we:docs/agent/platform-decisions.md#review-human-declarative-leash-only`. The operator
-  makes the flip; the machine only proves it is *allowed*.
+  disposition config is an edit to the declarative leash (`we:scripts/lib/review-policy.contract.json`), so
+  it is human-gated by `we:docs/agent/platform-decisions.md#review-human-declarative-leash-only`. This
+  survives `#xhrni4v` **only** because `#xhrni4v` pins the leash files to the human gate as whole files (its
+  `isDeclarativeLeashPath` floor) — see the Coupling note above. The operator makes the flip; the machine
+  only proves it is *allowed*.
 - **Write gate.** A `check:standards` rule (`we:scripts/check-standards-rules.mjs`) **refuses**
   `landMode: enforce` in the disposition config unless `enforceFlipReady().ready` is true, and stamps the
   three reasons. So the switch cannot be flipped early even by a human edit: the preconditions are a
@@ -99,7 +140,7 @@ default at every layer.
 
 | Option | Shape | Verdict |
 |--------|-------|---------|
-| **A — triple-gated flip predicate + write gate (recommended)** | `enforce` armed only when (a)+(b) green on main AND (c) agreement metric met; the flip edit stays `review:human` | oversight reduced only after the machinery + track record earn it |
+| **A — triple-gated flip predicate (CI-status + durable ledger) + write gate (recommended)** | `enforce` armed only when (a)+(b) show GREEN via a CI-status probe AND (c) the durable review-seam ledger meets the agreement metric; the flip edit stays `review:human` (leash pin, per `#xhrni4v`) | oversight reduced only after the machinery + track record earn it |
 | B — operator flips by hand, no predicate | trust the operator to check the three conditions before editing the config | REJECT — the directive is "enforced by mechanical gating"; an unchecked hand-flip is the unenforced instruction |
 | C — auto-flip on the metric alone | flip when `computeAgreementMetric.flipReady`, ignore (a)/(b) | REJECT — flips before the merge-hold and prevention machinery exist; mechanizes an under-powered, unsafely-mergeable review |
 
@@ -108,14 +149,26 @@ default at every layer.
 **Adopt A.** This is the single switch that turns the whole shadow-mode investment into actual reduced
 oversight, and it should flip exactly when — and only when — it is safe. Gating it on (a) the merge-hold,
 (b) the prevention field, and (c) a measured clean track record makes "is it safe to stop having a human
-clear these?" a deterministic predicate, not a judgment call each time. The flip edit remains the
-operator's `review:human` act; the predicate only certifies it is permitted. The `enforceFlipReady`
-predicate + the write gate are a follow-on impl PR under `#x84bjrx` — this PR authors only the principle
-and its gate conditions.
+clear these?" a machine-checked precondition, not a judgment call each time. The flip edit remains the
+operator's `review:human` act; the gate only certifies it is permitted. The `enforceFlipReady` predicate,
+the CI-status probe, the durable review-seam ledger, and the write gate are a follow-on impl PR under
+`#x84bjrx` — this PR authors only the principle and its gate conditions.
+
+## Preconditions (impl PR, under `#x84bjrx`)
+
+1. **`xzc1sc5` (PR #982) landed** — the `#human-required-is-judgment-only` anchor this composes exists on
+   `main` (prose land-order precondition; not frontmatter `blockedBy` — the file is not yet in this tree).
+2. **`#xhrni4v` leash pin ratified** — keeps `we:scripts/lib/review-policy.contract.json` human-gated, or
+   the flip's own safeguard evaporates.
+3. **`#2820` (PR #975) and `#2823` (PR #976) landed** — the merge-hold predicate and the prevention field,
+   read via a live CI-status probe by conditions (a)/(b).
+4. **A durable review-seam ledger built** — the auto-land seam persists each shadow review outcome as a
+   `ShadowOutcomeRecord`; today it only logs to stderr, so condition (c) has nothing to read until this
+   exists.
 
 **Lineage:** composes `we:docs/agent/platform-decisions.md#human-required-is-judgment-only` (mechanical
 convergent review need not stay human once the flip is safe) and reuses the shadow→enforce readiness
-machinery `we:scripts/lib/decision-routing.mjs#resolveLandMode` /
+*metric* `we:scripts/lib/decision-routing.mjs#resolveLandMode` /
 `we:scripts/lib/decision-routing.mjs#computeAgreementMetric` (`ENFORCE_FLIP_TRIGGER`) and the auto-land
-seam `we:scripts/lib/auto-land-seam.mjs#applyAutoLand` (the #2675 shadow default). Preconditions: `#2820`
-(review-hold merge predicate, PR #975) and `#2823` (prevention-introspection field, PR #976).
+seam `we:scripts/lib/auto-land-seam.mjs#applyAutoLand` (the #2675 shadow default) — but adds the missing
+review-seam persistence layer and CI-status probe the metric needs at this seam.
