@@ -3,11 +3,13 @@ bornAs: xmllmw4
 kind: story
 size: 5
 parent: "2804"
-status: active
+status: resolved
 blockedBy: ["2809"]
 scope:
   - plateau-app:tests/visual/geometry-theme.ts
 dateOpened: "2026-08-01"
+dateStarted: "2026-08-01"
+dateResolved: "2026-08-02"
 tags: [plateau-loop, conveyor, ui-fidelity, plateau-app, render-slice, human-verify, slice-uifg]
 ---
 
