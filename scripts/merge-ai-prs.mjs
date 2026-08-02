@@ -2225,8 +2225,12 @@ async function runCli() {
         }
         // #2820-review-fix (finding-1, round 3) — suppress the final skip-stamp ONLY when this branch actually
         // recorded the why (an agent-reviewable `park` comment, or a non-empty #2324 human body block). A
-        // `review:changes` wait-author and a de-escalated human park recorded nothing → `reviewParked` stays
-        // false → the skip loop stamps their reason, restoring the #2313 "every final skip carries its why".
+        // NON-escalating `review:changes` wait-author and a de-escalated human park recorded nothing →
+        // `reviewParked` stays false → the skip loop stamps their reason. (Scope note: this fixes only the kinds
+        // the skip loop gates on `reviewParked`. An ESCALATING wait-author — `humanRequired:false`, no applyLabel,
+        // no body block — is separately, PRE-EXISTINGLY suppressed by the untouched `escalated==='yes'` exclusion
+        // below and is NOT addressed here; the reviewer's own change-request text carries its "why". Widening to
+        // cover it would have to loosen `escalated==='yes'`, which the round-2 tamper/test-gaming parks depend on.)
         v.reviewParked = durableRecorded;
         // #2285 v1 — the skill's auto-review step consumes this: humanRequired PRs are left for the operator,
         // the rest are eligible for a fresh-context adversarial review subagent.

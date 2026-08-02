@@ -286,7 +286,11 @@ describe('the real drain entrypoint consults the gate before merging', () => {
   // `buildEscalationReasonBlock([]) === ''`). The fix tracks whether a durable record was ACTUALLY posted. This is
   // the ONLY case that exercises the non-dry-run COMMENT paths, so it runs live (lease bypassed, merges nothing —
   // every fixture PR is held, `toMerge` is empty), recording every `gh pr comment`.
-  it('#2820-review-fix (finding 1): every held park kind gets EXACTLY ONE durable drain comment — no kind is silenced, none doubled', () => {
+  // Scope: this covers the two kinds finding-1 restores (a NON-escalating review:changes wait-author, a
+  // de-escalated review:human park) plus the agent review:pending park (which must NOT double). It does NOT
+  // assert totality over ALL park kinds — an ESCALATING review:changes wait-author is separately/pre-existingly
+  // suppressed by the untouched `escalated==='yes'` skip-loop exclusion (out of finding-1's scope; see the code).
+  it('#2820-review-fix (finding 1): the two silenced park kinds regain their skip comment, and the agent park still posts exactly one (not doubled)', () => {
     const green = { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN, body: 'a real summary', _commits: AI_COMMIT, _files: [{ path: 'backlog/u.md', additions: 1, deletions: 0 }] };
     const fixture = {
       _id: 'skip-stamp',
@@ -301,7 +305,8 @@ describe('the real drain entrypoint consults the gate before merging', () => {
     // Nothing merged — all three are held.
     expect(nums(result.toMerge)).toEqual([]);
 
-    // Each PR gets EXACTLY ONE comment (no kind silenced, no kind doubled).
+    // Each of THESE three PRs gets EXACTLY ONE comment — the two restored kinds are no longer silenced, and the
+    // agent park is not doubled. (Not a claim over all park kinds — see the scope note above.)
     for (const n of ['701', '702', '703']) {
       expect(comments.filter((c) => c.num === n).length).toBe(1);
     }
