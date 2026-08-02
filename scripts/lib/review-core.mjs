@@ -75,6 +75,7 @@ import {
   normalizeFindings,
   deriveVerdict,
   hasUncapturedPrevention,
+  isFindingOutstanding,
   NEGOTIATION_ROUND_CAP,
   NEGOTIATION_OUTCOMES,
   deriveNegotiationOutcome,
@@ -113,6 +114,7 @@ export {
   normalizeFindings,
   deriveVerdict,
   hasUncapturedPrevention,
+  isFindingOutstanding,
   NEGOTIATION_ROUND_CAP,
   NEGOTIATION_OUTCOMES,
   deriveNegotiationOutcome,
@@ -838,8 +840,15 @@ export function buildValidatorMandate({ lens, contextIsolation = 'diff-only' } =
  *     earns `redteam:accepted`.
  *   - panel accept + validator `changes` → `changes` (the validator found something the panel missed → another
  *     editor↔reviewer round, not a land).
- * @param {{panelVerdict: 'accept'|'changes'|'needs-human', validatorVerdict: 'accept'|'changes'|'needs-human'}} o
- * @returns {'accept'|'changes'|'needs-human'}
+ *   - #2823 round-2 finding 2 — panel accept + validator `prevention-outstanding` → `prevention-outstanding`. On the
+ *     #2439 independent-validator path a validator can re-report the panel's findings as resolved (`no_change_needed`)
+ *     while naming an uncaptured guard — that is `prevention-outstanding`, a distinct terminal state. It must NOT
+ *     flatten to `changes`: flattening reintroduces exactly the non-progressing round loop `deriveNegotiationOutcome`
+ *     escalates it to avoid (every finding already resolved, so an editor round has nothing to fix — it would burn
+ *     the budget to the cap, then escalate as `non-convergence` instead of "file the guard"). Preserved here so it
+ *     rides `deriveNegotiationOutcome`'s immediate escalate straight to the operator who files the guard.
+ * @param {{panelVerdict: 'accept'|'changes'|'needs-human'|'prevention-outstanding', validatorVerdict: 'accept'|'changes'|'needs-human'|'prevention-outstanding'}} o
+ * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
 export function combineValidatedVerdict({ panelVerdict, validatorVerdict } = {}) {
   const known = new Set(Object.values(VERDICTS));
@@ -848,6 +857,8 @@ export function combineValidatedVerdict({ panelVerdict, validatorVerdict } = {})
   if (!known.has(validatorVerdict)) throw new Error(`combineValidatedVerdict: unknown validatorVerdict "${validatorVerdict}"`);
   if (validatorVerdict === VERDICTS.NEEDS_HUMAN) return VERDICTS.NEEDS_HUMAN;
   if (validatorVerdict === VERDICTS.ACCEPT) return VERDICTS.ACCEPT;
+  // #2823 — a validator prevention-outstanding is carried through, NOT flattened to changes (which would loop).
+  if (validatorVerdict === VERDICTS.PREVENTION_OUTSTANDING) return VERDICTS.PREVENTION_OUTSTANDING;
   return VERDICTS.CHANGES;
 }
 
@@ -906,18 +917,23 @@ export const REVIEW_NOTICE_EVENTS = Object.freeze({
  * AND the verdict is not `prevention-outstanding`. Otherwise names the count and the guards owed, so the
  * acceptance gate ("file before accept") rides the same line the operator already reads.
  *
- * Considers ONLY RESOLVED findings (`outcome: 'fixed'|'no_change_needed'`), exactly as `deriveVerdict` does — it
- * consults prevention ONLY after every finding is resolved (an unfixed defect is `changes`, and the fix comes
- * before the prevention gate). That shared filter is what makes the claim true: the notice and the verdict CAN'T
- * disagree, because both count the SAME set (resolved findings with an uncaptured guard, via the single-sourced
- * `hasUncapturedPrevention`). An unfixed finding that merely happens to name a prevention no longer mis-fires the
- * "prevention outstanding" line while the real blocker is still the defect itself.
+ * SUPPRESSES ITSELF whenever ANY finding is still outstanding, matching `deriveVerdict`'s SHORT-CIRCUIT exactly:
+ * `deriveVerdict` returns `changes` on ANY outstanding finding and NEVER consults prevention (the fix comes before
+ * the guard). So on a MIXED list (some fixed, some not) the verdict is `changes` and this summary must stay silent —
+ * the real blocker is the unfixed defect, not an unfiled guard (#2823 round-2 finding 3). It is only AFTER every
+ * finding is resolved that a resolved finding with an uncaptured guard makes the summary fire. Both this function
+ * and `deriveVerdict` gate on the SAME single-sourced predicates (`isFindingOutstanding` for "still open",
+ * `hasUncapturedPrevention` for "owes a guard"), so the notice and the verdict count the SAME set and CAN'T
+ * disagree — by construction, not by matching comments.
  * @param {{findings?: Array<object>, verdict?: string}} [o]
  * @returns {string}
  */
 export function renderPreventionSummary({ findings = [], verdict } = {}) {
-  const resolved = normalizeFindings(findings).filter((f) => f.outcome === 'fixed' || f.outcome === 'no_change_needed');
-  const outstanding = resolved.filter(hasUncapturedPrevention);
+  const all = normalizeFindings(findings);
+  // Match deriveVerdict's short-circuit: ANY outstanding finding ⇒ the verdict is `changes` and prevention is never
+  // consulted, so the summary stays silent (the blocker is the unfixed defect, not an unfiled guard).
+  if (all.some(isFindingOutstanding)) return '';
+  const outstanding = all.filter(hasUncapturedPrevention);
   if (!outstanding.length && verdict !== VERDICTS.PREVENTION_OUTSTANDING) return '';
   if (!outstanding.length) return ' Prevention outstanding — file the named guard(s) before accept.';
   const guards = outstanding.map((f) => f.prevention).join('; ');

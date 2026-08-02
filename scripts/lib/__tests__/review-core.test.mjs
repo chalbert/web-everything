@@ -653,6 +653,37 @@ describe('derivePanelVerdict (#2310)', () => {
     const verdicts = { ...allAccept, correctness: VERDICTS.CHANGES, simplicity: VERDICTS.PREVENTION_OUTSTANDING };
     expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.CHANGES);
   });
+
+  it('#2823 round-2 finding 4 — the STRUCTURAL advisory leak: prevention derived from FINDINGS, not per-lens verdicts', () => {
+    // The reachable leak the reviewer verified: an advisory lens holds one STILL-UNRESOLVED finding PLUS a resolved
+    // one naming an uncaptured guard. Its single verdict flattens to `changes` (the unresolved finding), advisory
+    // `changes` rides the accept, so a lensVerdicts-only scan never sees prevention-outstanding → the panel lands
+    // with the guard unfiled. Scanning the panel's FINDINGS catches the resolved-with-uncaptured-guard finding
+    // regardless of what its lens verdict flattened to.
+    const lensVerdicts = { ...allAccept, simplicity: VERDICTS.CHANGES };
+    const findings = [
+      { summary: 'advisory still-open nit', category: 'simplicity' }, // outstanding ⇒ its lens flattened to changes
+      { summary: 'advisory resolved but owes a guard', category: 'simplicity', outcome: 'fixed', prevention: 'a lint rule', preventionCaptured: false },
+    ];
+    // Without findings the old lensVerdicts-only scan drops it (advisory changes rides → accept):
+    expect(derivePanelVerdict({ lensVerdicts })).toBe(VERDICTS.ACCEPT);
+    // With the panel findings it surfaces as prevention-outstanding — the guard cannot leak unfiled:
+    expect(derivePanelVerdict({ lensVerdicts, findings })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it('#2823 round-2 finding 4 — an UNRESOLVED finding naming a prevention does NOT trip the panel gate (fix first)', () => {
+    // Only RESOLVED findings owe a guard — an unresolved one is `changes` territory. For an advisory lens it rides
+    // the accept (a mandatory unresolved finding would already be `changes` on its lens verdict).
+    const lensVerdicts = { ...allAccept, simplicity: VERDICTS.CHANGES };
+    const findings = [{ summary: 'still open, names a guard', category: 'simplicity', prevention: 'a gate', preventionCaptured: false }];
+    expect(derivePanelVerdict({ lensVerdicts, findings })).toBe(VERDICTS.ACCEPT);
+  });
+
+  it('#2823 round-2 finding 4 — a mandatory `changes` in the findings scan still OUTRANKS a resolved guard', () => {
+    const lensVerdicts = { ...allAccept, correctness: VERDICTS.CHANGES };
+    const findings = [{ summary: 'resolved, owes a guard', category: 'simplicity', outcome: 'fixed', prevention: 'gate', preventionCaptured: false }];
+    expect(derivePanelVerdict({ lensVerdicts, findings })).toBe(VERDICTS.CHANGES);
+  });
 });
 
 describe('renderPanelVerdictTable (#2310)', () => {
@@ -722,6 +753,16 @@ describe('combineValidatedVerdict (#2439 — gate a panel accept on the independ
   it('a validator needs-human escalates a panel accept', () => {
     expect(combineValidatedVerdict({ panelVerdict: VERDICTS.ACCEPT, validatorVerdict: VERDICTS.NEEDS_HUMAN }))
       .toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('#2823 round-2 finding 2 — a validator prevention-outstanding is CARRIED THROUGH, never flattened to changes', () => {
+    // The #2439 path: the validator re-reports the panel's findings as resolved but names an uncaptured guard.
+    // Flattening to `changes` would reintroduce the non-progressing round loop (nothing left to fix → burns the
+    // budget to the cap → escalates as non-convergence instead of "file the guard").
+    expect(combineValidatedVerdict({ panelVerdict: VERDICTS.ACCEPT, validatorVerdict: VERDICTS.PREVENTION_OUTSTANDING }))
+      .toBe(VERDICTS.PREVENTION_OUTSTANDING);
+    // And it must NOT loop: deriveNegotiationOutcome escalates prevention-outstanding immediately.
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.PREVENTION_OUTSTANDING, round: 1 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
   });
 
   it('the validator can only TIGHTEN — a non-accept panel verdict stands regardless of the validator', () => {
@@ -884,6 +925,32 @@ describe('renderPreventionSummary (#2823)', () => {
     expect(renderPreventionSummary({ verdict: VERDICTS.PREVENTION_OUTSTANDING })).toBe(
       ' Prevention outstanding — file the named guard(s) before accept.',
     );
+  });
+
+  it('#2823 round-2 finding 3 — a MIXED list (some fixed, some unfixed) stays SILENT, matching deriveVerdict', () => {
+    // The live shape SKILL.md tells callers to pass: buildPanelFindings(lensFindings) — the whole panel's list,
+    // mixing fixed and unfixed. deriveVerdict short-circuits to `changes` on the unfixed one and never consults
+    // prevention, so the summary MUST suppress itself. Before the fix it filtered to the resolved subset and fired
+    // "1 guard must be filed" while the real blocker was the unfixed defect — the exact disagreement.
+    const findings = [
+      { summary: 'fixed one', outcome: 'fixed', prevention: 'gate A', preventionCaptured: false },
+      { summary: 'still broken' },
+    ];
+    // The two now count the SAME set — both see an outstanding finding, so both are "changes / silent".
+    expect(deriveVerdict({ findings })).toBe(VERDICTS.CHANGES);
+    expect(renderPreventionSummary({ findings, verdict: VERDICTS.CHANGES })).toBe('');
+  });
+
+  it('#2823 round-2 finding 3 — once EVERY finding is resolved, the mixed guard DOES surface', () => {
+    // The complement: resolve the defect too, and the resolved-with-uncaptured-guard finding fires the summary
+    // (proving the suppression is about outstanding findings, not a blanket mute).
+    const findings = [
+      { summary: 'fixed one', outcome: 'fixed', prevention: 'gate A', preventionCaptured: false },
+      { summary: 'now resolved', outcome: 'no_change_needed' },
+    ];
+    expect(deriveVerdict({ findings })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+    expect(renderPreventionSummary({ findings, verdict: VERDICTS.PREVENTION_OUTSTANDING }))
+      .toBe(' Prevention outstanding — 1 guard must be filed before accept: gate A.');
   });
 });
 

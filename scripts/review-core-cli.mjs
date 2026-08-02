@@ -175,7 +175,9 @@ export function reduceReview(input = {}) {
 
   const hasPanel = lensVerdicts && typeof lensVerdicts === 'object';
   if (hasPanel) {
-    out.verdict = derivePanelVerdict({ lensVerdicts, humanRequired, conflict, mandatoryLenses });
+    // #2823 round-2 finding 4 — pass the whole panel's `findings` so the prevention gate is derived from findings
+    // (immune to per-lens verdict flattening), not just the per-lens verdicts.
+    out.verdict = derivePanelVerdict({ lensVerdicts, humanRequired, conflict, mandatoryLenses, findings: normalized });
     out.verdictTable = renderPanelVerdictTable({ lensVerdicts, mandatoryLenses });
   } else {
     out.verdict = deriveVerdict({ findings: normalized, humanRequired });

@@ -39,6 +39,12 @@ import {
   MANDATORY_LENSES,
   JURY_EVENT_TYPES,
   normalizeJuryEvent,
+  // #2823 round-2 finding 1 — the strictness table + its fail-loud accessor + the outstanding predicate are
+  // SINGLE-SOURCED in jury-core (next to the `VERDICTS` enum they range over). This module imports them rather than
+  // keeping a hand-copied twin, so "mirrors jury-core / jury-ledger" is enforced by construction and can never drift
+  // (the round-1 fix updated this table but missed jury-ledger's copy — there is now only one copy to update).
+  verdictStrictness,
+  isFindingOutstanding,
 } from './jury-core.mjs';
 
 /** The two dispositions the green judge proposes (#2652). A frozen enum so every caller names them once. */
@@ -46,45 +52,6 @@ export const DISPOSITIONS = Object.freeze({
   AUTO_DISPOSE: 'auto-dispose',
   ESCALATE: 'escalate',
 });
-
-/** Verdict strictness — diversity-selection order (#2567): the STRICTEST verdict wins a reduction, never a vote.
- *  `needs-human` (3) beats `changes` (2) beats `prevention-outstanding` (1) beats `accept` (0). `prevention-outstanding`
- *  (#2823) ranks ABOVE `accept` (a co-juror's "file the guard" must never lose to another's `accept`) and BELOW
- *  `changes` (an unfixed defect is a harder block than a missing guard — mirrors `deriveVerdict`, which returns
- *  `changes` before it ever consults prevention). MUST stay TOTAL over `VERDICTS` — see the assertion below. */
-const VERDICT_STRICTNESS = Object.freeze({
-  [VERDICTS.ACCEPT]: 0,
-  [VERDICTS.PREVENTION_OUTSTANDING]: 1,
-  [VERDICTS.CHANGES]: 2,
-  [VERDICTS.NEEDS_HUMAN]: 3,
-});
-
-// #2823 — ENFORCE TOTALITY over `VERDICTS` at module load. A verdict added to the enum without a rank here would
-// otherwise compare as `undefined` in every strictest-wins reduction below — silently ranking BELOW `accept` and
-// dropping a blocking verdict (the exact defect this PR was bounced for). Fail LOUDLY at import instead: a
-// missing rank is a build-time crash, never a silent mis-reduction at review time.
-for (const verdict of Object.values(VERDICTS)) {
-  if (VERDICT_STRICTNESS[verdict] === undefined) {
-    throw new Error(`VERDICT_STRICTNESS is not total over VERDICTS: verdict "${verdict}" has no strictness rank — add it (the table must rank every VERDICTS member).`);
-  }
-}
-
-/** The strictness rank of a verdict. THROWS on an unranked verdict rather than yielding `undefined` (which every
- *  `>` comparison would silently lose). Ledger/panel verdicts are enum-constrained upstream (`validateJuryEvent`
- *  admits only `VERDICTS` values), so this never throws on real data — it is the fail-loud backstop the totality
- *  assertion above guarantees, applied at each comparison site. */
-function verdictStrictness(verdict) {
-  const rank = VERDICT_STRICTNESS[verdict];
-  if (rank === undefined) {
-    throw new Error(`verdictStrictness: no strictness rank for verdict "${verdict}" — not a member of VERDICTS.`);
-  }
-  return rank;
-}
-
-/** A finding is OUTSTANDING unless a fix pass explicitly resolved it (mirrors `deriveVerdict` in jury-core). */
-function isFindingOutstanding(finding) {
-  return finding.outcome !== 'fixed' && finding.outcome !== 'no_change_needed';
-}
 
 /**
  * @typedef {Object} ReducedLedger
