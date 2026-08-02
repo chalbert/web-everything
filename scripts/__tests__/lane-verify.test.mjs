@@ -82,8 +82,10 @@ describe('verifyGateDecision — the finish-guard the delivery path applies (#28
     expect(v.detail).toMatch(/abandoned/);
   });
 
-  it('a recorded RED result for THIS head → refused (fix + re-verify)', () => {
-    const v = verifyGateDecision({ record: red, headSha: SHA, nowMs: T0 });
+  it('a recorded RED result for THIS head under --require-verified → refused (fix + re-verify)', () => {
+    // #2833 finding 2: red is refused only when a local green was DEMANDED. Without --require-verified the
+    // required CI check gates the merge, so a red marker does not block (asserted in the decision-table block).
+    const v = verifyGateDecision({ record: red, headSha: SHA, nowMs: T0, requireVerified: true });
     expect(v.ok).toBe(false);
     expect(v.reason).toBe('verify-red');
   });
@@ -113,6 +115,63 @@ describe('verifyGateDecision — the finish-guard the delivery path applies (#28
     const v = verifyGateDecision({ record: running, headSha: SHA, nowMs: T0, breakGlass: true });
     expect(v.ok).toBe(true);
     expect(v.reason).toBe('break-glass');
+  });
+});
+
+describe('verifyFinishBody stamps the sha the run verified, never the on-disk marker (#2833 finding 1)', () => {
+  it('an explicit sha wins over prev.sha — a finish never inherits a moved marker\'s sha', () => {
+    // `prev` is a marker that moved to OTHER (an overlapping run) while THIS run verified SHA.
+    const moved = verifyStartBody({ sha: OTHER, suites: 'gate', startedAt: 't' });
+    const done = verifyFinishBody(moved, { finishedAt: 'u', exitCode: 0, sha: SHA });
+    expect(done.sha).toBe(SHA); // the run's own sha, NOT the on-disk OTHER
+    expect(done.status).toBe('green');
+  });
+  it('THE FALSE-GREEN: a green finish at X does NOT produce a green record for a different sha Y', () => {
+    // On disk is a RED record for Y (a newer overlapping run finished red at Y). This slow run passes green at X.
+    const redY = verifyFinishBody(verifyStartBody({ sha: OTHER, suites: 'gate', startedAt: 't' }), { finishedAt: 'u', exitCode: 2, sha: OTHER });
+    const greenX = verifyFinishBody(redY, { finishedAt: 'v', exitCode: 0, sha: SHA });
+    expect(greenX.sha).toBe(SHA); // stamped X — it must NEVER stamp green for Y
+    expect(greenX.sha).not.toBe(OTHER);
+    // The gate at Y therefore still sees the red record, never a green for Y.
+    expect(verifyGateDecision({ record: redY, headSha: OTHER, requireVerified: true }).reason).toBe('verify-red');
+  });
+  it('falls back to prev.sha only when no explicit sha is passed (legacy same-process caller)', () => {
+    const start = verifyStartBody({ sha: SHA, suites: 'gate', startedAt: 't' });
+    expect(verifyFinishBody(start, { finishedAt: 'u', exitCode: 0 }).sha).toBe(SHA);
+  });
+});
+
+describe('verifyGateDecision decision table — red is conditional on requireVerified (#2833 finding 2)', () => {
+  const rec = (status, exitCode = status === 'red' ? 2 : 0) => ({ sha: SHA, status, exitCode, startedAt: new Date(T0).toISOString() });
+  it('red × requireVerified:true → refused (verify-red)', () => {
+    const v = verifyGateDecision({ record: rec('red'), headSha: SHA, requireVerified: true });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe('verify-red');
+  });
+  it('red × requireVerified:false → allowed (red-ci-gated) — the required CI check gates the merge', () => {
+    const v = verifyGateDecision({ record: rec('red'), headSha: SHA, requireVerified: false });
+    expect(v.ok).toBe(true);
+    expect(v.reason).toBe('red-ci-gated');
+  });
+  it('running is refused for BOTH requireVerified values (asymmetry: never-finished ≠ finished-badly)', () => {
+    expect(verifyGateDecision({ record: rec('running'), headSha: SHA, nowMs: T0 + min(1), requireVerified: false }).ok).toBe(false);
+    expect(verifyGateDecision({ record: rec('running'), headSha: SHA, nowMs: T0 + min(1), requireVerified: true }).ok).toBe(false);
+  });
+  it('green is ok for BOTH requireVerified values', () => {
+    expect(verifyGateDecision({ record: rec('green'), headSha: SHA, requireVerified: false }).ok).toBe(true);
+    expect(verifyGateDecision({ record: rec('green'), headSha: SHA, requireVerified: true }).ok).toBe(true);
+  });
+});
+
+describe('verifyGateDecision — a corrupt marker refuses, never fails open (#2833 finding 5)', () => {
+  it('a corrupt record is refused regardless of requireVerified', () => {
+    expect(verifyGateDecision({ record: { corrupt: true }, headSha: SHA, requireVerified: false }).ok).toBe(false);
+    const v = verifyGateDecision({ record: { corrupt: true }, headSha: SHA, requireVerified: true });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe('verify-corrupt');
+  });
+  it('break-glass still overrides a corrupt marker', () => {
+    expect(verifyGateDecision({ record: { corrupt: true }, headSha: SHA, breakGlass: true }).ok).toBe(true);
   });
 });
 

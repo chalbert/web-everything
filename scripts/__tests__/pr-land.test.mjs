@@ -352,7 +352,14 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     // It reads the HEAD's marker and refuses (non-ok) on the source commit BEFORE publishing to the lane ref.
     expect(src).toMatch(/VERIFY_FILENAME/);
     expect(src).toMatch(/headSha: refSha/);
-    expect(src.indexOf('verifyGateDecision')).toBeLessThan(src.indexOf('Publish the source commit to the lane ref'));
+    // Anchor the ordering on a token unique to the guard BODY — NOT the bare identifier `verifyGateDecision`,
+    // which also appears in the top-of-file ESM import (line ~98) and so ALWAYS sorts before the push, making the
+    // assertion tautological (#2833 finding 3). "#2833's stall guard" lives only in the guard's emit() detail, so
+    // moving the guard below the push actually flips this comparison and fails the test (house precedent: the
+    // #2622 assertion anchors on `reason: 'bad-park'`, a body-unique token).
+    const GUARD_BODY = "this is #2833's stall guard";
+    expect(src).toContain(GUARD_BODY);
+    expect(src.indexOf(GUARD_BODY)).toBeLessThan(src.indexOf('Publish the source commit to the lane ref'));
     // --require-verified / env demand a green; break-glass is the documented override.
     expect(src).toMatch(/REQUIRE_VERIFIED = !!flags\['require-verified'\] \|\| process\.env\.WE_REQUIRE_VERIFIED === '1'/);
     expect(src).toMatch(/WE_LAND_UNVERIFIED/);

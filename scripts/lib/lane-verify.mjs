@@ -45,13 +45,20 @@ export function verifyStartBody({ sha, suites, startedAt }) {
 }
 
 /** Rewrite a `running` marker into its terminal (`green`/`red`) form once the synchronous run has exited.
- *  Pure: the caller supplies `finishedAt` (ISO) and the process `exitCode` (0 ⇒ green). Preserves the started
- *  marker's `sha`/`startedAt`/`suites` so the record is a full audit of the one run. */
-export function verifyFinishBody(prev, { finishedAt, exitCode }) {
+ *  Pure: the caller supplies `finishedAt` (ISO), the process `exitCode` (0 ⇒ green), and — crucially — the
+ *  `sha` this run ACTUALLY verified.
+ *
+ *  #2833 finding 1: the finish write must stamp the sha the run itself captured at START, NEVER inherit it from
+ *  the on-disk marker (`prev.sha`). Two overlapping `verify-lane` runs share one clone's marker; if a slow run
+ *  finishing at X copies whatever sha is on disk (a newer run's Y) onto its own green, it publishes a false
+ *  green for a tree it never verified — the exact false-green this guard exists to kill. So `sha` is passed
+ *  explicitly and wins. `prev` supplies only `startedAt`/`suites` (audit fields); `base.sha` is a fallback for
+ *  legacy callers that pass their own start body as `prev`. */
+export function verifyFinishBody(prev, { finishedAt, exitCode, sha } = {}) {
   const base = prev && typeof prev === 'object' ? prev : {};
   const green = Number(exitCode) === 0;
   return {
-    sha: base.sha ?? null,
+    sha: sha ?? base.sha ?? null,
     status: green ? 'green' : 'red',
     startedAt: base.startedAt ?? null,
     finishedAt: finishedAt || null,
@@ -82,7 +89,15 @@ export function isVerifyAbandoned(record, nowMs, ttlMs = DEFAULT_VERIFY_TTL_MINU
  *   - a `running` record whose `sha` === `headSha` → NOT ok (`verify-unfinished`) — the EXACT observed stall: a
  *     verification was started for this commit and never finished. Refused REGARDLESS of `requireVerified`,
  *     because a half-run verification must never look complete. `isVerifyAbandoned` only colours the message.
- *   - a `red` record whose `sha` === `headSha` → NOT ok (`verify-red`) — a recorded failure; fix + re-verify.
+ *   - a `red` record whose `sha` === `headSha`: refused (`verify-red`) ONLY under `requireVerified`; without it
+ *     the marker is advisory and the record is allowed (`red-ci-gated`). This is the asymmetry between the two
+ *     hazard classes — "never finished" (`running`) is always refused; "finished badly" (`red`) blocks only when
+ *     the caller demanded a local green. It matches the "absent/red under `--require-verified`" contract in the
+ *     PR body + #2833 resolution, and keeps the CI-gated drain / parallel-workflow paths (which gate the merge
+ *     via the required GitHub `test` check — a red tree also fails it) untouched, as documented.
+ *   - a `corrupt` record (the marker exists but did not parse) → NOT ok (`verify-corrupt`), regardless of
+ *     `requireVerified`. A torn/garbled marker must never fold into `absent` and fail OPEN — exactly backwards
+ *     for a stall guard (#2833 finding 5). Re-run `verify-lane` (or delete the marker) to recover.
  *   - no record, or a record for a DIFFERENT `sha` (stale — the tree moved on): if `requireVerified` → NOT ok
  *     (`unverified`); else ok (`untracked`). The default-allow keeps CI-gated callers (the drain, the parallel
  *     workflow — which verify via the required GitHub check, not this marker) working unchanged; the solo /
@@ -95,6 +110,13 @@ export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs 
     return { ok: true, status: 'break-glass', reason: 'break-glass', detail: 'WE_LAND_UNVERIFIED=1 — verification gate overridden (deliberate break-glass; the PR still rides the required CI check).' };
   }
   const rec = record && typeof record === 'object' ? record : null;
+
+  // A marker that exists but did not parse (the IO layer signals `{ corrupt: true }`) is refused unconditionally
+  // — never treated as `absent`, which would fail open (#2833 finding 5).
+  if (rec && rec.corrupt) {
+    return { ok: false, status: 'corrupt', reason: 'verify-corrupt', detail: 'the lane verification marker exists but is unparseable (corrupt/torn) — refusing to land; re-run `node scripts/verify-lane.mjs` (or delete the marker) to record a clean result.' };
+  }
+
   const matches = rec && rec.sha && headSha && rec.sha === headSha;
 
   if (matches && rec.status === 'green') {
@@ -108,7 +130,12 @@ export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs 
     };
   }
   if (matches && rec.status === 'red') {
-    return { ok: false, status: 'red', reason: 'verify-red', detail: `verification for ${String(headSha).slice(0, 8)} recorded a RED result (exit ${rec.exitCode ?? '?'}) — fix the failure and re-run \`node scripts/verify-lane.mjs\`.` };
+    if (requireVerified) {
+      return { ok: false, status: 'red', reason: 'verify-red', detail: `verification for ${String(headSha).slice(0, 8)} recorded a RED result (exit ${rec.exitCode ?? '?'}) — fix the failure and re-run \`node scripts/verify-lane.mjs\`.` };
+    }
+    // Advisory mode: the required CI check (which a red tree also fails) gates the actual merge, so a local red
+    // marker does not block here — matching "absent/red under --require-verified" (docs + #2833 resolution).
+    return { ok: true, status: 'red', reason: 'red-ci-gated', detail: `verification for ${String(headSha).slice(0, 8)} recorded RED (exit ${rec.exitCode ?? '?'}), but --require-verified was not set — not blocking here; the PR's required CI check gates the merge.` };
   }
 
   // No marker, or a marker for a different commit (the tree moved since it was written).

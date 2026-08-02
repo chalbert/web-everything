@@ -76,7 +76,7 @@
  * drain stays the sole writer to main). A non-zero exit means `main` was left UNTOUCHED.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -608,17 +608,25 @@ function runCli() {
   //     nothing reclaimed it, because a half-run verification LOOKED complete. This guard makes an unfinished
   //     verification NOT look complete: it reads the lane's `.git/.lane-verify` marker (written synchronously by
   //     `scripts/verify-lane.mjs`) and refuses to publish/land the source commit when that commit's verification
-  //     is UNFINISHED (`running` — the exact stall) or, under --require-verified / WE_REQUIRE_VERIFIED, absent or
-  //     red. A `running`/`red` marker for THIS HEAD is always refused; a missing marker only blocks when
-  //     verification is required (the CI-gated drain / parallel-workflow paths verify via the required GitHub
-  //     check, not this marker, so they are not blocked). WE_LAND_UNVERIFIED=1 is the documented break-glass.
-  //     Runs AFTER the dry-run block (a dry run reports the plan without being gated) and BEFORE any push.
+  //     is UNFINISHED (`running` — the exact stall), CORRUPT (marker present but unparseable), or — under
+  //     --require-verified / WE_REQUIRE_VERIFIED — absent or red. A `running` marker for THIS HEAD is ALWAYS
+  //     refused (a half-run must never look complete); a `red` marker blocks only under --require-verified (the
+  //     "absent/red under --require-verified" contract) since the required CI check gates the merge otherwise; a
+  //     missing marker only blocks when verification is required (the CI-gated drain / parallel-workflow paths
+  //     verify via the required GitHub check, not this marker, so they are not blocked). WE_LAND_UNVERIFIED=1 is
+  //     the documented break-glass. Runs AFTER the dry-run block (a dry run reports the plan without being gated)
+  //     and BEFORE any push.
   {
     let verifyRecord = null;
-    try {
-      const markerPath = join(REPO, '.git', VERIFY_FILENAME);
-      verifyRecord = JSON.parse(readFileSync(markerPath, 'utf8'));
-    } catch { verifyRecord = null; } // no/corrupt marker → treated as absent (the gate decides per --require-verified)
+    // Resolve the marker in the REAL git dir (`.git` is a directory in a clone, a FILE in a worktree; #2833
+    // finding 4), and distinguish a present-but-unparseable marker (corrupt → refuse) from a missing one
+    // (absent → gate decides per --require-verified) so a torn marker never fails open (#2833 finding 5).
+    const gitDir = tryGit(['rev-parse', '--absolute-git-dir']) || join(REPO, '.git');
+    const markerPath = join(gitDir, VERIFY_FILENAME);
+    if (existsSync(markerPath)) {
+      try { verifyRecord = JSON.parse(readFileSync(markerPath, 'utf8')); }
+      catch { verifyRecord = { corrupt: true }; }
+    }
     const gate = verifyGateDecision({ record: verifyRecord, headSha: refSha, breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED });
     if (!gate.ok) {
       emit({ repo: REPO, merged: false, reason: gate.reason, ref: REF, sha: refSha, verifyStatus: gate.status, detail: `refusing to land ${REF} — ${gate.detail} (${BASE} left untouched; this is #2833's stall guard)` }, 3);

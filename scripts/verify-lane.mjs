@@ -29,7 +29,7 @@
  * red) / `check` verdict not-ok; 3 = usage / git error (no marker written).
  */
 import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -53,22 +53,35 @@ const AS_JSON = !!flags.json;
 const REQUIRE_VERIFIED = !!flags['require-verified'];
 const MODE = positionals[0] === 'check' ? 'check' : 'verify';
 
-const MARKER = join(REPO, '.git', VERIFY_FILENAME);
-
 const git = (args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const tryGit = (args) => { try { return git(args); } catch { return null; } };
+
+// Resolve the marker inside the REAL git dir. `.git` is a DIRECTORY in a clone (the lane case) but a FILE in a
+// worktree, and can be relocated via $GIT_DIR — so `git rev-parse --absolute-git-dir` is the only correct way to
+// locate it (#2833 finding 4: a hardcoded `join(REPO, '.git', …)` throws ENOTDIR in a worktree). Falls back to
+// the literal only if git can't answer, in which case the downstream git ops fail loudly anyway.
+const GIT_DIR = tryGit(['rev-parse', '--absolute-git-dir']) || join(REPO, '.git');
+const MARKER = join(GIT_DIR, VERIFY_FILENAME);
 
 function readMarker() {
   if (!existsSync(MARKER)) return null;
   try {
     const parsed = JSON.parse(readFileSync(MARKER, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : { corrupt: true };
   } catch {
-    return null; // a corrupt marker reads as "no verification" — the gate then refuses under --require-verified
+    // The marker EXISTS but is unparseable (corrupt/torn). Do NOT fold this into `absent` (null): the gate would
+    // then fail OPEN under the default mode — exactly backwards for a stall guard. Signal `corrupt` so the gate
+    // refuses (#2833 finding 5).
+    return { corrupt: true };
   }
 }
 function writeMarker(record) {
-  writeFileSync(MARKER, JSON.stringify(record, null, 2) + '\n');
+  // Atomic: write a temp sibling in the same git dir, then rename over the marker — so a concurrent reader
+  // (pr-land's finish-guard) never observes a half-written file (#2833 finding 5). renameSync is atomic within a
+  // filesystem, and the temp lives beside the marker so it always is.
+  const tmp = `${MARKER}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(record, null, 2) + '\n');
+  renameSync(tmp, MARKER);
 }
 
 function emit(result, exitCode) {
@@ -101,10 +114,31 @@ try {
   exitCode = Number.isFinite(e && e.status) ? e.status : 2;
 }
 
-// 3. Rewrite the marker to its terminal green/red form.
-const finished = verifyFinishBody(readMarker() || verifyStartBody({ sha: headSha, suites: GATE, startedAt: null }), {
+// 3. Rewrite the marker to its terminal green/red form — for the sha THIS run actually verified.
+//    #2833 finding 1: two overlapping verify-lane runs share one clone's marker. The finish write must
+//    (a) stamp OUR sha (`headSha`, captured at start) — NOT re-read the on-disk marker's sha, or a slow run
+//        finishing at X copies a newer run's sha Y onto its green and publishes a false green for Y; and
+//    (b) refuse to overwrite a marker whose sha is not ours — an older/overlapping run must never clobber a
+//        newer run's record (compare-and-set on the sha). A slow GREEN run at X must NOT stamp green over a
+//        RED record for Y.
+const onDisk = readMarker();
+if (onDisk && !onDisk.corrupt && onDisk.sha && onDisk.sha !== headSha) {
+  emit(
+    {
+      sha: headSha, status: 'superseded', reason: 'superseded', exitCode,
+      detail: `suites finished (exit ${exitCode}) for ${headSha.slice(0, 8)}, but the on-disk marker now belongs to ${String(onDisk.sha).slice(0, 8)} (an overlapping verify-lane run) — refusing to overwrite it; no marker written for this run.`,
+    },
+    3,
+  );
+}
+// Reuse the on-disk start body's audit fields only when it is OUR run's marker; otherwise synthesize a fresh one.
+const startBody = onDisk && !onDisk.corrupt && onDisk.sha === headSha
+  ? onDisk
+  : verifyStartBody({ sha: headSha, suites: GATE, startedAt: null });
+const finished = verifyFinishBody(startBody, {
   finishedAt: new Date().toISOString(),
   exitCode,
+  sha: headSha,
 });
 writeMarker(finished);
 
