@@ -1,7 +1,8 @@
 ---
+bornAs: xsxz3lk
 kind: story
 size: 3
-parent: "xk8w1ep"
+parent: "2873"
 status: open
 dateOpened: "2026-08-02"
 tags: [conveyor, self-approval, spec-first]

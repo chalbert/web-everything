@@ -1,9 +1,10 @@
 ---
+bornAs: xrlfy17
 kind: story
 size: 5
-parent: "xk8w1ep"
+parent: "2873"
 status: open
-blockedBy: ["x0za326"]
+blockedBy: ["2876"]
 dateOpened: "2026-08-02"
 tags: [conveyor, self-approval, spec-first]
 ---

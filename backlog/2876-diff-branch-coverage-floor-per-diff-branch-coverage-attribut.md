@@ -1,9 +1,10 @@
 ---
+bornAs: x0za326
 kind: story
 size: 3
-parent: "xk8w1ep"
+parent: "2873"
 status: open
-blockedBy: ["xsxz3lk"]
+blockedBy: ["2875"]
 dateOpened: "2026-08-02"
 tags: [conveyor, self-approval, spec-first]
 ---
@@ -18,7 +19,7 @@ The repo's v8 coverage is **NOT whole-repo, and does NOT cover this epic's tier.
 
 ## Prerequisite (hard dependency)
 
-Per-diff attribution measures nothing on a tier v8 never instruments. So the first slice ([#xsxz3lk](xsxz3lk-trust-chain-tier-predicate-coverage-instrumentation-the-mech.md), this item's `blockedBy`) MUST first (a) define the `isTrustChainTier(path)` predicate and (b) **add the trust-chain tier to `coverage.include`** so v8 emits coverage for those files. Only then can this slice attribute that coverage to the diff. This item does NOT re-derive the tier or re-edit the allowlist; it consumes both from #xsxz3lk.
+Per-diff attribution measures nothing on a tier v8 never instruments. So the first slice ([#2875](2875-trust-chain-tier-predicate-coverage-instrumentation-the-mech.md), this item's `blockedBy`) MUST first (a) define the `isTrustChainTier(path)` predicate and (b) **add the trust-chain tier to `coverage.include`** so v8 emits coverage for those files. Only then can this slice attribute that coverage to the diff. This item does NOT re-derive the tier or re-edit the allowlist; it consumes both from #2875.
 
 ## Why
 
@@ -26,10 +27,10 @@ Spec-first self-approval leans on a mechanical floor. The floor's cheapest, alwa
 
 ## Mechanical approach
 
-- Compute branch coverage attributed to the diff — the changed/added lines in the in-scope file set (the `isTrustChainTier` predicate from [#xsxz3lk](xsxz3lk-trust-chain-tier-predicate-coverage-instrumentation-the-mech.md)) — from the v8 coverage output (now emitted for the tier per the prerequisite), and fail below a stated per-diff floor.
+- Compute branch coverage attributed to the diff — the changed/added lines in the in-scope file set (the `isTrustChainTier` predicate from [#2875](2875-trust-chain-tier-predicate-coverage-instrumentation-the-mech.md)) — from the v8 coverage output (now emitted for the tier per the prerequisite), and fail below a stated per-diff floor.
 - Wire it as a `check:standards` / CI gate distinct from the existing scoped-planes 80% threshold (keep both; that one is a plane-wide average, this one is diff-scoped to the trust-chain tier).
 - Language discipline: report it as "branches introduced by this diff were exercised," never "the impl is correct."
 
 ## Non-goals
 
-Mutation testing ([#x9ke51w](x9ke51w-mutation-testing-on-the-trust-chain-tier-stryker-vitest-scop.md) closes the execution-≠-assertion gap) and the probe-runner ([#xrlfy17](xrlfy17-probe-runner-and-commit-the-probe-as-test-adversarial-reprod.md)) are separate. This slice only attributes tier v8 coverage to the diff; defining the tier and turning its instrumentation on belong to [#xsxz3lk](xsxz3lk-trust-chain-tier-predicate-coverage-instrumentation-the-mech.md).
+Mutation testing ([#2878](2878-mutation-testing-on-the-trust-chain-tier-stryker-vitest-scop.md) closes the execution-≠-assertion gap) and the probe-runner ([#2877](2877-probe-runner-and-commit-the-probe-as-test-adversarial-reprod.md)) are separate. This slice only attributes tier v8 coverage to the diff; defining the tier and turning its instrumentation on belong to [#2875](2875-trust-chain-tier-predicate-coverage-instrumentation-the-mech.md).

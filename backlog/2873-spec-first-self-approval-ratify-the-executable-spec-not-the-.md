@@ -1,4 +1,5 @@
 ---
+bornAs: xk8w1ep
 kind: epic
 status: open
 dateOpened: "2026-08-02"
@@ -36,10 +37,10 @@ A happy-path spec can still ship a subtly-wrong impl unreviewed, because a bug c
 
 The tier predicate ("which files are in scope") and its coverage instrumentation are the definitional prerequisite everything else consumes, so they lead — never a forward-reference from an earlier slice to a later one.
 
-1. **#xsxz3lk — Trust-chain tier predicate + coverage instrumentation** (no `blockedBy`; Tier-A first). Defines `isTrustChainTier(path)` and adds the trust-chain tier to `coverage.include` (v8 does not instrument `scripts/` today). Everything below `blockedBy`-depends on this.
-2. **#x0za326 — Diff-branch-coverage floor** (blockedBy 1). Per-diff branch-coverage attribution over the now-instrumented tier, as the cheap first mechanical gate.
-3. **#xrlfy17 — Probe-runner + commit-the-probe-as-test** (blockedBy 2). A *separate* runner executes adversarial inputs against the built head and emits ledger events; the existing pure `redRefute` reads them. **[fatal fix]**
-4. **#x9ke51w — Mutation testing on the trust-chain tier** (blockedBy 3). Stryker + vitest scoped to a named file set, with a stated cost — the only mechanical catch for out-of-scenario bugs.
-5. **#xtjajqz — Spec-first ratification default + enforce-flip gating** (blockedBy 4). A ONE-PR, human-signed frozen test-manifest hash lets a ratified spec land green, plus the gate that forbids weakening a ratified spec test. (The earlier `it.fails` landing mechanism was grounded and retired — vitest hard-fails `it.fails` over an already-passing invariant.) **[fatal fix]**
+1. **#2875 — Trust-chain tier predicate + coverage instrumentation** (no `blockedBy`; Tier-A first). Defines `isTrustChainTier(path)` and adds the trust-chain tier to `coverage.include` (v8 does not instrument `scripts/` today). Everything below `blockedBy`-depends on this.
+2. **#2876 — Diff-branch-coverage floor** (blockedBy 1). Per-diff branch-coverage attribution over the now-instrumented tier, as the cheap first mechanical gate.
+3. **#2877 — Probe-runner + commit-the-probe-as-test** (blockedBy 2). A *separate* runner executes adversarial inputs against the built head and emits ledger events; the existing pure `redRefute` reads them. **[fatal fix]**
+4. **#2878 — Mutation testing on the trust-chain tier** (blockedBy 3). Stryker + vitest scoped to a named file set, with a stated cost — the only mechanical catch for out-of-scenario bugs.
+5. **#2879 — Spec-first ratification default + enforce-flip gating** (blockedBy 4). A ONE-PR, human-signed frozen test-manifest hash lets a ratified spec land green, plus the gate that forbids weakening a ratified spec test. (The earlier `it.fails` landing mechanism was grounded and retired — vitest hard-fails `it.fails` over an already-passing invariant.) **[fatal fix]**
 
 Each slice is independently useful and downgraded to "raises the floor," not "proves the impl meets the spec."
