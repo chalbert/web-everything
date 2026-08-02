@@ -30,4 +30,4 @@ Two enforcement holes behind the independence guarantee:
 
 ## Provenance
 
-Outstanding prevention **M3** from the human `/review` on **PR #982** (`we:backlog/xzc1sc5-stop-the-line-conveyor-governance-the-orchestrator-never-abs.md`), captured per the prevention-introspection discipline (#2823). Composes with `#agent-convergence-independent-validation` (#2398) and the independence rail (#2439). Enforcement belongs on the open conveyor-mechanization line (#2840 / #2785); this item does not reopen the resolved decision.
+Outstanding prevention **M3** from the human `/review` on **PR #982** (`we:backlog/2851-stop-the-line-conveyor-governance-the-orchestrator-never-abs.md`), captured per the prevention-introspection discipline (#2823). Composes with `#agent-convergence-independent-validation` (#2398) and the independence rail (#2439). Enforcement belongs on the open conveyor-mechanization line (#2840 / #2785); this item does not reopen the resolved decision.

@@ -25,4 +25,4 @@ Add a **temporal-token statute lint** to `we:scripts/lib/validate-rules-anchors.
 
 ## Provenance
 
-Outstanding **minor** prevention from the human `/review` on **PR #982** (`we:backlog/xzc1sc5-stop-the-line-conveyor-governance-the-orchestrator-never-abs.md`), captured per the prevention-introspection discipline (#2823). Enforcement belongs on the open conveyor-mechanization line (#2840 / #2785); this item does not reopen the resolved decision.
+Outstanding **minor** prevention from the human `/review` on **PR #982** (`we:backlog/2851-stop-the-line-conveyor-governance-the-orchestrator-never-abs.md`), captured per the prevention-introspection discipline (#2823). Enforcement belongs on the open conveyor-mechanization line (#2840 / #2785); this item does not reopen the resolved decision.

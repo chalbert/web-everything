@@ -19,9 +19,9 @@ decision and logs it, but a human still clears every `review:pending` PR.
 
 This is a principle, so it lands in a decisions-only PR parked `review:human` alongside `#2840` and
 `#2839`; the code that reads the flip predicate is a follow-on impl PR under the two-PR rule
-(`#2839`). The `#human-required-is-judgment-only` anchor it composes lands via `xzc1sc5` (PR #982), so
+(`#2839`). The `#human-required-is-judgment-only` anchor it composes lands via `2851` (PR #982), so
 that is a **hard land-order precondition** — #982 must land first or the lineage cite 404s. It is stated in
-prose, not `blockedBy` frontmatter, because `xzc1sc5`'s file is not yet in this tree and
+prose, not `blockedBy` frontmatter, because `2851`'s file is not yet in this tree and
 `we:scripts/check-backlog-item.mjs` would reject an unresolved target.
 
 **Coupling to `#2840` (load-bearing).** This decision's headline safeguard — "the flip edit is itself
@@ -157,7 +157,7 @@ the CI-status probe, the durable review-seam ledger, and the write gate are a fo
 
 ## Preconditions (impl PR, under `#2839`)
 
-1. **`xzc1sc5` (PR #982) landed** — the `#human-required-is-judgment-only` anchor this composes exists on
+1. **`2851` (PR #982) landed** — the `#human-required-is-judgment-only` anchor this composes exists on
    `main` (prose land-order precondition; not frontmatter `blockedBy` — the file is not yet in this tree).
 2. **`#2840` leash pin ratified** — keeps `we:scripts/lib/review-policy.contract.json` human-gated, or
    the flip's own safeguard evaporates.

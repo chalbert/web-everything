@@ -32,9 +32,9 @@ only lets behaviour-preserving impl go mechanical *because* a principle is ENCOD
 that encoding rides the impl PR (as impl), never smuggling a *principle edit* into the ratification PR.
 This decision is itself authored under its own rule: it is a principle, so it lands in a decisions-only PR
 parked `review:human` alongside `#2840` and `#2838`, with zero implementation. The
-`#human-required-is-judgment-only` anchor it cites lands via `xzc1sc5` (PR #982), so that is a **hard
+`#human-required-is-judgment-only` anchor it cites lands via `2851` (PR #982), so that is a **hard
 land-order precondition** — #982 must land first or the lineage cite 404s. It is stated in prose, not
-`blockedBy` frontmatter, because `xzc1sc5`'s file is not yet in this tree and
+`blockedBy` frontmatter, because `2851`'s file is not yet in this tree and
 `we:scripts/check-backlog-item.mjs` would reject an unresolved target.
 
 ## Current state

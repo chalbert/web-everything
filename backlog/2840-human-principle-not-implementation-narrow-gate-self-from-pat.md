@@ -27,10 +27,10 @@ the implementation that narrows the gate is a separate follow-on PR (see `#2839`
 **Blocked-by / precondition, not just lineage.** The four anchors this decision reasons over
 (`#human-required-is-judgment-only`, `#fix-review-convergence-independent-root-cause`,
 `#deterministic-oracle-clears-slice`, `#orchestrator-stops-line-never-absorbs`) do NOT yet exist on `main`
-— they land via `xzc1sc5` (PR #982, the stop-the-line conveyor-governance statute cluster, itself
-`review:human`). Only `#review-human-declarative-leash-only` currently resolves. So **`xzc1sc5` (PR #982)
+— they land via `2851` (PR #982, the stop-the-line conveyor-governance statute cluster, itself
+`review:human`). Only `#review-human-declarative-leash-only` currently resolves. So **`2851` (PR #982)
 is a hard land-order precondition**: this item must land AFTER it or every lineage cite here 404s. It is
-NOT in the `blockedBy` frontmatter because `xzc1sc5`'s file is not yet in this lane's tree and
+NOT in the `blockedBy` frontmatter because `2851`'s file is not yet in this lane's tree and
 `we:scripts/check-backlog-item.mjs` errors on a `blockedBy` target that does not resolve to a present item
 — so the ordering is stated here in prose and must be honored at land (the drain lands #982 first).
 `check:standards` will not otherwise catch the dangling prose cites — `we:scripts/lib/validate-rules-anchors.cjs`
@@ -204,7 +204,7 @@ rule, and the first `@principle` invariants — is a separate follow-on PR under
 
 ## Preconditions (impl PR, under `#2839`)
 
-1. **`xzc1sc5` (PR #982) landed** — the four anchors this decision cites exist on `main` (prose land-order
+1. **`2851` (PR #982) landed** — the four anchors this decision cites exist on `main` (prose land-order
    precondition; not a frontmatter `blockedBy` because the file is not yet in this tree).
 2. **#2785 landed** — the base narrowing to `POLICY_SPEC` this decision extends. (`blockedBy`.)
 3. **Producer-side diff-content plumbing** — `diffHunks` threaded into `scoreEscalation` /

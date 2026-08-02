@@ -29,4 +29,4 @@ Both let real metadata slip past the gate unread — coverage that stops at one 
 
 ## Provenance
 
-Captures two outstanding **minor** preventions (the codifiedIn-array minor and the front-matter-key-allowlist minor) from the human `/review` on **PR #982** (`we:backlog/xzc1sc5-stop-the-line-conveyor-governance-the-orchestrator-never-abs.md`), grouped as one item per the prevention-introspection discipline (#2823). Enforcement belongs on the open conveyor-mechanization line (#2840 / #2785); this item does not reopen the resolved decision.
+Captures two outstanding **minor** preventions (the codifiedIn-array minor and the front-matter-key-allowlist minor) from the human `/review` on **PR #982** (`we:backlog/2851-stop-the-line-conveyor-governance-the-orchestrator-never-abs.md`), grouped as one item per the prevention-introspection discipline (#2823). Enforcement belongs on the open conveyor-mechanization line (#2840 / #2785); this item does not reopen the resolved decision.
