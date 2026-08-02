@@ -86,41 +86,47 @@ Deliberation lives in the anchor bodies' rationale and prior art (#2398, #2439, 
 recorded as an explicit fork-existence collapse so the prepared-decision health check (G4/G5) reads a
 justification rather than an invisible forkless pass.
 
-## Outstanding preventions — owed as filed backlog items at accept-convergence
+## Preventions — CAPTURED as filed backlog items
 
 Per the prevention-introspection discipline (#2823) and the human `/review` on PR #982, each review
 finding routes to a prevention that generalizes it to the class. #2823 sets the bar at **accept**: a
 finding's prevention must be *built or filed* before the reviewer accepts, and the review core's
-`prevention-outstanding` verdict holds accept (not the `review:human` ratification park) until it is. The
-guards below are therefore captured here and owed as filed items **at that accept step** — deferred to
-accept, rather than filed now, to keep this PR inside the reviewed two-file statute delta and out of the
-mechanization surface those guards belong to (the open conveyor-mechanization line: #2840 — narrow
-gate-self from file path to principle-surface, and #2785 — implement the narrowed `review:human` rubric,
-both `status: open`). The enforcement each guard names lands under those open items, never under this
-resolved decision:
+`prevention-outstanding` verdict holds accept (not the `review:human` ratification park) until it is.
+**These preventions are now FILED** — each guard below cites its tracked backlog item. They were filed as
+**nine `task` items (#2842–#2850) under epic #2822** (conveyor-native self-improvement) on their own
+lane/PR — kept out of this reviewed two-file statute delta so this PR stays inside its statute surface. The enforcement each guard names lands under the
+open conveyor-mechanization line (#2840 — narrow gate-self from file path to principle-surface, and #2785 —
+implement the narrowed `review:human` rubric, both `status: open`), never under this resolved decision:
 
-- **B1 →** extend the statute gate (`we:scripts/lib/validate-rules-anchors.cjs`) so a `#NNN` cited in
-  precedent framing (`**Concrete precedent:**`, "cleared", "proven by") must resolve to a `status: resolved` item.
-- **B2 →** a `check:standards` rule pinning statute clearance claims to `we:scripts/lib/review-policy.contract.json`
-  — an anchor naming a rubric reason may not assert a clearance weaker than that reason's `clearance` field.
-- **M1 →** a statute-overlap rule: a NEW `{#anchor}` whose body cites an existing anchor must carry an explicit
-  relation line ("composes with — does not alter", "extends", "supersedes", "narrows").
-- **M2 →** register acceptance-oracle test files as spec-tier paths in `we:scripts/lib/gate-config.mjs` (weakening
-  one becomes gate-visible), plus a required non-author signal on the oracle diff.
-- **M3 →** the clearing actor writes its session/service id into the verdict, and the land seam refuses a clear
-  whose reviewer id equals the author's; plus a rule that an operational-invariant anchor must link an enforcing
-  code path or an open item.
-- **M4 →** a `check:standards` error: a `kind: decision` carrying `preparedDate` with zero `## Fork` headings must
-  record an explicit fork-existence collapse (above) or a research cite.
-- **Minor →** let `codifiedIn` accept an array, so all four new anchors (not just the lead) get resolution +
-  substance coverage under `check:statute`.
-- **Minor →** a front-matter key allowlist in `we:scripts/check-standards.mjs` (catches novel unread keys such as
-  the removed `dateRatified`).
-- **Minor →** give `human-verify` an observable code reader so its retirement is enforced in both directions.
-- **Minor →** a temporal-token statute lint: an anchor body carrying an interim/point-in-time claim
-  ("today", "not yet current fact", "build-pending", "still parks") must name the OPEN item whose
-  resolution retires the claim, so the anchor is re-opened for update when that item lands rather than going
-  silently stale. (The honest build-pending disclosures the human `/review` required are the reason such
-  language is present; this guard keeps it from outliving the mechanization it describes.)
+- **B1 → filed #2842:** extend the statute gate (`we:scripts/lib/validate-rules-anchors.cjs`)
+  so a `#NNN` cited in precedent framing (`**Concrete precedent:**`, "cleared", "proven by") must resolve to a
+  `status: resolved` item.
+- **B2 → filed #2847:** a `check:standards` rule pinning statute clearance claims to
+  `we:scripts/lib/review-policy.contract.json` — an anchor naming a rubric reason may not assert a clearance
+  weaker than that reason's `clearance` field.
+- **M1 → filed #2850:** a statute-overlap rule: a NEW `{#anchor}` whose body cites an
+  existing anchor must carry an explicit relation line ("composes with — does not alter", "extends",
+  "supersedes", "narrows").
+- **M2 → filed #2843:** register acceptance-oracle test files as spec-tier paths in
+  `we:scripts/lib/gate-config.mjs` (weakening one becomes gate-visible), plus a required non-author signal on
+  the oracle diff.
+- **M3 → filed #2844:** the clearing actor writes its session/service id into the verdict,
+  and the land seam refuses a clear whose reviewer id equals the author's; plus a rule that an
+  operational-invariant anchor must link an enforcing code path or an open item.
+- **M4 → filed #2845:** a `check:standards` error: a `kind: decision` carrying
+  `preparedDate` with zero `## Fork` headings must record an explicit fork-existence collapse (above) or a
+  research cite.
+- **Minor → filed #2846:** let `codifiedIn` accept an array, so all four new anchors (not
+  just the lead) get resolution + substance coverage under `check:statute`. *(Grouped with the next minor in
+  the one item #2846.)*
+- **Minor → filed #2846:** a front-matter key allowlist in `we:scripts/check-standards.mjs`
+  (catches novel unread keys such as the removed `dateRatified`).
+- **Minor → filed #2848:** give `human-verify` an observable code reader so its retirement
+  is enforced in both directions.
+- **Minor → filed #2849:** a temporal-token statute lint: an anchor body carrying an
+  interim/point-in-time claim ("today", "not yet current fact", "build-pending", "still parks") must name the
+  OPEN item whose resolution retires the claim, so the anchor is re-opened for update when that item lands
+  rather than going silently stale. (The honest build-pending disclosures the human `/review` required are the
+  reason such language is present; this guard keeps it from outliving the mechanization it describes.)
 
 (The digest word-cap nit is already gate-captured — it lints on `check:standards` / `check:item`.)
