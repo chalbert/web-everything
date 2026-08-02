@@ -31,6 +31,8 @@ import {
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
+  hasUncapturedPrevention,
+  renderPreventionSummary,
   buildMandate,
   buildEditorMandate,
   deriveNegotiationOutcome,
@@ -100,6 +102,25 @@ describe('normalizeFinding', () => {
     expect(normalizeFinding({ file: 'a.mjs' })).toBeNull();
     expect(normalizeFinding({ summary: '   ' })).toBeNull();
   });
+
+  it('carries the #2823 prevention-introspection fields, coercing them', () => {
+    const f = normalizeFinding({
+      summary: 'PR number cited as a backlog id',
+      rootCause: ' the brief cited the story by PR, not backlog id ',
+      prevention: 'a check:standards rule that flags a #NNN that resolves to a PR, not an item',
+      preventionCaptured: 0, // falsy non-boolean → coerced to a strict boolean
+    });
+    expect(f).toEqual({
+      summary: 'PR number cited as a backlog id',
+      rootCause: 'the brief cited the story by PR, not backlog id',
+      prevention: 'a check:standards rule that flags a #NNN that resolves to a PR, not an item',
+      preventionCaptured: false,
+    });
+  });
+
+  it('adds NO prevention key when the fields are absent or blank (old-shape findings unaffected)', () => {
+    expect(normalizeFinding({ summary: 'x', prevention: '   ', rootCause: '' })).toEqual({ summary: 'x' });
+  });
 });
 
 describe('normalizeFindings', () => {
@@ -142,6 +163,46 @@ describe('deriveVerdict', () => {
     expect(deriveVerdict({ findings: [{ summary: 'a', outcome: 'fixed' }], humanRequired: true }))
       .toBe(VERDICTS.NEEDS_HUMAN);
   });
+
+  it('#2823 — a resolved finding with an uncaptured, filable prevention does NOT clean-accept (prevention-outstanding)', () => {
+    const findings = [
+      { summary: 'citation miscite', outcome: 'fixed', prevention: 'a check:standards id-space gate', preventionCaptured: false },
+    ];
+    expect(deriveVerdict({ findings })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it('#2823 — accepts once every finding\'s prevention is captured or filed', () => {
+    const findings = [
+      { summary: 'citation miscite', outcome: 'fixed', prevention: 'a check:standards id-space gate', preventionCaptured: true },
+      { summary: 'stale link', outcome: 'no_change_needed', prevention: 'a dead-link check', preventionCaptured: true },
+    ];
+    expect(deriveVerdict({ findings })).toBe(VERDICTS.ACCEPT);
+  });
+
+  it('#2823 — a still-outstanding finding stays `changes` (the fix comes before the prevention gate)', () => {
+    // The prevention gate only guards the accept boundary; an unfixed finding is `changes` regardless of prevention.
+    const findings = [{ summary: 'bug', prevention: 'a gate', preventionCaptured: false }];
+    expect(deriveVerdict({ findings })).toBe(VERDICTS.CHANGES);
+  });
+
+  it('#2823 — a resolved finding with NO named prevention still clean-accepts (old-shape unaffected)', () => {
+    expect(deriveVerdict({ findings: [{ summary: 'a', outcome: 'fixed' }] })).toBe(VERDICTS.ACCEPT);
+  });
+
+  it('#2823 — humanRequired still wins over an uncaptured prevention (gate-self semantics intact)', () => {
+    const findings = [{ summary: 'a', outcome: 'fixed', prevention: 'a gate', preventionCaptured: false }];
+    expect(deriveVerdict({ findings, humanRequired: true })).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+});
+
+describe('hasUncapturedPrevention (#2823)', () => {
+  it('is true only for a finding that names a prevention that is not captured', () => {
+    expect(hasUncapturedPrevention({ prevention: 'a gate', preventionCaptured: false })).toBe(true);
+    expect(hasUncapturedPrevention({ prevention: 'a gate' })).toBe(true); // undefined captured ⇒ not captured
+    expect(hasUncapturedPrevention({ prevention: 'a gate', preventionCaptured: true })).toBe(false);
+    expect(hasUncapturedPrevention({ summary: 'no prevention named' })).toBe(false);
+    expect(hasUncapturedPrevention(null)).toBe(false);
+  });
 });
 
 describe('buildMandate', () => {
@@ -168,6 +229,28 @@ describe('buildMandate', () => {
     const text = buildMandate({ contextIsolation: 'diff+pr-description' });
     expect(text).toContain('Context isolation: diff+pr-description');
     expect(text).not.toContain('ONLY the diff');
+  });
+
+  it('#2823 — mandates prevention introspection: root cause + prevention + capture, for every finding', () => {
+    const text = buildMandate();
+    expect(text).toContain('PREVENTION INTROSPECTION');
+    expect(text).toMatch(/for EVERY finding/);
+    expect(text).toMatch(/ROOT CAUSE/);
+    expect(text).toMatch(/why the CREATOR got this wrong/);
+    expect(text).toMatch(/PREVENTION/);
+    expect(text).toMatch(/DETERMINISTIC GATE/);
+    expect(text).toMatch(/check:standards/);
+    // capture: whether the guard already exists as a gate, else must be FILED
+    expect(text).toMatch(/CAPTURE/);
+    expect(text).toMatch(/FILED as a future backlog item/);
+    // acceptance is gated on capture
+    expect(text).toMatch(/BLOCKS acceptance/);
+  });
+
+  it('#2823 — the panel-lens mandate inherits the prevention introspection (single-sourced in the skeleton)', () => {
+    const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS });
+    expect(text).toContain('PREVENTION INTROSPECTION');
+    expect(text).toMatch(/DETERMINISTIC GATE/);
   });
 });
 
@@ -734,6 +817,47 @@ describe('renderReviewNotice (#2433)', () => {
       .toThrow(/unknown outcome/);
     expect(() => renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.CLEARED, pr: 3 }))
       .toThrow(/unknown outcome/);
+  });
+
+  it('#2823 — appends a prevention summary naming the guards owed before accept', () => {
+    const n = renderReviewNotice({
+      event: REVIEW_NOTICE_EVENTS.ESCALATED, pr: 12, verdict: VERDICTS.PREVENTION_OUTSTANDING,
+      findings: [
+        { summary: 'miscite', outcome: 'fixed', prevention: 'a check:standards id-space gate', preventionCaptured: false },
+        { summary: 'clean', outcome: 'fixed', prevention: 'already a gate', preventionCaptured: true },
+      ],
+    });
+    expect(n).toContain('Prevention outstanding — 1 guard must be filed before accept');
+    expect(n).toContain('a check:standards id-space gate');
+    expect(n).not.toContain('already a gate'); // captured guard is not owed
+  });
+
+  it('#2823 — leaves the escalated notice byte-for-byte unchanged when no prevention is outstanding', () => {
+    const n = renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.ESCALATED, pr: 9, reasons: ['size'] });
+    expect(n).toBe('PR #9 escalated for review (size). Verdict: (pending).');
+  });
+});
+
+describe('renderPreventionSummary (#2823)', () => {
+  it('returns empty when nothing is outstanding and the verdict is not prevention-outstanding', () => {
+    expect(renderPreventionSummary({ findings: [{ summary: 'x', outcome: 'fixed' }], verdict: VERDICTS.ACCEPT })).toBe('');
+    expect(renderPreventionSummary()).toBe('');
+  });
+
+  it('flags the count + guards when findings name uncaptured prevention', () => {
+    const s = renderPreventionSummary({
+      findings: [
+        { summary: 'finding a', prevention: 'gate A', preventionCaptured: false },
+        { summary: 'finding b', prevention: 'gate B', preventionCaptured: false },
+      ],
+    });
+    expect(s).toBe(' Prevention outstanding — 2 guards must be filed before accept: gate A; gate B.');
+  });
+
+  it('falls back to a generic line when the verdict is prevention-outstanding but no findings were supplied', () => {
+    expect(renderPreventionSummary({ verdict: VERDICTS.PREVENTION_OUTSTANDING })).toBe(
+      ' Prevention outstanding — file the named guard(s) before accept.',
+    );
   });
 });
 

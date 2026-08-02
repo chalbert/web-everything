@@ -34,6 +34,7 @@ const VERDICT_LABELS = Object.freeze({
   [VERDICTS.ACCEPT]: '✅ pass — no blocking findings',
   [VERDICTS.CHANGES]: '🔁 changes requested',
   [VERDICTS.NEEDS_HUMAN]: '🚦 human review required',
+  [VERDICTS.PREVENTION_OUTSTANDING]: '🚩 prevention outstanding — file the guard before accept',
 });
 
 /**
