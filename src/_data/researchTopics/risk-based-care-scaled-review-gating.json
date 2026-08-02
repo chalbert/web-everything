@@ -1,0 +1,23 @@
+{
+  "id": "risk-based-care-scaled-review-gating",
+  "title": "Risk-based / care-scaled review gating — always-on floor vs risk-triggered depth, and the flake-and-mute failure",
+  "status": "open",
+  "summary": "Grounds the build-lane self-review-scope decision (under epic #2804, the UI-Fidelity Gate) and its parent story #2819: should the conveyor build lane's pre-PR adversarial self-review be always-on, care-level-scaled, or hybrid? Surveys where code review runs always-on vs risk-triggered across mature high-throughput pipelines (Google change-based review + readability; CODEOWNERS / branch protection; ISTQB risk-based testing; Coverity incremental-vs-deep; CodeRabbit / Graphite Diamond AI review on every PR with tunable depth; GCP Change Risk) and the failure mode of a review that flakes and gets muted (flaky-test quarantine, SOC alert fatigue, Vaughan's normalization of deviance, rubber-stamp code review). Two independent findings converge on a two-sided clamp: (1) nobody who ships fast runs ZERO review — risk prioritizes and deepens scrutiny, it never switches it off, so a care dial that maps a trivial change to no review is the outlier and is exactly the hole #2819 was opened to close; (2) a heavy pass on trivial changes destroys itself — frequent low-value findings train the reviewer to wave the channel through, so the rare high-value finding is waved through too (a merit defect that survives a zero-cost thought experiment: uniform-full is worse, not equal, because it dilutes attention). Recommendation: hybrid with a non-zero LIGHT floor (one fast high-signal pass) on every build + depth scaled above it by care-level. The floor's existence is a ratifiable governance invariant; the depth above it is a config dimension (#config-extends-platform-default) reusing the care model (#2567) as pattern, NOT authority — a distinct selfReviewDepthForCareLevel clamped to a non-zero minimum, because panelRigorForCareLevel maps none to zero rounds and it governs the downstream INDEPENDENT panel (Layer 2), not the author's own self-review (Layer 1, #2672). Reconciles with #2563 (care is advisory not a gate — composes, different turf) and #2439 (a builder may not CLEAR its own diff — the floor is a non-clearing FIX pass, not clearance). Full grounding in reports/2026-08-01-risk-based-care-scaled-review-gating.md.",
+  "dateOpened": "2026-08-01",
+  "lastReviewed": "2026-08-01",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "review",
+    "convergence",
+    "conveyor",
+    "care-level",
+    "risk-based",
+    "gating",
+    "self-review",
+    "alert-fatigue",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}
