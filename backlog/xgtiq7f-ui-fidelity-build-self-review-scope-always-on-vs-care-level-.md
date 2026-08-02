@@ -15,12 +15,13 @@ tags: [conveyor, review, convergence, self-review, care-level, ui-fidelity, slic
 
 ## Ruling (2026-08-01) — Fork 1 = (c) hybrid
 
+Every delegated build carries a non-zero self-review floor: even a `none`-care leaf edit gets one fast
+adversarial pass, so no build reaches the PR having run zero self-review. That floor is a non-clearing FIX pass
+([#2439]: the builder never clears its own diff); the visual floor stays locus-gated, not care-gated; and the
+depth above the floor is a config dimension, not a fork.
+
 **RATIFIED by the operator (Nicolas Gilbert) on 2026-08-01** — Fork 1 = **(c) hybrid** accepted. The
-**ratifiable core**: every delegated build carries a **non-zero self-review
-floor** — even a `none`-care leaf edit gets one fast pass, so no build reaches the PR having run zero adversarial
-self-review. The floor is a **non-clearing FIX pass** ([#2439]: the builder never clears its own diff). The
-**visual** floor stays **locus-gated, not care-gated**. **Depth above the floor is a config dimension**, not a
-fork. Codified as [`#build-lane-self-review-non-zero-floor`](../docs/agent/platform-decisions.md#build-lane-self-review-non-zero-floor),
+**ratifiable core** is that non-zero floor. Codified as [`#build-lane-self-review-non-zero-floor`](../docs/agent/platform-decisions.md#build-lane-self-review-non-zero-floor),
 composing with — not altering — [#2563] and [#2439].
 
 ## Grounding digest
@@ -35,7 +36,7 @@ The build lane runs **two** pre-PR self-review steps today, both mandatory and u
 - **Step 6 — adversarial code self-review** (`we:skills-src/conveyor/delivery-agent-brief.md:136`): spawn one
   adversarial code-review subagent on the working diff, address every finding to convergence, only then open
   the PR. It is **non-clearing** by design — a builder may not clear its own diff
-  ([#2439], `#agent-convergence-independent-validation`), so this pass **fixes, it does not accept**.
+  ([#2398], `#agent-convergence-independent-validation`), so this pass **fixes, it does not accept**.
 - **Step 7 — visual self-review** (`we:skills-src/conveyor/delivery-agent-brief.md:158`): UI-locus items only,
   render + screenshot + by-eye/comparator diff to visual convergence before the PR.
 

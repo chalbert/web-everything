@@ -71,4 +71,4 @@ it (c) hybrid, codifying the non-zero self-review floor as a binding platform ru
 | the build-lane self-review-scope decision item (under epic #2804) | authored, prepared, **and ratified** — `status: resolved`, `dateResolved`, `codifiedIn`, and a `## Ruling` section added |
 | `we:docs/agent/platform-decisions.md` | **new binding statute** — the `#build-lane-self-review-non-zero-floor` anchor (Ratified 2026-08-01) |
 | `we:AGENTS.md` | research-topic inventory count bumped (the auto-generated `Research topics` row: 284 (280 open) → 285 (281 open)) |
-| the ratify-gate + provenance-hooks story (#2821) | edited — captured this review's lessons as gates: gate 1b's second fixture (the corrected decision item, needed-the-marker); gate 3's round-4 recurrence paragraph; gate 8 rewritten to key off the [#2771] statute (not the `tier:` field) — retracting the round-4 gate-self advice; and a new gate 9 (ruled-but-not-yet-implemented marker) |
+| the ratify-gate + provenance-hooks story (#2821) | not in this diff — the review-lesson gates landed separately in #2821 (on main); this branch is byte-identical to main at that file |
