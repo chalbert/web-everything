@@ -2,9 +2,11 @@
 bornAs: xhrni4v
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateResolved: "2026-08-02"
 preparedDate: "2026-08-02"
+codifiedIn: "docs/agent/platform-decisions.md#human-is-principle-surface-not-path"
 blockedBy: ["2785"]
 tags: [governance, review-human, gate-self, principle-surface, stop-the-line, mechanization]
 ---
@@ -181,6 +183,16 @@ gains its marker in the impl PR that also carries its enforcing invariant (`#283
 `check:standards` rule can assert leash-file guarantees are never *removed* from the gate. The un-encoded
 state is the *stricter* state (leash pinned + statute + no marker narrowing), so nothing loses its gate by
 default.
+
+## Ruling — ratified 2026-08-02 (A)
+
+**Option A adopted, ratified by the operator (Nicolas Gilbert) on 2026-08-02.** `review:human` fires on a
+**principle surface** — the canonical three-trigger union: a statute-anchor rule-text edit, an edit / removal
+of a pre-existing `@principle`/`@invariant` marker, and the permanently-pinned `POLICY_SPEC` declarative-leash
+path floor. Codified in `we:docs/agent/platform-decisions.md#human-is-principle-surface-not-path`
+(`codifiedIn`), which is the canonical definition of "principle surface" the sibling two-PR rule (#2839)
+cites. The impl that narrows the gate is the follow-on `xe5vt9s` (`blockedBy: 2785`). The Options table and
+Recommendation below are retained as the deliberation record; this ruling is the operative call.
 
 ## Options
 
