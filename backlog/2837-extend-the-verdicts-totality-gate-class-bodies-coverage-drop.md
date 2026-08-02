@@ -1,4 +1,5 @@
 ---
+bornAs: xydd3eq
 kind: task
 parent: "2527"
 status: open
@@ -9,7 +10,7 @@ tags: []
 # Extend the VERDICTS totality gate: class bodies + coverage drop-out below the 2-verdict threshold
 
 The `@verdicts-total` discovery gate (`we:scripts/lib/verdict-totality.mjs`, filed as
-`xiqj3w9`, built in PR #976) closes the enum-totality miss class for the shapes it
+`2835`, built in PR #976) closes the enum-totality miss class for the shapes it
 scans, but two demonstrated evasions remain. It only recognises top-level
 `function`/`const`/`let`/`var` symbols, so verdict logic inside a `class` body is
 invisible; and it only treats a symbol as a verdict consumer at **≥2** distinct
