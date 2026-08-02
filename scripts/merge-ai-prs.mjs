@@ -2148,12 +2148,15 @@ async function runCli() {
         // leave v.decision === 'merge' → falls through to the land cascade below.
       } else if (gate.action === 'park' || gate.action === 'wait-author') {
         v.decision = 'skip';
-        // #2820-review-fix (de-dup) — this branch OWNS the PR's durable drain comment: an agent-reviewable park
-        // stamps its own `park` comment below, a human park carries the reason in its #2324 body block. Mark it so
-        // the final skip-stamp loop does NOT also post a byte-identical `skip` comment. The old `escalated==='yes'`
-        // proxy missed a DE-ESCALATED sticky park (`score.escalate` false → `escalated:'no'`, e.g. the #2820 sticky
-        // review:pending or a de-escalated review:human), which then got BOTH a `park` and a `skip` comment.
-        v.reviewParked = true;
+        // #2820-review-fix (de-dup, corrected round 3) — the final skip-stamp loop must NOT double-post a
+        // byte-identical `skip` comment when THIS branch already recorded the WHY. But "entered this branch" is
+        // NOT the same as "recorded the why": a `review:changes` wait-author (no `applyLabel`, `humanRequired`
+        // false) and a DE-ESCALATED human park (`parkReasons` empty → the #2324 body block is '') both fall
+        // through posting NOTHING. The old round-2 fix set `reviewParked = true` unconditionally on entry, which
+        // then SUPPRESSED the skip-stamp for exactly those two kinds — deleting the only drain record of why the
+        // PR was not landed (#2313). So track whether a durable record was ACTUALLY posted, and set
+        // `reviewParked` from THAT below — the skip loop still stamps the two kinds this branch does not cover.
+        let durableRecorded = false;
         v.reason = gate.reason + (score.reasons.length ? ` [${score.reasons.join('; ')}]` : '');
         // #2409 — a stale-acceptance re-park carries its reason on `gate.reason` (the head-advanced-past-reviewed
         // message), NOT on the fresh-diff `score.reasons`. PREPEND it (not either/or): the ride-in commit can
@@ -2181,6 +2184,9 @@ async function runCli() {
             // decided above; it only records what was acted on, so a later body edit is tamper-evident.
             const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} escalation reason stamped on PR\n`);
+            // This branch OWNS the durable `park` comment for an agent-reviewable park — whether it was posted now
+            // or `postDrainReasonComment` deduped it against an identical one from a prior pass, the record exists.
+            durableRecorded = true;
           }
         }
         // #2409 — drop the now-stale review:accepted, ADD-FIRST / REMOVE-LAST: only AFTER the re-park label
@@ -2199,10 +2205,15 @@ async function runCli() {
         // (never replace) the live body with the marked block at park time, then verify the write landed —
         // best-effort (a write/verify miss is surfaced, never fatal: the label already carries the signal).
         if (gate.humanRequired && !DRY_RUN) {
+          // The #2324 body block IS this human park's durable drain record. It exists only when there are reasons
+          // to embed: `buildEscalationReasonBlock([])` is '' (a DE-ESCALATED human park has no fresh reasons), so
+          // that case records NOTHING here and must NOT suppress the skip-stamp below (finding-1, round 3).
+          const reasonBlock = buildEscalationReasonBlock(parkReasons);
+          if (reasonBlock) durableRecorded = true;
           let liveBody = '';
           try { liveBody = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').body || ''; } catch { /* fetch miss — augment from empty, still best-effort */ }
           if (!bodyHasEscalationReason(liveBody)) {
-            const newBody = liveBody + buildEscalationReasonBlock(parkReasons);
+            const newBody = liveBody + reasonBlock;
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--body', newBody], { stdio: ['ignore', 'ignore', 'pipe'] }); }
             catch { if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} could not write the review:human escalation reason into the PR body (#2324) — add it by hand: ${parkReasons.join('; ')}\n`); }
             // Verify the write actually landed (never trust the edit call's exit code alone — gh can succeed
@@ -2212,6 +2223,11 @@ async function runCli() {
             if (!verified && !AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} review:human body still missing the escalation reason after the write (#2324) — verify by hand: ${parkReasons.join('; ')}\n`);
           }
         }
+        // #2820-review-fix (finding-1, round 3) — suppress the final skip-stamp ONLY when this branch actually
+        // recorded the why (an agent-reviewable `park` comment, or a non-empty #2324 human body block). A
+        // `review:changes` wait-author and a de-escalated human park recorded nothing → `reviewParked` stays
+        // false → the skip loop stamps their reason, restoring the #2313 "every final skip carries its why".
+        v.reviewParked = durableRecorded;
         // #2285 v1 — the skill's auto-review step consumes this: humanRequired PRs are left for the operator,
         // the rest are eligible for a fresh-context adversarial review subagent.
         parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: parkReasons });
@@ -2232,11 +2248,13 @@ async function runCli() {
 
   // #2313 — stamp the *why* onto every OTHER final skip too (a real non-manifest conflict, a red required
   // check, an unlandable merge state, …), not only the review-escalation park path above. Excludes: verdicts
-  // already commented via the park path (`v.reviewParked` — the park/wait-author branch owns the durable comment;
-  // #2820-review-fix widened this from the old `escalated==='yes'` proxy, which double-commented a de-escalated
-  // sticky park); a collision-heal in flight (`v.collisionHealed` — self-fixing, CI is re-running on the
-  // renumbered tip, nothing for a human to act on yet); an uncertified PR (not a producer PR the drain owns —
-  // never comment on an unrelated human PR).
+  // whose park path ALREADY posted a durable record (`v.reviewParked` — set true only when the park branch
+  // actually stamped an agent `park` comment or wrote a non-empty #2324 human body block, so a `review:changes`
+  // wait-author and a de-escalated human park — which record nothing — are NOT excluded and get stamped here;
+  // #2820-review-fix corrected this from unconditional-on-entry, which double-commented an agent park yet
+  // dropped the record for those two kinds); a collision-heal in flight (`v.collisionHealed` — self-fixing, CI
+  // is re-running on the renumbered tip, nothing for a human to act on yet); an uncertified PR (not a producer
+  // PR the drain owns — never comment on an unrelated human PR).
   if (!DRY_RUN) {
     for (const v of skipped) {
       if (v.escalated === 'yes' || v.reviewParked || v.collisionHealed) continue;

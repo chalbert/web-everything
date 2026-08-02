@@ -19,7 +19,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +35,14 @@ const a = process.argv.slice(2);
 const ji = a.indexOf('--json');
 const fields = ji >= 0 ? String(a[ji + 1] || '') : '';
 function out(o) { process.stdout.write(JSON.stringify(o)); process.exit(0); }
+// Record every 'pr comment' the drain posts (only when a log path is set — dry-run runs never reach here, so the
+// default JSON-reading tests are unaffected). Used by the finding-1 non-dry-run test to prove which park kinds
+// get a durable skip/park comment.
+if (a[0] === 'pr' && a[1] === 'comment' && process.env.GATE_COMMENT_LOG) {
+  const bi = a.indexOf('--body');
+  fs.appendFileSync(process.env.GATE_COMMENT_LOG, JSON.stringify({ num: a[2], head: String((bi >= 0 && a[bi + 1]) || '').split('\\n')[0] }) + '\\n');
+  process.exit(0);
+}
 if (a[0] === 'pr' && a[1] === 'list') out(fx.prs);
 if (a[0] === 'pr' && a[1] === 'view') {
   const pr = fx.prs.find((p) => String(p.number) === String(a[2])) || {};
@@ -83,6 +91,28 @@ function runDrain(fixture, args) {
   });
   const line = stdout.trim().split('\n').filter(Boolean).pop(); // the last line is the JSON result
   return JSON.parse(line);
+}
+
+/** Run the REAL entrypoint NON-dry-run (so the skip/park COMMENT paths actually fire), with the whole-process
+ *  lease bypassed (`--no-drain-lease`, the documented tests/break-glass escape) and every `gh pr comment`
+ *  recorded. Returns `{ result, comments }`. Used only by the finding-1 test — a merge never happens because the
+ *  fixtures are all held/parked (empty `toMerge`), so the cascade is a no-op and nothing touches the real tree. */
+function runDrainLive(fixture, args) {
+  const fxPath = join(workDir, `fixture-${fixture._id}.json`);
+  const logPath = join(workDir, `comments-${fixture._id}.log`);
+  writeFileSync(fxPath, JSON.stringify(fixture));
+  writeFileSync(logPath, '');
+  const stdout = execFileSync('node', [SCRIPT, ...args, '--no-drain-lease', '--this-repo', '--json'], {
+    cwd: workDir,
+    env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GATE_FIXTURE: fxPath, GATE_COMMENT_LOG: logPath },
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const result = JSON.parse(stdout.trim().split('\n').filter(Boolean).pop());
+  const comments = existsSync(logPath)
+    ? readFileSync(logPath, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+    : [];
+  return { result, comments };
 }
 
 const nums = (arr) => (arr || []).map((x) => Number(x.num));
@@ -248,5 +278,39 @@ describe('the real drain entrypoint consults the gate before merging', () => {
     expect(nums(r.merged)).not.toContain(601);
     expect(nums(r.skipped)).toContain(601);                       // plain skip for the CI reason…
     expect(r.parked.find((p) => Number(p.num) === 601)).toBeFalsy(); // …NOT routed through the escalation/parking path
+  });
+
+  // #2820-review-fix (round-3 finding 1) — the round-2 "de-dup" set `reviewParked = true` on ENTRY to the
+  // park/wait-author branch, which suppressed the final #2313 skip-stamp for two kinds that post NOTHING of their
+  // own: a `review:changes` wait-author (no `applyLabel`) and a de-escalated `review:human` park (empty reasons →
+  // `buildEscalationReasonBlock([]) === ''`). The fix tracks whether a durable record was ACTUALLY posted. This is
+  // the ONLY case that exercises the non-dry-run COMMENT paths, so it runs live (lease bypassed, merges nothing —
+  // every fixture PR is held, `toMerge` is empty), recording every `gh pr comment`.
+  it('#2820-review-fix (finding 1): every held park kind gets EXACTLY ONE durable drain comment — no kind is silenced, none doubled', () => {
+    const green = { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN, body: 'a real summary', _commits: AI_COMMIT, _files: [{ path: 'backlog/u.md', additions: 1, deletions: 0 }] };
+    const fixture = {
+      _id: 'skip-stamp',
+      prs: [
+        { number: 701, title: 'review:changes wait-author', labels: [{ name: 'ready-to-merge' }, { name: 'review:changes' }], ...green },
+        { number: 702, title: 'review:pending agent park',  labels: [{ name: 'ready-to-merge' }, { name: 'review:pending' }], ...green },
+        { number: 703, title: 'review:human de-escalated leaf', labels: [{ name: 'ready-to-merge' }, { name: 'review:human' }], ...green },
+      ],
+    };
+    const { result, comments } = runDrainLive(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    // Nothing merged — all three are held.
+    expect(nums(result.toMerge)).toEqual([]);
+
+    // Each PR gets EXACTLY ONE comment (no kind silenced, no kind doubled).
+    for (const n of ['701', '702', '703']) {
+      expect(comments.filter((c) => c.num === n).length).toBe(1);
+    }
+    // review:changes wait-author and the de-escalated review:human park post a SKIP stamp (their why, restored) —
+    // before the fix they posted nothing at all.
+    expect(comments.find((c) => c.num === '701').head).toContain('drain-skip-reason');
+    expect(comments.find((c) => c.num === '703').head).toContain('drain-skip-reason');
+    // The agent review:pending park still posts its own PARK comment — and only that one (the round-2 de-dup goal
+    // — no byte-identical skip on top — is preserved by the corrected exclusion).
+    expect(comments.find((c) => c.num === '702').head).toContain('drain-park-reason');
   });
 });
