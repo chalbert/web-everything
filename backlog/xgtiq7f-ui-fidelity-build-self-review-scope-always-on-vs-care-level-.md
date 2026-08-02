@@ -42,7 +42,7 @@ Separately, the conveyor already has a **care-level model** (#2567): `deriveCare
 blast-radius / size / dismissed-findings / cross-repo signals, and `panelRigorForCareLevel`
 (`we:scripts/lib/jury-core.mjs:274`) scales the **downstream independent** AI panel's rigor from that band —
 mapping **`none → { rounds: 0, lenses: [], jurorsPerLens: 0 }`**, i.e. *zero*. That model was built to dial the
-**Layer-2 independent panel** (#2567 / #2671), not the **Layer-1 author-run self-review** (#2672).
+**Layer-2 independent panel** (#2567), not the **Layer-1 author-run self-review** (#2672).
 
 Prior-art (report `we:reports/2026-08-01-risk-based-care-scaled-review-gating.md`, research topic
 [`/research/risk-based-care-scaled-review-gating/`](/research/risk-based-care-scaled-review-gating/)) lands a
@@ -198,91 +198,27 @@ adds only a **floored depth table** for Layer 1, it does not re-declare the band
 
 ## How this is prevented next time
 
-This one item was bounced in review **twice**, both times for the **same class: provenance/citation
-precision** — a reference written from what was *salient* rather than *verified against the source* (its exact
-id-space, file, line, or meaning). Round 1 was the `#955`-for-`#2819` mixup; round 2 was **three fresh
-citation defects introduced by the round-1 fix**, one of which reproduced the very class this section was
-written to prevent. That recursion is the headline finding: **writing the rule down did not change the
-outcome.** It is the strongest possible evidence that the guard must be **deterministic** (a hook), not
-authorial diligence.
+This item bounced in review on **one class**: provenance/citation precision — a reference (an `#NNN`, a
+`we:path:line`, or a count/label) asserted without resolving it against the source it points at. The full
+post-mortem for that class — the per-finding blameless chains, and the deterministic gates that make it
+script-decidable (cross-ref lint, hash-slug rewrite widening, `we:path:line` resolution, symbol-anchored
+citations) — lives in its durable home, **[#2821]** (ratify-gate + provenance hooks). It is not restated here,
+because a restated ledger of counts and cites is itself the fragile surface this bounce is about: it re-stales
+on every rebase and every sibling land. Read [#2821] for the class and its gates; do **not** re-derive them
+in this item.
 
-### The class (both rounds, every finding)
-
-**Provenance/citation precision.** A citation — an `#NNN`, a `we:path:line`, or a count/label claim —
-asserted without resolving it against the source. Every finding across both bounces is this one class; none
-is a typo. Below, each finding carries `{ class · why-the-author-erred · gate-or-process-fix · route }`.
-
-### Round 1 — `#955` (the PR) written where `#2819` (the story) was meant
-
-- **Why the author erred (blameless chain):** the PR that landed the warm-lane story (`#955`) was the salient
-  handle → the story got cited by its PR number → in this repo `#NNN` *is* a backlog id, and nothing forced a
-  distinct spelling for a PR → the wrong id baked into permanent statute ~15×. Round 1's other two findings
-  (the dead `xmhvbvx-…` links) were the *same* renumbering leaking into links the at-land rewrite never covers.
-- **Route — gateable, already filed as [#2821].** That story turns this class into deterministic gates: a
-  `check:standards` cross-ref rule that hard-errors a PR number cited as `#NNN` and flags a target whose
-  kind/title is implausible for the citing sentence, plus widening `findBadBodyLinks` and the at-land hash→NNN
-  rewrite to hash slugs outside `we:backlog/` + `we:docs/agent/`. Reference it; do **not** refile.
-
-### Round 2 — three fresh defects the round-1 fix introduced
-
-All three are the **same class**, and all three are **machine-checkable** — yet none was machine-checked
-before it shipped.
-
-1. **`#51` written as a backlog `#NNN`** (this section, previously). *Class:* provenance/citation precision.
-   *Referent:* **memory rule 51 (hookable-vs-judgment)** — a memory rule, **not** a backlog item; `#51`
-   resolves to `we:backlog/051-jsx-event-style-toggle.md`, an unrelated JSX-adapter story. *Why the author
-   erred:* "51" was salient as a *rule* number → written in `#NNN` shorthand without checking that id-space →
-   nothing forced a memory-rule spelling distinct from a backlog id. *The recursion:* this sat **inside the
-   bullet declaring that `#NNN` means a backlog item** — the section committed the exact error it documents.
-   *Route — gateable, the same [#2821] gate,* extended to forbid a non-backlog concept (a memory rule) written
-   as `#NNN`. Fixed here to the spelled-out "memory rule 51 (hookable-vs-judgment)".
-2. **`we:AGENTS.md` inventory row mislabeled** (`we:reports/2026-08-01-risk-based-care-scaled-review-gating.md`).
-   *Class:* provenance/citation precision. The counts `283→284, 279→280` are the **research-topic** inventory
-   (`Research topics 284 (280 open)` in `we:AGENTS.md`'s auto-generated block); `we:AGENTS.md` carries **no**
-   statute/anchor counter. *Why the author erred:* the diff *did* add the new anchor and *did* bump a counter,
-   so "statute/anchor" felt right → the label was written from intent, not from the actual hunk. *Route —
-   mostly judgment* (which inventory line a prose row describes is not cleanly greppable): a **working-style
-   correction** — "verify every cited count and label against the actual diff hunk before writing it" — routed
-   to **agent memory (memory rule 9)** as a durable practice, and it belongs in the build/fix brief. The one
-   machine-checkable sliver (`we:AGENTS.md` has no "statute/anchor" counter to inventory) is a weak gate at best.
-3. **`applyLedger` pointer named the wrong file:line** (this section, previously
-   `we:scripts/lane-drain.mjs:596`). *Class:* provenance/citation precision. *Verified in-repo:* `applyLedger`
-   is **defined** at `we:scripts/backlog/id.mjs:144` and **called** from `we:scripts/lane-drain.mjs:641`; the
-   hash→NNN rewrite *scope* this bullet wants widened is built at `we:scripts/lane-drain.mjs:583-595` (line 596
-   is an unrelated `contentByName` Map). *Why the author erred:* a plausible line number was written without
-   opening the file → a `we:path:line` citation is a load-bearing claim with **no gate behind it**, and it
-   rots on any edit above it even when first correct. *Route — gateable in principle:* a `check:standards`
-   rule that verifies each `we:<path>:<line>` resolves (the named symbol appears at the cited line), and a
-   convention shift to **symbol-anchored refs** (`we:scripts/backlog/id.mjs` → `applyLedger`) that never
-   go stale; until that lands, the same **working-style correction** ("verify every cited file:line against
-   the source before writing it") in **agent memory (memory rule 9)** and the build/fix brief.
-
-### Why the just-ratified self-review floor missed all three
-
-First-hand evidence about the rule *this very item ratifies*: the floor is `{ rounds: 1, lenses:
-['correctness'] }`, and it cleared a diff carrying three wrong references in the section *about* wrong
-references. The defect is **lens mismatch, not round count.** "Correctness" on a citation-heavy *prose* diff
-means "does the argument hold" — it does not resolve each cited id/line/count against the source. A
-provenance/citation lens (resolve-and-compare) is a *different* check, and no author-run pass reliably
-self-applies a lens to its own framing — which is exactly why the durable fix is a deterministic gate
-([#2821]), not a deeper self-review. This does not weaken the ratified floor; it **sharpens the config
-dimension above it**: a citation-heavy prose diff should *earn* a provenance lens on top of correctness.
-
-### What was actually filed
-
-- **[#2821]** (ratify-gate + provenance hooks) — a real, open story that makes finding 1's class
-  script-decidable. Round 1 said "durable hooks are being filed separately"; they are **#2821**. This is the
-  forcing function the round-1 reflection lacked: proposing a hook and *filing* it are different acts, and
-  only the filed item changes anything.
-- **Not yet filed as their own slice:** the `we:<path>:<line>`-verification gate and the symbol-anchored-ref
-  convention (findings 2/3). Stated plainly rather than left as an unfiled intention — that unfiled intention
-  is the exact failure this whole bounce is about. They belong under the same provenance family as #2821; the
-  interim mitigation lives as the working-style practice in **agent memory (memory rule 9)** and the
-  build/fix brief.
+The one durable lesson that is genuinely about *this item's ratified rule* stays here: the non-zero self-review
+floor (`{ rounds: 1, lenses: ['correctness'] }`) did **not** catch these defects, and the reason is **lens
+mismatch, not round count**. "Correctness" on a citation-heavy *prose* diff asks *does the argument hold* — it
+does not resolve each cited id/line/count against the source. A provenance/citation lens (resolve-and-compare)
+is a **different** check, and no author-run pass reliably self-applies a lens to its own framing — which is why
+the durable fix is a deterministic gate ([#2821]), not a deeper self-review. This does not weaken the ratified
+floor; it **sharpens the config dimension above it**: a citation-heavy prose diff should *earn* a provenance
+lens on top of correctness.
 
 Prior art on the dangling-ref class this rides: [#2400] and [#2428] (statute-layer hash refs). Per **memory
-rule 51 (hookable-vs-judgment)**: the script-decidable tells above (id-space, symbol-at-line, PR-vs-item)
-belong in a hook; the judgment — which lens a citation-heavy prose diff earns — stays in context.
+rule 51 (hookable-vs-judgment)**: the script-decidable tells belong in a hook ([#2821]); the judgment — which
+lens a citation-heavy prose diff earns — stays in context.
 
 ## Related
 

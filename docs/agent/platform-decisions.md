@@ -2859,6 +2859,8 @@ by `we:reports/2026-07-10-ai-code-review-best-practices.md`; the build lands und
 
 **Invariants preserved:** layer separation (self-review = Layer 1 author-run #2672; independent clear = Layer 2 #2439/#2567); one shared care model (`deriveCareLevel`), only the depth *table* differs by layer. Grounded by `we:reports/2026-08-01-risk-based-care-scaled-review-gating.md`. Governs Layer 1 only; the Layer-2 panel's `none→0` mapping stays a separate concern under #2567.
 
+**Lineage:** xgtiq7f (ratified 2026-08-01 — the build-lane self-review-scope decision, under epic #2804, carved from #2819; report `we:reports/2026-08-01-risk-based-care-scaled-review-gating.md`).
+
 ---
 
 ### Behaviour/event attribute *names* are colon-namespaced — a collision-safe internal authoring spelling, not the platform-shaped standard proposal {#attribute-name-colon-namespacing}

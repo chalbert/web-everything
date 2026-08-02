@@ -70,4 +70,4 @@ it (c) hybrid, codifying the non-zero self-review floor as a binding platform ru
 | `we:src/_includes/research-descriptions/risk-based-care-scaled-review-gating.njk` | created (write-up) |
 | the decision item (`we:backlog/xgtiq7f-*.md`) | authored, prepared, **and ratified** — `status: resolved`, `dateResolved`, `codifiedIn`, and a `## Ruling` section added |
 | `we:docs/agent/platform-decisions.md` | **new binding statute** — the `#build-lane-self-review-non-zero-floor` anchor (Ratified 2026-08-01) |
-| `we:AGENTS.md` | research-topic inventory count bumped (the auto-generated `Research topics` row: 283 (279 open) → 284 (280 open)) |
+| `we:AGENTS.md` | research-topic inventory count bumped (the auto-generated `Research topics` row: 284 (280 open) → 285 (281 open)) |
