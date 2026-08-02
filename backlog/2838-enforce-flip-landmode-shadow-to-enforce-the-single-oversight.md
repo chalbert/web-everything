@@ -2,9 +2,11 @@
 bornAs: x2w4qbf
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateResolved: "2026-08-02"
 preparedDate: "2026-08-02"
+codifiedIn: "docs/agent/platform-decisions.md#enforce-flip-triple-gated"
 tags: [governance, enforce-flip, land-mode, shadow-mode, review-pending, auto-land, oversight]
 ---
 
