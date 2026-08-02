@@ -1,4 +1,5 @@
 ---
+bornAs: xjkje69
 kind: story
 size: 3
 status: open
@@ -139,4 +140,4 @@ degraded read must fail CLOSED, not fall through as "nothing is open".**
 - [we:scripts/merge-ai-prs.mjs](scripts/merge-ai-prs.mjs) — `RECONCILE` /
   `orderExtraOpenItems` (the `--no-reconcile-labels` hole)
 - [we:scripts/__tests__/merge-ai-prs.test.mjs](scripts/__tests__/merge-ai-prs.test.mjs)
-  — the `#999/xq985wu F3` describe block (the assertion pinning empty as healthy)
+  — the `#999/2880 F3` describe block (the assertion pinning empty as healthy)
