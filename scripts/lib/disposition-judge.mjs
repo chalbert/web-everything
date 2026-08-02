@@ -39,6 +39,12 @@ import {
   MANDATORY_LENSES,
   JURY_EVENT_TYPES,
   normalizeJuryEvent,
+  // #2823 round-2 finding 1 — the strictness table + its fail-loud accessor + the outstanding predicate are
+  // SINGLE-SOURCED in jury-core (next to the `VERDICTS` enum they range over). This module imports them rather than
+  // keeping a hand-copied twin, so "mirrors jury-core / jury-ledger" is enforced by construction and can never drift
+  // (the round-1 fix updated this table but missed jury-ledger's copy — there is now only one copy to update).
+  verdictStrictness,
+  isFindingOutstanding,
 } from './jury-core.mjs';
 
 /** The two dispositions the green judge proposes (#2652). A frozen enum so every caller names them once. */
@@ -46,19 +52,6 @@ export const DISPOSITIONS = Object.freeze({
   AUTO_DISPOSE: 'auto-dispose',
   ESCALATE: 'escalate',
 });
-
-/** Verdict strictness — diversity-selection order (#2567): the STRICTEST verdict wins a reduction, never a vote.
- *  `needs-human` (2) beats `changes` (1) beats `accept` (0). */
-const VERDICT_STRICTNESS = Object.freeze({
-  [VERDICTS.ACCEPT]: 0,
-  [VERDICTS.CHANGES]: 1,
-  [VERDICTS.NEEDS_HUMAN]: 2,
-});
-
-/** A finding is OUTSTANDING unless a fix pass explicitly resolved it (mirrors `deriveVerdict` in jury-core). */
-function isFindingOutstanding(finding) {
-  return finding.outcome !== 'fixed' && finding.outcome !== 'no_change_needed';
-}
 
 /**
  * @typedef {Object} ReducedLedger
@@ -130,7 +123,7 @@ export function reduceLedger(ledger) {
     const lens = lensByJuror.get(jurorId);
     if (!lens) continue; // a verdict from a juror the roster never named — ignore it (fail-closed handles the gap)
     const current = lensVerdicts[lens];
-    if (current === undefined || VERDICT_STRICTNESS[verdict] > VERDICT_STRICTNESS[current]) {
+    if (current === undefined || verdictStrictness(verdict) > verdictStrictness(current)) {
       lensVerdicts[lens] = verdict;
     }
   }
@@ -217,6 +210,9 @@ function escalate(reason, trailLine, extra = {}) {
  *          unanimity is the mode's contract.)
  *        • `accept-best` → auto-dispose while weighted dissent ≤ `dissentThreshold`; above it → escalate.
  *
+ * @verdicts-total — the strictestMandatory branch handles every `VERDICTS` member (needs-human, changes,
+ *   prevention-outstanding each escalate; accept continues to the dissent policy); the `check:standards`
+ *   verdict-totality gate enforces it so a new member can't silently fall through to the accept/dissent path.
  * @param {{ ledger?: Array<object>, config: {lensWeights: object, dissentThreshold: number, resolutionMode: string},
  *   signals?: {gateSelf?: boolean, humanRequired?: boolean, nonConvergence?: boolean}, mandatoryLenses?: string[] }} o
  * @returns {DispositionProposal}
@@ -255,7 +251,7 @@ export function proposeDisposition({ ledger = [], config, signals = {}, mandator
   // 4 — PANEL verdict over the mandatory lenses (diversity-selection: strictest wins).
   const strictestMandatory = mandatoryLenses.reduce((worst, lens) => {
     const v = reduced.lensVerdicts[lens];
-    return VERDICT_STRICTNESS[v] > VERDICT_STRICTNESS[worst] ? v : worst;
+    return verdictStrictness(v) > verdictStrictness(worst) ? v : worst;
   }, VERDICTS.ACCEPT);
   const totals = weightedTotals(reduced, lensWeights);
   const dissentFraction = totals.total > 0 ? totals.dissent / totals.total : 0;
@@ -269,6 +265,14 @@ export function proposeDisposition({ ledger = [], config, signals = {}, mandator
   }
   if (strictestMandatory === VERDICTS.CHANGES) {
     return escalate('panel-changes', 'A mandatory lens wants changes — the review has not converged to accept; escalate.', { panelVerdict: strictestMandatory, dissentFraction });
+  }
+  // #2823 — a mandatory lens whose findings are resolved but names an uncaptured, unfiled PREVENTION guard is
+  // NOT a clean accept: the guard must be filed before land. Escalate to the operator (who files it) rather than
+  // letting the weight-independent panel gate fall through to the dissent policy and auto-dispose. Without this
+  // branch, `prevention-outstanding` ranks above `accept` but below `changes`, so it would slip past both the
+  // needs-human and changes checks and reach step 5 — auto-disposing the very PR the verdict exists to hold.
+  if (strictestMandatory === VERDICTS.PREVENTION_OUTSTANDING) {
+    return escalate('panel-prevention-outstanding', 'A mandatory lens resolved its findings but named a prevention guard that is neither captured nor filed — file the guard before accept; escalate.', { panelVerdict: strictestMandatory, dissentFraction });
   }
 
   // 5 — DISSENT policy (the #2651 knobs). Mandatory lenses unanimously accept here.

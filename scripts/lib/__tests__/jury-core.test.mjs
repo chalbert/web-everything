@@ -233,6 +233,15 @@ describe('deriveNegotiationOutcome — the subject-jury self-driving loop\'s con
     expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: NEGOTIATION_ROUND_CAP })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
   });
 
+  it('#2823 — prevention-outstanding ESCALATES immediately on EVERY round (never a non-progressing loop)', () => {
+    // No editor round can close it and no loop actor files the guard, so `continue` would just burn the whole
+    // budget re-deriving the same verdict. It hands straight to the operator instead — at round 1 AND at the cap.
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.PREVENTION_OUTSTANDING, round: 1, roundCap: 5 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.PREVENTION_OUTSTANDING, round: 5, roundCap: 5 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+    // never LANDs even with a green test (it is not an accept).
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.PREVENTION_OUTSTANDING, round: 1, roundCap: 5, requiredTestGreen: true })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+  });
+
   // #2410 slice D (capstone) — the CI-green land clause is folded into the land condition. `requiredTestGreen`
   // defaults to true so every pre-#2410 caller stays byte-stable; it only BLOCKS a land when explicitly not-green.
   describe('CI-green land clause (#2410 slice D — required-`test`-green folded into the land condition)', () => {

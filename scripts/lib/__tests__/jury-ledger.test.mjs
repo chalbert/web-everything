@@ -12,6 +12,8 @@ import { join } from 'node:path';
 import {
   JURY_EVENT_TYPES,
   JUROR_STATUSES,
+  VERDICTS,
+  VERDICT_STRICTNESS,
 } from '../jury-core.mjs';
 import {
   subjectSlug,
@@ -44,6 +46,44 @@ function rosterEvent(jurors, round = 0) {
     ],
   };
 }
+
+describe('#2823 round-2 finding 1 — the fold ranks via the SINGLE-SOURCED strictness table (no stale twin)', () => {
+  // The round-2 miss: jury-ledger kept a HAND-COPIED VERDICT_STRICTNESS (3 entries) whose doc claimed to "mirror
+  // disposition-judge", but it was never extended for `prevention-outstanding` — so the fold compared it as
+  // `undefined` and ranked it BELOW accept, rendering ✓ accept for a blocking panel. The fix imports the ONE table
+  // from jury-core; these tests prove the fold now ranks prevention-outstanding correctly (it could not, before).
+  const roster = [
+    { id: 'correctness#1', lens: 'correctness', charter: 'a' },
+    { id: 'correctness#2', lens: 'correctness', charter: 'b' },
+  ];
+
+  it('the imported table is the single source and is TOTAL over VERDICTS, ranking prevention-outstanding above accept', () => {
+    for (const v of Object.values(VERDICTS)) expect(VERDICT_STRICTNESS[v]).toBeTypeOf('number');
+    expect(VERDICT_STRICTNESS[VERDICTS.ACCEPT]).toBeLessThan(VERDICT_STRICTNESS[VERDICTS.PREVENTION_OUTSTANDING]);
+    expect(VERDICT_STRICTNESS[VERDICTS.PREVENTION_OUTSTANDING]).toBeLessThan(VERDICT_STRICTNESS[VERDICTS.CHANGES]);
+    expect(VERDICT_STRICTNESS[VERDICTS.CHANGES]).toBeLessThan(VERDICT_STRICTNESS[VERDICTS.NEEDS_HUMAN]);
+  });
+
+  it('a co-juror prevention-outstanding CARRIES the lens over another juror accept (would have lost to accept before)', () => {
+    const ledger = foldJuryLedger([
+      { type: JURY_EVENT_TYPES.ROSTER_PICKED, round: 0, jurors: roster },
+      verdictEvent({ jurorId: 'correctness#1', verdict: VERDICTS.ACCEPT }),
+      verdictEvent({ jurorId: 'correctness#2', verdict: VERDICTS.PREVENTION_OUTSTANDING }),
+    ]);
+    expect(ledger.lensVerdicts.correctness).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+    expect(ledger.panelVerdict).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it('a co-juror needs-human still beats an incumbent prevention-outstanding (2 > undefined no longer discards it)', () => {
+    const ledger = foldJuryLedger([
+      { type: JURY_EVENT_TYPES.ROSTER_PICKED, round: 0, jurors: roster },
+      verdictEvent({ jurorId: 'correctness#1', verdict: VERDICTS.PREVENTION_OUTSTANDING }),
+      verdictEvent({ jurorId: 'correctness#2', verdict: VERDICTS.NEEDS_HUMAN }),
+    ]);
+    expect(ledger.lensVerdicts.correctness).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(ledger.panelVerdict).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+});
 
 describe('subjectSlug — reversible, filesystem-safe subject basenames', () => {
   it('keeps # (a legal filename char) so we#123 stays reversible', () => {
