@@ -345,6 +345,18 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     // The plan is built with the validated park label threaded in.
     expect(src).toMatch(/park: PARK\.ok \? PARK\.label : null/);
   });
+  it('#2833: the verification finish-guard is wired BEFORE the lane-ref push and refuses an unfinished/absent verification', () => {
+    // The guard calls the shared pure decision core (never a re-implementation of the gate).
+    expect(src).toMatch(/verifyGateDecision/);
+    expect(src).toMatch(/from '\.\/lib\/lane-verify\.mjs'/);
+    // It reads the HEAD's marker and refuses (non-ok) on the source commit BEFORE publishing to the lane ref.
+    expect(src).toMatch(/VERIFY_FILENAME/);
+    expect(src).toMatch(/headSha: refSha/);
+    expect(src.indexOf('verifyGateDecision')).toBeLessThan(src.indexOf('Publish the source commit to the lane ref'));
+    // --require-verified / env demand a green; break-glass is the documented override.
+    expect(src).toMatch(/REQUIRE_VERIFIED = !!flags\['require-verified'\] \|\| process\.env\.WE_REQUIRE_VERIFIED === '1'/);
+    expect(src).toMatch(/WE_LAND_UNVERIFIED/);
+  });
   it('#2622: every PARK_LABELS value has REVIEW_LABEL_META (so the park label provision never crashes on undefined)', () => {
     for (const label of PARK_LABELS) {
       expect(REVIEW_LABEL_META[label]).toBeDefined();
