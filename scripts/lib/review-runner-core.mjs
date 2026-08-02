@@ -26,25 +26,26 @@
  * runner still observes-only. Flipping the runner to act is a SEPARATE, later, ratified step (#2572 part 2); a
  * mechanical implementation slice must not be able to auto-land anything. See `runnerShadowPlan`.
  */
-import { REVIEW_LABELS, hasReviewLabel } from './review-escalation.mjs';
+import { REVIEW_LABELS, hasReviewLabel, partitionAgentClearable } from './review-escalation.mjs';
 import { decideDispositionLabel, LAND_ACTIONS } from './disposition-land-seam.mjs';
 import { decideAutoLand, LAND_MODES } from './auto-land-seam.mjs';
-import { reduceLedger } from './disposition-judge.mjs';
+import { reduceLedger, dispositionPanelVerdict } from './disposition-judge.mjs';
+import { verdictStrictness } from './jury-core.mjs';
 
 /** The agent-clearable park the runner acts on, and the human-only class it NEVER touches (fail-closed). */
 export const RUNNER_PENDING = REVIEW_LABELS.pending;
 export const RUNNER_HUMAN = REVIEW_LABELS.human;
 
-/** Verdict strictness for the shadow-log panel-verdict line — diversity-selection (#2567): the STRICTEST lens
- *  verdict carries (needs-human > changes > prevention-outstanding > accept). Purely descriptive (the seams own the
- *  real disposition). Mirrors jury-core's canonical `VERDICT_STRICTNESS` ranking exactly.
- *  @verdicts-total — every `VERDICTS` member is a key (enforced by the `check:standards` verdict-totality gate), so a
- *   new enum member cannot silently rank as `undefined` (below accept) in this descriptive reduction. */
-const VERDICT_RANK = { accept: 0, 'prevention-outstanding': 1, changes: 2, 'needs-human': 3 };
-function strictestVerdict(lensVerdicts) {
+/** The STRICTEST per-lens verdict for the shadow-log fallback line — diversity-selection (#2567): the strictest
+ *  verdict carries (needs-human > changes > prevention-outstanding > accept). Purely descriptive, and only a
+ *  FALLBACK for the case where the judge escalated before it could derive a panel verdict (no-roster / no-verdicts /
+ *  missing-mandatory-lens). Uses jury-core's CANONICAL `verdictStrictness` — no hand-copied rank table (#2823): an
+ *  unranked verdict THROWS loudly rather than silently ranking below accept. Lens verdicts are enum-constrained
+ *  upstream (`validateJuryEvent`), so this never throws on real ledger data. */
+function strictestLensVerdict(lensVerdicts) {
   const entries = Object.values(lensVerdicts || {});
   if (!entries.length) return 'unknown';
-  return entries.reduce((worst, v) => ((VERDICT_RANK[v] ?? -1) > (VERDICT_RANK[worst] ?? -1) ? v : worst));
+  return entries.reduce((worst, v) => (verdictStrictness(v) > verdictStrictness(worst) ? v : worst));
 }
 
 /**
@@ -59,25 +60,24 @@ function strictestVerdict(lensVerdicts) {
  * A PR with a verified label array that carries NEITHER pending nor human is simply not this runner's business
  * (dropped silently — the runner only routes the `review:pending` class).
  *
+ * SINGLE-SOURCED on `partitionAgentClearable` (`review-escalation.mjs`) — the ONE INVARIANT-2 filter the
+ * convergence workflow also shares (#2823 mirror-instead-of-import). The runner's only divergence, routing just
+ * the `review:pending` class, is a CALLER-SIDE filter over the shared `clearable`, not a second partition.
+ *
  * @param {Array<{pr:(number|string), repo?:string, labels?:Array}>} prs
  * @returns {{ clearable: Array<{pr:number,repo:string,labels:Array}>,
  *             skippedHuman: Array<{pr:number,repo:string}>,
  *             skippedUnverified: Array<{pr:number,repo:string}> }}
  */
 export function partitionRunnerPRs(prs) {
-  const clearable = [];
-  const skippedHuman = [];
-  const skippedUnverified = [];
-  for (const item of Array.isArray(prs) ? prs : []) {
-    const pr = Number(item && item.pr);
-    if (!Number.isFinite(pr) || pr <= 0) continue;
-    const repo = (item && typeof item.repo === 'string' && item.repo) ? item.repo : 'we';
-    if (!Array.isArray(item.labels)) { skippedUnverified.push({ pr, repo }); continue; }
-    if (hasReviewLabel(item.labels, RUNNER_HUMAN)) { skippedHuman.push({ pr, repo }); continue; }
-    if (!hasReviewLabel(item.labels, RUNNER_PENDING)) continue; // not a review:pending park — not ours
-    clearable.push({ pr, repo, labels: item.labels });
-  }
-  return { clearable, skippedHuman, skippedUnverified };
+  const { clearable, skippedHuman, skippedUnverified } = partitionAgentClearable(prs);
+  return {
+    // caller-side narrowing: the runner routes ONLY the review:pending class (a verified non-human PR that is not
+    // pending is not this runner's business — dropped silently, never surfaced as skipped).
+    clearable: clearable.filter((c) => hasReviewLabel(c.labels, RUNNER_PENDING)),
+    skippedHuman,
+    skippedUnverified,
+  };
 }
 
 /**
@@ -149,11 +149,13 @@ export function buildShadowRecord({ item, ledger = [], intent, plan }) {
   const repo = (item && typeof item.repo === 'string' && item.repo) ? item.repo : 'we';
   const summary = summarizeLedger(ledger);
   const wouldClear = intent.action === LAND_ACTIONS.CLEAR;
-  // The panel verdict for the log line: the judge's own `panelVerdict` when it carried one, else the strictest
-  // per-lens verdict from the reduced ledger (diversity-selection — one changes carries), else `none` (no ledger).
-  const panelVerdict = (intent.verdict && typeof intent.verdict === 'object' && intent.verdict.panelVerdict)
-    ? intent.verdict.panelVerdict
-    : (summary.ledgerFound ? strictestVerdict(summary.lensVerdicts) : 'none');
+  // The panel verdict for the log line: the JUDGE'S OWN reduced panel verdict — read via the single accessor
+  // `dispositionPanelVerdict` (it lives at `verdict.proposed.panelVerdict`, NOT the verdict root; reaching for the
+  // wrong path silently read `undefined` and always fell through — the #2830 M2 defect). Only when the judge
+  // escalated BEFORE deriving a panel verdict (no-roster / no-verdicts / missing-mandatory-lens) do we fall back to
+  // the strictest per-lens verdict from the reduced ledger, else `none` (no ledger at all).
+  const panelVerdict = dispositionPanelVerdict(intent.verdict)
+    || (summary.ledgerFound ? strictestLensVerdict(summary.lensVerdicts) : 'none');
   return {
     pr: Number(item && item.pr),
     repo,

@@ -403,3 +403,20 @@ export function disposeVerdict({ ledger = [], config, signals = {}, mandatoryLen
     trail: [...proposed.trail, 'Red judge found no grounds to refute — auto-dispose survives the adversarial pass.'],
   };
 }
+
+/**
+ * THE ONE ACCESSOR for a `DispositionVerdict`'s reduced panel verdict (#2830). The `panelVerdict` field lives on
+ * `verdict.proposed.panelVerdict` (the green judge sets it), NOT on the verdict root — so every consumer that wants
+ * "what verdict did the panel reach" must read it here rather than reaching into the internal shape (a projection
+ * that reached for the wrong path would silently read `undefined` and fall through to a re-derivation). PURE.
+ * Returns `undefined` when the judge escalated before it could derive a panel verdict (the early fail-closed reads:
+ * no-roster / no-verdicts / missing-mandatory-lens, and the caller-signal escalates) — the caller decides the
+ * fallback.
+ * @param {DispositionVerdict|null|undefined} verdict
+ * @returns {string|undefined}
+ */
+export function dispositionPanelVerdict(verdict) {
+  return (verdict && verdict.proposed && typeof verdict.proposed === 'object')
+    ? verdict.proposed.panelVerdict
+    : undefined;
+}

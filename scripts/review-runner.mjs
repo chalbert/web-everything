@@ -50,15 +50,15 @@
  * (`--enforce`, or a discovery/gh failure that left nothing to do). A per-PR error never aborts the batch.
  */
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
-import { join } from 'node:path';
+import { resolve, join } from 'node:path';
 import { homedir, hostname } from 'node:os';
 import { mkdirSync } from 'node:fs';
 import {
-  reserve, readLockEntry, releaseLockDir, isLeaseExpired, DEFAULT_LEASE_MINUTES,
+  reserve, readLockEntry, releaseLockDir, DEFAULT_LEASE_MINUTES,
 } from './readiness/file-locks.mjs';
 import { resolveDispositionConfig } from './lib/review-policy.mjs';
 import { readJuryLog } from './lib/jury-ledger.mjs';
+import { repoKeyForSlug } from './lib/constellation-repos.mjs';
 import {
   partitionRunnerPRs, runnerShadowPlan, buildShadowRecord,
 } from './lib/review-runner-core.mjs';
@@ -72,8 +72,9 @@ export const RUNNER_LEASE_PATH = '<review-runner:singleton>';
 /** A read-only pass is seconds; the TTL only needs to outlast a slow pass and self-reclaim a crash. Mirrors the
  *  daemon lease default (15 min). */
 export const RUNNER_LEASE_MINUTES = DEFAULT_LEASE_MINUTES;
-/** A stable per-process owner id (host:pid:kind) — the SAME string acquires and releases. */
-function runnerOwner() { return `${hostname()}:${process.pid}:review-runner`; }
+/** A stable per-process owner id (host:pid:kind) — the SAME string acquires and releases. Exported so a test can
+ *  prove the acquire/release owner-match round-trips (a drift in this format would make release a silent no-op). */
+export function runnerOwner() { return `${hostname()}:${process.pid}:review-runner`; }
 
 const DEFAULT_REPO_SLUG = 'chalbert/web-everything';
 
@@ -90,9 +91,11 @@ function parseFlags(argv) {
   return { flags, positionals };
 }
 
-/** Read-only `gh pr list` of the review:pending PRs for a repo → `[{pr, repo, labels}]`. A gh failure returns
- *  `null` (the caller reports it), never a partial/guessed set. */
-function discoverPending(repoSlug) {
+/** Read-only `gh pr list` of the review:pending PRs for a repo → `[{pr, repo, labels}]`. `repoKey` is the internal
+ *  constellation key (`we`/`frontierui`/…) the ledger subject is keyed by — derived from the `--repo` slug through
+ *  the shared mapper, NEVER hard-coded (#2830 M3). A gh failure returns `null` (the caller reports it), never a
+ *  partial/guessed set. */
+function discoverPending(repoSlug, repoKey) {
   try {
     const out = execFileSync('gh', [
       'pr', 'list', '--repo', repoSlug, '--label', 'review:pending', '--state', 'open',
@@ -100,16 +103,19 @@ function discoverPending(repoSlug) {
     ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     const rows = JSON.parse(out);
     return (Array.isArray(rows) ? rows : []).map((r) => ({
-      pr: r.number, repo: 'we', labels: labelNamesOf(r.labels),
+      pr: r.number, repo: repoKey, labels: labelNamesOf(r.labels),
     }));
   } catch {
     return null;
   }
 }
 
-/** Re-read the CURRENT labels for an explicit PR set (never trust the number alone) → `[{pr, repo, labels}]`. A
- *  PR that cannot be read is OMITTED (fail-closed: the partition then never sees it, so it is never acted on). */
-function lookupLabels(prNumbers, repoSlug) {
+/** Re-read the CURRENT labels for an explicit PR set (never trust the number alone) → `[{pr, repo, labels?}]`.
+ *  `repoKey` is the internal constellation key (#2830 M3). A PR that cannot be read is emitted WITHOUT a `labels`
+ *  key (`{pr, repo}`) so the partition routes it to the fail-closed `skippedUnverified` bucket and REPORTS it —
+ *  a deleted / private / rate-limited PR is distinguishable from one never requested (#2830 minor), and it is
+ *  still never acted on (no labels array ⇒ unverified ⇒ never cleared). */
+function lookupLabels(prNumbers, repoSlug, repoKey) {
   const out = [];
   for (const n of prNumbers) {
     try {
@@ -117,9 +123,10 @@ function lookupLabels(prNumbers, repoSlug) {
         'pr', 'view', String(n), '--repo', repoSlug, '--json', 'number,labels',
       ], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
       const parsed = JSON.parse(view);
-      out.push({ pr: parsed.number, repo: 'we', labels: labelNamesOf(parsed.labels) });
+      out.push({ pr: parsed.number, repo: repoKey, labels: labelNamesOf(parsed.labels) });
     } catch {
-      // omit — an unreadable PR is fail-closed out of the run
+      // unreadable — emit with NO labels key so it surfaces as skippedUnverified (reported, never acted on).
+      out.push({ pr: Number(n), repo: repoKey });
     }
   }
   return out;
@@ -138,19 +145,22 @@ function loadLedgerFromDurableLog(subject) {
   try { return readJuryLog(subject); } catch { return []; }
 }
 
-/** Acquire the singleton lease. `{ ok, reason, heldBy }` — `ok:false, reason:'held'` ⇒ a live runner holds it. */
-function acquireLease(owner, nowMs = Date.now()) {
-  try { mkdirSync(RUNNER_LOCK_ROOT, { recursive: true }); } catch { /* reserve self-heals a missing root */ }
+/** Acquire the singleton lease. `{ ok, reason, heldBy }` — `ok:false, reason:'held'` ⇒ a live runner holds it. The
+ *  `root` is injectable (default: the machine-global lock root) so a test can exercise the protocol against a temp
+ *  dir instead of the real `~/.claude` home. Exported for that test. */
+export function acquireLease(owner, nowMs = Date.now(), root = RUNNER_LOCK_ROOT) {
+  try { mkdirSync(root, { recursive: true }); } catch { /* reserve self-heals a missing root */ }
   return reserve(
-    RUNNER_LOCK_ROOT, RUNNER_LEASE_PATH, owner, nowMs, new Date(nowMs).toISOString(),
+    root, RUNNER_LEASE_PATH, owner, nowMs, new Date(nowMs).toISOString(),
     process.pid, 'unknown', RUNNER_LEASE_MINUTES,
   );
 }
 
-/** Release the singleton lease, but ONLY if `owner` still holds it (never stomp a reclaimer). Idempotent. */
-function releaseLease(owner) {
-  const cur = readLockEntry(RUNNER_LOCK_ROOT, RUNNER_LEASE_PATH);
-  if (cur && cur.owner === owner) { releaseLockDir(RUNNER_LOCK_ROOT, RUNNER_LEASE_PATH); return true; }
+/** Release the singleton lease, but ONLY if `owner` still holds it (never stomp a reclaimer). Idempotent. `root`
+ *  is injectable for the same reason as `acquireLease`. Returns true iff it actually released. Exported for test. */
+export function releaseLease(owner, root = RUNNER_LOCK_ROOT) {
+  const cur = readLockEntry(root, RUNNER_LEASE_PATH);
+  if (cur && cur.owner === owner) { releaseLockDir(root, RUNNER_LEASE_PATH); return true; }
   return false;
 }
 
@@ -189,6 +199,15 @@ function main(argv) {
     return process.exit(2);
   }
 
+  // Derive the INTERNAL repo key from the --repo SLUG through the shared mapper — the ledger subject is keyed by
+  // key (`${key}#${pr}`), never the slug. Fail-CLOSED on an unknown slug rather than silently keying it `we` (the
+  // #2830 M3 defect: `--repo=…frontierui` reading a FrontierUI PR but folding the WE ledger).
+  const repoKey = repoKeyForSlug(repoSlug);
+  if (!repoKey) {
+    process.stdout.write(`${JSON.stringify({ error: `review-runner: --repo=${repoSlug} is not a known constellation repo (slug or key) — refusing to guess its ledger key` })}\n`);
+    return process.exit(2);
+  }
+
   const owner = runnerOwner();
   const useLock = !flags['no-lock'];
   let holding = false;
@@ -209,9 +228,9 @@ function main(argv) {
     let discovered;
     if (positionals.length) {
       const nums = positionals.map((p) => Number(p)).filter((n) => Number.isFinite(n) && n > 0);
-      discovered = lookupLabels(nums, repoSlug);
+      discovered = lookupLabels(nums, repoSlug, repoKey);
     } else {
-      discovered = discoverPending(repoSlug);
+      discovered = discoverPending(repoSlug, repoKey);
     }
     if (discovered == null) {
       process.stdout.write(`${JSON.stringify({ error: `review-runner: could not discover review:pending PRs from ${repoSlug} (gh failed)` })}\n`);

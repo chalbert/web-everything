@@ -420,6 +420,39 @@ export function hasReviewLabel(labels, label) {
 }
 
 /**
+ * THE ONE agent-clearable partition (INVARIANT 2 / #2439) — split a discovered parked-PR set into the
+ * AGENT-CLEARABLE set (a verified label array that does NOT carry `review:human`), the SKIPPED `review:human`
+ * set (a human's to clear — conflict of interest), and the label-UNVERIFIED set (no labels array at all: its
+ * labels could not be read, so we cannot PROVE it is not a `review:human` PR → never act on it). PURE,
+ * FAIL-CLOSED. The human check runs BEFORE anything else, so a PR carrying human is always skipped as human.
+ *
+ * This is the codebase's most safety-critical filter, so it is single-sourced HERE and shared by both the
+ * convergence workflow (`review-parked-prs.mjs`) and the scheduled runner (`review-runner-core.mjs`) — a copy
+ * cannot drift if there is no copy (#2823 mirror-instead-of-import). Any caller-specific NARROWING (e.g. the
+ * runner routes only the `review:pending` class) is a caller-side filter over the returned `clearable`, never a
+ * second partition. Each `clearable` entry carries its verified `labels` so a caller can apply that filter.
+ *
+ * @param {Array<{pr?:(number|string), number?:(number|string), repo?:string, labels?:Array}>} prs
+ * @returns {{ clearable: Array<{pr:number,repo:string,labels:Array}>,
+ *             skippedHuman: Array<{pr:number,repo:string}>,
+ *             skippedUnverified: Array<{pr:number,repo:string}> }}
+ */
+export function partitionAgentClearable(prs) {
+  const clearable = [];
+  const skippedHuman = [];
+  const skippedUnverified = [];
+  for (const item of Array.isArray(prs) ? prs : []) {
+    const pr = Number(item && (item.pr != null ? item.pr : item.number));
+    if (!Number.isFinite(pr) || pr <= 0) continue;
+    const repo = (item && typeof item.repo === 'string' && item.repo) ? item.repo : 'we';
+    if (!Array.isArray(item.labels)) { skippedUnverified.push({ pr, repo }); continue; }
+    if (hasReviewLabel(item.labels, REVIEW_LABELS.human)) { skippedHuman.push({ pr, repo }); continue; }
+    clearable.push({ pr, repo, labels: item.labels });
+  }
+  return { clearable, skippedHuman, skippedUnverified };
+}
+
+/**
  * #2409 — the machine-readable marker that records WHICH commit-set a `review:accepted` verdict actually
  * covered. `review-set-label.mjs` stamps it into the durable accept comment at the moment it applies
  * `review:accepted`, capturing the PR's head SHA THEN (the tree the reviewer looked at). The drain reads it

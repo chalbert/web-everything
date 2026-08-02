@@ -24,6 +24,7 @@ import { resolveDispositionConfig } from '../review-policy.mjs';
 import { REVIEW_LABELS } from '../review-escalation.mjs';
 import { VERDICTS, MANDATORY_LENSES } from '../jury-core.mjs';
 import { LAND_ACTIONS } from '../disposition-land-seam.mjs';
+import { disposeVerdict } from '../disposition-judge.mjs';
 
 const CONFIG = resolveDispositionConfig(); // present-unless-all-agree, dissentThreshold 0, equal weights; landMode shadow
 
@@ -174,6 +175,34 @@ describe('buildShadowRecord — the structured shadow-log record', () => {
     expect(rec.wouldClear).toBe(true);
     expect(rec.disposition).toBe('auto-dispose');
     expect(rec.ledgerFound).toBe(true);
+  });
+
+  it('panelVerdict is the JUDGE\'S OWN reduced verdict — equal to disposeVerdict(...).proposed.panelVerdict (M2)', () => {
+    // #2830 M2: the record's panelVerdict must be a projection of the upstream decider's field, NEVER a local
+    // re-derivation. Proven by equivalence against the producer for BOTH a clean-accept and a contested ledger.
+    for (const build of [cleanDiverseLedger, contestedLedger]) {
+      const ledger = build();
+      const item = { pr: 7, repo: 'we', labels: [REVIEW_LABELS.pending] };
+      const { intent, plan } = runnerShadowPlan({ ledger, config: CONFIG, currentLabels: item.labels });
+      const rec = buildShadowRecord({ item, ledger, intent, plan });
+      const upstream = disposeVerdict({ ledger, config: CONFIG }).proposed.panelVerdict;
+      expect(rec.panelVerdict).toBe(upstream);
+    }
+  });
+
+  it('a clean-accept ledger records panelVerdict "accept"; a contested ledger records "changes" (not a fallback)', () => {
+    const clean = buildShadowRecord({
+      item: { pr: 1, repo: 'we', labels: [REVIEW_LABELS.pending] },
+      ledger: cleanDiverseLedger(),
+      ...runnerShadowPlan({ ledger: cleanDiverseLedger(), config: CONFIG, currentLabels: [REVIEW_LABELS.pending] }),
+    });
+    expect(clean.panelVerdict).toBe(VERDICTS.ACCEPT);
+    const contested = buildShadowRecord({
+      item: { pr: 2, repo: 'we', labels: [REVIEW_LABELS.pending] },
+      ledger: contestedLedger(),
+      ...runnerShadowPlan({ ledger: contestedLedger(), config: CONFIG, currentLabels: [REVIEW_LABELS.pending] }),
+    });
+    expect(contested.panelVerdict).toBe(VERDICTS.CHANGES);
   });
 
   it('records ledgerFound:false and wouldClear:false for a PR with no persisted ledger (the #2830 live case)', () => {

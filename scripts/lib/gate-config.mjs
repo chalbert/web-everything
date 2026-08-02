@@ -154,6 +154,30 @@ export const TRUST_CHAIN = [
     desc: 'the drain-daemon pure logic (WE #2480) — buildPassArgs() constructs the merge-sweep argv (label + --under-lease) and buildSetLabelArgs() constructs the review-clear argv (--to=accepted clears the parked gate so the drain may merge); a change to either invocation builder is gate-deciding. Engine tier — the WE child scripts stay the rubric/disposition authority. NB: generic basename (see note above)',
     homes: ['plateau-app/tools/drain-daemon/lib.mjs'],
   },
+  // ── the scheduled SHADOW review runner (WE #2830, front slice of #2572, under epic #2612) ─────────────────────
+  // The runner is an INDEPENDENT scheduled process that COMPOSES the disposition→land seams (disposition-land-seam.mjs
+  // + auto-land-seam.mjs, both `policy` above) to decide whether a review:pending PR WOULD clear. Its zero-mutation
+  // guarantee is a POLICY fact, not just runtime behaviour: `runnerShadowPlan` hard-codes `LAND_MODES.SHADOW` and the
+  // CLI REFUSES `--enforce`, and THAT pairing is what keeps the machine from auto-writing `review:accepted` unattended.
+  // An edit that flips the mode to `config.landMode`, or deletes the `--enforce` refusal, arms the runner to clear a
+  // review on a scheduled run with NO human — so it is leash-DEFINING (it decides what clears the gate), exactly like
+  // the seams it composes. Registered `policy` (NOT engine): a change to the mutation guarantee forces review:human, so
+  // an agent panel can never clear the very edit that flips shadow→enforce. Basename-matched, so it follows the runner
+  // if the enforce-era wiring relocates it (see file header).
+  {
+    role: 'review-runner-core',
+    file: 'review-runner-core.mjs',
+    tier: 'policy',
+    desc: 'the PURE core of the scheduled shadow review runner (#2830) — `runnerShadowPlan` composes the disposition/auto-land seams with the mode HARD-CODED to LAND_MODES.SHADOW; that forced-shadow constant IS the zero-mutation guarantee (flip it to config.landMode and a scheduled run auto-writes review:accepted). It decides what clears the gate, so it is leash-defining policy tier — an agent may not clear an edit to its own mutation guarantee',
+    homes: ['scripts/lib/review-runner-core.mjs'],
+  },
+  {
+    role: 'review-runner-cli',
+    file: 'review-runner.mjs',
+    tier: 'policy',
+    desc: 'the scheduled shadow review runner CLI (#2830) — discovers review:pending PRs and shadow-disposes each; the `--enforce` REFUSAL is the second half of the zero-mutation guarantee (delete it and the runner can be flipped to act). Gate-deciding + leash-defining, so policy tier: flipping this mechanical slice to auto-clear is a separate ratified step (#2572 part 2) that must be human-reviewed',
+    homes: ['scripts/review-runner.mjs'],
+  },
   // ── the check:standards GATE — its definition-of-green split into policy vs engine (WE #2769, #2625 fork (d)) ──
   // The repo-health gate (`npm run check:standards`) is itself trust-chain machinery: its rules decide whether a
   // change may land at all. #2625 ruled it should split like the auto-review gate — the IMPLEMENTATION stays
