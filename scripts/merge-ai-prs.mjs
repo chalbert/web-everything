@@ -414,8 +414,18 @@ export function planCiLifecycleLabelUpdate({ currentLabels = [], desired, owned 
  *     signal the bare `/merge` orphan sweep relies on, where NO label is present. This branch is UNCHANGED:
  *     an unlabelled mixed-authorship PR still SKIPS (strict gate preserved for the orphan sweep).
  * Pass `trustLabel: null` to force the strict every-commit gate regardless of labels.
+ *
+ * HOLD-INTEGRITY (#2820). The merge decision is an AND, never an OR on `ready-to-merge` alone: a PR bearing an
+ * UNSATISFIED review hold — `review:changes` / `review:human`, or a non-relieved `review:pending`, all WITHOUT
+ * `review:accepted` — is SKIPPED here regardless of `ready-to-merge`. ci-lifecycle stamps `ready-to-merge` on
+ * green CI independently of review state, so the hold and the go-ahead sit on the same PR at once; reading only
+ * `ready-to-merge` let the go-ahead win and merged WE #956 while it carried `review:changes`. Checking the review
+ * hold in the predicate itself makes it the single source of truth — no label-timing race downstream can slip a
+ * held PR through. `allowPendingReview` mirrors the #2423 per-PR relief valve: a PR the operator named in
+ * `--no-review-escalation=<pr#>` may still merge past `review:pending` (NEVER past `review:changes`/`review:human`,
+ * which stay held even when relieved). A PR with NO review label at all is unaffected — it merges exactly as before.
  */
-export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-merge' } = {}) {
+export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-merge', allowPendingReview = false } = {}) {
   const num = pr?.number;
   const title = pr?.title || '';
   const aiGenerated = isAiGeneratedPr(pr);
@@ -432,6 +442,14 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
   const state = String(pr?.mergeStateStatus || '').toUpperCase();
   const mergeable = String(pr?.mergeable || '').toUpperCase();
   const landableState = state === 'CLEAN' || state === 'UNSTABLE'; // UNSTABLE = mergeable, only non-required checks red
+  // #2820 HOLD-INTEGRITY — is an unsatisfied review hold live on this PR? `hasUnclearedReviewLabel` is the shared
+  // hold predicate: true iff review:changes / review:human (or, unless relieved, review:pending) is present AND
+  // review:accepted is NOT. This is the durable half of the fix — the merge predicate ANDs review-satisfied with
+  // ready-to-merge, so no downstream ci-lifecycle re-add of `ready-to-merge` can slip a held PR through.
+  const reviewHeld = hasUnclearedReviewLabel(pr?.labels, { allowPending: allowPendingReview });
+  const heldLabel = hasLabel(pr, REVIEW_LABELS.changes) ? REVIEW_LABELS.changes
+    : hasLabel(pr, REVIEW_LABELS.human) ? REVIEW_LABELS.human
+      : REVIEW_LABELS.pending;
   let decision = 'merge';
   let reason = certifyLabel
     ? `producer-certified (label "${trustLabel}"), required check green, cleanly mergeable`
@@ -439,6 +457,12 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
       ? 'human-cleared (review:accepted), required check green, cleanly mergeable'
       : 'AI-generated, required check green, cleanly mergeable';
   if (!certified) { decision = 'skip'; reason = `not AI-generated (a commit lacks the Co-Authored-By: Claude trailer), no "${trustLabel}" label, and not human-cleared (review:accepted)`; }
+  // #2820 — the review hold is checked right after certification (a held PR that could otherwise merge is ALWAYS
+  // certified — it carries `ready-to-merge` — so this ordering never lets a held PR slip past on the earlier
+  // uncertified branch) and BEFORE the CI/mergeability checks, so WE #956's exact state (`ready-to-merge` +
+  // `review:changes`, green, cleanly mergeable) is refused HERE with the hold surfaced as the auditable reason. A
+  // PR with no review label is never held, so this branch is a no-op for the common case.
+  else if (reviewHeld) { decision = 'skip'; reason = `unsatisfied review hold ("${heldLabel}") present without review:accepted — refusing to merge regardless of "${trustLabel}" (#2820)`; }
   else if (!testGreen) { decision = 'skip'; reason = `required check "${requiredCheck}" is not green`; }
   else if (mergeable !== 'MERGEABLE') { decision = 'skip'; reason = `not mergeable (mergeable=${mergeable || 'UNKNOWN'})`; }
   else if (!landableState) { decision = 'skip'; reason = `merge state ${state || 'UNKNOWN'} (BEHIND⇒needs rebase, DIRTY/BLOCKED/DRAFT⇒not landable) — left for its author`; }
@@ -446,7 +470,7 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
   // labelling (PR #206 landed bodyless). Checked LAST so the earlier, more actionable reasons (uncertified /
   // red / unmergeable) still win when several are true at once.
   else if (!hasNonEmptyBody(pr?.body)) { decision = 'skip'; reason = 'empty/whitespace description — refusing to land it (add a real summary of what changed and why; #2324)'; }
-  return { num, title, decision, reason, aiGenerated, certifyLabel, humanCleared, testGreen, state, mergeable };
+  return { num, title, decision, reason, aiGenerated, certifyLabel, humanCleared, reviewHeld, testGreen, state, mergeable };
 }
 
 /**
@@ -1688,7 +1712,10 @@ async function runCli() {
     for (const p of prs) {
       const read = sweepReads.get(prCacheKey(repo, p.number))?.value || {};
       p.commits = read.commits || [];
-      const v = classifyPr(p, { requiredCheck: REQUIRED });
+      // #2820 — thread the #2423 per-PR relief set so a PR the operator named in `--no-review-escalation=<pr#>`
+      // may still merge past `review:pending` (the hold predicate honours `allowPending` for it); a NON-relieved
+      // review:pending — and ALWAYS review:changes / review:human — stays held here, before the escalation pass.
+      const v = classifyPr(p, { requiredCheck: REQUIRED, allowPendingReview: escalationRelief.prs.includes(Number(p.number)) });
       v.repo = repo;               // null (local clone) or a slug — routes the merge/view/edit + the git-side gate
       v.headRef = p.headRefName;
       // #2188: attach the manifest (backlog `item` + cross-item `blockedBy`) so the GLOBAL cascade honours
