@@ -1,4 +1,5 @@
 ---
+bornAs: x4ve94l
 kind: story
 size: 3
 parent: "2527"
@@ -9,7 +10,7 @@ tags: []
 
 # Repair 2821 gate 3 fixture eaten by the at-land hash-to-NNN rewriter
 
-On main, #2821 gate 3's justification reads round 1's dead 2819 links; it originally said the xmhvbvx hash slug. The at-land hash-to-NNN rewrite healed the very example that exists to demonstrate hash slugs are NOT healed, so the sentence now asserts numbered links dangle (false) and gate 3 has lost its reproducible fixture. Restore the example AND make it rewrite-proof so the next land does not eat it again.
+On main, #2821 gate 3's justification reads round 1's dead 2819 links; it originally said the 2819 hash slug. The at-land hash-to-NNN rewrite healed the very example that exists to demonstrate hash slugs are NOT healed, so the sentence now asserts numbered links dangle (false) and gate 3 has lost its reproducible fixture. Restore the example AND make it rewrite-proof so the next land does not eat it again.
 
 ## Acceptance
 
