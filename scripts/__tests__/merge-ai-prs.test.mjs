@@ -394,6 +394,61 @@ describe('merge-ai-prs — #2683 extraOpenItems (the --only fast drain orders li
   });
 });
 
+// #xq985wu — DECOUPLE the drain's merge-ORDERING from the `ready-to-merge` label scope. Ordering must derive
+// from the FULL open-PR item set (the label-blind `collectOpenPrContext` set), NOT the `--label`-scoped
+// candidate list. This is the prerequisite that makes #984/#2832's strip of `ready-to-merge` from a held PR
+// SAFE: once stripped, the held PR drops out of the `--label`-scoped `verdicts`, so if ordering derived only
+// from that list a dependent `blockedBy` the held item would resolve the edge as "landed" and land EARLY.
+describe('merge-ai-prs — #xq985wu decouple merge-ordering from the ready-to-merge label scope', () => {
+  const cand = (num, item, blockedBy = [], decision = 'merge') => ({ num, item, blockedBy, decision });
+
+  // AC1 — decoupled ordering. On a FULL sweep, #984 strips `ready-to-merge` from a held blocker, so it is
+  // ABSENT from the `--label`-scoped candidate list — yet it is STILL an open PR, so its item rides in via
+  // `extraOpenItems` (the label-blind full-open set). The dependent must DEFER against that membership.
+  it('AC1: a dependent DEFERS on a held blocker that is absent from the candidate list but present in extraOpenItems (the #984 strip)', () => {
+    // candidate list = only the dependent (#2 → item 2200 blockedBy 2199); the held blocker 2199 was stripped
+    // of `ready-to-merge` so it is NOT a candidate. Its item is fed via the label-blind open-PR set.
+    const gated = planLabelDrain([cand(2, 2200, [2199])], { extraOpenItems: new Set([2199, 2200]) });
+    expect(gated.ready).toEqual([]);
+    expect(gated.deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199] }]);
+  });
+
+  it('AC1 mirror: the SAME dependent is READY once the blocker is absent from BOTH the candidate list AND extraOpenItems (truly landed)', () => {
+    // Proves the defer above comes from open-SET membership, not from nothing: drop 2199 from the open set and
+    // the dependent frees. (The extraOpenItems still carries the dependent's own item — a self-edge is a no-op.)
+    const freed = planLabelDrain([cand(2, 2200, [2199])], { extraOpenItems: new Set([2200]) });
+    expect(freed.ready.map((c) => c.num)).toEqual([2]);
+    expect(freed.deferred).toEqual([]);
+  });
+
+  // AC2 — superset safety / no regression. A FULL candidate list plus a superset `extraOpenItems` (containing
+  // extra UNRELATED open items) yields the SAME ready/deferred partition as feeding no extra set at all for the
+  // non-held items. Extra open items only add a defer for an edge that points AT them — never drop one.
+  it('AC2: a superset extraOpenItems produces the SAME partition as today for non-held items (only ADDs defers, never drops one)', () => {
+    const list = [cand(2, 2200, [2199]), cand(1, 2199, []), cand(3, 2205, [])];
+    const baseline = planLabelDrain(list); // today's full-sweep behaviour (extraOpenItems null)
+    // superset = the candidate items PLUS unrelated open items no edge points at.
+    const withSuperset = planLabelDrain(list, { extraOpenItems: new Set([2199, 2200, 2205, 9998, 9999]) });
+    expect(withSuperset.ready.map((c) => c.num)).toEqual(baseline.ready.map((c) => c.num));
+    expect(withSuperset.deferred).toEqual(baseline.deferred);
+    // and the concrete partition is unchanged: the blocker (#1) + the disjoint sibling (#3) land; #2 defers.
+    expect(withSuperset.ready.map((c) => c.num)).toEqual([1, 3]);
+    expect(withSuperset.deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199] }]);
+  });
+
+  // AC3 — the wiring. `orderExtraOpenItems` is sourced from the label-blind full-open context (`openPrContext`)
+  // on EVERY pass, no longer conditioned on `onlyPr`. This is a source-contract assertion (mirrors the existing
+  // #2409 add-first/remove-last source check): the observable seam is a single top-level assignment.
+  it('AC3: orderExtraOpenItems is sourced from openPrContext.openItems and NOT gated on onlyPr', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
+    const m = src.match(/const orderExtraOpenItems = (.+);/);
+    expect(m).not.toBeNull(); // the assignment is present
+    const rhs = m[1];
+    expect(rhs).toContain('openPrContext.openItems'); // sourced from the label-blind full-open set
+    expect(rhs).not.toContain('onlyPr'); // NOT conditioned on the --only fast-drain flag
+  });
+});
+
 describe('merge-ai-prs — #2393 proof-of-land stackParents gate (planLabelDrain)', () => {
   // a candidate that may carry stackParents (the overlap-stack edge) alongside its blockedBy edge.
   const sc = (num, item, stackParents = [], { blockedBy = [], decision = 'merge' } = {}) => ({ num, item, blockedBy, stackParents, decision });
