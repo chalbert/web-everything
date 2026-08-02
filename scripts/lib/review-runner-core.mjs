@@ -36,8 +36,11 @@ export const RUNNER_PENDING = REVIEW_LABELS.pending;
 export const RUNNER_HUMAN = REVIEW_LABELS.human;
 
 /** Verdict strictness for the shadow-log panel-verdict line — diversity-selection (#2567): the STRICTEST lens
- *  verdict carries (needs-human > changes > accept). Purely descriptive (the seams own the real disposition). */
-const VERDICT_RANK = { accept: 0, changes: 1, 'needs-human': 2 };
+ *  verdict carries (needs-human > changes > prevention-outstanding > accept). Purely descriptive (the seams own the
+ *  real disposition). Mirrors jury-core's canonical `VERDICT_STRICTNESS` ranking exactly.
+ *  @verdicts-total — every `VERDICTS` member is a key (enforced by the `check:standards` verdict-totality gate), so a
+ *   new enum member cannot silently rank as `undefined` (below accept) in this descriptive reduction. */
+const VERDICT_RANK = { accept: 0, 'prevention-outstanding': 1, changes: 2, 'needs-human': 3 };
 function strictestVerdict(lensVerdicts) {
   const entries = Object.values(lensVerdicts || {});
   if (!entries.length) return 'unknown';
