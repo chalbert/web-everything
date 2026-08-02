@@ -21,14 +21,16 @@ fix↔review loop clears review, and when a deterministic oracle clears a slice.
 ## Ruling (2026-08-02) — RATIFIED by the operator (Nicolas Gilbert)
 
 The operator (Nicolas Gilbert) ratified this governance cluster in-session on **2026-08-02**. On routing:
-today the live gate parks this diff `review:human` on the statute-path test itself
-(`humanRequired = gateSelfFiles.length > 0 || statuteFiles.length > 0`, `we:scripts/lib/review-escalation.mjs`),
-because the #2771 codify-shape classifier is not yet built (#2785, `status: open`). And even once it is,
-this PR is **not** the `#review-human-declarative-leash-only` (#2771) Fork-B codify-shape exemption:
-that exemption requires the **ONLY** `we:docs/agent/platform-decisions.md` edit to be the single anchor
-named in `codifiedIn`, but this diff adds **four** new anchors while `codifiedIn` names one — an author
-writing new rules, not the mechanical codification of one already-ruled anchor. A NEW-rule statute diff
-stays `review:human`, the genuine ratification that gate exists for.
+this diff parks `review:human` because it is a **NEW-rule statute diff** — it adds **four** new anchors
+while `codifiedIn` names one, an author writing new rules, not the mechanical codification of one
+already-ruled anchor. That holds under both routing regimes. Today the live gate parks it on the
+statute-path test itself (`humanRequired = gateSelfFiles.length > 0 || statuteFiles.length > 0`,
+`we:scripts/lib/review-escalation.mjs`) — the #2771 codify-shape classifier is not yet built (#2785,
+`status: open`). And once #2785 lands, this PR is still **not** the `#review-human-declarative-leash-only`
+(#2771) Fork-B codify-shape exemption: that exemption requires the **ONLY**
+`we:docs/agent/platform-decisions.md` edit to be the single anchor named in `codifiedIn`, and this diff's
+four-anchor addition fails that test. Either way it stays `review:human`, the genuine ratification that
+gate exists for.
 
 The ruling codifies four cross-linked statute anchors (each carries a `**Ratified 2026-08-02 by the operator
 (Nicolas Gilbert)**` provenance line pointing back at this decision):
