@@ -1,4 +1,5 @@
 ---
+bornAs: x84bjrx
 kind: decision
 size: 3
 status: open
@@ -26,11 +27,11 @@ exists on the base is the principle step; *adding* a brand-new marked assertion 
 the rule refuses its own prescribed impl PR (a hunk that adds `// @principle` + the assertion is trivially
 "a hunk inside a tagged block") — see the deadlock resolution below.
 
-This is the sequencing discipline the sibling gate-narrowing decision (`#xhrni4v`) depends on: `#xhrni4v`
+This is the sequencing discipline the sibling gate-narrowing decision (`#2840`) depends on: `#2840`
 only lets behaviour-preserving impl go mechanical *because* a principle is ENCODED as an invariant — and
 that encoding rides the impl PR (as impl), never smuggling a *principle edit* into the ratification PR.
 This decision is itself authored under its own rule: it is a principle, so it lands in a decisions-only PR
-parked `review:human` alongside `#xhrni4v` and `#x2w4qbf`, with zero implementation. The
+parked `review:human` alongside `#2840` and `#2838`, with zero implementation. The
 `#human-required-is-judgment-only` anchor it cites lands via `xzc1sc5` (PR #982), so that is a **hard
 land-order precondition** — #982 must land first or the lineage cite 404s. It is stated in prose, not
 `blockedBy` frontmatter, because `xzc1sc5`'s file is not yet in this tree and
@@ -70,7 +71,7 @@ A **write-time `check:standards` gate**, `assertNotPrincipleAndImpl(changedFiles
 `we:scripts/check-standards-rules.mjs`, invoked from both the `PreToolUse(Edit|Write)` deny path
 (shift-left, per rule #43) and the whole-tree `check:standards` run (durable backstop):
 
-- **`principleTouch`** = any changed file/hunk that is a **principle surface**, reusing `#xhrni4v`'s
+- **`principleTouch`** = any changed file/hunk that is a **principle surface**, reusing `#2840`'s
   `isPrincipleSurface` detector at its **pre-existing-guarantee grain**: a statute-anchor edit in
   `we:docs/agent/platform-decisions.md`, OR an edit/removal of a `@principle` / `@invariant`-marked
   assertion **that is present in the base version of the file**. It does NOT include *adding* a new marked
@@ -91,21 +92,21 @@ A **write-time `check:standards` gate**, `assertNotPrincipleAndImpl(changedFiles
   of its ratified anchor is a hard error (`check:standards`), so impl can never precede the human ruling it
   enforces.
 
-**Deadlock resolution with `#xhrni4v` (the joint migration PR).** `#xhrni4v`'s impl PR both (i) edits the
+**Deadlock resolution with `#2840` (the joint migration PR).** `#2840`'s impl PR both (i) edits the
 gate engine (`we:scripts/lib/gate-config.mjs` / `we:scripts/lib/review-escalation.mjs`) to compose the new
 `isPrincipleSurface` trigger and (ii) *adds* the first `@principle`-marked invariants. Under the corrected
 grain, **both halves are `implTouch`** — (i) is engine code, (ii) is *added* markers — so `principleTouch`
 is false and the PR is NOT refused. There is no "leave the path gate in the same diff that adds a marked
-invariant" gymnastic either: `#xhrni4v`'s declarative-leash floor is **pinned** (whole-file, permanent),
+invariant" gymnastic either: `#2840`'s declarative-leash floor is **pinned** (whole-file, permanent),
 not a per-file "until-encoded" floor, so files are never individually dropped from the gate. The two
 decisions, ratified together, therefore have an executable joint migration path — each principle is
 ratified in its `review:human` PR, and its enforcing invariant + engine wiring land in a following pure-impl
 PR the committee clears.
 
-Like `#xhrni4v`, this gate reads hunk **content** (`isPrincipleSurface` needs base-vs-head), so it shares
+Like `#2840`, this gate reads hunk **content** (`isPrincipleSurface` needs base-vs-head), so it shares
 that decision's **diff-content plumbing precondition** — the base/head signal must be threaded into the
 `PreToolUse(Edit|Write)` hook and the tree run. It is a pure function over `{changedFiles, diffHunks}` once
-that plumbing exists, and then composes with `#xhrni4v`'s trigger and the locus-prefix write guard at one
+that plumbing exists, and then composes with `#2840`'s trigger and the locus-prefix write guard at one
 write-time seam.
 
 ## RISK
@@ -138,8 +139,8 @@ changes no rule text is not a statute-anchor edit).
 
 **Adopt A.** It makes the ratification act clean — the operator sees a principle and only a principle — and
 turns enforcement of that principle into ordinary mechanical impl the committee clears. It is the
-structural precondition for `#xhrni4v` (an invariant can only make impl "mechanical" if the invariant
-itself never smuggled through the human gate) and for `#x2w4qbf` (the enforce-flip's readiness record is
+structural precondition for `#2840` (an invariant can only make impl "mechanical" if the invariant
+itself never smuggled through the human gate) and for `#2838` (the enforce-flip's readiness record is
 only trustworthy if principle and impl are separable events). The write-time gate is the mechanical
 enforcement the directive demands; the implementation of that gate is itself a follow-on impl PR under this
 very rule — this PR authors only the principle.

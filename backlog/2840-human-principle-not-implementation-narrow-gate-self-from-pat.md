@@ -1,4 +1,5 @@
 ---
+bornAs: xhrni4v
 kind: decision
 size: 3
 status: open
@@ -19,9 +20,9 @@ green) is **mechanical**, and mechanical work is cleared by the fix↔review con
 `we:docs/agent/platform-decisions.md#human-required-is-judgment-only`.
 
 This is one of three principle decisions prepared together for a single ratification pass (with
-`#x84bjrx` — the two-PR rule — and `#x2w4qbf` — the enforce-flip). Per the discipline those decisions
+`#2839` — the two-PR rule — and `#2838` — the enforce-flip). Per the discipline those decisions
 establish, this is a **principle change**, so it lands in its own decisions-only PR parked `review:human`;
-the implementation that narrows the gate is a separate follow-on PR (see `#x84bjrx`).
+the implementation that narrows the gate is a separate follow-on PR (see `#2839`).
 
 **Blocked-by / precondition, not just lineage.** The four anchors this decision reasons over
 (`#human-required-is-judgment-only`, `#fix-review-convergence-independent-root-cause`,
@@ -48,13 +49,13 @@ against it:
   mechanic**: narrow `humanRequired` from *any `isPolicyCorePath`* to *any `POLICY_SPEC` basename* (a
   frozen declarative-leash subset). Its impl follow-on is **#2785** (`status: open`) — which is why the
   code today still reads `isGateSelfPath = isPolicyCorePath` (the un-narrowed path gate).
-- **This decision (`#xhrni4v`) is the second-stage narrowing.** #2785 narrows the human gate by *path* to
-  the declarative-leash files. `#xhrni4v` adds a second, orthogonal axis: a `@principle`/`@invariant`-marked
+- **This decision (`#2840`) is the second-stage narrowing.** #2785 narrows the human gate by *path* to
+  the declarative-leash files. `#2840` adds a second, orthogonal axis: a `@principle`/`@invariant`-marked
   **guarantee** is human-gated **wherever it lives** — including in an engine/committee-tier file #2785
   drops to the committee — and, conversely, a trust-chain file that carries **no** marked guarantee this
   diff (a behaviour-preserving refactor) is *not* human-gated just for its path. The leash files stay
   human-gated as whole files (see the pin below); markers extend the gate, they never shrink it.
-- **Therefore #xhrni4v depends on #2785 landing first** (`blockedBy: 2785`). Building #xhrni4v on the
+- **Therefore #2840 depends on #2785 landing first** (`blockedBy: 2785`). Building #2840 on the
   un-narrowed `isGateSelfPath = isPolicyCorePath` base would re-derive #2771's ruling instead of extending
   it.
 
@@ -79,7 +80,7 @@ address, and what remains after it lands:
 - There is no way to say "this specific edit changed a guarantee" versus "this edit reflowed a comment":
   the gate is all-or-nothing per path.
 
-`#xhrni4v` closes both by making the *encoded guarantee itself* — a `@principle`/`@invariant` marker — a
+`#2840` closes both by making the *encoded guarantee itself* — a `@principle`/`@invariant` marker — a
 human trigger independent of path.
 
 **Marker inventory today: ZERO.** There are currently no `@principle` or `@invariant` markers anywhere in
@@ -100,7 +101,7 @@ permanent floor, not a temporary one):
    guarantee ENCODED as a machine-checkable invariant, tagged so the gate can find it. Editing or removing
    an existing marked guarantee is editing the principle; it is human-gated. (Note the "already exists on
    the base" grain — *adding* a new marked invariant that enforces an already-ratified anchor is
-   *implementation*, mechanical, per `#x84bjrx`; only touching a pre-existing one is the principle step.)
+   *implementation*, mechanical, per `#2839`; only touching a pre-existing one is the principle step.)
 3. The **declarative-leash path floor (permanent).** Every file in #2785's `POLICY_SPEC` declarative-leash
    set — the policy contract, the roster, the invariant/conformance suites — stays human-gated **as a whole
    file, by path, permanently**. These files *are* the encoded principle; there is no behaviour-preserving
@@ -126,7 +127,7 @@ Compose a **principle-surface** trigger on top of #2785's narrowed path gate in 
     `@principle` or `@invariant` **that is present in the base version of the file** (a leading marker
     comment on the `test(...)` / `expect(...)` / exported assertion). The marker set is greppable and its
     owning file need not be in the trust chain. Requiring base-presence is what keeps *adding* an enforcing
-    invariant out of this trigger (that is `implTouch` under `#x84bjrx`).
+    invariant out of this trigger (that is `implTouch` under `#2839`).
   - **`isDeclarativeLeashPath(changedFile)`** — the changed-file basename is in #2785's `POLICY_SPEC` set
     (the pinned floor, item 3 above). This is the ONE path-based term that survives; it is permanent.
 - **Diff-content plumbing is a prerequisite, not a no-op.** `isStatuteAnchorEdit` and `isMarkedInvariantEdit`
@@ -173,10 +174,10 @@ only as guarantees are encoded.
 The design can only ever **over-gate to a human** (the safe direction), never under-gate below today's
 line, because the human trigger is a **superset** of #2785's gate: (i) the declarative-leash floor is
 **pinned** — every leash file stays human-gated as a whole file, so the enforce-flip contract, the roster,
-and the suites never leave the human gate (this is what `#x2w4qbf` depends on); (ii) the marker axis only
+and the suites never leave the human gate (this is what `#2838` depends on); (ii) the marker axis only
 *adds* human-gating for encoded guarantees outside the leash; (iii) statute edits stay human-gated, now
 content-scoped so only real rule changes fire. Marker-seeding is deliberate and per-guarantee: a guarantee
-gains its marker in the impl PR that also carries its enforcing invariant (`#x84bjrx`), and a
+gains its marker in the impl PR that also carries its enforcing invariant (`#2839`), and a
 `check:standards` rule can assert leash-file guarantees are never *removed* from the gate. The un-encoded
 state is the *stricter* state (leash pinned + statute + no marker narrowing), so nothing loses its gate by
 default.
@@ -193,15 +194,15 @@ default.
 
 **Adopt A.** It is the direct mechanization of
 `we:docs/agent/platform-decisions.md#human-required-is-judgment-only` on the review gate, layered on
-#2771/#2785: #2785 sheds the derivation-code toil by path, and `#xhrni4v` makes the *encoded guarantee*
+#2771/#2785: #2785 sheds the derivation-code toil by path, and `#2840` makes the *encoded guarantee*
 the trigger so a human keeps every genuine principle change wherever it lives, while the declarative-leash
 files (contract, roster, suites) stay pinned to the human gate. The pinned floor makes the transition safe
 without a per-file "until-encoded" race, so findings 3 and 7 never open. The implementation — the
 `diffHunks` plumbing (precondition), the `isPrincipleSurface` composition, the leash-pin `check:standards`
-rule, and the first `@principle` invariants — is a separate follow-on PR under the two-PR rule (`#x84bjrx`)
+rule, and the first `@principle` invariants — is a separate follow-on PR under the two-PR rule (`#2839`)
 — this PR only authors the principle.
 
-## Preconditions (impl PR, under `#x84bjrx`)
+## Preconditions (impl PR, under `#2839`)
 
 1. **`xzc1sc5` (PR #982) landed** — the four anchors this decision cites exist on `main` (prose land-order
    precondition; not a frontmatter `blockedBy` because the file is not yet in this tree).
@@ -210,11 +211,11 @@ rule, and the first `@principle` invariants — is a separate follow-on PR under
    `producerReviewLabel` and both call sites (`we:scripts/pr-land.mjs`, `we:scripts/merge-ai-prs.mjs`);
    without it the content triggers under-fire. This is new plumbing, not a no-op.
 4. **Marker-seeding** — encode the first guarantees as `@principle`/`@invariant` invariants (the marker
-   axis is inert until then). Each seeding rides its own impl PR per `#x84bjrx`.
+   axis is inert until then). Each seeding rides its own impl PR per `#2839`.
 
 **Lineage:** mechanizes `we:docs/agent/platform-decisions.md#human-required-is-judgment-only`; **extends**
 `we:docs/agent/platform-decisions.md#review-human-declarative-leash-only` (#2771 — narrowed the gate by
-*path* to the declarative leash; #xhrni4v adds the *edit/guarantee* axis on top, impl follow-on #2785); and
+*path* to the declarative leash; #2840 adds the *edit/guarantee* axis on top, impl follow-on #2785); and
 composes `we:docs/agent/platform-decisions.md#fix-review-convergence-independent-root-cause` (the mechanical
 clearer the shed work routes to). Current mechanism:
 `we:scripts/lib/review-escalation.mjs#isGateSelfPath`, `we:scripts/lib/gate-config.mjs#isPolicyCorePath`,

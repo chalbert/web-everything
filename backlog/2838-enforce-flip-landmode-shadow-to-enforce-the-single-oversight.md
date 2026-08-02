@@ -1,4 +1,5 @@
 ---
+bornAs: x2w4qbf
 kind: decision
 size: 3
 status: open
@@ -16,22 +17,22 @@ may arm only when the machinery that makes it safe has landed AND a clean shadow
 the auto-clear agrees with the human. Until then the seam runs in shadow: it computes the would-clear
 decision and logs it, but a human still clears every `review:pending` PR.
 
-This is a principle, so it lands in a decisions-only PR parked `review:human` alongside `#xhrni4v` and
-`#x84bjrx`; the code that reads the flip predicate is a follow-on impl PR under the two-PR rule
-(`#x84bjrx`). The `#human-required-is-judgment-only` anchor it composes lands via `xzc1sc5` (PR #982), so
+This is a principle, so it lands in a decisions-only PR parked `review:human` alongside `#2840` and
+`#2839`; the code that reads the flip predicate is a follow-on impl PR under the two-PR rule
+(`#2839`). The `#human-required-is-judgment-only` anchor it composes lands via `xzc1sc5` (PR #982), so
 that is a **hard land-order precondition** — #982 must land first or the lineage cite 404s. It is stated in
 prose, not `blockedBy` frontmatter, because `xzc1sc5`'s file is not yet in this tree and
 `we:scripts/check-backlog-item.mjs` would reject an unresolved target.
 
-**Coupling to `#xhrni4v` (load-bearing).** This decision's headline safeguard — "the flip edit is itself
+**Coupling to `#2840` (load-bearing).** This decision's headline safeguard — "the flip edit is itself
 `review:human`" — holds **only** because `landMode` lives in `we:scripts/lib/review-policy.contract.json`,
 whose basename is in the policy-core / declarative-leash set, so editing it is path-gated to a human.
-`#xhrni4v` narrows that gate. The two decisions are safe together **only** because `#xhrni4v`'s corrected
+`#2840` narrows that gate. The two decisions are safe together **only** because `#2840`'s corrected
 design **pins** the declarative-leash files (contract, roster, suites) to the human gate as whole files,
 permanently — it does *not* narrow them to marker-grain. Ratifying these together therefore keeps the flip
-edit human-gated. If `#xhrni4v` were adopted in a form that let the contract leave the path gate, this
+edit human-gated. If `#2840` were adopted in a form that let the contract leave the path gate, this
 safeguard would evaporate and the single most oversight-reducing edit in the system would become
-agent-clearable — so this decision explicitly **depends on `#xhrni4v`'s leash pin** (see its item 3 /
+agent-clearable — so this decision explicitly **depends on `#2840`'s leash pin** (see its item 3 /
 `isDeclarativeLeashPath`).
 
 ## Current state
@@ -105,7 +106,7 @@ preconditions of the impl PR:
 - **The flip itself is a policy-spec change → `review:human`.** Setting `landMode: enforce` in the `#2651`
   disposition config is an edit to the declarative leash (`we:scripts/lib/review-policy.contract.json`), so
   it is human-gated by `we:docs/agent/platform-decisions.md#review-human-declarative-leash-only`. This
-  survives `#xhrni4v` **only** because `#xhrni4v` pins the leash files to the human gate as whole files (its
+  survives `#2840` **only** because `#2840` pins the leash files to the human gate as whole files (its
   `isDeclarativeLeashPath` floor) — see the Coupling note above. The operator makes the flip; the machine
   only proves it is *allowed*.
 - **Write gate.** A `check:standards` rule (`we:scripts/check-standards-rules.mjs`) **refuses**
@@ -140,7 +141,7 @@ default at every layer.
 
 | Option | Shape | Verdict |
 |--------|-------|---------|
-| **A — triple-gated flip predicate (CI-status + durable ledger) + write gate (recommended)** | `enforce` armed only when (a)+(b) show GREEN via a CI-status probe AND (c) the durable review-seam ledger meets the agreement metric; the flip edit stays `review:human` (leash pin, per `#xhrni4v`) | oversight reduced only after the machinery + track record earn it |
+| **A — triple-gated flip predicate (CI-status + durable ledger) + write gate (recommended)** | `enforce` armed only when (a)+(b) show GREEN via a CI-status probe AND (c) the durable review-seam ledger meets the agreement metric; the flip edit stays `review:human` (leash pin, per `#2840`) | oversight reduced only after the machinery + track record earn it |
 | B — operator flips by hand, no predicate | trust the operator to check the three conditions before editing the config | REJECT — the directive is "enforced by mechanical gating"; an unchecked hand-flip is the unenforced instruction |
 | C — auto-flip on the metric alone | flip when `computeAgreementMetric.flipReady`, ignore (a)/(b) | REJECT — flips before the merge-hold and prevention machinery exist; mechanizes an under-powered, unsafely-mergeable review |
 
@@ -152,13 +153,13 @@ oversight, and it should flip exactly when — and only when — it is safe. Gat
 clear these?" a machine-checked precondition, not a judgment call each time. The flip edit remains the
 operator's `review:human` act; the gate only certifies it is permitted. The `enforceFlipReady` predicate,
 the CI-status probe, the durable review-seam ledger, and the write gate are a follow-on impl PR under
-`#x84bjrx` — this PR authors only the principle and its gate conditions.
+`#2839` — this PR authors only the principle and its gate conditions.
 
-## Preconditions (impl PR, under `#x84bjrx`)
+## Preconditions (impl PR, under `#2839`)
 
 1. **`xzc1sc5` (PR #982) landed** — the `#human-required-is-judgment-only` anchor this composes exists on
    `main` (prose land-order precondition; not frontmatter `blockedBy` — the file is not yet in this tree).
-2. **`#xhrni4v` leash pin ratified** — keeps `we:scripts/lib/review-policy.contract.json` human-gated, or
+2. **`#2840` leash pin ratified** — keeps `we:scripts/lib/review-policy.contract.json` human-gated, or
    the flip's own safeguard evaporates.
 3. **`#2820` (PR #975) and `#2823` (PR #976) landed** — the merge-hold predicate and the prevention field,
    read via a live CI-status probe by conditions (a)/(b).
