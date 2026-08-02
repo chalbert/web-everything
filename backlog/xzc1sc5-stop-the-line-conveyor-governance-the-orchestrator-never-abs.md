@@ -56,9 +56,10 @@ The ruling codifies four cross-linked statute anchors (each carries a `**Ratifie
 **Lineage:** cites `we:docs/agent/platform-decisions.md#agent-convergence-independent-validation`
 (#2398, resolved — a builder never clears its own diff; independence rests on **a distinct fresh
 validator**, in-process role-separated subagents allowed, plus the anti-test-gaming guards). The
-convergence-loop anchor **narrows** #2398 for the conveyor's stop-the-line context — the orchestrator may
-not clear its own delivery by wearing a reviewer hat — and says so under a `narrows` label, not "does not
-alter." Also cites #2439 (resolved — the distinct fresh-context adversarial validator + the
+convergence-loop anchor **applies** #2398 to the conveyor's stop-the-line context — the orchestrator
+wearing a reviewer hat (a subagent sharing its live priors) is exactly the non-fresh-context case #2398
+already rejects — so it composes with #2398 and does not alter the bar; the new work is ENFORCING that
+independence (owed on the open #2840/#2785 line). Also cites #2439 (resolved — the distinct fresh-context adversarial validator + the
 `redteam:accepted` acceptance label; #2439 is the interim independence rail, NOT a ruling that
 "same-orchestrator subagents are not independent" — that narrowing is this cluster's, declared as such),
 and the declarative-leash / derivation-code split (#2771, resolved — the script-decidable `review:human`
