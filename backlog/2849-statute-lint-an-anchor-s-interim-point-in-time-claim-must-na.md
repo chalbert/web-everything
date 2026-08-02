@@ -2,6 +2,7 @@
 bornAs: xv2vosc
 kind: task
 parent: "2822"
+blockedBy: ["2854"]
 status: open
 dateOpened: "2026-08-02"
 tags: [conveyor, statute-lint, prevention, temporal-token]
@@ -14,6 +15,8 @@ Statute anchors carry honest build-pending disclosures ("today", "not yet", "bui
 ## Gap
 
 `we:scripts/lib/validate-rules-anchors.cjs` does not detect interim/point-in-time language in an anchor body, so a "today the gate still parks…" disclosure has no linked expiry. When the item that changes the behaviour lands, nothing points back at the anchor to update it.
+
+**Blocked on #2854 — build the decision first.** #2854 (does point-in-time build status belong in a statute anchor, or on the decision item?) determines this lint's shape, and says so in its own Fork 2: under option (a) the rule inverts — it should **error** on build-status tokens in an anchor body and route them to the item, keeping the retiring-item pointer only for the narrow "until #NNNN" case. #2854 also notes that this item's token list (`today`, `not yet`) would hard-error the ~15 pre-existing uses on `main` unless it ships an exemption list. Building this lint before #2854 rules risks building the wrong rule. The back-link clause this lint also needs is tracked separately as #2856 (`blockedBy` this item).
 
 ## Why it matters
 
