@@ -473,9 +473,13 @@ function jurorPrompt(subject, noun, lens, mandate, method, material, materialFil
     '',
     ...materialBlock,
     '',
-    `Return { lens: "${lens}", findings: [{ summary, file?, failure_scenario?, category?, line? }] }. Return an`,
-    'EMPTY findings array if the subject survives your lens\'s scrutiny (do not pad with nitpicks). Return ONLY the',
-    'structured object.',
+    // #2823 — every finding MUST carry the prevention-introspection triple (see the shared mandate): rootCause
+    // (why the creator erred, blameless), prevention (the cheapest durable guard — a deterministic check:standards
+    // gate preferred over a lens over a doc note), preventionCaptured (true if that guard already exists, else
+    // false ⇒ it must be FILED before accept). This surface's return schema is additionalProperties:true.
+    `Return { lens: "${lens}", findings: [{ summary, file?, failure_scenario?, category?, line?, rootCause, prevention, preventionCaptured }] }. For EACH`,
+    'finding include rootCause + prevention + preventionCaptured. Return an EMPTY findings array if the subject',
+    'survives your lens\'s scrutiny (do not pad with nitpicks). Return ONLY the structured object.',
   ].filter((l) => l !== '').join('\n');
 }
 
@@ -582,10 +586,12 @@ function redTeamPrompt(subject, noun, material, materialFile) {
     ...UNTRUSTED_MATERIAL,
     ...materialBlock,
     '',
-    'Return { findings: [{ summary, file?, failure_scenario?, category?, line? }] }. Each finding is a BLOCKING',
-    'reason not to ratify. Return an EMPTY findings array ONLY if you tried hard and genuinely could not break the',
-    'accept (do NOT pad with nitpicks — a red-team finding must be a real reason to withhold ratification). Return',
-    'ONLY the structured object.',
+    // #2823 — a red-team finding is still a finding: carry rootCause + prevention + preventionCaptured (see the
+    // shared mandate) so a ratification-blocking defect also names the durable guard that would catch its class.
+    'Return { findings: [{ summary, file?, failure_scenario?, category?, line?, rootCause, prevention, preventionCaptured }] }. Each finding is a',
+    'BLOCKING reason not to ratify; include rootCause + prevention + preventionCaptured on each. Return an EMPTY',
+    'findings array ONLY if you tried hard and genuinely could not break the accept (do NOT pad with nitpicks — a',
+    'red-team finding must be a real reason to withhold ratification). Return ONLY the structured object.',
   ].filter((l) => l !== '').join('\n');
 }
 

@@ -24,7 +24,7 @@
  *   ◷  pending   — a rostered juror that has not started
  *   ⟳  running   — a juror mid-review
  *   ✓  found     — a juror that has reported (a finding or a verdict)
- *   and the verdict glyph on a juror / panel line: ✓ accept · ✎ changes · ⚑ needs-human · · none yet
+ *   and the verdict glyph on a juror / panel line: ✓ accept · ✎ changes · ⚑ needs-human · ⚐ prevention-outstanding · · none yet
  */
 
 import { pathToFileURL } from 'node:url';
@@ -35,8 +35,12 @@ import { foldAllSubjects, foldSubject } from '../lib/jury-ledger.mjs';
 /** Juror lifecycle-status glyphs (one symbol, one meaning — see the header legend). */
 export const STATUS_MARKERS = Object.freeze({ pending: '◷', running: '⟳', found: '✓' });
 
-/** Verdict glyphs — the strictest-wins verdict on a juror / panel line. `null`/unknown → a neutral dot. */
-export const VERDICT_MARKERS = Object.freeze({ accept: '✓', changes: '✎', 'needs-human': '⚑' });
+/** Verdict glyphs — the strictest-wins verdict on a juror / panel line. `null`/unknown → a neutral dot. The
+ *  `prevention-outstanding` (#2823) glyph is an OUTLINE flag `⚐`, distinct from needs-human's filled `⚑` — a
+ *  blocking verdict must never render as the neutral `·` reserved for "no verdict reported yet".
+ *  @verdicts-total — every `VERDICTS` member must be a key (enforced by the `check:standards` verdict-totality gate),
+ *  so a new blocking verdict can never fall back to the neutral `·` glyph again. */
+export const VERDICT_MARKERS = Object.freeze({ accept: '✓', changes: '✎', 'needs-human': '⚑', 'prevention-outstanding': '⚐' });
 
 const arr = (x) => (Array.isArray(x) ? x : []);
 const verdictGlyph = (v) => VERDICT_MARKERS[v] || '·';

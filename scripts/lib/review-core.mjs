@@ -10,9 +10,19 @@
  *
  * SCOPE (important): `/code-review` is a Claude Code product surface with no source living in this repo —
  * this module cannot "call into" it. What it DOES do is define the canonical `Finding`/`verdict` contract
- * that `/code-review`'s own output already matches (see the `ReportFindings` tool shape it renders through:
- * file, summary, failure_scenario, category, line, verdict, outcome) and that this repo's own docs
- * (`we:docs/agent/platform-decisions.md`, the pre-PR review rider) and skills point reviewers at. The
+ * whose CORE fields `/code-review`'s own output already matches (see the `ReportFindings` tool shape it renders
+ * through: file, summary, failure_scenario, category, line, verdict, outcome) and that this repo's own docs
+ * (`we:docs/agent/platform-decisions.md`, the pre-PR review rider) and skills point reviewers at.
+ *
+ * #2823 SHAPE PARITY — the prevention-introspection fields (`rootCause` / `prevention` / `preventionCaptured`)
+ * are a SUPERSET the canonical `Finding` carries but `/code-review`'s `ReportFindings` tool CANNOT: its schema is
+ * `additionalProperties: false`, so it hard-rejects the three keys. They are therefore scoped to the surfaces
+ * whose return schemas are `additionalProperties: true` — the drain panel reviewer (`scripts/workflows/review-parked-prs.mjs`)
+ * and the subject-jury jurors/red-team (`skills-src/jury/subject-jury.workflow.js`), whose prompts DO ask for the
+ * three fields so `normalizeFinding` picks them up and `deriveVerdict` can reach `prevention-outstanding`. On the
+ * `/code-review` surface the prevention introspection still happens (the shared mandate demands it) but is carried
+ * in the finding's PROSE (its `summary`/`failure_scenario`), not as structured fields the tool would reject. So
+ * "matches `/code-review`" holds for the CORE shape; the #2823 fields are a deliberate, surface-scoped extension. The
  * JUDGEMENT itself (spawning a subagent, reading a diff, deciding what's wrong) is never done here — like
  * `we:scripts/lane-review.mjs`, this module is the mechanical/derivation half; judging stays the caller's
  * action. `#2326` wires the drain auto-review + the new `/review` skill to this contract; this item (`#2325`)
@@ -64,6 +74,8 @@ import {
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
+  hasUncapturedPrevention,
+  isFindingOutstanding,
   NEGOTIATION_ROUND_CAP,
   NEGOTIATION_OUTCOMES,
   deriveNegotiationOutcome,
@@ -101,6 +113,8 @@ export {
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
+  hasUncapturedPrevention,
+  isFindingOutstanding,
   NEGOTIATION_ROUND_CAP,
   NEGOTIATION_OUTCOMES,
   deriveNegotiationOutcome,
@@ -303,16 +317,28 @@ export function buildPlanCritiqueMandate({ approach = '', round = 1, roundCap = 
  *
  *   - `needs-human` → `escalate`, ALWAYS (peers fundamentally can't agree on direction — no round budget
  *     resolves that; escalating from the plan phase is cheaper than burning code-writing rounds on it).
+ *   - `prevention-outstanding` (#2823) → `escalate`, immediately — the SAME call `deriveNegotiationOutcome` makes,
+ *     for the same reason: every finding is already resolved, so no plan-loop actor files the guard or flips
+ *     `preventionCaptured`. `continue`-ing would re-derive the identical verdict every round until `PLAN_ROUND_CAP`
+ *     and then escalate as approach non-convergence — burning the budget on a state the loop cannot close — instead
+ *     of handing STRAIGHT to the operator who files the named guard(s). (This was the round-3 enum-totality miss:
+ *     the member fell through to the `changes` round-cap path below and looped.)
  *   - `accept` → `agreed` (the approach is settled; the code-writing phase — the existing editor↔reviewer
  *     diff loop — starts from here).
  *   - `changes` and `round < roundCap` → `continue` (the critic's concerns feed `buildPlanMandate`'s next round).
  *   - `changes` and `round >= roundCap` → `escalate` (non-convergence on the APPROACH itself).
  *
- * @param {{verdict: 'accept'|'changes'|'needs-human', round: number, roundCap?: number}} o
+ * @verdicts-total fallthrough=changes — `changes` is the intentional final fall-through (the round-cap path); every
+ *   OTHER `VERDICTS` member is handled explicitly. The `check:standards` verdict-totality gate enforces this, so a
+ *   new enum member can never again silently ride the `changes` fall-through (the round-3 defect this fixed).
+ * @param {{verdict: 'accept'|'changes'|'needs-human'|'prevention-outstanding', round: number, roundCap?: number}} o
  * @returns {'continue'|'agreed'|'escalate'}
  */
 export function derivePlanOutcome({ verdict, round, roundCap = PLAN_ROUND_CAP }) {
   if (verdict === VERDICTS.NEEDS_HUMAN) return PLAN_OUTCOMES.ESCALATE;
+  // #2823 — prevention-outstanding is NOT a negotiable `changes`: every finding is resolved, so no plan round can
+  // close it and no loop actor files the guard. Escalate immediately to the operator (mirrors deriveNegotiationOutcome).
+  if (verdict === VERDICTS.PREVENTION_OUTSTANDING) return PLAN_OUTCOMES.ESCALATE;
   if (verdict === VERDICTS.ACCEPT) return PLAN_OUTCOMES.AGREED;
   return round < roundCap ? PLAN_OUTCOMES.CONTINUE : PLAN_OUTCOMES.ESCALATE;
 }
@@ -826,8 +852,17 @@ export function buildValidatorMandate({ lens, contextIsolation = 'diff-only' } =
  *     earns `redteam:accepted`.
  *   - panel accept + validator `changes` → `changes` (the validator found something the panel missed → another
  *     editor↔reviewer round, not a land).
- * @param {{panelVerdict: 'accept'|'changes'|'needs-human', validatorVerdict: 'accept'|'changes'|'needs-human'}} o
- * @returns {'accept'|'changes'|'needs-human'}
+ *   - #2823 round-2 finding 2 — panel accept + validator `prevention-outstanding` → `prevention-outstanding`. On the
+ *     #2439 independent-validator path a validator can re-report the panel's findings as resolved (`no_change_needed`)
+ *     while naming an uncaptured guard — that is `prevention-outstanding`, a distinct terminal state. It must NOT
+ *     flatten to `changes`: flattening reintroduces exactly the non-progressing round loop `deriveNegotiationOutcome`
+ *     escalates it to avoid (every finding already resolved, so an editor round has nothing to fix — it would burn
+ *     the budget to the cap, then escalate as `non-convergence` instead of "file the guard"). Preserved here so it
+ *     rides `deriveNegotiationOutcome`'s immediate escalate straight to the operator who files the guard.
+ * @verdicts-total — every `VERDICTS` member is handled explicitly on both the panelVerdict pass-through and the
+ *   validatorVerdict branch; the `check:standards` verdict-totality gate enforces it so a new member can't flatten.
+ * @param {{panelVerdict: 'accept'|'changes'|'needs-human'|'prevention-outstanding', validatorVerdict: 'accept'|'changes'|'needs-human'|'prevention-outstanding'}} o
+ * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
 export function combineValidatedVerdict({ panelVerdict, validatorVerdict } = {}) {
   const known = new Set(Object.values(VERDICTS));
@@ -836,6 +871,8 @@ export function combineValidatedVerdict({ panelVerdict, validatorVerdict } = {})
   if (!known.has(validatorVerdict)) throw new Error(`combineValidatedVerdict: unknown validatorVerdict "${validatorVerdict}"`);
   if (validatorVerdict === VERDICTS.NEEDS_HUMAN) return VERDICTS.NEEDS_HUMAN;
   if (validatorVerdict === VERDICTS.ACCEPT) return VERDICTS.ACCEPT;
+  // #2823 — a validator prevention-outstanding is carried through, NOT flattened to changes (which would loop).
+  if (validatorVerdict === VERDICTS.PREVENTION_OUTSTANDING) return VERDICTS.PREVENTION_OUTSTANDING;
   return VERDICTS.CHANGES;
 }
 
@@ -889,17 +926,64 @@ export const REVIEW_NOTICE_EVENTS = Object.freeze({
 });
 
 /**
+ * #2823 — render the prevention-summary TAIL appended to an escalated notice. Pure. Returns `''` (byte-stable
+ * for every pre-#2823 caller) when there is no guard owed. Otherwise names the count and the guards owed, so the
+ * acceptance gate ("file before accept") rides the same line the operator already reads.
+ *
+ * THE REDUCED VERDICT IS AUTHORITATIVE (#2823 round-3 finding 2). When the caller's `verdict` is
+ * `prevention-outstanding`, this summary NAMES the guards owed — checked FIRST, BEFORE any outstanding-finding
+ * short-circuit. That is the reconciliation with `derivePanelVerdict`: that reducer raises `prevention-outstanding`
+ * from a MIXED list — a RESOLVED finding owes a guard while an ADVISORY finding is still open (an advisory
+ * `changes` never blocks the mandatory-accept path) — and on exactly that list the operator is told the blocker is
+ * an unfiled guard, so the guard MUST be named, not muted. The prior cut suppressed on ANY outstanding finding and
+ * so returned `''` precisely when the verdict demanded the guard's name — the two contradicted (round-3 finding 2).
+ *
+ * With NO explicit `prevention-outstanding` verdict, it falls back to `deriveVerdict`'s shape: ANY outstanding
+ * finding ⇒ the verdict is `changes`, prevention is never consulted, so the summary stays silent (the blocker is
+ * the unfixed defect — #2823 round-2 finding 3); only once every finding is resolved does a resolved finding with
+ * an uncaptured guard fire it. Either way it gates on the SAME single-sourced predicates every reducer shares
+ * (`isFindingOutstanding` for "still open", `hasUncapturedPrevention` for "owes a guard"), and it names EXACTLY the
+ * set `derivePanelVerdict`/`deriveVerdict` raised the verdict on (resolved ∧ uncaptured) — so the notice and the
+ * verdict can't disagree, by construction.
+ * @param {{findings?: Array<object>, verdict?: string}} [o]
+ * @returns {string}
+ */
+export function renderPreventionSummary({ findings = [], verdict } = {}) {
+  const all = normalizeFindings(findings);
+  // The guards owed = the SAME set derivePanelVerdict / deriveVerdict raise the verdict on: a RESOLVED finding whose
+  // named guard is neither captured nor filed. An OUTSTANDING finding is `changes` territory and never owes here.
+  const owed = all.filter((f) => !isFindingOutstanding(f) && hasUncapturedPrevention(f));
+  const name = () => {
+    if (!owed.length) return ' Prevention outstanding — file the named guard(s) before accept.';
+    const guards = owed.map((f) => f.prevention).join('; ');
+    const n = owed.length;
+    return ` Prevention outstanding — ${n} guard${n === 1 ? '' : 's'} must be filed before accept: ${guards}.`;
+  };
+  // The reduced verdict is AUTHORITATIVE and checked FIRST — when it is prevention-outstanding, name the guards even
+  // on a mixed list (this is the round-3 finding 2 reconciliation with derivePanelVerdict).
+  if (verdict === VERDICTS.PREVENTION_OUTSTANDING) return name();
+  // No explicit prevention verdict: match deriveVerdict's short-circuit — any outstanding finding ⇒ `changes`, stay
+  // silent; else surface a guard owed by the (verdict-less) resolved findings themselves.
+  if (all.some(isFindingOutstanding) || !owed.length) return '';
+  return name();
+}
+
+/**
  * Render the operator-facing escalation/clearance notice (#2433) — the short line `/drain` reports when a PR
  * parks/escalates, and `/review` reports after recording a human verdict. Distinct from the PR-COMMENT body
  * (`renderPanelVerdictTable` / #2432's `renderPanelComment`, posted to GitHub via `gh pr comment`) — this is
  * what the SESSION itself tells the operator in-chat. Pure; never posts anything.
+ * #2823 — the ESCALATED notice also carries a PREVENTION SUMMARY: when the verdict is `prevention-outstanding`
+ * or the supplied `findings` name guards that are neither captured nor filed, it appends "prevention outstanding
+ * — N guard(s) must be filed before accept: …" so the operator sees the acceptance gate in the same line, not
+ * only in the verdict token. Passing no `findings` (every existing caller) leaves the line byte-for-byte unchanged.
  * @param {{event: 'escalated'|'cleared', pr: number|string, repo?: string, verdict?: string,
  *   disposition?: {mode: 'converge'|'human', autoLand: boolean}, reasons?: string[],
- *   outcome?: 'accept'|'changes', actor?: string}} o — `outcome` is required (and strictly validated) for
- *   the `cleared` event; anything else throws rather than failing open to "accepted".
+ *   outcome?: 'accept'|'changes', actor?: string, findings?: Array<object>}} o — `outcome` is required (and
+ *   strictly validated) for the `cleared` event; anything else throws rather than failing open to "accepted".
  * @returns {string}
  */
-export function renderReviewNotice({ event, pr, repo, verdict, disposition, reasons = [], outcome, actor } = {}) {
+export function renderReviewNotice({ event, pr, repo, verdict, disposition, reasons = [], outcome, actor, findings = [] } = {}) {
   const tag = repo ? `${repo}#${pr}` : `#${pr}`;
   if (event === REVIEW_NOTICE_EVENTS.ESCALATED) {
     const reasonText = reasons.length ? ` (${reasons.join('; ')})` : '';
@@ -908,7 +992,7 @@ export function renderReviewNotice({ event, pr, repo, verdict, disposition, reas
       : disposition?.autoLand === false
         ? 'converged with an advisory fix — a human must still clear it (gate-self)'
         : 'escalated for review';
-    return `PR ${tag} ${modeText}${reasonText}. Verdict: ${verdict ?? '(pending)'}.`;
+    return `PR ${tag} ${modeText}${reasonText}. Verdict: ${verdict ?? '(pending)'}.${renderPreventionSummary({ findings, verdict })}`;
   }
   if (event === REVIEW_NOTICE_EVENTS.CLEARED) {
     if (outcome !== 'accept' && outcome !== 'changes') {

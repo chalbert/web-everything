@@ -27,6 +27,8 @@ import { parseClaims, mineFiles, porcelainFiles, partitionFindings, partitionLoc
 import { checkDemos } from './check-demos.mjs';
 import { buildReport, source as reportSource, finding as reportFinding, section as reportSection } from './lib/buildReport.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
+import { checkVerdictTotality } from './lib/verdict-totality.mjs';
+import { VERDICTS } from './lib/jury-core.mjs';
 import { loadIntents } from './lib/intents-loader.cjs';
 import { loadResearch } from './lib/research-loader.cjs';
 import { loadProtocols } from './lib/protocols-loader.cjs';
@@ -1588,6 +1590,34 @@ try {
   for (const e of pce) err(e.message, e.descriptor);
 } catch (e) {
   err(`Playwright container pin check failed: ${e.message}`);
+}
+
+// ── 14. VERDICTS enum-totality gate (#2823, item xiqj3w9) ──────────────────────
+// Every structure total over the `VERDICTS` enum (strictness/marker/label tables + the reducers that branch on a
+// verdict) must handle EVERY member — a member added without updating one is the script-decidable class PR #976 hit
+// three review rounds running. The gate is DERIVE-BASED (round-2 meta-finding): it DISCOVERS its coverage by scanning
+// the enum's consumers in source (any symbol referencing ≥2 verdicts must carry a `@verdicts-total` marker, then is
+// checked total), never a hand list — so a new consumer a future PR adds can't regress a table nobody remembered to
+// list. The member set is DERIVED from the real `VERDICTS` import, so the gate can't drift from the enum it guards.
+// Pure rule in `lib/verdict-totality.mjs`; the fs walk stays here (mirrors scanRepoLocusPrefixes).
+{
+  const scanDirs = ['scripts', 'skills-src'];
+  const SKIP_DIRS = new Set(['node_modules', '.git', '__tests__']);
+  const walkSource = (dir, acc = []) => {
+    for (const name of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, name.name);
+      if (name.isDirectory()) { if (!SKIP_DIRS.has(name.name)) walkSource(p, acc); }
+      else if ((name.name.endsWith('.mjs') || name.name.endsWith('.js')) && !name.name.includes('.test.')) acc.push(p);
+    }
+    return acc;
+  };
+  const docs = [];
+  for (const d of scanDirs) {
+    const abs = join(ROOT, d);
+    if (existsSync(abs)) for (const f of walkSource(abs)) docs.push({ file: relative(ROOT, f), content: readFileSync(f, 'utf8') });
+  }
+  const { errors: vte } = checkVerdictTotality(docs, VERDICTS);
+  for (const e of vte) err(e);
 }
 
 // ── Scope attribution (#952, ratified #949 Fork 3-A) ───────────────────────────

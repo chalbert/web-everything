@@ -29,11 +29,13 @@ import {
 } from './review-core.mjs';
 
 /** Human-readable label per overall verdict (`VERDICTS`). An unknown verdict falls back to its raw token so a
- *  new verdict never renders as a blank line. Pure data. */
+ *  new verdict never renders as a blank line. Pure data.
+ *  @verdicts-total — every `VERDICTS` member must be a key (enforced by the `check:standards` verdict-totality gate). */
 const VERDICT_LABELS = Object.freeze({
   [VERDICTS.ACCEPT]: '✅ pass — no blocking findings',
   [VERDICTS.CHANGES]: '🔁 changes requested',
   [VERDICTS.NEEDS_HUMAN]: '🚦 human review required',
+  [VERDICTS.PREVENTION_OUTSTANDING]: '🚩 prevention outstanding — file the guard before accept',
 });
 
 /**

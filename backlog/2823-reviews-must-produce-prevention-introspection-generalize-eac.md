@@ -3,8 +3,9 @@ bornAs: xisgzfz
 kind: story
 size: 5
 parent: "2527"
-status: open
+status: active
 dateOpened: "2026-08-01"
+dateStarted: "2026-08-02"
 tags: []
 ---
 
@@ -79,6 +80,14 @@ Worked instance: the **#957 round-2 provenance nits slipped** because the ratifi
 - It **composes with** the closing-session improvement-candidate flow and the **transparency ledger (backlog #2818, landed via PR #954)** — it does not replace them. The transparency item makes each pipeline step *visible*; this makes each finding *generalized-and-guarded*.
 - The key difference is *timing and granularity*: this fires **at review time, on the actual findings, per-finding-class** — not at session close, and not once per session. Closing-session sweeps the session; this sweeps each defect the moment a review names it.
 - The routed outputs (proposed hook / memory note) feed the same destinations those flows already own (the backlog for hooks, `we:MEMORY.md` for working-style), so there is one funnel, not two.
+
+## Round-2 design call — the panel derives "owes a guard" from FINDINGS, not per-lens verdicts (PR #976 finding 4)
+
+**Decision:** `derivePanelVerdict` (`we:scripts/lib/jury-core.mjs`) derives the `prevention-outstanding` state by scanning the panel's **findings** for a resolved finding whose named guard is neither captured nor filed — NOT by scanning the per-lens verdicts.
+
+**Why (the structural reason a patch could not fix it):** a lens reduces to ONE verdict, and a single verdict cannot carry both "still has a defect" AND "owes a guard". An advisory lens holding an unresolved finding **plus** a resolved one that names an uncaptured guard reduces (via that lens's own `deriveVerdict`) to `changes` — the unresolved finding wins the short-circuit. Advisory `changes` rides the mandatory-unanimous accept, so a scan of the per-lens verdicts never sees `prevention-outstanding` and the guard lands unfiled. That is the exact leak the reviewer verified from round 2 onward. It is a design limitation of the one-verdict-per-lens flattening, not a missing table entry — so the fix is to **derive prevention from the findings**, which are immune to that flattening: a resolved finding with an uncaptured guard is visible regardless of what its lens verdict collapsed to.
+
+**Scope of the scan:** only RESOLVED findings owe a guard (an unresolved finding is `changes` territory — the fix comes before the guard), matching `deriveVerdict`'s ordering. A real mandatory `changes` still outranks it (checked first). The old per-lens `prevention-outstanding` scan is kept as a belt-and-suspenders fallback for callers that pass a verdict but no findings, so no pre-round-2 caller regresses. Callers thread the whole panel's list via `buildPanelFindings(lensFindings)`.
 
 ## Cross-references
 

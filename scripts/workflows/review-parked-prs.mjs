@@ -530,8 +530,14 @@ function lensPrompt(pr, repo, lens, diff, escalationReason, title, round = 1, ju
     'stylistic nit. Omit `invite` (or set it null) on a normal round. Inviting does NOT replace reporting: still',
     'report your own lens\'s findings.',
     '',
-    `Return { lens: "${lens}", findings: [{ summary, file?, failure_scenario?, category?, line? }], invite? }. Return an`,
-    'EMPTY findings array if the diff survives scrutiny (do not pad with nitpicks). Return ONLY the structured object.',
+    // #2823 — every finding MUST also carry the prevention-introspection triple (see the shared mandate above):
+    // rootCause (a blameless "why the creator erred"), prevention (the cheapest durable guard, preferring a
+    // deterministic check:standards gate), and preventionCaptured (true if that guard already exists as a gate,
+    // else false ⇒ it must be FILED before accept). This surface's return schema is additionalProperties:true, so
+    // the three fields are accepted; the reduce path reaches `prevention-outstanding` only when they are present.
+    `Return { lens: "${lens}", findings: [{ summary, file?, failure_scenario?, category?, line?, rootCause, prevention, preventionCaptured }], invite? }. For EACH`,
+    'finding include rootCause + prevention + preventionCaptured. Return an EMPTY findings array if the diff',
+    'survives scrutiny (do not pad with nitpicks). Return ONLY the structured object.',
   ].join('\n');
 }
 

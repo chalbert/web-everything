@@ -40,16 +40,85 @@ import { CARE_LEVELS } from './review-escalation.mjs';
  * @property {number} [line] - 1-indexed line the finding anchors to.
  * @property {'CONFIRMED'|'PLAUSIBLE'} [verdict] - set when a verify pass ran; absent on inline-only reviews.
  * @property {'fixed'|'skipped'|'no_change_needed'} [outcome] - set only when RE-reporting after fixes were applied.
+ * @property {string} [rootCause] - #2823 blameless "why the CREATOR erred" chain (the authoring failure mode), not just what is wrong.
+ * @property {string} [prevention] - #2823 the cheapest durable guard that would have caught this CLASS (a deterministic gate preferred over a lens over a doc note).
+ * @property {boolean} [preventionCaptured] - #2823 true when the prevention already EXISTS as a gate or is filed; false ⇒ neither built nor filed ⇒ blocks a clean accept.
  */
 
-/** The three review dispositions (#2325) — a superset of what `/code-review` computes today (which renders
- *  findings only, no accept/changes call). `needs-human` is the #2285 conflict-of-interest escalation:
- *  humanRequired ALWAYS wins over any finding-derived disposition (see `deriveVerdict`). */
+/** The review verdicts (#2325). `needs-human` is the #2285 conflict-of-interest escalation: humanRequired
+ *  ALWAYS wins over any finding-derived disposition (see `deriveVerdict`). `prevention-outstanding` (#2823) is
+ *  the accept-gated-on-capture surface: every finding is resolved, but at least one names a PREVENTION guard
+ *  that is neither already captured (an existing gate) nor filed as a future item — so a CLEAN accept is
+ *  withheld ("file the guard before accept", closing the unfiled-intention gap). It is NOT a negotiable
+ *  `changes` state: every finding is already fixed, so no editor round has anything to revise and no round-loop
+ *  actor files the guard. `deriveNegotiationOutcome` therefore ESCALATES it straight to the operator (who files
+ *  the named guard(s)), carrying the guard list in the notice — it never re-enters the round loop to burn the
+ *  budget re-deriving the identical verdict. It never silently lands (`deriveNegotiationOutcome` lands ONLY
+ *  `accept`). */
 export const VERDICTS = Object.freeze({
   ACCEPT: 'accept',
   CHANGES: 'changes',
   NEEDS_HUMAN: 'needs-human',
+  PREVENTION_OUTSTANDING: 'prevention-outstanding',
 });
+
+/**
+ * VERDICT STRICTNESS — the diversity-selection order (#2567): the STRICTEST verdict carries a lens/panel, never a
+ * vote. `needs-human` (3) beats `changes` (2) beats `prevention-outstanding` (1) beats `accept` (0).
+ * `prevention-outstanding` (#2823) ranks ABOVE `accept` (a co-juror's "file the guard" must never lose to another's
+ * `accept`) and BELOW `changes` (an unfixed defect is a harder block than a missing guard — mirrors `deriveVerdict`,
+ * which returns `changes` before it ever consults prevention).
+ *
+ * THE SINGLE SOURCE (#2823 round-2 finding 1): this is the ONE strictness table in the codebase. `disposition-judge`
+ * (`reduceLedger`, `proposeDisposition`) and `jury-ledger` (`strictestVerdict`, the fold's per-lens roll-up) BOTH
+ * IMPORT it — so "mirrors disposition-judge" is enforced BY CONSTRUCTION and can never drift again (the round-1 fix
+ * missed jury-ledger's hand-copied twin; a copy cannot be missed if there is no copy). MUST stay TOTAL over
+ * `VERDICTS` — the assertion below crashes at import if a new enum member has no rank, so a partial table is a
+ * build-time failure, never a silent `undefined` mis-reduction at review time.
+ *
+ * @verdicts-total — every `VERDICTS` member must be a key (the `check:standards` verdict-totality gate enforces the
+ *   same totality the module-load assertion below does, as a static-scan backstop that also covers every other table).
+ */
+export const VERDICT_STRICTNESS = Object.freeze({
+  [VERDICTS.ACCEPT]: 0,
+  [VERDICTS.PREVENTION_OUTSTANDING]: 1,
+  [VERDICTS.CHANGES]: 2,
+  [VERDICTS.NEEDS_HUMAN]: 3,
+});
+
+// #2823 — ENFORCE TOTALITY over `VERDICTS` at module load. A verdict added to the enum without a rank here would
+// otherwise compare as `undefined` in every strictest-wins reduction — silently ranking BELOW `accept` and dropping
+// a blocking verdict (the exact defect this feature was bounced for). Fail LOUDLY at import instead.
+for (const verdict of Object.values(VERDICTS)) {
+  if (VERDICT_STRICTNESS[verdict] === undefined) {
+    throw new Error(`VERDICT_STRICTNESS is not total over VERDICTS: verdict "${verdict}" has no strictness rank — add it (the table must rank every VERDICTS member).`);
+  }
+}
+
+/** The strictness rank of a verdict. THROWS on an unranked verdict rather than yielding `undefined` (which every
+ *  `>` comparison would silently lose). Ledger/panel verdicts are enum-constrained upstream (`validateJuryEvent`
+ *  admits only `VERDICTS` values), so this never throws on real data — it is the fail-loud backstop the totality
+ *  assertion above guarantees, applied at each comparison site (disposition-judge + jury-ledger both call it).
+ *  @param {string} verdict
+ *  @returns {number} */
+export function verdictStrictness(verdict) {
+  const rank = VERDICT_STRICTNESS[verdict];
+  if (rank === undefined) {
+    throw new Error(`verdictStrictness: no strictness rank for verdict "${verdict}" — not a member of VERDICTS.`);
+  }
+  return rank;
+}
+
+/** A finding is OUTSTANDING unless a fix pass explicitly resolved it (`outcome: 'fixed'|'no_change_needed'`). The
+ *  SINGLE definition every consumer shares — `deriveVerdict` (the accept gate), `renderPreventionSummary` (the
+ *  operator notice), `derivePanelVerdict` (the panel prevention scan), and `disposition-judge.reduceLedger`. Sharing
+ *  it is what makes the notice and the verdict UNABLE to disagree on "is this finding still open" (#2823 round-2
+ *  finding 3): they count the same set by construction, not by matching comments.
+ *  @param {{outcome?: string}} finding
+ *  @returns {boolean} */
+export function isFindingOutstanding(finding) {
+  return finding.outcome !== 'fixed' && finding.outcome !== 'no_change_needed';
+}
 
 const VALID_VERDICT_TAGS = new Set(['CONFIRMED', 'PLAUSIBLE']);
 const VALID_OUTCOMES = new Set(['fixed', 'skipped', 'no_change_needed']);
@@ -72,6 +141,15 @@ export function normalizeFinding(raw) {
   if (raw.line != null && Number.isFinite(Number(raw.line))) out.line = Number(raw.line);
   if (raw.verdict && VALID_VERDICT_TAGS.has(String(raw.verdict))) out.verdict = String(raw.verdict);
   if (raw.outcome && VALID_OUTCOMES.has(String(raw.outcome))) out.outcome = String(raw.outcome);
+  // #2823 — the PREVENTION-INTROSPECTION fields, carried through the canonical shape so they survive into the
+  // verdict/notice (not just prose). `rootCause` = a blameless "why the CREATOR erred" chain; `prevention` = the
+  // cheapest durable guard that would have caught this CLASS (a `check:standards` gate preferred over a review
+  // lens over a doc note); `preventionCaptured` = whether that guard already EXISTS as a gate, or is filed —
+  // vs. neither (which blocks a clean accept, see `deriveVerdict`). Absent fields add NO key (old-shape findings
+  // unaffected). `preventionCaptured` is coerced to a strict boolean; it is only meaningful with a `prevention`.
+  if (raw.rootCause != null && String(raw.rootCause).trim()) out.rootCause = String(raw.rootCause).trim();
+  if (raw.prevention != null && String(raw.prevention).trim()) out.prevention = String(raw.prevention).trim();
+  if (raw.preventionCaptured != null) out.preventionCaptured = Boolean(raw.preventionCaptured);
   return out;
 }
 
@@ -96,16 +174,40 @@ export function normalizeFindings(rawList) {
  *   - otherwise: any finding still OUTSTANDING (no `outcome`, or `outcome: 'skipped'`) → `changes`.
  *     A first-pass review has no `outcome` yet, so ANY finding present outstands it; a RE-report after fixes
  *     (`outcome: 'fixed'|'no_change_needed'`) resolves that finding, leaving only genuinely unaddressed ones.
- *   - no outstanding findings → `accept`.
+ *   - all findings resolved BUT one still names an uncaptured, filable PREVENTION guard → `prevention-outstanding`
+ *     (#2823, the accept-gated-on-capture negotiation): a clean accept is withheld until the guard is captured or
+ *     filed. See `hasUncapturedPrevention`. This is the ONE place the acceptance gate is enforced, so every
+ *     surface that reduces to `deriveVerdict` inherits it — no reviewer can accept a finding whose guard evaporated.
+ *   - no outstanding findings AND no uncaptured prevention → `accept`.
  *
+ * @verdicts-total — every `VERDICTS` member is a distinct return (needs-human, changes, prevention-outstanding,
+ *   accept); the `check:standards` verdict-totality gate enforces it so a new member can't be dropped from the ladder.
  * @param {{findings?: Finding[]|Array<object>, humanRequired?: boolean}} [o]
- * @returns {'accept'|'changes'|'needs-human'}
+ * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
 export function deriveVerdict({ findings = [], humanRequired = false } = {}) {
   if (humanRequired) return VERDICTS.NEEDS_HUMAN;
   const list = normalizeFindings(findings);
-  const outstanding = list.filter((f) => f.outcome !== 'fixed' && f.outcome !== 'no_change_needed');
-  return outstanding.length > 0 ? VERDICTS.CHANGES : VERDICTS.ACCEPT;
+  const outstanding = list.filter(isFindingOutstanding);
+  if (outstanding.length > 0) return VERDICTS.CHANGES;
+  // #2823 — accept is GATED ON PREVENTION CAPTURE. Even with every finding resolved, a finding whose named
+  // prevention is neither already captured (an existing gate) nor filed as a future item withholds a clean
+  // accept — the reviewer accepts only once every reasonable prevention is captured or filed.
+  if (list.some(hasUncapturedPrevention)) return VERDICTS.PREVENTION_OUTSTANDING;
+  return VERDICTS.ACCEPT;
+}
+
+/**
+ * #2823 — does this finding carry a named PREVENTION guard that is NOT yet captured (neither an existing gate
+ * nor filed as a future item)? Pure. Such a finding blocks a clean `accept` (see `deriveVerdict`) until its
+ * guard is captured or filed. A finding with no `prevention` names no guard, so it never blocks — an old-shape
+ * finding (pre-#2823) is unaffected. This is the SINGLE definition of "prevention outstanding" every consumer
+ * (the verdict, the operator notice) shares, so the acceptance gate is decided once.
+ * @param {Finding|null|undefined} finding
+ * @returns {boolean}
+ */
+export function hasUncapturedPrevention(finding) {
+  return Boolean(finding && finding.prevention && finding.preventionCaptured !== true);
 }
 
 /**
@@ -131,6 +233,11 @@ export const NEGOTIATION_OUTCOMES = Object.freeze({
  *
  *   - the round's verdict is `needs-human` → `escalate`, ALWAYS (a revision that itself touches the
  *     auto-review trust chain is the v1 conflict-of-interest case — no round budget saves it).
+ *   - `prevention-outstanding` (#2823) → `escalate`, immediately. Every finding is already resolved, so another
+ *     editor round has nothing to fix, and NO round-loop actor files a guard or flips `preventionCaptured` —
+ *     `continue`-ing would only re-derive the identical verdict every round until the cap, then escalate anyway
+ *     (burning the whole budget). So it hands STRAIGHT to the operator, who files the named guard(s); the loop
+ *     cannot close this state itself. The guard list rides the escalation notice (`renderPreventionSummary`).
  *   - `accept` AND the required `test` check is green → `land` (the FULL bar holds: the final diff was
  *     accepted by a non-author reviewer AND CI is green).
  *   - `accept` but the required `test` is NOT green → NOT landable. The CI-green land clause (#2410 slice D,
@@ -149,11 +256,18 @@ export const NEGOTIATION_OUTCOMES = Object.freeze({
  * caller owns mapping its CI state to this boolean (green ⇒ `true`; red OR pending/unknown ⇒ not green), keeping
  * this reducer subject-agnostic (it never parses a GitHub conclusion string itself).
  *
- * @param {{verdict: 'accept'|'changes'|'needs-human', round: number, roundCap?: number, requiredTestGreen?: boolean}} o
+ * @verdicts-total fallthrough=changes — `changes` is the intentional final fall-through (the round-cap path); every
+ *   OTHER `VERDICTS` member is handled explicitly. The `check:standards` verdict-totality gate enforces this, so a new
+ *   member can never again silently ride the `changes` fall-through.
+ * @param {{verdict: 'accept'|'changes'|'needs-human'|'prevention-outstanding', round: number, roundCap?: number, requiredTestGreen?: boolean}} o
  * @returns {'continue'|'land'|'escalate'}
  */
 export function deriveNegotiationOutcome({ verdict, round, roundCap = NEGOTIATION_ROUND_CAP, requiredTestGreen = true }) {
   if (verdict === VERDICTS.NEEDS_HUMAN) return NEGOTIATION_OUTCOMES.ESCALATE;
+  // #2823 — prevention-outstanding is NOT a negotiable `changes`: every finding is resolved, so no editor round
+  // can close it and no loop actor files the guard. Escalate immediately to the operator (who files the guard),
+  // rather than looping to re-derive the identical verdict until the cap. See the VERDICTS doc above.
+  if (verdict === VERDICTS.PREVENTION_OUTSTANDING) return NEGOTIATION_OUTCOMES.ESCALATE;
   if (verdict === VERDICTS.ACCEPT && requiredTestGreen === true) return NEGOTIATION_OUTCOMES.LAND;
   return round < roundCap ? NEGOTIATION_OUTCOMES.CONTINUE : NEGOTIATION_OUTCOMES.ESCALATE;
 }
@@ -202,7 +316,7 @@ export function redTeamRequired(verdict) {
  * The harness only ever calls this for a verdict `redTeamRequired` returned true on; a non-accept verdict never
  * reaches the red-team.
  * @param {{ran?: boolean, findings?: Finding[]|Array<object>}} [o]
- * @returns {'accept'|'changes'|'needs-human'}
+ * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
 export function foldRedTeamVerdict({ ran = false, findings = [] } = {}) {
   return deriveVerdict({ findings, humanRequired: !ran });
@@ -313,15 +427,36 @@ export function buildPanelFindings(lensFindings = {}) {
  *     this pure function can detect from verdict labels alone (#51: the derivation stays mechanical, the
  *     judgment stays with the caller/subagents reading the actual findings) — so the caller passes it in
  *     explicitly, the same pattern `deriveVerdict`'s `humanRequired` already establishes.
- *   - every MANDATORY lens verdict is `accept` → `accept` (the "unanimous accept lands" spec line — unanimity
- *     is scored over the mandatory lenses; an advisory lens's outstanding findings are surfaced, never blocking).
- *   - otherwise → `changes` (at least one mandatory lens wants changes; feeds the SAME round-cap loop v2 uses).
+ *   - a MANDATORY lens wants `changes` → `changes` (feeds the SAME round-cap loop v2 uses).
+ *   - #2823 — the panel owes a PREVENTION guard when its FINDINGS name one that is neither captured nor filed.
+ *     DESIGN CALL (round-2 finding 4, STRUCTURAL): prevention is derived from the panel's `findings`, NOT from the
+ *     per-lens verdicts. A single verdict per lens cannot carry both "still has a defect" AND "owes a guard": an
+ *     advisory lens holding one unresolved finding PLUS a resolved one naming an uncaptured guard reduces (via its
+ *     own `deriveVerdict`) to `changes` — advisory `changes` rides the accept, so the guard leaked unfiled. Scanning
+ *     the FINDINGS instead is immune to that one-verdict-per-lens flattening: a resolved finding with an uncaptured
+ *     guard is seen regardless of what its lens's single verdict flattened to. Checked AFTER needs-human/changes (a
+ *     real mandatory defect still outranks a missing guard — the fix comes first). The per-lens `prevention-outstanding`
+ *     scan is KEPT as a belt-and-suspenders fallback for callers that pass a verdict but no findings (a mandatory
+ *     lens whose whole verdict IS prevention-outstanding still surfaces). Either path → `prevention-outstanding`.
+ *   - every MANDATORY lens verdict is `accept` AND nothing owes a guard → `accept` (the "unanimous accept lands"
+ *     spec line — an advisory lens's ordinary outstanding findings are surfaced, never blocking).
  *
- * @param {{lensVerdicts: Object<string, 'accept'|'changes'|'needs-human'>, humanRequired?: boolean,
- *   conflict?: boolean, mandatoryLenses?: string[]}} o
- * @returns {'accept'|'changes'|'needs-human'}
+ * `findings` is REQUIRED (#2823 round-3 finding 1), not defaulted: the drain's live path built `buildPanelFindings`
+ * then dropped it, so the findings-derived prevention scan saw an empty list and the advisory-prevention leak was
+ * silently reinstated on the ONE path that matters. A required parameter makes an omitting caller fail LOUDLY
+ * instead — pass the whole panel's list, or an explicit `[]` to assert there are none (never let it default).
+ *
+ * @verdicts-total — every `VERDICTS` member is handled explicitly (needs-human, changes, prevention-outstanding,
+ *   accept); the `check:standards` verdict-totality gate enforces it, so a new enum member can't be dropped here.
+ * @param {{lensVerdicts: Object<string, 'accept'|'changes'|'needs-human'|'prevention-outstanding'>, humanRequired?: boolean,
+ *   conflict?: boolean, mandatoryLenses?: string[], findings: Array<object>}} o - `findings` (REQUIRED) is the WHOLE
+ *   panel's list (`buildPanelFindings(lensFindings)`); the prevention scan reads it, immune to per-lens verdict flattening.
+ * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
-export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, mandatoryLenses = MANDATORY_LENSES } = {}) {
+export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, mandatoryLenses = MANDATORY_LENSES, findings } = {}) {
+  if (findings === undefined) {
+    throw new Error('derivePanelVerdict: `findings` is required — pass buildPanelFindings(lensFindings) (or an explicit [] to assert none). A defaulted [] silently reinstates the #2823 advisory-prevention leak on the drain path.');
+  }
   if (humanRequired || conflict) return VERDICTS.NEEDS_HUMAN;
   if (!mandatoryLenses.length) {
     // Guard the `Array.prototype.every` vacuous-truth trap: an empty mandatory set must never silently read as
@@ -335,6 +470,17 @@ export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, c
     throw new Error(`derivePanelVerdict: missing verdict for mandatory lens(es): ${missing.join(', ')}`);
   }
   if (mandatoryVerdicts.some((v) => v === VERDICTS.NEEDS_HUMAN)) return VERDICTS.NEEDS_HUMAN;
+  if (mandatoryVerdicts.some((v) => v === VERDICTS.CHANGES)) return VERDICTS.CHANGES;
+  // #2823 round-2 finding 4 — derive "the panel owes a guard" from the FINDINGS, not the per-lens verdicts (the
+  // structural fix). A RESOLVED finding whose named prevention is neither captured nor filed owes a guard, whatever
+  // its lens's single verdict flattened to (an advisory lens with a co-resident unresolved finding would flatten to
+  // `changes` and hide it). Only resolved findings count — an unresolved one is `changes` territory (fix first).
+  const preventionFromFindings = normalizeFindings(findings)
+    .some((f) => !isFindingOutstanding(f) && hasUncapturedPrevention(f));
+  // Belt-and-suspenders: a caller that passes a mandatory/advisory lens verdict of `prevention-outstanding` but no
+  // findings still surfaces it (byte-stable for the pre-round-2 verdict-only callers).
+  const preventionFromLens = Object.values(lensVerdicts).some((v) => v === VERDICTS.PREVENTION_OUTSTANDING);
+  if (preventionFromFindings || preventionFromLens) return VERDICTS.PREVENTION_OUTSTANDING;
   if (mandatoryVerdicts.every((v) => v === VERDICTS.ACCEPT)) return VERDICTS.ACCEPT;
   return VERDICTS.CHANGES;
 }
@@ -866,6 +1012,20 @@ export function buildSubjectMandate({
     `Judge only: report concrete findings (${findingAnchor}, one-sentence summary, the failure scenario it causes) and`,
     'nothing about labels, merge policy, or who may clear this change — that is the caller\'s decision, not yours.',
     'Report an empty findings list if nothing survives scrutiny; do not pad with stylistic nitpicks.',
+    // #2823 — MANDATORY PREVENTION INTROSPECTION, single-sourced here so EVERY review surface that frames a
+    // mandate through this skeleton (the diff reviewer, the panel lenses, any future subject) inherits it — it
+    // cannot be skipped. Tuned per finding-class: a citation miscite earns a deterministic gate; a design-fidelity
+    // miss earns a render assertion; etc.
+    'PREVENTION INTROSPECTION (required, for EVERY finding you report — at every severity, nits included):',
+    'alongside the finding you MUST also answer three fields — (a) ROOT CAUSE (`rootCause`): a blameless "why"',
+    'chain for why the CREATOR got this wrong (the authoring failure mode), not merely what is wrong;',
+    '(b) PREVENTION (`prevention`): the cheapest DURABLE guard that would have caught this whole CLASS of defect,',
+    'tuned to the finding\'s class — preferring a DETERMINISTIC GATE (a `check:standards` rule / write-gate / lint)',
+    'over a review lens over a doc note; and (c) CAPTURE (`preventionCaptured`): whether that guard is already',
+    'CAPTURED as an existing gate (true) or must be FILED as a future backlog item (false).',
+    'A finding whose prevention is neither already captured nor filed BLOCKS acceptance — accept ONLY once every',
+    'finding\'s prevention is captured or filed. A script-decidable defect for which you propose no gate is an',
+    'INCOMPLETE review, not a clean one.',
   ].join(' ');
 }
 
