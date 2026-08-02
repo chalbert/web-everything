@@ -1067,10 +1067,11 @@ try {
 
   for (const { rel, content } of scanFiles) {
     for (const f of findAnchorRulingMismatches(content, anchorOwners)) {
+      const ownerList = f.owners.map((n) => `#${n}`).join(', ');
       emit(`${rel}: anchor \`#${f.anchor}\` is attributed to #${f.citedNum}, but that anchor's ruling ` +
-        `authority (its codifiedIn owner) is #${f.expectedNum} — a wrong law citation that outlives the ` +
-        `session (#25/#2821 gate 10). Cite #${f.expectedNum} for the ruling, or name the build slice ` +
-        `explicitly if you mean the implementation. Near: "${f.context}"`,
+        `authorities (its codifiedIn / graduatedTo owners) are ${ownerList} — a wrong law citation that ` +
+        `outlives the session (#25/#2821 gate 10). Cite one of ${ownerList} for the ruling, or name the ` +
+        `build slice explicitly if you mean the implementation. Near: "${f.context}"`,
         { kind: 'citation-anchor-authority', file: rel });
     }
     for (const f of findDanglingLoci(content, { fileExists: relExists, lineCount: relLineCount })) {

@@ -26,15 +26,36 @@ import {
 } from '../lib/citation-check.mjs';
 
 describe('buildAnchorOwners', () => {
-  it('maps an anchor to the backlog item whose codifiedIn owns it', () => {
+  it('maps an anchor to the SET of backlog items whose codifiedIn owns it', () => {
     const owners = buildAnchorOwners([
       { num: '2398', codifiedIn: 'docs/agent/platform-decisions.md#agent-convergence-independent-validation' },
       { num: '2439', codifiedIn: undefined },
       { num: '020', codifiedIn: '"docs/agent/platform-decisions.md#constellation-placement"' },
     ]);
-    expect(owners.get('agent-convergence-independent-validation')).toBe('2398');
-    expect(owners.get('constellation-placement')).toBe('020');
+    expect(owners.get('agent-convergence-independent-validation')).toEqual(new Set(['2398']));
+    expect(owners.get('constellation-placement')).toEqual(new Set(['020']));
     expect(owners.has('nonexistent')).toBe(false);
+  });
+
+  it('UNIONS every owner of a MULTI-OWNER anchor — the corpus reality (32+ anchors have 2+ owners)', () => {
+    // #constellation-placement has 43 codifiedIn owners on the real tree; the single-owner premise kept only
+    // whichever readdirSync yielded first and mislabeled the rest. The union keeps them all.
+    const owners = buildAnchorOwners([
+      { num: '020', codifiedIn: 'docs/agent/platform-decisions.md#constellation-placement' },
+      { num: '021', codifiedIn: 'docs/agent/platform-decisions.md#constellation-placement' },
+      { num: '022', codifiedIn: 'docs/agent/platform-decisions.md#constellation-placement' },
+    ]);
+    expect(owners.get('constellation-placement')).toEqual(new Set(['020', '021', '022']));
+  });
+
+  it('confers ownership via graduatedTo too (an item that graduated INTO the anchor)', () => {
+    // 14 items on the real tree graduate to a platform-decisions anchor; that is just as much an authority
+    // for it as codifiedIn. #1832 owns #composition-preserves-a11y-contract via graduatedTo.
+    const owners = buildAnchorOwners([
+      { num: '1795', codifiedIn: 'docs/agent/platform-decisions.md#composition-preserves-a11y-contract' },
+      { num: '1832', graduatedTo: '"docs/agent/platform-decisions.md#composition-preserves-a11y-contract"' },
+    ]);
+    expect(owners.get('composition-preserves-a11y-contract')).toEqual(new Set(['1795', '1832']));
   });
 });
 
@@ -50,7 +71,7 @@ describe('findAnchorRulingMismatches — gate 10 (the 11-vs-1 core)', () => {
     expect(hits).toHaveLength(1);
     expect(hits[0].anchor).toBe('agent-convergence-independent-validation');
     expect(hits[0].citedNum).toBe('2439');
-    expect(hits[0].expectedNum).toBe('2398');
+    expect(hits[0].owners).toEqual(['2398']);
   });
 
   it('FAILS on the real #2563 shape — anchor and number in one paren `(`#anchor`, #2439)` (shape B)', () => {
@@ -60,7 +81,7 @@ describe('findAnchorRulingMismatches — gate 10 (the 11-vs-1 core)', () => {
     expect(hits).toHaveLength(1);
     expect(hits[0].shape).toBe('B');
     expect(hits[0].citedNum).toBe('2439');
-    expect(hits[0].expectedNum).toBe('2398');
+    expect(hits[0].owners).toEqual(['2398']);
   });
 
   it('PASSES when the anchor is attributed to the correct ruling #2398', () => {
@@ -93,6 +114,41 @@ describe('findAnchorRulingMismatches — gate 10 (the 11-vs-1 core)', () => {
   it('does NOT fire on the heading-definition form `{#anchor}` followed by its `**Ratified (#NNN)**` line', () => {
     const text = '### Agent fix/convergence {#agent-convergence-independent-validation}\n\n' +
       '**Ratified 2026-07-10 (#2398, graduated to epic #2410).**';
+    expect(findAnchorRulingMismatches(text, owners)).toHaveLength(0);
+  });
+});
+
+describe('findAnchorRulingMismatches — MULTI-OWNER authority (32+ anchors have 2+ owners on the corpus)', () => {
+  // `#component-dc` is one of the real multi-owner anchors. A citation to ANY of its legitimate owners must
+  // PASS; only a number that owns NONE of it is a genuine mis-attribution and FAILS.
+  const owners = buildAnchorOwners([
+    { num: '043', codifiedIn: 'docs/agent/platform-decisions.md#component-dc' },
+    { num: '854', codifiedIn: 'docs/agent/platform-decisions.md#component-dc' },
+    { num: '900', codifiedIn: 'docs/agent/platform-decisions.md#component-dc' },
+    // graduatedTo also confers ownership — mirror the real #compose-dont-handroll / #933 case.
+    { num: '933', graduatedTo: '"docs/agent/platform-decisions.md#compose-dont-handroll"' },
+    { num: '1394', codifiedIn: 'docs/agent/platform-decisions.md#compose-dont-handroll' },
+  ]);
+
+  it('PASSES when the cited #NNN is ONE of several legitimate owners (not the first-seen)', () => {
+    // #854 is not the first owner, yet it genuinely owns #component-dc — the single-owner premise wrongly
+    // flagged this as a mismatch (16 of the 17 corpus false positives were exactly this).
+    const text = 'the definition-of-component rule (`#component-dc` (#854)) governs here.';
+    expect(findAnchorRulingMismatches(text, owners)).toHaveLength(0);
+  });
+
+  it('FAILS when the cited #NNN owns NONE of the anchor (a genuinely wrong attribution)', () => {
+    const text = 'the definition-of-component rule (`#component-dc` (#2439)) governs here.';
+    const hits = findAnchorRulingMismatches(text, owners);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].citedNum).toBe('2439');
+    expect(hits[0].owners).toEqual(['043', '854', '900']); // the full sorted owner set, none of them #2439
+  });
+
+  it('PASSES when the cited #NNN owns the anchor via graduatedTo (demo-workflow #compose-dont-handroll #933)', () => {
+    // The reviewer's own example: `demo-workflow.md` citing `#compose-dont-handroll (#933)` must PASS, since
+    // #933 owns it via graduatedTo even though #1394 owns it via codifiedIn.
+    const text = 'compose over hand-rolling (`#compose-dont-handroll` (#933)).';
     expect(findAnchorRulingMismatches(text, owners)).toHaveLength(0);
   });
 });

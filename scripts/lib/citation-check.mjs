@@ -58,33 +58,51 @@ export const CROSS_REPO_LOCI = new Set(['fui:', 'plateau:']);
 const HASH_SLUG = 'x[0-9a-z]{6}';
 
 /**
- * Build the anchor → owning-item map from backlog front-matter. Exactly one backlog item carries
- * `codifiedIn: docs/agent/platform-decisions.md#<anchor>` for a given anchor; that item's number IS the
- * anchor's ruling authority. This is a lookup, not a recall (#2821 gate 10).
+ * Build the anchor → owning-items map from backlog front-matter. A platform-decisions `#anchor` is owned
+ * by EVERY backlog item that resolves to it — an anchor is genuinely multi-owner on this corpus (measured:
+ * 109 anchors resolve, 32 have 2+ owners; `#constellation-placement` alone has 43). Two front-matter fields
+ * confer ownership, both written as `…platform-decisions.md#<anchor>`:
+ *   • `codifiedIn` — the item whose ruling the anchor codifies.
+ *   • `graduatedTo` — an item that graduated INTO the anchor (14 items on this tree do), which is just as
+ *     much a legitimate authority for it.
+ * So the map is `anchor → Set(ownerNum)`, the UNION of both fields across all items. Firing must test set
+ * membership, never a single "the owner" — an earlier single-owner premise kept whichever item `readdirSync`
+ * yielded first and mislabeled the other 30+ legitimate owners as wrong (#2821 gate 10). This is a lookup,
+ * not a recall (#51 hookable-vs-judgment).
  *
- * @param items array of `{ num, codifiedIn }` (codifiedIn may be absent). `num` is the backlog number.
- * @param opts.doc the statute doc basename the anchors live in (default platform-decisions.md).
- * @returns Map<anchorName, ownerNum:string>. If two items claim the same anchor the first wins and the
- *          collision is ignored here (a separate rule owns "one codifiedIn owner per anchor").
+ * @param items array of `{ num, codifiedIn?, graduatedTo? }`. `num` is the backlog number; either field may
+ *        be absent. Both are scanned for the doc#anchor form.
+ * @param opts.doc the statute doc path the anchors live in (default platform-decisions.md).
+ * @returns Map<anchorName, Set<ownerNum:string>>. Every item that cites the anchor via either field is in
+ *          the set; membership — not identity — is what `findAnchorRulingMismatches` tests.
  */
 export function buildAnchorOwners(items, { doc = 'docs/agent/platform-decisions.md' } = {}) {
   const owners = new Map();
   const re = new RegExp(`${doc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}#([a-z0-9][a-z0-9-]*)`);
+  const add = (anchor, num) => {
+    let set = owners.get(anchor);
+    if (!set) { set = new Set(); owners.set(anchor, set); }
+    set.add(String(num));
+  };
   for (const it of items || []) {
-    if (!it || typeof it.codifiedIn !== 'string' || it.num == null) continue;
-    const m = it.codifiedIn.match(re);
-    if (m && !owners.has(m[1])) owners.set(m[1], String(it.num));
+    if (!it || it.num == null) continue;
+    for (const field of [it.codifiedIn, it.graduatedTo]) {
+      if (typeof field !== 'string') continue;
+      const m = field.match(re);
+      if (m) add(m[1], it.num);
+    }
   }
   return owners;
 }
 
 /**
  * Gate 10 — anchor-authority resolution. Find sentences that cite a platform-decisions `#anchor` AND
- * attribute its ruling to an `#NNN` that is NOT the anchor's codifiedIn owner.
+ * attribute its ruling to an `#NNN` that is NOT in the anchor's owner set (its codifiedIn / graduatedTo
+ * owners). An anchor with several legitimate owners passes for a citation to ANY one of them.
  *
  * PRECISION is the whole game (the task's zero-false-positive bar): a bare `#2439` used as a build-slice
  * reference, and a cross-reference to an anchor with no attributing number, must NOT fire. We fire on only
- * two tight *attribution* shapes, and only for anchors we can resolve (a known codifiedIn owner):
+ * two tight *attribution* shapes, and only for anchors we can resolve (present in the owner map):
  *
  *   A. anchor immediately followed by an attribution paren whose LEADING token is a number —
  *      `#anchor (#2439, …)` or `[…](#anchor) (#2439)`. A trailing PROSE paren — `#anchor (independence
@@ -99,8 +117,9 @@ export function buildAnchorOwners(items, { doc = 'docs/agent/platform-decisions.
  * `anchorOwners`.
  *
  * @param text     the file body (raw). Newlines are normalised so a citation split across lines still matches.
- * @param anchorOwners Map<anchorName, ownerNum> from buildAnchorOwners.
- * @returns array of `{ anchor, citedNum, expectedNum, shape, context }`.
+ * @param anchorOwners Map<anchorName, Set<ownerNum>> from buildAnchorOwners.
+ * @returns array of `{ anchor, citedNum, owners, shape, context }` — `owners` is the anchor's full sorted
+ *          owner set (the legitimate authorities the cited number was NOT one of).
  */
 export function findAnchorRulingMismatches(text, anchorOwners) {
   const findings = [];
@@ -114,12 +133,14 @@ export function findAnchorRulingMismatches(text, anchorOwners) {
   if (!anchorAlt) return findings;
 
   const record = (anchor, citedNum, shape, idx) => {
-    const expectedNum = anchorOwners.get(anchor);
-    if (expectedNum === undefined || String(citedNum) === String(expectedNum)) return;
+    const ownerSet = anchorOwners.get(anchor);
+    // Fire ONLY when the cited number owns NONE of this anchor — a genuinely wrong attribution. An anchor
+    // is multi-owner on this corpus, so a citation to any ONE of its legitimate owners must pass.
+    if (!ownerSet || ownerSet.size === 0 || ownerSet.has(String(citedNum))) return;
     findings.push({
       anchor,
       citedNum: String(citedNum),
-      expectedNum: String(expectedNum),
+      owners: [...ownerSet].sort(),
       shape,
       context: flat.slice(Math.max(0, idx - 30), idx + 80).trim(),
     });
