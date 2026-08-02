@@ -10,9 +10,19 @@
  *
  * SCOPE (important): `/code-review` is a Claude Code product surface with no source living in this repo —
  * this module cannot "call into" it. What it DOES do is define the canonical `Finding`/`verdict` contract
- * that `/code-review`'s own output already matches (see the `ReportFindings` tool shape it renders through:
- * file, summary, failure_scenario, category, line, verdict, outcome) and that this repo's own docs
- * (`we:docs/agent/platform-decisions.md`, the pre-PR review rider) and skills point reviewers at. The
+ * whose CORE fields `/code-review`'s own output already matches (see the `ReportFindings` tool shape it renders
+ * through: file, summary, failure_scenario, category, line, verdict, outcome) and that this repo's own docs
+ * (`we:docs/agent/platform-decisions.md`, the pre-PR review rider) and skills point reviewers at.
+ *
+ * #2823 SHAPE PARITY — the prevention-introspection fields (`rootCause` / `prevention` / `preventionCaptured`)
+ * are a SUPERSET the canonical `Finding` carries but `/code-review`'s `ReportFindings` tool CANNOT: its schema is
+ * `additionalProperties: false`, so it hard-rejects the three keys. They are therefore scoped to the surfaces
+ * whose return schemas are `additionalProperties: true` — the drain panel reviewer (`scripts/workflows/review-parked-prs.mjs`)
+ * and the subject-jury jurors/red-team (`skills-src/jury/subject-jury.workflow.js`), whose prompts DO ask for the
+ * three fields so `normalizeFinding` picks them up and `deriveVerdict` can reach `prevention-outstanding`. On the
+ * `/code-review` surface the prevention introspection still happens (the shared mandate demands it) but is carried
+ * in the finding's PROSE (its `summary`/`failure_scenario`), not as structured fields the tool would reject. So
+ * "matches `/code-review`" holds for the CORE shape; the #2823 fields are a deliberate, surface-scoped extension. The
  * JUDGEMENT itself (spawning a subagent, reading a diff, deciding what's wrong) is never done here — like
  * `we:scripts/lane-review.mjs`, this module is the mechanical/derivation half; judging stays the caller's
  * action. `#2326` wires the drain auto-review + the new `/review` skill to this contract; this item (`#2325`)
@@ -892,15 +902,22 @@ export const REVIEW_NOTICE_EVENTS = Object.freeze({
 
 /**
  * #2823 — render the prevention-summary TAIL appended to an escalated notice. Pure. Returns `''` (byte-stable
- * for every pre-#2823 caller) when there is nothing outstanding — no supplied finding names an uncaptured guard
+ * for every pre-#2823 caller) when there is nothing outstanding — no RESOLVED finding names an uncaptured guard
  * AND the verdict is not `prevention-outstanding`. Otherwise names the count and the guards owed, so the
- * acceptance gate ("file before accept") rides the same line the operator already reads. The "outstanding"
- * definition is the SINGLE-SOURCED `hasUncapturedPrevention`, so the notice and the verdict never disagree.
+ * acceptance gate ("file before accept") rides the same line the operator already reads.
+ *
+ * Considers ONLY RESOLVED findings (`outcome: 'fixed'|'no_change_needed'`), exactly as `deriveVerdict` does — it
+ * consults prevention ONLY after every finding is resolved (an unfixed defect is `changes`, and the fix comes
+ * before the prevention gate). That shared filter is what makes the claim true: the notice and the verdict CAN'T
+ * disagree, because both count the SAME set (resolved findings with an uncaptured guard, via the single-sourced
+ * `hasUncapturedPrevention`). An unfixed finding that merely happens to name a prevention no longer mis-fires the
+ * "prevention outstanding" line while the real blocker is still the defect itself.
  * @param {{findings?: Array<object>, verdict?: string}} [o]
  * @returns {string}
  */
 export function renderPreventionSummary({ findings = [], verdict } = {}) {
-  const outstanding = normalizeFindings(findings).filter(hasUncapturedPrevention);
+  const resolved = normalizeFindings(findings).filter((f) => f.outcome === 'fixed' || f.outcome === 'no_change_needed');
+  const outstanding = resolved.filter(hasUncapturedPrevention);
   if (!outstanding.length && verdict !== VERDICTS.PREVENTION_OUTSTANDING) return '';
   if (!outstanding.length) return ' Prevention outstanding — file the named guard(s) before accept.';
   const guards = outstanding.map((f) => f.prevention).join('; ');

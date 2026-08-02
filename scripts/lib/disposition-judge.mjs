@@ -48,12 +48,38 @@ export const DISPOSITIONS = Object.freeze({
 });
 
 /** Verdict strictness — diversity-selection order (#2567): the STRICTEST verdict wins a reduction, never a vote.
- *  `needs-human` (2) beats `changes` (1) beats `accept` (0). */
+ *  `needs-human` (3) beats `changes` (2) beats `prevention-outstanding` (1) beats `accept` (0). `prevention-outstanding`
+ *  (#2823) ranks ABOVE `accept` (a co-juror's "file the guard" must never lose to another's `accept`) and BELOW
+ *  `changes` (an unfixed defect is a harder block than a missing guard — mirrors `deriveVerdict`, which returns
+ *  `changes` before it ever consults prevention). MUST stay TOTAL over `VERDICTS` — see the assertion below. */
 const VERDICT_STRICTNESS = Object.freeze({
   [VERDICTS.ACCEPT]: 0,
-  [VERDICTS.CHANGES]: 1,
-  [VERDICTS.NEEDS_HUMAN]: 2,
+  [VERDICTS.PREVENTION_OUTSTANDING]: 1,
+  [VERDICTS.CHANGES]: 2,
+  [VERDICTS.NEEDS_HUMAN]: 3,
 });
+
+// #2823 — ENFORCE TOTALITY over `VERDICTS` at module load. A verdict added to the enum without a rank here would
+// otherwise compare as `undefined` in every strictest-wins reduction below — silently ranking BELOW `accept` and
+// dropping a blocking verdict (the exact defect this PR was bounced for). Fail LOUDLY at import instead: a
+// missing rank is a build-time crash, never a silent mis-reduction at review time.
+for (const verdict of Object.values(VERDICTS)) {
+  if (VERDICT_STRICTNESS[verdict] === undefined) {
+    throw new Error(`VERDICT_STRICTNESS is not total over VERDICTS: verdict "${verdict}" has no strictness rank — add it (the table must rank every VERDICTS member).`);
+  }
+}
+
+/** The strictness rank of a verdict. THROWS on an unranked verdict rather than yielding `undefined` (which every
+ *  `>` comparison would silently lose). Ledger/panel verdicts are enum-constrained upstream (`validateJuryEvent`
+ *  admits only `VERDICTS` values), so this never throws on real data — it is the fail-loud backstop the totality
+ *  assertion above guarantees, applied at each comparison site. */
+function verdictStrictness(verdict) {
+  const rank = VERDICT_STRICTNESS[verdict];
+  if (rank === undefined) {
+    throw new Error(`verdictStrictness: no strictness rank for verdict "${verdict}" — not a member of VERDICTS.`);
+  }
+  return rank;
+}
 
 /** A finding is OUTSTANDING unless a fix pass explicitly resolved it (mirrors `deriveVerdict` in jury-core). */
 function isFindingOutstanding(finding) {
@@ -130,7 +156,7 @@ export function reduceLedger(ledger) {
     const lens = lensByJuror.get(jurorId);
     if (!lens) continue; // a verdict from a juror the roster never named — ignore it (fail-closed handles the gap)
     const current = lensVerdicts[lens];
-    if (current === undefined || VERDICT_STRICTNESS[verdict] > VERDICT_STRICTNESS[current]) {
+    if (current === undefined || verdictStrictness(verdict) > verdictStrictness(current)) {
       lensVerdicts[lens] = verdict;
     }
   }
@@ -255,7 +281,7 @@ export function proposeDisposition({ ledger = [], config, signals = {}, mandator
   // 4 — PANEL verdict over the mandatory lenses (diversity-selection: strictest wins).
   const strictestMandatory = mandatoryLenses.reduce((worst, lens) => {
     const v = reduced.lensVerdicts[lens];
-    return VERDICT_STRICTNESS[v] > VERDICT_STRICTNESS[worst] ? v : worst;
+    return verdictStrictness(v) > verdictStrictness(worst) ? v : worst;
   }, VERDICTS.ACCEPT);
   const totals = weightedTotals(reduced, lensWeights);
   const dissentFraction = totals.total > 0 ? totals.dissent / totals.total : 0;
@@ -269,6 +295,14 @@ export function proposeDisposition({ ledger = [], config, signals = {}, mandator
   }
   if (strictestMandatory === VERDICTS.CHANGES) {
     return escalate('panel-changes', 'A mandatory lens wants changes — the review has not converged to accept; escalate.', { panelVerdict: strictestMandatory, dissentFraction });
+  }
+  // #2823 — a mandatory lens whose findings are resolved but names an uncaptured, unfiled PREVENTION guard is
+  // NOT a clean accept: the guard must be filed before land. Escalate to the operator (who files it) rather than
+  // letting the weight-independent panel gate fall through to the dissent policy and auto-dispose. Without this
+  // branch, `prevention-outstanding` ranks above `accept` but below `changes`, so it would slip past both the
+  // needs-human and changes checks and reach step 5 — auto-disposing the very PR the verdict exists to hold.
+  if (strictestMandatory === VERDICTS.PREVENTION_OUTSTANDING) {
+    return escalate('panel-prevention-outstanding', 'A mandatory lens resolved its findings but named a prevention guard that is neither captured nor filed — file the guard before accept; escalate.', { panelVerdict: strictestMandatory, dissentFraction });
   }
 
   // 5 — DISSENT policy (the #2651 knobs). Mandatory lenses unanimously accept here.

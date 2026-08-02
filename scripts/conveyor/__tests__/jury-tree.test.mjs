@@ -46,6 +46,10 @@ describe('renderJuryTree — a /workflows-style subject tree', () => {
     expect(out).toContain(VERDICT_MARKERS.accept);
     expect(out).toContain(VERDICT_MARKERS.changes);
   });
+  it('#2823 — maps prevention-outstanding to its own glyph, NOT the neutral no-verdict dot', () => {
+    expect(VERDICT_MARKERS['prevention-outstanding']).toBe('⚐');
+    expect(VERDICT_MARKERS['prevention-outstanding']).not.toBe('·');
+  });
 });
 
 describe('renderJuryTree — graceful degradation', () => {

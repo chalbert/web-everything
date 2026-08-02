@@ -636,6 +636,23 @@ describe('derivePanelVerdict (#2310)', () => {
   it('throws on an empty mandatoryLenses set rather than vacuously accepting (Array#every trap)', () => {
     expect(() => derivePanelVerdict({ lensVerdicts: allAccept, mandatoryLenses: [] })).toThrow(/must be non-empty/);
   });
+
+  it('#2823 — an ADVISORY lens returning prevention-outstanding SURFACES to the panel (never dropped into accept)', () => {
+    // The exact leak the reviewer flagged: an advisory lens's prevention-outstanding used to be unscored, so the
+    // panel accepted and the PR landed with the guard unfiled. It must now surface as prevention-outstanding.
+    const verdicts = { ...allAccept, 'standards-conformance': VERDICTS.PREVENTION_OUTSTANDING };
+    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it('#2823 — a MANDATORY lens at prevention-outstanding surfaces as prevention-outstanding, not flattened to changes', () => {
+    const verdicts = { ...allAccept, security: VERDICTS.PREVENTION_OUTSTANDING };
+    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it('#2823 — a real mandatory `changes` still OUTRANKS a prevention-outstanding elsewhere (the fix comes first)', () => {
+    const verdicts = { ...allAccept, correctness: VERDICTS.CHANGES, simplicity: VERDICTS.PREVENTION_OUTSTANDING };
+    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.CHANGES);
+  });
 });
 
 describe('renderPanelVerdictTable (#2310)', () => {
@@ -844,14 +861,23 @@ describe('renderPreventionSummary (#2823)', () => {
     expect(renderPreventionSummary()).toBe('');
   });
 
-  it('flags the count + guards when findings name uncaptured prevention', () => {
+  it('flags the count + guards when RESOLVED findings name uncaptured prevention', () => {
     const s = renderPreventionSummary({
       findings: [
-        { summary: 'finding a', prevention: 'gate A', preventionCaptured: false },
-        { summary: 'finding b', prevention: 'gate B', preventionCaptured: false },
+        { summary: 'finding a', outcome: 'fixed', prevention: 'gate A', preventionCaptured: false },
+        { summary: 'finding b', outcome: 'no_change_needed', prevention: 'gate B', preventionCaptured: false },
       ],
     });
     expect(s).toBe(' Prevention outstanding — 2 guards must be filed before accept: gate A; gate B.');
+  });
+
+  it('#2823 — ignores an UNFIXED finding that names a prevention (matches deriveVerdict: the fix comes first)', () => {
+    // An unresolved defect is `changes`, not `prevention-outstanding`. The summary must stay silent so the notice
+    // and the verdict never disagree — the real blocker is the unfixed defect, not an unfiled guard.
+    expect(renderPreventionSummary({
+      findings: [{ summary: 'null deref', prevention: 'a lint rule', preventionCaptured: false }],
+      verdict: VERDICTS.CHANGES,
+    })).toBe('');
   });
 
   it('falls back to a generic line when the verdict is prevention-outstanding but no findings were supplied', () => {

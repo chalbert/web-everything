@@ -49,9 +49,12 @@ import { CARE_LEVELS } from './review-escalation.mjs';
  *  ALWAYS wins over any finding-derived disposition (see `deriveVerdict`). `prevention-outstanding` (#2823) is
  *  the accept-gated-on-capture surface: every finding is resolved, but at least one names a PREVENTION guard
  *  that is neither already captured (an existing gate) nor filed as a future item — so a CLEAN accept is
- *  withheld ("file the guard before accept", closing the unfiled-intention gap). It behaves like `changes` in
- *  the round loop (`deriveNegotiationOutcome` lands ONLY `accept`), so a prevention-outstanding verdict never
- *  silently lands — it re-enters the loop until every guard is captured or filed. */
+ *  withheld ("file the guard before accept", closing the unfiled-intention gap). It is NOT a negotiable
+ *  `changes` state: every finding is already fixed, so no editor round has anything to revise and no round-loop
+ *  actor files the guard. `deriveNegotiationOutcome` therefore ESCALATES it straight to the operator (who files
+ *  the named guard(s)), carrying the guard list in the notice — it never re-enters the round loop to burn the
+ *  budget re-deriving the identical verdict. It never silently lands (`deriveNegotiationOutcome` lands ONLY
+ *  `accept`). */
 export const VERDICTS = Object.freeze({
   ACCEPT: 'accept',
   CHANGES: 'changes',
@@ -170,6 +173,11 @@ export const NEGOTIATION_OUTCOMES = Object.freeze({
  *
  *   - the round's verdict is `needs-human` → `escalate`, ALWAYS (a revision that itself touches the
  *     auto-review trust chain is the v1 conflict-of-interest case — no round budget saves it).
+ *   - `prevention-outstanding` (#2823) → `escalate`, immediately. Every finding is already resolved, so another
+ *     editor round has nothing to fix, and NO round-loop actor files a guard or flips `preventionCaptured` —
+ *     `continue`-ing would only re-derive the identical verdict every round until the cap, then escalate anyway
+ *     (burning the whole budget). So it hands STRAIGHT to the operator, who files the named guard(s); the loop
+ *     cannot close this state itself. The guard list rides the escalation notice (`renderPreventionSummary`).
  *   - `accept` AND the required `test` check is green → `land` (the FULL bar holds: the final diff was
  *     accepted by a non-author reviewer AND CI is green).
  *   - `accept` but the required `test` is NOT green → NOT landable. The CI-green land clause (#2410 slice D,
@@ -188,11 +196,15 @@ export const NEGOTIATION_OUTCOMES = Object.freeze({
  * caller owns mapping its CI state to this boolean (green ⇒ `true`; red OR pending/unknown ⇒ not green), keeping
  * this reducer subject-agnostic (it never parses a GitHub conclusion string itself).
  *
- * @param {{verdict: 'accept'|'changes'|'needs-human', round: number, roundCap?: number, requiredTestGreen?: boolean}} o
+ * @param {{verdict: 'accept'|'changes'|'needs-human'|'prevention-outstanding', round: number, roundCap?: number, requiredTestGreen?: boolean}} o
  * @returns {'continue'|'land'|'escalate'}
  */
 export function deriveNegotiationOutcome({ verdict, round, roundCap = NEGOTIATION_ROUND_CAP, requiredTestGreen = true }) {
   if (verdict === VERDICTS.NEEDS_HUMAN) return NEGOTIATION_OUTCOMES.ESCALATE;
+  // #2823 — prevention-outstanding is NOT a negotiable `changes`: every finding is resolved, so no editor round
+  // can close it and no loop actor files the guard. Escalate immediately to the operator (who files the guard),
+  // rather than looping to re-derive the identical verdict until the cap. See the VERDICTS doc above.
+  if (verdict === VERDICTS.PREVENTION_OUTSTANDING) return NEGOTIATION_OUTCOMES.ESCALATE;
   if (verdict === VERDICTS.ACCEPT && requiredTestGreen === true) return NEGOTIATION_OUTCOMES.LAND;
   return round < roundCap ? NEGOTIATION_OUTCOMES.CONTINUE : NEGOTIATION_OUTCOMES.ESCALATE;
 }
@@ -352,13 +364,20 @@ export function buildPanelFindings(lensFindings = {}) {
  *     this pure function can detect from verdict labels alone (#51: the derivation stays mechanical, the
  *     judgment stays with the caller/subagents reading the actual findings) — so the caller passes it in
  *     explicitly, the same pattern `deriveVerdict`'s `humanRequired` already establishes.
- *   - every MANDATORY lens verdict is `accept` → `accept` (the "unanimous accept lands" spec line — unanimity
- *     is scored over the mandatory lenses; an advisory lens's outstanding findings are surfaced, never blocking).
- *   - otherwise → `changes` (at least one mandatory lens wants changes; feeds the SAME round-cap loop v2 uses).
+ *   - a MANDATORY lens wants `changes` → `changes` (feeds the SAME round-cap loop v2 uses).
+ *   - #2823 — ANY lens (mandatory OR advisory) returns `prevention-outstanding` → `prevention-outstanding`.
+ *     Scored over ALL lensVerdicts, not just the mandatory ones: an advisory lens (simplicity,
+ *     standards-conformance) that names a guard neither captured nor filed must NOT be silently dropped into a
+ *     panel `accept` — that is the exact miss the verdict exists to catch (the PR would land with the guard
+ *     unfiled). Surfacing it here is what carries the distinction (and `renderPreventionSummary`'s operator
+ *     line) into the notice. Checked AFTER needs-human/changes (a real defect still outranks a missing guard),
+ *     so it fires only once the mandatory lenses did not want changes.
+ *   - every MANDATORY lens verdict is `accept` AND no lens is prevention-outstanding → `accept` (the "unanimous
+ *     accept lands" spec line — an advisory lens's ordinary outstanding findings are surfaced, never blocking).
  *
- * @param {{lensVerdicts: Object<string, 'accept'|'changes'|'needs-human'>, humanRequired?: boolean,
+ * @param {{lensVerdicts: Object<string, 'accept'|'changes'|'needs-human'|'prevention-outstanding'>, humanRequired?: boolean,
  *   conflict?: boolean, mandatoryLenses?: string[]}} o
- * @returns {'accept'|'changes'|'needs-human'}
+ * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
 export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, mandatoryLenses = MANDATORY_LENSES } = {}) {
   if (humanRequired || conflict) return VERDICTS.NEEDS_HUMAN;
@@ -374,6 +393,11 @@ export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, c
     throw new Error(`derivePanelVerdict: missing verdict for mandatory lens(es): ${missing.join(', ')}`);
   }
   if (mandatoryVerdicts.some((v) => v === VERDICTS.NEEDS_HUMAN)) return VERDICTS.NEEDS_HUMAN;
+  if (mandatoryVerdicts.some((v) => v === VERDICTS.CHANGES)) return VERDICTS.CHANGES;
+  // #2823 — a prevention-outstanding from ANY lens (mandatory or advisory) surfaces to the panel so it is never
+  // dropped into an accept. Scans EVERY lens verdict, not just the mandatory pair — an advisory lens is exactly
+  // where this leaked before (its verdict was never scored, so the panel accepted and the guard went unfiled).
+  if (Object.values(lensVerdicts).some((v) => v === VERDICTS.PREVENTION_OUTSTANDING)) return VERDICTS.PREVENTION_OUTSTANDING;
   if (mandatoryVerdicts.every((v) => v === VERDICTS.ACCEPT)) return VERDICTS.ACCEPT;
   return VERDICTS.CHANGES;
 }

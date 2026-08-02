@@ -114,6 +114,31 @@ describe('reduceLedger', () => {
     }
     expect(reduceLedger(null).rosterKnown).toBe(false);
   });
+
+  it('#2823 — prevention-outstanding is STRICTER than accept, so a co-juror\'s accept never drops it', () => {
+    const ledger = [
+      rosterEvent([
+        { id: 'correctness#1', lens: 'correctness', charter: CHARTER },
+        { id: 'correctness#2', lens: 'correctness', charter: CHARTER },
+      ]),
+      verdictEvent('correctness#1', VERDICTS.ACCEPT),
+      verdictEvent('correctness#2', VERDICTS.PREVENTION_OUTSTANDING), // must carry the lens, not be smoothed to accept
+    ];
+    expect(reduceLedger(ledger).lensVerdicts).toEqual({ correctness: VERDICTS.PREVENTION_OUTSTANDING });
+  });
+
+  it('#2823 — a co-juror\'s needs-human is NOT discarded when the current value is prevention-outstanding', () => {
+    // The exact regression the reviewer flagged: `2 > undefined` used to be false, silently losing needs-human.
+    const ledger = [
+      rosterEvent([
+        { id: 'security#1', lens: 'security', charter: CHARTER },
+        { id: 'security#2', lens: 'security', charter: CHARTER },
+      ]),
+      verdictEvent('security#1', VERDICTS.PREVENTION_OUTSTANDING),
+      verdictEvent('security#2', VERDICTS.NEEDS_HUMAN), // strictest — must win
+    ];
+    expect(reduceLedger(ledger).lensVerdicts).toEqual({ security: VERDICTS.NEEDS_HUMAN });
+  });
 });
 
 describe('weightedDissentFraction', () => {
@@ -227,6 +252,16 @@ describe('proposeDisposition — panel verdict', () => {
     const ledger = singleJurorLedger(MANDATORY_LENSES, VERDICTS.ACCEPT);
     ledger.push(verdictEvent('security#1', VERDICTS.NEEDS_HUMAN, 1)); // override security to needs-human
     expect(proposeDisposition({ ledger, config: DEFAULT_CONFIG }).reason).toBe('panel-needs-human');
+  });
+
+  it('#2823 — escalates (never auto-disposes) when a mandatory lens is prevention-outstanding', () => {
+    // Without the step-4 branch, prevention-outstanding (rank 1, above accept) slips past the changes/needs-human
+    // checks and reaches the dissent policy — auto-disposing the very PR the verdict exists to hold.
+    const ledger = singleJurorLedger(MANDATORY_LENSES, VERDICTS.ACCEPT);
+    ledger.push(verdictEvent('security#1', VERDICTS.PREVENTION_OUTSTANDING, 1));
+    const p = proposeDisposition({ ledger, config: DEFAULT_CONFIG });
+    expect(p.disposition).toBe(DISPOSITIONS.ESCALATE);
+    expect(p.reason).toBe('panel-prevention-outstanding');
   });
 });
 

@@ -347,8 +347,10 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
        `review:accepted`**: the panel converged and fixed the diff, but a human must clear a trust-chain edit.
        Keep `review:human`, post the converged findings + `renderPanelVerdictTable(...)` as the `🤖 advisory AI
        review / fix (non-clearing)` comment, and surface the PR to the operator via
-       `renderReviewNotice({ event: 'escalated', pr, repo, verdict, disposition, reasons })` (#2433) rather than
-       hand-typing the in-chat notice — the fix rode the PR branch, the clearance did not.
+       `renderReviewNotice({ event: 'escalated', pr, repo, verdict, disposition, reasons, findings })` (#2433) —
+       pass `findings = buildPanelFindings(lensFindings)` (the whole panel's list) so the notice's #2823 prevention
+       summary renders the guards owed before accept — rather than hand-typing the in-chat notice; the fix rode the
+       PR branch, the clearance did not.
      - **`escalate`** (verdict `needs-human` — a genuine mandate `conflict` or the global `humanRequired`
        conflict-of-interest flag — OR `changes` with `round >= roundCap`) → this is the `deriveReviewDisposition`
        DEADLOCK case (`mandate-conflict` / `non-convergence` → `{ mode: human }`): the loop already ran and could
@@ -358,7 +360,9 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
        mandatory/advisory/verdict breakdown) as a PR comment, so the human sees exactly which lens(es)
        disagreed and whether via non-convergence or a genuine mandate conflict. Then report it the same way as
        the gate-self case, via `renderReviewNotice({ event: 'escalated', pr, repo, verdict, disposition,
-       reasons })` (#2433). This is the **only** escalation shape agents produce; the operator clears it with
+       reasons, findings })` (#2433) — again passing `findings = buildPanelFindings(lensFindings)` so a
+       `prevention-outstanding` escalation names the guards owed in the same line. This is the **only** escalation
+       shape agents produce; the operator clears it with
        [`/review <PR>`](../review/SKILL.md).
      - **`continue`** (verdict `changes`, `round < roundCap`) → step 4.
   4. **Editor round.** Spawn a **fresh-context editor subagent** seeded with `buildEditorMandate({ findings,
