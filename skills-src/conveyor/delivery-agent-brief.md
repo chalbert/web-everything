@@ -128,8 +128,16 @@ A WE item's gate is `npm run check:standards`. For a cross-locus item, run **tha
 (look up `LOCI[item.locus]` in `check-standards-rules.mjs`). **The gate must be green before you push** — a red
 gate is a hard stop (see *Escalations*). Then resolve:
 
+**Run the gate in the FOREGROUND and never background it.** Backgrounding your suite run and then yielding is
+the exact stall #2833 exists to kill: a run you walk away from leaves the lane half-verified but LOOKING done,
+and nothing reclaims it. This is no longer just guidance: a `PreToolUse(Bash)` guard (`we:scripts/guard-bash.mjs`,
+#2833 finding 3) **DENIES** a backgrounded verification-set run (`verify-lane` / `check:standards` / `test:unit`)
+— whether via the Bash `run_in_background` param or a shell `&`/`nohup` — so the footgun is structurally blocked,
+not merely discouraged. The authoritative, marker-recording synchronous verification happens at step 8 against
+your FINAL commit (via `scripts/verify-lane.mjs`); the gate here is the same suites, run green so you may resolve.
+
 ```bash
-npm run check:standards          # (or the item's locus gate)
+npm run check:standards          # (or the item's locus gate) — FOREGROUND, blocking; never `&`/background-and-yield
 node scripts/backlog.mjs resolve {{ITEM_NUM}}
 ```
 
@@ -202,9 +210,20 @@ printf '%s\n' "WE #{{ITEM_NUM}}: <one-line summary>" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> <explicit-paths>
 
+# #2833 — synchronously verify the FINAL HEAD you are about to land, in the FOREGROUND (blocks until the
+# suites exit), recording a green marker keyed to this exact commit. Do NOT background this and yield: a
+# half-run verification strands a `running` marker and pr-land's finish-guard (--require-verified) will
+# refuse to publish. Exit 0 = green (proceed); exit 2 = red (a hard stop — fix, re-commit, re-verify).
+node scripts/verify-lane.mjs --gate="npm run check:standards"   # (or the item's locus gate)
+
 node scripts/pr-land.mjs --ref=lane/{{ITEM_NUM}}-<slug> --sha=HEAD --base=main \
-  --body-file=<pr-body> --label-on-green
+  --body-file=<pr-body> --label-on-green --require-verified
 ```
+
+`--require-verified` (#2833) makes `pr-land` refuse to publish the lane ref unless the HEAD it is landing has a
+fresh GREEN verification marker from the `verify-lane` run just above — so a lane that skipped or backgrounded
+its verification is caught at the finish line instead of stranding silently. `WE_LAND_UNVERIFIED=1` is the
+documented break-glass if you ever must land on CI alone.
 
 `--label-on-green` is the **producer mode** you want: it opens the self-approved PR, **waits for the required
 `test` check, applies the `ready-to-merge` label ONLY once it is green, then STOPS**. It does **not** trigger a
