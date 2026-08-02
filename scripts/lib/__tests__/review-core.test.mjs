@@ -419,6 +419,16 @@ describe('derivePlanOutcome (#2438 — plan-handshake round-cap decision)', () =
     expect(derivePlanOutcome({ verdict: VERDICTS.NEEDS_HUMAN, round: 1 })).toBe(PLAN_OUTCOMES.ESCALATE);
   });
 
+  it('#2823 round-3 finding 3 — escalates IMMEDIATELY on prevention-outstanding, never loops the changes fall-through', () => {
+    // The round-3 enum-totality miss: prevention-outstanding fell through the `changes` round-cap path and looped
+    // (continue at round 1, escalate only at the cap) because no plan-loop actor files the guard. It must escalate
+    // straight to the operator at every round — the SAME call deriveNegotiationOutcome makes.
+    expect(derivePlanOutcome({ verdict: VERDICTS.PREVENTION_OUTSTANDING, round: 1 })).toBe(PLAN_OUTCOMES.ESCALATE);
+    expect(derivePlanOutcome({ verdict: VERDICTS.PREVENTION_OUTSTANDING, round: PLAN_ROUND_CAP })).toBe(PLAN_OUTCOMES.ESCALATE);
+    // and it does NOT ride the `changes` continue path at an early round (the pre-fix bug):
+    expect(derivePlanOutcome({ verdict: VERDICTS.PREVENTION_OUTSTANDING, round: 1 })).not.toBe(PLAN_OUTCOMES.CONTINUE);
+  });
+
   it('honors a caller-supplied roundCap instead of the default', () => {
     expect(derivePlanOutcome({ verdict: VERDICTS.CHANGES, round: 1, roundCap: 1 })).toBe(PLAN_OUTCOMES.ESCALATE);
   });
@@ -596,62 +606,69 @@ describe('derivePanelVerdict (#2310)', () => {
   const allAccept = { correctness: VERDICTS.ACCEPT, security: VERDICTS.ACCEPT, simplicity: VERDICTS.ACCEPT, 'standards-conformance': VERDICTS.ACCEPT };
 
   it('lands only once every MANDATORY lens unanimously accepts', () => {
-    expect(derivePanelVerdict({ lensVerdicts: allAccept })).toBe(VERDICTS.ACCEPT);
+    expect(derivePanelVerdict({ lensVerdicts: allAccept, findings: [] })).toBe(VERDICTS.ACCEPT);
   });
 
   it('an outstanding ADVISORY-lens verdict never blocks the mandatory-unanimous accept', () => {
     const verdicts = { ...allAccept, simplicity: VERDICTS.CHANGES, 'standards-conformance': VERDICTS.CHANGES };
-    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.ACCEPT);
+    expect(derivePanelVerdict({ lensVerdicts: verdicts, findings: [] })).toBe(VERDICTS.ACCEPT);
   });
 
   it('a single MANDATORY lens wanting changes yields changes, not an immediate escalate', () => {
     const verdicts = { ...allAccept, security: VERDICTS.CHANGES };
-    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.CHANGES);
+    expect(derivePanelVerdict({ lensVerdicts: verdicts, findings: [] })).toBe(VERDICTS.CHANGES);
   });
 
   it('a MANDATORY lens returning needs-human escalates the whole panel', () => {
     const verdicts = { ...allAccept, correctness: VERDICTS.NEEDS_HUMAN };
-    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(derivePanelVerdict({ lensVerdicts: verdicts, findings: [] })).toBe(VERDICTS.NEEDS_HUMAN);
   });
 
   it('the global humanRequired conflict-of-interest flag always wins, same as deriveVerdict', () => {
-    expect(derivePanelVerdict({ lensVerdicts: allAccept, humanRequired: true })).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(derivePanelVerdict({ lensVerdicts: allAccept, humanRequired: true, findings: [] })).toBe(VERDICTS.NEEDS_HUMAN);
   });
 
   it('a caller-flagged genuine mandate conflict escalates even when every lens individually accepted', () => {
-    expect(derivePanelVerdict({ lensVerdicts: allAccept, conflict: true })).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(derivePanelVerdict({ lensVerdicts: allAccept, conflict: true, findings: [] })).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('#2823 round-3 finding 1 — `findings` is REQUIRED; an omitting caller fails loudly, never defaults to []', () => {
+    // The drain's live path built buildPanelFindings then dropped it, silently reinstating the advisory-prevention
+    // leak. A required argument makes that omission throw instead of defaulting to [] and hiding the leak.
+    expect(() => derivePanelVerdict({ lensVerdicts: allAccept })).toThrow(/`findings` is required/);
   });
 
   it('throws if a mandatory lens has no verdict at all, rather than silently treating it as accept', () => {
-    expect(() => derivePanelVerdict({ lensVerdicts: { correctness: VERDICTS.ACCEPT } })).toThrow(/missing verdict/);
+    expect(() => derivePanelVerdict({ lensVerdicts: { correctness: VERDICTS.ACCEPT }, findings: [] })).toThrow(/missing verdict/);
   });
 
   it('honors a caller-supplied mandatoryLenses set instead of the default pair', () => {
     expect(derivePanelVerdict({
       lensVerdicts: { simplicity: VERDICTS.ACCEPT },
       mandatoryLenses: [MANDATE_LENSES.SIMPLICITY],
+      findings: [],
     })).toBe(VERDICTS.ACCEPT);
   });
 
   it('throws on an empty mandatoryLenses set rather than vacuously accepting (Array#every trap)', () => {
-    expect(() => derivePanelVerdict({ lensVerdicts: allAccept, mandatoryLenses: [] })).toThrow(/must be non-empty/);
+    expect(() => derivePanelVerdict({ lensVerdicts: allAccept, mandatoryLenses: [], findings: [] })).toThrow(/must be non-empty/);
   });
 
   it('#2823 — an ADVISORY lens returning prevention-outstanding SURFACES to the panel (never dropped into accept)', () => {
     // The exact leak the reviewer flagged: an advisory lens's prevention-outstanding used to be unscored, so the
     // panel accepted and the PR landed with the guard unfiled. It must now surface as prevention-outstanding.
     const verdicts = { ...allAccept, 'standards-conformance': VERDICTS.PREVENTION_OUTSTANDING };
-    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+    expect(derivePanelVerdict({ lensVerdicts: verdicts, findings: [] })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
   });
 
   it('#2823 — a MANDATORY lens at prevention-outstanding surfaces as prevention-outstanding, not flattened to changes', () => {
     const verdicts = { ...allAccept, security: VERDICTS.PREVENTION_OUTSTANDING };
-    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+    expect(derivePanelVerdict({ lensVerdicts: verdicts, findings: [] })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
   });
 
   it('#2823 — a real mandatory `changes` still OUTRANKS a prevention-outstanding elsewhere (the fix comes first)', () => {
     const verdicts = { ...allAccept, correctness: VERDICTS.CHANGES, simplicity: VERDICTS.PREVENTION_OUTSTANDING };
-    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.CHANGES);
+    expect(derivePanelVerdict({ lensVerdicts: verdicts, findings: [] })).toBe(VERDICTS.CHANGES);
   });
 
   it('#2823 round-2 finding 4 — the STRUCTURAL advisory leak: prevention derived from FINDINGS, not per-lens verdicts', () => {
@@ -665,8 +682,8 @@ describe('derivePanelVerdict (#2310)', () => {
       { summary: 'advisory still-open nit', category: 'simplicity' }, // outstanding ⇒ its lens flattened to changes
       { summary: 'advisory resolved but owes a guard', category: 'simplicity', outcome: 'fixed', prevention: 'a lint rule', preventionCaptured: false },
     ];
-    // Without findings the old lensVerdicts-only scan drops it (advisory changes rides → accept):
-    expect(derivePanelVerdict({ lensVerdicts })).toBe(VERDICTS.ACCEPT);
+    // With an EXPLICIT empty findings list the lensVerdicts-only scan drops it (advisory changes rides → accept):
+    expect(derivePanelVerdict({ lensVerdicts, findings: [] })).toBe(VERDICTS.ACCEPT);
     // With the panel findings it surfaces as prevention-outstanding — the guard cannot leak unfiled:
     expect(derivePanelVerdict({ lensVerdicts, findings })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
   });
@@ -951,6 +968,33 @@ describe('renderPreventionSummary (#2823)', () => {
     expect(deriveVerdict({ findings })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
     expect(renderPreventionSummary({ findings, verdict: VERDICTS.PREVENTION_OUTSTANDING }))
       .toBe(' Prevention outstanding — 1 guard must be filed before accept: gate A.');
+  });
+
+  it('#2823 round-3 finding 2 — the MIXED shape derivePanelVerdict raises prevention-outstanding on NAMES the guard', () => {
+    // The live contradiction the reviewer ran: an ADVISORY lens holds one still-open nit PLUS a resolved finding that
+    // owes an uncaptured guard. derivePanelVerdict raises `prevention-outstanding` from the FINDINGS (the advisory
+    // `changes` never blocks the mandatory accept), yet the prior renderPreventionSummary short-circuited to '' on the
+    // open nit — muting the guard exactly when the verdict demanded it. The reduced verdict is authoritative: the
+    // summary (and the notice) MUST name the guard on this same mixed list.
+    const findings = [
+      { summary: 'advisory nit', category: 'simplicity' }, // still open ⇒ simplicity flattened to changes
+      { summary: 'resolved but owes a guard', category: 'simplicity', outcome: 'fixed', prevention: 'a lint rule', preventionCaptured: false },
+    ];
+    const lensVerdicts = {
+      correctness: VERDICTS.ACCEPT, security: VERDICTS.ACCEPT,
+      simplicity: VERDICTS.CHANGES, 'standards-conformance': VERDICTS.ACCEPT,
+    };
+    // The reducer raises prevention-outstanding from the findings scan (round-2 finding 4 fix):
+    expect(derivePanelVerdict({ lensVerdicts, findings })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+    // …and on that SAME mixed list the summary names the guard — no longer muted by the open advisory nit:
+    expect(renderPreventionSummary({ findings, verdict: VERDICTS.PREVENTION_OUTSTANDING }))
+      .toBe(' Prevention outstanding — 1 guard must be filed before accept: a lint rule.');
+    // …and the operator notice carries the guard name (not a bare "Verdict: prevention-outstanding."):
+    const notice = renderReviewNotice({
+      event: REVIEW_NOTICE_EVENTS.ESCALATED, pr: 976, verdict: VERDICTS.PREVENTION_OUTSTANDING, findings,
+    });
+    expect(notice).toContain('a lint rule');
+    expect(notice).toContain('1 guard must be filed before accept');
   });
 });
 

@@ -321,7 +321,11 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
      `deriveVerdict()` — you now have one `{ lens: verdict }` map (`lensVerdicts`) and, via
      `buildPanelFindings()`, one lens-tagged findings list.
   2. **Reduce the panel to one verdict** — `derivePanelVerdict({ lensVerdicts, humanRequired, conflict,
-     mandatoryLenses })`. `MANDATORY_LENSES` (`correctness`, `security` — real invariants with no other gate)
+     mandatoryLenses, findings: buildPanelFindings(lensFindings) })`. **Pass `findings` — the whole panel's list
+     from step 1 — always** (#2823 round-3 finding 1): the prevention scan is derived from the FINDINGS (immune to
+     per-lens verdict flattening), so dropping the list silently reinstates the advisory-prevention leak on the ONE
+     path the drain actually runs. `findings` is a REQUIRED argument — an omitting call now throws rather than
+     defaulting to `[]`. `MANDATORY_LENSES` (`correctness`, `security` — real invariants with no other gate)
      must **unanimously accept** to land; `ADVISORY_LENSES` (`simplicity`, `standards-conformance` —
      `standards-conformance` already has a deterministic backstop in `check:standards`, #2199; `simplicity` is
      genuine stylistic judgment) are always surfaced but never block on their own. `conflict` is a **judgment
@@ -336,8 +340,11 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
        INDEPENDENT HARDENED VALIDATOR (#2439) before landing.** Spawn a fresh-context validator JURY — one
        subagent per `PANEL_LENSES` lens seeded with `buildValidatorMandate({ lens })`. The jury took NO part in
        the negotiation and is NEVER shown the peers' findings, dismissals, or reasoning — only the FINAL diff and
-       the tests it touches. Reduce its per-lens verdicts with `derivePanelVerdict(...)` → `validatorVerdict`,
-       then `combineValidatedVerdict({ panelVerdict, validatorVerdict })` and re-run `deriveNegotiationOutcome`
+       the tests it touches. Reduce its per-lens verdicts with `derivePanelVerdict({ lensVerdicts: validatorVerdicts,
+       mandatoryLenses, findings: buildPanelFindings(validatorFindings) })` → `validatorVerdict` — again passing the
+       validator jury's OWN `findings` (required, same reason as step 2: the validator can re-report a resolved finding
+       that still names an uncaptured guard, which only the findings scan sees) — then
+       `combineValidatedVerdict({ panelVerdict, validatorVerdict })` and re-run `deriveNegotiationOutcome`
        on the combined verdict: **combined `land`** (BOTH the panel and the independent validator accepted) →
        apply `redteam:accepted` THEN `review:accepted` (`gh pr edit <num> --repo <repo> --add-label
        redteam:accepted --add-label review:accepted`) and **re-run the drain** — the non-author-accepts invariant

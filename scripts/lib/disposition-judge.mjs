@@ -210,6 +210,9 @@ function escalate(reason, trailLine, extra = {}) {
  *          unanimity is the mode's contract.)
  *        • `accept-best` → auto-dispose while weighted dissent ≤ `dissentThreshold`; above it → escalate.
  *
+ * @verdicts-total — the strictestMandatory branch handles every `VERDICTS` member (needs-human, changes,
+ *   prevention-outstanding each escalate; accept continues to the dissent policy); the `check:standards`
+ *   verdict-totality gate enforces it so a new member can't silently fall through to the accept/dissent path.
  * @param {{ ledger?: Array<object>, config: {lensWeights: object, dissentThreshold: number, resolutionMode: string},
  *   signals?: {gateSelf?: boolean, humanRequired?: boolean, nonConvergence?: boolean}, mandatoryLenses?: string[] }} o
  * @returns {DispositionProposal}

@@ -37,7 +37,9 @@ export const STATUS_MARKERS = Object.freeze({ pending: '◷', running: '⟳', fo
 
 /** Verdict glyphs — the strictest-wins verdict on a juror / panel line. `null`/unknown → a neutral dot. The
  *  `prevention-outstanding` (#2823) glyph is an OUTLINE flag `⚐`, distinct from needs-human's filled `⚑` — a
- *  blocking verdict must never render as the neutral `·` reserved for "no verdict reported yet". */
+ *  blocking verdict must never render as the neutral `·` reserved for "no verdict reported yet".
+ *  @verdicts-total — every `VERDICTS` member must be a key (enforced by the `check:standards` verdict-totality gate),
+ *  so a new blocking verdict can never fall back to the neutral `·` glyph again. */
 export const VERDICT_MARKERS = Object.freeze({ accept: '✓', changes: '✎', 'needs-human': '⚑', 'prevention-outstanding': '⚐' });
 
 const arr = (x) => (Array.isArray(x) ? x : []);

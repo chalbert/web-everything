@@ -75,6 +75,9 @@ export const VERDICTS = Object.freeze({
  * missed jury-ledger's hand-copied twin; a copy cannot be missed if there is no copy). MUST stay TOTAL over
  * `VERDICTS` — the assertion below crashes at import if a new enum member has no rank, so a partial table is a
  * build-time failure, never a silent `undefined` mis-reduction at review time.
+ *
+ * @verdicts-total — every `VERDICTS` member must be a key (the `check:standards` verdict-totality gate enforces the
+ *   same totality the module-load assertion below does, as a static-scan backstop that also covers every other table).
  */
 export const VERDICT_STRICTNESS = Object.freeze({
   [VERDICTS.ACCEPT]: 0,
@@ -177,6 +180,8 @@ export function normalizeFindings(rawList) {
  *     surface that reduces to `deriveVerdict` inherits it — no reviewer can accept a finding whose guard evaporated.
  *   - no outstanding findings AND no uncaptured prevention → `accept`.
  *
+ * @verdicts-total — every `VERDICTS` member is a distinct return (needs-human, changes, prevention-outstanding,
+ *   accept); the `check:standards` verdict-totality gate enforces it so a new member can't be dropped from the ladder.
  * @param {{findings?: Finding[]|Array<object>, humanRequired?: boolean}} [o]
  * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
@@ -251,6 +256,9 @@ export const NEGOTIATION_OUTCOMES = Object.freeze({
  * caller owns mapping its CI state to this boolean (green ⇒ `true`; red OR pending/unknown ⇒ not green), keeping
  * this reducer subject-agnostic (it never parses a GitHub conclusion string itself).
  *
+ * @verdicts-total fallthrough=changes — `changes` is the intentional final fall-through (the round-cap path); every
+ *   OTHER `VERDICTS` member is handled explicitly. The `check:standards` verdict-totality gate enforces this, so a new
+ *   member can never again silently ride the `changes` fall-through.
  * @param {{verdict: 'accept'|'changes'|'needs-human'|'prevention-outstanding', round: number, roundCap?: number, requiredTestGreen?: boolean}} o
  * @returns {'continue'|'land'|'escalate'}
  */
@@ -433,12 +441,22 @@ export function buildPanelFindings(lensFindings = {}) {
  *   - every MANDATORY lens verdict is `accept` AND nothing owes a guard → `accept` (the "unanimous accept lands"
  *     spec line — an advisory lens's ordinary outstanding findings are surfaced, never blocking).
  *
+ * `findings` is REQUIRED (#2823 round-3 finding 1), not defaulted: the drain's live path built `buildPanelFindings`
+ * then dropped it, so the findings-derived prevention scan saw an empty list and the advisory-prevention leak was
+ * silently reinstated on the ONE path that matters. A required parameter makes an omitting caller fail LOUDLY
+ * instead — pass the whole panel's list, or an explicit `[]` to assert there are none (never let it default).
+ *
+ * @verdicts-total — every `VERDICTS` member is handled explicitly (needs-human, changes, prevention-outstanding,
+ *   accept); the `check:standards` verdict-totality gate enforces it, so a new enum member can't be dropped here.
  * @param {{lensVerdicts: Object<string, 'accept'|'changes'|'needs-human'|'prevention-outstanding'>, humanRequired?: boolean,
- *   conflict?: boolean, mandatoryLenses?: string[], findings?: Array<object>}} o - `findings` is the WHOLE panel's
- *   list (`buildPanelFindings(lensFindings)`); the prevention scan reads it, immune to per-lens verdict flattening.
+ *   conflict?: boolean, mandatoryLenses?: string[], findings: Array<object>}} o - `findings` (REQUIRED) is the WHOLE
+ *   panel's list (`buildPanelFindings(lensFindings)`); the prevention scan reads it, immune to per-lens verdict flattening.
  * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
-export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, mandatoryLenses = MANDATORY_LENSES, findings = [] } = {}) {
+export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, mandatoryLenses = MANDATORY_LENSES, findings } = {}) {
+  if (findings === undefined) {
+    throw new Error('derivePanelVerdict: `findings` is required — pass buildPanelFindings(lensFindings) (or an explicit [] to assert none). A defaulted [] silently reinstates the #2823 advisory-prevention leak on the drain path.');
+  }
   if (humanRequired || conflict) return VERDICTS.NEEDS_HUMAN;
   if (!mandatoryLenses.length) {
     // Guard the `Array.prototype.every` vacuous-truth trap: an empty mandatory set must never silently read as
