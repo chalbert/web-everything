@@ -60,8 +60,10 @@ convergence-loop anchor **applies** #2398 to the conveyor's stop-the-line contex
 wearing a reviewer hat (a subagent sharing its live priors) is exactly the non-fresh-context case #2398
 already rejects — so it composes with #2398 and does not alter the bar; the new work is ENFORCING that
 independence (owed on the open #2840/#2785 line). Also cites #2439 (resolved — the distinct fresh-context adversarial validator + the
-`redteam:accepted` acceptance label; #2439 is the interim independence rail, NOT a ruling that
-"same-orchestrator subagents are not independent" — that narrowing is this cluster's, declared as such),
+`redteam:accepted` acceptance label; #2439 is the interim independence rail, NOT a ruling on
+same-orchestrator subagents — the orchestrator-as-its-own-reviewer case this cluster names, a subagent
+sharing the orchestrator's live priors, is #2398's own non-fresh-context reject, not a new bar this cluster
+adds),
 and the declarative-leash / derivation-code split (#2771, resolved — the script-decidable `review:human`
 boundary this cluster composes with; its implementation #2785 is still `status: open`), and the
 prevention-introspection review discipline (#2823, still `status: active` — cited as the discipline this
@@ -113,5 +115,10 @@ resolved decision:
 - **Minor →** a front-matter key allowlist in `we:scripts/check-standards.mjs` (catches novel unread keys such as
   the removed `dateRatified`).
 - **Minor →** give `human-verify` an observable code reader so its retirement is enforced in both directions.
+- **Minor →** a temporal-token statute lint: an anchor body carrying an interim/point-in-time claim
+  ("today", "not yet current fact", "build-pending", "still parks") must name the OPEN item whose
+  resolution retires the claim, so the anchor is re-opened for update when that item lands rather than going
+  silently stale. (The honest build-pending disclosures the human `/review` required — M3/M8/M9 — are the
+  reason such language is present; this guard keeps it from outliving the mechanization it describes.)
 
 (The digest word-cap nit is already gate-captured — it lints on `check:standards` / `check:item`.)
