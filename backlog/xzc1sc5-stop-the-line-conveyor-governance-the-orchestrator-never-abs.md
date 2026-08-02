@@ -120,7 +120,7 @@ resolved decision:
 - **Minor →** a temporal-token statute lint: an anchor body carrying an interim/point-in-time claim
   ("today", "not yet current fact", "build-pending", "still parks") must name the OPEN item whose
   resolution retires the claim, so the anchor is re-opened for update when that item lands rather than going
-  silently stale. (The honest build-pending disclosures the human `/review` required — M3/M8/M9 — are the
-  reason such language is present; this guard keeps it from outliving the mechanization it describes.)
+  silently stale. (The honest build-pending disclosures the human `/review` required are the reason such
+  language is present; this guard keeps it from outliving the mechanization it describes.)
 
 (The digest word-cap nit is already gate-captured — it lints on `check:standards` / `check:item`.)
