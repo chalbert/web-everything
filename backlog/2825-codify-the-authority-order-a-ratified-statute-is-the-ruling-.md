@@ -1,4 +1,5 @@
 ---
+bornAs: xyfr77r
 kind: story
 size: 3
 parent: "2527"
