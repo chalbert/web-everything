@@ -2,9 +2,11 @@
 bornAs: x2w4qbf
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateResolved: "2026-08-02"
 preparedDate: "2026-08-02"
+codifiedIn: "docs/agent/platform-decisions.md#enforce-flip-triple-gated"
 tags: [governance, enforce-flip, land-mode, shadow-mode, review-pending, auto-land, oversight]
 ---
 
@@ -136,6 +138,17 @@ resets it. Anything not exactly `enforce` normalizes to shadow (`we:scripts/lib/
 unset / unknown / corrupted mode fails safe to observe-only. And the flip edit is itself `review:human`, so
 a person makes the call the machine merely *permits*. The safe direction — staying in shadow — is the
 default at every layer.
+
+## Ruling — ratified 2026-08-02 (A)
+
+**Option A adopted, ratified by the operator (Nicolas Gilbert) on 2026-08-02.** The review-seam enforce-flip
+(`landMode: shadow → enforce`) is triple-gated and defaults closed: `enforce` arms only when (a) #2820's
+merge-hold conformance test is GREEN on `main` (live CI-status probe), (b) #2823's prevention-field
+conformance test is GREEN on `main` (likewise probed), and (c) the durable review-seam ledger shows a clean
+shadow-mode track record (the `computeAgreementMetric` bar) — and the flip edit itself stays `review:human`
+via #2840's leash pin. Codified in `we:docs/agent/platform-decisions.md#enforce-flip-triple-gated`. The
+predicate + CI probe + ledger + write gate are the follow-on `xva71x1` (`blockedBy: xe5vt9s`). The Options
+table and Recommendation below are retained as the deliberation record; this ruling is the operative call.
 
 ## Options
 
