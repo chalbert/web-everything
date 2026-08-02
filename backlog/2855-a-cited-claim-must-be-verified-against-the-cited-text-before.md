@@ -1,4 +1,5 @@
 ---
+bornAs: xi4syme
 kind: task
 parent: "2822"
 status: open
@@ -33,7 +34,7 @@ anchor bodies:
   instances 2 and 3).
 - **#2852** — verbatim duplication between a new anchor and the anchors it links must become a link.
 
-None of them fires on instance 5 (the owed-work pointers) — that needs the back-link clause tracked as `xl5yhja` —
+None of them fires on instance 5 (the owed-work pointers) — that needs the back-link clause tracked as `2856` —
 and none fires at all on a claim about a backlog item, a code path, or a contract field made **outside** a statute
 anchor. The class is wider than its three filed surfaces.
 
@@ -50,7 +51,7 @@ Two halves, cheapest first:
    `we:scripts/lib/validate-rules-anchors.cjs` that runs over ALL `we:docs/agent/*.md` rendered docs and over
    `kind: decision` backlog bodies, not just `we:docs/agent/platform-decisions.md` anchors: every `#NNNN` cited with
    a factual predicate must resolve, and its `status` must be consistent with the predicate (`cleared` /
-   `precedent` → `resolved`; `owed` / `build-pending` → not `resolved`, per `xl5yhja`).
+   `precedent` → `resolved`; `owed` / `build-pending` → not `resolved`, per `2856`).
 
 ## Why it matters
 
@@ -63,5 +64,5 @@ person, so the check has to be in the mandate and the gate, not in the reviewer'
 
 Filed at the operator's direction after the human `/review` accept on **PR #982** (the decision landed as **#2851**).
 The individual preventions were filed as #2842–#2850 and #2852; this item names the **class** they are surfaces
-of, which the round-3 review noted was tracked nowhere. Related: #2842, #2850, #2852, `xl5yhja`, #2823
+of, which the round-3 review noted was tracked nowhere. Related: #2842, #2850, #2852, `2856`, #2823
 (the prevention-introspection discipline this generalizes).
