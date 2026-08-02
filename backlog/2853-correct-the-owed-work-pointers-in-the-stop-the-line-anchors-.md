@@ -1,4 +1,5 @@
 ---
+bornAs: xat9huz
 kind: task
 parent: "2822"
 status: open
@@ -28,7 +29,7 @@ Affected sentences in `we:docs/agent/platform-decisions.md`:
 - `#deterministic-oracle-clears-slice` body — the `human-verify` reader is **#2848**; the oracle spec-tier +
   non-author signal is **#2843**.
 - `#deterministic-oracle-clears-slice` **Lineage** — same.
-- `we:backlog/xzc1sc5-stop-the-line-conveyor-governance-the-orchestrator-never-abs.md` — "The enforcement each guard
+- `we:backlog/2851-stop-the-line-conveyor-governance-the-orchestrator-never-abs.md` — "The enforcement each guard
   names lands under the open conveyor-mechanization line (#2840 …, #2785 …)" → filed under epic **#2822**.
 
 ## Why it matters

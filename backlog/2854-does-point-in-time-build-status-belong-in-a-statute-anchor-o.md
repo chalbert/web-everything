@@ -1,4 +1,5 @@
 ---
+bornAs: xzadt1m
 kind: decision
 parent: "2822"
 status: open
@@ -67,4 +68,4 @@ from text, which is the exact failure mode all four #982 review rounds kept find
 
 Round-3 finding **R4** from the human `/review` on **PR #982**, raised by the simplicity lens with measurements.
 Accepted over at ratification and filed as a decision because the layering call is a genuine fork and the reviewer
-owns part of the pressure that created it. Related: #2849, #2850, `x2vqz2v` (the duplication lint), #2844.
+owns part of the pressure that created it. Related: #2849, #2850, `2852` (the duplication lint), #2844.

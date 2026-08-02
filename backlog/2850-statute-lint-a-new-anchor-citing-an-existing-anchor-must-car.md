@@ -32,7 +32,7 @@ In `we:scripts/lib/validate-rules-anchors.cjs`, when a NEW anchor's body referen
    locate the cited anchor's normative sentence inside the cited body — else require `extends` / `narrows` /
    `supersedes` instead. **Without this clause the lint is satisfied by writing the phrase**, which is exactly the
    defect it was filed for (see Why it matters).
-3. **Reconcile with `x2vqz2v` (the duplication lint)** (the duplication lint) so fidelity is satisfied by a LINK plus a short relation
+3. **Reconcile with `2852` (the duplication lint)** (the duplication lint) so fidelity is satisfied by a LINK plus a short relation
    label, never by copying the cited anchor's text into the new one — otherwise clause 2 becomes a licence to quote,
    and the two guards pull against each other.
 

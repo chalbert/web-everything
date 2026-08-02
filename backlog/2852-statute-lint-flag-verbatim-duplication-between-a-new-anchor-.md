@@ -1,4 +1,5 @@
 ---
+bornAs: x2vqz2v
 kind: task
 parent: "2822"
 status: open
@@ -22,7 +23,7 @@ pass green.
 
 ## Why it matters
 
-Worked instance — PR #982 (`we:backlog/xzc1sc5-stop-the-line-conveyor-governance-the-orchestrator-never-abs.md`).
+Worked instance — PR #982 (`we:backlog/2851-stop-the-line-conveyor-governance-the-orchestrator-never-abs.md`).
 Round 2 of the human `/review` found the diff had copied #2771's three-trigger set and its
 leash-vs-derivation-code file roster into two new anchors, each under a relation line claiming no alteration; one copy
 had silently substituted a trigger. Round 3 deleted those two copies but GREW a third: #2398's four anti-test-gaming
