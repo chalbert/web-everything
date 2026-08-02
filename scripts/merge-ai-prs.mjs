@@ -1969,7 +1969,16 @@ async function runCli() {
     try { baselineState = parseBaselineState(readFileSync(REVIEW_BASELINE_STATE_PATH, 'utf8')); } catch { /* no file yet — fresh baselines */ }
     let baselineStateChanged = false;
     for (const v of verdicts) {
-      if (v.decision !== 'merge') continue;
+      // #2820-review-fix — a `reviewHeld` PR is `decision:'skip'` (classifyPr refuses it regardless of
+      // ready-to-merge, closing the #956 hold-integrity hole), but it MUST still flow through this pass so
+      // `decideReviewGate` routes it to the SAME parked/humanRequired outcome the sticky veto always produced
+      // (review:human → parked HUMAN-required; review:pending → parked agent-reviewable; review:changes →
+      // wait-author). Without this the classifyPr skip short-circuits the parking path and a held PR is bucketed
+      // as a bare `skipped` — losing the parked/humanRequired signal the drain contract + gate tests require
+      // (fixture #103). It still never merges: `toMerge` filters on `decision === 'merge'`, which a held PR is
+      // not, and decideReviewGate never returns `merge` for it (an uncleared, non-accepted review label always
+      // parks). Everything else (no review label) is unaffected — only `decision === 'merge'` OR `reviewHeld`.
+      if (v.decision !== 'merge' && !v.reviewHeld) continue;
       let changedFiles = [];
       let diffLines = 0;
       // #2390-review-fix — the CUMULATIVE origin/main…head file set the gate-self/human trigger scores over
