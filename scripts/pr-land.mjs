@@ -94,6 +94,8 @@ import { resolveJuryPlan } from './lib/review-core.mjs'; // #2635 — recompute 
 import { POLICY_CARE_JURY } from './lib/review-policy.mjs'; // #2635 — the care→jury contract's roster-timing mode (knob #4)
 import { parseManifest, embedManifestInBody, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs'; // xnsk54v — manifest rides the PR body, not a tracked file
 import { classifyPrOpenFailure, recordInfraBlockIO, infraStorePath, primaryRootFromClone, originSlugOf } from './conveyor/infra-blocked.mjs'; // #2659 — a post-push PR-open failure on an outside dependency → the infra-blocked state (recorded for auto-retry/resume), not a hard fail
+import { join } from 'node:path';
+import { verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs'; // #2833 — the lane-verification finish-guard: refuse to land a HEAD whose synchronous suite run never finished (or, under --require-verified, was never recorded green). readVerifyMarker/resolveVerifyOptions are the SHARED marker reader + option resolver (findings 2/5) both this gate and verify-lane use, so the two can never drift (readVerifyMarker owns the VERIFY_FILENAME path — no bare JSON.parse of the marker here).
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -119,6 +121,15 @@ const WAIT = !flags['no-wait'];
 const DRY_RUN = !!flags['dry-run'];
 const FALLBACK_GIT = !!flags['fallback-git'];
 const AS_JSON = !!flags.json;
+// #2833 — the lane-verification finish-guard. `--require-verified` (or env WE_REQUIRE_VERIFIED=1) DEMANDS a
+// fresh GREEN marker for the HEAD being landed — the solo / conveyor build flow passes it so a lane that
+// skipped its synchronous suite run cannot deliver. An UNFINISHED (`running`) marker for that HEAD is refused
+// UNCONDITIONALLY (it is the exact observed stall — a backgrounded run that yielded mid-flight). The documented
+// break-glass WE_LAND_UNVERIFIED=1 overrides the whole gate (the PR still rides the required CI check).
+// #2833 finding 5 — resolve through the SHARED resolver so this gate and `verify-lane check` agree on the same
+// flag/env pair (both call `resolveVerifyOptions`): `--require-verified` OR `WE_REQUIRE_VERIFIED=1`, plus the
+// `WE_LAND_UNVERIFIED=1` break-glass.
+const { requireVerified: REQUIRE_VERIFIED, breakGlass: VERIFY_BREAK_GLASS } = resolveVerifyOptions({ flags, env: process.env });
 const TITLE = typeof flags.title === 'string' ? flags.title : null;
 // Body precedence: --body-file (a path — robust for the multi-line body the #2170 lane review composes,
 // where the dismissed-findings block has newlines a CLI --body flag would mangle) wins over --body.
@@ -592,6 +603,34 @@ function runCli() {
       ].filter(Boolean),
       detail: `would open+label ${SRC} (${refSha.slice(0, 8)}) as a self-approved PR from ${REF}${PLAN.triggerDrain ? ' and trigger a single-couple drain' : ''} — the drain lands it onto ${BASE}`,
     }, 0);
+  }
+
+  // 1b. #2833 — THE VERIFICATION FINISH-GUARD. The observed stall: a build subagent backgrounded its long
+  //     suite run, then yielded/terminated before it finished — the lane sat mid-flight, never erroring, and
+  //     nothing reclaimed it, because a half-run verification LOOKED complete. This guard makes an unfinished
+  //     verification NOT look complete: it reads the lane's `.git/.lane-verify` marker (written synchronously by
+  //     `scripts/verify-lane.mjs`) and refuses to publish/land the source commit when that commit's verification
+  //     is UNFINISHED (`running` — the exact stall), CORRUPT (marker present but unparseable), or — under
+  //     --require-verified / WE_REQUIRE_VERIFIED — absent or red. A `running` marker for THIS HEAD is ALWAYS
+  //     refused (a half-run must never look complete); a `red` marker blocks only under --require-verified (the
+  //     "absent/red under --require-verified" contract) since the required CI check gates the merge otherwise; a
+  //     missing marker only blocks when verification is required (the CI-gated drain / parallel-workflow paths
+  //     verify via the required GitHub check, not this marker, so they are not blocked). WE_LAND_UNVERIFIED=1 is
+  //     the documented break-glass. Runs AFTER the dry-run block (a dry run reports the plan without being gated)
+  //     and BEFORE any push.
+  {
+    // Resolve the marker in the REAL git dir (`.git` is a directory in a clone, a FILE in a worktree; #2833
+    // finding 4) and read it through the SHARED reader `readVerifyMarker` (#2833 finding 2) — NEVER a hand-inlined
+    // JSON.parse here: pr-land's old inline parser caught only a throw, so a valid-JSON non-object (`null`/`"x"`/
+    // `[]`) slipped through as "no sha → untracked → land unverified". `readVerifyMarker` folds any such value to
+    // `{ corrupt: true }` (refused), distinguishes a torn marker (corrupt → refuse) from a missing one (absent →
+    // gate decides per --require-verified), and is the SAME read `verify-lane.mjs` performs.
+    const gitDir = tryGit(['rev-parse', '--absolute-git-dir']) || join(REPO, '.git');
+    const verifyRecord = readVerifyMarker(gitDir);
+    const gate = verifyGateDecision({ record: verifyRecord, headSha: refSha, breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED });
+    if (!gate.ok) {
+      emit({ repo: REPO, merged: false, reason: gate.reason, ref: REF, sha: refSha, verifyStatus: gate.status, detail: `refusing to land ${REF} — ${gate.detail} (${BASE} left untouched; this is #2833's stall guard)` }, 3);
+    }
   }
 
   // 1c. #2331 — PRODUCER locus-prefix re-check. The #2170 pre-PR review can edit an item body AFTER the
