@@ -16,7 +16,7 @@ The `firstParagraph` deriver (we:src/_data/backlog.js) silently yields a headles
 
 - A new check in `we:scripts/check-backlog-item.mjs`, beside the existing `DIGEST_MAX_WORDS` rule, runs the same `derive()` the loader uses and asserts the derived digest (a) starts with a capital letter and (b) ends in terminal punctuation (`.`/`!`/`?`).
 - Optional third assertion: the digest does not begin with a lowercase continuation word (e.g. "floor", "and", "the").
-- A passing fixture (a whole-sentence digest) and a failing fixture (a section opening with a bolded line, yielding a headless fragment) — #957's round-6 headless digest on `we:backlog/xgtiq7f-…` is the live failing instance.
+- A passing fixture (a whole-sentence digest) and a failing fixture (a section opening with a bolded line, yielding a headless fragment) — #957's round-6 headless digest on `we:backlog/2828-…` is the live failing instance.
 
 ## Related
 
