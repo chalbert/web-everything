@@ -147,4 +147,36 @@ describe('the real drain entrypoint consults the gate before merging', () => {
     // the clean orphan with no review label still lands — the backstop only refuses un-cleared labels
     expect(nums(r.toMerge)).toContain(202);
   });
+
+  // #2820-review-fix REGRESSION GUARD — the root cause of the earlier break was "a new not-merge decision
+  // (classifyPr's `reviewHeld` skip) SHORT-CIRCUITED an existing parking invariant": a review-held PR that used
+  // to be PARKED (with humanRequired) got silently bucketed as bare `skipped`, losing that signal. The invariant
+  // this guards: in a label-scoped drain, EVERY unsatisfied-review-hold PR that must-not-merge preserves its
+  // routing through decideReviewGate — it appears in `r.parked` (never merges, never merely vanishes into
+  // skipped-only), with humanRequired reflecting the hold's tier (review:human → true, review:changes → false).
+  // The #103 case above covers the human tier; this covers the non-human tier through the SAME parking path.
+  it('label-scoped drain: a review:changes leaf PARKS (wait-author, humanRequired:false) — the hold routing is preserved, not bare-skipped', () => {
+    const fixture = {
+      _id: 'changes-parks',
+      prs: [
+        { number: 301, title: 'clean leaf, no hold', body: 'a real summary', headRefName: 'lane/f', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/p.md', additions: 3, deletions: 0 }] },
+        { number: 302, title: 'leaf the reviewer bounced', body: 'a real summary', headRefName: 'lane/g', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:changes' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/q.md', additions: 2, deletions: 0 }] },
+      ],
+    };
+    const r = runDrain(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    // the un-held leaf still lands — the fix is a no-op for a PR with no review label
+    expect(nums(r.toMerge)).toContain(301);
+
+    // the review:changes leaf must NOT merge, and must be PARKED (its routing preserved), not silently bare-skipped
+    expect(nums(r.toMerge)).not.toContain(302);
+    expect(nums(r.merged)).not.toContain(302);
+    const p302 = r.parked.find((p) => Number(p.num) === 302);
+    expect(p302).toBeTruthy();
+    expect(p302.humanRequired).toBe(false); // review:changes is agent-reviewable (author lane fixes) — not human-only
+  });
 });

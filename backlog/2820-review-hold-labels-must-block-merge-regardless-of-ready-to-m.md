@@ -3,7 +3,7 @@ bornAs: xwtg5zh
 kind: story
 size: 3
 parent: "2527"
-status: open
+status: active
 dateOpened: "2026-08-01"
 tags: [drain, review, merge, ci-lifecycle, gate]
 ---
