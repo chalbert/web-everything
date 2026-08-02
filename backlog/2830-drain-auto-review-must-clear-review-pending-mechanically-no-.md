@@ -3,9 +3,14 @@ bornAs: x2tqdk3
 kind: story
 size: 5
 parent: "2612"
-status: open
+status: active
 dateOpened: "2026-08-02"
+dateStarted: "2026-08-02"
 tags: [conveyor, orchestrator-mechanization, drain, review]
+scope:
+  - we:scripts/review-runner.mjs
+  - we:scripts/lib/review-runner-core.mjs
+  - we:scripts/lib/__tests__/review-runner-core.test.mjs
 ---
 
 # Drain auto-review must clear review:pending mechanically — no human wait
