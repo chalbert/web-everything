@@ -589,7 +589,7 @@ export function joinImplToCouples(verdicts) {
  *
  * @param {Array<{num:number, item:(number|string|null), blockedBy:Array<number|string>, stackParents?:Array<number|string>, decision:'merge'|'skip'}>} candidates
  * @param {{landedThisPass?:Set, provenOnMain?:Set, extraOpenItems?:Iterable<number|string>}} [proof]  positive proof-of-land sets (both `asItemId`-keyed)
- * @returns {{ready:Array, deferred:Array<{num,item,waitOn:Array<number|string>}>}}  ready is ordered (item asc, then PR#).
+ * @returns {{ready:Array, deferred:Array<{num,item,waitOn:Array<number|string>}>, staleLandedOpenItems:Array<number|string>}}  ready is ordered (item asc, then PR#); staleLandedOpenItems = items proven landed yet still named by an open PR (#999/xq985wu F2 stale-PR diagnostic).
  */
 export function planLabelDrain(candidates, { landedThisPass = new Set(), provenOnMain = new Set(), extraOpenItems = null } = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
@@ -629,11 +629,25 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
     if (provenOnMain.has(id)) return true;     // (3)
     return typeof id === 'number' && Number.isFinite(id); // (4); a hash → false (5)
   };
+  // #999/xq985wu LIVENESS FIX — an item is a LIVE blocker only if it is open AND not proven landed. This mirrors
+  // `stackProven`'s landedThisPass-BEFORE-openItems precedence on the `blockedBy` path, which it lacked: the
+  // frozen `extraOpenItems` superset is snapshotted BEFORE any merge and never updated, so without this a blocker
+  // that landed THIS pass (`landedThisPass`, added on its WE-carrier merge) or in a PRIOR session (`provenOnMain`,
+  // `bornAs`-proven on main) stays in `openItems` and defers its dependent forever — a chain lands one link per
+  // pass (F1), and a stale/abandoned/impl-half PR still naming a LANDED item defers dependents permanently (F2).
+  // POSITIVE proof only (never absence): the edge clears solely on landedThisPass OR provenOnMain, matching the
+  // stowaway guard — an open blocker with no proof still defers.
+  const provenLanded = (id) => landedThisPass.has(id) || provenOnMain.has(id);
   const ready = [];
   const deferred = [];
+  // #999/xq985wu F2 diagnostic — items proven landed yet STILL named by an open PR (present in `openItems`). The
+  // fix clears their `blockedBy`/`stackParents` edges, but the open PR naming a landed item is a STALE-PR smell
+  // worth surfacing so a real "blocker genuinely unlanded" defer is distinguishable from it. Collected here (the
+  // one place with both sets in scope) and returned for the caller to name the holding PR.
+  const staleLandedOpenItems = [...openItems].filter((id) => provenLanded(id));
   for (const c of list) {
     if (c.decision !== 'merge') continue; // @merge-gate-exempt builds the merge-ORDERING lists (ready/deferred); a held PR is `skip` and correctly not ordered for landing — it must not join the merge cascade
-    const blockWait = (Array.isArray(c.blockedBy) ? c.blockedBy : []).map(asItemId).filter((b) => openItems.has(b));
+    const blockWait = (Array.isArray(c.blockedBy) ? c.blockedBy : []).map(asItemId).filter((b) => openItems.has(b) && !provenLanded(b));
     const stackWait = (Array.isArray(c.stackParents) ? c.stackParents : []).map(asItemId).filter((sp) => !stackProven(sp));
     const waitOn = [...new Set([...blockWait, ...stackWait])];
     if (waitOn.length === 0) ready.push(c);
@@ -654,7 +668,23 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
     return typeof id === 'string' ? Infinity : id;
   };
   ready.sort((a, b) => (rank(a.item) - rank(b.item)) || (a.num - b.num));
-  return { ready, deferred };
+  return { ready, deferred, staleLandedOpenItems };
+}
+
+/** #999/xq985wu F3 — the per-repo open-PR listing cap `collectOpenPrContext` uses. Since #xq985wu that listing
+ *  is the SOLE cross-item ordering source on a full sweep, so a SILENTLY truncated page (gh lists newest-first)
+ *  drops the OLDEST open PRs — exactly the long-lived HELD blockers this change exists to keep visible — and a
+ *  dependent then reads the missing edge as landed and merges EARLY (the hazard #xq985wu closes, reappearing
+ *  under load). Raised substantially off the old silent 100 to push the truncation point well past any realistic
+ *  open-PR count, but raising alone does NOT retire the class: `isDegradedOpenPrListing` still flags a full page
+ *  as a DEGRADED read so the ordering decision is never silently trusted on a truncated listing (truncation is
+ *  the UNSAFE direction). */
+export const OPEN_PR_LIST_LIMIT = 500;
+/** True when a listing came back at/over the cap — i.e. gh MAY have truncated it (a full page is indistinguishable
+ *  from an exactly-full one, so treat it as possibly-incomplete). A degraded listing must not be trusted as the
+ *  authoritative open set for the early-land decision. Pure. */
+export function isDegradedOpenPrListing(count, limit = OPEN_PR_LIST_LIMIT) {
+  return Number(count) >= Number(limit);
 }
 
 /** Bound a `--watch --interval=N` poll count. `--max-idle=N` (optional) exits after N consecutive idle passes
@@ -1556,10 +1586,25 @@ async function runCli() {
     // still contributes nothing from that repo (the mint loop stays idempotent), exactly as before.
     const listings = await mapWithConcurrency(REPOS, REPOS.length, async (repo) => {
       try {
-        const { stdout } = await execFileP('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100', '--json', 'number,title,labels,statusCheckRollup,headRefName,headRefOid'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+        // #999/xq985wu F3 — `--limit OPEN_PR_LIST_LIMIT` (raised off the old silent 100). This listing is the SOLE
+        // cross-item ordering source on a full sweep since #xq985wu, so a truncated page is a MERGE-SAFETY hazard
+        // (oldest = long-lived held blockers drop out → a dependent reads the edge as landed and lands EARLY). A
+        // full page (`isDegradedOpenPrListing`) is flagged DEGRADED with a LOUD per-repo warning below — we do not
+        // silently trust a truncated page for the early-land decision (truncation is the unsafe direction).
+        const { stdout } = await execFileP('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(OPEN_PR_LIST_LIMIT), '--json', 'number,title,labels,statusCheckRollup,headRefName,headRefOid'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
         return [repo, JSON.parse(stdout.trim() || '[]')];
       } catch { return [repo, []]; }
     });
+    // #999/xq985wu F3 — LOUD degraded-read warning: any repo whose listing hit the cap MAY be truncated (gh lists
+    // newest-first, so the OLDEST — long-lived held — PRs are the ones silently dropped). Surfaced so a truncated
+    // ordering source is never trusted in silence. Best-effort log only (never throws / fails the drain).
+    let listingTruncated = false;
+    for (const [repo, open] of listings) {
+      if (isDegradedOpenPrListing(open.length)) {
+        listingTruncated = true;
+        if (!AS_JSON) process.stderr.write(`  ⚠️  DEGRADED open-PR listing for ${repoTag(repo) || 'cwd'}: ${open.length} PRs hit the --limit ${OPEN_PR_LIST_LIMIT} cap — the page MAY be truncated (oldest, longest-held blockers dropped first). The cross-item merge order derived from this listing is NOT trustworthy for the early-land decision this pass (#999/xq985wu F3).\n`);
+      }
+    }
     // #2417 — fan out the per-PR manifest + commits reads across ALL repos' open PRs at once (bounded pool),
     // cached across `--watch` passes on unchanged head SHA. `commits` is read HERE (once) so the reconcile pass
     // reuses it instead of its own serial per-PR `gh pr view --json commits` (the #2421 double-read, collapsed).
@@ -1582,7 +1627,7 @@ async function runCli() {
       commitsByPr.set(key, commits);
       if (manifest && manifest.item != null) openItems.add(asItemId(manifest.item));
     }
-    return { prsByRepo, openItems, manifestByPr, commitsByPr };
+    return { prsByRepo, openItems, manifestByPr, commitsByPr, truncated: listingTruncated };
   };
 
   // #2421 — POST-CI TOTAL CI-LIFECYCLE LABEL RECONCILE, generalizing #2216's green-only `reconcileGreenLabels`
@@ -1590,12 +1635,19 @@ async function runCli() {
   // `lifecycleLabelFromCiTruth` says it should be in — self-healing (runs every drain pass + `--watch`
   // interval), never a per-check-tick `pr-land` write. `ready-to-merge` keeps being applied by the EXISTING
   // mechanism below (unchanged — the `label` var, `shouldLabelOnGreen`) and is deliberately EXCLUDED from the
-  // `owned` set this reconcile add/removes: stripping it here would drop a still-open, merely-reordered PR out
-  // of the SAME PASS's `--label`-scoped `verdicts` listing (built right after this returns), which derives
-  // `planLabelDrain`'s cross-item `openItems` set — a same-pass hazard that could let a PR blockedBy THIS one
-  // wrongly read it as landed. So `ready-to-merge`'s presence/absence — the landing-gate signal #2183 F1 /
-  // #2138 F4 depend on — is left to the pre-existing mechanic entirely; only `checking` / `ci:failed` /
-  // `blocked` are added/removed here. A PR can therefore legitimately carry BOTH `ready-to-merge` AND `blocked`
+  // `owned` set this reconcile add/removes: only `checking` / `ci:failed` / `blocked` are added/removed here.
+  // #xq985wu — HAZARD NOTE (ordering side, now RESOLVED): stripping `ready-to-merge` here would drop a
+  // still-open, merely-reordered PR out of the SAME PASS's `--label`-scoped `verdicts` listing (built right
+  // after this returns). BEFORE #xq985wu the cross-item `openItems` set `planLabelDrain` orders by derived
+  // SOLELY from that scoped listing on a full sweep, so such a strip could let a PR `blockedBy` the dropped one
+  // wrongly read it as landed and land EARLY. #xq985wu DECOUPLED ordering from the `--label` scope: the ordering
+  // context (`orderExtraOpenItems`, below) is now ALWAYS the label-BLIND full-open item set from
+  // `collectOpenPrContext`, so a stripped-but-still-open PR stays in the open set and keeps deferring its
+  // dependents regardless of its `ready-to-merge` label. That makes stripping `ready-to-merge` from a held PR
+  // SAFE for ORDERING — the strip itself is #984/#2832's job (NOT done here; this reconcile still leaves
+  // `ready-to-merge` alone, and it keeps being applied by the EXISTING mechanism below — the `label` var,
+  // `shouldLabelOnGreen`). So `ready-to-merge`'s presence/absence — the landing-gate signal #2183 F1 /
+  // #2138 F4 depend on — is left to the pre-existing mechanic entirely. A PR can therefore legitimately carry BOTH `ready-to-merge` AND `blocked`
   // at once (green, but still waiting on an item) — informative, not a merge-safety issue (the drain's
   // `blockedBy` defer already gates on the manifest directly, never on this label). Best-effort throughout — a
   // gh miss never fails the drain. Returns the reconciled PR numbers (for the pass summary), reported ONLY when
@@ -1675,7 +1727,7 @@ async function runCli() {
   // #2421 — the shared open-PR listing + manifest reads + cross-repo item-openness set the reconcile below
   // needs, computed ONCE for this pass (RECONCILE-gated — same cost profile as the reconcile it feeds: free on
   // a bare, unlabelled sweep).
-  const openPrContext = RECONCILE ? await collectOpenPrContext() : { prsByRepo: new Map(), openItems: new Set(), manifestByPr: new Map(), commitsByPr: new Map() };
+  const openPrContext = RECONCILE ? await collectOpenPrContext() : { prsByRepo: new Map(), openItems: new Set(), manifestByPr: new Map(), commitsByPr: new Map(), truncated: false };
   // #2417 — list ALL repos CONCURRENTLY up front (was one `gh pr list` per repo, serial, interleaved with the
   // per-repo processing below). A single repo's list failure is a bad-env hard-fail (exit 3), preserved — but
   // now surfaced after the concurrent batch instead of mid-loop. The rollup + mergeable come from the list;
@@ -1772,25 +1824,55 @@ async function runCli() {
   // a parent landing THIS run is captured by the caller's in-memory `landedThisPass`). `landedNumberFor` is a
   // local `git grep origin/main` — cheap, best-effort (a miss → not proven → the descendant defers, the safe
   // direction). Only meaningful for the local WE clone (where origin/main carries the backlog).
+  // #999/xq985wu F2 — the SAME `bornAs`-on-main proof now also covers `blockedBy` edges, not just `stackParents`.
+  // A stale/abandoned/draft/human PR — or the impl half of a couple whose WE half already landed — can keep
+  // naming a LANDED item in its manifest, holding it in `orderExtraOpenItems` (the label-blind full-open set)
+  // forever. Without a proof source the `blockedBy` dependent would defer permanently. Proving the blocker landed
+  // on main (via `landedNumberFor`) clears the edge exactly as it does for a stackParent. Numeric blockedBy ids
+  // are already-landed by construction and handled inside planLabelDrain; only hashes need the on-main lookup.
   const provenOnMain = new Set();
-  const stackParentIds = new Set();
-  for (const v of verdicts) for (const sp of Array.isArray(v.stackParents) ? v.stackParents : []) stackParentIds.add(asItemId(sp));
-  for (const sp of stackParentIds) {
-    if (isHash(String(sp)) && landedNumberFor(String(sp), process.cwd()) != null) provenOnMain.add(sp);
+  const provenCandidateIds = new Set();
+  for (const v of verdicts) {
+    for (const sp of Array.isArray(v.stackParents) ? v.stackParents : []) provenCandidateIds.add(asItemId(sp));
+    for (const b of Array.isArray(v.blockedBy) ? v.blockedBy : []) provenCandidateIds.add(asItemId(b));
+  }
+  for (const id of provenCandidateIds) {
+    if (isHash(String(id)) && landedNumberFor(String(id), process.cwd()) != null) provenOnMain.add(id);
   }
   // #2393 — the in-memory "landed THIS run" proof set, populated on each WE-carrier merge below (the WE PR is
   // the resolve carrier + the point `bornAs` is stamped, so a descendant only counts a parent landed once the
   // parent's WE side lands — never on a green impl PR of an otherwise-broken couple). Threaded into every
   // planLabelDrain call this pass so a chain lands in order.
   const landedThisPass = new Set();
-  // #2683 — the cross-item ORDERING CONTEXT for a `--only` FAST DRAIN. The candidate `verdicts` were narrowed to
-  // the single target PR above, so on their own `planLabelDrain` would see only the target's item as "open" and
-  // land it even if a `blockedBy`/`stackParents` sibling is still unlanded. Feeding the full open-PR item set
-  // (`collectOpenPrContext` — every open PR across the swept repos, unfiltered by `--only`) as `extraOpenItems`
-  // makes the target order IDENTICALLY to the full sweep: it defers whenever a blocker is still open, never
-  // early. `null` on a full sweep (the candidate list already IS the full set). Populated whenever RECONCILE ran
-  // (the `--label`-scoped fast drain the daemon/pr-watch fire); an empty context degrades to today's behaviour.
-  const orderExtraOpenItems = onlyPr ? openPrContext.openItems : null;
+  // #2683/#xq985wu — the cross-item ORDERING CONTEXT for EVERY pass. `planLabelDrain` derives its cross-item
+  // `openItems` set from the candidate `verdicts`, but those are `--label ready-to-merge`-SCOPED — so a PR that
+  // is still open yet absent from the scoped list (a `--only` narrow, OR #984/#2832 having stripped
+  // `ready-to-merge` from a merely-reordered held PR) would be invisible to the ordering gate, and a dependent
+  // `blockedBy` it would resolve the edge as "landed" and land EARLY. Feeding the label-BLIND full open-PR item
+  // set (`collectOpenPrContext` — every open PR across the swept repos, UNFILTERED by `--only` AND by `--label`)
+  // as `extraOpenItems` DECOUPLES ordering from the label scope (#xq985wu): the order derives from what is
+  // actually open, not from which PRs carry `ready-to-merge`. A superset is safe by construction (see
+  // `planLabelDrain`: it can only ADD a defer, never drop one). Populated whenever RECONCILE ran (the
+  // `--label`-scoped drain the daemon/pr-watch/full sweep fire); when it did not (the label-less orphan sweep)
+  // `openPrContext.openItems` is an empty Set, which degrades to today's behaviour (the candidate list already
+  // IS the full open set when unfiltered). This is what makes #984/#2832's strip of `ready-to-merge` from a held
+  // PR SAFE — see the `collectOpenPrContext` note above.
+  const orderExtraOpenItems = openPrContext.openItems; // label-blind full-open set feeds ordering on every pass, not just --only (#xq985wu)
+  // #999/xq985wu F2 — invert `collectOpenPrContext`'s per-PR manifest map to item → holding open-PR descriptors,
+  // so the stale-PR diagnostic below can NAME the open PR still holding a LANDED item open (the case the F2 fix
+  // clears silently). Cheap: one pass over the already-fetched manifests.
+  const openPrsNamingItem = new Map();
+  for (const [pk, manifest] of openPrContext.manifestByPr || []) {
+    if (!manifest || manifest.item == null) continue;
+    const id = asItemId(manifest.item);
+    const [repoK, numK] = String(pk).split('::');
+    const tag = `${repoK === 'cwd' ? '' : repoK + '#'}${numK}`;
+    if (!openPrsNamingItem.has(id)) openPrsNamingItem.set(id, []);
+    openPrsNamingItem.get(id).push(tag);
+  }
+  const nameStaleHolders = (items) => (items || [])
+    .map((id) => { const h = openPrsNamingItem.get(asItemId(id)) || []; return `#${id}${h.length ? ` (open PR${h.length > 1 ? 's' : ''} ${h.join(', ')})` : ''}`; })
+    .join(', ');
   // #2222 — PRE-CHECK id-collision self-heal, retained here (THE drain, the sole writer to main, #2290) as a
   // DORMANT BACKSTOP under JIT numbering (#2288/#2291): a new item is now born hash-keyed, so a lane's NEW item
   // reusing a base `NNN` should be unrepresentable pre-land — this stays a cheap no-op on the common path, kept
@@ -2296,6 +2378,7 @@ async function runCli() {
     if (!AS_JSON) {
       process.stderr.write(`  merge order: ${plan.ready.map((c) => repoTag(c.repo) + c.num + (c.item ? `→${c.item}` : '')).join(' → ') || '(none ready)'}\n`);
       if (deferred.length) process.stderr.write(`  deferred (blockedBy unlanded): ${deferred.map((d) => `#${d.num}→[${d.waitOn.join(',')}]`).join(', ')}\n`);
+      if (plan.staleLandedOpenItems?.length) process.stderr.write(`  ⓘ stale-PR note (#999/xq985wu F2): ${nameStaleHolders(plan.staleLandedOpenItems)} — proven landed but still named by an open PR (edge cleared; the open PR is stale/abandoned/impl-half)\n`);
     }
   } else {
     // Cascade: merge every READY candidate in blockedBy order; a merged item leaves the open set, freeing its
@@ -2305,9 +2388,11 @@ async function runCli() {
     // #2257 — an item is unique per (repo, PR#): match/remove candidates on both so a WE #10 and a FUI #10 never
     // collide in the cascade bookkeeping.
     const sameCand = (a, b) => a.num === b.num && a.repo === b.repo;
+    let staleLandedOpenItems = [];
     for (;;) {
       const plan = planLabelDrain(remaining, { landedThisPass, provenOnMain, extraOpenItems: orderExtraOpenItems });
       deferred = plan.deferred;
+      staleLandedOpenItems = plan.staleLandedOpenItems || [];
       if (!plan.ready.length) break;
       let progressed = false;
       for (const c of plan.ready) {
@@ -2396,6 +2481,7 @@ async function runCli() {
       if (!progressed) break; // every ready candidate failed → stop (dependents stay deferred)
     }
     if (deferred.length && !AS_JSON) process.stderr.write(`  · ${deferred.length} deferred (blockedBy an unlanded PR): ${deferred.map((d) => `#${d.num}→[${d.waitOn.join(',')}]`).join(', ')}\n`);
+    if (staleLandedOpenItems.length && !AS_JSON) process.stderr.write(`  ⓘ stale-PR note (#999/xq985wu F2): ${nameStaleHolders(staleLandedOpenItems)} — proven landed but still named by an open PR (edge cleared; the open PR is stale/abandoned/impl-half)\n`);
   }
 
   // Sync the LOCAL main checkout to the just-advanced origin/main (a merged PR moved origin, not local) — local
