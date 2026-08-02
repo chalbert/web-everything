@@ -3,7 +3,7 @@ bornAs: xe5vt9s
 kind: task
 status: open
 dateOpened: "2026-08-02"
-blockedBy: ["2785", "xpa89kw"]
+blockedBy: ["2785", "2890"]
 tags: [governance, mechanization, review-human, principle-surface, check-standards]
 ---
 
@@ -31,6 +31,6 @@ Mechanical follow-on that enforces the ratified principle-surface gate
 ## Preconditions
 
 `blockedBy: 2785` — the base `POLICY_SPEC` path narrowing this extends must land first (building on the
-un-narrowed `isGateSelfPath = isPolicyCorePath` base would re-derive #2771). `blockedBy: xpa89kw` — the
+un-narrowed `isGateSelfPath = isPolicyCorePath` base would re-derive #2771). `blockedBy: 2890` — the
 producer-side `diffHunks` plumbing; the content triggers under-fire without it. Enforces #2840's ratified
 anchor; mechanical, committee-clearable.

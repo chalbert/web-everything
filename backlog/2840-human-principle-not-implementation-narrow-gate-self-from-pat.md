@@ -191,7 +191,7 @@ default.
 of a pre-existing `@principle`/`@invariant` marker, and the permanently-pinned `POLICY_SPEC` declarative-leash
 path floor. Codified in `we:docs/agent/platform-decisions.md#human-is-principle-surface-not-path`
 (`codifiedIn`), which is the canonical definition of "principle surface" the sibling two-PR rule (#2839)
-cites. The impl that narrows the gate is the follow-on `xe5vt9s` (`blockedBy: 2785`). The Options table and
+cites. The impl that narrows the gate is the follow-on `2892` (`blockedBy: 2785`). The Options table and
 Recommendation below are retained as the deliberation record; this ruling is the operative call.
 
 ## Options

@@ -3,7 +3,7 @@ bornAs: x3rm10e
 kind: task
 status: open
 dateOpened: "2026-08-02"
-blockedBy: ["xpa89kw"]
+blockedBy: ["2890"]
 tags: [governance, mechanization, check-standards, write-gate, two-pr-rule]
 ---
 
@@ -33,6 +33,6 @@ its ratified anchor. This is the impl PR the two-PR rule itself prescribes — c
 
 ## Preconditions
 
-`blockedBy: xpa89kw` — the shared base-vs-head `diffHunks` plumbing into `scoreEscalation` / the write path;
+`blockedBy: 2890` — the shared base-vs-head `diffHunks` plumbing into `scoreEscalation` / the write path;
 `isPrincipleSurface` needs hunk content. Enforces #2839's ratified anchor; behaviour-preserving mechanical
 impl, committee-clearable (not `review:human`).

@@ -137,7 +137,7 @@ FIRST, the impl PR (code + the enforcing invariant, committee-cleared) lands SEC
 `codifiedIn:` anchor already `status: resolved` on `main`. Codified in
 `we:docs/agent/platform-decisions.md#principle-and-impl-two-pr`, which cites #2840's canonical
 "principle surface" definition rather than restating one. The write-time `assertNotPrincipleAndImpl` gate is
-the follow-on `x3rm10e`. The Options table and Recommendation below are retained as the deliberation record;
+the follow-on `2891`. The Options table and Recommendation below are retained as the deliberation record;
 this ruling is the operative call.
 
 ## Options

@@ -147,7 +147,7 @@ merge-hold conformance test is GREEN on `main` (live CI-status probe), (b) #2823
 conformance test is GREEN on `main` (likewise probed), and (c) the durable review-seam ledger shows a clean
 shadow-mode track record (the `computeAgreementMetric` bar) — and the flip edit itself stays `review:human`
 via #2840's leash pin. Codified in `we:docs/agent/platform-decisions.md#enforce-flip-triple-gated`. The
-predicate + CI probe + ledger + write gate are the follow-on `xva71x1` (`blockedBy: xe5vt9s`). The Options
+predicate + CI probe + ledger + write gate are the follow-on `2893` (`blockedBy: 2892`). The Options
 table and Recommendation below are retained as the deliberation record; this ruling is the operative call.
 
 ## Options

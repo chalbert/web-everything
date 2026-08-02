@@ -3,7 +3,7 @@ bornAs: xva71x1
 kind: task
 status: open
 dateOpened: "2026-08-02"
-blockedBy: ["xe5vt9s"]
+blockedBy: ["2892"]
 tags: [governance, mechanization, enforce-flip, land-mode, ci-probe, check-standards]
 ---
 
@@ -49,8 +49,8 @@ the predicate is ready. Code only, committee-cleared under the two-PR rule.
 
 ## Preconditions
 
-`blockedBy: xe5vt9s` — the flip's own safeguard (the `landMode` leash pin) is an unbuilt `check:standards`
-rule inside #2840's impl follow-on `xe5vt9s`; without it this `landMode: enforce` write gate could land while
+`blockedBy: 2892` — the flip's own safeguard (the `landMode` leash pin) is an unbuilt `check:standards`
+rule inside #2840's impl follow-on `2892`; without it this `landMode: enforce` write gate could land while
 the pin that keeps `we:scripts/lib/review-policy.contract.json` human-gated does not yet exist (the write gate
 exists while its safeguard does not — #2838's anchor calls the pin a "load-bearing dependency"). #2840's leash
 pin ratified (now true — keeps `we:scripts/lib/review-policy.contract.json` human-gated so the flip edit stays

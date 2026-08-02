@@ -1,4 +1,5 @@
 ---
+bornAs: x7dsrn2
 kind: task
 status: open
 dateOpened: "2026-08-02"
@@ -16,7 +17,7 @@ blocker resolves (per `we:docs/agent/backlog-workflow.md`), and the sanctioned
 ## Why (the #1002 defect this prevents)
 
 On resolving #2840, the diff deleted `blockedBy: ["2785"]` while #2785 was still `status: open` — the item's
-own anchor + body still cited "blockedBy #2785 … landing first", and the follow-on `xe5vt9s` re-declared the
+own anchor + body still cited "blockedBy #2785 … landing first", and the follow-on `2892` re-declared the
 same edge, so the file contradicted itself. Nothing caught it because the resolve was a hand edit, not the
 sanctioned CLI transition. This gate makes the drop mechanically visible: dropping a live (open-target) edge at
 resolve is an error the author must justify (the blocker really is gone) or reinstate.
