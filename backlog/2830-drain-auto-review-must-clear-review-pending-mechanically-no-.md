@@ -70,8 +70,8 @@ enforce flip must not land before that guard exists, or a stale ledger could cle
 - **#2820** — the merge predicate that treats `review:pending` as an unsatisfied hold. This item supplies the mechanism that SATISFIES that hold without a human.
 - **#2439** — non-author clear (conflict-of-interest invariant): the auto-review must be independent of the author.
 - The shared review core (`we:scripts/lib/review-core.mjs`) is the engine this pass runs.
-- **Ledger-freshness binding (#xmnvd7x)** — filed from this PR's review (finding M4). The jury ledger carries no reviewed-head SHA, so a stale ledger could fold clean for an unreviewed head. Fail-closed in SHADOW; it BLOCKS the enforce flip (#2572 part 2) and must land first.
-- **check:standards guards (#xu1v0ek)** — filed from this PR's review: the five deterministic prevention gates (trust-chain registration, numeric verdict-rank literal, repo-key literal, import hygiene, CLI↔test pairing) that close each finding's class.
+- **Ledger-freshness binding (#2864)** — filed from this PR's review (finding M4). The jury ledger carries no reviewed-head SHA, so a stale ledger could fold clean for an unreviewed head. Fail-closed in SHADOW; it BLOCKS the enforce flip (#2572 part 2) and must land first.
+- **check:standards guards (#2867)** — filed from this PR's review: the five deterministic prevention gates (trust-chain registration, numeric verdict-rank literal, repo-key literal, import hygiene, CLI↔test pairing) that close each finding's class.
 
 ## Acceptance (SHADOW slice)
 
