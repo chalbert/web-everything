@@ -4,6 +4,7 @@ parent: "2804"
 status: resolved
 dateOpened: "2026-08-01"
 dateResolved: "2026-08-01"
+ratifiedBy: "Nicolas Gilbert (operator)"
 preparedDate: "2026-08-01"
 codifiedIn: docs/agent/platform-decisions.md#build-lane-self-review-non-zero-floor
 relatedReport: reports/2026-08-01-risk-based-care-scaled-review-gating.md
@@ -14,7 +15,8 @@ tags: [conveyor, review, convergence, self-review, care-level, ui-fidelity, slic
 
 ## Ruling (2026-08-01) — Fork 1 = (c) hybrid
 
-Ratified **(c) hybrid**. The **ratifiable core**: every delegated build carries a **non-zero self-review
+**RATIFIED by the operator (Nicolas Gilbert) on 2026-08-01** — Fork 1 = **(c) hybrid** accepted. The
+**ratifiable core**: every delegated build carries a **non-zero self-review
 floor** — even a `none`-care leaf edit gets one fast pass, so no build reaches the PR having run zero adversarial
 self-review. The floor is a **non-clearing FIX pass** ([#2439]: the builder never clears its own diff). The
 **visual** floor stays **locus-gated, not care-gated**. **Depth above the floor is a config dimension**, not a
@@ -224,21 +226,32 @@ lens a citation-heavy prose diff earns — stays in context.
 
 Carved from [#2819] (its ratify-later open sub-point); under epic [#2804] (UI-Fidelity Gate). Reuses the
 care-level model [#2567], the non-author invariant [#2439], build-time self-review [#2672], and composes with
-[#2563]. Gate-self note: an implementing diff edits `we:skills-src/conveyor/delivery-agent-brief.md` (the build
-governance brief) + `we:scripts/lib/` — a system-machinery change, so it rides the normal independent review.
+[#2563]. **Gate-self note:** an implementing diff adds `selfReviewDepthForCareLevel` to
+`we:scripts/lib/review-core.mjs`, which `we:scripts/lib/gate-config.mjs:76` registers as **`tier: 'policy'`**
+(the disposition-router — editing it changes what the gate does with an escalation). So the implementing diff is
+**gate-self → `review:human`, never agent-cleared**: `humanRequired` makes `deriveCareLevel`
+(`we:scripts/lib/review-escalation.mjs:201`) short-circuit to **`high`**. A child slice carved at ratify inherits
+that scope — a human clears it, and the advisory panel runs at high rigor
+(`panelRigorForCareLevel('high')` → **3 rounds + 2 jurors per lens**), not the elevated roster below.
 
 ### Review jury (provisional — pre-registered #2638)
 
-Care level: `elevated` (system-machinery: the conveyor's build-governance brief + shared review lib). This jury
-binds against the item's predicted scope and is re-checked against the real diff at PR open.
+Care level: **`high`** — **gate-self**, not merely system-machinery. The predicted touch-set names
+`we:scripts/lib/review-core.mjs`, a `tier: 'policy'` file (`we:scripts/lib/gate-config.mjs:76`), so the
+implementing diff is `humanRequired` and `deriveCareLevel` (`we:scripts/lib/review-escalation.mjs:201`)
+short-circuits to `high`: the PR parks `review:human` and is **never agent-cleared**.
+`panelRigorForCareLevel('high')` accordingly pre-registers **3 rounds + 2 jurors per lens** (8 jurors across the
+four lenses below). This jury binds against the item's predicted scope and is re-checked against the real diff at
+PR open.
 
 | juror | lens | grounding method | pre-registered expectation |
 | --- | --- | --- | --- |
-| correctness#1 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
-| security#1 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
-| simplicity#1 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
-| standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+| correctness#1, correctness#2 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| security#1, security#2 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| simplicity#1, simplicity#2 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| standards-conformance#1, standards-conformance#2 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
 
 **Predicted touch-set (#2619, seeds any buildable child's `scope:`):** `we:skills-src/conveyor/` (the step-6/7
-brief) + `we:scripts/lib/review-core.mjs` (the new `selfReviewDepthForCareLevel`). A child carved at ratify
-inherits its own slice of this, already scoped.
+brief) + `we:scripts/lib/review-core.mjs` (the new `selfReviewDepthForCareLevel` — the `tier: 'policy'` file that
+puts the implementing diff in the gate-self trust chain above). A child carved at ratify inherits its own slice of
+this, already scoped, and inherits the `review:human` gate-self clearance with it.
