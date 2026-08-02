@@ -132,15 +132,21 @@ export function findAnchorRulingMismatches(text, anchorOwners) {
   const shapeA = new RegExp(`(?:\\]\\(#|#)(${anchorAlt})[)\`'"]*\\s*\\(\\s*#(\\d{3,5})\\b`, 'g');
   for (const m of flat.matchAll(shapeA)) record(m[1], m[2], 'A', m.index);
 
-  // Shape B: a single parenthetical group holding BOTH the anchor and a number, in either order.
+  // Shape B: a single parenthetical group holding the anchor and a number as COMMA-SEPARATED attribution
+  // tokens, in either order — `` (`#anchor`, #NNN) `` / `(#NNN, #anchor-name)`. The comma-adjacency is what
+  // makes it an ATTRIBUTION rather than mere co-residence: an incidental number in prose beside the anchor
+  // (`(#NNN introduced the check enforced by #anchor)`) has no comma directly between the two tokens, so it
+  // no longer over-fires (the earlier "any anchor + any number in one paren" test broke the zero-false-positive
+  // bar). A backtick/quote wrapper between a token and the comma is tolerated (the real `` `#anchor`, #NNN `` form).
   const parenGroup = /\(([^()]*)\)/g;
-  const anchorInParen = new RegExp(`#(${anchorAlt})\\b`);
-  const numInParen = /#(\d{3,5})\b/;
+  const anchorThenNum = new RegExp(`#(${anchorAlt})[\`'"]*\\s*,\\s*#(\\d{3,5})\\b`);
+  const numThenAnchor = new RegExp(`#(\\d{3,5})\\b[\`'"]*\\s*,\\s*[\`'"]*#(${anchorAlt})\\b`);
   for (const pm of flat.matchAll(parenGroup)) {
     const inner = pm[1];
-    const am = inner.match(anchorInParen);
-    const nm = inner.match(numInParen);
-    if (am && nm) record(am[1], nm[1], 'B', pm.index);
+    const am = inner.match(anchorThenNum);
+    if (am) { record(am[1], am[2], 'B', pm.index); continue; }
+    const nm = inner.match(numThenAnchor);
+    if (nm) record(nm[2], nm[1], 'B', pm.index);
   }
   return findings;
 }
@@ -158,6 +164,12 @@ export function findAnchorRulingMismatches(text, anchorOwners) {
 export function findDanglingLoci(text, { fileExists, lineCount }) {
   const findings = [];
   if (typeof text !== 'string' || text === '') return findings;
+  // A code-locus is a REPO-RELATIVE path. A matched path that is absolute or climbs out of the repo with a
+  // `..` segment is never a valid citation — and must NOT reach the injected fs readers, or the caller's
+  // `readFileSync(join(ROOT, path))` would resolve the traversal and read (and line-split) an arbitrary file
+  // outside the tree — a large/streaming target (e.g. `we:../../../../dev/urandom:1`) hangs or OOMs the gate.
+  // Skip such loci entirely (never resolved, never errored — same posture as a cross-repo locus).
+  const isInRepoPath = (p) => typeof p === 'string' && p !== '' && !p.startsWith('/') && !p.split('/').includes('..');
   // we:<path>:<line> or we:<path>:<start>-<end>. Path is a run of path chars (no whitespace, no `:` — the
   // `:` after the path is the line separator). Requires at least one `/` so a bare `we:foo:1` word can't
   // masquerade as a locus; matches the repo-locus convention (we:docs/agent/conventions.md).
@@ -166,6 +178,7 @@ export function findDanglingLoci(text, { fileExists, lineCount }) {
   for (const m of text.matchAll(rx)) {
     const [, prefix, path, startStr, endStr] = m;
     if (CROSS_REPO_LOCI.has(`${prefix}:`)) continue; // cross-repo — not resolvable here, never errored
+    if (!isInRepoPath(path)) continue;               // absolute / `..`-escaping — never hand to the fs readers
     const locus = endStr ? `${prefix}:${path}:${startStr}-${endStr}` : `${prefix}:${path}:${startStr}`;
     if (seen.has(locus)) continue;
     seen.add(locus);
@@ -181,6 +194,22 @@ export function findDanglingLoci(text, { fileExists, lineCount }) {
     }
   }
   return findings;
+}
+
+/**
+ * Count the LINES of a source file for a `we:<path>:<line>` range check (gate 5). A file ending in a
+ * newline has that trailing `\n` as a line TERMINATOR, not a following empty line — so a naive
+ * `split('\n').length` overcounts by one and lets a locus pointing one line past the true end read as
+ * in-range. This strips that single trailing-newline artifact so the count is the real line total. Pure —
+ * the caller injects the file text; this is exercised directly by the unit test (the injected `lineCount`
+ * in `findDanglingLoci` should be `countSourceLines(readFileSync(...))`).
+ * @param text the file body.
+ * @returns the number of lines (0 for an empty file).
+ */
+export function countSourceLines(text) {
+  if (typeof text !== 'string' || text === '') return 0;
+  const n = text.split('\n').length;
+  return text.endsWith('\n') ? n - 1 : n;
 }
 
 /**

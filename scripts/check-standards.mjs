@@ -59,7 +59,7 @@ import {
 } from './check-standards-rules.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
-  CITATION_GATES_ENFORCED,
+  countSourceLines, CITATION_GATES_ENFORCED,
 } from './lib/citation-check.mjs';
 
 const require = createRequire(import.meta.url);
@@ -1049,7 +1049,7 @@ try {
   const anchorOwners = buildAnchorOwners(backlog);
   const emit = CITATION_GATES_ENFORCED ? err : warn;
   const relExists = (p) => existsSync(join(ROOT, p));
-  const relLineCount = (p) => { try { return readFileSync(join(ROOT, p), 'utf8').split('\n').length; } catch { return null; } };
+  const relLineCount = (p) => { try { return countSourceLines(readFileSync(join(ROOT, p), 'utf8')); } catch { return null; } };
   // Scan the same widened scope as gate 2/3 (#957 round 7): backlog + docs/agent + reports + the two
   // src/ research dirs (the latter render on the public /research/ page).
   const scanFiles = [];

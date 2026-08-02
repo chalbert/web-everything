@@ -21,6 +21,7 @@ import {
   findAnchorRulingMismatches,
   findDanglingLoci,
   findOutOfScopeHashSlugs,
+  countSourceLines,
   CROSS_REPO_LOCI,
 } from '../lib/citation-check.mjs';
 
@@ -81,6 +82,14 @@ describe('findAnchorRulingMismatches — gate 10 (the 11-vs-1 core)', () => {
     expect(findAnchorRulingMismatches(text, owners)).toHaveLength(0);
   });
 
+  it('does NOT fire on an INCIDENTAL number sharing the SAME paren as the anchor (no comma attribution)', () => {
+    // Shape-B precision: `#2439` here is a build-slice mention, not a ruling attribution — there is no
+    // `anchor, #NNN` (or `#NNN, anchor`) comma-adjacency, so co-residence in one paren must NOT fire.
+    const text = 'the convergence gate (#2439 introduced the check enforced by ' +
+      '`#agent-convergence-independent-validation`) holds.';
+    expect(findAnchorRulingMismatches(text, owners)).toHaveLength(0);
+  });
+
   it('does NOT fire on the heading-definition form `{#anchor}` followed by its `**Ratified (#NNN)**` line', () => {
     const text = '### Agent fix/convergence {#agent-convergence-independent-validation}\n\n' +
       '**Ratified 2026-07-10 (#2398, graduated to epic #2410).**';
@@ -121,6 +130,37 @@ describe('findDanglingLoci — gate 5 (`we:<path>:<line>` must resolve)', () => 
 
   it('does NOT match a symbol-anchor form `we:path#symbol` (no `:line`) — gate 6 is not in this subset', () => {
     expect(findDanglingLoci('we:scripts/real.mjs#applyLedger', { fileExists, lineCount })).toHaveLength(0);
+  });
+
+  it('SKIPS a `..`-escaping or absolute path WITHOUT ever calling the fs readers (no traversal read)', () => {
+    // A locus whose path climbs out of the repo (or is absolute) must never reach fileExists/lineCount — the
+    // caller resolves those against ROOT with readFileSync, so a huge/streaming target would hang the gate.
+    const calls = [];
+    const spyExists = (p) => { calls.push(p); return true; };
+    const spyCount = (p) => { calls.push(p); return 10; };
+    const text = 'see we:../../../../dev/urandom:1 and we:/etc/passwd:1 for the call';
+    expect(findDanglingLoci(text, { fileExists: spyExists, lineCount: spyCount })).toHaveLength(0);
+    expect(calls).toHaveLength(0); // never resolved — the guard skips before any fs read
+  });
+});
+
+describe('countSourceLines — gate 5 line-count (no trailing-newline overcount)', () => {
+  it('does not count the terminator of a newline-terminated file as an extra line', () => {
+    expect(countSourceLines('a\nb\n')).toBe(2); // two lines, trailing \n is a terminator not a 3rd line
+    expect(countSourceLines('a\nb')).toBe(2);   // no trailing newline — still two lines
+    expect(countSourceLines('a')).toBe(1);
+    expect(countSourceLines('a\n')).toBe(1);
+    expect(countSourceLines('')).toBe(0);       // empty file has no lines
+  });
+
+  it('makes a locus one line past the true end read as OUT of range (the off-by-one the naive split missed)', () => {
+    const tree = { 'scripts/real.mjs': 'l1\nl2\n' }; // 2 real lines, trailing newline
+    const fileExists = (p) => Object.hasOwn(tree, p);
+    const lineCount = (p) => countSourceLines(tree[p] ?? '');
+    const hits = findDanglingLoci('at we:scripts/real.mjs:3', { fileExists, lineCount });
+    expect(hits).toHaveLength(1);
+    expect(hits[0].reason).toBe('line-out-of-range');
+    expect(findDanglingLoci('at we:scripts/real.mjs:2', { fileExists, lineCount })).toHaveLength(0);
   });
 });
 
