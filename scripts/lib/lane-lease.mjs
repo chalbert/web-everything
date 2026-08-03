@@ -152,6 +152,32 @@ export function leaseOwnedBy(lease, session) {
   return !!lease && !!session && lease.session === session;
 }
 
+/**
+ * #2452 (Gap 2) — is the CALLER the owner of `lease`, for the purpose of an un-forced `release`? Generalizes
+ * `leaseOwnedBy` past its host:pid-keyed `session` string, which is unstable across a session's separate
+ * shell invocations (`defaultSession()` falls back to `${hostname()}:${process.ppid}` when no `--session` /
+ * `LANE_SESSION` is given) — the very bug this closes: the session that ACQUIRED a lease read as "not yours"
+ * on a later RELEASE call because the two calls' `process.ppid` differed.
+ *
+ *   1. Exact `session` match (`leaseOwnedBy`) wins first — this is the AUTHORITATIVE signal for a MARKED
+ *      (`workflowLane`) lease, whose `session` field is the minted per-lane slug an orchestrator asserts
+ *      identically at both acquire and release (`LANE_SESSION=<slug>`), and it also keeps any legacy explicit
+ *      `--session` flow working unchanged.
+ *   2. For an UNMARKED lease with no exact `session` match, fall through to the durable `ownerSession` signal
+ *      (#2367, `isForeignLease`'s DEGRADED fail-open posture): stable across a session's separate Bash-tool
+ *      calls (unlike host:pid), so the session that acquired the lease can release it without needing an
+ *      identical `--session` string on both ends. A MARKED lease is deliberately EXCLUDED from this fallback —
+ *      every sibling parallel lane intentionally SHARES `ownerSession` (see `laneMarkedSlug`'s doc), so
+ *      `ownerSession` alone cannot tell one lane's own release from a sibling's; the minted slug (step 1) is
+ *      that lease's sole ownership signal.
+ */
+export function leaseOwnedByCaller({ lease, session, mySessionId } = {}) {
+  if (!lease) return false;
+  if (leaseOwnedBy(lease, session)) return true;
+  if (lease.workflowLane) return false; // marked lease: ownership is the minted slug ONLY (step 1 above)
+  return !isForeignLease({ lease, mySessionId });
+}
+
 // #2413 — the minted-slug ownership channel for a MARKED (workflowLane) lease. In the parallel-/workflow
 // topology every sibling lane shares `ownerSession`, so ambient identity can't tell a lane's own destructive
 // op from a sibling's. Instead the guard keys on a MINTED slug (`<batchSlug>-<laneKey>`, stored in the lease's

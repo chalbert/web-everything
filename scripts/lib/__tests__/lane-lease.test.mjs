@@ -13,6 +13,7 @@ import {
   leaseBody,
   describeLease,
   leaseOwnedBy,
+  leaseOwnedByCaller,
   isForeignLease,
   laneMarkedSlug,
   assertedLaneSlug,
@@ -159,6 +160,42 @@ describe('isForeignLease (#2367 r2 — durable ownerSession is the SOLE ownershi
     expect(isForeignLease({ lease: null, mySessionId: 'sess-A' })).toBe(false);
     expect(isForeignLease({})).toBe(false);
     expect(isForeignLease()).toBe(false);
+  });
+});
+
+describe('leaseOwnedByCaller (#2452 Gap 2 — release ownership survives a defaultSession() host:pid change)', () => {
+  const at = '2026-07-05T12:00:00.000Z';
+  it('exact session match wins first (legacy / explicit --session flow, unchanged)', () => {
+    const lease = leaseBody({ session: 'sess-a', acquiredAt: at });
+    expect(leaseOwnedByCaller({ lease, session: 'sess-a', mySessionId: null })).toBe(true);
+  });
+  it('an UNMARKED lease: the acquiring session releases it via ownerSession even though its host:pid `session` string changed', () => {
+    // Simulates: acquire ran as `host:111` (a since-exited pid), release runs as `host:222` — the exact bug
+    // (`defaultSession()`'s ppid differs per shell invocation). ownerSession (CLAUDE_CODE_SESSION_ID) is
+    // stable across both calls, so ownership is still recognized.
+    const lease = leaseBody({ session: 'host:111', acquiredAt: at, ownerSession: 'sess-uuid-A' });
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-A' })).toBe(true);
+  });
+  it('an UNMARKED lease genuinely owned by a DIFFERENT session (different ownerSession, no session-string match) is NOT owned', () => {
+    const lease = leaseBody({ session: 'host:111', acquiredAt: at, ownerSession: 'sess-uuid-A' });
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-B' })).toBe(false);
+  });
+  it('DEGRADED (no ownerSession / no mySessionId signal on both sides) fails open — same posture as isForeignLease', () => {
+    const lease = leaseBody({ session: 'host:111', acquiredAt: at }); // no ownerSession recorded
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-B' })).toBe(true);
+  });
+  it('a MARKED (workflowLane) lease is owned ONLY via its exact minted-slug session match — ownerSession never substitutes, because siblings share it', () => {
+    const lease = leaseBody({ session: 'batch-x-lane5', acquiredAt: at, ownerSession: 'sess-uuid-shared', workflowLane: true });
+    // A sibling lane under the SAME orchestrator session (shared ownerSession) but a DIFFERENT minted slug must
+    // NOT read as owned — that would let one sibling release another sibling's lane.
+    expect(leaseOwnedByCaller({ lease, session: 'batch-x-lane6', mySessionId: 'sess-uuid-shared' })).toBe(false);
+    // The correct slug, asserted as `session`, still owns it.
+    expect(leaseOwnedByCaller({ lease, session: 'batch-x-lane5', mySessionId: 'sess-uuid-shared' })).toBe(true);
+  });
+  it('no lease ⇒ never owned; empty args never throw', () => {
+    expect(leaseOwnedByCaller({ lease: null, session: 's', mySessionId: 'x' })).toBe(false);
+    expect(leaseOwnedByCaller({})).toBe(false);
+    expect(leaseOwnedByCaller()).toBe(false);
   });
 });
 
