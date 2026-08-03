@@ -47,6 +47,7 @@ import {
   validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
   validateDeclaredModuleContract,
+  countCodeLines, hasCohesiveEscapeHatch, countScopeCollisions, findLockPointFiles,
 } from '../check-standards-rules.mjs';
 import { execFileSync } from 'node:child_process';
 
@@ -1861,5 +1862,79 @@ describe('validateDeclaredModuleContract', () => {
     const mods = readdirSync(dir).filter((f) => f.endsWith('.mjs'))
       .map((f) => ({ file: `scripts/lib/${f}`, content: readFileSync(join(dir, f), 'utf8') }));
     expect(validateDeclaredModuleContract(mods).errors).toEqual([]);
+  });
+});
+
+describe('countCodeLines — size half of the #2678 size+collision composite', () => {
+  it('counts non-blank, non-"//"-comment lines', () => {
+    const text = ['const a = 1;', '', '// a comment', '  ', 'const b = 2;'].join('\n');
+    expect(countCodeLines(text)).toBe(2);
+  });
+  it('is 0 for an empty file', () => {
+    expect(countCodeLines('')).toBe(0);
+  });
+});
+
+describe('hasCohesiveEscapeHatch — #2678 `// @cohesive: <reason>` marker', () => {
+  it('true when a reason follows the marker', () => {
+    expect(hasCohesiveEscapeHatch('// @cohesive: single responsibility, just long\nconst a = 1;')).toBe(true);
+  });
+  it('false when the marker has no reason text', () => {
+    expect(hasCohesiveEscapeHatch('// @cohesive:\nconst a = 1;')).toBe(false);
+  });
+  it('false when absent', () => {
+    expect(hasCohesiveEscapeHatch('const a = 1;')).toBe(false);
+  });
+});
+
+describe('countScopeCollisions — queued items naming a file in scope: (#2678)', () => {
+  it('counts items whose scope covers the file, via the scope-lease coversFile matcher', () => {
+    const backlogScopes = [
+      ['we:scripts/foo.mjs'],
+      ['we:scripts/'], // subtree entry covers foo.mjs too
+      ['we:scripts/bar.mjs'], // does not cover
+      ['fui:scripts/foo.mjs'], // different repo — does not cover
+    ];
+    expect(countScopeCollisions('we:scripts/foo.mjs', backlogScopes)).toBe(2);
+  });
+  it('0 when no scope lists are given', () => {
+    expect(countScopeCollisions('we:scripts/foo.mjs', [])).toBe(0);
+  });
+});
+
+describe('findLockPointFiles — the #2678 Fork 1(b) soft-warn composite (flagged/quiet cases)', () => {
+  const bigCode = Array.from({ length: 900 }, (_, i) => `const x${i} = ${i};`).join('\n');
+  // 6 items all naming the same file → collisions = 6, over the default threshold of 5.
+  const hotScopes = Array.from({ length: 6 }, () => ['we:scripts/hot.mjs']);
+
+  it('flags a file that is BOTH large and scope-collision-heavy', () => {
+    const out = findLockPointFiles({ files: [{ path: 'we:scripts/hot.mjs', text: bigCode }], backlogScopes: hotScopes });
+    expect(out).toEqual([{ path: 'we:scripts/hot.mjs', codeLines: 900, collisions: 6 }]);
+  });
+  it('quiet when the file carries the @cohesive escape hatch, even if large + contended', () => {
+    const text = `// @cohesive: single responsibility, deliberately large\n${bigCode}`;
+    const out = findLockPointFiles({ files: [{ path: 'we:scripts/hot.mjs', text }], backlogScopes: hotScopes });
+    expect(out).toEqual([]);
+  });
+  it('quiet when large but uncontended (collisions under threshold)', () => {
+    const out = findLockPointFiles({
+      files: [{ path: 'we:scripts/hot.mjs', text: bigCode }],
+      backlogScopes: [['we:scripts/hot.mjs']], // only 1 collision
+    });
+    expect(out).toEqual([]);
+  });
+  it('quiet when small, even if heavily contended', () => {
+    const out = findLockPointFiles({
+      files: [{ path: 'we:scripts/hot.mjs', text: 'const a = 1;\nconst b = 2;' }],
+      backlogScopes: hotScopes,
+    });
+    expect(out).toEqual([]);
+  });
+  it('respects opts overrides for the two thresholds', () => {
+    const out = findLockPointFiles(
+      { files: [{ path: 'we:scripts/hot.mjs', text: 'const a = 1;\nconst b = 2;' }], backlogScopes: [['we:scripts/hot.mjs'], ['we:scripts/hot.mjs']] },
+      { codeLinesThreshold: 1, collisionsThreshold: 2 },
+    );
+    expect(out).toEqual([{ path: 'we:scripts/hot.mjs', codeLines: 2, collisions: 2 }]);
   });
 });

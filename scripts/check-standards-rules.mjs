@@ -14,6 +14,7 @@
  */
 
 import { validateFidelityContract } from './lib/fidelity-contract.mjs';
+import { coversFile, isSubtreeEntry } from './readiness/scope-lease.mjs';
 
 // Backlog operational axis (not the implementation lifecycle) + agile sizing — see
 // docs/agent/backlog-workflow.md. Exported so the script and the tests share one definition.
@@ -2266,4 +2267,77 @@ export function validateDeclaredModuleContract(modules = []) {
     }
   }
   return { errors, warnings: [] };
+}
+
+// ── 15. Small-file preference: size+collision composite soft-warn (#2678 ruling, #2782) ─────────
+// #2678 Fork 1 ratified (b): a NON-blocking warn (never an error, never a deny) on a file that is BOTH
+// oversized AND scope-collision-heavy — the real conveyor serialization cost (a file named in many queued
+// items' `scope:` is a single lock point that holds those items apart even with zero real overlap). The
+// signal is the size+collision COMPOSITE, never raw line count (a large-but-cohesive, uncontended file
+// stays quiet). An in-file `// @cohesive: <reason>` escape hatch silences the warn for a genuinely-cohesive
+// file. Codified at docs/agent/platform-decisions.md#small-file-preference.
+
+/** Ratified illustrative defaults (#2678's own code sample) — override via `findLockPointFiles`'s `opts`
+ * for tests; the live wiring in check-standards.mjs uses these. */
+export const LOCK_POINT_CODE_LINES_THRESHOLD = 800;
+export const LOCK_POINT_COLLISIONS_THRESHOLD = 5;
+
+/** Count "code lines" in a file body — total lines minus blank lines and single-line `//` comment lines.
+ * Deliberately a simple proxy, NOT a tokenizer/parser (block comments are not stripped): #2678's own point
+ * is that this composite need only be truer than raw line count, not exact — it is a warn-only gate. */
+export function countCodeLines(text) {
+  if (typeof text !== 'string' || text === '') return 0;
+  return text.split('\n').filter((line) => {
+    const t = line.trim();
+    return t !== '' && !t.startsWith('//');
+  }).length;
+}
+
+/** Does the file body carry the `// @cohesive: <reason>` escape hatch (#2678)? A bare marker with no
+ * reason text does NOT suppress the warn — the author must actually state why the file is cohesive. */
+export function hasCohesiveEscapeHatch(text) {
+  return typeof text === 'string' && /\/\/[ \t]*@cohesive:[ \t]*\S/.test(text);
+}
+
+/** Count how many backlog items' `scope:` entries NAME this file — the real serialization cost (#2678):
+ * each queued item whose predicted scope covers the file holds a lane apart from every other. Uses the
+ * same coverage matcher the scope-lease engine runs (`coversFile`, #2679), so a directory/glob scope entry
+ * that happens to cover the file counts too, not only an exact-path entry.
+ * @param file repo-qualified path (e.g. "we:scripts/merge-ai-prs.mjs").
+ * @param backlogScopes array of each (already status-filtered) item's `scope:` array.
+ */
+export function countScopeCollisions(file, backlogScopes) {
+  let n = 0;
+  for (const scopes of backlogScopes || []) {
+    if (Array.isArray(scopes) && scopes.some((s) => typeof s === 'string' && coversFile(s, file))) n++;
+  }
+  return n;
+}
+
+/**
+ * Find lock-point files: BOTH oversized (code lines over threshold) AND scope-collision-heavy (named by
+ * at least `collisionsThreshold` items' scopes), skipping any file carrying the `@cohesive:` escape hatch.
+ * #2678 Fork 1 (b) — warn-only; the caller decides how to surface the result (never an error/deny).
+ *
+ * @param files array of `{ path, text }` — path repo-qualified, text the file body. Pass only FILE-shaped
+ *   candidates (e.g. filter with `!isSubtreeEntry(path)`) — a directory has no single "size" to measure.
+ * @param backlogScopes array of each queued item's `scope:` array — the collision universe. Callers
+ *   typically pass only non-resolved items (a resolved item no longer holds a live lane).
+ * @param opts.codeLinesThreshold / opts.collisionsThreshold override the ratified defaults (test seam).
+ * @returns `[{ path, codeLines, collisions }]`
+ */
+export function findLockPointFiles({ files, backlogScopes }, opts = {}) {
+  const codeLinesThreshold = opts.codeLinesThreshold ?? LOCK_POINT_CODE_LINES_THRESHOLD;
+  const collisionsThreshold = opts.collisionsThreshold ?? LOCK_POINT_COLLISIONS_THRESHOLD;
+  const out = [];
+  for (const f of files || []) {
+    if (!f || typeof f.path !== 'string' || isSubtreeEntry(f.path)) continue;
+    if (hasCohesiveEscapeHatch(f.text)) continue;
+    const codeLines = countCodeLines(f.text);
+    if (codeLines <= codeLinesThreshold) continue;
+    const collisions = countScopeCollisions(f.path, backlogScopes);
+    if (collisions < collisionsThreshold) continue;
+    out.push({ path: f.path, codeLines, collisions });
+  }
+  return out;
 }
