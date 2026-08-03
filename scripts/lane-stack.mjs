@@ -24,9 +24,9 @@
  * Usage:
  *   node scripts/lane-stack.mjs init --plan=/tmp/stack-<slug>.json [--depth-cap=4] [--force] [--json]
  *   node scripts/lane-stack.mjs plan-item --plan=<file> --id=2394 --files=we:a.mjs,we:b.md [--repo=we] [--json]
- *   node scripts/lane-stack.mjs recheck --plan=<file> --id=2394 --base=origin/main [--repo=we] [--json]
+ *   node scripts/lane-stack.mjs recheck --plan=<file> --id=2394 --base=origin/main [--lane=<path>] [--repo=we] [--json]
  *   node scripts/lane-stack.mjs apply-rebase --plan=<file> --id=2394 --onto=2391 --base=<frontier tip sha> [--repo=we]
- *   node scripts/lane-stack.mjs record --plan=<file> --id=2394 --base=<ref> --tip-ref=lane/<slug>-2394 [--repo=we]
+ *   node scripts/lane-stack.mjs record --plan=<file> --id=2394 --base=<ref> --tip-ref=lane/<slug>-2394 [--lane=<path>] [--repo=we]
  *   node scripts/lane-stack.mjs drop --plan=<file> --id=2394
  *   node scripts/lane-stack.mjs couple-open --impl-repo=frontierui --impl-ref=lane/2684-fui [--impl-tip=<sha>] [--we-ref=lane/2684-we] [--json]  # #2684 cross-locus couple overlap-open order + WE stack-base (stateless)
  *
@@ -38,12 +38,19 @@
  *     set the gate certifies.
  *   • sha pins fail LOUD: `record` refuses to store a tip without a resolvable HEAD sha, and `plan-item` /
  *     `apply-rebase` refuse to emit/accept a base that isn't a recorded pinned sha — never the mutable ref.
+ *   • #2900 — the TREE the measurement runs on is validated too, not just the sha math on it. `recheck` /
+ *     `record` refuse a PRIMARY-checkout cwd (they would diff `origin/main...origin/main`, certify an EMPTY
+ *     actual set, and print the same success line as a real pass), refuse a base that resolves to HEAD (an
+ *     empty diff is never a certification), and `--lane=<path>` is REAL — it used to be absorbed silently,
+ *     which is what made a wrong-cwd invocation look deliberate. Unknown flags are now a hard error.
  *
  * Exit codes: 0 = ok; 3 = bad input / no plan; 4 = recheck verdict `rebase-required` (do NOT push).
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { laneTreeVerdict } from './readiness/lane-tree-guard.mjs'; // #2900 — the pure "which tree did we measure" rule (reuses guard-bash's /.lanes/ primitives)
 import {
   createStackPlan, planNextItem, recheckAtPush, applyRebase, recordPushed, dropItem,
 } from './readiness/overlap-chain.mjs';
@@ -58,6 +65,30 @@ for (const a of rest) {
 }
 const AS_JSON = !!flags.json;
 
+// #2900 A3 — an UNRECOGNISED flag is a hard error, never silently absorbed. The parser used to accept any
+// `--key=value`, so the `--lane=<path>` in the observed incident was swallowed without a word: the operator
+// had every reason to believe they had aimed the seam at the lane, and the tool measured the primary anyway.
+// A flag that does nothing must SAY it does nothing. (`--lane` is real as of this change; the rest is the
+// closed set the switch below actually reads.)
+const KNOWN_FLAGS = Object.freeze({
+  '*': ['plan', 'json', 'repo', 'lane'],                       // accepted everywhere
+  init: ['depth-cap', 'force'],
+  'plan-item': ['id', 'files'],
+  recheck: ['id', 'base'],
+  'apply-rebase': ['id', 'onto', 'base'],
+  record: ['id', 'base', 'tip-ref'],
+  drop: ['id'],
+  'couple-open': ['id', 'impl-ref', 'impl-repo', 'impl-tip', 'we-ref', 'we-repo'],
+});
+function assertKnownFlags() {
+  const allowed = new Set([...KNOWN_FLAGS['*'], ...(KNOWN_FLAGS[cmd] || [])]);
+  const unknown = Object.keys(flags).filter((k) => !allowed.has(k));
+  if (!unknown.length) return;
+  const detail = `unknown flag(s) for \`${cmd}\`: ${unknown.map((u) => `--${u}`).join(', ')} — accepted: ${[...allowed].sort().map((a) => `--${a}`).join(', ')}. A silently-absorbed flag is how #2900 shipped a vacuous certification; there is no pass-through.`;
+  // `fail` is defined below (function hoisting makes it callable here); keep the message shape identical.
+  fail(detail);
+}
+
 function emit(result, code) {
   if (AS_JSON) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   else process.stderr.write(`lane-stack ${result.ok === false ? '✗' : '✓'} ${result.detail}\n`);
@@ -65,8 +96,42 @@ function emit(result, code) {
 }
 function fail(detail) { emit({ ok: false, detail }, 3); }
 
+// #2900 — THE TREE THE MEASUREMENT RUNS ON. Every git call below used to inherit the process cwd, so a seam
+// launched from the primary checkout measured the PRIMARY, not the lane — and reported success. `--lane=<path>`
+// is now REAL (it was accepted and ignored, which is precisely what made the wrong-cwd invocation look
+// deliberate and correct); absent it, the tree is the process cwd, as before.
+const LANE_CWD = typeof flags.lane === 'string' && flags.lane ? resolve(flags.lane) : null;
 function git(args, opts = {}) {
-  return execFileSync('git', args, { encoding: 'utf8', ...opts }).trim();
+  return execFileSync('git', args, { encoding: 'utf8', cwd: LANE_CWD || process.cwd(), ...opts }).trim();
+}
+
+/** The tree these seams actually measure — `--lane` when given, else the process cwd. */
+function measuredTree() { return LANE_CWD || process.cwd(); }
+
+/**
+ * #2900 A1 — REFUSE to certify from a tree that is not a lane clone.
+ *
+ * `recheck` exists to assert `actual ⊆ declared` so a post-hoc overlap can never reach the drain as a
+ * certified-disjoint sibling. Run from the primary checkout it diffed `origin/main...origin/main`, found an
+ * EMPTY actual set, and printed the same `clean — push` line a real certification prints — a vacuous pass on a
+ * safety gate, with no observable difference from a genuine one. `record` then pinned the chain frontier to
+ * the primary's HEAD (`origin/main`) instead of the lane tip, so the next stacked child would acquire at a base
+ * missing its parent's commit — the exact un-pinned acquire the sha pin exists to prevent.
+ *
+ * The module already treats "silently shrinking the certified actual set" as its threat model and defends it
+ * with base-pinning and sha-pinning ("`--base` is validated, not trusted"). The cwd vector was the same threat
+ * through an undefended door.
+ *
+ * Detection reuses guard-bash's `/.lanes/` primitive (#2302/#2335/#2367) rather than inventing a second one.
+ * The refusal is narrow ON PURPOSE: a tree is rejected only when it is THIS script's own repo root (or under
+ * it) and that root is not a lane clone — i.e. the operator ran the seam from the checkout the script lives in.
+ * A throwaway clone (what the e2e suite drives, and any hand-made scratch tree) is neither, and still runs.
+ */
+function assertLaneTree(cmdName) {
+  const tree = resolve(measuredTree());
+  const selfRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  if (laneTreeVerdict({ tree, selfRoot }).ok) return;
+  fail(`\`${cmdName}\` measured ${tree}, which is the PRIMARY checkout, not a lane clone — it would certify the wrong tree and print success (#2900). Re-run it from inside the lane clone, or pass --lane=<lane clone path>.`);
 }
 
 const planPath = typeof flags.plan === 'string' ? resolve(flags.plan) : null;
@@ -114,6 +179,15 @@ function actualFiles(expectedBaseSha) {
   let effective = null;
   try { effective = git(['merge-base', baseSha, 'HEAD']); } catch { /* no common ancestor */ }
   if (!effective) fail(`--base=${base} shares no history with HEAD — not this lane's acquire point`);
+  // #2900 A2 — a VACUOUS certification is impossible. Belt to A1's braces: if the effective diff base IS
+  // HEAD, the lane has no commits of its own and `<base>...HEAD` is a no-op, so `actual` comes back EMPTY and
+  // satisfies `actual ⊆ declared` trivially — the false pass, printed identically to a real one. This catches
+  // the wrong-tree case even where the cwd heuristic cannot (a foreign clone, a lane reset to its base), and
+  // it is a genuine error in its own right: there is nothing to certify.
+  const headSha = resolveCommit('HEAD');
+  if (headSha && effective === headSha) {
+    fail(`--base=${base} resolves to the same commit as HEAD (${headSha.slice(0, 8)}) in ${measuredTree()} — the diff is empty, so this would certify NOTHING while printing success (#2900). Check you are measuring the lane clone (--lane=<path>) and that it carries its commits.`);
+  }
   if (expectedBaseSha && effective !== expectedBaseSha) {
     fail(`--base=${base} would diff from ${effective.slice(0, 8)} but the plan's recorded acquire point is ${expectedBaseSha.slice(0, 8)} — pass the ref this lane was ACTUALLY acquired at (a wrong base shrinks the actual set the gate certifies)`);
   }
@@ -125,6 +199,8 @@ function actualFiles(expectedBaseSha) {
 }
 
 const id = flags.id != null ? String(flags.id) : null;
+
+assertKnownFlags();   // #2900 A3 — before any work, so a typo'd flag can never be absorbed into a certification
 
 switch (cmd) {
   case 'init': {
@@ -197,6 +273,7 @@ switch (cmd) {
   }
   case 'recheck': {
     if (!id) fail('pass --id=<item id>');
+    assertLaneTree('recheck');   // #2900 A1 — never certify from the primary checkout
     const plan = loadPlan();
     const item = plan.items[id];
     if (!item) fail(`item ${id} is not in the plan`);
@@ -238,6 +315,7 @@ switch (cmd) {
   }
   case 'record': {
     if (!id) fail('pass --id=<item id>');
+    assertLaneTree('record');    // #2900 A1 — never pin the chain frontier from the primary checkout
     const plan = loadPlan();
     const item = plan.items[id];
     if (!item) fail(`item ${id} is not in the plan`);

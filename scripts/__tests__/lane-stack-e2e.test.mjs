@@ -464,3 +464,81 @@ describe('lane-stack e2e (#2684) — couple-open overlap seam (impl-first, WE st
     expect(r.code).toBe(3);
   });
 });
+
+describe('lane-stack e2e (#2900) — the seams must tell the truth about which tree they measured', () => {
+  // The incident: `recheck` was run from the PRIMARY checkout with an (invented, silently-ignored)
+  // `--lane=<path>`. It diffed origin/main...origin/main, recorded `"actual": []`, and printed the SAME
+  // `clean — push` line a real certification prints. `record` then pinned the chain frontier to the primary's
+  // HEAD instead of the lane tip, so the next stacked child would acquire at a base missing its parent's
+  // commit. A vacuous pass on a safety gate is indistinguishable from a real one — that is the whole defect.
+  const seedPlannedItem = () => {
+    expect(runStack(['init', `--plan=${planPath}`], primaryDir).code).toBe(0);
+    expect(runStack(['plan-item', `--plan=${planPath}`, '--id=A', '--files=we:a.txt'], primaryDir).code).toBe(0);
+    const laneA = makeLane('A', null);
+    writeFile(laneA, 'a.txt', 'a\n');
+    commitAll(laneA, 'A: a');
+    return laneA;
+  };
+
+  it('A2 — a base that resolves to HEAD is refused: an EMPTY diff can never be a certification', () => {
+    seedPlannedItem();
+    // A tree sitting exactly at origin/main (the primary's shape) — `origin/main...HEAD` is a no-op, so the
+    // actual set is empty and `actual ⊆ declared` passes trivially. THIS is what used to print "clean — push".
+    const atBase = join(base, 'at-base');
+    git(['clone', '--quiet', originDir, atBase]);
+    const r = runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main'], atBase);
+    expect(r.code, 'a vacuous certification must hard-fail, never print success').toBe(3);
+    expect(r.json.detail).toMatch(/same commit as HEAD/);
+    expect(r.json.detail).toMatch(/certify NOTHING/);
+  });
+
+  it('A2 — `record` is guarded too, so a vacuous run cannot pin the chain frontier to the wrong tip', () => {
+    seedPlannedItem();
+    const atBase = join(base, 'at-base-rec');
+    git(['clone', '--quiet', originDir, atBase]);
+    const r = runStack(['record', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--tip-ref=lane/A'], atBase);
+    expect(r.code).toBe(3);
+    expect(r.json.detail).toMatch(/same commit as HEAD/);
+    // The frontier was NOT advanced — the plan is untouched by a refused record.
+    expect(JSON.parse(readFileSync(planPath, 'utf8')).items.A.tips ?? null).toBe(null);
+  });
+
+  it('A3 — an unknown flag is a hard error, not silently absorbed (the `--lane` that started this)', () => {
+    seedPlannedItem();
+    const r = runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--laneDir=/tmp/nope'], primaryDir);
+    expect(r.code, 'an unrecognised flag must be refused before any work').toBe(3);
+    expect(r.json.detail).toMatch(/unknown flag\(s\)/);
+    expect(r.json.detail).toMatch(/--laneDir/);
+  });
+
+  it('A3 — the accepted set is listed in the refusal, so the operator can fix it in one read', () => {
+    seedPlannedItem();
+    const r = runStack(['record', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--typo=1'], primaryDir);
+    expect(r.code).toBe(3);
+    expect(r.json.detail).toMatch(/accepted: .*--base/);
+    expect(r.json.detail).toMatch(/--tip-ref/);
+  });
+
+  it('A3/A1 — `--lane=<path>` is now REAL: it aims the measurement at that tree', () => {
+    const laneA = seedPlannedItem();
+    // Run from a DIFFERENT cwd, pointing --lane at the real lane clone. Previously the flag was ignored and
+    // the primary was measured; now the lane's own diff is what gets certified.
+    const r = runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main', `--lane=${laneA}`], primaryDir);
+    expect(r.code, r.err).toBe(0);
+    expect(r.json.verdict).toBe('clean');
+    // Proof it measured the LANE and not the primary: the lane's actual set is non-empty.
+    const rec = runStack(['record', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--tip-ref=lane/A', `--lane=${laneA}`], primaryDir);
+    expect(rec.code, rec.err).toBe(0);
+    expect(rec.json.tips.we.sha, 'the recorded tip is the LANE head, not the base').toBe(git(['rev-parse', 'HEAD'], laneA));
+    expect(rec.json.tips.we.sha).not.toBe(mainSha0);
+  });
+
+  it('A4 — the genuine lane-clone run is unchanged: it passes and records the lane tip, not the base', () => {
+    const laneA = seedPlannedItem();
+    expect(runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main'], laneA).code).toBe(0);
+    const rec = runStack(['record', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--tip-ref=lane/A'], laneA);
+    expect(rec.code, rec.err).toBe(0);
+    expect(rec.json.tips.we.sha).toBe(git(['rev-parse', 'HEAD'], laneA));
+    expect(rec.json.tips.we.sha).not.toBe(mainSha0);
+  });
+});
