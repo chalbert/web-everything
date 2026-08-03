@@ -2,10 +2,15 @@
 bornAs: xd6yhuu
 kind: story
 size: 2
-status: open
+status: resolved
 relatedTo: ["2409", "2644", "2470"]
 scope: ["we:skills-src/review/SKILL.md", "we:scripts/review-set-label.mjs"]
 dateOpened: "2026-08-02"
+dateStarted: "2026-08-03"
+dateResolved: "2026-08-03"
+costTokens: "in:200 cw:192600 cr:13236200 out:67100"
+costUsd: 10.22
+costSessions: 1
 tags: [review, gate, skill, invariant]
 ---
 
