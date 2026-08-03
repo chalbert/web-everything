@@ -46,37 +46,46 @@ applies a label). The same module also renders the operator-facing notice for yo
 3. **Present** the findings + the escalation reason + the core's verdict to the operator. This is a **stop
    point** — the human reads and decides. Do not auto-proceed.
 
-4. **Record the verdict as a label** on the operator's OK (never inferred, always an explicit label — #2281):
-   - **accept** → `gh pr edit <PR> --repo <repo> --add-label review:accepted --remove-label review:pending`
-     (for a `review:human` PR, also `--remove-label review:human`). Then `/drain` (a bare pass) lands it.
-   - **changes** → `gh pr edit <PR> --repo <repo> --add-label review:changes --remove-label review:pending`,
-     which routes the fix back to the **author lane** (the drain does no editing here — that convergence loop is
-     v2, epic #2285). Summarize the required changes in a PR comment.
+4. **Record the verdict** on the operator's OK (never inferred, always an explicit label — #2281) — **always
+   through `we:scripts/review-set-label.mjs`, never a hand-rolled `gh pr edit`.** That module is the SINGLE HOME
+   of the review-label swap (#2644): it applies the label, stamps the `reviewed-sha` marker, and posts the
+   durable comment in one fail-closed arc. Write your findings write-up to a file first, then:
 
-5. **Post the human verdict as a PR comment** (both paths — so the verdict is a durable, readable record on
-   the PR, not just a label). Post via `gh pr comment <PR> --repo <repo> --body '<comment>'`, marked clearly as
-   the human decision so it is never mistaken for the drain's `🤖 advisory AI review (non-clearing)` take:
-   - **First line — the `reviewed-sha` marker, on the ACCEPT path (REQUIRED).** Stamp
-     `buildReviewedShaMarker(headSha)` (`we:scripts/lib/review-escalation.mjs`) for the PR's **live** head
-     (`gh pr view <PR> --json headRefOid`), so the comment opens with
-     `<!-- reviewed-sha: <40-hex> -->`. This is the ONLY record of which tree the acceptance covered: at land
-     the drain reads it with `parseReviewedSha` and `acceptanceCoversHead` (#2409) refuses a `review:accepted`
-     whose head has since advanced. **Omit it and the accept is silently mis-attributed** — `parseReviewedSha`
-     takes the LATEST marker from ANY comment, which is then the drain's own older advisory-review stamp, so
-     your accept reads as stale and the PR is re-parked to `review:pending` (observed on #983). The auto-review
-     path already stamps it; this is the human path catching up, not an optional extra.
-   - Header line: `✅ human review — accepted` or `🔁 human review — changes requested`.
-   - Body: the core's findings + verdict that you presented, plus one line naming who accepted / requested
-     changes (the operator).
-   - On the **changes** path this **is** the "summarize the required changes" comment from step 4 — post one
-     comment, not two.
+   ```
+   node scripts/review-set-label.mjs <PR> --repo=<owner/name> --to=accepted --actor="<operator>" --body-file=<findings.md>
+   node scripts/review-set-label.mjs <PR> --repo=<owner/name> --to=changes  --actor="<operator>" --body-file=<findings.md>
+   ```
+
+   - **accept** — adds `review:accepted`, drops `review:pending`. Then `/drain` (a bare pass) lands it.
+   - **changes** — adds `review:changes`, drops `review:pending` and any stale `review:accepted`, and routes the
+     fix back to the **author lane** (the drain does no editing here — that convergence loop is v2, epic #2285).
+   - The CLI **refuses** an `accepted` verdict on a `review:human` PR and changes nothing (INVARIANT 2). That
+     refusal is the gate-self protection, and it only binds callers that come through this module — which is
+     exactly why the swap must not be hand-rolled. When a human genuinely clears a gate-self PR, drop
+     `review:human` deliberately as a separate, stated act; do not route around the refusal to make it quiet.
+
+   **Why not `gh pr edit` directly.** Two things ride on the CLI that a raw label edit silently drops. (a) The
+   `reviewed-sha` marker: it is the ONLY record of which tree the acceptance covered, and at land the drain
+   reads it with `parseReviewedSha` while `acceptanceCoversHead` (#2409) refuses an accept whose head has since
+   advanced. Omit it and `parseReviewedSha` takes the LATEST marker from ANY comment — typically the drain's own
+   older advisory stamp — so your accept reads as stale and the PR is re-parked (observed on #983: five
+   re-parks). (b) INVARIANT 2, above. `check:standards` errors on a raw `gh pr edit … --add-label review:*` in
+   this file (#2882), so the hand-rolled path cannot come back.
+
+5. **The findings file you pass as `--body-file`** is the durable, readable record of the verdict on the PR —
+   marked clearly as the human decision so it is never mistaken for the drain's `🤖 advisory AI review
+   (non-clearing)` take. The CLI supplies the header line and the marker; your file supplies:
+   - the core's findings + verdict that you presented, and
+   - one line naming who accepted / requested changes (the operator).
+
+   On the **changes** path this **is** the "summarize the required changes" record — one comment, not two.
 
    **Re-accepting after a rebase.** `acceptanceCoversHead` keys on head-SHA IDENTITY, so a benign
    rebase-onto-`main` invalidates an accept even when it adds no review-worthy content. Do not re-run the whole
    panel for that: prove the content is unchanged by diffing the two NET patches
    (`git diff <merge-base>..<head>` at the accepted sha vs now — an empty diff means the reviewed tree is
-   byte-identical), then re-post the accept with a fresh marker for the new head and say in the comment that the
-   net patch is identical and why the head moved.
+   byte-identical), then re-run the CLI (it re-reads the live head, so the fresh marker is automatic) with a body
+   that states the net patch is identical and why the head moved.
 
 6. **Report the clearance to the operator via `renderReviewNotice({ event: 'cleared', pr, repo, outcome, actor })`**
    (`we:scripts/lib/review-core.mjs`, #2433) — the in-chat notice, distinct from the PR comment step 5 just

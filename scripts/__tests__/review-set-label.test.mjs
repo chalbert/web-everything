@@ -5,7 +5,7 @@
  *   against fixtures, no network.
  */
 import { describe, it, expect } from 'vitest';
-import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
+import { decideSetLabel, presentRemoveLabels, buildVerdictComment } from '../review-set-label.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const human = [{ name: REVIEW_LABELS.human }, { name: 'ready-to-merge' }];
@@ -117,5 +117,40 @@ describe('decideSetLabel — bad input', () => {
   it('throws on an unknown verdict', () => {
     expect(() => decideSetLabel({ to: 'merge', currentLabels: neither })).toThrow();
     expect(() => decideSetLabel({ to: undefined, currentLabels: neither })).toThrow();
+  });
+});
+
+describe('buildVerdictComment — the reviewed-sha stamp and the caller body (#2882/#2409)', () => {
+  const SHA = 'abf7d85700a3336a0ec77d94ab455162d4b8e00d';
+
+  it('stamps the marker FIRST on an accept, so a body quoting an older marker cannot win parseReviewedSha', () => {
+    const older = '0123456789abcdef0123456789abcdef01234567';
+    const out = buildVerdictComment({
+      to: 'accepted', actor: 'op', headSha: SHA,
+      body: `discussing the prior round: <!-- reviewed-sha: ${older} -->`,
+    });
+    expect(out.startsWith(`<!-- reviewed-sha: ${SHA} -->`)).toBe(true);
+    // parseReviewedSha takes the LAST marker; a leading stamp only loses to a later one the caller wrote, which
+    // is why the order matters. Assert the stamped marker precedes the quoted one.
+    expect(out.indexOf(SHA)).toBeLessThan(out.indexOf(older));
+  });
+
+  it('omits the marker on a changes verdict', () => {
+    const out = buildVerdictComment({ to: 'changes', actor: 'op', headSha: SHA, body: 'fix these' });
+    expect(out).not.toContain('reviewed-sha');
+    expect(out).toContain('🔁 review — changes requested');
+  });
+
+  it('omits the marker (never a garbage one) when the head SHA is unavailable', () => {
+    expect(buildVerdictComment({ to: 'accepted', actor: 'op', headSha: '' })).not.toContain('reviewed-sha');
+    expect(buildVerdictComment({ to: 'accepted', actor: 'op', headSha: 'not-a-sha' })).not.toContain('reviewed-sha');
+  });
+
+  it('includes the caller body, and stays the one-liner when none is passed', () => {
+    const withBody = buildVerdictComment({ to: 'accepted', actor: 'op', headSha: SHA, body: '## Findings\n1 major' });
+    expect(withBody).toContain('## Findings');
+    const bare = buildVerdictComment({ to: 'accepted', actor: 'op', headSha: SHA });
+    expect(bare).toContain('Recorded by op via the Plateau Loop review console.');
+    expect(bare.trim().endsWith('review console.')).toBe(true);
   });
 });
