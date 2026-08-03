@@ -2296,7 +2296,15 @@ export function countCodeLines(text) {
 /** Does the file body carry the `// @cohesive: <reason>` escape hatch (#2678)? A bare marker with no
  * reason text does NOT suppress the warn — the author must actually state why the file is cohesive. */
 export function hasCohesiveEscapeHatch(text) {
-  return typeof text === 'string' && /\/\/[ \t]*@cohesive:[ \t]*\S/.test(text);
+  // #2782 review — the marker must be a real DIRECTIVE (its own comment line), never a mention. The first
+  // cut matched `// @cohesive:` ANYWHERE in the body, so any file that merely TALKS about the escape hatch
+  // exempted itself — including all three files this rule ships in: the rule's own doc comment, the warn
+  // string in check-standards.mjs that tells authors how to use it, and the test file. A 2,200-line
+  // check-standards-rules.mjs is exactly the kind of lock point this gate exists to surface, and it had made
+  // itself permanently invisible to it. Anchoring to line-start (optional indent, then `//`) excludes every
+  // one of those — a prose mention sits after ` * ` or a backtick — while a genuine directive on its own
+  // line still silences the warn.
+  return typeof text === 'string' && /^[ \t]*\/\/[ \t]*@cohesive:[ \t]*\S/m.test(text);
 }
 
 /** Count how many backlog items' `scope:` entries NAME this file — the real serialization cost (#2678):

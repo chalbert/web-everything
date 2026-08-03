@@ -20,7 +20,7 @@
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import { createRequire } from 'node:module';
 import { renderInventory, spliceInventory } from './gen-inventory.mjs';
 import { parseClaims, mineFiles, porcelainFiles, partitionFindings, partitionLocal } from './readiness/claimScope.mjs';
@@ -1770,10 +1770,23 @@ try {
   for (const scopes of backlogScopes)
     for (const s of scopes)
       if (typeof s === 'string' && s.startsWith('we:') && !isSubtreeEntry(s)) candidatePaths.add(s);
-  const files = [...candidatePaths].map((p) => {
-    const abs = join(ROOT, p.slice('we:'.length));
-    return { path: p, text: existsSync(abs) ? readFileSync(abs, 'utf8') : '' };
-  });
+  // #2782 review — two hardenings on the read loop:
+  //  (a) CONTAINMENT. `scope:` is repo-authored metadata, but it is still untrusted input to a filesystem
+  //      read: `join(ROOT, p.slice(3))` on a `we:../../…` entry resolves outside the repo, turning a backlog
+  //      field into an arbitrary-file-read primitive. Resolve and require the result to stay under ROOT.
+  //  (b) PER-FILE isolation. The whole scan used to sit in ONE try/catch, so a single unreadable candidate
+  //      (a path that is really a directory, a permissions hiccup) threw and silently disabled the ENTIRE
+  //      gate with one generic warn. A bad candidate is now skipped; the rest of the scan still runs.
+  const files = [];
+  for (const p of candidatePaths) {
+    try {
+      const abs = resolve(ROOT, p.slice('we:'.length));
+      const rel = relative(ROOT, abs);
+      if (rel.startsWith('..') || isAbsolute(rel)) continue; // escapes the repo — never read it
+      if (!existsSync(abs) || !statSync(abs).isFile()) continue;
+      files.push({ path: p, text: readFileSync(abs, 'utf8') });
+    } catch { /* unreadable candidate: skip THIS file, never disable the gate */ }
+  }
   const lockPoints = findLockPointFiles({ files, backlogScopes });
   for (const lp of lockPoints)
     warn(

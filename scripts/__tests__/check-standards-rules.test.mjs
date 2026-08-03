@@ -1885,6 +1885,24 @@ describe('hasCohesiveEscapeHatch — #2678 `// @cohesive: <reason>` marker', () 
   it('false when absent', () => {
     expect(hasCohesiveEscapeHatch('const a = 1;')).toBe(false);
   });
+
+  // #2782 review — the self-exemption regression. The first cut matched the marker ANYWHERE in the body, so
+  // every file that merely DOCUMENTS the escape hatch silenced the gate for itself — including all three
+  // files this rule ships in (the rule's doc comment, the warn string that teaches the syntax, and this test
+  // file). A 2,200-line rules module is precisely the lock point the gate exists to surface.
+  it('a PROSE MENTION does not exempt a file — the marker must be its own comment line', () => {
+    // a JSDoc line describing the hatch (the exact shape in this rule's own header)
+    expect(hasCohesiveEscapeHatch(' * An in-file `// @cohesive: <reason>` escape hatch silences the warn.\n')).toBe(false);
+    // the warn message string that tells authors how to use it
+    expect(hasCohesiveEscapeHatch('  `silence this warn with an in-file \\`// @cohesive: <reason>\\` comment.`\n')).toBe(false);
+    // a mention mid-line, after real code
+    expect(hasCohesiveEscapeHatch('const help = "pass // @cohesive: reason";\n')).toBe(false);
+  });
+
+  it('a REAL directive on its own line still exempts, indented or not', () => {
+    expect(hasCohesiveEscapeHatch('// @cohesive: one grammar, splitting scatters it\nconst a = 1;')).toBe(true);
+    expect(hasCohesiveEscapeHatch('const a = 1;\n  // @cohesive: indented but still a directive\n')).toBe(true);
+  });
 });
 
 describe('countScopeCollisions — queued items naming a file in scope: (#2678)', () => {
