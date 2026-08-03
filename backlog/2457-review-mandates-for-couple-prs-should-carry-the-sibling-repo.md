@@ -89,10 +89,25 @@ correctness lens.
 
 ### The call site
 
-`we:skills-src/drain/SKILL.md` step 1 derives `crossRepoCouple` from the
-`joinImplToCouples(verdicts)` join, **not** from a manifest read — that join is what
-gives a manifest-less impl PR its couple identity (`joinedToCouple`), and is
-therefore what makes the flag true for the half the bug actually bites.
+The lander computes the flag and **emits it on the `--json` `parked` entry**
+(`crossRepoCouple`, via the pure `isCrossRepoCoupleHalf` in
+`we:scripts/merge-ai-prs.mjs`); `we:skills-src/drain/SKILL.md` step 1 reads it from
+there and passes it to `buildPanelMandate()`/`buildValidatorMandate()`.
+
+It is computed **after `joinImplToCouples`**, and that ordering is the whole point: a
+manifest read alone (`crossRepo`) answers `false` for every **impl** half, because only
+a WE PR carries a manifest — and the impl half is the case this item was filed about
+(plateau#19). The join stamps `joinedToCouple` on the manifest-less impl PR, so the two
+signals together cover both halves. `joinedToCouple` is also what the drain already
+gates ordering on, so this reads "is a couple half" off the same fact rather than a
+second opinion about it.
+
+A first pass at this rework left the flag un-plumbed — the SKILL told the reviewer to
+read it off the join, but `verdicts` never leaves `runCli` and the `parked` entry
+carried only `{num, repo, humanRequired, reasons}`. The flag would have defaulted to
+`false` in production and the block would never have rendered: the same inert outcome
+as the original manifest-only bug, one level up. Caught on the second `/review` pass of
+PR #1011.
 
 ### Additivity
 

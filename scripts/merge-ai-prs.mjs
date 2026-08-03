@@ -570,6 +570,28 @@ export function joinImplToCouples(verdicts) {
 }
 
 /**
+ * #2457 — is this verdict ONE HALF of a cross-repo couple? Pure. This is the source of the review mandate's
+ * `crossRepoCouple` flag (`we:scripts/lib/review-core.mjs` `coupleContextLines`), which tells a diff-only
+ * reviewer that a symbol the diff references may be ADDED by the unlanded sibling half rather than missing.
+ *
+ * A BOOLEAN, carrying no repo/ref/PR data BY DESIGN: the manifest rides the EDITABLE PR body, so naming its
+ * contents in the mandate would feed author-controlled bytes into the prompt that judges that author (PR #1011's
+ * review bounced exactly that, twice — sanitising cannot help when the sink is an LLM prompt, and corroborating
+ * a ref proves it exists, never that it belongs to THIS couple).
+ *
+ * MUST be read AFTER `joinImplToCouples`. Only a WE PR carries a manifest, so `crossRepo` alone answers `false`
+ * for every IMPL half — and the impl half is exactly where the bug bites (plateau#19, the case #2457 was filed
+ * about). The join stamps `joinedToCouple` on the manifest-less impl PR that inherited its couple's identity, so
+ * the two signals together cover both halves. `joinedToCouple` is also the signal the drain ALREADY gates on, so
+ * this reads "is a couple half" off the same fact the ordering does, rather than a second opinion about it.
+ * @param {{crossRepo?: boolean, joinedToCouple?: (number|string|null)}|null|undefined} v
+ * @returns {boolean}
+ */
+export function isCrossRepoCoupleHalf(v) {
+  return !!v && (v.crossRepo === true || v.joinedToCouple != null);
+}
+
+/**
  * Order a set of merge candidates for ONE cascade pass, honouring cross-item `blockedBy` (#2188) AND the
  * overlap-stacking proof-of-land gate (#2387 F5 / #2393). Pure.
  * This is the drain↔/merge convergence: the `ready-to-merge` label bounds the set, and each PR's
@@ -2162,7 +2184,7 @@ async function runCli() {
           const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
           if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} manifest-tamper baseline mismatch stamped on PR\n`);
         }
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: tamper.reasons });
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: tamper.reasons, crossRepoCouple: isCrossRepoCoupleHalf(v) });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} re-parked — manifest baseline mismatch (post-review tamper, HUMAN required): ${tamper.reasons.join('; ')}\n`);
         continue;
       }
@@ -2190,7 +2212,7 @@ async function runCli() {
             const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} test-gaming reason stamped on PR\n`);
           }
-          parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: gaming.reasons });
+          parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: gaming.reasons, crossRepoCouple: isCrossRepoCoupleHalf(v) });
           if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked — anti-test-gaming gate tripped (HUMAN required): ${gaming.reasons.join('; ')}\n`);
           continue;
         }
@@ -2324,7 +2346,7 @@ async function runCli() {
         v.reviewParked = durableRecorded;
         // #2285 v1 — the skill's auto-review step consumes this: humanRequired PRs are left for the operator,
         // the rest are eligible for a fresh-context adversarial review subagent.
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: parkReasons });
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: parkReasons, crossRepoCouple: isCrossRepoCoupleHalf(v) });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}${gate.humanRequired ? ', HUMAN required' : ', agent-reviewable'}): ${parkReasons.join('; ')}\n`);
       } else if (score.escalate && !AS_JSON) {
         process.stderr.write(`  ✓ ${repoTag(v.repo)}${v.num} escalation cleared (${gate.reason})\n`);

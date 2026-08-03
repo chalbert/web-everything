@@ -245,7 +245,12 @@ author-bounce with a bounded editor↔reviewer negotiation loop** (below). The o
 > prose.
 
 The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isGateSelfPath`) and emits it
-in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`.
+in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons, crossRepoCouple }`.
+`crossRepoCouple` (#2457) is a BOOLEAN — true when this PR is one half of a cross-repo couple, computed after
+`joinImplToCouples` so it holds for the manifest-less **impl** half too. It carries no repo/ref/PR data by
+design: the manifest rides the editable PR body, so naming its contents in a review mandate would feed
+author-controlled bytes into the prompt judging that author. Step 1 of the negotiation loop passes it straight
+to `buildPanelMandate()`/`buildValidatorMandate()`.
 
 > **The converge-vs-human branch is ONE derivation (#2285).** Don't hand-branch on `humanRequired` — call
 > `deriveReviewDisposition({ reasons })` in `we:scripts/lib/review-core.mjs` and act on `{ mode, autoLand }`. It
@@ -312,12 +317,13 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
      phantom scope-creep that burns rounds (#2450). If it returns `scored:false` (a foreign clone without the
      head ref, a diff failure), fall back to `gh pr diff <num> --repo <repo>`. Also `gh pr view <num> --repo
      <repo> --json title,body,files`, and take the NET changed-file list from `computeNetDiffChangedFiles(...)`
-     (the drain already computes it for scoring). Decide `crossRepoCouple` — is this PR one half of a cross-repo
-     couple? Read it off the **`joinImplToCouples(verdicts)` join** (`we:scripts/merge-ai-prs.mjs`), NOT off the
-     manifest directly: only a WE PR carries a manifest, so a manifest read alone answers `false` for every
-     **impl** half — and the impl half is exactly where the bug bites (plateau#19). After the join, a PR is a
-     couple half when it either carries a manifest naming more than one repo, or has `joinedToCouple` set
-     (the manifest-less impl PR that inherited its couple's identity). Spawn ONE **fresh-context adversarial
+     (the drain already computes it for scoring). Take `crossRepoCouple` — is this PR one half of a cross-repo
+     couple? — **off this PR's own entry in the `--json` `parked` array**, where the lander already emits it
+     (`isCrossRepoCoupleHalf`, `we:scripts/merge-ai-prs.mjs`). Do NOT re-derive it from the manifest: only a WE
+     PR carries one, so a manifest read alone answers `false` for every **impl** half — and the impl half is
+     exactly where the bug bites (plateau#19). The lander computes it AFTER `joinImplToCouples`, so it is true
+     for a PR that either carries a manifest naming more than one repo or inherited its couple's identity as a
+     manifest-less impl half. Spawn ONE **fresh-context adversarial
      review subagent per lens** (the `Agent` tool, fanned out in parallel via the Workflow orchestrator), each
      seeded with `buildPanelMandate({ lens, netChangedFiles, crossRepoCouple })` — the net changed-file list is
      passed as GROUND TRUTH so a reviewer will NOT flag a diff-side file outside that set as scope creep
