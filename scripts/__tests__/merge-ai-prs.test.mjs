@@ -2496,3 +2496,62 @@ describe('#2899 A5 — resolveIdsForLandedPass: which ids the LABEL lander resol
     expect(resolveIdsForLandedPass({ landedItems: ['x1'], assigned: [{ hash: 'x1' }, null, { nnn: '5' }] })).toEqual(['x1']);
   });
 });
+
+describe('#2899 B5 — the resolve gate requires the WHOLE couple to have landed, not just the carrier', () => {
+  // PR #1012 round-3 review, B5. The original gate rested on a comment claiming "WE-last ordering means the
+  // carrier merges only after its impl half did". Running the cascade disproves it: the couple decision is
+  // computed once at PLAN time and the in-cascade `replan` re-runs planLabelDrain WITHOUT the couple join, so an
+  // impl whose `gh pr merge` throws flips to `skip` while the carrier still lands. Resolving off the carrier
+  // alone then marks the card resolved on main with the implementation PR still OPEN — nothing re-dispatches it,
+  // which is the forever-block this item exists to close, reappearing inside the fix.
+  const carrier = { item: 'xcarr01', headRef: 'lane/xcarr01-we', manifestRefs: ['lane/xcarr01-fui', 'lane/xcarr01-we'] };
+
+  it('DEFERS the flip when a sibling half is still open (the impl merge failed mid-cascade)', () => {
+    expect(resolveIdsForLandedPass({
+      landedItems: new Set(['xcarr01']),
+      assigned: [{ hash: 'xcarr01', nnn: '2910' }],
+      carriers: [carrier],
+      openHeadRefs: ['lane/xcarr01-fui'],          // the impl PR never merged — still open after the cascade
+    })).toEqual([]);
+  });
+
+  it('RESOLVES when every sibling ref has left the open set (the whole couple landed)', () => {
+    expect(resolveIdsForLandedPass({
+      landedItems: new Set(['xcarr01']),
+      assigned: [{ hash: 'xcarr01', nnn: '2910' }],
+      carriers: [carrier],
+      openHeadRefs: ['lane/unrelated-other'],
+    })).toEqual(['2910']);
+  });
+
+  it('ignores the carrier\'s OWN head ref — it is the half that just merged, not a blocker', () => {
+    expect(resolveIdsForLandedPass({
+      landedItems: new Set(['xcarr01']),
+      assigned: [],
+      carriers: [carrier],
+      openHeadRefs: ['lane/xcarr01-we'],           // the carrier itself, stale in the pass-start snapshot
+    })).toEqual(['xcarr01']);
+  });
+
+  it('is unchanged for a caller that supplies no couple shape (single-repo item, or an older caller)', () => {
+    expect(resolveIdsForLandedPass({ landedItems: new Set(['xsolo01']), assigned: [{ hash: 'xsolo01', nnn: '2911' }] }))
+      .toEqual(['2911']);
+    // A carrier entry with no refs blocks nothing.
+    expect(resolveIdsForLandedPass({
+      landedItems: new Set(['xsolo01']),
+      assigned: [],
+      carriers: [{ item: 'xsolo01', headRef: 'lane/xsolo01-we', manifestRefs: [] }],
+      openHeadRefs: ['lane/whatever'],
+    })).toEqual(['xsolo01']);
+  });
+
+  it('gates per couple — one blocked couple does not suppress a healthy one', () => {
+    const other = { item: 'xcarr02', headRef: 'lane/xcarr02-we', manifestRefs: ['lane/xcarr02-fui', 'lane/xcarr02-we'] };
+    expect(resolveIdsForLandedPass({
+      landedItems: ['xcarr01', 'xcarr02'],
+      assigned: [],
+      carriers: [carrier, other],
+      openHeadRefs: ['lane/xcarr01-fui'],          // only couple 01 is half-landed
+    })).toEqual(['xcarr02']);
+  });
+});

@@ -646,30 +646,63 @@ export function joinImplToCouples(verdicts) {
 /**
  * #2899 A5 — which item ids should the label lander RESOLVE after this pass's JIT numbering? Pure.
  *
- * `landedItems` is the pass's `landedThisPass` set — item ids keyed on the WE-CARRIER merge, so each one names
- * a couple that fully landed (WE-last ⇒ the impl half merged first, #96). But those are the ids the manifest
- * carried, and a hash-born item (#2288) has JUST been renamed to its real `<NNN>` by `numberPendingHashes` — so
- * resolving under the pre-numbering hash would look for a file that no longer exists. Re-key every hash through
- * `assigned` (`[{hash, nnn}]`, the numbering's own report) and drop duplicates, preserving first-seen order so
- * the emitted log line is stable.
+ * `landedItems` is the pass's `landedThisPass` set — item ids stamped on the WE-CARRIER merge. Two corrections
+ * turn that into the set safe to resolve:
  *
- * A hash with NO `assigned` entry is kept AS-IS rather than dropped: numbering can legitimately be a no-op (the
- * card landed already-numbered, or a concurrent lander minted it), and `resolveLandedItem` is itself a safe
- * no-op when the path does not resolve — whereas dropping it would silently re-open the stranded-item hole this
- * closes.
+ * **1 — re-key hashes to their minted NNN.** A hash-born item (#2288) was JUST renamed to its real `<NNN>` by
+ * `numberPendingHashes`, so resolving under the pre-numbering hash would look for a file that no longer exists.
+ * Re-key through `assigned` (`[{hash, nnn}]`, the numbering's own report) and de-duplicate, preserving
+ * first-seen order so the emitted log line is stable. A hash with NO `assigned` entry is kept AS-IS rather than
+ * dropped: numbering can legitimately be a no-op (the card landed already-numbered, or a concurrent lander
+ * minted it), and `resolveLandedItem` is a safe no-op when the path does not resolve — whereas dropping it
+ * would silently re-open the stranded-item hole this closes.
  *
- * @param {{landedItems?: Iterable<number|string>, assigned?: Array<{hash:(string|number), nnn:(string|number)}>}} o
+ * **2 — require the WHOLE couple to have landed, not just the carrier (PR #1012 round-3 review, B5).** The
+ * original gate rested on a comment claiming "WE-last ordering means the carrier merges only after its impl half
+ * did". That is FALSE, and it was disproved by running the cascade: `coupleDefer`/`readyImplRefs` are computed
+ * once at PLAN time from `decision === 'merge'` — a *planned* merge — and the in-cascade `replan` calls
+ * `planLabelDrain` only, so the couple join never re-runs. If the impl's `gh pr merge` throws (conflict, branch
+ * protection, CI flipping red between classify and merge), the handler sets its decision to `skip` and the
+ * carrier STILL lands. Resolving off the carrier alone then flips the card to `resolved` on main with the
+ * implementation PR still open — and nothing re-dispatches it, which is the exact forever-block this item
+ * exists to close, reappearing inside the fix.
+ *
+ * So a couple resolves only when every OTHER lane ref its manifest names is **no longer an open PR**: either it
+ * merged in this pass or it had already landed. A sibling ref still sitting in `openHeadRefs` is positive
+ * evidence the couple did not fully land, and it defers the flip to a later pass — the safe direction, since an
+ * unresolved card is a re-pack (annoying) while a wrongly-resolved one is a silent forever-block (harmful).
+ * A carrier with no `carriers` entry keeps the old behaviour, so a caller that cannot supply couple shape is
+ * unchanged rather than silently blocked.
+ *
+ * @param {{landedItems?: Iterable<number|string>,
+ *          assigned?: Array<{hash:(string|number), nnn:(string|number)}>,
+ *          carriers?: Array<{item:(number|string), headRef?:string, manifestRefs?:string[]}>,
+ *          openHeadRefs?: Iterable<string>}} o
  * @returns {Array<number|string>} ids to flip, de-duplicated, in first-seen order
  */
-export function resolveIdsForLandedPass({ landedItems = [], assigned = [] } = {}) {
+export function resolveIdsForLandedPass({ landedItems = [], assigned = [], carriers = [], openHeadRefs = [] } = {}) {
   const byHash = new Map();
   for (const a of (Array.isArray(assigned) ? assigned : [])) {
     if (a && a.hash != null && a.nnn != null) byHash.set(String(a.hash), a.nnn);
   }
+  // Couple shape by item id — the lane refs the manifest names, and which one is the carrier's own head.
+  const coupleByItem = new Map();
+  for (const c of (Array.isArray(carriers) ? carriers : [])) {
+    if (!c || c.item == null) continue;
+    coupleByItem.set(String(c.item), {
+      headRef: c.headRef || null,
+      refs: (Array.isArray(c.manifestRefs) ? c.manifestRefs : []).filter(Boolean),
+    });
+  }
+  const stillOpen = new Set([...(openHeadRefs || [])].filter(Boolean).map(String));
   const out = [];
   const seen = new Set();
   for (const raw of (landedItems || [])) {
     if (raw == null) continue;
+    // B5 — a sibling half still OPEN proves the couple did not fully land this pass. Keyed on the PRE-numbering
+    // id, because that is what the manifest (and `landedThisPass`) carries.
+    const couple = coupleByItem.get(String(raw));
+    if (couple && couple.refs.some((r) => r !== couple.headRef && stillOpen.has(String(r)))) continue;
     const id = byHash.has(String(raw)) ? byHash.get(String(raw)) : raw;
     const key = String(id);
     if (seen.has(key)) continue;
@@ -2822,11 +2855,33 @@ async function runCli() {
       // so main never shows a numbered-but-unresolved card. `sync:false` because this path already synced and
       // holds an un-pushed numbering commit that a `pull --ff-only` has no business touching.
       //
-      // `landedThisPass` is keyed on the WE-CARRIER merge (`c.hasManifest`), which is exactly the right gate:
-      // WE-last ordering means the carrier merges only after its impl half did, so this can never resolve a
-      // couple whose implementation failed to land (#96). Best-effort/non-fatal throughout, as numbering is.
+      // THE GATE (corrected — PR #1012 round-3 review, B5). `landedThisPass` is stamped on the WE-CARRIER merge,
+      // and an earlier version of this comment claimed that was sufficient because "WE-last ordering means the
+      // carrier merges only after its impl half did". That is FALSE, and running the cascade disproves it: the
+      // couple decision is computed once at PLAN time, and the in-cascade `replan` re-runs `planLabelDrain`
+      // WITHOUT the couple join — so if the impl's merge throws, its decision flips to `skip` and the carrier
+      // still lands. Resolving off the carrier alone would then flip the card on main with the implementation PR
+      // still open, and nothing would re-dispatch it: the exact forever-block this item closes, reappearing
+      // inside the fix. So the gate now also requires every OTHER lane ref the couple's manifest names to be
+      // absent from the pass's OPEN-PR set — positive evidence the whole couple landed. A sibling still open
+      // defers the flip to a later pass, the safe direction (an unresolved card costs a re-pack; a wrongly
+      // resolved one is a silent forever-block). Best-effort/non-fatal throughout, as numbering is.
+      const landedCarriers = verdicts.filter((v) => v && v.hasManifest && v.item != null)
+        .map((v) => ({ item: v.item, headRef: v.headRef, manifestRefs: v.manifestRefs }));
+      // `openPrContext` is a PASS-START snapshot, so a sibling that merged during THIS pass is still listed in
+      // it. Subtract the refs merged this pass or the gate could never pass for the normal impl-first/WE-last
+      // couple — the whole point is to catch a sibling that is STILL open after the cascade finished.
+      const mergedRefs = new Set(merged
+        .map((m) => (verdicts.find((v) => v && v.num === m.num && (v.repo || null) === (m.repo || null)) || {}).headRef)
+        .filter(Boolean));
+      const openHeadRefs = [];
+      for (const [, prs] of (openPrContext.prsByRepo instanceof Map ? openPrContext.prsByRepo : new Map())) {
+        for (const p of (Array.isArray(prs) ? prs : [])) {
+          if (p && p.headRefName && !mergedRefs.has(p.headRefName)) openHeadRefs.push(p.headRefName);
+        }
+      }
       const resolvedOnLand = [];
-      for (const id of resolveIdsForLandedPass({ landedItems: landedThisPass, assigned: n.assigned })) {
+      for (const id of resolveIdsForLandedPass({ landedItems: landedThisPass, assigned: n.assigned, carriers: landedCarriers, openHeadRefs })) {
         try {
           const flip = resolveLandedItem(process.cwd(), id, { sync: false, publish: false });
           if (flip.flipped) resolvedOnLand.push(id);
