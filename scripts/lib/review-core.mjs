@@ -136,36 +136,48 @@ export {
 export const DEFAULT_MANDATE = 'correctness';
 
 /**
- * #2457 — render the COUPLE CONTEXT body lines for a cross-repo couple half, or `[]` when there is nothing to
- * say. A single item's impl can span the constellation (WE → frontierui → plateau-app, memory rule #96) and is
- * delivered as ONE PR PER REPO; the lane manifest already names every half (`repos: [{repo, ref}, …]`). A
- * fresh-context, diff-only reviewer judging ONE half verifies unresolved symbols against THAT repo's `main` —
- * where the sibling half has not landed yet — and false-positives on "this does not exist". Observed 2026-07-12:
- * reviewing plateau#19 (the impl half of the #2449 couple), the round-2 reviewer's only finding was that
- * `--under-lease` did not exist in `we:scripts/merge-ai-prs.mjs`; it did, on the couple's unlanded WE half.
+ * #2457 — render the CROSS-REPO COUPLE body lines, or `[]` when the PR is not a couple half.
  *
- * `selfRepo` is filtered out so the block names only the SIBLING halves — the ones whose content the reviewer
- * cannot see. Passing no `coupleRepos` (or a list that is empty after filtering — the single-repo case, which is
- * most PRs) returns `[]` and leaves the mandate BYTE-FOR-BYTE unchanged, so every existing caller and test is
- * unaffected: the block is purely additive, exactly like #2450's `netChangedFiles` ground truth.
- * @param {{coupleRepos?: Array<{repo?: string, ref?: string}>|null, selfRepo?: string|null}} [o]
+ * A single item's impl can span the constellation (WE → frontierui → plateau-app, memory rule #96) and is
+ * delivered as ONE PR PER REPO. A fresh-context, diff-only reviewer judging ONE half verifies unresolved
+ * symbols against THAT repo's `main` — where the sibling half has not landed — and false-positives on "this
+ * does not exist". Observed 2026-07-12: reviewing plateau#19 (the impl half of the #2449 couple), the round-2
+ * reviewer's only finding was that `--under-lease` did not exist in `we:scripts/merge-ai-prs.mjs`; it did, on
+ * the couple's unlanded WE half.
+ *
+ * DELIBERATELY DATA-FREE — a boolean, not a repo/ref list. The first cut of this took the lane manifest's
+ * `repos` array and named each sibling half. A `/review` panel bounced it (PR #1011), and the reason
+ * generalises: the manifest rides the EDITABLE PR body, so naming its contents here injects author-controlled
+ * bytes into the very prompt that judges that author. Three rounds of hardening (charset checks, then
+ * corroboration against the open-PR listing) each introduced the next round's hole — sanitising cannot help
+ * when the sink is an LLM prompt, and corroboration proves existence, not identity. Naming the halves also
+ * bought nothing: the reviewer runs diff-only under #2336 and cannot fetch a sibling ref anyway. So the block
+ * asserts only the ONE fact the reviewer needs and the drain already knows for certain — that a sibling half
+ * exists — and never says what or where it is. No author data, no corroboration, no identity problem.
+ *
+ * On the disposition: `PLAUSIBLE` is named because it is a real member of `VALID_VERDICT_TAGS`
+ * (`we:scripts/lib/jury-core.mjs`) and therefore SURVIVES `normalizeFinding`. It does NOT soften the verdict —
+ * `deriveVerdict` returns `changes` for ANY outstanding finding regardless of tag — which is exactly why the
+ * primary instruction is "do not report it at all on that basis", with the tag as the fallback for a reviewer
+ * that reports anyway. (The first cut said "mark the finding uncertain"; `uncertain` is not in the tag set, so
+ * `normalizeFinding` dropped it and the clause was inert.)
+ *
+ * `false`/omitted returns `[]`, leaving the mandate BYTE-FOR-BYTE unchanged — purely additive, like #2450's
+ * `netChangedFiles` ground truth.
+ * @param {{crossRepoCouple?: boolean}} [o]
  * @returns {string[]} body lines to append, or `[]`
  */
-function coupleContextLines({ coupleRepos = null, selfRepo = null } = {}) {
-  const self = typeof selfRepo === 'string' ? selfRepo.trim() : '';
-  const siblings = (Array.isArray(coupleRepos) ? coupleRepos : [])
-    .filter((r) => r && typeof r === 'object')
-    .map((r) => ({ repo: String(r.repo ?? '').trim(), ref: String(r.ref ?? '').trim() }))
-    .filter((r) => r.repo && r.repo !== self);
-  if (!siblings.length) return [];
-  const named = siblings.map((r) => (r.ref ? `${r.repo} (${r.ref})` : r.repo)).join(', ');
+function coupleContextLines({ crossRepoCouple = false } = {}) {
+  if (crossRepoCouple !== true) return []; // strict: only an explicit true opts in (no truthy-string surprises)
   return [
-    `COUPLE CONTEXT — this PR is ONE HALF of a cross-repo couple. Its sibling half/halves live in: ${named}.`,
-    'The halves land together, so a symbol, flag, function, export, or file this diff references may be ADDED by a',
-    'sibling half and therefore absent from THIS repo\'s main. Verify such a reference against the sibling ref named',
-    'above before reporting it — do NOT report a symbol as undefined, missing, or a broken reference on the strength',
-    'of its absence from this repo alone. If you cannot inspect the sibling ref, say so and mark the finding',
-    'uncertain rather than asserting the reference is broken.',
+    'CROSS-REPO COUPLE — this PR is ONE HALF of a couple whose halves land together. The sibling half is NOT',
+    'visible to you, has NOT landed on this repo\'s main, and you cannot fetch it. So a symbol, flag, function,',
+    'export, type, or file this diff references may be ADDED by that sibling half rather than missing. Do NOT',
+    'report such a reference as undefined, missing, unresolved, or broken when your ONLY basis is that it is',
+    'absent from this repo — that is the expected state mid-couple, not a defect. If you report it anyway, tag',
+    'the finding PLAUSIBLE rather than CONFIRMED so it reads as advisory. This does NOT excuse a reference that',
+    'is broken for any OTHER reason (a typo against a symbol that exists, a wrong arity, a contradiction inside',
+    'the visible diff) — judge those exactly as you would normally.',
   ];
 }
 
@@ -176,13 +188,13 @@ function coupleContextLines({ coupleRepos = null, selfRepo = null } = {}) {
  * subagent and reading its answer remains the caller's action (this module never calls a model, same split
  * `we:scripts/lane-review.mjs` documents for the pre-PR review seam).
  *
- * #2457 — the OPTIONAL `coupleRepos` / `selfRepo` pair appends a COUPLE CONTEXT block naming the sibling
- * repo/ref halves of a cross-repo couple (see `coupleContextLines`). Omitting them leaves the output
- * byte-identical.
- * @param {{contextIsolation?: string, mandate?: string|string[], coupleRepos?: Array<{repo?: string, ref?: string}>|null, selfRepo?: string|null}} [o]
+ * #2457 — the OPTIONAL `crossRepoCouple` flag appends a CROSS-REPO COUPLE block telling the reviewer a
+ * sibling half exists (see `coupleContextLines` for why it carries no repo/ref data). Omitting it leaves the
+ * output byte-identical.
+ * @param {{contextIsolation?: string, mandate?: string|string[], crossRepoCouple?: boolean}} [o]
  * @returns {string}
  */
-export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE, coupleRepos = null, selfRepo = null } = {}) {
+export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE, crossRepoCouple = false } = {}) {
   const isolationLine = contextIsolation === 'diff-only'
     ? 'You see ONLY the diff (and, if supplied, the PR description) — no author framing, no prior session context.'
     : `Context isolation: ${contextIsolation}.`;
@@ -202,7 +214,7 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
       'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain. If',
       'you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.',
       // #2457 — appended LAST so the couple block never splits the #2336 no-checkout instruction it follows.
-      ...coupleContextLines({ coupleRepos, selfRepo }),
+      ...coupleContextLines({ crossRepoCouple }),
     ],
   });
 }
@@ -794,17 +806,17 @@ export const PR_DIFF_ADAPTER = Object.freeze({
  * burns a negotiation round for nothing. OMITTING the param (or passing an empty list) leaves the mandate
  * BYTE-FOR-BYTE unchanged, so every existing caller/test is unaffected — the block is purely additive.
  *
- * #2457 — `coupleRepos` / `selfRepo` are forwarded to `buildMandate`, which appends the COUPLE CONTEXT block
- * naming the sibling repo/ref halves so a lens reviewer does not false-positive on a symbol its couple's other
- * half adds. Also additive: omit them and the mandate is byte-identical.
- * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null, coupleRepos?: Array<{repo?: string, ref?: string}>|null, selfRepo?: string|null}} o
+ * #2457 — `crossRepoCouple` is forwarded to `buildMandate`, which appends the CROSS-REPO COUPLE block so a lens
+ * reviewer does not false-positive on a symbol its couple's other half adds. Also additive: omit it and the
+ * mandate is byte-identical.
+ * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null, crossRepoCouple?: boolean}} o
  * @returns {string}
  */
-export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netChangedFiles = null, coupleRepos = null, selfRepo = null } = {}) {
+export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netChangedFiles = null, crossRepoCouple = false } = {}) {
   if (!PANEL_LENSES.includes(lens)) {
     throw new Error(`buildPanelMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
   }
-  const base = buildMandate({ contextIsolation, mandate: lens, coupleRepos, selfRepo });
+  const base = buildMandate({ contextIsolation, mandate: lens, crossRepoCouple });
   const parts = [
     base,
     `You are ONE of several independent mandate reviewers on this diff, each judging a single lens`,
@@ -853,14 +865,19 @@ export function renderPanelVerdictTable({ lensVerdicts = {}, mandatoryLenses = M
  * value is that it never saw why the peers thought it was right. `combineValidatedVerdict` then gates the panel's
  * accept on this independent verdict, and only a JOINT accept earns `redteam:accepted` (the label lives in
  * `review-escalation.mjs`; this module stays label-free — it JUDGES ONLY).
- * @param {{lens: string, contextIsolation?: string}} o
+ * #2457 — `crossRepoCouple` is forwarded to `buildMandate` HERE TOO, not only on the panel path. The validator
+ * is the FINAL joint-accept gate and is deliberately blind to the negotiation, so if it alone lacked the couple
+ * context it would re-raise the exact cross-repo false positive the panel had already resolved — and, being the
+ * independent gate, its finding is the one that blocks the land. (PR #1011's review caught this composer as
+ * un-threaded; a fourth composer, `we:skills-src/jury/resolve-roster.mjs`, is out of scope and filed.)
+ * @param {{lens: string, contextIsolation?: string, crossRepoCouple?: boolean}} o
  * @returns {string}
  */
-export function buildValidatorMandate({ lens, contextIsolation = 'diff-only' } = {}) {
+export function buildValidatorMandate({ lens, contextIsolation = 'diff-only', crossRepoCouple = false } = {}) {
   if (!PANEL_LENSES.includes(lens)) {
     throw new Error(`buildValidatorMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
   }
-  const base = buildMandate({ contextIsolation, mandate: lens });
+  const base = buildMandate({ contextIsolation, mandate: lens, crossRepoCouple });
   return [
     base,
     `You are the INDEPENDENT FINAL VALIDATOR for the ${lens} lens (#2439) — a fresh adversary who took NO part`,

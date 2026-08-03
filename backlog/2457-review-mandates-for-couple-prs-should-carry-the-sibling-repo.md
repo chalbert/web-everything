@@ -24,57 +24,93 @@ A fresh-context diff-only reviewer judging ONE half of a cross-repo couple false
 
 ## Progress
 
-**Delivered.** The mandate now carries the couple's sibling halves, following the
-same purely-additive shape #2450 used for its `netChangedFiles` ground truth.
+**Delivered — as a DATA-FREE flag, not the repo/ref list the item's own fix line
+proposed.** That change of shape is the substance of this entry: the first cut did
+what the item asked, a `/review` panel bounced it on PR #1011, and the bounce was
+correct. Recording why, because the item text above still proposes the design that
+was rejected.
 
-### The library seam
+### What the first cut did, and why it failed
 
-`we:scripts/lib/review-core.mjs` gains a private `coupleContextLines({ coupleRepos,
-selfRepo })` helper, threaded through **both** builders the item names:
+It added `coupleContextLines({ coupleRepos, selfRepo })`, taking the lane manifest's
+`repos` array and naming each sibling half (`we (lane/x-2449)`) in the mandate.
+Three findings killed it:
 
-- `buildMandate({ …, coupleRepos, selfRepo })` appends the block as its **last**
-  body line, so it can never split the #2336 no-checkout instruction it follows.
-- `buildPanelMandate({ …, coupleRepos, selfRepo })` forwards both to `buildMandate`,
-  so every lens reviewer in the v3 panel gets it.
+1. **It never fired on its own motivating case.** Only a WE PR carries a lane
+   manifest — `we:scripts/merge-ai-prs.mjs` says so outright: *"Only a WE PR carries
+   one; an orphan/impl PR has none → null"*. The incident behind this item was
+   plateau#19, an **impl** half. No manifest, so the mandate was byte-identical to
+   before. The block fired only on the WE half, which holds no implementation.
+2. **The self-filter never matched.** Manifest `repo` is the short key `"we"`; the
+   drain's `repo` is a GitHub slug (`repoFlag` documents it as *"a slug"*). So
+   `selfRepo` never equalled a manifest key, the reviewer's own half was named as an
+   unseen sibling, and a genuinely undefined symbol in the visible diff got excused —
+   a false negative on the mandatory correctness lens, the exact inverse of the bug.
+3. **It fed author-controlled bytes into the prompt that judges that author.** The
+   manifest rides the **editable PR body**. Two hardening rounds (charset/control-char
+   checks, then corroborating the halves against the open-PR listing) each left the
+   next round's hole: sanitising cannot help when the sink is an LLM prompt, because
+   hyphen-delimited prose is executable without any syntactic escape; and
+   corroboration proves a ref **exists**, never that it belongs to *this* couple.
 
-`coupleRepos` takes the lane manifest's `repos` array verbatim — no caller-side
-reshaping — and `selfRepo` is **filtered out**, so the block names only the halves
-the reviewer cannot see. Naming the reviewer's own half as a "sibling" would be a
-lie, and the filter lives inside the pure, tested function rather than at each call
-site where it could be got wrong.
+The root pattern: the feature injected author-influenced assertions into the gate
+judging that author, so each round needed more trust machinery to contain the last.
 
-The block tells the reviewer that a symbol, flag, function, export, or file the diff
-references may be **added by a sibling half** and therefore absent from this repo's
-main, that it must verify against the named sibling ref before reporting it, and
-that if it cannot inspect that ref it must mark the finding **uncertain** rather
-than assert the reference is broken. That last clause matters: the failure mode is a
-confident false negative, so the fallback has to be uncertainty, not silence.
+### What shipped instead
 
-### Additivity
+`coupleContextLines({ crossRepoCouple })` — a **boolean**. The block asserts the one
+fact the reviewer needs and the drain knows for certain (a sibling half exists) and
+never says what or where it is. Naming the halves bought nothing anyway: the reviewer
+is diff-only under #2336 and cannot fetch a sibling ref.
 
-Omitting the params — or passing `null`, `[]`, malformed entries, a non-array, or a
-single-repo manifest that filters to empty — leaves the mandate **byte-for-byte**
-unchanged. Most PRs are single-repo, so the common path is provably untouched.
+Every failure above dies at the root rather than being filtered: there is no manifest
+dependency (so it fires on both halves), no `selfRepo` comparison (so no key/slug
+mismatch), and **no data channel at all** (so nothing to sanitise or corroborate).
+
+Threaded through **three** composers on `buildMandate` — `buildPanelMandate` and,
+newly, `buildValidatorMandate`. The validator is the #2439 independent joint-accept
+gate and is deliberately blind to the negotiation, so if it alone lacked the context
+it would re-raise the cross-repo false positive as the finding that blocks the land.
+
+### On the disposition it names
+
+`PLAUSIBLE`, because it is a real member of `VALID_VERDICT_TAGS`
+(`we:scripts/lib/jury-core.mjs`) and survives `normalizeFinding`. It does **not**
+soften the verdict — `deriveVerdict` returns `changes` for any outstanding finding
+regardless of tag — which is why the primary instruction is *don't report it on that
+basis at all*, with the tag as the fallback. The first cut said "mark the finding
+uncertain"; `uncertain` is not in the tag set, so `normalizeFinding` dropped it and
+the clause was inert despite being described as the point of the change.
+
+The block also states explicitly that it does **not** excuse a reference broken for
+any other reason (a typo against a symbol that exists, a wrong arity, a contradiction
+inside the visible diff). Without that clause it is a blanket amnesty on the
+correctness lens.
 
 ### The call site
 
-`we:skills-src/drain/SKILL.md` step 1 of the negotiation loop now takes `coupleRepos`
-from the PR's lane manifest `repos` list — the manifest the ordering step already
-reads off the head ref, so this costs no new fetch — and passes
-`buildPanelMandate({ lens, netChangedFiles, coupleRepos, selfRepo })`.
+`we:skills-src/drain/SKILL.md` step 1 derives `crossRepoCouple` from the
+`joinImplToCouples(verdicts)` join, **not** from a manifest read — that join is what
+gives a manifest-less impl PR its couple identity (`joinedToCouple`), and is
+therefore what makes the flag true for the half the bug actually bites.
+
+### Additivity
+
+Omitted, `false`, or any non-`true` truthy value leaves the mandate byte-for-byte
+unchanged (the check is strict `=== true`, so a stray truthy can never opt a PR in).
 
 ### Oracles
 
-Nine cases in `we:scripts/lib/__tests__/review-core.test.mjs` (suite: **226 passed**),
-covering the sibling naming, the self-repo filter, the single-repo no-op, byte-for-byte
-additivity across every malformed input, the ref-less half, the omitted-`selfRepo`
-over-naming fallback, and an ordering assertion that the couple block follows — never
-displaces — the #2336 no-checkout instruction.
+`we:scripts/lib/__tests__/review-core.test.mjs` — suite **226 passed**. Beyond the
+happy path: the couple mandate is a **constant** (no input can vary a byte of it —
+the property that replaces sanitising), `PLAUSIBLE` survives `normalizeFinding` while
+`uncertain` does not, the other-reasons carve-out is present, strict-`true` additivity,
+the block follows rather than displaces the #2336 no-checkout instruction, and the
+validator composer carries the flag.
 
 ### Deliberately NOT in this item
 
-`we:scripts/review-core-cli.mjs`'s `buildMandateText()` calls `buildPanelMandate({ lens })`
-with neither `netChangedFiles` **nor** the new couple params. That is a **pre-existing
-shared gap** — #2450 did not thread its ground truth there either — so closing it for
-one param and not the other would be incoherent. Captured as its own item rather than
-grown into this one.
+`we:scripts/review-core-cli.mjs`'s `buildMandateText()` passes neither
+`netChangedFiles` nor `crossRepoCouple` — a pre-existing shared gap with #2450, filed
+as `xs81k3k`. A fourth composer at `we:skills-src/jury/resolve-roster.mjs` is also
+un-threaded; folded into that item rather than grown into this one.

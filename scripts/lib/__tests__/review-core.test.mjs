@@ -578,21 +578,16 @@ describe('buildPanelMandate (#2310)', () => {
     });
   });
 
-  describe('#2457 — optional couple context (sibling repo/ref)', () => {
-    it('forwards coupleRepos/selfRepo to buildMandate so a lens reviewer gets the COUPLE CONTEXT block', () => {
-      const text = buildPanelMandate({
-        lens: MANDATE_LENSES.CORRECTNESS,
-        coupleRepos: [{ repo: 'we', ref: 'lane/batch-2449' }, { repo: 'plateau-app', ref: 'lane/batch-2449' }],
-        selfRepo: 'plateau-app',
-      });
-      expect(text).toContain('COUPLE CONTEXT');
-      expect(text).toContain('we (lane/batch-2449)');
+  describe('#2457 — optional crossRepoCouple flag', () => {
+    it('forwards crossRepoCouple to buildMandate so a lens reviewer gets the CROSS-REPO COUPLE block', () => {
+      const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, crossRepoCouple: true });
+      expect(text).toContain('CROSS-REPO COUPLE');
     });
 
-    it('leaves the panel mandate byte-for-byte unchanged when the couple params are omitted', () => {
+    it('leaves the panel mandate byte-for-byte unchanged when the flag is omitted or false', () => {
       const base = buildPanelMandate({ lens: MANDATE_LENSES.SECURITY });
-      expect(buildPanelMandate({ lens: MANDATE_LENSES.SECURITY, coupleRepos: null, selfRepo: null })).toBe(base);
-      expect(base).not.toContain('COUPLE CONTEXT');
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.SECURITY, crossRepoCouple: false })).toBe(base);
+      expect(base).not.toContain('CROSS-REPO COUPLE');
     });
   });
 });
@@ -601,57 +596,78 @@ describe('buildPanelMandate (#2310)', () => {
 // symbols against THAT repo's main, where the sibling half has not landed, and false-positives on
 // "this does not exist". Observed 2026-07-12 on plateau#19 (the impl half of the #2449 couple): the round-2
 // reviewer's ONLY finding was that `--under-lease` did not exist in we:scripts/merge-ai-prs.mjs — it did, on
-// the couple's unlanded WE half. The manifest already names every half; the mandate now carries them.
-describe('buildMandate — #2457 couple context (sibling repo/ref from the lane manifest)', () => {
-  const COUPLE = [{ repo: 'we', ref: 'lane/x-2449' }, { repo: 'plateau-app', ref: 'lane/x-2449' }];
-
-  it('names the SIBLING half and instructs the reviewer not to call its symbols missing', () => {
-    const text = buildMandate({ coupleRepos: COUPLE, selfRepo: 'plateau-app' });
-    expect(text).toContain('COUPLE CONTEXT');
-    expect(text).toContain('we (lane/x-2449)');
-    expect(text).toMatch(/do NOT report a symbol as undefined, missing, or a broken reference/);
-    expect(text).toMatch(/uncertain rather than asserting the reference is broken/);
+// the couple's unlanded WE half.
+//
+// The block is DELIBERATELY DATA-FREE (PR #1011 review): naming the halves would inject author-controlled
+// bytes from the editable PR body into the prompt that judges that author, and bought nothing because the
+// reviewer is diff-only under #2336 and cannot fetch a sibling ref anyway.
+describe('buildMandate — #2457 cross-repo couple context', () => {
+  it('tells the reviewer a sibling half exists and not to call its symbols missing', () => {
+    const text = buildMandate({ crossRepoCouple: true });
+    expect(text).toContain('CROSS-REPO COUPLE');
+    expect(text).toMatch(/may be ADDED by that sibling half rather than missing/);
+    expect(text).toMatch(/Do NOT\s+report such a reference as undefined, missing, unresolved, or broken/);
   });
 
-  it('FILTERS OUT the reviewer\'s own repo — the block names only halves it cannot see', () => {
-    const text = buildMandate({ coupleRepos: COUPLE, selfRepo: 'we' });
-    expect(text).toContain('plateau-app (lane/x-2449)');
-    // the self half is the diff in front of the reviewer; naming it as a sibling would be a lie.
-    expect(text).not.toContain('we (lane/x-2449)');
+  it('names PLAUSIBLE — a tag normalizeFinding actually keeps — not an invented disposition', () => {
+    // The first cut said "mark the finding uncertain". `uncertain` is not in VALID_VERDICT_TAGS, so
+    // normalizeFinding DROPPED it and the clause was inert. PLAUSIBLE survives the round-trip.
+    const text = buildMandate({ crossRepoCouple: true });
+    expect(text).toContain('PLAUSIBLE');
+    expect(text).not.toMatch(/\buncertain\b/);
+    expect(normalizeFinding({ file: 'a.mjs', summary: 's', failure_scenario: 'f', verdict: 'PLAUSIBLE' }).verdict).toBe('PLAUSIBLE');
+    expect(normalizeFinding({ file: 'a.mjs', summary: 's', failure_scenario: 'f', verdict: 'uncertain' }).verdict).toBeUndefined();
   });
 
-  it('a SINGLE-repo manifest (the common case) yields NO block — self-only filters to empty', () => {
+  it('the couple mandate is a CONSTANT — no input can vary a single byte of it', () => {
+    // THE load-bearing property of the redesign, and the one the PR #1011 review bounced the first cut for.
+    // The first cut took the manifest's repo/ref list, which rides the EDITABLE PR body — author-controlled
+    // bytes flowing into the prompt that judges that author. Sanitising could not fix it (the sink is an LLM
+    // prompt, so delimiter-free prose is executable) and corroboration proved existence, not identity. The fix
+    // is not a better filter: it is having no data channel at all. Assert exactly that — the block is
+    // byte-identical no matter what the caller does, because `true` is the only thing it can say.
+    const canonical = buildMandate({ crossRepoCouple: true });
+    expect(buildMandate({ crossRepoCouple: true })).toBe(canonical);
+    // ...and across every lens/composer that forwards it, still not a byte of caller-supplied content.
+    for (const lens of PANEL_LENSES) {
+      const panel = buildPanelMandate({ lens, crossRepoCouple: true });
+      const block = panel.slice(panel.indexOf('CROSS-REPO COUPLE'));
+      expect(block).not.toMatch(/lane\/|refs\/|https?:\/\/|plateau-app|frontierui/);
+    }
+  });
+
+  it('does NOT excuse a reference broken for any other reason', () => {
+    // Without this clause the block is a blanket amnesty on the mandatory correctness lens.
+    const text = buildMandate({ crossRepoCouple: true });
+    expect(text).toMatch(/does NOT excuse a reference that\s+is broken for any OTHER reason/);
+    expect(text).toMatch(/judge those exactly as you would normally/);
+  });
+
+  it('is byte-for-byte additive: omitted, false, and non-true truthy values all leave the base mandate', () => {
     const base = buildMandate();
-    expect(buildMandate({ coupleRepos: [{ repo: 'we', ref: 'lane/x-2880' }], selfRepo: 'we' })).toBe(base);
-    expect(base).not.toContain('COUPLE CONTEXT');
+    expect(buildMandate({ crossRepoCouple: false })).toBe(base);
+    expect(buildMandate({})).toBe(base);
+    // strict === true, so a stray truthy value can never silently opt a PR in.
+    expect(buildMandate({ crossRepoCouple: 'yes' })).toBe(base);
+    expect(buildMandate({ crossRepoCouple: 1 })).toBe(base);
+    expect(base).not.toContain('CROSS-REPO COUPLE');
   });
 
-  it('is byte-for-byte additive: omitted, null, empty, and malformed entries all leave the base mandate', () => {
-    const base = buildMandate();
-    expect(buildMandate({ coupleRepos: null })).toBe(base);
-    expect(buildMandate({ coupleRepos: [] })).toBe(base);
-    expect(buildMandate({ coupleRepos: [null, undefined, {}, { ref: 'lane/x' }] })).toBe(base); // no `repo` → dropped
-    expect(buildMandate({ coupleRepos: 'not-an-array' })).toBe(base);
-  });
-
-  it('omitting selfRepo names EVERY half rather than silently dropping the block', () => {
-    // A caller that cannot determine which repo it is reviewing still gets the couple's shape — over-naming is
-    // safe (the reviewer is told these are the couple's halves), silently emitting nothing would not be.
-    const text = buildMandate({ coupleRepos: COUPLE });
-    expect(text).toContain('we (lane/x-2449)');
-    expect(text).toContain('plateau-app (lane/x-2449)');
-  });
-
-  it('a half with no ref is named by repo alone (a manifest missing a ref must not break the block)', () => {
-    const text = buildMandate({ coupleRepos: [{ repo: 'frontierui' }], selfRepo: 'we' });
-    expect(text).toContain('frontierui');
-    expect(text).not.toContain('frontierui ()');
-  });
-
-  it('survives the couple block WITHOUT losing the #2336 no-checkout instruction it follows', () => {
-    const text = buildMandate({ coupleRepos: COUPLE, selfRepo: 'we' });
+  it('appends the block WITHOUT losing the #2336 no-checkout instruction it follows', () => {
+    const text = buildMandate({ crossRepoCouple: true });
     expect(text).toMatch(/do NOT `git checkout`/);
-    expect(text.indexOf('COUPLE CONTEXT')).toBeGreaterThan(text.indexOf('do NOT `git checkout`'));
+    expect(text.indexOf('CROSS-REPO COUPLE')).toBeGreaterThan(text.indexOf('do NOT `git checkout`'));
+  });
+
+  it('the VALIDATOR mandate carries it too — the final gate must not re-raise what the panel resolved', () => {
+    // buildValidatorMandate is the #2439 independent joint-accept gate and is blind to the negotiation. If it
+    // alone lacked the couple context it would re-raise the cross-repo false positive as the finding that
+    // blocks the land. PR #1011's review caught this composer un-threaded.
+    const withFlag = buildValidatorMandate({ lens: MANDATE_LENSES.CORRECTNESS, crossRepoCouple: true });
+    const without = buildValidatorMandate({ lens: MANDATE_LENSES.CORRECTNESS });
+    expect(withFlag).toContain('CROSS-REPO COUPLE');
+    expect(without).not.toContain('CROSS-REPO COUPLE');
+    expect(buildValidatorMandate({ lens: MANDATE_LENSES.CORRECTNESS, crossRepoCouple: false })).toBe(without);
   });
 });
 
