@@ -2,8 +2,10 @@
 bornAs: xmcv5qa
 kind: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-08-03"
+dateStarted: "2026-08-03"
+dateResolved: "2026-08-03"
 relatedTo: ["2450", "2373", "2336", "2326"]
 scope:
   - we:skills-src/review/SKILL.md

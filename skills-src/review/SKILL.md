@@ -29,18 +29,38 @@ applies a label). The same module also renders the operator-facing notice for yo
 
 ## Flow
 
-1. **Pull the PR.** Diff + metadata + the drain's escalation reasons:
+1. **Pull the PR — on the NET basis vs CURRENT main, never `gh pr diff` alone (#2901).** Metadata first, so you
+   have the head ref:
    ```
-   gh pr diff <PR> --repo <repo>
-   gh pr view <PR> --repo <repo> --json title,body,files,labels,comments
+   gh pr view <PR> --repo <repo> --json headRefName,title,body,files,labels,comments
    ```
+   Then take the diff from **`computeNetDiffText({ exec, rev: <headRefName>, fetchExtraRefs: [<headRefName>] })`**
+   ([we:scripts/merge-ai-prs.mjs](../../../scripts/merge-ai-prs.mjs), #2450) — the two-tree
+   `git diff <forkpoint> <head>` resolved off the SAME #2373/#2404 basis the drain's escalation SCORE uses, so
+   what you review and what was scored cannot drift. Take the net changed-file list from
+   `computeNetDiffChangedFiles(...)` and carry it into step 2.
+
+   This is **not** `gh pr diff <PR>`'s three-dot merge-base diff. That one still lists a sibling-lane file that
+   has since landed on `main` as if this PR added it, and the phantom scope-creep is not harmless framing — it
+   hides the findings that matter. Observed on PR #1009: `gh pr diff` presented 4 files / 42 lines where the net
+   diff was 2 files / 2 lines, and the one real conflict only became visible on the net basis. Observed again on
+   PR #1012, where `gh pr diff` reported three files the PR does not touch.
+
+   The #2336 no-checkout constraint is intact: `computeNetDiffText` fetches tracking refs and diffs two trees in
+   place — it never moves HEAD in this shared checkout. If it returns **`scored:false`** (a foreign clone without
+   the head ref, or a diff failure) — and only then — fall back to `gh pr diff <PR> --repo <repo>`, and **say so
+   in your write-up**: the basis is degraded and the reader must know the file list may be inflated.
+
    The escalation reasons ride the PR body's escalation block (and the `parked` entry in the drain's `--json`).
    Read the `🤖 advisory AI review (non-clearing)` comment if the drain already posted one.
 
 2. **Run the shared core.** Seed a **fresh-context** review subagent (the `Agent` tool, e.g. `general-purpose`)
    with `buildMandate()` from `review-core.mjs` — it sees **ONLY the diff + PR description**, and per the mandate
-   **never checks out the PR branch** in a shared tree (#2336; any test/repro runs in a throwaway clone). Shape
-   its answer with `normalizeFindings()` and reduce it to a verdict with `deriveVerdict({ findings, humanRequired })`
+   **never checks out the PR branch** in a shared tree (#2336; any test/repro runs in a throwaway clone). Running
+   a multi-lens panel instead of one reviewer? Seed each with `buildPanelMandate({ lens, netChangedFiles })` and
+   pass step 1's net changed-file list — it rides as GROUND TRUTH so a reviewer will not flag a diff-side file
+   outside that set as scope creep (#2450). Shape each answer with `normalizeFindings()` and reduce it to a
+   verdict with `deriveVerdict({ findings, humanRequired })`
    (`humanRequired: true` for a `review:human` PR → the verdict is always `needs-human`, never agent-clearable).
 
 3. **Present** the findings + the escalation reason + the core's verdict to the operator. This is a **stop
