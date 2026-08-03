@@ -21,9 +21,10 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, cpSync } f
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { localToday } from '../lib/local-date.mjs';
 
 const WE_SCRIPTS_DIR = dirname(dirname(fileURLToPath(import.meta.url))); // .../scripts (this file is scripts/__tests__/*)
-const TODAY = new Date().toISOString().slice(0, 10);
+const TODAY = localToday(); // #2747 — same operator-local stamp the CLI itself now derives its `today()` from
 
 let clone;
 beforeAll(() => {
