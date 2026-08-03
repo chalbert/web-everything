@@ -298,7 +298,10 @@ describe('#2899 A1 — the card is located in the origin/main TREE, not the loca
     git('push', '-q', 'origin', 'HEAD:main');
     // main advances (a numbering commit landed there) while THIS checkout stays on the pre-numbering tree.
     const other = mkdtempSync(join(tmpdir(), 'drain-other-'));
-    execFileSync('git', ['clone', '-q', origin, other]);
+    // `--branch main` is REQUIRED, not tidiness: a bare repo's HEAD follows the runner's `init.defaultBranch`,
+    // which is `master` on the CI image and `main` on this machine. Without the pin, the clone checks out an
+    // UNBORN branch and the `git mv` below dies with "fatal: bad source" — green locally, red on CI.
+    execFileSync('git', ['clone', '-q', '--branch', 'main', origin, other]);
     const og = (...a) => execFileSync('git', a, { cwd: other, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     og('config', 'user.email', 'test@test'); og('config', 'user.name', 'Test'); og('config', 'commit.gpgsign', 'false');
     execFileSync('git', ['mv', 'backlog/xhash01-alpha.md', 'backlog/2202-alpha.md'], { cwd: other });
