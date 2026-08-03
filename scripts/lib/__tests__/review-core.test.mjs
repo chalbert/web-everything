@@ -577,6 +577,82 @@ describe('buildPanelMandate (#2310)', () => {
       expect(buildPanelMandate({ lens: MANDATE_LENSES.SIMPLICITY, netChangedFiles: [null, ''] })).toBe(base);
     });
   });
+
+  describe('#2457 — optional couple context (sibling repo/ref)', () => {
+    it('forwards coupleRepos/selfRepo to buildMandate so a lens reviewer gets the COUPLE CONTEXT block', () => {
+      const text = buildPanelMandate({
+        lens: MANDATE_LENSES.CORRECTNESS,
+        coupleRepos: [{ repo: 'we', ref: 'lane/batch-2449' }, { repo: 'plateau-app', ref: 'lane/batch-2449' }],
+        selfRepo: 'plateau-app',
+      });
+      expect(text).toContain('COUPLE CONTEXT');
+      expect(text).toContain('we (lane/batch-2449)');
+    });
+
+    it('leaves the panel mandate byte-for-byte unchanged when the couple params are omitted', () => {
+      const base = buildPanelMandate({ lens: MANDATE_LENSES.SECURITY });
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.SECURITY, coupleRepos: null, selfRepo: null })).toBe(base);
+      expect(base).not.toContain('COUPLE CONTEXT');
+    });
+  });
+});
+
+// #2457 — a fresh-context diff-only reviewer judging ONE half of a cross-repo couple verifies unresolved
+// symbols against THAT repo's main, where the sibling half has not landed, and false-positives on
+// "this does not exist". Observed 2026-07-12 on plateau#19 (the impl half of the #2449 couple): the round-2
+// reviewer's ONLY finding was that `--under-lease` did not exist in we:scripts/merge-ai-prs.mjs — it did, on
+// the couple's unlanded WE half. The manifest already names every half; the mandate now carries them.
+describe('buildMandate — #2457 couple context (sibling repo/ref from the lane manifest)', () => {
+  const COUPLE = [{ repo: 'we', ref: 'lane/x-2449' }, { repo: 'plateau-app', ref: 'lane/x-2449' }];
+
+  it('names the SIBLING half and instructs the reviewer not to call its symbols missing', () => {
+    const text = buildMandate({ coupleRepos: COUPLE, selfRepo: 'plateau-app' });
+    expect(text).toContain('COUPLE CONTEXT');
+    expect(text).toContain('we (lane/x-2449)');
+    expect(text).toMatch(/do NOT report a symbol as undefined, missing, or a broken reference/);
+    expect(text).toMatch(/uncertain rather than asserting the reference is broken/);
+  });
+
+  it('FILTERS OUT the reviewer\'s own repo — the block names only halves it cannot see', () => {
+    const text = buildMandate({ coupleRepos: COUPLE, selfRepo: 'we' });
+    expect(text).toContain('plateau-app (lane/x-2449)');
+    // the self half is the diff in front of the reviewer; naming it as a sibling would be a lie.
+    expect(text).not.toContain('we (lane/x-2449)');
+  });
+
+  it('a SINGLE-repo manifest (the common case) yields NO block — self-only filters to empty', () => {
+    const base = buildMandate();
+    expect(buildMandate({ coupleRepos: [{ repo: 'we', ref: 'lane/x-2880' }], selfRepo: 'we' })).toBe(base);
+    expect(base).not.toContain('COUPLE CONTEXT');
+  });
+
+  it('is byte-for-byte additive: omitted, null, empty, and malformed entries all leave the base mandate', () => {
+    const base = buildMandate();
+    expect(buildMandate({ coupleRepos: null })).toBe(base);
+    expect(buildMandate({ coupleRepos: [] })).toBe(base);
+    expect(buildMandate({ coupleRepos: [null, undefined, {}, { ref: 'lane/x' }] })).toBe(base); // no `repo` → dropped
+    expect(buildMandate({ coupleRepos: 'not-an-array' })).toBe(base);
+  });
+
+  it('omitting selfRepo names EVERY half rather than silently dropping the block', () => {
+    // A caller that cannot determine which repo it is reviewing still gets the couple's shape — over-naming is
+    // safe (the reviewer is told these are the couple's halves), silently emitting nothing would not be.
+    const text = buildMandate({ coupleRepos: COUPLE });
+    expect(text).toContain('we (lane/x-2449)');
+    expect(text).toContain('plateau-app (lane/x-2449)');
+  });
+
+  it('a half with no ref is named by repo alone (a manifest missing a ref must not break the block)', () => {
+    const text = buildMandate({ coupleRepos: [{ repo: 'frontierui' }], selfRepo: 'we' });
+    expect(text).toContain('frontierui');
+    expect(text).not.toContain('frontierui ()');
+  });
+
+  it('survives the couple block WITHOUT losing the #2336 no-checkout instruction it follows', () => {
+    const text = buildMandate({ coupleRepos: COUPLE, selfRepo: 'we' });
+    expect(text).toMatch(/do NOT `git checkout`/);
+    expect(text.indexOf('COUPLE CONTEXT')).toBeGreaterThan(text.indexOf('do NOT `git checkout`'));
+  });
 });
 
 describe('buildPanelFindings (#2310)', () => {

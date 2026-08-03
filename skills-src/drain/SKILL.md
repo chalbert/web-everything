@@ -312,10 +312,17 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
      phantom scope-creep that burns rounds (#2450). If it returns `scored:false` (a foreign clone without the
      head ref, a diff failure), fall back to `gh pr diff <num> --repo <repo>`. Also `gh pr view <num> --repo
      <repo> --json title,body,files`, and take the NET changed-file list from `computeNetDiffChangedFiles(...)`
-     (the drain already computes it for scoring). Spawn ONE **fresh-context adversarial review subagent per
-     lens** (the `Agent` tool, fanned out in parallel via the Workflow orchestrator), each seeded with
-     `buildPanelMandate({ lens, netChangedFiles })` — the net changed-file list is passed as GROUND TRUTH so a
-     reviewer will NOT flag a diff-side file outside that set as scope creep (#2450) — same diff-only,
+     (the drain already computes it for scoring). Take the couple's halves from the PR's `.lane-manifest.json`
+     `repos` list — the manifest the ordering step already read off the head ref (step 2 above) — as
+     `coupleRepos`, and this PR's own repo as `selfRepo`. Spawn ONE **fresh-context adversarial review subagent
+     per lens** (the `Agent` tool, fanned out in parallel via the Workflow orchestrator), each seeded with
+     `buildPanelMandate({ lens, netChangedFiles, coupleRepos, selfRepo })` — the net changed-file list is passed
+     as GROUND TRUTH so a reviewer will NOT flag a diff-side file outside that set as scope creep (#2450), and
+     the sibling repo/ref halves are named so a reviewer will NOT report a symbol its couple's OTHER half adds as
+     undefined or missing (#2457: a diff-only reviewer verifies against THIS repo's main, where the sibling half
+     has not landed — observed on plateau#19 of the #2449 couple, whose only round-2 finding was a `--under-lease`
+     flag that did exist, on the unlanded WE half). Both params are additive: a single-repo PR filters to
+     nothing and the mandate is byte-identical. Same diff-only,
      no-checkout isolation as v2 (#2336), but judging only its own lens and blind to the other lenses'
      reviewers. Shape each reply with `normalizeFindings()`, reduce each to its own verdict with
      `deriveVerdict()` — you now have one `{ lens: verdict }` map (`lensVerdicts`) and, via

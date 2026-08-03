@@ -136,15 +136,53 @@ export {
 export const DEFAULT_MANDATE = 'correctness';
 
 /**
+ * #2457 — render the COUPLE CONTEXT body lines for a cross-repo couple half, or `[]` when there is nothing to
+ * say. A single item's impl can span the constellation (WE → frontierui → plateau-app, memory rule #96) and is
+ * delivered as ONE PR PER REPO; the lane manifest already names every half (`repos: [{repo, ref}, …]`). A
+ * fresh-context, diff-only reviewer judging ONE half verifies unresolved symbols against THAT repo's `main` —
+ * where the sibling half has not landed yet — and false-positives on "this does not exist". Observed 2026-07-12:
+ * reviewing plateau#19 (the impl half of the #2449 couple), the round-2 reviewer's only finding was that
+ * `--under-lease` did not exist in `we:scripts/merge-ai-prs.mjs`; it did, on the couple's unlanded WE half.
+ *
+ * `selfRepo` is filtered out so the block names only the SIBLING halves — the ones whose content the reviewer
+ * cannot see. Passing no `coupleRepos` (or a list that is empty after filtering — the single-repo case, which is
+ * most PRs) returns `[]` and leaves the mandate BYTE-FOR-BYTE unchanged, so every existing caller and test is
+ * unaffected: the block is purely additive, exactly like #2450's `netChangedFiles` ground truth.
+ * @param {{coupleRepos?: Array<{repo?: string, ref?: string}>|null, selfRepo?: string|null}} [o]
+ * @returns {string[]} body lines to append, or `[]`
+ */
+function coupleContextLines({ coupleRepos = null, selfRepo = null } = {}) {
+  const self = typeof selfRepo === 'string' ? selfRepo.trim() : '';
+  const siblings = (Array.isArray(coupleRepos) ? coupleRepos : [])
+    .filter((r) => r && typeof r === 'object')
+    .map((r) => ({ repo: String(r.repo ?? '').trim(), ref: String(r.ref ?? '').trim() }))
+    .filter((r) => r.repo && r.repo !== self);
+  if (!siblings.length) return [];
+  const named = siblings.map((r) => (r.ref ? `${r.repo} (${r.ref})` : r.repo)).join(', ');
+  return [
+    `COUPLE CONTEXT — this PR is ONE HALF of a cross-repo couple. Its sibling half/halves live in: ${named}.`,
+    'The halves land together, so a symbol, flag, function, export, or file this diff references may be ADDED by a',
+    'sibling half and therefore absent from THIS repo\'s main. Verify such a reference against the sibling ref named',
+    'above before reporting it — do NOT report a symbol as undefined, missing, or a broken reference on the strength',
+    'of its absence from this repo alone. If you cannot inspect the sibling ref, say so and mark the finding',
+    'uncertain rather than asserting the reference is broken.',
+  ];
+}
+
+/**
  * Build the canonical judge-only mandate text handed to a review subagent (the "read a diff, judge it"
  * instructions) — single-sourced so `/code-review`-shaped callers and the drain auto-review (`#2326`) stop
  * hand-rolling their own prose copy of the same mandate. Pure — returns the instruction string; SPAWNING the
  * subagent and reading its answer remains the caller's action (this module never calls a model, same split
  * `we:scripts/lane-review.mjs` documents for the pre-PR review seam).
- * @param {{contextIsolation?: string, mandate?: string|string[]}} [o]
+ *
+ * #2457 — the OPTIONAL `coupleRepos` / `selfRepo` pair appends a COUPLE CONTEXT block naming the sibling
+ * repo/ref halves of a cross-repo couple (see `coupleContextLines`). Omitting them leaves the output
+ * byte-identical.
+ * @param {{contextIsolation?: string, mandate?: string|string[], coupleRepos?: Array<{repo?: string, ref?: string}>|null, selfRepo?: string|null}} [o]
  * @returns {string}
  */
-export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE } = {}) {
+export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE, coupleRepos = null, selfRepo = null } = {}) {
   const isolationLine = contextIsolation === 'diff-only'
     ? 'You see ONLY the diff (and, if supplied, the PR description) — no author framing, no prior session context.'
     : `Context isolation: ${contextIsolation}.`;
@@ -163,6 +201,8 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
       'Work from the diff text alone — do NOT `git checkout`, `git switch`, `git fetch`+checkout, or otherwise',
       'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain. If',
       'you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.',
+      // #2457 — appended LAST so the couple block never splits the #2336 no-checkout instruction it follows.
+      ...coupleContextLines({ coupleRepos, selfRepo }),
     ],
   });
 }
@@ -753,14 +793,18 @@ export const PR_DIFF_ADAPTER = Object.freeze({
  * landed on main via a sibling lane and only shows in the three-dot diff, so a phantom scope-creep finding on it
  * burns a negotiation round for nothing. OMITTING the param (or passing an empty list) leaves the mandate
  * BYTE-FOR-BYTE unchanged, so every existing caller/test is unaffected — the block is purely additive.
- * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null}} o
+ *
+ * #2457 — `coupleRepos` / `selfRepo` are forwarded to `buildMandate`, which appends the COUPLE CONTEXT block
+ * naming the sibling repo/ref halves so a lens reviewer does not false-positive on a symbol its couple's other
+ * half adds. Also additive: omit them and the mandate is byte-identical.
+ * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null, coupleRepos?: Array<{repo?: string, ref?: string}>|null, selfRepo?: string|null}} o
  * @returns {string}
  */
-export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netChangedFiles = null } = {}) {
+export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netChangedFiles = null, coupleRepos = null, selfRepo = null } = {}) {
   if (!PANEL_LENSES.includes(lens)) {
     throw new Error(`buildPanelMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
   }
-  const base = buildMandate({ contextIsolation, mandate: lens });
+  const base = buildMandate({ contextIsolation, mandate: lens, coupleRepos, selfRepo });
   const parts = [
     base,
     `You are ONE of several independent mandate reviewers on this diff, each judging a single lens`,
