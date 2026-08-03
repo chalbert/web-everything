@@ -24,7 +24,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { parseBacklogFilename, rewriteRefs, allocateGapId } from '../backlog/renumber-collisions.mjs';
+import { parseBacklogFilename, rewriteRefs, allocateGapId, assertContentPreserved } from '../backlog/renumber-collisions.mjs';
 
 /**
  * Build the renumber PLAN for an incoming lane whose NEW backlog item reuses an id already on the merge base.
@@ -86,6 +86,9 @@ export function planBaseCollisionHeal(laneFiles, { baseNums = [], baseNames = []
   // #2316 — NEVER rewrite inside a base-owned file (`baseNameSet`): its refs predate the collision and can
   // only mean the base's own real item (the keeper), never the incoming yielder.
   const contentByName = new Map(files.map((f) => [f.name, f.text]));
+  // Snapshot the pre-rewrite content, keyed by name — the content-preservation guard (#2546) diffs every
+  // write against this ORIGINAL, so a rewrite that blanks/corrupts a file is caught before the plan returns.
+  const originalByName = new Map(files.map((f) => [f.name, f.text]));
   const renamed = new Map(moves.map((m) => [m.oldName, m.newName]));
   const touched = new Set();
   for (const mv of moves) {
@@ -96,9 +99,19 @@ export function planBaseCollisionHeal(laneFiles, { baseNums = [], baseNames = []
     }
   }
   const writes = [];
-  for (const name of touched) writes.push({ name: renamed.get(name) || name, text: contentByName.get(name) });
+  for (const name of touched) {
+    const finalName = renamed.get(name) || name;
+    const text = contentByName.get(name);
+    // #2546 — a rewrite must ONLY swap refs; refuse to emit a blanked/corrupted file (fail loudly).
+    assertContentPreserved(originalByName.get(name), text, moves, finalName);
+    writes.push({ name: finalName, text });
+  }
   for (const mv of moves) {
-    if (!touched.has(mv.oldName)) writes.push({ name: mv.newName, text: contentByName.get(mv.oldName) });
+    if (!touched.has(mv.oldName)) {
+      const text = contentByName.get(mv.oldName);
+      assertContentPreserved(originalByName.get(mv.oldName), text, moves, mv.newName); // #2546
+      writes.push({ name: mv.newName, text });
+    }
   }
   const deletes = moves.map((m) => m.oldName);
 
