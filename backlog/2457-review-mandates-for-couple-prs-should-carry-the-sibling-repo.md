@@ -18,9 +18,16 @@ scope:
   - we:skills-src/drain/SKILL.md
 ---
 
-# Review mandates for couple PRs should carry the sibling repo/ref from the lane manifest
+# Review mandates for couple PRs should tell the reviewer a sibling half exists
 
-A fresh-context diff-only reviewer judging ONE half of a cross-repo couple false-positives on symbols the sibling PR adds: re-reviewing plateau#19 (impl half of the #2449 couple), the round-2 reviewer's only finding was that --under-lease does not exist in we:scripts/merge-ai-prs.mjs — it verified against WE main, where the couple's WE half (PR #441) had not landed. buildMandate()/buildPanelMandate() in we:scripts/lib/review-core.mjs take no couple context, yet the lane manifest already carries the couple's repos/refs. Fix: thread the manifest's sibling repo/ref list into the mandate text so reviewers judge cross-repo symbols against the couple, not each repo's main. Observed 2026-07-12 (dismissed-with-reason on plateau#19).
+A fresh-context diff-only reviewer judging ONE half of a cross-repo couple false-positives on symbols the sibling PR adds: re-reviewing plateau#19 (impl half of the #2449 couple), the round-2 reviewer's only finding was that --under-lease does not exist in we:scripts/merge-ai-prs.mjs — it verified against WE main, where the couple's WE half (PR #441) had not landed. buildMandate()/buildPanelMandate() in we:scripts/lib/review-core.mjs take no couple context at all. Fix: pass a BOOLEAN couple flag into the mandate so the reviewer knows an unlanded sibling half exists. Observed 2026-07-12 (dismissed-with-reason on plateau#19).
+
+> **The title and the fix line above were reworded on resolve.** Both originally said to carry the
+> sibling **repo/ref list** from the lane manifest. That design was built, reviewed, and **rejected
+> twice** — the manifest rides the editable PR body, so naming its contents feeds author-controlled
+> bytes into the prompt that judges that author, and no amount of sanitising or corroboration fixes a
+> prompt sink. The shipped design carries no repo, ref, or PR number. See `## Progress`. The filename
+> slug still reflects the original framing; the item number is the identity.
 
 ## Progress
 
