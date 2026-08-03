@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, isCrossRepoCoupleHalf, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -627,6 +627,41 @@ describe('merge-ai-prs — #2393 impl-PR→WE-manifest laneRef join (joinImplToC
     expect(orphan.item).toBeNull();
     expect(orphan.joinedToCouple).toBeUndefined();
     expect(planLabelDrain([{ ...orphan, decision: 'merge' }]).ready.map((c) => c.num)).toEqual([30]);
+  });
+
+  // #2457 — the review mandate's `crossRepoCouple` flag. The bug this item was filed about was observed on
+  // plateau#19, an IMPL half — which carries NO manifest, so a manifest-only read (`crossRepo`) answers false
+  // for exactly the case that matters. Reading it AFTER the join is what makes the flag reach that half.
+  describe('#2457 isCrossRepoCoupleHalf — the mandate flag must reach the IMPL half, not just the WE carrier', () => {
+    it('is TRUE for the manifest-less IMPL half, via the join (the motivating plateau#19 case)', () => {
+      const couple = we(10, 'xitem00', { refs: ['lane/xitem00', 'lane/xitem00-fui'] });
+      couple.crossRepo = true;                       // WE manifest names >1 repo
+      const implPr = impl(20, 'lane/xitem00-fui');   // no manifest ⇒ crossRepo is falsy on its own
+      expect(isCrossRepoCoupleHalf(implPr)).toBe(false); // BEFORE the join: the pre-#2457 blind spot
+      joinImplToCouples([couple, implPr]);
+      expect(isCrossRepoCoupleHalf(implPr)).toBe(true);  // AFTER: inherited via joinedToCouple
+      expect(isCrossRepoCoupleHalf(couple)).toBe(true);  // and the WE carrier, off its own manifest
+    });
+
+    it('is FALSE for a solo single-repo PR and for a true orphan — no phantom couple context', () => {
+      const solo = we(10, 'xitem00', { refs: ['lane/xitem00'] });
+      solo.crossRepo = false;                        // manifest names exactly one repo
+      const orphan = impl(30, 'lane/unrelated');
+      joinImplToCouples([solo, orphan]);
+      expect(isCrossRepoCoupleHalf(solo)).toBe(false);
+      expect(isCrossRepoCoupleHalf(orphan)).toBe(false);
+    });
+
+    it('is a strict BOOLEAN and never throws on a missing/degenerate verdict', () => {
+      expect(isCrossRepoCoupleHalf(null)).toBe(false);
+      expect(isCrossRepoCoupleHalf(undefined)).toBe(false);
+      expect(isCrossRepoCoupleHalf({})).toBe(false);
+      // a TRUTHY-but-not-true crossRepo must not opt in — `coupleContextLines` takes only an explicit `true`,
+      // so anything looser here would silently render no block while the parked entry claimed otherwise.
+      expect(isCrossRepoCoupleHalf({ crossRepo: 'yes' })).toBe(false);
+      expect(isCrossRepoCoupleHalf({ joinedToCouple: 0 })).toBe(true);   // item id 0 is still an id
+      expect(isCrossRepoCoupleHalf({ joinedToCouple: null })).toBe(false);
+    });
   });
 });
 

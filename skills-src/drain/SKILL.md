@@ -245,7 +245,12 @@ author-bounce with a bounded editor↔reviewer negotiation loop** (below). The o
 > prose.
 
 The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isGateSelfPath`) and emits it
-in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`.
+in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons, crossRepoCouple }`.
+`crossRepoCouple` (#2457) is a BOOLEAN — true when this PR is one half of a cross-repo couple, computed after
+`joinImplToCouples` so it holds for the manifest-less **impl** half too. It carries no repo/ref/PR data by
+design: the manifest rides the editable PR body, so naming its contents in a review mandate would feed
+author-controlled bytes into the prompt judging that author. Step 1 of the negotiation loop passes it straight
+to `buildPanelMandate()`/`buildValidatorMandate()`.
 
 > **The converge-vs-human branch is ONE derivation (#2285).** Don't hand-branch on `humanRequired` — call
 > `deriveReviewDisposition({ reasons })` in `we:scripts/lib/review-core.mjs` and act on `{ mode, autoLand }`. It
@@ -312,10 +317,26 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
      phantom scope-creep that burns rounds (#2450). If it returns `scored:false` (a foreign clone without the
      head ref, a diff failure), fall back to `gh pr diff <num> --repo <repo>`. Also `gh pr view <num> --repo
      <repo> --json title,body,files`, and take the NET changed-file list from `computeNetDiffChangedFiles(...)`
-     (the drain already computes it for scoring). Spawn ONE **fresh-context adversarial review subagent per
-     lens** (the `Agent` tool, fanned out in parallel via the Workflow orchestrator), each seeded with
-     `buildPanelMandate({ lens, netChangedFiles })` — the net changed-file list is passed as GROUND TRUTH so a
-     reviewer will NOT flag a diff-side file outside that set as scope creep (#2450) — same diff-only,
+     (the drain already computes it for scoring). Take `crossRepoCouple` — is this PR one half of a cross-repo
+     couple? — **off this PR's own entry in the `--json` `parked` array**, where the lander already emits it
+     (`isCrossRepoCoupleHalf`, `we:scripts/merge-ai-prs.mjs`). Do NOT re-derive it from the manifest: only a WE
+     PR carries one, so a manifest read alone answers `false` for every **impl** half — and the impl half is
+     exactly where the bug bites (plateau#19). The lander computes it AFTER `joinImplToCouples`, so it is true
+     for a PR that either carries a manifest naming more than one repo or inherited its couple's identity as a
+     manifest-less impl half. Spawn ONE **fresh-context adversarial
+     review subagent per lens** (the `Agent` tool, fanned out in parallel via the Workflow orchestrator), each
+     seeded with `buildPanelMandate({ lens, netChangedFiles, crossRepoCouple })` — the net changed-file list is
+     passed as GROUND TRUTH so a reviewer will NOT flag a diff-side file outside that set as scope creep
+     (#2450), and the couple flag tells the reviewer a sibling half exists so it will NOT report a symbol that
+     half adds as undefined or missing (#2457: a diff-only reviewer verifies against THIS repo's main, where
+     the sibling half has not landed — observed on plateau#19 of the #2449 couple, whose only round-2 finding
+     was a `--under-lease` flag that did exist, on the unlanded WE half). **Pass the same `crossRepoCouple` to
+     `buildValidatorMandate()` in the final-validator step** — that gate is blind to the negotiation, so
+     without it the independent validator re-raises the very false positive the panel resolved, as the finding
+     that blocks the land. The flag carries **no repo, ref, or PR number by design**: the manifest rides the
+     editable PR body, so naming its contents here would feed author-controlled bytes into the prompt judging
+     that author, and the reviewer is diff-only (#2336) and could not fetch a sibling ref anyway. Both params
+     are additive: omit them and the mandate is byte-identical. Same diff-only,
      no-checkout isolation as v2 (#2336), but judging only its own lens and blind to the other lenses'
      reviewers. Shape each reply with `normalizeFindings()`, reduce each to its own verdict with
      `deriveVerdict()` — you now have one `{ lens: verdict }` map (`lensVerdicts`) and, via
