@@ -51,38 +51,62 @@ confidently handing an agent work that does not exist.
 
 ## Root cause
 
-#2748 already shipped the general resolve-on-land mechanism, and it *is* wired. The gap is
-narrower and specific to freshly-numbered items:
+**CORRECTED 2026-08-03 — the original diagnosis below was wrong, and the title still reflects it.**
+A red-team of a follow-on proposal re-traced this and found the cause is not JIT numbering at all.
+Recording both, because the wrong version already landed and a future reader needs to know which
+to trust.
 
-- `readResolveReachable` (`we:scripts/lane-drain.mjs:804-810`) resolves the card's path with
-  `git ls-files backlog/<num>-*.md` — a query against the **local working index**, not against the
-  `origin/main` tree it is trying to read. For a brand-new JIT-numbered item the `<NNN>`-named file
-  has never existed in the local index, so `ls-files` returns nothing and the function returns
-  **`null`** ("couldn't tell").
-- The caller (`we:scripts/lane-drain.mjs:414`) gates the flip on `if (resolveReachable === false)`.
-  `null` is not `false`, so the flip is **silently skipped** — no attempt, no warning.
+### The actual cause: the solo land routes never call the flip
 
-So the mechanism is correct for an item whose file already existed on main under its NNN, and
-misses exactly the class JIT-numbering creates. The two distinct verdicts — `null` (couldn't tell)
-and `false` (definitely not resolved) — collapse into "do nothing" at the call site.
+`we:scripts/merge-ai-prs.mjs` imports exactly `DERIVED_REGEN`, `DERIVED_OUTPUT_PATHS`,
+`numberPendingHashes`, `isPostLandTreeDirty`, `landedNumberFor` from `we:scripts/lane-drain.mjs`.
+It does **not** import `resolveLandedItem` — #2748's `active`/`open` → `resolved` flip — and never
+calls it.
+
+`resolveLandedItem` is wired only into `we:scripts/lane-drain.mjs`'s own couple-drain path. So an
+item landing via the solo `/pr` or `/merge` route gets its number and its derived-artifact regen,
+but **never** the status flip. #2880 landed via exactly that route (PR #999), which is why it sat
+`open` with its code live on main.
+
+This is a coverage gap in #2748, entirely independent of when the NNN is assigned. It reproduces
+identically under any numbering scheme, and the fix is to make every land route share one flip —
+not to change numbering.
+
+### The original (incorrect) diagnosis, kept for the record
+
+It claimed `readResolveReachable` (`we:scripts/lane-drain.mjs`) returns `null` for a brand-new
+JIT-numbered item because it resolves the card with `git ls-files` against the local index, and
+that the caller's `if (resolveReachable === false)` guard then skips the flip since `null` is not
+`false`.
+
+That `null`-vs-`false` conflation is **real and still worth fixing** (see A2) — it is a genuine
+sharp edge in the same function. But it is not what stranded #2880 and #2450, because on the solo
+route neither `readResolveReachable` nor the guard is ever reached: the module that lands those
+PRs does not import the flip at all.
 
 ## Definition of done
 
-- **A1 — read the tree, not the index.** `readResolveReachable` resolves the card off `origin/main`
-  (e.g. `git ls-tree` / `git show origin/main:…`, or a lookup that also tries the item's `bornAs`
-  filename), so a brand-new JIT-numbered file is found rather than reported absent.
-- **A2 — `null` is not silently "do nothing".** A couldn't-tell verdict at the call site is
-  distinguished from a definite `false`: it either retries against the fetched tree or is surfaced,
-  never dropped. A land that cannot determine resolve-reachability must not pass quietly.
-- **A3 — the JIT path is covered end-to-end.** A test lands a hash-id item, JIT-numbers it, and
-  asserts the card ends `resolved` on main — the case that currently escapes.
+- **A1 — every land route flips the status.** The solo `/pr` and `/merge` route
+  (`we:scripts/merge-ai-prs.mjs`) calls the SAME resolve-on-land flip the couple-drain path uses,
+  rather than importing only the numbering half of `we:scripts/lane-drain.mjs`. One flip, shared —
+  not a second copy that can drift from the first.
+- **A2 — `null` is not silently "do nothing".** In `readResolveReachable`, a couldn't-tell verdict
+  is distinguished at the call site from a definite `false`: it retries against the fetched tree or
+  is surfaced, never dropped. Independent of A1 — a real sharp edge in the same function, just not
+  the one that stranded these items.
+- **A3 — covered end-to-end on BOTH routes.** A test lands an item via the solo route and asserts
+  the card ends `resolved` on main. Route coverage is the point: the original bug was invisible
+  precisely because only the couple path was exercised.
 - **A4 — heal the existing strandings.** A one-time sweep flags every `open`/`active` item whose
   `bornAs` hash corresponds to a merged PR, so the ones already stranded (beyond #2880/#2450) are
   found rather than waiting to be re-packed. Report them; do not bulk-flip unreviewed, since a
   genuinely broader-scoped item may legitimately outlive its first PR.
+- **A5 — retitle.** The title still says "JIT-numbering at land leaves a delivered item open", which
+  the corrected diagnosis disproves. Rename to name the real cause (a land route that skips the
+  resolve-on-land flip) as part of the fix, so the card stops teaching the wrong lesson.
 
 ## Boundary
 
-Not a change to JIT-numbering itself (#2288, resolved) nor to the resolve-on-land mechanism's
-ownership model (#2748) — both stay as they are. This closes the one path where the two meet and
-the status flip falls through.
+Not a change to JIT-numbering (#2288, resolved) — the corrected diagnosis removes it from the causal
+chain entirely. This is a **coverage** fix to #2748's resolve-on-land ownership: the mechanism is
+right, one land route just never calls it.
