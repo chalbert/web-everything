@@ -21,10 +21,17 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, cpSync } f
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { localToday } from '../lib/local-date.mjs';
 
 const WE_SCRIPTS_DIR = dirname(dirname(fileURLToPath(import.meta.url))); // .../scripts (this file is scripts/__tests__/*)
-const TODAY = localToday(); // #2747 — same operator-local stamp the CLI itself now derives its `today()` from
+
+// #2747 — the expected stamp is derived INDEPENDENTLY of the CLI's own helper: shift the epoch by the
+// offset `Date` itself reports, then slice the UTC ISO. Pure arithmetic — no `Intl`, no zone name, and
+// no import of `scripts/lib/local-date.mjs` — so this oracle cannot inherit a bug from the code it
+// judges (docs/agent/platform-decisions.md #deterministic-oracle-clears-slice). It goes red on a
+// UTC-behind host during the evening window; the zone-pinned block at the bottom of this file is the
+// companion that stays red even on a UTC CI host, where offset arithmetic and UTC agree.
+const hostLocalDay = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const TODAY = hostLocalDay();
 
 let clone;
 beforeAll(() => {
@@ -47,10 +54,20 @@ const backlogPath = (rel) => join(clone, 'backlog', rel);
 const write = (rel, content) => { mkdirSync(join(clone, 'backlog'), { recursive: true }); writeFileSync(backlogPath(rel), content); };
 const read = (rel) => readFileSync(backlogPath(rel), 'utf8');
 
+/**
+ * The child env. `BACKLOG_TZ` is dropped by default so the CLI stamps in the HOST's local zone — the one
+ * `hostLocalDay()` above computes. `overrides` pins it for the zone-pinned cases at the bottom of the file.
+ */
+function childEnv(overrides = {}) {
+  const env = { ...process.env, ...overrides };
+  if (!overrides.BACKLOG_TZ) delete env.BACKLOG_TZ;
+  return env;
+}
+
 /** Run the real CLI subprocess against the throwaway clone; never throws — captures exit code + output. */
-function run(args) {
+function run(args, envOverrides = {}) {
   try {
-    const stdout = execFileSync('node', [BACKLOG_MJS(), ...args, '--json'], { cwd: clone, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdout = execFileSync('node', [BACKLOG_MJS(), ...args, '--json'], { cwd: clone, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: childEnv(envOverrides) });
     return { code: 0, json: JSON.parse(stdout) };
   } catch (e) {
     let json;
@@ -62,7 +79,7 @@ function run(args) {
 /** Run the real CLI WITHOUT `--json` to capture the human-readable stdout (the message text this file asserts on). */
 function runHuman(args) {
   try {
-    const stdout = execFileSync('node', [BACKLOG_MJS(), ...args], { cwd: clone, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdout = execFileSync('node', [BACKLOG_MJS(), ...args], { cwd: clone, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: childEnv() });
     return { code: 0, stdout };
   } catch (e) {
     return { code: typeof e.status === 'number' ? e.status : 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
@@ -258,5 +275,58 @@ describe('backlog.mjs CLI — ephemeral-clone integration smoke (#2273/#2274)', 
   it('an unknown item reference exits 1 without touching the tree', () => {
     const res = run(['claim', '9999']);
     expect(res.code).toBe(1);
+  });
+});
+
+// #2747 — the deliverable is that the REAL CLI stamps the OPERATOR's calendar day, not the runtime's UTC
+// day. The assertions above cannot prove that on a UTC host (CI), where the two agree. This block pins
+// the CLI's stamp under two zones held 25 hours apart, so their calendar days ALWAYS differ, at every
+// instant. A CLI that stamps `new Date().toISOString().slice(0, 10)` (the exact defect this item fixes)
+// returns the same UTC day for both and fails the first assertion — deterministically, on every host.
+// The per-zone expectation is again pure epoch arithmetic, never `localToday()`.
+describe('backlog.mjs CLI — the stamped date follows the operator zone, not UTC (#2747)', () => {
+  const ZONES = [
+    { tz: 'Pacific/Kiritimati', offsetHours: +14 }, // UTC+14, no DST
+    { tz: 'Pacific/Niue', offsetHours: -11 },       // UTC-11, no DST
+  ];
+  /** The calendar day in a FIXED-offset zone, by shifting the epoch — no Intl, no local-date import. */
+  const dayAtOffset = (offsetHours, at = Date.now()) =>
+    new Date(at + offsetHours * 3600_000).toISOString().slice(0, 10);
+
+  it('claim under a UTC+14 pin and a UTC-11 pin stamp DIFFERENT calendar days', () => {
+    const stamped = ZONES.map(({ tz, offsetHours }, i) => {
+      const rel = `95${i}0-tz.md`;
+      write(rel, item({ kind: 'task', status: 'open', dateOpened: '"2026-07-01"' }));
+      const before = dayAtOffset(offsetHours);
+      const res = run(['claim', String(9500 + i * 10)], { BACKLOG_TZ: tz });
+      const after = dayAtOffset(offsetHours);
+      expect(res.code).toBe(0);
+      const m = read(rel).match(/^dateStarted: "(\d{4}-\d{2}-\d{2})"$/m);
+      expect(m, `no dateStarted stamped for ${tz}`).toBeTruthy();
+      // Two samples straddle the (rare) midnight-crossing race; either is correct.
+      expect([before, after]).toContain(m[1]);
+      return m[1];
+    });
+    // 25 hours apart ⇒ the two zones are never on the same calendar day. A UTC stamp makes these equal.
+    expect(stamped[0]).not.toBe(stamped[1]);
+  });
+
+  it('resolve stamps dateResolved in the pinned zone too', () => {
+    write('9530-tz.md', item({ kind: 'task', status: 'active', dateOpened: '"2026-07-01"', dateStarted: '"2026-07-01"' }));
+    const before = dayAtOffset(+14);
+    const res = run(['resolve', '9530'], { BACKLOG_TZ: 'Pacific/Kiritimati' });
+    const after = dayAtOffset(+14);
+    expect(res.code).toBe(0);
+    const m = read('9530-tz.md').match(/^dateResolved: "(\d{4}-\d{2}-\d{2})"$/m);
+    expect(m).toBeTruthy();
+    expect([before, after]).toContain(m[1]);
+  });
+
+  it('an invalid BACKLOG_TZ pin fails the CLI loudly instead of stamping a silently-wrong day', () => {
+    write('9540-tz.md', item({ kind: 'task', status: 'open', dateOpened: '"2026-07-01"' }));
+    const before = read('9540-tz.md');
+    const res = run(['claim', '9540'], { BACKLOG_TZ: 'America/Toronoto' });
+    expect(res.code).not.toBe(0);
+    expect(read('9540-tz.md')).toBe(before); // no half-written stamp
   });
 });

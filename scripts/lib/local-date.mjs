@@ -6,29 +6,54 @@
  * reads UTC, so a UTC-behind operator gets stamped a day ahead during the evening window where it's
  * still "today" for them but already "tomorrow" in UTC.
  *
- * Zone resolution order: `BACKLOG_TZ` env → `TZ` env → the host's resolved IANA zone (`Intl
- * .DateTimeFormat().resolvedOptions().timeZone`). This lets an operator pin their real zone via env when
- * the host clock/zone doesn't already reflect it (e.g. a UTC container), while defaulting to "just work"
- * on a correctly-configured host.
+ * ## Which clock is "the operator's"?
  *
- * Only date-ONLY stamps route through this. Instant timestamps (the claims-ledger `nowIso`) legitimately
- * want full UTC ISO and must NOT be touched.
+ * Node's own local time — the offset `Date` already uses. We deliberately do NOT re-derive a zone NAME
+ * and hand it back to `Intl`: an `Intl.DateTimeFormat` with no `timeZone` option formats in exactly the
+ * zone `Date` is using, whatever produced it, so the stamped day can never disagree with the process's
+ * own local time.
  *
- * #2747 review — TWO hardenings, both from real crash/corruption modes:
+ * That round-trip is not hypothetical (#2747 review finding 1, reproduced on node 22): `TZ` is a POSIX
+ * variable, not an IANA name. With `TZ=GMT+5` POSIX means UTC−5, but
+ * `Intl.DateTimeFormat().resolvedOptions().timeZone` normalises it to the string `"+05:00"` — a VALID
+ * zone meaning UTC+5. Feeding that name back in stamps a day computed 10 hours away from the process's
+ * real local time, i.e. it re-creates the exact bug this item fixes, with the sign flipped. `TZ=+05:00`
+ * diverges the same way (`Date` ignores that form entirely), and `TZ=UTC+8` / `TZ=EST5` make
+ * `resolvedOptions().timeZone` return nothing at all. Formatting with NO zone matched `Date` in every
+ * one of those cases.
  *
- *  1. EVERY candidate zone is VALIDATED before use. `Intl.DateTimeFormat` accepts IANA names only, and
- *     throws `RangeError: Invalid time zone specified` on values that are perfectly legal in `TZ` — the
- *     full POSIX form (`EST5EDT,M3.2.0,M11.1.0`), a `GMT+5` offset spelling, or a simple typo (all three
- *     verified to throw on this runtime). Feeding the raw env value straight in meant EVERY date-stamping
- *     script (`backlog.mjs` claim/resolve/scaffold, `check-backlog-workflow`, `audit-backlog-health`)
- *     hard-crashed on such a host. Each candidate is now probed and skipped if invalid, so a bad `TZ`
- *     degrades to the next source instead of taking the CLI down. `UTC` is the final, always-valid backstop.
+ * So there is exactly ONE knob, and it is not `TZ`:
  *
- *  2. The date is assembled from `formatToParts`, not from a locale's default pattern. The previous code
- *     relied on `sv-SE` happening to render `YYYY-MM-DD`; on a Node built with small-icu that locale is not
- *     available and the format silently degrades to the fallback locale's pattern (e.g. `MM/DD/YYYY`),
- *     which would write a corrupt date into frontmatter rather than fail loudly. Reading the year/month/day
- *     parts and joining them ourselves makes the output shape independent of locale data.
+ *   `BACKLOG_TZ` — an explicit IANA pin (e.g. `America/Toronto`) for the operator whose HOST clock is
+ *   already wrong, typically a UTC container. Unset (the normal case) ⇒ Node's own local time.
+ *
+ * `TZ` needs no rung of its own: Node already derives its local time from it, so the no-zone path honours
+ * it — correctly, including the POSIX forms an IANA lookup mangles.
+ *
+ * ## Loud, never silent
+ *
+ * Every failure mode here writes a WRONG DATE into frontmatter that no gate can spot (it is still a
+ * well-formed `YYYY-MM-DD`), so this module has no silent-degrade paths:
+ *
+ *  - A `BACKLOG_TZ` that `Intl` rejects (a typo, or a POSIX/offset spelling) THROWS. Skipping it silently
+ *    would ignore an explicit pin from the one population that needs it most — the operator whose host
+ *    zone is already wrong — and their evidence that the pin "didn't work" would be identical to never
+ *    having set it (#2747 review finding 2).
+ *  - An explicit `timeZone` argument is used as given; `Intl` throws on a bad one. No swap-in fallback.
+ *  - A missing year/month/day part throws rather than yielding `2026-08-` or `--`.
+ *
+ * ## Shape
+ *
+ * The date is assembled from `formatToParts`, not from a locale's default pattern: relying on `sv-SE`
+ * happening to render `YYYY-MM-DD` breaks on a small-icu Node, where the format silently degrades to the
+ * fallback locale's `MM/DD/YYYY` and writes a corrupt date. Reading the parts makes the shape independent
+ * of locale data.
+ *
+ * ## Scope
+ *
+ * Only date-ONLY stamps route through this — enforced by `scripts/lib/utc-day-slice-scan.mjs`, run from
+ * `check:standards`. Instant timestamps (the claims-ledger `nowIso`) legitimately want full UTC ISO and
+ * must NOT be touched.
  */
 
 /** Is `tz` a timezone `Intl` will actually accept? Pure (no env read). Empty/absent ⇒ false. */
@@ -43,36 +68,52 @@ export function isValidTimeZone(tz) {
 }
 
 /**
- * Resolve the configured operator timezone: BACKLOG_TZ → TZ → host-resolved IANA zone → 'UTC'.
- * Each candidate is validated; an invalid one is SKIPPED (never thrown), so a POSIX-form or typo'd `TZ`
- * degrades instead of crashing every date-stamping script.
+ * The operator's explicit zone pin, or `undefined` meaning "use Node's own local time".
+ *
+ * `undefined` is the normal answer and the correct default: passing no `timeZone` to `Intl` formats in
+ * whatever zone `Date` is using, so the stamp can never disagree with the process's local clock. Only
+ * `BACKLOG_TZ` overrides that, and an invalid `BACKLOG_TZ` THROWS rather than being ignored.
+ *
+ * @param {Record<string, string|undefined>} [env]
+ * @returns {string|undefined} an IANA zone name, or undefined for host-local
  */
-export function resolveTimeZone(env = process.env) {
-  for (const candidate of [env.BACKLOG_TZ, env.TZ]) {
-    if (isValidTimeZone(candidate)) return candidate;
-  }
-  try {
-    const host = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (isValidTimeZone(host)) return host;
-  } catch { /* fall through to the UTC backstop */ }
-  return 'UTC';
+export function backlogTimeZone(env = process.env) {
+  const pin = env.BACKLOG_TZ;
+  if (pin === undefined || pin === '') return undefined;
+  if (!isValidTimeZone(pin))
+    throw new Error(
+      `BACKLOG_TZ="${pin}" is not a time zone Intl accepts, so backlog dates cannot be stamped. `
+      + 'Use an IANA name (e.g. "America/Toronto") — POSIX spellings like "EST5EDT,M3.2.0,M11.1.0" or '
+      + '"GMT+5" are not zone names. Unset BACKLOG_TZ to stamp in the host\'s own local time.');
+  return pin;
 }
 
 /**
- * Format a Date (default: now) as a `YYYY-MM-DD` calendar date in the given (or resolved) timezone.
- * Assembled from `formatToParts` so the shape never depends on a locale's default pattern (see header).
- * An invalid explicit `timeZone` falls back to the resolved zone rather than throwing.
+ * Format a given instant as a `YYYY-MM-DD` calendar date.
+ *
+ * @param {Date} date the instant to format — REQUIRED (for "now", call `localToday()`)
+ * @param {string|undefined} [timeZone] IANA zone; omit for the `BACKLOG_TZ`-pinned-or-host-local default.
+ *   An invalid value throws (via `Intl`); it is never swapped for something else.
+ * @returns {string}
  */
-export function localDateString(date = new Date(), timeZone = resolveTimeZone()) {
-  const tz = isValidTimeZone(timeZone) ? timeZone : resolveTimeZone();
+export function localDateString(date, timeZone = backlogTimeZone()) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime()))
+    throw new TypeError(`localDateString(date) requires a valid Date; got ${String(date)}`);
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(date);
-  const get = (type) => (parts.find((p) => p.type === type) || {}).value || '';
+  const get = (type) => {
+    const part = parts.find((p) => p.type === type);
+    if (!part) throw new Error(`localDateString: no "${type}" part in the formatted date (timeZone=${timeZone ?? 'host'})`);
+    return part.value;
+  };
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
-/** The operator's local "today" as `YYYY-MM-DD`, per the resolved timezone. */
-export function localToday(timeZone = resolveTimeZone()) {
-  return localDateString(new Date(), timeZone);
+/**
+ * The operator's local "today" as `YYYY-MM-DD` — THE idiom every backlog date-only stamp must use.
+ * Resolves the zone once and reads the clock once.
+ */
+export function localToday() {
+  return localDateString(new Date());
 }
