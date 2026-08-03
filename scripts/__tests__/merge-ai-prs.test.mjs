@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, latestRequiredCheck, rollupRowKind, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, computeNetDiffPaths, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
+import { isAiAuthor, resolveIdsForLandedPass, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, latestRequiredCheck, rollupRowKind, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, computeNetDiffPaths, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -2456,5 +2456,43 @@ describe('rollupRowKind — the union member comes off `__typename`, it is not g
   it('an all-untagged rollup still resolves latest-wins (fixtures / re-normalised rows keep working)', () => {
     const pr = { statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED' }, { name: 'test', conclusion: 'SUCCESS' }] };
     expect(isRequiredCheckGreen(pr)).toBe(true);
+  });
+});
+
+describe('#2899 A5 — resolveIdsForLandedPass: which ids the LABEL lander resolves after JIT numbering', () => {
+  // Context: this drain single-sourced lane-drain's NUMBERING but never its RESOLVING, so it assigned the NNN
+  // and left `status:` untouched — delivered work kept ranking Tier-A agent-ready and got re-packed (#2880,
+  // #2450). The flip now runs here, and it must target the id the card carries AFTER numbering, not before.
+  it('re-keys a hash-born item to the NNN numbering just minted for it', () => {
+    expect(resolveIdsForLandedPass({
+      landedItems: new Set(['xdxlevu']),
+      assigned: [{ hash: 'xdxlevu', nnn: '2899' }],
+    })).toEqual(['2899']);
+  });
+
+  it('leaves an already-numeric item alone', () => {
+    expect(resolveIdsForLandedPass({ landedItems: new Set([2880]), assigned: [] })).toEqual([2880]);
+  });
+
+  it('KEEPS a hash with no assignment rather than dropping it', () => {
+    // Numbering can legitimately be a no-op (the card landed already-numbered, or a concurrent lander minted
+    // it). Dropping the id here would silently re-open the stranded-item hole this closes; `resolveLandedItem`
+    // is itself a safe no-op when the path does not resolve, so keeping it costs nothing.
+    expect(resolveIdsForLandedPass({ landedItems: new Set(['xnomatch']), assigned: [{ hash: 'xother', nnn: '1' }] }))
+      .toEqual(['xnomatch']);
+  });
+
+  it('de-duplicates when a hash and its minted NNN both appear, preserving first-seen order', () => {
+    expect(resolveIdsForLandedPass({
+      landedItems: ['xaaa', 'xbbb', '2900', 'xaaa'],
+      assigned: [{ hash: 'xaaa', nnn: '2900' }, { hash: 'xbbb', nnn: '2901' }],
+    })).toEqual(['2900', '2901']);
+  });
+
+  it('is empty for a pass that landed nothing, and tolerates junk inputs', () => {
+    expect(resolveIdsForLandedPass({ landedItems: new Set(), assigned: [] })).toEqual([]);
+    expect(resolveIdsForLandedPass()).toEqual([]);
+    expect(resolveIdsForLandedPass({ landedItems: [null, undefined, 'x1'], assigned: null })).toEqual(['x1']);
+    expect(resolveIdsForLandedPass({ landedItems: ['x1'], assigned: [{ hash: 'x1' }, null, { nnn: '5' }] })).toEqual(['x1']);
   });
 });

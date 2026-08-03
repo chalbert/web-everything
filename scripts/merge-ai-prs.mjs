@@ -109,7 +109,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
-import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor } from './lane-drain.mjs';
+import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
 import { withNumberingLock, withLandWriteLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2683) the merge-write mutex (withLandWriteLock, same lock key) + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
@@ -641,6 +641,42 @@ export function joinImplToCouples(verdicts) {
     v.joinedToCouple = couple.item;                 // marks an impl PR gated via its couple (diagnostics/tests)
   }
   return list;
+}
+
+/**
+ * #2899 A5 — which item ids should the label lander RESOLVE after this pass's JIT numbering? Pure.
+ *
+ * `landedItems` is the pass's `landedThisPass` set — item ids keyed on the WE-CARRIER merge, so each one names
+ * a couple that fully landed (WE-last ⇒ the impl half merged first, #96). But those are the ids the manifest
+ * carried, and a hash-born item (#2288) has JUST been renamed to its real `<NNN>` by `numberPendingHashes` — so
+ * resolving under the pre-numbering hash would look for a file that no longer exists. Re-key every hash through
+ * `assigned` (`[{hash, nnn}]`, the numbering's own report) and drop duplicates, preserving first-seen order so
+ * the emitted log line is stable.
+ *
+ * A hash with NO `assigned` entry is kept AS-IS rather than dropped: numbering can legitimately be a no-op (the
+ * card landed already-numbered, or a concurrent lander minted it), and `resolveLandedItem` is itself a safe
+ * no-op when the path does not resolve — whereas dropping it would silently re-open the stranded-item hole this
+ * closes.
+ *
+ * @param {{landedItems?: Iterable<number|string>, assigned?: Array<{hash:(string|number), nnn:(string|number)}>}} o
+ * @returns {Array<number|string>} ids to flip, de-duplicated, in first-seen order
+ */
+export function resolveIdsForLandedPass({ landedItems = [], assigned = [] } = {}) {
+  const byHash = new Map();
+  for (const a of (Array.isArray(assigned) ? assigned : [])) {
+    if (a && a.hash != null && a.nnn != null) byHash.set(String(a.hash), a.nnn);
+  }
+  const out = [];
+  const seen = new Set();
+  for (const raw of (landedItems || [])) {
+    if (raw == null) continue;
+    const id = byHash.has(String(raw)) ? byHash.get(String(raw)) : raw;
+    const key = String(id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(id);
+  }
+  return out;
 }
 
 /**
@@ -2774,15 +2810,38 @@ async function runCli() {
     // the TTL-bounded numbering mutex so a concurrent drain/land never mints the same NNN off the same base.
     const numLock = withNumberingLock(() => {
       const n = numberPendingHashes(process.cwd());
-      if (n.committed) {
+      // #2899 A5 — RESOLVE-ON-LAND for the LABEL lander. This drain single-sourced lane-drain's NUMBERING but
+      // never its RESOLVING, so it assigned the NNN and left `status:` untouched — delivered work kept ranking
+      // Tier-A agent-ready and was re-packed into batch after batch (observed on #2880 / #2450, each costing a
+      // full claim+lane+investigate cycle to change one frontmatter line). Flip every item whose WE CARRIER
+      // merged this pass, via the SAME `resolveLandedItem` lane-drain uses — one home, two callers.
+      //
+      // Ordering matters and is deliberate: this runs INSIDE the numbering critical section and AFTER
+      // `numberPendingHashes`, so a hash-born item is flipped under its freshly-minted `<NNN>` (the id its file
+      // now carries), and `publish:false` makes the flip commits ride the SAME push as the numbering commit —
+      // so main never shows a numbered-but-unresolved card. `sync:false` because this path already synced and
+      // holds an un-pushed numbering commit that a `pull --ff-only` has no business touching.
+      //
+      // `landedThisPass` is keyed on the WE-CARRIER merge (`c.hasManifest`), which is exactly the right gate:
+      // WE-last ordering means the carrier merges only after its impl half did, so this can never resolve a
+      // couple whose implementation failed to land (#96). Best-effort/non-fatal throughout, as numbering is.
+      const resolvedOnLand = [];
+      for (const id of resolveIdsForLandedPass({ landedItems: landedThisPass, assigned: n.assigned })) {
+        try {
+          const flip = resolveLandedItem(process.cwd(), id, { sync: false, publish: false });
+          if (flip.flipped) resolvedOnLand.push(id);
+        } catch { /* a single card's flip never unwinds a green land */ }
+      }
+      if (n.committed || resolvedOnLand.length) {
         try {
           execFileSync('git', ['push', 'origin', 'HEAD:main'], { env: { ...process.env, MAIN_PUSH_OK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
-          if (!AS_JSON) process.stderr.write(`  ✓ JIT-numbered ${n.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} + pushed to main (#2288)\n`);
+          if (!AS_JSON && n.committed) process.stderr.write(`  ✓ JIT-numbered ${n.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} + pushed to main (#2288)\n`);
+          if (!AS_JSON && resolvedOnLand.length) process.stderr.write(`  ✓ resolved on land ${resolvedOnLand.map((i) => `#${i}`).join(', ')} + pushed to main (#2899/#2748)\n`);
         } catch (e) {
-          if (!AS_JSON) process.stderr.write(`  ⚠ JIT numbering committed locally but push FAILED (${String(e.message || e).split('\n')[0]}) — push main by hand\n`);
+          if (!AS_JSON) process.stderr.write(`  ⚠ numbering/resolve committed locally but push FAILED (${String(e.message || e).split('\n')[0]}) — push main by hand\n`);
         }
       }
-      return n;
+      return { ...n, resolvedOnLand };
     });
     numbered = numLock.result;
     if (numLock.contended && !AS_JSON) process.stderr.write(`  ⚠ numbering mutex not acquired (held by ${numLock.heldBy || '?'}) — numbered without it (#2391); the #2318 duplicate-NNN tripwire is the backstop\n`);

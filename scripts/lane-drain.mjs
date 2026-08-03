@@ -410,10 +410,18 @@ function runDrainOne() {
   // ordering means we only get here after impl merged, so this can never false-resolve a failed impl half
   // (#96). A flip that REFUSES (decision-needs-codifiedTo / epic-open-child / illegal status) leaves
   // resolveReachable false → the existing reopen-on-fail path below handles it exactly as before.
+  // #2899 A2 — a `null` (couldn't tell) is NOT silently "do nothing". The old guard was
+  // `if (resolveReachable === false)`, so the two distinct verdicts collapsed at the call site: a couldn't-tell
+  // read skipped the flip with no attempt and no warning — and couldn't-tell was the NORMAL verdict for a
+  // freshly JIT-numbered item, whose card A1 could not locate. Attempt the flip on `false` OR `null` and re-read:
+  // the attempt is safe either way (an already-`resolved` card is an explicit no-op, and an illegal transition
+  // REFUSES and leaves the reopen path below untouched), so trying on couldn't-tell can only turn an unknown
+  // into a known. A `null` that SURVIVES the retry falls through to the advisory-proceed below, as before.
   let resolveOwnedByDrain = false;
-  if (resolveReachable === false) {
+  if (resolveReachable !== true) {
     const flip = resolveLandedItem(CWD, num);
     if (flip.flipped) { resolveOwnedByDrain = true; resolveReachable = readResolveReachable(CWD, num); }
+    else if (flip.alreadyResolved) resolveReachable = readResolveReachable(CWD, num); // card is resolved locally — re-read main rather than trust the stale verdict
   }
 
   // Gate the single clear point on the resolve actually being on main (review #3): if the check is
@@ -798,13 +806,35 @@ function reopenStrandedItem(CWD, num) {
   return { reopened: true, pushed };
 }
 
+// #2899 A1 — find an item's card in a git TREE (default the freshly-fetched `origin/main`), not in the local
+// INDEX. `git ls-files` answers "what does THIS checkout track", which is the wrong question when the caller is
+// trying to read main: a brand-new JIT-numbered file (#2288) has never existed in the local index under its
+// `<NNN>` name, so `ls-files` returned nothing and every downstream read collapsed to "couldn't tell". Reading
+// the tree asks the question the caller actually means. Pure-ish (one git read). Returns a repo-relative path
+// or null.
+export function cardPathInTree(CWD, num, { tree = 'origin/main', exec = null } = {}) {
+  const tg = (a) => {
+    const run = typeof exec === 'function' ? exec : execFileSync;
+    try { return String(run('git', a, { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').trim(); } catch { return null; }
+  };
+  const listed = tg(['ls-tree', '--name-only', `${tree}:backlog`]);
+  if (listed == null) return null;
+  const prefix = `${num}-`;
+  const hit = listed.split('\n').map((s) => s.trim()).filter(Boolean)
+    .find((f) => f.endsWith('.md') && f.startsWith(prefix));
+  return hit ? `backlog/${hit}` : null;
+}
+
 // #2748 — is the item's WE resolve reachable on origin/main RIGHT NOW? Fetches, finds the backlog file, reads
 // `status:` FRONTMATTER-strict (via resolveReachableFromBody). Extracted so the drain can read it BEFORE and
 // AFTER an on-land flip (below). Returns true/false, or null when the body can't be fetched (couldn't tell).
+// #2899 A1 — the card is located via `cardPathInTree` (the origin/main TREE) rather than `git ls-files` (the
+// local INDEX): for a freshly JIT-numbered item the `<NNN>`-named file is on main but was never in this
+// checkout's index, so the index probe reported it absent and the caller silently skipped the flip.
 function readResolveReachable(CWD, num) {
   const tg = (a) => { try { return execFileSync('git', a, { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); } catch { return null; } };
   tg(['fetch', 'origin', '--quiet']);
-  const path = (tg(['ls-files', `backlog/${num}-*.md`]) || '').split('\n').filter(Boolean)[0];
+  const path = cardPathInTree(CWD, num);
   if (!path) return null;
   return resolveReachableFromBody(tg(['show', `origin/main:${path}`]));
 }
@@ -818,8 +848,22 @@ function readResolveReachable(CWD, num) {
 // epic with open children, correctly REFUSES → the caller falls back to the reopen path). Frontmatter-strict
 // throughout (#2603). Mirrors reopenStrandedItem's transport: it runs in the drain's LANE clone, so the backlog
 // write-guard permits the mutation (same as the reopen path). Best-effort. Returns { flipped, alreadyResolved }.
-function resolveLandedItem(CWD, num) {
-  syncMain(CWD); // reconcile against merged origin/main before reading/writing the card's status
+//
+// #2899 A5 — EXPORTED, because there are TWO landers and only this one used to resolve. The LABEL lander
+// (`we:scripts/merge-ai-prs.mjs` — the one the `/drain` skill actually runs) already single-sources this file's
+// `numberPendingHashes`, but had no resolve at all: it assigned the NNN and never touched `status:`, which is
+// why delivered work kept ranking Tier-A agent-ready and got re-packed. It now imports THIS function rather
+// than forking one, so the flip has exactly one home no matter which drain lands the couple.
+// The two options exist only because the two callers' transports differ; the DECISION logic is shared:
+//   • `sync`    — lane-drain pulls merged origin/main before reading the card. The label lander has already
+//                 synced (and holds an un-pushed numbering commit), so it passes `sync:false`.
+//   • `publish` — lane-drain publishes each flip itself. The label lander passes `publish:false` so the flip
+//                 commit rides the SAME `HEAD:main` push as the numbering commit it follows (one push, and no
+//                 window where a numbered-but-unresolved card is on main).
+export function resolveLandedItem(CWD, num, { sync = true, publish = true } = {}) {
+  if (sync) syncMain(CWD); // reconcile against merged origin/main before reading/writing the card's status
+  // The WORKING-TREE path is the right probe here (unlike readResolveReachable's tree read, #2899 A1): this
+  // function READS and COMMITS the file in CWD, and post-numbering the index already carries the `<NNN>` name.
   const path = (quietGit(CWD, ['ls-files', `backlog/${num}-*.md`]) || '').split('\n').filter(Boolean)[0];
   if (!path) return { flipped: false, alreadyResolved: false };
   let body = null;
@@ -829,8 +873,9 @@ function resolveLandedItem(CWD, num) {
   catch { return { flipped: false, alreadyResolved: false }; } // illegal from-status / decision-needs-codifiedTo / epic-open-child / guard → leave it (caller reopens)
   // Scope the commit to ONLY this item's backlog file (explicit `-- <path>`) — never a bare commit that would
   // absorb a foreign staged hunk (the shared-index commit race, as finalizeLand/reopenStrandedItem guard).
-  if (quietGit(CWD, ['commit', '-m', `drain: resolve #${num} on land (#2748)`, '--', path]) != null) publishMain(CWD);
-  return { flipped: true, alreadyResolved: false };
+  const committed = quietGit(CWD, ['commit', '-m', `drain: resolve #${num} on land (#2748)`, '--', path]) != null;
+  if (committed && publish) publishMain(CWD);
+  return { flipped: true, alreadyResolved: false, committed };
 }
 
 // #2748 — RELEASE-ON-LAND: hand the item's lane lease back to the pool in EVERY pool it was acquired in (a
