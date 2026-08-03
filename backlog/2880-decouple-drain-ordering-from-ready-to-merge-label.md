@@ -1,8 +1,10 @@
 ---
 bornAs: xq985wu
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateStarted: "2026-08-03"
+dateResolved: "2026-08-03"
 tags: [conveyor, drain, merge-ordering, review-integrity]
 ---
 
@@ -85,3 +87,36 @@ Do NOT strip `ready-to-merge` here — that is #984's job. Do NOT touch
   ready/deferred partition as today for the non-held items.
 - **AC3 — the wiring.** `orderExtraOpenItems` is sourced from the label-blind
   full-open context on a full sweep, not gated on `onlyPr`.
+
+## Progress
+
+**Delivered on `main` before this item was numbered — verified, not rebuilt.**
+
+The work shipped as PR #999 (merged 2026-08-02) under this item's `bornAs` hash
+`xq985wu`; the at-land JIT-number pass (commit `b4894dd8`) assigned #2880 but
+never flipped `status`. So the item read `open` while its code was already live.
+Verification, all against `origin/main`:
+
+- **The wiring is in place.** `we:scripts/merge-ai-prs.mjs` carries
+  `const orderExtraOpenItems = openPrContext.openItems;` — the label-blind
+  full-open set feeds `planLabelDrain`'s `extraOpenItems` on **every** pass,
+  no longer `onlyPr ? … : null`.
+- **All three ACs have live oracles**, in the
+  `#xq985wu decouple merge-ordering from the ready-to-merge label scope` describe
+  block of `we:scripts/__tests__/merge-ai-prs.test.mjs`: AC1 (dependent defers on
+  a blocker present only via `extraOpenItems`) with its mirror (the same
+  dependent frees once the blocker leaves both sets, proving the defer comes from
+  set membership), AC2 (a superset partitions identically to the baseline), and
+  AC3 as a source-contract assertion that the assignment reads
+  `openPrContext.openItems` and does **not** mention `onlyPr`.
+- **The review-caught liveness regression is also fixed and tested.** The `/review`
+  pass on PR #999 found that freezing ordering onto the full-open superset made
+  `blockWait` consult `openItems` alone, so an item landed this pass or proven on
+  main kept deferring its dependents forever. `blockWait` now honours
+  `landedThisPass` / `provenOnMain` first — the same precedence `stackParents`
+  already had — with F1/F2 contract tests at that seam.
+- The `we:scripts/__tests__/merge-ai-prs.test.mjs` suite runs green: **261 passed**.
+
+The `ready-to-merge` strip itself stays out of scope and remains #984/#2832's job,
+exactly as the fix note requires. Its follow-up — a *degraded* read of the now-sole
+ordering source being trusted as healthy — is filed separately as #2885.
