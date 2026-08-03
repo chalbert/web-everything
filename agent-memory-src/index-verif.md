@@ -17,3 +17,4 @@ Verification & Proof cluster — open a leaf with `node scripts/memory-resolve.m
 - 129. Prove Before Claiming Fixed — never say 'fixed' without a runtime test on the REAL surface; #1207
 - [Verify "ratified #NNNN" against live status](verify-ratified-citation-against-live-status.md) — "per ratified #NNNN" can be false; check the cited item's status, encode blockedBy if active; #2027
 - [Review a parked PR against CURRENT main, not `gh pr diff`](review-parked-pr-diff-against-current-main.md) — `gh pr diff` renders the stale merge-base; siblings may have already landed most of it, so diff the head against current main to get the true review surface (a gate-self touch can be illusory); WE #798
+- 146. Prompt Sink Resists Sanitising — author data in a prompt that JUDGES that author can't be sanitised (LLM sink ≠ shell) or corroborated (existence ≠ identity); delete the channel, carry a boolean; #2457
