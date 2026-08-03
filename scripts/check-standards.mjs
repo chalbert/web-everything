@@ -38,6 +38,7 @@ import { loadSemantics } from './lib/semantics-loader.cjs';
 import { loadPresets } from './lib/presets-loader.cjs';
 import { loadDataRegistry } from './lib/registry-loader.cjs';
 import { loadAdapters } from './lib/adapters-loader.cjs';
+import { localToday } from './lib/local-date.mjs';
 import {
   BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, validatePolyglotWideningGate, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance, computeDesignKnowledgeConformance,
@@ -842,7 +843,7 @@ for (const item of backlog) {
 // (standalone: `npm run check:backlog-workflow`).
 try {
   const { validateWorkflowInvariants } = require('./lib/workflow-invariants.cjs');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const { errors: we, warnings: ww } = validateWorkflowInvariants(backlog, { today });
   for (const e of we) err(e.message, e.descriptor);
   for (const w of ww) warn(w.message, w.descriptor);
