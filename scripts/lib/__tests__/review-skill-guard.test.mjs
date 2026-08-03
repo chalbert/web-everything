@@ -7,7 +7,7 @@
  *   callers that come through the module. Observed on PR #983 — five re-parks.
  */
 import { describe, it, expect } from 'vitest';
-import { checkReviewLabelSingleHome, isGuardedDoc } from '../review-skill-guard.mjs';
+import { checkReviewLabelSingleHome, isGuardedDoc, GUARDED_DOC_PREFIXES } from '../review-skill-guard.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
@@ -59,20 +59,6 @@ describe('checkReviewLabelSingleHome — what it must NOT flag', () => {
     expect(errors).toHaveLength(0);
   });
 
-  it('allows an ELIDED pattern — a doc explaining the rule must be able to name it', () => {
-    // `…` is not valid shell, so an elided form is a description. The gate's own first run flagged the
-    // paragraph documenting it; this cell pins the carve-out.
-    const { errors } = checkReviewLabelSingleHome(doc(
-      'check:standards errors on a raw `gh pr edit … --add-label review:*` in this file\n',
-    ));
-    expect(errors).toHaveLength(0);
-  });
-
-  it('but the carve-out does not launder a REAL command that merely trails an ellipsis', () => {
-    const { errors } = checkReviewLabelSingleHome(doc('gh pr edit 12 --add-label review:accepted … then drain\n'));
-    expect(errors).toHaveLength(1);
-  });
-
   it('ignores docs outside the guarded prefixes', () => {
     expect(isGuardedDoc('reports/x.md')).toBe(false);
     expect(isGuardedDoc('skills-src/review/SKILL.md')).toBe(true);
@@ -102,5 +88,61 @@ describe('the live review skill obeys its own rule', () => {
   it('and it does route through the single home', () => {
     const content = readFileSync(join(ROOT, 'skills-src/review/SKILL.md'), 'utf8');
     expect(content).toContain('scripts/review-set-label.mjs');
+  });
+});
+
+describe('wrapped commands — the shape that hid the real instance (#1005 review, major 2)', () => {
+  // The VERBATIM bytes from we:skills-src/drain/SKILL.md — a real raw swap on the auto-land path, wrapped so
+  // `--add-label` ends one line and `review:accepted` opens the next. The line-anchored first cut MISSED this
+  // and flagged a benign note elsewhere in the same file instead, then the PR claimed it had caught this one.
+  const WRAPPED = [
+    '       on the combined verdict: **combined `land`** (BOTH the panel and the independent validator accepted) →',
+    '       apply `redteam:accepted` THEN `review:accepted` (`gh pr edit <num> --repo <repo> --add-label',
+    '       redteam:accepted --add-label review:accepted`) and **re-run the drain** — the non-author-accepts invariant',
+  ].join('\n');
+
+  // The benign note from the SAME file — the one the first cut actually flagged. It is prose about label
+  // provisioning, not an instruction to swap, and it must stay clean.
+  const BENIGN = '> if it is missing, `gh pr edit --add-label review:human` silently no-ops. Ensure it exists once:';
+
+  it('FLAGS the wrapped auto-land swap', () => {
+    const { errors } = checkReviewLabelSingleHome(doc(WRAPPED));
+    expect(errors).toHaveLength(1);
+  });
+
+  it('does NOT flag the label-must-exist note', () => {
+    // It is a bare mention with no swap intent; the rule keys on an edit that carries a review label, and this
+    // one does carry it — so the honest statement is that it IS matched and the DRAIN FILE is out of scope.
+    // Assert the file-scope decision instead of pretending the regex distinguishes prose here.
+    expect(isGuardedDoc('skills-src/drain/SKILL.md')).toBe(false);
+    expect(checkReviewLabelSingleHome([{ file: 'skills-src/drain/SKILL.md', content: BENIGN }]).errors).toHaveLength(0);
+  });
+
+  it('does not run a match across a paragraph break', () => {
+    const across = 'gh pr edit 12 --repo x/y\n\nunrelated paragraph mentioning --add-label review:accepted';
+    expect(checkReviewLabelSingleHome(doc(across)).errors).toHaveLength(0);
+  });
+
+  it('reports EVERY occurrence, not just the first on a line or in a file', () => {
+    const two = 'gh pr edit 1 --add-label review:accepted\nand gh pr edit 2 --add-label review:changes\n';
+    expect(checkReviewLabelSingleHome(doc(two)).errors).toHaveLength(2);
+  });
+
+  it('an elided command is NOT exempt — the carve-out is gone (#1005 review, major 3)', () => {
+    // A fully runnable template with an elision slipped through the old carve-out.
+    const runnable = 'gh pr edit <PR> --repo … --add-label review:accepted --remove-label review:pending';
+    expect(checkReviewLabelSingleHome(doc(runnable)).errors).toHaveLength(1);
+    // And an elided mention no longer launders a real command later on the same line.
+    const laundered = 'never `gh pr edit … --add-label review:*`; instead gh pr edit 12 --add-label review:accepted';
+    expect(checkReviewLabelSingleHome(doc(laundered)).errors.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('the fs walk cannot drift from the guarded set', () => {
+  it('GUARDED_DOC_PREFIXES is the single source the check-standards walk derives its roots from', () => {
+    // Pins minor 1: the walk must not hardcode a second copy, or a widening here silently no-ops.
+    const source = readFileSync(join(ROOT, 'scripts/check-standards.mjs'), 'utf8');
+    expect(source).toContain('GUARDED_DOC_PREFIXES.map');
+    expect(source).not.toMatch(/scanDirs = \['skills-src', 'docs\/agent'\]/);
   });
 });

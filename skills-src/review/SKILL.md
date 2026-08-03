@@ -61,16 +61,17 @@ applies a label). The same module also renders the operator-facing notice for yo
      fix back to the **author lane** (the drain does no editing here — that convergence loop is v2, epic #2285).
    - The CLI **refuses** an `accepted` verdict on a `review:human` PR and changes nothing (INVARIANT 2). That
      refusal is the gate-self protection, and it only binds callers that come through this module — which is
-     exactly why the swap must not be hand-rolled. When a human genuinely clears a gate-self PR, drop
-     `review:human` deliberately as a separate, stated act; do not route around the refusal to make it quiet.
+     exactly why the swap must not be hand-rolled. Clearing a gate-self PR has **no tool yet** (`x58tjn2`): until
+     it does, stop and hand the decision to the operator rather than routing around the refusal to make it quiet.
 
-   **Why not `gh pr edit` directly.** Two things ride on the CLI that a raw label edit silently drops. (a) The
-   `reviewed-sha` marker: it is the ONLY record of which tree the acceptance covered, and at land the drain
-   reads it with `parseReviewedSha` while `acceptanceCoversHead` (#2409) refuses an accept whose head has since
-   advanced. Omit it and `parseReviewedSha` takes the LATEST marker from ANY comment — typically the drain's own
+   **Why not a raw label edit.** Two things ride on the CLI that adding the label by hand silently drops.
+   (a) The `reviewed-sha` marker: it is the ONLY record of which tree the acceptance covered, and at land the
+   drain reads it with `parseReviewedSha` while `acceptanceCoversHead` (#2409) refuses an accept whose head has
+   since advanced. Without it `parseReviewedSha` takes the LAST marker in ANY comment — typically the drain's own
    older advisory stamp — so your accept reads as stale and the PR is re-parked (observed on #983: five
-   re-parks). (b) INVARIANT 2, above. `check:standards` errors on a raw `gh pr edit … --add-label review:*` in
-   this file (#2882), so the hand-rolled path cannot come back.
+   re-parks). Note the direction: the CLI puts its stamp **last** and neutralises any marker your body quotes,
+   precisely because the reader is last-match-wins. (b) INVARIANT 2, above. `check:standards` errors when this
+   file spells a hand-rolled review-label edit (#2882), so the raw path cannot come back.
 
 5. **The findings file you pass as `--body-file`** is the durable, readable record of the verdict on the PR —
    marked clearly as the human decision so it is never mistaken for the drain's `🤖 advisory AI review

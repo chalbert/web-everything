@@ -28,7 +28,7 @@ import { checkDemos } from './check-demos.mjs';
 import { buildReport, source as reportSource, finding as reportFinding, section as reportSection } from './lib/buildReport.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
 import { checkVerdictTotality } from './lib/verdict-totality.mjs';
-import { checkReviewLabelSingleHome } from './lib/review-skill-guard.mjs';
+import { checkReviewLabelSingleHome, GUARDED_DOC_PREFIXES } from './lib/review-skill-guard.mjs';
 import { VERDICTS } from './lib/jury-core.mjs';
 import { loadIntents } from './lib/intents-loader.cjs';
 import { loadResearch } from './lib/research-loader.cjs';
@@ -1691,7 +1691,11 @@ try {
 // re-parks, and nothing else would have caught the invariant gap — no workflow references the review labels.
 // Pure rule in `lib/review-skill-guard.mjs`; the fs walk stays here (mirrors the gate above).
 {
-  const scanDirs = ['skills-src', 'docs/agent'];
+  // DERIVED from the exported prefix list, never a second hardcoded copy — hardcoding the roots here is the same
+  // two-readers-of-one-contract defect this rule exists to prevent, and it fails in the worst direction: widening
+  // GUARDED_DOC_PREFIXES would silently no-op because the walk never visits the new root, with every unit test
+  // still green (they feed fixtures and bypass the walk entirely). PR #1005 review, minor 1.
+  const scanDirs = [...new Set(GUARDED_DOC_PREFIXES.map((p) => p.replace(/\/+$/, '')))];
   const SKIP_DIRS = new Set(['node_modules', '.git']);
   const walkDocs = (dir, acc = []) => {
     for (const name of readdirSync(dir, { withFileTypes: true })) {
