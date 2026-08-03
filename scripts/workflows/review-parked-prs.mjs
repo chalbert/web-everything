@@ -67,27 +67,9 @@
 export const meta = {
   name: 'review-parked-prs',
   description:
-    'Review the drain\'s PARKED PRs in one launch, running the REAL editor↔reviewer convergence loop (#2639). Per '
-    + 'parked PR: a fresh-context multi-lens panel (one agent per lens: correctness/security/simplicity/'
-    + 'standards-conformance — correctness and security are mandatory) judges one shared diff snapshot; a reduce '
-    + 'step shells the shared review core (review-core-cli reduce --round) to a verdict + disposition + the '
-    + 'negotiation OUTCOME (land/continue/escalate, from deriveNegotiationOutcome); on `continue` an EDITOR subagent '
-    + '(seeded by review-core-cli mandate --editor = buildEditorMandate) fixes each finding or dismisses it with a '
-    + 'stated reason and pushes the revision to the SAME PR branch, and the panel RE-reviews it next round — until '
-    + 'it converges (accept → land) or hits the per-care-band round cap / needs-human (escalate → review:human). The '
-    + 'bound is passes, not time (no clock); the cap is panelRigorForCareLevel.rounds, never above '
-    + 'NEGOTIATION_ROUND_CAP. Returns a ledger of { pr, repo, disposition, verdict, lensVerdicts, commentBody, '
-    + 'rounds, outcome, dismissedFindings } — it NEVER applies a label, posts a comment, or merges (the operator '
-    + 'decides what a verdict does; the "decisions stay in the loop" boundary of epic #2418). Reviews the '
-    + 'agent-clearable review:pending class ONLY — a review:human PR (its labels re-fetched fresh on every path) is '
-    + 'filtered out and never touched (INVARIANT 2). A mandatory reviewer that fails to run degrades that round to '
-    + 'needs-human → escalate — a dead reviewer never reads as accept. INVARIANT: a `land` outcome means the final '
-    + 'diff was signed off by a fresh-context panel that did not author it.',
+    'Review the drain\'s PARKED PRs in one launch, running the REAL editor↔reviewer convergence loop (#2639). Per parked PR: a fresh-context multi-lens panel (one agent per lens: correctness/security/simplicity/standards-conformance — correctness and security are mandatory) judges one shared diff snapshot; a reduce step shells the shared review core (review-core-cli reduce --round) to a verdict + disposition + the negotiation OUTCOME (land/continue/escalate, from deriveNegotiationOutcome); on `continue` an EDITOR subagent (seeded by review-core-cli mandate --editor = buildEditorMandate) fixes each finding or dismisses it with a stated reason and pushes the revision to the SAME PR branch, and the panel RE-reviews it next round — until it converges (accept → land) or hits the per-care-band round cap / needs-human (escalate → review:human). The bound is passes, not time (no clock); the cap is panelRigorForCareLevel.rounds, never above NEGOTIATION_ROUND_CAP. Returns a ledger of { pr, repo, disposition, verdict, lensVerdicts, commentBody, rounds, outcome, dismissedFindings } — it NEVER applies a label, posts a comment, or merges (the operator decides what a verdict does; the "decisions stay in the loop" boundary of epic #2418). Reviews the agent-clearable review:pending class ONLY — a review:human PR (its labels re-fetched fresh on every path) is filtered out and never touched (INVARIANT 2). A mandatory reviewer that fails to run degrades that round to needs-human → escalate — a dead reviewer never reads as accept. INVARIANT: a `land` outcome means the final diff was signed off by a fresh-context panel that did not author it.',
   whenToUse:
-    'Invoked to review the PRs the drain parked with review:pending, as one batched launch instead of the '
-    + 'hand-run review+fix+re-review steps per PR. NOT for a review:human PR (only a human clears those — use '
-    + '/review). It runs the editor↔reviewer convergence loop and produces converged verdicts for the operator to '
-    + 'act on; it never lands or labels anything itself.',
+    'Invoked to review the PRs the drain parked with review:pending, as one batched launch instead of the hand-run review+fix+re-review steps per PR. NOT for a review:human PR (only a human clears those — use /review). It runs the editor↔reviewer convergence loop and produces converged verdicts for the operator to act on; it never lands or labels anything itself.',
   phases: [
     { title: 'Discover', detail: 'collect the review:pending parked PRs (from args, or `gh pr list --label review:pending` across the constellation repos), re-fetch each candidate\'s CURRENT labels, and DROP any review:human / label-unverifiable PR (fail-closed, INVARIANT 2)' },
     { title: 'Converge', detail: 'per PR, the bounded editor↔reviewer loop: fetch the diff + escalation reason ONCE, read the advisory care band (review-core-cli rigor) to dial the jury size AND the round cap, then loop — fan out jurorsPerLens fresh-context reviewer(s) per lens over the current diff snapshot (reduced by diversity-selection, #2567) → reduce to verdict + OUTCOME (review-core-cli reduce --round = deriveNegotiationOutcome) → on `continue`, a GROUNDED juror-invite-on-discovery (#2640) grows the jury by its delta (review-core-cli invite; raise care → recompute rigor → spawn only the delta, spends a round, never resets, ceiling-bounded) and re-reviews the same diff, ELSE an editor subagent (mandate --editor = buildEditorMandate) fixes/dismisses each finding and pushes to the SAME PR branch → re-fetch + re-review — until `land` (accept) or `escalate` (round cap / needs-human)' },
@@ -221,6 +203,17 @@ const RETURN_HYGIENE = [
 ].join('\n');
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MODEL TIERING (cost). The agents below split cleanly in two, and only one half is doing any thinking:
+//   • MECHANICAL — `fetch` / `discover` / `labels` / `rigor` / `reduce` / `record`. Each shells ONE command
+//     (`fetch-parked.mjs`, `review-core-cli.mjs`, `jury-ledger.mjs`) and returns a shape the `schema` option
+//     then VALIDATES. They make no judgment, and a wrong answer is caught by schema validation rather than by
+//     reasoning — so they run on `haiku` at low effort. This is where the bulk of the agent COUNT lives (one
+//     fetch + one reduce per PR per round), which made it the bulk of the spend for none of the value.
+//   • JUDGMENT — the `panel` lens jurors and the `editor`. These are the review itself and the fixes it
+//     produces, so they stay on the session model. Tier these only against measured numbers, never by guess.
+// Deliberately NOT expressed as a table keyed by label: the tier belongs at the call site, where the next
+// person editing that agent can see what it costs and why.
+
 // Agent I/O schemas — validated shapes the spawned agents return (the `agent(prompt, {schema})` form).
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -679,7 +672,7 @@ function editorPrompt(pr, repo, findings, round, roundCap) {
  */
 async function careRigorFor(item, escalationReason) {
   if (!escalationReason.length) return { careLevel: 'low', jurorsPerLens: 1, roundCap: 1, aggregation: 'diversity-selection' };
-  const r = await agent(rigorPrompt(item, escalationReason), { label: `rigor:${prTag(item)}`, phase: 'Converge', schema: RIGOR_SCHEMA }).catch(() => null);
+  const r = await agent(rigorPrompt(item, escalationReason), { label: `rigor:${prTag(item)}`, model: 'haiku', effort: 'low', phase: 'Converge', schema: RIGOR_SCHEMA }).catch(() => null);
   const jurorsPerLens = (r && Number.isFinite(Number(r.jurorsPerLens)) && Number(r.jurorsPerLens) >= 1) ? Math.floor(Number(r.jurorsPerLens)) : 1;
   // The per-band round cap; floor at 1 so at least one panel review always runs (a `none`/0-round band still gets
   // one review pass, just no editor round). Never trust a non-finite or <1 value from the dial.
@@ -805,7 +798,7 @@ async function reducePanelRound(pr, repo, lensResults, escalationReason, fetchOk
   }
 
   const okLenses = lensResults.filter((r) => r.ok).map((r) => ({ lens: r.lens, findings: r.findings }));
-  const r = await agent(reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, degrade, round, roundCap), { label: `reduce:${repo}#${pr}:r${round}`, phase: 'Converge', schema: VERDICT_SCHEMA }).catch(() => null);
+  const r = await agent(reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, degrade, round, roundCap), { label: `reduce:${repo}#${pr}:r${round}`, model: 'haiku', effort: 'low', phase: 'Converge', schema: VERDICT_SCHEMA }).catch(() => null);
 
   let verdict = (r && r.verdict) || (degrade ? 'needs-human' : 'unknown');
   let outcome = (r && r.outcome) || null;
@@ -892,7 +885,7 @@ function recordPrompt(subject, state) {
  *  durable log its mirror. */
 async function recordJuryLedger(item, state) {
   const subject = prTag(item);
-  const r = await agent(recordPrompt(subject, state), { label: `record:${subject}`, phase: 'Converge', schema: RECORD_SCHEMA }).catch(() => null);
+  const r = await agent(recordPrompt(subject, state), { label: `record:${subject}`, model: 'haiku', effort: 'low', phase: 'Converge', schema: RECORD_SCHEMA }).catch(() => null);
   if (r && Number.isFinite(r.appended)) {
     log(`  ${subject}: recorded ${r.appended} jury-ledger event(s) to the durable log${r.rejected && r.rejected.length ? ` (${r.rejected.length} rejected)` : ''}.`);
   } else {
@@ -912,7 +905,7 @@ async function convergePr(item) {
   const { pr, repo } = item;
 
   // ONE fetch + rigor dial up front (round 1's diff; re-fetched each subsequent round after an editor push).
-  let fetched = await agent(fetchPrompt(pr, repo, 1), { label: `fetch:${prTag(item)}:r1`, phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
+  let fetched = await agent(fetchPrompt(pr, repo, 1), { label: `fetch:${prTag(item)}:r1`, model: 'haiku', effort: 'low', phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
   let diff = (fetched && typeof fetched.diff === 'string') ? fetched.diff : '';
   const title = (fetched && fetched.title) ? String(fetched.title) : '';
   const escalationReason = (fetched && Array.isArray(fetched.escalationReason)) ? fetched.escalationReason : [];
@@ -983,7 +976,7 @@ async function convergePr(item) {
           break;
         }
         // Re-fetch the CURRENT diff (no editor this pass — the grown jury re-judges the same code) and re-review.
-        fetched = await agent(fetchPrompt(pr, repo, round), { label: `fetch:${prTag(item)}:r${round}`, phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
+        fetched = await agent(fetchPrompt(pr, repo, round), { label: `fetch:${prTag(item)}:r${round}`, model: 'haiku', effort: 'low', phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
         diff = (fetched && typeof fetched.diff === 'string') ? fetched.diff : diff;
         fetchOk = !!(fetched && !fetched.error && diff.length > 0);
         if (!fetchOk) log(`  ${prTag(item)}: round ${round} re-fetch failed — the round will degrade to needs-human.`);
@@ -1006,7 +999,7 @@ async function convergePr(item) {
 
     round += 1;
     // Re-fetch the CURRENT (revised) diff for the next round's re-review.
-    fetched = await agent(fetchPrompt(pr, repo, round), { label: `fetch:${prTag(item)}:r${round}`, phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
+    fetched = await agent(fetchPrompt(pr, repo, round), { label: `fetch:${prTag(item)}:r${round}`, model: 'haiku', effort: 'low', phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
     diff = (fetched && typeof fetched.diff === 'string') ? fetched.diff : diff;
     fetchOk = !!(fetched && !fetched.error && diff.length > 0);
     if (!fetchOk) log(`  ${prTag(item)}: round ${round} re-fetch failed — the round will degrade to needs-human.`);
@@ -1052,11 +1045,11 @@ const provided = normalizeParkedInput(args);
 let parked;
 if (provided.length) {
   log(`Given ${provided.length} PR(s) explicitly: ${provided.map(prTag).join(', ')} — re-fetching their CURRENT labels to enforce the review:human guard (caller-supplied labels are never trusted).`);
-  const fetchedLabels = await agent(labelFetchPrompt(provided), { label: 'labels:explicit', phase: 'Discover', schema: DISCOVER_SCHEMA }).catch(() => null);
+  const fetchedLabels = await agent(labelFetchPrompt(provided), { label: 'labels:explicit', model: 'haiku', effort: 'low', phase: 'Discover', schema: DISCOVER_SCHEMA }).catch(() => null);
   parked = normalizeParkedInput({ prs: (fetchedLabels && Array.isArray(fetchedLabels.prs)) ? fetchedLabels.prs : [] });
 } else {
   log('No PRs given — discovering the review:pending parked PRs across the constellation repos.');
-  const disc = await agent(discoverPrompt(), { label: 'discover:parked', phase: 'Discover', schema: DISCOVER_SCHEMA }).catch(() => null);
+  const disc = await agent(discoverPrompt(), { label: 'discover:parked', model: 'haiku', effort: 'low', phase: 'Discover', schema: DISCOVER_SCHEMA }).catch(() => null);
   parked = normalizeParkedInput({ prs: (disc && Array.isArray(disc.prs)) ? disc.prs : [] });
 }
 
