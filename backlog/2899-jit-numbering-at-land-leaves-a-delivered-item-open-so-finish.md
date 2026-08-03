@@ -1,4 +1,5 @@
 ---
+bornAs: xdxlevu
 kind: story
 size: 3
 status: open
@@ -26,10 +27,10 @@ Two of the three packed items were already fully delivered on `main`:
 
 | item | `bornAs` | landed as | state when packed |
 | --- | --- | --- | --- |
-| #2880 | `xq985wu` | PR #999, merged 2026-08-02 | `status: open` |
+| #2880 | `2880` | PR #999, merged 2026-08-02 | `status: open` |
 | #2450 | `xo75zon` | PR #435 | `status: open` |
 
-- #2880's JIT-number commit is `b4894dd8` — *"drain: JIT-number xq985wu→#2880, xw2ivof→#2881 at
+- #2880's JIT-number commit is `b4894dd8` — *"drain: JIT-number 2880→#2880, 2881→#2881 at
   land (#2288)"*. The number was assigned; the status was not. Meanwhile
   `we:scripts/merge-ai-prs.mjs` already carried `const orderExtraOpenItems = openPrContext.openItems;`
   and **all three** of the item's ACs had passing oracles.
