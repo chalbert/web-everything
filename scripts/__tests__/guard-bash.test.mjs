@@ -9,7 +9,7 @@ import {
   laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
   isVerificationRun, isBackgrounded, backgroundedVerificationReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
-  mainSessionDelegateNudge,
+  mainSessionDelegateNudge, hasLeadingEnvEscape,
 } from '../guard-bash.mjs';
 
 describe('guard-bash — backgrounded verification is denied (#2833 finding 3)', () => {
@@ -434,6 +434,46 @@ describe('guard-bash — primary-tree-write build backstop (#2749/#2788, 4th arm
     // no redirect/tee/sed/perl at all
     expect(isFileWriteRedirect('git status')).toBe(false);
     expect(isFileWriteRedirect('')).toBe(false);
+  });
+
+  // ── #2788 review regressions ────────────────────────────────────────────────────────────────────
+  // Each case below FAILED on the first cut of this arm and was caught by the review jury.
+
+  it('isFileWriteRedirect: the REAL platform scratch roots are scratch, not primary-tree writes', () => {
+    // The sanctioned per-session scratchpad every agent is handed is spelled `/private/tmp/claude-<uid>/…`
+    // (macOS resolves `/tmp` through that symlink); `$TMPDIR` resolves to `/var/folders/<xx>/<yy>/T/…`.
+    // Matching only `^/tmp/` denied an agent's own scratchpad — the most common legitimate write there is.
+    expect(isFileWriteRedirect('echo hi > /private/tmp/claude-501/sess/scratch.txt')).toBe(false);
+    expect(isFileWriteRedirect('tee /private/tmp/claude-501/sess/body.md')).toBe(false);
+    expect(isFileWriteRedirect('echo hi > /var/folders/ab/cd/T/scratch.txt')).toBe(false);
+    expect(isFileWriteRedirect('echo hi > /var/tmp/scratch.txt')).toBe(false);
+    // …while a path that merely CONTAINS a temp-looking segment is still a tree write (anchored, not loose)
+    expect(isFileWriteRedirect('echo hi > docs/private/tmp/notes.md')).toBe(true);
+    expect(isFileWriteRedirect('echo hi > ./tmp/notes.md')).toBe(true);
+  });
+
+  it('isTreeWritingBuildRun: an excluded target named ELSEWHERE cannot disarm a real tree build', () => {
+    const CHECK = `build:${'check'}`;
+    const PLUGS = `build:${'plugs'}`;
+    // the exclusion is tested against the MATCHED target, never the whole segment
+    expect(isTreeWritingBuildRun(`npm run build && echo ${CHECK}`)).toBe(true);
+    expect(isTreeWritingBuildRun(`npm run build # see ${PLUGS}`)).toBe(true);
+    // a genuinely excluded target still excludes
+    expect(isTreeWritingBuildRun(`npm run ${CHECK}`)).toBe(false);
+    expect(isTreeWritingBuildRun(`npm run ${PLUGS}`)).toBe(false);
+  });
+
+  it('hasLeadingEnvEscape: the escape counts only as a LEADING assignment, never as a mention', () => {
+    const V = 'MAIN_SESSION_BUILD_OK';
+    expect(hasLeadingEnvEscape(`${V}=1 npm run build`, V)).toBe(true);
+    expect(hasLeadingEnvEscape(`FOO=x ${V}=1 npm run build`, V)).toBe(true);
+    // a mention anywhere else must NOT disarm the guard
+    expect(hasLeadingEnvEscape(`git commit -m "see ${V}=1 in docs"`, V)).toBe(false);
+    expect(hasLeadingEnvEscape(`echo ${V}=1`, V)).toBe(false);
+    expect(hasLeadingEnvEscape(`grep ${V}=1 docs/agent/x.md`, V)).toBe(false);
+    // only the documented `=1` value opts out
+    expect(hasLeadingEnvEscape(`${V}=0 npm run build`, V)).toBe(false);
+    expect(hasLeadingEnvEscape('npm run build', V)).toBe(false);
   });
 
   it('primaryTreeWriteReason returns a reason for each of the three shapes, null otherwise', () => {

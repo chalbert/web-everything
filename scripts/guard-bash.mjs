@@ -131,11 +131,35 @@ export function backgroundedVerificationReason(command, runInBackground = false)
 // `--output=/tmp/…`) and `build:plugs` (already its own arm above, different message/reason) are excluded —
 // neither is a primary-tree write in the sense this arm cares about.
 const BUILD_RUN = /^(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b[^|;&]*\b(?:run\s+)?build(?::[-\w]+)?\b/;
-const BUILD_RUN_EXCLUDED = /\bbuild:(?:check|plugs)\b/;
+// #2788 review — the exclusion must be tested against the MATCHED build target, never the whole segment.
+// Whole-segment matching meant any command that merely MENTIONED an excluded target disarmed the arm for a
+// real tree-writing build in the same segment (verified: `npm run build && echo build:check` read as safe).
+const BUILD_RUN_EXCLUDED = /^build:(?:check|plugs)$/;
 
 /** Strip a leading `VAR=val …`/`sudo` prefix off a command segment — mirrors the `cmd` derivation in
  *  `reason()` below, kept local so these detectors stay self-sufficient/independently testable. */
 const stripCmdPrefix = (s) => String(s || '').replace(/^(?:\w+=\S+\s+)*(?:sudo\s+)?/, '');
+
+/**
+ * #2788 review — is `name=1` present as a LEADING env-assignment prefix of `segment` (the documented
+ * "prefix `VAR=1`" spelling), rather than merely appearing somewhere in the text? Pure.
+ *
+ * A sanctioned escape hatch that matches anywhere is not an escape hatch, it is a bypass: any command that
+ * quotes, echoes, greps for, or documents the token would disarm the guard. Scan ONLY the `VAR=val` run at
+ * the head of the segment (the sole position a shell treats as an assignment for the following command) and
+ * stop at the first token that is not an assignment.
+ */
+export function hasLeadingEnvEscape(segment, name) {
+  const s = String(segment || '').replace(/^\s+/, '');
+  const re = /^(\w+)=(\S*)\s+/;
+  let rest = s;
+  for (;;) {
+    const m = rest.match(re);
+    if (!m) return false;
+    if (m[1] === name && m[2] === '1') return true;
+    rest = rest.slice(m[0].length);
+  }
+}
 
 /** Is `segment` an actual RUN (not a mention — anchored at command position, not a quoted/echoed string) of
  *  the tree-writing `build` family — `npm run build`/`build:docs`/`build:demo`/the bare `pnpm`/`yarn`/
@@ -143,8 +167,12 @@ const stripCmdPrefix = (s) => String(s || '').replace(/^(?:\w+=\S+\s+)*(?:sudo\s
  *  and the separately-handled `build:plugs`? Pure. */
 export function isTreeWritingBuildRun(segment) {
   const cmd = stripCmdPrefix(segment);
-  if (!BUILD_RUN.test(cmd)) return false;
-  return !BUILD_RUN_EXCLUDED.test(cmd);
+  const m = cmd.match(BUILD_RUN);
+  if (!m) return false;
+  // #2788 review — test the exclusion against the MATCHED target alone (`build`, `build:docs`, …), so an
+  // excluded name appearing ELSEWHERE in the segment cannot disarm a real tree-writing build.
+  const target = (m[0].match(/\bbuild(?::[-\w]+)?\b/) || [''])[0];
+  return !BUILD_RUN_EXCLUDED.test(target);
 }
 
 // (b) an fs-writing GENERATOR/SCAFFOLD script — the exact hole guard-lane.mjs misses (a `node` script writes
@@ -167,7 +195,14 @@ export function isGeneratorScriptRun(segment) {
 // must be the LAST thing in the segment (a quoted string containing a literal `>` is followed by its closing
 // quote, which breaks the trailing-anchor match) — so this stays a low-false-positive accidental-collision
 // guard, the same footing as the other rules in this table.
-const SCRATCH_TARGET = /^\/tmp\/|^\/dev\//;
+// #2788 review — a scratch target is any of the REAL temp roots this platform hands an agent, not just the
+// literal `/tmp/` spelling. On macOS `/tmp` is a symlink to `/private/tmp`, and the sanctioned per-session
+// scratchpad the harness hands every agent is spelled `/private/tmp/claude-<uid>/…`; `$TMPDIR` resolves to
+// `/var/folders/<xx>/<yy>/T/…`. Matching only `^/tmp/` DENIED the agent's own scratchpad (verified: a write to
+// `/private/tmp/claude-501/…` flagged as a primary-tree write), turning the guard into a false-positive on the
+// single most common legitimate write. Keep this list literal + anchored — a loose `/tmp/` ANYWHERE would let
+// `./not-tmp/x` or `foo/tmp/bar` pass as scratch.
+const SCRATCH_TARGET = /^(?:\/tmp\/|\/private\/tmp\/|\/var\/tmp\/|\/var\/folders\/|\/dev\/)/;
 
 /** Is `segment` a shell redirect/`tee`/`sed -i`/`perl -pi` that writes a file OTHER than a `/tmp`|`/dev`
  *  scratch path? Pure. */
@@ -430,7 +465,12 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // #2749/#2788 — the 4th `#primary-read-only-lanes-only` guard arm: a build that writes the shared PRIMARY
   // tree, run at primary cwd. Keys on the tree-write alone (never session identity, #2335) — only fires when
   // cwd IS a primary; a lane clone (main session or a delegated subagent, both build in a lane) is untouched.
-  if (primaryCwd && !/\bMAIN_SESSION_BUILD_OK=1\b/.test(s)) {
+  // #2788 review — the escape must be a LEADING env-assignment prefix, exactly how it is documented
+  // ("prefix `MAIN_SESSION_BUILD_OK=1`"), never a bare substring test. Matching it anywhere meant a command
+  // that merely MENTIONED the token — inside a quoted string, a commit message, an echoed doc line — silently
+  // disarmed the whole arm. `hasLeadingEnvEscape` walks only the `VAR=val …` prefix, so the token must be in
+  // assignment position ahead of the command word to count.
+  if (primaryCwd && !hasLeadingEnvEscape(s, 'MAIN_SESSION_BUILD_OK')) {
     const treeWriteReason = primaryTreeWriteReason(s);
     if (treeWriteReason) return treeWriteReason;
   }
@@ -587,7 +627,18 @@ if (IS_CLI) {
   // blocks. try/catch: a guard bug here must never wedge the agent.
   try {
     const nudge = mainSessionDelegateNudge(cmd, { primaryCwd });
-    if (nudge) process.stderr.write('guard-bash: ' + nudge + '\n');
+    // #2788 review — stderr on an exit-0 PreToolUse hook is NOT surfaced to the user or fed back to the
+    // model, so the WARN half shipped as a no-op. Emit it on the structured stdout channel instead
+    // (`systemMessage`, the documented field for a non-blocking hook message) and keep writing stderr as a
+    // belt-and-braces fallback for a human tailing the hook log.
+    // NOTE: the deny path (`hookSpecificOutput`) is proven by this file's own use; `systemMessage` delivery
+    // is NOT independently verified here — it is additive and strictly no worse than today's stderr-only
+    // behaviour (an unrecognised field is ignored), and it can never deny, so a wrong guess cannot wedge a
+    // command. Confirm against the live hook contract before relying on it as the sole channel.
+    if (nudge) {
+      process.stdout.write(JSON.stringify({ systemMessage: 'guard-bash: ' + nudge }) + '\n');
+      process.stderr.write('guard-bash: ' + nudge + '\n');
+    }
   } catch { /* never wedge on a nudge-computation fault */ }
   process.exit(0);
 }
