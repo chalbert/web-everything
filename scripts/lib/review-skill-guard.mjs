@@ -53,7 +53,7 @@
  * the wrapped-line fixture in the test suite); the file is held out of SCOPE because fixing it is not a doc
  * edit: the CLI has no `redteam:accepted` target, and routing the accept through it adds a second comment to a
  * flow that already posts its own panel table. That is a change to the auto-land path and belongs in its own
- * item (`xy93549`) with its own review. Widen this list to `skills-src/` once that lands — narrow-and-honest,
+ * item (#2896) with its own review. Widen this list to `skills-src/` once that lands — narrow-and-honest,
  * not broad-and-waived.
  */
 export const GUARDED_DOC_PREFIXES = Object.freeze(['skills-src/review/', 'docs/agent/']);
