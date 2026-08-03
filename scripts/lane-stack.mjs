@@ -46,11 +46,11 @@
  *
  * Exit codes: 0 = ok; 3 = bad input / no plan; 4 = recheck verdict `rebase-required` (do NOT push).
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { laneTreeVerdict } from './readiness/lane-tree-guard.mjs'; // #2900 — the pure "which tree did we measure" rule (reuses guard-bash's /.lanes/ primitives)
+import { laneTreeVerdict } from './readiness/lane-tree-guard.mjs'; // #2900 — the positive "is this the item's leased lane" rule
+import { LEASE_FILENAME } from './lib/lane-lease.mjs'; // #2900 — the marker lane-pool writes at acquire; the fact the old path guess was reaching for
 import {
   createStackPlan, planNextItem, recheckAtPush, applyRebase, recordPushed, dropItem,
 } from './readiness/overlap-chain.mjs';
@@ -96,42 +96,52 @@ function emit(result, code) {
 }
 function fail(detail) { emit({ ok: false, detail }, 3); }
 
-// #2900 — THE TREE THE MEASUREMENT RUNS ON. Every git call below used to inherit the process cwd, so a seam
-// launched from the primary checkout measured the PRIMARY, not the lane — and reported success. `--lane=<path>`
-// is now REAL (it was accepted and ignored, which is precisely what made the wrong-cwd invocation look
-// deliberate and correct); absent it, the tree is the process cwd, as before.
-const LANE_CWD = typeof flags.lane === 'string' && flags.lane ? resolve(flags.lane) : null;
+// #2900 — THE TREE THE MEASUREMENT RUNS ON. `--lane=<path>` is REAL (it was accepted and ignored, which is
+// precisely what made the wrong-cwd invocation look deliberate and correct); absent it, the tree is the process
+// cwd. Either way the path is reduced to git's OWN work-tree ROOT before anything judges or measures it — git
+// discovers its repository by walking UP, so the directory you name and the repository it operates on are not
+// necessarily the same place, and a guard that judges the raw string can be handed one and lied to by the other.
+const id = flags.id != null ? String(flags.id) : null;
+const LANE_FLAG = typeof flags.lane === 'string' && flags.lane ? resolve(flags.lane) : null;
+if (flags.lane !== undefined && !LANE_FLAG) fail('--lane needs a path (--lane=<lane clone>), not a bare flag');
+if (LANE_FLAG && !existsSync(LANE_FLAG)) fail(`--lane=${LANE_FLAG} does not exist`);
+
 function git(args, opts = {}) {
-  return execFileSync('git', args, { encoding: 'utf8', cwd: LANE_CWD || process.cwd(), ...opts }).trim();
+  return execFileSync('git', args, { encoding: 'utf8', cwd: LANE_FLAG || process.cwd(), ...opts }).trim();
 }
 
-/** The tree these seams actually measure — `--lane` when given, else the process cwd. */
-function measuredTree() { return LANE_CWD || process.cwd(); }
+/** The WORK-TREE ROOT these seams measure — never a raw path string. Null when it is not a git work tree. */
+function measuredTree() {
+  const start = LANE_FLAG || process.cwd();
+  try {
+    const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: start, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return root ? realpathSync(root) : null;
+  } catch { return null; }
+}
 
 /**
- * #2900 A1 — REFUSE to certify from a tree that is not a lane clone.
+ * #2900 — REFUSE to operate on a tree that is not THIS item's leased lane clone.
  *
- * `recheck` exists to assert `actual ⊆ declared` so a post-hoc overlap can never reach the drain as a
- * certified-disjoint sibling. Run from the primary checkout it diffed `origin/main...origin/main`, found an
- * EMPTY actual set, and printed the same `clean — push` line a real certification prints — a vacuous pass on a
- * safety gate, with no observable difference from a genuine one. `record` then pinned the chain frontier to
- * the primary's HEAD (`origin/main`) instead of the lane tip, so the next stacked child would acquire at a base
- * missing its parent's commit — the exact un-pinned acquire the sha pin exists to prevent.
+ * The first version of this guard asked whether the path contained `/.lanes/`. That guess failed twice: its
+ * `script-in-lane` allowance made the refusal unreachable whenever the running copy of this script lived in a
+ * lane clone — this repo's NORMAL execution context, so the guard was off exactly when it should fire — and a
+ * substring test accepts any directory whose path merely contains `.lanes`.
  *
- * The module already treats "silently shrinking the certified actual set" as its threat model and defends it
- * with base-pinning and sha-pinning ("`--base` is validated, not trusted"). The cwd vector was the same threat
- * through an undefended door.
- *
- * Detection reuses guard-bash's `/.lanes/` primitive (#2302/#2335/#2367) rather than inventing a second one.
- * The refusal is narrow ON PURPOSE: a tree is rejected only when it is THIS script's own repo root (or under
- * it) and that root is not a lane clone — i.e. the operator ran the seam from the checkout the script lives in.
- * A throwaway clone (what the e2e suite drives, and any hand-made scratch tree) is neither, and still runs.
+ * The pool already records the fact that guess was reaching for: `lane-pool.mjs acquire` writes a lease marker
+ * at `<lane>/.git/.lane-lease` when it hands the folder out (the same file `guard-bash.mjs` reads, #2367). So
+ * ask a POSITIVE question against a fact on disk — is this a leased lane, and is its lease for the item being
+ * certified? — instead of inferring one from a name. That is the module's own "validated, not trusted" rule,
+ * applied to the tree as it already is to `--base`. It also closes a hole the path guess could not: aiming
+ * `--lane` at a DIFFERENT lane used to yield a full `clean` certification.
  */
 function assertLaneTree(cmdName) {
-  const tree = resolve(measuredTree());
-  const selfRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  if (laneTreeVerdict({ tree, selfRoot }).ok) return;
-  fail(`\`${cmdName}\` measured ${tree}, which is the PRIMARY checkout, not a lane clone — it would certify the wrong tree and print success (#2900). Re-run it from inside the lane clone, or pass --lane=<lane clone path>.`);
+  const tree = measuredTree();
+  if (!tree) fail(`\`${cmdName}\`: ${LANE_FLAG || process.cwd()} is not a git work tree — nothing to measure (#2900)`);
+  let lease = null;
+  try { lease = JSON.parse(readFileSync(join(tree, '.git', LEASE_FILENAME), 'utf8')); } catch { lease = null; }
+  const v = laneTreeVerdict({ lease, id });
+  if (v.ok) return;
+  fail(`\`${cmdName}\` measured ${tree} — ${v.detail}`);
 }
 
 const planPath = typeof flags.plan === 'string' ? resolve(flags.plan) : null;
@@ -197,8 +207,6 @@ function actualFiles(expectedBaseSha) {
   catch (e) { fail(`git diff --name-only ${baseSha}...HEAD failed: ${String(e.message || e).split('\n')[0]}`); }
   return out.split('\n').map((s) => s.trim()).filter(Boolean).map((f) => `${repo}:${f}`);
 }
-
-const id = flags.id != null ? String(flags.id) : null;
 
 assertKnownFlags();   // #2900 A3 — before any work, so a typo'd flag can never be absorbed into a certification
 
@@ -291,6 +299,7 @@ switch (cmd) {
   }
   case 'apply-rebase': {
     if (!id) fail('pass --id=<item id>');
+    assertLaneTree('apply-rebase');   // #2900 jury — the one seam that REWRITES history was unguarded while accepting --lane
     if (typeof flags.onto !== 'string' || !flags.onto) fail('pass --onto=<comma-separated frontier item ids> (from the recheck verdict)');
     if (typeof flags.base !== 'string' || !flags.base) fail('pass --base=<the frontier tip sha the lane was rebased onto> (the recheck verdict\'s ontoTips sha) — it re-pins the acquire point and recomputes the actuals');
     const plan = loadPlan();

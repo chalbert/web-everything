@@ -1,54 +1,83 @@
 /**
  * @file scripts/__tests__/lane-stack-tree-guard.test.mjs
- * @description Unit proof of #2900 A1 — the PURE decision behind `recheck`/`record` refusing to certify from a
- * tree that is not a lane clone. The e2e suite (`lane-stack-e2e.test.mjs`) drives throwaway clones, which are
- * by construction neither lane clones NOR the script's own primary root, so it can exercise A2/A3 but not this
- * verdict. Hence the pure seam: `laneTreeVerdict` is where the whole A1 rule lives, and it is asserted here.
+ * @description Unit proof of #2900's tree guard — the rule behind `lane-stack.mjs`'s `recheck` / `record` /
+ * `apply-rebase` refusing to operate on anything but the item's own leased lane clone.
  *
- * The rule is deliberately NARROW. It refuses exactly one shape — the operator running the seam from the
- * checkout the script itself lives in — because that is the observed incident and the only case we can call
- * with certainty. Every other tree is allowed through to A2, which catches a vacuous certification on its own.
+ * WHY THIS FILE EXISTS IN THIS SHAPE. The first version of the guard asked "does the path contain `/.lanes/`",
+ * and an advisory jury found it did not work: its `script-in-lane` allowance made the refusal unreachable
+ * whenever the running script lived in a lane clone — this repo's NORMAL execution context — so the guard was
+ * off exactly when it should fire. The unit test that claimed to cover that branch passed `tree: LANE`, which
+ * returned at the EARLIER branch, so the line was never exercised and deleting it left the suite green.
+ *
+ * Two lessons are baked into the tests below. First, the rule is now a POSITIVE check against a fact the lane
+ * pool wrote (`.git/.lane-lease`), not an inference from a name — so the cases are about lease presence and
+ * lease ownership, which cannot be spoofed by a path. Second, every allow-case here asserts the REASON, not
+ * just `ok`, so a test can no longer pass by reaching a different branch than the one it names.
  */
 import { describe, it, expect } from 'vitest';
-import { laneTreeVerdict } from '../readiness/lane-tree-guard.mjs';
+import { laneTreeVerdict, leaseItem } from '../readiness/lane-tree-guard.mjs';
 
-const PRIMARY = '/Users/dev/workspace/webeverything';
-const LANE = '/Users/dev/workspace/.lanes/web-everything/lane-7';
+const leaseFor = (purpose) => ({ session: 'Mac:1', purpose, acquiredAt: '2026-08-03T00:00:00Z', ttlMinutes: 240 });
 
-describe('#2900 A1 — laneTreeVerdict', () => {
-  it('REFUSES the primary checkout the script itself lives in — the observed incident', () => {
-    expect(laneTreeVerdict({ tree: PRIMARY, selfRoot: PRIMARY }))
-      .toEqual({ ok: false, reason: 'primary-checkout' });
+describe('#2900 — leaseItem', () => {
+  it('reads the item from an explicit field, then from the purpose slug', () => {
+    expect(leaseItem({ item: 2899 })).toBe('2899');
+    expect(leaseItem(leaseFor('2899-resolve-on-land'))).toBe('2899');
+    expect(leaseItem(leaseFor('xdxlevu-resolve-on-land'))).toBe('xdxlevu');
+  });
+  it('is null when the lease names no item', () => {
+    expect(leaseItem(leaseFor('close-session'))).toBe(null);
+    expect(leaseItem(leaseFor(null))).toBe(null);
+    expect(leaseItem(null)).toBe(null);
+    expect(leaseItem('nonsense')).toBe(null);
+  });
+});
+
+describe('#2900 — laneTreeVerdict: a leased lane, and the RIGHT one', () => {
+  it('REFUSES a tree with no lease — the primary checkout, or any unleased tree', () => {
+    const v = laneTreeVerdict({ lease: null, id: '2899' });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe('no-lease');
+    expect(v.detail).toMatch(/not a leased lane clone/);
   });
 
-  it('REFUSES a subdirectory of that primary too (cwd need not be the root)', () => {
-    expect(laneTreeVerdict({ tree: `${PRIMARY}/scripts`, selfRoot: PRIMARY }).ok).toBe(false);
+  it('ALLOWS the lane leased for THIS item', () => {
+    expect(laneTreeVerdict({ lease: leaseFor('2899-resolve-on-land'), id: '2899' }))
+      .toEqual({ ok: true, reason: 'leased-lane' });
   });
 
-  it('ALLOWS a lane clone — the intended case', () => {
-    expect(laneTreeVerdict({ tree: LANE, selfRoot: PRIMARY }))
-      .toEqual({ ok: true, reason: 'lane-clone' });
-    expect(laneTreeVerdict({ tree: `${LANE}/scripts`, selfRoot: PRIMARY }).ok).toBe(true);
+  it('REFUSES a lane leased for a DIFFERENT item — the hole the path guess could not close', () => {
+    // Under the old rule any directory under /.lanes/ was accepted unconditionally, so aiming `--lane` at the
+    // wrong lane produced a full `clean` certification against someone else's tree.
+    const v = laneTreeVerdict({ lease: leaseFor('2900-lane-stack'), id: '2899' });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe('wrong-lane');
+    expect(v.detail).toMatch(/leased for #2900/);
+    expect(v.detail).toMatch(/certifying #2899/);
   });
 
-  it('ALLOWS anything when the script is itself running from a lane clone', () => {
-    // A lane clone's own `scripts/lane-stack.mjs` measuring that lane: both sides are under /.lanes/.
-    expect(laneTreeVerdict({ tree: LANE, selfRoot: LANE }).ok).toBe(true);
+  it('matches a hash-born id against a hash-slug lease', () => {
+    expect(laneTreeVerdict({ lease: leaseFor('xdxlevu-resolve'), id: 'xdxlevu' }).ok).toBe(true);
+    expect(laneTreeVerdict({ lease: leaseFor('xdxlevu-resolve'), id: 'xother1' }).reason).toBe('wrong-lane');
   });
 
-  it('ALLOWS a foreign tree — a temp clone is not ours to judge; A2 covers it', () => {
-    expect(laneTreeVerdict({ tree: '/var/folders/xx/lane-stack-e2e-abc/laneA', selfRoot: PRIMARY }))
-      .toEqual({ ok: true, reason: 'foreign-tree' });
+  it('ALLOWS a lease that names no item — it cannot disagree with the id', () => {
+    // A lane acquired with a non-item purpose (`--purpose=close-session`) is still a real leased lane. Refusing
+    // it would break honest workflows; the no-lease rule already covers the case that actually caused #2900.
+    expect(laneTreeVerdict({ lease: leaseFor('close-session'), id: '2899' }))
+      .toEqual({ ok: true, reason: 'leased-lane-unnamed' });
   });
 
-  it('is a no-op on missing input rather than a throw — never unwinds a seam on a bad probe', () => {
-    expect(laneTreeVerdict()).toEqual({ ok: true, reason: 'no-tree' });
-    expect(laneTreeVerdict({ tree: '' }).ok).toBe(true);
-    expect(laneTreeVerdict({ tree: PRIMARY, selfRoot: null }).ok).toBe(true);   // no root to compare → not our call
+  it('skips the ownership compare when the seam has no id, but still requires a lease', () => {
+    expect(laneTreeVerdict({ lease: leaseFor('2900-x'), id: null }).reason).toBe('leased-lane');
+    expect(laneTreeVerdict({ lease: leaseFor('2900-x'), id: '' }).reason).toBe('leased-lane');
+    expect(laneTreeVerdict({ lease: null, id: null }).ok).toBe(false);
   });
 
-  it('does not confuse a sibling repo that merely shares a path prefix', () => {
-    // `…/webeverything-notes` must not read as "under …/webeverything".
-    expect(laneTreeVerdict({ tree: `${PRIMARY}-notes`, selfRoot: PRIMARY }).ok).toBe(true);
+  it('no argument shape reaches `ok` without a lease — the guard cannot be defaulted open', () => {
+    expect(laneTreeVerdict().ok).toBe(false);
+    expect(laneTreeVerdict({}).ok).toBe(false);
+    expect(laneTreeVerdict({ id: '2899' }).ok).toBe(false);
+    expect(laneTreeVerdict({ lease: null, requireItemMatch: false }).ok).toBe(false);
   });
 });
