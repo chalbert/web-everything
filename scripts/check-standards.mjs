@@ -28,6 +28,7 @@ import { checkDemos } from './check-demos.mjs';
 import { buildReport, source as reportSource, finding as reportFinding, section as reportSection } from './lib/buildReport.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
 import { checkVerdictTotality } from './lib/verdict-totality.mjs';
+import { checkReviewLabelSingleHome, GUARDED_DOC_PREFIXES } from './lib/review-skill-guard.mjs';
 import { VERDICTS } from './lib/jury-core.mjs';
 import { loadIntents } from './lib/intents-loader.cjs';
 import { loadResearch } from './lib/research-loader.cjs';
@@ -1680,6 +1681,37 @@ try {
   }
   const { errors: vte } = checkVerdictTotality(docs, VERDICTS);
   for (const e of vte) err(e);
+}
+
+// ── 15. Review-label swap must stay in its single home (#2882) ─────────────────
+// A doc under skills-src/ or docs/agent/ may not INSTRUCT a raw `gh pr edit … --add-label review:*`. That path
+// skips the `reviewed-sha` stamp the drain's staleness gate reads (#2409) and bypasses INVARIANT 2, which is
+// enforced in `decideSetLabel`'s pure core and so only binds callers that come through
+// `we:scripts/review-set-label.mjs` (#2644). Observed on PR #983: the `/review` skill's raw swap cost five
+// re-parks, and nothing else would have caught the invariant gap — no workflow references the review labels.
+// Pure rule in `lib/review-skill-guard.mjs`; the fs walk stays here (mirrors the gate above).
+{
+  // DERIVED from the exported prefix list, never a second hardcoded copy — hardcoding the roots here is the same
+  // two-readers-of-one-contract defect this rule exists to prevent, and it fails in the worst direction: widening
+  // GUARDED_DOC_PREFIXES would silently no-op because the walk never visits the new root, with every unit test
+  // still green (they feed fixtures and bypass the walk entirely). PR #1005 review, minor 1.
+  const scanDirs = [...new Set(GUARDED_DOC_PREFIXES.map((p) => p.replace(/\/+$/, '')))];
+  const SKIP_DIRS = new Set(['node_modules', '.git']);
+  const walkDocs = (dir, acc = []) => {
+    for (const name of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, name.name);
+      if (name.isDirectory()) { if (!SKIP_DIRS.has(name.name)) walkDocs(p, acc); }
+      else if (name.name.endsWith('.md')) acc.push(p);
+    }
+    return acc;
+  };
+  const docs = [];
+  for (const d of scanDirs) {
+    const abs = join(ROOT, d);
+    if (existsSync(abs)) for (const f of walkDocs(abs)) docs.push({ file: relative(ROOT, f), content: readFileSync(f, 'utf8') });
+  }
+  const { errors: rle } = checkReviewLabelSingleHome(docs);
+  for (const e of rle) err(e);
 }
 
 // ── Scope attribution (#952, ratified #949 Fork 3-A) ───────────────────────────

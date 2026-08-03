@@ -5,7 +5,8 @@
  *   against fixtures, no network.
  */
 import { describe, it, expect } from 'vitest';
-import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
+import { decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers } from '../review-set-label.mjs';
+import { parseReviewedSha } from '../lib/review-escalation.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const human = [{ name: REVIEW_LABELS.human }, { name: 'ready-to-merge' }];
@@ -117,5 +118,58 @@ describe('decideSetLabel — bad input', () => {
   it('throws on an unknown verdict', () => {
     expect(() => decideSetLabel({ to: 'merge', currentLabels: neither })).toThrow();
     expect(() => decideSetLabel({ to: undefined, currentLabels: neither })).toThrow();
+  });
+});
+
+describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/#2409)', () => {
+  const SHA = 'abf7d85700a3336a0ec77d94ab455162d4b8e00d';
+  const OLDER = '0123456789abcdef0123456789abcdef01234567';
+  // Round-trip through the actual consumer, never a string-position assertion. The first cut of #2882 asserted
+  // `indexOf(SHA) < indexOf(older)` and passed while being WRONG: parseReviewedSha is last-match-wins, so the
+  // leading stamp lost to a quoted marker. Verifying producer and consumer independently is what hid it.
+  const readBack = (comment) => parseReviewedSha([{ body: comment }]);
+
+  it('round-trips to the stamped sha even when the body quotes an OLDER marker', () => {
+    const comment = buildVerdictComment({
+      to: 'accepted', actor: 'op', headSha: SHA,
+      body: `re-accepting; the prior round covered <!-- reviewed-sha: ${OLDER} -->, the head only moved by rebase`,
+    });
+    expect(readBack(comment)).toBe(SHA);
+  });
+
+  it('round-trips when the body quotes SEVERAL markers, including one at the very end', () => {
+    const comment = buildVerdictComment({
+      to: 'accepted', actor: 'op', headSha: SHA,
+      body: `first <!-- reviewed-sha: ${OLDER} --> and last <!-- reviewed-sha: ${'a'.repeat(40)} -->`,
+    });
+    expect(readBack(comment)).toBe(SHA);
+  });
+
+  it('neutralises quoted markers but keeps them READABLE — the write-up still says what it meant', () => {
+    const out = stripReviewedShaMarkers(`prior round: <!-- reviewed-sha: ${OLDER} -->`);
+    expect(out).toContain(OLDER);
+    expect(out).not.toContain('<!--');
+  });
+
+  it('reads back nothing on a changes verdict, even with a quoted marker in the body', () => {
+    const comment = buildVerdictComment({
+      to: 'changes', actor: 'op', headSha: SHA, body: `see <!-- reviewed-sha: ${OLDER} -->`,
+    });
+    expect(readBack(comment)).toBe(null);
+    expect(comment).toContain('🔁 review — changes requested');
+  });
+
+  it('stamps nothing (never a garbage marker) when the head SHA is unavailable', () => {
+    expect(readBack(buildVerdictComment({ to: 'accepted', actor: 'op', headSha: '' }))).toBe(null);
+    expect(readBack(buildVerdictComment({ to: 'accepted', actor: 'op', headSha: 'not-a-sha' }))).toBe(null);
+  });
+
+  it('includes the caller body, and stays the one-liner when none is passed', () => {
+    const withBody = buildVerdictComment({ to: 'accepted', actor: 'op', headSha: SHA, body: '## Findings\n1 major' });
+    expect(withBody).toContain('## Findings');
+    expect(readBack(withBody)).toBe(SHA);
+    const bare = buildVerdictComment({ to: 'accepted', actor: 'op', headSha: SHA });
+    expect(bare).toContain('Recorded by op via the Plateau Loop review console.');
+    expect(readBack(bare)).toBe(SHA);
   });
 });

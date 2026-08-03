@@ -19,8 +19,8 @@
  * label strings.
  */
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
-import { writeFileSync, unlinkSync } from 'node:fs';
+import { resolve, sep } from 'node:path';
+import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker } from './lib/review-escalation.mjs';
@@ -255,24 +255,102 @@ export function runReviewLabelCli({
   process.exit(0);
 }
 
+/**
+ * we:scripts/review-set-label.mjs#buildVerdictComment — the reviewer-verdict comment body. PURE, so the one
+ * place the `reviewed-sha` marker is attached to an accept is unit-testable.
+ *
+ * #2882 — `body` is the OPTIONAL caller-supplied write-up. The loop console records a one-line verdict and
+ * passes nothing; `/review` (`we:skills-src/review/SKILL.md`) passes its full findings + verdict via
+ * `--body-file`. Before this, the CLI could only emit the fixed one-liner, so `/review` hand-rolled
+ * `gh pr edit` + `gh pr comment` to get a detailed comment — and thereby lost the marker AND bypassed
+ * INVARIANT 2, which lives in `decideSetLabel` and only binds callers that come through here. Accepting a body
+ * removes the reason to route around the single home.
+ *
+ * #2409 — on `accepted` the reviewed head SHA is stamped (`buildReviewedShaMarker`) so the drain can later
+ * refuse to honour the acceptance if the head advanced past the reviewed tree.
+ *
+ * THE STAMP MUST WIN, AND THE READER DECIDES WHAT WINNING MEANS. `parseReviewedSha` is LAST-match-wins (it
+ * scans every marker in a body and keeps the final one), so this builder does two things, belt and braces:
+ *   1. it STRIPS any `reviewed-sha` marker out of the caller's body — a `/review` write-up legitimately quotes
+ *      a prior round's marker while explaining why the head moved (#983's re-accept comment did exactly that),
+ *      and a quoted marker must never be mistaken for this verdict's claim; and
+ *   2. it appends its own marker LAST, so even a marker this strip failed to recognise cannot outrank it.
+ * The first cut of #2882 put the marker FIRST and reasoned backwards about the reader — which silently
+ * REGRESSED the pre-#2882 behaviour, because a quoted marker then overwrote the stamp. Caught in review on
+ * PR #1005. The pin for this is a ROUND-TRIP assertion through the real `parseReviewedSha`, never a
+ * string-position one: verifying producer and consumer independently is exactly how the inversion hid.
+ *
+ * The marker is omitted on `changes`, and when the head SHA is unavailable (`buildReviewedShaMarker` → '') the
+ * gate fails open rather than reading a garbage marker.
+ * @param {{to:string, actor:string, headSha?:string, body?:string}} o
+ * @returns {string}
+ */
+export function buildVerdictComment({ to, actor, headSha = '', body = '' } = {}) {
+  const marker = to === 'accepted' ? buildReviewedShaMarker(headSha) : '';
+  const text = stripReviewedShaMarkers(typeof body === 'string' ? body : '');
+  return [
+    to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested',
+    '',
+    `Recorded by ${actor} via the Plateau Loop review console.`,
+    ...(text ? ['', text] : []),
+    ...(marker ? ['', marker] : []),
+  ].join('\n');
+}
+
+/**
+ * we:scripts/review-set-label.mjs#stripReviewedShaMarkers — remove every `reviewed-sha` marker from a
+ * caller-supplied body, replacing each with a visible placeholder so the write-up still reads correctly where
+ * it was quoting one. PURE. Mirrors `REVIEWED_SHA_RE` in `we:scripts/lib/review-escalation.mjs` — the marker
+ * SHAPE is defined there; this only has to recognise the same thing, and over-matching is the safe direction
+ * (a stripped marker is inert text, an un-stripped one can outrank the real stamp).
+ */
+/** GitHub's hard cap on an issue/PR comment body. Checked BEFORE the label swap — see the CLI block below. */
+export const GH_COMMENT_MAX = 65536;
+
+export function stripReviewedShaMarkers(body) {
+  return String(body || '')
+    .replace(/<!--\s*reviewed-sha:\s*([0-9a-fA-F]{7,40})\s*-->/g, '`reviewed-sha: $1` (quoted, not this verdict\'s)')
+    .trim();
+}
+
 // we:scripts/review-set-label.mjs — allow importing the pure decider + shared harness without running the CLI
 // (the test file and rearm-review.mjs import this module). The standard main check used in review-detail.mjs.
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) {
+  // #2882 — the OPTIONAL `--body-file=<path>` carries the caller's write-up (see `buildVerdictComment`). Every
+  // check happens HERE, before any gh mutation, because this flag fails in the worst direction: the label is
+  // applied first and the comment posted second, so a body problem discovered late leaves an ACCEPTED PR with
+  // no marker — and `acceptanceCoversHead` fails open on a missing marker, so the drain then lands it. That
+  // would contradict this module's own "no partial swap" promise. PR #1005 review, minors 2-4.
+  const argvRest = process.argv.slice(2);
+  // The bare `--body-file <path>` form is REJECTED, not silently ignored: ignoring it posts a verdict with the
+  // findings missing and still exits 0. Every other flag in the harness is `=`-form; say so rather than no-op.
+  const bareIdx = argvRest.indexOf('--body-file');
+  if (bareIdx !== -1) fail('use --body-file=<path> (the =-form) — the space-separated form is not accepted');
+  const bodyFileArg = (argvRest.find((a) => a.startsWith('--body-file=')) || '').slice('--body-file='.length);
+  let verdictBody = '';
+  if (bodyFileArg) {
+    // Constrain the path: this file's contents are published to a PUBLIC PR and cannot be unpublished. A stale
+    // shell variable or a wrong path would otherwise leak whatever it points at, with the CLI reporting success.
+    const abs = resolve(bodyFileArg);
+    const allowed = [resolve(process.cwd()), resolve(tmpdir())];
+    if (!allowed.some((root) => abs === root || abs.startsWith(root + sep))) {
+      fail(`--body-file must live under the repo root or the temp dir (got ${abs}) — its contents are published to a public PR`);
+    }
+    try { verdictBody = readFileSync(abs, 'utf8'); }
+    catch (e) { fail(`--body-file=${bodyFileArg} is unreadable (${String((e && e.message) || e).split('\n')[0]})`); }
+    if (!verdictBody.trim()) fail(`--body-file=${bodyFileArg} is empty — pass the verdict write-up, or omit the flag for the one-line record`);
+    // GitHub rejects a comment body over 65536 chars. Catching it here means the label is never applied against
+    // a comment that cannot post; catching it later would leave exactly the accepted-without-a-marker state above.
+    const projected = buildVerdictComment({ to: 'accepted', actor: 'x'.repeat(64), headSha: 'f'.repeat(40), body: verdictBody }).length;
+    if (projected > GH_COMMENT_MAX) {
+      fail(`--body-file=${bodyFileArg} renders a ${projected}-char comment, over GitHub's ${GH_COMMENT_MAX} limit — trim it (the label is not applied)`);
+    }
+  }
   runReviewLabelCli({
     defaultActor: 'loop-console operator',
-    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes [--actor=<name>]  (pr must be a positive integer)',
-    // we:scripts/review-set-label.mjs — the reviewer-verdict comment (the delta from the rearm caller's body).
-    // #2409 — on `accepted`, stamp the reviewed head SHA (`buildReviewedShaMarker`, a machine-readable marker)
-    // so the drain can later refuse to honour the acceptance if the head advanced past the reviewed tree. The
-    // marker is omitted on `changes`, and when the head SHA is unavailable (empty → '' from the builder), the
-    // gate simply fails open — never a garbage marker.
-    buildComment: ({ to, actor, headSha }) => [
-      to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested',
-      '',
-      `Recorded by ${actor} via the Plateau Loop review console.`,
-      ...(to === 'accepted' && buildReviewedShaMarker(headSha) ? ['', buildReviewedShaMarker(headSha)] : []),
-    ].join('\n'),
+    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes [--actor=<name>] [--body-file=<path>]  (pr must be a positive integer)',
+    buildComment: ({ to, actor, headSha }) => buildVerdictComment({ to, actor, headSha, body: verdictBody }),
     successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
     refusalResult: ({ decision }) => ({ error: decision.reason }),
   });
