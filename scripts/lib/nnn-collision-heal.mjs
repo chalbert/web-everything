@@ -108,9 +108,13 @@ export function planBaseCollisionHeal(laneFiles, { baseNums = [], baseNames = []
   }
   for (const mv of moves) {
     if (!touched.has(mv.oldName)) {
-      const text = contentByName.get(mv.oldName);
-      assertContentPreserved(originalByName.get(mv.oldName), text, moves, mv.newName); // #2546
-      writes.push({ name: mv.newName, text });
+      // #2746 review — this file was NOT touched by the ref sweep, so emit the ORIGINAL bytes explicitly
+      // rather than the mutable working copy. Two things follow, both by construction rather than by
+      // convention: a rename-only move can never carry a partial rewrite, and a content guard here would be
+      // vacuous (it previously compared `contentByName.get(x)` against `originalByName.get(x)` — for an
+      // untouched file those are the same string, so the assertion could never fire). The guard that matters
+      // is on the rewritten branch above, where the bytes actually change.
+      writes.push({ name: mv.newName, text: originalByName.get(mv.oldName) });
     }
   }
   const deletes = moves.map((m) => m.oldName);
