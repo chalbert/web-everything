@@ -3,16 +3,19 @@
  * @description Unit proof of the #2579 skills-src → deployed-skills-dir sync core: given a source skill dir,
  *   a destination dir, and the set of git-tracked relative paths, `planSkill` diffs them into add/update/remove
  *   actions and `applyPlan` executes them. Proves: a new file is added, a changed file is updated, a file no
- *   longer tracked in source is removed at the destination (the exact "stale deployed copy" bug this item
- *   closes), and an already-in-sync skill produces zero actions (idempotent — a second sync is a no-op).
- *   `buildPlans`' default-scope rule (only sync skills already present at the destination unless --all/--only)
- *   is proven against real tmp dirs, no git call (git-tracked-file listing is injected directly).
+ *   longer tracked in source is reported STALE and deleted only under --prune (#2579 review — the deploy root
+ *   is the user's own tree, so deletion is never automatic), and an already-in-sync skill produces zero
+ *   actions (idempotent — a second sync is a no-op). `applyPlan` refuses to write through a symlinked path
+ *   that escapes the deploy root. `buildPlans`' default-scope rule (only sync skills already present at the
+ *   destination unless --all/--only) is proven against a real tmp git repo — the one guard that stops
+ *   repo-local orchestration skills from being deployed machine-globally.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { planSkill, applyPlan, listFilesRecursive, parseArgs } from '../sync-skills-deploy.mjs';
+import { execFileSync } from 'node:child_process';
+import { planSkill, applyPlan, listFilesRecursive, parseArgs, assertInsideRoot, buildPlans } from '../sync-skills-deploy.mjs';
 
 let root;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'sync-skills-')); });
@@ -46,13 +49,17 @@ describe('planSkill — pure diff (no git call; tracked-file list injected)', ()
     expect(plan.alreadyDeployed).toBe(true);
   });
 
-  it('flags a dest file no longer tracked in source as "remove" (the stale-copy bug)', () => {
+  it('reports a dest file no longer tracked in source as STALE, and removes it only under --prune', () => {
     const srcDir = join(root, 'src');
     const destDir = join(root, 'dest');
     writeTree(srcDir, { 'SKILL.md': 'v1' });
     writeTree(destDir, { 'SKILL.md': 'v1', 'renamed-away.mjs': 'old content' });
+    // #2579 review — default is REPORT, not delete: the deploy root is the user's own tree.
     const plan = planSkill({ name: 'x', srcDir, destDir, trackedRel: ['SKILL.md'] });
-    expect(plan.actions).toEqual([{ type: 'remove', rel: 'renamed-away.mjs' }]);
+    expect(plan.actions).toEqual([]);
+    expect(plan.stale).toEqual(['renamed-away.mjs']);
+    const pruned = planSkill({ name: 'x', srcDir, destDir, trackedRel: ['SKILL.md'], prune: true });
+    expect(pruned.actions).toEqual([{ type: 'remove', rel: 'renamed-away.mjs' }]);
   });
 
   it('a fully-in-sync skill produces zero actions (idempotent)', () => {
@@ -81,7 +88,8 @@ describe('applyPlan — executes add/update/remove on disk', () => {
     const destDir = join(root, 'dest');
     writeTree(srcDir, { 'SKILL.md': 'new content', 'added.mjs': 'brand new' });
     writeTree(destDir, { 'SKILL.md': 'stale content', 'gone.mjs': 'should be removed' });
-    const plan = planSkill({ name: 'x', srcDir, destDir, trackedRel: ['SKILL.md', 'added.mjs'] });
+    // --prune so this keeps covering the remove path (deletion is opt-in since the #2579 review)
+    const plan = planSkill({ name: 'x', srcDir, destDir, trackedRel: ['SKILL.md', 'added.mjs'], prune: true });
     applyPlan(plan);
     expect(readFileSync(join(destDir, 'SKILL.md'), 'utf8')).toBe('new content');
     expect(readFileSync(join(destDir, 'added.mjs'), 'utf8')).toBe('brand new');
@@ -123,14 +131,106 @@ describe('listFilesRecursive', () => {
 describe('parseArgs', () => {
   it('parses flags and --only as a list', () => {
     expect(parseArgs(['--all', '--check', '--dry-run', '--json'])).toEqual({
-      all: true, check: true, dryRun: true, json: true, only: null,
+      all: true, check: true, dryRun: true, json: true, prune: false, only: null,
     });
     expect(parseArgs(['--only=a,b, c'])).toEqual({
-      all: false, check: false, dryRun: false, json: false, only: ['a', 'b', 'c'],
+      all: false, check: false, dryRun: false, json: false, prune: false, only: ['a', 'b', 'c'],
     });
   });
 
   it('rejects an unrecognised flag', () => {
     expect(() => parseArgs(['--bogus'])).toThrow(/unrecognised arg/);
+  });
+});
+
+// ── #2579 review regressions ──────────────────────────────────────────────────────────────────────
+// Each case below FAILED on the first cut and was caught by the review jury.
+describe('sync-skills-deploy — #2579 review regressions', () => {
+  let root;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'sync-review-')); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('does NOT delete untracked deploy-root files by default (data loss); --prune is opt-in', () => {
+    const srcDir = join(root, 'src', 'demo');
+    const destDir = join(root, 'dest', 'demo');
+    mkdirSync(srcDir, { recursive: true });
+    mkdirSync(destDir, { recursive: true });
+    writeFileSync(join(srcDir, 'SKILL.md'), 'v2');
+    writeFileSync(join(destDir, 'SKILL.md'), 'v1');
+    // the user's OWN file, living in the same deploy dir — must survive an ordinary sync
+    writeFileSync(join(destDir, 'my-local-notes.md'), 'precious');
+
+    const plan = planSkill({ name: 'demo', srcDir, destDir, trackedRel: ['SKILL.md'] });
+    expect(plan.actions.some((a) => a.type === 'remove')).toBe(false);
+    expect(plan.stale).toEqual(['my-local-notes.md']);   // reported, not destroyed
+    applyPlan(plan);
+    expect(existsSync(join(destDir, 'my-local-notes.md'))).toBe(true);
+    expect(readFileSync(join(destDir, 'SKILL.md'), 'utf8')).toBe('v2'); // the fix still went live
+
+    // explicit --prune is the ONLY way a delete happens
+    const pruned = planSkill({ name: 'demo', srcDir, destDir, trackedRel: ['SKILL.md'], prune: true });
+    expect(pruned.actions.some((a) => a.type === 'remove' && a.rel === 'my-local-notes.md')).toBe(true);
+  });
+
+  it('refuses to write THROUGH a symlinked directory inside the deploy root', () => {
+    const outside = join(root, 'outside');
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, 'victim.mjs'), 'ORIGINAL');
+
+    const srcDir = join(root, 'src', 'demo');
+    const destDir = join(root, 'dest', 'demo');
+    mkdirSync(join(srcDir, 'nested'), { recursive: true });
+    mkdirSync(destDir, { recursive: true });
+    writeFileSync(join(srcDir, 'nested', 'victim.mjs'), 'PAYLOAD');
+    symlinkSync(outside, join(destDir, 'nested'), 'dir');   // the escape hatch
+
+    const plan = planSkill({ name: 'demo', srcDir, destDir, trackedRel: ['nested/victim.mjs'] });
+    expect(() => applyPlan(plan)).toThrow(/resolves outside the deploy root/);
+    // the file outside the deploy root is untouched
+    expect(readFileSync(join(outside, 'victim.mjs'), 'utf8')).toBe('ORIGINAL');
+  });
+
+  it('assertInsideRoot allows an ordinary not-yet-existing path under the root', () => {
+    const destDir = join(root, 'dest');
+    mkdirSync(destDir, { recursive: true });
+    expect(() => assertInsideRoot(destDir, join(destDir, 'a', 'b', 'c.md'))).not.toThrow();
+    expect(() => assertInsideRoot(destDir, join(root, 'elsewhere.md'))).toThrow(/outside the deploy root/);
+  });
+
+  it('parseArgs understands --prune and still rejects unknown flags', () => {
+    expect(parseArgs(['--prune']).prune).toBe(true);
+    expect(parseArgs([]).prune).toBe(false);
+  });
+});
+
+describe('buildPlans — default scope (#2579 review: the header claimed this was proven; it was not)', () => {
+  let root;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'sync-buildplans-')); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+
+  it('by default deploys ONLY skills already present at the destination; --all/--only widen it', () => {
+    // a real (tiny) git repo, because buildPlans shells `git ls-files`
+    git(['init', '-q']);
+    const srcRoot = join(root, 'skills-src');
+    mkdirSync(join(srcRoot, 'deployed-one'), { recursive: true });
+    mkdirSync(join(srcRoot, 'repo-local-only'), { recursive: true });
+    writeFileSync(join(srcRoot, 'deployed-one', 'SKILL.md'), 'a');
+    writeFileSync(join(srcRoot, 'repo-local-only', 'SKILL.md'), 'b');
+    git(['add', '-A']);
+    git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'seed']);
+
+    const destRoot = join(root, 'deploy');
+    mkdirSync(join(destRoot, 'deployed-one'), { recursive: true }); // only ONE is already deployed
+
+    const dflt = buildPlans({ srcRoot, destRoot, repoRoot: root });
+    expect(dflt.map((p) => p.name)).toEqual(['deployed-one']);   // repo-local-only stays repo-local
+
+    const all = buildPlans({ srcRoot, destRoot, all: true, repoRoot: root });
+    expect(all.map((p) => p.name).sort()).toEqual(['deployed-one', 'repo-local-only']);
+
+    const only = buildPlans({ srcRoot, destRoot, only: ['repo-local-only'], repoRoot: root });
+    expect(only.map((p) => p.name)).toEqual(['repo-local-only']);
   });
 });
