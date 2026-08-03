@@ -122,3 +122,25 @@ describe('#2899 A4 — sweepStrandings', () => {
     expect(sweepStrandings([null, undefined], null)).toEqual([]);
   });
 });
+
+describe('#2899 jury — the sweep must not fabricate matches or hide its own bounds', () => {
+  it('rejects a non-id token instead of compiling it into a regex', () => {
+    // `item.id` comes from a filename stem and `bornAs` from frontmatter — both are interpolated into
+    // `new RegExp(...)`. A card whose id is not an id shape is a data error, not a pattern to match on.
+    const pr = { headRefName: 'lane/anything', title: 'x', body: '' };
+    expect(prDeliveredItem(pr, { id: '.*', bornAs: '' }).matched).toBe(false);
+    expect(prDeliveredItem(pr, { id: '(((', bornAs: '' }).matched).toBe(false);
+    expect(() => prDeliveredItem({ title: 'a: b' }, { id: '(((' })).not.toThrow();
+    // the two real shapes still match
+    expect(prDeliveredItem({ headRefName: 'lane/2899-x' }, { id: '2899' }).matched).toBe(true);
+    expect(prDeliveredItem({ headRefName: 'lane/xdxlevu-x' }, { id: '', bornAs: 'xdxlevu' }).matched).toBe(true);
+  });
+
+  it('does NOT read a date segment as an item id', () => {
+    // `lane/calibrate-2026-08-02` was crediting item #2026 as delivered.
+    expect(prDeliveredItem({ headRefName: 'lane/calibrate-2026-08-02' }, { id: '2026' }).matched).toBe(false);
+    expect(prDeliveredItem({ headRefName: 'lane/close-2026-08-02-findings' }, { id: '2026' }).matched).toBe(false);
+    // a genuine id in the same ref still matches
+    expect(prDeliveredItem({ headRefName: 'lane/2899-fix-2026-08-02' }, { id: '2899' }).matched).toBe(true);
+  });
+});

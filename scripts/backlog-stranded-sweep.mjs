@@ -90,7 +90,12 @@ export function isAnnotationPr({ headRefName = '', title = '' } = {}) {
  * @returns {{matched:boolean, via:(string|null)}}
  */
 export function prDeliveredItem(pr = {}, item = {}) {
-  const tokens = [String(item.id || ''), String(item.bornAs || '')].filter((t) => t && t !== 'null');
+  // #2899 jury — tokens come from a CARD (the filename stem and its `bornAs` frontmatter) and are interpolated
+  // into `new RegExp` below, so they are untrusted input to a regex compiler. Accept only the two real id
+  // shapes; anything else is dropped rather than escaped, because a card id that is not an id is a data error,
+  // not something to pattern-match. This also stops a stray token from matching half the corpus.
+  const isId = (t) => /^\d{1,6}$/.test(t) || /^x[0-9a-z]{6}$/.test(t);
+  const tokens = [String(item.id || ''), String(item.bornAs || '')].filter((t) => t && t !== 'null' && isId(t));
   if (!tokens.length) return { matched: false, via: null };
   if (isAnnotationPr(pr)) return { matched: false, via: null };
   const ref = String(pr.headRefName || '');
@@ -100,7 +105,18 @@ export function prDeliveredItem(pr = {}, item = {}) {
   // segment names the item the lane actually built.
   const isBatchRef = /(^|[/\-_])batch([/\-_]|$)/.test(ref);
   const refCandidates = isBatchRef ? refSegments.slice(-1) : refSegments;
-  const refSet = new Set(refCandidates);
+  // #2899 jury — a DATE segment is not an item id. `lane/calibrate-2026-08-02` was crediting item #2026 as
+  // delivered, because every numeric segment was treated as a candidate. Drop the segments of any `YYYY-MM-DD`
+  // run before matching; a real 4-digit item id that happens to look like a year is still matched via the
+  // title/manifest paths, which carry an explicit `#`/`item:` marker.
+  const dateSpans = new Set();
+  for (let i = 0; i + 2 < refCandidates.length; i++) {
+    const [y, m, d] = refCandidates.slice(i, i + 3);
+    if (/^(19|20)\d{2}$/.test(y) && /^(0[1-9]|1[0-2])$/.test(m) && /^(0[1-9]|[12]\d|3[01])$/.test(d)) {
+      dateSpans.add(y); dateSpans.add(m); dateSpans.add(d);
+    }
+  }
+  const refSet = new Set(refCandidates.filter((s) => !dateSpans.has(s)));
   for (const t of tokens) {
     if (refSet.has(t)) return { matched: true, via: `lane-ref ${ref}` };
   }
@@ -163,8 +179,17 @@ function main() {
     process.exit(2); return;
   }
   const hits = sweepStrandings(cards, prs);
-  if (asJson) { process.stdout.write(`${JSON.stringify({ scannedCards: cards.length, scannedPrs: prs.length, candidates: hits }, null, 2)}\n`); return; }
-  if (!hits.length) { process.stdout.write(`stranded-sweep ✓ no candidates (${cards.length} cards × ${prs.length} merged PRs)\n`); return; }
+  // #2899 jury — NO SILENT CAPS. `gh pr list --limit N` returns at most N, and a full page means the window may
+  // be truncated: strandings older than it are simply absent from a report whose whole job is to find the ones
+  // already stranded. An unqualified "no candidates" over a truncated window is a false all-clear, which is the
+  // same class of silent bound this review flagged elsewhere and then shipped here.
+  const truncated = prs.length >= limit;
+  const window = truncated
+    ? `the most recent ${prs.length} merged PRs — WINDOW FULL, older strandings are NOT covered; re-run with --limit=<bigger>`
+    : `all ${prs.length} merged PRs`;
+  if (asJson) { process.stdout.write(`${JSON.stringify({ scannedCards: cards.length, scannedPrs: prs.length, windowTruncated: truncated, limit, candidates: hits }, null, 2)}\n`); return; }
+  if (truncated) process.stderr.write(`stranded-sweep ⚠ merged-PR window is FULL at --limit=${limit} — this report covers only the most recent ${prs.length}; older strandings are NOT covered. Re-run with a larger --limit for a complete sweep.\n`);
+  if (!hits.length) { process.stdout.write(`stranded-sweep ✓ no candidates (${cards.length} cards × ${window})\n`); return; }
   process.stdout.write(`stranded-sweep — ${hits.length} candidate(s) (${cards.length} cards × ${prs.length} merged PRs, #2899 A4). REPORT ONLY; nothing was written.\n\n`);
   for (const h of hits) {
     process.stdout.write(`  #${h.id}  status:${h.status}${h.dateStarted ? `  started:${h.dateStarted}` : ''}${h.bornAs ? `  bornAs:${h.bornAs}` : ''}\n`);

@@ -327,11 +327,29 @@ describe('lane-drain on-land cleanup contract guard (source-level, #2748)', () =
     // flips via backlog.mjs resolve (legal from active OR open) — no --force that would resolve an epic over kids
     expect(src).toMatch(/'resolve', num\b/);
     expect(src).not.toMatch(/'resolve', num, '--force'/);
-    // the flip is attempted ONLY when the card is not already resolved (guards the prior producer-authored path)
-    const flipGuard = src.indexOf('if (resolveReachable === false)');
+    // #2899 A2 — the flip is attempted on a `false` OR a `null` (couldn't-tell) verdict, never only on `false`:
+    // couldn't-tell was the NORMAL verdict for a freshly JIT-numbered card, and the old `=== false` guard
+    // skipped it with no attempt and no warning. Scrape the CODE line, not the prose: the previous version of
+    // this assertion searched for `if (resolveReachable === false)` and kept passing after the guard changed,
+    // because that string survived inside an explanatory COMMENT. A source scrape must anchor on something a
+    // comment cannot satisfy.
+    const codeLines = src.split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*'));
+    const guardLine = codeLines.findIndex((l) => l.includes('if (resolveReachable !== true)'));
+    expect(guardLine, 'the flip must be attempted on false OR null, not only false').toBeGreaterThan(-1);
+    expect(codeLines.some((l) => l.includes('if (resolveReachable === false)') && l.includes('const flip'))).toBe(false);
     const flipCall = src.indexOf('resolveLandedItem(CWD, num)');
-    expect(flipGuard).toBeGreaterThan(-1);
-    expect(flipCall).toBeGreaterThan(flipGuard);
+    expect(flipCall).toBeGreaterThan(-1);
+  });
+
+  it('#2899 jury J1 — `flipped` means the flip is a COMMIT, so a failed commit is never reported as resolved', () => {
+    // The shipped version returned `flipped: true` whenever `backlog.mjs resolve` succeeded, regardless of
+    // whether the scoped commit landed — and both call sites branch on `flipped`. A failed commit therefore
+    // printed `✓ resolved on land … + pushed to main` while the card was untouched on main: a silent false
+    // success on the sole writer to main, which is the exact failure class #2899 was filed to close.
+    expect(src).toMatch(/return \{ flipped: committed,/);
+    expect(src).not.toMatch(/return \{ flipped: true, alreadyResolved: false, committed \}/);
+    // and the commit result is what feeds it — not a hardcoded literal
+    expect(src).toMatch(/const committed = quietGit\(CWD, \['commit'/);
   });
 
   it('resolve-on-land runs AFTER every ref merged (WE-last), so a failed impl half never false-resolves (#96)', () => {

@@ -873,9 +873,15 @@ export function resolveLandedItem(CWD, num, { sync = true, publish = true } = {}
   catch { return { flipped: false, alreadyResolved: false }; } // illegal from-status / decision-needs-codifiedTo / epic-open-child / guard → leave it (caller reopens)
   // Scope the commit to ONLY this item's backlog file (explicit `-- <path>`) — never a bare commit that would
   // absorb a foreign staged hunk (the shared-index commit race, as finalizeLand/reopenStrandedItem guard).
+  // #2899 jury J1 — `flipped` means "the flip is a COMMIT", not "the frontmatter splice returned 0". Returning
+  // an unconditional `flipped: true` here made a failed commit read as a successful resolve at both call sites
+  // (both branch on `flipped`), so the drain printed `✓ resolved on land … + pushed to main` while the card was
+  // untouched on main — a silent false success on the sole writer to main, which is the exact failure class
+  // #2899 was filed to close. An un-committed splice is a FAILURE: the working tree carries an edit nobody
+  // asked for and main is unchanged, so the caller must be able to see it and say so.
   const committed = quietGit(CWD, ['commit', '-m', `drain: resolve #${num} on land (#2748)`, '--', path]) != null;
   if (committed && publish) publishMain(CWD);
-  return { flipped: true, alreadyResolved: false, committed };
+  return { flipped: committed, alreadyResolved: false, committed, ...(committed ? {} : { reason: 'commit-failed' }) };
 }
 
 // #2748 — RELEASE-ON-LAND: hand the item's lane lease back to the pool in EVERY pool it was acquired in (a

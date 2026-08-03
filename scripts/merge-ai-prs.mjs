@@ -680,36 +680,54 @@ export function joinImplToCouples(verdicts) {
  *          openHeadRefs?: Iterable<string>}} o
  * @returns {Array<number|string>} ids to flip, de-duplicated, in first-seen order
  */
-export function resolveIdsForLandedPass({ landedItems = [], assigned = [], carriers = [], openHeadRefs = [] } = {}) {
+export function planResolveOnLand({ landedItems = [], assigned = [], carriers = [], openHeadRefs = [] } = {}) {
   const byHash = new Map();
   for (const a of (Array.isArray(assigned) ? assigned : [])) {
     if (a && a.hash != null && a.nnn != null) byHash.set(String(a.hash), a.nnn);
   }
-  // Couple shape by item id — the lane refs the manifest names, and which one is the carrier's own head.
+  // Couple shape keyed by item — but the WE CARRIER wins on collision (jury J4). A non-WE PR can carry a body
+  // manifest too, so two verdicts can share one item id; if the impl half won, its ref became `headRef` and the
+  // exemption below skipped the very ref that proves the couple is incomplete.
   const coupleByItem = new Map();
   for (const c of (Array.isArray(carriers) ? carriers : [])) {
     if (!c || c.item == null) continue;
-    coupleByItem.set(String(c.item), {
+    const key = String(c.item);
+    const prev = coupleByItem.get(key);
+    if (prev && prev.isWe && !c.isWe) continue;          // keep the WE carrier
+    coupleByItem.set(key, {
+      isWe: !!c.isWe,
       headRef: c.headRef || null,
       refs: (Array.isArray(c.manifestRefs) ? c.manifestRefs : []).filter(Boolean),
     });
   }
   const stillOpen = new Set([...(openHeadRefs || [])].filter(Boolean).map(String));
-  const out = [];
+  const resolve = [];
+  const deferred = [];
   const seen = new Set();
   for (const raw of (landedItems || [])) {
     if (raw == null) continue;
-    // B5 — a sibling half still OPEN proves the couple did not fully land this pass. Keyed on the PRE-numbering
-    // id, because that is what the manifest (and `landedThisPass`) carries.
-    const couple = coupleByItem.get(String(raw));
-    if (couple && couple.refs.some((r) => r !== couple.headRef && stillOpen.has(String(r)))) continue;
     const id = byHash.has(String(raw)) ? byHash.get(String(raw)) : raw;
     const key = String(id);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(id);
+    // B5 — a sibling half still OPEN proves the couple did not fully land this pass. Keyed on the PRE-numbering
+    // id, because that is what the manifest (and `landedThisPass`) carries. The withheld item is REPORTED, not
+    // dropped (jury J2): this deferral is terminal for the run, and the A4 stranded sweep is the recovery path.
+    const couple = coupleByItem.get(String(raw));
+    const blocking = couple ? couple.refs.filter((r) => r !== couple.headRef && stillOpen.has(String(r))) : [];
+    if (blocking.length) deferred.push({ id, reason: `couple half still open: ${blocking.join(', ')}` });
+    else resolve.push(id);
   }
-  return out;
+  return { resolve, deferred };
+}
+
+/**
+ * #2899 A5 — back-compat shim: the ids to flip. Prefer `planResolveOnLand`, which also reports what it withheld
+ * — a caller that only takes this list cannot honour the totality rule (every landed item in exactly one
+ * observable bucket) that jury finding J2 exists to enforce.
+ */
+export function resolveIdsForLandedPass(o = {}) {
+  return planResolveOnLand(o).resolve;
 }
 
 /**
@@ -2838,6 +2856,10 @@ async function runCli() {
   // scaffolded in its lane) and push. Runs BEFORE the derived regen so the inventory reflects the final numbers.
   // Shares lane-drain's `numberPendingHashes` (single source, never a fork). Best-effort/non-fatal.
   let numbered = { assigned: [], committed: false };
+  // #2899 jury J2 — the resolve-on-land totality report: every id in `landedThisPass` ends in exactly one of
+  // these buckets, and every bucket reaches the operator (stderr) AND `--json`. A withheld item that appears in
+  // none of them is the silent skip this whole item was filed against.
+  let resolveOnLandReport = { resolved: [], alreadyResolved: [], deferred: [], failed: [] };
   if (landedLocal && !DRY_RUN) {
     // #2391 — number+publish is the NUMBERING CRITICAL SECTION (sole-serial-writer, #2288/#2290). Guard it with
     // the TTL-bounded numbering mutex so a concurrent drain/land never mints the same NNN off the same base.
@@ -2866,27 +2888,66 @@ async function runCli() {
       // absent from the pass's OPEN-PR set — positive evidence the whole couple landed. A sibling still open
       // defers the flip to a later pass, the safe direction (an unresolved card costs a re-pack; a wrongly
       // resolved one is a silent forever-block). Best-effort/non-fatal throughout, as numbering is.
+      // #2899 jury J4 — key the couple map by ITEM+REPO, not item alone. `landedCarriers` is built from EVERY
+      // manifest-bearing verdict, and a non-WE PR can carry a body manifest too, so two verdicts can share one
+      // item id. With an item-only key the last writer won, and if that was the IMPL half then `couple.headRef`
+      // became the impl's ref — which the gate's `r !== couple.headRef` exemption then treats as "the half that
+      // just merged", skipping the very ref that proves the couple is incomplete. The safety check silently
+      // disabled itself. The WE carrier is preferred explicitly rather than left to iteration order.
       const landedCarriers = verdicts.filter((v) => v && v.hasManifest && v.item != null)
-        .map((v) => ({ item: v.item, headRef: v.headRef, manifestRefs: v.manifestRefs }));
+        .map((v) => ({ item: v.item, repo: v.repo || null, isWe: isLocalRepo(v.repo), headRef: v.headRef, manifestRefs: v.manifestRefs }));
       // `openPrContext` is a PASS-START snapshot, so a sibling that merged during THIS pass is still listed in
       // it. Subtract the refs merged this pass or the gate could never pass for the normal impl-first/WE-last
       // couple — the whole point is to catch a sibling that is STILL open after the cascade finished.
-      const mergedRefs = new Set(merged
-        .map((m) => (verdicts.find((v) => v && v.num === m.num && (v.repo || null) === (m.repo || null)) || {}).headRef)
-        .filter(Boolean));
+      // #2899 jury J5 — a `merged` entry that matches no verdict is an INTEGRITY failure, not a silent skip: it
+      // would leave that ref looking "still open", block its couple, and (pre-J2) drop the item with no trace.
+      // Surface it and fail the gate closed for this pass rather than guessing.
+      const mergedRefs = new Set();
+      const unmatchedMerges = [];
+      for (const m of merged) {
+        const v = verdicts.find((x) => x && x.num === m.num && (x.repo || null) === (m.repo || null));
+        if (v && v.headRef) mergedRefs.add(v.headRef);
+        else unmatchedMerges.push(`${m.repo || 'cwd'}#${m.num}`);
+      }
+      if (unmatchedMerges.length && !AS_JSON) {
+        process.stderr.write(`  ⚠ resolve-on-land: ${unmatchedMerges.join(', ')} merged but matched no verdict — cannot prove its couple landed; those items are DEFERRED (#2899)\n`);
+      }
       const openHeadRefs = [];
       for (const [, prs] of (openPrContext.prsByRepo instanceof Map ? openPrContext.prsByRepo : new Map())) {
         for (const p of (Array.isArray(prs) ? prs : [])) {
           if (p && p.headRefName && !mergedRefs.has(p.headRefName)) openHeadRefs.push(p.headRefName);
         }
       }
+      // #2899 jury J2/J3 — TOTALITY. Every id in `landedThisPass` must end in exactly ONE observable bucket:
+      // resolved / already-resolved / deferred / failed. The first cut returned only the ids to flip, so a
+      // couple withheld by the B5 gate vanished with no log line, no `--json` key and no retry — and the comment
+      // claimed it would "defer to a later pass", which is FALSE: `landedThisPass` is only populated when a
+      // carrier merges IN that pass, so a later pass never re-lists it. The deferral is correct (never resolve
+      // on partial evidence) but it is TERMINAL for this run, so it must be reported — the A4 stranded sweep is
+      // the recovery path, and it can only find what was announced. A silent skip inside a fix for silent skips
+      // is the one outcome this item cannot ship.
+      const plan = planResolveOnLand({ landedItems: landedThisPass, assigned: n.assigned, carriers: landedCarriers, openHeadRefs });
       const resolvedOnLand = [];
-      for (const id of resolveIdsForLandedPass({ landedItems: landedThisPass, assigned: n.assigned, carriers: landedCarriers, openHeadRefs })) {
+      const alreadyResolved = [];
+      const failedResolve = [];
+      for (const id of plan.resolve) {
         try {
           const flip = resolveLandedItem(process.cwd(), id, { sync: false, publish: false });
           if (flip.flipped) resolvedOnLand.push(id);
-        } catch { /* a single card's flip never unwinds a green land */ }
+          else if (flip.alreadyResolved) alreadyResolved.push(id);
+          else failedResolve.push({ id, reason: flip.reason || 'resolve-refused' });
+        } catch (e) {
+          // Never unwinds a green land — but never silent either (J3).
+          failedResolve.push({ id, reason: String((e && e.message) || e).split('\n')[0] });
+        }
       }
+      if (!AS_JSON && plan.deferred.length) {
+        process.stderr.write(`  · resolve-on-land DEFERRED ${plan.deferred.map((d) => `#${d.id} (${d.reason})`).join(', ')} — the couple did not fully land; \`node scripts/backlog-stranded-sweep.mjs\` finds these (#2899)\n`);
+      }
+      if (!AS_JSON && failedResolve.length) {
+        process.stderr.write(`  ⚠ resolve-on-land FAILED ${failedResolve.map((f) => `#${f.id} (${f.reason})`).join(', ')} — the card is NOT resolved on main; resolve it by hand (#2899)\n`);
+      }
+      resolveOnLandReport = { resolved: resolvedOnLand, alreadyResolved, deferred: plan.deferred, failed: failedResolve };
       if (n.committed || resolvedOnLand.length) {
         try {
           execFileSync('git', ['push', 'origin', 'HEAD:main'], { env: { ...process.env, MAIN_PUSH_OK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -2945,7 +3006,7 @@ async function runCli() {
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 
