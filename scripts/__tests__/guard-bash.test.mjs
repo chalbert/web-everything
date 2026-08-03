@@ -463,6 +463,38 @@ describe('guard-bash — primary-tree-write build backstop (#2749/#2788, 4th arm
     expect(isTreeWritingBuildRun(`npm run ${PLUGS}`)).toBe(false);
   });
 
+  // ── #2788 review ROUND 2 regressions ────────────────────────────────────────────────────────────
+  // The round-1 fixes were themselves bypassable; each case below failed on that cut.
+
+  it('isTreeWritingBuildRun: NO placement of an excluded target can disarm a real build', () => {
+    const CHECK = `build:${'check'}`;
+    const PLUGS = `build:${'plugs'}`;
+    // r1 extracted ONE target (the first in a greedy match), so an excluded name placed BEFORE a real one
+    // disarmed the arm — the same bypass r1 was meant to close, one spelling further out.
+    expect(isTreeWritingBuildRun(`run-s ${CHECK} build`)).toBe(true);
+    expect(isTreeWritingBuildRun(`run-s build ${CHECK}`)).toBe(true);
+    expect(isTreeWritingBuildRun(`run-p ${PLUGS} build:docs`)).toBe(true);
+    // …while a segment whose targets are ALL excluded still stays quiet
+    expect(isTreeWritingBuildRun(`run-s ${CHECK} ${PLUGS}`)).toBe(false);
+    expect(isTreeWritingBuildRun(`npm run ${CHECK}`)).toBe(false);
+    // and a word merely CONTAINING "build" is not a build target
+    expect(isTreeWritingBuildRun('npm run test --rebuild-cache')).toBe(false);
+    expect(isTreeWritingBuildRun('git commit -m "npm run build"')).toBe(false);
+  });
+
+  it('isFileWriteRedirect: a QUOTED path is unquoted before the scratch allowlist sees it', () => {
+    // r1 tested the raw shell token against an anchored `^/tmp/`, so quoting a scratch path — ordinary
+    // hygiene, and required for a path with a space — read as a primary-tree write and was denied.
+    expect(isFileWriteRedirect('tee "/tmp/x"')).toBe(false);
+    expect(isFileWriteRedirect("tee '/tmp/x'")).toBe(false);
+    expect(isFileWriteRedirect('sed -i s/a/b/ "/tmp/x"')).toBe(false);
+    expect(isFileWriteRedirect('echo hi > "/private/tmp/claude-501/s.txt"')).toBe(false);
+    // …and the mirror bypass: a QUOTED tree target must still be caught (the old `[\w./-]+` class
+    // excluded quote chars, so a quoted redirect matched nothing at all).
+    expect(isFileWriteRedirect('echo hi > "config/app.json"')).toBe(true);
+    expect(isFileWriteRedirect('tee "docs/x.md"')).toBe(true);
+  });
+
   it('hasLeadingEnvEscape: the escape counts only as a LEADING assignment, never as a mention', () => {
     const V = 'MAIN_SESSION_BUILD_OK';
     expect(hasLeadingEnvEscape(`${V}=1 npm run build`, V)).toBe(true);

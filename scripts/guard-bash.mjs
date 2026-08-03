@@ -130,10 +130,16 @@ export function backgroundedVerificationReason(command, runInBackground = false)
 // (a) an actual RUN of the tree-writing `build` family. `build:check` (writes only `/tmp`, see package.json's
 // `--output=/tmp/…`) and `build:plugs` (already its own arm above, different message/reason) are excluded —
 // neither is a primary-tree write in the sense this arm cares about.
-const BUILD_RUN = /^(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b[^|;&]*\b(?:run\s+)?build(?::[-\w]+)?\b/;
-// #2788 review — the exclusion must be tested against the MATCHED build target, never the whole segment.
-// Whole-segment matching meant any command that merely MENTIONED an excluded target disarmed the arm for a
-// real tree-writing build in the same segment (verified: `npm run build && echo build:check` read as safe).
+const BUILD_RUNNER = /^(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b/;
+/** Every `build`/`build:<target>` token in a segment. `\b` keeps `rebuild-cache` / `prebuild` out. */
+const BUILD_TARGETS_G = /\bbuild(?::[-\w]+)?\b/g;
+// #2788 review r2 — the exclusion is tested against EVERY build target in the segment, and the arm fires if
+// ANY of them is tree-writing. Two earlier cuts were both bypassable:
+//   r0 tested the exclusion against the WHOLE segment, so merely MENTIONING `build:check` anywhere disarmed
+//      a real build (`npm run build && echo build:check` read as safe).
+//   r1 tested it against ONE extracted target — the FIRST in a greedy match — so an excluded target placed
+//      BEFORE a real one disarmed it (verified: `run-s build:check build` read as safe). Same bypass, new
+//      spelling. Checking all targets removes the ordering dependency entirely.
 const BUILD_RUN_EXCLUDED = /^build:(?:check|plugs)$/;
 
 /** Strip a leading `VAR=val …`/`sudo` prefix off a command segment — mirrors the `cmd` derivation in
@@ -167,12 +173,11 @@ export function hasLeadingEnvEscape(segment, name) {
  *  and the separately-handled `build:plugs`? Pure. */
 export function isTreeWritingBuildRun(segment) {
   const cmd = stripCmdPrefix(segment);
-  const m = cmd.match(BUILD_RUN);
-  if (!m) return false;
-  // #2788 review — test the exclusion against the MATCHED target alone (`build`, `build:docs`, …), so an
-  // excluded name appearing ELSEWHERE in the segment cannot disarm a real tree-writing build.
-  const target = (m[0].match(/\bbuild(?::[-\w]+)?\b/) || [''])[0];
-  return !BUILD_RUN_EXCLUDED.test(target);
+  if (!BUILD_RUNNER.test(cmd)) return false;                 // a package runner at command position
+  const head = cmd.split(/[|;&]/)[0];                        // stay inside THIS segment
+  const targets = head.match(BUILD_TARGETS_G) || [];
+  // Fire if ANY target is tree-writing — order-independent, so no placement of an excluded name can disarm it.
+  return targets.some((t) => !BUILD_RUN_EXCLUDED.test(t));
 }
 
 // (b) an fs-writing GENERATOR/SCAFFOLD script — the exact hole guard-lane.mjs misses (a `node` script writes
@@ -208,18 +213,27 @@ const SCRATCH_TARGET = /^(?:\/tmp\/|\/private\/tmp\/|\/var\/tmp\/|\/var\/folders
  *  scratch path? Pure. */
 export function isFileWriteRedirect(segment) {
   const s = String(segment || '');
-  const cmd = s.replace(/^(?:\w+=\S+\s+)*(?:sudo\s+)?/, '');
+  const cmd = stripCmdPrefix(s); // #2788 review — call the shared helper, don't re-inline its regex
+  // #2788 review r2 — a target must be UNQUOTED before the scratch allowlist sees it. `SCRATCH_TARGET` is
+  // anchored (`^/tmp/`…), so testing the raw shell token made every QUOTED scratch write read as a
+  // primary-tree write — verified: `tee "/tmp/x"` and `sed -i s/a/b/ "/tmp/x"` were both denied. Quoting a
+  // path is ordinary shell hygiene (it is what you do for a path with a space), so this was the same
+  // false-positive class as the scratchpad denial, just one spelling further out.
+  const unquote = (t) => String(t || '').replace(/^(['"])(.*)\1$/, '$2');
+  const isScratch = (t) => SCRATCH_TARGET.test(unquote(t));
   const lastArg = () => {
     const toks = cmd.trim().split(/\s+/).filter((t) => t && !t.startsWith('-'));
     return toks[toks.length - 1] || '';
   };
-  if (/^sed\b/.test(cmd) && /(?:^|\s)-i\b/.test(s) && !SCRATCH_TARGET.test(lastArg())) return true;
-  if (/^perl\b/.test(cmd) && /-[A-Za-z]*p[A-Za-z]*i\b/.test(s) && !SCRATCH_TARGET.test(lastArg())) return true;
+  if (/^sed\b/.test(cmd) && /(?:^|\s)-i\b/.test(s) && !isScratch(lastArg())) return true;
+  if (/^perl\b/.test(cmd) && /-[A-Za-z]*p[A-Za-z]*i\b/.test(s) && !isScratch(lastArg())) return true;
   const teeMatch = cmd.match(/^tee\b(?:\s+-a)?\s+(\S+)/);
-  if (teeMatch && !SCRATCH_TARGET.test(teeMatch[1])) return true;
+  if (teeMatch && !isScratch(teeMatch[1])) return true;
   const neutral = s.replace(/[0-9]*>&[0-9-]*/g, '').replace(/&>/g, '');
-  const m = neutral.match(/>>?\s*([\w./-]+)\s*$/);
-  if (m && !SCRATCH_TARGET.test(m[1])) return true;
+  // Allow a QUOTED redirect target too — the old `[\w./-]+` class excluded quote characters, so
+  // `echo hi > "config/app.json"` matched nothing and slipped past the arm entirely.
+  const m = neutral.match(/>>?\s*("[^"]+"|'[^']+'|[\w./-]+)\s*$/);
+  if (m && !isScratch(m[1])) return true;
   return false;
 }
 
@@ -636,7 +650,12 @@ if (IS_CLI) {
     // behaviour (an unrecognised field is ignored), and it can never deny, so a wrong guess cannot wedge a
     // command. Confirm against the live hook contract before relying on it as the sole channel.
     if (nudge) {
-      process.stdout.write(JSON.stringify({ systemMessage: 'guard-bash: ' + nudge }) + '\n');
+      // #2788 review r2 — stdout must stay ONE JSON document per hook invocation. The deny path above may
+      // already have written `hookSpecificOutput`; emitting a second `systemMessage` object after it produced
+      // two concatenated JSON documents on one stream, which a strict reader cannot parse — and the deny is
+      // the message that matters, so corrupting it to append a nudge is a strictly bad trade. When the
+      // command is already denied, the nudge goes to stderr only.
+      if (!r) process.stdout.write(JSON.stringify({ systemMessage: 'guard-bash: ' + nudge }) + '\n');
       process.stderr.write('guard-bash: ' + nudge + '\n');
     }
   } catch { /* never wedge on a nudge-computation fault */ }
