@@ -93,7 +93,7 @@ Do NOT strip `ready-to-merge` here — that is #984's job. Do NOT touch
 **Delivered on `main` before this item was numbered — verified, not rebuilt.**
 
 The work shipped as PR #999 (merged 2026-08-02) under this item's `bornAs` hash
-`xq985wu`; the at-land JIT-number pass (commit `b4894dd8`) assigned #2880 but
+`2880`; the at-land JIT-number pass (commit `b4894dd8`) assigned #2880 but
 never flipped `status`. So the item read `open` while its code was already live.
 Verification, all against `origin/main`:
 
@@ -102,7 +102,7 @@ Verification, all against `origin/main`:
   full-open set feeds `planLabelDrain`'s `extraOpenItems` on **every** pass,
   no longer `onlyPr ? … : null`.
 - **All three ACs have live oracles**, in the
-  `#xq985wu decouple merge-ordering from the ready-to-merge label scope` describe
+  `#2880 decouple merge-ordering from the ready-to-merge label scope` describe
   block of `we:scripts/__tests__/merge-ai-prs.test.mjs`: AC1 (dependent defers on
   a blocker present only via `extraOpenItems`) with its mirror (the same
   dependent frees once the blocker leaves both sets, proving the defer comes from
