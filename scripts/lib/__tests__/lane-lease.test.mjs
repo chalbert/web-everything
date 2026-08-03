@@ -180,9 +180,29 @@ describe('leaseOwnedByCaller (#2452 Gap 2 — release ownership survives a defau
     const lease = leaseBody({ session: 'host:111', acquiredAt: at, ownerSession: 'sess-uuid-A' });
     expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-B' })).toBe(false);
   });
-  it('DEGRADED (no ownerSession / no mySessionId signal on both sides) fails open — same posture as isForeignLease', () => {
+  // #2452 review — this case previously asserted FAIL-OPEN (`toBe(true)`), inheriting isForeignLease's
+  // posture. That was an authorization weakening, not a fix: isForeignLease answers "is this PROVABLY someone
+  // else's?" and returns false on no signal, so `!isForeignLease(...)` handed ANY caller ownership of an
+  // unmarked lease that recorded no ownerSession — strictly weaker than the exact-session match this fallback
+  // was meant to supplement, and a live hold could be dropped without --force. Ownership now needs a POSITIVE
+  // match on both sides; no signal means not owned, so the explicit --force is required.
+  it('DEGRADED (no ownerSession recorded) is NOT owned — the durable-id fallback needs a positive match', () => {
     const lease = leaseBody({ session: 'host:111', acquiredAt: at }); // no ownerSession recorded
-    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-B' })).toBe(true);
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-B' })).toBe(false);
+  });
+  it('DEGRADED (caller has no mySessionId) is NOT owned either — both sides must be present and equal', () => {
+    const lease = leaseBody({ session: 'host:111', acquiredAt: at, ownerSession: 'sess-uuid-A' });
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: null })).toBe(false);
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: '' })).toBe(false);
+  });
+  it('a RESERVED lease is never owned via the ownerSession fallback — #2350 keeps --release-reserved the ONE un-reserve', () => {
+    // ownerSession is minted on EVERY lease, reserved ones included, so without this carve-out an ordinary
+    // `release` from the minting session would silently drop a PERMANENT reserved lane with no flag —
+    // exactly what "#2350: --force alone never drops one" forbids.
+    const lease = leaseBody({ session: 'reserved-slug', acquiredAt: at, ownerSession: 'sess-uuid-A', reserved: true });
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-A' })).toBe(false);
+    // the exact minted-slug match still identifies it (the --release-reserved path does the un-reserving).
+    expect(leaseOwnedByCaller({ lease, session: 'reserved-slug', mySessionId: 'sess-uuid-A' })).toBe(true);
   });
   it('a MARKED (workflowLane) lease is owned ONLY via its exact minted-slug session match — ownerSession never substitutes, because siblings share it', () => {
     const lease = leaseBody({ session: 'batch-x-lane5', acquiredAt: at, ownerSession: 'sess-uuid-shared', workflowLane: true });

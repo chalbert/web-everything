@@ -77,13 +77,15 @@ describe('lane-pool release ownership via ownerSession (#2452 Gap 2)', () => {
     const acquire = runPool(['acquire', ...poolArgs(), '--no-reset', '--session=acquired-as-host-A'], 'sess-uuid-mine');
     expect(acquire.code).toBe(0);
 
-    const release = runPool(['release', '--lane=1', ...poolArgs(), '--session=released-as-host-B'], 'sess-uuid-mine');
+    // #2452 review — `--json` is REQUIRED for this to assert anything: `log()` writes to stderr, so without
+    // it stdout is empty. The original assertion sat behind a truthiness check on stdout, which was therefore
+    // always false — the test could (and did) pass while releasing zero lanes. Ask for the machine-readable
+    // result and assert the release count unconditionally.
+    const release = runPool(['release', '--lane=1', ...poolArgs(), '--session=released-as-host-B', '--json'], 'sess-uuid-mine');
     expect(release.code).toBe(0);
     expect(release.out + release.err).not.toMatch(/not yours/);
-    if (release.out.trim()) {
-      const parsed = JSON.parse(release.out);
-      expect(parsed.released).toBe(1);
-    }
+    expect(release.out.trim()).not.toBe('');
+    expect(JSON.parse(release.out).released).toBe(1);
   });
 
   it('a DIFFERENT ownerSession is still refused without --force (a genuinely foreign lease stays protected)', () => {

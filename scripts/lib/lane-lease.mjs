@@ -175,7 +175,18 @@ export function leaseOwnedByCaller({ lease, session, mySessionId } = {}) {
   if (!lease) return false;
   if (leaseOwnedBy(lease, session)) return true;
   if (lease.workflowLane) return false; // marked lease: ownership is the minted slug ONLY (step 1 above)
-  return !isForeignLease({ lease, mySessionId });
+  // #2452 review — a RESERVED lease is never releasable through the ownerSession fallback. #2350 makes
+  // `release --release-reserved` the ONE deliberate un-reserve ("--force alone never drops one"), and
+  // `ownerSession` is minted on EVERY lease including reserved ones — so falling through here would let an
+  // ordinary `release` from the minting session silently drop a permanent reserved lane, no flag required.
+  if (isReservedLease(lease)) return false;
+  // #2452 review — require a POSITIVE identity match. `isForeignLease` fails OPEN by design (it answers
+  // "is this provably someone else's?", returning false when either side has no identity signal), so
+  // `!isForeignLease(...)` treated "no signal at all" as "mine" — handing any caller the right to release an
+  // unmarked lease that recorded no `ownerSession`, which is strictly weaker than the exact-`session` match
+  // this fallback was meant to supplement. Ownership now needs both sides present AND equal; anything else
+  // falls back to the explicit `--force`.
+  return !!lease.ownerSession && !!mySessionId && lease.ownerSession === mySessionId;
 }
 
 // #2413 — the minted-slug ownership channel for a MARKED (workflowLane) lease. In the parallel-/workflow
