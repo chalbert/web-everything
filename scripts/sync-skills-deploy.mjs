@@ -22,7 +22,10 @@
  * files are added and updated at the deploy target. DELETION IS OPT-IN (`--prune`, #2579 review): the deploy
  * root is the user's own machine-global tree, so a stale file there is reported, never silently destroyed —
  * an automatic `remove` sweep would let a plain `git pull` wipe a user's local notes/overrides inside a
- * same-named skill dir. `--check` lists stale files so the drift is still visible.
+ * same-named skill dir. Stale files ARE surfaced: `formatPlans` prints a `STALE <skill>` line naming each
+ * one, `--json` carries them per-skill plus `staleFiles`/`staleSkills` totals, and `--check` exits 1 on
+ * them — so opt-in deletion costs visibility of nothing (#2579 review r2: this control was documented
+ * before it existed, and `plan.stale` was computed but consumed nowhere).
  *
  * Usage:
  *   node scripts/sync-skills-deploy.mjs                  # sync every skill already deployed at ~/.claude/skills
@@ -138,13 +141,32 @@ function realpathDeepest(p) {
   let probe = path.resolve(p);
   const parts = [];
   for (;;) {
-    if (fs.existsSync(probe)) break;
+    // #2579 review — probe with `lstat`, NOT `existsSync`. `existsSync` FOLLOWS the link and answers false
+    // for a DANGLING symlink, so the walk stepped straight past a broken link without resolving it and
+    // returned a path that merely LOOKED contained — while the subsequent `copyFileSync` still followed the
+    // link and wrote outside the deploy root. Verified: the guard allowed `dest/nested/x.md` where `nested`
+    // was a dangling link to an outside dir. `lstat` sees the link itself, so a dangling link now resolves
+    // through `readlink` below and its true target is what gets containment-checked.
+    let st = null;
+    try { st = fs.lstatSync(probe); } catch { st = null; }
+    if (st) {
+      if (st.isSymbolicLink()) {
+        // Resolve the link by hand (realpathSync throws on a dangling target) and keep walking, so a chain
+        // of links is followed to its real destination.
+        let target;
+        try { target = fs.readlinkSync(probe); } catch { break; }
+        probe = path.resolve(path.dirname(probe), target);
+        continue;
+      }
+      break; // a real file/dir — realpath it below
+    }
     const parent = path.dirname(probe);
     if (parent === probe) break;
     parts.unshift(path.basename(probe));
     probe = parent;
   }
-  const base = fs.existsSync(probe) ? fs.realpathSync(probe) : probe;
+  let base = probe;
+  try { base = fs.realpathSync(probe); } catch { /* dangling/absent tail — the hand-resolved path stands */ }
   return path.resolve(base, ...parts);
 }
 
@@ -206,10 +228,18 @@ export function buildPlans({ srcRoot = SRC_ROOT, destRoot, only = null, all = fa
   return plans;
 }
 
-function formatPlans(plans, { checkOnly, dryRun }) {
+/** #2579 review — exported so the OUTPUT contract is unit-testable. The stale-reporting gap existed
+ *  precisely because nothing could assert what this function prints. */
+export function formatPlans(plans, { checkOnly, dryRun }) {
   const drifted = plans.filter((p) => p.actions.length > 0);
+  // #2579 review — STALE FILES MUST BE REPORTED. Making deletion opt-in (`--prune`) was justified in this
+  // file's own header by "stale files are reported by `--check`, never silently destroyed" — but `plan.stale`
+  // was computed, returned, and then consumed by NOTHING, so the compensating control did not exist and the
+  // header's claim was false. A stale deployed file is real drift: it is a file the deploy tree has that
+  // source does not, which is exactly the divergence this tool exists to surface.
+  const withStale = plans.filter((p) => (p.stale || []).length > 0 && !p.pruned);
   const lines = [];
-  if (drifted.length === 0) {
+  if (drifted.length === 0 && withStale.length === 0) {
     lines.push(`✓ in sync — ${plans.length} skill(s) checked, no drift`);
   } else {
     const verb = checkOnly ? 'DRIFT' : dryRun ? 'WOULD SYNC' : 'SYNCED';
@@ -222,7 +252,13 @@ function formatPlans(plans, { checkOnly, dryRun }) {
       if (counts.remove) parts.push(`-${counts.remove}`);
       lines.push(`${verb} ${plan.name}: ${parts.join(' ')} (${plan.destDir})`);
     }
-    lines.push(`${drifted.length}/${plans.length} skill(s) drifted`);
+    if (drifted.length) lines.push(`${drifted.length}/${plans.length} skill(s) drifted`);
+    for (const plan of withStale) {
+      lines.push(
+        `STALE ${plan.name}: ${plan.stale.length} file(s) at the deploy target are not tracked in source `
+        + `— ${plan.stale.join(', ')} (${plan.destDir}). Not deleted; re-run with --prune to remove them.`,
+      );
+    }
   }
   return lines.join('\n');
 }
@@ -239,25 +275,50 @@ async function main() {
     for (const plan of drifted) applyPlan(plan);
   }
 
+  // #2579 review — stale files are drift too (see formatPlans), and `ok` must mean "nothing pending" in
+  // EVERY no-write mode, not just `--check`. The old `: true` reported ok:true under `--dry-run --json`
+  // while add/update actions were still outstanding, so automation gating on `ok` would conclude the deploy
+  // tree was in sync when it was not — reintroducing the silent-stale-deploy bug this item exists to close.
+  const stalePending = plans.filter((p) => (p.stale || []).length > 0 && !p.pruned);
+  const nothingPending = drifted.length === 0 && stalePending.length === 0;
+  const writesNothing = args.check || args.dryRun;
   if (args.json) {
     process.stdout.write(JSON.stringify({
-      ok: args.check ? drifted.length === 0 : true,
+      ok: writesNothing ? nothingPending : true,
       checked: plans.length,
       drifted: drifted.length,
+      staleSkills: stalePending.length,
+      staleFiles: stalePending.reduce((n, p) => n + p.stale.length, 0),
       applied: !args.check && !args.dryRun,
-      skills: plans.map((p) => ({ name: p.name, actions: p.actions, alreadyDeployed: p.alreadyDeployed })),
+      skills: plans.map((p) => ({
+        name: p.name, actions: p.actions, stale: p.stale || [], alreadyDeployed: p.alreadyDeployed,
+      })),
     }, null, 2) + '\n');
   } else {
     process.stdout.write(formatPlans(plans, { checkOnly: args.check, dryRun: args.dryRun }) + '\n');
   }
 
-  if (args.check && drifted.length > 0) process.exitCode = 1;
+  // #2579 review — `--check` exits 1 on ANY pending divergence, stale files included. Keying only on
+  // `drifted` meant a deploy tree carrying untracked leftovers reported "no drift" and exited 0.
+  if (args.check && !nothingPending) process.exitCode = 1;
 }
 
 // #2579 review — build the comparison URL with `pathToFileURL`, never by string-concatenating `file://`.
 // A hand-built prefix does not percent-encode, so on any checkout path containing a space or other
 // URL-significant character the two strings never matched and the CLI exited 0 having silently done nothing.
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+//
+// #2579 review r2 — `argv[1]` may be ABSENT (`node -e`, `node --eval`, `node -` / stdin), and
+// `pathToFileURL(undefined)` THROWS, so merely IMPORTING this module crashed under those launchers. That is
+// strictly worse than the string-concat version it replaced, which just produced a non-matching string. The
+// tests never caught it because vitest always sets `argv[1]`. Guard the argument, and realpath both sides so
+// a symlinked invocation path still matches (`import.meta.url` is already realpath-resolved by Node).
+const entryHref = (() => {
+  const argv1 = process.argv[1];
+  if (!argv1) return null;                       // no script path ⇒ this module was imported, not run
+  try { return pathToFileURL(fs.realpathSync(argv1)).href; } catch { /* fall through */ }
+  try { return pathToFileURL(argv1).href; } catch { return null; }
+})();
+if (entryHref && import.meta.url === entryHref) {
   main().catch((err) => {
     const message = /^sync-skills-deploy:/.test(err.message) ? err.message : `sync-skills-deploy: ${err.message}`;
     process.stderr.write(`${message}\n`);

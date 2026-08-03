@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { planSkill, applyPlan, listFilesRecursive, parseArgs, assertInsideRoot, buildPlans } from '../sync-skills-deploy.mjs';
+import { planSkill, applyPlan, listFilesRecursive, parseArgs, assertInsideRoot, buildPlans, formatPlans } from '../sync-skills-deploy.mjs';
 
 let root;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'sync-skills-')); });
@@ -232,5 +232,49 @@ describe('buildPlans — default scope (#2579 review: the header claimed this wa
 
     const only = buildPlans({ srcRoot, destRoot, only: ['repo-local-only'], repoRoot: root });
     expect(only.map((p) => p.name)).toEqual(['repo-local-only']);
+  });
+});
+
+// ── #2579 review ROUND 2 regressions ──────────────────────────────────────────────────────────────
+describe('sync-skills-deploy — #2579 review r2', () => {
+  let root;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'sync-r2-')); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('formatPlans REPORTS stale files — the control that justifies opt-in deletion must actually exist', () => {
+    // r1 computed plan.stale and consumed it NOWHERE, while the header claimed "--check lists stale files".
+    const plan = { name: 'demo', destDir: '/d/demo', actions: [], stale: ['my-notes.md'], pruned: false };
+    const out = formatPlans([plan], { checkOnly: true, dryRun: false });
+    expect(out).toMatch(/STALE demo/);
+    expect(out).toMatch(/my-notes\.md/);
+    expect(out).toMatch(/--prune/);              // tells the operator how to act on it
+    expect(out).not.toMatch(/no drift/);         // and must NOT claim everything is in sync
+  });
+
+  it('formatPlans stays quiet when there is genuinely nothing pending', () => {
+    const plan = { name: 'demo', destDir: '/d/demo', actions: [], stale: [], pruned: false };
+    expect(formatPlans([plan], { checkOnly: true, dryRun: false })).toMatch(/in sync/);
+  });
+
+  it('formatPlans does not double-report stale files that --prune already turned into removes', () => {
+    const plan = { name: 'demo', destDir: '/d/demo', actions: [{ type: 'remove', rel: 'x.md' }], stale: ['x.md'], pruned: true };
+    const out = formatPlans([plan], { checkOnly: false, dryRun: true });
+    expect(out).not.toMatch(/STALE demo/);
+  });
+
+  it('assertInsideRoot REFUSES a dangling symlink (r1 failed open on it)', () => {
+    // existsSync FOLLOWS the link and answers false for a broken one, so r1's walk stepped past it and
+    // returned a lexically-contained path while the real write still escaped.
+    const dest = join(root, 'dest');
+    mkdirSync(dest, { recursive: true });
+    const outside = join(root, 'outside');            // deliberately NOT created → dangling
+    symlinkSync(outside, join(dest, 'nested'), 'dir');
+    expect(() => assertInsideRoot(dest, join(dest, 'nested', 'x.md'))).toThrow(/outside the deploy root/);
+  });
+
+  it('assertInsideRoot still allows an ordinary not-yet-created path under the root', () => {
+    const dest = join(root, 'dest');
+    mkdirSync(dest, { recursive: true });
+    expect(() => assertInsideRoot(dest, join(dest, 'a', 'b', 'c.md'))).not.toThrow();
   });
 });
