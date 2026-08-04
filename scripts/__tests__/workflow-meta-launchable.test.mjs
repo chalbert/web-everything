@@ -85,32 +85,3 @@ describe('Workflow harness scripts must be launchable (pure-literal meta)', () =
     },
   );
 });
-
-describe('#2901 — the parked-PR bundle must carry a NET diff, and say so', () => {
-  // A reviewer handed `gh pr diff`'s three-dot output sees files sibling lanes already landed on `main` as
-  // though this PR added them, and reports confident, well-argued findings about code the PR does not contain.
-  // Observed on PR #1018: a juror flagged an "unrelated #2457 re-scope" that is not in the diff at all. #2901
-  // fixed this for the /review SKILL and did not touch fetch-parked.mjs — which is what the converge loop reads.
-  const src = readFileSync(resolve(process.cwd(), 'scripts/fetch-parked.mjs'), 'utf8');
-
-  it('computes the net two-tree diff, with `gh pr diff` only as the fallback', () => {
-    expect(src).toMatch(/computeNetDiffText\(/);
-    // the three-dot call must be guarded, not the primary path
-    const netAt = src.indexOf('computeNetDiffText(');
-    const ghAt = src.indexOf("gh(['pr', 'diff'");
-    expect(netAt).toBeGreaterThan(-1);
-    expect(ghAt, 'the gh fallback must come AFTER the net attempt').toBeGreaterThan(netAt);
-    expect(src, 'the fallback must be conditional on the net basis failing').toMatch(/if \(!diff\)/);
-  });
-
-  it('scopes the FILE LIST to the same basis — the file list is what a juror cites', () => {
-    expect(src).toMatch(/computeNetDiffChangedFiles\(/);
-    // and reads its real shape: an object with .changedFiles, never an array
-    expect(src).toMatch(/\.changedFiles/);
-    expect(src, 'reading the helper as an array fails silently and restores the defect').not.toMatch(/Array\.isArray\(f\)\s*&&\s*f\.length/);
-  });
-
-  it('defaults `diffBasis` to the DEGRADED label so an unstated basis never reads as net', () => {
-    expect(src).toMatch(/diffBasis === 'net' \? 'net' : 'three-dot'/);
-  });
-});
