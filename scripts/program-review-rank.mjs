@@ -31,6 +31,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { idFromName } from './backlog/id.mjs';
+import { localDateString } from './lib/local-date.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BACKLOG = join(ROOT, 'backlog');
@@ -128,10 +129,10 @@ const programs = items
 const shortlist = programs.slice(0, TOP);
 
 if (asJson) {
-  process.stdout.write(JSON.stringify({ generatedFor: TODAY.toISOString().slice(0, 10), programs: shortlist }, null, 2));
+  process.stdout.write(JSON.stringify({ generatedFor: localDateString(TODAY), programs: shortlist }, null, 2));
   process.stdout.write('\n');
 } else {
-  console.log(`Program review value-rank — ${TODAY.toISOString().slice(0, 10)} (deterministic signals; skill adds velocity + drift-risk)\n`);
+  console.log(`Program review value-rank — ${localDateString(TODAY)} (deterministic signals; skill adds velocity + drift-risk)\n`);
   const pad = (s, n) => String(s).padEnd(n);
   console.log(`  ${pad('score', 6)} ${pad('#', 6)} ${pad('stale', 7)} ${pad('open', 5)} ${pad('done', 5)}  program`);
   for (const p of shortlist) {
