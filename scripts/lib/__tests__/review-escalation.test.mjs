@@ -75,7 +75,7 @@ describe('isBlastRadiusPath', () => {
       expect(r.reasons.join(' ')).toMatch(/blast-radius/);
     });
     // The SYMMETRY finding: `.claude/skills/` was registered while `.claude/agent-memory/` was not, so a sibling
-    // repo keeping agent memory as a REAL directory had zero coverage — the #1040/#1043/#1045 hole, relocated
+    // repo keeping agent memory as a REAL directory had zero coverage — the PR #1040 / PR #1043 / PR #1045 hole, relocated
     // one repo over. Both trees now share one `.claude/(skills|agent-memory)` anchor, so neither can be
     // registered without the other.
     it('flags the link spelling as a REAL directory for BOTH trees, at a repo root and cross-repo', () => {
@@ -85,22 +85,29 @@ describe('isBlastRadiusPath', () => {
         expect(isBlastRadiusPath(p)).toBe(true);
       }
     });
-    it('the source trees escalate, so a skill/memory edit can never merge unreviewed (the #1040 hole)', () => {
+    it('the source trees escalate, so a skill/memory edit can never merge unreviewed (the PR #1040 hole)', () => {
       for (const p of ['skills-src/drain/SKILL.md', 'agent-memory-src/index-meta.md']) {
         const r = scoreEscalation({ changedFiles: [p], diffLines: 40 });
         expect(r.escalate).toBe(true);
         expect(r.reasons.join(' ')).toMatch(/blast-radius/);
       }
     });
-    // The exact file that regressed in PR #1040 / #1043 / #1045 — the rule that defines the land bar itself.
+    // The exact file that regressed in PR #1040 / PR #1043 / PR #1045 — the rule that defines the land bar itself.
     // All three merged with no `review:*` label; this case is the regression guard for that specific path.
-    it('the land-bar memory rule that regressed in #1040/#1043/#1045 no longer scores {escalate:false}', () => {
+    it('the land-bar memory rule that regressed in PR #1040/PR #1043/PR #1045 no longer scores {escalate:false}', () => {
       const p = 'agent-memory-src/land-on-no-regression-not-perfection.md';
       const r = scoreEscalation({ changedFiles: [p], diffLines: 12 });
       expect(r.escalate).toBe(true);
       expect(r.signals.blastRadius).toContain(p);
       expect(producerReviewLabel(r)).toBe(REVIEW_LABELS.pending); // a label at PR-open, not a silent merge
     });
+    // SCOPE-NEUTRAL fixtures only. This case proves the REGEX is scoped — that the optional trailing separator
+    // cannot swallow a sibling name, and that the `.claude/` anchor does not sweep the whole directory. It
+    // deliberately does NOT assert anything about `.claude/settings.json`: that path registers the
+    // `PreToolUse(Edit|Write)` write-gate hooks and its `false` is a KNOWN FAIL-OPEN — the open design call is
+    // #xzsnnta (how wide the `.claude/` net should be), which #x853s5c waits on. It is NOT a ratified scoping
+    // decision. Pinning it green here would turn an open gap into an expectation a later reader reads as
+    // settled — and closing #x853s5c would then look like deleting a passing test.
     it('stays narrow — a prose doc ABOUT memory, or a backlog item naming it, is still a leaf', () => {
       for (const p of ['docs/agent/memory-management.md', 'backlog/1234-agent-memory-thing.md',
                        'src/_data/agent-memory-notes.json',
@@ -108,14 +115,51 @@ describe('isBlastRadiusPath', () => {
                        '.claude/agent-memory-notes',  // …at either the file or the extension-less spelling…
                        'skills-src-notes.md',         // …and the same on the SOURCE anchor, whose separator is
                        'agent-memory-src-notes.md',   //    now optional too
-                       '.claude/settings.json']) {    // …and the .claude/ anchor stays scoped to the two trees
-                                                      //    (widening it is a separately-filed backlog call)
+                       '.claude/README.md']) {        // …and the .claude/ anchor stays scoped to the two trees:
+                                                      //    an inert doc beside them is a leaf (a scope-neutral
+                                                      //    fixture on purpose — see the note above)
         expect(isBlastRadiusPath(p)).toBe(false);
       }
     });
     it('both trees travel cross-repo via the (^|/) anchor, like the other agent surfaces', () => {
       for (const p of ['plateau-app/skills-src/x/SKILL.md', 'frontierui/agent-memory-src/1-rule.md']) {
         expect(isBlastRadiusPath(p)).toBe(true);
+      }
+    });
+  });
+
+  // #2909 review round 4 — the roster protected the gate's CALLER but not its INVOCATION. The root
+  // `package.json` is where `"test": "vitest"` and `"check:standards"` are DEFINED, and the vitest config is
+  // where the tests that `test` runs are ENUMERATED. Both scored `false`, so a one-line PR flipping `"test"` to
+  // `"exit 0"` (or dropping `scripts/lib/__tests__/**` from the vitest `include`) merged with no `review:*`
+  // label under a green required check — green because it now ran nothing. These paths turn enforcement OFF.
+  describe('#2909 r4 — the files that DEFINE the gate score, so the gate cannot be disabled unreviewed', () => {
+    it('flags the root manifest and every vitest config spelling', () => {
+      for (const p of ['package.json',
+                       'vitest.config.ts', 'vitest.config.js', 'vitest.config.mts', 'vitest.config.mjs',
+                       'plateau-app/vitest.config.ts']) {
+        expect(isBlastRadiusPath(p)).toBe(true);
+      }
+    });
+    // The narrowness is DELIBERATE and pinned here: `^package\.json$` is ROOT-only because the root manifest is
+    // the only one whose scripts CI invokes as the required check (.github/workflows/ci.yml runs
+    // `npm run test:coverage:shard` + `npm run check:standards` at the root). The nested manifests are npm
+    // PUBLISH manifests — a `test` script in one is not a required check and disables nothing. Repo-relative
+    // scoring is what lets the `^` anchor travel: a sibling repo's PR carries ITS root manifest as the bare path
+    // `package.json`, which this pattern matches, so no `(^|/)` widening is needed for cross-repo coverage.
+    it('stays narrow — a nested publish manifest and a sibling name are leaves', () => {
+      for (const p of ['webcases/package.json', 'contracts/package.json', 'demos/loan/package.json',
+                       'package.json.bak', 'my-vitest.config.ts', 'packages/foo/index.js']) {
+        expect(isBlastRadiusPath(p)).toBe(false);
+      }
+    });
+    // …and end-to-end, the case that motivated this: a 2-line `"test": "exit 0"` PR can no longer merge silently.
+    it('a 2-line edit to the gate definition escalates and earns a review label at PR-open', () => {
+      for (const p of ['package.json', 'vitest.config.ts']) {
+        const r = scoreEscalation({ changedFiles: [p], diffLines: 2 });
+        expect(r.escalate).toBe(true);
+        expect(r.signals.blastRadius).toContain(p);
+        expect(producerReviewLabel(r)).toBe(REVIEW_LABELS.pending);
       }
     });
   });

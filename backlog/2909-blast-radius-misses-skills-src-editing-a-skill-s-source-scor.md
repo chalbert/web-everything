@@ -39,8 +39,8 @@ returns `null`, so the PR merges with no `review:*` label and no reviewer ever s
 Same read-path chain as skills: `~/.claude/projects/<key>/memory` → `.claude/agent-memory` → `agent-memory-src`.
 
 Three PRs landed this way on 2026-08-05 — PR #1040, PR #1043, PR #1045 — all editing
-`we:agent-memory-src/land-on-no-regression-not-perfection.md`, **the rule that defines the land bar itself**. PR
-#1045 narrowed test 3 ("no weakened gate") and merged unreviewed *during* its own `/review`; the four-lens panel
+`we:agent-memory-src/land-on-no-regression-not-perfection.md`, **the rule that defines the land bar itself**.
+PR #1045 narrowed test 3 ("no weakened gate") and merged unreviewed *during* its own `/review`; the four-lens panel
 returned `changes` on both mandatory lenses, after the merge. That is the bootstrap this gate exists to prevent:
 relax the land bar with no review, then apply the relaxed bar to clear a real gate diff.
 
@@ -67,7 +67,7 @@ blind spot it exposed is independent of it and outlives it.
 - A test in [`we:scripts/lib/__tests__/review-escalation.test.mjs`](scripts/lib/__tests__/review-escalation.test.mjs)
   locks source and build output to the same band for **both** pairs, so neither can drift apart again — including
   a case asserting `scoreEscalation` on `we:agent-memory-src/land-on-no-regression-not-perfection.md` does not
-  return `{escalate: false}` (the PR #1040 / #1043 / #1045 regression).
+  return `{escalate: false}` (the PR #1040 / PR #1043 / PR #1045 regression).
 - Check whether any other built/source pair in the repo has the same shape before closing — `.claude/` is the
   common parent for the built halves, so an anchor on `(^|\/)\.claude\/` scoped to the procedure directories may
   be a better fix than adding one regex per pair.
@@ -111,8 +111,22 @@ What that misses, twice over:
 2. **"Nowhere" was scoped to WE only.** `we:.claude/skills/` was kept precisely because plateau-app has 2 real
    tracked files under it — so the same argument applied to `we:.claude/agent-memory/` proves the opposite of what
    was claimed: a sibling repo that keeps agent memory as a real directory rather than relocating it had **zero**
-   coverage. That is the #1040/#1043/#1045 hole, relocated one repo over. Both trees now share one `.claude/`
+   coverage. That is the PR #1040 / PR #1043 / PR #1045 hole, relocated one repo over. Both trees now share one `.claude/`
    anchor, so neither can be registered without the other.
+
+### One surface further, found by the same review: where the gate is *defined*
+
+Round 4 of PR #1048's review found that every pattern above protects a surface the gate **reads**, and none
+protected where the gate is **invoked**. `we:package.json` declares `"test": "vitest"` and `"check:standards"` —
+the scripts CI runs as the required check — and `we:vitest.config.ts` declares which tests that check includes.
+Both scored `false`. A one-line PR flipping `"test"` to `"exit 0"`, or dropping `scripts/lib/__tests__/**` from
+the vitest `include`, therefore merged with **no** `review:*` label under a **green** required check — green
+because it now ran nothing, including the regression tests on this very list. Both are registered here:
+`^package\.json$` (root only — the nested `we:contracts/`, `we:webcases/`, `we:capability-manifest/` and
+`we:validation-generation/` manifests are npm *publish* manifests and define no required check; repo-relative
+scoring is what makes the `^` anchor cover a sibling repo's own root manifest) and
+`(^|\/)vitest\.config\.[cm]?[jt]s$`. Positives, the root-only negatives, and the end-to-end 2-line case are
+pinned in [`we:scripts/lib/__tests__/review-escalation.test.mjs`](scripts/lib/__tests__/review-escalation.test.mjs).
 
 Bullet 4 is discharged, and this item's own suggestion was **taken**: the fix is the `(^|\/)\.claude\/`-scoped
 anchor, narrowed to the two procedure directories — `(skills|agent-memory)` — so it does **not** sweep in
@@ -140,7 +154,8 @@ Because this item resolves here, an obligation left in prose would have left the
 Adjacent defects surfaced in the same pass and **not** covered here, each now filed rather than left in prose:
 
 - `we:AGENTS.md`, `we:CLAUDE.md`, `we:.claude/settings.json`, `we:.claude/commands/` and non-statute
-  `we:docs/agent/` remain unregistered behaviour-defining surfaces — **#x853s5c**, which also weighs inverting the
+  `we:docs/agent/` remain unregistered behaviour-defining surfaces — **#x853s5c**, the build item, which now
+  `blockedBy`-waits on **#xzsnnta**, the carved-out design call: enumerate the named paths, or invert the
   `we:.claude/` anchor to default-deny so the next unregistered surface fails closed instead of open.
 - The drain's content-resolve write-back emptied this very item to 0 bytes on the rebase that produced `836ae978`,
   where the pure merge library replays the same stages cleanly — **#2923** (a sibling lane filed the same incident

@@ -82,7 +82,7 @@ export function isStatutePath(path) {
  *  `.claude/agent-memory → ../agent-memory-src`. Git tracks a symlink as a leaf BLOB and never DESCENDS it, so
  *  no diff path can ever begin with `.claude/skills/…` in WE — every real edit lands as `skills-src/…` /
  *  `agent-memory-src/…`. The `.claude/skills/` entry therefore matched NOTHING in WE from 2026-07-04 until the
- *  source spellings were added, and #1040 rewrote the land bar and merged with no `review:*` label at all.
+ *  source spellings were added, and PR #1040 rewrote the land bar and merged with no `review:*` label at all.
  *
  *  FOUR spellings must all score, and the two anchors below cover all four — each anchor pairs the two trees,
  *  and each makes its trailing separator OPTIONAL so the bare LEAF matches as well as anything under it:
@@ -100,16 +100,38 @@ export function isStatutePath(path) {
  *  the trailing separator is optional (so a leaf blob matches) and the two trees always share an anchor (so
  *  neither can be registered without the other). The `.claude/` half is the `(^|\/)\.claude\/`-scoped anchor
  *  #2909's Done-when bullet 4 proposed, kept narrow to the two procedure directories so it does NOT sweep in
- *  `.claude/settings.json` / `.claude/commands/` — those are real gaps, but they are a separately-filed backlog
- *  call about how wide the `.claude/` anchor should be, not a side effect of this one. */
+ *  `.claude/settings.json` / `.claude/commands/` — those are real gaps, and they are OPEN: how wide the
+ *  `.claude/` anchor should be is the carved-out decision #xzsnnta (enumerate named paths vs. invert to
+ *  default-deny), which the build item #x853s5c waits on. Not a side effect of this one.
+ *
+ *  THE GATE'S OWN INVOCATION, not just its caller (#2909 review round 4). Every entry above protects a surface
+ *  the gate READS. The two entries below protect where the gate is DEFINED: `package.json` declares `"test":
+ *  "vitest"` and `"check:standards": …` — the scripts CI runs as the required check — and the vitest config
+ *  declares WHICH tests that check includes. A one-line PR flipping `"test"` to `"exit 0"`, or dropping
+ *  `scripts/lib/__tests__/**` from the vitest `include`, scored NOTHING here: no `review:*` label, and
+ *  `merge-ai-prs.mjs` merges it because the required check is green — green precisely because it now runs
+ *  nothing. Every later PR then merges with the health gate and the whole suite silently disabled, INCLUDING the
+ *  regression tests that pin this very list. That is strictly worse than an unregistered instruction file: these
+ *  paths turn enforcement OFF rather than changing what an agent is told.
+ *
+ *  `package.json` is `^`-anchored to the REPO ROOT on purpose, and the narrowness is deliberate, not an
+ *  oversight: the root manifest is the ONLY one that defines the gates CI actually invokes (`.github/workflows/
+ *  ci.yml` runs `npm run test:coverage:shard` and `npm run check:standards` at the root). The nested manifests —
+ *  `contracts/`, `webcases/`, `capability-manifest/`, `validation-generation/` — are npm PUBLISH manifests; a
+ *  `test` script in one is not a required check and cannot disable anything. Repo-relative scoring makes the
+ *  `^` anchor travel for free: a sibling repo's PR carries its own root manifest as the bare path `package.json`,
+ *  so plateau-app's gates are covered in plateau-app's own diffs without a `(^|\/)` widening here. The vitest
+ *  config uses `(^|\/)` because ANY vitest config governs what a vitest run includes, wherever it sits. */
 const BLAST_RADIUS = [
   /^scripts\//,                              // build/CI/merge tooling (WHILE in WE; relocatable engine files also travel by basename — see BLAST_RADIUS_ENGINE)
   /(^|\/)\.claude\/(skills|agent-memory)(\/|$)/, // both agent-behaviour trees under the link spelling: a REAL dir (plateau-app) AND the bare symlink blob (repoint/delete) — travels cross-repo via (^|\/)
-  /(^|\/)(skills|agent-memory)-src(\/|$)/,   // …and WE's post-#2266 SOURCE home for the same two trees — the spelling WE diffs actually carry, plus the bare leaf (dir→link swap). The surface #1040 slipped through
+  /(^|\/)(skills|agent-memory)-src(\/|$)/,   // …and WE's post-#2266 SOURCE home for the same two trees — the spelling WE diffs actually carry, plus the bare leaf (dir→link swap). The surface PR #1040 slipped through
   /(^|\/)\.githooks\//,                       // git hooks (the guards) — already travels cross-repo
   /(^|\/)\.github\//,                         // CI config / workflows — already travels cross-repo
   ...STATUTE_PATHS,                          // the statute layer (also forces a human — see scoreEscalation)
   /^src\/_data\/(blocks|plugs|intents|protocols|semantics)\.json$/, // standards definitions — WE-permanent, never relocates
+  /^package\.json$/,                         // where the gates are DEFINED (`test`, `check:standards`) — ROOT only; nested manifests are publish-only (see note above)
+  /(^|\/)vitest\.config\.[cm]?[jt]s$/,       // …and which tests the `test` gate INCLUDES — any config, wherever it sits
 ];
 
 /**
@@ -247,7 +269,8 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * (`escalated: yes/no` + why). Signals (each independent):
  *   • blast-radius — the diff touches a high-blast-radius surface (scripts/, the agent-behaviour trees — skills
  *                    and agent memory, in both their `.claude/` link and `*-src/` source spellings — hooks, CI,
- *                    statute, standards defs).
+ *                    statute, standards defs, and the gate's own definition: the root `package.json` + any
+ *                    vitest config).
  *   • size         — total changed lines ≥ thresholds.diffLines.
  *   • dismissed    — the lane's pre-PR review (#2170) DISMISSED ≥1 finding — the STRONGEST signal (it targets
  *                    author anchoring directly: the lane judged its own reviewer's findings away).

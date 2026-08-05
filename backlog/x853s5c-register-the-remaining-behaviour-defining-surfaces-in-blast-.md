@@ -2,6 +2,7 @@
 kind: task
 status: open
 dateOpened: "2026-08-05"
+blockedBy: [xzsnnta]
 tags: []
 scope: ["we:scripts/lib/review-escalation.mjs", "we:scripts/lib/__tests__/review-escalation.test.mjs", "we:scripts/lib/review-policy.contract.json"]
 ---
@@ -26,21 +27,17 @@ The last two are listed as prospective on purpose: they are exactly the surfaces
 
 ## Why it matters
 
-Same shape as the #1040 / #1043 / #1045 regression #2909 fixed, one surface over. A ~4-line agent-authored PR deleting a hook entry from `we:.claude/settings.json` fires no rubric signal, so `producerReviewLabel` returns `null`, no `review:*` label is applied, and it merges with no reviewer — turning off the guard that the *next* session's edits rely on. These files are exactly what blast-radius exists to catch: they change how the system behaves, not what it renders.
+Same shape as the PR #1040 / PR #1043 / PR #1045 regression #2909 fixed, one surface over. A ~4-line agent-authored PR deleting a hook entry from `we:.claude/settings.json` fires no rubric signal, so `producerReviewLabel` returns `null`, no `review:*` label is applied, and it merges with no reviewer — turning off the guard that the *next* session's edits rely on. These files are exactly what blast-radius exists to catch: they change how the system behaves, not what it renders.
 
-## The open call — enumerate wider, or invert to default-deny
+## The design call is NOT decided here — it is #xzsnnta
 
-Every recurrence of this class (#1040/#1043/#1045 → #2909 → this item) was closed **one surface at a time**, because a named-path list is correct only while someone remembers to register each *future* surface. That memory is precisely what the prior regressions proved unreliable, so "add these seven paths" is the weakest of the options here, not the obvious one.
+How wide the net should be is a live either/or (enumerate the named paths vs. invert `(^|\/)\.claude\/` to default-deny with an exemption list), and it is **carved out to the `kind: decision` item [#xzsnnta](backlog/xzsnnta-how-wide-should-the-blast-radius-net-over-the-agent-instruct.md)**, which this item `blockedBy`-waits on. The two forks — how the net treats an *unregistered* surface, and whether non-statute `we:docs/agent/` is registered whole or behind a router predicate — live there with their options and bold defaults.
 
-- **Enumerate wider** — register the named paths above and keep the list a list. Cheapest; fails OPEN again the next time a behaviour-defining file appears under a name nobody predicted.
-- **Invert to default-deny (preferred candidate)** — anchor `(^|\/)\.claude\/` *whole* as blast-radius, with a short commented EXEMPTION list for the genuinely inert entries. An unregistered surface then fails **CLOSED** the day it appears: a new `we:.claude/agents/` or a new hook file escalates without anyone having filed anything. The cost is over-escalation on the exempt-but-unlisted tail, which is the safe direction by policy. Note this only covers `we:.claude/` — `we:AGENTS.md`, `we:CLAUDE.md` and `we:docs/agent/` still need their own call.
-- **Register `we:docs/agent/` behind a narrower predicate** (the router files, not every reference) — the one genuinely volume-sensitive half: registering the whole tree escalates every prose touch-up in a large, frequently-edited directory, and every escalation parks a PR awaiting a review.
-
-Weigh the inversion as a real option, not as a footnote — it is the only one of the three whose correctness does not depend on a future editor remembering this item exists.
+The reason for the carve: this item is `kind: task`, so an agent may claim and build it. If the call sat here, that agent would hit it mid-lane and either stall or rule on it unratified. This item becomes mechanical the moment #xzsnnta is ruled: register whatever line the ruling draws, and pin it.
 
 ## Done when
 
-- The `we:.claude/` anchor is settled one way or the other: either inverted to default-deny with a written exemption list, or each named surface above scores blast-radius / carries a written reason in
+- **#xzsnnta is ruled first** — this item does not start before it. Then the ruling is implemented: either the `we:.claude/` anchor is inverted to default-deny with a written exemption list, or each named surface above scores blast-radius / carries a written reason in
   [`we:scripts/lib/review-escalation.mjs`](scripts/lib/review-escalation.mjs) for why it deliberately does not.
 - Positive **and** negative cases in [`we:scripts/lib/__tests__/review-escalation.test.mjs`](scripts/lib/__tests__/review-escalation.test.mjs) pin whatever line is drawn — including a case for a surface that does **not** exist yet, so the fail-open-on-a-new-name behaviour is pinned rather than assumed.
 - The `blast-radius` token description in [`we:scripts/lib/review-policy.contract.json`](scripts/lib/review-policy.contract.json) is re-derived from the **whole** `BLAST_RADIUS` array — every entry, including `...STATUTE_PATHS` and the engine-tier basenames, not only the surfaces this item adds (the #2564/#2566 rule: the contract's per-entry prose *is* its meaning, so a partial enumeration is drift by construction).
