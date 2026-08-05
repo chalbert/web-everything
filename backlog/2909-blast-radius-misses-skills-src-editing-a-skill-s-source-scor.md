@@ -27,15 +27,33 @@ Measured on the same file at ~500 lines:
 Same skill, opposite band, decided by whether the edit lands on the source or the build output. Since the
 source is where these are actually authored, the built-path pattern is the one that rarely fires.
 
+**Sharper than "rarely fires" — in WE the built-path pattern fires NEVER (measured 2026-08-05).** The built
+directory is not a directory: `we:.claude/skills` is a **symlink** to `we:skills-src/`, tracked by git as a
+single symlink entry (`git ls-files '.claude/skills*'` returns exactly one path — the link itself, no files
+under it). So git can never report a changed file as `we:.claude/skills/<anything>`; every real edit surfaces as
+`we:skills-src/…`. Scored live:
+
+| changed-file path as git reports it | `scoreEscalation` |
+|---|---|
+| `we:skills-src/pr/SKILL.md` — what git actually emits | `{escalate: false, careLevel: "none", reasons: []}` |
+| `we:.claude/skills/pr/SKILL.md` — a shape git cannot emit here | `{escalate: true, careLevel: "elevated", reasons: ["blast-radius"]}` |
+
+So this is not an asymmetry between two live paths — **the only skills pattern in `BLAST_RADIUS` is dead code in
+this repo**, and skills have no blast-radius coverage at all. It is NOT dead everywhere: `.claude/skills` is a
+real directory in plateau-app, where the same regex is live (and absent entirely in frontierui) — which is why
+the fix is to add the source paths, not to replace the built ones.
+
 ### The agent-memory corpus is missing on BOTH sides (found by the `/review` of PR #1045)
 
-The skills case is an asymmetry — the built path is covered, the source is not. The agent-memory corpus is a
-**hole**: `agent-memory` appears nowhere in `we:scripts/lib/review-escalation.mjs`, `we:scripts/lib/review-core.mjs`
-or `we:scripts/lib/gate-config.mjs`, so neither `we:agent-memory-src/` nor the built `.claude/agent-memory/`
-matches anything. `scoreEscalation` returns `{escalate: false, humanRequired: false}` and `producerReviewLabel`
-returns `null`, so the PR merges with no `review:*` label and no reviewer ever sees it.
+The skills case has a dead pattern. The agent-memory corpus has **no pattern at all**: `agent-memory` appears
+nowhere in `we:scripts/lib/review-escalation.mjs`, `we:scripts/lib/review-core.mjs` or
+`we:scripts/lib/gate-config.mjs`, so neither `we:agent-memory-src/` nor `we:.claude/agent-memory/` matches
+anything. `scoreEscalation` returns `{escalate: false, humanRequired: false}` and `producerReviewLabel` returns
+`null`, so the PR merges with no `review:*` label and no reviewer ever sees it.
 
-Same read-path chain as skills: `~/.claude/projects/<key>/memory` → `.claude/agent-memory` → `agent-memory-src`.
+Same symlink shape as skills: `we:.claude/agent-memory` → `we:agent-memory-src/`, read through
+`~/.claude/projects/<key>/memory`. So both surfaces reduce to the same one-line fix — **register the `-src`
+directories**, since those are the only paths git ever reports.
 
 Three PRs landed this way on 2026-08-05 — PR #1040, PR #1043, PR #1045 — all editing
 `we:agent-memory-src/land-on-no-regression-not-perfection.md`, **the rule that defines the land bar itself**. PR

@@ -68,9 +68,18 @@ first sweep.
    - `--label-on-green` is the **batch producer** mode (#2199): open the PR, **wait for the required
      checks, apply `ready-to-merge` only once they are green**, then STOP — does NOT trigger a drain (a
      `/workflow` or `/batch` closeout runs the standalone drain over the whole set).
-   - `--no-wait` opens the self-approved PR **UNLABELLED** and leaves it (CI unconfirmed — the label lander
-     won't collect it until something labels it). Use only when the user just wants the PR raised now and
-     will land it themselves.
+   - `--no-wait` opens the self-approved PR **UNLABELLED** and returns immediately (CI unconfirmed). **This is
+     NOT a hold** — do not reach for it to keep a PR back for a human. `shouldLabelOnGreen` (#2216) labels any
+     producer-owned AI PR `ready-to-merge` the instant its required check goes green, and the resident drain
+     daemon runs that reconcile every ~60s, so `--no-wait` only changes *who* labels it and delays the merge by
+     a few minutes. (Observed on PR #1047: opened unlabelled → daemon labelled it 3 min later → merged.) Use it
+     only when you want the PR raised now and are content for the daemon to land it on green.
+   - `--park=<review:human|review:pending>` (#2622) is **the hold** — it applies the review label **at open**,
+     and the #2820 merge-hold test blocks merge on a `review:*` label regardless of `ready-to-merge`. It runs
+     the same numbering / land-prep as the normal path, so a parked PR's hash-keyed backlog items are not
+     stranded. Park takes precedence over `--label-on-green` / `--no-wait`, and an off-list value fails fast
+     (exit 3) before any push. Reach for this whenever a diff must reach a human before it lands — including
+     any diff **you** authored that you therefore may not clear yourself (#2439).
    - **The `ready-to-merge` label is applied ONLY after the required checks are green (#2196/#2199)** — never
      eagerly at open, so a red PR never enters the drain's queue. In the default land path (above) and the
      `--label-on-green` path `pr-land` applies it once CI passes. Pass `--no-label` to opt out; `--label=<name>`
