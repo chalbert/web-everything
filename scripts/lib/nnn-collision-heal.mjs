@@ -24,7 +24,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { parseBacklogFilename, rewriteRefs, allocateGapId } from '../backlog/renumber-collisions.mjs';
+import { parseBacklogFilename, rewriteRefs, allocateGapId, assertContentPreserved } from '../backlog/renumber-collisions.mjs';
 
 /**
  * Build the renumber PLAN for an incoming lane whose NEW backlog item reuses an id already on the merge base.
@@ -86,6 +86,9 @@ export function planBaseCollisionHeal(laneFiles, { baseNums = [], baseNames = []
   // #2316 — NEVER rewrite inside a base-owned file (`baseNameSet`): its refs predate the collision and can
   // only mean the base's own real item (the keeper), never the incoming yielder.
   const contentByName = new Map(files.map((f) => [f.name, f.text]));
+  // Snapshot the pre-rewrite content, keyed by name — the content-preservation guard (#2546) diffs every
+  // write against this ORIGINAL, so a rewrite that blanks/corrupts a file is caught before the plan returns.
+  const originalByName = new Map(files.map((f) => [f.name, f.text]));
   const renamed = new Map(moves.map((m) => [m.oldName, m.newName]));
   const touched = new Set();
   for (const mv of moves) {
@@ -96,9 +99,23 @@ export function planBaseCollisionHeal(laneFiles, { baseNums = [], baseNames = []
     }
   }
   const writes = [];
-  for (const name of touched) writes.push({ name: renamed.get(name) || name, text: contentByName.get(name) });
+  for (const name of touched) {
+    const finalName = renamed.get(name) || name;
+    const text = contentByName.get(name);
+    // #2546 — a rewrite must ONLY swap refs; refuse to emit a blanked/corrupted file (fail loudly).
+    assertContentPreserved(originalByName.get(name), text, moves, finalName);
+    writes.push({ name: finalName, text });
+  }
   for (const mv of moves) {
-    if (!touched.has(mv.oldName)) writes.push({ name: mv.newName, text: contentByName.get(mv.oldName) });
+    if (!touched.has(mv.oldName)) {
+      // #2746 review — this file was NOT touched by the ref sweep, so emit the ORIGINAL bytes explicitly
+      // rather than the mutable working copy. Two things follow, both by construction rather than by
+      // convention: a rename-only move can never carry a partial rewrite, and a content guard here would be
+      // vacuous (it previously compared `contentByName.get(x)` against `originalByName.get(x)` — for an
+      // untouched file those are the same string, so the assertion could never fire). The guard that matters
+      // is on the rewritten branch above, where the bytes actually change.
+      writes.push({ name: mv.newName, text: originalByName.get(mv.oldName) });
+    }
   }
   const deletes = moves.map((m) => m.oldName);
 
