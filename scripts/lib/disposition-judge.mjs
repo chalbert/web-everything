@@ -88,12 +88,21 @@ export function reduceLedger(ledger) {
   const findingByKey = new Map();
   let rosterKnown = false;
   let maxRound = 0;
+  // #2864 — the head sha the LATEST roster was seated over. This reduction, not the observability fold, is what
+  // the auto-clear path reads (decideDispositionLabel → disposeVerdict → here), so the freshness gate must be
+  // able to see the sha HERE or it would have to re-derive "latest roster wins, a sha-less roster clears it" a
+  // second time — the hand-copied-twin duplication this module already recorded as having gone stale once (#2823).
+  let reviewedSha = null;
   for (const ev of events) {
     if (Number.isInteger(ev.round) && ev.round > maxRound) maxRound = ev.round;
     switch (ev.type) {
       case JURY_EVENT_TYPES.ROSTER_PICKED:
         rosterKnown = true;
         for (const juror of ev.jurors) lensByJuror.set(juror.id, juror.lens);
+        // Latest roster wins, and a sha-less re-pick CLEARS it — an unknown tree must read as unknown, never as
+        // the previously-known one. Same rule as the observability fold, single-sourced in shape by both reading
+        // the event directly rather than one deriving it from the other.
+        reviewedSha = ev.reviewedSha != null ? String(ev.reviewedSha) : null;
         break;
       case JURY_EVENT_TYPES.VERDICT: {
         const prev = jurorVerdicts.get(ev.jurorId);
@@ -127,7 +136,7 @@ export function reduceLedger(ledger) {
       lensVerdicts[lens] = verdict;
     }
   }
-  return { rosterKnown, lensByJuror, jurorVerdicts, lensVerdicts, outstandingFindings, maxRound };
+  return { rosterKnown, lensByJuror, jurorVerdicts, lensVerdicts, outstandingFindings, maxRound, reviewedSha };
 }
 
 /** The weight of one juror's lens under a resolved `{ default, values }` lens-weight config (#2651). A lens absent

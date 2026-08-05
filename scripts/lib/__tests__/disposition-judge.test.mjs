@@ -435,3 +435,25 @@ describe('disposeVerdict — green + red combined', () => {
     expect(v.disposition).toBe(DISPOSITIONS.ESCALATE);
   });
 });
+
+describe('#2864 — reduceLedger carries the reviewed sha (the DECIDING reduction, not just the fold)', () => {
+  // PR #1034 review, finding 2: the sha was captured only in `foldJuryLedger`, which is the observability
+  // surface. The auto-clear path reads THIS reduction (decideDispositionLabel → disposeVerdict → reduceLedger),
+  // so a freshness gate wired against the fold would be checking a value the decider never sees.
+  const seat = [{ id: 'correctness#1', lens: 'correctness', charter: CHARTER }];
+  const withSha = (sha, round = 0) => ({ type: 'roster-picked', round, jurors: seat, ...(sha ? { reviewedSha: sha } : {}) });
+
+  it('reports the sha the roster was seated over', () => {
+    expect(reduceLedger([withSha('deadbee'), verdictEvent('correctness#1', VERDICTS.ACCEPT)]).reviewedSha).toBe('deadbee');
+  });
+
+  it('is null when no roster carried one — a legacy ledger is UNKNOWN, never assumed current', () => {
+    expect(reduceLedger([withSha(null), verdictEvent('correctness#1', VERDICTS.ACCEPT)]).reviewedSha).toBe(null);
+  });
+
+  it('the LATEST roster wins, and a sha-less re-pick CLEARS it', () => {
+    // Same fail-closed rule the fold holds: an unknown tree reads as unknown, not as the previously-known one.
+    expect(reduceLedger([withSha('aaaaaaa'), withSha('bbbbbbb', 1)]).reviewedSha).toBe('bbbbbbb');
+    expect(reduceLedger([withSha('aaaaaaa'), withSha(null, 1)]).reviewedSha).toBe(null);
+  });
+});
