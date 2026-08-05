@@ -1062,7 +1062,10 @@ function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetc
   try {
     // ALWAYS force-update the base tracking-ref (#2373 opportunistic-fetch fix): the cumulative human-gate basis
     // below is `<remote>/<base>…head`, which a stacked `baseRev` must never be able to shrink (#2390-review-fix).
-    exec('git', ['fetch', remote, `+${base}:refs/remotes/${remote}/${base}`, ...fetchExtraRefs, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] });
+    // `--end-of-options` FIRST: `fetchExtraRefs` carries a branch name straight off the `gh` API, and a
+    // dash-leading refname is legal (`git check-ref-format 'refs/heads/--output=/tmp/pwn'` exits 0), so without
+    // the guard git parses it as an option — `--upload-pack=<script>` EXECUTES. Verified against git 2.50.1.
+    exec('git', ['fetch', '--quiet', '--end-of-options', remote, `+${base}:refs/remotes/${remote}/${base}`, ...fetchExtraRefs], { stdio: ['ignore', 'ignore', 'ignore'] });
   } catch { /* degrade to whatever is locally cached — the diff attempts below still run */ }
   const candidates = [`${remote}/${rev}`, rev];
   for (const candidate of candidates) {
@@ -1132,6 +1135,43 @@ export function computeNetDiffText({ exec, remote = 'origin', base = 'main', rev
     return { text, base: diffBase, rev: candidate, scored: true };
   } catch {
     return unscored; // the text diff failed even though the basis resolved → caller falls back to `gh pr diff`
+  }
+}
+
+/**
+ * #2901 / #1031 review finding 5 — the NET changed-file list as PLAIN PATHS, off the SAME basis
+ * `computeNetDiffText` resolves. This is the list a REVIEWER or a JUROR may cite.
+ *
+ * WHY THIS EXISTS SEPARATELY FROM `computeNetDiffChangedFiles`. That one is the SCORING path: it returns
+ * `parseNumstat` output, which is git's DISPLAY encoding — a rename renders as `a.txt => b.txt`, and a
+ * non-ASCII path is C-quoted (`"caf\303\251.txt"`). That is correct for counting lines and it is WRONG for
+ * anything that intersects with `gh pr view --json files`, which reports the plain new path: the intersection
+ * silently drops those entries, so a rename-only PR yields a ZERO-file list presented as authoritative. A
+ * reviewer is then told a real file is not in the PR and dismisses genuine findings on it — strictly worse than
+ * the inflated three-dot list this replaced.
+ *
+ * `--name-only -z` gives plain NUL-separated paths in every case. `--no-renames` is deliberately NOT passed:
+ * with it, a rename reports BOTH the old and new path while `gh` reports only the new one, so the intersection
+ * loses an entry and the caller's fail-open downgrade fires on every rename-carrying PR. Without it, git
+ * reports the new path alone — exactly what `gh` reports.
+ *
+ * Same `resolveNetDiffBasis`, so the diff text, the score, and this list cannot drift. Never checks out the PR
+ * branch (#2336). Degrades to `{ scored:false, paths:[] }` — the caller must then NOT claim a `net` basis.
+ * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
+ * @returns {{paths:string[], base:string|null, rev:string|null, scored:boolean}}
+ */
+export function computeNetDiffPaths({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
+  const unscored = { paths: [], base: null, rev: null, scored: false };
+  if (typeof exec !== 'function' || !rev) return unscored;
+  const basis = resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
+  if (!basis) return unscored;
+  const { diffBase, candidate } = basis;
+  try {
+    const raw = exec('git', ['diff', '--name-only', '-z', '--end-of-options', `${diffBase}..${candidate}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const paths = String(raw || '').split('\0').map((x) => x.trim()).filter(Boolean);
+    return { paths, base: diffBase, rev: candidate, scored: true };
+  } catch {
+    return unscored;
   }
 }
 
@@ -1497,10 +1537,14 @@ async function runCli() {
   // manifest), so serializing it costs ~nothing while keeping the fan-out correct.
   const legacyGitManifestMutex = makeAsyncMutex();
   const readLegacyLocalManifest = (headRef) => legacyGitManifestMutex.run(() => {
-    try { execFileSync('git', ['fetch', 'origin', headRef, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may be local */ }
+    // PR #1031 review r3 — the THIRD instance of the argv class (`#xo5tyqn` lints it repo-wide). `headRef` is a
+    // `gh`-supplied refname and a dash-leading one is legal, so bare it is parsed as an option. It reaches TWO
+    // calls here: the fetch, and — via `rev` — the `git show` argument, where `git show` accepts diff options
+    // including `--output=`. Both guarded.
+    try { execFileSync('git', ['fetch', '--quiet', '--end-of-options', 'origin', headRef], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may be local */ }
     for (const rev of ['FETCH_HEAD', `origin/${headRef}`, headRef]) {
       try {
-        const m = JSON.parse(execFileSync('git', ['show', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+        const m = JSON.parse(execFileSync('git', ['show', '--end-of-options', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
         if (m && m.item != null) return m;
       } catch { /* try next rev */ }
     }

@@ -203,6 +203,27 @@ const RETURN_HYGIENE = [
 ].join('\n');
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MODEL TIERING — REVERTED, and why it is not simply re-applied.
+//
+// A first pass tiered fetch/discover/labels/rigor/reduce/record to a cheap model, justified as "each shells one
+// command and returns a shape the `schema` option then VALIDATES, so a wrong answer is caught by validation
+// rather than by reasoning." The PR #1031 review showed that premise is FALSE for the agents that carry the most
+// trust:
+//   • `reduce` — VERDICT_SCHEMA's `verdict`/`outcome` are plain `type: 'string'` with NO enum, and
+//     `reducePanelRound` consumes them verbatim. `degrade` fires only on an absent mandatory lens or an
+//     unfetchable diff — never on "the lenses reported blocking findings but the reducer said accept". An agent
+//     returning {verdict:'accept', outcome:'land'} without ever running review-core-cli is taken at its word.
+//   • `fetch` — the one boundary where fully author-controlled content enters the loop, and the sole supplier of
+//     the single snapshot every lens judges. FETCH_SCHEMA.diff requires only a non-empty string, so a truncated
+//     or summarised diff reads as a clean fetch and blinds all four lenses at once.
+//   • `rigor` — its echo is floored at 1 but has no upper bound and no schema `maximum`.
+//   • `labels`/`discover` — the sole source of the label set INVARIANT 2 is decided from; a dropped
+//     `review:human` is silent.
+//
+// So the tiering is out. The right fix is NOT a cheaper model but NO model: these are fixed commands with no
+// judgment, and running them in-process (execFileSync) means no tier can affect the outcome at all. That is a
+// larger refactor than this PR's subject and is filed separately — cost work should not ride a correctness fix.
+
 // Agent I/O schemas — validated shapes the spawned agents return (the `agent(prompt, {schema})` form).
 // ─────────────────────────────────────────────────────────────────────────────
 
