@@ -74,10 +74,35 @@ export const VERDICTS = Object.freeze({
  *
  * Belt and braces: every membership test against these tables also goes through `Object.hasOwn`, so neither the
  * prototype nor a future own-property addition can be mistaken for an enum member.
+ *
+ * EXPORTED (#xdompzx round-2, finding 5) because the same hole exists in every sibling LOOKUP table across the
+ * modules — `VERDICT_LABELS` (`review-render.mjs`) and `VERDICT_MARKERS` (`conveyor/jury-tree.mjs`) are read with
+ * `??` / `||` defaults, which never fire on an inherited truthy value, so `'toString'` rendered the native
+ * function. Rank, gloss, label, marker, glyph: if it is a module-level frozen object literal used as a LOOKUP, it
+ * is built here.
  * @param {Object<string, *>} entries
  * @returns {Object<string, *>}
  */
-const frozenLookup = (entries) => Object.freeze(Object.assign(Object.create(null), entries));
+export const frozenLookup = (entries) => Object.freeze(Object.assign(Object.create(null), entries));
+
+/**
+ * Read a rank out of a `frozenLookup` rank table, or THROW (#xdompzx round-2, finding 6 — `verdictStrictness` and
+ * `impactStrictness` were a hand-copied twin pair, edited in lockstep by the very diff that created the second).
+ * Membership is `Object.hasOwn`, never a bare bracket read: these tables take keys that arrive as free-form model
+ * JSON, and yielding `undefined` (or an inherited member) would lose every `>` / `>=` comparison in BOTH
+ * directions — a guard that fails OPEN.
+ * @param {Object<string, number>} table - a `frozenLookup` rank table.
+ * @param {string} key
+ * @param {string} label - the error-message lead naming the caller and what the key should be.
+ * @returns {number}
+ */
+const rankIn = (table, key, label) => {
+  const k = String(key);
+  if (!Object.hasOwn(table, k)) {
+    throw new Error(`${label} "${key}" — not a member of the enum this table ranks (known: ${Object.keys(table).join(', ')}).`);
+  }
+  return table[k];
+};
 
 /**
  * VERDICT STRICTNESS — the diversity-selection order (#2567): the STRICTEST verdict carries a lens/panel, never a
@@ -120,16 +145,11 @@ for (const verdict of Object.values(VERDICTS)) {
  *  `>` comparison would silently lose). Ledger/panel verdicts are enum-constrained upstream (`validateJuryEvent`
  *  admits only `VERDICTS` values), so this never throws on real data — it is the fail-loud backstop the totality
  *  assertion above guarantees, applied at each comparison site (disposition-judge + jury-ledger both call it).
- *  Membership is `Object.hasOwn`, not a bare bracket read — an inherited `Object.prototype` key ('toString',
- *  'constructor', 'valueOf', 'hasOwnProperty', '__proto__') must throw like any other non-member, never sail
- *  through as a rank (#xdompzx review, blocker 2).
+ *  Membership + the throw live once in `rankIn`, so this and `impactStrictness` cannot drift apart.
  *  @param {string} verdict
  *  @returns {number} */
 export function verdictStrictness(verdict) {
-  if (!Object.hasOwn(VERDICT_STRICTNESS, String(verdict))) {
-    throw new Error(`verdictStrictness: no strictness rank for verdict "${verdict}" — not a member of VERDICTS.`);
-  }
-  return VERDICT_STRICTNESS[String(verdict)];
+  return rankIn(VERDICT_STRICTNESS, verdict, 'verdictStrictness: no strictness rank for verdict');
 }
 
 /**
@@ -193,17 +213,13 @@ for (const level of Object.values(IMPACT_LEVELS)) {
   }
 }
 
-/** Rank an impact level. THROWS on an unranked level rather than yielding `undefined`, mirroring
- *  `verdictStrictness` — the fail-loud backstop for every bar comparison. Membership is `Object.hasOwn`, never a
- *  bare bracket read, so an inherited `Object.prototype` key throws like any other non-member (#xdompzx review,
- *  blocker 2 — a bare read returned the inherited function, which then compared as `NaN` and failed OPEN).
+/** Rank an impact level. THROWS on an unranked level rather than yielding `undefined` — the fail-loud backstop for
+ *  every bar comparison. Shares `rankIn` with `verdictStrictness` (#xdompzx round-2, finding 6): one accessor, so
+ *  the two can no longer be edited in lockstep and drift.
  *  @param {string} level
  *  @returns {number} */
 export function impactStrictness(level) {
-  if (!Object.hasOwn(IMPACT_STRICTNESS, String(level))) {
-    throw new Error(`impactStrictness: no rank for impact level "${level}" — not a member of IMPACT_LEVELS.`);
-  }
-  return IMPACT_STRICTNESS[String(level)];
+  return rankIn(IMPACT_STRICTNESS, level, 'impactStrictness: no rank for impact level');
 }
 
 /**
@@ -313,9 +329,7 @@ export function deriveVerdict({ findings = [], humanRequired = false, bar = PREV
   // #2823 — accept is GATED ON PREVENTION CAPTURE. Even with every finding resolved, a finding whose named
   // prevention is neither already captured (an existing gate) nor filed as a future item withholds a clean
   // accept — the reviewer accepts only once every reasonable prevention is captured or filed.
-  // #xdompzx — gated on IMPACT, not merely on capture: only a guard whose finding would cost `PREVENTION_IMPACT_BAR`
-  // or more to ship withholds the accept. A `cosmetic`/`degraded` finding still reports its guard (the notice reads
-  // the wider `hasUncapturedPrevention`) and is still owed a filing — it just no longer blocks the land.
+  // #xdompzx — gated on IMPACT too, via `blocksAcceptance` (see its doc for the notice-wide / verdict-narrow split).
   if (list.some((f) => blocksAcceptance(f, { bar }))) return VERDICTS.PREVENTION_OUTSTANDING;
   return VERDICTS.ACCEPT;
 }
@@ -325,19 +339,9 @@ export function deriveVerdict({ findings = [], humanRequired = false, bar = PREV
  * nor filed as a future item)? Pure. A finding with no `prevention` names no guard, so it is never reported here —
  * an old-shape finding (pre-#2823) is unaffected.
  *
- * THE WIDE HALF OF A DELIBERATE ASYMMETRY (#xdompzx). Until #xdompzx this predicate was BOTH the report set and the
- * accept gate, and the two were provably identical. They are no longer. Read the split as:
- *
- *   - NOTICE-WIDE — `hasUncapturedPrevention` (this function) is what every REPORTING surface reads: the operator
- *     notice (`renderPreventionSummary`) and the posted PR comment (`renderFindingLine`). EVERY uncaptured guard is
- *     surfaced and still owed a filing, whatever it would cost to ship. Nothing goes quiet.
- *   - VERDICT-NARROW — `blocksAcceptance` is what every VERDICT reducer reads: the same predicate AND the finding's
- *     `impactIfUnfixed` at or above `PREVENTION_IMPACT_BAR`.
- *
- * So the notice can now legitimately name a guard the verdict did NOT stop for — that is the intended shape, not a
- * disagreement to "re-align" away. Do not collapse the two back into one predicate: the split is the whole point of
- * #xdompzx, and the wide reporting half is what makes the narrow gate a scaling of the gate rather than a loss of
- * information. What is still decided ONCE is each half — one definition of "owes a guard", one of "blocks".
+ * THE WIDE HALF of the notice-wide / verdict-narrow split (#xdompzx): every REPORTING surface reads this predicate;
+ * only the VERDICT reducers read the narrower `blocksAcceptance`. The rationale for the split — and the
+ * compensating control that makes it safe — is stated ONCE at `blocksAcceptance` below. Read it there.
  * @param {Finding|null|undefined} finding
  * @returns {boolean}
  */
@@ -346,24 +350,33 @@ export function hasUncapturedPrevention(finding) {
 }
 
 /**
- * #xdompzx — does this finding's uncaptured guard actually WITHHOLD the accept, at the given bar? The split from
- * `hasUncapturedPrevention` is the whole point and is deliberate:
+ * #xdompzx — does this finding's uncaptured guard actually WITHHOLD the accept, at the given bar? Pure.
  *
- *   - `hasUncapturedPrevention` stays the pure "names a guard nobody has captured" predicate. Every REPORTING
- *     surface keeps reading it, so every uncaptured guard is still surfaced and still owed a filing. Nothing goes
- *     quiet.
- *   - `blocksAcceptance` is the narrower "…and shipping it costs enough to be worth stopping for" predicate. Only
- *     the VERDICT reducers read it.
+ * THE SPLIT, STATED ONCE (this is its owning symbol; `hasUncapturedPrevention`, `renderPreventionSummary` and
+ * `renderFindingLine` point back here rather than restating it):
+ *   - NOTICE-WIDE — `hasUncapturedPrevention` is the pure "names a guard nobody has captured" predicate. Every
+ *     REPORTING surface reads it, so no uncaptured guard is filtered OUT of what a rendered review shows,
+ *     whatever it would cost to ship — the bar narrows the verdict, never the report.
+ *   - VERDICT-NARROW — this predicate adds "…and shipping it costs `PREVENTION_IMPACT_BAR` or more". Only the
+ *     VERDICT reducers (`deriveVerdict`, `derivePanelVerdict`) read it.
+ * So a reporting surface can legitimately name a guard the verdict did NOT stop for. That is the intended shape,
+ * not a disagreement to "re-align" away — keeping the reporting half wide is exactly what makes the narrowed gate a
+ * SCALING of the gate rather than a loss of information. Do not collapse the two back into one predicate. What is
+ * still decided ONCE is each half: one definition of "owes a guard", one of "blocks".
  *
- * THE COMPENSATING CONTROL IS LOAD-BEARING, AND IT IS TWO-SIDED (#xdompzx review, blocker 3). A relaxation that
- * un-blocks a finding is only "no loss of information" if the finding, its declared impact and its owed guard all
- * still REACH a human on the path the relaxation opens — the merge path, not just the escalation path. So:
+ * THE COMPENSATING CONTROL IS LOAD-BEARING, AND IT IS TWO-SIDED (review blocker 3). A relaxation that un-blocks a
+ * finding is "no loss of information" only if the finding, its declared impact and its owed guard REACH a human on
+ * the path the relaxation opens — the AUTO-LAND merge path, not just the escalation path. So:
  *   - INPUT: `buildSubjectMandate` demands `rootCause`/`prevention`/`preventionCaptured` on EVERY finding, at every
  *     impact, unconditionally. The bar is the CALLER's dial, never something a reviewer pre-applies by omitting a
  *     field — a demand conditioned on the bar starves this predicate of the very guards it exists to report.
- *   - OUTPUT: `renderFindingLine` (`review-render.mjs`) prints `impactIfUnfixed` and the owed `prevention` on every
- *     finding in the posted PR comment. The reason a finding was un-blocked, and the guard it still owes, are
- *     therefore always visible to someone who could dispute them — including on a clean accept that auto-lands.
+ *   - OUTPUT: `renderFindingLine` (`review-render.mjs`) prints `impactIfUnfixed` and the owed `prevention` for every
+ *     finding in the posted PR comment, and the drain's auto-land branch (`skills-src/drain/SKILL.md`, step 3
+ *     `land` → `autoLand: true`) MUST post that comment BEFORE it applies the accept labels whenever any finding
+ *     satisfies `hasUncapturedPrevention(f) && !blocksAcceptance(f)` — i.e. whenever the bar is what un-blocked it.
+ *     That emission is CONDITIONAL, deliberately: a clean accept with no bar-un-blocked guard posts nothing, so an
+ *     ordinary land stays quiet. The guarantee is therefore narrower and exact — no land that the BAR un-blocked
+ *     happens without the declared impact and the owed guard being posted first, where someone can dispute them.
  * Neither half works alone. Removing either turns this from a scaling of the gate into a silent loosening.
  *
  * FAIL-CLOSED on an undeclared impact. A finding with no valid `impactIfUnfixed` blocks exactly as it did before
@@ -1210,11 +1223,13 @@ export function buildSubjectMandate({
     'over a review lens over a doc note; and (c) CAPTURE (`preventionCaptured`): whether that guard is already',
     'CAPTURED as an existing gate (true) or must be FILED as a future backlog item (false).',
     'A script-decidable defect for which you propose no gate is an INCOMPLETE review, not a clean one.',
-    `WHAT THE GUARD GATES (#xdompzx): reporting is unconditional, BLOCKING is not. A finding at`,
+    // The claim below must match what the drain's auto-land branch actually emits (round-2 blocker 1B): the posted
+    // review is guaranteed only when the bar is what un-blocked a guard, so the wording says exactly that.
+    'WHAT THE GUARD GATES: reporting is unconditional, BLOCKING is not. A finding at',
     `\`${PREVENTION_IMPACT_BAR}\` impact or above whose prevention is neither captured nor filed BLOCKS acceptance.`,
-    'A below-bar guard is still reported, still named in the posted review, and still owed a filing — it simply does',
-    'not stop the land. Answer all three fields either way: the bar is the caller\'s dial, not yours to pre-apply by',
-    'leaving a field out.',
+    'A below-bar guard is still reported here and still owed a filing — it simply does not stop the land, and when',
+    'the bar is what un-blocked it the reviewing agent must post your findings on the PR before it lands. Answer all',
+    'three fields either way: the bar is the caller\'s dial, not yours to pre-apply by leaving a field out.',
   ].join(' ');
 }
 

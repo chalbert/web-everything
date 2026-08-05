@@ -114,15 +114,11 @@ describe('renderPanelComment — the full PR-comment body', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// #xdompzx review, blocker 3B — THE AUDIT TRAIL ON THE MERGE PATH.
-// `PREVENTION_IMPACT_BAR` lets a below-bar finding's uncaptured guard ride a clean `accept`. That is a SCALING of
-// the gate rather than a silent loosening only if the two facts that justified un-blocking it still reach a reader
-// on the path the relaxation opens: the impact the reviewer DECLARED, and the guard the repo still OWES. The
-// operator notice (`renderPreventionSummary`) fires only on the ESCALATED event — exactly the path a below-bar
-// finding no longer takes. So the POSTED COMMENT must carry both. These assert the surface, not the predicate.
-// ─────────────────────────────────────────────────────────────────────────────
-describe('renderFindingLine carries impactIfUnfixed + the owed prevention (#xdompzx review, blocker 3B)', () => {
+// THE AUDIT TRAIL ON THE MERGE PATH (review blocker 3B) — the OUTPUT half of the compensating control for
+// `PREVENTION_IMPACT_BAR`; rationale lives once at `blocksAcceptance` in `jury-core.mjs`. These assert the rendered
+// SURFACE, not the predicate: the declared impact and the owed guard must be in the posted comment body, because
+// that body is what the drain's auto-land branch posts when the bar is what un-blocked a guard.
+describe('renderFindingLine carries impactIfUnfixed + the owed prevention (review blocker 3B)', () => {
   it('a resolved below-bar guard ACCEPTS, and the rendered comment still names the guard and the impact', () => {
     const finding = {
       file: 'scripts/lib/thing.mjs',
@@ -162,5 +158,26 @@ describe('renderFindingLine carries impactIfUnfixed + the owed prevention (#xdom
   it('DROPS an invented impact word rather than printing it (normalizeFindings validates the enum)', () => {
     const md = renderPanelComment({ verdict: VERDICTS.CHANGES, findings: [{ summary: 'x', impactIfUnfixed: 'high' }] });
     expect(md).not.toContain('impact if unfixed');
+  });
+});
+
+// ── round-2 finding 5 — THE SIBLING LOOKUP TABLES HAD THE SAME PROTOTYPE HOLE AS THE RANK TABLES. ──────
+// `VERDICT_LABELS` was a frozen NORMAL-prototype object read with `VERDICT_LABELS[verdict] ?? String(verdict)`.
+// `Object.freeze` seals own properties but does not detach `Object.prototype`, and `??` only fires on
+// null/undefined — so an inherited member is truthy, the raw-token fallback never runs, and
+// `renderPanelComment({ verdict: 'toString' })` rendered `**Verdict:** function toString() { [native code] }` into
+// a posted PR comment. The table is now built through `frozenLookup`; these probe the real prototype members.
+describe('VERDICT_LABELS is prototype-proof — an unknown verdict falls back to its raw token (finding 5)', () => {
+  const PROTO_KEYS = ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__', 'isPrototypeOf', 'propertyIsEnumerable'];
+
+  it.each(PROTO_KEYS)('renderPanelComment({ verdict: "%s" }) prints the raw token, not an inherited member', (key) => {
+    const md = renderPanelComment({ verdict: key, findings: [] });
+    expect(md).toContain(`**Verdict:** ${key}`);
+    expect(md).not.toContain('[native code]');
+    expect(md).not.toContain('function ');
+  });
+
+  it('a real verdict still renders its human label', () => {
+    expect(renderPanelComment({ verdict: VERDICTS.ACCEPT, findings: [] })).toContain('✅ pass — no blocking findings');
   });
 });

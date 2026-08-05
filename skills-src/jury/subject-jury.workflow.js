@@ -231,7 +231,7 @@ const IMPACT_LEVEL_VALUES = ['cosmetic', 'degraded', 'broken', 'unrecoverable'];
 // Declared once and spread into both finding schemas (juror + red-team) so the two cannot drift apart, and declared
 // at all — rather than merely tolerated by `additionalProperties: true` — so the producer is told the shape.
 const FINDING_INTROSPECTION_PROPERTIES = {
-  impactIfUnfixed: { type: 'string', enum: IMPACT_LEVEL_VALUES, description: 'what it COSTS to ship this finding — the ranking key the verdict reducers gate on (#xdompzx). Omit ONLY if you genuinely cannot tell: an absent/unrecognised value reads as UNDECLARED and fails CLOSED (blocks acceptance).' },
+  impactIfUnfixed: { type: 'string', enum: IMPACT_LEVEL_VALUES, description: 'what it COSTS to ship this finding — the ranking key the verdict reducers gate on. Omit ONLY if you genuinely cannot tell: an absent/unrecognised value reads as UNDECLARED and fails CLOSED (blocks acceptance).' },
   rootCause: { type: 'string', description: '#2823 — a blameless "why the CREATOR got this wrong" chain (the authoring failure mode), not merely what is wrong' },
   prevention: { type: 'string', description: '#2823 — the cheapest DURABLE guard that would have caught this whole CLASS (a deterministic check:standards gate preferred over a review lens over a doc note)' },
   preventionCaptured: { type: 'boolean', description: '#2823 — true if that guard already EXISTS as a gate; false ⇒ it must be FILED as a backlog item' },

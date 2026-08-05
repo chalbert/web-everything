@@ -950,17 +950,11 @@ export const REVIEW_NOTICE_EVENTS = Object.freeze({
  * an uncaptured guard fire it. Either way it gates on the SAME single-sourced predicates every reducer shares
  * (`isFindingOutstanding` for "still open", `hasUncapturedPrevention` for "owes a guard").
  *
- * NOTICE-WIDE, VERDICT-NARROW (#xdompzx) — the notice deliberately names a SUPERSET of what the verdict stopped
- * for. Before #xdompzx this function named EXACTLY the set `derivePanelVerdict`/`deriveVerdict` raised the verdict
- * on, and the two could not disagree by construction. `PREVENTION_IMPACT_BAR` split that: the reducers now gate on
- * `blocksAcceptance` (uncaptured AND at-or-above the bar) while this notice stays on the wider
- * `hasUncapturedPrevention` (uncaptured, whatever its impact). So a `cosmetic`/`degraded` guard can appear here on
- * a run whose verdict is a clean `accept` — that is the INTENDED asymmetry, not a contradiction to repair. Keeping
- * the reporting surfaces wide is precisely what makes the narrowed gate a scaling rather than a loss of
- * information; re-aligning this predicate onto `blocksAcceptance` would silently undo it. What the notice claims
- * is therefore "these guards are OWED", never "these guards blocked the accept" — the wording below says owed for
- * that reason. (The other half of the same control is `renderFindingLine` in `review-render.mjs`, which prints the
- * impact and the owed guard in the posted PR comment on the merge path this notice never reaches.)
+ * NOTICE-WIDE, VERDICT-NARROW (#xdompzx) — this is the WIDE half: it reads `hasUncapturedPrevention`, so it can
+ * name a guard the verdict did not stop for. Rationale stated once at `blocksAcceptance` (`jury-core.mjs`). Two
+ * consequences for the COPY below: it claims guards are OWED, never that they blocked the accept; and its lead
+ * word is not a verdict name, because on an `accept` run this summary still fires and a notice must never print a
+ * verdict it did not reduce to (#xdompzx round-2, finding 4).
  * @param {{findings?: Array<object>, verdict?: string}} [o]
  * @returns {string}
  */
@@ -970,13 +964,15 @@ export function renderPreventionSummary({ findings = [], verdict } = {}) {
   // the reducers raise the verdict on (they additionally require the impact bar, #xdompzx). An OUTSTANDING finding is
   // `changes` territory and never owes here.
   const owed = all.filter((f) => !isFindingOutstanding(f) && hasUncapturedPrevention(f));
+  // "Prevention OWED", not "Prevention outstanding" (#xdompzx round-2, finding 4): the old lead was the literal
+  // `VERDICTS.PREVENTION_OUTSTANDING` token used as copy, and this summary also fires on a run that reduced to
+  // `accept` (a below-bar guard) — so the operator read a verdict name the reduction never produced. And "owed",
+  // not "must be filed before accept": below the bar a guard is owed without withholding the accept.
   const name = () => {
-    if (!owed.length) return ' Prevention outstanding — file the named guard(s).';
+    if (!owed.length) return ' Prevention owed — file the named guard(s).';
     const guards = owed.map((f) => f.prevention).join('; ');
     const n = owed.length;
-    // "owed", not "must be filed before accept" (#xdompzx): below the impact bar an uncaptured guard is still owed
-    // but no longer withholds the accept, so the old wording over-claimed on exactly the findings the bar un-blocks.
-    return ` Prevention outstanding — ${n} guard${n === 1 ? '' : 's'} owed: ${guards}.`;
+    return ` Prevention owed — ${n} guard${n === 1 ? '' : 's'} to file: ${guards}.`;
   };
   // The reduced verdict is AUTHORITATIVE and checked FIRST — when it is prevention-outstanding, name the guards even
   // on a mixed list (this is the round-3 finding 2 reconciliation with derivePanelVerdict).
@@ -993,8 +989,8 @@ export function renderPreventionSummary({ findings = [], verdict } = {}) {
  * (`renderPanelVerdictTable` / #2432's `renderPanelComment`, posted to GitHub via `gh pr comment`) — this is
  * what the SESSION itself tells the operator in-chat. Pure; never posts anything.
  * #2823 — the ESCALATED notice also carries a PREVENTION SUMMARY: when the verdict is `prevention-outstanding`
- * or the supplied `findings` name guards that are neither captured nor filed, it appends "prevention outstanding
- * — N guard(s) owed: …" so the operator sees the outstanding prevention debt in the same line, not only in the
+ * or the supplied `findings` name guards that are neither captured nor filed, it appends "Prevention owed
+ * — N guard(s) to file: …" so the operator sees the outstanding prevention debt in the same line, not only in the
  * verdict token. Passing no `findings` (every existing caller) leaves the line byte-for-byte unchanged. Note this
  * is the ESCALATED event only — a below-bar guard on a clean accept never reaches here, which is why the posted PR
  * comment (`renderFindingLine`, review-render.mjs) carries the impact + guard on the merge path (#xdompzx).

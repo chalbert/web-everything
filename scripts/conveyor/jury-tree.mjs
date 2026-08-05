@@ -29,6 +29,7 @@
 
 import { pathToFileURL } from 'node:url';
 import { foldAllSubjects, foldSubject } from '../lib/jury-ledger.mjs';
+import { VERDICTS, frozenLookup } from '../lib/jury-core.mjs';
 
 // ── PURE CORE (no fs / Date / child_process — the folded ledger is passed IN) ────────────────────────────────
 
@@ -38,9 +39,20 @@ export const STATUS_MARKERS = Object.freeze({ pending: '◷', running: '⟳', fo
 /** Verdict glyphs — the strictest-wins verdict on a juror / panel line. `null`/unknown → a neutral dot. The
  *  `prevention-outstanding` (#2823) glyph is an OUTLINE flag `⚐`, distinct from needs-human's filled `⚑` — a
  *  blocking verdict must never render as the neutral `·` reserved for "no verdict reported yet".
+ *
+ *  NULL-PROTOTYPE, and KEYED FROM THE ENUM (#xdompzx round-2, finding 5). `verdictGlyph` reads this table with a
+ *  `|| '·'` default, which never fires on an inherited truthy value — so as a normal object literal
+ *  `verdictGlyph('toString')` rendered the native `Object.prototype.toString` function into the tree instead of the
+ *  neutral dot. Computed `VERDICTS.*` keys also mean the table is DERIVED from the enum rather than re-typing its
+ *  string values, so the totality gate below discovers it symbolically.
  *  @verdicts-total — every `VERDICTS` member must be a key (enforced by the `check:standards` verdict-totality gate),
  *  so a new blocking verdict can never fall back to the neutral `·` glyph again. */
-export const VERDICT_MARKERS = Object.freeze({ accept: '✓', changes: '✎', 'needs-human': '⚑', 'prevention-outstanding': '⚐' });
+export const VERDICT_MARKERS = frozenLookup({
+  [VERDICTS.ACCEPT]: '✓',
+  [VERDICTS.CHANGES]: '✎',
+  [VERDICTS.NEEDS_HUMAN]: '⚑',
+  [VERDICTS.PREVENTION_OUTSTANDING]: '⚐',
+});
 
 const arr = (x) => (Array.isArray(x) ? x : []);
 const verdictGlyph = (v) => VERDICT_MARKERS[v] || '·';

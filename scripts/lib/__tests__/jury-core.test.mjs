@@ -7,6 +7,9 @@
  *   from '../jury-core.mjs' directly.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   JURY_EVENT_TYPES,
   JURY_EVENT_TYPE_LIST,
@@ -43,6 +46,7 @@ import {
   deriveVerdict,
   derivePanelVerdict,
   buildPanelFindings,
+  frozenLookup,
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
@@ -706,5 +710,62 @@ describe('IMPACT_GLOSS — the level definitions are DATA, single-sourced (#xdom
       expect(IMPACT_GLOSS[level].length).toBeGreaterThan(10);
     }
     expect(Object.keys(IMPACT_GLOSS).sort()).toEqual(Object.values(IMPACT_LEVELS).sort());
+  });
+});
+
+// ── round-2 blocker 1 — THE COMPENSATING CONTROL MUST BE WIRED ON THE PATH THE RELAXATION OPENS. ───────
+// `PREVENTION_IMPACT_BAR` un-blocks a below-bar uncaptured guard on the AUTO-LAND path. Round 1 built the renderer
+// (`renderFindingLine`) and shipped prose claiming the guard was "always visible … including on a clean accept that
+// auto-lands" — but the drain's `land` / `autoLand: true` branch posted nothing at all, so the renderer was never
+// reached. A rendering function nobody calls is not a control. These pin BOTH halves: the drain skill instructs the
+// emission on that branch, and no surface makes an unconditional visibility claim over a conditional emission.
+describe('the below-bar prevention control is wired on the auto-land branch (round-2 blocker 1)', () => {
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const drainSkill = () => readFileSync(join(ROOT, 'skills-src/drain/SKILL.md'), 'utf8');
+
+  it('the drain skill instructs the auto-land branch to POST the panel comment before the accept labels', () => {
+    const md = drainSkill();
+    // the check is named on the land branch itself, ahead of the label application …
+    const landIdx = md.indexOf('BAR-UN-BLOCKED PREVENTION CHECK');
+    expect(landIdx).toBeGreaterThan(-1);
+    // … and it is defined in terms of the two predicates, not restated as prose the code cannot be checked against
+    expect(md).toContain('hasUncapturedPrevention(f) === true');
+    expect(md).toContain('blocksAcceptance(f) === false');
+    // … and it names the actual emitter
+    expect(md).toContain('renderPanelComment(');
+  });
+
+  it('the drain skill states the guarantee as CONDITIONAL — a clean accept with nothing un-blocked stays quiet', () => {
+    const md = drainSkill();
+    expect(md).toContain('no\n       > land that the bar un-blocked happens silently');
+    // the emission must not be described as unconditional — that was the false claim round 1 shipped
+    expect(md).not.toMatch(/always visible/i);
+  });
+
+  it('the reviewer-facing mandate makes no unconditional "always visible" claim', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
+    expect(text).not.toMatch(/always visible/i);
+    expect(text).not.toContain('still named in the posted review');
+    // what it DOES claim is the conditional truth
+    expect(text).toContain('when the bar is what un-blocked it');
+  });
+});
+
+// ── round-2 findings 5 + 6 — one lookup builder, one rank accessor. ────────────────────────────────────
+describe('frozenLookup + the shared rank accessor', () => {
+  it('frozenLookup is EXPORTED and produces a frozen null-prototype table', () => {
+    const t = frozenLookup({ a: 1 });
+    expect(Object.getPrototypeOf(t)).toBe(null);
+    expect(Object.isFrozen(t)).toBe(true);
+    expect(t.toString).toBeUndefined();
+  });
+
+  it('both rank accessors report the SAME shape of failure — one accessor, not a hand-copied twin', () => {
+    // Same class of message (caller: no rank for <thing> "<key>" — …), differing only in the label each passes.
+    expect(() => verdictStrictness('nope')).toThrow(/verdictStrictness: no strictness rank for verdict "nope"/);
+    expect(() => impactStrictness('nope')).toThrow(/impactStrictness: no rank for impact level "nope"/);
+    // and each names the members it DOES know, which the old hand-written messages did not
+    expect(() => verdictStrictness('nope')).toThrow(/known: /);
+    expect(() => impactStrictness('nope')).toThrow(/known: /);
   });
 });

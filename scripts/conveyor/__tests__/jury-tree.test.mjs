@@ -74,3 +74,28 @@ describe('renderAllJuryTrees', () => {
     expect(out).toContain('JURY we#2');
   });
 });
+
+// ── round-2 finding 5 — VERDICT_MARKERS had the rank tables' prototype hole, one `||` away. ────────────
+// A frozen NORMAL-prototype object read with `VERDICT_MARKERS[v] || '·'`: `||` only fires on a FALSY value, and an
+// inherited `Object.prototype` member is a truthy function — so an unknown verdict rendered the native function
+// into the live tree instead of the neutral dot. The table is now built through `frozenLookup` and keyed from the
+// `VERDICTS` enum. These probe the real prototype members, not a hand-picked invented word.
+describe('VERDICT_MARKERS is prototype-proof (round-2 finding 5)', () => {
+  const PROTO_KEYS = ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__', 'isPrototypeOf', 'propertyIsEnumerable'];
+
+  it('the table is NULL-PROTOTYPE, so an inherited key is genuinely absent', () => {
+    expect(Object.getPrototypeOf(VERDICT_MARKERS)).toBe(null);
+    for (const key of PROTO_KEYS) expect(VERDICT_MARKERS[key]).toBeUndefined();
+  });
+
+  it.each(PROTO_KEYS)('a panel verdict of "%s" renders the neutral dot, never an inherited member', (key) => {
+    const out = renderJuryTree('we#1', ledger({ panelVerdict: key }));
+    expect(out).toContain(`panel · ${key}`);
+    expect(out).not.toContain('[native code]');
+  });
+
+  it('every real verdict still has its own glyph', () => {
+    expect(VERDICT_MARKERS.accept).toBe('✓');
+    expect(VERDICT_MARKERS['prevention-outstanding']).toBe('⚐');
+  });
+});

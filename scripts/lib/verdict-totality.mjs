@@ -49,8 +49,11 @@ const DEFAULT_ENROLMENT = Object.freeze({
   partialMarker: VERDICT_PARTIAL_MARKER,
 });
 
-export const IMPACT_TOTAL_MARKER = '@impact-total';
-export const IMPACT_PARTIAL_MARKER = '@impact-partial';
+// NOT exported (#xdompzx round-2, finding 3): these two strings are consumed only by `IMPACT_ENROLMENT` just below.
+// The enrolment object IS the public handle — exporting the raw markers as well invites a caller to re-type a marker
+// name, which is the drift this gate exists to stop.
+const IMPACT_TOTAL_MARKER = '@impact-total';
+const IMPACT_PARTIAL_MARKER = '@impact-partial';
 
 /** The second enrolment (#xdompzx review, finding 5): `IMPACT_LEVELS` (jury-core) — the finding-impact enum whose
  *  rank table (`IMPACT_STRICTNESS`) and gloss map (`IMPACT_GLOSS`) must each stay total over it. Exported so
@@ -84,12 +87,26 @@ function verdictSymbolRefs(span, name2val, enumSymbol) {
   return found;
 }
 
-/** Distinct verdict VALUES referenced as an object-literal KEY (`accept:`, `'needs-human':`, `[VERDICTS.X]:` is the
+/** Distinct enum VALUES referenced as an object-literal KEY (`'needs-human':`, `accept:`; `[VERDICTS.X]:` is the
  *  symbolic form handled above) in a code span. The key must sit in KEY POSITION — immediately after `{`, `,`, or a
- *  line start — so a verdict word inside a sentence-shaped string (`before accept: …`) is NOT mistaken for a key. */
-function verdictKeyRefs(span, values) {
+ *  line start — so an enum word inside a sentence-shaped string (`before accept: …`) is NOT mistaken for a key.
+ *
+ *  ONLY DISTINCTIVE VALUES (#xdompzx round-2, finding 3). Enum values are often ordinary English status words —
+ *  `accept`, `broken`, `degraded`. Matching those in bare key position across all of `scripts/` + `skills-src/`
+ *  turns any unrelated `const HEALTH = { ok: 0, degraded: 1, broken: 2 }` into a nonsense totality error, and the
+ *  author's cheapest escape is to silence an unrelated gate with a bogus `@impact-partial`. So a value is matched
+ *  in bare key position only when it is DISTINCTIVE — it contains a hyphen (`needs-human`,
+ *  `prevention-outstanding`, which no unrelated literal spells by accident), or the span itself names the enum
+ *  symbol, which makes the co-location deliberate. A generic single-word member falls back to SYMBOLIC matching
+ *  (`ENUM.MEMBER`) only, which is what a real consumer of the enum writes anyway.
+ *  @param {string} span
+ *  @param {string[]} values
+ *  @param {boolean} spanNamesEnum - does the span reference the enum symbol itself?
+ */
+function verdictKeyRefs(span, values, spanNamesEnum) {
   const found = new Set();
   for (const v of values) {
+    if (!v.includes('-') && !spanNamesEnum) continue; // generic word, no enum symbol in the span → symbolic-only
     const re = new RegExp(`(?:[{,]|^)\\s*(['"]?)${v.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}\\1\\s*:`, 'gm');
     if (re.test(span)) found.add(v);
   }
@@ -154,7 +171,8 @@ export function checkVerdictTotality(docs = [], verdicts = {}, enrolment = {}) {
       const { line, symbol } = starts[s];
       const end = s + 1 < starts.length ? starts[s + 1].line : codeLines.length;
       const span = codeLines.slice(line, end).join('\n');
-      const referenced = new Set([...verdictSymbolRefs(span, name2val, enumSymbol), ...verdictKeyRefs(span, values)]);
+      const spanNamesEnum = span.includes(enumSymbol);
+      const referenced = new Set([...verdictSymbolRefs(span, name2val, enumSymbol), ...verdictKeyRefs(span, values, spanNamesEnum)]);
       if (referenced.size < 2) continue; // not a consumer of this enum — nothing to enforce
 
       const comment = precedingComment(rawLines, line);

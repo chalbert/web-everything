@@ -282,7 +282,7 @@ const LENS_SCHEMA = {
           line: { type: 'number' },
           // #xdompzx / #2823 — the introspection fields the shared mandate demands. Declared here (not merely
           // tolerated by `additionalProperties: true`) so the producer is told the shape rather than inferring it.
-          impactIfUnfixed: { type: 'string', enum: IMPACT_LEVEL_VALUES, description: 'what it COSTS to ship this finding — the ranking key the verdict reducers gate on (#xdompzx). Omit ONLY if you genuinely cannot tell: an absent/unrecognised value reads as UNDECLARED and fails CLOSED (blocks acceptance).' },
+          impactIfUnfixed: { type: 'string', enum: IMPACT_LEVEL_VALUES, description: 'what it COSTS to ship this finding — the ranking key the verdict reducers gate on. Omit ONLY if you genuinely cannot tell: an absent/unrecognised value reads as UNDECLARED and fails CLOSED (blocks acceptance).' },
           rootCause: { type: 'string', description: '#2823 — a blameless "why the CREATOR got this wrong" chain (the authoring failure mode), not merely what is wrong' },
           prevention: { type: 'string', description: '#2823 — the cheapest DURABLE guard that would have caught this whole CLASS (a deterministic check:standards gate preferred over a review lens over a doc note)' },
           preventionCaptured: { type: 'boolean', description: '#2823 — true if that guard already EXISTS as a gate; false ⇒ it must be FILED as a backlog item' },

@@ -348,9 +348,10 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
        that still names an uncaptured guard, which only the findings scan sees) — then
        `combineValidatedVerdict({ panelVerdict, validatorVerdict })` and re-run `deriveNegotiationOutcome`
        on the combined verdict: **combined `land`** (BOTH the panel and the independent validator accepted) →
-       apply `redteam:accepted` THEN `review:accepted` (`gh pr edit <num> --repo <repo> --add-label
-       redteam:accepted --add-label review:accepted`) and **re-run the drain** — the non-author-accepts invariant
-       now holds INDEPENDENTLY; **combined `continue`** (the validator wants changes the panel missed) → step 4,
+       **first run the BAR-UN-BLOCKED PREVENTION CHECK, THEN** apply `redteam:accepted` THEN
+       `review:accepted` (`gh pr edit <num> --repo <repo> --add-label redteam:accepted --add-label
+       review:accepted`) and **re-run the drain** — the non-author-accepts invariant now holds INDEPENDENTLY;
+       **combined `continue`** (the validator wants changes the panel missed) → step 4,
        another editor round; **combined `escalate`** (validator `needs-human`) → the `escalate` path below.
        `autoLand: false` (`gate-self`) → **do NOT apply
        `review:accepted`**: the panel converged and fixed the diff, but a human must clear a trust-chain edit.
@@ -360,6 +361,29 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
        pass `findings = buildPanelFindings(lensFindings)` (the whole panel's list) so the notice's #2823 prevention
        summary renders the guards owed before accept — rather than hand-typing the in-chat notice; the fix rode the
        PR branch, the clearance did not.
+
+       > **THE BAR-UN-BLOCKED PREVENTION CHECK — the compensating control for `PREVENTION_IMPACT_BAR`.** The
+       > impact bar (`we:scripts/lib/jury-core.mjs`) lets a finding whose named prevention guard is neither
+       > captured nor filed ride a CLEAN `accept`, as long as the reviewer declared the finding cheap
+       > (`impactIfUnfixed` below the bar). That is a scaling of the gate rather than a silent loosening ONLY if
+       > the declared impact and the still-owed guard reach a human on the path it opens — and the path it opens
+       > is exactly THIS one, the auto-land. `renderReviewNotice` fires only on `escalated`, which an
+       > un-blocked finding never reaches; a rendering function nobody calls is not a control.
+       >
+       > So, on the **combined `land` / `autoLand: true`** branch, BEFORE applying the accept labels: take
+       > `findings = buildPanelFindings(lensFindings)` merged with the validator jury's
+       > `buildPanelFindings(validatorFindings)`, and test each for **`hasUncapturedPrevention(f) === true` AND
+       > `blocksAcceptance(f) === false`** — a guard the BAR un-blocked. If ANY finding matches, you **MUST** post
+       > `renderPanelComment({ findings, verdict, disposition, lensVerdicts })` as a PR comment
+       > (`node scripts/review-core-cli.mjs comment --file=<result.json>` → `gh pr comment <num> --repo <repo>
+       > --body-file -`) first, so the impact each finding declared and the guard it still owes are on the record
+       > where someone can dispute them before the merge. Only then apply the labels.
+       >
+       > If NO finding matches — a clean accept with nothing the bar un-blocked — post **nothing**. The emission is
+       > deliberately conditional: making every land noisy would train the operator to skim past the one comment
+       > that carries real prevention debt. The guarantee this control makes is therefore narrow and exact: **no
+       > land that the bar un-blocked happens silently.** Say it that way anywhere you restate it — a claim that
+       > every finding is posted on every land would be false.
      - **`escalate`** (verdict `needs-human` — a genuine mandate `conflict` or the global `humanRequired`
        conflict-of-interest flag — OR `changes` with `round >= roundCap`) → this is the `deriveReviewDisposition`
        DEADLOCK case (`mandate-conflict` / `non-convergence` → `{ mode: human }`): the loop already ran and could

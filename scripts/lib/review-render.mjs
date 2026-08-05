@@ -27,11 +27,19 @@ import {
   MANDATORY_LENSES,
   PANEL_LENSES,
 } from './review-core.mjs';
+// The null-prototype lookup builder lives in the subject-agnostic engine core; import it DIRECTLY (review-core
+// re-exports only the review-shaped symbols, and this module is engine-tier like jury-core itself).
+import { frozenLookup } from './jury-core.mjs';
 
 /** Human-readable label per overall verdict (`VERDICTS`). An unknown verdict falls back to its raw token so a
  *  new verdict never renders as a blank line. Pure data.
+ *
+ *  NULL-PROTOTYPE (#xdompzx round-2, finding 5) — this table is read with `VERDICT_LABELS[verdict] ?? String(verdict)`
+ *  where `verdict` can arrive from free-form model JSON. `??` only fires on `null`/`undefined`, so on a normal object
+ *  literal `renderPanelComment({ verdict: 'toString' })` rendered the INHERITED native function as the verdict label.
+ *  A null-prototype table has nothing to inherit, so the raw-token fallback actually runs.
  *  @verdicts-total — every `VERDICTS` member must be a key (enforced by the `check:standards` verdict-totality gate). */
-const VERDICT_LABELS = Object.freeze({
+const VERDICT_LABELS = frozenLookup({
   [VERDICTS.ACCEPT]: '✅ pass — no blocking findings',
   [VERDICTS.CHANGES]: '🔁 changes requested',
   [VERDICTS.NEEDS_HUMAN]: '🚦 human review required',
@@ -72,13 +80,10 @@ function renderDisposition(disposition) {
  * `impactIfUnfixed`, and — as a nested sub-bullet — the named `prevention` guard with whether it is already
  * CAPTURED or still OWED. Tolerant of a finding carrying only a summary.
  *
- * WHY IMPACT + PREVENTION ARE ON THE MERGE PATH (#xdompzx review, blocker 3B). `PREVENTION_IMPACT_BAR` lets a
- * below-bar finding's uncaptured guard ride a clean `accept`. That is only a SCALING of the gate — rather than a
- * silent loosening — if the two facts that justified un-blocking it reach a reader on the path it opens: the
- * impact the reviewer declared, and the guard the repo still owes. The operator notice
- * (`renderPreventionSummary`) fires only on the ESCALATED event, which is exactly the path a below-bar finding no
- * longer takes. This comment body is posted on every review, escalated or merged, so it is where those two facts
- * belong. Anyone who disagrees with the declared impact can see it and say so before the merge.
+ * This is the OUTPUT half of the compensating control that makes `PREVENTION_IMPACT_BAR` a scaling of the gate
+ * rather than a silent loosening — see `blocksAcceptance` (`jury-core.mjs`) for why, stated once there. What this
+ * renderer owes it: the declared impact and the owed guard must appear on every finding, because the drain's
+ * auto-land branch posts THIS body when the bar is what un-blocked a guard.
  * @param {import('./review-core.mjs').Finding} f
  * @returns {string}
  */
