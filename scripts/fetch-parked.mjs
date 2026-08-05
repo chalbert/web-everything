@@ -29,6 +29,9 @@
  * Exit 0 always when at least one number was given; 2 on a usage error (no numbers).
  */
 import { execFileSync } from 'node:child_process';
+// #2901 — the NET two-tree diff basis. merge-ai-prs.mjs guards its CLI behind `if (IS_CLI)`, so importing
+// this one function does not run the lander; the /review skill mandates the same import for the same reason.
+import { computeNetDiffText } from './merge-ai-prs.mjs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { classifyChecks } from './pr-land.mjs';
@@ -161,12 +164,19 @@ export function reviewClassFromLabels(labels) {
  * The `checks` token is over the REQUIRED set when `requiredNames` is supplied (so it matches what pr-land waits
  * for — #2482); with no `requiredNames` it degrades to the full rollup (the historical all-checks behaviour), and
  * `checksScope` records which (`'required'` vs `'all'`) so a consumer knows exactly what the token covers.
- * @param {{view: object, diff?: string, requiredNames?: string[]|null}} o
+ * #2901 — `diffBasis` records WHICH diff the consumer is holding: `'net'` (the two-tree
+ * `git diff <forkpoint> <head>`, what a reviewer must judge) or `'three-dot'` (`gh pr diff`, the degraded
+ * fallback). A reviewer handed a three-dot diff sees files that sibling lanes already landed on `main` as though
+ * this PR added them, and will faithfully report findings about code the PR does not contain — observed on
+ * PR #1018, where a juror flagged an "unrelated #2457 re-scope" that is not in the diff at all. The basis must
+ * therefore travel WITH the diff: a degraded basis that looks identical to a good one is how a confident,
+ * well-argued, wrong finding reaches a PR author.
+ * @param {{view: object, diff?: string, requiredNames?: string[]|null, diffBasis?: string}} o
  * @returns {{number:number, title:string, body:string, files:Array, state:string,
- *   checks:{status:string, reason:string}, checksScope:string, diff:string, labels:string[], reviewClass:string,
- *   headRefName:string, mergeable:string}}
+ *   checks:{status:string, reason:string}, checksScope:string, diff:string, diffBasis:string, labels:string[],
+ *   reviewClass:string, headRefName:string, mergeable:string}}
  */
-export function assembleParked({ view, diff, requiredNames } = {}) {
+export function assembleParked({ view, diff, requiredNames, diffBasis } = {}) {
   const v = view || {};
   const labels = labelNames(v.labels);
   const checkRows = filterToRequired(rollupToCheckRows(v.statusCheckRollup), requiredNames);
@@ -179,6 +189,8 @@ export function assembleParked({ view, diff, requiredNames } = {}) {
     checks: classifyChecks(checkRows),
     checksScope: Array.isArray(requiredNames) ? 'required' : 'all',
     diff: typeof diff === 'string' ? diff : '',
+    // Default to the DEGRADED label, never the good one: an unstated basis must not read as a net diff.
+    diffBasis: diffBasis === 'net' ? 'net' : 'three-dot',
     labels,
     reviewClass: reviewClassFromLabels(labels),
     headRefName: String(v.headRefName || ''),
@@ -212,12 +224,70 @@ function runCli() {
         'pr', 'view', num, '--json',
         'number,title,body,files,state,statusCheckRollup,labels,headRefName,mergeable',
       ]));
+      // #2901 — the NET two-tree diff vs CURRENT main, NOT `gh pr diff`'s three-dot merge-base diff. The
+      // three-dot form lists a sibling-lane file that has since landed on main as if THIS PR added it, so a
+      // reviewer grades work the PR never did. #2901 fixed this for the `/review` skill and did not touch this
+      // module — which is what the converge loop reads — so the defect survived here and produced a phantom
+      // finding on PR #1018 within hours. Same basis the drain's escalation SCORE uses (#2450/#2373/#2404), so
+      // what a reviewer reads and what was scored cannot drift.
       let diff = '';
-      try { diff = gh(['pr', 'diff', num]); } catch { diff = ''; } // a diff hiccup must not drop the whole entry
+      let diffBasis = 'three-dot';
+      const headRef = String(view.headRefName || '');
+      let netFiles = null;
+      if (headRef) {
+        const exec = (c, a, o) => execFileSync(c, a, { cwd, maxBuffer: 64 * 1024 * 1024, ...o });
+        // #1031 review, finding 4 — `scored` means only "a candidate ref RESOLVED", never "the ref is CURRENT".
+        // resolveNetDiffBasis swallows its fetch error and falls through to whatever `origin/<headRef>` happens
+        // to be cached, so a working gh API path plus a broken git transport would hand back a plausible OLDER
+        // diff labelled `net`: the panel signs off commit A while the head is commit B, with no signal. Before
+        // this block existed a diff-fetch failure produced `diff: ''`, which degrades the round to needs-human —
+        // strictly safer. So prove the fetch here, and refuse the `net` label if it did not happen.
+        let fetched = false;
+        try { exec('git', ['fetch', '--quiet', 'origin', headRef], { stdio: ['ignore', 'pipe', 'pipe'] }); fetched = true; } catch { fetched = false; }
+        const net = fetched ? computeNetDiffText({ exec, rev: headRef, fetchExtraRefs: [headRef] }) : null;
+        if (net && net.scored && typeof net.text === 'string' && net.text) {
+          diff = net.text; diffBasis = 'net';
+          // The FILE LIST must come from the same basis as the diff — `gh pr view --json files` is three-dot too,
+          // and the file list is what a juror CITES. On PR #1018 it carried 29 entries against 18 real ones and
+          // the phantom finding named one of the surplus.
+          //
+          // #1031 review, finding 2 — do NOT source this from `computeNetDiffChangedFiles`. That returns
+          // `parseNumstat` output, which is git's DISPLAY encoding: a rename renders as `a.txt => b.txt` and a
+          // non-ASCII path is C-quoted (`"caf\303\251.txt"`). `gh` reports the plain new path, so the
+          // intersection silently DROPS those entries — and a rename-only PR would produce a ZERO-file list
+          // advertised as `net`, i.e. authoritative. That is worse than the inflated list this replaced: a
+          // reviewer is told a real file is not in the PR and dismisses genuine findings on it.
+          // `--name-only -z --no-renames` gives plain NUL-separated paths in every case.
+          let changed = null;
+          try {
+            const raw = exec('git', ['diff', '--name-only', '-z', '--no-renames', '--end-of-options', `${net.base}..${net.rev}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+            changed = String(raw || '').split('\0').map((x) => x.trim()).filter(Boolean);
+          } catch { changed = null; }
+          // FAIL OPEN. If the intersection would lose entries the gh list has, the two sources disagree about
+          // encoding or scope and we cannot say which is right — so keep the UNFILTERED list and drop back to the
+          // `three-dot` label rather than present a short list as authoritative. A basis claim we cannot support
+          // is the failure this whole field exists to prevent.
+          if (changed && changed.length) {
+            const candidate = new Set(changed.map(String));
+            const ghPaths = (Array.isArray(view.files) ? view.files : []).map((x) => String(x && (x.path || x.filename)));
+            const kept = ghPaths.filter((x) => candidate.has(x));
+            if (kept.length >= candidate.size) netFiles = candidate;
+            else diffBasis = 'three-dot';
+          } else {
+            diffBasis = 'three-dot';
+          }
+        }
+      }
+      // Fall back ONLY when the net basis could not be resolved (a foreign clone without the head ref, a failed
+      // fetch, a diff failure). `diffBasis` then says so, so a consumer can tell a reviewer the list may be inflated.
+      if (!diff) { try { diff = gh(['pr', 'diff', num]); } catch { diff = ''; } } // a diff hiccup must not drop the whole entry
       // Narrow the `checks=` token to the REQUIRED set so it matches what pr-land waits for (#2482); a gh hiccup
       // here yields `undefined` → assembleParked falls back to the all-checks display (never drops the entry).
       const requiredNames = resolveRequiredNames(gh, num);
-      return assembleParked({ view, diff, requiredNames });
+      const scopedView = netFiles
+        ? { ...view, files: (Array.isArray(view.files) ? view.files : []).filter((x) => netFiles.has(String(x && (x.path || x.filename)))) }
+        : view;
+      return assembleParked({ view: scopedView, diff, requiredNames, diffBasis });
     } catch (e) {
       const msg = String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean).pop() || 'gh pr view failed';
       return { number: Number(num) || 0, error: msg };

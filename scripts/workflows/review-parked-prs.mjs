@@ -67,27 +67,9 @@
 export const meta = {
   name: 'review-parked-prs',
   description:
-    'Review the drain\'s PARKED PRs in one launch, running the REAL editor↔reviewer convergence loop (#2639). Per '
-    + 'parked PR: a fresh-context multi-lens panel (one agent per lens: correctness/security/simplicity/'
-    + 'standards-conformance — correctness and security are mandatory) judges one shared diff snapshot; a reduce '
-    + 'step shells the shared review core (review-core-cli reduce --round) to a verdict + disposition + the '
-    + 'negotiation OUTCOME (land/continue/escalate, from deriveNegotiationOutcome); on `continue` an EDITOR subagent '
-    + '(seeded by review-core-cli mandate --editor = buildEditorMandate) fixes each finding or dismisses it with a '
-    + 'stated reason and pushes the revision to the SAME PR branch, and the panel RE-reviews it next round — until '
-    + 'it converges (accept → land) or hits the per-care-band round cap / needs-human (escalate → review:human). The '
-    + 'bound is passes, not time (no clock); the cap is panelRigorForCareLevel.rounds, never above '
-    + 'NEGOTIATION_ROUND_CAP. Returns a ledger of { pr, repo, disposition, verdict, lensVerdicts, commentBody, '
-    + 'rounds, outcome, dismissedFindings } — it NEVER applies a label, posts a comment, or merges (the operator '
-    + 'decides what a verdict does; the "decisions stay in the loop" boundary of epic #2418). Reviews the '
-    + 'agent-clearable review:pending class ONLY — a review:human PR (its labels re-fetched fresh on every path) is '
-    + 'filtered out and never touched (INVARIANT 2). A mandatory reviewer that fails to run degrades that round to '
-    + 'needs-human → escalate — a dead reviewer never reads as accept. INVARIANT: a `land` outcome means the final '
-    + 'diff was signed off by a fresh-context panel that did not author it.',
+    'Review the drain\'s PARKED PRs in one launch, running the REAL editor↔reviewer convergence loop (#2639). Per parked PR: a fresh-context multi-lens panel (one agent per lens: correctness/security/simplicity/standards-conformance — correctness and security are mandatory) judges one shared diff snapshot; a reduce step shells the shared review core (review-core-cli reduce --round) to a verdict + disposition + the negotiation OUTCOME (land/continue/escalate, from deriveNegotiationOutcome); on `continue` an EDITOR subagent (seeded by review-core-cli mandate --editor = buildEditorMandate) fixes each finding or dismisses it with a stated reason and pushes the revision to the SAME PR branch, and the panel RE-reviews it next round — until it converges (accept → land) or hits the per-care-band round cap / needs-human (escalate → review:human). The bound is passes, not time (no clock); the cap is panelRigorForCareLevel.rounds, never above NEGOTIATION_ROUND_CAP. Returns a ledger of { pr, repo, disposition, verdict, lensVerdicts, commentBody, rounds, outcome, dismissedFindings } — it NEVER applies a label, posts a comment, or merges (the operator decides what a verdict does; the "decisions stay in the loop" boundary of epic #2418). Reviews the agent-clearable review:pending class ONLY — a review:human PR (its labels re-fetched fresh on every path) is filtered out and never touched (INVARIANT 2). A mandatory reviewer that fails to run degrades that round to needs-human → escalate — a dead reviewer never reads as accept. INVARIANT: a `land` outcome means the final diff was signed off by a fresh-context panel that did not author it.',
   whenToUse:
-    'Invoked to review the PRs the drain parked with review:pending, as one batched launch instead of the '
-    + 'hand-run review+fix+re-review steps per PR. NOT for a review:human PR (only a human clears those — use '
-    + '/review). It runs the editor↔reviewer convergence loop and produces converged verdicts for the operator to '
-    + 'act on; it never lands or labels anything itself.',
+    'Invoked to review the PRs the drain parked with review:pending, as one batched launch instead of the hand-run review+fix+re-review steps per PR. NOT for a review:human PR (only a human clears those — use /review). It runs the editor↔reviewer convergence loop and produces converged verdicts for the operator to act on; it never lands or labels anything itself.',
   phases: [
     { title: 'Discover', detail: 'collect the review:pending parked PRs (from args, or `gh pr list --label review:pending` across the constellation repos), re-fetch each candidate\'s CURRENT labels, and DROP any review:human / label-unverifiable PR (fail-closed, INVARIANT 2)' },
     { title: 'Converge', detail: 'per PR, the bounded editor↔reviewer loop: fetch the diff + escalation reason ONCE, read the advisory care band (review-core-cli rigor) to dial the jury size AND the round cap, then loop — fan out jurorsPerLens fresh-context reviewer(s) per lens over the current diff snapshot (reduced by diversity-selection, #2567) → reduce to verdict + OUTCOME (review-core-cli reduce --round = deriveNegotiationOutcome) → on `continue`, a GROUNDED juror-invite-on-discovery (#2640) grows the jury by its delta (review-core-cli invite; raise care → recompute rigor → spawn only the delta, spends a round, never resets, ceiling-bounded) and re-reviews the same diff, ELSE an editor subagent (mandate --editor = buildEditorMandate) fixes/dismisses each finding and pushes to the SAME PR branch → re-fetch + re-review — until `land` (accept) or `escalate` (round cap / needs-human)' },
@@ -221,6 +203,27 @@ const RETURN_HYGIENE = [
 ].join('\n');
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MODEL TIERING — REVERTED, and why it is not simply re-applied.
+//
+// A first pass tiered fetch/discover/labels/rigor/reduce/record to a cheap model, justified as "each shells one
+// command and returns a shape the `schema` option then VALIDATES, so a wrong answer is caught by validation
+// rather than by reasoning." The PR #1031 review showed that premise is FALSE for the agents that carry the most
+// trust:
+//   • `reduce` — VERDICT_SCHEMA's `verdict`/`outcome` are plain `type: 'string'` with NO enum, and
+//     `reducePanelRound` consumes them verbatim. `degrade` fires only on an absent mandatory lens or an
+//     unfetchable diff — never on "the lenses reported blocking findings but the reducer said accept". An agent
+//     returning {verdict:'accept', outcome:'land'} without ever running review-core-cli is taken at its word.
+//   • `fetch` — the one boundary where fully author-controlled content enters the loop, and the sole supplier of
+//     the single snapshot every lens judges. FETCH_SCHEMA.diff requires only a non-empty string, so a truncated
+//     or summarised diff reads as a clean fetch and blinds all four lenses at once.
+//   • `rigor` — its echo is floored at 1 but has no upper bound and no schema `maximum`.
+//   • `labels`/`discover` — the sole source of the label set INVARIANT 2 is decided from; a dropped
+//     `review:human` is silent.
+//
+// So the tiering is out. The right fix is NOT a cheaper model but NO model: these are fixed commands with no
+// judgment, and running them in-process (execFileSync) means no tier can affect the outcome at all. That is a
+// larger refactor than this PR's subject and is filed separately — cost work should not ride a correctness fix.
+
 // Agent I/O schemas — validated shapes the spawned agents return (the `agent(prompt, {schema})` form).
 // ─────────────────────────────────────────────────────────────────────────────
 
