@@ -21,6 +21,7 @@
  */
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
+import { localToday } from '../lib/local-date.mjs';
 
 const REPO = 'chalbert/web-everything';
 const sh = (c) => { try { return execSync(c, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return ''; } };
@@ -31,7 +32,7 @@ const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').
 const state = j('node scripts/readiness/conveyor-state.mjs --json') || {};
 const plan = j('node scripts/readiness/dispatch-plan.mjs --json') || { launch: [], held: [] };
 const openPRs = j(`gh pr list --repo ${REPO} --state open --json number,title,labels --limit 60`) || [];
-const today = new Date().toISOString().slice(0, 10);
+const today = localToday();
 const mergedToday = [...new Set((sh('git log origin/main --since=midnight --format=%s')
   .match(/WE #(\d+)/g) || []).map((m) => m.replace('WE #', '')))];
 
