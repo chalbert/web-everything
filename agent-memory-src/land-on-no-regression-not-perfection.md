@@ -32,6 +32,13 @@ the parked queue did not move at all. Perfection-before-land cost more than the 
    The trust chain's standing posture is that over-escalating is the safe direction
    (`we:scripts/lib/review-escalation.mjs`), so a change that trades a false denial for a possible false
    clearance is a **regression**, not a fix.
+   **Unless a ratified anchor already ruled the narrowing.** This test binds *unilateral* loosening — an agent
+   deciding on its own that a gate is too tight. A narrowing that codifies a resolved
+   `we:docs/agent/platform-decisions.md#anchor` is the statute layer doing its job, and the ruling governs:
+   [#review-human-declarative-leash-only](../docs/agent/platform-decisions.md#review-human-declarative-leash-only)
+   (#2771) and [#human-is-principle-surface-not-path](../docs/agent/platform-decisions.md#human-is-principle-surface-not-path)
+   (#2840) both deliberately shrink the `review:human` trigger, and their impl arm (#2785) must not be blocked by
+   this test. Cite the anchor; the ruling's own "retained invariants" are the guard, not this bullet.
 
 **Incompleteness is not a blocker.** A guard with known bypasses beats no guard, provided it does not
 false-deny **and does not weaken a gate that already holds**. *"It doesn't catch everything"* → file it and
