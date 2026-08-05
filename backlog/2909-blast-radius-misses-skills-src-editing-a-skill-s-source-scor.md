@@ -75,11 +75,13 @@ blind spot it exposed is independent of it and outlives it.
 ## Resolved 2026-08-05 — all four Done-when bullets delivered
 
 Delivered in PR #1048. `BLAST_RADIUS` in [`we:scripts/lib/review-escalation.mjs`](scripts/lib/review-escalation.mjs)
-now scores **all three spellings** of both agent-behaviour trees:
+now scores **all four spellings** of both agent-behaviour trees, from **two** patterns — one per home, each pairing
+the two trees and each with an optional trailing separator:
 
 | Spelling | Pattern | Why it must score |
 |---|---|---|
-| `we:skills-src/…`, `we:agent-memory-src/…` | `(^\|\/)skills-src\/`, `(^\|\/)agent-memory-src\/` | the SOURCE trees — what a WE diff of a rule's *content* actually carries |
+| `we:skills-src/…`, `we:agent-memory-src/…` | `(^\|\/)(skills\|agent-memory)-src(\/\|$)` | the SOURCE trees — what a WE diff of a rule's *content* actually carries |
+| `we:skills-src`, `we:agent-memory-src` (no trailing slash) | same pattern, via the `$` alternative | the source tree as a **leaf** — swapping the real directory for a link is one diff path at mode `120000` |
 | `we:.claude/skills/…`, `we:.claude/agent-memory/…` | `(^\|\/)\.claude\/(skills\|agent-memory)(\/\|$)` | the link spelling as a **real tracked directory** — live in plateau-app, and in any repo that never relocated the tree |
 | `we:.claude/skills`, `we:.claude/agent-memory` (no trailing slash) | same pattern, via the `$` alternative | the **symlink blob itself** — git emits the link node when the link is created, repointed or deleted |
 
@@ -103,7 +105,9 @@ What that misses, twice over:
    (`we:.claude/skills → ../some-other-tree`) or deleting it is a one-line commit whose diff path is exactly
    `we:.claude/skills` — and every pattern required a trailing `/`, so it scored `{escalate: false}`. That commit
    swaps the entire operating-procedure tree the agent loads, with no reviewer. The trailing separator is now
-   optional (`(\/|$)`), which closes it.
+   optional (`(\/|$)`), which closes it. The same hole existed one directory over — a commit replacing the real
+   `we:skills-src` directory with a link emits the bare leaf `skills-src` — so the source patterns carry the
+   optional separator too, and the two trees now share **one** source anchor as they do under `.claude/`.
 2. **"Nowhere" was scoped to WE only.** `we:.claude/skills/` was kept precisely because plateau-app has 2 real
    tracked files under it — so the same argument applied to `we:.claude/agent-memory/` proves the opposite of what
    was claimed: a sibling repo that keeps agent memory as a real directory rather than relocating it had **zero**
@@ -128,13 +132,17 @@ description in [`we:scripts/lib/review-policy.contract.json`](scripts/lib/review
 machine-diffable spec whose per-entry prose *is* its meaning (#2564/#2566). Leaving the contract reading
 "(scripts, skills, hooks, CI, standards defs)" is the same drift class this item exists to fix, one level up.
 
-The tier question (statute vs blast-radius for the land-bar rule) is left open, as this item states.
+The tier question (statute vs blast-radius for the land-bar rule) is left open, as this item states — but it is
+now **filed**, as **#xn4b7xp**, rather than living only in this closing note: the newly-registered trees score
+`review:pending`, which is agent-clearable, so an agent can still clear a diff to the very rule it is governed by.
+Because this item resolves here, an obligation left in prose would have left the backlog at merge.
 
 Adjacent defects surfaced in the same pass and **not** covered here, each now filed rather than left in prose:
 
-- `we:AGENTS.md`, `we:.claude/settings.json`, `we:.claude/commands/` and non-statute `we:docs/agent/` remain
-  unregistered behaviour-defining surfaces — **#x853s5c**.
+- `we:AGENTS.md`, `we:CLAUDE.md`, `we:.claude/settings.json`, `we:.claude/commands/` and non-statute
+  `we:docs/agent/` remain unregistered behaviour-defining surfaces — **#x853s5c**, which also weighs inverting the
+  `we:.claude/` anchor to default-deny so the next unregistered surface fails closed instead of open.
 - The drain's content-resolve write-back emptied this very item to 0 bytes on the rebase that produced `836ae978`,
   where the pure merge library replays the same stages cleanly — **#x0xlc1d**.
 - [`we:scripts/lib/invariant-catalogue.json`](scripts/lib/invariant-catalogue.json) still claims the lane guard
-  exempts agent memory (removed 2026-07-09; the guard denies it).
+  exempts agent memory (removed 2026-07-09; the guard denies it) — **#xl1ru2l**.

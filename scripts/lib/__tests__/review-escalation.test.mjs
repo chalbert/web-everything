@@ -27,11 +27,12 @@ import {
 } from '../review-escalation.mjs';
 
 describe('isBlastRadiusPath', () => {
-  it('flags tooling / skills / hooks / CI / statute / standards-defs', () => {
+  // The agent-behaviour trees (skills + agent memory) are NOT re-asserted here: every spelling of both has one
+  // canonical home, the `#2909` describe block below. Adding a second fixture set here would mean a future
+  // narrowing fails in two places with two narratives, and the copies drift.
+  it('flags tooling / hooks / CI / statute / standards-defs', () => {
     for (const p of [
       'scripts/merge-ai-prs.mjs',
-      '.claude/skills/drain/SKILL.md',                   // the link spelling at a repo's OWN root — the `^` branch of `(^|\/)`
-      'plateau-app/.claude/skills/stress-test/SKILL.md', // …and the same spelling as a REAL tracked dir one repo over (#2909)
       '.githooks/pre-push',
       '.github/workflows/ci.yml',
       'docs/agent/platform-decisions.md',
@@ -48,7 +49,7 @@ describe('isBlastRadiusPath', () => {
   // symlink as a leaf blob and never DESCENDS it, so a WE diff of a rule's CONTENT always carries the source
   // spelling. But git does emit the LINK NODE itself when the link is created / repointed / deleted, and the
   // link spelling is a real tracked directory one repo over — so all three spellings must score.
-  describe('#2909 — all three spellings of the agent-behaviour trees score', () => {
+  describe('#2909 — all four spellings of the agent-behaviour trees score', () => {
     it('flags the source spelling of both relocated trees', () => {
       for (const p of [
         'skills-src/drain/SKILL.md',
@@ -57,12 +58,15 @@ describe('isBlastRadiusPath', () => {
         'agent-memory-src/106-backlog_is_the_tracker.md',
       ]) expect(isBlastRadiusPath(p)).toBe(true);
     });
-    // The finding the first cut of this fix missed: `(^|\/)\.claude\/skills\//` REQUIRES a trailing slash, so the
-    // symlink BLOB — the diff path git emits for `.claude/skills -> ../somewhere-else`, a one-line commit that
-    // swaps the whole operating-procedure tree — scored nothing at all. The trailing separator is now optional.
-    it('flags the bare SYMLINK LEAF itself — repointing or deleting the link is a diff path git really emits', () => {
+    // The finding the first cut of this fix missed: every pattern REQUIRED a trailing slash, so a bare tree LEAF
+    // — the diff path git emits for `.claude/skills -> ../somewhere-else`, or for replacing the real `skills-src`
+    // directory with a link, each a one-line commit that swaps the whole operating-procedure tree — scored
+    // nothing at all. The trailing separator is now optional on BOTH anchors, so all four leaves match.
+    it('flags the bare tree LEAF itself — creating/repointing/deleting a link is a diff path git really emits', () => {
       for (const p of ['.claude/skills', '.claude/agent-memory',
-                       'plateau-app/.claude/skills', 'plateau-app/.claude/agent-memory']) {
+                       'plateau-app/.claude/skills', 'plateau-app/.claude/agent-memory',
+                       'skills-src', 'agent-memory-src',
+                       'plateau-app/skills-src', 'frontierui/agent-memory-src']) {
         expect(isBlastRadiusPath(p)).toBe(true);
       }
       // …and end-to-end: a 2-line commit repointing the link can no longer merge with no review label.
@@ -100,9 +104,12 @@ describe('isBlastRadiusPath', () => {
     it('stays narrow — a prose doc ABOUT memory, or a backlog item naming it, is still a leaf', () => {
       for (const p of ['docs/agent/memory-management.md', 'backlog/1234-agent-memory-thing.md',
                        'src/_data/agent-memory-notes.json',
-                       '.claude/skills-notes.md',    // the optional separator must not swallow a SIBLING name…
-                       '.claude/agent-memory-notes', // …at either the file or the extension-less spelling
-                       '.claude/settings.json']) {   // …and the anchor stays scoped to the two trees (#x853s5c)
+                       '.claude/skills-notes.md',     // the optional separator must not swallow a SIBLING name…
+                       '.claude/agent-memory-notes',  // …at either the file or the extension-less spelling…
+                       'skills-src-notes.md',         // …and the same on the SOURCE anchor, whose separator is
+                       'agent-memory-src-notes.md',   //    now optional too
+                       '.claude/settings.json']) {    // …and the .claude/ anchor stays scoped to the two trees
+                                                      //    (widening it is a separately-filed backlog call)
         expect(isBlastRadiusPath(p)).toBe(false);
       }
     });

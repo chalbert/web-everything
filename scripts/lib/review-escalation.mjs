@@ -84,24 +84,28 @@ export function isStatutePath(path) {
  *  `agent-memory-src/…`. The `.claude/skills/` entry therefore matched NOTHING in WE from 2026-07-04 until the
  *  source spellings were added, and #1040 rewrote the land bar and merged with no `review:*` label at all.
  *
- *  THREE spellings must all score, and the one anchor below covers all three:
+ *  FOUR spellings must all score, and the two anchors below cover all four — each anchor pairs the two trees,
+ *  and each makes its trailing separator OPTIONAL so the bare LEAF matches as well as anything under it:
  *   • `skills-src/…` / `agent-memory-src/…` — the SOURCE trees; what a WE diff actually carries.
+ *   • `skills-src` / `agent-memory-src` with NO trailing slash — the source tree as a LEAF diff path. Replacing
+ *     a real directory with a link (`skills-src → ../shared-skills`) is a single diff path at mode 120000, and
+ *     it swaps the whole operating-procedure tree exactly like repointing the `.claude/` link does.
  *   • `…/.claude/skills/…` — the link spelling as a REAL tracked directory (plateau-app has 2 files there),
  *     live cross-repo via the `(^|\/)` anchor. Kept: deleting it would uncover the siblings.
  *   • `.claude/skills` / `.claude/agent-memory` with NO trailing slash — the symlink BLOB itself. Git cannot
  *     descend a link, but it absolutely emits the LINK NODE as a diff path when the link is created, REPOINTED
  *     or DELETED. `.claude/skills → ../somewhere-else` is a one-line commit that swaps the entire operating-
  *     procedure tree the agent loads, and before the `(\/|$)` alternative below it scored nothing at all.
- *  Hence `(skills|agent-memory)(\/|$)` rather than one `…\/` regex per tree: the trailing separator is OPTIONAL
- *  (so the leaf blob matches) and both trees share the `.claude/` anchor (so neither can be registered without
- *  the other). This is the `(^|\/)\.claude\/`-scoped anchor #2909's Done-when bullet 4 proposed, kept narrow to
- *  the two procedure directories so it does NOT sweep in `.claude/settings.json` / `.claude/commands/` — those
- *  are real gaps but a separately-filed call (#x853s5c), not a side effect of this one. */
+ *  Hence `(skills|agent-memory)` alternation + `(\/|$)` on BOTH anchors, rather than one `…\/` regex per tree:
+ *  the trailing separator is optional (so a leaf blob matches) and the two trees always share an anchor (so
+ *  neither can be registered without the other). The `.claude/` half is the `(^|\/)\.claude\/`-scoped anchor
+ *  #2909's Done-when bullet 4 proposed, kept narrow to the two procedure directories so it does NOT sweep in
+ *  `.claude/settings.json` / `.claude/commands/` — those are real gaps, but they are a separately-filed backlog
+ *  call about how wide the `.claude/` anchor should be, not a side effect of this one. */
 const BLAST_RADIUS = [
   /^scripts\//,                              // build/CI/merge tooling (WHILE in WE; relocatable engine files also travel by basename — see BLAST_RADIUS_ENGINE)
   /(^|\/)\.claude\/(skills|agent-memory)(\/|$)/, // both agent-behaviour trees under the link spelling: a REAL dir (plateau-app) AND the bare symlink blob (repoint/delete) — travels cross-repo via (^|\/)
-  /(^|\/)skills-src\//,                      // …and WE's post-#2266 source home for them — the spelling WE diffs actually carry
-  /(^|\/)agent-memory-src\//,                // agent memory (the standing instructions) — sibling to skills; the surface #1040 slipped through
+  /(^|\/)(skills|agent-memory)-src(\/|$)/,   // …and WE's post-#2266 SOURCE home for the same two trees — the spelling WE diffs actually carry, plus the bare leaf (dir→link swap). The surface #1040 slipped through
   /(^|\/)\.githooks\//,                       // git hooks (the guards) — already travels cross-repo
   /(^|\/)\.github\//,                         // CI config / workflows — already travels cross-repo
   ...STATUTE_PATHS,                          // the statute layer (also forces a human — see scoreEscalation)
