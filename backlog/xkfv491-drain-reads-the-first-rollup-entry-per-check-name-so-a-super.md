@@ -34,14 +34,31 @@ a PR whose current run is green, because a superseded CANCELLED run counts as a 
 ## Build
 
 - `latestRequiredCheck(pr, name)` — the newest matching rollup entry, exported and shared by both predicates.
-- `checkRunTimestamp` orders on `completedAt` → `startedAt` → `createdAt`, covering both the CheckRun shape
-  and the legacy StatusContext shape.
-- Ties and absent timestamps fall through to array order (last-listed wins), which alone fixes the observed
-  shape even when nothing carries a timestamp.
+- The rollup arrives in creation order, so the newest entry is simply the LAST matching one. No timestamp is
+  read and no sorting happens.
+- A CheckRun outranks a legacy StatusContext: when any CheckRun matches the name, only CheckRuns are
+  considered. A StatusContext decides only when the workflow produced nothing at all.
 
 ## Acceptance
 
 - Latest-wins, NOT "ignore CANCELLED": if the newest run is cancelled the check has no current verdict and
   the PR must not land. A PR whose only run is cancelled still reads not-green.
-- A single-run rollup, a missing check, and an unparseable timestamp all behave exactly as before.
+- A single-run rollup and a missing check behave exactly as before.
 - `isRequiredCheckFailed` no longer fires on a superseded cancelled run when the latest run is green.
+- A `test`-named commit status posted after a red check run can NEVER clear the merge gate.
+
+## Why no timestamp ranking (review of PR #1049)
+
+The first cut ranked entries by a timestamp, to survive a rollup ordering GitHub does not emit. Two
+independent review panels found it bought three defects and no observed benefit:
+
+- it compared one run's `completedAt` against another's `startedAt` — different clocks, so a run that ENDED
+  late outranked the newer run that had only STARTED;
+- an entry with no usable stamp ranked as globally OLDEST, so an in-flight run could never suppress a stale
+  SUCCESS;
+- pooling CheckRuns and StatusContexts under last-wins let a posted `test` status override a real FAILURE and
+  clear the merge gate — a bypass the pre-fix `find` did not allow.
+
+Trusting GitHub's documented creation order removes all three and needs no special case for the
+`0001-01-01T00:00:00Z` sentinel it reports for an unfinished run. If a rollup ever arrives out of order,
+that is the moment to revisit.

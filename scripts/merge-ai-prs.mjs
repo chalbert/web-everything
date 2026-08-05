@@ -326,25 +326,6 @@ export function hasLabel(pr, label) {
   return labels.some((l) => (typeof l === 'string' ? l : l?.name) === label);
 }
 
-/** The orderable timestamp of a rollup entry: the MAX of whatever plausible stamps it carries — a CheckRun has
- *  `completedAt`/`startedAt`, a legacy StatusContext only `createdAt`. `null` when none is plausible; such an
- *  entry sorts as OLDEST below, so a run that reports a real time always outranks one that does not.
- *
- *  MAX, not first-non-empty (live-data catch): GitHub reports the ZERO date `0001-01-01T00:00:00Z` for the
- *  `completedAt` of a run that has not finished — verified on PR #1046's QUEUED `test` run. That parses as a
- *  valid year-1 date, so preferring `completedAt` would rank an IN-FLIGHT run as the oldest entry. A stale
- *  SUCCESS sitting beside it would then win, and the drain would land a PR whose current run had not finished
- *  — strictly worse than the jam this fixes. Taking the max ignores the sentinel without special-casing it:
- *  a finished run's `completedAt` exceeds its `startedAt`, and a queued run's only real stamp is `startedAt`. */
-function checkRunTimestamp(check) {
-  const stamps = [check?.completedAt, check?.startedAt, check?.createdAt]
-    .map((raw) => (raw ? Date.parse(raw) : NaN))
-    // `> 0` drops both unparseable values and the year-1 zero date (which parses NEGATIVE), so a sentinel can
-    // never out-rank a real stamp. No real CI run predates the epoch.
-    .filter((ms) => Number.isFinite(ms) && ms > 0);
-  return stamps.length ? Math.max(...stamps) : null;
-}
-
 /**
  * #xkfv491 — the MOST RECENT rollup entry for a check name, which is the only one that describes the CURRENT
  * tree. A head SHA routinely carries SEVERAL runs of the same check: a workflow `concurrency` group cancels the
@@ -359,10 +340,25 @@ function checkRunTimestamp(check) {
  * twin `isRequiredCheckFailed` would have stamped `ci:failed` on a genuinely green PR from the same evidence.
  * Re-running CI does NOT clear it: the cancelled entry stays in the rollup and a re-run only appends.
  *
+ * WE TRUST GITHUB'S ORDER — the rollup arrives in creation order, so the LAST matching entry is the newest.
+ * An earlier cut of this fix ranked entries by a timestamp instead, to be robust to an ordering GitHub does
+ * not actually emit. That bought three defects and no observed benefit (review of PR #1049), so it is gone:
+ *   • it compared one run's `completedAt` against another's `startedAt` — different clocks, so a run that
+ *     ENDED late outranked the newer run that had only STARTED;
+ *   • an entry with no usable stamp ranked as globally OLDEST, so an in-flight run could never suppress a
+ *     stale SUCCESS;
+ *   • it needed a special case for the `0001-01-01T00:00:00Z` sentinel GitHub reports for an unfinished run.
+ * If a rollup ever arrives out of creation order, that is the moment to revisit — not before.
+ *
+ * CHECK RUNS OUTRANK COMMIT STATUSES. A rollup can mix two shapes: a `CheckRun` (produced by the workflow) and
+ * a legacy `StatusContext` (posted through the commit-statuses API by anyone holding `statuses:write` — a
+ * collaborator, a bot, an installed App). Plain last-wins across both would let a `test`-named status posted
+ * after the real run OVERRIDE its FAILURE and clear the merge gate, which the pre-#xkfv491 `find` did not
+ * allow. So when any CheckRun matches the name, only CheckRuns are considered; a StatusContext decides only
+ * when the workflow has produced nothing at all.
+ *
  * Latest-wins is the principled rule, not "ignore CANCELLED": if the NEWEST run is cancelled then the check
- * genuinely has no current verdict and the PR must not land. Ties and missing timestamps fall through to
- * array order, so the last-listed entry wins — which alone fixes the observed shape even with no timestamps.
- * Pure.
+ * genuinely has no current verdict and the PR must not land. Pure.
  * @param {{statusCheckRollup?: Array<object>}} pr
  * @param {string} requiredCheck
  * @returns {object|null} the newest matching entry, or `null` when the check has not reported at all.
@@ -371,12 +367,11 @@ export function latestRequiredCheck(pr, requiredCheck = 'test') {
   const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
   const matches = roll.filter((c) => (c?.name || c?.context) === requiredCheck);
   if (!matches.length) return null;
-  // Sort ascending by (timestamp, original index) and take the last: an untimestamped entry ranks as oldest
-  // (`-1`), and the index tiebreak keeps the sort stable so equal/absent timestamps resolve to array order.
-  const ranked = matches
-    .map((check, index) => ({ check, at: checkRunTimestamp(check), index }))
-    .sort((a, b) => ((a.at ?? -1) - (b.at ?? -1)) || (a.index - b.index));
-  return ranked[ranked.length - 1].check;
+  // A CheckRun is identified by carrying `name` (the StatusContext shape carries `context` instead) — the same
+  // discriminator the filter above already relies on, so no new field is trusted.
+  const checkRuns = matches.filter((c) => c?.name === requiredCheck);
+  const pool = checkRuns.length ? checkRuns : matches;
+  return pool[pool.length - 1];
 }
 
 /** Is the required `test` check green on this PR's rollup? (Other checks — cla, Workers Builds — are ignored.)

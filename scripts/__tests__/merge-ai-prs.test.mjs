@@ -2200,12 +2200,6 @@ describe('latestRequiredCheck — a superseded run must not outvote the one that
     expect(isRequiredCheckFailed(supersededThenGreen)).toBe(false);
   });
 
-  it('orders by timestamp, NOT array position — a newest-first rollup resolves the same way', () => {
-    const reversed = { statusCheckRollup: [...supersededThenGreen.statusCheckRollup].reverse() };
-    expect(isRequiredCheckGreen(reversed)).toBe(true);
-    expect(isRequiredCheckFailed(reversed)).toBe(false);
-  });
-
   it('LATEST-WINS, not ignore-CANCELLED: a cancelled newest run means no current verdict', () => {
     const greenThenCancelled = {
       statusCheckRollup: [
@@ -2217,9 +2211,9 @@ describe('latestRequiredCheck — a superseded run must not outvote the one that
     expect(isRequiredCheckFailed(greenThenCancelled)).toBe(true);
   });
 
-  it('the ZERO completedAt of an in-flight run never ranks it as oldest (live shape from PR #1046)', () => {
-    // GitHub reports `0001-01-01T00:00:00Z` for a run that has not finished — it parses as a valid year-1
-    // date. Ranking on it would let a stale SUCCESS beat the run currently in flight and land the PR early.
+  it('an in-flight run listed last suppresses the stale SUCCESS before it (live shape from PR #1046)', () => {
+    // The run still executing is the newest, so it decides — the PR is neither green nor red while it runs.
+    // No timestamp is consulted, so GitHub's `0001-01-01T00:00:00Z` sentinel for an unfinished run is inert.
     const staleGreenPlusQueued = {
       statusCheckRollup: [
         { name: 'test', conclusion: 'SUCCESS', status: 'COMPLETED', startedAt: '2026-08-05T18:35:32Z', completedAt: '2026-08-05T18:36:10Z' },
@@ -2231,17 +2225,16 @@ describe('latestRequiredCheck — a superseded run must not outvote the one that
     expect(isRequiredCheckFailed(staleGreenPlusQueued)).toBe(false); // and not red either
   });
 
-  it('prefers completedAt over startedAt when both are present', () => {
-    const pr = {
+  it('ignores timestamps entirely — creation order alone decides (no clock is read)', () => {
+    // A rollup whose stamps CONTRADICT its order still resolves by order. This pins the trust-GitHub's-order
+    // rule: the earlier cut ranked by a timestamp and, on this shape, returned the FAILURE instead.
+    const stampsContradictOrder = {
       statusCheckRollup: [
-        { name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:30:00Z', completedAt: '2026-08-05T18:40:00Z' },
-        { name: 'test', conclusion: 'FAILURE', startedAt: '2026-08-05T18:35:00Z', completedAt: '2026-08-05T18:36:00Z' },
+        { name: 'test', conclusion: 'FAILURE', startedAt: '2026-08-05T18:40:00Z', completedAt: '2026-08-05T18:50:00Z' },
+        { name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:30:00Z', completedAt: '2026-08-05T18:31:00Z' },
       ],
     };
-    expect(isRequiredCheckGreen(pr)).toBe(true); // the run that finished LAST is the green one
-  });
-
-  it('falls back to array order when timestamps are absent or unparseable (last-listed wins)', () => {
+    expect(isRequiredCheckGreen(stampsContradictOrder)).toBe(true);
     const noTimes = { statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED' }, { name: 'test', conclusion: 'SUCCESS' }] };
     expect(isRequiredCheckGreen(noTimes)).toBe(true);
     const badTimes = {
@@ -2253,17 +2246,7 @@ describe('latestRequiredCheck — a superseded run must not outvote the one that
     expect(isRequiredCheckGreen(badTimes)).toBe(true);
   });
 
-  it('a timestamped run outranks an untimestamped one whatever the array order', () => {
-    const pr = {
-      statusCheckRollup: [
-        { name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:35:32Z' },
-        { name: 'test', conclusion: 'CANCELLED' },
-      ],
-    };
-    expect(isRequiredCheckGreen(pr)).toBe(true);
-  });
-
-  it('matches the legacy StatusContext shape (context + state + createdAt)', () => {
+  it('matches the legacy StatusContext shape when the workflow produced nothing', () => {
     const pr = {
       statusCheckRollup: [
         { context: 'test', state: 'FAILURE', createdAt: '2026-08-05T18:34:02Z' },
@@ -2271,6 +2254,21 @@ describe('latestRequiredCheck — a superseded run must not outvote the one that
       ],
     };
     expect(isRequiredCheckGreen(pr)).toBe(true);
+  });
+
+  it('a posted commit status can NEVER override the real check run (merge-gate bypass, PR #1049 review)', () => {
+    // A `StatusContext` is postable through the commit-statuses API by anyone holding `statuses:write` — a
+    // collaborator, a bot, an installed App. Plain last-wins across both shapes would let one posted AFTER the
+    // real run clear the gate on a red tree. CheckRuns win whenever any exists.
+    const spoofedGreen = {
+      statusCheckRollup: [
+        { name: 'test', conclusion: 'FAILURE', startedAt: '2026-08-05T18:00:00Z', completedAt: '2026-08-05T18:10:00Z' },
+        { context: 'test', state: 'SUCCESS', createdAt: '2026-08-05T18:11:00Z' },
+      ],
+    };
+    expect(latestRequiredCheck(spoofedGreen).conclusion).toBe('FAILURE');
+    expect(isRequiredCheckGreen(spoofedGreen)).toBe(false);
+    expect(isRequiredCheckFailed(spoofedGreen)).toBe(true);
   });
 
   it('single-run, missing-check and non-required cases are unchanged', () => {
