@@ -213,7 +213,7 @@ Escalation is **by good reason only** — a scope-only PR normally auto-lands. E
 4. **A review finding you cannot self-clear** — the step-5 adversarial review surfaced a gap you fixed what you
    could of, but one issue needs a human call (e.g. the spec is genuinely too vague to scope honestly). Do
    **not** ship an unreviewed guess: either return `could-not-predict` (case 1) if no honest scope exists, or
-   open the PR parked `review:human` (`--label=review:human`) — never leave a scope PR to auto-land with an
+   open the PR parked `review:human` (`--park=review:human`) — never leave a scope PR to auto-land with an
    unresolved review finding.
 
 ## Guardrails (the non-negotiables)
