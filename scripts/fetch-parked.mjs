@@ -269,7 +269,19 @@ export function resolveNetDiff({ exec, headRef, headRefOid } = {}) {
   // The ref must now BE the head gh reported. No oid to compare against → we cannot prove it, so we do not claim it.
   if (!/^[0-9a-f]{7,64}$/i.test(String(headRefOid || ''))) return degraded;
   try {
-    const at = String(exec('git', ['rev-parse', '--end-of-options', `refs/remotes/origin/${headRef}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').trim();
+    // `--verify` is LOAD-BEARING, not decoration. Plain `git rev-parse --end-of-options <ref>` ECHOES the
+    // guard as an output line — rev-parse prints back any argument it cannot interpret, unlike `fetch`/`diff`
+    // which consume it. Observed on git 2.50.1:
+    //     $ git rev-parse --end-of-options refs/remotes/origin/lane/x
+    //     --end-of-options
+    //     9cd54a9dca60c7902643d3cc6847378c331c2abf
+    // so `at` came back as "--end-of-options\n9cd54a9d…", `sameCommit`'s `^[0-9a-f]{7,64}$` rejected it, and
+    // this function returned `degraded` on EVERY real invocation — the whole net basis silently never engaged.
+    // `--verify` demands exactly one revision and prints the bare sha; it also still refuses an option-shaped
+    // ref (`fatal: Needed a single revision`), so the guard is not weakened. Proven by the real-git case in
+    // fetch-parked.test.mjs, which runs this against an actual repo — a fake `exec` cannot catch this class,
+    // because a fake encodes what git was ASSUMED to do.
+    const at = String(exec('git', ['rev-parse', '--verify', '--end-of-options', `refs/remotes/origin/${headRef}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').trim();
     if (!sameCommit(at, headRefOid)) return degraded;
   } catch { return degraded; }
   const net = computeNetDiffText({ exec, rev: headRef, fetchExtraRefs: [headRef] });

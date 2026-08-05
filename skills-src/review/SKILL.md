@@ -8,10 +8,16 @@ description: Review a parked pull request and record the human verdict — pull 
 The drain (`/drain`) **parks** a blast-radius or gate-self PR with a `review:*` label and waits for an
 independent verdict before it may land (#2171/#2262/#2285). Two classes reach a human:
 - **`review:pending`** — agent-reviewable but not yet cleared (or the drain's auto-review bounced it here);
-- **`review:human`** — a **gate-self** edit (the diff touches the auto-review trust chain,
-  `we:scripts/lib/review-escalation.mjs` / `we:scripts/merge-ai-prs.mjs`), which an agent may **never**
-  self-clear (conflict of interest). Two shapes reach you here, and `deriveReviewDisposition` (#2285) tells them
-  apart — read the drain's comment to see which:
+- **`review:human`** — a **POLICY-tier** trust-chain edit, which an agent may **never** self-clear (conflict of
+  interest). Since the #2445/#2448 two-tier split the trust chain has two tiers, and only the **policy** one
+  forces a human: `we:scripts/lib/review-escalation.mjs`, `we:scripts/lib/review-core.mjs`, the review-policy
+  contract/conformance files, the land seams, the review runner, and `we:scripts/lib/gate-config.mjs` itself —
+  the authoritative test is `isPolicyCorePath()` (over `POLICY_CORE_BASENAMES`) in
+  [we:scripts/lib/gate-config.mjs](../../../scripts/lib/gate-config.mjs) — ask it, never a list retyped here.
+  **ENGINE**-tier files — `we:scripts/merge-ai-prs.mjs`, `we:scripts/lib/daemon.mjs`,
+  `we:scripts/check-standards.mjs` and the like — escalate and run the full panel but stay **agent-clearable**.
+  So a diff touching `merge-ai-prs.mjs` alone is correctly `review:pending`, not `review:human`. Two shapes
+  reach you here, and `deriveReviewDisposition` (#2285) tells them apart — read the drain's comment to see which:
   - a **sensitivity** park (`gate-self`, `{ mode: converge, autoLand: false }`) — the drain **ran the panel↔editor
     convergence and may have pushed an advisory FIX** to the PR branch, then posted an `🤖 advisory AI review /
     fix (non-clearing)` comment. The diff you review may already carry agent-authored trust-chain edits — scrutinize

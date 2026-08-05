@@ -1537,10 +1537,14 @@ async function runCli() {
   // manifest), so serializing it costs ~nothing while keeping the fan-out correct.
   const legacyGitManifestMutex = makeAsyncMutex();
   const readLegacyLocalManifest = (headRef) => legacyGitManifestMutex.run(() => {
-    try { execFileSync('git', ['fetch', 'origin', headRef, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may be local */ }
+    // PR #1031 review r3 — the THIRD instance of the argv class (`#xo5tyqn` lints it repo-wide). `headRef` is a
+    // `gh`-supplied refname and a dash-leading one is legal, so bare it is parsed as an option. It reaches TWO
+    // calls here: the fetch, and — via `rev` — the `git show` argument, where `git show` accepts diff options
+    // including `--output=`. Both guarded.
+    try { execFileSync('git', ['fetch', '--quiet', '--end-of-options', 'origin', headRef], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may be local */ }
     for (const rev of ['FETCH_HEAD', `origin/${headRef}`, headRef]) {
       try {
-        const m = JSON.parse(execFileSync('git', ['show', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+        const m = JSON.parse(execFileSync('git', ['show', '--end-of-options', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
         if (m && m.item != null) return m;
       } catch { /* try next rev */ }
     }

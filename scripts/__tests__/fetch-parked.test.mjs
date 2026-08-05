@@ -3,13 +3,17 @@
  *   are the I/O boundary (the CLI's concern); the view+diff → contract distillation, the rollup→bucket
  *   normalization, and the review-class read are decided in pure fns and unit-tested against fixtures, no gh.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   assembleParked, rollupToCheckRows, reviewClassFromLabels, labelNames,
   filterToRequired, recoverCheckRows, resolveRequiredNames,
   scopeFilesToNet, resolveNetDiff, sameCommit,
 } from '../fetch-parked.mjs';
 import { classifyChecks } from '../pr-land.mjs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // A real-shaped `gh pr view … --json statusCheckRollup` — CheckRun rows carry status/conclusion, not bucket.
 const greenRollup = [
@@ -337,7 +341,10 @@ describe('resolveNetDiff — a `net` basis is CLAIMED only when it is PROVEN', (
         calls.push([cmd, ...args].join(' '));
         const a = args.join(' ');
         if (a.startsWith('fetch')) { if (fetchThrows) throw new Error('transport failed'); return ''; }
-        if (a.startsWith('rev-parse --end-of-options refs/remotes/origin/')) { if (refAt === null) throw new Error('unknown revision'); return `${refAt}\n`; }
+        if (a.startsWith('rev-parse --verify --end-of-options refs/remotes/origin/')) { if (refAt === null) throw new Error('unknown revision'); return `${refAt}\n`; }
+        // A fake CANNOT prove the real argv is right — the real-git block below is what covers that. This arm
+        // only keeps the fake honest about WHICH form the code asks for, so an argv change shows up here too.
+        if (a.startsWith('rev-parse --end-of-options')) throw new Error('fake: unguarded rev-parse form is not the one under test');
         if (a.includes('--name-only')) return names;
         if (a.startsWith('rev-parse')) return `${OID}\n`;          // resolveNetDiffBasis' own probes
         if (a.startsWith('merge-base')) return `${OID}\n`;
@@ -409,5 +416,72 @@ describe('resolveNetDiff — a `net` basis is CLAIMED only when it is PROVEN', (
     for (const c of calls.filter((x) => x.includes('--name-only'))) {
       expect(c, `--no-renames re-introduced: ${c}`).not.toContain('--no-renames');
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REAL GIT — the case the fakes structurally cannot cover.
+//
+// The third #1031 review found `resolveNetDiff` returning `degraded` on EVERY real invocation: plain
+// `git rev-parse --end-of-options <ref>` ECHOES the guard as an output line, so the sha never parsed. Twenty
+// fake-driven cases passed over a dead path, because the fake answered that command with the bare sha — it
+// encoded what git was ASSUMED to do, not what git does. No amount of additional fake coverage catches that
+// class; only running the real binary does. So this block spawns real git in a throwaway repo under tmpdir and
+// asserts the ONE thing the fakes cannot: that the net basis actually engages end-to-end.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('resolveNetDiff against REAL git (the fake-vs-reality guard)', () => {
+
+  let dir; let clone; let headOid;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fetch-parked-realgit-'));
+    const up = join(dir, 'up');
+    const git = (cwd, ...args) => String(execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').trim();
+    execFileSync('git', ['init', '-q', '--initial-branch=main', up], { stdio: 'ignore' });
+    git(up, 'config', 'user.email', 'a@b.c');
+    git(up, 'config', 'user.name', 'test');
+    writeFileSync(join(up, 'README.md'), 'base\n');
+    git(up, 'add', 'README.md');
+    git(up, 'commit', '-qm', 'base');
+    // A head ref that is AHEAD of main by one commit, created without ever switching branches.
+    const baseOid = git(up, 'rev-parse', 'HEAD');
+    writeFileSync(join(up, 'feature.txt'), 'new\n');
+    git(up, 'add', 'feature.txt');
+    const tree = git(up, 'write-tree');
+    headOid = git(up, 'commit-tree', tree, '-p', baseOid, '-m', 'feature');
+    git(up, 'update-ref', 'refs/heads/lane/x', headOid);
+    git(up, 'reset', '-q', '--hard', baseOid); // main stays at base; lane/x is the PR head
+    clone = join(dir, 'down');
+    execFileSync('git', ['clone', '-q', up, clone], { stdio: 'ignore' });
+  });
+
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+
+  const realExec = () => (c, a, o) => execFileSync(c, a, { cwd: clone, maxBuffer: 64 * 1024 * 1024, ...o });
+
+  it('ENGAGES the net basis — the assertion that was dead for a whole review round', () => {
+    const r = resolveNetDiff({ exec: realExec(), headRef: 'lane/x', headRefOid: headOid });
+    expect(r.basis, 'the net basis never engaged against real git').toBe('net');
+    expect(r.paths).toEqual(['feature.txt']);
+    expect(r.text).toContain('feature.txt');
+  });
+
+  it('rev-parse returns a BARE sha under --verify (plain --end-of-options echoes the guard)', () => {
+    // Pin the exact git behaviour the bug turned on, so a future edit back to the un-verified form fails here.
+    const exec = realExec();
+    const verified = String(exec('git', ['rev-parse', '--verify', '--end-of-options', 'refs/remotes/origin/lane/x'], { encoding: 'utf8' })).trim();
+    expect(verified).toMatch(/^[0-9a-f]{40}$/);
+    const echoed = String(exec('git', ['rev-parse', '--end-of-options', 'refs/remotes/origin/lane/x'], { encoding: 'utf8' })).trim();
+    expect(echoed.split('\n')[0], 'git no longer echoes the guard — the workaround may be removable').toBe('--end-of-options');
+  });
+
+  it('still REFUSES an option-shaped ref, so --verify did not weaken the guard', () => {
+    const exec = realExec();
+    expect(() => exec('git', ['rev-parse', '--verify', '--end-of-options', 'refs/remotes/origin/--output=/tmp/pwn'], { encoding: 'utf8' })).toThrow();
+  });
+
+  it('degrades against a real repo when the head moved under it (currency, not just resolvability)', () => {
+    const other = 'ffffffffffffffffffffffffffffffffffffffff';
+    expect(resolveNetDiff({ exec: realExec(), headRef: 'lane/x', headRefOid: other }).basis).toBe('three-dot');
   });
 });
