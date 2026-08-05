@@ -6,9 +6,9 @@ dateOpened: "2026-08-05"
 tags: []
 ---
 
-# BLAST_RADIUS misses skills-src/ and the whole agent-memory corpus — editing an operating procedure's source scores lower than editing its build output
+# BLAST_RADIUS covers no operating-procedure source in WE — the .claude/skills pattern is dead code, and agent-memory has no pattern at all
 
-scoreEscalation's BLAST_RADIUS list in we:scripts/lib/review-escalation.mjs matches only the BUILT skills directory .claude/skills/ — which in WE is a symlink to we:skills-src/, so git never reports a changed file beneath it and the pattern fires never. Skills have no blast-radius coverage at all here: an edit to we:skills-src/jury/subject-jury.workflow.js scores on size alone. The agent-memory corpus has no pattern on either side — neither we:agent-memory-src/ nor .claude/agent-memory/ matches anything — so a memory rule governing the land bar itself merges with no review label. Both surfaces reduce to the same fix: register the -src directories git actually reports. Operating procedures are what blast-radius exists to catch. Found by the 2026-08-04 red-team of #2572; the agent-memory half by the /review of PR #1045.
+BLAST_RADIUS in we:scripts/lib/review-escalation.mjs has no pattern that an operating-procedure edit can match. Its one skills pattern targets .claude/skills/, which in WE is a symlink to we:skills-src/, so git never reports a file beneath it and the pattern fires never; a skills edit scores on size alone. The agent-memory corpus has no pattern on either side, so a memory rule governing the land bar itself merges with no review label. Both reduce to one fix: register the -src directories git actually reports. Found by the 2026-08-04 red-team of #2572; the agent-memory half by the /review of PR #1045.
 
 ## The gap
 
@@ -74,8 +74,9 @@ blind spot it exposed is independent of it and outlives it.
 
 ## Done when
 
-- `we:skills-src/` scores blast-radius wherever the built skills directory does, and the two agree for the same
-  logical file.
+- `we:skills-src/` is itself registered in `BLAST_RADIUS`, so a skills edit scores blast-radius on **the path
+  git actually reports**. The acceptance condition is that path, not parity with the built directory — a
+  `.claude/skills/…` path never appears in a WE changed-file list, so "the two agree" would be vacuous here.
 - `we:agent-memory-src/` **and** `.claude/agent-memory/` both score blast-radius, so a memory-corpus edit carries
   a `review:*` label at PR-open instead of merging silently.
 - A test in [`we:scripts/lib/__tests__/review-escalation.test.mjs`](scripts/lib/__tests__/review-escalation.test.mjs)
