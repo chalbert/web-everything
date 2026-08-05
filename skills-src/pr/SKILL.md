@@ -68,9 +68,35 @@ first sweep.
    - `--label-on-green` is the **batch producer** mode (#2199): open the PR, **wait for the required
      checks, apply `ready-to-merge` only once they are green**, then STOP — does NOT trigger a drain (a
      `/workflow` or `/batch` closeout runs the standalone drain over the whole set).
-   - `--no-wait` opens the self-approved PR **UNLABELLED** and leaves it (CI unconfirmed — the label lander
-     won't collect it until something labels it). Use only when the user just wants the PR raised now and
-     will land it themselves.
+   - `--no-wait` opens the self-approved PR **UNLABELLED** and returns immediately (CI unconfirmed). **This is
+     NOT a hold** — do not reach for it to keep a PR back for a human. `shouldLabelOnGreen` (#2216) labels any
+     producer-owned AI PR `ready-to-merge` once its required check reads green, and the resident drain daemon
+     runs that reconcile every ~60s, so `--no-wait` only changes *who* labels it — a couple of poll periods,
+     not a hold. Use it only when you want the PR raised now and are content for the daemon to land it on
+     green. Measured proof: [[pr-land-dogfood-mechanics]].
+   - `--park=<review:human|review:pending>` (#2622) is **the hold** — it applies the review label **at open**,
+     before any check-wait, and the #2820 merge predicate (`classifyPr` → `hasUnclearedReviewLabel`) skips a PR
+     carrying an uncleared `review:*` label regardless of `ready-to-merge`. It runs the same numbering /
+     land-prep as the normal path, so a parked PR's hash-keyed backlog items are not stranded. Park takes
+     precedence over `--label-on-green` / `--no-wait`; it exits **0** with `reason:"parked"` (the PR is open and
+     HELD, *not* merged), and an off-list value fails fast (exit 3, `reason:"bad-park"`) before any push. Reach
+     for this whenever a diff must not land on its author's own say-so — including any diff **you** authored and
+     therefore may not clear yourself (#2439). **The two values are not interchangeable:**
+     - `review:pending` — the routine park, and the one an independent review can actually clear
+       (`decideSetLabel({ to: 'accepted' })` allows it, and the operator's `--no-review-escalation=<pr>` relief
+       valve, #2423, can also pass it through). It does **not** enforce *who* clears it: no code compares the
+       clearer's identity to the author's (`--actor` is free text that only reaches the comment body), so
+       non-author independence is a NORM you honour, not a predicate that runs. The reviewer-id check is
+       build-pending on the OPEN #2785 (`docs/agent/platform-decisions.md`,
+       `#fix-review-convergence-independent-root-cause`, says so in as many words).
+     - `review:human` — human-ceremony-only, and its clearance act **has no tool yet** (#2895, `status: open`):
+       `decideSetLabel` refuses `→ review:accepted` whenever `review:human` is present, unconditionally, with no
+       actor/human parameter that satisfies it (INVARIANT 2). A `check:standards` rule —
+       `checkReviewLabelSingleHome` in [`we:scripts/lib/review-skill-guard.mjs`](../../../scripts/lib/review-skill-guard.mjs),
+       #2882 — also stops the docs in its scope (`skills-src/review/`, `docs/agent/`) from prescribing the
+       raw-`gh` workaround. `skills-src/review/SKILL.md` says it plainly: until #2895 lands, stop and hand the
+       decision to the operator. So reach for `review:human` only when that is genuinely what you want.
+     The `--label=<name>` trap and the measured `--no-wait` cost: [[pr-land-dogfood-mechanics]].
    - **The `ready-to-merge` label is applied ONLY after the required checks are green (#2196/#2199)** — never
      eagerly at open, so a red PR never enters the drain's queue. In the default land path (above) and the
      `--label-on-green` path `pr-land` applies it once CI passes. Pass `--no-label` to opt out; `--label=<name>`
@@ -79,10 +105,18 @@ first sweep.
      so it is routed through the shared merge gate (`scripts/lib/pr-merge-gate.mjs`, caller `pr-land`) and is
      BLOCKED unless the documented `WE_MERGE_BREAK_GLASS=1` emergency admin override is set (which logs a loud
      audit line).** Normal landing goes through the drain, never `--fallback-git`.
-   - If `pr-land` still fails on create, the manual equivalent is `gh pr create --base main
-     --head lane/<slug> --title "…" --body-file <path>` then **label it** `gh pr edit <n> --add-label
-     ready-to-merge` and run the drain (`node scripts/merge-ai-prs.mjs --only=<n> --this-repo`) — never
-     `gh pr merge` yourself (the gate rejects any non-drain merge).
+   - **If `pr-land` fails on create, do NOT hand-roll the PR.** There is no safe manual equivalent: a
+     `gh pr create` + a hand-applied `ready-to-merge` + a `merge-ai-prs.mjs --only=<n>` run lands the change
+     with **no review scoring at all**. It skips the #2307 producer rubric (`scoreEscalation` →
+     `producerReviewLabel`), and a drain invoked without `--label` has `REVIEW_ESCALATION` false
+     (`we:scripts/merge-ai-prs.mjs`), so the drain's rubric never runs either — while the #2366 concurrent-lander
+     backstop only refuses a PR that **already** carries an uncleared `review:*` label. Nothing catches it, so a
+     statute or trust-chain diff can land unreviewed. Use the real recovery instead: exit 4
+     (`blocked-on-infra`) is already recorded and auto-retried by the conveyor, and exit 3 `gh-error` is
+     re-runnable once `gh` works — a re-run re-uses an already-open PR for the same head (`gh pr list --head`)
+     rather than creating a duplicate, so it resumes rather than restarts. If a PR must
+     exist right now, open it with `pr-land … --park=review:pending` so it is HELD — never with a hand-applied
+     `ready-to-merge`. And never `gh pr merge` yourself: the gate rejects any non-drain merge.
 5. **Sync the local checkout** — the drain (which lands the PR) ff-syncs the lane clone's local `main` to the
    advanced `origin/main`; pr-land best-effort ff-syncs the user's PRIMARY checkout too (`git pull --ff-only
    --autostash`, #2205). If you landed from a lane clone, also reset that lane back to `origin/main` so the
@@ -90,11 +124,59 @@ first sweep.
 
 ## Exit codes (surface these, never merge a red PR)
 
-- `0` = merged (or opened with `--no-wait` / dry-run).
-- `2` = the required check was RED — nothing merged, `main` untouched. Report the failing check; fix and
-  re-run.
-- `3` = unmergeable / `gh` error / push failed — recoverable: rebase the ref on `main` and re-run, or
-  pass `--fallback-git`.
+**Always report the `reason` field, never the exit code alone** — the codes below are derived from the
+`emit(<result>, <code>)` sites in `we:scripts/pr-land.mjs`, and `merged: true` appears on exactly ONE of them.
+Since #2290 `pr-land` never merges: the drain is the sole writer to `main`, so even a fully successful default
+run comes back `merged: false`.
+
+- **`0` — the run did what it was asked.** Six reasons, only the last a merge:
+  - `enqueued` — the **DEFAULT**, no flags: checks green → `ready-to-merge` applied → a single-couple fast
+    drain triggered. `merged: false`; the drain lands it moments later. Report it as *enqueued*, not merged.
+  - `labelled-on-green` — `--label-on-green`: green + labelled, no drain triggered.
+  - `parked` — `--park`: the PR is open and **HELD** for review. Nothing landed. **Confirm the label actually
+    landed:** a failed label apply still reports `parked` with exit 0 today — `reviewLabelApplied: false` in
+    the JSON is the only tell, and the `gh` warning is suppressed under `--json`. Read
+    `gh pr view <pr> --json labels`.
+  - `opened` — `--no-wait`: the PR is open, UNLABELLED, CI unconfirmed.
+  - `dry-run` — nothing pushed, nothing created.
+  - `merged-git-fallback` — the only `merged: true`, and only via `--fallback-git`, which is break-glass-only
+    (see *Guardrails*).
+- **`2` — `check-red`:** the required check was RED. Nothing merged, `main` untouched. Report the failing
+  check; fix and re-run.
+- **`3` — a producer-side stop; `main` untouched.** The recovery is **reason-specific — there is no general
+  remedy**, and in particular `--fallback-git` is not one: only the `gh-error` path reads that flag at all (see
+  its bullet), and every other reason here exits regardless of it.
+  - `conflict` — the lane ref conflicts with `main`. Re-parent the changeset onto the latest `origin/main`,
+    resolve, re-run.
+  - `empty-body` — the PR description is empty/whitespace (checked before create, and again before the
+    label). Write a real summary and re-run with `--body-file`, or fill the open PR's body.
+  - `bad-park` — the `--park` value is off-list; correct it to `review:human` / `review:pending`. Fails fast,
+    before any push.
+  - `locus-prefix` — a bare code-path ref in this lane's corpus changes (#883/#2331). Prefix them
+    (`foo.ts` → `we:foo.ts`), `git commit --amend`, re-run. Raised **before** the push, so there is no PR yet.
+  - `unverified` / `verify-red` / `verify-unfinished` / `verify-corrupt` — the #2833 stall guard, also before
+    the push. Run `node scripts/verify-lane.mjs` (foreground, blocking) on **this** head and re-run.
+  - `no-ref` / `bad-ref` / `no-such-src` — fix the invocation (`--ref=lane/<name>`, `--sha=<commit>`).
+  - `push-failed` / `check-timeout` — transport or CI-wait; re-run. A `check-timeout` leaves the PR open and
+    unlabelled, which is **not** a hold — the drain's reconcile labels it from CI truth on its next sweep.
+  - `gh-error` — `gh` itself failed (a non-infra `gh pr create` failure, or the PR number could not be read
+    after create). **This is the one reason that consults `--fallback-git`**: without the flag `pr-land` stops
+    here; with it, it attempts a local `git merge --no-ff` + push to `main`, which the shared merge gate BLOCKS
+    unless `WE_MERGE_BREAK_GLASS=1` is armed — so passing it normally just converts this stop into
+    `fallback-failed`. Don't. Re-run once `gh` works.
+  - `fallback-failed` — the `--fallback-git` attempt above failed (usually the merge gate refusing it).
+    `main` is untouched; go back to the normal path.
+  - `behind` — **listed by `pr-land`, but not producible from this CLI.** `pollVerdict` returns `behind` only
+    when `labelWhenGreen` is false, and the two modes that wait for checks (default land, `--label-on-green`)
+    both set it true — so the poll loop never takes that branch. A stale (BEHIND) ref actually resolves as:
+    green → labelled `ready-to-merge` and handed to the drain, which rebases before merging (#2284);
+    not-yet-green → keeps polling → `check-timeout`. So do **not** rebase-and-re-run on account of behind-ness
+    alone; that is the drain's job.
+- **`4` — `blocked-on-infra` (#2659):** the lane ref **is pushed**; only `gh pr create` failed, on a known
+  outside dependency. This is resumable, **not** a hard failure: `pr-land` recorded the resume handle
+  (`ref`/`sha`/`base`/body) in the conveyor infra-blocked store, which auto-retries with backoff and
+  resume-opens the PR. Do **not** re-push the lane, loop `pr-land` by hand, or `--fallback-git`. Report
+  `blocked-on-infra (<cause>)` and stop.
 
 ## Guardrails
 
