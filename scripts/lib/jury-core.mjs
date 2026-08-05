@@ -109,6 +109,69 @@ export function verdictStrictness(verdict) {
   return rank;
 }
 
+/**
+ * IMPACT IF UNFIXED (#xdompzx) — what it COSTS to ship this finding, as distinct from `severity` (how bad the defect
+ * looks to the lens that found it). The two come apart constantly, and before this existed only the second one was
+ * expressible: a cosmetic nit and an unrecoverable data-loss race both reduced to "a finding", so the panel could
+ * only COUNT objections, never RANK them by consequence. Observed on PR #1042 — a dead struct field and a stale
+ * comment each arrived carrying a proposed new `check:standards` rule, and the mechanical verdict came back
+ * `changes` on a diff whose only mandatory-lens objection was a race needing a branch deleted without landing
+ * inside a ~30s window.
+ *
+ * Ordered LEAST to MOST costly. Deliberately subject-agnostic — this spine judges diffs, designs, and decisions:
+ *   - `cosmetic`      — nothing breaks; a later reader might be mildly misled.
+ *   - `degraded`      — someone hits friction or a worse result, and recovers unaided.
+ *   - `broken`        — real work is lost, duplicated, or silently skipped; recoverable, but only by someone noticing.
+ *   - `unrecoverable` — data or work is destroyed with no way back.
+ */
+export const IMPACT_LEVELS = Object.freeze({
+  COSMETIC: 'cosmetic',
+  DEGRADED: 'degraded',
+  BROKEN: 'broken',
+  UNRECOVERABLE: 'unrecoverable',
+});
+
+/** The impact ordering. Same fail-loud contract as `VERDICT_STRICTNESS`: total over `IMPACT_LEVELS`, asserted at
+ *  module load, so a level added without a rank crashes the import instead of comparing as `undefined` (which every
+ *  `>=` bar comparison would silently lose — reading as BELOW the bar and quietly un-blocking a real finding). */
+export const IMPACT_STRICTNESS = Object.freeze({
+  [IMPACT_LEVELS.COSMETIC]: 0,
+  [IMPACT_LEVELS.DEGRADED]: 1,
+  [IMPACT_LEVELS.BROKEN]: 2,
+  [IMPACT_LEVELS.UNRECOVERABLE]: 3,
+});
+
+for (const level of Object.values(IMPACT_LEVELS)) {
+  if (IMPACT_STRICTNESS[level] === undefined) {
+    throw new Error(`IMPACT_STRICTNESS is not total over IMPACT_LEVELS: level "${level}" has no rank — add it (the table must rank every IMPACT_LEVELS member).`);
+  }
+}
+
+/** Rank an impact level. THROWS on an unranked level rather than yielding `undefined`, mirroring
+ *  `verdictStrictness` — the fail-loud backstop for every bar comparison.
+ *  @param {string} level
+ *  @returns {number} */
+export function impactStrictness(level) {
+  const rank = IMPACT_STRICTNESS[level];
+  if (rank === undefined) {
+    throw new Error(`impactStrictness: no rank for impact level "${level}" — not a member of IMPACT_LEVELS.`);
+  }
+  return rank;
+}
+
+/**
+ * THE STRICTNESS DIAL (#xdompzx). The minimum `impactIfUnfixed` at which an uncaptured prevention guard WITHHOLDS a
+ * clean accept. Findings below the bar are still reported, still ranked, and still owed a filing — they simply do
+ * not block the land.
+ *
+ * Set to `broken` for the CURRENT context: a solo constellation whose review surface is mostly internal tooling,
+ * where the cost of a blocked land (a stalled conveyor, a hand-held re-review) genuinely exceeds the cost of a
+ * cosmetic defect shipping. This is the knob to TURN, not the code to rewrite, as the constellation grows —
+ * lowering it to `degraded` (then `cosmetic`, the pre-#xdompzx behaviour) tightens the gate with a one-line change
+ * and no consumer edits, because every consumer reads the bar from here.
+ */
+export const PREVENTION_IMPACT_BAR = IMPACT_LEVELS.BROKEN;
+
 /** A finding is OUTSTANDING unless a fix pass explicitly resolved it (`outcome: 'fixed'|'no_change_needed'`). The
  *  SINGLE definition every consumer shares — `deriveVerdict` (the accept gate), `renderPreventionSummary` (the
  *  operator notice), `derivePanelVerdict` (the panel prevention scan), and `disposition-judge.reduceLedger`. Sharing
@@ -150,6 +213,13 @@ export function normalizeFinding(raw) {
   if (raw.rootCause != null && String(raw.rootCause).trim()) out.rootCause = String(raw.rootCause).trim();
   if (raw.prevention != null && String(raw.prevention).trim()) out.prevention = String(raw.prevention).trim();
   if (raw.preventionCaptured != null) out.preventionCaptured = Boolean(raw.preventionCaptured);
+  // #xdompzx — IMPACT IF UNFIXED, the ranking key. Validated against the enum: an unrecognised value adds NO key,
+  // so a reviewer that invents its own word ("high") is treated as UNDECLARED, which `blocksAcceptance` reads as
+  // fail-closed (blocking) rather than silently ranking it below the bar. Absent field adds no key, so every
+  // pre-#xdompzx finding shape is carried through untouched.
+  if (raw.impactIfUnfixed != null && IMPACT_STRICTNESS[String(raw.impactIfUnfixed)] !== undefined) {
+    out.impactIfUnfixed = String(raw.impactIfUnfixed);
+  }
   return out;
 }
 
@@ -185,7 +255,7 @@ export function normalizeFindings(rawList) {
  * @param {{findings?: Finding[]|Array<object>, humanRequired?: boolean}} [o]
  * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
-export function deriveVerdict({ findings = [], humanRequired = false } = {}) {
+export function deriveVerdict({ findings = [], humanRequired = false, bar = PREVENTION_IMPACT_BAR } = {}) {
   if (humanRequired) return VERDICTS.NEEDS_HUMAN;
   const list = normalizeFindings(findings);
   const outstanding = list.filter(isFindingOutstanding);
@@ -193,7 +263,10 @@ export function deriveVerdict({ findings = [], humanRequired = false } = {}) {
   // #2823 — accept is GATED ON PREVENTION CAPTURE. Even with every finding resolved, a finding whose named
   // prevention is neither already captured (an existing gate) nor filed as a future item withholds a clean
   // accept — the reviewer accepts only once every reasonable prevention is captured or filed.
-  if (list.some(hasUncapturedPrevention)) return VERDICTS.PREVENTION_OUTSTANDING;
+  // #xdompzx — gated on IMPACT, not merely on capture: only a guard whose finding would cost `PREVENTION_IMPACT_BAR`
+  // or more to ship withholds the accept. A `cosmetic`/`degraded` finding still reports its guard (the notice reads
+  // the wider `hasUncapturedPrevention`) and is still owed a filing — it just no longer blocks the land.
+  if (list.some((f) => blocksAcceptance(f, { bar }))) return VERDICTS.PREVENTION_OUTSTANDING;
   return VERDICTS.ACCEPT;
 }
 
@@ -208,6 +281,34 @@ export function deriveVerdict({ findings = [], humanRequired = false } = {}) {
  */
 export function hasUncapturedPrevention(finding) {
   return Boolean(finding && finding.prevention && finding.preventionCaptured !== true);
+}
+
+/**
+ * #xdompzx — does this finding's uncaptured guard actually WITHHOLD the accept, at the given bar? The split from
+ * `hasUncapturedPrevention` is the whole point and is deliberate:
+ *
+ *   - `hasUncapturedPrevention` stays the pure "names a guard nobody has captured" predicate. The OPERATOR NOTICE
+ *     keeps reading it, so every uncaptured guard is still surfaced and still owed a filing. Nothing goes quiet.
+ *   - `blocksAcceptance` is the narrower "…and shipping it costs enough to be worth stopping for" predicate. Only
+ *     the VERDICT reducers read it.
+ *
+ * Keeping the notice on the wider predicate is what stops this being a loosening that loses information: below-bar
+ * findings are reported exactly as before, they simply stop converting a clean review into a blocked one.
+ *
+ * FAIL-CLOSED on an undeclared impact. A finding with no valid `impactIfUnfixed` blocks exactly as it did before
+ * #xdompzx, so this is a STRICT RELAXATION — it can only ever un-block a finding that explicitly declared itself
+ * cheap. Every pre-#xdompzx caller and every old-shape finding is byte-stable, which is what makes the dial safe to
+ * land: turning it cannot silently change the verdict on findings that never opted into the new field.
+ *
+ * @param {Finding|null|undefined} finding
+ * @param {{bar?: string}} [o] - the dial; defaults to `PREVENTION_IMPACT_BAR`.
+ * @returns {boolean}
+ */
+export function blocksAcceptance(finding, { bar = PREVENTION_IMPACT_BAR } = {}) {
+  if (!hasUncapturedPrevention(finding)) return false;
+  const declared = finding.impactIfUnfixed;
+  if (declared === undefined) return true; // undeclared ⇒ fail closed, pre-#xdompzx behaviour
+  return impactStrictness(declared) >= impactStrictness(bar);
 }
 
 /**
@@ -453,7 +554,7 @@ export function buildPanelFindings(lensFindings = {}) {
  *   panel's list (`buildPanelFindings(lensFindings)`); the prevention scan reads it, immune to per-lens verdict flattening.
  * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
-export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, mandatoryLenses = MANDATORY_LENSES, findings } = {}) {
+export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, mandatoryLenses = MANDATORY_LENSES, findings, bar = PREVENTION_IMPACT_BAR } = {}) {
   if (findings === undefined) {
     throw new Error('derivePanelVerdict: `findings` is required — pass buildPanelFindings(lensFindings) (or an explicit [] to assert none). A defaulted [] silently reinstates the #2823 advisory-prevention leak on the drain path.');
   }
@@ -475,8 +576,10 @@ export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, c
   // structural fix). A RESOLVED finding whose named prevention is neither captured nor filed owes a guard, whatever
   // its lens's single verdict flattened to (an advisory lens with a co-resident unresolved finding would flatten to
   // `changes` and hide it). Only resolved findings count — an unresolved one is `changes` territory (fix first).
+  // #xdompzx — same impact gate as `deriveVerdict`: a resolved finding whose guard is uncaptured blocks only if
+  // shipping it would cost `bar` or more. Below-bar guards stay in the notice, out of the verdict.
   const preventionFromFindings = normalizeFindings(findings)
-    .some((f) => !isFindingOutstanding(f) && hasUncapturedPrevention(f));
+    .some((f) => !isFindingOutstanding(f) && blocksAcceptance(f, { bar }));
   // Belt-and-suspenders: a caller that passes a mandatory/advisory lens verdict of `prevention-outstanding` but no
   // findings still surfaces it (byte-stable for the pre-round-2 verdict-only callers).
   const preventionFromLens = Object.values(lensVerdicts).some((v) => v === VERDICTS.PREVENTION_OUTSTANDING);
@@ -1016,16 +1119,27 @@ export function buildSubjectMandate({
     // mandate through this skeleton (the diff reviewer, the panel lenses, any future subject) inherits it — it
     // cannot be skipped. Tuned per finding-class: a citation miscite earns a deterministic gate; a design-fidelity
     // miss earns a render assertion; etc.
-    'PREVENTION INTROSPECTION (required, for EVERY finding you report — at every severity, nits included):',
-    'alongside the finding you MUST also answer three fields — (a) ROOT CAUSE (`rootCause`): a blameless "why"',
-    'chain for why the CREATOR got this wrong (the authoring failure mode), not merely what is wrong;',
-    '(b) PREVENTION (`prevention`): the cheapest DURABLE guard that would have caught this whole CLASS of defect,',
-    'tuned to the finding\'s class — preferring a DETERMINISTIC GATE (a `check:standards` rule / write-gate / lint)',
-    'over a review lens over a doc note; and (c) CAPTURE (`preventionCaptured`): whether that guard is already',
-    'CAPTURED as an existing gate (true) or must be FILED as a future backlog item (false).',
-    'A finding whose prevention is neither already captured nor filed BLOCKS acceptance — accept ONLY once every',
-    'finding\'s prevention is captured or filed. A script-decidable defect for which you propose no gate is an',
-    'INCOMPLETE review, not a clean one.',
+    // #xdompzx — IMPACT FIRST. Ranking by consequence-if-shipped is what stops a review reading as a flat list of
+    // objections; the prevention demand below is then SCALED to it, rather than levied uniformly on nits.
+    `IMPACT (required, for EVERY finding): answer \`impactIfUnfixed\` — what it COSTS to ship this, using exactly`,
+    `one of: ${Object.values(IMPACT_LEVELS).join(', ')}. \`cosmetic\` = nothing breaks, a later reader might be`,
+    'mildly misled; `degraded` = someone hits friction and recovers unaided; `broken` = real work is lost,',
+    'duplicated, or silently skipped, and only recoverable by someone noticing; `unrecoverable` = data or work is',
+    'destroyed with no way back. Judge the CONSEQUENCE, not how bad the code looks: a defect can be ugly and',
+    'cosmetic, or a two-line omission and unrecoverable. State the likelihood in your failure scenario — a rare',
+    'path with a catastrophic end and a certain path with a trivial end are different findings, and the reader',
+    'needs both halves to rank them. If you genuinely cannot tell, omit the field: it is then treated as blocking.',
+    `PREVENTION INTROSPECTION (required for every finding at \`${PREVENTION_IMPACT_BAR}\` or above; OPTIONAL below`,
+    'it — do NOT manufacture a gate proposal for a nit): (a) ROOT CAUSE (`rootCause`): a blameless "why" chain for',
+    'why the CREATOR got this wrong (the authoring failure mode), not merely what is wrong; (b) PREVENTION',
+    '(`prevention`): the cheapest DURABLE guard that would have caught this whole CLASS of defect, tuned to the',
+    'finding\'s class — preferring a DETERMINISTIC GATE (a `check:standards` rule / write-gate / lint) over a review',
+    'lens over a doc note; and (c) CAPTURE (`preventionCaptured`): whether that guard is already CAPTURED as an',
+    'existing gate (true) or must be FILED as a future backlog item (false).',
+    `An AT-OR-ABOVE-\`${PREVENTION_IMPACT_BAR}\` finding whose prevention is neither captured nor filed BLOCKS`,
+    'acceptance. A below-bar finding never blocks — report it, and report its guard if one is obvious, but a clean',
+    'review is not withheld for it. A script-decidable defect at or above the bar for which you propose no gate is',
+    'an INCOMPLETE review, not a clean one.',
   ].join(' ');
 }
 
