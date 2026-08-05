@@ -42,6 +42,20 @@
  *     supersedes the `ownerSession` compare for marked lanes only; unmarked leases keep the fail-open behavior
  *     above. The owning lane re-asserts the slug it acquired under and passes; a sibling never holds it and is
  *     denied. Same escape: `LANE_CLOBBER_OK=1`.
+ *   • a build that WRITES the shared PRIMARY tree, run at primary cwd (#2749/#2788 — the 4th arm under
+ *     `#primary-read-only-lanes-only`) — an `npm run build`/`build:docs`/`build:demo` (or the `pnpm`/`yarn`/
+ *     `run-s`/`run-p`/`npm-run-all` equivalent; `build:check` and `build:plugs` are excluded — the former
+ *     writes only `/tmp`, the latter is already its own arm above), an fs-writing `node <generate*|scaffold*>`
+ *     script, or a `sed -i`/`perl -pi`/`tee`/shell-redirect writing a file other than a `/tmp`|`/dev` scratch
+ *     path. Keys on the TREE-WRITE alone, never session identity — the reported Bash cwd resets to primary
+ *     between calls (#2335), so a session-identity gate would wrongly wedge a delegated subagent's lane-scoped
+ *     build; this backstop is sound for ANY session because both the main session and a subagent build in a
+ *     lane, never the primary. Escape: `MAIN_SESSION_BUILD_OK=1` (mirrors `MAIN_PUSH_OK`/`LANE_GUARD_OFF`).
+ *   • (WARN, never deny) a verification-set command (`test:unit`/`check:standards`/`verify-lane`) run at
+ *     primary cwd — the un-script-decidable residual half of #2749 ("this session should have delegated
+ *     mechanical work to a lane", #2677). Doesn't write the tree, so the hard arm above doesn't catch it, and
+ *     there is no reliable way to tell a delegated subagent's own primary-reporting verify apart from the main
+ *     session's own laziness (#2335) — so this is a stderr nudge only, never a deny.
  *
  * Input: PreToolUse JSON on stdin. Output: a deny decision (JSON) when blocked; nothing otherwise.
  * Fails open on unparseable input. The pure `reason`/`decide` are unit-tested (guard-bash.test.mjs).
@@ -106,6 +120,148 @@ export function isBackgrounded(command, runInBackground = false) {
 export function backgroundedVerificationReason(command, runInBackground = false) {
   if (!isVerificationRun(command) || !isBackgrounded(command, runInBackground)) return null;
   return 'the verification set (verify-lane / check:standards / test:unit) must run SYNCHRONOUSLY in the FOREGROUND — never backgrounded (run_in_background, a trailing `&`, nohup/setsid/disown). Backgrounding the suite run and then yielding is the EXACT #2833 subagent stall: the lane sits mid-flight, produces nothing, and never errors, so nothing reclaims it. Re-run it in the foreground and WAIT for it to exit before landing (`node scripts/verify-lane.mjs …`, blocking). There is no override — a synchronous run is the whole point.';
+}
+
+// #2749/#2788 — the 4th `#primary-read-only-lanes-only` guard arm: a build that WRITES the shared PRIMARY
+// tree, run at primary cwd. Three shapes; each pure/unit-tested below. Gated by `primaryCwd` in `reason()`
+// (never by session identity, #2335) — sound for any session, since both the main session and a subagent
+// build in a lane, never the primary.
+
+// (a) an actual RUN of the tree-writing `build` family. `build:check` (writes only `/tmp`, see package.json's
+// `--output=/tmp/…`) and `build:plugs` (already its own arm above, different message/reason) are excluded —
+// neither is a primary-tree write in the sense this arm cares about.
+const BUILD_RUNNER = /^(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b/;
+/** Every `build`/`build:<target>` token in a segment. `\b` keeps `rebuild-cache` / `prebuild` out. */
+const BUILD_TARGETS_G = /\bbuild(?::[-\w]+)?\b/g;
+// #2788 review r2 — the exclusion is tested against EVERY build target in the segment, and the arm fires if
+// ANY of them is tree-writing. Two earlier cuts were both bypassable:
+//   r0 tested the exclusion against the WHOLE segment, so merely MENTIONING `build:check` anywhere disarmed
+//      a real build (`npm run build && echo build:check` read as safe).
+//   r1 tested it against ONE extracted target — the FIRST in a greedy match — so an excluded target placed
+//      BEFORE a real one disarmed it (verified: `run-s build:check build` read as safe). Same bypass, new
+//      spelling. Checking all targets removes the ordering dependency entirely.
+const BUILD_RUN_EXCLUDED = /^build:(?:check|plugs)$/;
+
+/** Strip a leading `VAR=val …`/`sudo` prefix off a command segment — mirrors the `cmd` derivation in
+ *  `reason()` below, kept local so these detectors stay self-sufficient/independently testable. */
+const stripCmdPrefix = (s) => String(s || '').replace(/^(?:\w+=\S+\s+)*(?:sudo\s+)?/, '');
+
+/**
+ * #2788 review — is `name=1` present as a LEADING env-assignment prefix of `segment` (the documented
+ * "prefix `VAR=1`" spelling), rather than merely appearing somewhere in the text? Pure.
+ *
+ * A sanctioned escape hatch that matches anywhere is not an escape hatch, it is a bypass: any command that
+ * quotes, echoes, greps for, or documents the token would disarm the guard. Scan ONLY the `VAR=val` run at
+ * the head of the segment (the sole position a shell treats as an assignment for the following command) and
+ * stop at the first token that is not an assignment.
+ */
+export function hasLeadingEnvEscape(segment, name) {
+  const s = String(segment || '').replace(/^\s+/, '');
+  const re = /^(\w+)=(\S*)\s+/;
+  let rest = s;
+  for (;;) {
+    const m = rest.match(re);
+    if (!m) return false;
+    if (m[1] === name && m[2] === '1') return true;
+    rest = rest.slice(m[0].length);
+  }
+}
+
+/** Is `segment` an actual RUN (not a mention — anchored at command position, not a quoted/echoed string) of
+ *  the tree-writing `build` family — `npm run build`/`build:docs`/`build:demo`/the bare `pnpm`/`yarn`/
+ *  `run-s`/`run-p`/`npm-run-all` equivalent — excluding the non-tree-writing `build:check` (`/tmp` output)
+ *  and the separately-handled `build:plugs`? Pure. */
+export function isTreeWritingBuildRun(segment) {
+  const cmd = stripCmdPrefix(segment);
+  if (!BUILD_RUNNER.test(cmd)) return false;                 // a package runner at command position
+  const head = cmd.split(/[|;&]/)[0];                        // stay inside THIS segment
+  const targets = head.match(BUILD_TARGETS_G) || [];
+  // Fire if ANY target is tree-writing — order-independent, so no placement of an excluded name can disarm it.
+  return targets.some((t) => !BUILD_RUN_EXCLUDED.test(t));
+}
+
+// (b) an fs-writing GENERATOR/SCAFFOLD script — the exact hole guard-lane.mjs misses (a `node` script writes
+// the tree via `fs`, never touching the Edit/Write tools). Keyed on the script's own name, not a hardcoded
+// list — forward-looking for a generator/scaffold script that doesn't exist yet.
+const GENERATOR_SCRIPT = /^node\s+\S*(?:generate|scaffold)\S*\.(?:mjs|cjs|js)\b/i;
+
+/** Is `segment` a `node <path>` invocation (anchored at command position, not a quoted/echoed string) of a
+ *  script whose OWN name says it generates/scaffolds files (`generate*`/`scaffold*`, any extension of
+ *  `.mjs`/`.cjs`/`.js`)? Pure. */
+export function isGeneratorScriptRun(segment) {
+  return GENERATOR_SCRIPT.test(stripCmdPrefix(segment));
+}
+
+// (c) a shell redirect/`tee`/`sed -i`/`perl -pi` writing a file — generalizes the existing backlog|reports-
+// scoped CORPUS_MD rule (further down in `reason()`) to ANY path, excluding a `/tmp`|`/dev` scratch target
+// (the pattern every lane/skill in this very workflow already uses for scratch files, e.g. the manifest/
+// PR-body files under `/tmp/`). Anchored the same way as the existing rules: `sed`/`perl`/`tee` must be the
+// command word itself (not merely mentioned in, say, a quoted commit message), and a bare `>`/`>>` redirect
+// must be the LAST thing in the segment (a quoted string containing a literal `>` is followed by its closing
+// quote, which breaks the trailing-anchor match) — so this stays a low-false-positive accidental-collision
+// guard, the same footing as the other rules in this table.
+// #2788 review — a scratch target is any of the REAL temp roots this platform hands an agent, not just the
+// literal `/tmp/` spelling. On macOS `/tmp` is a symlink to `/private/tmp`, and the sanctioned per-session
+// scratchpad the harness hands every agent is spelled `/private/tmp/claude-<uid>/…`; `$TMPDIR` resolves to
+// `/var/folders/<xx>/<yy>/T/…`. Matching only `^/tmp/` DENIED the agent's own scratchpad (verified: a write to
+// `/private/tmp/claude-501/…` flagged as a primary-tree write), turning the guard into a false-positive on the
+// single most common legitimate write. Keep this list literal + anchored — a loose `/tmp/` ANYWHERE would let
+// `./not-tmp/x` or `foo/tmp/bar` pass as scratch.
+const SCRATCH_TARGET = /^(?:\/tmp\/|\/private\/tmp\/|\/var\/tmp\/|\/var\/folders\/|\/dev\/)/;
+
+/** Is `segment` a shell redirect/`tee`/`sed -i`/`perl -pi` that writes a file OTHER than a `/tmp`|`/dev`
+ *  scratch path? Pure. */
+export function isFileWriteRedirect(segment) {
+  const s = String(segment || '');
+  const cmd = stripCmdPrefix(s); // #2788 review — call the shared helper, don't re-inline its regex
+  // #2788 review r2 — a target must be UNQUOTED before the scratch allowlist sees it. `SCRATCH_TARGET` is
+  // anchored (`^/tmp/`…), so testing the raw shell token made every QUOTED scratch write read as a
+  // primary-tree write — verified: `tee "/tmp/x"` and `sed -i s/a/b/ "/tmp/x"` were both denied. Quoting a
+  // path is ordinary shell hygiene (it is what you do for a path with a space), so this was the same
+  // false-positive class as the scratchpad denial, just one spelling further out.
+  const unquote = (t) => String(t || '').replace(/^(['"])(.*)\1$/, '$2');
+  const isScratch = (t) => SCRATCH_TARGET.test(unquote(t));
+  const lastArg = () => {
+    const toks = cmd.trim().split(/\s+/).filter((t) => t && !t.startsWith('-'));
+    return toks[toks.length - 1] || '';
+  };
+  if (/^sed\b/.test(cmd) && /(?:^|\s)-i\b/.test(s) && !isScratch(lastArg())) return true;
+  if (/^perl\b/.test(cmd) && /-[A-Za-z]*p[A-Za-z]*i\b/.test(s) && !isScratch(lastArg())) return true;
+  const teeMatch = cmd.match(/^tee\b(?:\s+-a)?\s+(\S+)/);
+  if (teeMatch && !isScratch(teeMatch[1])) return true;
+  const neutral = s.replace(/[0-9]*>&[0-9-]*/g, '').replace(/&>/g, '');
+  // Allow a QUOTED redirect target too — the old `[\w./-]+` class excluded quote characters, so
+  // `echo hi > "config/app.json"` matched nothing and slipped past the arm entirely.
+  const m = neutral.match(/>>?\s*("[^"]+"|'[^']+'|[\w./-]+)\s*$/);
+  if (m && !isScratch(m[1])) return true;
+  return false;
+}
+
+/** The #2749 hard-tree-write deny reason for `segment` at a PRIMARY cwd, or null. Pure. Checked ONLY when
+ *  `primaryCwd` is true (callers gate it); the `MAIN_SESSION_BUILD_OK=1` escape is checked by the caller
+ *  (`reason()`), mirroring `MAIN_PUSH_OK`/`LANE_CLOBBER_OK`. */
+export function primaryTreeWriteReason(segment) {
+  const s = String(segment || '');
+  if (isTreeWritingBuildRun(s))
+    return 'a build that WRITES the shared PRIMARY tree is blocked at primary cwd (#2749/#2788) — `npm run build`/`build:docs`/`build:demo` emits into the tree (dist/_site) at the shared checkout. Delegate the build to a lane clone. Sanctioned override (rare): prefix `MAIN_SESSION_BUILD_OK=1`.';
+  if (isGeneratorScriptRun(s))
+    return "an fs-writing generator/scaffold script is blocked at primary cwd (#2749/#2788) — a `node` script writes the tree via `fs`, slipping past the Edit/Write-tool guard (guard-lane.mjs) entirely. Run it in a lane clone. Sanctioned override (rare): prefix `MAIN_SESSION_BUILD_OK=1`.";
+  if (isFileWriteRedirect(s))
+    return "a shell redirect/`tee`/`sed -i`/`perl -pi` writing a file is blocked at primary cwd (#2749/#2788) — it writes the shared PRIMARY tree directly, bypassing the Edit/Write tools. Use a lane clone (or write under `/tmp` for scratch files). Sanctioned override (rare): prefix `MAIN_SESSION_BUILD_OK=1`.";
+  return null;
+}
+
+/** The #2749 WARN-only nudge for the un-script-decidable "this session should have delegated mechanical
+ *  work" half — never denies (a hard-deny here would false-wedge a delegated subagent whose bare verify
+ *  reports primary cwd, #2335/#2677). Fires when a verification-set command (`test:unit`/`check:standards`/
+ *  `verify-lane`, reusing `isVerificationRun`) runs at a PRIMARY cwd: it writes no tree (so
+ *  `primaryTreeWriteReason` above doesn't catch it), but is exactly the mechanical work #2677 argues the main
+ *  session should delegate to a lane. Pure + independent of `decide`/`reason` — never feeds the deny channel;
+ *  the CLI writes the result to stderr only. */
+export function mainSessionDelegateNudge(command, { primaryCwd = false } = {}) {
+  if (!primaryCwd) return null;
+  if (!isVerificationRun(String(command || ''))) return null;
+  return "you're running mechanical verification work (test:unit/check:standards/verify-lane) from the PRIMARY checkout — the conveyor's main session should delegate mechanical work to a lane subagent (#2677). This is a WARN, not a denial (there's no reliable way to tell a delegated subagent's own primary-reporting verify apart from the main session's own laziness, #2335) — if this really is a delegated subagent's verify, ignore it.";
 }
 
 /**
@@ -320,6 +476,19 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
       return 'This lane clone carries a LIVE lease held by ANOTHER session — a destructive git op here (reset --hard/clean -fd/checkout -- ./force-push) would clobber their in-flight work (#2367). If this really is your own lane, release it first (or re-acquire) rather than running this here; otherwise pick a different lane. Sanctioned override (rare): prefix `LANE_CLOBBER_OK=1`.';
   }
 
+  // #2749/#2788 — the 4th `#primary-read-only-lanes-only` guard arm: a build that writes the shared PRIMARY
+  // tree, run at primary cwd. Keys on the tree-write alone (never session identity, #2335) — only fires when
+  // cwd IS a primary; a lane clone (main session or a delegated subagent, both build in a lane) is untouched.
+  // #2788 review — the escape must be a LEADING env-assignment prefix, exactly how it is documented
+  // ("prefix `MAIN_SESSION_BUILD_OK=1`"), never a bare substring test. Matching it anywhere meant a command
+  // that merely MENTIONED the token — inside a quoted string, a commit message, an echoed doc line — silently
+  // disarmed the whole arm. `hasLeadingEnvEscape` walks only the `VAR=val …` prefix, so the token must be in
+  // assignment position ahead of the command word to count.
+  if (primaryCwd && !hasLeadingEnvEscape(s, 'MAIN_SESSION_BUILD_OK')) {
+    const treeWriteReason = primaryTreeWriteReason(s);
+    if (treeWriteReason) return treeWriteReason;
+  }
+
   // Only an actual RUN of build:plugs (a runner invocation), not a mention (grep/echo/read).
   if (/\b(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b[^|;&]*\bbuild:plugs\b/.test(s) || (/\btsc\b[^|;&]*-p\s+\S*tsconfig\.plugs\.json/.test(s) && !/--noEmit/.test(s)))
     return 'build:plugs / `tsc -p tsconfig.plugs.json` emits shadow .js/.d.ts into the tree (breaks vitest, fakes a red gate). To typecheck plugs use `tsc --noEmit`.';
@@ -467,5 +636,28 @@ if (IS_CLI) {
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Blocked: ' + r },
     }));
   }
+  // #2749/#2788 — the WARN-only nudge for the un-script-decidable "should have delegated" half. Independent
+  // of the deny channel above (fires even when `r` is null — this command wrote no tree); stderr only, never
+  // blocks. try/catch: a guard bug here must never wedge the agent.
+  try {
+    const nudge = mainSessionDelegateNudge(cmd, { primaryCwd });
+    // #2788 review — stderr on an exit-0 PreToolUse hook is NOT surfaced to the user or fed back to the
+    // model, so the WARN half shipped as a no-op. Emit it on the structured stdout channel instead
+    // (`systemMessage`, the documented field for a non-blocking hook message) and keep writing stderr as a
+    // belt-and-braces fallback for a human tailing the hook log.
+    // NOTE: the deny path (`hookSpecificOutput`) is proven by this file's own use; `systemMessage` delivery
+    // is NOT independently verified here — it is additive and strictly no worse than today's stderr-only
+    // behaviour (an unrecognised field is ignored), and it can never deny, so a wrong guess cannot wedge a
+    // command. Confirm against the live hook contract before relying on it as the sole channel.
+    if (nudge) {
+      // #2788 review r2 — stdout must stay ONE JSON document per hook invocation. The deny path above may
+      // already have written `hookSpecificOutput`; emitting a second `systemMessage` object after it produced
+      // two concatenated JSON documents on one stream, which a strict reader cannot parse — and the deny is
+      // the message that matters, so corrupting it to append a nudge is a strictly bad trade. When the
+      // command is already denied, the nudge goes to stderr only.
+      if (!r) process.stdout.write(JSON.stringify({ systemMessage: 'guard-bash: ' + nudge }) + '\n');
+      process.stderr.write('guard-bash: ' + nudge + '\n');
+    }
+  } catch { /* never wedge on a nudge-computation fault */ }
   process.exit(0);
 }
