@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import {
   JURY_EVENT_TYPES,
   JUROR_STATUSES,
+  validateJuryEvent,
   VERDICTS,
   VERDICT_STRICTNESS,
 } from '../jury-core.mjs';
@@ -348,5 +349,48 @@ describe('fs append/read round-trip (temp CONVEYOR_JURY_DIR)', () => {
     const all = foldAllSubjects();
     expect(all).toHaveLength(2);
     expect(all.every((s) => s.ledger.rosterKnown)).toBe(true);
+  });
+});
+
+describe('#2864 — the ledger records WHICH TREE the jury was seated over', () => {
+  // Without this the ledger carries no commit identity, so a clean fold written at head A reads as `clear` at
+  // head B. Enforced (#2572), that clears a diff no juror saw — and `reviewed-sha` (#2409) cannot catch it,
+  // because that marker is stamped at WRITE time and so certifies the unreviewed tree.
+  const juror = { id: 'j1', lens: 'correctness', charter: 'c' };
+  const roster = (extra = {}) => validateJuryEvent({ type: JURY_EVENT_TYPES.ROSTER_PICKED, round: 0, jurors: [juror], ...extra });
+
+  it('carries the reviewed sha onto the fold', () => {
+    const { valid, event } = roster({ reviewedSha: 'a1b2c3d4e5f6' });
+    expect(valid).toBe(true);
+    expect(foldJuryLedger([event]).reviewedSha).toBe('a1b2c3d4e5f6');
+  });
+
+  it('is OPTIONAL — every event already on disk predates the field and must still fold', () => {
+    // Rejecting them would erase the log rather than age it.
+    const { valid, event } = roster();
+    expect(valid).toBe(true);
+    expect(foldJuryLedger([event]).reviewedSha).toBe(null);
+    expect(foldJuryLedger([]).reviewedSha).toBe(null);
+  });
+
+  it('REJECTS a malformed sha rather than recording an unusable one', () => {
+    for (const bad of ['not-a-sha', 'ABC1234', 'abc', '', 'abc123g', 123, {}, 'a'.repeat(65)]) {
+      const r = validateJuryEvent({ type: JURY_EVENT_TYPES.ROSTER_PICKED, round: 0, jurors: [juror], reviewedSha: bad });
+      expect(r.valid, `reviewedSha=${JSON.stringify(bad)} must be rejected`).toBe(false);
+    }
+  });
+
+  it('the LATEST roster is authoritative about the tree, as it is about the seats', () => {
+    // A re-pick (a grown jury, #2640) re-seats over the current head; the fold must not report the older tree.
+    const a = roster({ reviewedSha: 'aaaaaaa' }).event;
+    const b = validateJuryEvent({ type: JURY_EVENT_TYPES.ROSTER_PICKED, round: 1, jurors: [juror], reviewedSha: 'bbbbbbb' }).event;
+    expect(foldJuryLedger([a, b]).reviewedSha).toBe('bbbbbbb');
+  });
+
+  it('a later roster WITHOUT a sha clears it — never leaves a stale one standing', () => {
+    // Fail-closed direction: an unknown tree must read as unknown, not as the previous known one.
+    const a = roster({ reviewedSha: 'aaaaaaa' }).event;
+    const b = validateJuryEvent({ type: JURY_EVENT_TYPES.ROSTER_PICKED, round: 1, jurors: [juror] }).event;
+    expect(foldJuryLedger([a, b]).reviewedSha).toBe(null);
   });
 });
