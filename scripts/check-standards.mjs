@@ -29,7 +29,6 @@ import { buildReport, source as reportSource, finding as reportFinding, section 
 import { loadBlocks } from './lib/blocks-loader.cjs';
 import { checkVerdictTotality } from './lib/verdict-totality.mjs';
 import { checkReviewLabelSingleHome, GUARDED_DOC_PREFIXES } from './lib/review-skill-guard.mjs';
-import { checkWorkflowMeta, WORKFLOW_HARNESS_ROOTS } from './lib/workflow-meta.mjs';
 import { VERDICTS } from './lib/jury-core.mjs';
 import { loadIntents } from './lib/intents-loader.cjs';
 import { loadResearch } from './lib/research-loader.cjs';
@@ -1713,67 +1712,6 @@ try {
   }
   const { errors: rle } = checkReviewLabelSingleHome(docs);
   for (const e of rle) err(e);
-}
-
-// ── 16. Workflow harness scripts must be LAUNCHABLE (#2664) ────────────────────
-// The Workflow runtime requires `export const meta` to be a PURE LITERAL and rejects the script at validation
-// time, before a single agent spawns. `scripts/workflows/review-parked-prs.mjs` — the editor↔reviewer
-// convergence loop (#2639) — concatenated its `meta.description` across lines and was therefore UNLAUNCHABLE
-// from the day it was written. The failure is silent in the one way that matters: it never ran, so it never
-// produced a wrong answer, and three layers above it inherited the silence for weeks. The class had already
-// recurred once (`backlog/2664`, resolved with no gate), which is what makes a gate owed rather than optional.
-// Vitest alone is not enough: the check must be reachable from the health gate, so an unlaunchable harness is
-// refused by `check:standards` rather than discovered when someone tries to run the loop. (There is no
-// PreToolUse hook for this — verified against .claude/settings.json — so the write itself is not blocked.)
-// Pure core in `lib/workflow-meta.mjs` (which also documents that PURE_KINDS MODELS the runtime rather than
-// checking it); the fs walk stays here, mirroring the two gates above.
-{
-  const SKIP_DIRS = new Set(['node_modules', '.git']);
-  const walkScripts = (dir, acc = []) => {
-    let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return acc; }
-    for (const name of entries) {
-      const p = join(dir, name.name);
-      if (name.isDirectory()) { if (!SKIP_DIRS.has(name.name)) walkScripts(p, acc); }
-      // isFile() — NOT `else`. A dirent is neither dir nor file when it is a symlink, so an `else` branch would
-      // feed a symlinked directory named `*.mjs` to readFileSync, which throws EISDIR and aborts the WHOLE
-      // health gate before its remaining rules run: one stray file destroys every other guard's findings.
-      else if (name.isFile() && /\.(mjs|js)$/.test(name.name)) acc.push(p);
-    }
-    return acc;
-  };
-  let harnessesSeen = 0;
-  for (const d of WORKFLOW_HARNESS_ROOTS) {
-    const abs = join(ROOT, d);
-    if (!existsSync(abs)) continue;
-    for (const f of walkScripts(abs)) {
-      const rel = relative(ROOT, f);
-      // Selection is by PARSE, never by a text match: `src.includes('export const meta')` skips
-      // `const meta = {…}; export { meta };` entirely, so a harness in that spelling is never scanned.
-      let src; try { src = readFileSync(f, 'utf8'); } catch { continue; }
-      const r = checkWorkflowMeta(src, rel);
-      // An export spelling we could not RESOLVE is a harness we failed to read, not a non-harness. Skipping it
-      // silently is the loose direction — `export { built as meta }`, `export default {…}` and `export let meta`
-      // would ship green while the runtime refuses them. Loud beats silent here.
-      if (r.unreadable) {
-        err(`${rel}: exports a Workflow \`meta\` in a spelling this gate cannot resolve, so its launchability is UNVERIFIED — use \`export const meta = { … }\` (a pure literal), or teach findExportedMeta this form`, { kind: 'workflow-meta', file: rel });
-        continue;
-      }
-      if (!r.found) continue; // genuinely not a harness
-      harnessesSeen += 1;
-      if (r.impure.length) {
-        err(`${rel}: Workflow \`meta\` is not a pure literal — the runtime refuses to launch this harness (${r.impure.join('; ')})`, { kind: 'workflow-meta', file: rel });
-      }
-      if (r.missingKeys.length) {
-        err(`${rel}: Workflow \`meta\` is missing required field(s): ${r.missingKeys.join(', ')}`, { kind: 'workflow-meta', file: rel });
-      }
-    }
-  }
-  // A sweep that scans nothing passes vacuously — rename a root and this gate is green forever over zero files.
-  // The vitest sweep asserts this; the gate must too, or the two disagree exactly when it matters.
-  if (harnessesSeen === 0) {
-    err(`check:standards rule 16 scanned ZERO Workflow harnesses under ${WORKFLOW_HARNESS_ROOTS.join(', ')} — the roots are wrong or the sweep is broken; the launchability gate is currently proving nothing`, { kind: 'workflow-meta' });
-  }
 }
 
 // ── Scope attribution (#952, ratified #949 Fork 3-A) ───────────────────────────

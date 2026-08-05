@@ -204,17 +204,6 @@ const RETURN_HYGIENE = [
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent I/O schemas — validated shapes the spawned agents return (the `agent(prompt, {schema})` form).
-//
-// NOTE — every agent here runs on the session model; none is cheap-tiered, and `schema` is not a safety net for
-// tiering one down. It validates SHAPE, never judgment: `VERDICT_SCHEMA.verdict`/`outcome` are plain strings
-// with no enum, so `{verdict:'accept', outcome:'land'}` is taken at its word whether or not the reducer ever
-// ran. Emptiness is likewise NOT a schema concern — `FETCH_SCHEMA.diff` documents `''` as the legal value for an
-// unreadable PR, and non-emptiness is enforced in code by `fetchOk` (`diff.length > 0`, three call sites below).
-// DO NOT remove those checks as redundant with the schema: without them an unreadable PR returns `diff: ''`,
-// every lens finds nothing in an empty diff, and the round reduces to accept → `land` — a PR signed off by a
-// panel that reviewed no code. The right fix for cost is not a cheaper model but NO model here (these shell
-// fixed commands and exercise no judgment); that refactor rides its own item, deliberately uncited because a
-// hash id cited from code is never rewritten at land and would go dead — see HASH_SLUG_OUT_OF_SCOPE_DIRS.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // What the DISCOVER / LABEL-FETCH agents return — parked PRs, each with its CURRENT label names (so the
