@@ -326,21 +326,70 @@ export function hasLabel(pr, label) {
   return labels.some((l) => (typeof l === 'string' ? l : l?.name) === label);
 }
 
-/** Is the required `test` check green on this PR's rollup? (Other checks — cla, Workers Builds — are ignored.) */
-export function isRequiredCheckGreen(pr, requiredCheck = 'test') {
+/**
+ * #xkfv491 — the MOST RECENT rollup entry for a check name, which is the only one that describes the CURRENT
+ * tree. A head SHA routinely carries SEVERAL runs of the same check: a workflow `concurrency` group cancels the
+ * in-flight run when a new one supersedes it, leaving a CANCELLED entry sitting next to the SUCCESS that
+ * actually finished.
+ *
+ * Both callers below used `roll.find(...)`, i.e. the FIRST entry by name — and GitHub returns the rollup in
+ * creation order, so `find` reliably picked the OLDEST run. Observed on PR #1042: `test` had CANCELLED at
+ * 18:34:02 (superseded) at index 0 and SUCCESS at 18:35:32 at index 1, so the drain read the PR as not-green
+ * and skipped it every pass while `gh pr checks` reported a pass — the two disagreed because `gh` collapses to
+ * the latest run per name and the drain did not. Three PRs were held at once (#1042, #1046, #1012), and the
+ * twin `isRequiredCheckFailed` would have stamped `ci:failed` on a genuinely green PR from the same evidence.
+ * Re-running CI does NOT clear it: the cancelled entry stays in the rollup and a re-run only appends.
+ *
+ * WE TRUST GITHUB'S ORDER — the rollup arrives in creation order, so the LAST matching entry is the newest.
+ * An earlier cut of this fix ranked entries by a timestamp instead, to be robust to an ordering GitHub does
+ * not actually emit. That bought three defects and no observed benefit (review of PR #1049), so it is gone:
+ *   • it compared one run's `completedAt` against another's `startedAt` — different clocks, so a run that
+ *     ENDED late outranked the newer run that had only STARTED;
+ *   • an entry with no usable stamp ranked as globally OLDEST, so an in-flight run could never suppress a
+ *     stale SUCCESS;
+ *   • it needed a special case for the `0001-01-01T00:00:00Z` sentinel GitHub reports for an unfinished run.
+ * If a rollup ever arrives out of creation order, that is the moment to revisit — not before.
+ *
+ * CHECK RUNS OUTRANK COMMIT STATUSES. A rollup can mix two shapes: a `CheckRun` (produced by the workflow) and
+ * a legacy `StatusContext` (posted through the commit-statuses API by anyone holding `statuses:write` — a
+ * collaborator, a bot, an installed App). Plain last-wins across both would let a `test`-named status posted
+ * after the real run OVERRIDE its FAILURE and clear the merge gate, which the pre-#xkfv491 `find` did not
+ * allow. So when any CheckRun matches the name, only CheckRuns are considered; a StatusContext decides only
+ * when the workflow has produced nothing at all.
+ *
+ * Latest-wins is the principled rule, not "ignore CANCELLED": if the NEWEST run is cancelled then the check
+ * genuinely has no current verdict and the PR must not land. Pure.
+ * @param {{statusCheckRollup?: Array<object>}} pr
+ * @param {string} requiredCheck
+ * @returns {object|null} the newest matching entry, or `null` when the check has not reported at all.
+ */
+export function latestRequiredCheck(pr, requiredCheck = 'test') {
   const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
-  const check = roll.find((c) => (c?.name || c?.context) === requiredCheck);
+  const matches = roll.filter((c) => (c?.name || c?.context) === requiredCheck);
+  if (!matches.length) return null;
+  // A CheckRun is identified by carrying `name` (the StatusContext shape carries `context` instead) — the same
+  // discriminator the filter above already relies on, so no new field is trusted.
+  const checkRuns = matches.filter((c) => c?.name === requiredCheck);
+  const pool = checkRuns.length ? checkRuns : matches;
+  return pool[pool.length - 1];
+}
+
+/** Is the required `test` check green on this PR's rollup? (Other checks — cla, Workers Builds — are ignored.)
+ *  Reads the LATEST run of that check (#xkfv491), never the first-listed one. */
+export function isRequiredCheckGreen(pr, requiredCheck = 'test') {
+  const check = latestRequiredCheck(pr, requiredCheck);
   if (!check) return false;
   const concl = String(check.conclusion || check.state || '').toUpperCase();
   return concl === 'SUCCESS';
 }
 
 /** Is the required `test` check DEFINITIVELY red (failed/cancelled/timed-out/errored) on this PR's rollup? The
- *  twin of `isRequiredCheckGreen` (#2421). A MISSING check (not yet reported) is NOT failed — it reads as
- *  in-flight (`checking`), never `ci:failed`; only a check GitHub has actually concluded red counts. */
+ *  twin of `isRequiredCheckGreen` (#2421), reading the same LATEST run (#xkfv491) — so a superseded CANCELLED
+ *  run can no longer stamp `ci:failed` on a PR whose current run went green. A MISSING check (not yet reported)
+ *  is NOT failed — it reads as in-flight (`checking`), never `ci:failed`; only a check GitHub has actually
+ *  concluded red counts. */
 export function isRequiredCheckFailed(pr, requiredCheck = 'test') {
-  const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
-  const check = roll.find((c) => (c?.name || c?.context) === requiredCheck);
+  const check = latestRequiredCheck(pr, requiredCheck);
   if (!check) return false;
   const concl = String(check.conclusion || check.state || '').toUpperCase();
   return ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(concl);
