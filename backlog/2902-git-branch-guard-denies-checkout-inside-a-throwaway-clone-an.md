@@ -1,7 +1,7 @@
 ---
 bornAs: x9vcybx
 kind: story
-size: 2
+size: 3
 status: open
 dateOpened: "2026-08-03"
 relatedTo: ["1934", "2897"]
@@ -46,16 +46,36 @@ checkouts — this is not a request to weaken it. Two narrower problems:
 
 ## Definition of done
 
-- The deny is **path-aware**: a `git checkout`/`switch` whose effective cwd (process cwd or an explicit
-  `-C <dir>`) resolves **outside** the known primary + lane checkouts is allowed; inside them it is
-  denied exactly as today. Resolve symlinks before comparing (the macOS `/tmp` → `/private/tmp` case).
-- The deny message names the **actual** target and, when it denies, states the correct alternative
+The carve-out is an **allowlist that stays fail-closed**, never a denylist keyed on cwd. Keyed the other
+way it ships a bypassable guard: any target the hook cannot resolve would fall into "outside the known
+checkouts" and be allowed, while git actually moves HEAD inside a lane. So:
+
+- **Allow only on positive proof.** A `git checkout`/`switch` is allowed only when the hook resolves the
+  command's target repository root AND that root lies outside the known primary + lane checkouts. A
+  target it cannot resolve unambiguously is **denied**, exactly as today.
+- **Resolve the target from every mechanism that can select it**, not just the process cwd:
+  - `-C <dir>` (repeatable, each relative to the previous);
+  - `--git-dir=<d>` / `--work-tree=<d>` and their space-separated forms;
+  - `GIT_DIR` / `GIT_WORK_TREE`, both from the tool call's environment and from a `VAR=… git …` prefix
+    on the command line;
+  - a compound command that moves first — `cd <lane> && git checkout …`, and the `;` / `|` / subshell
+    variants — since the Bash tool runs the whole string, not one argv.
+  Anything the parser cannot reduce to ONE unambiguous repo root (two `git` invocations in the string, a
+  shell construct it does not model, a path it cannot stat) is denied.
+- Compare **resolved real paths** by containment — `realpath` both sides first (the macOS `/tmp` →
+  `/private/tmp` case) — and treat a lane checkout nested inside the primary as inside.
+- The message names the **actual resolved target** and, when it denies, states the correct alternative
   (a throwaway clone) rather than "commit on the current branch".
 - `branch`/`worktree add` denials inside the known checkouts stay untouched; the push carve-out from
   #1934 is unchanged.
-- PreToolUse JSON payload cases pin both directions: a checkout inside the primary/lane checkout still
-  denies, and one inside a scratchpad clone is allowed. The hook lives under `~/.claude/`, outside this
-  repo, so no repo gate covers it — the cases are the only oracle, as #1934 notes.
+- PreToolUse JSON payload cases pin **both directions and every vector above** — the hook lives under
+  `~/.claude/`, outside this repo, so no repo gate covers it and the cases are the only oracle (#1934).
+  At minimum, with the process cwd set to a scratchpad clone, each of these still **denies**:
+  `git -C <lane> checkout -b x`; `git --git-dir=<lane>/.git --work-tree=<lane> checkout -b x`;
+  `GIT_DIR=<lane>/.git git checkout -b x` (env form and inline-prefix form); `cd <lane> && git checkout
+  -b x`. And these **allow**: a checkout with cwd inside the scratchpad clone, and
+  `git -C <scratchpad> checkout -q FETCH_HEAD` from anywhere. Plus one unparseable compound command that
+  must deny.
 
 ## Not in scope
 
