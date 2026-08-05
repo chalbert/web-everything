@@ -143,6 +143,7 @@ Adjacent defects surfaced in the same pass and **not** covered here, each now fi
   `we:docs/agent/` remain unregistered behaviour-defining surfaces — **#x853s5c**, which also weighs inverting the
   `we:.claude/` anchor to default-deny so the next unregistered surface fails closed instead of open.
 - The drain's content-resolve write-back emptied this very item to 0 bytes on the rebase that produced `836ae978`,
-  where the pure merge library replays the same stages cleanly — **#x0xlc1d**.
+  where the pure merge library replays the same stages cleanly — **#2923** (a sibling lane filed the same incident
+  first; the verified reproduction that localises it to the write-back path is folded into that item).
 - [`we:scripts/lib/invariant-catalogue.json`](scripts/lib/invariant-catalogue.json) still claims the lane guard
   exempts agent memory (removed 2026-07-09; the guard denies it) — **#xl1ru2l**.
