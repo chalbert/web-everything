@@ -2,8 +2,10 @@
 bornAs: xybdl27
 shortTitle: "Sync skills-src to deployed dir"
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-20"
+dateStarted: "2026-08-03"
+dateResolved: "2026-08-03"
 tags: []
 scope:
   - we:scripts/
