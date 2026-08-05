@@ -237,3 +237,33 @@ describe('assembleParked — tolerance of missing fields', () => {
     expect(() => assembleParked()).not.toThrow();
   });
 });
+
+describe('#2901 — diffBasis: the bundle must say WHICH diff it is carrying', () => {
+  // PR #1031 review, finding 5: the first cut guarded this field only with source-text greps in another file —
+  // which pass on a file whose net-diff call is commented out, and fail on a behaviour-preserving rename. These
+  // are behavioural, on the exported pure assembler, in the module's own canonical suite.
+  const view = { number: 7, title: 't', body: '', files: [], state: 'OPEN', labels: [], headRefName: 'lane/x', mergeable: 'MERGEABLE' };
+
+  it("reports 'net' only when the caller states it", () => {
+    expect(assembleParked({ view, diff: 'd', diffBasis: 'net' }).diffBasis).toBe('net');
+  });
+
+  it("DEFAULTS to the degraded label — an unstated basis must never read as net", () => {
+    // The whole point of the field: a degraded basis that looks identical to a good one is how a confident,
+    // well-argued, wrong finding reaches a PR author (observed on PR #1018).
+    expect(assembleParked({ view, diff: 'd' }).diffBasis).toBe('three-dot');
+    expect(assembleParked({ view, diff: 'd', diffBasis: undefined }).diffBasis).toBe('three-dot');
+    expect(assembleParked({ view, diff: 'd', diffBasis: null }).diffBasis).toBe('three-dot');
+  });
+
+  it('treats any unrecognised value as degraded, never as net', () => {
+    for (const v of ['NET', 'net ', 'true', true, 1, {}, [], 'two-dot']) {
+      expect(assembleParked({ view, diff: 'd', diffBasis: v }).diffBasis, `basis=${JSON.stringify(v)}`).toBe('three-dot');
+    }
+  });
+
+  it('is present on every bundle, so a consumer can always ask', () => {
+    expect(assembleParked({ view })).toHaveProperty('diffBasis');
+    expect(assembleParked({})).toHaveProperty('diffBasis', 'three-dot');
+  });
+});
