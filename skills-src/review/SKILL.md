@@ -38,7 +38,10 @@ applies a label). The same module also renders the operator-facing notice for yo
    ([we:scripts/merge-ai-prs.mjs](../../../scripts/merge-ai-prs.mjs), #2450) — the two-tree
    `git diff <forkpoint> <head>` resolved off the SAME #2373/#2404 basis the drain's escalation SCORE uses, so
    what you review and what was scored cannot drift. Take the net changed-file list from
-   `computeNetDiffChangedFiles(...)` and carry it into step 2.
+   **`computeNetDiffPaths(...)`** (same module, same basis) and carry it into step 2 — **not** from
+   `computeNetDiffChangedFiles`, which is the SCORING path and returns git's display encoding (a rename renders
+   as `a.txt => b.txt`, a non-ASCII path is C-quoted). Intersect that with `gh`'s plain paths and the entries
+   silently vanish, so a rename-only PR yields a zero-file list that reads as authoritative.
 
    This is **not** `gh pr diff <PR>`'s three-dot merge-base diff. That one still lists a sibling-lane file that
    has since landed on `main` as if this PR added it, and the phantom scope-creep is not harmless framing — it

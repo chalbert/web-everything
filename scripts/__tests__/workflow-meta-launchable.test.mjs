@@ -22,8 +22,64 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import ts from 'typescript';
 
 const ROOTS = ['scripts/workflows', 'skills-src'];
+
+// The node kinds a PURE literal may be built from. Anything else — an identifier, a call, a spread, a binary
+// `+`, a template with a substitution — is what the runtime rejects.
+const PURE_KINDS = new Set([
+  ts.SyntaxKind.ObjectLiteralExpression,
+  ts.SyntaxKind.ArrayLiteralExpression,
+  ts.SyntaxKind.PropertyAssignment,
+  ts.SyntaxKind.StringLiteral,
+  ts.SyntaxKind.NumericLiteral,
+  ts.SyntaxKind.TrueKeyword,
+  ts.SyntaxKind.FalseKeyword,
+  ts.SyntaxKind.NullKeyword,
+  ts.SyntaxKind.NoSubstitutionTemplateLiteral,
+]);
+// Identifier is deliberately ABSENT: the walk never descends into a property NAME (it jumps straight to the
+// initializer), so the only way an Identifier is reached is in a VALUE position — `description: SUFFIX` — which
+// is exactly the impurity being caught.
+
+/**
+ * Parse `src` and return the impure nodes inside `export const meta = …`, by KIND rather than by spelling.
+ *
+ * WHY AN AST AND NOT REGEXES. The first version of this test asserted four spellings — quote-`+`-quote, `${`,
+ * and `...`. The PR #1031 review demonstrated it passing on `description: 'a ' + SUFFIX`, `phases: buildPhases()`
+ * and the mixed-quote `'a' +\n "b"`, all of which are unlaunchable, while `\.\.\.` false-positives on a prose
+ * ellipsis. A guard for "is this a literal?" that reasons about characters instead of syntax will always be one
+ * spelling behind the next author. `typescript` is already a declared dependency.
+ *
+ * @returns {{found: boolean, impure: string[]}} `found:false` when the file declares no `meta`
+ */
+export function metaPurity(src, fileName = 'meta.mjs') {
+  const sf = ts.createSourceFile(fileName, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  let init = null;
+  const findMeta = (node) => {
+    if (init) return;
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'meta' && node.initializer) {
+      init = node.initializer;
+      return;
+    }
+    ts.forEachChild(node, findMeta);
+  };
+  findMeta(sf);
+  if (!init) return { found: false, impure: [] };
+
+  const impure = [];
+  const walk = (node) => {
+    if (!PURE_KINDS.has(node.kind)) {
+      impure.push(`${ts.SyntaxKind[node.kind]} — ${node.getText().slice(0, 60).replace(/\s+/g, ' ')}`);
+      return; // do not descend into an already-impure subtree; one report per offending node is enough
+    }
+    if (ts.isPropertyAssignment(node)) { walk(node.initializer); return; } // skip the NAME, walk the VALUE
+    ts.forEachChild(node, walk);
+  };
+  walk(init);
+  return { found: true, impure };
+}
 
 /** Every file under `roots` that declares a Workflow `meta` block. */
 function harnessScripts() {
@@ -44,14 +100,6 @@ function harnessScripts() {
   return out;
 }
 
-/** The `export const meta = { … }` block's source text, up to the first line that is exactly `}`. */
-function metaBlock(src) {
-  const start = src.indexOf('export const meta');
-  if (start === -1) return '';
-  const m = src.slice(start).match(/^[\s\S]*?\n\}/);
-  return m ? m[0] : src.slice(start);
-}
-
 describe('Workflow harness scripts must be launchable (pure-literal meta)', () => {
   const scripts = harnessScripts();
 
@@ -64,24 +112,48 @@ describe('Workflow harness scripts must be launchable (pure-literal meta)', () =
   it.each(harnessScripts().map((s) => [s.path.replace(`${process.cwd()}/`, ''), s]))(
     '%s — meta is a pure literal',
     (_name, script) => {
-      const meta = metaBlock(script.src);
-      expect(meta, 'meta block not found').not.toBe('');
-      // String concatenation — the defect that made review-parked-prs.mjs unlaunchable. The runtime reports
-      // `meta must be a pure literal: non-literal node type in meta: BinaryExpression`.
-      expect(meta, 'meta uses string concatenation (`+`) — the runtime rejects it as non-literal').not.toMatch(/'\s*\n?\s*\+\s*'/);
-      expect(meta, 'meta uses string concatenation (`+`) — the runtime rejects it as non-literal').not.toMatch(/"\s*\n?\s*\+\s*"/);
-      // Template interpolation and spreads are rejected by the same validator.
-      expect(meta, 'meta uses template interpolation').not.toMatch(/\$\{/);
-      expect(meta, 'meta uses a spread').not.toMatch(/\.\.\./);
+      const { found, impure } = metaPurity(script.src, script.path);
+      expect(found, 'meta block not found').toBe(true);
+      expect(impure, `meta is not a pure literal: ${impure.join(' | ')}`).toEqual([]);
     },
   );
 
   it.each(harnessScripts().map((s) => [s.path.replace(`${process.cwd()}/`, ''), s]))(
     '%s — meta declares the required fields',
     (_name, script) => {
-      const meta = metaBlock(script.src);
-      expect(meta).toMatch(/\bname:\s*'/);
-      expect(meta).toMatch(/\bdescription:\s*'/);
+      expect(script.src).toMatch(/\bname:\s*'/);
+      expect(script.src).toMatch(/\bdescription:\s*'/);
     },
   );
+
+  // The guard must REJECT what the runtime rejects. These are the spellings the regex version passed — each one
+  // is genuinely unlaunchable, and each was demonstrated slipping through in the PR #1031 review.
+  describe('the guard catches the CLASS, not one spelling', () => {
+    const cases = {
+      'string concatenation, same quotes': "export const meta = { name: 'a', description: 'x' + 'y' };",
+      'string concatenation, mixed quotes across lines': "export const meta = { name: 'a', description: 'x' +\n \"y\" };",
+      'concatenation with an identifier': "export const meta = { name: 'a', description: 'x ' + SUFFIX };",
+      'a call expression': "export const meta = { name: 'a', phases: buildPhases() };",
+      'template interpolation': 'export const meta = { name: `a${x}` };',
+      'a spread': "export const meta = { name: 'a', ...rest };",
+      'a bare identifier value': "export const meta = { name: NAME };",
+      'a member expression': "export const meta = { name: cfg.name };",
+    };
+    for (const [label, src] of Object.entries(cases)) {
+      it(`rejects: ${label}`, () => {
+        const { found, impure } = metaPurity(src);
+        expect(found).toBe(true);
+        expect(impure.length, `expected ${label} to be rejected`).toBeGreaterThan(0);
+      });
+    }
+
+    it('accepts a genuinely pure literal — including a prose ellipsis, which the regex guard false-flagged', () => {
+      const src = "export const meta = {\n  name: 'a',\n  description: 'first... then second',\n  phases: [{ title: 'T', detail: 'd' }],\n  n: 1, ok: true, none: null,\n};";
+      expect(metaPurity(src)).toEqual({ found: true, impure: [] });
+    });
+
+    it('reports found:false rather than passing vacuously when there is no meta at all', () => {
+      expect(metaPurity('const x = 1;').found).toBe(false);
+    });
+  });
 });

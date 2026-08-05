@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   assembleParked, rollupToCheckRows, reviewClassFromLabels, labelNames,
   filterToRequired, recoverCheckRows, resolveRequiredNames,
+  scopeFilesToNet, resolveNetDiff, sameCommit,
 } from '../fetch-parked.mjs';
 import { classifyChecks } from '../pr-land.mjs';
 
@@ -265,5 +266,148 @@ describe('#2901 — diffBasis: the bundle must say WHICH diff it is carrying', (
   it('is present on every bundle, so a consumer can always ask', () => {
     expect(assembleParked({ view })).toHaveProperty('diffBasis');
     expect(assembleParked({})).toHaveProperty('diffBasis', 'three-dot');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR #1031 review, finding 4 — the DECISION is now testable, not just its default.
+// The earlier repair asserted `assembleParked`'s one-line `diffBasis` ternary while everything that DECIDES the
+// value lived inline in the unexported `runCli()`: the fetch-proof, the path parse, the fail-open rule, the
+// scoped view. ~55 lines with no reachable assertion, explained by ~25 lines of comment doing a 3-line
+// assertion's job. Those two decisions are now `scopeFilesToNet` (pure) and `resolveNetDiff` (exec-injected).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('sameCommit — fail-closed object-name identity', () => {
+  it('matches on the common prefix, both directions', () => {
+    expect(sameCommit('a1b2c3d', 'a1b2c3d4e5f6789')).toBe(true);
+    expect(sameCommit('a1b2c3d4e5f6789', 'a1b2c3d')).toBe(true);
+    expect(sameCommit('A1B2C3D', ' a1b2c3d ')).toBe(true);
+  });
+  it('is false on a mismatch, and on anything it cannot verify', () => {
+    expect(sameCommit('a1b2c3d', 'b2c3d4e')).toBe(false);
+    for (const v of [null, undefined, '', '  ', 'abc', 'not-a-sha', 'abc123g', 123, {}]) {
+      expect(sameCommit(v, 'a1b2c3d4'), `left=${JSON.stringify(v)}`).toBe(false);
+      expect(sameCommit('a1b2c3d4', v), `right=${JSON.stringify(v)}`).toBe(false);
+    }
+  });
+});
+
+describe('scopeFilesToNet — the file list rides the diff\'s basis, or refuses to', () => {
+  const f = (...paths) => paths.map((path) => ({ path }));
+
+  it('narrows the gh list to the net set when gh contains every net path', () => {
+    const r = scopeFilesToNet({ ghFiles: f('a.ts', 'b.ts', 'sibling.md'), netPaths: ['a.ts', 'b.ts'] });
+    expect(r.scoped).toBe(true);
+    expect(r.files.map((x) => x.path)).toEqual(['a.ts', 'b.ts']);
+  });
+
+  it('reads `filename` as well as `path` (gh spells it both ways)', () => {
+    const r = scopeFilesToNet({ ghFiles: [{ filename: 'a.ts' }, { filename: 'z.md' }], netPaths: ['a.ts'] });
+    expect(r.scoped).toBe(true);
+    expect(r.files).toEqual([{ filename: 'a.ts' }]);
+  });
+
+  it('FAILS OPEN when a net path is missing from the gh list — the sources disagree', () => {
+    // The dangerous direction: scoping here would present a SHORT list as authoritative, telling a reviewer a
+    // real file is absent from the PR. Keep everything and let the caller drop the `net` claim.
+    const gh = f('a.ts', 'sibling.md');
+    const r = scopeFilesToNet({ ghFiles: gh, netPaths: ['a.ts', 'renamed.ts'] });
+    expect(r.scoped).toBe(false);
+    expect(r.files).toBe(gh);
+  });
+
+  it('refuses on an empty or absent net list rather than scoping to nothing', () => {
+    const gh = f('a.ts');
+    for (const netPaths of [[], null, undefined]) {
+      const r = scopeFilesToNet({ ghFiles: gh, netPaths });
+      expect(r.scoped).toBe(false);
+      expect(r.files).toBe(gh);
+    }
+  });
+});
+
+describe('resolveNetDiff — a `net` basis is CLAIMED only when it is PROVEN', () => {
+  const OID = 'a2a99afb73cde5f2d1c1be09a15d10e3b7083885';
+  // A fake git that answers the shape resolveNetDiff drives. `overrides` swap in one behaviour at a time.
+  function fakeExec({ fetchThrows = false, refAt = OID, diffText = 'diff --git a/a.ts b/a.ts\n+x\n', names = 'a.ts\0b.ts\0' } = {}) {
+    const calls = [];
+    return {
+      calls,
+      exec: (cmd, args) => {
+        calls.push([cmd, ...args].join(' '));
+        const a = args.join(' ');
+        if (a.startsWith('fetch')) { if (fetchThrows) throw new Error('transport failed'); return ''; }
+        if (a.startsWith('rev-parse --end-of-options refs/remotes/origin/')) { if (refAt === null) throw new Error('unknown revision'); return `${refAt}\n`; }
+        if (a.includes('--name-only')) return names;
+        if (a.startsWith('rev-parse')) return `${OID}\n`;          // resolveNetDiffBasis' own probes
+        if (a.startsWith('merge-base')) return `${OID}\n`;
+        if (a.startsWith('diff')) return diffText;
+        return '';
+      },
+    };
+  }
+
+  it('claims `net` and returns text + plain paths on the happy path', () => {
+    const { exec } = fakeExec();
+    const r = resolveNetDiff({ exec, headRef: 'lane/x', headRefOid: OID });
+    expect(r.basis).toBe('net');
+    expect(r.text).toContain('diff --git');
+    expect(r.paths).toEqual(['a.ts', 'b.ts']);
+  });
+
+  it('guards EVERY caller-supplied argv position with --end-of-options', () => {
+    // `headRef` comes from the gh API, and `git check-ref-format 'refs/heads/--output=/tmp/pwn'` exits 0 — so a
+    // dash-leading refname is legal and would otherwise be parsed as an option (`--upload-pack=<script>` runs).
+    const { exec, calls } = fakeExec();
+    resolveNetDiff({ exec, headRef: 'lane/x', headRefOid: OID });
+    const fetches = calls.filter((c) => c.startsWith('git fetch'));
+    expect(fetches.length).toBeGreaterThan(0);
+    for (const c of fetches) {
+      expect(c, `unguarded fetch argv: ${c}`).toContain('--end-of-options');
+      expect(c.indexOf('--end-of-options'), 'the guard must PRECEDE the ref').toBeLessThan(c.indexOf('lane/x'));
+    }
+  });
+
+  it('degrades when the fetch fails — a swallowed transport error must not yield a `net` label', () => {
+    const { exec } = fakeExec({ fetchThrows: true });
+    expect(resolveNetDiff({ exec, headRef: 'lane/x', headRefOid: OID })).toEqual({ text: '', paths: [], basis: 'three-dot' });
+  });
+
+  it('degrades when the fetched ref is NOT the head gh reported — exit 0 is not currency', () => {
+    // A clone with a narrowed refspec returns 0 from `git fetch origin lane/x` while never creating the ref, so
+    // the basis would silently resolve against a stale local branch: the panel signs off commit A at head B.
+    const { exec } = fakeExec({ refAt: 'ffffffffffffffffffffffffffffffffffffffff' });
+    expect(resolveNetDiff({ exec, headRef: 'lane/x', headRefOid: OID }).basis).toBe('three-dot');
+    const missing = fakeExec({ refAt: null });
+    expect(resolveNetDiff({ exec: missing.exec, headRef: 'lane/x', headRefOid: OID }).basis).toBe('three-dot');
+  });
+
+  it('degrades when there is no oid to prove currency AGAINST', () => {
+    const { exec } = fakeExec();
+    for (const oid of [undefined, '', null, 'not-a-sha']) {
+      expect(resolveNetDiff({ exec, headRef: 'lane/x', headRefOid: oid }).basis, `oid=${JSON.stringify(oid)}`).toBe('three-dot');
+    }
+  });
+
+  it('degrades on an empty diff or an empty path list rather than claiming an unusable net basis', () => {
+    expect(resolveNetDiff({ exec: fakeExec({ diffText: '' }).exec, headRef: 'lane/x', headRefOid: OID }).basis).toBe('three-dot');
+    expect(resolveNetDiff({ exec: fakeExec({ names: '' }).exec, headRef: 'lane/x', headRefOid: OID }).basis).toBe('three-dot');
+  });
+
+  it('degrades with no headRef and no exec at all', () => {
+    expect(resolveNetDiff({ exec: fakeExec().exec, headRef: '' }).basis).toBe('three-dot');
+    expect(resolveNetDiff({ headRef: 'lane/x', headRefOid: OID }).basis).toBe('three-dot');
+    expect(resolveNetDiff().basis).toBe('three-dot');
+  });
+
+  it('does NOT pass --no-renames — with it, every rename-carrying PR degrades', () => {
+    // git WITHOUT --no-renames reports only the new path for a rename, which is exactly what `gh` reports. WITH
+    // it, git reports old AND new, gh has no previous-path field, so scopeFilesToNet loses an entry and fails
+    // open on every rename. Dropping the flag makes renames work instead of degrade.
+    const { exec, calls } = fakeExec();
+    resolveNetDiff({ exec, headRef: 'lane/x', headRefOid: OID });
+    for (const c of calls.filter((x) => x.includes('--name-only'))) {
+      expect(c, `--no-renames re-introduced: ${c}`).not.toContain('--no-renames');
+    }
   });
 });
