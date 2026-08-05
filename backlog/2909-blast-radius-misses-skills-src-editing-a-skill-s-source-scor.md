@@ -1,8 +1,9 @@
 ---
 bornAs: x61vlkw
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-05"
+dateResolved: "2026-08-05"
 tags: []
 ---
 
@@ -94,3 +95,101 @@ blind spot it exposed is independent of it and outlives it.
   plateau-app, where `.claude/skills` is a real directory.
 - Check whether any other built/source pair in the repo has the same symlink shape before closing, and register
   the source half of each.
+
+## Resolved 2026-08-05 — all five Done-when bullets delivered
+
+Delivered in PR #1048. `BLAST_RADIUS` in [`we:scripts/lib/review-escalation.mjs`](scripts/lib/review-escalation.mjs)
+now scores **all four spellings** of both agent-behaviour trees, from **two** patterns — one per home, each pairing
+the two trees and each with an optional trailing separator:
+
+| Spelling | Pattern | Why it must score |
+|---|---|---|
+| `we:skills-src/…`, `we:agent-memory-src/…` | `(^\|\/)(skills\|agent-memory)-src(\/\|$)` | the SOURCE trees — what a WE diff of a rule's *content* actually carries. **This is the acceptance condition** (bullets 1–2) |
+| `we:skills-src`, `we:agent-memory-src` (no trailing slash) | same pattern, via the `$` alternative | the source tree as a **leaf** — swapping the real directory for a link is one diff path at mode `120000` |
+| `we:.claude/skills/…`, `we:.claude/agent-memory/…` | `(^\|\/)\.claude\/(skills\|agent-memory)(\/\|$)` | the link spelling as a **real tracked directory** — live in plateau-app, and in any repo that never relocated the tree |
+| `we:.claude/skills`, `we:.claude/agent-memory` (no trailing slash) | same pattern, via the `$` alternative | the **symlink blob itself** — git emits the link node when the link is created, repointed or deleted |
+
+Grounded independently while reviewing **PR #1044**, which proposed the memory half alone and was closed in
+favour of this item; its review comment carries the panel verdict and the reproductions.
+
+### On bullet 4 — the `we:.claude/` anchor was kept, but it did NOT replace the `-src` patterns
+
+Bullet 4 says to add the `-src` patterns and **not** to "simplify" by anchoring on `(^|\/)\.claude\/` instead.
+That instruction is followed exactly: the `-src` patterns are the acceptance condition and they are registered;
+the `.claude/` anchor is **kept alongside** them, never in place of them, exactly as the bullet's own last
+sentence requires ("Keep the existing built-path patterns too: they are live in plateau-app").
+
+One factual refinement to the bullet's reasoning, found by the review and worth recording because it is the
+whole reason the anchor is not inert: **the `.claude/` anchor is not entirely dead code in WE.** It is dead for
+paths *beneath* the link — git never descends a symlink, so no diff path begins `we:.claude/agent-memory/…` here:
+
+```
+$ printf 'b\n' >> .claude/agent-memory/rule.md      # write THROUGH the link
+$ git diff --name-only
+agent-memory-src/rule.md                             # ← the source spelling, always
+```
+
+But the **link node is itself a diff path**. `we:.claude/skills` is tracked at mode `120000`; repointing it
+(`we:.claude/skills → ../some-other-tree`) or deleting it is a one-line commit whose diff path is exactly
+`we:.claude/skills`. Every pattern used to require a trailing `/`, so that commit scored `{escalate: false}` —
+a change that swaps the entire operating-procedure tree the agent loads, with no reviewer. The trailing
+separator is now optional (`(\/|$)`), which closes it. The same hole existed one directory over — replacing the
+real `we:skills-src` directory with a link emits the bare leaf `skills-src` — so the source patterns carry the
+optional separator too.
+
+The anchor is narrowed to the two procedure directories (`(skills|agent-memory)`), so it does **not** sweep in
+`we:.claude/settings.json` or `we:.claude/commands/`. Bullet 2's built-half registration is delivered by the same
+anchor: an earlier cut of this PR registered the source spelling only, reasoning that the link spelling "can fire
+nowhere" — half right, and therefore wrong. "Nowhere" was scoped to WE: `we:.claude/skills/` was kept precisely
+because plateau-app has 2 real tracked files under it, and the same argument applied to
+`we:.claude/agent-memory/` proves the opposite of what was claimed — a sibling repo keeping agent memory as a
+real directory had **zero** coverage. That is the PR #1040 / PR #1043 / PR #1045 hole, relocated one repo over.
+Both trees now share one anchor, so neither can be registered without the other.
+
+### Bullet 3 — the test asserts on the paths git reports
+
+[`we:scripts/lib/__tests__/review-escalation.test.mjs`](scripts/lib/__tests__/review-escalation.test.mjs) pins
+every spelling of both trees — including the bare symlink leaves, `plateau-app/.claude/agent-memory/…`, the
+root-anchored `we:.claude/skills/…` positive (so the `^` branch of `(^|\/)` keeps a live fixture), and the named
+regression case asserting `scoreEscalation` on `we:agent-memory-src/land-on-no-regression-not-perfection.md`
+escalates and earns `review:pending` at PR-open. No "source and build output land in the same band" assertion was
+written, per the bullet's explicit warning. Negative cases keep the optional separator from swallowing a sibling
+name (`we:.claude/skills-notes.md`, `we:skills-src-notes.md`).
+
+### Bullet 5 — and one surface further, where the gate is *defined*
+
+`we:agent-memory-src/` was the other source/build pair with this symlink shape, registered in the same change.
+
+Round 4 of PR #1048's review then found that every pattern above protects a surface the gate **reads**, and none
+protected where the gate is **invoked**. `we:package.json` declares `"test": "vitest"` and `"check:standards"` —
+the scripts CI runs as the required check — and `we:vitest.config.ts` declares which tests that check includes.
+Both scored `false`. A one-line PR flipping `"test"` to `"exit 0"`, or dropping `scripts/lib/__tests__/**` from
+the vitest `include`, therefore merged with **no** `review:*` label under a **green** required check — green
+because it now ran nothing, including the regression tests on this very list. Both are registered here:
+`^package\.json$` (root only — the nested `we:contracts/`, `we:webcases/`, `we:capability-manifest/` and
+`we:validation-generation/` manifests are npm *publish* manifests and define no required check; repo-relative
+scoring is what makes the `^` anchor cover a sibling repo's own root manifest) and
+`(^|\/)vitest\.config\.[cm]?[jt]s$`.
+
+The three prose enumerations of the surface set were updated in the same change so the spec cannot drift from the
+code that reads it: the cross-repo bullet and `scoreEscalation`'s reason doc in
+[`we:scripts/lib/review-escalation.mjs`](scripts/lib/review-escalation.mjs), and the `blast-radius` token
+description in [`we:scripts/lib/review-policy.contract.json`](scripts/lib/review-policy.contract.json) — the
+machine-diffable spec whose per-entry prose *is* its meaning (#2564/#2566). Leaving the contract reading
+"(scripts, skills, hooks, CI, standards defs)" is the same drift class this item exists to fix, one level up.
+
+### Left open — filed, not left in prose
+
+Because this item resolves here, an obligation left only in this closing note would leave the backlog at merge.
+
+- The **tier question**: the newly-registered trees score `review:pending`, which is agent-clearable, so an agent
+  can still clear a diff to the very rule it is governed by — **#xn4b7xp**.
+- `we:AGENTS.md`, `we:CLAUDE.md`, `we:.claude/settings.json`, `we:.claude/commands/` and non-statute
+  `we:docs/agent/` remain unregistered behaviour-defining surfaces — **#x853s5c**, which `blockedBy`-waits on
+  **#xzsnnta**, the carved-out design call: enumerate the named paths, or invert the `we:.claude/` anchor to
+  default-deny so the next unregistered surface fails closed instead of open.
+- The drain's content-resolve write-back emptied this very item to 0 bytes on the rebase that produced
+  `836ae978`, where the pure merge library replays the same stages cleanly — **#2923** (a sibling lane filed the
+  same incident first; the verified reproduction localising it to the write-back path is folded into that item).
+- [`we:scripts/lib/invariant-catalogue.json`](scripts/lib/invariant-catalogue.json) still claims the lane guard
+  exempts agent memory (removed 2026-07-09; the guard denies it) — **#xl1ru2l**.
