@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, latestRequiredCheck, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -2179,5 +2179,112 @@ describe('#2417 — cross-pass cache reuses unchanged-SHA reads under --watch', 
     const p3 = await run(pr);
     expect(fetches).toBe(2);                                                // no new fetch — cache hit
     expect(p3.get('we::1').cached).toBe(true);
+  });
+});
+
+describe('latestRequiredCheck — a superseded run must not outvote the one that finished (#xkfv491)', () => {
+  // The exact PR #1042 rollup: a concurrency-cancelled run at index 0, the real SUCCESS at index 1.
+  const supersededThenGreen = {
+    statusCheckRollup: [
+      { name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:34:02Z' },
+      { name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:35:32Z' },
+    ],
+  };
+
+  it('reads the LATEST run, not the first-listed one — the jam that held #1042/#1046/#1012', () => {
+    expect(latestRequiredCheck(supersededThenGreen).conclusion).toBe('SUCCESS');
+    expect(isRequiredCheckGreen(supersededThenGreen)).toBe(true);
+  });
+
+  it('the ci:failed twin no longer fires on the superseded cancelled run', () => {
+    expect(isRequiredCheckFailed(supersededThenGreen)).toBe(false);
+  });
+
+  it('orders by timestamp, NOT array position — a newest-first rollup resolves the same way', () => {
+    const reversed = { statusCheckRollup: [...supersededThenGreen.statusCheckRollup].reverse() };
+    expect(isRequiredCheckGreen(reversed)).toBe(true);
+    expect(isRequiredCheckFailed(reversed)).toBe(false);
+  });
+
+  it('LATEST-WINS, not ignore-CANCELLED: a cancelled newest run means no current verdict', () => {
+    const greenThenCancelled = {
+      statusCheckRollup: [
+        { name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:34:02Z' },
+        { name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:35:32Z' },
+      ],
+    };
+    expect(isRequiredCheckGreen(greenThenCancelled)).toBe(false);
+    expect(isRequiredCheckFailed(greenThenCancelled)).toBe(true);
+  });
+
+  it('the ZERO completedAt of an in-flight run never ranks it as oldest (live shape from PR #1046)', () => {
+    // GitHub reports `0001-01-01T00:00:00Z` for a run that has not finished — it parses as a valid year-1
+    // date. Ranking on it would let a stale SUCCESS beat the run currently in flight and land the PR early.
+    const staleGreenPlusQueued = {
+      statusCheckRollup: [
+        { name: 'test', conclusion: 'SUCCESS', status: 'COMPLETED', startedAt: '2026-08-05T18:35:32Z', completedAt: '2026-08-05T18:36:10Z' },
+        { name: 'test', conclusion: '', status: 'QUEUED', startedAt: '2026-08-05T21:04:30Z', completedAt: '0001-01-01T00:00:00Z' },
+      ],
+    };
+    expect(latestRequiredCheck(staleGreenPlusQueued).status).toBe('QUEUED');
+    expect(isRequiredCheckGreen(staleGreenPlusQueued)).toBe(false); // in flight ⇒ no current verdict
+    expect(isRequiredCheckFailed(staleGreenPlusQueued)).toBe(false); // and not red either
+  });
+
+  it('prefers completedAt over startedAt when both are present', () => {
+    const pr = {
+      statusCheckRollup: [
+        { name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:30:00Z', completedAt: '2026-08-05T18:40:00Z' },
+        { name: 'test', conclusion: 'FAILURE', startedAt: '2026-08-05T18:35:00Z', completedAt: '2026-08-05T18:36:00Z' },
+      ],
+    };
+    expect(isRequiredCheckGreen(pr)).toBe(true); // the run that finished LAST is the green one
+  });
+
+  it('falls back to array order when timestamps are absent or unparseable (last-listed wins)', () => {
+    const noTimes = { statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED' }, { name: 'test', conclusion: 'SUCCESS' }] };
+    expect(isRequiredCheckGreen(noTimes)).toBe(true);
+    const badTimes = {
+      statusCheckRollup: [
+        { name: 'test', conclusion: 'CANCELLED', startedAt: 'not-a-date' },
+        { name: 'test', conclusion: 'SUCCESS', startedAt: 'also-not-a-date' },
+      ],
+    };
+    expect(isRequiredCheckGreen(badTimes)).toBe(true);
+  });
+
+  it('a timestamped run outranks an untimestamped one whatever the array order', () => {
+    const pr = {
+      statusCheckRollup: [
+        { name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:35:32Z' },
+        { name: 'test', conclusion: 'CANCELLED' },
+      ],
+    };
+    expect(isRequiredCheckGreen(pr)).toBe(true);
+  });
+
+  it('matches the legacy StatusContext shape (context + state + createdAt)', () => {
+    const pr = {
+      statusCheckRollup: [
+        { context: 'test', state: 'FAILURE', createdAt: '2026-08-05T18:34:02Z' },
+        { context: 'test', state: 'SUCCESS', createdAt: '2026-08-05T18:35:32Z' },
+      ],
+    };
+    expect(isRequiredCheckGreen(pr)).toBe(true);
+  });
+
+  it('single-run, missing-check and non-required cases are unchanged', () => {
+    expect(latestRequiredCheck({ statusCheckRollup: [] })).toBeNull();
+    expect(latestRequiredCheck({ statusCheckRollup: [{ name: 'cla', conclusion: 'SUCCESS' }] })).toBeNull();
+    expect(isRequiredCheckGreen({ statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] })).toBe(true);
+    expect(isRequiredCheckGreen({ statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED' }] })).toBe(false);
+    expect(isRequiredCheckFailed({ statusCheckRollup: [] })).toBe(false);
+    expect(isRequiredCheckGreen(undefined)).toBe(false);
+  });
+
+  it('a PR whose ONLY run is cancelled still reads not-green (never landed on a superseded verdict)', () => {
+    const onlyCancelled = { statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:34:02Z' }] };
+    expect(isRequiredCheckGreen(onlyCancelled)).toBe(false);
+    expect(isRequiredCheckFailed(onlyCancelled)).toBe(true);
   });
 });
