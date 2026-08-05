@@ -48,6 +48,8 @@ function deriveResearchFreshness(topic, { now = new Date(), defaultHorizon = RES
   const dueDate = addIsoDuration(new Date(`${lastReviewed}T00:00:00Z`), horizon);
   if (!dueDate) return { state: 'unreviewed', lastReviewed, horizon, dueDate: null };
   const state = now.getTime() > dueDate.getTime() ? 'stale' : 'fresh';
+  // utc-day-slice-ok: dueDate is pure UTC-anchored arithmetic (`lastReviewed` at T00:00:00Z + horizon),
+  // not a wall-clock read, so re-projecting it into a local zone would SHIFT a stored date. Not a stamp.
   return { state, lastReviewed, horizon, dueDate: dueDate.toISOString().slice(0, 10) };
 }
 
