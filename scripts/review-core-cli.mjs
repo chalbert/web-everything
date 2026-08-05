@@ -39,7 +39,6 @@
  *   node scripts/review-core-cli.mjs comment --file=result.json --json     # { markdown } on stdout
  *   node scripts/review-core-cli.mjs rigor --reasons='blast-radius (x),size (500 …)'  # care-level + panel rigor (#2567)
  *   cat invite.json | node scripts/review-core-cli.mjs invite --json       # juror-invite-on-discovery delta (#2640)
- *   node scripts/review-core-cli.mjs unblocked --file=result.json --json   # { mustPost, unblocked } (#xdompzx)
  *
  * `reduce` input (JSON, from --file or stdin) is the option bag `reduceReview` consumes — any subset of:
  *   { findings, humanRequired, lensVerdicts, mandatoryLenses, conflict, reason, reasons, round, roundCap, phase }
@@ -73,9 +72,6 @@ import {
   careLevelFromReasons,
   panelRigorFromReasons,
   deriveJurorInvite,
-  hasUncapturedPrevention,
-  blocksAcceptance,
-  PREVENTION_IMPACT_BAR,
 } from './lib/review-core.mjs';
 import { renderPanelComment } from './lib/review-render.mjs';
 
@@ -285,31 +281,6 @@ export function buildComment(input = {}) {
   });
 }
 
-/**
- * The BAR-UN-BLOCKED PREVENTION CHECK, as a scripted door (`unblocked` subcommand; #xdompzx round-4, finding 2).
- * Pure — no I/O, no dates.
- *
- * WHY A SUBCOMMAND AND NOT JUST PROSE. `PREVENTION_IMPACT_BAR` lets a finding whose named guard is neither
- * captured nor filed ride a clean `accept`. Its compensating control is that such a finding must be POSTED before
- * the drain's auto-land applies the accept labels. Two rounds of this item's own review found that control broken
- * in two different ways, both the same failure mode — the control depended on an agent doing something by hand:
- * round 2, the renderer existed but the land branch called nothing; round 4, the skill named `blocksAcceptance`
- * but the documented facade did not export it, so following the instruction literally threw. Leaving the last step
- * ("evaluate these two predicates over the merged findings") as prose keeps that mode alive. This makes it one
- * command with a machine answer, so the auto-land branch reads `mustPost` instead of re-deriving a predicate.
- *
- * @param {{findings?: Array<object>, bar?: string}} [input]
- * @returns {{bar: string, mustPost: boolean, unblocked: Array<object>, checked: number}} `unblocked` is the
- *   findings for which `hasUncapturedPrevention` is true AND `blocksAcceptance` is false — a guard the BAR, and
- *   only the bar, un-blocked. `mustPost` is simply `unblocked.length > 0`, named for the decision it drives.
- */
-export function selectBarUnblocked(input = {}) {
-  const { findings, bar = PREVENTION_IMPACT_BAR } = input || {};
-  const normalized = normalizeFindings(findings);
-  const unblocked = normalized.filter((f) => hasUncapturedPrevention(f) && !blocksAcceptance(f, { bar }));
-  return { bar, mustPost: unblocked.length > 0, unblocked, checked: normalized.length };
-}
-
 // ── thin impure CLI ───────────────────────────────────────────────────────────────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) main(process.argv.slice(2));
@@ -340,9 +311,8 @@ function main(argv) {
   if (subcommand === 'comment') return runComment(flags, asJson);
   if (subcommand === 'rigor') return runRigor(flags, asJson);
   if (subcommand === 'invite') return runInvite(flags, asJson);
-  if (subcommand === 'unblocked') return runUnblocked(flags, asJson);
   return fail(
-    'usage: review-core-cli.mjs <reduce|mandate|comment|rigor|invite|unblocked> [flags] — see the header for options',
+    'usage: review-core-cli.mjs <reduce|mandate|comment|rigor|invite> [flags] — see the header for options',
     2,
   );
 }
@@ -416,49 +386,6 @@ function runComment(flags, asJson) {
     return process.exit(0);
   }
   process.stdout.write(`${markdown}\n`);
-  return process.exit(0);
-}
-
-/**
- * `unblocked` (#xdompzx round-4, finding 2) — the scripted half of the BAR-UN-BLOCKED PREVENTION CHECK. Reads the
- * same result JSON `comment` takes and answers ONE question: does this land owe a posted panel comment?
- *
- * EXIT CODE IS ALWAYS 0 on success (2 on a usage/parse error, as elsewhere). This is a REPORT, not a gate — a
- * non-zero "you must post" would be swallowed or fatal depending on the caller's `set -e`, which is precisely the
- * kind of implicit control this whole item keeps getting bitten by. The answer lives in `mustPost` where a caller
- * has to look at it.
- */
-function runUnblocked(flags, asJson) {
-  let json;
-  try {
-    json = readJsonInput(flags);
-  } catch (e) {
-    return fail(`could not read/parse result JSON: ${String(e && e.message || e)}`, 2);
-  }
-  if (json == null) return fail('unblocked: no input — pass --file=<path> or pipe JSON on stdin', 2);
-
-  const input = { ...json };
-  if (typeof flags.bar === 'string') input.bar = flags.bar;
-
-  let result;
-  try {
-    result = selectBarUnblocked(input);
-  } catch (e) {
-    return fail(String(e && e.message || e), 1);
-  }
-
-  if (asJson) {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-    return process.exit(0);
-  }
-  const lines = result.mustPost
-    ? [
-      `POST REQUIRED — ${result.unblocked.length} of ${result.checked} finding(s) carry a guard the bar (\`${result.bar}\`) un-blocked:`,
-      ...result.unblocked.map((f) => `  • ${f.summary || '(no summary)'} — impact ${f.impactIfUnfixed || 'undeclared'}; guard OWED: ${f.prevention}`),
-      'Post the panel comment (`review-core-cli.mjs comment`) BEFORE applying the accept labels.',
-    ]
-    : [`no post required — none of ${result.checked} finding(s) carry a guard the bar (\`${result.bar}\`) un-blocked.`];
-  process.stdout.write(`${lines.join('\n')}\n`);
   return process.exit(0);
 }
 

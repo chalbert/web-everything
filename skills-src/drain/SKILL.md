@@ -372,22 +372,18 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
        >
        > So, on the **combined `land` / `autoLand: true`** branch, BEFORE applying the accept labels: take
        > `findings = buildPanelFindings(lensFindings)` merged with the validator jury's
-       > `buildPanelFindings(validatorFindings)`, and run the check as a COMMAND, not by hand —
-       > `node scripts/review-core-cli.mjs unblocked --file=<result.json> --json`. It prints
-       > `{ bar, mustPost, unblocked, checked }`, where `unblocked` is every finding for which
-       > `hasUncapturedPrevention(f) === true` AND `blocksAcceptance(f) === false` — a guard the BAR un-blocked.
-       > (Both predicates are exported from `we:scripts/lib/review-core.mjs` if you need them directly.)
-       >
-       > **`mustPost: true`** → you **MUST** post the panel comment
+       > `buildPanelFindings(validatorFindings)`, and test each for **`hasUncapturedPrevention(f) === true` AND
+       > `blocksAcceptance(f) === false`** — a guard the BAR un-blocked. If ANY finding matches, you **MUST** post
+       > `renderPanelComment({ findings, verdict, disposition, lensVerdicts })` as a PR comment
        > (`node scripts/review-core-cli.mjs comment --file=<result.json>` → `gh pr comment <num> --repo <repo>
        > --body-file -`) first, so the impact each finding declared and the guard it still owes are on the record
        > where someone can dispute them before the merge. Only then apply the labels.
        >
-       > **`mustPost: false`** — a clean accept with nothing the bar un-blocked — post **nothing**. The emission
-       > is deliberately conditional: making every land noisy would train the operator to skim past the one
-       > comment that carries real prevention debt. The guarantee this control makes is therefore narrow and
-       > exact: **no land that the bar un-blocked happens silently.** Say it that way anywhere you restate it — a
-       > claim that every finding is posted on every land would be false.
+       > If NO finding matches — a clean accept with nothing the bar un-blocked — post **nothing**. The emission is
+       > deliberately conditional: making every land noisy would train the operator to skim past the one comment
+       > that carries real prevention debt. The guarantee this control makes is therefore narrow and exact: **no
+       > land that the bar un-blocked happens silently.** Say it that way anywhere you restate it — a claim that
+       > every finding is posted on every land would be false.
      - **`escalate`** (verdict `needs-human` — a genuine mandate `conflict` or the global `humanRequired`
        conflict-of-interest flag — OR `changes` with `round >= roundCap`) → this is the `deriveReviewDisposition`
        DEADLOCK case (`mandate-conflict` / `non-convergence` → `{ mode: human }`): the loop already ran and could

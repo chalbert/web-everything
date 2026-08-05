@@ -734,17 +734,15 @@ describe('the below-bar prevention control is wired on the auto-land branch (rou
   const drainSkill = () => readFileSync(join(ROOT, 'skills-src/drain/SKILL.md'), 'utf8');
   const CHECK = 'BAR-UN-BLOCKED PREVENTION CHECK';
 
-  it('the drain skill instructs the auto-land branch to run the check before the accept labels', () => {
+  it('the drain skill instructs the auto-land branch to POST the panel comment before the accept labels', () => {
     const md = drainSkill();
     const block = blockquoteBlockAt(md, CHECK);
     expect(block, `the "${CHECK}" block must exist in the drain skill`).not.toBe('');
     // it is defined in terms of the two predicates, not restated as prose the code cannot be checked against …
     expect(proseContains(block, 'hasUncapturedPrevention(f) === true')).toBe(true);
     expect(proseContains(block, 'blocksAcceptance(f) === false')).toBe(true);
-    // … it points at the SCRIPTED door rather than leaving the agent to evaluate them by hand (round-4 finding 2)
-    expect(proseContains(block, 'review-core-cli.mjs unblocked')).toBe(true);
-    expect(proseContains(block, 'mustPost')).toBe(true);
-    // … and it names the actual emitter
+    // … and it names the actual emitter, both as the function and as the command that runs it
+    expect(proseContains(block, 'renderPanelComment(')).toBe(true);
     expect(proseContains(block, 'review-core-cli.mjs comment')).toBe(true);
   });
 

@@ -9,15 +9,10 @@
  *   themselves are proved in `scripts/lib/__tests__/review-core.test.mjs`; we only pin that the CLI wires them.
  */
 import { describe, it, expect } from 'vitest';
-import { parseFlags, reduceReview, buildMandateText, buildComment, deriveDispositionLenient, selectBarUnblocked } from '../review-core-cli.mjs';
+import { parseFlags, reduceReview, buildMandateText, buildComment, deriveDispositionLenient } from '../review-core-cli.mjs';
 import {
   VERDICTS,
   NEGOTIATION_OUTCOMES,
-  IMPACT_LEVELS,
-  PREVENTION_IMPACT_BAR,
-  deriveVerdict,
-  hasUncapturedPrevention,
-  blocksAcceptance,
   PLAN_OUTCOMES,
   MANDATORY_LENSES,
   PANEL_LENSES,
@@ -281,76 +276,5 @@ describe('buildComment — the comment subcommand glue (renders via renderPanelC
     expect(() => buildComment({ findings: [{ summary: 'x' }], reasons: ['sampling floor (1-in-10)'] })).not.toThrow();
     const md = buildComment({ findings: [{ summary: 'x' }], reasons: ['sampling floor (1-in-10)'] });
     expect(md).not.toContain('**Disposition:**');
-  });
-});
-
-// ── #xdompzx round-4, finding 2 — THE BAR-UN-BLOCKED PREVENTION CHECK AS A SCRIPTED DOOR. ─────────────
-// The drain's auto-land branch must post the panel comment before applying the accept labels whenever the impact
-// bar — and only the bar — un-blocked a finding's still-owed guard. Two rounds of review found that control broken
-// in two different ways, both because the last step was left to an agent doing it by hand: the renderer existed
-// but nothing called it (round 2), then the skill named a predicate the documented facade did not export (round
-// 4). `selectBarUnblocked` is that step as one machine answer.
-describe('selectBarUnblocked — the bar-un-blocked prevention check (#xdompzx)', () => {
-  const owed = (impactIfUnfixed) => ({
-    summary: 'a stale comment', outcome: 'fixed',
-    prevention: 'a check:standards freshness rule', preventionCaptured: false, impactIfUnfixed,
-  });
-
-  it('selects a RESOLVED finding whose owed guard sits BELOW the bar — the bar is what un-blocked it', () => {
-    const r = selectBarUnblocked({ findings: [owed(IMPACT_LEVELS.COSMETIC)] });
-    expect(r.bar).toBe(PREVENTION_IMPACT_BAR);
-    expect(r.mustPost).toBe(true);
-    expect(r.checked).toBe(1);
-    expect(r.unblocked).toHaveLength(1);
-    // precondition that makes this the interesting case: the verdict really is a clean accept
-    expect(deriveVerdict({ findings: [owed(IMPACT_LEVELS.COSMETIC)] })).toBe(VERDICTS.ACCEPT);
-  });
-
-  it('does NOT select a finding AT or ABOVE the bar — that one blocks, so it never reaches an auto-land', () => {
-    const r = selectBarUnblocked({ findings: [owed(IMPACT_LEVELS.BROKEN)] });
-    expect(r.mustPost).toBe(false);
-    expect(r.unblocked).toEqual([]);
-  });
-
-  it('does NOT select a finding whose guard is already CAPTURED — nothing is owed', () => {
-    const f = { ...owed(IMPACT_LEVELS.COSMETIC), preventionCaptured: true };
-    expect(selectBarUnblocked({ findings: [f] }).mustPost).toBe(false);
-  });
-
-  it('does NOT select a finding that names no prevention at all', () => {
-    expect(selectBarUnblocked({ findings: [{ summary: 'plain', outcome: 'fixed' }] }).mustPost).toBe(false);
-  });
-
-  it('an UNDECLARED impact fails CLOSED — it blocks, so it is not something the bar un-blocked', () => {
-    const { impactIfUnfixed, ...noImpact } = owed(IMPACT_LEVELS.COSMETIC);
-    expect(selectBarUnblocked({ findings: [noImpact] }).mustPost).toBe(false);
-  });
-
-  it('the bar is TURNABLE per call — dialling it to cosmetic makes nothing below it, so nothing is un-blocked', () => {
-    const findings = [owed(IMPACT_LEVELS.COSMETIC)];
-    expect(selectBarUnblocked({ findings }).mustPost).toBe(true);
-    const tightened = selectBarUnblocked({ findings, bar: IMPACT_LEVELS.COSMETIC });
-    expect(tightened.bar).toBe(IMPACT_LEVELS.COSMETIC);
-    expect(tightened.mustPost).toBe(false); // at the bar ⇒ blocks ⇒ never an auto-land to be quiet about
-  });
-
-  it('no findings at all → a clean, quiet land', () => {
-    expect(selectBarUnblocked({})).toEqual({ bar: PREVENTION_IMPACT_BAR, mustPost: false, unblocked: [], checked: 0 });
-  });
-
-  it('agrees with the two predicates it is defined by, over a mixed list', () => {
-    const findings = [
-      owed(IMPACT_LEVELS.COSMETIC),                            // un-blocked by the bar → selected
-      owed(IMPACT_LEVELS.UNRECOVERABLE),                       // blocks → not selected
-      { summary: 'clean', outcome: 'fixed' },                  // no guard → not selected
-    ];
-    const r = selectBarUnblocked({ findings });
-    expect(r.checked).toBe(3);
-    expect(r.unblocked).toHaveLength(1);
-    expect(r.unblocked[0].impactIfUnfixed).toBe(IMPACT_LEVELS.COSMETIC);
-    for (const f of r.unblocked) {
-      expect(hasUncapturedPrevention(f)).toBe(true);
-      expect(blocksAcceptance(f)).toBe(false);
-    }
   });
 });

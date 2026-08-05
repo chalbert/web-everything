@@ -10,7 +10,6 @@ scope:
   - we:scripts/lib/review-render.mjs
   - we:scripts/lib/verdict-totality.mjs
   - we:scripts/check-standards.mjs
-  - we:scripts/review-core-cli.mjs
   - we:scripts/conveyor/jury-tree.mjs
   - we:scripts/workflows/review-parked-prs.mjs
   - we:skills-src/jury/subject-jury.workflow.js
@@ -21,7 +20,6 @@ scope:
   - we:scripts/lib/__tests__/verdict-totality.test.mjs
   - we:scripts/lib/__tests__/doc-prose.mjs
   - we:scripts/lib/__tests__/doc-prose.test.mjs
-  - we:scripts/__tests__/review-core-cli.test.mjs
   - we:scripts/conveyor/__tests__/jury-tree.test.mjs
 ---
 
@@ -79,14 +77,14 @@ in a shape that records only severity, so the reduction had to change, not just 
   (`we:skills-src/jury/subject-jury.workflow.js`) — now request `impactIfUnfixed` and state its enum values, and
   `LENS_SCHEMA` / `JUROR_SCHEMA` / `RED_TEAM_SCHEMA` declare it (with the #2823 prevention triple) rather than
   merely tolerating it under `additionalProperties: true`.
-- **The audit trail rides the merge path, is WIRED there, and the wiring is a COMMAND.** Three halves, all needed:
+- **The audit trail rides the merge path, is WIRED there, and every symbol the wiring names is REACHABLE.** Three
+  halves, all needed:
   (1) `renderFindingLine` (`we:scripts/lib/review-render.mjs`) prints `impactIfUnfixed` and the owed `prevention`
   for every finding in the posted PR comment; (2) the drain's `land` / `autoLand: true` branch
   (`we:skills-src/drain/SKILL.md`) must POST that comment before it applies the accept labels whenever a finding
-  satisfies `hasUncapturedPrevention(f) && !blocksAcceptance(f)` — a guard the BAR un-blocked; (3) that test is
-  a subcommand, `unblocked` in `we:scripts/review-core-cli.mjs`, printing `{ bar, mustPost, unblocked, checked }`,
-  so the branch reads an answer instead of an agent re-deriving a predicate by hand. (3) exists because the same
-  failure mode broke this control twice: round 2, the renderer existed but the land branch called nothing; round
+  satisfies `hasUncapturedPrevention(f) && !blocksAcceptance(f)` — a guard the BAR un-blocked; (3) both predicates
+  resolve from the facade the branch tells its reader to import from. (3) exists because the same failure mode
+  broke this control twice: round 2, the renderer existed but the land branch called nothing; round
   4, the skill named `blocksAcceptance` while the documented facade `we:scripts/lib/review-core.mjs` did not
   export it, so following the instruction literally threw. `blocksAcceptance`, `PREVENTION_IMPACT_BAR` and
   `IMPACT_LEVELS` are now re-exported from that facade, and a test pins the general rule: every function the drain
@@ -130,9 +128,9 @@ in a shape that records only severity, so the reduction had to change, not just 
   `accept`, its declared impact + owed guard appear in the rendered panel comment (asserted on the rendered
   SURFACE, not on the predicate), and the drain's auto-land branch is instructed to post that comment before the
   accept labels whenever such a finding exists (asserted against the skill text itself).
-- The instruction the skill gives is EXECUTABLE, not just readable. The `unblocked` subcommand answers it in one
-  command, and every function the skill's branch blockquotes name resolves from a module the skill points at —
-  asserted by extracting the names from the doc and the exports from the modules, with no hand list on either side.
+- The instruction the skill gives is FOLLOWABLE, not merely readable: every function the skill's branch
+  blockquotes name resolves from a module the skill points at — asserted by extracting the names from the doc and
+  the exports from the modules, with no hand list on either side.
 - No surface claims more than the wiring delivers: the emission is conditional, and the mandate, the JSDoc and
   the skill all state the conditional guarantee. Asserted as a `not.toMatch(/always visible/i)` **scoped to the
   block that makes the claim**, so an unrelated later use of the phrase elsewhere in a 400-line skill does not
