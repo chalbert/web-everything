@@ -1,7 +1,7 @@
 ---
 bornAs: xpfousp
 kind: epic
-status: active
+status: open
 blockedBy: []
 scope:
   - we:scripts/review-runner.mjs
@@ -19,6 +19,9 @@ scopeRationale: >-
   tests.
 dateOpened: "2026-07-19"
 dateStarted: "2026-08-04"
+costTokens: "in:194 cw:159973 cr:11664592 out:74205"
+costUsd: 9.29
+costSessions: 1
 tags: []
 ---
 
