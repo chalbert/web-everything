@@ -50,5 +50,12 @@ three conveyor briefs (PR #1050), so a park failure is on the trust-chain path b
   the decision into a pure helper (the house shape: pure core, thin CLI) so the test does not need a `gh` stub.
 - The `/pr` skill's Exit-codes section lists the new reason (and its recovery: re-apply the label, or re-run
   `pr-land` on the same `--ref`).
+- **The two interim workarounds this bug forced are RETIRED in the same change** — PR #1050 planted a
+  "confirm the label landed with `gh pr view <pr> --json labels`" step, plus prose asserting the bug exists
+  *today*, in **both** [`we:skills-src/pr/SKILL.md`](skills-src/pr/SKILL.md) (the `parked` bullet of the
+  Exit-codes section) and [`we:skills-src/conveyor/delivery-agent-brief.md`](skills-src/conveyor/delivery-agent-brief.md)
+  (the confirmation block before the Escalations close). The first is co-located with the bullet above and hard
+  to miss; the second lives in a different file and is the one that will silently outlive its cause, leaving
+  every delivery agent running a hand-check for a hole that no longer exists.
 - Decide and record what the run should do about the *open* PR when the label cannot be applied — leaving an
   unlabelled open PR behind is the hazard; state whether the run retries the apply once, or reports it and stops.
