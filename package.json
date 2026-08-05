@@ -39,6 +39,7 @@
     "pin:references": "node scripts/pin-reference-snapshots.mjs",
     "gen:maas-openapi": "node scripts/gen-maas-openapi.mjs",
     "gen:webdirectives-ssr-vectors": "node scripts/gen-webdirectives-ssr-vectors.mjs",
+    "review:clear": "node scripts/review-set-label.mjs --to=clear-human",
     "check:standards": "node scripts/check-standards.mjs",
     "check:statute": "node scripts/check-statute.mjs",
     "check:backlog-workflow": "node scripts/check-backlog-workflow.mjs",

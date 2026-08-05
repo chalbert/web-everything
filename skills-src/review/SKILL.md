@@ -86,8 +86,32 @@ applies a label). The same module also renders the operator-facing notice for yo
      fix back to the **author lane** (the drain does no editing here — that convergence loop is v2, epic #2285).
    - The CLI **refuses** an `accepted` verdict on a `review:human` PR and changes nothing (INVARIANT 2). That
      refusal is the gate-self protection, and it only binds callers that come through this module — which is
-     exactly why the swap must not be hand-rolled. Clearing a gate-self PR has **no tool yet** (#2895): until
-     it does, stop and hand the decision to the operator rather than routing around the refusal to make it quiet.
+     exactly why the swap must not be hand-rolled.
+
+   **Clearing a `review:human` PR — the operator does it, at a terminal (#2895).** There IS a tool now; the
+   third target is `clear-human`, and it is the ONLY thing that removes `review:human`. **You cannot run it.**
+   It refuses unless stdin is a real tty and the operator types the PR number at the prompt — an agent shell has
+   no tty, and piping the answer does not satisfy the check. So your job is to PREPARE it and hand it over:
+   write the findings file, then give the operator this line to paste in their own terminal —
+
+   ```
+   npm run review:clear -- <PR> --repo=<owner/name> --actor="<operator>" --body-file=<findings.md>
+   ```
+
+   (The wrapper supplies only `--to=clear-human`, so the operator cannot typo the target. It deliberately does
+   NOT bake in a repo: the first `--repo=` on the line wins, so a hardcoded one would silently override the
+   operator's and clear a PR in the wrong repo.)
+
+   — and stop. Do not attempt `--to=clear-human` yourself to "check whether it works"; it will refuse, and the
+   refusal is the feature. Do not route around it with a raw `gh pr edit` (`check:standards` errors when this
+   file spells that). The tool does the rest of the ceremony the raw command loses: the `review:accepted` label,
+   the `reviewed-sha` stamp, and a comment attributing the clearance to the human who typed it.
+
+   The tty barrier is **interim, and honest about its limits**: an agent runs on the operator's machine with the
+   operator's PAT, so a secret file or env var would be forgeable and login identity is already useless as an
+   independence signal (#2439). Typing at a live terminal is simply the one act an agent cannot perform. The
+   durable home is a UI with its own auth, where "a human did it" is a property of the session rather than of
+   the input device — see #2895's resolution note.
 
    **Why not a raw label edit.** Two things ride on the CLI that adding the label by hand silently drops.
    (a) The `reviewed-sha` marker: it is the ONLY record of which tree the acceptance covered, and at land the

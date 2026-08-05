@@ -2,8 +2,10 @@
 bornAs: x58tjn2
 kind: story
 size: 2
-status: open
-relatedTo: ["2285", "2439", "2644", "2945", "2946"]
+status: resolved
+dateResolved: "2026-08-05"
+blockedBy: ["2882"]
+relatedTo: ["2285", "2439", "2644"]
 scope:
   - we:scripts/review-set-label.mjs
   - we:skills-src/review/SKILL.md
@@ -72,21 +74,62 @@ comment, labels — is one invocation and the marker cannot be hand-copied wrong
 
 ## Definition of done
 
-- A human can clear a gate-self PR entirely through `we:scripts/review-set-label.mjs` via `--to=clear-human`,
-  producing the label change, the `reviewed-sha` stamp, and an attributed comment stating the clearance.
-- The chosen shape and the deferral of the unforgeable signal are recorded with their reasoning (above), not
-  just implemented.
-- `clear-human` requires `--actor` and a stated reason; a test pins that it refuses without them.
-- INVARIANT 2 remains refused on every other path; a test pins that `accepted` on a `review:human` PR is still
-  refused and that the auto-review/agent callers cannot reach `clear-human` by passing a flag to `accepted`.
-- `we:skills-src/review/SKILL.md` names the tool instead of describing an act it forbids the reader from
-  performing, states the explicit-instruction rule, and states plainly what a clearance record does and does
-  not prove.
-- `/review &lt;PR&gt; accept` invokes it, so the operator's in-session word is the whole ceremony.
+- A human can clear a gate-self PR entirely through `we:scripts/review-set-label.mjs`, producing the label change, the `reviewed-sha` stamp, and an attributed comment stating the clearance.
+- The chosen shape (new target vs flag on `accepted`) is recorded with its reasoning, not just implemented.
+- INVARIANT 2 remains refused on every other path; a test pins that the new path cannot be reached by the auto-review/agent callers.
+- `we:skills-src/review/SKILL.md` names the tool instead of describing an act it forbids the reader from performing.
 
-## Follow-ons
+## Resolved 2026-08-05 — found the hard way, by walking into it
 
-- [#2945] — the minimal local console, now an ERGONOMICS surface for out-of-session clearance rather than a
-  security one, and the natural place a gesture would later attach.
-- [#2946] — the hardware human-presence gesture that would make the signal genuinely unforgeable. Filed
-  `someday`: the threat it answers is an adversarial agent, not the careless one that actually bites today.
+Surfaced during the `/review` of **PR #1048** (a gate-self edit to `we:scripts/lib/review-escalation.mjs`). The
+operator reviewed it, said "approve", and the CLI refused — the first time a human had been blocked from
+approving a PR here. Checking the history confirmed the dead end this item predicted: **PR #791** (2026-07-27)
+carries BOTH `review:accepted` and `review:human`, the signature of the raw label edit, and **PR #324** /
+**PR #318** merged with `review:human` still on and no approval at all. Every prior gate-self clearance used the
+path #2882 closed on 2026-08-03. #1048 was the first gate-self PR to reach `/review` after that, so the operator
+was the first to hit the wall.
+
+### The shape: a new `--to=clear-human` target, NOT a flag on `accepted`
+
+Decided, per this item's instruction not to default it. A `--clear-human` flag would make INVARIANT 2
+*conditional* — `accepted` would sometimes clear a gate-self PR — so every future reader of the `accepted`
+branch would have to check whether the lift was passed. As its own target, `accepted` stays UNCONDITIONALLY
+refused on a `review:human` PR (that branch is unchanged, and a test pins it), and the clearance cannot be
+reached by fumbling a flag on the ordinary accept path. A member added to a single-sourced decider is hard to
+remove later, so the narrower shape won.
+
+`clear-human` is the only target that removes `review:human`. It also drops a live `review:changes` — a cleared
+PR must not still read as a bounce — and it stamps the `reviewed-sha` marker, because it IS an acceptance and
+the drain must be able to refuse it later if the head advances past the cleared tree.
+
+### The actor signal: a typed confirmation at a real terminal
+
+This item said an unforgeable actor signal "is the substance", and it was right to. The honest finding is that
+in a solo constellation **nothing is truly unforgeable**: the agent runs on the operator's machine, with the
+operator's PAT, with read access to the whole filesystem. A secret file, an env var, and a GitHub identity check
+are all forgeable, and login identity is already useless as an independence signal (#2439 — every commit is the
+same account). GitHub's own review-approval button is no help either: it refuses self-approval, and every PR
+here is the operator's account.
+
+What an agent structurally cannot do is **type at a live terminal**. Its shell has no tty attached, and piping
+the answer does not satisfy `isTTY`. So `clear-human` refuses unless stdin is a tty AND the operator types the
+**PR number** (not `y` — the highest-consequence act in the review system must not be reachable by a
+fat-finger). Verified end-to-end against PR #1048 before it was cleared: an agent shell was refused, and a piped
+correct answer was refused, with the labels untouched in both cases.
+
+Reachability is closed on the caller side too: `clear-human` is valid only when the caller passes the
+`humanCeremony` hook, and only this file's own CLI does. The conveyor fix agent pins `fixedTo: 'rearm'` and
+passes no hook, so it cannot name the target even by constructing the argv by hand — pinned by a source-level
+test.
+
+**This is interim, and the code says so.** The durable home for the signal is a UI with its own auth, where "a
+human did it" is a property of the session rather than of the input device. Until that exists the terminal is
+the only place where "the operator did it" and "an agent did it" differ. The operator's call was to take the
+terminal gate now on the grounds that it is genuinely the safest available, with the UI as the intended
+successor.
+
+### Not addressed here
+
+The tty check is a *practical* barrier, not a cryptographic one — an adversary holding the machine wins
+regardless. That is the stated threat model ("an eager agent must not clear its own homework"), not a gap to
+close with more of the same mechanism; closing it properly is the UI-with-auth successor above.

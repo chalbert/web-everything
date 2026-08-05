@@ -5,12 +5,7 @@
  *   against fixtures, no network.
  */
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers } from '../review-set-label.mjs';
+import { decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers, decideHumanCeremony } from '../review-set-label.mjs';
 import { parseReviewedSha } from '../lib/review-escalation.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
@@ -95,6 +90,78 @@ describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRea
     expect(decideSetLabel({ to: 'rearm', currentLabels: pending }).allowed).toBe(false);
     expect(decideSetLabel({ to: 'rearm', currentLabels: human }).allowed).toBe(false);
     expect(decideSetLabel({ to: 'rearm', currentLabels: [] }).allowed).toBe(false);
+  });
+});
+
+// #2895 — the gate-self clearance target. The pair of invariants that matter: `clear-human` is the ONLY target
+// that removes review:human, and adding it must not have loosened `accepted` (which stays refused on gate-self).
+describe('decideSetLabel — clear-human (#2895, the ONE target that drops review:human)', () => {
+  it('clears a gate-self PR: adds accepted, drops human + pending, keepsHuman false', () => {
+    const d = decideSetLabel({ to: 'clear-human', currentLabels: human });
+    expect(d.allowed).toBe(true);
+    expect(d.addLabel).toBe(REVIEW_LABELS.accepted);
+    expect(d.removeLabels).toContain(REVIEW_LABELS.human);
+    expect(d.keepsHuman).toBe(false);
+  });
+
+  it('also drops a live review:changes — a cleared PR must not still read as a bounce', () => {
+    const d = decideSetLabel({ to: 'clear-human', currentLabels: [...human, { name: REVIEW_LABELS.changes }] });
+    expect(presentRemoveLabels(d.removeLabels, [...human, { name: REVIEW_LABELS.changes }]))
+      .toEqual([REVIEW_LABELS.human, REVIEW_LABELS.changes]);
+  });
+
+  it('REFUSES on a PR with no review:human — it is not a backdoor accept for an ordinary parked PR', () => {
+    const d = decideSetLabel({ to: 'clear-human', currentLabels: pending });
+    expect(d.allowed).toBe(false);
+    expect(d.addLabel).toBe('');
+    expect(d.reason).toMatch(/no review:human/);
+  });
+
+  // The regression that would matter most: adding this target must not have made `accepted` clearable.
+  it('did NOT loosen INVARIANT 2 — accepted is still refused on the very same gate-self PR', () => {
+    expect(decideSetLabel({ to: 'accepted', currentLabels: human }).allowed).toBe(false);
+  });
+
+  // #2439/#2285 — the agent callers must be unable to NAME this target. `rearm-review.mjs` pins fixedTo:'rearm'
+  // and passes no `humanCeremony` hook, so the only way in is this file's own CLI. Pinned at the source level:
+  // an import-time assertion is the cheapest proof that the shim never grew a second target.
+  it('the conveyor fix-agent shim pins rearm and never names clear-human', async () => {
+    // Read from the repo root (vitest's cwd) — `import.meta.url` is not a file: URL under the vitest transform.
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync('scripts/conveyor/rearm-review.mjs', 'utf8');
+    expect(src).toMatch(/fixedTo:\s*'rearm'/);
+    expect(src).not.toMatch(/clear-human/);
+    expect(src).not.toMatch(/humanCeremony/);
+  });
+});
+
+// #2895 — the human-ceremony barrier. See `decideHumanCeremony`'s doc for what it does and does not defend
+// against: an agent shell has no tty, and a pipe does not satisfy isTTY, so this is the one signal an agent
+// cannot produce. It is not cryptographic and the tests do not pretend otherwise.
+describe('decideHumanCeremony — the terminal barrier (#2895)', () => {
+  it('REFUSES when stdin is not a tty, whatever was "typed" — the agent-shell case', () => {
+    const v = decideHumanCeremony({ isTTY: false, typed: '1048', pr: 1048 });
+    expect(v.allowed).toBe(false);
+    expect(v.reason).toMatch(/real terminal/);
+  });
+
+  it('REFUSES a piped-in correct answer — piping is exactly the bypass a non-tty check must stop', () => {
+    expect(decideHumanCeremony({ isTTY: false, typed: '1048\n', pr: '1048' }).allowed).toBe(false);
+  });
+
+  it('requires the PR NUMBER, not a y/yes — a fat-finger must not clear a gate-self PR', () => {
+    for (const typed of ['y', 'yes', 'Y', '', 'clear']) {
+      expect(decideHumanCeremony({ isTTY: true, typed, pr: 1048 }).allowed).toBe(false);
+    }
+  });
+
+  it('REFUSES a DIFFERENT PR number — the operator must name the PR they mean', () => {
+    expect(decideHumanCeremony({ isTTY: true, typed: '1047', pr: 1048 }).allowed).toBe(false);
+  });
+
+  it('allows the exact PR number at a tty, tolerating surrounding whitespace', () => {
+    expect(decideHumanCeremony({ isTTY: true, typed: ' 1048 ', pr: 1048 }).allowed).toBe(true);
+    expect(decideHumanCeremony({ isTTY: true, typed: '1048', pr: '1048' }).allowed).toBe(true);
   });
 });
 
