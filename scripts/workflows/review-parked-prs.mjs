@@ -256,6 +256,12 @@ const FETCH_SCHEMA = {
 // axis beyond its own lens (the classic case: a correctness reviewer spots a security hole), it may INVITE another
 // panel lens — which raises the review's care level so a larger, more diverse jury re-judges. The invite MUST cite
 // the finding that justifies it (guardrail 1 — an ungrounded invite is dropped); it is rare, not every round.
+// #xdompzx — the `impactIfUnfixed` enum, MIRRORED as a literal because this harness body cannot `import` (the
+// sandbox note at the top of this file). Must stay equal to `IMPACT_LEVELS` in `we:scripts/lib/jury-core.mjs`.
+// The literal is the rootCause of the blocker-1 miss (three hand-typed producer key lists with no import edge to
+// the shape they produce); the deterministic guard that makes the parity mechanical is filed as its own item.
+const IMPACT_LEVEL_VALUES = ['cosmetic', 'degraded', 'broken', 'unrecoverable'];
+
 const LENS_SCHEMA = {
   type: 'object',
   required: ['lens', 'findings'],
@@ -274,6 +280,12 @@ const LENS_SCHEMA = {
           failure_scenario: { type: 'string' },
           category: { type: 'string' },
           line: { type: 'number' },
+          // #xdompzx / #2823 — the introspection fields the shared mandate demands. Declared here (not merely
+          // tolerated by `additionalProperties: true`) so the producer is told the shape rather than inferring it.
+          impactIfUnfixed: { type: 'string', enum: IMPACT_LEVEL_VALUES, description: 'what it COSTS to ship this finding — the ranking key the verdict reducers gate on (#xdompzx). Omit ONLY if you genuinely cannot tell: an absent/unrecognised value reads as UNDECLARED and fails CLOSED (blocks acceptance).' },
+          rootCause: { type: 'string', description: '#2823 — a blameless "why the CREATOR got this wrong" chain (the authoring failure mode), not merely what is wrong' },
+          prevention: { type: 'string', description: '#2823 — the cheapest DURABLE guard that would have caught this whole CLASS (a deterministic check:standards gate preferred over a review lens over a doc note)' },
+          preventionCaptured: { type: 'boolean', description: '#2823 — true if that guard already EXISTS as a gate; false ⇒ it must be FILED as a backlog item' },
         },
       },
     },
@@ -526,10 +538,15 @@ function lensPrompt(pr, repo, lens, diff, escalationReason, title, round = 1, ju
     // rootCause (a blameless "why the creator erred"), prevention (the cheapest durable guard, preferring a
     // deterministic check:standards gate), and preventionCaptured (true if that guard already exists as a gate,
     // else false ⇒ it must be FILED before accept). This surface's return schema is additionalProperties:true, so
-    // the three fields are accepted; the reduce path reaches `prevention-outstanding` only when they are present.
-    `Return { lens: "${lens}", findings: [{ summary, file?, failure_scenario?, category?, line?, rootCause, prevention, preventionCaptured }], invite? }. For EACH`,
-    'finding include rootCause + prevention + preventionCaptured. Return an EMPTY findings array if the diff',
-    'survives scrutiny (do not pad with nitpicks). Return ONLY the structured object.',
+    // the fields are accepted; the reduce path reaches `prevention-outstanding` only when they are present.
+    // #xdompzx — plus impactIfUnfixed, the RANKING key the verdict reducers gate on. The mandate demands it, so the
+    // key list here must ASK for it too: `additionalProperties: true` means an omitted field raises no error, and a
+    // reviewer reading a concrete key list that omits what the mandate demanded resolves the conflict toward the
+    // list. An omitted impact fails CLOSED (blocks), so the dial would simply never reach production.
+    `Return { lens: "${lens}", findings: [{ summary, file?, failure_scenario?, category?, line?, impactIfUnfixed, rootCause, prevention, preventionCaptured }], invite? }. For EACH`,
+    `finding include impactIfUnfixed (exactly one of: ${IMPACT_LEVEL_VALUES.join(', ')}) + rootCause + prevention +`,
+    'preventionCaptured. Return an EMPTY findings array if the diff survives scrutiny (do not pad with nitpicks).',
+    'Return ONLY the structured object.',
   ].join('\n');
 }
 

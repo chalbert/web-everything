@@ -27,9 +27,9 @@ import { parseClaims, mineFiles, porcelainFiles, partitionFindings, partitionLoc
 import { checkDemos } from './check-demos.mjs';
 import { buildReport, source as reportSource, finding as reportFinding, section as reportSection } from './lib/buildReport.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
-import { checkVerdictTotality } from './lib/verdict-totality.mjs';
+import { checkVerdictTotality, IMPACT_ENROLMENT } from './lib/verdict-totality.mjs';
 import { checkReviewLabelSingleHome, GUARDED_DOC_PREFIXES } from './lib/review-skill-guard.mjs';
-import { VERDICTS } from './lib/jury-core.mjs';
+import { VERDICTS, IMPACT_LEVELS } from './lib/jury-core.mjs';
 import { loadIntents } from './lib/intents-loader.cjs';
 import { loadResearch } from './lib/research-loader.cjs';
 import { loadProtocols } from './lib/protocols-loader.cjs';
@@ -1655,7 +1655,7 @@ try {
   err(`Playwright container pin check failed: ${e.message}`);
 }
 
-// ── 14. VERDICTS enum-totality gate (#2823, item xiqj3w9) ──────────────────────
+// ── 14. Enum-totality gate — VERDICTS (#2823, item xiqj3w9) + IMPACT_LEVELS (#xdompzx) ────────
 // Every structure total over the `VERDICTS` enum (strictness/marker/label tables + the reducers that branch on a
 // verdict) must handle EVERY member — a member added without updating one is the script-decidable class PR #976 hit
 // three review rounds running. The gate is DERIVE-BASED (round-2 meta-finding): it DISCOVERS its coverage by scanning
@@ -1681,6 +1681,13 @@ try {
   }
   const { errors: vte } = checkVerdictTotality(docs, VERDICTS);
   for (const e of vte) err(e);
+  // #xdompzx review, finding 5 — SECOND TENANT. `IMPACT_LEVELS` (jury-core) is the same enum+rank-table shape this
+  // gate exists for: `IMPACT_STRICTNESS` ranks it, `IMPACT_GLOSS` defines it, and a fifth level (or a third
+  // structure total over it — a glyph table, a hand-copied twin rank map, exactly the round-2 defect above) would
+  // otherwise drift unflagged behind a module-load loop that only knows the two tables it was written next to.
+  // Enrolling it costs one call because the gate is parameterised on the enum, its symbol name, and its markers.
+  const { errors: ite } = checkVerdictTotality(docs, IMPACT_LEVELS, IMPACT_ENROLMENT);
+  for (const e of ite) err(e);
 }
 
 // ── 15. Review-label swap must stay in its single home (#2882) ─────────────────

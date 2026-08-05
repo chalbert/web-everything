@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { checkVerdictTotality, VERDICT_TOTAL_MARKER } from '../verdict-totality.mjs';
-import { VERDICTS } from '../jury-core.mjs';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { checkVerdictTotality, VERDICT_TOTAL_MARKER, IMPACT_ENROLMENT } from '../verdict-totality.mjs';
+import { VERDICTS, IMPACT_LEVELS } from '../jury-core.mjs';
 
 // A SYNTHETIC enum proves the gate derives its member set from the passed VERDICTS object — never a hardcoded list.
 const SYN = Object.freeze({ A: 'aa', B: 'bb', C: 'cc' });
+const SYN2 = Object.freeze({ A: 'aa', B: 'bb' });
 const doc = (content) => [{ file: 'fixture.mjs', content }];
 const run = (content, verdicts = SYN) => checkVerdictTotality(doc(content), verdicts);
 
@@ -160,5 +164,57 @@ export const TABLE = Object.freeze({ aa: 0, bb: 1, cc: 2 });
   it('the REAL repo VERDICTS enum has the expected four members (guards the gate against an enum rename)', () => {
     expect(new Set(Object.values(VERDICTS))).toEqual(new Set(['accept', 'changes', 'needs-human', 'prevention-outstanding']));
     expect(VERDICT_TOTAL_MARKER).toBe('@verdicts-total');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #xdompzx review, finding 5 — a SECOND ENUM enrols in the same discovery machinery. `IMPACT_LEVELS` /
+// `IMPACT_STRICTNESS` / `IMPACT_GLOSS` (jury-core) reproduces the enum+rank-table shape this gate exists for; it
+// was originally covered only by a module-load loop local to jury-core that knew the two tables it was written
+// next to. These prove the enrolment is real: the symbol name and the marker pair are parameters, not constants.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('checkVerdictTotality — a second enum enrols via { enumSymbol, totalMarker, partialMarker }', () => {
+  const SRC = `
+/** the rank table.
+ *  @impact-total */
+export const IMPACT_STRICTNESS = frozenLookup({
+  [IMPACT_LEVELS.A]: 0,
+  [IMPACT_LEVELS.B]: 1,
+});
+
+/** an UNANNOTATED second structure total over the same enum — the drift this gate exists to catch. */
+export const IMPACT_GLYPHS = frozenLookup({
+  [IMPACT_LEVELS.A]: '·',
+  [IMPACT_LEVELS.B]: '!',
+});
+`;
+
+  it('checks the enrolled enum under ITS marker, and flags an unannotated consumer of it', () => {
+    const { errors } = checkVerdictTotality(doc(SRC), SYN2, IMPACT_ENROLMENT);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('IMPACT_GLYPHS');
+    expect(errors[0]).toContain('@impact-total');
+    expect(errors[0]).toContain('IMPACT_LEVELS');
+  });
+
+  it('ERRORS when a marked structure is not total over the enrolled enum', () => {
+    const partial = `
+/** @impact-total */
+export const IMPACT_STRICTNESS = frozenLookup({ [IMPACT_LEVELS.A]: 0, [IMPACT_LEVELS.B]: 1 });
+`;
+    const THREE = Object.freeze({ A: 'aa', B: 'bb', C: 'cc' });
+    const { errors } = checkVerdictTotality(doc(partial), THREE, IMPACT_ENROLMENT);
+    expect(errors.some((e) => e.includes('IMPACT_STRICTNESS') && e.includes('cc'))).toBe(true);
+  });
+
+  it('does NOT confuse the two enrolments — a VERDICTS pass ignores an @impact-total-only consumer', () => {
+    expect(checkVerdictTotality(doc(SRC), SYN2).errors).toEqual([]);
+  });
+
+  it('the REAL IMPACT_LEVELS tables in jury-core are total and annotated', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'jury-core.mjs'), 'utf8');
+    const { errors, sites } = checkVerdictTotality([{ file: 'jury-core.mjs', content: src }], IMPACT_LEVELS, IMPACT_ENROLMENT);
+    expect(errors).toEqual([]);
+    expect(sites.map((s) => s.symbol).sort()).toEqual(['IMPACT_GLOSS', 'IMPACT_STRICTNESS']);
   });
 });

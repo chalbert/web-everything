@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { renderPanelComment } from '../review-render.mjs';
-import { VERDICTS, REVIEW_DISPOSITIONS, MANDATORY_LENSES } from '../review-core.mjs';
+import { VERDICTS, REVIEW_DISPOSITIONS, MANDATORY_LENSES, deriveVerdict } from '../review-core.mjs';
 
 describe('renderPanelComment — the full PR-comment body', () => {
   it('renders heading, verdict, disposition, verdict table, and every finding', () => {
@@ -111,5 +111,56 @@ describe('renderPanelComment — the full PR-comment body', () => {
     });
     expect(md).toContain('## Auto-review');
     expect(md).toContain('### Panel verdicts');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #xdompzx review, blocker 3B — THE AUDIT TRAIL ON THE MERGE PATH.
+// `PREVENTION_IMPACT_BAR` lets a below-bar finding's uncaptured guard ride a clean `accept`. That is a SCALING of
+// the gate rather than a silent loosening only if the two facts that justified un-blocking it still reach a reader
+// on the path the relaxation opens: the impact the reviewer DECLARED, and the guard the repo still OWES. The
+// operator notice (`renderPreventionSummary`) fires only on the ESCALATED event — exactly the path a below-bar
+// finding no longer takes. So the POSTED COMMENT must carry both. These assert the surface, not the predicate.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('renderFindingLine carries impactIfUnfixed + the owed prevention (#xdompzx review, blocker 3B)', () => {
+  it('a resolved below-bar guard ACCEPTS, and the rendered comment still names the guard and the impact', () => {
+    const finding = {
+      file: 'scripts/lib/thing.mjs',
+      line: 7,
+      summary: 'a stale comment',
+      category: 'simplicity',
+      outcome: 'fixed',
+      impactIfUnfixed: 'cosmetic',
+      prevention: 'a check:standards rule that errors on a stale @see target',
+      preventionCaptured: false,
+    };
+    // the verdict really does un-block — this is the path with no escalation notice
+    const verdict = deriveVerdict({ findings: [finding] });
+    expect(verdict).toBe(VERDICTS.ACCEPT);
+
+    const md = renderPanelComment({ verdict, findings: [finding] });
+    expect(md).toContain('impact if unfixed: cosmetic');
+    expect(md).toContain('a check:standards rule that errors on a stale @see target');
+    expect(md).toContain('OWED');
+  });
+
+  it('marks an already-CAPTURED guard as captured rather than owed', () => {
+    const md = renderPanelComment({
+      verdict: VERDICTS.ACCEPT,
+      findings: [{ summary: 'x', outcome: 'fixed', impactIfUnfixed: 'broken', prevention: 'the existing lint', preventionCaptured: true }],
+    });
+    expect(md).toContain('_Prevention (captured):_ the existing lint');
+    expect(md).not.toContain('OWED');
+  });
+
+  it('omits both fields when the finding declares neither (old-shape findings render byte-stable)', () => {
+    const md = renderPanelComment({ verdict: VERDICTS.CHANGES, findings: [{ summary: 'plain finding' }] });
+    expect(md).not.toContain('impact if unfixed');
+    expect(md).not.toContain('_Prevention');
+  });
+
+  it('DROPS an invented impact word rather than printing it (normalizeFindings validates the enum)', () => {
+    const md = renderPanelComment({ verdict: VERDICTS.CHANGES, findings: [{ summary: 'x', impactIfUnfixed: 'high' }] });
+    expect(md).not.toContain('impact if unfixed');
   });
 });

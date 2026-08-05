@@ -894,7 +894,7 @@ describe('renderReviewNotice (#2433)', () => {
       .toThrow(/unknown outcome/);
   });
 
-  it('#2823 — appends a prevention summary naming the guards owed before accept', () => {
+  it('#2823 — appends a prevention summary naming the guards OWED (#xdompzx: owed, not "must be filed before accept" — below the impact bar a guard is owed without blocking)', () => {
     const n = renderReviewNotice({
       event: REVIEW_NOTICE_EVENTS.ESCALATED, pr: 12, verdict: VERDICTS.PREVENTION_OUTSTANDING,
       findings: [
@@ -902,7 +902,7 @@ describe('renderReviewNotice (#2433)', () => {
         { summary: 'clean', outcome: 'fixed', prevention: 'already a gate', preventionCaptured: true },
       ],
     });
-    expect(n).toContain('Prevention outstanding — 1 guard must be filed before accept');
+    expect(n).toContain('Prevention outstanding — 1 guard owed');
     expect(n).toContain('a check:standards id-space gate');
     expect(n).not.toContain('already a gate'); // captured guard is not owed
   });
@@ -926,7 +926,7 @@ describe('renderPreventionSummary (#2823)', () => {
         { summary: 'finding b', outcome: 'no_change_needed', prevention: 'gate B', preventionCaptured: false },
       ],
     });
-    expect(s).toBe(' Prevention outstanding — 2 guards must be filed before accept: gate A; gate B.');
+    expect(s).toBe(' Prevention outstanding — 2 guards owed: gate A; gate B.');
   });
 
   it('#2823 — ignores an UNFIXED finding that names a prevention (matches deriveVerdict: the fix comes first)', () => {
@@ -940,7 +940,7 @@ describe('renderPreventionSummary (#2823)', () => {
 
   it('falls back to a generic line when the verdict is prevention-outstanding but no findings were supplied', () => {
     expect(renderPreventionSummary({ verdict: VERDICTS.PREVENTION_OUTSTANDING })).toBe(
-      ' Prevention outstanding — file the named guard(s) before accept.',
+      ' Prevention outstanding — file the named guard(s).',
     );
   });
 
@@ -967,7 +967,7 @@ describe('renderPreventionSummary (#2823)', () => {
     ];
     expect(deriveVerdict({ findings })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
     expect(renderPreventionSummary({ findings, verdict: VERDICTS.PREVENTION_OUTSTANDING }))
-      .toBe(' Prevention outstanding — 1 guard must be filed before accept: gate A.');
+      .toBe(' Prevention outstanding — 1 guard owed: gate A.');
   });
 
   it('#2823 round-3 finding 2 — the MIXED shape derivePanelVerdict raises prevention-outstanding on NAMES the guard', () => {
@@ -988,13 +988,13 @@ describe('renderPreventionSummary (#2823)', () => {
     expect(derivePanelVerdict({ lensVerdicts, findings })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
     // …and on that SAME mixed list the summary names the guard — no longer muted by the open advisory nit:
     expect(renderPreventionSummary({ findings, verdict: VERDICTS.PREVENTION_OUTSTANDING }))
-      .toBe(' Prevention outstanding — 1 guard must be filed before accept: a lint rule.');
+      .toBe(' Prevention outstanding — 1 guard owed: a lint rule.');
     // …and the operator notice carries the guard name (not a bare "Verdict: prevention-outstanding."):
     const notice = renderReviewNotice({
       event: REVIEW_NOTICE_EVENTS.ESCALATED, pr: 976, verdict: VERDICTS.PREVENTION_OUTSTANDING, findings,
     });
     expect(notice).toContain('a lint rule');
-    expect(notice).toContain('1 guard must be filed before accept');
+    expect(notice).toContain('1 guard owed');
   });
 });
 

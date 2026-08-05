@@ -29,10 +29,38 @@
  * Pure — takes `{file, content}[]` docs + the `VERDICTS` enum OBJECT (so the member set is DERIVED from the enum,
  * never hardcoded here) and returns `{ errors, sites }`. The fs walk + the real `VERDICTS` import live in the
  * `check-standards.mjs` caller (mirrors `scanRepoLocusPrefixes`). Unit-tested with a synthetic enum + fixtures.
+ *
+ * ENUM-AGNOSTIC (#xdompzx review, finding 5). The gate was already parameterised on the enum's MEMBER SET; it is
+ * now also parameterised on the enum's SYMBOL NAME and its marker pair, so a SECOND enum+rank-table pair enrols in
+ * the same discovery machinery with one extra call rather than a hand-rolled local mirror. `IMPACT_LEVELS` /
+ * `IMPACT_STRICTNESS` / `IMPACT_GLOSS` (jury-core) is the first such tenant, under `@impact-total`. The whole point
+ * of this gate is that coverage is DISCOVERED, so a new structure total over an enrolled enum can never rely on
+ * someone remembering to list it — that includes structures total over an enum nobody thought to enrol.
  */
 
 export const VERDICT_TOTAL_MARKER = '@verdicts-total';
 export const VERDICT_PARTIAL_MARKER = '@verdicts-partial';
+
+/** The default enrolment: the `VERDICTS` enum under its `@verdicts-total` / `@verdicts-partial` markers. A second
+ *  enum passes its own `{ enumSymbol, totalMarker, partialMarker }` (see `check-standards.mjs` §14). */
+const DEFAULT_ENROLMENT = Object.freeze({
+  enumSymbol: 'VERDICTS',
+  totalMarker: VERDICT_TOTAL_MARKER,
+  partialMarker: VERDICT_PARTIAL_MARKER,
+});
+
+export const IMPACT_TOTAL_MARKER = '@impact-total';
+export const IMPACT_PARTIAL_MARKER = '@impact-partial';
+
+/** The second enrolment (#xdompzx review, finding 5): `IMPACT_LEVELS` (jury-core) — the finding-impact enum whose
+ *  rank table (`IMPACT_STRICTNESS`) and gloss map (`IMPACT_GLOSS`) must each stay total over it. Exported so
+ *  `check-standards.mjs` passes an object rather than re-typing marker strings (a second copy of a marker name is
+ *  the same drift this gate exists to stop). */
+export const IMPACT_ENROLMENT = Object.freeze({
+  enumSymbol: 'IMPACT_LEVELS',
+  totalMarker: IMPACT_TOTAL_MARKER,
+  partialMarker: IMPACT_PARTIAL_MARKER,
+});
 
 /** Replace every comment (line + block) with same-length whitespace, preserving newlines + offsets, so a verdict
  *  named in PROSE (a doc comment, an inline note) never counts as a code reference. Strings are left intact — a
@@ -44,12 +72,12 @@ function stripComments(src) {
     .replace(/(^|[^:/])\/\/[^\n]*/g, (m, p1) => p1 + m.slice(p1.length).replace(/./g, ' '));
 }
 
-/** Distinct verdict VALUES referenced SYMBOLICALLY (`VERDICTS.MEMBER_NAME`) in a code span, mapped through the enum
- *  so the value set is derived from `VERDICTS`, never hardcoded. `VERDICTS.includes`-style lowercase members don't
- *  match (member names are UPPER_SNAKE), so an unrelated `VERDICTS` array elsewhere never false-triggers. */
-function verdictSymbolRefs(span, name2val) {
+/** Distinct enum VALUES referenced SYMBOLICALLY (`<ENUM>.MEMBER_NAME`) in a code span, mapped through the enum
+ *  so the value set is derived from the enum object, never hardcoded. `<ENUM>.includes`-style lowercase members
+ *  don't match (member names are UPPER_SNAKE), so an unrelated same-named array elsewhere never false-triggers. */
+function verdictSymbolRefs(span, name2val, enumSymbol) {
   const found = new Set();
-  for (const m of span.matchAll(/VERDICTS\.([A-Z0-9_]+)/g)) {
+  for (const m of span.matchAll(new RegExp(`${enumSymbol}\\.([A-Z0-9_]+)`, 'g'))) {
     const v = name2val[m[1]];
     if (v) found.add(v);
   }
@@ -84,9 +112,9 @@ function precedingComment(rawLines, start) {
   return block.join('\n');
 }
 
-/** Parse a marker line's `fallthrough=a,b` clause into a set of verdict values. Empty when absent. */
-function parseFallthrough(commentBlock) {
-  const m = commentBlock.match(new RegExp(`${VERDICT_TOTAL_MARKER}[^\\n]*?fallthrough=([a-z0-9,\\-]+)`, 'i'));
+/** Parse a marker line's `fallthrough=a,b` clause into a set of enum values. Empty when absent. */
+function parseFallthrough(commentBlock, totalMarker) {
+  const m = commentBlock.match(new RegExp(`${totalMarker}[^\\n]*?fallthrough=([a-z0-9,\\-]+)`, 'i'));
   if (!m) return new Set();
   return new Set(m[1].split(',').map((s) => s.trim()).filter(Boolean));
 }
@@ -96,12 +124,16 @@ const SYMBOL_RE = /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|
 /**
  * Discover every verdict-consumer symbol in `docs` and check coverage + totality over `VERDICTS`. Pure.
  * @param {Array<{file: string, content: string}>} docs - source files to scan (the caller supplies the fs walk).
- * @param {Object<string,string>} verdicts - the `VERDICTS` enum object (`{ ACCEPT: 'accept', ... }`); the member set
+ * @param {Object<string,string>} verdicts - the enum object (`{ ACCEPT: 'accept', ... }`); the member set
  *   is DERIVED from its values, so the gate can never drift from the enum it guards.
+ * @param {{enumSymbol?: string, totalMarker?: string, partialMarker?: string}} [enrolment] - which enum this pass
+ *   guards. Defaults to `VERDICTS` / `@verdicts-total` / `@verdicts-partial`; a second enum (e.g. `IMPACT_LEVELS`
+ *   under `@impact-total`) passes its own, so it reuses this discovery machinery instead of hand-rolling a mirror.
  * @returns {{errors: string[], sites: Array<{file: string, line: number, symbol: string, marker: 'total'|'partial'|null,
  *   referenced: string[], missing: string[]}>}}
  */
-export function checkVerdictTotality(docs = [], verdicts = {}) {
+export function checkVerdictTotality(docs = [], verdicts = {}, enrolment = {}) {
+  const { enumSymbol, totalMarker, partialMarker } = { ...DEFAULT_ENROLMENT, ...enrolment };
   const values = Object.values(verdicts);
   const name2val = Object.fromEntries(Object.entries(verdicts).map(([k, v]) => [k, v]));
   const errors = [];
@@ -122,40 +154,40 @@ export function checkVerdictTotality(docs = [], verdicts = {}) {
       const { line, symbol } = starts[s];
       const end = s + 1 < starts.length ? starts[s + 1].line : codeLines.length;
       const span = codeLines.slice(line, end).join('\n');
-      const referenced = new Set([...verdictSymbolRefs(span, name2val), ...verdictKeyRefs(span, values)]);
-      if (referenced.size < 2) continue; // not a verdict-total consumer — nothing to enforce
+      const referenced = new Set([...verdictSymbolRefs(span, name2val, enumSymbol), ...verdictKeyRefs(span, values)]);
+      if (referenced.size < 2) continue; // not a consumer of this enum — nothing to enforce
 
       const comment = precedingComment(rawLines, line);
-      const hasTotal = comment.includes(VERDICT_TOTAL_MARKER);
-      const hasPartial = comment.includes(VERDICT_PARTIAL_MARKER);
+      const hasTotal = comment.includes(totalMarker);
+      const hasPartial = comment.includes(partialMarker);
       const loc = `${file}:${line + 1} (${symbol})`;
 
       if (hasPartial) {
         // Documented intentional partial — allowed, but the reason must be present (visible in review), not a bare tag.
-        const reason = comment.replace(/[\s\S]*?@verdicts-partial/, '').split('\n')[0].replace(/\*+\/?/g, '').trim();
+        const reason = comment.split(partialMarker).slice(1).join(partialMarker).split('\n')[0].replace(/\*+\/?/g, '').trim();
         if (!reason) {
-          errors.push(`${loc} carries a bare \`${VERDICT_PARTIAL_MARKER}\` with no reason — an intentional non-total verdict consumer must document WHY on the same line so a reviewer can judge it.`);
+          errors.push(`${loc} carries a bare \`${partialMarker}\` with no reason — an intentional non-total ${enumSymbol} consumer must document WHY on the same line so a reviewer can judge it.`);
         }
         sites.push({ file, line: line + 1, symbol, marker: 'partial', referenced: [...referenced], missing: [] });
         continue;
       }
 
       if (!hasTotal) {
-        // THE DISCOVERY CHECK — an unannotated verdict consumer is the miss this gate exists to catch. Force the author
+        // THE DISCOVERY CHECK — an unannotated consumer is the miss this gate exists to catch. Force the author
         // to either mark it total (and make it total) or document an intentional partial. This is what keeps coverage
         // DERIVED from the enum's consumers rather than a hand list nobody updates.
-        errors.push(`${loc} references ${referenced.size} VERDICTS members [${[...referenced].sort().join(', ')}] but carries no \`${VERDICT_TOTAL_MARKER}\` marker — a structure total over VERDICTS must be annotated so the gate enforces its totality (or mark it \`${VERDICT_PARTIAL_MARKER} <reason>\` if it is intentionally not total).`);
+        errors.push(`${loc} references ${referenced.size} ${enumSymbol} members [${[...referenced].sort().join(', ')}] but carries no \`${totalMarker}\` marker — a structure total over ${enumSymbol} must be annotated so the gate enforces its totality (or mark it \`${partialMarker} <reason>\` if it is intentionally not total).`);
         sites.push({ file, line: line + 1, symbol, marker: null, referenced: [...referenced], missing: [] });
         continue;
       }
 
-      const fallthrough = parseFallthrough(comment);
+      const fallthrough = parseFallthrough(comment, totalMarker);
       if (fallthrough.size > 1) {
         errors.push(`${loc} declares more than one \`fallthrough=\` member [${[...fallthrough].sort().join(', ')}] — at most ONE documented default is allowed, so the exemption can't be used to list away a real missing member.`);
       }
       const missing = values.filter((v) => !referenced.has(v) && !fallthrough.has(v));
       if (missing.length) {
-        errors.push(`${loc} is marked \`${VERDICT_TOTAL_MARKER}\` but is NOT total over VERDICTS — missing member(s) [${missing.sort().join(', ')}]. Every VERDICTS member must be handled here (or be the single documented \`fallthrough=\` default); an added enum member silently dropped here is exactly the #2823 defect class.`);
+        errors.push(`${loc} is marked \`${totalMarker}\` but is NOT total over ${enumSymbol} — missing member(s) [${missing.sort().join(', ')}]. Every ${enumSymbol} member must be handled here (or be the single documented \`fallthrough=\` default); an added enum member silently dropped here is exactly the #2823 defect class.`);
       }
       sites.push({ file, line: line + 1, symbol, marker: 'total', referenced: [...referenced], missing });
     }

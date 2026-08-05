@@ -221,6 +221,22 @@ const RETURN_HYGIENE = [
 // Agent I/O schemas — validated shapes the spawned agents return.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// #xdompzx — the `impactIfUnfixed` enum, MIRRORED as a literal because this harness body cannot `import`. Must stay
+// equal to `IMPACT_LEVELS` in `we:scripts/lib/jury-core.mjs`. The literal is the rootCause of the blocker-1 miss
+// (hand-typed producer key lists with no import edge to the shape they produce); the deterministic guard that makes
+// the parity mechanical is filed as its own item.
+const IMPACT_LEVEL_VALUES = ['cosmetic', 'degraded', 'broken', 'unrecoverable'];
+
+// #xdompzx / #2823 — the INTROSPECTION FIELDS every finding-producing surface on this workflow must ask for.
+// Declared once and spread into both finding schemas (juror + red-team) so the two cannot drift apart, and declared
+// at all — rather than merely tolerated by `additionalProperties: true` — so the producer is told the shape.
+const FINDING_INTROSPECTION_PROPERTIES = {
+  impactIfUnfixed: { type: 'string', enum: IMPACT_LEVEL_VALUES, description: 'what it COSTS to ship this finding — the ranking key the verdict reducers gate on (#xdompzx). Omit ONLY if you genuinely cannot tell: an absent/unrecognised value reads as UNDECLARED and fails CLOSED (blocks acceptance).' },
+  rootCause: { type: 'string', description: '#2823 — a blameless "why the CREATOR got this wrong" chain (the authoring failure mode), not merely what is wrong' },
+  prevention: { type: 'string', description: '#2823 — the cheapest DURABLE guard that would have caught this whole CLASS (a deterministic check:standards gate preferred over a review lens over a doc note)' },
+  preventionCaptured: { type: 'boolean', description: '#2823 — true if that guard already EXISTS as a gate; false ⇒ it must be FILED as a backlog item' },
+};
+
 // What the RESOLVE agent returns — the roster the engine (via resolve-roster.mjs) resolved for this subject.
 const ROSTER_SCHEMA = {
   type: 'object',
@@ -282,6 +298,7 @@ const JUROR_SCHEMA = {
           failure_scenario: { type: 'string' },
           category: { type: 'string' },
           line: { type: 'number' },
+          ...FINDING_INTROSPECTION_PROPERTIES,
         },
       },
     },
@@ -323,6 +340,7 @@ const RED_TEAM_SCHEMA = {
           failure_scenario: { type: 'string' },
           category: { type: 'string' },
           line: { type: 'number' },
+          ...FINDING_INTROSPECTION_PROPERTIES,
         },
       },
     },
@@ -477,9 +495,13 @@ function jurorPrompt(subject, noun, lens, mandate, method, material, materialFil
     // (why the creator erred, blameless), prevention (the cheapest durable guard — a deterministic check:standards
     // gate preferred over a lens over a doc note), preventionCaptured (true if that guard already exists, else
     // false ⇒ it must be FILED before accept). This surface's return schema is additionalProperties:true.
-    `Return { lens: "${lens}", findings: [{ summary, file?, failure_scenario?, category?, line?, rootCause, prevention, preventionCaptured }] }. For EACH`,
-    'finding include rootCause + prevention + preventionCaptured. Return an EMPTY findings array if the subject',
-    'survives your lens\'s scrutiny (do not pad with nitpicks). Return ONLY the structured object.',
+    // #xdompzx — plus impactIfUnfixed, the RANKING key the verdict reducers gate on. The mandate demands it, so
+    // this concrete key list must ASK for it too, or a juror resolves the conflict toward the list and the dial
+    // never reaches production (blocker 1).
+    `Return { lens: "${lens}", findings: [{ summary, file?, failure_scenario?, category?, line?, impactIfUnfixed, rootCause, prevention, preventionCaptured }] }. For EACH`,
+    `finding include impactIfUnfixed (exactly one of: ${IMPACT_LEVEL_VALUES.join(', ')}) + rootCause + prevention +`,
+    'preventionCaptured. Return an EMPTY findings array if the subject survives your lens\'s scrutiny (do not pad',
+    'with nitpicks). Return ONLY the structured object.',
   ].filter((l) => l !== '').join('\n');
 }
 
@@ -588,10 +610,12 @@ function redTeamPrompt(subject, noun, material, materialFile) {
     '',
     // #2823 — a red-team finding is still a finding: carry rootCause + prevention + preventionCaptured (see the
     // shared mandate) so a ratification-blocking defect also names the durable guard that would catch its class.
-    'Return { findings: [{ summary, file?, failure_scenario?, category?, line?, rootCause, prevention, preventionCaptured }] }. Each finding is a',
-    'BLOCKING reason not to ratify; include rootCause + prevention + preventionCaptured on each. Return an EMPTY',
-    'findings array ONLY if you tried hard and genuinely could not break the accept (do NOT pad with nitpicks — a',
-    'red-team finding must be a real reason to withhold ratification). Return ONLY the structured object.',
+    // #xdompzx — and impactIfUnfixed, so a red-team finding is RANKED by what it costs to ship, like any other.
+    'Return { findings: [{ summary, file?, failure_scenario?, category?, line?, impactIfUnfixed, rootCause, prevention, preventionCaptured }] }. Each finding is a',
+    `BLOCKING reason not to ratify; include impactIfUnfixed (exactly one of: ${IMPACT_LEVEL_VALUES.join(', ')}) +`,
+    'rootCause + prevention + preventionCaptured on each. Return an EMPTY findings array ONLY if you tried hard and',
+    'genuinely could not break the accept (do NOT pad with nitpicks — a red-team finding must be a real reason to',
+    'withhold ratification). Return ONLY the structured object.',
   ].filter((l) => l !== '').join('\n');
 }
 

@@ -68,8 +68,17 @@ function renderDisposition(disposition) {
 
 /**
  * Render ONE finding as a markdown bullet. Pure. Shows, when present: the `file:line` (or bare `file`) anchor,
- * the summary, the failure scenario (after an em-dash), and the verify tag (`CONFIRMED`/`PLAUSIBLE`). Tolerant
- * of a finding carrying only a summary.
+ * the summary, the failure scenario (after an em-dash), the verify tag (`CONFIRMED`/`PLAUSIBLE`), the declared
+ * `impactIfUnfixed`, and — as a nested sub-bullet — the named `prevention` guard with whether it is already
+ * CAPTURED or still OWED. Tolerant of a finding carrying only a summary.
+ *
+ * WHY IMPACT + PREVENTION ARE ON THE MERGE PATH (#xdompzx review, blocker 3B). `PREVENTION_IMPACT_BAR` lets a
+ * below-bar finding's uncaptured guard ride a clean `accept`. That is only a SCALING of the gate — rather than a
+ * silent loosening — if the two facts that justified un-blocking it reach a reader on the path it opens: the
+ * impact the reviewer declared, and the guard the repo still owes. The operator notice
+ * (`renderPreventionSummary`) fires only on the ESCALATED event, which is exactly the path a below-bar finding no
+ * longer takes. This comment body is posted on every review, escalated or merged, so it is where those two facts
+ * belong. Anyone who disagrees with the declared impact can see it and say so before the merge.
  * @param {import('./review-core.mjs').Finding} f
  * @returns {string}
  */
@@ -80,6 +89,11 @@ function renderFindingLine(f) {
   let line = parts.join(' — ');
   if (f.failure_scenario) line += ` — ${f.failure_scenario}`;
   if (f.verdict) line += ` _[${f.verdict}]_`;
+  if (f.impactIfUnfixed) line += ` _[impact if unfixed: ${f.impactIfUnfixed}]_`;
+  if (f.prevention) {
+    const state = f.preventionCaptured === true ? 'captured' : 'OWED — file it';
+    line += `\n  - _Prevention (${state}):_ ${f.prevention}`;
+  }
   return `- ${line}`;
 }
 

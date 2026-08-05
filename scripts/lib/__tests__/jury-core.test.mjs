@@ -32,6 +32,9 @@ import {
   foldRedTeamVerdict,
   IMPACT_LEVELS,
   IMPACT_STRICTNESS,
+  IMPACT_GLOSS,
+  VERDICT_STRICTNESS,
+  verdictStrictness,
   impactStrictness,
   PREVENTION_IMPACT_BAR,
   blocksAcceptance,
@@ -615,12 +618,93 @@ describe('IMPACT IF UNFIXED + the strictness dial (#xdompzx)', () => {
     expect(PREVENTION_IMPACT_BAR).toBe(IMPACT_LEVELS.BROKEN);
   });
 
-  it('the mandate demands impact on every finding but scales the prevention demand to the bar', () => {
+  it('the mandate demands impact on every finding, and DEFINES each level from IMPACT_GLOSS (not a pasted copy)', () => {
     const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
     expect(text).toContain('IMPACT (required, for EVERY finding)');
-    for (const level of Object.values(IMPACT_LEVELS)) expect(text).toContain(level);
-    expect(text).toContain('OPTIONAL below');
-    expect(text).toContain('do NOT manufacture a gate proposal for a nit');
-    expect(text).not.toContain('at every severity, nits included');
+    // The GLOSS, not merely the bare level name — a `join(', ')` of the enum satisfies a name-only assertion, which
+    // is how a fifth level could ship listed-but-undefined with the suite green (#xdompzx review, finding 6).
+    for (const level of Object.values(IMPACT_LEVELS)) {
+      expect(text).toContain(level);
+      expect(text).toContain(IMPACT_GLOSS[level]);
+    }
+  });
+
+  // ── #xdompzx review, blocker 3A — the prevention DEMAND is unconditional; only the GATE consults the bar. ──
+  // Asserted on the SURFACE (the mandate text a reviewer actually reads), not on the predicate: a demand a
+  // reviewer can opt out of by declaring a finding cheap starves both the operator notice and the posted PR
+  // comment of the guards they exist to surface, on exactly the path the bar newly un-blocks.
+  it('the mandate demands the prevention triple on EVERY finding — never conditioned on the impact bar', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
+    expect(text).toContain('PREVENTION INTROSPECTION (required, for EVERY finding you report — at every severity, nits included)');
+    expect(text).toContain('rootCause');
+    expect(text).toContain('prevention');
+    expect(text).toContain('preventionCaptured');
+    // the conditioning this PR shipped and the review bounced — it must not come back in any wording
+    expect(text).not.toContain('OPTIONAL below');
+    expect(text).not.toContain('do NOT manufacture a gate proposal for a nit');
+    expect(text).not.toMatch(/required for every finding at `?\w+`? or above/i);
+  });
+
+  it('the mandate still tells reviewers WHERE the bar bites — reporting is unconditional, blocking is not', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
+    expect(text).toContain(PREVENTION_IMPACT_BAR);
+    expect(text).toContain('reporting is unconditional, BLOCKING is not');
+    expect(text).toContain('BLOCKS acceptance');
+  });
+});
+
+// ── #xdompzx review, blocker 2 — the rank tables are read with keys that arrive as FREE-FORM MODEL JSON. ──
+// `Object.freeze` seals own properties but does not detach `Object.prototype`, so on a normal object literal a bare
+// bracket read of an inherited key returns a function/object instead of `undefined`: a `!== undefined` membership
+// test passes, and the value then compares as `NaN` — false in BOTH directions, i.e. the guard fails OPEN. These
+// probe the actual prototype members, not a hand-picked non-adversarial invented word.
+describe('rank tables are prototype-proof (#xdompzx review, blocker 2)', () => {
+  const PROTO_KEYS = ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__', 'isPrototypeOf', 'propertyIsEnumerable'];
+  const guarded = (extra = {}) => normalizeFinding({
+    summary: 'a finding', prevention: 'some durable gate', preventionCaptured: false, outcome: 'fixed', ...extra,
+  });
+
+  it('both tables are NULL-PROTOTYPE, so an inherited key is genuinely absent', () => {
+    expect(Object.getPrototypeOf(IMPACT_STRICTNESS)).toBe(null);
+    expect(Object.getPrototypeOf(VERDICT_STRICTNESS)).toBe(null);
+    for (const key of PROTO_KEYS) {
+      expect(IMPACT_STRICTNESS[key]).toBeUndefined();
+      expect(VERDICT_STRICTNESS[key]).toBeUndefined();
+    }
+  });
+
+  it.each(PROTO_KEYS)('normalizeFinding DROPS impactIfUnfixed: "%s" (it is not an impact level)', (key) => {
+    expect(guarded({ impactIfUnfixed: key })).not.toHaveProperty('impactIfUnfixed');
+  });
+
+  it.each(PROTO_KEYS)('an uncaptured guard declaring impactIfUnfixed: "%s" STILL BLOCKS — fails closed, not open', (key) => {
+    const f = guarded({ impactIfUnfixed: key });
+    expect(blocksAcceptance(f)).toBe(true);
+    expect(deriveVerdict({ findings: [f] })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it.each(PROTO_KEYS)('impactStrictness("%s") THROWS rather than returning an inherited member', (key) => {
+    expect(() => impactStrictness(key)).toThrow(/no rank for impact level/);
+  });
+
+  it.each(PROTO_KEYS)('verdictStrictness("%s") THROWS rather than returning an inherited member', (key) => {
+    expect(() => verdictStrictness(key)).toThrow(/no strictness rank for verdict/);
+  });
+
+  it('a prototype-key BAR is rejected too — the dial cannot be turned to a non-level', () => {
+    for (const key of PROTO_KEYS) {
+      expect(() => blocksAcceptance(guarded({ impactIfUnfixed: 'broken' }), { bar: key })).toThrow(/no rank for impact level/);
+    }
+  });
+});
+
+describe('IMPACT_GLOSS — the level definitions are DATA, single-sourced (#xdompzx review, finding 6)', () => {
+  it('is total over IMPACT_LEVELS, null-prototype, and every gloss is non-empty', () => {
+    expect(Object.getPrototypeOf(IMPACT_GLOSS)).toBe(null);
+    for (const level of Object.values(IMPACT_LEVELS)) {
+      expect(Object.hasOwn(IMPACT_GLOSS, level)).toBe(true);
+      expect(IMPACT_GLOSS[level].length).toBeGreaterThan(10);
+    }
+    expect(Object.keys(IMPACT_GLOSS).sort()).toEqual(Object.values(IMPACT_LEVELS).sort());
   });
 });
