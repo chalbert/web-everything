@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+# #2579 — auto-deploy skills-src/ to ~/.claude/skills after any merge that touches it, so a landed skill
+# fix is actually live without a manual hand-sync (the closing-session/session-cost.mjs staleness this
+# closes: the fix merged to main but the deployed copy kept serving the old numbers until hand-synced).
+# Fires on every successful `git merge`, including the fast-forward `git pull --ff-only` the drain's
+# syncMain() runs on the primary checkout after landing a couple (scripts/lane-drain.mjs).
+#
+# Skip lane clones (under .lanes/): a lane's local git state is not the deploy source of truth, and every
+# lane running this on its own merge would race the same shared ~/.claude/skills tree for no benefit — only
+# the primary checkout's post-merge state should ever deploy. Wired via `core.hooksPath .githooks` (the
+# `prepare` npm script), so this also applies to a lane's `npm ci`, but lane clones only ever `reset --hard`
+# (no merge, so this never fires there) except via this explicit path guard as a second line of defence.
+case "$(pwd)" in
+  */.lanes/*) exit 0 ;;
+esac
+
+# Only run when the merge actually touched skills-src/ — ORIG_HEAD is unset on the very first merge in a
+# fresh clone; the redirect below turns that into "no diff" rather than a noisy fatal.
+if git diff --name-only ORIG_HEAD HEAD -- skills-src/ 2>/dev/null | grep -q .; then
+  node scripts/sync-skills-deploy.mjs || echo "warning: skills deploy sync failed — run 'npm run skills:sync' by hand" >&2
+fi
