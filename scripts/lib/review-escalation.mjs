@@ -65,9 +65,10 @@ export function isStatutePath(path) {
  *  these files change how the system itself behaves, so a bad merge there is far costlier than a leaf edit.
  *
  *  TWO KINDS OF PATTERN, by whether the surface TRAVELS on extraction (#2479, sibling to #2448/#2480):
- *   • CROSS-REPO surfaces (skills, hooks, CI, statute) already anchor with `(^|\/)`, so they match a relocated
- *     copy for free — `plateau-app/.claude/skills/drain/SKILL.md` still trips, just like `.claude/skills/…` does
- *     today. No travel work is needed for these.
+ *   • CROSS-REPO surfaces (skills, agent memory — both their `.claude/` link spelling AND their `*-src/` source
+ *     trees — hooks, CI, statute) already anchor with `(^|\/)`, so they match a relocated copy for free —
+ *     `plateau-app/.claude/skills/drain/SKILL.md` and `plateau-app/skills-src/…` both trip, just like the WE
+ *     spellings do. No travel work is needed for these.
  *   • WE-PERMANENT surfaces stay `^`-anchored on purpose: the standards defs (`src/_data/…json`) live in WE
  *     forever (WE holds the standard), and `^scripts\/` escalates every WE script WHILE it is in WE. The
  *     RELOCATABLE delivery-engine scripts (pr-land, lane-drain, …) also match `^scripts\/` while here, but that
@@ -76,18 +77,29 @@ export function isStatutePath(path) {
  *     are deliberately NOT registered there: WE is their permanent home, `^scripts\/` is the correct matcher for
  *     them, and there is nowhere for them to travel to.
  *
- *  MATCH THE SOURCE TREE, NOT THE SYMLINK (#2909). In WE both agent-behaviour trees were relocated out of
- *  `.claude/` by #2266 and left behind a SYMLINK: `.claude/skills → ../skills-src` and
- *  `.claude/agent-memory → ../agent-memory-src`. Git tracks a symlink as a leaf BLOB and never descends it, so
- *  no diff path can ever begin with either link spelling — every real edit lands as `skills-src/…` /
- *  `agent-memory-src/…`. The `.claude/skills/` entry below therefore matched NOTHING in WE from 2026-07-04
- *  until this entry was added, and #1040 rewrote the land bar and merged with no `review:*` label at all. Note
- *  the direction of the fix: the link spellings are KEPT (in plateau-app `.claude/skills/` is a real tracked
- *  directory, and the `(^|\/)` anchor is live there) and the SOURCE spellings are ADDED alongside them. Adding
- *  the link spelling for a relocated tree is the wrong instinct — it registers a pattern git can never emit. */
+ *  MATCH THE SOURCE TREE, AND THE SYMLINK NODE ITSELF (#2909). In WE both agent-behaviour trees were relocated
+ *  out of `.claude/` by #2266 and left behind a SYMLINK: `.claude/skills → ../skills-src` and
+ *  `.claude/agent-memory → ../agent-memory-src`. Git tracks a symlink as a leaf BLOB and never DESCENDS it, so
+ *  no diff path can ever begin with `.claude/skills/…` in WE — every real edit lands as `skills-src/…` /
+ *  `agent-memory-src/…`. The `.claude/skills/` entry therefore matched NOTHING in WE from 2026-07-04 until the
+ *  source spellings were added, and #1040 rewrote the land bar and merged with no `review:*` label at all.
+ *
+ *  THREE spellings must all score, and the one anchor below covers all three:
+ *   • `skills-src/…` / `agent-memory-src/…` — the SOURCE trees; what a WE diff actually carries.
+ *   • `…/.claude/skills/…` — the link spelling as a REAL tracked directory (plateau-app has 2 files there),
+ *     live cross-repo via the `(^|\/)` anchor. Kept: deleting it would uncover the siblings.
+ *   • `.claude/skills` / `.claude/agent-memory` with NO trailing slash — the symlink BLOB itself. Git cannot
+ *     descend a link, but it absolutely emits the LINK NODE as a diff path when the link is created, REPOINTED
+ *     or DELETED. `.claude/skills → ../somewhere-else` is a one-line commit that swaps the entire operating-
+ *     procedure tree the agent loads, and before the `(\/|$)` alternative below it scored nothing at all.
+ *  Hence `(skills|agent-memory)(\/|$)` rather than one `…\/` regex per tree: the trailing separator is OPTIONAL
+ *  (so the leaf blob matches) and both trees share the `.claude/` anchor (so neither can be registered without
+ *  the other). This is the `(^|\/)\.claude\/`-scoped anchor #2909's Done-when bullet 4 proposed, kept narrow to
+ *  the two procedure directories so it does NOT sweep in `.claude/settings.json` / `.claude/commands/` — those
+ *  are real gaps but a separately-filed call (#x853s5c), not a side effect of this one. */
 const BLAST_RADIUS = [
   /^scripts\//,                              // build/CI/merge tooling (WHILE in WE; relocatable engine files also travel by basename — see BLAST_RADIUS_ENGINE)
-  /(^|\/)\.claude\/skills\//,                // agent skills, as a REAL dir (plateau-app) — travels cross-repo via (^|\/); dead in WE, see above
+  /(^|\/)\.claude\/(skills|agent-memory)(\/|$)/, // both agent-behaviour trees under the link spelling: a REAL dir (plateau-app) AND the bare symlink blob (repoint/delete) — travels cross-repo via (^|\/)
   /(^|\/)skills-src\//,                      // …and WE's post-#2266 source home for them — the spelling WE diffs actually carry
   /(^|\/)agent-memory-src\//,                // agent memory (the standing instructions) — sibling to skills; the surface #1040 slipped through
   /(^|\/)\.githooks\//,                       // git hooks (the guards) — already travels cross-repo
@@ -229,7 +241,9 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * signals }` — `escalate` is true iff ANY rubric signal fired; `careLevel` (#2567) is the advisory dial derived
  * from the same signals (`deriveCareLevel`); `reasons` is the human-readable rule outcome the drain STAMPS
  * (`escalated: yes/no` + why). Signals (each independent):
- *   • blast-radius — the diff touches a high-blast-radius surface (scripts/, skills, hooks, CI, statute, defs).
+ *   • blast-radius — the diff touches a high-blast-radius surface (scripts/, the agent-behaviour trees — skills
+ *                    and agent memory, in both their `.claude/` link and `*-src/` source spellings — hooks, CI,
+ *                    statute, standards defs).
  *   • size         — total changed lines ≥ thresholds.diffLines.
  *   • dismissed    — the lane's pre-PR review (#2170) DISMISSED ≥1 finding — the STRONGEST signal (it targets
  *                    author anchoring directly: the lane judged its own reviewer's findings away).

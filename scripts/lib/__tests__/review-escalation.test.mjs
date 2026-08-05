@@ -30,7 +30,8 @@ describe('isBlastRadiusPath', () => {
   it('flags tooling / skills / hooks / CI / statute / standards-defs', () => {
     for (const p of [
       'scripts/merge-ai-prs.mjs',
-      'plateau-app/.claude/skills/stress-test/SKILL.md', // a REAL tracked dir — in plateau-app, not WE (#2909)
+      '.claude/skills/drain/SKILL.md',                   // the link spelling at a repo's OWN root — the `^` branch of `(^|\/)`
+      'plateau-app/.claude/skills/stress-test/SKILL.md', // …and the same spelling as a REAL tracked dir one repo over (#2909)
       '.githooks/pre-push',
       '.github/workflows/ci.yml',
       'docs/agent/platform-decisions.md',
@@ -44,10 +45,10 @@ describe('isBlastRadiusPath', () => {
   });
 
   // #2909 — #2266 relocated both agent-behaviour trees out of `.claude/` and left a symlink behind. Git tracks a
-  // symlink as a leaf blob and never descends it, so a WE diff ALWAYS carries the source spelling and never the
-  // link spelling. These cases use the paths git can actually emit; the old `.claude/skills/drain/SKILL.md`
-  // fixture asserted a string this repo cannot produce, which is why the dead entry stayed green for a month.
-  describe('#2909 — the post-#2266 SOURCE trees are what a WE diff actually carries', () => {
+  // symlink as a leaf blob and never DESCENDS it, so a WE diff of a rule's CONTENT always carries the source
+  // spelling. But git does emit the LINK NODE itself when the link is created / repointed / deleted, and the
+  // link spelling is a real tracked directory one repo over — so all three spellings must score.
+  describe('#2909 — all three spellings of the agent-behaviour trees score', () => {
     it('flags the source spelling of both relocated trees', () => {
       for (const p of [
         'skills-src/drain/SKILL.md',
@@ -56,6 +57,30 @@ describe('isBlastRadiusPath', () => {
         'agent-memory-src/106-backlog_is_the_tracker.md',
       ]) expect(isBlastRadiusPath(p)).toBe(true);
     });
+    // The finding the first cut of this fix missed: `(^|\/)\.claude\/skills\//` REQUIRES a trailing slash, so the
+    // symlink BLOB — the diff path git emits for `.claude/skills -> ../somewhere-else`, a one-line commit that
+    // swaps the whole operating-procedure tree — scored nothing at all. The trailing separator is now optional.
+    it('flags the bare SYMLINK LEAF itself — repointing or deleting the link is a diff path git really emits', () => {
+      for (const p of ['.claude/skills', '.claude/agent-memory',
+                       'plateau-app/.claude/skills', 'plateau-app/.claude/agent-memory']) {
+        expect(isBlastRadiusPath(p)).toBe(true);
+      }
+      // …and end-to-end: a 2-line commit repointing the link can no longer merge with no review label.
+      const r = scoreEscalation({ changedFiles: ['.claude/skills'], diffLines: 2 });
+      expect(r.escalate).toBe(true);
+      expect(r.reasons.join(' ')).toMatch(/blast-radius/);
+    });
+    // The SYMMETRY finding: `.claude/skills/` was registered while `.claude/agent-memory/` was not, so a sibling
+    // repo keeping agent memory as a REAL directory had zero coverage — the #1040/#1043/#1045 hole, relocated
+    // one repo over. Both trees now share one `.claude/(skills|agent-memory)` anchor, so neither can be
+    // registered without the other.
+    it('flags the link spelling as a REAL directory for BOTH trees, at a repo root and cross-repo', () => {
+      for (const p of ['.claude/skills/drain/SKILL.md', '.claude/agent-memory/1-rule.md',
+                       'plateau-app/.claude/skills/stress-test/SKILL.md',
+                       'plateau-app/.claude/agent-memory/1-rule.md']) {
+        expect(isBlastRadiusPath(p)).toBe(true);
+      }
+    });
     it('the source trees escalate, so a skill/memory edit can never merge unreviewed (the #1040 hole)', () => {
       for (const p of ['skills-src/drain/SKILL.md', 'agent-memory-src/index-meta.md']) {
         const r = scoreEscalation({ changedFiles: [p], diffLines: 40 });
@@ -63,9 +88,21 @@ describe('isBlastRadiusPath', () => {
         expect(r.reasons.join(' ')).toMatch(/blast-radius/);
       }
     });
+    // The exact file that regressed in PR #1040 / #1043 / #1045 — the rule that defines the land bar itself.
+    // All three merged with no `review:*` label; this case is the regression guard for that specific path.
+    it('the land-bar memory rule that regressed in #1040/#1043/#1045 no longer scores {escalate:false}', () => {
+      const p = 'agent-memory-src/land-on-no-regression-not-perfection.md';
+      const r = scoreEscalation({ changedFiles: [p], diffLines: 12 });
+      expect(r.escalate).toBe(true);
+      expect(r.signals.blastRadius).toContain(p);
+      expect(producerReviewLabel(r)).toBe(REVIEW_LABELS.pending); // a label at PR-open, not a silent merge
+    });
     it('stays narrow — a prose doc ABOUT memory, or a backlog item naming it, is still a leaf', () => {
       for (const p of ['docs/agent/memory-management.md', 'backlog/1234-agent-memory-thing.md',
-                       'src/_data/agent-memory-notes.json']) {
+                       'src/_data/agent-memory-notes.json',
+                       '.claude/skills-notes.md',    // the optional separator must not swallow a SIBLING name…
+                       '.claude/agent-memory-notes', // …at either the file or the extension-less spelling
+                       '.claude/settings.json']) {   // …and the anchor stays scoped to the two trees (#x853s5c)
         expect(isBlastRadiusPath(p)).toBe(false);
       }
     });

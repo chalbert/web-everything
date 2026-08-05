@@ -72,46 +72,69 @@ blind spot it exposed is independent of it and outlives it.
   common parent for the built halves, so an anchor on `(^|\/)\.claude\/` scoped to the procedure directories may
   be a better fix than adding one regex per pair.
 
-## Resolved 2026-08-05 — with one Done-when bullet superseded by proof
+## Resolved 2026-08-05 — all four Done-when bullets delivered
 
-Delivered in PR #1048: `we:skills-src/` and `we:agent-memory-src/` are both registered and both pinned by tests,
-and `we:.claude/skills/` is kept. Grounded independently while reviewing **PR #1044**, which proposed the memory
-half alone and was closed in favour of this item; its review comment carries the panel verdict and the
-reproductions.
+Delivered in PR #1048. `BLAST_RADIUS` in [`we:scripts/lib/review-escalation.mjs`](scripts/lib/review-escalation.mjs)
+now scores **all three spellings** of both agent-behaviour trees:
 
-**Bullet 2 is delivered for the source spelling only, and deliberately NOT for `.claude/agent-memory/`.** The
-"built half" framing does not hold: `we:.claude/agent-memory` is not a build output, it is a **symlink** left
-behind when #2266 relocated the tree (target `../agent-memory-src`; `we:.claude/skills → ../skills-src` is the
-same shape). Git tracks a symlink as a leaf blob and never descends it, so no diff path can begin with either
-link spelling. Reproduced in a throwaway repo whose symlink blob hash is byte-identical to this repo's:
+| Spelling | Pattern | Why it must score |
+|---|---|---|
+| `we:skills-src/…`, `we:agent-memory-src/…` | `(^\|\/)skills-src\/`, `(^\|\/)agent-memory-src\/` | the SOURCE trees — what a WE diff of a rule's *content* actually carries |
+| `we:.claude/skills/…`, `we:.claude/agent-memory/…` | `(^\|\/)\.claude\/(skills\|agent-memory)(\/\|$)` | the link spelling as a **real tracked directory** — live in plateau-app, and in any repo that never relocated the tree |
+| `we:.claude/skills`, `we:.claude/agent-memory` (no trailing slash) | same pattern, via the `$` alternative | the **symlink blob itself** — git emits the link node when the link is created, repointed or deleted |
+
+Grounded independently while reviewing **PR #1044**, which proposed the memory half alone and was closed in
+favour of this item; its review comment carries the panel verdict and the reproductions.
+
+**Bullet 2 is delivered in full**, for both the source spelling and `we:.claude/agent-memory/`. An earlier cut of
+this PR registered the source spelling only, on the reasoning that the link spelling "can fire nowhere". That
+reasoning was **half right and therefore wrong**, and the review caught it. What is true: git tracks a symlink as
+a leaf blob and never **descends** it, so no diff path can begin with `we:.claude/agent-memory/…` *in this repo* —
 
 ```
 $ printf 'b\n' >> .claude/agent-memory/rule.md      # write THROUGH the link
 $ git diff --name-only
 agent-memory-src/rule.md                             # ← the source spelling, always
-$ git diff --name-only -- '.claude/agent-memory/rule.md'
-(empty — git cannot address that spelling at all)
 ```
 
-Confirmed against history: since the relocation (`599ccf06` / `95c59dc4`, 2026-07-04) there are **0** commits
-under either link spelling and **125** under `we:skills-src/`. Checked cross-repo too — neither plateau-app nor
-frontierui has a tracked `.claude/agent-memory/` directory at all. Registering that spelling would add a pattern
-that can fire **nowhere**, which is the mistake PR #1044 made. If you disagree the change is one line; it is
-flagged here rather than quietly dropped.
+What that misses, twice over:
 
-`we:.claude/skills/` **is** kept, for the opposite reason: plateau-app has 2 real tracked files under it, where
-the `(^|\/)` cross-repo anchor is live. Deleting it would break the siblings.
+1. **The link NODE is itself a diff path.** `we:.claude/agent-memory` is tracked at mode `120000`. Repointing it
+   (`we:.claude/skills → ../some-other-tree`) or deleting it is a one-line commit whose diff path is exactly
+   `we:.claude/skills` — and every pattern required a trailing `/`, so it scored `{escalate: false}`. That commit
+   swaps the entire operating-procedure tree the agent loads, with no reviewer. The trailing separator is now
+   optional (`(\/|$)`), which closes it.
+2. **"Nowhere" was scoped to WE only.** `we:.claude/skills/` was kept precisely because plateau-app has 2 real
+   tracked files under it — so the same argument applied to `we:.claude/agent-memory/` proves the opposite of what
+   was claimed: a sibling repo that keeps agent memory as a real directory rather than relocating it had **zero**
+   coverage. That is the #1040/#1043/#1045 hole, relocated one repo over. Both trees now share one `.claude/`
+   anchor, so neither can be registered without the other.
 
-Bullet 4 is discharged: `we:agent-memory-src/` was the other pair, registered in the same change. The suggested
-`(^|\/)\.claude\/` anchor was **not** taken — it would sweep in `we:.claude/settings.json` and
-`we:.claude/commands/` as a side effect. Those are real gaps but a different call (below).
+Bullet 4 is discharged, and this item's own suggestion was **taken**: the fix is the `(^|\/)\.claude\/`-scoped
+anchor, narrowed to the two procedure directories — `(skills|agent-memory)` — so it does **not** sweep in
+`we:.claude/settings.json` or `we:.claude/commands/`. `we:agent-memory-src/` was the other source/build pair.
+
+Bullet 3 is delivered: [`we:scripts/lib/__tests__/review-escalation.test.mjs`](scripts/lib/__tests__/review-escalation.test.mjs)
+pins every spelling of both trees — including the bare symlink leaves, `plateau-app/.claude/agent-memory/…`, the
+root-anchored `we:.claude/skills/…` positive (so the `^` branch of `(^|\/)` keeps a live fixture), and the named
+regression case asserting `scoreEscalation` on `we:agent-memory-src/land-on-no-regression-not-perfection.md`
+escalates and earns `review:pending` at PR-open. Negative cases keep the optional separator from swallowing a
+sibling name (`we:.claude/skills-notes.md`).
+
+The three prose enumerations of the surface set were updated in the same change so the spec cannot drift from the
+code that reads it: the cross-repo bullet and `scoreEscalation`'s reason doc in
+[`we:scripts/lib/review-escalation.mjs`](scripts/lib/review-escalation.mjs), and the `blast-radius` token
+description in [`we:scripts/lib/review-policy.contract.json`](scripts/lib/review-policy.contract.json) — the
+machine-diffable spec whose per-entry prose *is* its meaning (#2564/#2566). Leaving the contract reading
+"(scripts, skills, hooks, CI, standards defs)" is the same drift class this item exists to fix, one level up.
 
 The tier question (statute vs blast-radius for the land-bar rule) is left open, as this item states.
 
-The test fixture that asserted on `we:.claude/skills/drain/SKILL.md` — a path this repo cannot produce, and the
-reason the dead entry stayed green for a month — now uses real spellings.
+Adjacent defects surfaced in the same pass and **not** covered here, each now filed rather than left in prose:
 
-Two adjacent defects surfaced in the same pass and are **not** covered here:
-`we:scripts/lib/invariant-catalogue.json:173` still claims the lane guard exempts agent memory (removed
-2026-07-09; the guard denies it), and `we:AGENTS.md`, `we:.claude/settings.json`, `we:.claude/commands/`,
-non-statute `we:docs/agent/` remain unregistered behaviour-defining surfaces.
+- `we:AGENTS.md`, `we:.claude/settings.json`, `we:.claude/commands/` and non-statute `we:docs/agent/` remain
+  unregistered behaviour-defining surfaces — **#x853s5c**.
+- The drain's content-resolve write-back emptied this very item to 0 bytes on the rebase that produced `836ae978`,
+  where the pure merge library replays the same stages cleanly — **#x0xlc1d**.
+- [`we:scripts/lib/invariant-catalogue.json`](scripts/lib/invariant-catalogue.json) still claims the lane guard
+  exempts agent memory (removed 2026-07-09; the guard denies it).
