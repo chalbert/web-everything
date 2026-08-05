@@ -30,7 +30,7 @@ describe('isBlastRadiusPath', () => {
   it('flags tooling / skills / hooks / CI / statute / standards-defs', () => {
     for (const p of [
       'scripts/merge-ai-prs.mjs',
-      '.claude/skills/drain/SKILL.md',
+      'plateau-app/.claude/skills/stress-test/SKILL.md', // a REAL tracked dir — in plateau-app, not WE (#2909)
       '.githooks/pre-push',
       '.github/workflows/ci.yml',
       'docs/agent/platform-decisions.md',
@@ -41,6 +41,39 @@ describe('isBlastRadiusPath', () => {
     for (const p of ['backlog/2171-x.md', 'demos/declarative-spa.html', 'src/_data/other.json']) {
       expect(isBlastRadiusPath(p)).toBe(false);
     }
+  });
+
+  // #2909 — #2266 relocated both agent-behaviour trees out of `.claude/` and left a symlink behind. Git tracks a
+  // symlink as a leaf blob and never descends it, so a WE diff ALWAYS carries the source spelling and never the
+  // link spelling. These cases use the paths git can actually emit; the old `.claude/skills/drain/SKILL.md`
+  // fixture asserted a string this repo cannot produce, which is why the dead entry stayed green for a month.
+  describe('#2909 — the post-#2266 SOURCE trees are what a WE diff actually carries', () => {
+    it('flags the source spelling of both relocated trees', () => {
+      for (const p of [
+        'skills-src/drain/SKILL.md',
+        'skills-src/jury/subject-jury.workflow.js',
+        'agent-memory-src/index-meta.md',
+        'agent-memory-src/106-backlog_is_the_tracker.md',
+      ]) expect(isBlastRadiusPath(p)).toBe(true);
+    });
+    it('the source trees escalate, so a skill/memory edit can never merge unreviewed (the #1040 hole)', () => {
+      for (const p of ['skills-src/drain/SKILL.md', 'agent-memory-src/index-meta.md']) {
+        const r = scoreEscalation({ changedFiles: [p], diffLines: 40 });
+        expect(r.escalate).toBe(true);
+        expect(r.reasons.join(' ')).toMatch(/blast-radius/);
+      }
+    });
+    it('stays narrow — a prose doc ABOUT memory, or a backlog item naming it, is still a leaf', () => {
+      for (const p of ['docs/agent/memory-management.md', 'backlog/1234-agent-memory-thing.md',
+                       'src/_data/agent-memory-notes.json']) {
+        expect(isBlastRadiusPath(p)).toBe(false);
+      }
+    });
+    it('both trees travel cross-repo via the (^|/) anchor, like the other agent surfaces', () => {
+      for (const p of ['plateau-app/skills-src/x/SKILL.md', 'frontierui/agent-memory-src/1-rule.md']) {
+        expect(isBlastRadiusPath(p)).toBe(true);
+      }
+    });
   });
 
   // #2479 (sibling to #2448/#2480) — the blast-radius surface TRAVELS with the delivery engine on extraction.
@@ -87,7 +120,8 @@ describe('isGateSelfPath — the POLICY tier of the trust chain (#2285 v1, #2448
     expect(isGateSelfPath('packages/plateau-loop/src/merge-ai-prs.mjs')).toBe(false); // engine stays agent-reviewable
   });
   it('does NOT flag other blast-radius code — those stay agent-reviewable', () => {
-    for (const p of ['scripts/pr-land.mjs', 'scripts/lane-pool.mjs', '.claude/skills/drain/SKILL.md',
+    for (const p of ['scripts/pr-land.mjs', 'scripts/lane-pool.mjs', 'skills-src/drain/SKILL.md',
+                     'agent-memory-src/index-meta.md',
                      'src/_data/blocks.json', 'scripts/lib/rebase-drop-manifest.mjs']) {
       expect(isGateSelfPath(p)).toBe(false);
     }

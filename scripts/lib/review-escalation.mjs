@@ -74,10 +74,22 @@ export function isStatutePath(path) {
  *     match is lost the moment #2445 extracts them out of we:scripts/ — so those, and only those, ALSO travel by
  *     basename via `BLAST_RADIUS_ENGINE` below. WE-only scripts (standards/backlog/memory/conformance/generators)
  *     are deliberately NOT registered there: WE is their permanent home, `^scripts\/` is the correct matcher for
- *     them, and there is nowhere for them to travel to. */
+ *     them, and there is nowhere for them to travel to.
+ *
+ *  MATCH THE SOURCE TREE, NOT THE SYMLINK (#2909). In WE both agent-behaviour trees were relocated out of
+ *  `.claude/` by #2266 and left behind a SYMLINK: `.claude/skills → ../skills-src` and
+ *  `.claude/agent-memory → ../agent-memory-src`. Git tracks a symlink as a leaf BLOB and never descends it, so
+ *  no diff path can ever begin with either link spelling — every real edit lands as `skills-src/…` /
+ *  `agent-memory-src/…`. The `.claude/skills/` entry below therefore matched NOTHING in WE from 2026-07-04
+ *  until this entry was added, and #1040 rewrote the land bar and merged with no `review:*` label at all. Note
+ *  the direction of the fix: the link spellings are KEPT (in plateau-app `.claude/skills/` is a real tracked
+ *  directory, and the `(^|\/)` anchor is live there) and the SOURCE spellings are ADDED alongside them. Adding
+ *  the link spelling for a relocated tree is the wrong instinct — it registers a pattern git can never emit. */
 const BLAST_RADIUS = [
   /^scripts\//,                              // build/CI/merge tooling (WHILE in WE; relocatable engine files also travel by basename — see BLAST_RADIUS_ENGINE)
-  /(^|\/)\.claude\/skills\//,                // agent skills (the operating procedures) — already travels cross-repo via (^|\/)
+  /(^|\/)\.claude\/skills\//,                // agent skills, as a REAL dir (plateau-app) — travels cross-repo via (^|\/); dead in WE, see above
+  /(^|\/)skills-src\//,                      // …and WE's post-#2266 source home for them — the spelling WE diffs actually carry
+  /(^|\/)agent-memory-src\//,                // agent memory (the standing instructions) — sibling to skills; the surface #1040 slipped through
   /(^|\/)\.githooks\//,                       // git hooks (the guards) — already travels cross-repo
   /(^|\/)\.github\//,                         // CI config / workflows — already travels cross-repo
   ...STATUTE_PATHS,                          // the statute layer (also forces a human — see scoreEscalation)
