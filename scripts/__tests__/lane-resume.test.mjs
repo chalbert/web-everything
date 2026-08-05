@@ -3,7 +3,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyLane, orderByBlockedBy, landDecision, land, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain, resolvedItemSet } from '../lane-resume.mjs';
+import { classifyLane, orderByBlockedBy, landDecision, land, testConclusionOf, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain, resolvedItemSet } from '../lane-resume.mjs';
+// The drain's own selector — asserted alongside so the enqueue side is PROVEN to read the same entry (#xkfv491).
+import { latestRequiredCheck } from '../merge-ai-prs.mjs';
 
 const resolved = new Set([2110, 2113]); // blockers already landed on main
 
@@ -114,6 +116,63 @@ describe('lane-resume — landDecision (#2202)', () => {
   });
 });
 
+describe('lane-resume — testConclusionOf (#xkfv491: the ONE rollup-read seam both readers go through)', () => {
+  // `landDecision` and `classifyLane` are pure and already take `testConclusion`; the defect lived in how the
+  // two SHELL sites extracted it — `roll.find(...)`, i.e. the FIRST entry by name. Both now call this seam, so
+  // covering it covers both (`land` is additionally proven end-to-end below).
+  const supersededThenGreen = {
+    statusCheckRollup: [
+      { __typename: 'CheckRun', name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:34:02Z' },
+      { __typename: 'CheckRun', name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:35:32Z' },
+    ],
+  };
+
+  it('reads the LATEST run, so a concurrency-cancelled entry no longer reads as red', () => {
+    expect(testConclusionOf(supersededThenGreen)).toBe('SUCCESS');
+    // The enqueue verdict this feeds: previously `red` (refuse to enqueue a genuinely green PR).
+    expect(landDecision({ mergeable: 'MERGEABLE', mergeState: 'CLEAN', testConclusion: testConclusionOf(supersededThenGreen) }).action).toBe('clean');
+  });
+
+  it('agrees with the drain — the same rollup, the same selector, no second opinion', () => {
+    expect(testConclusionOf(supersededThenGreen)).toBe(latestRequiredCheck(supersededThenGreen).conclusion);
+  });
+
+  it('classifyLane no longer re-buckets a stack behind a phantom red (#2396 broken-link rule)', () => {
+    const lane = classifyLane({ num: 7, mergeable: 'MERGEABLE', mergeState: 'CLEAN', testConclusion: testConclusionOf(supersededThenGreen) }, new Set());
+    expect(lane.disposition).toBe('ready');
+  });
+
+  it('a cancelled NEWEST run is still red, and an unreported check is still null (not red)', () => {
+    const greenThenCancelled = {
+      statusCheckRollup: [
+        { __typename: 'CheckRun', name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:34:02Z' },
+        { __typename: 'CheckRun', name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:35:32Z' },
+      ],
+    };
+    expect(testConclusionOf(greenThenCancelled)).toBe('CANCELLED');
+    expect(landDecision({ mergeable: 'MERGEABLE', mergeState: 'CLEAN', testConclusion: testConclusionOf(greenThenCancelled) }).action).toBe('red');
+    expect(testConclusionOf({ statusCheckRollup: [{ __typename: 'CheckRun', name: 'cla', conclusion: 'SUCCESS' }] })).toBeNull();
+    expect(testConclusionOf({})).toBeNull();
+    expect(testConclusionOf(null)).toBeNull();
+  });
+
+  it('a posted `test` commit status cannot enqueue a red tree (the CheckRun preference rides along)', () => {
+    const spoofed = {
+      statusCheckRollup: [
+        { __typename: 'CheckRun', name: 'test', conclusion: 'FAILURE', startedAt: '2026-08-05T18:00:00Z' },
+        { __typename: 'StatusContext', context: 'test', state: 'SUCCESS', createdAt: '2026-08-05T18:11:00Z' },
+      ],
+    };
+    expect(testConclusionOf(spoofed)).toBe('FAILURE');
+    expect(landDecision({ mergeable: 'MERGEABLE', mergeState: 'CLEAN', testConclusion: testConclusionOf(spoofed) }).action).toBe('red');
+  });
+
+  it('a lone StatusContext still decides when the workflow produced no `test` CheckRun', () => {
+    const statusOnly = { statusCheckRollup: [{ __typename: 'StatusContext', context: 'test', state: 'SUCCESS' }] };
+    expect(testConclusionOf(statusOnly)).toBe('SUCCESS');
+  });
+});
+
 // A scripted runner: canned results per (cmd + subcommand), recording the call order.
 function scriptedRun(script) {
   const calls = [];
@@ -186,6 +245,25 @@ describe('lane-resume — land (#2202/#2290: enqueue + trigger the drain, never 
     const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] } });
     expect(v.action).toBe('red');
     expect(calls.length).toBe(0); // decided from signals alone, touches nothing
+  });
+
+  it('a superseded CANCELLED run ahead of the SUCCESS still ENQUEUES (#xkfv491 — the #1042 jam, one layer earlier)', () => {
+    // Before the shared selector, `land` took the first entry, decided `red`, and refused to enqueue a PR whose
+    // current run was green — so the queue jammed at the enqueue step rather than at the drain.
+    const { run, calls } = scriptedRun({ ...prView() });
+    const v = land({
+      prNum: 5, run,
+      prInfo: {
+        headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN',
+        statusCheckRollup: [
+          { __typename: 'CheckRun', name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:34:02Z' },
+          { __typename: 'CheckRun', name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:35:32Z' },
+        ],
+      },
+    });
+    expect(v.action).toBe('enqueued');
+    expect(hasLabelEdit(calls)).toBe(true);
+    expect(hasGhMerge(calls)).toBe(false); // still never merges directly (#2290)
   });
 
   it('dry-run reports the enqueue plan without touching git/gh', () => {
