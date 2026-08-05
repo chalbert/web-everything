@@ -54,7 +54,7 @@ The Gap-1 section above still describes the *original* problem statement — its
 **Residue filed rather than bundled** (land-bar rule — non-blocking means tracked): #2918 (the fix
 reaches only `acquire`, not `list`/`provision --acquirable`), #2920 (the fan-out cost, 677 git spawns /
 29.5s on the live 38-lane pool), #2919 (containment unprovable when the remote tip object is absent
-locally), and #xyi0x0h (the pick-time proof is never re-verified before the destructive reset).
+locally), and #2924 (the pick-time proof is never re-verified before the destructive reset).
 
 **Next: Gap 2 only.** This story stays `open` because the release-ownership half below is untouched. Its
 own review found that widening ownership to the durable `ownerSession` lets a bare `release --all` drop a
