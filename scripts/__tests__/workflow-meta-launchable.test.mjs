@@ -18,6 +18,12 @@
  * A harness script cannot be unit-tested by running it (it needs live agents), and it is not an importable
  * module (its top-level `return` fails `node --check`). So this is the ONE cheap check that proves the thing
  * everyone assumed: that it can start at all.
+ *
+ * WHAT THIS FILE IS AND IS NOT. It is a UNIT test over `metaPurity`/`metaKeys` — pure functions run against
+ * source text. It is NOT an integration test, and it cannot be: the validator it models lives in the Workflow
+ * runtime and is unavailable to this repo. See the note on `PURE_KINDS` for what is observed vs inferred, and
+ * for why the safe failure direction is "too strict". A green run here means the meta matches OUR MODEL of the
+ * runtime's rule; only a real launch proves the runtime agrees.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -26,8 +32,28 @@ import ts from 'typescript';
 
 const ROOTS = ['scripts/workflows', 'skills-src'];
 
-// The node kinds a PURE literal may be built from. Anything else — an identifier, a call, a spread, a binary
-// `+`, a template with a substitution — is what the runtime rejects.
+// ⚠️ THIS SET IS A MODEL OF AN EXTERNAL VALIDATOR, NOT A CHECKED CONTRACT. Read this before trusting it.
+//
+// The real validator lives in the Claude Code Workflow runtime. It is NOT importable from this repo (grepped:
+// nothing here implements it), so NOTHING in this file can prove the list below matches it. This is a unit test
+// over our own belief about a boundary — the same shape as a fake that returns what its author assumed the real
+// dependency does, which is precisely how the `rev-parse --end-of-options` defect shipped green in this suite.
+//
+// What is GROUNDED — two observed rejections from the live runtime, both `BinaryExpression`:
+//   • backlog/2664 recorded `meta must be a pure literal: BinaryExpression` from a real failed launch;
+//   • `review-parked-prs.mjs` hit the same, which is why this file exists.
+// Everything else here is INFERENCE from the error's wording ("pure literal", "non-literal node type").
+//
+// The DIRECTIONS of error are not symmetric, and only one is dangerous:
+//   • too STRICT (we reject something the runtime accepts) → a false alarm, loud, fixed in minutes;
+//   • too LOOSE (we accept something the runtime rejects) → this test passes and the harness STILL cannot
+//     start — the exact silent failure it was written to end.
+// So when in doubt, leave a kind OUT. Adding one is a claim about the runtime that nothing here can check.
+//
+// The only real integration proof is a LAUNCH: the runtime validates `meta` before spawning any agent, so a
+// workflow that gets past validation has exercised the actual validator. That cannot run in CI (it needs the
+// harness), so it belongs in the PR's verification notes, not here. #xkvvdpf tracks grounding boundary claims
+// against real dependencies generally; this is the one boundary where the dependency is unavailable to us.
 const PURE_KINDS = new Set([
   ts.SyntaxKind.ObjectLiteralExpression,
   ts.SyntaxKind.ArrayLiteralExpression,
