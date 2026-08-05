@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, latestRequiredCheck, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -2179,5 +2179,110 @@ describe('#2417 — cross-pass cache reuses unchanged-SHA reads under --watch', 
     const p3 = await run(pr);
     expect(fetches).toBe(2);                                                // no new fetch — cache hit
     expect(p3.get('we::1').cached).toBe(true);
+  });
+});
+
+describe('latestRequiredCheck — a superseded run must not outvote the one that finished (#xkfv491)', () => {
+  // The exact PR #1042 rollup: a concurrency-cancelled run at index 0, the real SUCCESS at index 1.
+  const supersededThenGreen = {
+    statusCheckRollup: [
+      { name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:34:02Z' },
+      { name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:35:32Z' },
+    ],
+  };
+
+  it('reads the LATEST run, not the first-listed one — the jam that held #1042/#1046/#1012', () => {
+    expect(latestRequiredCheck(supersededThenGreen).conclusion).toBe('SUCCESS');
+    expect(isRequiredCheckGreen(supersededThenGreen)).toBe(true);
+  });
+
+  it('the ci:failed twin no longer fires on the superseded cancelled run', () => {
+    expect(isRequiredCheckFailed(supersededThenGreen)).toBe(false);
+  });
+
+  it('LATEST-WINS, not ignore-CANCELLED: a cancelled newest run means no current verdict', () => {
+    const greenThenCancelled = {
+      statusCheckRollup: [
+        { name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:34:02Z' },
+        { name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:35:32Z' },
+      ],
+    };
+    expect(isRequiredCheckGreen(greenThenCancelled)).toBe(false);
+    expect(isRequiredCheckFailed(greenThenCancelled)).toBe(true);
+  });
+
+  it('an in-flight run listed last suppresses the stale SUCCESS before it (live shape from PR #1046)', () => {
+    // The run still executing is the newest, so it decides — the PR is neither green nor red while it runs.
+    // No timestamp is consulted, so GitHub's `0001-01-01T00:00:00Z` sentinel for an unfinished run is inert.
+    const staleGreenPlusQueued = {
+      statusCheckRollup: [
+        { name: 'test', conclusion: 'SUCCESS', status: 'COMPLETED', startedAt: '2026-08-05T18:35:32Z', completedAt: '2026-08-05T18:36:10Z' },
+        { name: 'test', conclusion: '', status: 'QUEUED', startedAt: '2026-08-05T21:04:30Z', completedAt: '0001-01-01T00:00:00Z' },
+      ],
+    };
+    expect(latestRequiredCheck(staleGreenPlusQueued).status).toBe('QUEUED');
+    expect(isRequiredCheckGreen(staleGreenPlusQueued)).toBe(false); // in flight ⇒ no current verdict
+    expect(isRequiredCheckFailed(staleGreenPlusQueued)).toBe(false); // and not red either
+  });
+
+  it('ignores timestamps entirely — creation order alone decides (no clock is read)', () => {
+    // A rollup whose stamps CONTRADICT its order still resolves by order. This pins the trust-GitHub's-order
+    // rule: the earlier cut ranked by a timestamp and, on this shape, returned the FAILURE instead.
+    const stampsContradictOrder = {
+      statusCheckRollup: [
+        { name: 'test', conclusion: 'FAILURE', startedAt: '2026-08-05T18:40:00Z', completedAt: '2026-08-05T18:50:00Z' },
+        { name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:30:00Z', completedAt: '2026-08-05T18:31:00Z' },
+      ],
+    };
+    expect(isRequiredCheckGreen(stampsContradictOrder)).toBe(true);
+    const noTimes = { statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED' }, { name: 'test', conclusion: 'SUCCESS' }] };
+    expect(isRequiredCheckGreen(noTimes)).toBe(true);
+    const badTimes = {
+      statusCheckRollup: [
+        { name: 'test', conclusion: 'CANCELLED', startedAt: 'not-a-date' },
+        { name: 'test', conclusion: 'SUCCESS', startedAt: 'also-not-a-date' },
+      ],
+    };
+    expect(isRequiredCheckGreen(badTimes)).toBe(true);
+  });
+
+  it('matches the legacy StatusContext shape when the workflow produced nothing', () => {
+    const pr = {
+      statusCheckRollup: [
+        { context: 'test', state: 'FAILURE', createdAt: '2026-08-05T18:34:02Z' },
+        { context: 'test', state: 'SUCCESS', createdAt: '2026-08-05T18:35:32Z' },
+      ],
+    };
+    expect(isRequiredCheckGreen(pr)).toBe(true);
+  });
+
+  it('a posted commit status can NEVER override the real check run (merge-gate bypass, PR #1049 review)', () => {
+    // A `StatusContext` is postable through the commit-statuses API by anyone holding `statuses:write` — a
+    // collaborator, a bot, an installed App. Plain last-wins across both shapes would let one posted AFTER the
+    // real run clear the gate on a red tree. CheckRuns win whenever any exists.
+    const spoofedGreen = {
+      statusCheckRollup: [
+        { name: 'test', conclusion: 'FAILURE', startedAt: '2026-08-05T18:00:00Z', completedAt: '2026-08-05T18:10:00Z' },
+        { context: 'test', state: 'SUCCESS', createdAt: '2026-08-05T18:11:00Z' },
+      ],
+    };
+    expect(latestRequiredCheck(spoofedGreen).conclusion).toBe('FAILURE');
+    expect(isRequiredCheckGreen(spoofedGreen)).toBe(false);
+    expect(isRequiredCheckFailed(spoofedGreen)).toBe(true);
+  });
+
+  it('single-run, missing-check and non-required cases are unchanged', () => {
+    expect(latestRequiredCheck({ statusCheckRollup: [] })).toBeNull();
+    expect(latestRequiredCheck({ statusCheckRollup: [{ name: 'cla', conclusion: 'SUCCESS' }] })).toBeNull();
+    expect(isRequiredCheckGreen({ statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] })).toBe(true);
+    expect(isRequiredCheckGreen({ statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED' }] })).toBe(false);
+    expect(isRequiredCheckFailed({ statusCheckRollup: [] })).toBe(false);
+    expect(isRequiredCheckGreen(undefined)).toBe(false);
+  });
+
+  it('a PR whose ONLY run is cancelled still reads not-green (never landed on a superseded verdict)', () => {
+    const onlyCancelled = { statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:34:02Z' }] };
+    expect(isRequiredCheckGreen(onlyCancelled)).toBe(false);
+    expect(isRequiredCheckFailed(onlyCancelled)).toBe(true);
   });
 });
