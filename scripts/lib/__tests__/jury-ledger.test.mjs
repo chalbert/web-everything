@@ -394,3 +394,33 @@ describe('#2864 — the ledger records WHICH TREE the jury was seated over', () 
     expect(foldJuryLedger([a, b]).reviewedSha).toBe(null);
   });
 });
+
+describe('#2864 — buildReviewLedgerEvents is the REAL writer, so the sha must ride it', () => {
+  // PR #1034 review, finding 1: the field was write-dead. It existed on `rosterPickedEvent`, but the path the
+  // review pipeline actually uses is this one (the `jury-ledger record` CLI and review-parked-prs.mjs both come
+  // through here). Without it every ledger the repo writes folds to null — and a null from a CURRENT writer is
+  // indistinguishable from a legacy pre-field null, so any freshness gate built on it could only ever fail
+  // closed, on 100% of PRs. The field being valid on the event is not the same claim as the field being written.
+  const args = {
+    activeLenses: ['correctness', 'security'],
+    lensVerdicts: { correctness: 'accept', security: 'accept' },
+    rounds: 1,
+  };
+
+  it('emits the sha on the roster-picked event it builds', () => {
+    const events = buildReviewLedgerEvents({ ...args, reviewedSha: 'deadbee' });
+    expect(events[0].type).toBe(JURY_EVENT_TYPES.ROSTER_PICKED);
+    expect(events[0].reviewedSha).toBe('deadbee');
+  });
+
+  it('carries end-to-end from the writer through the fold', () => {
+    const events = buildReviewLedgerEvents({ ...args, reviewedSha: 'deadbee' });
+    expect(foldJuryLedger(events).reviewedSha).toBe('deadbee');
+  });
+
+  it('omits it when the caller has none — a design or decision subject has no commit', () => {
+    const events = buildReviewLedgerEvents(args);
+    expect(events[0]).not.toHaveProperty('reviewedSha');
+    expect(foldJuryLedger(events).reviewedSha).toBe(null);
+  });
+});

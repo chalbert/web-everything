@@ -169,7 +169,7 @@ const VERDICT_STRINGS = new Set(Object.values(VERDICTS));
  * @param {{ activeLenses?: string[], lensVerdicts?: object, findings?: object[], rounds?: number }} [state]
  * @returns {object[]} schema-valid raw jury-ledger events
  */
-export function buildReviewLedgerEvents({ activeLenses, lensVerdicts = {}, findings = [], rounds = 1 } = {}) {
+export function buildReviewLedgerEvents({ activeLenses, lensVerdicts = {}, findings = [], rounds = 1, reviewedSha } = {}) {
   const lenses = Array.isArray(activeLenses) && activeLenses.length ? [...new Set(activeLenses)] : [...REVIEW_PANEL_LENSES];
   const jid = (lens) => `${lens}#1`;
   const finalRound = Math.max(0, (Number.isFinite(rounds) ? Math.floor(rounds) : 1) - 1);
@@ -178,6 +178,12 @@ export function buildReviewLedgerEvents({ activeLenses, lensVerdicts = {}, findi
     type: JURY_EVENT_TYPES.ROSTER_PICKED,
     round: 0,
     jurors: lenses.map((lens) => ({ id: jid(lens), lens, charter: REVIEW_LENS_CHARTER[lens] || `judge the "${lens}" lens` })),
+    // #2864 — the reviewed head sha. THIS is the writer the review pipeline actually uses (the `record` CLI and
+    // review-parked-prs.mjs both come through here), so without it the field is write-dead: every ledger the repo
+    // produces folds to `reviewedSha: null`, and a `null` from a CURRENT writer is indistinguishable from a `null`
+    // on a legacy pre-field event. A freshness gate could then only fail closed on 100% of PRs. Omitted when the
+    // caller has no sha (a design or decision subject has no commit) — the field stays optional in the schema.
+    ...(reviewedSha != null ? { reviewedSha } : {}),
   }];
   for (let r = 1; r <= finalRound; r += 1) events.push(roundAdvancedEvent({ round: r }));
   for (const lens of lenses) {
