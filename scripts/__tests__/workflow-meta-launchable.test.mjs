@@ -13,7 +13,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { metaPurity, metaKeys, checkWorkflowMeta, REQUIRED_META_KEYS, WORKFLOW_HARNESS_ROOTS } from '../lib/workflow-meta.mjs';
+import {
+  metaPurity, metaKeys, checkWorkflowMeta, declaresMetaExport,
+  REQUIRED_META_KEYS, WORKFLOW_HARNESS_ROOTS,
+} from '../lib/workflow-meta.mjs';
 
 /**
  * Every harness script under `roots`. Selection is by PARSE (`metaPurity(...).found`), never by a text match:
@@ -121,6 +124,58 @@ describe('findExportedMeta — the EXPORTED meta, in either spelling', () => {
 
   it('a non-exported meta is not a harness at all', () => {
     expect(metaPurity("const meta = { name: 'a' };").found).toBe(false);
+  });
+});
+
+describe('the found/not-found axis must not default LOOSE (PR #1037 r2, finding A)', () => {
+  // The dangerous direction is accepting what the runtime rejects. Three export spellings used to return
+  // `found: false` and be silently skipped by the gate, and one of them returned an affirmative `ok: true` on
+  // an unlaunchable harness — worse than a skip, because it reads as a pass.
+
+  it('resolves `export { built as meta }` through the ALIAS to its real local', () => {
+    const src = "const built = { name: 'a', description: 'x' + 'y' };\nexport { built as meta };";
+    const r = checkWorkflowMeta(src);
+    expect(r.found, 'the alias was not resolved').toBe(true);
+    expect(r.impure.length, 'the aliased meta is unlaunchable and must be reported').toBeGreaterThan(0);
+    expect(r.ok).toBe(false);
+  });
+
+  it('the DECOY case: an unrelated pure `const meta` must not launder an impure aliased export', () => {
+    // Previously: the lookup was by the exported NAME, so it found this decoy and returned ok:true.
+    const src = [
+      "const meta = { name: 'decoy', description: 'pure' };",
+      "const built = { name: 'a', description: 'x' + 'y' };",
+      'export { built as meta };',
+    ].join('\n');
+    const r = checkWorkflowMeta(src);
+    expect(r.ok, 'the decoy laundered an unlaunchable harness into a PASS').toBe(false);
+    expect(r.impure.length).toBeGreaterThan(0);
+  });
+
+  it('an UNRESOLVABLE meta export is reported as unreadable, never as "not a harness"', () => {
+    for (const [label, src] of Object.entries({
+      'export default': "export default { name: 'a', description: 'x' + 'y' };",
+      'late assignment': "export let meta;\nmeta = { name: 'a', description: 'x' + 'y' };",
+      're-export from elsewhere': "export { meta } from './other.mjs';",
+    })) {
+      const r = checkWorkflowMeta(src);
+      expect(r.found, `${label}: should not resolve`).toBe(false);
+      expect(r.unreadable, `${label}: must be flagged unreadable so the gate can be LOUD`).toBe(true);
+      expect(r.ok).toBe(false);
+    }
+  });
+
+  it('a file with no meta export at all is genuinely not a harness (not "unreadable")', () => {
+    const r = checkWorkflowMeta("export const other = 1;\nconst meta = { name: 'local-only' };");
+    expect(r.found).toBe(false);
+    expect(r.unreadable, 'a non-harness must stay silent, or every source file errors').toBe(false);
+  });
+
+  it('declaresMetaExport separates "exports meta" from "we could read it"', () => {
+    expect(declaresMetaExport("export const meta = { name: 'a' };")).toBe(true);
+    expect(declaresMetaExport('export { built as meta };')).toBe(true);
+    expect(declaresMetaExport('export default {};')).toBe(true);
+    expect(declaresMetaExport("const meta = { name: 'a' };")).toBe(false);
   });
 });
 

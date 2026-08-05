@@ -1,7 +1,13 @@
 /**
  * @file scripts/lib/workflow-meta.mjs — the I/O-free core deciding whether a Workflow harness script is
- * LAUNCHABLE. Consumed by `scripts/check-standards.mjs` (so the health gate and the write-time hook can refuse
- * an unlaunchable harness at author time) and exercised from `scripts/__tests__/workflow-meta-launchable.test.mjs`.
+ * LAUNCHABLE. Consumed by `scripts/check-standards.mjs` (rule 16, so the health gate refuses an unlaunchable
+ * harness) and exercised from `scripts/__tests__/workflow-meta-launchable.test.mjs`.
+ *
+ * NOT wired into a PreToolUse hook. Checked: `.claude/settings.json`'s `Edit|Write` hooks are guard-lane,
+ * lint-locus-prefix, check-memory, backlog-guard and guard-backward-edge — none reaches this module. So the
+ * earliest an impure `meta` surfaces is a `check:standards` run, not the write itself. Said explicitly because
+ * an earlier version of this header CLAIMED author-time enforcement it never had, and a reader who believes a
+ * backstop exists does not build it — the same shape as the unlaunchable loop this module exists to catch.
  *
  * WHY THIS EXISTS. The Workflow runtime requires `export const meta` to be a PURE LITERAL and rejects the script
  * at validation time, before a single agent spawns. `scripts/workflows/review-parked-prs.mjs` — the
@@ -65,21 +71,54 @@ function pureKeyKind(name) {
  */
 export function findExportedMeta(src, fileName = 'meta.mjs') {
   const sf = ts.createSourceFile(fileName, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const declared = new Map();
-  let exportedByName = false;
+  const locals = new Map();      // local binding name → initializer
+  let exportedInit = null;       // `export const meta = …`
+  let aliasLocalName = null;     // the LOCAL name behind `export { <local> as meta }`
   for (const stmt of sf.statements) {
     if (ts.isVariableStatement(stmt)) {
       const exported = stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
       for (const d of stmt.declarationList.declarations) {
-        if (!ts.isIdentifier(d.name) || d.name.text !== 'meta' || !d.initializer) continue;
-        declared.set(exported ? 'exported' : 'local', d.initializer);
+        if (!ts.isIdentifier(d.name) || !d.initializer) continue;
+        locals.set(d.name.text, d.initializer);
+        if (exported && d.name.text === 'meta') exportedInit = d.initializer;
       }
     } else if (ts.isExportDeclaration(stmt) && stmt.exportClause && ts.isNamedExports(stmt.exportClause)) {
-      // `export { meta }` / `export { x as meta }` — the LOCAL binding is what gets exported.
-      if (stmt.exportClause.elements.some((e) => e.name.text === 'meta')) exportedByName = true;
+      for (const e of stmt.exportClause.elements) {
+        if (e.name.text !== 'meta') continue;
+        // `export { built as meta }` — the LOCAL binding is `propertyName`, NOT the exported name. Looking the
+        // local up by `meta` found an unrelated `const meta` in the file and reported it PURE, an affirmative
+        // pass on a harness whose real exported meta the runtime rejects. That is the loose direction this
+        // module's header calls the only dangerous one.
+        aliasLocalName = e.propertyName?.text ?? e.name.text;
+      }
     }
   }
-  return declared.get('exported') || (exportedByName ? declared.get('local') || null : null);
+  if (exportedInit) return exportedInit;
+  if (aliasLocalName) return locals.get(aliasLocalName) ?? null;
+  return null;
+}
+
+/**
+ * Does this source EXPORT an identifier named `meta` at all? Distinct from `findExportedMeta` returning null:
+ * a file that exports `meta` in a spelling we cannot resolve (`export default {…}`, `export let meta;` then a
+ * later assignment, a re-export from another module) is a harness we FAILED TO READ — not a non-harness. The
+ * caller must treat those loudly; silently skipping them is how an unlaunchable harness ships green.
+ */
+export function declaresMetaExport(src, fileName = 'meta.mjs') {
+  const sf = ts.createSourceFile(fileName, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  for (const stmt of sf.statements) {
+    const exported = stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+    if (ts.isVariableStatement(stmt) && exported) {
+      for (const d of stmt.declarationList.declarations) {
+        if (ts.isIdentifier(d.name) && d.name.text === 'meta') return true;
+      }
+    }
+    if (ts.isExportDeclaration(stmt) && stmt.exportClause && ts.isNamedExports(stmt.exportClause)) {
+      if (stmt.exportClause.elements.some((e) => e.name.text === 'meta')) return true;
+    }
+    if (ts.isExportAssignment(stmt)) return true; // `export default { … }` — a meta we cannot name
+  }
+  return false;
 }
 
 /**
@@ -139,5 +178,14 @@ export function checkWorkflowMeta(src, fileName = 'meta.mjs') {
   const { found, impure } = metaPurity(src, fileName);
   const keys = metaKeys(src, fileName);
   const missingKeys = found ? REQUIRED_META_KEYS.filter((k) => !keys.includes(k)) : [];
-  return { found, impure, missingKeys, ok: found && impure.length === 0 && missingKeys.length === 0 };
+  // A file that exports `meta` in a spelling we could not resolve is UNREADABLE, not a non-harness. Reporting
+  // it as "not a harness" is the silent skip; the caller must surface it.
+  const unreadable = !found && declaresMetaExport(src, fileName);
+  return {
+    found,
+    impure,
+    missingKeys,
+    unreadable,
+    ok: found && impure.length === 0 && missingKeys.length === 0,
+  };
 }

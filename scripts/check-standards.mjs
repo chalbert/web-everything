@@ -63,7 +63,6 @@ import {
 } from './check-standards-rules.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
-  HASH_SLUG_OUT_OF_SCOPE_DIRS,
   countSourceLines, CITATION_GATES_ENFORCED,
 } from './lib/citation-check.mjs';
 
@@ -1094,37 +1093,6 @@ try {
         { kind: 'citation-hash-slug-scope', file: rel });
     }
   }
-
-  // CODE is out of the rewrite scope too (PR #1037 review, finding 2). A `#xNNNNNN` in a source comment is never
-  // rewritten when the item is JIT-numbered, so it dangles permanently — observed on this very PR, which cited
-  // an item that existed only on another branch. Widening HASH_SLUG_OUT_OF_SCOPE_DIRS alone was a NO-OP: the walk
-  // above never visits scripts/, which is the same list-widened-but-walk-unchanged defect rule 15's comment
-  // records. So the walk is widened here too — and ONLY for this gate, since running the anchor/locus gates over
-  // every source file would bury their real hits in noise.
-  {
-    const CODE_SKIP = new Set(['node_modules', '.git', '__tests__']);
-    const walkCode = (dir, acc = []) => {
-      for (const name of readdirSync(dir, { withFileTypes: true })) {
-        const p = join(dir, name.name);
-        if (name.isDirectory()) { if (!CODE_SKIP.has(name.name)) walkCode(p, acc); }
-        else if (/\.(mjs|js|md)$/.test(name.name)) acc.push(p);
-      }
-      return acc;
-    };
-    for (const dir of HASH_SLUG_OUT_OF_SCOPE_DIRS.filter((d) => d === 'scripts/' || d === 'skills-src/')) {
-      const abs = join(ROOT, dir);
-      if (!existsSync(abs)) continue;
-      for (const f of walkCode(abs)) {
-        const rel = relative(ROOT, f);
-        for (const h of findOutOfScopeHashSlugs(readFileSync(f, 'utf8'), rel)) {
-          emit(`${rel}: hash-slug \`${h.form === 'hash-ref' ? `#${h.slug}` : `${h.slug}-…​.md`}\` is cited from ` +
-            `CODE — the at-land rewrite covers backlog/ + docs/agent/ only, so this reference dies the moment ` +
-            `the item is numbered (#2821 gate 3). Cite a landed #NNNN, or state the reason inline with no id.`,
-            { kind: 'citation-hash-slug-scope', file: rel });
-        }
-      }
-    }
-  }
 }
 
 // ── 6g. Catalog-index completeness — every artifact type is reachable from a top-level index + nav ──
@@ -1754,20 +1722,27 @@ try {
 // from the day it was written. The failure is silent in the one way that matters: it never ran, so it never
 // produced a wrong answer, and three layers above it inherited the silence for weeks. The class had already
 // recurred once (`backlog/2664`, resolved with no gate), which is what makes a gate owed rather than optional.
-// Vitest alone is not enough: the check must be reachable from the health gate and the write-time hook, so an
-// unlaunchable harness is refused at AUTHOR time rather than discovered when someone tries to run it.
+// Vitest alone is not enough: the check must be reachable from the health gate, so an unlaunchable harness is
+// refused by `check:standards` rather than discovered when someone tries to run the loop. (There is no
+// PreToolUse hook for this — verified against .claude/settings.json — so the write itself is not blocked.)
 // Pure core in `lib/workflow-meta.mjs` (which also documents that PURE_KINDS MODELS the runtime rather than
 // checking it); the fs walk stays here, mirroring the two gates above.
 {
   const SKIP_DIRS = new Set(['node_modules', '.git']);
   const walkScripts = (dir, acc = []) => {
-    for (const name of readdirSync(dir, { withFileTypes: true })) {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return acc; }
+    for (const name of entries) {
       const p = join(dir, name.name);
       if (name.isDirectory()) { if (!SKIP_DIRS.has(name.name)) walkScripts(p, acc); }
-      else if (/\.(mjs|js)$/.test(name.name)) acc.push(p);
+      // isFile() — NOT `else`. A dirent is neither dir nor file when it is a symlink, so an `else` branch would
+      // feed a symlinked directory named `*.mjs` to readFileSync, which throws EISDIR and aborts the WHOLE
+      // health gate before its remaining rules run: one stray file destroys every other guard's findings.
+      else if (name.isFile() && /\.(mjs|js)$/.test(name.name)) acc.push(p);
     }
     return acc;
   };
+  let harnessesSeen = 0;
   for (const d of WORKFLOW_HARNESS_ROOTS) {
     const abs = join(ROOT, d);
     if (!existsSync(abs)) continue;
@@ -1775,8 +1750,17 @@ try {
       const rel = relative(ROOT, f);
       // Selection is by PARSE, never by a text match: `src.includes('export const meta')` skips
       // `const meta = {…}; export { meta };` entirely, so a harness in that spelling is never scanned.
-      const r = checkWorkflowMeta(readFileSync(f, 'utf8'), rel);
-      if (!r.found) continue; // not a harness
+      let src; try { src = readFileSync(f, 'utf8'); } catch { continue; }
+      const r = checkWorkflowMeta(src, rel);
+      // An export spelling we could not RESOLVE is a harness we failed to read, not a non-harness. Skipping it
+      // silently is the loose direction — `export { built as meta }`, `export default {…}` and `export let meta`
+      // would ship green while the runtime refuses them. Loud beats silent here.
+      if (r.unreadable) {
+        err(`${rel}: exports a Workflow \`meta\` in a spelling this gate cannot resolve, so its launchability is UNVERIFIED — use \`export const meta = { … }\` (a pure literal), or teach findExportedMeta this form`, { kind: 'workflow-meta', file: rel });
+        continue;
+      }
+      if (!r.found) continue; // genuinely not a harness
+      harnessesSeen += 1;
       if (r.impure.length) {
         err(`${rel}: Workflow \`meta\` is not a pure literal — the runtime refuses to launch this harness (${r.impure.join('; ')})`, { kind: 'workflow-meta', file: rel });
       }
@@ -1784,6 +1768,11 @@ try {
         err(`${rel}: Workflow \`meta\` is missing required field(s): ${r.missingKeys.join(', ')}`, { kind: 'workflow-meta', file: rel });
       }
     }
+  }
+  // A sweep that scans nothing passes vacuously — rename a root and this gate is green forever over zero files.
+  // The vitest sweep asserts this; the gate must too, or the two disagree exactly when it matters.
+  if (harnessesSeen === 0) {
+    err(`check:standards rule 16 scanned ZERO Workflow harnesses under ${WORKFLOW_HARNESS_ROOTS.join(', ')} — the roots are wrong or the sweep is broken; the launchability gate is currently proving nothing`, { kind: 'workflow-meta' });
   }
 }
 
