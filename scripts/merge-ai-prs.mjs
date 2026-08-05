@@ -1062,7 +1062,10 @@ function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetc
   try {
     // ALWAYS force-update the base tracking-ref (#2373 opportunistic-fetch fix): the cumulative human-gate basis
     // below is `<remote>/<base>…head`, which a stacked `baseRev` must never be able to shrink (#2390-review-fix).
-    exec('git', ['fetch', remote, `+${base}:refs/remotes/${remote}/${base}`, ...fetchExtraRefs, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] });
+    // `--end-of-options` FIRST: `fetchExtraRefs` carries a branch name straight off the `gh` API, and a
+    // dash-leading refname is legal (`git check-ref-format 'refs/heads/--output=/tmp/pwn'` exits 0), so without
+    // the guard git parses it as an option — `--upload-pack=<script>` EXECUTES. Verified against git 2.50.1.
+    exec('git', ['fetch', '--quiet', '--end-of-options', remote, `+${base}:refs/remotes/${remote}/${base}`, ...fetchExtraRefs], { stdio: ['ignore', 'ignore', 'ignore'] });
   } catch { /* degrade to whatever is locally cached — the diff attempts below still run */ }
   const candidates = [`${remote}/${rev}`, rev];
   for (const candidate of candidates) {
@@ -1084,7 +1087,11 @@ function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetc
     // The cumulative `<mergeBase>…head` diff is BOTH the human-gate basis AND the candidate-resolves probe.
     let humanBasis;
     try {
-      humanBasis = parseNumstat(exec('git', ['diff', '--numstat', diffBase, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+      // `--end-of-options` — `candidate` is `rev` verbatim on the second pass, i.e. a caller-supplied refname.
+      // Verified on git 2.50.1: unguarded, `git diff --numstat <base> '--output=<path>'` exits 0 and WRITES that
+      // file, and the swallowed numstat then reads EMPTY while the candidate still resolves — a zero blast-radius
+      // score for a PR about to land, the exact de-inflation the #2390-review-fix comments assert is impossible.
+      humanBasis = parseNumstat(exec('git', ['diff', '--numstat', '--end-of-options', diffBase, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
     } catch { continue; /* candidate doesn't resolve — try the next one */ }
     return { baseRef, diffBase, candidate, humanBasis };
   }
@@ -1102,7 +1109,10 @@ export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'ma
   // ancestor of head; otherwise use the cumulative basis (the safe over-scoring direction).
   let own = humanBasis;
   if (baseRevOk && isStrictAncestor(exec, baseRev, candidate)) {
-    try { own = parseNumstat(exec('git', ['diff', '--numstat', baseRev, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })); }
+    // Third position, not named in the PR #1031 r4 review but the same class: `baseRev` is hex-validated by
+    // `baseRevOk`, `candidate` is not — it is the caller-supplied refname. Guarded so the class is actually
+    // closed in this function rather than closed-except-one.
+    try { own = parseNumstat(exec('git', ['diff', '--numstat', '--end-of-options', baseRev, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })); }
     catch { own = humanBasis; /* own-delta diff failed → fall back to the cumulative basis */ }
   }
   return { changedFiles: own.changedFiles, diffLines: own.diffLines, scored: true, humanBasisFiles: humanBasis.changedFiles };
@@ -1128,10 +1138,48 @@ export function computeNetDiffText({ exec, remote = 'origin', base = 'main', rev
   if (!basis) return unscored; // neither candidate resolves → caller falls back to `gh pr diff`
   const { diffBase, candidate } = basis;
   try {
-    const text = String(exec('git', ['diff', diffBase, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '');
+    // Same guard, same reason — this is the reviewer-facing diff TEXT, off the same caller-supplied candidate.
+    const text = String(exec('git', ['diff', '--end-of-options', diffBase, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '');
     return { text, base: diffBase, rev: candidate, scored: true };
   } catch {
     return unscored; // the text diff failed even though the basis resolved → caller falls back to `gh pr diff`
+  }
+}
+
+/**
+ * #2901 / #1031 review finding 5 — the NET changed-file list as PLAIN PATHS, off the SAME basis
+ * `computeNetDiffText` resolves. This is the list a REVIEWER or a JUROR may cite.
+ *
+ * WHY THIS EXISTS SEPARATELY FROM `computeNetDiffChangedFiles`. That one is the SCORING path: it returns
+ * `parseNumstat` output, which is git's DISPLAY encoding — a rename renders as `a.txt => b.txt`, and a
+ * non-ASCII path is C-quoted (`"caf\303\251.txt"`). That is correct for counting lines and it is WRONG for
+ * anything that intersects with `gh pr view --json files`, which reports the plain new path: the intersection
+ * silently drops those entries, so a rename-only PR yields a ZERO-file list presented as authoritative. A
+ * reviewer is then told a real file is not in the PR and dismisses genuine findings on it — strictly worse than
+ * the inflated three-dot list this replaced.
+ *
+ * `--name-only -z` gives plain NUL-separated paths in every case. `--no-renames` is deliberately NOT passed:
+ * with it, a rename reports BOTH the old and new path while `gh` reports only the new one, so the intersection
+ * loses an entry and the caller's fail-open downgrade fires on every rename-carrying PR. Without it, git
+ * reports the new path alone — exactly what `gh` reports.
+ *
+ * Same `resolveNetDiffBasis`, so the diff text, the score, and this list cannot drift. Never checks out the PR
+ * branch (#2336). Degrades to `{ scored:false, paths:[] }` — the caller must then NOT claim a `net` basis.
+ * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
+ * @returns {{paths:string[], base:string|null, rev:string|null, scored:boolean}}
+ */
+export function computeNetDiffPaths({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
+  const unscored = { paths: [], base: null, rev: null, scored: false };
+  if (typeof exec !== 'function' || !rev) return unscored;
+  const basis = resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
+  if (!basis) return unscored;
+  const { diffBase, candidate } = basis;
+  try {
+    const raw = exec('git', ['diff', '--name-only', '-z', '--end-of-options', `${diffBase}..${candidate}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const paths = String(raw || '').split('\0').map((x) => x.trim()).filter(Boolean);
+    return { paths, base: diffBase, rev: candidate, scored: true };
+  } catch {
+    return unscored;
   }
 }
 
@@ -1497,10 +1545,14 @@ async function runCli() {
   // manifest), so serializing it costs ~nothing while keeping the fan-out correct.
   const legacyGitManifestMutex = makeAsyncMutex();
   const readLegacyLocalManifest = (headRef) => legacyGitManifestMutex.run(() => {
-    try { execFileSync('git', ['fetch', 'origin', headRef, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may be local */ }
+    // PR #1031 review r3 — the THIRD instance of the argv class (`#xo5tyqn` lints it repo-wide). `headRef` is a
+    // `gh`-supplied refname and a dash-leading one is legal, so bare it is parsed as an option. It reaches TWO
+    // calls here: the fetch, and — via `rev` — the `git show` argument, where `git show` accepts diff options
+    // including `--output=`. Both guarded.
+    try { execFileSync('git', ['fetch', '--quiet', '--end-of-options', 'origin', headRef], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may be local */ }
     for (const rev of ['FETCH_HEAD', `origin/${headRef}`, headRef]) {
       try {
-        const m = JSON.parse(execFileSync('git', ['show', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+        const m = JSON.parse(execFileSync('git', ['show', '--end-of-options', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
         if (m && m.item != null) return m;
       } catch { /* try next rev */ }
     }
