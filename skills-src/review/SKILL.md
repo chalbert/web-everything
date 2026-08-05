@@ -8,10 +8,16 @@ description: Review a parked pull request and record the human verdict — pull 
 The drain (`/drain`) **parks** a blast-radius or gate-self PR with a `review:*` label and waits for an
 independent verdict before it may land (#2171/#2262/#2285). Two classes reach a human:
 - **`review:pending`** — agent-reviewable but not yet cleared (or the drain's auto-review bounced it here);
-- **`review:human`** — a **gate-self** edit (the diff touches the auto-review trust chain,
-  `we:scripts/lib/review-escalation.mjs` / `we:scripts/merge-ai-prs.mjs`), which an agent may **never**
-  self-clear (conflict of interest). Two shapes reach you here, and `deriveReviewDisposition` (#2285) tells them
-  apart — read the drain's comment to see which:
+- **`review:human`** — a **POLICY-tier** trust-chain edit, which an agent may **never** self-clear (conflict of
+  interest). Since the #2445/#2448 two-tier split the trust chain has two tiers, and only the **policy** one
+  forces a human: `we:scripts/lib/review-escalation.mjs`, `we:scripts/lib/review-core.mjs`, the review-policy
+  contract/conformance files, the land seams, the review runner, and `we:scripts/lib/gate-config.mjs` itself —
+  the authoritative test is `isPolicyCorePath()` (over `POLICY_CORE_BASENAMES`) in
+  [we:scripts/lib/gate-config.mjs](../../../scripts/lib/gate-config.mjs) — ask it, never a list retyped here.
+  **ENGINE**-tier files — `we:scripts/merge-ai-prs.mjs`, `we:scripts/lib/daemon.mjs`,
+  `we:scripts/check-standards.mjs` and the like — escalate and run the full panel but stay **agent-clearable**.
+  So a diff touching `merge-ai-prs.mjs` alone is correctly `review:pending`, not `review:human`. Two shapes
+  reach you here, and `deriveReviewDisposition` (#2285) tells them apart — read the drain's comment to see which:
   - a **sensitivity** park (`gate-self`, `{ mode: converge, autoLand: false }`) — the drain **ran the panel↔editor
     convergence and may have pushed an advisory FIX** to the PR branch, then posted an `🤖 advisory AI review /
     fix (non-clearing)` comment. The diff you review may already carry agent-authored trust-chain edits — scrutinize
@@ -38,7 +44,10 @@ applies a label). The same module also renders the operator-facing notice for yo
    ([we:scripts/merge-ai-prs.mjs](../../../scripts/merge-ai-prs.mjs), #2450) — the two-tree
    `git diff <forkpoint> <head>` resolved off the SAME #2373/#2404 basis the drain's escalation SCORE uses, so
    what you review and what was scored cannot drift. Take the net changed-file list from
-   `computeNetDiffChangedFiles(...)` and carry it into step 2.
+   **`computeNetDiffPaths(...)`** (same module, same basis) and carry it into step 2 — **not** from
+   `computeNetDiffChangedFiles`, which is the SCORING path and returns git's display encoding (a rename renders
+   as `a.txt => b.txt`, a non-ASCII path is C-quoted). Intersect that with `gh`'s plain paths and the entries
+   silently vanish, so a rename-only PR yields a zero-file list that reads as authoritative.
 
    This is **not** `gh pr diff <PR>`'s three-dot merge-base diff. That one still lists a sibling-lane file that
    has since landed on `main` as if this PR added it, and the phantom scope-creep is not harmless framing — it

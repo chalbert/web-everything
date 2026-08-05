@@ -1075,7 +1075,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
   it('fetches BASE with an EXPLICIT destination refspec (never a bare `git fetch <remote> <base>`, which relies on the opportunistic tracking-ref update)', () => {
     const { exec, calls } = fakeExec({ 'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' } });
     computeNetDiffChangedFiles({ exec, rev: 'deadbeef' });
-    expect(calls.some((c) => c.args[0] === 'fetch' && c.args[1] === 'origin' && c.args[2] === '+main:refs/remotes/origin/main')).toBe(true);
+    expect(calls.some((c) => c.args[0] === 'fetch' && c.args.includes('origin') && c.args.includes('+main:refs/remotes/origin/main'))).toBe(true);
   });
 
   it('diffs `<remote>/<base>` against `rev` directly (a plain two-tree comparison, content-only) and parses via parseNumstat', () => {
@@ -1172,10 +1172,24 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     expect(calls.length).toBe(0);
   });
 
+  // PR #1031 review, finding 1 — `fetchExtraRefs` carries a branch name straight off the `gh` API, and a
+  // dash-leading refname is LEGAL (`git check-ref-format 'refs/heads/--output=/tmp/pwn'` exits 0). Verified on
+  // git 2.50.1: the unguarded form EXECUTES an injected `--upload-pack=<script>`, while the guarded form refuses
+  // with `invalid refspec`. So the guard must PRECEDE every caller-supplied argv element, not merely be present.
+  it('guards the fetch argv with --end-of-options BEFORE any caller-supplied value', () => {
+    const { exec, calls } = fakeExec({ 'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' } });
+    computeNetDiffChangedFiles({ exec, rev: 'deadbeef', fetchExtraRefs: ['lane/x'] });
+    const fetch = calls.find((c) => c.args[0] === 'fetch');
+    const guard = fetch.args.indexOf('--end-of-options');
+    expect(guard, 'the fetch argv carries no --end-of-options guard').toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(fetch.args.indexOf('origin'));
+    expect(guard).toBeLessThan(fetch.args.indexOf('lane/x'));
+  });
+
   it('honors a custom remote/base and passes fetchExtraRefs through to the fetch call', () => {
     const { exec, calls } = fakeExec({ 'git diff --numstat upstream/release deadbeef': { stdout: '1\t0\tREADME.md\n' } });
     computeNetDiffChangedFiles({ exec, remote: 'upstream', base: 'release', rev: 'deadbeef', fetchExtraRefs: ['lane/x'] });
-    expect(calls[0]).toMatchObject({ args: ['fetch', 'upstream', '+release:refs/remotes/upstream/release', 'lane/x', '--quiet'] });
+    expect(calls[0]).toMatchObject({ args: ['fetch', '--quiet', '--end-of-options', 'upstream', '+release:refs/remotes/upstream/release', 'lane/x'] });
   });
 
   // #2390 — a STACKED lane records the SHA it was cut from (its predecessor's tip) as the manifest per-repo
@@ -1205,7 +1219,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     });
     computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'a1b2c3d4e5f6', fetchExtraRefs: ['lane/child'] });
     const fetch = calls.find((c) => c.args[0] === 'fetch');
-    expect(fetch.args).toEqual(['fetch', 'origin', '+main:refs/remotes/origin/main', 'lane/child', '--quiet']);
+    expect(fetch.args).toEqual(['fetch', '--quiet', '--end-of-options', 'origin', '+main:refs/remotes/origin/main', 'lane/child']);
   });
 
   it('#2390 — a malformed (non-hex) baseRev is IGNORED — the origin/main basis serves BOTH size and the human gate, never an injected git arg', () => {
@@ -1213,7 +1227,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef', baseRev: '--upload-pack=evil' });
     expect(r).toEqual({ changedFiles: ['README.md'], diffLines: 1, scored: true, humanBasisFiles: ['README.md'] });
     expect(calls.some((c) => c.args.includes('--upload-pack=evil'))).toBe(false); // the poison value never reaches git
-    expect(calls[0].args[2]).toBe('+main:refs/remotes/origin/main'); // sibling basis restored
+    expect(calls[0].args).toContain('+main:refs/remotes/origin/main'); // sibling basis restored
   });
 
   // ── #2390-review-fix — the CORE security guarantees: a self-declared / mis-set base can de-inflate SIZE but
@@ -1343,7 +1357,7 @@ describe('computeNetDiffText (#2450 — reviewer-facing NET diff TEXT, SAME basi
     expect(r.base).toBe('origin/main');
     expect(r.rev).toBe('deadbeef');
     // exact same fetch refspec computeNetDiffChangedFiles uses — proving ONE shared basis, no drift.
-    expect(calls.some((c) => c.args[0] === 'fetch' && c.args[2] === '+main:refs/remotes/origin/main')).toBe(true);
+    expect(calls.some((c) => c.args[0] === 'fetch' && c.args.includes('+main:refs/remotes/origin/main'))).toBe(true);
     // #2336 — no checkout/switch of the PR branch, ever.
     expect(calls.some((c) => ['checkout', 'switch'].includes(c.args[0]))).toBe(false);
   });
