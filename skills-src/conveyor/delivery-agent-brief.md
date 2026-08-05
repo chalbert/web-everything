@@ -239,10 +239,8 @@ idempotent (it targets the existing PR and applies the label, never a duplicate)
 - End the commit message with:
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
 - If the PR's CI ends up red, `pr-land` exits `check-red` (exit 2) having applied no label — that is an
-  escalation (below), not a land. **An unlabelled PR is NOT held:** `shouldLabelOnGreen` (#2216) labels any
-  producer-owned AI PR `ready-to-merge` the moment its required check *reads* green, and it remembers no earlier
-  red run — so a flaky re-run, or a rebase that re-runs CI against a fixed `main`, can flip it green and the
-  daemon lands it with no reviewer. Park the escalation explicitly (Escalations case 2).
+  escalation, not a land, and **leaving it unlabelled does not hold it** (#2216). Park it explicitly:
+  *Escalations* case 2 has the mechanism and the exact re-run.
 - **`blocked-on-infra` (exit 4) — the ref PUSHED but PR-open failed on an outside dependency (#2659).** If
   `pr-land` pushed your `lane/*` ref but then `gh pr create` failed on a GitHub outage / network fault, it exits
   `blocked-on-infra` (exit 4) — **NOT gate-red, NOT a park**. Your built work is pushed and `pr-land` has already
@@ -257,20 +255,9 @@ script ([#deterministic-core-thin-judgment](../../../docs/agent/platform-decisio
 clean, reviewed, non-statute PR whose `test` is green lands that way, and that is the norm, not the exception.
 Open the PR **parked** instead — `--park=review:human` (#2622: the review label goes on **at open** and the
 merge-hold blocks the land) — ONLY when an *Escalations* condition below applies. Do **NOT**
-blanket-park a clean, reviewed PR "so a human can see it".
-
-`--park` is the only flag that holds a PR *unconditionally*. The two flags an older version of this brief
-reached for do not:
-
-- `--label=review:human` **does** hold — once it fires. `--label=<name>` renames the label `pr-land` applies,
-  and that apply lives **inside the green path**; the hold itself is real (`classifyPr` /
-  `hasUnclearedReviewLabel` skip an uncleared `review:*` PR regardless of `ready-to-merge`, #2820). But it is
-  **racy**: on a red gate, a check-timeout, or `--no-wait`, the label is never applied and nothing holds the
-  PR. `--park` applies it at open, before any wait.
-- `--no-wait` never applies a review label at all. The PR sits unlabelled only until the daemon's green
-  reconcile (`shouldLabelOnGreen`, #2216) labels it `ready-to-merge`.
-
-See [[pr-land-dogfood-mechanics]].
+blanket-park a clean, reviewed PR "so a human can see it". `--park` is the only flag that holds
+unconditionally; `--no-wait` and `--label=<name>` are **not** holds — why, and the measured cost, in
+[[pr-land-dogfood-mechanics]].
 
 ### 9. Append a structured learnings entry to the session drop-box (#2614)
 
@@ -377,13 +364,21 @@ and dilutes what `review:human` means.
 1. **Statute-touching change** — the item edits a policy-core / gate-self path (see `scripts/lib/gate-config.mjs`).
    `pr-land`'s deterministic rubric (`scoreEscalation` → `producerReviewLabel`, #2307) applies **`review:human`**
    at PR-open, and the daemon parks it. Do not try to clear it yourself.
-2. **Gate red** — `check:standards` (or the locus gate) fails from your own work, OR the PR's `test` check ends
-   red. `pr-land` applies no label and exits `check-red` (exit 2) — but **leaving it there does not hold it**:
-   the daemon's green reconcile labels *any* producer-owned AI PR `ready-to-merge` the moment CI reads green on
-   a later run (`shouldLabelOnGreen`, #2216), which a flaky re-run or a rebase can produce, and it is landed
-   unreviewed. If a PR is already open, re-run `pr-land` on the SAME `--ref` with `--park=review:human` (park
-   mode skips the check-wait, so it labels a red PR immediately). Report the failing check and stop. Do not
-   weaken or delete a test to go green.
+2. **Gate red** — three different stops. They do **not** share an exit code, and only the third leaves a PR
+   behind. Never weaken or delete a test to go green in any of them.
+   - **`check:standards` (or the locus gate) fails from your own work.** Caught at step 5, before `pr-land`
+     runs at all — there is no PR and no exit code from `pr-land`. Fix it; if you cannot, report the failing
+     gate and stop.
+   - **The locus-prefix lint fails.** `pr-land` exits **3** with `reason:"locus-prefix"`, *before* the push and
+     the create — again there is no PR. Prefix the bare code-path refs (`foo.ts` → `we:foo.ts`),
+     `git commit --amend`, re-run.
+   - **The PR's `test` check ends red.** `pr-land` exits **2** with `reason:"check-red"`, having applied no
+     label. This is the only one of the three where a PR exists, and **leaving it unlabelled does not hold
+     it**: the daemon's green reconcile labels *any* producer-owned AI PR `ready-to-merge` the moment CI reads
+     green on a later run (`shouldLabelOnGreen`, #2216), which a flaky re-run or a rebase can produce, and it
+     lands unreviewed. So park it: re-run `pr-land` on the SAME `--ref` with `--park=review:human` (park mode
+     skips the check-wait, so it labels a red PR immediately), **then confirm the label actually landed** (see
+     the note below the list). Report the failing check and stop.
 3. **A review finding that needs human judgment** — the step-6 adversarial code review (or the step-7 visual
    self-review, for a UI item) surfaced an issue you could not safely self-clear (you fixed what you could to
    convergence; this one needs a human call). Open the PR parked `review:human` (`--park=review:human`).
@@ -405,8 +400,17 @@ and dilutes what `review:human` means.
    There is no PR yet to watch, so your one-line return is the only signal; the conveyor's recovery pass (§4b)
    drives it from here.
 
-In every **post-build PR** escalation case (1–5) the outcome is the same: **the PR ends up carrying a
-`review:*` label — never merely "no label" — and it is reviewed in the main session** (`/review`). The
+**After any park, CONFIRM the label — the park is not guaranteed to have happened.** A re-run of `pr-land` can
+exit **3 before the park ever runs**: the #2833 verify finish-guard (and the step-8 command shape passes
+`--require-verified`), the locus-prefix lint, and the lane push all sit ahead of it. And even when the park
+block does run, a failed label apply still reports `reason:"parked"` with exit **0** — the `gh` warning is
+suppressed under `--json`. So do not infer the hold from the exit code: read `gh pr view <pr> --json labels`
+and check a `review:*` label is really there. If it is not, say so explicitly in your one-line return — an
+unlabelled PR is exactly the state `shouldLabelOnGreen` heals to `ready-to-merge`.
+
+In every **post-build PR** escalation case (1–5) the *intended* outcome is the same: **the PR ends up carrying a
+`review:*` label — never merely "no label" — and it is reviewed in the main session** (`/review`). That is the
+target, not a guarantee the seam enforces, which is why the confirmation above is part of the escalation. The
 **pre-build** case (0) has no PR to park — you return the claim to the pool and surface the `not-ready` reason.
 The **infra** case (6) has no PR yet either — the built + pushed work is recorded and auto-retried by the
 conveyor. Either way you surface the reason in your one-line return and exit — you never merge, never override,

@@ -77,12 +77,17 @@ blind spot it exposed is independent of it and outlives it.
 - `we:skills-src/` is itself registered in `BLAST_RADIUS`, so a skills edit scores blast-radius on **the path
   git actually reports**. The acceptance condition is that path, not parity with the built directory — a
   `.claude/skills/…` path never appears in a WE changed-file list, so "the two agree" would be vacuous here.
-- `we:agent-memory-src/` **and** `.claude/agent-memory/` both score blast-radius, so a memory-corpus edit carries
-  a `review:*` label at PR-open instead of merging silently.
+- `we:agent-memory-src/` is registered too, so a memory-corpus edit carries a `review:*` label at PR-open
+  instead of merging silently. Register the built `.claude/agent-memory/` pattern alongside it for the repos
+  where that directory is real — but, as in bullet 1, the WE acceptance condition is the `-src` path, since the
+  built half is a symlink here.
 - A test in [`we:scripts/lib/__tests__/review-escalation.test.mjs`](scripts/lib/__tests__/review-escalation.test.mjs)
-  locks source and build output to the same band for **both** pairs, so neither can drift apart again — including
-  a case asserting `scoreEscalation` on `we:agent-memory-src/land-on-no-regression-not-perfection.md` does not
-  return `{escalate: false}` (the PR #1040 / #1043 / #1045 regression).
+  asserts, for **each** `-src` root, that `scoreEscalation` on a changed file beneath it reports `blast-radius` —
+  scored on the path git reports — including the specific regression case: `scoreEscalation` on
+  `we:agent-memory-src/land-on-no-regression-not-perfection.md` must not return `{escalate: false}` (the PR
+  #1040 / #1043 / #1045 regression). Do **not** write a "source and build output land in the same band"
+  assertion: both built halves are symlinks here, so it would pass against a path git never emits and lock
+  nothing — the same false coverage this item exists to remove.
 - Add the `-src` patterns; **do not** "simplify" by anchoring on `(^|\/)\.claude\/` instead. In WE every
   `.claude/` procedure directory is a symlink, so such an anchor is dead code here for exactly the reason above —
   it would ship the bug this item documents. Keep the existing built-path patterns too: they are live in
