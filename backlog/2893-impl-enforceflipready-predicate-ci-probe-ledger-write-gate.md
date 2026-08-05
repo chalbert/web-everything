@@ -3,7 +3,7 @@ bornAs: xva71x1
 kind: task
 status: open
 dateOpened: "2026-08-02"
-blockedBy: ["2892"]
+blockedBy: ["2892", "2864"]
 tags: [governance, mechanization, enforce-flip, land-mode, ci-probe, check-standards]
 ---
 
@@ -56,3 +56,11 @@ exists while its safeguard does not — #2838's anchor calls the pin a "load-bea
 pin ratified (now true — keeps `we:scripts/lib/review-policy.contract.json` human-gated so the flip edit stays
 `review:human`); #2820 (PR #975) and #2823 (PR #976) merged (now true); the durable review-seam ledger to be
 built (above). Enforces #2838's ratified anchor; mechanical, committee-clearable.
+
+**`blockedBy: 2864` — added 2026-08-04, moved down from epic #2572.** `enforceFlipReady` tests the #2820
+conformance run, the #2823 conformance run, and the shadow agreement metric — but **not ledger freshness**. The
+jury ledger carries no head SHA, so a verdict written at head A folds to *clear* at head B; shadow is safe only
+because its "no ledger → keep parked" path fails closed. Without this edge the predicate could arm `enforce`
+with that hole open, auto-clearing a PR for a diff no juror saw. #2864 was sitting on #2572 as prose-derived
+DAG hygiene, but #2572 no longer contains any post-flip work (its part 2 was struck), so the edge belongs here
+— on the item that actually arms the flip.
