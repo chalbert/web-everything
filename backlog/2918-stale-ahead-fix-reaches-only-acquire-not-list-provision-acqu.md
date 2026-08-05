@@ -3,7 +3,9 @@ bornAs: x59nmjh
 kind: task
 status: open
 dateOpened: "2026-08-05"
-tags: []
+blockedBy: ["2920"]
+relatedTo: ["2452"]
+tags: [lane-pool, infra]
 ---
 
 # Stale-ahead fix reaches only acquire, not list/provision --acquirable (the dispatcher still sees a starved pool)

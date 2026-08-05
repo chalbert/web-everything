@@ -39,6 +39,29 @@ avoids), or keep no-fetch but treat *HEAD contained in known remote refs* as not
 when the no-fetch pass concludes "all held". Tests: a clean lane with stale origin + fully
 pushed HEAD must be auto-pickable; a genuinely unpushed-ahead lane must stay protected.
 
+## Progress
+
+**Gap 1 is DELIVERED and landed** — PR #1042 (`lane/2452-gap1-stale-ahead`), merged 2026-08-05, carved
+out of the abandoned #1022 under the no-regression land bar. `aheadIsProvablyPushed` + `liveRemoteShas`
+now let acquire's auto-pick treat a provably-pushed "ahead" lane as recyclable, proved against the LIVE
+remote (one lazy `ls-remote`) rather than local remote-tracking refs, and failing closed on any git
+fault. Pinned by `we:scripts/__tests__/lane-pool-acquire-stale-origin.test.mjs` (5 cases, including the
+deleted-ref hardening case and the fail-closed object-locality limit); mutation-verified both ways.
+
+The Gap-1 section above still describes the *original* problem statement — its "Fix directions" and
+"Tests" lines are now satisfied on disk, not open work.
+
+**Residue filed rather than bundled** (land-bar rule — non-blocking means tracked): #2918 (the fix
+reaches only `acquire`, not `list`/`provision --acquirable`), #2920 (the fan-out cost, 677 git spawns /
+29.5s on the live 38-lane pool), #2919 (containment unprovable when the remote tip object is absent
+locally), and #xyi0x0h (the pick-time proof is never re-verified before the destructive reset).
+
+**Next: Gap 2 only.** This story stays `open` because the release-ownership half below is untouched. Its
+own review found that widening ownership to the durable `ownerSession` lets a bare `release --all` drop a
+sibling's live lease without `--force`, after which a fresh acquire runs `checkout -B --force` +
+`clean -fd` on that clone — a new way to destroy another actor's work, so it needs its own PR and its own
+scrutiny rather than riding the stale-ahead fix.
+
 ## Gap 2 — release ownership still keyed on host:pid
 
 `cmdRelease` compares against `defaultSession()` (host:pid — differs per shell invocation),
