@@ -20,6 +20,9 @@ import {
   EXIT_CLOSED,
   EXIT_ERROR,
 } from '../pr-watch.mjs';
+// The drain's own green predicate — asserted side by side so "the trigger and the lander read green
+// identically" is a PROVEN parity, not a docstring claim (#xkfv491 / PR #1049 round 3).
+import { isRequiredCheckGreen as drainIsRequiredCheckGreen } from '../../merge-ai-prs.mjs';
 
 describe('classifyPr — MERGED (the drain landed it; the lane is free)', () => {
   it('state MERGED → merged', () => {
@@ -127,6 +130,44 @@ describe('isRequiredCheckGreen (#2683 — the trigger reads CI truth like the dr
   it('a missing/failed required check → NOT green (never a false green)', () => {
     expect(isRequiredCheckGreen({ statusCheckRollup: [] })).toBe(false);
     expect(isRequiredCheckGreen({ statusCheckRollup: RED })).toBe(false);
+  });
+});
+
+describe('isRequiredCheckGreen — real parity with the drain, not a claimed one (#xkfv491 / PR #1049 r3)', () => {
+  // The exact PR #1042 rollup: a concurrency-CANCELLED run at index 0, the SUCCESS that finished at index 1.
+  // This file used to re-derive the lookup with `roll.find(...)`, so it read the CANCELLED one and
+  // `isReadyToLand` never fired the fast land for the very PRs the shared fix targets. It now calls the drain's
+  // exported `latestRequiredCheck`, so parity holds by construction.
+  const supersededThenGreen = [
+    { __typename: 'CheckRun', name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:34:02Z' },
+    { __typename: 'CheckRun', name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:35:32Z' },
+  ];
+
+  it('a superseded CANCELLED run ahead of the real SUCCESS reads GREEN, exactly as the drain reads it', () => {
+    expect(isRequiredCheckGreen({ statusCheckRollup: supersededThenGreen })).toBe(true);
+    expect(drainIsRequiredCheckGreen({ statusCheckRollup: supersededThenGreen })).toBe(true);
+  });
+
+  it('and the fast-land trigger therefore fires on that PR', () => {
+    expect(isReadyToLand({ state: 'OPEN', statusCheckRollup: supersededThenGreen, reviewDecision: 'APPROVED' })).toBe(true);
+  });
+
+  it('LATEST-wins, not ignore-CANCELLED: a cancelled NEWEST run is still not green', () => {
+    const greenThenCancelled = [
+      { __typename: 'CheckRun', name: 'test', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:34:02Z' },
+      { __typename: 'CheckRun', name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:35:32Z' },
+    ];
+    expect(isRequiredCheckGreen({ statusCheckRollup: greenThenCancelled })).toBe(false);
+    expect(isReadyToLand({ state: 'OPEN', statusCheckRollup: greenThenCancelled, reviewDecision: 'APPROVED' })).toBe(false);
+  });
+
+  it('a posted commit status cannot fast-land a red tree (the CheckRun preference rides along)', () => {
+    const spoofed = [
+      { __typename: 'CheckRun', name: 'test', conclusion: 'FAILURE', startedAt: '2026-08-05T18:00:00Z' },
+      { __typename: 'StatusContext', context: 'test', state: 'SUCCESS', createdAt: '2026-08-05T18:11:00Z' },
+    ];
+    expect(isRequiredCheckGreen({ statusCheckRollup: spoofed })).toBe(false);
+    expect(isReadyToLand({ state: 'OPEN', statusCheckRollup: spoofed, reviewDecision: 'APPROVED' })).toBe(false);
   });
 });
 

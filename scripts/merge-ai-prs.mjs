@@ -357,6 +357,16 @@ export function hasLabel(pr, label) {
  * allow. So when any CheckRun matches the name, only CheckRuns are considered; a StatusContext decides only
  * when the workflow has produced nothing at all.
  *
+ * THE UNION MEMBER IS READ OFF `__typename`, NOT GUESSED FROM `name` (PR #1049 review). Every live
+ * `gh pr view --json statusCheckRollup` row carries `__typename` (verified on PR #1049 itself), so the
+ * authoritative tag is free. An earlier cut inferred "this is a CheckRun" from the presence of `name` — correct
+ * against raw gh output, but `rollupToCheckRows` (`we:scripts/fetch-parked.mjs#rollupToCheckRows`) re-normalises
+ * rows to `{ name: c.name || c.context }`, so every StatusContext in that output would have classified as a
+ * CheckRun and the preference above would have silently collapsed to plain last-wins. A row with NO (or an
+ * unrecognised) `__typename` is therefore treated as UNTRUSTED rather than as a CheckRun: it ranks in its own
+ * tier, below any tagged CheckRun. {@link rollupRowKind} does the classification; the pool is the FIRST
+ * non-empty tier of `CheckRun` → untagged → `StatusContext`.
+ *
  * Latest-wins is the principled rule, not "ignore CANCELLED": if the NEWEST run is cancelled then the check
  * genuinely has no current verdict and the PR must not land. Pure.
  * @param {{statusCheckRollup?: Array<object>}} pr
@@ -367,11 +377,26 @@ export function latestRequiredCheck(pr, requiredCheck = 'test') {
   const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
   const matches = roll.filter((c) => (c?.name || c?.context) === requiredCheck);
   if (!matches.length) return null;
-  // A CheckRun is identified by carrying `name` (the StatusContext shape carries `context` instead) — the same
-  // discriminator the filter above already relies on, so no new field is trusted.
-  const checkRuns = matches.filter((c) => c?.name === requiredCheck);
-  const pool = checkRuns.length ? checkRuns : matches;
+  const tier = (k) => matches.filter((c) => rollupRowKind(c) === k);
+  const pool = [tier('CheckRun'), tier('untagged'), matches].find((t) => t.length);
   return pool[pool.length - 1];
+}
+
+/**
+ * Which member of GitHub's `StatusCheckRollupContext` union a rollup row is — `'CheckRun'`, `'StatusContext'`,
+ * or `'untagged'` (unknown provenance, never granted CheckRun rank). `__typename` is authoritative when present;
+ * only when it is absent entirely do we fall back to shape, and then only for the ONE unambiguous case: a
+ * `context` with no `name` is the legacy commit-status shape and nothing else. A bare `name` is NOT taken as
+ * proof of a CheckRun — that is exactly the inference `rollupToCheckRows` output would fool. Pure.
+ * @param {object|null|undefined} c a single `statusCheckRollup` entry
+ * @returns {'CheckRun'|'StatusContext'|'untagged'}
+ */
+export function rollupRowKind(c) {
+  const t = c?.__typename;
+  if (t === 'CheckRun' || t === 'StatusContext') return t;
+  if (t) return 'untagged';                                     // a union member we don't know — no CheckRun rank
+  if (c?.context != null && c?.name == null) return 'StatusContext'; // unambiguous legacy commit-status shape
+  return 'untagged';
 }
 
 /** Is the required `test` check green on this PR's rollup? (Other checks — cla, Workers Builds — are ignored.)

@@ -74,6 +74,13 @@
 
 // ── PURE CORE (no gh / child_process / clock — the gh PR object is passed IN) ─────────────────────────────────
 
+// The SHARED required-check selector (#xkfv491). Imported rather than re-derived so the fast-land trigger and
+// the lander can never disagree about which rollup entry is "the" check — the split this watcher's docstring
+// used to *claim* was closed while a local `.find(...)` quietly held the opposite rule. `merge-ai-prs.mjs` has
+// no module-scope side effects (its CLI is behind an `IS_CLI` guard) and does not import this file, so there is
+// no cycle and no daemon-startup cost: importing it measures the same ~50ms as importing this file alone.
+import { latestRequiredCheck } from '../merge-ai-prs.mjs';
+
 /** The review labels that mark an OPEN PR as PARKED for human review — the main session runs /review to clear
  *  them. The drain daemon applies `review:human`/`review:pending` on escalation; `review:changes` is included
  *  because a human bounced a prior diff and (on the re-dispatch path) pr-land can update a `lane/<num>` PR that
@@ -127,13 +134,16 @@ export function classifyPr(pr) {
   return 'pending';
 }
 
-/** The required check's conclusion is SUCCESS on this PR's rollup? Mirrors merge-ai-prs `isRequiredCheckGreen`
- *  (the drain's own CI-green truth) so the trigger and the lander read "green" identically. Other checks
- *  (cla, Workers Builds) are ignored. Pure — the parsed `statusCheckRollup` is passed in. A MISSING required
- *  check reads as NOT green (in-flight), never a false green. */
+/** The required check's conclusion is SUCCESS on this PR's rollup? Reads the check through the drain's OWN
+ *  shared selector ({@link latestRequiredCheck}) rather than a local lookup, so the trigger and the lander read
+ *  "green" identically BY CONSTRUCTION — including #xkfv491's latest-run-wins rule (a head SHA routinely carries
+ *  a concurrency-CANCELLED run beside the SUCCESS that actually finished) and its CheckRun-over-StatusContext
+ *  preference. This file previously re-derived the lookup with `roll.find(...)`, i.e. the FIRST entry by name,
+ *  so the parity this docstring claims was false for exactly the superseded-run PRs the fast land exists for.
+ *  Other checks (cla, Workers Builds) are ignored. Pure — the parsed `statusCheckRollup` is passed in. A MISSING
+ *  required check reads as NOT green (in-flight), never a false green. */
 export function isRequiredCheckGreen(pr, requiredCheck = 'test') {
-  const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
-  const check = roll.find((c) => (c?.name || c?.context) === requiredCheck);
+  const check = latestRequiredCheck(pr, requiredCheck);
   if (!check) return false;
   return String(check.conclusion || check.state || '').toUpperCase() === 'SUCCESS';
 }

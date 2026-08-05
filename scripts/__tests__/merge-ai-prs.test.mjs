@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, latestRequiredCheck, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, latestRequiredCheck, rollupRowKind, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -2246,24 +2246,35 @@ describe('latestRequiredCheck — a superseded run must not outvote the one that
     expect(isRequiredCheckGreen(badTimes)).toBe(true);
   });
 
-  it('matches the legacy StatusContext shape when the workflow produced nothing', () => {
-    const pr = {
+  it('a LONE StatusContext decides when the workflow produced no `test` CheckRun', () => {
+    // The only reachable shape for this branch. GitHub's combined status is DEDUPLICATED per context (and
+    // `StatusContext` carries no `name`), so a rollup can hold at most ONE `test` StatusContext — an earlier
+    // cut of this test asserted over two of them, a shape GitHub cannot emit, and left the single-entry case
+    // (the one that actually reaches the `pool = matches` fallback) uncovered.
+    const withStatus = (state) => ({
       statusCheckRollup: [
-        { context: 'test', state: 'FAILURE', createdAt: '2026-08-05T18:34:02Z' },
-        { context: 'test', state: 'SUCCESS', createdAt: '2026-08-05T18:35:32Z' },
+        { __typename: 'CheckRun', name: 'cla', conclusion: 'SUCCESS', startedAt: '2026-08-05T18:30:00Z' },
+        { __typename: 'StatusContext', context: 'test', state, createdAt: '2026-08-05T18:35:32Z' },
       ],
-    };
-    expect(isRequiredCheckGreen(pr)).toBe(true);
+    });
+    expect(latestRequiredCheck(withStatus('SUCCESS')).context).toBe('test');
+    expect(isRequiredCheckGreen(withStatus('SUCCESS'))).toBe(true);
+    expect(isRequiredCheckGreen(withStatus('FAILURE'))).toBe(false);
+    expect(isRequiredCheckFailed(withStatus('FAILURE'))).toBe(true);
+    // A `cla` CheckRun is not a `test` CheckRun — the preference is PER NAME, so it must not suppress the
+    // `test` status above and leave the check reading as unreported.
+    expect(latestRequiredCheck(withStatus('SUCCESS'))).not.toBeNull();
   });
 
   it('a posted commit status can NEVER override the real check run (merge-gate bypass, PR #1049 review)', () => {
     // A `StatusContext` is postable through the commit-statuses API by anyone holding `statuses:write` — a
     // collaborator, a bot, an installed App. Plain last-wins across both shapes would let one posted AFTER the
-    // real run clear the gate on a red tree. CheckRuns win whenever any exists.
+    // real run clear the gate on a red tree. CheckRuns win whenever any exists. The live rollup shape: every
+    // row carries `__typename` (verified against `gh pr view 1049 --json statusCheckRollup`).
     const spoofedGreen = {
       statusCheckRollup: [
-        { name: 'test', conclusion: 'FAILURE', startedAt: '2026-08-05T18:00:00Z', completedAt: '2026-08-05T18:10:00Z' },
-        { context: 'test', state: 'SUCCESS', createdAt: '2026-08-05T18:11:00Z' },
+        { __typename: 'CheckRun', name: 'test', conclusion: 'FAILURE', startedAt: '2026-08-05T18:00:00Z', completedAt: '2026-08-05T18:10:00Z' },
+        { __typename: 'StatusContext', context: 'test', state: 'SUCCESS', createdAt: '2026-08-05T18:11:00Z' },
       ],
     };
     expect(latestRequiredCheck(spoofedGreen).conclusion).toBe('FAILURE');
@@ -2284,5 +2295,51 @@ describe('latestRequiredCheck — a superseded run must not outvote the one that
     const onlyCancelled = { statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:34:02Z' }] };
     expect(isRequiredCheckGreen(onlyCancelled)).toBe(false);
     expect(isRequiredCheckFailed(onlyCancelled)).toBe(true);
+  });
+});
+
+describe('rollupRowKind — the union member comes off `__typename`, it is not guessed from `name` (#1049 r3)', () => {
+  it('reads the authoritative tag when present', () => {
+    expect(rollupRowKind({ __typename: 'CheckRun', name: 'test' })).toBe('CheckRun');
+    expect(rollupRowKind({ __typename: 'StatusContext', context: 'test' })).toBe('StatusContext');
+  });
+
+  it('an ABSENT or unrecognised `__typename` is UNTAGGED — never promoted to CheckRun', () => {
+    expect(rollupRowKind({ name: 'test', conclusion: 'SUCCESS' })).toBe('untagged');
+    expect(rollupRowKind({ __typename: 'SomeFutureContext', name: 'test' })).toBe('untagged');
+    expect(rollupRowKind(null)).toBe('untagged');
+    expect(rollupRowKind({})).toBe('untagged');
+  });
+
+  it('falls back to shape ONLY for the unambiguous legacy case: a `context` with no `name`', () => {
+    expect(rollupRowKind({ context: 'test', state: 'SUCCESS' })).toBe('StatusContext');
+    // `rollupToCheckRows` (we:scripts/fetch-parked.mjs#rollupToCheckRows) normalises a StatusContext to
+    // `{ name: c.name || c.context }`. Under the old `name`-presence inference that row classified as a
+    // CheckRun; it must not.
+    expect(rollupRowKind({ name: 'test', bucket: 'pass' })).toBe('untagged');
+  });
+
+  it('a TAGGED CheckRun outranks an untagged row listed after it', () => {
+    // The tier ladder is CheckRun → untagged → StatusContext, so a row of unknown provenance cannot displace
+    // the verdict of a row GitHub itself labelled a CheckRun.
+    const pr = {
+      statusCheckRollup: [
+        { __typename: 'CheckRun', name: 'test', conclusion: 'FAILURE' },
+        { name: 'test', conclusion: 'SUCCESS' }, // untagged — lower tier, so it never decides
+      ],
+    };
+    expect(latestRequiredCheck(pr).conclusion).toBe('FAILURE');
+    expect(isRequiredCheckGreen(pr)).toBe(false);
+  });
+
+  it('a tagged StatusContext still decides when NO CheckRun reported that name', () => {
+    const pr = { statusCheckRollup: [{ __typename: 'StatusContext', context: 'test', state: 'SUCCESS' }] };
+    expect(latestRequiredCheck(pr).state).toBe('SUCCESS');
+    expect(isRequiredCheckGreen(pr)).toBe(true);
+  });
+
+  it('an all-untagged rollup still resolves latest-wins (fixtures / re-normalised rows keep working)', () => {
+    const pr = { statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED' }, { name: 'test', conclusion: 'SUCCESS' }] };
+    expect(isRequiredCheckGreen(pr)).toBe(true);
   });
 });

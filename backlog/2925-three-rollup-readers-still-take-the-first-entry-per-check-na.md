@@ -5,10 +5,8 @@ status: open
 dateOpened: "2026-08-05"
 tags: [drain, ci, gate, conveyor]
 scope:
-  - we:scripts/conveyor/pr-watch.mjs
-  - we:scripts/lane-resume.mjs
   - we:scripts/readiness/conveyor-state.mjs
-  - we:scripts/check-standards-rules.mjs
+  - we:scripts/readiness/__tests__/conveyor-state.test.mjs
 ---
 
 # Three rollup readers still take the first entry per check name, so the #1042 jam survives outside the drain
@@ -42,15 +40,17 @@ Found by two independent review panels on PR #1049 (the hand-run `/review` panel
 
 ## Build
 
-- Import the shared `latestRequiredCheck` from `we:scripts/merge-ai-prs.mjs` in
+- ~~Import the shared `latestRequiredCheck` from `we:scripts/merge-ai-prs.mjs` in
   `we:scripts/conveyor/pr-watch.mjs` and `we:scripts/lane-resume.mjs` (both call sites) instead of
-  re-deriving the lookup. Delete the local `.find(...)`.
+  re-deriving the lookup. Delete the local `.find(...)`.~~ **Delivered** by PR #1049 round 4 (the `#xkfv491`
+  lane): `we:scripts/conveyor/pr-watch.mjs` imports the helper, and both `we:scripts/lane-resume.mjs` sites go
+  through one tested seam, `testConclusionOf`. The false parity claim in that docstring is corrected too.
 - `ciRollup` needs a different shape — it distils ALL checks to one token rather than picking one check — so
   give it a per-name collapse (keep only the last entry for each name) before the pass/fail/pending fold.
-- Add a `check:standards` rule: error on any `statusCheckRollup` consumer under `we:scripts/` that selects a
-  check by name outside the shared helper (`statusCheckRollup` combined with `.find(` or a name-match loop),
-  allowlisting `latestRequiredCheck` itself. `statusCheckRollup` appears nowhere in
-  `we:scripts/check-standards-rules.mjs` today.
+  **This is the only reader still open.**
+- The `check:standards` rule over `statusCheckRollup` consumers is carved out to
+  [#xjblya4](xjblya4-gate-any-statuscheckrollup-consumer-that-selects-a-check-out.md) — the PREVENTION outlives
+  the specific readers it was written for, so it is tracked on its own rather than inside this repair.
 
 ## Acceptance
 
