@@ -8,7 +8,7 @@ tags: []
 
 # BLAST_RADIUS misses skills-src/ and the whole agent-memory corpus — editing an operating procedure's source scores lower than editing its build output
 
-scoreEscalation's BLAST_RADIUS list in we:scripts/lib/review-escalation.mjs matches the built skills directory but not we:skills-src/, its source — so a 500-line edit to we:skills-src/jury/subject-jury.workflow.js scores care band low while the same edit to the built file scores high. The agent-memory corpus is worse: neither we:agent-memory-src/ nor .claude/agent-memory/ matches any pattern, so a memory rule governing the land bar itself merges with no review label. Operating procedures are what blast-radius exists to catch. Found by the 2026-08-04 red-team of #2572; the agent-memory half by the /review of PR #1045.
+scoreEscalation's BLAST_RADIUS list in we:scripts/lib/review-escalation.mjs matches only the BUILT skills directory .claude/skills/ — which in WE is a symlink to we:skills-src/, so git never reports a changed file beneath it and the pattern fires never. Skills have no blast-radius coverage at all here: an edit to we:skills-src/jury/subject-jury.workflow.js scores on size alone. The agent-memory corpus has no pattern on either side — neither we:agent-memory-src/ nor .claude/agent-memory/ matches anything — so a memory rule governing the land bar itself merges with no review label. Both surfaces reduce to the same fix: register the -src directories git actually reports. Operating procedures are what blast-radius exists to catch. Found by the 2026-08-04 red-team of #2572; the agent-memory half by the /review of PR #1045.
 
 ## The gap
 
@@ -16,27 +16,24 @@ scoreEscalation's BLAST_RADIUS list in we:scripts/lib/review-escalation.mjs matc
 `/(^|\/)\.claude\/skills\//` — "agent skills (the operating procedures)". `we:skills-src/` is not in the list
 and matches no other pattern (`^scripts/`, `.githooks/`, `.github/`, the statute paths, the standards JSON).
 
-Measured on the same file at ~500 lines:
+**And in WE the one pattern that IS there fires NEVER (measured 2026-08-05).** The built directory is not a
+directory: `we:.claude/skills` is a **symlink** to `we:skills-src/`, tracked by git as a single symlink entry
+(`git ls-files '.claude/skills*'` returns exactly one path — the link itself, no files under it). So git can
+never report a changed file as `we:.claude/skills/<anything>`; every real edit surfaces as `we:skills-src/…`.
 
-| Path | Band |
+Scored live, both rows on the **same** basis — `scoreEscalation({ changedFiles: [path], diffLines: 500 })`, the
+~500-line edit this item is about. The `blast-radius` reason echoes the matched path back, written `<path>` here:
+
+| changed-file path as git reports it | result |
 |---|---|
-| `we:skills-src/jury/subject-jury.workflow.js` | `low` |
-| `we:skills-src/conveyor/runner.mjs` | `low` |
-| the built skill file under the skills directory | `high` |
+| `we:skills-src/pr/SKILL.md` — what git actually emits (identically for `we:skills-src/jury/subject-jury.workflow.js` and `we:skills-src/conveyor/runner.mjs`) | `{escalate: true, careLevel: "low", reasons: ["size (500 ≥ 400 changed lines)"], signals: {size: 500}}` — **size alone**; blast-radius contributes nothing |
+| `we:.claude/skills/pr/SKILL.md` — a shape git cannot emit here | `{escalate: true, careLevel: "high", reasons: ["blast-radius (<path>)", "size (500 ≥ 400 changed lines)"], signals: {blastRadius: ["<path>"], size: 500}}` |
 
-Same skill, opposite band, decided by whether the edit lands on the source or the build output. Since the
-source is where these are actually authored, the built-path pattern is the one that rarely fires.
-
-**Sharper than "rarely fires" — in WE the built-path pattern fires NEVER (measured 2026-08-05).** The built
-directory is not a directory: `we:.claude/skills` is a **symlink** to `we:skills-src/`, tracked by git as a
-single symlink entry (`git ls-files '.claude/skills*'` returns exactly one path — the link itself, no files
-under it). So git can never report a changed file as `we:.claude/skills/<anything>`; every real edit surfaces as
-`we:skills-src/…`. Scored live:
-
-| changed-file path as git reports it | `scoreEscalation` |
-|---|---|
-| `we:skills-src/pr/SKILL.md` — what git actually emits | `{escalate: false, careLevel: "none", reasons: []}` |
-| `we:.claude/skills/pr/SKILL.md` — a shape git cannot emit here | `{escalate: true, careLevel: "elevated", reasons: ["blast-radius"]}` |
+Same skill, opposite band, decided only by whether the edit lands on the source or the build output — except
+the build-output row is unreachable, so only the first row ever happens. Below the 400-line size threshold the
+gap is total: at `diffLines: 12` the real path scores `{escalate: false, careLevel: "none", reasons: []}`, while
+the unreachable built path would score
+`{escalate: true, careLevel: "elevated", reasons: ["blast-radius (<path>)"], signals: {blastRadius: ["<path>"]}}`.
 
 So this is not an asymmetry between two live paths — **the only skills pattern in `BLAST_RADIUS` is dead code in
 this repo**, and skills have no blast-radius coverage at all. It is NOT dead everywhere: `.claude/skills` is a
@@ -85,6 +82,9 @@ blind spot it exposed is independent of it and outlives it.
   locks source and build output to the same band for **both** pairs, so neither can drift apart again — including
   a case asserting `scoreEscalation` on `we:agent-memory-src/land-on-no-regression-not-perfection.md` does not
   return `{escalate: false}` (the PR #1040 / #1043 / #1045 regression).
-- Check whether any other built/source pair in the repo has the same shape before closing — `.claude/` is the
-  common parent for the built halves, so an anchor on `(^|\/)\.claude\/` scoped to the procedure directories may
-  be a better fix than adding one regex per pair.
+- Add the `-src` patterns; **do not** "simplify" by anchoring on `(^|\/)\.claude\/` instead. In WE every
+  `.claude/` procedure directory is a symlink, so such an anchor is dead code here for exactly the reason above —
+  it would ship the bug this item documents. Keep the existing built-path patterns too: they are live in
+  plateau-app, where `.claude/skills` is a real directory.
+- Check whether any other built/source pair in the repo has the same symlink shape before closing, and register
+  the source half of each.

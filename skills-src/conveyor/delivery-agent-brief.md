@@ -251,9 +251,12 @@ idempotent (it targets the existing PR and applies the label, never a duplicate)
 script ([#deterministic-core-thin-judgment](../../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
 **Default** is `--label-on-green` (opens `ready-to-merge`; the daemon lands it with no human in the loop) — a
 clean, reviewed, non-statute PR whose `test` is green lands that way, and that is the norm, not the exception.
-Open the PR **parked** instead — `--label=review:human` (STOPS at open, no auto-land), or leave it
-**unlabelled** (`--no-wait`) on a red gate — ONLY when an *Escalations* condition below applies. Do **NOT**
-blanket-park a clean, reviewed PR "so a human can see it".
+Open the PR **parked** instead — `--park=review:human` (#2622: the review label goes on **at open** and the
+merge-hold blocks the land) — ONLY when an *Escalations* condition below applies. Do **NOT**
+blanket-park a clean, reviewed PR "so a human can see it". Neither `--label=review:human` nor `--no-wait` is a
+hold: `--label=<name>` only *renames* the label applied on green, and `--no-wait` leaves the PR unlabelled only
+until the daemon's green reconcile (`shouldLabelOnGreen`, #2216) labels it `ready-to-merge` — see
+[[pr-land-dogfood-mechanics]].
 
 ### 9. Append a structured learnings entry to the session drop-box (#2614)
 
@@ -365,7 +368,7 @@ and dilutes what `review:human` means.
    or delete a test to go green.
 3. **A review finding that needs human judgment** — the step-6 adversarial code review (or the step-7 visual
    self-review, for a UI item) surfaced an issue you could not safely self-clear (you fixed what you could to
-   convergence; this one needs a human call). Open the PR parked `review:human` (`--label=review:human`).
+   convergence; this one needs a human call). Open the PR parked `review:human` (`--park=review:human`).
 4. **Genuine uncertainty** — you are not confident the change is right and want a human eye before it lands.
    Park it `review:human`. (Uncertainty is a *good reason*; "so a human can see a clean change" is not.)
 5. **`review:changes`** — a human bounced a prior version of this diff. As a fresh delivery agent you normally

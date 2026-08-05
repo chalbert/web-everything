@@ -71,15 +71,24 @@ first sweep.
    - `--no-wait` opens the self-approved PR **UNLABELLED** and returns immediately (CI unconfirmed). **This is
      NOT a hold** — do not reach for it to keep a PR back for a human. `shouldLabelOnGreen` (#2216) labels any
      producer-owned AI PR `ready-to-merge` the instant its required check goes green, and the resident drain
-     daemon runs that reconcile every ~60s, so `--no-wait` only changes *who* labels it and delays the merge by
-     a few minutes. (Observed on PR #1047: opened unlabelled → daemon labelled it 3 min later → merged.) Use it
-     only when you want the PR raised now and are content for the daemon to land it on green.
+     daemon runs that reconcile every ~60s, so `--no-wait` only changes *who* labels it — it costs at most one
+     ~60s daemon poll, not a hold. (Observed on PR #1047: opened 20:56:30Z → daemon labelled it `ready-to-merge`
+     21:00:58Z, the moment `test` went green → merged 21:07:20Z.) Use it only when you want the PR raised now
+     and are content for the daemon to land it on green.
    - `--park=<review:human|review:pending>` (#2622) is **the hold** — it applies the review label **at open**,
      and the #2820 merge-hold test blocks merge on a `review:*` label regardless of `ready-to-merge`. It runs
      the same numbering / land-prep as the normal path, so a parked PR's hash-keyed backlog items are not
-     stranded. Park takes precedence over `--label-on-green` / `--no-wait`, and an off-list value fails fast
-     (exit 3) before any push. Reach for this whenever a diff must reach a human before it lands — including
-     any diff **you** authored that you therefore may not clear yourself (#2439).
+     stranded. Park takes precedence over `--label-on-green` / `--no-wait`; it exits **0** with
+     `reason:"parked"` (the PR is open and HELD, *not* merged), and an off-list value fails fast (exit 3,
+     `reason:"bad-park"`) before any push. Reach for this whenever a diff must not land on its author's own
+     say-so — including any diff **you** authored and therefore may not clear yourself (#2439).
+     **The two values are not interchangeable:** only `review:human` guarantees a *human*. `decideSetLabel`
+     (`we:scripts/review-set-label.mjs`, INVARIANT 2) refuses `review:human → review:accepted` in its pure
+     core, so no caller routed through it can clear the gate — a human's `/review` ceremony must. And the
+     `allowPendingReview` relief valve (#2423, `we:scripts/merge-ai-prs.mjs`) cannot relieve it. `review:pending`
+     only guarantees an *independent (non-author)* clearer: an agent review may accept it, and that relief valve
+     lets the operator pass it through. Pass `review:human` when a human specifically must see the diff;
+     `review:pending` when any non-author reviewer will do.
    - **The `ready-to-merge` label is applied ONLY after the required checks are green (#2196/#2199)** — never
      eagerly at open, so a red PR never enters the drain's queue. In the default land path (above) and the
      `--label-on-green` path `pr-land` applies it once CI passes. Pass `--no-label` to opt out; `--label=<name>`
@@ -99,11 +108,15 @@ first sweep.
 
 ## Exit codes (surface these, never merge a red PR)
 
-- `0` = merged (or opened with `--no-wait` / dry-run).
+- `0` = merged — **or** opened and deliberately left un-landed. Read `reason` in the JSON before you report
+  anything as merged: `--park` exits 0 with `reason:"parked"` (the PR is open and HELD for review, **not**
+  merged), and `--no-wait` / `--label-on-green` / `--dry-run` also exit 0 without a merge.
 - `2` = the required check was RED — nothing merged, `main` untouched. Report the failing check; fix and
   re-run.
-- `3` = unmergeable / `gh` error / push failed — recoverable: rebase the ref on `main` and re-run, or
-  pass `--fallback-git`.
+- `3` = unmergeable / `gh` error / push failed / empty PR body — recoverable: rebase the ref on `main` and
+  re-run, or pass `--fallback-git`. **Exception:** an off-list `--park` value also exits 3, with
+  `reason:"bad-park"`, before anything is pushed — the fix there is correcting the label string to
+  `review:human` or `review:pending`, never `--fallback-git`.
 
 ## Guardrails
 
