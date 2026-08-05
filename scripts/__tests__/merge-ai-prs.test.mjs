@@ -1059,8 +1059,13 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
   const fakeExec = (script = {}) => {
     const calls = [];
     const exec = (cmd, args, opts) => {
-      calls.push({ cmd, args, opts, key: `${cmd} ${args.join(' ')}` });
-      const h = script[`${cmd} ${args.join(' ')}`];
+      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options`. That flag is argv
+      // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
+      // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
+      // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
+      const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
       if (h && 'stdout' in h) return h.stdout;
       // Faithful to real git: an UNSTUBBED `git diff` against a ref this fake doesn't know throws
@@ -1072,10 +1077,32 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     return { exec, calls };
   };
 
+  // PR #1031 r4 finding 1 — `candidate` is the caller-supplied refname on the second resolution pass. Verified
+  // on git 2.50.1: unguarded, `git diff --numstat <base> '--output=<path>'` exits 0 and WRITES that file. Worse
+  // than the write — the swallowed numstat then reads EMPTY while the candidate still resolves, so this reports
+  // ZERO blast radius for a PR the lander is about to merge.
+  it('guards the git-diff argv with --end-of-options at EVERY position taking a caller-supplied ref', () => {
+    const { exec, calls } = fakeExec({
+      'git diff --numstat origin/main origin/lane/x': { stdout: '1\t0\tREADME.md\n' },
+      'git diff --numstat a1b2c3d4e5f6 origin/lane/x': { stdout: '1\t0\tREADME.md\n' },
+      'git diff origin/main origin/lane/x': { stdout: 'diff --git a/README.md b/README.md\n' },
+    });
+    computeNetDiffChangedFiles({ exec, rev: 'lane/x', baseRev: 'a1b2c3d4e5f6', fetchExtraRefs: ['lane/x'] });
+    computeNetDiffText({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    const diffs = calls.filter((c) => c.args[0] === 'diff');
+    expect(diffs.length, 'no git diff calls made — the assertion would pass vacuously').toBeGreaterThan(2);
+    for (const c of diffs) {
+      const g = c.args.indexOf('--end-of-options');
+      expect(g, `unguarded git diff argv: ${c.args.join(' ')}`).toBeGreaterThan(-1);
+      const firstRef = c.args.findIndex((a, i) => i > 0 && !a.startsWith('-'));
+      expect(g, `guard must PRECEDE the refs: ${c.args.join(' ')}`).toBeLessThan(firstRef);
+    }
+  });
+
   it('fetches BASE with an EXPLICIT destination refspec (never a bare `git fetch <remote> <base>`, which relies on the opportunistic tracking-ref update)', () => {
     const { exec, calls } = fakeExec({ 'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' } });
     computeNetDiffChangedFiles({ exec, rev: 'deadbeef' });
-    expect(calls.some((c) => c.args[0] === 'fetch' && c.args[1] === 'origin' && c.args[2] === '+main:refs/remotes/origin/main')).toBe(true);
+    expect(calls.some((c) => c.args[0] === 'fetch' && c.args.includes('origin') && c.args.includes('+main:refs/remotes/origin/main'))).toBe(true);
   });
 
   it('diffs `<remote>/<base>` against `rev` directly (a plain two-tree comparison, content-only) and parses via parseNumstat', () => {
@@ -1172,10 +1199,24 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     expect(calls.length).toBe(0);
   });
 
+  // PR #1031 review, finding 1 — `fetchExtraRefs` carries a branch name straight off the `gh` API, and a
+  // dash-leading refname is LEGAL (`git check-ref-format 'refs/heads/--output=/tmp/pwn'` exits 0). Verified on
+  // git 2.50.1: the unguarded form EXECUTES an injected `--upload-pack=<script>`, while the guarded form refuses
+  // with `invalid refspec`. So the guard must PRECEDE every caller-supplied argv element, not merely be present.
+  it('guards the fetch argv with --end-of-options BEFORE any caller-supplied value', () => {
+    const { exec, calls } = fakeExec({ 'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' } });
+    computeNetDiffChangedFiles({ exec, rev: 'deadbeef', fetchExtraRefs: ['lane/x'] });
+    const fetch = calls.find((c) => c.args[0] === 'fetch');
+    const guard = fetch.args.indexOf('--end-of-options');
+    expect(guard, 'the fetch argv carries no --end-of-options guard').toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(fetch.args.indexOf('origin'));
+    expect(guard).toBeLessThan(fetch.args.indexOf('lane/x'));
+  });
+
   it('honors a custom remote/base and passes fetchExtraRefs through to the fetch call', () => {
     const { exec, calls } = fakeExec({ 'git diff --numstat upstream/release deadbeef': { stdout: '1\t0\tREADME.md\n' } });
     computeNetDiffChangedFiles({ exec, remote: 'upstream', base: 'release', rev: 'deadbeef', fetchExtraRefs: ['lane/x'] });
-    expect(calls[0]).toMatchObject({ args: ['fetch', 'upstream', '+release:refs/remotes/upstream/release', 'lane/x', '--quiet'] });
+    expect(calls[0]).toMatchObject({ args: ['fetch', '--quiet', '--end-of-options', 'upstream', '+release:refs/remotes/upstream/release', 'lane/x'] });
   });
 
   // #2390 — a STACKED lane records the SHA it was cut from (its predecessor's tip) as the manifest per-repo
@@ -1205,7 +1246,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     });
     computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'a1b2c3d4e5f6', fetchExtraRefs: ['lane/child'] });
     const fetch = calls.find((c) => c.args[0] === 'fetch');
-    expect(fetch.args).toEqual(['fetch', 'origin', '+main:refs/remotes/origin/main', 'lane/child', '--quiet']);
+    expect(fetch.args).toEqual(['fetch', '--quiet', '--end-of-options', 'origin', '+main:refs/remotes/origin/main', 'lane/child']);
   });
 
   it('#2390 — a malformed (non-hex) baseRev is IGNORED — the origin/main basis serves BOTH size and the human gate, never an injected git arg', () => {
@@ -1213,7 +1254,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     const r = computeNetDiffChangedFiles({ exec, rev: 'deadbeef', baseRev: '--upload-pack=evil' });
     expect(r).toEqual({ changedFiles: ['README.md'], diffLines: 1, scored: true, humanBasisFiles: ['README.md'] });
     expect(calls.some((c) => c.args.includes('--upload-pack=evil'))).toBe(false); // the poison value never reaches git
-    expect(calls[0].args[2]).toBe('+main:refs/remotes/origin/main'); // sibling basis restored
+    expect(calls[0].args).toContain('+main:refs/remotes/origin/main'); // sibling basis restored
   });
 
   // ── #2390-review-fix — the CORE security guarantees: a self-declared / mis-set base can de-inflate SIZE but
@@ -1322,8 +1363,13 @@ describe('computeNetDiffText (#2450 — reviewer-facing NET diff TEXT, SAME basi
   const fakeExec = (script = {}) => {
     const calls = [];
     const exec = (cmd, args, opts) => {
-      calls.push({ cmd, args, opts, key: `${cmd} ${args.join(' ')}` });
-      const h = script[`${cmd} ${args.join(' ')}`];
+      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options`. That flag is argv
+      // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
+      // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
+      // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
+      const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
       if (h && 'stdout' in h) return h.stdout;
       if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
@@ -1343,7 +1389,7 @@ describe('computeNetDiffText (#2450 — reviewer-facing NET diff TEXT, SAME basi
     expect(r.base).toBe('origin/main');
     expect(r.rev).toBe('deadbeef');
     // exact same fetch refspec computeNetDiffChangedFiles uses — proving ONE shared basis, no drift.
-    expect(calls.some((c) => c.args[0] === 'fetch' && c.args[2] === '+main:refs/remotes/origin/main')).toBe(true);
+    expect(calls.some((c) => c.args[0] === 'fetch' && c.args.includes('+main:refs/remotes/origin/main'))).toBe(true);
     // #2336 — no checkout/switch of the PR branch, ever.
     expect(calls.some((c) => ['checkout', 'switch'].includes(c.args[0]))).toBe(false);
   });
@@ -1417,8 +1463,13 @@ describe('regenDerivedOnLand — the drain owns post-land WE derived regen (#229
   const fakeExec = (script = {}) => {
     const calls = [];
     const exec = (cmd, args, opts) => {
-      calls.push({ cmd, args, opts, key: `${cmd} ${args.join(' ')}` });
-      const h = script[`${cmd} ${args.join(' ')}`];
+      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options`. That flag is argv
+      // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
+      // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
+      // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
+      const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
       return h && 'stdout' in h ? h.stdout : '';
     };
@@ -1611,8 +1662,13 @@ describe('resyncDetachedCwdForLand (#2348 — a lane clone\'s detached HEAD stra
   const fakeExec = (script = {}) => {
     const calls = [];
     const exec = (cmd, args, opts) => {
-      calls.push({ cmd, args, opts, key: `${cmd} ${args.join(' ')}` });
-      const h = script[`${cmd} ${args.join(' ')}`];
+      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options`. That flag is argv
+      // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
+      // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
+      // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
+      const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
       return h && 'stdout' in h ? h.stdout : '';
     };

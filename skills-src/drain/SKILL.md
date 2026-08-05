@@ -311,8 +311,10 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
      diff, which still lists a sibling-lane file that has since landed on main as if this PR added it — the
      phantom scope-creep that burns rounds (#2450). If it returns `scored:false` (a foreign clone without the
      head ref, a diff failure), fall back to `gh pr diff <num> --repo <repo>`. Also `gh pr view <num> --repo
-     <repo> --json title,body,files`, and take the NET changed-file list from `computeNetDiffChangedFiles(...)`
-     (the drain already computes it for scoring). Spawn ONE **fresh-context adversarial review subagent per
+     <repo> --json title,body,files`, and take the NET changed-file list from **`computeNetDiffPaths(...)`** —
+     plain paths off the same basis. NOT `computeNetDiffChangedFiles`, which is the scoring path and emits git's
+     display encoding (`a.txt => b.txt` for a rename, C-quoted non-ASCII), so intersecting it with `gh`'s plain
+     paths drops those entries and a rename-only PR reads as zero files. Spawn ONE **fresh-context adversarial review subagent per
      lens** (the `Agent` tool, fanned out in parallel via the Workflow orchestrator), each seeded with
      `buildPanelMandate({ lens, netChangedFiles })` — the net changed-file list is passed as GROUND TRUTH so a
      reviewer will NOT flag a diff-side file outside that set as scope creep (#2450) — same diff-only,

@@ -29,6 +29,9 @@
  * Exit 0 always when at least one number was given; 2 on a usage error (no numbers).
  */
 import { execFileSync } from 'node:child_process';
+// #2901 — the NET two-tree diff basis. merge-ai-prs.mjs guards its CLI behind `if (IS_CLI)`, so importing
+// this one function does not run the lander; the /review skill mandates the same import for the same reason.
+import { computeNetDiffText, computeNetDiffPaths } from './merge-ai-prs.mjs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { classifyChecks } from './pr-land.mjs';
@@ -161,12 +164,19 @@ export function reviewClassFromLabels(labels) {
  * The `checks` token is over the REQUIRED set when `requiredNames` is supplied (so it matches what pr-land waits
  * for — #2482); with no `requiredNames` it degrades to the full rollup (the historical all-checks behaviour), and
  * `checksScope` records which (`'required'` vs `'all'`) so a consumer knows exactly what the token covers.
- * @param {{view: object, diff?: string, requiredNames?: string[]|null}} o
+ * #2901 — `diffBasis` records WHICH diff the consumer is holding: `'net'` (the two-tree
+ * `git diff <forkpoint> <head>`, what a reviewer must judge) or `'three-dot'` (`gh pr diff`, the degraded
+ * fallback). A reviewer handed a three-dot diff sees files that sibling lanes already landed on `main` as though
+ * this PR added them, and will faithfully report findings about code the PR does not contain — observed on
+ * PR #1018, where a juror flagged an "unrelated #2457 re-scope" that is not in the diff at all. The basis must
+ * therefore travel WITH the diff: a degraded basis that looks identical to a good one is how a confident,
+ * well-argued, wrong finding reaches a PR author.
+ * @param {{view: object, diff?: string, requiredNames?: string[]|null, diffBasis?: string}} o
  * @returns {{number:number, title:string, body:string, files:Array, state:string,
- *   checks:{status:string, reason:string}, checksScope:string, diff:string, labels:string[], reviewClass:string,
- *   headRefName:string, mergeable:string}}
+ *   checks:{status:string, reason:string}, checksScope:string, diff:string, diffBasis:string, labels:string[],
+ *   reviewClass:string, headRefName:string, mergeable:string}}
  */
-export function assembleParked({ view, diff, requiredNames } = {}) {
+export function assembleParked({ view, diff, requiredNames, diffBasis } = {}) {
   const v = view || {};
   const labels = labelNames(v.labels);
   const checkRows = filterToRequired(rollupToCheckRows(v.statusCheckRollup), requiredNames);
@@ -179,11 +189,131 @@ export function assembleParked({ view, diff, requiredNames } = {}) {
     checks: classifyChecks(checkRows),
     checksScope: Array.isArray(requiredNames) ? 'required' : 'all',
     diff: typeof diff === 'string' ? diff : '',
+    // Default to the DEGRADED label, never the good one: an unstated basis must not read as a net diff.
+    diffBasis: diffBasis === 'net' ? 'net' : 'three-dot',
     labels,
     reviewClass: reviewClassFromLabels(labels),
     headRefName: String(v.headRefName || ''),
     mergeable: String(v.mergeable || ''),
   };
+}
+
+/**
+ * PURE — do two git object names denote the same commit? Compares on the COMMON PREFIX (min 7), because `gh`
+ * and `git rev-parse` legitimately spell the same commit at different lengths. Fail-closed on either side being
+ * absent or non-hex: an unprovable identity must read as "different", never as "same".
+ * @param {string} a @param {string} b @returns {boolean}
+ */
+export function sameCommit(a, b) {
+  const x = String(a || '').trim().toLowerCase();
+  const y = String(b || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{7,64}$/.test(x) || !/^[0-9a-f]{7,64}$/.test(y)) return false;
+  const n = Math.min(x.length, y.length);
+  return n >= 7 && x.slice(0, n) === y.slice(0, n);
+}
+
+/**
+ * PURE — narrow a three-dot `gh pr view --json files` list down to the NET changed set, or REFUSE to.
+ *
+ * The file list is what a juror CITES, so it must come from the same basis as the diff. On PR #1018 the
+ * three-dot list carried 29 entries against 18 real ones, and the phantom finding named one of the surplus.
+ *
+ * FAIL OPEN, and the rule is not obvious, so it is stated once here rather than re-derived at the call site:
+ * we keep the scoped list only when the gh list CONTAINS every net path (`kept.length >= candidate.size`). If
+ * it does not, the two sources disagree about encoding or scope and we cannot say which is right — so the
+ * caller must keep the unfiltered list AND stop claiming a `net` basis. Presenting a SHORT list as
+ * authoritative is the worse error: it tells a reviewer a real file is absent from the PR.
+ *
+ * @param {{ghFiles?: Array, netPaths?: string[]}} o
+ * @returns {{files: Array, scoped: boolean}} `scoped:false` means the caller must degrade the basis too
+ */
+export function scopeFilesToNet({ ghFiles, netPaths } = {}) {
+  const files = Array.isArray(ghFiles) ? ghFiles : [];
+  const paths = (Array.isArray(netPaths) ? netPaths : []).map(String).filter(Boolean);
+  if (!paths.length) return { files, scoped: false };
+  const candidate = new Set(paths);
+  const ghPaths = new Set(files.map((x) => String((x && (x.path || x.filename)) || '')));
+  // SET containment, not a count comparison. `kept.length >= candidate.size` passed on duplicates: gh reporting
+  // [a.ts, a.ts, c.md] against net [a.ts, b.ts] gave kept.length 2 >= size 2 and scoped away b.ts — presenting a
+  // SHORT list as authoritative, the outcome this function's own contract calls the worse error. (Finding 8.)
+  for (const p of candidate) if (!ghPaths.has(p)) return { files, scoped: false };
+  return { files: files.filter((x) => candidate.has(String((x && (x.path || x.filename)) || ''))), scoped: true };
+}
+
+/**
+ * The NET diff bundle for one PR head — text + plain path list + the basis label, resolved in ONE shot so the
+ * three can never disagree. `exec(cmd, args, opts)` is injected, so this is unit-testable with a fake.
+ *
+ * PROVING THE REF IS CURRENT, not merely resolvable (PR #1031 review). `computeNetDiff*`'s `scored` means only "a
+ * candidate ref RESOLVED" — `resolveNetDiffBasis` swallows its own fetch error and falls through to whatever
+ * `origin/<headRef>` happens to be cached. A working `gh` API path plus a broken git transport would then hand
+ * back a plausible OLDER diff labelled `net`: the panel signs off commit A while the head is commit B, with no
+ * signal at all. Before this existed, a diff failure produced `diff: ''`, which degrades the round to
+ * needs-human — strictly safer. So two things are proven here, not one:
+ *   1. the fetch actually ran (its failure is caught, not swallowed), and
+ *   2. `origin/<headRef>` now points at the head `gh` reported (`headRefOid`). Exit 0 is NOT enough: a clone
+ *      with a narrowed refspec returns 0 from `git fetch origin lane/x` while never creating `origin/lane/x`.
+ * With no `headRefOid` supplied the currency check cannot run, so the basis stays `three-dot` — an unprovable
+ * claim is not made.
+ *
+ * `--end-of-options` guards every git call that puts a caller-supplied value in argv position. `headRef` comes
+ * from the `gh` API and `git check-ref-format 'refs/heads/--output=/tmp/pwn'` exits 0, so a dash-leading ref is
+ * a legal refname that git would otherwise parse as an option (`--upload-pack=<script>` executes).
+ *
+ * @param {{exec: Function, headRef?: string, headRefOid?: string}} o
+ * @returns {{text: string, paths: string[], basis: 'net'|'three-dot'}}
+ */
+export function resolveNetDiff({ exec, headRef, headRefOid } = {}) {
+  const degraded = { text: '', paths: [], basis: 'three-dot' };
+  if (typeof exec !== 'function' || !headRef) return degraded;
+  // EXPLICIT destination refspec, never the bare opportunistic `git fetch origin <ref>` — the form #2373 banned
+  // in the sibling function. In a narrowed-refspec clone the bare form exits 0 WITHOUT creating
+  // `refs/remotes/origin/<ref>`, so the currency proof below fails and every PR silently degrades to three-dot:
+  // the feature is off with no signal. (PR #1039 review, finding 9.)
+  try {
+    exec('git', ['fetch', '--quiet', '--end-of-options', 'origin', `+${headRef}:refs/remotes/origin/${headRef}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch { return degraded; }
+  // The ref must now BE the head gh reported. No oid to compare against → we cannot prove it, so we do not claim it.
+  if (!/^[0-9a-f]{7,64}$/i.test(String(headRefOid || ''))) return degraded;
+  try {
+    // `--verify` is LOAD-BEARING, not decoration. Plain `git rev-parse --end-of-options <ref>` ECHOES the
+    // guard as an output line — rev-parse prints back any argument it cannot interpret, unlike `fetch`/`diff`
+    // which consume it. Observed on git 2.50.1:
+    //     $ git rev-parse --end-of-options refs/remotes/origin/lane/x
+    //     --end-of-options
+    //     9cd54a9dca60c7902643d3cc6847378c331c2abf
+    // so `at` came back as "--end-of-options\n9cd54a9d…", `sameCommit`'s `^[0-9a-f]{7,64}$` rejected it, and
+    // this function returned `degraded` on EVERY real invocation — the whole net basis silently never engaged.
+    // `--verify` demands exactly one revision and prints the bare sha; it also still refuses an option-shaped
+    // ref (`fatal: Needed a single revision`), so the guard is not weakened. Proven by the real-git case in
+    // fetch-parked.test.mjs, which runs this against an actual repo — a fake `exec` cannot catch this class,
+    // because a fake encodes what git was ASSUMED to do.
+    const at = String(exec('git', ['rev-parse', '--verify', '--end-of-options', `refs/remotes/origin/${headRef}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').trim();
+    if (!sameCommit(at, headRefOid)) return degraded;
+  } catch { return degraded; }
+  // THE DIFF IS TAKEN ON THE OID, NOT THE NAME (PR #1039 review, finding 1 — two lenses, one root cause).
+  // Proving `refs/remotes/origin/<headRef>` and then diffing `origin/<headRef>` proves nothing about the diff:
+  //   • DWIM. `resolveNetDiffBasis`'s candidate 1 is the SHORTHAND `origin/<rev>`, and git resolves refs/tags/
+  //     and refs/heads/ BEFORE refs/remotes/. Reproduced on 2.50.1 with a tag literally named `origin/lane/y`:
+  //     the proof site returned the head 93d417ae while the diff site returned the tag 02d9552b, and `net` was
+  //     still claimed. `git clone` fetches tags by default and `git fetch origin <ref>` auto-follows them; the
+  //     local-BRANCH variant resolves with no ambiguity warning at all.
+  //   • TOCTOU. Each compute re-runs `resolveNetDiffBasis`, which re-fetches — so the proof is re-invalidated
+  //     twice, after the fact. A head that moves mid-run (a rebase-drop force-push, a producer push landing
+  //     mid-drain — both routine here) yields a `net`-labelled diff of commit B while `view.files` and the
+  //     reviewed sha are commit A: verbatim the failure this function claims to eliminate.
+  // Passing the object id closes both: candidate 1 (`origin/<oid>`) fails fast, candidate 2 resolves the oid
+  // EXACTLY, and an object id cannot move. `fetchExtraRefs` still carries the NAME so the fetch stays correct.
+  const rev = headRefOid;
+  const net = computeNetDiffText({ exec, rev, fetchExtraRefs: [headRef] });
+  if (!net || !net.scored || typeof net.text !== 'string') return degraded;
+  const list = computeNetDiffPaths({ exec, rev, fetchExtraRefs: [headRef] });
+  if (!list || !list.scored) return degraded;
+  // An EMPTY net diff is not a failure — it is this basis's most valuable signal: the branch is
+  // content-identical to main. `scored` already separates "empty" from "could not resolve", so discarding it in
+  // favour of the inflated three-dot diff would throw away the one case a reviewer most needs told about.
+  // (Finding 10.)
+  return { text: net.text, paths: list.paths, basis: 'net' };
 }
 
 // Allow importing the pure assembler without running the CLI (the test file + pr-state.mjs import this module).
@@ -210,14 +340,33 @@ function runCli() {
     try {
       const view = JSON.parse(gh([
         'pr', 'view', num, '--json',
-        'number,title,body,files,state,statusCheckRollup,labels,headRefName,mergeable',
+        'number,title,body,files,state,statusCheckRollup,labels,headRefName,headRefOid,mergeable',
       ]));
-      let diff = '';
-      try { diff = gh(['pr', 'diff', num]); } catch { diff = ''; } // a diff hiccup must not drop the whole entry
+      // #2901 — the NET two-tree diff vs CURRENT main, NOT `gh pr diff`'s three-dot merge-base diff. The
+      // three-dot form lists a sibling-lane file that has since landed on main as if THIS PR added it, so a
+      // reviewer grades work the PR never did. #2901 fixed this for the `/review` skill and did not touch this
+      // module — which is what the converge loop reads — so the defect survived here and produced a phantom
+      // finding on PR #1018 within hours. Same basis the drain's escalation SCORE uses (#2450/#2373/#2404), so
+      // what a reviewer reads and what was scored cannot drift.
+      const exec = (c, a, o) => execFileSync(c, a, { cwd, maxBuffer: 64 * 1024 * 1024, ...o });
+      const net = resolveNetDiff({ exec, headRef: String(view.headRefName || ''), headRefOid: String(view.headRefOid || '') });
+      // The diff and the file list ride ONE basis or neither does. `scopeFilesToNet` refusing to scope means the
+      // two sources disagree, so the net TEXT is dropped too and the whole bundle falls back to three-dot —
+      // rather than shipping a net diff beside an inflated three-dot list under a `three-dot` label. That mix is
+      // how PR #1018's juror cited a sibling-lane file absent from the diff it was reading.
+      const scoped = net.basis === 'net' ? scopeFilesToNet({ ghFiles: view.files, netPaths: net.paths }) : null;
+      const useNet = Boolean(scoped && scoped.scoped);
+      let diff = useNet ? net.text : '';
+      const diffBasis = useNet ? 'net' : 'three-dot';
+      // Fall back ONLY when the net basis could not be resolved or could not be trusted (a foreign clone without
+      // the head ref, a failed/incomplete fetch, a diff failure, a file list that disagrees with gh's).
+      // `diffBasis` then says so, so a consumer can tell a reviewer the list may be inflated.
+      if (!diff) { try { diff = gh(['pr', 'diff', num]); } catch { diff = ''; } } // a diff hiccup must not drop the whole entry
       // Narrow the `checks=` token to the REQUIRED set so it matches what pr-land waits for (#2482); a gh hiccup
       // here yields `undefined` → assembleParked falls back to the all-checks display (never drops the entry).
       const requiredNames = resolveRequiredNames(gh, num);
-      return assembleParked({ view, diff, requiredNames });
+      const scopedView = useNet ? { ...view, files: scoped.files } : view;
+      return assembleParked({ view: scopedView, diff, requiredNames, diffBasis });
     } catch (e) {
       const msg = String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean).pop() || 'gh pr view failed';
       return { number: Number(num) || 0, error: msg };
