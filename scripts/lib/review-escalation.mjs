@@ -74,10 +74,25 @@ export function isStatutePath(path) {
  *     match is lost the moment #2445 extracts them out of we:scripts/ — so those, and only those, ALSO travel by
  *     basename via `BLAST_RADIUS_ENGINE` below. WE-only scripts (standards/backlog/memory/conformance/generators)
  *     are deliberately NOT registered there: WE is their permanent home, `^scripts\/` is the correct matcher for
- *     them, and there is nowhere for them to travel to. */
+ *     them, and there is nowhere for them to travel to.
+ *
+ *  THE AGENT-MEMORY ENTRY (added after PR #1040 landed unreviewed). `agent-memory-src/` holds the STANDING
+ *  INSTRUCTIONS agents follow — including, literally, the rule that says when a PR may land. It is the exact
+ *  sibling of `.claude/skills/` (procedures) in what it does to agent behaviour, but it was never registered
+ *  here, so a memory diff scored `{escalate:false, reasons:[]}` and `decideReviewGate` returned
+ *  `no escalation signal — merge immediately`. PR #1040 rewrote the land bar and merged with NO review label at
+ *  all; its own text then cited "policy-tier edits still require a human" as proof it was safe. That is the
+ *  hole: the memory corpus can loosen the effective review policy through the one behaviour-defining surface
+ *  the gate could not see, and it is ALSO exempt from the lane guard (invariant-catalogue.json), so it is
+ *  reachable directly from a primary checkout. Registering it makes a memory edit at minimum agent-reviewed.
+ *  Both spellings are listed because `.claude/agent-memory` is a symlink to `../agent-memory-src` — a write
+ *  through the link produces the linked path in the diff, and a one-spelling matcher would miss it. Blast-radius
+ *  is `clearance: agent`, so this costs a panel, not a human — the cheapest thing that closes the hole. */
 const BLAST_RADIUS = [
   /^scripts\//,                              // build/CI/merge tooling (WHILE in WE; relocatable engine files also travel by basename — see BLAST_RADIUS_ENGINE)
   /(^|\/)\.claude\/skills\//,                // agent skills (the operating procedures) — already travels cross-repo via (^|\/)
+  /(^|\/)agent-memory-src\//,                // agent memory (the standing instructions) — sibling to skills; see note below
+  /(^|\/)\.claude\/agent-memory\//,          // …and its symlinked spelling, so a write through the link trips too
   /(^|\/)\.githooks\//,                       // git hooks (the guards) — already travels cross-repo
   /(^|\/)\.github\//,                         // CI config / workflows — already travels cross-repo
   ...STATUTE_PATHS,                          // the statute layer (also forces a human — see scoreEscalation)
