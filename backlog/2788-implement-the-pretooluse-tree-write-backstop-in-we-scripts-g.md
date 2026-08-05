@@ -3,10 +3,12 @@ bornAs: xp7piyt
 kind: story
 size: 3
 parent: "2612"
-status: open
+status: resolved
 blockedBy: ["2749"]
 relatedTo: ["2123", "2302", "883", "2677"]
 dateOpened: "2026-07-28"
+dateStarted: "2026-08-03"
+dateResolved: "2026-08-03"
 tags: [guard, pretooluse, enforcement, hook, main-session, conveyor]
 scope:
   - we:scripts/guard-bash.mjs
