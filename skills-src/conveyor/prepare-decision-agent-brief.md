@@ -230,7 +230,7 @@ Escalation is **by good reason only** — a prepare PR normally auto-lands. Esca
    (#2629): even a parked prepare PR reaches the human only *after* an AI convergence pass.
 4. **A review finding you cannot self-clear** — the step-5 review surfaced an issue you fixed what you could of,
    but one needs a human call. Either return `could-not-prepare` (case 1) if the decision can't be honestly
-   prepared, or open the PR parked `review:human` (`--label=review:human`) — never let a prepare PR auto-land
+   prepared, or open the PR parked `review:human` (`--park=review:human`) — never let a prepare PR auto-land
    with an unresolved review finding or a half-earned `preparedDate`.
 
 ## Guardrails (the non-negotiables)

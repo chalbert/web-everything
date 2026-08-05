@@ -26,7 +26,7 @@ Batch · Commit · Git Hygiene cluster — open a leaf with `node scripts/memory
 - [Keep local main current after merge](keep-local-main-current-after-merge.md) — post-merge sync = `git pull --ff-only --autostash`; dirty tree must never leave main behind; #2183
 - [Closeout never infers ownership from dirty tree](closeout-never-infers-ownership-from-dirty-tree.md) — scope to own changeset; never revert files you didn't write; ratified invariant #1985
 - [Parallel orchestrator: first multi-lane run](parallel-orchestrator-first-real-multilane-run.md) — #1153 validated; carried items land active-unclaimed → reopen at closeout
-- [pr-land dogfood mechanics](pr-land-dogfood-mechanics.md) — --body-file; behind-main→rebase; --admin blocked; gh-pr-create 401→REST; self-heals id collisions; #2181
+- [pr-land dogfood mechanics](pr-land-dogfood-mechanics.md) — --park is the only unconditional hold (--no-wait / --label=NAME are not); --body-file; behind-main→rebase; --admin blocked; gh-pr-create 401→REST; self-heals id collisions; #2181
 - [Shared-file staging sweeps concurrent hunks](shared-file-staging-sweeps-concurrent-hunks.md) — `git add` stages foreign hunks; diff before staging, verify sha after commit
 - [Shared-index commit race](shared-index-commit-race.md) — peer session's `git commit` can sweep YOUR staged files; stage+commit in one step; #2138
 - [Single session should use a lane](single-session-should-use-a-lane.md) — RULED #2123: every edit-action session runs in an isolated lane CLONE; no carve-out
