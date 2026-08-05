@@ -30,6 +30,16 @@ import {
   VERDICTS,
   redTeamRequired,
   foldRedTeamVerdict,
+  IMPACT_LEVELS,
+  IMPACT_STRICTNESS,
+  impactStrictness,
+  PREVENTION_IMPACT_BAR,
+  blocksAcceptance,
+  hasUncapturedPrevention,
+  normalizeFinding,
+  deriveVerdict,
+  derivePanelVerdict,
+  buildPanelFindings,
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
@@ -530,5 +540,87 @@ describe('resolveAdapterRoster — the adapter-driven roster seam (#2656, F2)', 
 
   it('delegates the unknown-care-level throw to the spine', () => {
     expect(() => resolveAdapterRoster({ adapter, careLevel: 'critical' })).toThrow(/unknown care-level/);
+  });
+});
+
+describe('IMPACT IF UNFIXED + the strictness dial (#xdompzx)', () => {
+  const guarded = (extra = {}) => normalizeFinding({
+    summary: 'a finding', prevention: 'some durable gate', preventionCaptured: false, outcome: 'fixed', ...extra,
+  });
+
+  it('ranks the levels least- to most-costly and is total over the enum', () => {
+    expect(impactStrictness(IMPACT_LEVELS.COSMETIC)).toBeLessThan(impactStrictness(IMPACT_LEVELS.DEGRADED));
+    expect(impactStrictness(IMPACT_LEVELS.DEGRADED)).toBeLessThan(impactStrictness(IMPACT_LEVELS.BROKEN));
+    expect(impactStrictness(IMPACT_LEVELS.BROKEN)).toBeLessThan(impactStrictness(IMPACT_LEVELS.UNRECOVERABLE));
+    for (const level of Object.values(IMPACT_LEVELS)) expect(IMPACT_STRICTNESS[level]).toBeTypeOf('number');
+  });
+
+  it('throws on an unranked level rather than yielding undefined (every >= bar compare would lose it)', () => {
+    expect(() => impactStrictness('catastrophic')).toThrow(/no rank for impact level/);
+  });
+
+  it('normalizeFinding carries a valid level and DROPS an invented one (so it reads as undeclared)', () => {
+    expect(guarded({ impactIfUnfixed: 'broken' }).impactIfUnfixed).toBe('broken');
+    expect(guarded({ impactIfUnfixed: 'high' })).not.toHaveProperty('impactIfUnfixed');
+    expect(guarded()).not.toHaveProperty('impactIfUnfixed');
+  });
+
+  it('blocks at or above the bar, and does not below it', () => {
+    expect(blocksAcceptance(guarded({ impactIfUnfixed: 'cosmetic' }))).toBe(false);
+    expect(blocksAcceptance(guarded({ impactIfUnfixed: 'degraded' }))).toBe(false);
+    expect(blocksAcceptance(guarded({ impactIfUnfixed: 'broken' }))).toBe(true);
+    expect(blocksAcceptance(guarded({ impactIfUnfixed: 'unrecoverable' }))).toBe(true);
+  });
+
+  it('FAILS CLOSED on an undeclared or invented impact — the pre-#xdompzx behaviour, so this is a strict relaxation', () => {
+    expect(blocksAcceptance(guarded())).toBe(true);
+    expect(blocksAcceptance(guarded({ impactIfUnfixed: 'high' }))).toBe(true);
+  });
+
+  it('a captured guard never blocks, whatever its impact', () => {
+    expect(blocksAcceptance(guarded({ preventionCaptured: true, impactIfUnfixed: 'unrecoverable' }))).toBe(false);
+  });
+
+  it('keeps below-bar guards VISIBLE to the notice — the relaxation loses no information', () => {
+    const nit = guarded({ impactIfUnfixed: 'cosmetic' });
+    expect(hasUncapturedPrevention(nit)).toBe(true); // the notice still reports it
+    expect(blocksAcceptance(nit)).toBe(false); // the verdict does not stop for it
+  });
+
+  it('deriveVerdict accepts a below-bar guard and withholds on an at-bar one', () => {
+    expect(deriveVerdict({ findings: [guarded({ impactIfUnfixed: 'cosmetic' })] })).toBe(VERDICTS.ACCEPT);
+    expect(deriveVerdict({ findings: [guarded({ impactIfUnfixed: 'broken' })] })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it('an OUTSTANDING finding is still `changes` regardless of impact — the fix outranks the guard', () => {
+    expect(deriveVerdict({ findings: [guarded({ impactIfUnfixed: 'cosmetic', outcome: undefined })] })).toBe(VERDICTS.CHANGES);
+  });
+
+  it('TURNING THE DIAL tightens without touching a consumer', () => {
+    const nit = guarded({ impactIfUnfixed: 'cosmetic' });
+    expect(deriveVerdict({ findings: [nit] })).toBe(VERDICTS.ACCEPT);
+    expect(deriveVerdict({ findings: [nit], bar: IMPACT_LEVELS.COSMETIC })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it('derivePanelVerdict applies the same gate as deriveVerdict', () => {
+    const lensVerdicts = { correctness: 'accept', security: 'accept' };
+    const below = buildPanelFindings({ simplicity: [{ summary: 'nit', prevention: 'g', preventionCaptured: false, impactIfUnfixed: 'cosmetic', outcome: 'fixed' }] });
+    const above = buildPanelFindings({ security: [{ summary: 'race', prevention: 'g', preventionCaptured: false, impactIfUnfixed: 'unrecoverable', outcome: 'fixed' }] });
+    expect(derivePanelVerdict({ lensVerdicts, findings: below })).toBe(VERDICTS.ACCEPT);
+    expect(derivePanelVerdict({ lensVerdicts, findings: above })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+    expect(derivePanelVerdict({ lensVerdicts, findings: below, bar: IMPACT_LEVELS.COSMETIC })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it('the shipped bar is `broken` — the solo-context setting, documented as the knob to turn', () => {
+    expect(PREVENTION_IMPACT_BAR).toBe(IMPACT_LEVELS.BROKEN);
+  });
+
+  it('the mandate demands impact on every finding but scales the prevention demand to the bar', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
+    expect(text).toContain('IMPACT (required, for EVERY finding)');
+    for (const level of Object.values(IMPACT_LEVELS)) expect(text).toContain(level);
+    expect(text).toContain('OPTIONAL below');
+    expect(text).toContain('do NOT manufacture a gate proposal for a nit');
+    expect(text).not.toContain('at every severity, nits included');
   });
 });
