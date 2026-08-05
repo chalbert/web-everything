@@ -232,9 +232,11 @@ export function scopeFilesToNet({ ghFiles, netPaths } = {}) {
   const paths = (Array.isArray(netPaths) ? netPaths : []).map(String).filter(Boolean);
   if (!paths.length) return { files, scoped: false };
   const candidate = new Set(paths);
-  const ghPaths = files.map((x) => String((x && (x.path || x.filename)) || ''));
-  const kept = ghPaths.filter((x) => candidate.has(x));
-  if (kept.length < candidate.size) return { files, scoped: false };
+  const ghPaths = new Set(files.map((x) => String((x && (x.path || x.filename)) || '')));
+  // SET containment, not a count comparison. `kept.length >= candidate.size` passed on duplicates: gh reporting
+  // [a.ts, a.ts, c.md] against net [a.ts, b.ts] gave kept.length 2 >= size 2 and scoped away b.ts — presenting a
+  // SHORT list as authoritative, the outcome this function's own contract calls the worse error. (Finding 8.)
+  for (const p of candidate) if (!ghPaths.has(p)) return { files, scoped: false };
   return { files: files.filter((x) => candidate.has(String((x && (x.path || x.filename)) || ''))), scoped: true };
 }
 
@@ -264,8 +266,13 @@ export function scopeFilesToNet({ ghFiles, netPaths } = {}) {
 export function resolveNetDiff({ exec, headRef, headRefOid } = {}) {
   const degraded = { text: '', paths: [], basis: 'three-dot' };
   if (typeof exec !== 'function' || !headRef) return degraded;
-  try { exec('git', ['fetch', '--quiet', '--end-of-options', 'origin', headRef], { stdio: ['ignore', 'pipe', 'pipe'] }); }
-  catch { return degraded; }
+  // EXPLICIT destination refspec, never the bare opportunistic `git fetch origin <ref>` — the form #2373 banned
+  // in the sibling function. In a narrowed-refspec clone the bare form exits 0 WITHOUT creating
+  // `refs/remotes/origin/<ref>`, so the currency proof below fails and every PR silently degrades to three-dot:
+  // the feature is off with no signal. (PR #1039 review, finding 9.)
+  try {
+    exec('git', ['fetch', '--quiet', '--end-of-options', 'origin', `+${headRef}:refs/remotes/origin/${headRef}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch { return degraded; }
   // The ref must now BE the head gh reported. No oid to compare against → we cannot prove it, so we do not claim it.
   if (!/^[0-9a-f]{7,64}$/i.test(String(headRefOid || ''))) return degraded;
   try {
@@ -284,10 +291,28 @@ export function resolveNetDiff({ exec, headRef, headRefOid } = {}) {
     const at = String(exec('git', ['rev-parse', '--verify', '--end-of-options', `refs/remotes/origin/${headRef}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').trim();
     if (!sameCommit(at, headRefOid)) return degraded;
   } catch { return degraded; }
-  const net = computeNetDiffText({ exec, rev: headRef, fetchExtraRefs: [headRef] });
-  if (!net || !net.scored || typeof net.text !== 'string' || !net.text) return degraded;
-  const list = computeNetDiffPaths({ exec, rev: headRef, fetchExtraRefs: [headRef] });
-  if (!list || !list.scored || !list.paths.length) return degraded;
+  // THE DIFF IS TAKEN ON THE OID, NOT THE NAME (PR #1039 review, finding 1 — two lenses, one root cause).
+  // Proving `refs/remotes/origin/<headRef>` and then diffing `origin/<headRef>` proves nothing about the diff:
+  //   • DWIM. `resolveNetDiffBasis`'s candidate 1 is the SHORTHAND `origin/<rev>`, and git resolves refs/tags/
+  //     and refs/heads/ BEFORE refs/remotes/. Reproduced on 2.50.1 with a tag literally named `origin/lane/y`:
+  //     the proof site returned the head 93d417ae while the diff site returned the tag 02d9552b, and `net` was
+  //     still claimed. `git clone` fetches tags by default and `git fetch origin <ref>` auto-follows them; the
+  //     local-BRANCH variant resolves with no ambiguity warning at all.
+  //   • TOCTOU. Each compute re-runs `resolveNetDiffBasis`, which re-fetches — so the proof is re-invalidated
+  //     twice, after the fact. A head that moves mid-run (a rebase-drop force-push, a producer push landing
+  //     mid-drain — both routine here) yields a `net`-labelled diff of commit B while `view.files` and the
+  //     reviewed sha are commit A: verbatim the failure this function claims to eliminate.
+  // Passing the object id closes both: candidate 1 (`origin/<oid>`) fails fast, candidate 2 resolves the oid
+  // EXACTLY, and an object id cannot move. `fetchExtraRefs` still carries the NAME so the fetch stays correct.
+  const rev = headRefOid;
+  const net = computeNetDiffText({ exec, rev, fetchExtraRefs: [headRef] });
+  if (!net || !net.scored || typeof net.text !== 'string') return degraded;
+  const list = computeNetDiffPaths({ exec, rev, fetchExtraRefs: [headRef] });
+  if (!list || !list.scored) return degraded;
+  // An EMPTY net diff is not a failure — it is this basis's most valuable signal: the branch is
+  // content-identical to main. `scored` already separates "empty" from "could not resolve", so discarding it in
+  // favour of the inflated three-dot diff would throw away the one case a reviewer most needs told about.
+  // (Finding 10.)
   return { text: net.text, paths: list.paths, basis: 'net' };
 }
 

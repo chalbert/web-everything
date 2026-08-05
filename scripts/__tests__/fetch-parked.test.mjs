@@ -320,6 +320,17 @@ describe('scopeFilesToNet — the file list rides the diff\'s basis, or refuses 
     expect(r.files).toBe(gh);
   });
 
+  it('compares SETS, not counts — a duplicate in gh\'s list must not mask a missing net path', () => {
+    // PR #1039 finding 8. The old rule was `kept.length >= candidate.size`. gh reporting [a.ts, a.ts, c.md]
+    // against net [a.ts, b.ts] gives kept.length 2 >= size 2, so it scoped — and b.ts vanished from the list a
+    // juror is handed. That is the SHORT-list-as-authoritative outcome this function's own contract calls the
+    // worse error, produced by the guard meant to prevent it.
+    const gh = [{ path: 'a.ts' }, { path: 'a.ts' }, { path: 'c.md' }];
+    const r = scopeFilesToNet({ ghFiles: gh, netPaths: ['a.ts', 'b.ts'] });
+    expect(r.scoped, 'a duplicate masked a net path missing from gh\'s list').toBe(false);
+    expect(r.files).toBe(gh);
+  });
+
   it('refuses on an empty or absent net list rather than scoping to nothing', () => {
     const gh = f('a.ts');
     for (const netPaths of [[], null, undefined]) {
@@ -333,7 +344,7 @@ describe('scopeFilesToNet — the file list rides the diff\'s basis, or refuses 
 describe('resolveNetDiff — a `net` basis is CLAIMED only when it is PROVEN', () => {
   const OID = 'a2a99afb73cde5f2d1c1be09a15d10e3b7083885';
   // A fake git that answers the shape resolveNetDiff drives. `overrides` swap in one behaviour at a time.
-  function fakeExec({ fetchThrows = false, refAt = OID, diffText = 'diff --git a/a.ts b/a.ts\n+x\n', names = 'a.ts\0b.ts\0' } = {}) {
+  function fakeExec({ fetchThrows = false, refAt = OID, diffText = 'diff --git a/a.ts b/a.ts\n+x\n', names = 'a.ts\0b.ts\0', unresolvable = false } = {}) {
     const calls = [];
     return {
       calls,
@@ -345,6 +356,7 @@ describe('resolveNetDiff — a `net` basis is CLAIMED only when it is PROVEN', (
         // A fake CANNOT prove the real argv is right — the real-git block below is what covers that. This arm
         // only keeps the fake honest about WHICH form the code asks for, so an argv change shows up here too.
         if (a.startsWith('rev-parse --end-of-options')) throw new Error('fake: unguarded rev-parse form is not the one under test');
+        if (unresolvable) throw new Error('unknown revision');
         if (a.includes('--name-only')) return names;
         if (a.startsWith('rev-parse')) return `${OID}\n`;          // resolveNetDiffBasis' own probes
         if (a.startsWith('merge-base')) return `${OID}\n`;
@@ -396,9 +408,19 @@ describe('resolveNetDiff — a `net` basis is CLAIMED only when it is PROVEN', (
     }
   });
 
-  it('degrades on an empty diff or an empty path list rather than claiming an unusable net basis', () => {
-    expect(resolveNetDiff({ exec: fakeExec({ diffText: '' }).exec, headRef: 'lane/x', headRefOid: OID }).basis).toBe('three-dot');
-    expect(resolveNetDiff({ exec: fakeExec({ names: '' }).exec, headRef: 'lane/x', headRefOid: OID }).basis).toBe('three-dot');
+  it('KEEPS an empty net diff — it is the most valuable signal this basis produces (PR #1039 finding 10)', () => {
+    // A branch content-identical to main. The old code threw this away and shipped the inflated three-dot diff
+    // instead, hiding the one case a reviewer most needs told about. `scored` already separates "empty" from
+    // "could not resolve", so emptiness never has to be read as failure.
+    const r = resolveNetDiff({ exec: fakeExec({ diffText: '', names: '' }).exec, headRef: 'lane/x', headRefOid: OID });
+    expect(r.basis).toBe('net');
+    expect(r.text).toBe('');
+    expect(r.paths).toEqual([]);
+  });
+
+  it('still degrades when the basis could not be RESOLVED (scored:false), which is a real failure', () => {
+    const { exec } = fakeExec({ unresolvable: true });
+    expect(resolveNetDiff({ exec, headRef: 'lane/x', headRefOid: OID }).basis).toBe('three-dot');
   });
 
   it('degrades with no headRef and no exec at all', () => {
@@ -429,6 +451,51 @@ describe('resolveNetDiff — a `net` basis is CLAIMED only when it is PROVEN', (
 // class; only running the real binary does. So this block spawns real git in a throwaway repo under tmpdir and
 // asserts the ONE thing the fakes cannot: that the net basis actually engages end-to-end.
 // ─────────────────────────────────────────────────────────────────────────────
+describe('resolveNetDiff binds the diff to the OID, not the ref NAME (PR #1039 finding 1)', () => {
+  const OID2 = 'a2a99afb73cde5f2d1c1be09a15d10e3b7083885';
+
+  it('passes the OID as `rev`, so the diff cannot resolve a shadowing tag or local branch', () => {
+    // The bug: proof took `refs/remotes/origin/<ref>` while the diff took the shorthand `origin/<ref>`, and git
+    // resolves refs/tags/ and refs/heads/ BEFORE refs/remotes/. Reproduced on 2.50.1 — proof saw the head,
+    // the diff saw a tag of the same name, and `net` was still claimed.
+    const seen = [];
+    const exec = (cmd, args) => {
+      const a = args.join(' ');
+      if (a.startsWith('fetch')) return '';
+      if (a.startsWith('rev-parse --verify --end-of-options refs/remotes/')) return `${OID2}\n`;
+      if (a.includes('--name-only')) { seen.push(a); return 'a.ts\0'; }
+      if (a.startsWith('diff')) { seen.push(a); return 'diff --git a/a.ts b/a.ts\n'; }
+      if (a.startsWith('rev-parse')) return `${OID2}\n`;
+      if (a.startsWith('merge-base')) return `${OID2}\n`;
+      return '';
+    };
+    const r = resolveNetDiff({ exec, headRef: 'lane/y', headRefOid: OID2 });
+    expect(r.basis).toBe('net');
+    expect(seen.length, 'no diff was taken — the assertion would pass vacuously').toBeGreaterThan(0);
+    for (const cmd of seen) {
+      expect(cmd, `diff resolved a NAME, not the oid: ${cmd}`).not.toMatch(/origin\/lane\/y/);
+      expect(cmd).toContain(OID2);
+    }
+  });
+
+  it('still fetches by NAME — the oid is not fetchable, only diffable', () => {
+    const fetches = [];
+    const exec = (cmd, args) => {
+      const a = args.join(' ');
+      if (a.startsWith('fetch')) { fetches.push(a); return ''; }
+      if (a.startsWith('rev-parse')) return `${OID2}\n`;
+      if (a.startsWith('merge-base')) return `${OID2}\n`;
+      if (a.includes('--name-only')) return 'a.ts\0';
+      if (a.startsWith('diff')) return 'd\n';
+      return '';
+    };
+    resolveNetDiff({ exec, headRef: 'lane/y', headRefOid: OID2 });
+    expect(fetches.some((f) => f.includes('lane/y')), 'the head ref must still be fetched by name').toBe(true);
+    // …and with an EXPLICIT destination refspec, never the bare opportunistic form (#2373 / finding 9).
+    expect(fetches.some((f) => f.includes('+lane/y:refs/remotes/origin/lane/y'))).toBe(true);
+  });
+});
+
 describe('resolveNetDiff against REAL git (the fake-vs-reality guard)', () => {
 
   let dir; let clone; let headOid;

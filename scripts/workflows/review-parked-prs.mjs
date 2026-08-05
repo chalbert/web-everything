@@ -234,11 +234,17 @@ const DISCOVER_SCHEMA = {
 // Re-run each round (after an editor push) so the panel always re-reviews the CURRENT revised diff.
 const FETCH_SCHEMA = {
   type: 'object',
-  required: ['pr', 'diff'],
+  required: ['pr', 'diff', 'diffBasis'],
   additionalProperties: true,
   properties: {
     pr: { type: 'number' },
     diff: { type: 'string', description: 'the full unified diff from fetch-parked ("" if the PR could not be read)' },
+    // REQUIRED, because the whole safety story of the net basis rests on the label travelling WITH the diff.
+    // Five conditions degrade net → three-dot, so without this the loop gets a NONDETERMINISTIC diff and no
+    // signal: round 1 net, round 2 three-dot after a transient hiccup, and the round-2 juror files the #1018
+    // phantom-scope finding — intermittent and undetectable rather than constant and known. A field with a
+    // producer and no consumer is not a safety feature. (PR #1039 review, finding 3.)
+    diffBasis: { type: 'string', description: "'net' (the two-tree diff vs current main — what a reviewer must judge) or 'three-dot' (gh pr diff, DEGRADED: it lists sibling-lane files that already landed on main as if this PR added them)" },
     title: { type: 'string' },
     escalationReason: { type: 'array', items: { type: 'string' }, description: 'the bare decorated reasons under the PR body\'s "## Escalation reason" heading' },
     error: { type: 'string', description: 'set if fetch-parked could not read the PR' },
@@ -468,10 +474,14 @@ function fetchPrompt(pr, repo, round = 1) {
     `whole review panel will share (do NOT fetch per-lens). ${roundNote}Run, in ` + where + ':',
     `  node scripts/fetch-parked.mjs ${pr}${flag} --json`,
     'It prints a JSON array; take the entry whose `number` is this PR. Use its `diff` and `body`.',
+    'Copy its `diffBasis` through VERBATIM — do not infer it, do not default it. It records WHICH diff you are',
+    "holding: 'net' (the two-tree diff vs current main) or 'three-dot' (DEGRADED — lists sibling-lane files that",
+    'already landed on main as if this PR added them). If the field is absent, return "three-dot": an unstated',
+    'basis must never read as the good one.',
     'Parse escalationReason from the `body`: the "- <reason>" bullet lines under the "## Escalation reason"',
     'heading (up to the next "##" heading), as bare strings (may be empty).',
-    'If the entry has an `error` field (the PR could not be read), return { pr, diff: "", error: <that message> }.',
-    'Do NOT `git checkout`/`switch` to the PR branch. Return ONLY { pr, diff, title, escalationReason, error? }.',
+    'If the entry has an `error` field (the PR could not be read), return { pr, diff: "", diffBasis: "three-dot", error: <that message> }.',
+    'Do NOT `git checkout`/`switch` to the PR branch. Return ONLY { pr, diff, diffBasis, title, escalationReason, error? }.',
   ].join('\n');
 }
 

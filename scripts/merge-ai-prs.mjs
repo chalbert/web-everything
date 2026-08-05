@@ -967,11 +967,11 @@ export function parseNumstat(numstat) {
  */
 function isStrictAncestor(exec, ancestor, descendant) {
   try {
-    exec('git', ['merge-base', '--is-ancestor', ancestor, descendant], { stdio: ['ignore', 'ignore', 'ignore'] });
+    exec('git', ['merge-base', '--is-ancestor', '--end-of-options', ancestor, descendant], { stdio: ['ignore', 'ignore', 'ignore'] });
   } catch { return false; } // non-zero exit (not an ancestor) or unresolvable → don't trust the base
   try {
-    const a = String(exec('git', ['rev-parse', ancestor], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').trim();
-    const b = String(exec('git', ['rev-parse', descendant], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').trim();
+    const a = String(exec('git', ['rev-parse', '--verify', '--end-of-options', ancestor], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').trim();
+    const b = String(exec('git', ['rev-parse', '--verify', '--end-of-options', descendant], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').trim();
     if (a && b && a === b) return false; // base == head → degenerate empty own-delta, reject
   } catch { /* can't resolve to SHAs → is-ancestor already vouched it's a distinct ancestor path */ }
   return true;
@@ -1081,7 +1081,7 @@ function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetc
       // newline in a would-be single revision arg, making it an invalid `git diff` argument (a "continue" to
       // the next candidate, or a `null` resolve if both candidates hit it — always the safe over-scoring
       // fallback, never wrong data, but avoidable).
-      const mb = String(exec('git', ['merge-base', baseRef, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').split('\n')[0].trim();
+      const mb = String(exec('git', ['merge-base', '--end-of-options', baseRef, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').split('\n')[0].trim();
       if (mb) diffBase = mb;
     } catch { /* no common history, or candidate doesn't resolve yet — the diff below is the real probe */ }
     // The cumulative `<mergeBase>…head` diff is BOTH the human-gate basis AND the candidate-resolves probe.
@@ -1109,9 +1109,10 @@ export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'ma
   // ancestor of head; otherwise use the cumulative basis (the safe over-scoring direction).
   let own = humanBasis;
   if (baseRevOk && isStrictAncestor(exec, baseRev, candidate)) {
-    // Third position, not named in the PR #1031 r4 review but the same class: `baseRev` is hex-validated by
-    // `baseRevOk`, `candidate` is not — it is the caller-supplied refname. Guarded so the class is actually
-    // closed in this function rather than closed-except-one.
+    // Same class: `baseRev` is hex-validated by `baseRevOk`, `candidate` is not — it is the caller-supplied
+    // refname. Every argv position in this file that takes a caller-supplied ref is now guarded; `merge-base`
+    // and `rev-parse` are hardening rather than live holes (both reject an unknown option on git 2.50.1, and
+    // the surrounding catch absorbs it), while the `git diff` positions are genuinely exploitable — verified.
     try { own = parseNumstat(exec('git', ['diff', '--numstat', '--end-of-options', baseRev, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })); }
     catch { own = humanBasis; /* own-delta diff failed → fall back to the cumulative basis */ }
   }
@@ -1176,7 +1177,7 @@ export function computeNetDiffPaths({ exec, remote = 'origin', base = 'main', re
   const { diffBase, candidate } = basis;
   try {
     const raw = exec('git', ['diff', '--name-only', '-z', '--end-of-options', `${diffBase}..${candidate}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    const paths = String(raw || '').split('\0').map((x) => x.trim()).filter(Boolean);
+    const paths = String(raw || '').split('\0').filter(Boolean);
     return { paths, base: diffBase, rev: candidate, scored: true };
   } catch {
     return unscored;
@@ -1545,7 +1546,9 @@ async function runCli() {
   // manifest), so serializing it costs ~nothing while keeping the fan-out correct.
   const legacyGitManifestMutex = makeAsyncMutex();
   const readLegacyLocalManifest = (headRef) => legacyGitManifestMutex.run(() => {
-    // PR #1031 review r3 — the THIRD instance of the argv class (`#xo5tyqn` lints it repo-wide). `headRef` is a
+    // The same argv class, third instance. NOTE: no repo-wide lint exists for it — an earlier version of this
+    // comment cited one, which read as captured prevention and is exactly how a sibling instance survived one
+    // function away. Guarded by hand here; the lint is filed, not built. `headRef` is a
     // `gh`-supplied refname and a dash-leading one is legal, so bare it is parsed as an option. It reaches TWO
     // calls here: the fetch, and — via `rev` — the `git show` argument, where `git show` accepts diff options
     // including `--output=`. Both guarded.

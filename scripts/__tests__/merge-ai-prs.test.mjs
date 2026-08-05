@@ -1063,7 +1063,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
       // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
       // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
       // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
-      const intent = args.filter((a) => a !== '--end-of-options');
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
       calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
       const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
@@ -1367,7 +1367,7 @@ describe('computeNetDiffText (#2450 — reviewer-facing NET diff TEXT, SAME basi
       // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
       // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
       // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
-      const intent = args.filter((a) => a !== '--end-of-options');
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
       calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
       const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
@@ -1467,7 +1467,7 @@ describe('regenDerivedOnLand — the drain owns post-land WE derived regen (#229
       // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
       // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
       // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
-      const intent = args.filter((a) => a !== '--end-of-options');
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
       calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
       const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
@@ -1666,7 +1666,7 @@ describe('resyncDetachedCwdForLand (#2348 — a lane clone\'s detached HEAD stra
       // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
       // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
       // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
-      const intent = args.filter((a) => a !== '--end-of-options');
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
       calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
       const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
