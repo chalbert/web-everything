@@ -1682,10 +1682,19 @@ try {
   const { errors: vte } = checkVerdictTotality(docs, VERDICTS);
   for (const e of vte) err(e);
   // #xdompzx review, finding 5 — SECOND TENANT. `IMPACT_LEVELS` (jury-core) is the same enum+rank-table shape this
-  // gate exists for: `IMPACT_STRICTNESS` ranks it, `IMPACT_GLOSS` defines it, and a fifth level (or a third
-  // structure total over it — a glyph table, a hand-copied twin rank map, exactly the round-2 defect above) would
-  // otherwise drift unflagged behind a module-load loop that only knows the two tables it was written next to.
-  // Enrolling it costs one call because the gate is parameterised on the enum, its symbol name, and its markers.
+  // gate exists for: `IMPACT_STRICTNESS` ranks it and `IMPACT_GLOSS` defines it. Enrolling it costs one call
+  // because the gate is parameterised on the enum, its symbol name, its markers, and how wide its bare-key
+  // discovery reaches.
+  //
+  // WHAT THIS PASS CATCHES, AND WHAT IT DOES NOT (#xdompzx round-4, finding c — stated because the first version
+  // of this comment claimed more than the pass delivers). CATCHES: a THIRD structure total over `IMPACT_LEVELS`
+  // that references the enum symbolically (`[IMPACT_LEVELS.X]:`) — a glyph table, a hand-copied twin rank map,
+  // exactly the round-2 defect above — which the module-load loop in jury-core cannot see, because that loop
+  // checks `IMPACT_STRICTNESS` and `IMPACT_GLOSS` BY NAME. DOES NOT CATCH: a table that spells the levels as bare
+  // string keys and never names the enum. Every `IMPACT_LEVELS` value is an ordinary English word, so this
+  // enrolment sets `genericKeysNeedSymbol` (see `IMPACT_ENROLMENT`); without it any unrelated
+  // `{ ok, degraded, broken }` in scripts/ becomes a false error. A FIFTH LEVEL added to the enum is caught by the
+  // module-load assert, not by this pass. The `VERDICTS` pass above is unrestricted and keeps its full reach.
   const { errors: ite } = checkVerdictTotality(docs, IMPACT_LEVELS, IMPACT_ENROLMENT);
   for (const e of ite) err(e);
 }

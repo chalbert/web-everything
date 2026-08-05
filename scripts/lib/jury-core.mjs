@@ -72,14 +72,24 @@ export const VERDICTS = Object.freeze({
  * compares as `NaN` in every `>=` / `>` bar comparison, which is false in BOTH directions: the guard fails OPEN.
  * A null-prototype table has nothing to inherit, so an invented word is genuinely absent.
  *
- * Belt and braces: every membership test against these tables also goes through `Object.hasOwn`, so neither the
- * prototype nor a future own-property addition can be mistaken for an enum member.
+ * Belt and braces on the RANK tables specifically: their membership test goes through `rankIn`, which uses
+ * `Object.hasOwn`, so neither the prototype nor a future own-property addition can be mistaken for an enum member.
+ * (The render tables below are read with a `??` / `||` default rather than a membership test — for those, the null
+ * prototype IS the fix, because it is what makes the default fire at all.)
  *
- * EXPORTED (#xdompzx round-2, finding 5) because the same hole exists in every sibling LOOKUP table across the
- * modules — `VERDICT_LABELS` (`review-render.mjs`) and `VERDICT_MARKERS` (`conveyor/jury-tree.mjs`) are read with
- * `??` / `||` defaults, which never fire on an inherited truthy value, so `'toString'` rendered the native
- * function. Rank, gloss, label, marker, glyph: if it is a module-level frozen object literal used as a LOOKUP, it
- * is built here.
+ * EXPORTED (#xdompzx round-2, finding 5) because the same hole was present in the sibling LOOKUP tables on this
+ * path: `VERDICT_LABELS` (`review-render.mjs`), and `VERDICT_MARKERS` + `STATUS_MARKERS` (`conveyor/jury-tree.mjs`)
+ * are read with `??` / `||` defaults, which never fire on an inherited truthy value, so `'toString'` rendered the
+ * native function into a posted PR comment and into the live conveyor tree.
+ *
+ * SCOPE OF THAT CLAIM, precisely (#xdompzx round-4, finding 5 — the round-2 wording said "every sibling lookup
+ * table" and the round-4 panel found one it had missed in the same file): the six tables converted here are the
+ * ones on the review/jury VERDICT path — `VERDICT_STRICTNESS`, `IMPACT_STRICTNESS`, `IMPACT_GLOSS`,
+ * `VERDICT_LABELS`, `VERDICT_MARKERS`, `STATUS_MARKERS`. This is NOT a repo-wide guarantee: other defaulted
+ * bare-bracket reads exist (e.g. `REVIEW_LENS_CHARTER` in `jury-ledger.mjs`, `LENS_DEFAULT_METHOD` and
+ * `LENS_EXPECTATIONS` in `review-core.mjs`, `STATE_LABEL` in `conveyor/status-artifact.mjs`) and are untouched.
+ * Sweeping them, and gating against new ones, is filed as its own `check:standards` rule (`xg9gboa`) — do not read
+ * this doc as saying it already happened.
  * @param {Object<string, *>} entries
  * @returns {Object<string, *>}
  */

@@ -99,3 +99,34 @@ describe('VERDICT_MARKERS is prototype-proof (round-2 finding 5)', () => {
     expect(VERDICT_MARKERS['prevention-outstanding']).toBe('⚐');
   });
 });
+
+// ── round-4 finding 4 — STATUS_MARKERS was MISSED by the round-2 null-prototype sweep. ────────────────
+// Same file, twenty lines above `VERDICT_MARKERS`, same defect: `STATUS_MARKERS[j.status] || '?'` on a normal
+// prototype chain. `j.status` comes from the folded ledger, whose juror records originate as model-produced JSON,
+// so a juror status of `'toString'` rendered the native function into the live conveyor tree. The round-2 prose
+// claimed "every module-level lookup table on this path is null-prototype" while this one was not — hence this
+// test asserts the CLASS (all exported tables in this module), not just the one table that was found.
+describe('STATUS_MARKERS is prototype-proof (round-4 finding 4)', () => {
+  const PROTO_KEYS = ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__', 'isPrototypeOf', 'propertyIsEnumerable'];
+
+  it('every exported lookup table in this module is null-prototype — asserted as a class, not one table', () => {
+    for (const [name, table] of Object.entries({ STATUS_MARKERS, VERDICT_MARKERS })) {
+      expect(Object.getPrototypeOf(table), `${name} must be null-prototype`).toBe(null);
+      for (const key of PROTO_KEYS) expect(table[key], `${name}.${key}`).toBeUndefined();
+    }
+  });
+
+  it.each(PROTO_KEYS)('a juror status of "%s" renders the `?` fallback, never an inherited member', (key) => {
+    const out = renderJuryTree('we#1', ledger({
+      jurors: [{ id: 'correctness#1', lens: 'correctness', charter: 'c', status: key, verdict: 'accept', findings: [] }],
+    }));
+    expect(out).toContain('? correctness [correctness#1]');
+    expect(out).not.toContain('[native code]');
+  });
+
+  it('the three real lifecycle statuses still render their own glyph', () => {
+    expect(STATUS_MARKERS.pending).toBe('◷');
+    expect(STATUS_MARKERS.running).toBe('⟳');
+    expect(STATUS_MARKERS.found).toBe('✓');
+  });
+});

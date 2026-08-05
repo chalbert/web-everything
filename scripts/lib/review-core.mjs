@@ -75,12 +75,24 @@ import { deriveCareLevel, CARE_LEVELS, CARE_LEVEL_ORDER } from './review-escalat
 // re-export, never a behaviour change. review-core's own body still USES several of them (the mandate builders,
 // the plan handshake, the panel renderers, panelRigorFromReasons), so they are IMPORTED here (local bindings)
 // AND re-exported.
+//
+// #xdompzx round-4, finding 2 — A CONTROL THE DOCUMENTED DOOR CANNOT REACH IS NOT A CONTROL. The drain skill's
+// auto-land branch is told to test `hasUncapturedPrevention(f) === true && blocksAcceptance(f) === false`, and
+// this module is the facade that skill's callers import from. `hasUncapturedPrevention` was re-exported and
+// `blocksAcceptance` was not, so the instruction named a symbol that threw on import — the round-2 blocker shape
+// (a control wired to a path nobody walks) one layer out. `blocksAcceptance`, its dial `PREVENTION_IMPACT_BAR`,
+// and the `IMPACT_LEVELS` enum an author needs to read a finding's declared impact are therefore re-exported too,
+// and `review-core.facade.test.mjs` pins the general rule: every function the drain skill's terminal-branch
+// blockquotes name must be reachable from here.
 import {
   VERDICTS,
+  IMPACT_LEVELS,
+  PREVENTION_IMPACT_BAR,
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
   hasUncapturedPrevention,
+  blocksAcceptance,
   isFindingOutstanding,
   NEGOTIATION_ROUND_CAP,
   NEGOTIATION_OUTCOMES,
@@ -116,10 +128,13 @@ import { materializeRoster } from './jury-core.mjs';
 
 export {
   VERDICTS,
+  IMPACT_LEVELS,
+  PREVENTION_IMPACT_BAR,
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
   hasUncapturedPrevention,
+  blocksAcceptance,
   isFindingOutstanding,
   NEGOTIATION_ROUND_CAP,
   NEGOTIATION_OUTCOMES,

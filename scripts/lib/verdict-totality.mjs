@@ -18,7 +18,10 @@
  *      DISTINCT verdicts is a "verdict consumer". Every such symbol MUST carry a marker (`@verdicts-total`, or an
  *      explicit opt-out `@verdicts-partial <reason>`) — an UNMARKED consumer is itself an ERROR. THIS is what makes
  *      coverage derived: you cannot introduce a new verdict-total structure without either annotating it (→ checked)
- *      or being flagged. The gate finds ALL sites; a forgotten new consumer can't slip past a stale list.
+ *      or being flagged. WHAT "DISCOVERS" MEANS, EXACTLY (it is not magic): a symbol counts as a consumer when the
+ *      scan sees ≥2 members either SYMBOLICALLY (`ENUM.MEMBER`) or, when the enrolment allows it, as bare
+ *      object-literal KEYS. For `VERDICTS` both are always on, so a forgotten new consumer can't slip past a stale
+ *      list. For an enum whose members are ordinary English words the key half is narrowed — see `keyRefsEnabled`.
  *   2. TOTALITY. For each `@verdicts-total` symbol, assert every `VERDICTS` member is referenced — as an object-literal
  *      KEY (`[VERDICTS.X]:` or `'accept':`) for a table, or in a branch (`=== VERDICTS.X` / `case VERDICTS.X`) for a
  *      reducer. A branch reducer with ONE documented default may declare it: `@verdicts-total fallthrough=changes`
@@ -31,22 +34,30 @@
  * `check-standards.mjs` caller (mirrors `scanRepoLocusPrefixes`). Unit-tested with a synthetic enum + fixtures.
  *
  * ENUM-AGNOSTIC (#xdompzx review, finding 5). The gate was already parameterised on the enum's MEMBER SET; it is
- * now also parameterised on the enum's SYMBOL NAME and its marker pair, so a SECOND enum+rank-table pair enrols in
- * the same discovery machinery with one extra call rather than a hand-rolled local mirror. `IMPACT_LEVELS` /
- * `IMPACT_STRICTNESS` / `IMPACT_GLOSS` (jury-core) is the first such tenant, under `@impact-total`. The whole point
- * of this gate is that coverage is DISCOVERED, so a new structure total over an enrolled enum can never rely on
- * someone remembering to list it — that includes structures total over an enum nobody thought to enrol.
+ * now also parameterised on the enum's SYMBOL NAME, its marker pair, and how wide its bare-key discovery reaches,
+ * so a SECOND enum+rank-table pair enrols in the same discovery machinery with one extra call rather than a
+ * hand-rolled local mirror. `IMPACT_LEVELS` / `IMPACT_STRICTNESS` / `IMPACT_GLOSS` (jury-core) is the first such
+ * tenant, under `@impact-total`. Its enrolment is DELIBERATELY NARROWER than the `VERDICTS` one and the tradeoff is
+ * written out at `IMPACT_ENROLMENT` — read it before assuming a second tenant gets the same reach as the first.
  */
 
 export const VERDICT_TOTAL_MARKER = '@verdicts-total';
 export const VERDICT_PARTIAL_MARKER = '@verdicts-partial';
 
 /** The default enrolment: the `VERDICTS` enum under its `@verdicts-total` / `@verdicts-partial` markers. A second
- *  enum passes its own `{ enumSymbol, totalMarker, partialMarker }` (see `check-standards.mjs` §14). */
+ *  enum passes its own `{ enumSymbol, totalMarker, partialMarker, genericKeysNeedSymbol }` (see
+ *  `check-standards.mjs` §14).
+ *
+ *  `genericKeysNeedSymbol: false` is the ORIGINAL, UNRESTRICTED behaviour and is what `VERDICTS` has always had:
+ *  bare object-literal keys (`accept:`, `changes:`) count as references wherever they appear. That is not
+ *  negotiable for this enum — `DECISION_COPY = Object.freeze({ accept: …, changes: … })` written by a future PR
+ *  with no `VERDICTS` import in sight is EXACTLY the unannotated-consumer class this gate was built for after
+ *  PR #976. See `keyRefsEnabled` for why the flag is a per-ENROLMENT property and never a per-VALUE filter. */
 const DEFAULT_ENROLMENT = Object.freeze({
   enumSymbol: 'VERDICTS',
   totalMarker: VERDICT_TOTAL_MARKER,
   partialMarker: VERDICT_PARTIAL_MARKER,
+  genericKeysNeedSymbol: false,
 });
 
 // NOT exported (#xdompzx round-2, finding 3): these two strings are consumed only by `IMPACT_ENROLMENT` just below.
@@ -58,11 +69,32 @@ const IMPACT_PARTIAL_MARKER = '@impact-partial';
 /** The second enrolment (#xdompzx review, finding 5): `IMPACT_LEVELS` (jury-core) — the finding-impact enum whose
  *  rank table (`IMPACT_STRICTNESS`) and gloss map (`IMPACT_GLOSS`) must each stay total over it. Exported so
  *  `check-standards.mjs` passes an object rather than re-typing marker strings (a second copy of a marker name is
- *  the same drift this gate exists to stop). */
+ *  the same drift this gate exists to stop).
+ *
+ *  `genericKeysNeedSymbol: true`, AND WHAT THAT COSTS (#xdompzx round-4, finding c — stated here because a reader
+ *  must not have to infer it). EVERY `IMPACT_LEVELS` value is an ordinary English word — `cosmetic`, `degraded`,
+ *  `broken`, `unrecoverable`. Matching those in bare key position across all of `scripts/` + `skills-src/` would
+ *  turn an unrelated `const HEALTH = { ok: 0, degraded: 1, broken: 2 }` into a nonsense impact-totality error whose
+ *  cheapest escape is a bogus `@impact-partial` on innocent code. So this enrolment discovers a consumer only when
+ *  the span NAMES `IMPACT_LEVELS`.
+ *
+ *  THE HOLE THAT LEAVES, EXPLICITLY: a table that spells the levels as bare keys and never names the enum —
+ *  `const IMPACT_WEIGHTS = Object.freeze({ cosmetic: 0, degraded: 1, broken: 2, unrecoverable: 3 })` — is INVISIBLE
+ *  to this gate. It is pinned as a characterization test in `verdict-totality.test.mjs` so nobody rediscovers it as
+ *  a surprise.
+ *
+ *  WHAT IT STILL BUYS, and why the enrolment is not merely decorative: a THIRD structure total over the enum,
+ *  written the way every real consumer in this repo writes one (`frozenLookup({ [IMPACT_LEVELS.COSMETIC]: … })`),
+ *  IS discovered and must carry `@impact-total`. The module-load loop in `jury-core.mjs` cannot catch that — it
+ *  asserts `IMPACT_STRICTNESS` and `IMPACT_GLOSS` BY NAME, so it is total-checking the two tables it was written
+ *  next to and blind to any third. The division of labour is therefore: the module-load assert is the coverage for
+ *  the two NAMED tables (including a fifth level added to the enum); this gate is the coverage for a NEW symbolic
+ *  consumer nobody listed. */
 export const IMPACT_ENROLMENT = Object.freeze({
   enumSymbol: 'IMPACT_LEVELS',
   totalMarker: IMPACT_TOTAL_MARKER,
   partialMarker: IMPACT_PARTIAL_MARKER,
+  genericKeysNeedSymbol: true,
 });
 
 /** Replace every comment (line + block) with same-length whitespace, preserving newlines + offsets, so a verdict
@@ -90,27 +122,41 @@ function verdictSymbolRefs(span, name2val, enumSymbol) {
 /** Distinct enum VALUES referenced as an object-literal KEY (`'needs-human':`, `accept:`; `[VERDICTS.X]:` is the
  *  symbolic form handled above) in a code span. The key must sit in KEY POSITION — immediately after `{`, `,`, or a
  *  line start — so an enum word inside a sentence-shaped string (`before accept: …`) is NOT mistaken for a key.
- *
- *  ONLY DISTINCTIVE VALUES (#xdompzx round-2, finding 3). Enum values are often ordinary English status words —
- *  `accept`, `broken`, `degraded`. Matching those in bare key position across all of `scripts/` + `skills-src/`
- *  turns any unrelated `const HEALTH = { ok: 0, degraded: 1, broken: 2 }` into a nonsense totality error, and the
- *  author's cheapest escape is to silence an unrelated gate with a bogus `@impact-partial`. So a value is matched
- *  in bare key position only when it is DISTINCTIVE — it contains a hyphen (`needs-human`,
- *  `prevention-outstanding`, which no unrelated literal spells by accident), or the span itself names the enum
- *  symbol, which makes the co-location deliberate. A generic single-word member falls back to SYMBOLIC matching
- *  (`ENUM.MEMBER`) only, which is what a real consumer of the enum writes anyway.
- *  @param {string} span
- *  @param {string[]} values
- *  @param {boolean} spanNamesEnum - does the span reference the enum symbol itself?
- */
-function verdictKeyRefs(span, values, spanNamesEnum) {
+ *  Every value is treated alike; whether this pass runs AT ALL for a given span is `keyRefsEnabled`'s call. */
+function verdictKeyRefs(span, values) {
   const found = new Set();
   for (const v of values) {
-    if (!v.includes('-') && !spanNamesEnum) continue; // generic word, no enum symbol in the span → symbolic-only
     const re = new RegExp(`(?:[{,]|^)\\s*(['"]?)${v.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}\\1\\s*:`, 'gm');
     if (re.test(span)) found.add(v);
   }
   return found;
+}
+
+/**
+ * Is bare-key discovery enabled for THIS span? ALL-OR-NOTHING, PER SPAN — never per value (#xdompzx round-4,
+ * BLOCKER). Round 3 put this restriction inside the matcher as a per-VALUE filter (`skip generic values unless the
+ * span names the enum`), on the SHARED matcher, and it broke the gate three ways at once:
+ *
+ *   (a) COVERAGE LOST for `VERDICTS`. `accept` and `changes` are hyphen-free, so an unannotated
+ *       `DECISION_COPY = Object.freeze({ accept: 'ship it', changes: 'bounce it' })` — the exact class the gate was
+ *       built for — went from FLAGGED to zero sites, zero errors.
+ *   (b) A FALSE "NOT total" ERROR. A per-value filter yields a PARTIAL reference set, and a partial set is then
+ *       reported as MISSING MEMBERS. A table marked `@verdicts-total` and spelling every member as a bare key —
+ *       `{ accept: 1, changes: 2, 'needs-human': 3, 'prevention-outstanding': 4 }`, genuinely total — errored
+ *       "missing [accept, changes]", because only the two hyphenated keys were collected. The only sanctioned
+ *       escape was `@verdicts-partial`, permanently exempting a real consumer.
+ *   (c) It bought the new tenant nothing anyway (see `IMPACT_ENROLMENT`).
+ *
+ * (b) is the structural lesson and is why this predicate returns a BOOLEAN FOR THE WHOLE SPAN: key discovery is
+ * either fully on for a span (every value matchable) or fully off (no value matchable, so the span simply is not a
+ * consumer). A span can therefore never end up with a half-collected reference set that the totality check then
+ * misreads as a real omission. Symbolic (`ENUM.MEMBER`) matching is unaffected and always runs.
+ *
+ * @param {boolean} genericKeysNeedSymbol - the ENROLMENT's opt-in (see `IMPACT_ENROLMENT`), not a property of a value.
+ * @param {boolean} spanNamesEnum - does the span reference the enum symbol itself?
+ */
+function keyRefsEnabled(genericKeysNeedSymbol, spanNamesEnum) {
+  return !genericKeysNeedSymbol || spanNamesEnum;
 }
 
 /** The contiguous comment block IMMEDIATELY above line `start` (skipping a single run of blank lines between the doc
@@ -143,14 +189,16 @@ const SYMBOL_RE = /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|
  * @param {Array<{file: string, content: string}>} docs - source files to scan (the caller supplies the fs walk).
  * @param {Object<string,string>} verdicts - the enum object (`{ ACCEPT: 'accept', ... }`); the member set
  *   is DERIVED from its values, so the gate can never drift from the enum it guards.
- * @param {{enumSymbol?: string, totalMarker?: string, partialMarker?: string}} [enrolment] - which enum this pass
- *   guards. Defaults to `VERDICTS` / `@verdicts-total` / `@verdicts-partial`; a second enum (e.g. `IMPACT_LEVELS`
- *   under `@impact-total`) passes its own, so it reuses this discovery machinery instead of hand-rolling a mirror.
+ * @param {{enumSymbol?: string, totalMarker?: string, partialMarker?: string, genericKeysNeedSymbol?: boolean}}
+ *   [enrolment] - which enum this pass guards. Defaults to `VERDICTS` / `@verdicts-total` / `@verdicts-partial`
+ *   with UNRESTRICTED bare-key discovery; a second enum (e.g. `IMPACT_LEVELS` under `@impact-total`) passes its
+ *   own, so it reuses this discovery machinery instead of hand-rolling a mirror. `genericKeysNeedSymbol` narrows
+ *   discovery for an enum whose values are ordinary English words — see `keyRefsEnabled` and `IMPACT_ENROLMENT`.
  * @returns {{errors: string[], sites: Array<{file: string, line: number, symbol: string, marker: 'total'|'partial'|null,
  *   referenced: string[], missing: string[]}>}}
  */
 export function checkVerdictTotality(docs = [], verdicts = {}, enrolment = {}) {
-  const { enumSymbol, totalMarker, partialMarker } = { ...DEFAULT_ENROLMENT, ...enrolment };
+  const { enumSymbol, totalMarker, partialMarker, genericKeysNeedSymbol } = { ...DEFAULT_ENROLMENT, ...enrolment };
   const values = Object.values(verdicts);
   const name2val = Object.fromEntries(Object.entries(verdicts).map(([k, v]) => [k, v]));
   const errors = [];
@@ -172,7 +220,8 @@ export function checkVerdictTotality(docs = [], verdicts = {}, enrolment = {}) {
       const end = s + 1 < starts.length ? starts[s + 1].line : codeLines.length;
       const span = codeLines.slice(line, end).join('\n');
       const spanNamesEnum = span.includes(enumSymbol);
-      const referenced = new Set([...verdictSymbolRefs(span, name2val, enumSymbol), ...verdictKeyRefs(span, values, spanNamesEnum)]);
+      const keyRefs = keyRefsEnabled(genericKeysNeedSymbol, spanNamesEnum) ? verdictKeyRefs(span, values) : [];
+      const referenced = new Set([...verdictSymbolRefs(span, name2val, enumSymbol), ...keyRefs]);
       if (referenced.size < 2) continue; // not a consumer of this enum — nothing to enforce
 
       const comment = precedingComment(rawLines, line);

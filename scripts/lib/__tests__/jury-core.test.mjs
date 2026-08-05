@@ -10,6 +10,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// #xdompzx round-4, finding 3 — assertions against markdown PROSE go through these, never a raw `toContain` that
+// pins a wrap point or a blockquote indent. See the module header for the autopsy.
+import { proseContains, blockquoteBlockAt, functionNamesInCodeSpans, normalizeProse } from './doc-prose.mjs';
 import {
   JURY_EVENT_TYPES,
   JURY_EVENT_TYPE_LIST,
@@ -719,27 +722,40 @@ describe('IMPACT_GLOSS — the level definitions are DATA, single-sourced (#xdom
 // auto-lands" — but the drain's `land` / `autoLand: true` branch posted nothing at all, so the renderer was never
 // reached. A rendering function nobody calls is not a control. These pin BOTH halves: the drain skill instructs the
 // emission on that branch, and no surface makes an unconditional visibility claim over a conditional emission.
+//
+// ROUND 4, finding 3 — HOW these are asserted matters as much as what. The conditional-guarantee test used to
+// `toContain('no\n       > land that the bar un-blocked happens silently')`, pinning the line's wrap point and a
+// 7-space blockquote indent; a harmless reflow would have failed the suite with a message reading "the safety
+// control is missing". Every prose assertion here now goes through `proseContains` (whitespace-normalized,
+// blockquote markers stripped), and the negative claim-check is SCOPED to the block that makes the claim instead
+// of the whole 400-line skill.
 describe('the below-bar prevention control is wired on the auto-land branch (round-2 blocker 1)', () => {
   const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
   const drainSkill = () => readFileSync(join(ROOT, 'skills-src/drain/SKILL.md'), 'utf8');
+  const CHECK = 'BAR-UN-BLOCKED PREVENTION CHECK';
 
-  it('the drain skill instructs the auto-land branch to POST the panel comment before the accept labels', () => {
+  it('the drain skill instructs the auto-land branch to run the check before the accept labels', () => {
     const md = drainSkill();
-    // the check is named on the land branch itself, ahead of the label application …
-    const landIdx = md.indexOf('BAR-UN-BLOCKED PREVENTION CHECK');
-    expect(landIdx).toBeGreaterThan(-1);
-    // … and it is defined in terms of the two predicates, not restated as prose the code cannot be checked against
-    expect(md).toContain('hasUncapturedPrevention(f) === true');
-    expect(md).toContain('blocksAcceptance(f) === false');
+    const block = blockquoteBlockAt(md, CHECK);
+    expect(block, `the "${CHECK}" block must exist in the drain skill`).not.toBe('');
+    // it is defined in terms of the two predicates, not restated as prose the code cannot be checked against …
+    expect(proseContains(block, 'hasUncapturedPrevention(f) === true')).toBe(true);
+    expect(proseContains(block, 'blocksAcceptance(f) === false')).toBe(true);
+    // … it points at the SCRIPTED door rather than leaving the agent to evaluate them by hand (round-4 finding 2)
+    expect(proseContains(block, 'review-core-cli.mjs unblocked')).toBe(true);
+    expect(proseContains(block, 'mustPost')).toBe(true);
     // … and it names the actual emitter
-    expect(md).toContain('renderPanelComment(');
+    expect(proseContains(block, 'review-core-cli.mjs comment')).toBe(true);
   });
 
   it('the drain skill states the guarantee as CONDITIONAL — a clean accept with nothing un-blocked stays quiet', () => {
-    const md = drainSkill();
-    expect(md).toContain('no\n       > land that the bar un-blocked happens silently');
-    // the emission must not be described as unconditional — that was the false claim round 1 shipped
-    expect(md).not.toMatch(/always visible/i);
+    const block = blockquoteBlockAt(drainSkill(), CHECK);
+    expect(block).not.toBe('');
+    // reflow-proof: the phrase is matched whitespace-normalized, not at the wrap point it happens to sit at today
+    expect(proseContains(block, 'no land that the bar un-blocked happens silently')).toBe(true);
+    // the emission must not be described as unconditional — that was the false claim round 1 shipped. Scoped to
+    // THIS block: an unrelated future "always visible" elsewhere in the skill is not this control's problem.
+    expect(block).not.toMatch(/always visible/i);
   });
 
   it('the reviewer-facing mandate makes no unconditional "always visible" claim', () => {
@@ -747,7 +763,41 @@ describe('the below-bar prevention control is wired on the auto-land branch (rou
     expect(text).not.toMatch(/always visible/i);
     expect(text).not.toContain('still named in the posted review');
     // what it DOES claim is the conditional truth
-    expect(text).toContain('when the bar is what un-blocked it');
+    expect(proseContains(text, 'when the bar is what un-blocked it')).toBe(true);
+  });
+
+  // ── round-4 finding 2 — A NAMED FUNCTION THE DOCUMENTED DOOR CANNOT REACH IS NOT A CONTROL. ──────────
+  // The skill told the auto-land branch to test `blocksAcceptance(f)`, but `import { blocksAcceptance } from
+  // 'scripts/lib/review-core.mjs'` — the facade the skill documents — threw. Same failure mode as the round-2
+  // blocker, one layer out. This is the general guard, derived from both sides: extract every function name the
+  // skill's BRANCH-ATTACHED blockquotes name in a code span, and require each to be a real export of a module the
+  // skill points its reader at. No hand list on either side, so a future instruction naming an unreachable symbol
+  // fails here rather than at 3am on a land.
+  it('every function the branch blockquotes name is importable from a module the skill points at', async () => {
+    const md = drainSkill();
+    // Branch-attached blockquotes are the INDENTED ones (nested in a step); the column-0 blockquotes are
+    // document-level callouts, not instructions to call something.
+    // Normalized first, so a code span that happens to wrap across two lines is still read as one span.
+    const branchQuotes = normalizeProse(md.split('\n').filter((l) => /^\s+>/.test(l)).join('\n'));
+    const named = functionNamesInCodeSpans(branchQuotes);
+    expect(named.length, 'expected the branch blockquotes to name at least one function').toBeGreaterThan(0);
+
+    const doors = ['../review-core.mjs', '../review-render.mjs'];
+    const reachable = new Set();
+    for (const d of doors) for (const k of Object.keys(await import(d))) reachable.add(k);
+
+    const unreachable = named.filter((n) => !reachable.has(n));
+    expect(unreachable, `named in the drain skill but exported by neither ${doors.join(' nor ')}`).toEqual([]);
+  });
+
+  it('the two predicates the check is DEFINED by resolve from the facade specifically', async () => {
+    // Tighter than the subset check above: whatever the blockquote states as `fn(f) === <bool>` is a predicate the
+    // reader is told to evaluate, so it must come from the documented facade — not merely from somewhere.
+    const block = blockquoteBlockAt(drainSkill(), CHECK);
+    const predicates = [...normalizeProse(block).matchAll(/\b([a-z][A-Za-z0-9_$]*)\(f\)\s*===\s*(?:true|false)/g)].map((m) => m[1]);
+    expect(predicates.length).toBeGreaterThan(0);
+    const facade = await import('../review-core.mjs');
+    for (const p of predicates) expect(typeof facade[p], `review-core.mjs must export ${p}`).toBe('function');
   });
 });
 
