@@ -498,7 +498,47 @@ function laneDirtyOrAhead(dir, branch) {
   const uncommitted = porcelain ? porcelain.split('\n').filter(Boolean).length : 0;
   const aheadRaw = tryGit(['rev-list', '--count', `origin/${branch}..HEAD`], dir);
   const ahead = aheadRaw === null ? 0 : Number(aheadRaw);
+  // #2452 review — this predicate reports the FACT only ("how many commits ahead of the local origin ref").
+  // The Gap-1 relaxation used to live here, which silently changed reset/skip semantics for every caller
+  // (`refreshLane`'s hard-reset decision, `status`, the board) even though it is justified only for acquire's
+  // auto-pick. Policy now lives at that one call site — see `aheadIsProvablyPushed`.
   return { dirty: uncommitted > 0, uncommitted, ahead };
+}
+
+/**
+ * #2452 (Gap 1, hardened in review) — is this lane's HEAD PROVABLY already on origin, so acquire's auto-pick
+ * may treat an "ahead" lane as recyclable rather than firing the #2267 never-recycle-unpushed-work guard?
+ *
+ * The first cut answered this from LOCAL remote-tracking refs alone (`for-each-ref --contains=HEAD
+ * refs/remotes`). That is unsound: a local `refs/remotes/origin/lane/*` ref is exactly as stale as the
+ * `origin/<branch>` ref the check exists to distrust. A `lane/*` branch deleted on origin after landing (the
+ * normal end of a lane's life) leaves its remote-tracking ref behind locally, so HEAD still "contains" into
+ * it and the guard clears — handing a hard `reset --hard` to a lane whose commits exist NOWHERE on the
+ * remote. The failure mode of a wrong answer here is destroyed work, so it must be checked against the live
+ * remote, not a cache.
+ *
+ * `remoteShas` is the live `ls-remote` snapshot (taken ONCE per acquire pass, and only when some lane looks
+ * ahead — so the no-per-lane-fetch cost profile is preserved in the common case). HEAD counts as pushed only
+ * if it is a live remote tip or an ancestor of one. Fails CLOSED on any git fault: no proof ⇒ stay protected.
+ */
+function aheadIsProvablyPushed(dir, remoteShas) {
+  if (!remoteShas || remoteShas.size === 0) return false;
+  const headRaw = tryGit(['rev-parse', 'HEAD'], dir);
+  if (!headRaw) return false;
+  const head = headRaw.trim();
+  if (remoteShas.has(head)) return true;
+  for (const sha of remoteShas) {
+    // `--is-ancestor` exits 0 when true, non-zero otherwise ⇒ tryGit returns null on false/unknown-object.
+    if (tryGit(['merge-base', '--is-ancestor', head, sha], dir) !== null) return true;
+  }
+  return false;
+}
+
+/** Live remote tip SHAs (one network call). Returns an EMPTY set on any failure, so callers fail closed. */
+function liveRemoteShas(dir) {
+  const out = tryGit(['ls-remote', '--heads', 'origin'], dir);
+  if (out === null) return new Set();
+  return new Set(out.split('\n').filter(Boolean).map((l) => l.split(/\s+/)[0]).filter(Boolean));
 }
 
 // Returns { skipped: boolean, dirty, uncommitted, ahead } so callers can tell an actually-reset lane
@@ -802,10 +842,22 @@ function cmdAcquire(repo) {
 
   // Candidate infos from LOCAL refs (no per-lane fetch): `dirty` is live (working tree), `ahead` is vs the
   // last-known origin — conservative (over-protects an ahead lane). We fetch+reset only the winner.
+  // #2452 (Gap 1) — the live-remote snapshot backing `aheadIsProvablyPushed`, taken LAZILY: only the first
+  // lane that actually looks ahead pays the single `ls-remote`, so a pool with no ahead lanes still makes
+  // zero network calls (the no-per-lane-fetch property this design is built around).
+  let remoteShas = null;
   const infoFor = (n) => {
     const dir = laneDir(repo, n);
     if (!existsSync(dir)) return { lane: n, exists: false };
-    return { lane: n, exists: true, dirtyOrAhead: laneDirtyOrAhead(dir, repo.branch), lease: readLease(dir) };
+    const raw = laneDirtyOrAhead(dir, repo.branch);
+    let dirtyOrAhead = raw;
+    if (raw.ahead > 0) {
+      // Only HERE (acquire's auto-pick) may a provably-pushed "ahead" lane be treated as recyclable —
+      // `refreshLane`/`status` keep reading the raw fact. Fails closed: unproven ⇒ stays protected (#2267).
+      if (remoteShas === null) remoteShas = liveRemoteShas(dir);
+      if (aheadIsProvablyPushed(dir, remoteShas)) dirtyOrAhead = { ...raw, ahead: 0, aheadPushed: true };
+    }
+    return { lane: n, exists: true, dirtyOrAhead, lease: readLease(dir) };
   };
 
   let chosen = null;
@@ -1070,6 +1122,11 @@ function cmdRelease(repo) {
     // is a fixed slug, so the human un-reserving is typically a different session). It must NOT double as a
     // `--force` for an ordinary FOREIGN lease — that still requires the explicit `--force`.
     const bypassOwnership = force || (flags['release-reserved'] && isReservedLease(lease));
+    // #2452 Gap 2 (the release-ownership relaxation) is NOT in this PR — it ships separately. Its review found
+    // that widening ownership to the durable `ownerSession` lets a bare `release --all` drop a SIBLING's live
+    // lease without `--force`, after which a fresh acquire does `checkout -B --force` + `clean -fd` on that
+    // clone. That is a new way to destroy another actor's work, so it needs its own scrutiny rather than riding
+    // the stale-ahead fix, which only ever makes MORE lanes available and destroys nothing.
     if (!bypassOwnership && !leaseOwnedBy(lease, session)) {
       log(`  lane-${n}: ${describeLease(lease)} — not yours; pass --force to break`);
       continue;
