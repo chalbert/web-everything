@@ -42,6 +42,7 @@ import {
   applyCodificationToMeta, harvestCandidates, renderCodificationReport, candidateToScaffold,
 } from './design-refs/codification.mjs';
 import { runBenchmark } from './design-refs/benchmark.mjs';
+import { localDateString } from './lib/local-date.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', 'design-refs');
@@ -697,7 +698,7 @@ async function codify(args) {
     runId, provider: provider.name, generatedAt: now.toISOString(), codified, candidates, minSupport,
   });
   mkdirSync(REPORTS, { recursive: true });
-  const reportPath = join(REPORTS, `${now.toISOString().slice(0, 10)}-design-ref-codification.md`);
+  const reportPath = join(REPORTS, `${localDateString(now)}-design-ref-codification.md`);
   writeFileSync(reportPath, report);
 
   // Optional: file each candidate as a type:idea item for human ratification (no standard is minted —
