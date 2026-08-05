@@ -72,6 +72,7 @@ import { parseClaims, claimedIdsFor, partitionById } from './readiness/claimScop
 import { loadDataRegistry } from './lib/registry-loader.cjs';
 import { isExecKind, isEntityGraduation } from './check-standards-rules.mjs';
 import { idFromName, isNum } from './backlog/id.mjs';
+import { localToday } from './lib/local-date.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BL = join(ROOT, 'backlog');
@@ -346,7 +347,7 @@ try {
 
 // ---- run checks ----------------------------------------------------------
 const flags = { G1: [], G2: [], G3: [], G4: [], G5: [], G6: [], G7: [], O1: [], D1: [], D2: [], D3: [] };
-const TODAY = new Date().toISOString().slice(0, 10); // for the O1 born-active-orphan TTL (#670)
+const TODAY = localToday(); // for the O1 born-active-orphan TTL (#670)
 for (const it of items.values()) {
   const blocked = new Set((it.fm.blockedBy || []).map(norm));
   const isExec = isExecKind(it.type);
