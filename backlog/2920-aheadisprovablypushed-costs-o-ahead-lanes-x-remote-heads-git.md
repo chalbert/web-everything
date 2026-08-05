@@ -3,7 +3,8 @@ bornAs: xxpozbx
 kind: task
 status: open
 dateOpened: "2026-08-05"
-tags: []
+relatedTo: ["2452"]
+tags: [lane-pool, infra, perf]
 ---
 
 # aheadIsProvablyPushed costs O(ahead-lanes x remote-heads) git spawns — ~30s per acquire on the live pool
