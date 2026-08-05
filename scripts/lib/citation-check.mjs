@@ -45,6 +45,13 @@ export const HASH_SLUG_OUT_OF_SCOPE_DIRS = [
   'reports/',
   'src/_data/researchTopics/',
   'src/_includes/research-descriptions/',
+  // PR #1037 review, finding 2 — CODE is out of the at-land rewrite scope too. A `#xNNNNNN` cited from a source
+  // comment is never rewritten when the item is JIT-numbered (`HASH_REWRITE_DIRS` covers only backlog/ and
+  // docs/agent/), so it becomes a permanently dead reference with nothing warning about it. Observed: a
+  // `#xpr5p67` cite added to scripts/workflows/review-parked-prs.mjs pointing at an item that existed only on
+  // another PR's branch. Code must cite a landed `#NNNN`, or state the reason inline with no id.
+  'scripts/',
+  'skills-src/',
 ];
 
 // Repo-locus prefixes (we:docs/agent/conventions.md → the repo-locus convention). `we:` resolves against

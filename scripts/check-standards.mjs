@@ -29,6 +29,7 @@ import { buildReport, source as reportSource, finding as reportFinding, section 
 import { loadBlocks } from './lib/blocks-loader.cjs';
 import { checkVerdictTotality } from './lib/verdict-totality.mjs';
 import { checkReviewLabelSingleHome, GUARDED_DOC_PREFIXES } from './lib/review-skill-guard.mjs';
+import { checkWorkflowMeta, WORKFLOW_HARNESS_ROOTS } from './lib/workflow-meta.mjs';
 import { VERDICTS } from './lib/jury-core.mjs';
 import { loadIntents } from './lib/intents-loader.cjs';
 import { loadResearch } from './lib/research-loader.cjs';
@@ -62,6 +63,7 @@ import {
 } from './check-standards-rules.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
+  HASH_SLUG_OUT_OF_SCOPE_DIRS,
   countSourceLines, CITATION_GATES_ENFORCED,
 } from './lib/citation-check.mjs';
 
@@ -1092,6 +1094,37 @@ try {
         { kind: 'citation-hash-slug-scope', file: rel });
     }
   }
+
+  // CODE is out of the rewrite scope too (PR #1037 review, finding 2). A `#xNNNNNN` in a source comment is never
+  // rewritten when the item is JIT-numbered, so it dangles permanently — observed on this very PR, which cited
+  // an item that existed only on another branch. Widening HASH_SLUG_OUT_OF_SCOPE_DIRS alone was a NO-OP: the walk
+  // above never visits scripts/, which is the same list-widened-but-walk-unchanged defect rule 15's comment
+  // records. So the walk is widened here too — and ONLY for this gate, since running the anchor/locus gates over
+  // every source file would bury their real hits in noise.
+  {
+    const CODE_SKIP = new Set(['node_modules', '.git', '__tests__']);
+    const walkCode = (dir, acc = []) => {
+      for (const name of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, name.name);
+        if (name.isDirectory()) { if (!CODE_SKIP.has(name.name)) walkCode(p, acc); }
+        else if (/\.(mjs|js|md)$/.test(name.name)) acc.push(p);
+      }
+      return acc;
+    };
+    for (const dir of HASH_SLUG_OUT_OF_SCOPE_DIRS.filter((d) => d === 'scripts/' || d === 'skills-src/')) {
+      const abs = join(ROOT, dir);
+      if (!existsSync(abs)) continue;
+      for (const f of walkCode(abs)) {
+        const rel = relative(ROOT, f);
+        for (const h of findOutOfScopeHashSlugs(readFileSync(f, 'utf8'), rel)) {
+          emit(`${rel}: hash-slug \`${h.form === 'hash-ref' ? `#${h.slug}` : `${h.slug}-…​.md`}\` is cited from ` +
+            `CODE — the at-land rewrite covers backlog/ + docs/agent/ only, so this reference dies the moment ` +
+            `the item is numbered (#2821 gate 3). Cite a landed #NNNN, or state the reason inline with no id.`,
+            { kind: 'citation-hash-slug-scope', file: rel });
+        }
+      }
+    }
+  }
 }
 
 // ── 6g. Catalog-index completeness — every artifact type is reachable from a top-level index + nav ──
@@ -1712,6 +1745,46 @@ try {
   }
   const { errors: rle } = checkReviewLabelSingleHome(docs);
   for (const e of rle) err(e);
+}
+
+// ── 16. Workflow harness scripts must be LAUNCHABLE (#2664) ────────────────────
+// The Workflow runtime requires `export const meta` to be a PURE LITERAL and rejects the script at validation
+// time, before a single agent spawns. `scripts/workflows/review-parked-prs.mjs` — the editor↔reviewer
+// convergence loop (#2639) — concatenated its `meta.description` across lines and was therefore UNLAUNCHABLE
+// from the day it was written. The failure is silent in the one way that matters: it never ran, so it never
+// produced a wrong answer, and three layers above it inherited the silence for weeks. The class had already
+// recurred once (`backlog/2664`, resolved with no gate), which is what makes a gate owed rather than optional.
+// Vitest alone is not enough: the check must be reachable from the health gate and the write-time hook, so an
+// unlaunchable harness is refused at AUTHOR time rather than discovered when someone tries to run it.
+// Pure core in `lib/workflow-meta.mjs` (which also documents that PURE_KINDS MODELS the runtime rather than
+// checking it); the fs walk stays here, mirroring the two gates above.
+{
+  const SKIP_DIRS = new Set(['node_modules', '.git']);
+  const walkScripts = (dir, acc = []) => {
+    for (const name of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, name.name);
+      if (name.isDirectory()) { if (!SKIP_DIRS.has(name.name)) walkScripts(p, acc); }
+      else if (/\.(mjs|js)$/.test(name.name)) acc.push(p);
+    }
+    return acc;
+  };
+  for (const d of WORKFLOW_HARNESS_ROOTS) {
+    const abs = join(ROOT, d);
+    if (!existsSync(abs)) continue;
+    for (const f of walkScripts(abs)) {
+      const rel = relative(ROOT, f);
+      // Selection is by PARSE, never by a text match: `src.includes('export const meta')` skips
+      // `const meta = {…}; export { meta };` entirely, so a harness in that spelling is never scanned.
+      const r = checkWorkflowMeta(readFileSync(f, 'utf8'), rel);
+      if (!r.found) continue; // not a harness
+      if (r.impure.length) {
+        err(`${rel}: Workflow \`meta\` is not a pure literal — the runtime refuses to launch this harness (${r.impure.join('; ')})`, { kind: 'workflow-meta', file: rel });
+      }
+      if (r.missingKeys.length) {
+        err(`${rel}: Workflow \`meta\` is missing required field(s): ${r.missingKeys.join(', ')}`, { kind: 'workflow-meta', file: rel });
+      }
+    }
+  }
 }
 
 // ── Scope attribution (#952, ratified #949 Fork 3-A) ───────────────────────────
