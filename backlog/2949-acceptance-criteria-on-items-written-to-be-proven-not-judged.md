@@ -1,7 +1,8 @@
 ---
+bornAs: xctebq6
 kind: story
 size: 3
-parent: "x169s8f"
+parent: "2948"
 status: open
 dateOpened: "2026-08-06"
 tags: []
@@ -15,7 +16,7 @@ Every item states how it will be proven done, on a determinism ladder: an execut
 
 Only **266 of 2919** items carry a `## Acceptance` section — about 9% — even though the dev-ready bar asks for "clear acceptance criteria" and `/resolve` re-checks them. The only gate-enforced goal field is the lead-paragraph digest. So a juror today has nothing to check *against*, and open-ended "find what's wrong with this diff" is the most expensive mandate you can give a model.
 
-Pre-registered criteria change the shape of the review: each juror checks a named list plus anything catastrophic, instead of re-deriving the space of possible defects. That is a much shorter read and a much shorter argument — the biggest token lever after cutting the always-on lens set. It also **dissolves the scope question mechanically**: a finding that traces to a criterion is in scope, one that does not is a carve-out by construction (#xlcmu06), with no judgment call.
+Pre-registered criteria change the shape of the review: each juror checks a named list plus anything catastrophic, instead of re-deriving the space of possible defects. That is a much shorter read and a much shorter argument — the biggest token lever after cutting the always-on lens set. It also **dissolves the scope question mechanically**: a finding that traces to a criterion is in scope, one that does not is a carve-out by construction (#2950), with no judgment call.
 
 This cashes in a call already settled on #2636 — *"early human alignment (jury pre-registered at prepare)"* — and is the item-side half of #2638's prepare-time charter.
 

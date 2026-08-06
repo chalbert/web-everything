@@ -1,7 +1,8 @@
 ---
+bornAs: xlcmu06
 kind: story
 size: 5
-parent: "x169s8f"
+parent: "2948"
 status: open
 dateOpened: "2026-08-06"
 tags: []
@@ -31,7 +32,7 @@ A blocker does not bounce the PR into an edit↔review loop. It is carved into i
 
 ## Scope is the goal, not the file set
 
-A fix that serves the item's stated goal is in scope however many files it takes — new integration tests, a caller that needed updating, a doc the change invalidated are the same goal *finished*, not new scope. A fix that introduces a **new** goal is a carve-out. Anchor the test on the item's lead paragraph (the one gate-enforced goal field today; only ~9% of items carry a `## Acceptance` section) and prefer #xctebq6's criteria once those exist.
+A fix that serves the item's stated goal is in scope however many files it takes — new integration tests, a caller that needed updating, a doc the change invalidated are the same goal *finished*, not new scope. A fix that introduces a **new** goal is a carve-out. Anchor the test on the item's lead paragraph (the one gate-enforced goal field today; only ~9% of items carry a `## Acceptance` section) and prefer #2949's criteria once those exist.
 
 **The anti-spiral guard is on rounds, not files:** in round 2+, jurors may judge only the round-1 fix. Anything else they notice is auto-carved, not argued. Combined with blocker-only rounds, a PR cannot exceed two passes no matter what anyone finds.
 

@@ -1,4 +1,5 @@
 ---
+bornAs: x169s8f
 kind: epic
 status: open
 dateOpened: "2026-08-06"
@@ -29,10 +30,10 @@ And **the bar is better-than-`main`, not perfect.** Jurors judge against an impl
 
 | slice | what it does |
 |---|---|
-| #x0q5anw | the `solo-dev` profile — earned lenses, re-weighted signals, one juror per lens |
-| #xlcmu06 | finding disposition (blocker / carve-out / nit) and blocker-only rounds |
-| #xctebq6 | acceptance criteria on items, on a determinism ladder |
-| #xm4owlw | the PR evidence block — red before, green after |
+| #2947 | the `solo-dev` profile — earned lenses, re-weighted signals, one juror per lens |
+| #2950 | finding disposition (blocker / carve-out / nit) and blocker-only rounds |
+| #2949 | acceptance criteria on items, on a determinism ladder |
+| #2951 | the PR evidence block — red before, green after |
 
 ## What is deliberately not changed
 

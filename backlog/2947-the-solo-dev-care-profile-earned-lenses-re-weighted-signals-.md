@@ -1,7 +1,8 @@
 ---
+bornAs: x0q5anw
 kind: story
 size: 5
-parent: "x169s8f"
+parent: "2948"
 status: open
 dateOpened: "2026-08-06"
 tags: []

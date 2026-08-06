@@ -1,8 +1,9 @@
 ---
+bornAs: xm4owlw
 kind: story
 size: 5
-parent: "x169s8f"
-blockedBy: ["xctebq6"]
+parent: "2948"
+blockedBy: ["2949"]
 status: open
 dateOpened: "2026-08-06"
 tags: []
@@ -12,7 +13,7 @@ tags: []
 
 The PR body carries the proof its item's criteria were met — each criterion, the command that checks it, and its result against the base commit and against head. A check that already passes on main proves nothing, so the before-and-after pair is what makes a criterion evidence rather than a claim, and it lets the jury confirm a run instead of judging done-ness.
 
-Depends on #xctebq6 — there is nothing to evidence until items carry criteria.
+Depends on #2949 — there is nothing to evidence until items carry criteria.
 
 ## Red before, green after
 
