@@ -1,9 +1,10 @@
 ---
+bornAs: xzlhqfi
 kind: story
 size: 3
 status: open
 tier: someday
-blockedBy: ["x6gp3oa"]
+blockedBy: ["2945"]
 relatedTo: ["2895", "2439"]
 scope:
   - we:scripts/review-console.mjs

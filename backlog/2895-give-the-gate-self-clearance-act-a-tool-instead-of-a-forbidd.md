@@ -3,7 +3,7 @@ bornAs: x58tjn2
 kind: story
 size: 2
 status: open
-relatedTo: ["2285", "2439", "2644", "x6gp3oa", "xzlhqfi"]
+relatedTo: ["2285", "2439", "2644", "2945", "2946"]
 scope:
   - we:scripts/review-set-label.mjs
   - we:skills-src/review/SKILL.md
@@ -86,7 +86,7 @@ comment, labels — is one invocation and the marker cannot be hand-copied wrong
 
 ## Follow-ons
 
-- [#x6gp3oa] — the minimal local console, now an ERGONOMICS surface for out-of-session clearance rather than a
+- [#2945] — the minimal local console, now an ERGONOMICS surface for out-of-session clearance rather than a
   security one, and the natural place a gesture would later attach.
-- [#xzlhqfi] — the hardware human-presence gesture that would make the signal genuinely unforgeable. Filed
+- [#2946] — the hardware human-presence gesture that would make the signal genuinely unforgeable. Filed
   `someday`: the threat it answers is an adversarial agent, not the careless one that actually bites today.

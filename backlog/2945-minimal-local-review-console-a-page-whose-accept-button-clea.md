@@ -1,4 +1,5 @@
 ---
+bornAs: x6gp3oa
 kind: story
 size: 2
 status: open
@@ -18,7 +19,7 @@ A one-page local server that renders a parked PR's review context and clears it 
 times the operator is NOT in a session with an agent. Purely an ergonomics surface: [#2895] already makes the
 clearance possible and recorded from the CLI, and in-session the fastest correct path is saying "accept
 &lt;PR&gt;" and letting the agent run it. This exists for out-of-session clearance and as the natural place a
-human-presence gesture ([#xzlhqfi]) would later attach.
+human-presence gesture ([#2946]) would later attach.
 
 ## Why it is owed, and why it is LOW priority
 
@@ -28,7 +29,7 @@ urgent does not survive scrutiny, and the item should say so rather than inherit
 
 - **It is not a security boundary.** An agent with shell access on the same machine can `curl` the page and
   scrape any token it holds, so a click proves nothing a CLI flag does not. That was ruled on [#2895]; the
-  genuinely unforgeable option is [#xzlhqfi].
+  genuinely unforgeable option is [#2946].
 - **In-session it is worse DevX, not better.** The operator is already in a terminal talking to the agent. A
   browser context-switch to click one button is more friction than saying two words. [#2895]'s
   `/review &lt;PR&gt; accept` covers that case better.
@@ -49,7 +50,7 @@ gesture to live later. That is worth building, and worth building small.
 - The actor comes from git config; the stated reason is a required field in the form, matching [#2895]'s
   requirement that a clearance always carries one.
 - The page states plainly what a clearance record proves — that the sanctioned path was followed, not that a
-  human followed it — for as long as [#xzlhqfi] is unbuilt.
+  human followed it — for as long as [#2946] is unbuilt.
 
 ## Home, and the condition on it
 
