@@ -32,15 +32,16 @@ import { build } from 'esbuild';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { localToday } from './lib/local-date.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DESIGN_SYSTEMS = join(ROOT, 'design-systems');
 const REPORTS = join(ROOT, 'reports');
 const FUI_WEBTHEME = join(ROOT, '..', 'frontierui', 'plugs', 'webtheme');
 
-/** ISO date (UTC) for the report filename, e.g. `2026-07-02`. */
+/** The operator's local calendar date for the report filename, e.g. `2026-07-02` (#2747). */
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return localToday();
 }
 
 /**
