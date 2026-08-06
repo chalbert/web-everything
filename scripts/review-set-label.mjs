@@ -323,6 +323,8 @@ if (IS_CLI) {
   // no marker — and `acceptanceCoversHead` fails open on a missing marker, so the drain then lands it. That
   // would contradict this module's own "no partial swap" promise. PR #1005 review, minors 2-4.
   const argvRest = process.argv.slice(2);
+  // Single-sourced so the size PROJECTION below and the `defaultActor` the render actually uses can never drift.
+  const DEFAULT_ACTOR = 'loop-console operator';
   // The bare `--body-file <path>` form is REJECTED, not silently ignored: ignoring it posts a verdict with the
   // findings missing and still exits 0. Every other flag in the harness is `=`-form; say so rather than no-op.
   const bareIdx = argvRest.indexOf('--body-file');
@@ -342,13 +344,21 @@ if (IS_CLI) {
     if (!verdictBody.trim()) fail(`--body-file=${bodyFileArg} is empty — pass the verdict write-up, or omit the flag for the one-line record`);
     // GitHub rejects a comment body over 65536 chars. Catching it here means the label is never applied against
     // a comment that cannot post; catching it later would leave exactly the accepted-without-a-marker state above.
-    const projected = buildVerdictComment({ to: 'accepted', actor: 'x'.repeat(64), headSha: 'f'.repeat(40), body: verdictBody }).length;
+    // Project with the ACTUAL `--actor`, not an assumed 64-char stand-in. `--actor` is unbounded caller input and
+    // is rendered verbatim into the attribution line, so a stand-in makes this an ESTIMATE rather than the upper
+    // bound the guard needs — and it errs in the one direction that matters. Measured on this file before the fix:
+    // a 400-char actor renders 336 chars LONGER than the projection, so a body sized to pass here posts over the
+    // cap, `gh pr edit` having already applied the label. That is precisely the accepted-without-a-marker state
+    // the comment above says this check exists to prevent. Mirror `runReviewLabelCli`'s own parse so the projection
+    // and the render cannot disagree about who the actor is (`defaultActor` below is the same fallback).
+    const projectedActor = (argvRest.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length) || DEFAULT_ACTOR;
+    const projected = buildVerdictComment({ to: 'accepted', actor: projectedActor, headSha: 'f'.repeat(40), body: verdictBody }).length;
     if (projected > GH_COMMENT_MAX) {
       fail(`--body-file=${bodyFileArg} renders a ${projected}-char comment, over GitHub's ${GH_COMMENT_MAX} limit — trim it (the label is not applied)`);
     }
   }
   runReviewLabelCli({
-    defaultActor: 'loop-console operator',
+    defaultActor: DEFAULT_ACTOR,
     usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes [--actor=<name>] [--body-file=<path>]  (pr must be a positive integer)',
     buildComment: ({ to, actor, headSha }) => buildVerdictComment({ to, actor, headSha, body: verdictBody }),
     successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
