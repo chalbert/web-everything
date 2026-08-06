@@ -325,6 +325,20 @@ export function runReviewLabelCli({
   // that are size-checked, written and posted are the same bytes.
   const commentBody = buildComment({ to, actor, decision, headSha, reason: clearReason });
 
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — THE SIZE GUARD, on the RENDERED bytes, before the swap.
+  // GitHub rejects a comment over `GH_COMMENT_MAX`, and the swap lands FIRST — so an oversize comment leaves the
+  // PR `review:accepted` with NO `reviewed-sha` marker, which `acceptanceCoversHead` fails OPEN on, and the drain
+  // then merges with the staleness gate disarmed. PR #1057 review: the only guard used to be an argv projection
+  // sitting inside the CLI's `if (bodyFileArg)` branch, so a long `--reason` with no `--body-file` walked straight
+  // around it (reproduced: `gh pr edit` succeeded, `gh pr comment` 422'd, and re-running `clear-human` then
+  // refused — "nothing to clear" — so recovery needed the raw `gh pr comment` this whole item exists to forbid).
+  // Checking HERE, where the bytes are produced, is what makes it unskippable: no call path — this CLI, the
+  // `npm run review:clear` wrapper, or an importer supplying its own `buildComment` — can route around it. The
+  // argv projection stays as belt-and-braces only because it can name the offending flag before any gh call.
+  if (commentBody.length > GH_COMMENT_MAX) {
+    fail(`the rendered comment is ${commentBody.length} chars, over GitHub's ${GH_COMMENT_MAX} limit — trim the body/--reason/--actor (nothing was changed)`);
+  }
+
   // we:scripts/review-set-label.mjs#runReviewLabelCli — apply the swap: add the verdict label, remove the stale
   // ones (argv array, no shell). Intersect the decision's removals with the labels the PR ACTUALLY carries so
   // `gh pr edit --remove-label` is never handed an absent label (which errors).
@@ -438,7 +452,8 @@ export function buildVerdictComment({ to, actor, headSha = '', body = '', reason
  * SHAPE is defined there; this only has to recognise the same thing, and over-matching is the safe direction
  * (a stripped marker is inert text, an un-stripped one can outrank the real stamp).
  */
-/** GitHub's hard cap on an issue/PR comment body. Checked BEFORE the label swap — see the CLI block below. */
+/** GitHub's hard cap on an issue/PR comment body. Checked BEFORE the label swap, on the rendered bytes in
+ *  `runReviewLabelCli` (unskippable) and again from argv in the CLI block below (names the flag to trim). */
 export const GH_COMMENT_MAX = 65536;
 
 /** Who the durable comment is attributed to when `--actor` is absent. `clear-human` REFUSES this default. */
@@ -505,13 +520,18 @@ if (IS_CLI) {
     try { verdictBody = readFileSync(abs, 'utf8'); }
     catch (e) { fail(`--body-file=${bodyFileArg} is unreadable (${String((e && e.message) || e).split('\n')[0]})`); }
     if (!verdictBody.trim()) fail(`--body-file=${bodyFileArg} is empty — pass the verdict write-up, or omit the flag for the one-line record`);
-    // GitHub rejects a comment body over 65536 chars. Catching it here means the label is never applied against
-    // a comment that cannot post; catching it later would leave exactly the accepted-without-a-marker state above.
-    // Projected over the WHOLE target set AND the actual actor/reason — see projectVerdictCommentLength.
-    const projected = projectVerdictCommentLength({ body: verdictBody, actor: projActor, reason: projReason });
-    if (projected > GH_COMMENT_MAX) {
-      fail(`--body-file=${bodyFileArg} renders a ${projected}-char comment, over GitHub's ${GH_COMMENT_MAX} limit — trim it (the label is not applied)`);
-    }
+  }
+  // GitHub rejects a comment body over 65536 chars, and it rejects it AFTER the swap has landed. The authoritative
+  // guard is on the RENDERED bytes in `runReviewLabelCli`; this argv projection is belt-and-braces, kept because it
+  // fires before ANY gh call and can name the flag to trim. UNCONDITIONAL — PR #1057 review: it used to sit inside
+  // the `if (bodyFileArg)` branch above, so `--reason`, added later and just as unbounded, was unguarded whenever
+  // no `--body-file` was passed. Projected over the WHOLE target set AND every free-text argv input; see
+  // `projectVerdictCommentLength`.
+  const projected = projectVerdictCommentLength({ body: verdictBody, actor: projActor, reason: projReason });
+  if (projected > GH_COMMENT_MAX) {
+    const flag = [[verdictBody.length, `--body-file=${bodyFileArg}`], [projReason.length, '--reason'],
+      [projActor.length, '--actor']].sort((a, b) => b[0] - a[0])[0][1];
+    fail(`${flag} renders a ${projected}-char comment, over GitHub's ${GH_COMMENT_MAX} limit — trim it (the label is not applied)`);
   }
   runReviewLabelCli({
     defaultActor: DEFAULT_ACTOR,

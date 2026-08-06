@@ -4,7 +4,12 @@
  *   review:human PR is never cleared to accepted here) — is decided in the pure decider and unit-tested here
  *   against fixtures, no network.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers,
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
@@ -375,5 +380,92 @@ describe('buildVerdictComment — a clear-human record must not over-claim (#289
 
   it('still stamps the reviewed-sha marker — the clearance IS an acceptance (#2409)', () => {
     expect(parseReviewedSha([{ body: render({}) }])).toBe(SHA);
+  });
+});
+
+// PR #1057 review — WHERE the size guard is called, which is a different claim from whether the projection is
+// correct. The projection above was already total (no target could be under-counted); the defect was that its ONE
+// call site sat inside the CLI's `if (bodyFileArg)` branch, so `--reason` — a second unbounded free-text input,
+// added later — walked around it whenever no `--body-file` was passed. Reproduced against a `gh` that enforces
+// GitHub's cap: `gh pr edit` landed (review:human removed), `gh pr comment` was rejected, and the PR was left
+// ACCEPTED with no `reviewed-sha` marker — the fail-OPEN state the pre-flight exists to prevent, made worse by
+// `clear-human` then refusing to re-run ("nothing to clear"). Hermetic: a fake `gh` on PATH records every call,
+// so "refused before any gh call" and "refused before the SWAP" are both observable rather than asserted.
+describe('the GH_COMMENT_MAX guard is reachable-around by nothing (PR #1057)', () => {
+  const FAKE_GH = `#!/usr/bin/env node
+const fs = require('fs');
+const a = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_CALL_LOG, a.slice(0, 2).join(' ') + '\\n');
+if (a[0] === 'pr' && a[1] === 'view') {
+  process.stdout.write(JSON.stringify({ labels: [{ name: 'review:human' }], headRefOid: 'f'.repeat(40) }));
+  process.exit(0);
+}
+process.exit(0);
+`;
+  let shimDir;
+  let logPath;
+
+  beforeAll(() => {
+    shimDir = mkdtempSync(join(tmpdir(), 'review-label-shim-'));
+    writeFileSync(join(shimDir, 'gh'), FAKE_GH);
+    chmodSync(join(shimDir, 'gh'), 0o755);
+    logPath = join(shimDir, 'gh-calls.log');
+  });
+  afterAll(() => { try { rmSync(shimDir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+
+  const ghCalls = () => (existsSync(logPath) ? readFileSync(logPath, 'utf8').split('\n').filter(Boolean) : []);
+  beforeEach(() => { try { rmSync(logPath, { force: true }); } catch { /* first run */ } });
+
+  // THE UNCOVERED BOUNDARY CASE: a long `--reason` and NO `--body-file`. Drives the REAL entrypoint, because the
+  // hole was in the entrypoint's control flow — an in-process call to the harness would have missed it entirely.
+  it('a long --reason with NO --body-file is refused, and reaches no gh call at all', () => {
+    const script = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'review-set-label.mjs');
+    // Under the cap on its own — GitHub only rejects the RENDERED comment, which adds the clear-human chrome.
+    const reason = 'r'.repeat(65200);
+    expect(reason.length).toBeLessThan(GH_COMMENT_MAX);
+    const r = spawnSync('node', [script, '1048', '--repo=o/n', '--to=clear-human', '--actor=Nicolas Gilbert',
+      `--reason=${reason}`], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GH_CALL_LOG: logPath },
+    });
+    expect(r.status).not.toBe(0);
+    const payload = JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop());
+    expect(payload.error).toMatch(/--reason/);
+    expect(payload.error).toMatch(new RegExp(`over GitHub's ${GH_COMMENT_MAX} limit`));
+    expect(ghCalls()).toEqual([]);
+  });
+
+  // And the guard that makes it unskippable: the check on the RENDERED bytes inside the harness. No free-text
+  // argv here at all, so an argv projection could not possibly catch this — an importer with its own
+  // `buildComment` is exactly the call path the CLI-block-only guard left open.
+  it('an importer whose buildComment renders over the cap is refused BEFORE the label swap', () => {
+    const chunks = [];
+    const realWrite = process.stdout.write.bind(process.stdout);
+    const realExit = process.exit.bind(process);
+    const realPath = process.env.PATH;
+    process.env.PATH = `${shimDir}:${realPath}`;
+    process.env.GH_CALL_LOG = logPath;
+    process.stdout.write = (s) => { chunks.push(String(s)); return true; };
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = null;
+    try {
+      runReviewLabelCli({
+        argv: ['1048', '--repo=o/n', '--to=clear-human', '--actor=op', '--reason=operator said clear it'],
+        allowClearHuman: true,
+        defaultActor: 'test',
+        usage: 'usage: test',
+        buildComment: () => 'z'.repeat(GH_COMMENT_MAX + 1),
+        successResult: (o) => ({ ok: true, ...o }),
+        refusalResult: ({ decision }) => ({ error: decision.reason }),
+      });
+    } catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
+    finally {
+      process.stdout.write = realWrite; process.exit = realExit; process.env.PATH = realPath;
+      delete process.env.GH_CALL_LOG;
+    }
+    expect(exitCode).not.toBe(0);
+    expect(JSON.parse(chunks.join('')).error).toMatch(/rendered comment is \d+ chars/);
+    // It observed the PR (a read), and then stopped: no `pr edit` swap, no `pr comment`.
+    expect(ghCalls()).toEqual(['pr view']);
   });
 });
