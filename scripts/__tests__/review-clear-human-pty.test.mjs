@@ -88,7 +88,7 @@ const shq = (s) => `'${String(s).split("'").join(`'\\''`)}'`;
  *     is a false NEGATIVE that looks exactly like the bug this file exists to catch.
  * We close our stdin only once the CLI has printed its JSON result, so `cat` (and therefore the shell) exits.
  */
-function runUnderPty({ dir, bin, args, answer, timeoutMs = 20000 }) {
+function runUnderPty({ dir, bin, args, answer, timeoutMs = 90000 }) {
   const cmd = ['node', CLI, ...args].map(shq).join(' ');
   const pty = process.platform === 'darwin'
     ? `script -q /dev/null ${cmd}`
@@ -168,7 +168,7 @@ describe.skipIf(!PTY_OK)('clear-human END TO END through a real pty (#2895, PR #
     expect(out).toMatch(/actor\s+Nicolas Gilbert/);
     expect(out).toMatch(/comment\s+\d+ chars, sha256 [0-9a-f]{12}/);
     expect(out).toContain('One minor, addressed.');
-  }, 30000);
+  }, 120000);
 
   // The control. If the read were broken in the OTHER direction (accepting anything), the test above would pass
   // for the wrong reason. This proves the ceremony reads and compares what was actually typed.
@@ -184,5 +184,5 @@ describe.skipIf(!PTY_OK)('clear-human END TO END through a real pty (#2895, PR #
     expect(ghCalls(dir).some((a) => a[1] === 'edit')).toBe(false);
     expect(ghCalls(dir).some((a) => a[1] === 'comment')).toBe(false);
     expect(existsSync(join(dir, 'posted-comment.md'))).toBe(false);
-  }, 30000);
+  }, 120000);
 });

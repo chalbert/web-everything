@@ -2,21 +2,49 @@
 kind: task
 status: open
 dateOpened: "2026-08-05"
-tags: []
+blockedBy: ["2895"]
+scope:
+  - we:scripts/lib/gate-config.mjs
+  - we:scripts/lib/__tests__/gate-config.test.mjs
+tags: [review, gate, gate-self, trust-chain]
 ---
 
 # Register the review-label CLI on the trust chain's POLICY tier — it now decides what clears the gate
 
 Since #2895 gave it the clear-human target and its human-ceremony tty gate, we:scripts/review-set-label.mjs holds the one barrier between an agent and a self-cleared gate-self edit, but it is still unregistered in we:scripts/lib/gate-config.mjs — so an agent-clearable PR could delete the tty check and then self-clear the PR that deleted it. Deliberately split out of #2895 to avoid a bootstrap hazard: registering it in the same PR would have made that PR gate-self, clearable only by the tool it was adding, leaving no path at all if the tool had a bug.
 
-## Why it is policy tier, by the roster's own rubric
+## Why it is policy tier — argued from the ratified statute, not from a file comment
 
-[`we:scripts/lib/gate-config.mjs`](scripts/lib/gate-config.mjs) draws the line at code that decides *whether the
-gate fires and what clears it*. Before #2895, [`we:scripts/review-set-label.mjs`](scripts/review-set-label.mjs)
-only APPLIED a swap decided elsewhere, so leaving it off the roster was defensible. #2895 changed that: it now
-owns the `clear-human` target and the tty ceremony — literally the definition of what clears a gate-self PR.
-The roster's own `auto-land-seam` entry already describes it as the INVARIANT-2-guarded clearance writer, so it
-was treated as trust-critical in prose while staying unregistered in the matcher.
+The authority is [`we:docs/agent/platform-decisions.md#review-human-declarative-leash-only`](../docs/agent/platform-decisions.md#review-human-declarative-leash-only)
+(#2771, ratified 2026-07-28), not [`we:scripts/lib/gate-config.mjs`](scripts/lib/gate-config.mjs)'s own file
+comment. The first cut of this item argued from that comment, which is backwards: the code is the thing this
+item proposes to change, so it cannot also be the thing that justifies the change (the round-4 mistake #2821 is
+the retraction of).
+
+**#2771 SPLITS the policy tier, and this item has to say which side it lands on.** That ruling holds the
+**declarative leash** at `review:human` — the machine-diffable contract (`we:scripts/lib/review-policy.contract.json`),
+the roster (`we:scripts/lib/gate-config.mjs`), and the invariant/conformance suites — while **derivation code**
+(`we:scripts/lib/review-escalation.mjs`, `we:scripts/lib/review-core.mjs`, `we:scripts/lib/review-policy.mjs`,
+and the two land seams) routes to the sized independent committee at `review:pending`.
+
+[`we:scripts/review-set-label.mjs`](scripts/review-set-label.mjs) is neither, exactly: it is a **writer / acting
+seam**. It does not *derive* whether the gate fires, and it is not the declarative spec of the gate — it is the
+one place the clearance is *performed*, and since #2895 it owns the `clear-human` target and the human ceremony.
+The argument for the leash side is that "what may clear `review:human`, and on what confirmation" is a policy
+statement, and a behaviour-preserving-looking diff here can still delete the ceremony without reddening the
+conformance suite (which does not cover this file). The argument for the derivation side is #2771's own reason
+for the split: any change that alters the gate's *behaviour* necessarily reddens conformance and forces a
+contract diff — a property that does NOT hold here, which is precisely why this file needs its own answer rather
+than an analogy.
+
+**The choice is not free, and the timing decides it.** Today `humanRequired = gateSelfFiles.length > 0 || …`
+fires on any `isPolicyCorePath`, so simply adding the entry produces `review:human` for a diff to this file.
+Once #2785 (the implementation of #2771, `status: open`) lands, `humanRequired` narrows to the `POLICY_SPEC`
+basenames — and a bare `tier: 'policy'` registration would then STOP forcing a human. So this item must either
+(a) place the file in `POLICY_SPEC` and record the #2771-shaped reason (the ceremony is a leash statement, and
+conformance cannot catch its removal), or (b) register it `tier: 'policy'` for the escalation/care signal only,
+and cover the ceremony with a conformance-suite case so the derivation-code route is honest. Pick one
+explicitly; do not let #2785's landing silently change the answer.
 
 ## The loop this closes
 
@@ -40,6 +68,10 @@ tool first, exercise it on a real gate-self PR, then tighten the tier.
 - The clearance writer [`we:scripts/review-set-label.mjs`](scripts/review-set-label.mjs) is a `tier: 'policy'`
   member of `TRUST_CHAIN` in [`we:scripts/lib/gate-config.mjs`](scripts/lib/gate-config.mjs), with a `desc`
   recording why it became leash-defining (it was not, before #2895).
+- The item states, in the diff, which side of
+  [`#review-human-declarative-leash-only`](../docs/agent/platform-decisions.md#review-human-declarative-leash-only)
+  (#2771) this file sits on — declarative leash or derivation code — and what happens to that answer when #2785
+  lands. Option (a) or option (b) above, chosen and written down, not left implicit in a tier string.
 - A test pins that a diff touching it derives `humanRequired: true`.
-- Landed only AFTER #2895 is on `main` and `clear-human` has been exercised at least once — this PR will itself
-  be gate-self, so it is the tool's first real customer.
+- Landed only AFTER #2895 is on `main` (the `blockedBy` edge) and `clear-human` has been exercised at least
+  once — this PR will itself be gate-self, so it is the tool's first real customer.

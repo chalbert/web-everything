@@ -566,7 +566,7 @@ if (IS_CLI) {
   }
   runReviewLabelCli({
     defaultActor: 'loop-console operator',
-    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--body-file=<path>]  (pr must be a positive integer; clear-human needs a real terminal)',
+    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--body-file=<path>]  (pr must be a positive integer; clear-human prompts at the terminal)',
     buildComment: ({ to, actor, headSha }) => buildVerdictComment({ to, actor, headSha, body: verdictBody }),
     successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
     refusalResult: ({ decision }) => ({ error: decision.reason }),

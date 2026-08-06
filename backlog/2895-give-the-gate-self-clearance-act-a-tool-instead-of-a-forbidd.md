@@ -3,14 +3,16 @@ bornAs: x58tjn2
 kind: story
 size: 2
 status: resolved
-dateResolved: "2026-08-05"
+dateResolved: "2026-08-06"
 blockedBy: ["2882"]
 relatedTo: ["2285", "2439", "2644"]
 scope:
   - we:scripts/review-set-label.mjs
   - we:skills-src/review/SKILL.md
   - we:scripts/__tests__/review-set-label.test.mjs
+  - we:scripts/__tests__/review-clear-human-pty.test.mjs
 dateOpened: "2026-08-03"
+graduatedTo: none
 tags: [review, gate, invariant, gate-self]
 ---
 
@@ -102,7 +104,7 @@ remove later, so the narrower shape won.
 PR must not still read as a bounce — and it stamps the `reviewed-sha` marker, because it IS an acceptance and
 the drain must be able to refuse it later if the head advances past the cleared tree.
 
-### The actor signal: a typed confirmation at a real terminal
+### The actor signal: a typed confirmation at a terminal — a speed bump, not a wall
 
 This item said an unforgeable actor signal "is the substance", and it was right to. The honest finding is that
 in a solo constellation **nothing is truly unforgeable**: the agent runs on the operator's machine, with the
@@ -111,25 +113,51 @@ are all forgeable, and login identity is already useless as an independence sign
 same account). GitHub's own review-approval button is no help either: it refuses self-approval, and every PR
 here is the operator's account.
 
-What an agent structurally cannot do is **type at a live terminal**. Its shell has no tty attached, and piping
-the answer does not satisfy `isTTY`. So `clear-human` refuses unless stdin is a tty AND the operator types the
-**PR number** (not `y` — the highest-consequence act in the review system must not be reachable by a
-fat-finger). Verified end-to-end against PR #1048 before it was cleared: an agent shell was refused, and a piped
-correct answer was refused, with the labels untouched in both cases.
+So `clear-human` refuses unless stdin is a terminal AND the operator types the **PR number** (not `y` — the
+highest-consequence act in the review system must not be reachable by a fat-finger).
 
-Reachability is closed on the caller side too: `clear-human` is valid only when the caller passes the
-`humanCeremony` hook, and only this file's own CLI does. The conveyor fix agent pins `fixedTo: 'rearm'` and
-passes no hook, so it cannot name the target even by constructing the argv by hand — pinned by a source-level
-test.
+**What that terminal check is and is not is stated ONCE, in the code**, at
+`we:scripts/review-set-label.mjs#decideHumanCeremony`. Read it there; this note deliberately does not restate
+it, and neither does `we:skills-src/review/SKILL.md`. The short version, so this paragraph is not misleading on
+its own: it is a **deliberate speed bump** that stops an agent from clearing its own homework *incidentally*; an
+agent that **deliberately** allocates a pseudo-terminal defeats it, and the durable fix is the UI-with-auth
+successor below.
+
+Reachability is closed on the caller side too, and this is where the first cut was wrong. `clear-human` is
+reachable only when the caller sets `allowClearHuman: true`, which only this file's own `IS_CLI` block does, and
+the ceremony itself is module-private. The conveyor fix agent pins `fixedTo: 'rearm'` and never opts in, so it
+cannot name the target even by constructing the argv by hand — pinned by a behavioural test that drives the
+harness and reads the refusal, not by a source grep.
 
 **This is interim, and the code says so.** The durable home for the signal is a UI with its own auth, where "a
-human did it" is a property of the session rather than of the input device. Until that exists the terminal is
-the only place where "the operator did it" and "an agent did it" differ. The operator's call was to take the
-terminal gate now on the grounds that it is genuinely the safest available, with the UI as the intended
-successor.
+human did it" is a property of an authenticated session rather than of the input device. Until that exists the
+terminal is the only place where "the operator did it" and "an agent did it" differ at all. The operator's call
+was to take the terminal gate now on the grounds that it is genuinely the best available, with the UI as the
+intended successor.
+
+### Round 1 of review on PR #1056 — three things this note got wrong
+
+Filed here because this note was itself one of the artefacts the panel corrected. See the PR for the full
+verdict; the corrections that matter to a future reader of THIS item:
+
+1. **The tool did not work.** `promptHumanCeremony` read `process.stdin.isTTY` first, which instantiates Node's
+   lazy `tty.ReadStream` on fd 0 and makes that descriptor non-blocking; the following `readFileSync(0)` threw
+   `EAGAIN` into a bare `catch`, so the ceremony ALWAYS refused with an empty answer. The "verified end-to-end"
+   claim above rested on two runs that were both **refusals** — and a refusal looks identical whether the gate
+   works or is dead. Fixed by reading one line from `/dev/tty` with `readSync` and testing `isatty(0)` from
+   `node:tty` instead of touching `process.stdin`. The prevention is
+   `we:scripts/__tests__/review-clear-human-pty.test.mjs`: a pty-backed test of the SUCCESS path.
+2. **"An agent structurally cannot type at a live terminal" was false**, and this note asserted it. `isatty` is
+   a property of the descriptor, not of who is behind it; `script -q /dev/null` and `python3` `pty.fork()` both
+   satisfy it. Corrected above, and stated once in the code rather than copied into four documents.
+3. **The ceremony was an injected parameter** (`humanCeremony`) on an exported function whose return value was
+   trusted verbatim, so any importer could pass `() => ({ allowed: true })` and manufacture a durable comment
+   falsely asserting a human cleared the PR — strictly worse than the dead end this item set out to fix.
+   Replaced with the non-injectable `allowClearHuman` boolean.
 
 ### Not addressed here
 
-The tty check is a *practical* barrier, not a cryptographic one — an adversary holding the machine wins
-regardless. That is the stated threat model ("an eager agent must not clear its own homework"), not a gap to
-close with more of the same mechanism; closing it properly is the UI-with-auth successor above.
+The terminal check is a practical speed bump, not a cryptographic barrier — an adversary holding the machine
+wins regardless. That is the stated threat model ("an eager agent must not clear its own homework by extending
+the flow it is already running"), not a gap to close with more of the same mechanism; closing it properly is the
+UI-with-auth successor above.
