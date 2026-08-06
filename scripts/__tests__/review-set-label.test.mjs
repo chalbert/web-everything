@@ -5,7 +5,10 @@
  *   against fixtures, no network.
  */
 import { describe, it, expect } from 'vitest';
-import { decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers, decideHumanCeremony } from '../review-set-label.mjs';
+import {
+  decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers, decideHumanCeremony,
+  runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
+} from '../review-set-label.mjs';
 import { parseReviewedSha } from '../lib/review-escalation.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
@@ -122,27 +125,95 @@ describe('decideSetLabel — clear-human (#2895, the ONE target that drops revie
     expect(decideSetLabel({ to: 'accepted', currentLabels: human }).allowed).toBe(false);
   });
 
-  // #2439/#2285 — the agent callers must be unable to NAME this target. `rearm-review.mjs` pins fixedTo:'rearm'
-  // and passes no `humanCeremony` hook, so the only way in is this file's own CLI. Pinned at the source level:
-  // an import-time assertion is the cheapest proof that the shim never grew a second target.
-  it('the conveyor fix-agent shim pins rearm and never names clear-human', async () => {
-    // Read from the repo root (vitest's cwd) — `import.meta.url` is not a file: URL under the vitest transform.
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync('scripts/conveyor/rearm-review.mjs', 'utf8');
-    expect(src).toMatch(/fixedTo:\s*'rearm'/);
-    expect(src).not.toMatch(/clear-human/);
-    expect(src).not.toMatch(/humanCeremony/);
+});
+
+// #2895 / PR #1056 review, B2 + m1 + m3 — REACHABILITY, asserted BEHAVIOURALLY. The first cut proved this with
+// a source grep over `scripts/conveyor/rearm-review.mjs` (`expect(src).not.toMatch(/clear-human/)`), which is
+// wrong twice over: it goes red the day someone DOCUMENTS why the shim cannot reach the clearance (a change
+// that weakens nothing), and it says nothing whatsoever about any OTHER caller. What actually matters is that a
+// caller which did not opt in gets a REFUSAL through the `{"error":…}` JSON contract — so drive the harness and
+// read what it prints. Every case below refuses BEFORE the first `gh` call, so no network, no mocking.
+describe('runReviewLabelCli — clear-human is unreachable from any caller but this module CLI (#2895)', () => {
+  const CFG = {
+    defaultActor: 'test',
+    usage: 'usage: test',
+    buildComment: () => 'unused',
+    successResult: (o) => ({ ok: true, ...o }),
+    refusalResult: ({ decision }) => ({ error: decision.reason }),
+  };
+
+  /** Run the harness with stdout + process.exit captured. Returns the parsed JSON payload and the exit code. */
+  function runCli(cfg) {
+    const chunks = [];
+    const realWrite = process.stdout.write.bind(process.stdout);
+    const realExit = process.exit.bind(process);
+    process.stdout.write = (s) => { chunks.push(String(s)); return true; };
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = null;
+    let threw = null;
+    try { runReviewLabelCli({ ...CFG, ...cfg }); }
+    catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else threw = e; }
+    finally { process.stdout.write = realWrite; process.exit = realExit; }
+    if (threw) throw threw;
+    return { exitCode, payload: JSON.parse(chunks.join('') || '{}') };
+  }
+
+  it('an importer asking for --to=clear-human REFUSES through the JSON contract, and reaches no gh call', () => {
+    const { exitCode, payload } = runCli({ argv: ['1048', '--repo=o/n', '--to=clear-human'] });
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toMatch(/clear-human is reachable only from/);
+  });
+
+  // m1 — a caller PINNING the target skipped the `!fixedTo &&`-guarded validation entirely in the first cut and
+  // hit `TypeError: humanCeremony is not a function` after `gh pr view`. It must refuse like everything else.
+  it('a caller PINNING fixedTo:clear-human refuses too — not a TypeError, and not after a gh mutation', () => {
+    const { exitCode, payload } = runCli({ argv: ['1048', '--repo=o/n'], fixedTo: 'clear-human' });
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toMatch(/clear-human is reachable only from/);
+  });
+
+  // B2 — the ceremony used to be an injected parameter whose return value was trusted verbatim, so an importer
+  // could pass `() => ({ allowed: true })` and manufacture a durable comment asserting a human cleared the PR.
+  // It is module-private now: a stray `humanCeremony` in the config is inert, and the refusal still stands.
+  it('a forged ceremony in the config buys nothing — the hook is not a parameter any more', () => {
+    const { exitCode, payload } = runCli({
+      argv: ['1048', '--repo=o/n', '--to=clear-human'],
+      humanCeremony: () => ({ allowed: true, reason: 'forged' }),
+    });
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toMatch(/clear-human is reachable only from/);
+  });
+
+  it('the ordinary targets are unaffected — the opt-in gates clear-human only', () => {
+    const { payload } = runCli({ argv: ['1048', '--repo=o/n', '--to=nonsense'] });
+    expect(payload.error).toMatch(/invalid --to — expected 'accepted' or 'changes'/);
   });
 });
 
-// #2895 — the human-ceremony barrier. See `decideHumanCeremony`'s doc for what it does and does not defend
-// against: an agent shell has no tty, and a pipe does not satisfy isTTY, so this is the one signal an agent
-// cannot produce. It is not cryptographic and the tests do not pretend otherwise.
+// #2895 — the human-ceremony barrier. What it does and does not defend against is stated once, at
+// `we:scripts/review-set-label.mjs#decideHumanCeremony`; read that before adding a case here. In particular it
+// is a SPEED BUMP, not a structural barrier — a deliberately-allocated pty satisfies it, which the pty test in
+// `review-clear-human-pty.test.mjs` demonstrates on purpose. These cases pin the DECISION shape only.
 describe('decideHumanCeremony — the terminal barrier (#2895)', () => {
   it('REFUSES when stdin is not a tty, whatever was "typed" — the agent-shell case', () => {
     const v = decideHumanCeremony({ isTTY: false, typed: '1048', pr: 1048 });
     expect(v.allowed).toBe(false);
-    expect(v.reason).toMatch(/real terminal/);
+    expect(v.reason).toMatch(/needs a terminal/);
+  });
+
+  // PR #1056 review, B1 — a failure to READ must never be reported as a wrong answer. The whole defect hid
+  // because an EAGAIN was swallowed into `typed = ''` and surfaced as "confirmation did not match", which reads
+  // as operator error. The refusal must name the tool as the faulty party.
+  it('a read failure gets its OWN refusal reason — never the mismatch message that blames the operator', () => {
+    const v = decideHumanCeremony({ isTTY: true, typed: '', pr: 1048, readError: 'EAGAIN' });
+    expect(v.allowed).toBe(false);
+    expect(v.reason).toMatch(/could not read the confirmation/);
+    expect(v.reason).toMatch(/fault in the tool/);
+    expect(v.reason).not.toMatch(/did not match/);
+  });
+
+  it('a read failure refuses even when the right answer somehow arrived — fail closed on a broken read', () => {
+    expect(decideHumanCeremony({ isTTY: true, typed: '1048', pr: 1048, readError: 'EIO' }).allowed).toBe(false);
   });
 
   it('REFUSES a piped-in correct answer — piping is exactly the bypass a non-tty check must stop', () => {
@@ -246,59 +317,46 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
   });
 });
 
-describe('--body-file size pre-flight projects with the ACTUAL actor (the partial-swap guard)', () => {
-  // The projection is inside the `IS_CLI` block, so the only honest test is to RUN the CLI. It refuses before
-  // the first `gh` call (the body-file checks all precede `runReviewLabelCli`), so no stub is needed.
-  //
-  // The bug this pins: the projection used to assume `actor: 'x'.repeat(64)` while `--actor` is unbounded caller
-  // input rendered verbatim into the attribution line. That made the check an ESTIMATE, not the upper bound the
-  // guard needs — and it erred in the one direction that matters. A body sized to pass the estimate posts OVER
-  // GitHub's cap, by which point `gh pr edit` has already applied the label: the PR is left `review:accepted`
-  // with NO `reviewed-sha` marker, and `acceptanceCoversHead` fails OPEN on a missing marker, so the drain lands
-  // it. That is exactly the accepted-without-a-marker state this pre-flight exists to prevent.
-  // vitest hands `import.meta.url` as a bare path in some modes, so only run it through `fileURLToPath` when it
-  // really is a file: URL. Deriving from this module's own location keeps the test cwd-independent.
-  const HERE = import.meta.url.startsWith('file:') ? dirname(fileURLToPath(import.meta.url)) : dirname(import.meta.url);
-  const CLI = join(HERE, '..', 'review-set-label.mjs');
+// PR #1056 review, M2 — ENUM TOTALITY over the label-swap target set. The `GH_COMMENT_MAX` pre-flight exists to
+// guarantee the durable comment can actually POST before the label swap is applied, because the failure mode is
+// the worst one this module has: label applied, comment rejected, PR left `review:accepted` with NO
+// `reviewed-sha` marker — and `acceptanceCoversHead` fails OPEN on a missing marker, silently disarming the
+// staleness gate. The first cut projected `to: 'accepted'` only, so a `clear-human` comment (132 chars more
+// chrome) was under-counted and a body in the 65,405–65,536 band walked straight into that state. This asserts
+// the projection is an UPPER BOUND for EVERY member of the set, so adding a target cannot re-open the hole.
+describe('projectVerdictCommentLength — total over REVIEW_LABEL_TARGETS (#1056 M2)', () => {
+  const SHA = 'abf7d85700a3336a0ec77d94ab455162d4b8e00d';
 
-  /** Run the CLI with a body file of `bodyLen` chars and an actor of `actorLen` chars. Returns parsed stdout. */
-  const runWithBody = (bodyLen, actorLen) => {
-    // Under the repo root — the CLI constrains --body-file to the cwd or the temp dir (a public-PR leak guard).
-    const file = join(tmpdir(), `review-set-label-size-${bodyLen}-${actorLen}.md`);
-    writeFileSync(file, 'x'.repeat(bodyLen));
-    try {
-      const out = execFileSync(process.execPath, [
-        CLI, '999', '--repo=o/n', '--to=accepted', `--actor=${'a'.repeat(actorLen)}`, `--body-file=${file}`,
-      ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-      return JSON.parse(out);
-    } catch (e) {
-      // A refusal exits non-zero with the machine-readable error on stdout.
-      return JSON.parse(String(e.stdout || '{}'));
-    } finally { unlinkSync(file); }
-  };
-
-  it('REFUSES a body that only overflows because of a long --actor', () => {
-    // 65000-char body + 400-char actor renders 65537 — one char over. The old 64-char stand-in projected 65201
-    // and let it through.
-    const res = runWithBody(65000, 400);
-    expect(res.error).toMatch(/over GitHub's 65536 limit/);
-    expect(res.error).toMatch(/65537-char comment/);
-    expect(res.ok).toBeUndefined();
+  it('has at least one target it must cover, and covers the whole declared set', () => {
+    expect(REVIEW_LABEL_TARGETS.length).toBeGreaterThan(0);
+    expect(REVIEW_LABEL_TARGETS).toContain('clear-human');
   });
 
-  it('the projected length it reports MATCHES what buildVerdictComment actually renders', () => {
-    const res = runWithBody(65000, 400);
-    const actual = buildVerdictComment({
-      to: 'accepted', actor: 'a'.repeat(400), headSha: 'f'.repeat(40), body: 'x'.repeat(65000),
+  for (const to of REVIEW_LABEL_TARGETS) {
+    it(`projected >= actual for to='${to}' — the pre-flight can never under-count it`, () => {
+      for (const body of ['', 'x', '## Findings\n\nsomething\n', 'y'.repeat(60000)]) {
+        const actual = buildVerdictComment({ to, actor: 'op', headSha: SHA, body }).length;
+        expect(projectVerdictCommentLength(body)).toBeGreaterThanOrEqual(actual);
+      }
+    });
+  }
+
+  // The concrete regression: a body sized so `accepted` fits under the cap but `clear-human` does not. Under the
+  // first cut this passed the pre-flight; it must now be rejected.
+  it('rejects the band where accepted fits but clear-human does not — the exact M2 window', () => {
+    const render = (to, n) => buildVerdictComment({
+      to, actor: 'x'.repeat(64), headSha: 'f'.repeat(40), body: 'y'.repeat(n),
     }).length;
-    // The number in the refusal is the projection; it must be the real render, not an estimate near it.
-    expect(res.error).toContain(`${actual}-char comment`);
-  });
-
-  it('still ACCEPTS a body that fits once the real actor is accounted for', () => {
-    // Same body, a short actor — under the cap, so the size gate must not fire. It gets past the pre-flight and
-    // fails later on the fake repo, which is proof enough that the size check passed.
-    const res = runWithBody(65000, 4);
-    expect(String(res.error || '')).not.toMatch(/over GitHub's/);
+    // Solve for the body that renders to exactly the cap as `accepted` (the chrome is a fixed additive amount,
+    // so one correction step lands it exactly — asserted below rather than assumed).
+    const guess = GH_COMMENT_MAX - render('accepted', 0);
+    const body = 'y'.repeat(guess - (render('accepted', guess) - GH_COMMENT_MAX));
+    expect(buildVerdictComment({ to: 'accepted', actor: 'x'.repeat(64), headSha: 'f'.repeat(40), body }).length)
+      .toBe(GH_COMMENT_MAX);
+    expect(buildVerdictComment({ to: 'accepted', actor: 'x'.repeat(64), headSha: 'f'.repeat(40), body }).length)
+      .toBeLessThanOrEqual(GH_COMMENT_MAX);
+    expect(buildVerdictComment({ to: 'clear-human', actor: 'x'.repeat(64), headSha: 'f'.repeat(40), body }).length)
+      .toBeGreaterThan(GH_COMMENT_MAX);
+    expect(projectVerdictCommentLength(body)).toBeGreaterThan(GH_COMMENT_MAX);
   });
 });
