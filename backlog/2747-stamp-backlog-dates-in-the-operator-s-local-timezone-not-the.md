@@ -1,8 +1,10 @@
 ---
 bornAs: x89thql
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-28"
+dateStarted: "2026-08-03"
+dateResolved: "2026-08-03"
 tags: []
 ---
 
@@ -38,3 +40,24 @@ Derive the date-only stamp from the operator's local timezone instead of raw UTC
 - Keep timestamp fields that legitimately want an instant (the claims-ledger `nowIso: new Date().toISOString()` at `we:scripts/backlog.mjs` lines 146/310/458/487) as full UTC ISO — only the **date-only** frontmatter stamps need the local-zone treatment.
 
 This is a straightforward fix (not a contested fork): one helper, a handful of call sites, no competing design.
+
+## Resolution — one deliberate deviation from the fix direction above
+
+Shipped as `we:scripts/lib/local-date.mjs` (`localToday()` / `localDateString(date)`), routed through
+`we:scripts/backlog.mjs`'s `today()` + `prepareStamp`, `we:scripts/check-backlog-workflow.mjs`,
+`we:scripts/audit-backlog-health.mjs` and `we:scripts/check-standards.mjs`.
+
+The "fix direction" bullet above proposed a `BACKLOG_TZ → TZ → host zone` ladder. **The `TZ` rung was
+dropped**, on review evidence: `TZ` is a POSIX variable, not an IANA zone name, so looking it up as one
+DIVERGES from the process's own local time for the offset spellings. With `TZ=GMT+5` (POSIX: UTC−5),
+`Intl.DateTimeFormat().resolvedOptions().timeZone` normalises to the zone `"+05:00"` (UTC+5) — feeding
+that name back stamps a day computed 10 hours from real local time, re-creating this item's own bug with
+the sign flipped. `TZ=UTC+8` / `TZ=EST5` resolve to no zone name at all. Formatting with **no** `timeZone`
+option uses Node's own local resolution and matched `Date` in every case, so that is what the helper does.
+`TZ` is still honoured — by Node, one layer down. `BACKLOG_TZ` remains as the explicit IANA pin for a host
+whose clock is already wrong (a UTC container), and an invalid pin now **throws** instead of being
+silently ignored.
+
+Enforcement: `we:scripts/lib/utc-day-slice-scan.mjs`, run from `check:standards`, fails any
+`.toISOString()`-into-a-day slice left in `scripts/**` — the rule is a gate, not a docblock paragraph. The
+remaining `.mjs` copies of the idiom were converted at the same time.
