@@ -5,6 +5,11 @@
  *   against fixtures, no network.
  */
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers } from '../review-set-label.mjs';
 import { parseReviewedSha } from '../lib/review-escalation.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
@@ -171,5 +176,62 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
     const bare = buildVerdictComment({ to: 'accepted', actor: 'op', headSha: SHA });
     expect(bare).toContain('Recorded by op via the Plateau Loop review console.');
     expect(readBack(bare)).toBe(SHA);
+  });
+});
+
+describe('--body-file size pre-flight projects with the ACTUAL actor (the partial-swap guard)', () => {
+  // The projection is inside the `IS_CLI` block, so the only honest test is to RUN the CLI. It refuses before
+  // the first `gh` call (the body-file checks all precede `runReviewLabelCli`), so no stub is needed.
+  //
+  // The bug this pins: the projection used to assume `actor: 'x'.repeat(64)` while `--actor` is unbounded caller
+  // input rendered verbatim into the attribution line. That made the check an ESTIMATE, not the upper bound the
+  // guard needs — and it erred in the one direction that matters. A body sized to pass the estimate posts OVER
+  // GitHub's cap, by which point `gh pr edit` has already applied the label: the PR is left `review:accepted`
+  // with NO `reviewed-sha` marker, and `acceptanceCoversHead` fails OPEN on a missing marker, so the drain lands
+  // it. That is exactly the accepted-without-a-marker state this pre-flight exists to prevent.
+  // vitest hands `import.meta.url` as a bare path in some modes, so only run it through `fileURLToPath` when it
+  // really is a file: URL. Deriving from this module's own location keeps the test cwd-independent.
+  const HERE = import.meta.url.startsWith('file:') ? dirname(fileURLToPath(import.meta.url)) : dirname(import.meta.url);
+  const CLI = join(HERE, '..', 'review-set-label.mjs');
+
+  /** Run the CLI with a body file of `bodyLen` chars and an actor of `actorLen` chars. Returns parsed stdout. */
+  const runWithBody = (bodyLen, actorLen) => {
+    // Under the repo root — the CLI constrains --body-file to the cwd or the temp dir (a public-PR leak guard).
+    const file = join(tmpdir(), `review-set-label-size-${bodyLen}-${actorLen}.md`);
+    writeFileSync(file, 'x'.repeat(bodyLen));
+    try {
+      const out = execFileSync(process.execPath, [
+        CLI, '999', '--repo=o/n', '--to=accepted', `--actor=${'a'.repeat(actorLen)}`, `--body-file=${file}`,
+      ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return JSON.parse(out);
+    } catch (e) {
+      // A refusal exits non-zero with the machine-readable error on stdout.
+      return JSON.parse(String(e.stdout || '{}'));
+    } finally { unlinkSync(file); }
+  };
+
+  it('REFUSES a body that only overflows because of a long --actor', () => {
+    // 65000-char body + 400-char actor renders 65537 — one char over. The old 64-char stand-in projected 65201
+    // and let it through.
+    const res = runWithBody(65000, 400);
+    expect(res.error).toMatch(/over GitHub's 65536 limit/);
+    expect(res.error).toMatch(/65537-char comment/);
+    expect(res.ok).toBeUndefined();
+  });
+
+  it('the projected length it reports MATCHES what buildVerdictComment actually renders', () => {
+    const res = runWithBody(65000, 400);
+    const actual = buildVerdictComment({
+      to: 'accepted', actor: 'a'.repeat(400), headSha: 'f'.repeat(40), body: 'x'.repeat(65000),
+    }).length;
+    // The number in the refusal is the projection; it must be the real render, not an estimate near it.
+    expect(res.error).toContain(`${actual}-char comment`);
+  });
+
+  it('still ACCEPTS a body that fits once the real actor is accounted for', () => {
+    // Same body, a short actor — under the cap, so the size gate must not fire. It gets past the pre-flight and
+    // fails later on the fake repo, which is proof enough that the size check passed.
+    const res = runWithBody(65000, 4);
+    expect(String(res.error || '')).not.toMatch(/over GitHub's/);
   });
 });
