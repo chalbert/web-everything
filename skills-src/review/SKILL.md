@@ -88,16 +88,20 @@ applies a label). The same module also renders the operator-facing notice for yo
      refusal is the gate-self protection, and it only binds callers that come through this module — which is
      exactly why the swap must not be hand-rolled.
 
-   **Clearing a `review:human` PR — `--to=clear-human` (#2895).** There IS a tool now; it is the third target,
-   and the ONLY thing that removes `review:human`:
+   **Clearing a `review:human` PR — `--to=clear-human` (#2895).** There IS a tool now; it is the fourth target,
+   and the ONLY thing that removes `review:human`. Same invocation shape as the two lines above — one form for
+   this tool everywhere, so `JSON.parse(stdout)` always works:
 
    ```
-   npm run review:clear -- <PR> --repo=<owner/name> --actor="<operator>" --reason="<quoted instruction>" --body-file=<findings.md>
+   node scripts/review-set-label.mjs <PR> --repo=<owner/name> --to=clear-human --actor="<operator>" --reason="<quoted instruction>" --body-file=<findings.md>
    ```
 
-   (The wrapper supplies only `--to=clear-human`, so the target cannot be typo'd. It deliberately does NOT bake
-   in a repo: the first `--repo=` on the line wins, so a hardcoded one would silently override yours and clear a
-   PR in the wrong repo.)
+   (`npm run --silent review:clear -- <PR> --repo=<owner/name> …` is an equivalent alias: it supplies only
+   `--to=clear-human`, so the target cannot be typo'd, and it deliberately bakes in NO repo — the first `--repo=`
+   on the line wins, so a hardcoded one would silently override yours and clear a PR in the wrong repo. The
+   `--silent` is **not** optional: without it `npm run` prints its two banner lines to *stdout* ahead of the
+   payload, and `JSON.parse(stdout)` then throws on a clearance that in fact landed. Prefer the direct `node`
+   line above — it is what every other caller in this repo uses.)
 
    **Nothing in the tool checks who ran it.** #2895 ruled the unforgeable actor signal DEFERRED — no local
    construct survives an agent with shell access on this machine, so a flag, a token, or a terminal check are

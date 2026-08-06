@@ -2,7 +2,6 @@
 kind: task
 status: open
 dateOpened: "2026-08-05"
-blockedBy: ["2895"]
 scope:
   - we:scripts/lib/gate-config.mjs
   - we:scripts/lib/__tests__/gate-config.test.mjs
@@ -76,5 +75,7 @@ tool first, exercise it on a real gate-self PR, then tighten the tier.
   (#2771) this file sits on — declarative leash or derivation code — and what happens to that answer when #2785
   lands. Option (a) or option (b) above, chosen and written down, not left implicit in a tier string.
 - A test pins that a diff touching it derives `humanRequired: true`.
-- Landed only AFTER #2895 is on `main` (the `blockedBy` edge) and `clear-human` has been exercised at least
-  once — this PR will itself be gate-self, so it is the tool's first real customer.
+- Landed only AFTER #2895 is on `main` and `clear-human` has been exercised at least once — this PR will itself
+  be gate-self, so it is the tool's first real customer. **This ordering is prose, not a `blockedBy` edge:**
+  #2895 resolves in the same commit that files this item, so an edge on it would report as a stale block from
+  the moment it lands (PR #1056 review, round 4). Do not re-add it; check that #2895 is on `main` instead.

@@ -55,9 +55,10 @@ export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm
 
 /**
  * we:scripts/review-set-label.mjs#decideSetLabel — the PURE verdict-label decision. Given the target `to` and
- * the PR's OBSERVED labels, return the label swap. Three targets, each with its invariant enforced HERE
- * (unbypassable): the reviewer verdicts `accepted` / `changes`, and the conveyor fix-agent `rearm` (#2644, was
- * `decideRearm`). Every return carries `keepsHuman` — whether the swap leaves `review:human` in place.
+ * the PR's OBSERVED labels, return the label swap. FOUR targets (the closed set is `REVIEW_LABEL_TARGETS`), each
+ * with its invariant enforced HERE (unbypassable): the reviewer verdicts `accepted` / `changes`, the conveyor
+ * fix-agent `rearm` (#2644, was `decideRearm`), and the #2895 gate-self `clear-human`. Every return carries
+ * `keepsHuman` — whether the swap leaves `review:human` in place.
  *   • `accepted` — INVARIANT 2: REFUSED on a `review:human` PR (only a human's /review may clear the gate);
  *     otherwise adds `review:accepted`, drops the parked `review:pending`.
  *   • `changes` — always allowed (a bounce lands nothing); adds `review:changes`, drops `review:pending` AND a
@@ -65,8 +66,10 @@ export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm
  *   • `rearm` — the #2630 invariant: ONLY a live `review:changes` is re-armable (idempotent — a second call
  *     refuses cleanly); the swap is ALWAYS `review:changes → review:pending`, NEVER `review:accepted`, and
  *     NEVER removes `review:human`. The strongest thing an auto-fix can do is re-arm the review, never clear it.
- * @param {{to:('accepted'|'changes'|'rearm'), currentLabels?:Array}} o - `currentLabels` is the observed label
- *   array (string or `{name}` shape, per `hasReviewLabel`).
+ *   • `clear-human` — the #2895 gate-self clearance: the ONLY target that removes `review:human` (and the only
+ *     one refused when the PR does NOT carry it). Nothing here checks WHO is asking — see below.
+ * @param {{to:('accepted'|'changes'|'rearm'|'clear-human'), currentLabels?:Array}} o - `currentLabels` is the
+ *   observed label array (string or `{name}` shape, per `hasReviewLabel`).
  * @returns {{allowed:boolean, addLabel:string, removeLabels:string[], keepsHuman:boolean, reason:string}}
  */
 export function decideSetLabel({ to, currentLabels = [] } = {}) {
@@ -93,9 +96,12 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
   // single-sourced decider is hard to remove later, so the narrower shape wins.
   //
   // Nothing here checks WHO is asking, and nothing anywhere else does either — #2895 ruled the unforgeable
-  // actor signal deferred (see the file header). What guards this target is the honesty tax in
-  // `runReviewLabelCli` (`--actor` + `--reason` required) plus the `allowClearHuman` opt-in, which stops a
-  // caller pinned to another target from stumbling into it. Both are accident guards, not barriers.
+  // actor signal deferred (see the file header). What stands in the way of a clearance nobody asked for is the
+  // honesty tax in `runReviewLabelCli` (`--actor` + `--reason` are required and are quoted verbatim into the
+  // durable comment, so misuse takes a written lie rather than a silent label add) and the explicit-instruction
+  // rule in `we:skills-src/review/SKILL.md`. The `allowClearHuman` opt-in is a much smaller thing than either —
+  // it binds importers only, and today it binds none (see its doc on `runReviewLabelCli`). None of the three is
+  // a barrier.
   if (to === 'clear-human') {
     if (!isHuman) {
       return {
@@ -205,13 +211,19 @@ export function presentRemoveLabels(removeLabels, currentLabels) {
  * PURE `decideSetLabel` above owns every invariant, so this harness only moves bytes. Fails closed — every input
  * is validated BEFORE any gh mutation, and any gh error exits non-zero without a partial swap.
  *
- * `allowClearHuman` is the opt-in for the #2895 gate-self clearance. It is an ACCIDENT GUARD and nothing more:
- * it keeps a caller that is here for another target — the conveyor fix agent, an auto-review shim — from
- * naming `clear-human` by fumbling an argv, and it makes any caller that wants the clearance say so in its own
- * source. It is NOT a trust boundary: it is an ordinary parameter of an exported function, so an importer that
- * wants it can pass it. That is accepted, because #2895 ruled the unforgeable signal deferred (file header);
- * the mitigation is the honesty tax below, not this boolean. It is deliberately a DUMB BOOLEAN rather than an
- * injected predicate — a caller may declare a capability, never supply a verdict (PR #1056 review, B2).
+ * `allowClearHuman` is the opt-in for the #2895 gate-self clearance. SAY WHAT IT ACTUALLY IS (PR #1056 review,
+ * round 4 — the earlier wording over-claimed): it binds IMPORTERS ONLY, and today it binds nobody. This file's
+ * own `IS_CLI` block passes `true` unconditionally, so EVERY shell caller of this CLI is opted in and the flag
+ * constrains nothing on a command line. The one importer of this harness, `we:scripts/conveyor/rearm-review.mjs`,
+ * pins `fixedTo: 'rearm'` and so could never reach `clear-human` by relaying an argv anyway; and nothing else
+ * reaches the target at all — `we:scripts/lib/auto-land-seam.mjs#buildSetLabelArgs` builds a literal
+ * `--to=accepted`. What the boolean buys is narrow and forward-looking: a FUTURE importer that forwards argv it
+ * did not vet (the #2945 console is the next candidate) cannot land on `clear-human` unless it names the
+ * capability in its own source, where a reviewer reads it. It is NOT a trust boundary and NOT a barrier — it is
+ * an ordinary parameter of an exported function, so an importer that wants it just passes it. That is accepted,
+ * because #2895 ruled the unforgeable signal deferred (file header); the mitigation is the honesty tax below,
+ * not this boolean. It is deliberately a DUMB BOOLEAN rather than an injected predicate — a caller may declare a
+ * capability, never supply a verdict (PR #1056 review, B2).
  * @param {{argv?:string[], fixedTo?:string|null, defaultActor:string, repoOptional?:boolean, usage:string,
  *   allowClearHuman?:boolean,
  *   buildComment:(o:{to:string,actor:string,decision:object,headSha:string,reason:string})=>string,
@@ -537,9 +549,10 @@ if (IS_CLI) {
     buildComment: ({ to, actor, headSha, reason }) => buildVerdictComment({ to, actor, headSha, reason, body: verdictBody }),
     successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
     refusalResult: ({ decision }) => ({ error: decision.reason }),
-    // #2895 — this block is the only caller that opts in, so a caller here for another target cannot fumble its
-    // way to `clear-human`. That is the whole claim: an accident guard, not a barrier. An importer that wants
-    // the target can pass this itself, and that is accepted — see `allowClearHuman` on `runReviewLabelCli`.
+    // #2895 — UNCONDITIONAL, so every shell invocation of this CLI is opted in, including one run for
+    // `--to=accepted`. The opt-in therefore constrains nothing here; it exists so an IMPORTER of
+    // `runReviewLabelCli` has to name the capability in its own source. See `allowClearHuman` on that function
+    // for exactly how far that goes (not far — it is not a barrier).
     allowClearHuman: true,
   });
 }

@@ -469,3 +469,149 @@ process.exit(0);
     expect(ghCalls()).toEqual(['pr view']);
   });
 });
+
+// PR #1056 review, round 4 / C3 — THE SUCCESS PATH. Every other CLI-level `clear-human` assertion in this file is
+// a REFUSAL, and the recorded `gh` calls top out at `['pr view']` or `[]`. That is structurally the SAME defect as
+// round 1's blocking B1 on this PR: *a refusal looks identical whether the gate works or is dead*, so a
+// refusal-only suite cannot tell "clear-human is correctly wired" apart from "clear-human is unreachable". These
+// tests drive the REAL entrypoint all the way THROUGH the impure half against a recording fake `gh` and assert the
+// three things that actually have to land: the label swap, the attributed comment, and the `reviewed-sha` stamp.
+// (`xsfp7k0` is the general rule this instantiates.) They double as the size pre-flight's missing NEGATIVE
+// CONTROL: a body that FITS must be let through, or the guard above could pass its tests by refusing everything.
+describe('clear-human drives the swap END-TO-END (#2895, PR #1056 C3)', () => {
+  const SHA = 'abf7d85700a3336a0ec77d94ab455162d4b8e00d';
+  const ACTOR = 'Nicolas Gilbert';
+  const REASON = 'operator in-session: "read the panel, clear 1048"';
+
+  // Records the FULL argv of every call (not just the verb pair), flips the observed labels once `pr edit` has
+  // run so the post-swap re-read is honest, and copies the posted `--body-file` out so the durable comment can be
+  // read back through the real `parseReviewedSha`.
+  const FAKE_GH = `#!/usr/bin/env node
+const fs = require('fs');
+const a = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_CALL_LOG, JSON.stringify(a) + '\\n');
+if (a[0] === 'pr' && a[1] === 'view') {
+  const labels = fs.existsSync(process.env.GH_EDIT_FLAG)
+    ? [{ name: 'review:accepted' }, { name: 'ready-to-merge' }]
+    : [{ name: 'review:human' }, { name: 'review:pending' }, { name: 'ready-to-merge' }];
+  process.stdout.write(JSON.stringify({ labels, headRefOid: process.env.GH_HEAD_SHA }));
+  process.exit(0);
+}
+if (a[0] === 'pr' && a[1] === 'edit') { fs.writeFileSync(process.env.GH_EDIT_FLAG, '1'); process.exit(0); }
+if (a[0] === 'pr' && a[1] === 'comment') {
+  fs.writeFileSync(process.env.GH_COMMENT_BODY, fs.readFileSync(a[a.indexOf('--body-file') + 1], 'utf8'));
+  process.exit(0);
+}
+process.exit(0);
+`;
+
+  const script = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'review-set-label.mjs');
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  let dir;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'review-label-success-'));
+    writeFileSync(join(dir, 'gh'), FAKE_GH);
+    chmodSync(join(dir, 'gh'), 0o755);
+  });
+  afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+  beforeEach(() => {
+    for (const f of ['gh-calls.log', 'edited', 'comment.md']) {
+      try { rmSync(join(dir, f), { force: true }); } catch { /* first run */ }
+    }
+  });
+
+  const env = () => ({
+    ...process.env,
+    PATH: `${dir}:${process.env.PATH}`,
+    GH_CALL_LOG: join(dir, 'gh-calls.log'),
+    GH_EDIT_FLAG: join(dir, 'edited'),
+    GH_COMMENT_BODY: join(dir, 'comment.md'),
+    GH_HEAD_SHA: SHA,
+  });
+  /** Every recorded call as its full argv array. */
+  const calls = () => (existsSync(join(dir, 'gh-calls.log'))
+    ? readFileSync(join(dir, 'gh-calls.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+    : []);
+  /** The values that FOLLOW each occurrence of `flag` in an argv array (adjacency, not mere presence). */
+  const valuesOf = (argv, flag) => argv.flatMap((a, i) => (a === flag ? [argv[i + 1]] : []));
+  const runClear = (extra) => spawnSync('node', [script, '1048', '--repo=o/n', '--to=clear-human',
+    `--actor=${ACTOR}`, `--reason=${REASON}`, ...extra], { encoding: 'utf8', env: env() });
+
+  it('returns ok:true and lands the label swap, the attributed comment and the reviewed-sha stamp', () => {
+    const bodyPath = join(dir, 'findings.md');
+    writeFileSync(bodyPath, '## Findings\n\nNo blocking issues; the panel reduced to accept.\n', 'utf8');
+    const r = runClear([`--body-file=${bodyPath}`]);
+
+    // 1. The payload is a SUCCESS, not a refusal — the assertion the whole suite was missing.
+    expect(r.status).toBe(0);
+    const payload = JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop());
+    expect(payload).toMatchObject({ ok: true, pr: 1048, to: 'clear-human' });
+    expect(payload.labels).toContain(REVIEW_LABELS.accepted);
+    expect(payload.labels).not.toContain(REVIEW_LABELS.human);
+
+    // 2. The swap that actually reached `gh`: accepted ADDED and human REMOVED, on one `pr edit`.
+    const edit = calls().find((c) => c[0] === 'pr' && c[1] === 'edit');
+    expect(edit).toBeDefined();
+    expect(valuesOf(edit, '--add-label')).toEqual([REVIEW_LABELS.accepted]);
+    expect(valuesOf(edit, '--remove-label')).toContain(REVIEW_LABELS.human);
+    // The parked state goes too — a cleared PR must not still read as awaiting review.
+    expect(valuesOf(edit, '--remove-label')).toContain(REVIEW_LABELS.pending);
+    // `review:changes` was NOT on the PR, so `presentRemoveLabels` must have dropped it (gh errors on an absent
+    // label), and the whole arc ran in order: observe → edit → comment → re-read.
+    expect(valuesOf(edit, '--remove-label')).not.toContain(REVIEW_LABELS.changes);
+    expect(calls().map((c) => c.slice(0, 2).join(' ')))
+      .toEqual(['pr view', 'pr edit', 'pr comment', 'pr view']);
+
+    // 3. The durable comment — the honesty tax as it is actually posted, not as the module describes it.
+    const comment = readFileSync(join(dir, 'comment.md'), 'utf8');
+    expect(comment).toContain(`Cleared by ${ACTOR} via \`review-set-label.mjs --to=clear-human\` (#2895).`);
+    expect(comment).toContain(`> ${REASON}`);
+    expect(comment).toContain('What it does NOT prove: that a human performed it.');
+    expect(comment).toContain('## Findings');
+    // A well-formed marker, proven through the REAL reader rather than a substring check.
+    expect(parseReviewedSha([{ body: comment }])).toBe(SHA);
+  });
+
+  // THE NEGATIVE CONTROL for the size pre-flight (dropped, not replaced, when the ceremony block was deleted —
+  // PR #1056 round 4). A guard that refuses everything passes every refusal test ever written; this pins the
+  // other side at the exact boundary — the largest body that still renders under the cap must go THROUGH.
+  it('lets a body that renders exactly AT the cap through — the size guard is not a blanket refusal', () => {
+    const at = (body) => projectVerdictCommentLength({ body, actor: ACTOR, reason: REASON });
+    const guess = GH_COMMENT_MAX - at('');
+    const body = 'y'.repeat(guess - (at('y'.repeat(guess)) - GH_COMMENT_MAX));
+    expect(at(body)).toBe(GH_COMMENT_MAX); // exactly at the cap, not one char under
+    const bodyPath = join(dir, 'max-findings.md');
+    writeFileSync(bodyPath, body, 'utf8');
+
+    const r = runClear([`--body-file=${bodyPath}`]);
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop()).ok).toBe(true);
+    expect(calls().map((c) => c.slice(0, 2).join(' '))).toContain('pr comment');
+    expect(readFileSync(join(dir, 'comment.md'), 'utf8').length).toBeLessThanOrEqual(GH_COMMENT_MAX);
+  });
+
+  // PR #1056 review, C2 — the DOCUMENTED invocation, exercised as documented. `npm run <script>` writes its two
+  // banner lines to STDOUT ahead of the payload, so the wrapper the skill hands the operator used to break the
+  // module's stated contract (`{"ok":…}`/`{"error":…}` as the whole of stdout): an agent parsed stdout, threw on
+  // a clearance that had in fact landed, and a naive retry then hit "nothing to clear" — reading like a second
+  // failure. The class is "a package.json wrapper around a JSON-contract CLI is never exercised as documented".
+  it('the documented `npm run --silent review:clear` wrapper puts ONLY JSON on stdout', () => {
+    const r = spawnSync('npm', ['run', '--silent', 'review:clear', '--',
+      '1048', '--repo=o/n', `--actor=${ACTOR}`], { cwd: repoRoot, encoding: 'utf8', env: env() });
+    expect(r.status).not.toBe(0);
+    // The WHOLE of stdout must parse — a banner line ahead of the payload is exactly what this catches.
+    const payload = JSON.parse(r.stdout);
+    expect(payload.error).toMatch(/requires --reason/);
+    expect(calls()).toEqual([]); // refused before any gh call
+  }, 60000);
+
+  // …and the pin that keeps the DOC honest, which no amount of testing npm itself would give: if the skill ever
+  // documents the wrapper without `--silent`, the banner problem is back and the test above stops covering it.
+  it('the /review skill never documents the wrapper without --silent', () => {
+    const skill = readFileSync(join(repoRoot, 'skills-src', 'review', 'SKILL.md'), 'utf8');
+    for (const m of skill.matchAll(/npm run[^\n]*review:clear/g)) {
+      expect(m[0]).toContain('--silent');
+    }
+  });
+});

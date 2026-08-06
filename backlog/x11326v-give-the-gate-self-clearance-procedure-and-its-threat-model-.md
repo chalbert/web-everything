@@ -1,11 +1,10 @@
 ---
 kind: task
 status: open
-blockedBy: ["2895"]
 dateOpened: "2026-08-06"
 scope:
-  - we:docs/agent/review-workflow.md
   - we:skills-src/review/SKILL.md
+  - we:scripts/review-set-label.mjs
 tags: [review, gate-self, docs, skill-authoring]
 ---
 
@@ -14,6 +13,11 @@ tags: [review, gate-self, docs, skill-authoring]
 The clearance rationale and its threat model live in the /review skill and in a backlog resolution note, but we:AGENTS.md says the backlog chain is an archive, not the reference, and skill-authoring says the "why" belongs in a doc.
 
 Carved out of the round-1 review of **PR #1056** (#2895's implementation), finding **m7**.
+
+**There is no review doc to extend.** `we:docs/agent/` holds no review-workflow doc — the first cut of this item
+named `we:docs/agent/review-workflow.md` in `scope:` and in "Done when", and no such file exists anywhere in the
+repo (PR #1056 review, round 4). So this item CREATES its doc; `scope:` above lists only the surfaces that
+already exist and will be edited to cite it. It is unblocked: the mechanism it documents ships with #2895 itself.
 
 ## Why it is misplaced today
 
@@ -36,15 +40,17 @@ Carved out of the round-1 review of **PR #1056** (#2895's implementation), findi
   have the skill and the code header cite this doc — #1056 finding M1 was that the same claim was paraphrased
   in four places and was wrong in all four, and the round-2/3 finding was that a mechanism can be removed while
   its guarantee sentence stays behind.
-- **No unforgeability claim of any kind.** Not "an agent cannot", not "structurally", not "confirmed at a
-  terminal". If a future mechanism changes what is true, this doc changes with it.
+- **No unforgeability claim of any kind.** No wording that puts the act beyond an agent's reach, nothing
+  "structural", no "confirmed at a terminal". If a future mechanism changes what is true, this doc changes
+  with it.
 - The **successor**: [#2946], the hardware human-presence gesture, so a reader knows today's state is a
   way-station and not the design.
 
 ## Done when
 
-- A `we:docs/agent/*.md` section owns the gate-self clearance procedure (extending the existing review-workflow
-  doc if that is the natural home rather than minting a new file).
+- A `we:docs/agent/*.md` section owns the gate-self clearance procedure. There is no review doc in `we:docs/agent/`
+  today, so this means minting a new file (`we:docs/agent/review-workflow.md` is the obvious name) — check the
+  directory first in case one has landed since.
 - [`we:skills-src/review/SKILL.md`](skills-src/review/SKILL.md) keeps the operator-facing command and the
   explicit-instruction rule, and cites the doc for the "why".
 - The threat model is stated in exactly one place, and every other surface cites it.
