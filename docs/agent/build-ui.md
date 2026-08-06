@@ -59,6 +59,29 @@ the spacing that finally read right, the glyph that won, the tuned hierarchy —
 already fixed. Edit the ratified artifact *forward* so craft accretes across rounds instead of resetting to
 zero. The spec is the record of what was decided; it is not a regeneration seed.
 
+**How many mocks? Right-size the proposal panel to the ask — and start at zero.** Fanning several agents out
+to each propose a design is a *cost lever you must earn*, not the default shape of this phase. Pick a rung and
+**say which rung you picked and why** before you spawn anything:
+
+- **No panel** — you author the mock. The right answer for a tweak, a single component, or a call that is
+  already obvious. Most of the time this is the rung.
+- **One proposer** — a second pair of eyes when you want a check, not a spread.
+- **Two proposers** — the real minimum when you want *spread*: two mocks, two **distinct assigned angles**
+  (e.g. density-first vs novice-first), each author **blind to the other's work** so the second isn't an edit
+  of the first.
+- **More than two** — a genuinely contested or high-stakes surface only.
+
+**Never climb a rung without asking the human first.** Escalation spends real budget and time, so it is their
+call, not a silent upgrade.
+
+**Right-size by count, not by model tier.** The reason a panel helps is **decorrelated angles**, not more total
+brainpower — and that only pays off if each mock is good enough that *seeing it rendered* changes your mind. A
+weak candidate teaches nothing: you glance at it, reject it, and the fork is no better ruled than before. So
+scale the *number* of proposers and leave each one at full strength; one strong proposer beats three lesser
+ones. (This is the mirror of the jury's rigor gate, which sizes the *judging* panel — see
+*jury-refinement-method.md → When to run the full jury*. Same instinct, different half of the loop: that dial
+is a derivation in the engine, this one is your explicit, asked-for choice.)
+
 ### 3. Review the pixels, not the source — screenshot matrix × both themes → PNGs to reviewers
 
 Render the mock and **screenshot every cell of the matrix in BOTH light and dark themes** (Playwright). Hand
