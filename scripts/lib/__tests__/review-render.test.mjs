@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { renderPanelComment } from '../review-render.mjs';
-import { VERDICTS, REVIEW_DISPOSITIONS, MANDATORY_LENSES } from '../review-core.mjs';
+import { VERDICTS, REVIEW_DISPOSITIONS, MANDATORY_LENSES, deriveVerdict } from '../review-core.mjs';
 
 describe('renderPanelComment — the full PR-comment body', () => {
   it('renders heading, verdict, disposition, verdict table, and every finding', () => {
@@ -111,5 +111,73 @@ describe('renderPanelComment — the full PR-comment body', () => {
     });
     expect(md).toContain('## Auto-review');
     expect(md).toContain('### Panel verdicts');
+  });
+});
+
+// THE AUDIT TRAIL ON THE MERGE PATH (review blocker 3B) — the OUTPUT half of the compensating control for
+// `PREVENTION_IMPACT_BAR`; rationale lives once at `blocksAcceptance` in `jury-core.mjs`. These assert the rendered
+// SURFACE, not the predicate: the declared impact and the owed guard must be in the posted comment body, because
+// that body is what the drain's auto-land branch posts when the bar is what un-blocked a guard.
+describe('renderFindingLine carries impactIfUnfixed + the owed prevention (review blocker 3B)', () => {
+  it('a resolved below-bar guard ACCEPTS, and the rendered comment still names the guard and the impact', () => {
+    const finding = {
+      file: 'scripts/lib/thing.mjs',
+      line: 7,
+      summary: 'a stale comment',
+      category: 'simplicity',
+      outcome: 'fixed',
+      impactIfUnfixed: 'cosmetic',
+      prevention: 'a check:standards rule that errors on a stale @see target',
+      preventionCaptured: false,
+    };
+    // the verdict really does un-block — this is the path with no escalation notice
+    const verdict = deriveVerdict({ findings: [finding] });
+    expect(verdict).toBe(VERDICTS.ACCEPT);
+
+    const md = renderPanelComment({ verdict, findings: [finding] });
+    expect(md).toContain('impact if unfixed: cosmetic');
+    expect(md).toContain('a check:standards rule that errors on a stale @see target');
+    expect(md).toContain('OWED');
+  });
+
+  it('marks an already-CAPTURED guard as captured rather than owed', () => {
+    const md = renderPanelComment({
+      verdict: VERDICTS.ACCEPT,
+      findings: [{ summary: 'x', outcome: 'fixed', impactIfUnfixed: 'broken', prevention: 'the existing lint', preventionCaptured: true }],
+    });
+    expect(md).toContain('_Prevention (captured):_ the existing lint');
+    expect(md).not.toContain('OWED');
+  });
+
+  it('omits both fields when the finding declares neither (old-shape findings render byte-stable)', () => {
+    const md = renderPanelComment({ verdict: VERDICTS.CHANGES, findings: [{ summary: 'plain finding' }] });
+    expect(md).not.toContain('impact if unfixed');
+    expect(md).not.toContain('_Prevention');
+  });
+
+  it('DROPS an invented impact word rather than printing it (normalizeFindings validates the enum)', () => {
+    const md = renderPanelComment({ verdict: VERDICTS.CHANGES, findings: [{ summary: 'x', impactIfUnfixed: 'high' }] });
+    expect(md).not.toContain('impact if unfixed');
+  });
+});
+
+// ── round-2 finding 5 — THE SIBLING LOOKUP TABLES HAD THE SAME PROTOTYPE HOLE AS THE RANK TABLES. ──────
+// `VERDICT_LABELS` was a frozen NORMAL-prototype object read with `VERDICT_LABELS[verdict] ?? String(verdict)`.
+// `Object.freeze` seals own properties but does not detach `Object.prototype`, and `??` only fires on
+// null/undefined — so an inherited member is truthy, the raw-token fallback never runs, and
+// `renderPanelComment({ verdict: 'toString' })` rendered `**Verdict:** function toString() { [native code] }` into
+// a posted PR comment. The table is now built through `frozenLookup`; these probe the real prototype members.
+describe('VERDICT_LABELS is prototype-proof — an unknown verdict falls back to its raw token (finding 5)', () => {
+  const PROTO_KEYS = ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__', 'isPrototypeOf', 'propertyIsEnumerable'];
+
+  it.each(PROTO_KEYS)('renderPanelComment({ verdict: "%s" }) prints the raw token, not an inherited member', (key) => {
+    const md = renderPanelComment({ verdict: key, findings: [] });
+    expect(md).toContain(`**Verdict:** ${key}`);
+    expect(md).not.toContain('[native code]');
+    expect(md).not.toContain('function ');
+  });
+
+  it('a real verdict still renders its human label', () => {
+    expect(renderPanelComment({ verdict: VERDICTS.ACCEPT, findings: [] })).toContain('✅ pass — no blocking findings');
   });
 });

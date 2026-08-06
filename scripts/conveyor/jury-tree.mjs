@@ -29,18 +29,40 @@
 
 import { pathToFileURL } from 'node:url';
 import { foldAllSubjects, foldSubject } from '../lib/jury-ledger.mjs';
+import { VERDICTS, frozenLookup } from '../lib/jury-core.mjs';
 
 // ── PURE CORE (no fs / Date / child_process — the folded ledger is passed IN) ────────────────────────────────
 
-/** Juror lifecycle-status glyphs (one symbol, one meaning — see the header legend). */
-export const STATUS_MARKERS = Object.freeze({ pending: '◷', running: '⟳', found: '✓' });
+/** Juror lifecycle-status glyphs (one symbol, one meaning — see the header legend).
+ *
+ *  NULL-PROTOTYPE (#xdompzx round-4, finding 4). Missed by the round-2 null-prototype sweep, twenty lines above the
+ *  table that sweep did harden, and with the identical defect: `STATUS_MARKERS[j.status] || '?'` — `||` fires only
+ *  on a FALSY value, and an inherited `Object.prototype` member is a truthy function. `j.status` arrives from a
+ *  folded ledger written by model-produced JSON, so `renderJuryTree` with a juror whose status was `'toString'`
+ *  rendered `function toString() { [native code] }` into the live tree instead of `?`. `frozenLookup` detaches the
+ *  prototype so the `|| '?'` default actually runs. NOT keyed from an enum: these three strings are a lifecycle
+ *  vocabulary local to this renderer, with no exported enum to derive from. */
+export const STATUS_MARKERS = frozenLookup({ pending: '◷', running: '⟳', found: '✓' });
 
 /** Verdict glyphs — the strictest-wins verdict on a juror / panel line. `null`/unknown → a neutral dot. The
  *  `prevention-outstanding` (#2823) glyph is an OUTLINE flag `⚐`, distinct from needs-human's filled `⚑` — a
  *  blocking verdict must never render as the neutral `·` reserved for "no verdict reported yet".
+ *
+ *  NULL-PROTOTYPE, and KEYED FROM THE ENUM (#xdompzx round-2, finding 5). `verdictGlyph` reads this table with a
+ *  `|| '·'` default, which never fires on an inherited truthy value — so as a normal object literal
+ *  `verdictGlyph('toString')` rendered the native `Object.prototype.toString` function into the tree instead of the
+ *  neutral dot. Computed `VERDICTS.*` keys also mean the table is DERIVED from the enum rather than re-typing its
+ *  string values. (The computed keys are kept as a plain improvement, NOT as a gate workaround: round 3 needed
+ *  them because a bug in the key matcher only discovered hyphenated bare keys; round 5 removed that bug, so this
+ *  table would be discovered either way. Deriving from the enum is still better than re-typing four strings.)
  *  @verdicts-total — every `VERDICTS` member must be a key (enforced by the `check:standards` verdict-totality gate),
  *  so a new blocking verdict can never fall back to the neutral `·` glyph again. */
-export const VERDICT_MARKERS = Object.freeze({ accept: '✓', changes: '✎', 'needs-human': '⚑', 'prevention-outstanding': '⚐' });
+export const VERDICT_MARKERS = frozenLookup({
+  [VERDICTS.ACCEPT]: '✓',
+  [VERDICTS.CHANGES]: '✎',
+  [VERDICTS.NEEDS_HUMAN]: '⚑',
+  [VERDICTS.PREVENTION_OUTSTANDING]: '⚐',
+});
 
 const arr = (x) => (Array.isArray(x) ? x : []);
 const verdictGlyph = (v) => VERDICT_MARKERS[v] || '·';

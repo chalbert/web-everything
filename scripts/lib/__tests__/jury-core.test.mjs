@@ -7,6 +7,12 @@
  *   from '../jury-core.mjs' directly.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+// #xdompzx round-4, finding 3 — assertions against markdown PROSE go through these, never a raw `toContain` that
+// pins a wrap point or a blockquote indent. See the module header for the autopsy.
+import { proseContains, blockquoteBlockAt, functionNamesInCodeSpans, normalizeProse } from './doc-prose.mjs';
 import {
   JURY_EVENT_TYPES,
   JURY_EVENT_TYPE_LIST,
@@ -30,6 +36,20 @@ import {
   VERDICTS,
   redTeamRequired,
   foldRedTeamVerdict,
+  IMPACT_LEVELS,
+  IMPACT_STRICTNESS,
+  IMPACT_GLOSS,
+  VERDICT_STRICTNESS,
+  verdictStrictness,
+  impactStrictness,
+  PREVENTION_IMPACT_BAR,
+  blocksAcceptance,
+  hasUncapturedPrevention,
+  normalizeFinding,
+  deriveVerdict,
+  derivePanelVerdict,
+  buildPanelFindings,
+  frozenLookup,
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
@@ -530,5 +550,277 @@ describe('resolveAdapterRoster — the adapter-driven roster seam (#2656, F2)', 
 
   it('delegates the unknown-care-level throw to the spine', () => {
     expect(() => resolveAdapterRoster({ adapter, careLevel: 'critical' })).toThrow(/unknown care-level/);
+  });
+});
+
+describe('IMPACT IF UNFIXED + the strictness dial (#xdompzx)', () => {
+  const guarded = (extra = {}) => normalizeFinding({
+    summary: 'a finding', prevention: 'some durable gate', preventionCaptured: false, outcome: 'fixed', ...extra,
+  });
+
+  it('ranks the levels least- to most-costly and is total over the enum', () => {
+    expect(impactStrictness(IMPACT_LEVELS.COSMETIC)).toBeLessThan(impactStrictness(IMPACT_LEVELS.DEGRADED));
+    expect(impactStrictness(IMPACT_LEVELS.DEGRADED)).toBeLessThan(impactStrictness(IMPACT_LEVELS.BROKEN));
+    expect(impactStrictness(IMPACT_LEVELS.BROKEN)).toBeLessThan(impactStrictness(IMPACT_LEVELS.UNRECOVERABLE));
+    for (const level of Object.values(IMPACT_LEVELS)) expect(IMPACT_STRICTNESS[level]).toBeTypeOf('number');
+  });
+
+  it('throws on an unranked level rather than yielding undefined (every >= bar compare would lose it)', () => {
+    expect(() => impactStrictness('catastrophic')).toThrow(/no rank for impact level/);
+  });
+
+  it('normalizeFinding carries a valid level and DROPS an invented one (so it reads as undeclared)', () => {
+    expect(guarded({ impactIfUnfixed: 'broken' }).impactIfUnfixed).toBe('broken');
+    expect(guarded({ impactIfUnfixed: 'high' })).not.toHaveProperty('impactIfUnfixed');
+    expect(guarded()).not.toHaveProperty('impactIfUnfixed');
+  });
+
+  it('blocks at or above the bar, and does not below it', () => {
+    expect(blocksAcceptance(guarded({ impactIfUnfixed: 'cosmetic' }))).toBe(false);
+    expect(blocksAcceptance(guarded({ impactIfUnfixed: 'degraded' }))).toBe(false);
+    expect(blocksAcceptance(guarded({ impactIfUnfixed: 'broken' }))).toBe(true);
+    expect(blocksAcceptance(guarded({ impactIfUnfixed: 'unrecoverable' }))).toBe(true);
+  });
+
+  it('FAILS CLOSED on an undeclared or invented impact — the pre-#xdompzx behaviour, so this is a strict relaxation', () => {
+    expect(blocksAcceptance(guarded())).toBe(true);
+    expect(blocksAcceptance(guarded({ impactIfUnfixed: 'high' }))).toBe(true);
+  });
+
+  it('a captured guard never blocks, whatever its impact', () => {
+    expect(blocksAcceptance(guarded({ preventionCaptured: true, impactIfUnfixed: 'unrecoverable' }))).toBe(false);
+  });
+
+  it('keeps below-bar guards VISIBLE to the notice — the relaxation loses no information', () => {
+    const nit = guarded({ impactIfUnfixed: 'cosmetic' });
+    expect(hasUncapturedPrevention(nit)).toBe(true); // the notice still reports it
+    expect(blocksAcceptance(nit)).toBe(false); // the verdict does not stop for it
+  });
+
+  it('deriveVerdict accepts a below-bar guard and withholds on an at-bar one', () => {
+    expect(deriveVerdict({ findings: [guarded({ impactIfUnfixed: 'cosmetic' })] })).toBe(VERDICTS.ACCEPT);
+    expect(deriveVerdict({ findings: [guarded({ impactIfUnfixed: 'broken' })] })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it('an OUTSTANDING finding is still `changes` regardless of impact — the fix outranks the guard', () => {
+    expect(deriveVerdict({ findings: [guarded({ impactIfUnfixed: 'cosmetic', outcome: undefined })] })).toBe(VERDICTS.CHANGES);
+  });
+
+  it('TURNING THE DIAL tightens without touching a consumer', () => {
+    const nit = guarded({ impactIfUnfixed: 'cosmetic' });
+    expect(deriveVerdict({ findings: [nit] })).toBe(VERDICTS.ACCEPT);
+    expect(deriveVerdict({ findings: [nit], bar: IMPACT_LEVELS.COSMETIC })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it('derivePanelVerdict applies the same gate as deriveVerdict', () => {
+    const lensVerdicts = { correctness: 'accept', security: 'accept' };
+    const below = buildPanelFindings({ simplicity: [{ summary: 'nit', prevention: 'g', preventionCaptured: false, impactIfUnfixed: 'cosmetic', outcome: 'fixed' }] });
+    const above = buildPanelFindings({ security: [{ summary: 'race', prevention: 'g', preventionCaptured: false, impactIfUnfixed: 'unrecoverable', outcome: 'fixed' }] });
+    expect(derivePanelVerdict({ lensVerdicts, findings: below })).toBe(VERDICTS.ACCEPT);
+    expect(derivePanelVerdict({ lensVerdicts, findings: above })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+    expect(derivePanelVerdict({ lensVerdicts, findings: below, bar: IMPACT_LEVELS.COSMETIC })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it('the shipped bar is `broken` — the solo-context setting, documented as the knob to turn', () => {
+    expect(PREVENTION_IMPACT_BAR).toBe(IMPACT_LEVELS.BROKEN);
+  });
+
+  it('the mandate demands impact on every finding, and DEFINES each level from IMPACT_GLOSS (not a pasted copy)', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
+    expect(text).toContain('IMPACT (required, for EVERY finding)');
+    // The GLOSS, not merely the bare level name — a `join(', ')` of the enum satisfies a name-only assertion, which
+    // is how a fifth level could ship listed-but-undefined with the suite green (#xdompzx review, finding 6).
+    for (const level of Object.values(IMPACT_LEVELS)) {
+      expect(text).toContain(level);
+      expect(text).toContain(IMPACT_GLOSS[level]);
+    }
+  });
+
+  // ── #xdompzx review, blocker 3A — the prevention DEMAND is unconditional; only the GATE consults the bar. ──
+  // Asserted on the SURFACE (the mandate text a reviewer actually reads), not on the predicate: a demand a
+  // reviewer can opt out of by declaring a finding cheap starves both the operator notice and the posted PR
+  // comment of the guards they exist to surface, on exactly the path the bar newly un-blocks.
+  it('the mandate demands the prevention triple on EVERY finding — never conditioned on the impact bar', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
+    expect(text).toContain('PREVENTION INTROSPECTION (required, for EVERY finding you report — at every severity, nits included)');
+    expect(text).toContain('rootCause');
+    expect(text).toContain('prevention');
+    expect(text).toContain('preventionCaptured');
+    // the conditioning this PR shipped and the review bounced — it must not come back in any wording
+    expect(text).not.toContain('OPTIONAL below');
+    expect(text).not.toContain('do NOT manufacture a gate proposal for a nit');
+    expect(text).not.toMatch(/required for every finding at `?\w+`? or above/i);
+  });
+
+  it('the mandate still tells reviewers WHERE the bar bites — reporting is unconditional, blocking is not', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
+    expect(text).toContain(PREVENTION_IMPACT_BAR);
+    expect(text).toContain('reporting is unconditional, BLOCKING is not');
+    expect(text).toContain('BLOCKS acceptance');
+  });
+});
+
+// ── #xdompzx review, blocker 2 — the rank tables are read with keys that arrive as FREE-FORM MODEL JSON. ──
+// `Object.freeze` seals own properties but does not detach `Object.prototype`, so on a normal object literal a bare
+// bracket read of an inherited key returns a function/object instead of `undefined`: a `!== undefined` membership
+// test passes, and the value then compares as `NaN` — false in BOTH directions, i.e. the guard fails OPEN. These
+// probe the actual prototype members, not a hand-picked non-adversarial invented word.
+describe('rank tables are prototype-proof (#xdompzx review, blocker 2)', () => {
+  const PROTO_KEYS = ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__', 'isPrototypeOf', 'propertyIsEnumerable'];
+  const guarded = (extra = {}) => normalizeFinding({
+    summary: 'a finding', prevention: 'some durable gate', preventionCaptured: false, outcome: 'fixed', ...extra,
+  });
+
+  it('both tables are NULL-PROTOTYPE, so an inherited key is genuinely absent', () => {
+    expect(Object.getPrototypeOf(IMPACT_STRICTNESS)).toBe(null);
+    expect(Object.getPrototypeOf(VERDICT_STRICTNESS)).toBe(null);
+    for (const key of PROTO_KEYS) {
+      expect(IMPACT_STRICTNESS[key]).toBeUndefined();
+      expect(VERDICT_STRICTNESS[key]).toBeUndefined();
+    }
+  });
+
+  it.each(PROTO_KEYS)('normalizeFinding DROPS impactIfUnfixed: "%s" (it is not an impact level)', (key) => {
+    expect(guarded({ impactIfUnfixed: key })).not.toHaveProperty('impactIfUnfixed');
+  });
+
+  it.each(PROTO_KEYS)('an uncaptured guard declaring impactIfUnfixed: "%s" STILL BLOCKS — fails closed, not open', (key) => {
+    const f = guarded({ impactIfUnfixed: key });
+    expect(blocksAcceptance(f)).toBe(true);
+    expect(deriveVerdict({ findings: [f] })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+
+  it.each(PROTO_KEYS)('impactStrictness("%s") THROWS rather than returning an inherited member', (key) => {
+    expect(() => impactStrictness(key)).toThrow(/no rank for impact level/);
+  });
+
+  it.each(PROTO_KEYS)('verdictStrictness("%s") THROWS rather than returning an inherited member', (key) => {
+    expect(() => verdictStrictness(key)).toThrow(/no strictness rank for verdict/);
+  });
+
+  it('a prototype-key BAR is rejected too — the dial cannot be turned to a non-level', () => {
+    for (const key of PROTO_KEYS) {
+      expect(() => blocksAcceptance(guarded({ impactIfUnfixed: 'broken' }), { bar: key })).toThrow(/no rank for impact level/);
+    }
+  });
+});
+
+describe('IMPACT_GLOSS — the level definitions are DATA, single-sourced (#xdompzx review, finding 6)', () => {
+  it('is total over IMPACT_LEVELS, null-prototype, and every gloss is non-empty', () => {
+    expect(Object.getPrototypeOf(IMPACT_GLOSS)).toBe(null);
+    for (const level of Object.values(IMPACT_LEVELS)) {
+      expect(Object.hasOwn(IMPACT_GLOSS, level)).toBe(true);
+      expect(IMPACT_GLOSS[level].length).toBeGreaterThan(10);
+    }
+    expect(Object.keys(IMPACT_GLOSS).sort()).toEqual(Object.values(IMPACT_LEVELS).sort());
+  });
+});
+
+// ── round-2 blocker 1 — THE COMPENSATING CONTROL MUST BE WIRED ON THE PATH THE RELAXATION OPENS. ───────
+// `PREVENTION_IMPACT_BAR` un-blocks a below-bar uncaptured guard on the AUTO-LAND path. Round 1 built the renderer
+// (`renderFindingLine`) and shipped prose claiming the guard was "always visible … including on a clean accept that
+// auto-lands" — but the drain's `land` / `autoLand: true` branch posted nothing at all, so the renderer was never
+// reached. A rendering function nobody calls is not a control. These pin BOTH halves: the drain skill instructs the
+// emission on that branch, and no surface makes an unconditional visibility claim over a conditional emission.
+//
+// ROUND 4, finding 3 — HOW these are asserted matters as much as what. The conditional-guarantee test used to
+// `toContain('no\n       > land that the bar un-blocked happens silently')`, pinning the line's wrap point and a
+// 7-space blockquote indent; a harmless reflow would have failed the suite with a message reading "the safety
+// control is missing". Every prose assertion here now goes through `proseContains` (whitespace-normalized,
+// blockquote markers stripped), and the negative claim-check is SCOPED to the block that makes the claim instead
+// of the whole 400-line skill.
+describe('the below-bar prevention control is wired on the auto-land branch (round-2 blocker 1)', () => {
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const drainSkill = () => readFileSync(join(ROOT, 'skills-src/drain/SKILL.md'), 'utf8');
+  const CHECK = 'BAR-UN-BLOCKED PREVENTION CHECK';
+
+  it('the drain skill instructs the auto-land branch to POST the panel comment before the accept labels', () => {
+    const md = drainSkill();
+    const block = blockquoteBlockAt(md, CHECK);
+    expect(block, `the "${CHECK}" block must exist in the drain skill`).not.toBe('');
+    // it is defined in terms of the two predicates, not restated as prose the code cannot be checked against …
+    expect(proseContains(block, 'hasUncapturedPrevention(f) === true')).toBe(true);
+    expect(proseContains(block, 'blocksAcceptance(f) === false')).toBe(true);
+    // … and it names the actual emitter, both as the function and as the command that runs it
+    expect(proseContains(block, 'renderPanelComment(')).toBe(true);
+    expect(proseContains(block, 'review-core-cli.mjs comment')).toBe(true);
+  });
+
+  it('the drain skill states the guarantee as CONDITIONAL — a clean accept with nothing un-blocked stays quiet', () => {
+    const block = blockquoteBlockAt(drainSkill(), CHECK);
+    expect(block).not.toBe('');
+    // reflow-proof: the phrase is matched whitespace-normalized, not at the wrap point it happens to sit at today
+    expect(proseContains(block, 'no land that the bar un-blocked happens silently')).toBe(true);
+    // the emission must not be described as unconditional — that was the false claim round 1 shipped. Scoped to
+    // THIS block: an unrelated future "always visible" elsewhere in the skill is not this control's problem.
+    expect(block).not.toMatch(/always visible/i);
+  });
+
+  it('the reviewer-facing mandate makes no unconditional "always visible" claim', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
+    expect(text).not.toMatch(/always visible/i);
+    expect(text).not.toContain('still named in the posted review');
+    // what it DOES claim is the conditional truth
+    expect(proseContains(text, 'when the bar is what un-blocked it')).toBe(true);
+  });
+
+  // ── round-4 finding 2 — A NAMED FUNCTION THE DOCUMENTED DOOR CANNOT REACH IS NOT A CONTROL. ──────────
+  // The skill told the auto-land branch to test `blocksAcceptance(f)`, but `import { blocksAcceptance } from
+  // 'scripts/lib/review-core.mjs'` — the facade the skill documents — threw. Same failure mode as the round-2
+  // blocker, one layer out. The guard: extract every function name the skill's BRANCH-ATTACHED blockquotes name in
+  // a code span, and require each to be a real export of one of the modules the skill points its reader at.
+  //
+  // WHAT IS DERIVED AND WHAT IS NOT. Derived: the NAMES (read out of the live skill text) and the EXPORTS (read
+  // off the live modules) — so a new instruction naming an unreachable symbol, or an export quietly dropped from
+  // the facade, fails here rather than at 3am on a land. NOT derived: `doors`, which is a hand-written list of the
+  // two modules that count. It is hand-written on purpose — deriving it from the `we:scripts/**.mjs` paths those
+  // same blockquotes cite yields {jury-core, review-core-cli}, which does not export `renderPanelComment`, so the
+  // derived set is not the door set. Cost of the hand list: adding a THIRD facade the skill points at needs this
+  // line updated, and until then a symbol reachable only from it reads as unreachable (a false FAIL, not a false
+  // pass — the safe direction).
+  it('every function the branch blockquotes name is exported by one of the two modules listed in `doors`', async () => {
+    const md = drainSkill();
+    // Branch-attached blockquotes are the INDENTED ones (nested in a step); the column-0 blockquotes are
+    // document-level callouts, not instructions to call something.
+    // Normalized first, so a code span that happens to wrap across two lines is still read as one span.
+    const branchQuotes = normalizeProse(md.split('\n').filter((l) => /^\s+>/.test(l)).join('\n'));
+    const named = functionNamesInCodeSpans(branchQuotes);
+    expect(named.length, 'expected the branch blockquotes to name at least one function').toBeGreaterThan(0);
+
+    const doors = ['../review-core.mjs', '../review-render.mjs'];
+    const reachable = new Set();
+    for (const d of doors) for (const k of Object.keys(await import(d))) reachable.add(k);
+
+    const unreachable = named.filter((n) => !reachable.has(n));
+    expect(unreachable, `named in the drain skill but exported by neither ${doors.join(' nor ')}`).toEqual([]);
+  });
+
+  it('the two predicates the check is DEFINED by resolve from the facade specifically', async () => {
+    // Tighter than the subset check above: whatever the blockquote states as `fn(f) === <bool>` is a predicate the
+    // reader is told to evaluate, so it must come from the documented facade — not merely from somewhere.
+    const block = blockquoteBlockAt(drainSkill(), CHECK);
+    const predicates = [...normalizeProse(block).matchAll(/\b([a-z][A-Za-z0-9_$]*)\(f\)\s*===\s*(?:true|false)/g)].map((m) => m[1]);
+    expect(predicates.length).toBeGreaterThan(0);
+    const facade = await import('../review-core.mjs');
+    for (const p of predicates) expect(typeof facade[p], `review-core.mjs must export ${p}`).toBe('function');
+  });
+});
+
+// ── round-2 findings 5 + 6 — one lookup builder, one rank accessor. ────────────────────────────────────
+describe('frozenLookup + the shared rank accessor', () => {
+  it('frozenLookup is EXPORTED and produces a frozen null-prototype table', () => {
+    const t = frozenLookup({ a: 1 });
+    expect(Object.getPrototypeOf(t)).toBe(null);
+    expect(Object.isFrozen(t)).toBe(true);
+    expect(t.toString).toBeUndefined();
+  });
+
+  it('both rank accessors report the SAME shape of failure — one accessor, not a hand-copied twin', () => {
+    // Same class of message (caller: no rank for <thing> "<key>" — …), differing only in the label each passes.
+    expect(() => verdictStrictness('nope')).toThrow(/verdictStrictness: no strictness rank for verdict "nope"/);
+    expect(() => impactStrictness('nope')).toThrow(/impactStrictness: no rank for impact level "nope"/);
+    // and each names the members it DOES know, which the old hand-written messages did not
+    expect(() => verdictStrictness('nope')).toThrow(/known: /);
+    expect(() => impactStrictness('nope')).toThrow(/known: /);
   });
 });

@@ -14,12 +14,20 @@
  * through: file, summary, failure_scenario, category, line, verdict, outcome) and that this repo's own docs
  * (`we:docs/agent/platform-decisions.md`, the pre-PR review rider) and skills point reviewers at.
  *
- * #2823 SHAPE PARITY — the prevention-introspection fields (`rootCause` / `prevention` / `preventionCaptured`)
+ * #2823 SHAPE PARITY — the introspection fields (`rootCause` / `prevention` / `preventionCaptured`, plus #xdompzx's
+ * `impactIfUnfixed`)
  * are a SUPERSET the canonical `Finding` carries but `/code-review`'s `ReportFindings` tool CANNOT: its schema is
- * `additionalProperties: false`, so it hard-rejects the three keys. They are therefore scoped to the surfaces
+ * `additionalProperties: false`, so it hard-rejects the extra keys. They are therefore scoped to the surfaces
  * whose return schemas are `additionalProperties: true` — the drain panel reviewer (`scripts/workflows/review-parked-prs.mjs`)
- * and the subject-jury jurors/red-team (`skills-src/jury/subject-jury.workflow.js`), whose prompts DO ask for the
- * three fields so `normalizeFinding` picks them up and `deriveVerdict` can reach `prevention-outstanding`. On the
+ * and the subject-jury jurors/red-team (`skills-src/jury/subject-jury.workflow.js`), whose prompts AND return
+ * schemas DO ask for the fields so `normalizeFinding` picks them up and `deriveVerdict` can reach
+ * `prevention-outstanding`. ADDING A FIELD TO THE FINDING SHAPE MEANS EDITING BOTH OF THOSE FILES BY HAND, in two
+ * places each — the return schema AND the prompt sentence that asks for it (`subject-jury.workflow.js` has two such
+ * prompts, juror and red-team). There is no import edge from them to this contract (both are Workflow-harness
+ * bodies that cannot `import`), and
+ * `additionalProperties: true` means an omitted field raises no error, so the omission is silent. #xdompzx's
+ * `impactIfUnfixed` shipped inert for exactly that reason (review blocker 1); the deterministic guard that would
+ * make the parity mechanical is filed as its own backlog item. On the
  * `/code-review` surface the prevention introspection still happens (the shared mandate demands it) but is carried
  * in the finding's PROSE (its `summary`/`failure_scenario`), not as structured fields the tool would reject. So
  * "matches `/code-review`" holds for the CORE shape; the #2823 fields are a deliberate, surface-scoped extension. The
@@ -69,12 +77,27 @@ import { deriveCareLevel, CARE_LEVELS, CARE_LEVEL_ORDER } from './review-escalat
 // re-export, never a behaviour change. review-core's own body still USES several of them (the mandate builders,
 // the plan handshake, the panel renderers, panelRigorFromReasons), so they are IMPORTED here (local bindings)
 // AND re-exported.
+//
+// #xdompzx round-4, finding 2 — A CONTROL THE DOCUMENTED DOOR CANNOT REACH IS NOT A CONTROL. The drain skill's
+// auto-land branch is told to test `hasUncapturedPrevention(f) === true && blocksAcceptance(f) === false`, and
+// this module is the facade that skill's callers import from. `hasUncapturedPrevention` was re-exported and
+// `blocksAcceptance` was not, so the instruction named a symbol that threw on import — the round-2 blocker shape
+// (a control wired to a path nobody walks) one layer out. `blocksAcceptance`, its dial `PREVENTION_IMPACT_BAR`,
+// and the `IMPACT_LEVELS` enum an author needs to read a finding's declared impact are therefore re-exported too.
+// The guard lives in `we:scripts/lib/__tests__/jury-core.test.mjs`, in the describe block `the below-bar
+// prevention control is wired on the auto-land branch`:
+// every function named in a code span inside the skill's INDENTED branch blockquotes must be exported by this
+// facade or by `we:scripts/lib/review-render.mjs` — the two modules the skill points its reader at — and the two
+// predicates the bar-un-blocked check is DEFINED by must resolve from this facade specifically.
 import {
   VERDICTS,
+  IMPACT_LEVELS,
+  PREVENTION_IMPACT_BAR,
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
   hasUncapturedPrevention,
+  blocksAcceptance,
   isFindingOutstanding,
   NEGOTIATION_ROUND_CAP,
   NEGOTIATION_OUTCOMES,
@@ -110,10 +133,13 @@ import { materializeRoster } from './jury-core.mjs';
 
 export {
   VERDICTS,
+  IMPACT_LEVELS,
+  PREVENTION_IMPACT_BAR,
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
   hasUncapturedPrevention,
+  blocksAcceptance,
   isFindingOutstanding,
   NEGOTIATION_ROUND_CAP,
   NEGOTIATION_OUTCOMES,
@@ -927,8 +953,8 @@ export const REVIEW_NOTICE_EVENTS = Object.freeze({
 
 /**
  * #2823 — render the prevention-summary TAIL appended to an escalated notice. Pure. Returns `''` (byte-stable
- * for every pre-#2823 caller) when there is no guard owed. Otherwise names the count and the guards owed, so the
- * acceptance gate ("file before accept") rides the same line the operator already reads.
+ * for every pre-#2823 caller) when there is no guard owed. Otherwise names the count and the guards OWED, so the
+ * repo's outstanding prevention debt rides the same line the operator already reads.
  *
  * THE REDUCED VERDICT IS AUTHORITATIVE (#2823 round-3 finding 2). When the caller's `verdict` is
  * `prevention-outstanding`, this summary NAMES the guards owed — checked FIRST, BEFORE any outstanding-finding
@@ -942,22 +968,31 @@ export const REVIEW_NOTICE_EVENTS = Object.freeze({
  * finding ⇒ the verdict is `changes`, prevention is never consulted, so the summary stays silent (the blocker is
  * the unfixed defect — #2823 round-2 finding 3); only once every finding is resolved does a resolved finding with
  * an uncaptured guard fire it. Either way it gates on the SAME single-sourced predicates every reducer shares
- * (`isFindingOutstanding` for "still open", `hasUncapturedPrevention` for "owes a guard"), and it names EXACTLY the
- * set `derivePanelVerdict`/`deriveVerdict` raised the verdict on (resolved ∧ uncaptured) — so the notice and the
- * verdict can't disagree, by construction.
+ * (`isFindingOutstanding` for "still open", `hasUncapturedPrevention` for "owes a guard").
+ *
+ * NOTICE-WIDE, VERDICT-NARROW (#xdompzx) — this is the WIDE half: it reads `hasUncapturedPrevention`, so it can
+ * name a guard the verdict did not stop for. Rationale stated once at `blocksAcceptance` (`jury-core.mjs`). Two
+ * consequences for the COPY below: it claims guards are OWED, never that they blocked the accept; and its lead
+ * word is not a verdict name, because on an `accept` run this summary still fires and a notice must never print a
+ * verdict it did not reduce to (#xdompzx round-2, finding 4).
  * @param {{findings?: Array<object>, verdict?: string}} [o]
  * @returns {string}
  */
 export function renderPreventionSummary({ findings = [], verdict } = {}) {
   const all = normalizeFindings(findings);
-  // The guards owed = the SAME set derivePanelVerdict / deriveVerdict raise the verdict on: a RESOLVED finding whose
-  // named guard is neither captured nor filed. An OUTSTANDING finding is `changes` territory and never owes here.
+  // The guards owed = every RESOLVED finding whose named guard is neither captured nor filed — a SUPERSET of the set
+  // the reducers raise the verdict on (they additionally require the impact bar, #xdompzx). An OUTSTANDING finding is
+  // `changes` territory and never owes here.
   const owed = all.filter((f) => !isFindingOutstanding(f) && hasUncapturedPrevention(f));
+  // "Prevention OWED", not "Prevention outstanding" (#xdompzx round-2, finding 4): the old lead was the literal
+  // `VERDICTS.PREVENTION_OUTSTANDING` token used as copy, and this summary also fires on a run that reduced to
+  // `accept` (a below-bar guard) — so the operator read a verdict name the reduction never produced. And "owed",
+  // not "must be filed before accept": below the bar a guard is owed without withholding the accept.
   const name = () => {
-    if (!owed.length) return ' Prevention outstanding — file the named guard(s) before accept.';
+    if (!owed.length) return ' Prevention owed — file the named guard(s).';
     const guards = owed.map((f) => f.prevention).join('; ');
     const n = owed.length;
-    return ` Prevention outstanding — ${n} guard${n === 1 ? '' : 's'} must be filed before accept: ${guards}.`;
+    return ` Prevention owed — ${n} guard${n === 1 ? '' : 's'} to file: ${guards}.`;
   };
   // The reduced verdict is AUTHORITATIVE and checked FIRST — when it is prevention-outstanding, name the guards even
   // on a mixed list (this is the round-3 finding 2 reconciliation with derivePanelVerdict).
@@ -974,9 +1009,11 @@ export function renderPreventionSummary({ findings = [], verdict } = {}) {
  * (`renderPanelVerdictTable` / #2432's `renderPanelComment`, posted to GitHub via `gh pr comment`) — this is
  * what the SESSION itself tells the operator in-chat. Pure; never posts anything.
  * #2823 — the ESCALATED notice also carries a PREVENTION SUMMARY: when the verdict is `prevention-outstanding`
- * or the supplied `findings` name guards that are neither captured nor filed, it appends "prevention outstanding
- * — N guard(s) must be filed before accept: …" so the operator sees the acceptance gate in the same line, not
- * only in the verdict token. Passing no `findings` (every existing caller) leaves the line byte-for-byte unchanged.
+ * or the supplied `findings` name guards that are neither captured nor filed, it appends "Prevention owed
+ * — N guard(s) to file: …" so the operator sees the outstanding prevention debt in the same line, not only in the
+ * verdict token. Passing no `findings` (every existing caller) leaves the line byte-for-byte unchanged. Note this
+ * is the ESCALATED event only — a below-bar guard on a clean accept never reaches here, which is why the posted PR
+ * comment (`renderFindingLine`, review-render.mjs) carries the impact + guard on the merge path (#xdompzx).
  * @param {{event: 'escalated'|'cleared', pr: number|string, repo?: string, verdict?: string,
  *   disposition?: {mode: 'converge'|'human', autoLand: boolean}, reasons?: string[],
  *   outcome?: 'accept'|'changes', actor?: string, findings?: Array<object>}} o — `outcome` is required (and

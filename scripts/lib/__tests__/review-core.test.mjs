@@ -76,7 +76,7 @@ import {
   floorGrowOnlyJurors,
   absentMandatoryLenses,
 } from '../review-core.mjs';
-import { validateSubjectAdapter, resolveAdapterRoster } from '../jury-core.mjs';
+import { validateSubjectAdapter, resolveAdapterRoster, IMPACT_LEVELS } from '../jury-core.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -894,7 +894,7 @@ describe('renderReviewNotice (#2433)', () => {
       .toThrow(/unknown outcome/);
   });
 
-  it('#2823 — appends a prevention summary naming the guards owed before accept', () => {
+  it('#2823 — appends a prevention summary naming the guards OWED (owed, not "must be filed before accept" — below the impact bar a guard is owed without blocking)', () => {
     const n = renderReviewNotice({
       event: REVIEW_NOTICE_EVENTS.ESCALATED, pr: 12, verdict: VERDICTS.PREVENTION_OUTSTANDING,
       findings: [
@@ -902,7 +902,7 @@ describe('renderReviewNotice (#2433)', () => {
         { summary: 'clean', outcome: 'fixed', prevention: 'already a gate', preventionCaptured: true },
       ],
     });
-    expect(n).toContain('Prevention outstanding — 1 guard must be filed before accept');
+    expect(n).toContain('Prevention owed — 1 guard to file');
     expect(n).toContain('a check:standards id-space gate');
     expect(n).not.toContain('already a gate'); // captured guard is not owed
   });
@@ -926,7 +926,7 @@ describe('renderPreventionSummary (#2823)', () => {
         { summary: 'finding b', outcome: 'no_change_needed', prevention: 'gate B', preventionCaptured: false },
       ],
     });
-    expect(s).toBe(' Prevention outstanding — 2 guards must be filed before accept: gate A; gate B.');
+    expect(s).toBe(' Prevention owed — 2 guards to file: gate A; gate B.');
   });
 
   it('#2823 — ignores an UNFIXED finding that names a prevention (matches deriveVerdict: the fix comes first)', () => {
@@ -940,7 +940,7 @@ describe('renderPreventionSummary (#2823)', () => {
 
   it('falls back to a generic line when the verdict is prevention-outstanding but no findings were supplied', () => {
     expect(renderPreventionSummary({ verdict: VERDICTS.PREVENTION_OUTSTANDING })).toBe(
-      ' Prevention outstanding — file the named guard(s) before accept.',
+      ' Prevention owed — file the named guard(s).',
     );
   });
 
@@ -967,7 +967,7 @@ describe('renderPreventionSummary (#2823)', () => {
     ];
     expect(deriveVerdict({ findings })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
     expect(renderPreventionSummary({ findings, verdict: VERDICTS.PREVENTION_OUTSTANDING }))
-      .toBe(' Prevention outstanding — 1 guard must be filed before accept: gate A.');
+      .toBe(' Prevention owed — 1 guard to file: gate A.');
   });
 
   it('#2823 round-3 finding 2 — the MIXED shape derivePanelVerdict raises prevention-outstanding on NAMES the guard', () => {
@@ -988,13 +988,58 @@ describe('renderPreventionSummary (#2823)', () => {
     expect(derivePanelVerdict({ lensVerdicts, findings })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
     // …and on that SAME mixed list the summary names the guard — no longer muted by the open advisory nit:
     expect(renderPreventionSummary({ findings, verdict: VERDICTS.PREVENTION_OUTSTANDING }))
-      .toBe(' Prevention outstanding — 1 guard must be filed before accept: a lint rule.');
+      .toBe(' Prevention owed — 1 guard to file: a lint rule.');
     // …and the operator notice carries the guard name (not a bare "Verdict: prevention-outstanding."):
     const notice = renderReviewNotice({
       event: REVIEW_NOTICE_EVENTS.ESCALATED, pr: 976, verdict: VERDICTS.PREVENTION_OUTSTANDING, findings,
     });
     expect(notice).toContain('a lint rule');
-    expect(notice).toContain('1 guard must be filed before accept');
+    expect(notice).toContain('1 guard to file');
+  });
+});
+
+// ── round-2 finding 4 — A NOTICE MUST NEVER PRINT A VERDICT NAME IT DID NOT REDUCE TO. ──────────────
+// `PREVENTION_IMPACT_BAR` made the prevention summary fire on runs that reduce to `accept` (a below-bar guard is
+// owed without blocking). The summary's lead was still the literal `VERDICTS.PREVENTION_OUTSTANDING` token used as
+// copy — so the operator read "Prevention outstanding" on a line whose own verdict said `accept`, a
+// self-contradicting operator line. The lead is now "Prevention owed", and this asserts the general property, not
+// just the one wording: on an ACCEPT reduction, no OTHER verdict's name appears anywhere in the rendered notice.
+describe('the operator notice never names a verdict the reduction did not produce', () => {
+  /** Every spelling a verdict token could plausibly surface as in prose: the token, and its spaced form. */
+  const spellings = (v) => [v, v.replace(/-/g, ' ')];
+
+  const belowBarOwedGuard = [{
+    summary: 'a stale comment', outcome: 'fixed',
+    prevention: 'a check:standards comment-freshness rule', preventionCaptured: false,
+    impactIfUnfixed: IMPACT_LEVELS.COSMETIC,
+  }];
+
+  it('a resolved BELOW-BAR uncaptured guard reduces to accept, and the notice names no other verdict', () => {
+    const findings = belowBarOwedGuard;
+    const verdict = deriveVerdict({ findings });
+    expect(verdict).toBe(VERDICTS.ACCEPT); // precondition: the bar un-blocked it
+
+    const notice = renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.ESCALATED, pr: 1046, verdict, findings });
+    // it still reports the debt — the relaxation loses no information …
+    expect(notice).toContain('a check:standards comment-freshness rule');
+    // … but it must not print any verdict name other than the one it reduced to.
+    const lower = notice.toLowerCase();
+    for (const other of Object.values(VERDICTS)) {
+      if (other === verdict) continue;
+      for (const spelling of spellings(other)) {
+        expect(lower).not.toContain(spelling.toLowerCase());
+      }
+    }
+  });
+
+  it('the generic no-findings summary is verdict-neutral copy too', () => {
+    const s = renderPreventionSummary({ verdict: VERDICTS.PREVENTION_OUTSTANDING });
+    // it is legitimately rendered on a prevention-outstanding run, but the COPY itself must not be a verdict name —
+    // the same string is reachable from an accept reduction via renderReviewNotice.
+    const lower = s.toLowerCase();
+    for (const spelling of spellings(VERDICTS.PREVENTION_OUTSTANDING)) {
+      expect(lower).not.toContain(spelling.toLowerCase());
+    }
   });
 });
 

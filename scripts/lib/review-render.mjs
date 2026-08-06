@@ -27,11 +27,19 @@ import {
   MANDATORY_LENSES,
   PANEL_LENSES,
 } from './review-core.mjs';
+// The null-prototype lookup builder lives in the subject-agnostic engine core; import it DIRECTLY (review-core
+// re-exports only the review-shaped symbols, and this module is engine-tier like jury-core itself).
+import { frozenLookup } from './jury-core.mjs';
 
 /** Human-readable label per overall verdict (`VERDICTS`). An unknown verdict falls back to its raw token so a
  *  new verdict never renders as a blank line. Pure data.
+ *
+ *  NULL-PROTOTYPE (#xdompzx round-2, finding 5) — this table is read with `VERDICT_LABELS[verdict] ?? String(verdict)`
+ *  where `verdict` can arrive from free-form model JSON. `??` only fires on `null`/`undefined`, so on a normal object
+ *  literal `renderPanelComment({ verdict: 'toString' })` rendered the INHERITED native function as the verdict label.
+ *  A null-prototype table has nothing to inherit, so the raw-token fallback actually runs.
  *  @verdicts-total — every `VERDICTS` member must be a key (enforced by the `check:standards` verdict-totality gate). */
-const VERDICT_LABELS = Object.freeze({
+const VERDICT_LABELS = frozenLookup({
   [VERDICTS.ACCEPT]: '✅ pass — no blocking findings',
   [VERDICTS.CHANGES]: '🔁 changes requested',
   [VERDICTS.NEEDS_HUMAN]: '🚦 human review required',
@@ -68,8 +76,14 @@ function renderDisposition(disposition) {
 
 /**
  * Render ONE finding as a markdown bullet. Pure. Shows, when present: the `file:line` (or bare `file`) anchor,
- * the summary, the failure scenario (after an em-dash), and the verify tag (`CONFIRMED`/`PLAUSIBLE`). Tolerant
- * of a finding carrying only a summary.
+ * the summary, the failure scenario (after an em-dash), the verify tag (`CONFIRMED`/`PLAUSIBLE`), the declared
+ * `impactIfUnfixed`, and — as a nested sub-bullet — the named `prevention` guard with whether it is already
+ * CAPTURED or still OWED. Tolerant of a finding carrying only a summary.
+ *
+ * This is the OUTPUT half of the compensating control that makes `PREVENTION_IMPACT_BAR` a scaling of the gate
+ * rather than a silent loosening — see `blocksAcceptance` (`jury-core.mjs`) for why, stated once there. What this
+ * renderer owes it: the declared impact and the owed guard must appear on every finding, because the drain's
+ * auto-land branch posts THIS body when the bar is what un-blocked a guard.
  * @param {import('./review-core.mjs').Finding} f
  * @returns {string}
  */
@@ -80,6 +94,11 @@ function renderFindingLine(f) {
   let line = parts.join(' — ');
   if (f.failure_scenario) line += ` — ${f.failure_scenario}`;
   if (f.verdict) line += ` _[${f.verdict}]_`;
+  if (f.impactIfUnfixed) line += ` _[impact if unfixed: ${f.impactIfUnfixed}]_`;
+  if (f.prevention) {
+    const state = f.preventionCaptured === true ? 'captured' : 'OWED — file it';
+    line += `\n  - _Prevention (${state}):_ ${f.prevention}`;
+  }
   return `- ${line}`;
 }
 
