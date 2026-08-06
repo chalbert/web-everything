@@ -28,8 +28,19 @@ All four return `false` from `isBlastRadiusPath` — re-measured after the round
 | `we:package-lock.json` | `false` | **The file CI actually resolves tooling from.** Every job installs with `npm ci`, which reads the lockfile strictly and ignores what the manifest's version ranges would resolve to. |
 | `we:vitest.config.ts` | `false` | Declares which tests a `vitest run` collects — including whether the gate's own unit tests under [`we:scripts/lib/__tests__/`](scripts/lib/__tests__/) are in the set. |
 | `we:playwright.config.ts` | `false` | Declares `testDir` and the `projects` the `test:interaction` and `check:visual` scripts select. |
+| `we:vitest.workspace.ts` (and `.js` / `.mjs` / `.json`) | `false`, **and the file does not exist yet** | vitest 1.6.1 AUTO-DISCOVERS a root workspace file and lets it override the project/include set. Verified in the lane: the installed `vitest/dist` carries the `vitest.workspace` / `workspaceFiles` discovery strings, and `npx vitest --help` exposes `--workspace`. |
 
-**The lockfile is the sharpest one.** A lockfile-only diff — no manifest change, no source change — can repoint `vitest` at a stub that exits `0`, or add a transitive dependency whose install script runs on the runner *before any gate does*. Lockfile-only dependency bumps are also the single most common shape of agent-authored PR, so this is the highest-traffic unreviewed path in the repo, not a theoretical one.
+**A file that does not exist yet is the case a path list cannot reach.** The workspace entry above is the
+sharpest illustration of why this item is framed as a rule. Every other surface here can be found by grepping
+the repo; `we:vitest.workspace.ts` cannot, because **adding** it is the attack. A one-file PR creating
+`export default ['./demos']` makes vitest honour the workspace instead of the config, so
+`we:scripts/**/__tests__/**` — including the tests pinning `BLAST_RADIUS` itself — is no longer collected. The
+required check goes green because it now runs less, and the PR scores `{escalate: false}`. Any registration
+written under this item must therefore enumerate the RUNNER'S OWN discovery filenames, not the config files
+present in the tree; a runner upgrade that adds a discovery name must fail a gate rather than silently widen
+the hole.
+
+**The lockfile is the sharpest one of the files that do exist.** A lockfile-only diff — no manifest change, no source change — can repoint `vitest` at a stub that exits `0`, or add a transitive dependency whose install script runs on the runner *before any gate does*. Lockfile-only dependency bumps are also the single most common shape of agent-authored PR, so this is the highest-traffic unreviewed path in the repo, not a theoretical one.
 
 ## Correcting round 4's justification — `npm test` is NOT what CI runs
 
@@ -54,7 +65,8 @@ The round-4 error was a **contract description asserting a CI fact that no gate 
 
 ## Done when
 
-- `isBlastRadiusPath` returns `true` for `we:package.json`, `we:package-lock.json`, and the `vitest` / `playwright` config spellings, with the narrowness (root-only vs. any-directory) argued per path in the comment rather than asserted.
+- `isBlastRadiusPath` returns `true` for `we:package.json`, `we:package-lock.json`, and the `vitest` / `playwright` config spellings **including the auto-discovered `vitest.workspace.*` names that no file currently occupies**, with the narrowness (root-only vs. any-directory) argued per path in the comment rather than asserted.
+- The registration is derived from the RUNNER'S discovery filenames, not from the files present in the tree, and a test enumerates them — so a runner upgrade that adds a discovery name fails the gate instead of silently widening the hole.
 - The comment justifying the entries states the **resolution** rule — a file scores because changing it alone changes what the required check does — so the next surface in this class is covered by the rule instead of needing a fifth review round.
 - Positive **and** negative cases pin each pattern in [`we:scripts/lib/__tests__/review-escalation.test.mjs`](scripts/lib/__tests__/review-escalation.test.mjs), including a lockfile-only diff scoring a `review:*` label at PR-open.
 - The `blast-radius` token description in [`we:scripts/lib/review-policy.contract.json`](scripts/lib/review-policy.contract.json) is re-derived from the **whole** `BLAST_RADIUS` array (the #2564/#2566 rule), and names only scripts CI genuinely runs.
