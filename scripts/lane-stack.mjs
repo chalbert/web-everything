@@ -24,9 +24,9 @@
  * Usage:
  *   node scripts/lane-stack.mjs init --plan=/tmp/stack-<slug>.json [--depth-cap=4] [--force] [--json]
  *   node scripts/lane-stack.mjs plan-item --plan=<file> --id=2394 --files=we:a.mjs,we:b.md [--repo=we] [--json]
- *   node scripts/lane-stack.mjs recheck --plan=<file> --id=2394 --base=origin/main [--repo=we] [--json]
+ *   node scripts/lane-stack.mjs recheck --plan=<file> --id=2394 --base=origin/main [--lane=<path>] [--repo=we] [--json]
  *   node scripts/lane-stack.mjs apply-rebase --plan=<file> --id=2394 --onto=2391 --base=<frontier tip sha> [--repo=we]
- *   node scripts/lane-stack.mjs record --plan=<file> --id=2394 --base=<ref> --tip-ref=lane/<slug>-2394 [--repo=we]
+ *   node scripts/lane-stack.mjs record --plan=<file> --id=2394 --base=<ref> --tip-ref=lane/<slug>-2394 [--lane=<path>] [--repo=we]
  *   node scripts/lane-stack.mjs drop --plan=<file> --id=2394
  *   node scripts/lane-stack.mjs couple-open --impl-repo=frontierui --impl-ref=lane/2684-fui [--impl-tip=<sha>] [--we-ref=lane/2684-we] [--json]  # #2684 cross-locus couple overlap-open order + WE stack-base (stateless)
  *
@@ -38,12 +38,19 @@
  *     set the gate certifies.
  *   • sha pins fail LOUD: `record` refuses to store a tip without a resolvable HEAD sha, and `plan-item` /
  *     `apply-rebase` refuse to emit/accept a base that isn't a recorded pinned sha — never the mutable ref.
+ *   • #2900 — the TREE the measurement runs on is validated too, not just the sha math on it. `recheck` /
+ *     `record` refuse a PRIMARY-checkout cwd (they would diff `origin/main...origin/main`, certify an EMPTY
+ *     actual set, and print the same success line as a real pass), refuse a base that resolves to HEAD (an
+ *     empty diff is never a certification), and `--lane=<path>` is REAL — it used to be absorbed silently,
+ *     which is what made a wrong-cwd invocation look deliberate. Unknown flags are now a hard error.
  *
  * Exit codes: 0 = ok; 3 = bad input / no plan; 4 = recheck verdict `rebase-required` (do NOT push).
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { laneTreeVerdict } from './readiness/lane-tree-guard.mjs'; // #2900 — the positive "is this the item's leased lane" rule
+import { LEASE_FILENAME } from './lib/lane-lease.mjs'; // #2900 — the marker lane-pool writes at acquire; the fact the old path guess was reaching for
 import {
   createStackPlan, planNextItem, recheckAtPush, applyRebase, recordPushed, dropItem,
 } from './readiness/overlap-chain.mjs';
@@ -58,6 +65,30 @@ for (const a of rest) {
 }
 const AS_JSON = !!flags.json;
 
+// #2900 A3 — an UNRECOGNISED flag is a hard error, never silently absorbed. The parser used to accept any
+// `--key=value`, so the `--lane=<path>` in the observed incident was swallowed without a word: the operator
+// had every reason to believe they had aimed the seam at the lane, and the tool measured the primary anyway.
+// A flag that does nothing must SAY it does nothing. (`--lane` is real as of this change; the rest is the
+// closed set the switch below actually reads.)
+const KNOWN_FLAGS = Object.freeze({
+  '*': ['plan', 'json', 'repo', 'lane'],                       // accepted everywhere
+  init: ['depth-cap', 'force'],
+  'plan-item': ['id', 'files'],
+  recheck: ['id', 'base'],
+  'apply-rebase': ['id', 'onto', 'base'],
+  record: ['id', 'base', 'tip-ref'],
+  drop: ['id'],
+  'couple-open': ['id', 'impl-ref', 'impl-repo', 'impl-tip', 'we-ref', 'we-repo'],
+});
+function assertKnownFlags() {
+  const allowed = new Set([...KNOWN_FLAGS['*'], ...(KNOWN_FLAGS[cmd] || [])]);
+  const unknown = Object.keys(flags).filter((k) => !allowed.has(k));
+  if (!unknown.length) return;
+  const detail = `unknown flag(s) for \`${cmd}\`: ${unknown.map((u) => `--${u}`).join(', ')} — accepted: ${[...allowed].sort().map((a) => `--${a}`).join(', ')}. A silently-absorbed flag is how #2900 shipped a vacuous certification; there is no pass-through.`;
+  // `fail` is defined below (function hoisting makes it callable here); keep the message shape identical.
+  fail(detail);
+}
+
 function emit(result, code) {
   if (AS_JSON) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   else process.stderr.write(`lane-stack ${result.ok === false ? '✗' : '✓'} ${result.detail}\n`);
@@ -65,8 +96,52 @@ function emit(result, code) {
 }
 function fail(detail) { emit({ ok: false, detail }, 3); }
 
+// #2900 — THE TREE THE MEASUREMENT RUNS ON. `--lane=<path>` is REAL (it was accepted and ignored, which is
+// precisely what made the wrong-cwd invocation look deliberate and correct); absent it, the tree is the process
+// cwd. Either way the path is reduced to git's OWN work-tree ROOT before anything judges or measures it — git
+// discovers its repository by walking UP, so the directory you name and the repository it operates on are not
+// necessarily the same place, and a guard that judges the raw string can be handed one and lied to by the other.
+const id = flags.id != null ? String(flags.id) : null;
+const LANE_FLAG = typeof flags.lane === 'string' && flags.lane ? resolve(flags.lane) : null;
+if (flags.lane !== undefined && !LANE_FLAG) fail('--lane needs a path (--lane=<lane clone>), not a bare flag');
+if (LANE_FLAG && !existsSync(LANE_FLAG)) fail(`--lane=${LANE_FLAG} does not exist`);
+
 function git(args, opts = {}) {
-  return execFileSync('git', args, { encoding: 'utf8', ...opts }).trim();
+  return execFileSync('git', args, { encoding: 'utf8', cwd: LANE_FLAG || process.cwd(), ...opts }).trim();
+}
+
+/** The WORK-TREE ROOT these seams measure — never a raw path string. Null when it is not a git work tree. */
+function measuredTree() {
+  const start = LANE_FLAG || process.cwd();
+  try {
+    const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: start, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return root ? realpathSync(root) : null;
+  } catch { return null; }
+}
+
+/**
+ * #2900 — REFUSE to operate on a tree that is not THIS item's leased lane clone.
+ *
+ * The first version of this guard asked whether the path contained `/.lanes/`. That guess failed twice: its
+ * `script-in-lane` allowance made the refusal unreachable whenever the running copy of this script lived in a
+ * lane clone — this repo's NORMAL execution context, so the guard was off exactly when it should fire — and a
+ * substring test accepts any directory whose path merely contains `.lanes`.
+ *
+ * The pool already records the fact that guess was reaching for: `lane-pool.mjs acquire` writes a lease marker
+ * at `<lane>/.git/.lane-lease` when it hands the folder out (the same file `guard-bash.mjs` reads, #2367). So
+ * ask a POSITIVE question against a fact on disk — is this a leased lane, and is its lease for the item being
+ * certified? — instead of inferring one from a name. That is the module's own "validated, not trusted" rule,
+ * applied to the tree as it already is to `--base`. It also closes a hole the path guess could not: aiming
+ * `--lane` at a DIFFERENT lane used to yield a full `clean` certification.
+ */
+function assertLaneTree(cmdName) {
+  const tree = measuredTree();
+  if (!tree) fail(`\`${cmdName}\`: ${LANE_FLAG || process.cwd()} is not a git work tree — nothing to measure (#2900)`);
+  let lease = null;
+  try { lease = JSON.parse(readFileSync(join(tree, '.git', LEASE_FILENAME), 'utf8')); } catch { lease = null; }
+  const v = laneTreeVerdict({ lease, id });
+  if (v.ok) return;
+  fail(`\`${cmdName}\` measured ${tree} — ${v.detail}`);
 }
 
 const planPath = typeof flags.plan === 'string' ? resolve(flags.plan) : null;
@@ -114,6 +189,15 @@ function actualFiles(expectedBaseSha) {
   let effective = null;
   try { effective = git(['merge-base', baseSha, 'HEAD']); } catch { /* no common ancestor */ }
   if (!effective) fail(`--base=${base} shares no history with HEAD — not this lane's acquire point`);
+  // #2900 A2 — a VACUOUS certification is impossible. Belt to A1's braces: if the effective diff base IS
+  // HEAD, the lane has no commits of its own and `<base>...HEAD` is a no-op, so `actual` comes back EMPTY and
+  // satisfies `actual ⊆ declared` trivially — the false pass, printed identically to a real one. This catches
+  // the wrong-tree case even where the cwd heuristic cannot (a foreign clone, a lane reset to its base), and
+  // it is a genuine error in its own right: there is nothing to certify.
+  const headSha = resolveCommit('HEAD');
+  if (headSha && effective === headSha) {
+    fail(`--base=${base} resolves to the same commit as HEAD (${headSha.slice(0, 8)}) in ${measuredTree()} — the diff is empty, so this would certify NOTHING while printing success (#2900). Check you are measuring the lane clone (--lane=<path>) and that it carries its commits.`);
+  }
   if (expectedBaseSha && effective !== expectedBaseSha) {
     fail(`--base=${base} would diff from ${effective.slice(0, 8)} but the plan's recorded acquire point is ${expectedBaseSha.slice(0, 8)} — pass the ref this lane was ACTUALLY acquired at (a wrong base shrinks the actual set the gate certifies)`);
   }
@@ -124,7 +208,7 @@ function actualFiles(expectedBaseSha) {
   return out.split('\n').map((s) => s.trim()).filter(Boolean).map((f) => `${repo}:${f}`);
 }
 
-const id = flags.id != null ? String(flags.id) : null;
+assertKnownFlags();   // #2900 A3 — before any work, so a typo'd flag can never be absorbed into a certification
 
 switch (cmd) {
   case 'init': {
@@ -197,6 +281,7 @@ switch (cmd) {
   }
   case 'recheck': {
     if (!id) fail('pass --id=<item id>');
+    assertLaneTree('recheck');   // #2900 A1 — never certify from the primary checkout
     const plan = loadPlan();
     const item = plan.items[id];
     if (!item) fail(`item ${id} is not in the plan`);
@@ -214,6 +299,7 @@ switch (cmd) {
   }
   case 'apply-rebase': {
     if (!id) fail('pass --id=<item id>');
+    assertLaneTree('apply-rebase');   // #2900 jury — the one seam that REWRITES history was unguarded while accepting --lane
     if (typeof flags.onto !== 'string' || !flags.onto) fail('pass --onto=<comma-separated frontier item ids> (from the recheck verdict)');
     if (typeof flags.base !== 'string' || !flags.base) fail('pass --base=<the frontier tip sha the lane was rebased onto> (the recheck verdict\'s ontoTips sha) — it re-pins the acquire point and recomputes the actuals');
     const plan = loadPlan();
@@ -238,6 +324,7 @@ switch (cmd) {
   }
   case 'record': {
     if (!id) fail('pass --id=<item id>');
+    assertLaneTree('record');    // #2900 A1 — never pin the chain frontier from the primary checkout
     const plan = loadPlan();
     const item = plan.items[id];
     if (!item) fail(`item ${id} is not in the plan`);
