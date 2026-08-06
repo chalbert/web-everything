@@ -1,4 +1,5 @@
 ---
+bornAs: xf1wttx
 kind: story
 size: 3
 status: open
