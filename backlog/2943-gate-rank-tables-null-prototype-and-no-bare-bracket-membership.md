@@ -1,4 +1,5 @@
 ---
+bornAs: xg9gboa
 kind: task
 status: open
 dateOpened: "2026-08-05"
@@ -18,7 +19,7 @@ properties but does not detach `Object.prototype`, so `TABLE['toString']`, `TABL
   `null`/`undefined` and `||` only on a falsy value, so an inherited truthy member is rendered as if it were real
   data. **This item is scoped to include these**, not only the `=== undefined` form.
 
-Observed on PR #1046 (`#xdompzx`), across four tables:
+Observed on PR #1046 (`#2942`), across four tables:
 
 - `IMPACT_STRICTNESS` (`we:scripts/lib/jury-core.mjs`) was validated with a bare bracket read against a key that
   arrives as **free-form model JSON** (a reviewer authors `impactIfUnfixed`). An invented word like `high` was
@@ -51,7 +52,7 @@ reinforces the false sense that the table is sealed. Tests written alongside suc
 hand-picked invented word (`high`) that happens not to be a prototype member, confirming the intent rather than
 probing the mechanism — so the suite stays green on a broken invariant.
 
-**Prevention for:** PR #1046 review, blocker 2 and round-2 findings 5 + 6 (`#xdompzx`).
+**Prevention for:** PR #1046 review, blocker 2 and round-2 findings 5 + 6 (`#2942`).
 
 **Locus:** `we:scripts/check-standards.mjs`, `we:scripts/lib/jury-core.mjs`,
 `we:scripts/lib/review-render.mjs`, `we:scripts/conveyor/jury-tree.mjs`

@@ -1,4 +1,5 @@
 ---
+bornAs: xcnjqcn
 kind: task
 status: open
 dateOpened: "2026-08-05"
@@ -53,7 +54,7 @@ that auto-lands" while the emission was in fact conditional. Whatever this rule 
 claim must match the wiring — an unconditional claim over a conditional emission is the same defect in
 prose.
 
-**Prevention for:** PR #1046 review, round 2 blocker 1 (`#xdompzx`).
+**Prevention for:** PR #1046 review, round 2 blocker 1 (`#2942`).
 
 **Locus:** `we:scripts/check-standards.mjs`, `we:scripts/lib/review-skill-guard.mjs`,
 `we:skills-src/drain/SKILL.md`

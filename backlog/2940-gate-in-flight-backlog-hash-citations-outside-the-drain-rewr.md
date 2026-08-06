@@ -1,4 +1,5 @@
 ---
+bornAs: xabqoah
 kind: task
 status: open
 dateOpened: "2026-08-05"
@@ -15,7 +16,7 @@ never rewritten and dangles permanently once the item lands.
 ## Why it is owed
 
 The class is already proven to rot in this repo: `we:scripts/lane-drain.mjs` cites `xnsk54v`, which resolves
-to nothing. PR #1046 (`#xdompzx`) planted roughly 60 more across `scripts/**` and `skills-src/**` in a single
+to nothing. PR #1046 (`#2942`) planted roughly 60 more across `scripts/**` and `skills-src/**` in a single
 change; three of them were RUNTIME-emitted text handed to a live reviewing model (a mandate line and two
 JSON-schema `description` fields), which is strictly worse than a stale comment — a reviewer cannot look up
 a backlog hash and should never be shown one. Those three were stripped by hand; the rest were left, because
@@ -42,6 +43,6 @@ drain's rewrite scope.
 - The remedy the message should suggest: cite the durable thing (the symbol, the invariant, the landed
   parent item) rather than the temporary id, or wait for the item's `NNN`.
 
-**Prevention for:** PR #1046 review, round 2 finding 8 (`#xdompzx`).
+**Prevention for:** PR #1046 review, round 2 finding 8 (`#2942`).
 
 **Locus:** `we:scripts/check-standards.mjs`, `we:scripts/lane-drain.mjs`

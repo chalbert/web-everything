@@ -1,4 +1,5 @@
 ---
+bornAs: xkpyfxj
 kind: task
 status: open
 dateOpened: "2026-08-05"
@@ -15,7 +16,7 @@ lens) and `we:skills-src/jury/subject-jury.workflow.js` (the juror + the red-tea
 Workflow-harness bodies that **cannot `import`**, so nothing links them to the contract they produce, and every
 return schema is `additionalProperties: true`, so a missing field raises no error anywhere.
 
-Observed on PR #1046 (`#xdompzx`): `impactIfUnfixed` was added to the `Finding` shape and demanded by the shared
+Observed on PR #1046 (`#2942`): `impactIfUnfixed` was added to the `Finding` shape and demanded by the shared
 mandate, but no producer prompt or schema asked for it. A juror got the mandate saying impact was required and a
 later, more concrete key list that omitted it. An omitted impact fails closed, so the verdict was byte-identical
 to pre-change — the whole mechanism shipped **inert**, with a green suite. #2823 hit the same seam and fixed it by
@@ -55,7 +56,7 @@ So the rule must gate the whole CONTRACT a producer restates, not only the field
    same set. This is what makes a hand-copied mirror safe to keep: it may exist (the harness cannot `import`),
    but it can no longer silently disagree.
 
-**Prevention for:** PR #1046 review, blocker 1 and round-2 finding 2 (`#xdompzx`).
+**Prevention for:** PR #1046 review, blocker 1 and round-2 finding 2 (`#2942`).
 
 **Locus:** `we:scripts/lib/jury-core.mjs`, `we:scripts/check-standards.mjs`,
 `we:scripts/workflows/review-parked-prs.mjs`, `we:skills-src/jury/subject-jury.workflow.js`
