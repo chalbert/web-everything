@@ -43,6 +43,17 @@ So the **label-scoped drain client-side path blocks a `review:changes`-only PR**
 
 [we:scripts/review-set-label.mjs](scripts/review-set-label.mjs) — the `accept` decision (~L90–95) sets `addLabel: review:accepted` with `removeLabels: [review:pending]` **only**; it does **not** remove a pre-existing `review:changes`. (The mirror `changes` decision at ~L102–108 *does* drop a stale `review:accepted`.) So the swap is mutually-exclusive on the changes→accepted direction but **not** on accept-over-changes: applying `review:accepted` to a PR that still carries `review:changes` leaves **both** labels. Observed: PR #868 kept both until manually stripped. Combined with the accept-first precedence above (`decideReviewGate` ~L524), a coexisting `review:accepted` + `review:changes` PR merges on the accepted label with the changes-request still open. Observed again on PR #1049, which MERGED 2026-08-06 carrying `[ready-to-merge, review:accepted, review:changes]`.
 
+**Observed again 2026-08-06 — PR #1062.** Taken `review:changes` → `review:accepted` through
+[we:scripts/review-set-label.mjs](scripts/review-set-label.mjs) (not a raw `gh pr edit`), and the PR ended up
+carrying **both** labels: `gh pr view 1062 --json labels` reads `[ready-to-merge, review:accepted,
+review:changes]`, `state: MERGED`. Exactly the asymmetry above — `decideSetLabel`'s `accepted` branch returns
+`removeLabels: [review:pending]` while its `changes` branch returns `removeLabels: [review:pending,
+review:accepted]`. It did **not** block the merge: `hasUnclearedReviewLabel`
+([we:scripts/lib/review-escalation.mjs](scripts/lib/review-escalation.mjs)) returns false once `review:accepted`
+is present, so the bare-orphan backstop saw nothing to hold. This is a fresh live sighting confirming the
+analysis, not new information — the ruled fix below (refuse the transition, require an explicit `rearm`) is
+still the right one and this sighting does not change it.
+
 **Fix: REFUSE the transition, do NOT strip the label.** An earlier draft of this item said "the accept branch must also strip `review:changes` so the two review-axis verdicts can never coexist". Do not build that — it puts a label-clearing power in shared code that a machine inherits:
 
 - [we:scripts/review-set-label.mjs](scripts/review-set-label.mjs) `decideSetLabel` is **single-sourced** for BOTH the human `/review` path and the automated disposition seam — [we:scripts/lib/disposition-land-seam.mjs](scripts/lib/disposition-land-seam.mjs) calls it with `to: 'accepted'`, and [we:scripts/lib/auto-land-seam.mjs](scripts/lib/auto-land-seam.mjs) shells [we:scripts/review-set-label.mjs](scripts/review-set-label.mjs) with `--to=accepted --actor="auto-land seam (enforce)"` in ENFORCE mode, with no human actor.
