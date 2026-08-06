@@ -2,13 +2,17 @@
 bornAs: xou3tl9
 kind: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-08-03"
+dateStarted: "2026-08-03"
+dateResolved: "2026-08-03"
 tags: [lane-stack, drain, safety-gate, conveyor]
 relatedTo: ["2394", "2684", "2744"]
 scope:
   - we:scripts/lane-stack.mjs
+  - we:scripts/readiness/lane-tree-guard.mjs
   - we:scripts/__tests__/lane-stack-e2e.test.mjs
+  - we:scripts/__tests__/lane-stack-tree-guard.test.mjs
 ---
 
 # lane-stack recheck/record silently certify the wrong tree when run outside the lane clone
