@@ -27,10 +27,12 @@ import {
 } from '../review-escalation.mjs';
 
 describe('isBlastRadiusPath', () => {
-  it('flags tooling / skills / hooks / CI / statute / standards-defs', () => {
+  // The agent-behaviour trees (skills + agent memory) are NOT re-asserted here: every spelling of both has one
+  // canonical home, the `#2909` describe block below. Adding a second fixture set here would mean a future
+  // narrowing fails in two places with two narratives, and the copies drift.
+  it('flags tooling / hooks / CI / statute / standards-defs', () => {
     for (const p of [
       'scripts/merge-ai-prs.mjs',
-      '.claude/skills/drain/SKILL.md',
       '.githooks/pre-push',
       '.github/workflows/ci.yml',
       'docs/agent/platform-decisions.md',
@@ -41,6 +43,125 @@ describe('isBlastRadiusPath', () => {
     for (const p of ['backlog/2171-x.md', 'demos/declarative-spa.html', 'src/_data/other.json']) {
       expect(isBlastRadiusPath(p)).toBe(false);
     }
+  });
+
+  // #2909 — #2266 relocated both agent-behaviour trees out of `.claude/` and left a symlink behind. Git tracks a
+  // symlink as a leaf blob and never DESCENDS it, so a WE diff of a rule's CONTENT always carries the source
+  // spelling. But git does emit the LINK NODE itself when the link is created / repointed / deleted, and the
+  // link spelling is a real tracked directory one repo over — so all three spellings must score.
+  describe('#2909 — all four spellings of the agent-behaviour trees score', () => {
+    it('flags the source spelling of both relocated trees', () => {
+      for (const p of [
+        'skills-src/drain/SKILL.md',
+        'skills-src/jury/subject-jury.workflow.js',
+        'agent-memory-src/index-meta.md',
+        'agent-memory-src/106-backlog_is_the_tracker.md',
+      ]) expect(isBlastRadiusPath(p)).toBe(true);
+    });
+    // The finding the first cut of this fix missed: every pattern REQUIRED a trailing slash, so a bare tree LEAF
+    // — the diff path git emits for `.claude/skills -> ../somewhere-else`, or for replacing the real `skills-src`
+    // directory with a link, each a one-line commit that swaps the whole operating-procedure tree — scored
+    // nothing at all. The trailing separator is now optional on BOTH anchors, so all four leaves match.
+    it('flags the bare tree LEAF itself — creating/repointing/deleting a link is a diff path git really emits', () => {
+      for (const p of ['.claude/skills', '.claude/agent-memory',
+                       'plateau-app/.claude/skills', 'plateau-app/.claude/agent-memory',
+                       'skills-src', 'agent-memory-src',
+                       'plateau-app/skills-src', 'frontierui/agent-memory-src']) {
+        expect(isBlastRadiusPath(p)).toBe(true);
+      }
+      // …and end-to-end: a 2-line commit repointing the link can no longer merge with no review label.
+      const r = scoreEscalation({ changedFiles: ['.claude/skills'], diffLines: 2 });
+      expect(r.escalate).toBe(true);
+      expect(r.reasons.join(' ')).toMatch(/blast-radius/);
+    });
+    // The SYMMETRY finding: `.claude/skills/` was registered while `.claude/agent-memory/` was not, so a sibling
+    // repo keeping agent memory as a REAL directory had zero coverage — the PR #1040 / PR #1043 / PR #1045 hole, relocated
+    // one repo over. Both trees now share one `.claude/(skills|agent-memory)` anchor, so neither can be
+    // registered without the other.
+    it('flags the link spelling as a REAL directory for BOTH trees, at a repo root and cross-repo', () => {
+      for (const p of ['.claude/skills/drain/SKILL.md', '.claude/agent-memory/1-rule.md',
+                       'plateau-app/.claude/skills/stress-test/SKILL.md',
+                       'plateau-app/.claude/agent-memory/1-rule.md']) {
+        expect(isBlastRadiusPath(p)).toBe(true);
+      }
+    });
+    it('the source trees escalate, so a skill/memory edit can never merge unreviewed (the PR #1040 hole)', () => {
+      for (const p of ['skills-src/drain/SKILL.md', 'agent-memory-src/index-meta.md']) {
+        const r = scoreEscalation({ changedFiles: [p], diffLines: 40 });
+        expect(r.escalate).toBe(true);
+        expect(r.reasons.join(' ')).toMatch(/blast-radius/);
+      }
+    });
+    // The exact file that regressed in PR #1040 / PR #1043 / PR #1045 — the rule that defines the land bar itself.
+    // All three merged with no `review:*` label; this case is the regression guard for that specific path.
+    it('the land-bar memory rule that regressed in PR #1040/PR #1043/PR #1045 no longer scores {escalate:false}', () => {
+      const p = 'agent-memory-src/land-on-no-regression-not-perfection.md';
+      const r = scoreEscalation({ changedFiles: [p], diffLines: 12 });
+      expect(r.escalate).toBe(true);
+      expect(r.signals.blastRadius).toContain(p);
+      expect(producerReviewLabel(r)).toBe(REVIEW_LABELS.pending); // a label at PR-open, not a silent merge
+    });
+    // SCOPE-NEUTRAL fixtures only. This case proves the REGEX is scoped — that the optional trailing separator
+    // cannot swallow a sibling name, and that the `.claude/` anchor does not sweep the whole directory. It
+    // deliberately does NOT assert anything about `.claude/settings.json`: that path registers the
+    // `PreToolUse(Edit|Write)` write-gate hooks and its `false` is a KNOWN FAIL-OPEN — the open design call is
+    // #xzsnnta (how wide the `.claude/` net should be), which #x853s5c waits on. It is NOT a ratified scoping
+    // decision. Pinning it green here would turn an open gap into an expectation a later reader reads as
+    // settled — and closing #x853s5c would then look like deleting a passing test.
+    it('stays narrow — a prose doc ABOUT memory, or a backlog item naming it, is still a leaf', () => {
+      for (const p of ['docs/agent/memory-management.md', 'backlog/1234-agent-memory-thing.md',
+                       'src/_data/agent-memory-notes.json',
+                       '.claude/skills-notes.md',     // the optional separator must not swallow a SIBLING name…
+                       '.claude/agent-memory-notes',  // …at either the file or the extension-less spelling…
+                       'skills-src-notes.md',         // …and the same on the SOURCE anchor, whose separator is
+                       'agent-memory-src-notes.md',   //    now optional too
+                       '.claude/README.md']) {        // …and the .claude/ anchor stays scoped to the two trees:
+                                                      //    an inert doc beside them is a leaf (a scope-neutral
+                                                      //    fixture on purpose — see the note above)
+        expect(isBlastRadiusPath(p)).toBe(false);
+      }
+    });
+    it('both trees travel cross-repo via the (^|/) anchor, like the other agent surfaces', () => {
+      for (const p of ['plateau-app/skills-src/x/SKILL.md', 'frontierui/agent-memory-src/1-rule.md']) {
+        expect(isBlastRadiusPath(p)).toBe(true);
+      }
+    });
+  });
+
+  // #2909 review round 4 — the roster protected the gate's CALLER but not its INVOCATION. The root
+  // `package.json` is where `"test": "vitest"` and `"check:standards"` are DEFINED, and the vitest config is
+  // where the tests that `test` runs are ENUMERATED. Both scored `false`, so a one-line PR flipping `"test"` to
+  // `"exit 0"` (or dropping `scripts/lib/__tests__/**` from the vitest `include`) merged with no `review:*`
+  // label under a green required check — green because it now ran nothing. These paths turn enforcement OFF.
+  describe('#2909 r4 — the files that DEFINE the gate score, so the gate cannot be disabled unreviewed', () => {
+    it('flags the root manifest and every vitest config spelling', () => {
+      for (const p of ['package.json',
+                       'vitest.config.ts', 'vitest.config.js', 'vitest.config.mts', 'vitest.config.mjs',
+                       'plateau-app/vitest.config.ts']) {
+        expect(isBlastRadiusPath(p)).toBe(true);
+      }
+    });
+    // The narrowness is DELIBERATE and pinned here: `^package\.json$` is ROOT-only because the root manifest is
+    // the only one whose scripts CI invokes as the required check (.github/workflows/ci.yml runs
+    // `npm run test:coverage:shard` + `npm run check:standards` at the root). The nested manifests are npm
+    // PUBLISH manifests — a `test` script in one is not a required check and disables nothing. Repo-relative
+    // scoring is what lets the `^` anchor travel: a sibling repo's PR carries ITS root manifest as the bare path
+    // `package.json`, which this pattern matches, so no `(^|/)` widening is needed for cross-repo coverage.
+    it('stays narrow — a nested publish manifest and a sibling name are leaves', () => {
+      for (const p of ['webcases/package.json', 'contracts/package.json', 'demos/loan/package.json',
+                       'package.json.bak', 'my-vitest.config.ts', 'packages/foo/index.js']) {
+        expect(isBlastRadiusPath(p)).toBe(false);
+      }
+    });
+    // …and end-to-end, the case that motivated this: a 2-line `"test": "exit 0"` PR can no longer merge silently.
+    it('a 2-line edit to the gate definition escalates and earns a review label at PR-open', () => {
+      for (const p of ['package.json', 'vitest.config.ts']) {
+        const r = scoreEscalation({ changedFiles: [p], diffLines: 2 });
+        expect(r.escalate).toBe(true);
+        expect(r.signals.blastRadius).toContain(p);
+        expect(producerReviewLabel(r)).toBe(REVIEW_LABELS.pending);
+      }
+    });
   });
 
   // #2479 (sibling to #2448/#2480) — the blast-radius surface TRAVELS with the delivery engine on extraction.
@@ -87,7 +208,8 @@ describe('isGateSelfPath — the POLICY tier of the trust chain (#2285 v1, #2448
     expect(isGateSelfPath('packages/plateau-loop/src/merge-ai-prs.mjs')).toBe(false); // engine stays agent-reviewable
   });
   it('does NOT flag other blast-radius code — those stay agent-reviewable', () => {
-    for (const p of ['scripts/pr-land.mjs', 'scripts/lane-pool.mjs', '.claude/skills/drain/SKILL.md',
+    for (const p of ['scripts/pr-land.mjs', 'scripts/lane-pool.mjs', 'skills-src/drain/SKILL.md',
+                     'agent-memory-src/index-meta.md',
                      'src/_data/blocks.json', 'scripts/lib/rebase-drop-manifest.mjs']) {
       expect(isGateSelfPath(p)).toBe(false);
     }
