@@ -11,7 +11,7 @@ tags: [review, gate, gate-self, trust-chain]
 
 # Register the review-label CLI on the trust chain's POLICY tier — it now decides what clears the gate
 
-Since #2895 gave it the clear-human target and its human-ceremony tty gate, we:scripts/review-set-label.mjs holds the one barrier between an agent and a self-cleared gate-self edit, but it is still unregistered in we:scripts/lib/gate-config.mjs — so an agent-clearable PR could delete the tty check and then self-clear the PR that deleted it. Deliberately split out of #2895 to avoid a bootstrap hazard: registering it in the same PR would have made that PR gate-self, clearable only by the tool it was adding, leaving no path at all if the tool had a bug.
+Since #2895 gave it the clear-human target, we:scripts/review-set-label.mjs is where a gate-self PR gets cleared and where the honesty tax that guards that act is enforced, but it is still unregistered in we:scripts/lib/gate-config.mjs — so a diff that loosens the clearance path scores blast-radius only and can be cleared by a converged agent verdict. Deliberately split out of #2895 to avoid a bootstrap hazard: registering it in the same PR would have made that PR gate-self, clearable only by the tool it was adding, leaving no path at all if the tool had a bug.
 
 ## Why it is policy tier — argued from the ratified statute, not from a file comment
 
@@ -29,10 +29,11 @@ and the two land seams) routes to the sized independent committee at `review:pen
 
 [`we:scripts/review-set-label.mjs`](scripts/review-set-label.mjs) is neither, exactly: it is a **writer / acting
 seam**. It does not *derive* whether the gate fires, and it is not the declarative spec of the gate — it is the
-one place the clearance is *performed*, and since #2895 it owns the `clear-human` target and the human ceremony.
-The argument for the leash side is that "what may clear `review:human`, and on what confirmation" is a policy
-statement, and a behaviour-preserving-looking diff here can still delete the ceremony without reddening the
-conformance suite (which does not cover this file). The argument for the derivation side is #2771's own reason
+one place the clearance is *performed*, and since #2895 it owns the `clear-human` target and the honesty tax
+(`--actor` and `--reason` mandatory, and a durable comment that states what the record does and does not prove).
+The argument for the leash side is that "what may clear `review:human`, and on what stated record" is a policy
+statement, and a behaviour-preserving-looking diff here can still delete those requirements without reddening
+the conformance suite (which does not cover this file). The argument for the derivation side is #2771's own reason
 for the split: any change that alters the gate's *behaviour* necessarily reddens conformance and forces a
 contract diff — a property that does NOT hold here, which is precisely why this file needs its own answer rather
 than an analogy.
@@ -41,16 +42,18 @@ than an analogy.
 fires on any `isPolicyCorePath`, so simply adding the entry produces `review:human` for a diff to this file.
 Once #2785 (the implementation of #2771, `status: open`) lands, `humanRequired` narrows to the `POLICY_SPEC`
 basenames — and a bare `tier: 'policy'` registration would then STOP forcing a human. So this item must either
-(a) place the file in `POLICY_SPEC` and record the #2771-shaped reason (the ceremony is a leash statement, and
-conformance cannot catch its removal), or (b) register it `tier: 'policy'` for the escalation/care signal only,
-and cover the ceremony with a conformance-suite case so the derivation-code route is honest. Pick one
-explicitly; do not let #2785's landing silently change the answer.
+(a) place the file in `POLICY_SPEC` and record the #2771-shaped reason (what may clear `review:human` is a
+leash statement, and conformance cannot catch its loosening), or (b) register it `tier: 'policy'` for the
+escalation/care signal only, and cover the `clear-human` preconditions with a conformance-suite case so the
+derivation-code route is honest. Pick one explicitly; do not let #2785's landing silently change the answer.
 
 ## The loop this closes
 
-Today an agent-authored PR deleting the `decideHumanCeremony` tty check scores `blast-radius` only
-(`humanRequired: false`), so a converged agent verdict can clear it. Once merged, the same agent can clear any
-gate-self PR — including the one that removed the check.
+Today an agent-authored PR that drops the `clear-human` preconditions — the `--actor`/`--reason` requirement, or
+the `allowClearHuman` opt-in — scores `blast-radius` only (`humanRequired: false`), so a converged agent verdict
+can clear it. Once merged, the same agent can clear any gate-self PR, including the one that loosened the path.
+The honesty tax is not a barrier (#2895 deferred the unforgeable signal), but it is the record every later
+reader relies on, and nothing currently makes weakening it expensive.
 
 Verified on the #2895 lane before the split: adding the entry flips `isGateSelfPath` on
 [`we:scripts/review-set-label.mjs`](scripts/review-set-label.mjs) to `true`, and the PR's own reasons to

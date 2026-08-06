@@ -11,7 +11,7 @@ tags: [gate, review, testing, prevention]
 
 # Enum-totality over the review-label target set for anything that projects or renders per target
 
-PR #1056's comment-size pre-flight hardcoded one target and under-counted another by 132 chars, which can leave a PR accepted with no reviewed-sha marker and the staleness gate silently disarmed.
+PR #1056's comment-size pre-flight hardcoded one target and under-counted another, which can leave a PR accepted with no reviewed-sha marker and the staleness gate silently disarmed.
 
 Prevention (c) of three carved out of the round-1 review of **PR #1056** (#2895's implementation), from finding
 **M2**. The instance is fixed in that PR (`projectVerdictCommentLength` is total over `REVIEW_LABEL_TARGETS`,
@@ -23,10 +23,11 @@ with a per-member test); the CLASS is not.
 discipline is owed to the review-label **TARGET** set — `accepted`, `changes`, `rearm`, `clear-human` — because
 a per-target renderer or projection that silently covers only one member fails in the worst direction:
 
-> the `GH_COMMENT_MAX` pre-flight projected `to: 'accepted'` while a `clear-human` comment renders 132 chars
-> more chrome. A body in the 65,405–65,536 band passed the check, the label swap landed, `gh pr comment` then
-> failed on GitHub's cap, and the PR was left **`review:accepted` with no `reviewed-sha` marker** — and
-> `acceptanceCoversHead` **fails open** on a missing marker, so the staleness gate is disarmed without a sound.
+> the `GH_COMMENT_MAX` pre-flight projected `to: 'accepted'` while a `clear-human` comment renders a longer
+> heading plus its attribution block. A body just under the cap passed the check, the label swap landed,
+> `gh pr comment` then failed on GitHub's cap, and the PR was left **`review:accepted` with no `reviewed-sha`
+> marker** — and `acceptanceCoversHead` **fails open** on a missing marker, so the staleness gate is disarmed
+> without a sound.
 
 The failure is not "a wrong number"; it is a partial swap that the module's own comment (PR #1005) says must
 never happen.

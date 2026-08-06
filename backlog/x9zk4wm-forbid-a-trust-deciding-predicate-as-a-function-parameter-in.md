@@ -11,30 +11,29 @@ tags: [gate, security, review, prevention]
 
 # Forbid a trust-deciding predicate as a function parameter in the review-label module
 
-PR #1056 shipped the gate-self ceremony as an injected hook on an exported function whose return value was trusted verbatim, so any importer could pass a stub returning allowed:true.
+A caller may declare a capability, but must never be able to supply a verdict — an exported gate function that takes its trust decision as a parameter has moved that decision into the caller's data.
 
 Prevention (b) of three carved out of the round-1 review of **PR #1056** (#2895's implementation), from finding
-**B2**. The instance is fixed in that PR; the CLASS is not, which is why this is filed.
+**B2**. **This is a general rule, not a bug report**: the code that prompted it no longer exists anywhere — the
+gate-self ceremony was deleted outright when #2895 ruled the unforgeable actor signal deferred. The shape is
+filed because it is easy to reintroduce and expensive when it lands.
 
 ## The class
 
-`runReviewLabelCli` is `export`ed and took `humanCeremony` as a config parameter, then trusted its return value
-verbatim. That made "only the CLI can clear a gate-self PR" a property of **caller discipline** rather than of
-module scope, and an importer could write:
+**A predicate that decides trust must not be reachable through the caller's data.** A caller may declare a
+CAPABILITY ("I am the operator-run CLI") — a boolean, which cannot carry an answer. It must never supply the
+VERDICT ("the check passed") — a function, whose return value the callee then trusts.
 
-```js
-import('./scripts/review-set-label.mjs').then((m) => m.runReviewLabelCli({
-  argv: ['1048', '--repo=o/n', '--to=clear-human'],
-  humanCeremony: () => ({ allowed: true, reason: 'ok' }),
-}));
-```
+The instance that named the shape: an earlier cut of `runReviewLabelCli` (exported) took the gate-self ceremony
+as a `humanCeremony` config parameter and trusted its return verbatim, so an importer could pass
+`() => ({ allowed: true })` and clear the PR **and** post a durable comment falsely asserting a human confirmed
+it. That is worse than the dead end #2895 set out to fix: the old bypass left an unattributed raw `gh` edit;
+this one manufactures a positive audit record. The sanctioned shape that replaced it, and that survives today,
+is the `allowClearHuman` boolean — a capability opt-in, with no verdict in it.
 
-— clearing the PR **and** posting a durable comment falsely asserting a human confirmed it at a terminal. That
-is worse than the dead end #2895 set out to fix: the old bypass left an unattributed raw `gh` edit; this one
-manufactures a positive audit record.
-
-The general shape: **a predicate that decides trust must not be reachable through the caller's data.** A caller
-may declare a capability ("I am an interactive CLI") but must never supply the verdict ("the human said yes").
+Note the rule is about the SHAPE, not about how strong the gate is. `allowClearHuman` is only an accident
+guard (#2895 accepted that an importer who wants the target can pass it), and the rule still binds: a weak
+guard that can be forged into a positive audit record is strictly worse than a weak guard that cannot.
 
 ## The guard
 
@@ -52,4 +51,5 @@ weakening it to fit.
 
 - `check:standards` errors when the review-label module grows a trust-deciding function parameter, with a
   message naming #1056 B2 and pointing at the `allowClearHuman` boolean as the sanctioned shape.
-- A test pins the rule against a fixture that reintroduces the injected hook.
+- A test pins the rule against a fixture that introduces an injected verdict hook (the rule must go red on the
+  shape, not on the specific `humanCeremony` name, which no longer appears in the tree).

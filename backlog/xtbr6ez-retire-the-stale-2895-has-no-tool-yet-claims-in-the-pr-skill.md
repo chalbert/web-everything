@@ -1,8 +1,10 @@
 ---
 kind: task
-status: open
-blockedBy: ["2895"]
+status: resolved
+dateResolved: "2026-08-06"
+relatedTo: ["2895"]
 dateOpened: "2026-08-06"
+graduatedTo: none
 scope:
   - we:skills-src/pr/SKILL.md
   - we:agent-memory-src/pr-land-dogfood-mechanics.md
@@ -35,6 +37,15 @@ one of them changes agent behaviour because of it.
 - None of the three asserts that the gate-self clearance has no tool, and `/pr`'s park-label choice no longer
   keys off #2895's status.
 - The guard's notice lists `clear-human` alongside the other targets.
-- The claim about what the terminal check defends against is CITED, not restated —
-  `we:scripts/review-set-label.mjs#decideHumanCeremony` is its single home (#1056 finding M1). Adding a fourth
-  paraphrase of it is the failure this item must not repeat.
+- No site claims the clearance is something an agent cannot do. #2895 ruled the unforgeable actor signal
+  DEFERRED, so what holds the tier is the explicit-instruction rule plus the honesty tax — say that, in the one
+  or two lines it takes, and do not paraphrase a guarantee that does not exist. Adding a fourth over-claim is
+  the failure this item must not repeat.
+
+## Resolved 2026-08-06 — folded into #2895's own PR (#1056)
+
+The operator originally scoped #1056 to its own file set, which is why these three were carved out. On the fix
+pass they were done there instead: leaving them would have shipped #2895's tool while `/pr` still routed
+gate-self diffs to `review:pending` on the strength of "#2895 is open" — a live weakening of the gate, not just
+stale prose. All three sites now describe `clear-human` as it actually is: it exists, it requires `--actor` and
+`--reason`, and nothing in it verifies that a human ran it.

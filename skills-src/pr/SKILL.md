@@ -89,13 +89,16 @@ first sweep.
        non-author independence is a NORM you honour, not a predicate that runs. The reviewer-id check is
        build-pending on the OPEN #2785 (`docs/agent/platform-decisions.md`,
        `#fix-review-convergence-independent-root-cause`, says so in as many words).
-     - `review:human` — human-ceremony-only, and its clearance act **has no tool yet** (#2895, `status: open`):
-       `decideSetLabel` refuses `→ review:accepted` whenever `review:human` is present, unconditionally, with no
-       actor/human parameter that satisfies it (INVARIANT 2). A `check:standards` rule —
-       `checkReviewLabelSingleHome` in [`we:scripts/lib/review-skill-guard.mjs`](../../../scripts/lib/review-skill-guard.mjs),
-       #2882 — also stops the docs in its scope (`skills-src/review/`, `docs/agent/`) from prescribing the
-       raw-`gh` workaround. `skills-src/review/SKILL.md` says it plainly: until #2895 lands, stop and hand the
-       decision to the operator. So reach for `review:human` only when that is genuinely what you want.
+     - `review:human` — the gate-self tier. `decideSetLabel` refuses `→ review:accepted` whenever `review:human`
+       is present, unconditionally (INVARIANT 2); the ONE thing that clears it is the separate `--to=clear-human`
+       target (#2895), which requires `--actor` and a `--reason` quoting the operator's instruction. A
+       `check:standards` rule — `checkReviewLabelSingleHome` in
+       [`we:scripts/lib/review-skill-guard.mjs`](../../../scripts/lib/review-skill-guard.mjs), #2882 — also stops
+       the docs in its scope (`skills-src/review/`, `docs/agent/`) from prescribing the raw-`gh` workaround.
+       **Nothing verifies that a human ran `clear-human`** — #2895 ruled that signal deferred — so what holds the
+       tier is the rule in `skills-src/review/SKILL.md`: you may run it only on an explicit in-conversation
+       operator instruction naming that PR. Park `review:human` whenever the diff is genuinely gate-self; do not
+       downgrade it to `review:pending` to make the clearance easier.
      The `--label=<name>` trap and the measured `--no-wait` cost: [[pr-land-dogfood-mechanics]].
    - **The `ready-to-merge` label is applied ONLY after the required checks are green (#2196/#2199)** — never
      eagerly at open, so a red PR never enters the drain's queue. In the default land path (above) and the

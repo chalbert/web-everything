@@ -17,12 +17,18 @@
  * actually does it. Before this, #2882 closed the raw label edit without opening a replacement, so the single
  * act the `review:human` tier exists to enable had no sanctioned way to perform it and the operator was pushed
  * to an unrecorded `gh` call — losing the `reviewed-sha` stamp and the attributed comment. `clear-human` is the
- * ONLY target that removes `review:human`; it is reachable only from this file's own CLI block (the ceremony is
- * module-private and the opt-in is not injectable), and it demands a confirmation typed at a terminal.
- * `accepted` stays unconditionally refused on a `review:human` PR — see `decideSetLabel` for why this is a
- * target rather than a flag. WHAT THE TERMINAL CHECK IS AND IS NOT is stated ONCE, at
- * `we:scripts/review-set-label.mjs#decideHumanCeremony`; every other mention of it in this repo cites that
- * anchor rather than restating it. Do not paraphrase it here.
+ * ONLY target that removes `review:human`, and `accepted` stays unconditionally refused on a `review:human` PR
+ * — see `decideSetLabel` for why this is a target rather than a flag.
+ *
+ * WHAT THIS TARGET DOES NOT DO, stated up front so nobody re-derives it: it does NOT verify that a human ran
+ * it. #2895 RULED that the unforgeable actor signal is DEFERRED — no local construct survives an agent with
+ * shell access on the same machine (a flag is trivially passed; a local console's token is scrapeable; a tty
+ * check is satisfied by `script`/`expect`). So this ships as the raw command with better manners, and the
+ * manners are the point: the `reviewed-sha` stamp, an attributed comment, a stated reason, one documented path
+ * instead of an ad-hoc paste. The mitigation that replaces the missing signal is the HONESTY TAX — `--actor`
+ * and `--reason` are both REQUIRED, so misuse takes a lie rather than a silence, and every surface that reports
+ * a clearance says what the record proves (the sanctioned path was followed) and not what it does not (that a
+ * human followed it). The durable fix is #2946 (a hardware human-presence gesture), filed `someday`.
  *
  * Split mirrors `we:scripts/review-detail.mjs`: a PURE decider that takes the already-observed labels and
  * returns the swap, plus a thin impure CLI that does the `gh` calls and prints. REUSES
@@ -31,9 +37,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { resolve, sep } from 'node:path';
-import { writeFileSync, unlinkSync, readFileSync, openSync, readSync, closeSync } from 'node:fs';
-import { isatty } from 'node:tty';
-import { createHash } from 'node:crypto';
+import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker } from './lib/review-escalation.mjs';
@@ -88,9 +92,10 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
   // the clearance is impossible to reach by fumbling a flag on the ordinary accept path. A member added to a
   // single-sourced decider is hard to remove later, so the narrower shape wins.
   //
-  // The human-ceremony gate itself is NOT here: it is inherently impure (a real terminal), so it lives in
-  // `runReviewLabelCli` behind `decideHumanCeremony`. This core decides only WHAT the swap is; `fixedTo` keeps
-  // the agent callers (the conveyor fix agent pins `rearm`) from ever naming this target — pinned by a test.
+  // Nothing here checks WHO is asking, and nothing anywhere else does either — #2895 ruled the unforgeable
+  // actor signal deferred (see the file header). What guards this target is the honesty tax in
+  // `runReviewLabelCli` (`--actor` + `--reason` required) plus the `allowClearHuman` opt-in, which stops a
+  // caller pinned to another target from stumbling into it. Both are accident guards, not barriers.
   if (to === 'clear-human') {
     if (!isHuman) {
       return {
@@ -108,7 +113,7 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
       // awaiting review or as a live bounce. `presentRemoveLabels` narrows this superset to what the PR carries.
       removeLabels: [REVIEW_LABELS.human, REVIEW_LABELS.pending, REVIEW_LABELS.changes],
       keepsHuman: false,
-      reason: 'gate-self CLEARED by a human — review:human dropped, review:accepted added; drain may merge',
+      reason: 'gate-self CLEARED via --to=clear-human — review:human dropped, review:accepted added; drain may merge',
     };
   }
 
@@ -175,77 +180,6 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
 }
 
 /**
- * we:scripts/review-set-label.mjs#decideHumanCeremony — the PURE half of the #2895 human-ceremony gate: given
- * whether stdin is a terminal and what was typed at the prompt, may this `clear-human` proceed? Pure, so the
- * barrier is unit-testable without a pty.
- *
- * ═══ THE CANONICAL STATEMENT OF WHAT THIS BARRIER IS AND IS NOT ═══
- * This is the SINGLE HOME of that claim. `we:skills-src/review/SKILL.md`, this module's header, and #2895's
- * resolution note all CITE `we:scripts/review-set-label.mjs#decideHumanCeremony` instead of restating it —
- * PR #1056 review, M1: the claim was written out in near-verbatim copies in four places, so correcting the one
- * fact below meant editing all of them in lockstep, and the first cut of it was wrong in every copy.
- *
- * What it IS: a deliberate SPEED BUMP. In a solo constellation the agent runs on the operator's machine, with
- * the operator's PAT, with read access to the whole filesystem — so a secret file, an env var, or a GitHub
- * identity check are ALL forgeable by an agent, and login identity is already useless as an independence signal
- * (#2439: every commit is the same account). An agent shell is normally launched with no controlling terminal,
- * so `isatty` is the cheapest available signal that a person is present, and it costs the operator one typed
- * line. The threat model it actually covers is "an eager agent must not clear its own homework INCIDENTALLY" —
- * it must not be able to do it by extending the flow it is already running.
- *
- * What it is NOT: a structural barrier, and NOT cryptographic. `isatty` is a property of the file DESCRIPTOR,
- * not of who is behind it. An agent that DELIBERATELY allocates a pseudo-terminal defeats it outright, with
- * tools that ship on the box: `script -q /dev/null node …` and a `python3` `pty.fork()` were both verified to
- * satisfy this check for a byte-identical probe of the read path (PR #1056 review, M1 — and the pty test in
- * `we:scripts/__tests__/review-clear-human-pty.test.mjs` demonstrates exactly that, on purpose). An adversary
- * holding the machine wins regardless. Do not write, anywhere, that an agent "cannot" run this.
- *
- * INTERIM BY DESIGN: the durable fix is the UI-with-auth successor, where "the human did it" is a property of
- * an authenticated session rather than of the input device. Until that exists the terminal is the only place
- * where "the operator did it" and "an agent did it" differ AT ALL, so this is a way-station, not the
- * destination.
- * ═════════════════════════════════════════════════════════════════
- *
- * The typed token is the PR NUMBER, not `y`. Clearing a gate-self PR is the highest-consequence act in the
- * review system, so a fat-finger on a confirm prompt must not be able to perform it — the operator has to name
- * the PR they mean. Comparison is exact after trimming surrounding whitespace.
- *
- * `readError` is the DISTINCT third outcome (PR #1056 review, B1): when the read from the terminal itself
- * fails, the refusal must say so rather than falling through to the mismatch message, which would blame the
- * operator's typing for a bug in the tool. That is precisely how B1 hid — an `EAGAIN` was swallowed into an
- * empty answer and reported as "confirmation did not match".
- * @param {{isTTY?:boolean, typed?:string, pr:(string|number), readError?:string}} o
- * @returns {{allowed:boolean, reason:string}}
- */
-export function decideHumanCeremony({ isTTY = false, typed = '', pr, readError = '' } = {}) {
-  if (!isTTY) {
-    return {
-      allowed: false,
-      reason:
-        'clear-human needs a terminal — stdin is not a tty, so this is not an interactive human ceremony. ' +
-        'Run it yourself in a terminal (an agent shell normally has none; a pipe does not count).',
-    };
-  }
-  if (readError) {
-    return {
-      allowed: false,
-      reason:
-        `could not read the confirmation from the terminal (${readError}) — nothing was changed. ` +
-        'This is a fault in the tool, not a wrong answer; re-run it directly in a terminal.',
-    };
-  }
-  const want = String(pr).trim();
-  const got = String(typed == null ? '' : typed).trim();
-  if (got !== want) {
-    return {
-      allowed: false,
-      reason: `confirmation did not match — expected the PR number "${want}", got "${got}"; nothing was changed`,
-    };
-  }
-  return { allowed: true, reason: `confirmed by a human at a terminal for PR #${want}` };
-}
-
-/**
  * we:scripts/review-set-label.mjs#presentRemoveLabels — narrow a decision's `removeLabels` to only those the PR
  * ACTUALLY carries, so `gh pr edit --remove-label` is never handed an absent label (which errors). Pure — the
  * CLI intersects the decider's superset of removals against the observed labels before shelling out. Order and
@@ -271,16 +205,16 @@ export function presentRemoveLabels(removeLabels, currentLabels) {
  * PURE `decideSetLabel` above owns every invariant, so this harness only moves bytes. Fails closed — every input
  * is validated BEFORE any gh mutation, and any gh error exits non-zero without a partial swap.
  *
- * `allowClearHuman` is the ONE opt-in for the #2895 gate-self clearance, and it is deliberately a DUMB BOOLEAN
- * rather than an injected hook (PR #1056 review, B2). The first cut took the ceremony itself as a parameter
- * (`humanCeremony`) and trusted its return value verbatim, so any agent could `import()` this module and pass
- * `() => ({ allowed: true })` — clearing a gate-self PR AND manufacturing a durable comment falsely asserting a
- * human confirmed it at a terminal. That is strictly worse than the dead end #2895 set out to fix, which at
- * least left an unattributed raw `gh` edit. The ceremony is now module-private and non-injectable; a caller can
- * only say "I am a human-operated CLI, run the ceremony", never "the ceremony passed".
+ * `allowClearHuman` is the opt-in for the #2895 gate-self clearance. It is an ACCIDENT GUARD and nothing more:
+ * it keeps a caller that is here for another target — the conveyor fix agent, an auto-review shim — from
+ * naming `clear-human` by fumbling an argv, and it makes any caller that wants the clearance say so in its own
+ * source. It is NOT a trust boundary: it is an ordinary parameter of an exported function, so an importer that
+ * wants it can pass it. That is accepted, because #2895 ruled the unforgeable signal deferred (file header);
+ * the mitigation is the honesty tax below, not this boolean. It is deliberately a DUMB BOOLEAN rather than an
+ * injected predicate — a caller may declare a capability, never supply a verdict (PR #1056 review, B2).
  * @param {{argv?:string[], fixedTo?:string|null, defaultActor:string, repoOptional?:boolean, usage:string,
  *   allowClearHuman?:boolean,
- *   buildComment:(o:{to:string,actor:string,decision:object,headSha:string})=>string,
+ *   buildComment:(o:{to:string,actor:string,decision:object,headSha:string,reason:string})=>string,
  *   successResult:(o:{pr:number,to:string,decision:object,labels:string[]})=>object,
  *   refusalResult:(o:{pr:number,decision:object})=>object}} cfg
  */
@@ -298,6 +232,7 @@ export function runReviewLabelCli({
   let repo = (argv.find((a) => a.startsWith('--repo=')) || '').slice('--repo='.length);
   const actorArg = (argv.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length);
   const actor = actorArg || defaultActor;
+  const clearReason = (argv.find((a) => a.startsWith('--reason=')) || '').slice('--reason='.length).trim();
   const pr = argv.find((a) => /^\d+$/.test(a));
   const to = fixedTo || (argv.find((a) => a.startsWith('--to=')) || '').slice('--to='.length);
 
@@ -311,17 +246,35 @@ export function runReviewLabelCli({
   if (repo ? !REPO_RE.test(repo) : !repoOptional) {
     fail('invalid --repo — expected <owner/name>');
   }
-  // #2895 — `clear-human` is reachable ONLY when the caller opts in with `allowClearHuman`, and the only caller
-  // that does is this file's own CLI block below. Checked UNCONDITIONALLY, at the point of use, BEFORE any gh
-  // call — PR #1056 review, m1: folding it into the `!fixedTo &&` argv-validation branch below meant a caller
-  // pinning `fixedTo: 'clear-human'` skipped validation entirely and reached a ceremony that was never wired,
-  // blowing up with a TypeError after `gh pr view` instead of refusing through the `{"error":…}` JSON contract
-  // every other refusal here honours.
-  if (to === 'clear-human' && !allowClearHuman) {
-    fail(
-      "--to=clear-human is reachable only from review-set-label.mjs's own CLI, which an operator runs at a "
-      + 'terminal (#2895) — this caller did not opt in, and nothing was changed',
-    );
+  // #2895 — every `clear-human` precondition is checked HERE: unconditionally, at the point of use, BEFORE any
+  // gh call, and refusing through the `{"error":…}` JSON contract every other refusal here honours. Not folded
+  // into the `!fixedTo &&` argv branch below — PR #1056 review, m1: a caller pinning `fixedTo: 'clear-human'`
+  // skipped that branch entirely and blew up later with a TypeError instead of a clean refusal.
+  if (to === 'clear-human') {
+    // The opt-in. An accident guard — see `allowClearHuman` above for exactly how far it goes (not far).
+    if (!allowClearHuman) {
+      fail(
+        '--to=clear-human is for the operator-run CLI in review-set-label.mjs (#2895) — this caller did not '
+        + 'opt in, and nothing was changed',
+      );
+    }
+    // THE HONESTY TAX (#2895). The unforgeable actor signal is deferred, so the only thing standing between a
+    // clearance and a fabricated one is that the record has to be WRITTEN. Both fields are mandatory and both
+    // land in the durable comment: a clearance nobody authorised now requires inventing a name AND inventing a
+    // quoted instruction, which is a far brighter line than quietly adding a label. `we:skills-src/review/`
+    // `SKILL.md` binds the agent side: `--reason` must quote the operator's in-conversation instruction.
+    if (!actorArg.trim()) {
+      fail(
+        '--to=clear-human requires an explicit --actor=<name> — the clearance record must name who asked for '
+        + 'it, and the default actor is not an answer (#2895)',
+      );
+    }
+    if (!clearReason) {
+      fail(
+        '--to=clear-human requires --reason=<stated reason> — quote the operator instruction authorising this '
+        + 'clearance; it is posted verbatim in the durable comment (#2895)',
+      );
+    }
   }
   const targets = allowClearHuman ? "'accepted', 'changes', or 'clear-human'" : "'accepted' or 'changes'";
   const targetOk = to === 'accepted' || to === 'changes' || to === 'clear-human';
@@ -368,26 +321,9 @@ export function runReviewLabelCli({
     process.exit(1);
   }
 
-  // we:scripts/review-set-label.mjs#runReviewLabelCli — render the durable comment ONCE, here, before the
-  // ceremony. #1056 review, m2: the operator was being shown the label swap but not the `--actor` name or the
-  // `--body-file` write-up, while the comment their confirmation produces says "Cleared by <actor>" over an
-  // agent-authored body. Rendering it up front means the prompt can show the EXACT bytes that will be posted,
-  // not a reconstruction that could drift from them.
-  const commentBody = buildComment({ to, actor, decision, headSha });
-
-  // we:scripts/review-set-label.mjs#runReviewLabelCli — the #2895 HUMAN CEREMONY, run AFTER the pure decision
-  // (so the operator is shown the real swap, not a guess) and BEFORE any gh mutation (so a refused or
-  // mistyped ceremony changes nothing). Only `clear-human` reaches it; every other target is untouched. The
-  // ceremony is called DIRECTLY, not through a caller-supplied hook — see `allowClearHuman` above for why.
-  if (to === 'clear-human') {
-    const verdict = promptHumanCeremony({ pr, repo, decision, headSha, currentLabels, actor, commentBody });
-    if (!verdict.allowed) {
-      process.stdout.write(`${JSON.stringify(refusalResult({ pr: Number(pr), decision: {
-        ...decision, allowed: false, reason: verdict.reason,
-      } }))}\n`);
-      process.exit(1);
-    }
-  }
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — render the durable comment ONCE, here, so the bytes
+  // that are size-checked, written and posted are the same bytes.
+  const commentBody = buildComment({ to, actor, decision, headSha, reason: clearReason });
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — apply the swap: add the verdict label, remove the stale
   // ones (argv array, no shell). Intersect the decision's removals with the labels the PR ACTUALLY carries so
@@ -461,25 +397,30 @@ export function runReviewLabelCli({
  *
  * The marker is omitted on `changes`, and when the head SHA is unavailable (`buildReviewedShaMarker` → '') the
  * gate fails open rather than reading a garbage marker.
- * @param {{to:string, actor:string, headSha?:string, body?:string}} o
+ * @param {{to:string, actor:string, headSha?:string, body?:string, reason?:string}} o
  * @returns {string}
  */
-export function buildVerdictComment({ to, actor, headSha = '', body = '' } = {}) {
+export function buildVerdictComment({ to, actor, headSha = '', body = '', reason = '' } = {}) {
   // #2895 — `clear-human` stamps the marker for the same reason `accepted` does: it IS an acceptance (it adds
   // review:accepted), so the drain must be able to refuse it later if the head advances past the cleared tree.
   const marker = to === 'accepted' || to === 'clear-human' ? buildReviewedShaMarker(headSha) : '';
   const text = stripReviewedShaMarkers(typeof body === 'string' ? body : '');
   const heading = to === 'clear-human'
-    ? '✅ review — gate-self CLEARED by a human'
+    ? '✅ review — `review:human` cleared via the sanctioned path'
     : to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested';
-  // The attribution line is the point of the whole item: a raw `gh` call recorded none of this. On the
-  // gate-self path it says explicitly that a human performed the terminal ceremony, so the record distinguishes
-  // "a human cleared it" from "a reviewer accepted it" without the reader having to infer it from the label set.
+  // #2895 — the attribution is the point of the whole item: a raw `gh` call recorded none of this. On the
+  // gate-self path it must state EXACTLY what the record proves and no more. It proves the sanctioned path was
+  // followed; it does NOT prove a human followed it, because `--actor` and `--reason` are free text and nothing
+  // here verifies either. Saying so in the durable record is the honesty tax, and it is not optional: a reader
+  // who trusts this further than it earns is the failure mode the deferral of the actor signal creates.
   const attribution = to === 'clear-human'
-    ? `Cleared by ${actor} — confirmed at a terminal via \`review-set-label.mjs --to=clear-human\` (#2895). `
-      + 'A gate-self edit is human-ceremony-only: the clearance ran through the interactive ceremony rather '
-      + 'than a raw label edit, so this record exists at all. The terminal check is a speed bump, not proof of '
-      + 'a human — see `we:scripts/review-set-label.mjs#decideHumanCeremony`.'
+    ? `Cleared by ${actor} via \`review-set-label.mjs --to=clear-human\` (#2895).\n\n`
+      + `> ${String(reason || '').split('\n').join('\n> ')}\n\n`
+      + 'What this record proves: the clearance went through the sanctioned tool, so the label swap, the '
+      + '`reviewed-sha` stamp and this comment exist and agree. What it does NOT prove: that a human performed '
+      + 'it. The actor name and the reason above are free text and nothing verifies who supplied them — #2895 '
+      + 'deferred the unforgeable actor signal (no local construct survives an agent with shell access on the '
+      + 'same machine), and #2946 is the durable fix.'
     : `Recorded by ${actor} via the Plateau Loop review console.`;
   return [
     heading,
@@ -500,6 +441,9 @@ export function buildVerdictComment({ to, actor, headSha = '', body = '' } = {})
 /** GitHub's hard cap on an issue/PR comment body. Checked BEFORE the label swap — see the CLI block below. */
 export const GH_COMMENT_MAX = 65536;
 
+/** Who the durable comment is attributed to when `--actor` is absent. `clear-human` REFUSES this default. */
+export const DEFAULT_ACTOR = 'loop-console operator';
+
 export function stripReviewedShaMarkers(body) {
   return String(body || '')
     .replace(/<!--\s*reviewed-sha:\s*([0-9a-fA-F]{7,40})\s*-->/g, '`reviewed-sha: $1` (quoted, not this verdict\'s)')
@@ -508,22 +452,23 @@ export function stripReviewedShaMarkers(body) {
 
 /**
  * we:scripts/review-set-label.mjs#projectVerdictCommentLength — the WORST-CASE rendered length of the durable
- * comment for a caller-supplied body, taken over EVERY member of `REVIEW_LABEL_TARGETS` (with the longest
- * plausible actor and a full-length SHA). PURE.
+ * comment, taken over EVERY member of `REVIEW_LABEL_TARGETS` with the ACTUAL caller-supplied variable-length
+ * inputs (body, actor, reason) and a full-length SHA. PURE.
  *
- * Total over the target set on purpose (PR #1056 review, M2). The first cut projected `to: 'accepted'` only,
- * while `clear-human` renders a longer heading plus its attribution line — 132 chars more chrome. A body in the
- * 65,405–65,536 band therefore PASSED the pre-flight, the label swap landed, and `gh pr comment` then failed on
- * GitHub's cap, leaving an ACCEPTED PR with no `reviewed-sha` marker. `acceptanceCoversHead` fails OPEN on a
+ * Total over the target set, and over every unbounded input, on purpose (PR #1056 review, M2). The first cut
+ * projected `to: 'accepted'` only, while `clear-human` renders a longer heading plus its attribution — a body in
+ * the 65,405–65,536 band therefore PASSED the pre-flight, the label swap landed, and `gh pr comment` then failed
+ * on GitHub's cap, leaving an ACCEPTED PR with no `reviewed-sha` marker. `acceptanceCoversHead` fails OPEN on a
  * missing marker, so that silently disarms the staleness gate — exactly the partial-swap state the pre-flight
- * exists to prevent. Over-estimating is the safe direction: the cost is asking the operator to trim a body that
- * would just barely have fitted under a shorter target.
- * @param {string} body - the caller-supplied write-up (`--body-file` contents)
+ * exists to prevent. `actor` and `reason` are argv and therefore unbounded too, so they are projected from what
+ * was actually passed rather than from a fixed-width placeholder that a long one would overrun. Over-estimating
+ * is the safe direction: the cost is asking the operator to trim a body that would just barely have fitted.
+ * @param {{body?:string, actor?:string, reason?:string}} o - the caller-supplied variable-length inputs
  * @returns {number} the largest length any target renders to
  */
-export function projectVerdictCommentLength(body) {
+export function projectVerdictCommentLength({ body = '', actor = '', reason = '' } = {}) {
   return Math.max(...REVIEW_LABEL_TARGETS.map((to) => buildVerdictComment({
-    to, actor: 'x'.repeat(64), headSha: 'f'.repeat(40), body,
+    to, actor, headSha: 'f'.repeat(40), body, reason,
   }).length));
 }
 
@@ -544,6 +489,10 @@ if (IS_CLI) {
   const bareIdx = argvRest.indexOf('--body-file');
   if (bareIdx !== -1) fail('use --body-file=<path> (the =-form) — the space-separated form is not accepted');
   const bodyFileArg = (argvRest.find((a) => a.startsWith('--body-file=')) || '').slice('--body-file='.length);
+  // The other two variable-length inputs the durable comment renders. Read here ONLY so the size pre-flight
+  // below can be a real upper bound (#1056 M2) — `runReviewLabelCli` re-parses them and owns their validation.
+  const projActor = (argvRest.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length) || DEFAULT_ACTOR;
+  const projReason = (argvRest.find((a) => a.startsWith('--reason=')) || '').slice('--reason='.length);
   let verdictBody = '';
   if (bodyFileArg) {
     // Constrain the path: this file's contents are published to a PUBLIC PR and cannot be unpublished. A stale
@@ -558,119 +507,23 @@ if (IS_CLI) {
     if (!verdictBody.trim()) fail(`--body-file=${bodyFileArg} is empty — pass the verdict write-up, or omit the flag for the one-line record`);
     // GitHub rejects a comment body over 65536 chars. Catching it here means the label is never applied against
     // a comment that cannot post; catching it later would leave exactly the accepted-without-a-marker state above.
-    // Projected over the WHOLE target set, not the `accepted` shape alone — see projectVerdictCommentLength.
-    const projected = projectVerdictCommentLength(verdictBody);
+    // Projected over the WHOLE target set AND the actual actor/reason — see projectVerdictCommentLength.
+    const projected = projectVerdictCommentLength({ body: verdictBody, actor: projActor, reason: projReason });
     if (projected > GH_COMMENT_MAX) {
       fail(`--body-file=${bodyFileArg} renders a ${projected}-char comment, over GitHub's ${GH_COMMENT_MAX} limit — trim it (the label is not applied)`);
     }
   }
   runReviewLabelCli({
-    defaultActor: 'loop-console operator',
-    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--body-file=<path>]  (pr must be a positive integer; clear-human prompts at the terminal)',
-    buildComment: ({ to, actor, headSha }) => buildVerdictComment({ to, actor, headSha, body: verdictBody }),
+    defaultActor: DEFAULT_ACTOR,
+    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--body-file=<path>]  (pr must be a positive integer; clear-human additionally requires --actor and --reason=<stated reason>)',
+    buildComment: ({ to, actor, headSha, reason }) => buildVerdictComment({ to, actor, headSha, reason, body: verdictBody }),
     successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
     refusalResult: ({ decision }) => ({ error: decision.reason }),
-    // #2895 — ONLY this block sets the opt-in, and it is inside the `IS_CLI` guard, so `--to=clear-human` is
-    // reachable only by RUNNING this file. An importer cannot set it for a call it makes itself and cannot
-    // supply the ceremony either (it is module-private) — the conveyor fix agent (`rearm-review.mjs`) pins
-    // `fixedTo: 'rearm'` and never opts in, so the clearance stays unreachable from an agent caller even if it
-    // builds the argv by hand. Pinned by behavioural tests, not a source grep.
+    // #2895 — this block is the only caller that opts in, so a caller here for another target cannot fumble its
+    // way to `clear-human`. That is the whole claim: an accident guard, not a barrier. An importer that wants
+    // the target can pass this itself, and that is accepted — see `allowClearHuman` on `runReviewLabelCli`.
     allowClearHuman: true,
   });
-}
-
-/**
- * we:scripts/review-set-label.mjs#readTerminalLine — read EXACTLY ONE LINE, synchronously, from the controlling
- * terminal. Returns `{ line }` on success or `{ error }` with a short reason; never throws, never blames the
- * caller for its own failure.
- *
- * Both halves of this are the fix for PR #1056's B1, and both are easy to get wrong:
- *
- * 1. NEVER TOUCH `process.stdin`. Reading `process.stdin.isTTY` instantiates Node's lazy `tty.ReadStream` on
- *    fd 0 and puts that descriptor into NON-BLOCKING mode. Any synchronous read of fd 0 after that throws
- *    `EAGAIN` immediately. The first cut did exactly this — `process.stdin.isTTY` then `readFileSync(0)` — so
- *    the prompt returned instantly with an empty answer and the ceremony ALWAYS refused. Verified under a real
- *    pty on node v22.1.0. `isatty(fd)` from `node:tty` answers the same question with a bare `isatty(2)` and
- *    leaves the descriptor alone; that is why the caller uses it.
- * 2. READ ONE LINE, NOT TO EOF. `readFileSync(0)` returns only at EOF, so even with (1) fixed the operator
- *    would have had to press Ctrl-D after typing. `readSync` a byte at a time until the newline is what "read
- *    one line" actually means here.
- *
- * We open `/dev/tty` rather than reading fd 0 so this works even when stdout/stdin have been redirected, and so
- * the descriptor we read is one WE opened with default (blocking) flags. Deliberately synchronous: every other
- * step in this CLI is `execFileSync`, and an async `readline` prompt would force the whole shared harness to
- * become async for this one branch.
- */
-function readTerminalLine() {
-  let fd = -1;
-  try {
-    fd = openSync('/dev/tty', 'r');
-  } catch (e) {
-    return { error: `cannot open /dev/tty (${(e && e.code) || e})` };
-  }
-  const buf = Buffer.alloc(1);
-  let line = '';
-  try {
-    for (;;) {
-      const n = readSync(fd, buf, 0, 1, null);
-      if (n === 0) break; // EOF before a newline — take what we have
-      const ch = buf.toString('utf8');
-      if (ch === '\n') break;
-      if (ch !== '\r') line += ch;
-      if (line.length > 256) break; // a confirmation is a PR number; do not accumulate a paste
-    }
-  } catch (e) {
-    return { error: `read from /dev/tty failed (${(e && e.code) || e})` };
-  } finally {
-    try { closeSync(fd); } catch { /* best-effort */ }
-  }
-  return { line };
-}
-
-/**
- * we:scripts/review-set-label.mjs#promptHumanCeremony — the IMPURE half of the #2895 gate: show the operator the
- * swap AND the record it will produce, read one line from the terminal, and hand both facts to the pure
- * `decideHumanCeremony`. Prints to stderr so stdout stays the machine-readable JSON result the callers parse.
- *
- * MODULE-PRIVATE ON PURPOSE and never passed in as a parameter — see `allowClearHuman` on `runReviewLabelCli`
- * for why (PR #1056 review, B2). It is not exported, so no importer can substitute a stub that returns
- * `{ allowed: true }`.
- *
- * The prompt shows the ACTOR and a digest+preview of the comment body, not just the label swap (#1056 review,
- * m2): the durable record says "Cleared by <actor>" over a write-up the agent authored, so the operator has to
- * be able to see what their confirmation is attesting to. Full bodies run to tens of thousands of chars, so it
- * is a length + sha256 prefix + the first few lines rather than the whole thing.
- *
- * On a non-tty this never reads at all — `decideHumanCeremony` refuses first, so an agent invocation cannot hang
- * waiting on input that will never come. What that check does and does not prove is stated once, at
- * `we:scripts/review-set-label.mjs#decideHumanCeremony`.
- */
-function promptHumanCeremony({ pr, repo, decision, headSha, currentLabels, actor, commentBody = '' }) {
-  const isTTY = isatty(0);
-  if (!isTTY) return decideHumanCeremony({ isTTY, typed: '', pr });
-
-  const names = (Array.isArray(currentLabels) ? currentLabels : [])
-    .map((l) => (typeof l === 'string' ? l : l && l.name)).filter(Boolean);
-  const removals = presentRemoveLabels(decision.removeLabels, currentLabels);
-  const body = String(commentBody || '');
-  const digest = createHash('sha256').update(body).digest('hex').slice(0, 12);
-  const preview = body.split('\n').slice(0, 10).map((l) => `           │ ${l.slice(0, 96)}`).join('\n');
-  process.stderr.write(
-    `\nGATE-SELF CLEARANCE — the one act the review system reserves for you.\n\n`
-    + `  PR       #${pr}  (${repo})\n`
-    + `  head     ${headSha || '(unknown)'}\n`
-    + `  labels   ${names.join(', ') || '(none)'}\n`
-    + `  add      ${decision.addLabel}\n`
-    + `  remove   ${removals.join(', ') || '(none)'}\n`
-    + `  actor    ${actor}   ← the comment will read "Cleared by ${actor}"\n`
-    + `  comment  ${body.length} chars, sha256 ${digest}\n`
-    + `${preview}\n`
-    + `           └─ (first lines; the full body is posted to the PR as your attestation)\n\n`
-    + `Confirm you reviewed this tree yourself. Type the PR number (${pr}) to clear it, anything else to abort: `,
-  );
-  const { line, error } = readTerminalLine();
-  process.stderr.write('\n');
-  return decideHumanCeremony({ isTTY, typed: line || '', pr, readError: error || '' });
 }
 
 /** we:scripts/review-set-label.mjs#fail — print a machine-readable error and exit non-zero. */

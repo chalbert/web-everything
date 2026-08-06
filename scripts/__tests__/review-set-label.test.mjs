@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers, decideHumanCeremony,
+  decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers,
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
 } from '../review-set-label.mjs';
 import { parseReviewedSha } from '../lib/review-escalation.mjs';
@@ -127,13 +127,16 @@ describe('decideSetLabel — clear-human (#2895, the ONE target that drops revie
 
 });
 
-// #2895 / PR #1056 review, B2 + m1 + m3 — REACHABILITY, asserted BEHAVIOURALLY. The first cut proved this with
-// a source grep over `scripts/conveyor/rearm-review.mjs` (`expect(src).not.toMatch(/clear-human/)`), which is
-// wrong twice over: it goes red the day someone DOCUMENTS why the shim cannot reach the clearance (a change
-// that weakens nothing), and it says nothing whatsoever about any OTHER caller. What actually matters is that a
-// caller which did not opt in gets a REFUSAL through the `{"error":…}` JSON contract — so drive the harness and
-// read what it prints. Every case below refuses BEFORE the first `gh` call, so no network, no mocking.
-describe('runReviewLabelCli — clear-human is unreachable from any caller but this module CLI (#2895)', () => {
+// #2895 — the `clear-human` PRECONDITIONS, asserted behaviourally. Two separate things are pinned here and it
+// matters that they are not confused:
+//   • the `allowClearHuman` opt-in — an ACCIDENT guard. A caller that did not ask for the target gets a clean
+//     refusal instead of stumbling into it. It is NOT a trust boundary: it is an ordinary parameter, so an
+//     importer that wants it passes it, and #2895 accepted that when it deferred the unforgeable actor signal.
+//   • the HONESTY TAX — `--actor` and `--reason` are mandatory, so a clearance nobody authorised takes a
+//     fabricated name and a fabricated quote rather than a silent label add. This is the mitigation that
+//     replaces the missing signal, so its refusals are load-bearing, not cosmetic.
+// Both refuse through the `{"error":…}` JSON contract and BEFORE the first `gh` call, so no network, no mocking.
+describe('runReviewLabelCli — the clear-human preconditions (#2895)', () => {
   const CFG = {
     defaultActor: 'test',
     usage: 'usage: test',
@@ -158,81 +161,47 @@ describe('runReviewLabelCli — clear-human is unreachable from any caller but t
     return { exitCode, payload: JSON.parse(chunks.join('') || '{}') };
   }
 
-  it('an importer asking for --to=clear-human REFUSES through the JSON contract, and reaches no gh call', () => {
+  it('a caller that did not opt in REFUSES through the JSON contract, and reaches no gh call', () => {
     const { exitCode, payload } = runCli({ argv: ['1048', '--repo=o/n', '--to=clear-human'] });
     expect(exitCode).not.toBe(0);
-    expect(payload.error).toMatch(/clear-human is reachable only from/);
+    expect(payload.error).toMatch(/did not opt in/);
   });
 
   // m1 — a caller PINNING the target skipped the `!fixedTo &&`-guarded validation entirely in the first cut and
-  // hit `TypeError: humanCeremony is not a function` after `gh pr view`. It must refuse like everything else.
+  // blew up with a TypeError after `gh pr view`. Every clear-human precondition is checked at the point of use.
   it('a caller PINNING fixedTo:clear-human refuses too — not a TypeError, and not after a gh mutation', () => {
     const { exitCode, payload } = runCli({ argv: ['1048', '--repo=o/n'], fixedTo: 'clear-human' });
     expect(exitCode).not.toBe(0);
-    expect(payload.error).toMatch(/clear-human is reachable only from/);
+    expect(payload.error).toMatch(/did not opt in/);
   });
 
-  // B2 — the ceremony used to be an injected parameter whose return value was trusted verbatim, so an importer
-  // could pass `() => ({ allowed: true })` and manufacture a durable comment asserting a human cleared the PR.
-  // It is module-private now: a stray `humanCeremony` in the config is inert, and the refusal still stands.
-  it('a forged ceremony in the config buys nothing — the hook is not a parameter any more', () => {
+  // THE HONESTY TAX, refusal 1 of 2. The default actor must NOT satisfy it: the record has to name whoever
+  // asked, and 'loop-console operator' names nobody.
+  it('REFUSES an opted-in clear-human with no --actor — the default actor is not an answer', () => {
     const { exitCode, payload } = runCli({
-      argv: ['1048', '--repo=o/n', '--to=clear-human'],
-      humanCeremony: () => ({ allowed: true, reason: 'forged' }),
+      argv: ['1048', '--repo=o/n', '--to=clear-human', '--reason=operator said accept 1048'],
+      allowClearHuman: true,
     });
     expect(exitCode).not.toBe(0);
-    expect(payload.error).toMatch(/clear-human is reachable only from/);
+    expect(payload.error).toMatch(/requires an explicit --actor/);
+  });
+
+  // THE HONESTY TAX, refusal 2 of 2. A blank/whitespace reason is the same as none — otherwise `--reason=` is a
+  // one-character way to satisfy the thing whose whole purpose is that it has to be written out.
+  it('REFUSES an opted-in clear-human with no stated reason, including a whitespace-only one', () => {
+    for (const reasonArg of [[], ['--reason='], ['--reason=   ']]) {
+      const { exitCode, payload } = runCli({
+        argv: ['1048', '--repo=o/n', '--to=clear-human', '--actor=Nicolas Gilbert', ...reasonArg],
+        allowClearHuman: true,
+      });
+      expect(exitCode).not.toBe(0);
+      expect(payload.error).toMatch(/requires --reason/);
+    }
   });
 
   it('the ordinary targets are unaffected — the opt-in gates clear-human only', () => {
     const { payload } = runCli({ argv: ['1048', '--repo=o/n', '--to=nonsense'] });
     expect(payload.error).toMatch(/invalid --to — expected 'accepted' or 'changes'/);
-  });
-});
-
-// #2895 — the human-ceremony barrier. What it does and does not defend against is stated once, at
-// `we:scripts/review-set-label.mjs#decideHumanCeremony`; read that before adding a case here. In particular it
-// is a SPEED BUMP, not a structural barrier — a deliberately-allocated pty satisfies it, which the pty test in
-// `review-clear-human-pty.test.mjs` demonstrates on purpose. These cases pin the DECISION shape only.
-describe('decideHumanCeremony — the terminal barrier (#2895)', () => {
-  it('REFUSES when stdin is not a tty, whatever was "typed" — the agent-shell case', () => {
-    const v = decideHumanCeremony({ isTTY: false, typed: '1048', pr: 1048 });
-    expect(v.allowed).toBe(false);
-    expect(v.reason).toMatch(/needs a terminal/);
-  });
-
-  // PR #1056 review, B1 — a failure to READ must never be reported as a wrong answer. The whole defect hid
-  // because an EAGAIN was swallowed into `typed = ''` and surfaced as "confirmation did not match", which reads
-  // as operator error. The refusal must name the tool as the faulty party.
-  it('a read failure gets its OWN refusal reason — never the mismatch message that blames the operator', () => {
-    const v = decideHumanCeremony({ isTTY: true, typed: '', pr: 1048, readError: 'EAGAIN' });
-    expect(v.allowed).toBe(false);
-    expect(v.reason).toMatch(/could not read the confirmation/);
-    expect(v.reason).toMatch(/fault in the tool/);
-    expect(v.reason).not.toMatch(/did not match/);
-  });
-
-  it('a read failure refuses even when the right answer somehow arrived — fail closed on a broken read', () => {
-    expect(decideHumanCeremony({ isTTY: true, typed: '1048', pr: 1048, readError: 'EIO' }).allowed).toBe(false);
-  });
-
-  it('REFUSES a piped-in correct answer — piping is exactly the bypass a non-tty check must stop', () => {
-    expect(decideHumanCeremony({ isTTY: false, typed: '1048\n', pr: '1048' }).allowed).toBe(false);
-  });
-
-  it('requires the PR NUMBER, not a y/yes — a fat-finger must not clear a gate-self PR', () => {
-    for (const typed of ['y', 'yes', 'Y', '', 'clear']) {
-      expect(decideHumanCeremony({ isTTY: true, typed, pr: 1048 }).allowed).toBe(false);
-    }
-  });
-
-  it('REFUSES a DIFFERENT PR number — the operator must name the PR they mean', () => {
-    expect(decideHumanCeremony({ isTTY: true, typed: '1047', pr: 1048 }).allowed).toBe(false);
-  });
-
-  it('allows the exact PR number at a tty, tolerating surrounding whitespace', () => {
-    expect(decideHumanCeremony({ isTTY: true, typed: ' 1048 ', pr: 1048 }).allowed).toBe(true);
-    expect(decideHumanCeremony({ isTTY: true, typed: '1048', pr: '1048' }).allowed).toBe(true);
   });
 });
 
@@ -321,11 +290,14 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
 // guarantee the durable comment can actually POST before the label swap is applied, because the failure mode is
 // the worst one this module has: label applied, comment rejected, PR left `review:accepted` with NO
 // `reviewed-sha` marker — and `acceptanceCoversHead` fails OPEN on a missing marker, silently disarming the
-// staleness gate. The first cut projected `to: 'accepted'` only, so a `clear-human` comment (132 chars more
-// chrome) was under-counted and a body in the 65,405–65,536 band walked straight into that state. This asserts
-// the projection is an UPPER BOUND for EVERY member of the set, so adding a target cannot re-open the hole.
+// staleness gate. The first cut projected `to: 'accepted'` only, so a `clear-human` comment (a longer heading
+// plus its attribution) was under-counted and a body just under the cap walked straight into that state. This
+// asserts the projection is an UPPER BOUND over EVERY target AND over the other unbounded argv inputs (`actor`,
+// `reason`), so neither a new target nor a long free-text field can re-open the hole.
 describe('projectVerdictCommentLength — total over REVIEW_LABEL_TARGETS (#1056 M2)', () => {
   const SHA = 'abf7d85700a3336a0ec77d94ab455162d4b8e00d';
+  const ACTOR = 'Nicolas Gilbert';
+  const REASON = 'operator in-session: "accept 1048"';
 
   it('has at least one target it must cover, and covers the whole declared set', () => {
     expect(REVIEW_LABEL_TARGETS.length).toBeGreaterThan(0);
@@ -335,8 +307,9 @@ describe('projectVerdictCommentLength — total over REVIEW_LABEL_TARGETS (#1056
   for (const to of REVIEW_LABEL_TARGETS) {
     it(`projected >= actual for to='${to}' — the pre-flight can never under-count it`, () => {
       for (const body of ['', 'x', '## Findings\n\nsomething\n', 'y'.repeat(60000)]) {
-        const actual = buildVerdictComment({ to, actor: 'op', headSha: SHA, body }).length;
-        expect(projectVerdictCommentLength(body)).toBeGreaterThanOrEqual(actual);
+        const actual = buildVerdictComment({ to, actor: ACTOR, headSha: SHA, body, reason: REASON }).length;
+        expect(projectVerdictCommentLength({ body, actor: ACTOR, reason: REASON }))
+          .toBeGreaterThanOrEqual(actual);
       }
     });
   }
@@ -344,19 +317,63 @@ describe('projectVerdictCommentLength — total over REVIEW_LABEL_TARGETS (#1056
   // The concrete regression: a body sized so `accepted` fits under the cap but `clear-human` does not. Under the
   // first cut this passed the pre-flight; it must now be rejected.
   it('rejects the band where accepted fits but clear-human does not — the exact M2 window', () => {
-    const render = (to, n) => buildVerdictComment({
-      to, actor: 'x'.repeat(64), headSha: 'f'.repeat(40), body: 'y'.repeat(n),
-    }).length;
+    const at = (to, n) => buildVerdictComment({
+      to, actor: ACTOR, headSha: 'f'.repeat(40), body: 'y'.repeat(n), reason: REASON,
+    });
     // Solve for the body that renders to exactly the cap as `accepted` (the chrome is a fixed additive amount,
     // so one correction step lands it exactly — asserted below rather than assumed).
-    const guess = GH_COMMENT_MAX - render('accepted', 0);
-    const body = 'y'.repeat(guess - (render('accepted', guess) - GH_COMMENT_MAX));
-    expect(buildVerdictComment({ to: 'accepted', actor: 'x'.repeat(64), headSha: 'f'.repeat(40), body }).length)
-      .toBe(GH_COMMENT_MAX);
-    expect(buildVerdictComment({ to: 'accepted', actor: 'x'.repeat(64), headSha: 'f'.repeat(40), body }).length)
-      .toBeLessThanOrEqual(GH_COMMENT_MAX);
-    expect(buildVerdictComment({ to: 'clear-human', actor: 'x'.repeat(64), headSha: 'f'.repeat(40), body }).length)
+    const guess = GH_COMMENT_MAX - at('accepted', 0).length;
+    const n = guess - (at('accepted', guess).length - GH_COMMENT_MAX);
+    expect(at('accepted', n).length).toBe(GH_COMMENT_MAX);
+    expect(at('clear-human', n).length).toBeGreaterThan(GH_COMMENT_MAX);
+    expect(projectVerdictCommentLength({ body: 'y'.repeat(n), actor: ACTOR, reason: REASON }))
       .toBeGreaterThan(GH_COMMENT_MAX);
-    expect(projectVerdictCommentLength(body)).toBeGreaterThan(GH_COMMENT_MAX);
+  });
+
+  // The second dimension the first cut missed: `--actor` and `--reason` are argv, so they are unbounded too. A
+  // fixed-width placeholder in the projection would under-count exactly the same way the fixed target did.
+  it('covers a long actor and a long reason — both are unbounded argv, not fixed-width chrome', () => {
+    const body = 'y'.repeat(1000);
+    const actor = 'a'.repeat(4000);
+    const reason = 'r'.repeat(8000);
+    const actual = buildVerdictComment({ to: 'clear-human', actor, headSha: SHA, body, reason }).length;
+    expect(projectVerdictCommentLength({ body, actor, reason })).toBeGreaterThanOrEqual(actual);
+    // and the short-input projection would have MISSED it — that is the whole point of passing them through.
+    expect(projectVerdictCommentLength({ body })).toBeLessThan(actual);
+  });
+});
+
+// #2895 — the honesty tax in the durable record itself. The comment is the only thing a future reader sees, so
+// it must state what it proves and refuse to imply more. These are prose assertions on purpose: this is the
+// exact class of over-claim that dogged PR #1046 for four rounds and #1056 for three.
+describe('buildVerdictComment — a clear-human record must not over-claim (#2895)', () => {
+  const SHA = 'abf7d85700a3336a0ec77d94ab455162d4b8e00d';
+  const render = (o) => buildVerdictComment({
+    to: 'clear-human', actor: 'Nicolas Gilbert', headSha: SHA,
+    reason: 'operator in-session: "accept 1048"', ...o,
+  });
+
+  it('quotes the stated reason verbatim and names the actor', () => {
+    const c = render({});
+    expect(c).toMatch(/Nicolas Gilbert/);
+    expect(c).toMatch(/> operator in-session: "accept 1048"/);
+  });
+
+  it('says the sanctioned path was followed and explicitly NOT that a human followed it', () => {
+    const c = render({});
+    expect(c).toMatch(/does NOT prove: that a human performed/i);
+    expect(c).toMatch(/free text and nothing verifies/i);
+  });
+
+  it('makes no unforgeability claim anywhere — no "cannot", no terminal confirmation, no structural barrier', () => {
+    const c = render({ body: '## Findings\n\nall good\n' });
+    expect(c).not.toMatch(/confirmed at a terminal/i);
+    expect(c).not.toMatch(/no agent can/i);
+    expect(c).not.toMatch(/unforgeable(?! actor signal)/i);
+    expect(c).not.toMatch(/structural/i);
+  });
+
+  it('still stamps the reviewed-sha marker — the clearance IS an acceptance (#2409)', () => {
+    expect(parseReviewedSha([{ body: render({}) }])).toBe(SHA);
   });
 });
