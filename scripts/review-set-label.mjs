@@ -13,6 +13,23 @@
  * cannot route around it. Do NOT weaken it. The `rearm` target carries the sibling #2630 invariant: an auto-fix
  * re-arms `review:changes → review:pending` but NEVER emits `review:accepted` and NEVER removes `review:human`.
  *
+ * #2895 — INVARIANT 2 says who may NOT clear a gate-self PR; the `clear-human` target says how the one who MAY
+ * actually does it. Before this, #2882 closed the raw label edit without opening a replacement, so the single
+ * act the `review:human` tier exists to enable had no sanctioned way to perform it and the operator was pushed
+ * to an unrecorded `gh` call — losing the `reviewed-sha` stamp and the attributed comment. `clear-human` is the
+ * ONLY target that removes `review:human`, and `accepted` stays unconditionally refused on a `review:human` PR
+ * — see `decideSetLabel` for why this is a target rather than a flag.
+ *
+ * WHAT THIS TARGET DOES NOT DO, stated up front so nobody re-derives it: it does NOT verify that a human ran
+ * it. #2895 RULED that the unforgeable actor signal is DEFERRED — no local construct survives an agent with
+ * shell access on the same machine (a flag is trivially passed; a local console's token is scrapeable; a tty
+ * check is satisfied by `script`/`expect`). So this ships as the raw command with better manners, and the
+ * manners are the point: the `reviewed-sha` stamp, an attributed comment, a stated reason, one documented path
+ * instead of an ad-hoc paste. The mitigation that replaces the missing signal is the HONESTY TAX — `--actor`
+ * and `--reason` are both REQUIRED, so misuse takes a lie rather than a silence, and every surface that reports
+ * a clearance says what the record proves (the sanctioned path was followed) and not what it does not (that a
+ * human followed it). The durable fix is #2946 (a hardware human-presence gesture), filed `someday`.
+ *
  * Split mirrors `we:scripts/review-detail.mjs`: a PURE decider that takes the already-observed labels and
  * returns the swap, plus a thin impure CLI that does the `gh` calls and prints. REUSES
  * `we:scripts/lib/review-escalation.mjs` (`REVIEW_LABELS`, `hasReviewLabel`) — it never re-hardcodes the
@@ -26,10 +43,22 @@ import { join } from 'node:path';
 import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker } from './lib/review-escalation.mjs';
 
 /**
+ * we:scripts/review-set-label.mjs#REVIEW_LABEL_TARGETS — the CLOSED set of label-swap targets `decideSetLabel`
+ * understands. Exported so anything that must be TOTAL over the targets (the comment-size projection below, and
+ * its enum-totality test) enumerates this one list instead of hardcoding a member — PR #1056 review, M2: the
+ * `GH_COMMENT_MAX` pre-flight hardcoded `to: 'accepted'` and therefore under-counted a `clear-human` comment by
+ * the 132 chars of extra chrome, so a body in the 65,405–65,536 band passed the check, the label swap landed,
+ * and `gh pr comment` then failed — leaving an ACCEPTED PR with no `reviewed-sha` marker, which
+ * `acceptanceCoversHead` fails OPEN on. Add a member here and the projection covers it automatically.
+ */
+export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm', 'clear-human']);
+
+/**
  * we:scripts/review-set-label.mjs#decideSetLabel — the PURE verdict-label decision. Given the target `to` and
- * the PR's OBSERVED labels, return the label swap. Three targets, each with its invariant enforced HERE
- * (unbypassable): the reviewer verdicts `accepted` / `changes`, and the conveyor fix-agent `rearm` (#2644, was
- * `decideRearm`). Every return carries `keepsHuman` — whether the swap leaves `review:human` in place.
+ * the PR's OBSERVED labels, return the label swap. FOUR targets (the closed set is `REVIEW_LABEL_TARGETS`), each
+ * with its invariant enforced HERE (unbypassable): the reviewer verdicts `accepted` / `changes`, the conveyor
+ * fix-agent `rearm` (#2644, was `decideRearm`), and the #2895 gate-self `clear-human`. Every return carries
+ * `keepsHuman` — whether the swap leaves `review:human` in place.
  *   • `accepted` — INVARIANT 2: REFUSED on a `review:human` PR (only a human's /review may clear the gate);
  *     otherwise adds `review:accepted`, drops the parked `review:pending`.
  *   • `changes` — always allowed (a bounce lands nothing); adds `review:changes`, drops `review:pending` AND a
@@ -37,17 +66,62 @@ import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker } from './lib/rev
  *   • `rearm` — the #2630 invariant: ONLY a live `review:changes` is re-armable (idempotent — a second call
  *     refuses cleanly); the swap is ALWAYS `review:changes → review:pending`, NEVER `review:accepted`, and
  *     NEVER removes `review:human`. The strongest thing an auto-fix can do is re-arm the review, never clear it.
- * @param {{to:('accepted'|'changes'|'rearm'), currentLabels?:Array}} o - `currentLabels` is the observed label
- *   array (string or `{name}` shape, per `hasReviewLabel`).
+ *   • `clear-human` — the #2895 gate-self clearance: the ONLY target that removes `review:human` (and the only
+ *     one refused when the PR does NOT carry it). Nothing here checks WHO is asking — see below.
+ * @param {{to:('accepted'|'changes'|'rearm'|'clear-human'), currentLabels?:Array}} o - `currentLabels` is the
+ *   observed label array (string or `{name}` shape, per `hasReviewLabel`).
  * @returns {{allowed:boolean, addLabel:string, removeLabels:string[], keepsHuman:boolean, reason:string}}
  */
 export function decideSetLabel({ to, currentLabels = [] } = {}) {
-  // we:scripts/review-set-label.mjs#decideSetLabel — only the three verdict targets are valid.
-  if (to !== 'accepted' && to !== 'changes' && to !== 'rearm') {
-    throw new Error(`decideSetLabel: unknown verdict '${to}' — expected 'accepted', 'changes', or 'rearm'`);
+  // we:scripts/review-set-label.mjs#decideSetLabel — only the targets in the closed set are valid.
+  if (!REVIEW_LABEL_TARGETS.includes(to)) {
+    throw new Error(
+      `decideSetLabel: unknown verdict '${to}' — expected ${REVIEW_LABEL_TARGETS.map((t) => `'${t}'`).join(', ')}`,
+    );
   }
 
   const isHuman = hasReviewLabel(currentLabels, REVIEW_LABELS.human);
+
+  // we:scripts/review-set-label.mjs#decideSetLabel — clear-human (#2895): the ONE target that removes
+  // `review:human`, and the only sanctioned way to clear a gate-self PR. It exists because #2882 closed the raw
+  // label edit (rightly) without opening a replacement, leaving the single act the `review:human` tier exists to
+  // enable with no way to perform it — the operator was pushed to an unrecorded `gh` call outside the flow,
+  // which is exactly the attribution loss the single home was built to prevent.
+  //
+  // WHY A TARGET, NOT A FLAG ON `accepted` (#2895 asked for this to be decided, not defaulted): a
+  // `--clear-human` flag would make INVARIANT 2 conditional — `accepted` would sometimes clear a gate-self PR —
+  // so every future reader of the `accepted` branch would have to check whether the lift was passed. As its own
+  // target, `accepted` stays UNCONDITIONALLY refused on a `review:human` PR (the branch below is unchanged), and
+  // the clearance is impossible to reach by fumbling a flag on the ordinary accept path. A member added to a
+  // single-sourced decider is hard to remove later, so the narrower shape wins.
+  //
+  // Nothing here checks WHO is asking, and nothing anywhere else does either — #2895 ruled the unforgeable
+  // actor signal deferred (see the file header). What stands in the way of a clearance nobody asked for is the
+  // honesty tax in `runReviewLabelCli` (`--actor` + `--reason` are required and are quoted verbatim into the
+  // durable comment, so misuse takes a written lie rather than a silent label add) and the explicit-instruction
+  // rule in `we:skills-src/review/SKILL.md`. The `allowClearHuman` opt-in is a much smaller thing than either —
+  // it binds importers only, and today it binds none (see its doc on `runReviewLabelCli`). None of the three is
+  // a barrier.
+  if (to === 'clear-human') {
+    if (!isHuman) {
+      return {
+        allowed: false,
+        addLabel: '',
+        removeLabels: [],
+        keepsHuman: false,
+        reason: 'no review:human label — nothing to clear (use --to=accepted for an ordinary parked PR)',
+      };
+    }
+    return {
+      allowed: true,
+      addLabel: REVIEW_LABELS.accepted,
+      // Drops the human gate AND any parked/bounced state: a cleared gate-self PR must not still read as
+      // awaiting review or as a live bounce. `presentRemoveLabels` narrows this superset to what the PR carries.
+      removeLabels: [REVIEW_LABELS.human, REVIEW_LABELS.pending, REVIEW_LABELS.changes],
+      keepsHuman: false,
+      reason: 'gate-self CLEARED via --to=clear-human — review:human dropped, review:accepted added; drain may merge',
+    };
+  }
 
   // we:scripts/review-set-label.mjs#decideSetLabel — rearm (#2644, folded in from the old conveyor decideRearm).
   // The conveyor fix agent hands a repaired review:changes bounce back for re-review. ONLY a live review:changes
@@ -136,8 +210,23 @@ export function presentRemoveLabels(removeLabels, currentLabels) {
  * The printed payload shapes stay the caller's, via `successResult`/`refusalResult`. Impure (shells gh); the
  * PURE `decideSetLabel` above owns every invariant, so this harness only moves bytes. Fails closed — every input
  * is validated BEFORE any gh mutation, and any gh error exits non-zero without a partial swap.
+ *
+ * `allowClearHuman` is the opt-in for the #2895 gate-self clearance. SAY WHAT IT ACTUALLY IS (PR #1056 review,
+ * round 4 — the earlier wording over-claimed): it binds IMPORTERS ONLY, and today it binds nobody. This file's
+ * own `IS_CLI` block passes `true` unconditionally, so EVERY shell caller of this CLI is opted in and the flag
+ * constrains nothing on a command line. The one importer of this harness, `we:scripts/conveyor/rearm-review.mjs`,
+ * pins `fixedTo: 'rearm'` and so could never reach `clear-human` by relaying an argv anyway; and nothing else
+ * reaches the target at all — `we:scripts/lib/auto-land-seam.mjs#buildSetLabelArgs` builds a literal
+ * `--to=accepted`. What the boolean buys is narrow and forward-looking: a FUTURE importer that forwards argv it
+ * did not vet (the #2945 console is the next candidate) cannot land on `clear-human` unless it names the
+ * capability in its own source, where a reviewer reads it. It is NOT a trust boundary and NOT a barrier — it is
+ * an ordinary parameter of an exported function, so an importer that wants it just passes it. That is accepted,
+ * because #2895 ruled the unforgeable signal deferred (file header); the mitigation is the honesty tax below,
+ * not this boolean. It is deliberately a DUMB BOOLEAN rather than an injected predicate — a caller may declare a
+ * capability, never supply a verdict (PR #1056 review, B2).
  * @param {{argv?:string[], fixedTo?:string|null, defaultActor:string, repoOptional?:boolean, usage:string,
- *   buildComment:(o:{to:string,actor:string,decision:object,headSha:string})=>string,
+ *   allowClearHuman?:boolean,
+ *   buildComment:(o:{to:string,actor:string,decision:object,headSha:string,reason:string})=>string,
  *   successResult:(o:{pr:number,to:string,decision:object,labels:string[]})=>object,
  *   refusalResult:(o:{pr:number,decision:object})=>object}} cfg
  */
@@ -150,10 +239,12 @@ export function runReviewLabelCli({
   buildComment,
   successResult,
   refusalResult,
+  allowClearHuman = false,
 } = {}) {
   let repo = (argv.find((a) => a.startsWith('--repo=')) || '').slice('--repo='.length);
   const actorArg = (argv.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length);
   const actor = actorArg || defaultActor;
+  const clearReason = (argv.find((a) => a.startsWith('--reason=')) || '').slice('--reason='.length).trim();
   const pr = argv.find((a) => /^\d+$/.test(a));
   const to = fixedTo || (argv.find((a) => a.startsWith('--to=')) || '').slice('--to='.length);
 
@@ -167,8 +258,40 @@ export function runReviewLabelCli({
   if (repo ? !REPO_RE.test(repo) : !repoOptional) {
     fail('invalid --repo — expected <owner/name>');
   }
-  if (!fixedTo && to !== 'accepted' && to !== 'changes') {
-    fail("invalid --to — expected 'accepted' or 'changes'");
+  // #2895 — every `clear-human` precondition is checked HERE: unconditionally, at the point of use, BEFORE any
+  // gh call, and refusing through the `{"error":…}` JSON contract every other refusal here honours. Not folded
+  // into the `!fixedTo &&` argv branch below — PR #1056 review, m1: a caller pinning `fixedTo: 'clear-human'`
+  // skipped that branch entirely and blew up later with a TypeError instead of a clean refusal.
+  if (to === 'clear-human') {
+    // The opt-in. An accident guard — see `allowClearHuman` above for exactly how far it goes (not far).
+    if (!allowClearHuman) {
+      fail(
+        '--to=clear-human is for the operator-run CLI in review-set-label.mjs (#2895) — this caller did not '
+        + 'opt in, and nothing was changed',
+      );
+    }
+    // THE HONESTY TAX (#2895). The unforgeable actor signal is deferred, so the only thing standing between a
+    // clearance and a fabricated one is that the record has to be WRITTEN. Both fields are mandatory and both
+    // land in the durable comment: a clearance nobody authorised now requires inventing a name AND inventing a
+    // quoted instruction, which is a far brighter line than quietly adding a label. `we:skills-src/review/`
+    // `SKILL.md` binds the agent side: `--reason` must quote the operator's in-conversation instruction.
+    if (!actorArg.trim()) {
+      fail(
+        '--to=clear-human requires an explicit --actor=<name> — the clearance record must name who asked for '
+        + 'it, and the default actor is not an answer (#2895)',
+      );
+    }
+    if (!clearReason) {
+      fail(
+        '--to=clear-human requires --reason=<stated reason> — quote the operator instruction authorising this '
+        + 'clearance; it is posted verbatim in the durable comment (#2895)',
+      );
+    }
+  }
+  const targets = allowClearHuman ? "'accepted', 'changes', or 'clear-human'" : "'accepted' or 'changes'";
+  const targetOk = to === 'accepted' || to === 'changes' || to === 'clear-human';
+  if (!fixedTo && !targetOk) {
+    fail(`invalid --to — expected ${targets}`);
   }
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — --repo optional: default to the cwd repo (the fix agent
@@ -210,6 +333,24 @@ export function runReviewLabelCli({
     process.exit(1);
   }
 
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — render the durable comment ONCE, here, so the bytes
+  // that are size-checked, written and posted are the same bytes.
+  const commentBody = buildComment({ to, actor, decision, headSha, reason: clearReason });
+
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — THE SIZE GUARD, on the RENDERED bytes, before the swap.
+  // GitHub rejects a comment over `GH_COMMENT_MAX`, and the swap lands FIRST — so an oversize comment leaves the
+  // PR `review:accepted` with NO `reviewed-sha` marker, which `acceptanceCoversHead` fails OPEN on, and the drain
+  // then merges with the staleness gate disarmed. PR #1057 review: the only guard used to be an argv projection
+  // sitting inside the CLI's `if (bodyFileArg)` branch, so a long `--reason` with no `--body-file` walked straight
+  // around it (reproduced: `gh pr edit` succeeded, `gh pr comment` 422'd, and re-running `clear-human` then
+  // refused — "nothing to clear" — so recovery needed the raw `gh pr comment` this whole item exists to forbid).
+  // Checking HERE, where the bytes are produced, is what makes it unskippable: no call path — this CLI, the
+  // `npm run review:clear` wrapper, or an importer supplying its own `buildComment` — can route around it. The
+  // argv projection stays as belt-and-braces only because it can name the offending flag before any gh call.
+  if (commentBody.length > GH_COMMENT_MAX) {
+    fail(`the rendered comment is ${commentBody.length} chars, over GitHub's ${GH_COMMENT_MAX} limit — trim the body/--reason/--actor (nothing was changed)`);
+  }
+
   // we:scripts/review-set-label.mjs#runReviewLabelCli — apply the swap: add the verdict label, remove the stale
   // ones (argv array, no shell). Intersect the decision's removals with the labels the PR ACTUALLY carries so
   // `gh pr edit --remove-label` is never handed an absent label (which errors).
@@ -226,7 +367,7 @@ export function runReviewLabelCli({
   // dodge shell-quoting pitfalls (emoji/newlines), then `--body-file`.
   const tmp = join(tmpdir(), `review-label-${pr}-${Date.now()}.md`);
   try {
-    writeFileSync(tmp, buildComment({ to, actor, decision, headSha }), 'utf8');
+    writeFileSync(tmp, commentBody, 'utf8');
     execFileSync('gh', ['pr', 'comment', pr, '--repo', repo, '--body-file', tmp], {
       encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
     });
@@ -282,16 +423,35 @@ export function runReviewLabelCli({
  *
  * The marker is omitted on `changes`, and when the head SHA is unavailable (`buildReviewedShaMarker` → '') the
  * gate fails open rather than reading a garbage marker.
- * @param {{to:string, actor:string, headSha?:string, body?:string}} o
+ * @param {{to:string, actor:string, headSha?:string, body?:string, reason?:string}} o
  * @returns {string}
  */
-export function buildVerdictComment({ to, actor, headSha = '', body = '' } = {}) {
-  const marker = to === 'accepted' ? buildReviewedShaMarker(headSha) : '';
+export function buildVerdictComment({ to, actor, headSha = '', body = '', reason = '' } = {}) {
+  // #2895 — `clear-human` stamps the marker for the same reason `accepted` does: it IS an acceptance (it adds
+  // review:accepted), so the drain must be able to refuse it later if the head advances past the cleared tree.
+  const marker = to === 'accepted' || to === 'clear-human' ? buildReviewedShaMarker(headSha) : '';
   const text = stripReviewedShaMarkers(typeof body === 'string' ? body : '');
+  const heading = to === 'clear-human'
+    ? '✅ review — `review:human` cleared via the sanctioned path'
+    : to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested';
+  // #2895 — the attribution is the point of the whole item: a raw `gh` call recorded none of this. On the
+  // gate-self path it must state EXACTLY what the record proves and no more. It proves the sanctioned path was
+  // followed; it does NOT prove a human followed it, because `--actor` and `--reason` are free text and nothing
+  // here verifies either. Saying so in the durable record is the honesty tax, and it is not optional: a reader
+  // who trusts this further than it earns is the failure mode the deferral of the actor signal creates.
+  const attribution = to === 'clear-human'
+    ? `Cleared by ${actor} via \`review-set-label.mjs --to=clear-human\` (#2895).\n\n`
+      + `> ${String(reason || '').split('\n').join('\n> ')}\n\n`
+      + 'What this record proves: the clearance went through the sanctioned tool, so the label swap, the '
+      + '`reviewed-sha` stamp and this comment exist and agree. What it does NOT prove: that a human performed '
+      + 'it. The actor name and the reason above are free text and nothing verifies who supplied them — #2895 '
+      + 'deferred the unforgeable actor signal (no local construct survives an agent with shell access on the '
+      + 'same machine), and #2946 is the durable fix.'
+    : `Recorded by ${actor} via the Plateau Loop review console.`;
   return [
-    to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested',
+    heading,
     '',
-    `Recorded by ${actor} via the Plateau Loop review console.`,
+    attribution,
     ...(text ? ['', text] : []),
     ...(marker ? ['', marker] : []),
   ].join('\n');
@@ -304,13 +464,39 @@ export function buildVerdictComment({ to, actor, headSha = '', body = '' } = {})
  * SHAPE is defined there; this only has to recognise the same thing, and over-matching is the safe direction
  * (a stripped marker is inert text, an un-stripped one can outrank the real stamp).
  */
-/** GitHub's hard cap on an issue/PR comment body. Checked BEFORE the label swap — see the CLI block below. */
+/** GitHub's hard cap on an issue/PR comment body. Checked BEFORE the label swap, on the rendered bytes in
+ *  `runReviewLabelCli` (unskippable) and again from argv in the CLI block below (names the flag to trim). */
 export const GH_COMMENT_MAX = 65536;
+
+/** Who the durable comment is attributed to when `--actor` is absent. `clear-human` REFUSES this default. */
+export const DEFAULT_ACTOR = 'loop-console operator';
 
 export function stripReviewedShaMarkers(body) {
   return String(body || '')
     .replace(/<!--\s*reviewed-sha:\s*([0-9a-fA-F]{7,40})\s*-->/g, '`reviewed-sha: $1` (quoted, not this verdict\'s)')
     .trim();
+}
+
+/**
+ * we:scripts/review-set-label.mjs#projectVerdictCommentLength — the WORST-CASE rendered length of the durable
+ * comment, taken over EVERY member of `REVIEW_LABEL_TARGETS` with the ACTUAL caller-supplied variable-length
+ * inputs (body, actor, reason) and a full-length SHA. PURE.
+ *
+ * Total over the target set, and over every unbounded input, on purpose (PR #1056 review, M2). The first cut
+ * projected `to: 'accepted'` only, while `clear-human` renders a longer heading plus its attribution — a body in
+ * the 65,405–65,536 band therefore PASSED the pre-flight, the label swap landed, and `gh pr comment` then failed
+ * on GitHub's cap, leaving an ACCEPTED PR with no `reviewed-sha` marker. `acceptanceCoversHead` fails OPEN on a
+ * missing marker, so that silently disarms the staleness gate — exactly the partial-swap state the pre-flight
+ * exists to prevent. `actor` and `reason` are argv and therefore unbounded too, so they are projected from what
+ * was actually passed rather than from a fixed-width placeholder that a long one would overrun. Over-estimating
+ * is the safe direction: the cost is asking the operator to trim a body that would just barely have fitted.
+ * @param {{body?:string, actor?:string, reason?:string}} o - the caller-supplied variable-length inputs
+ * @returns {number} the largest length any target renders to
+ */
+export function projectVerdictCommentLength({ body = '', actor = '', reason = '' } = {}) {
+  return Math.max(...REVIEW_LABEL_TARGETS.map((to) => buildVerdictComment({
+    to, actor, headSha: 'f'.repeat(40), body, reason,
+  }).length));
 }
 
 // we:scripts/review-set-label.mjs — allow importing the pure decider + shared harness without running the CLI
@@ -323,13 +509,15 @@ if (IS_CLI) {
   // no marker — and `acceptanceCoversHead` fails open on a missing marker, so the drain then lands it. That
   // would contradict this module's own "no partial swap" promise. PR #1005 review, minors 2-4.
   const argvRest = process.argv.slice(2);
-  // Single-sourced so the size PROJECTION below and the `defaultActor` the render actually uses can never drift.
-  const DEFAULT_ACTOR = 'loop-console operator';
   // The bare `--body-file <path>` form is REJECTED, not silently ignored: ignoring it posts a verdict with the
   // findings missing and still exits 0. Every other flag in the harness is `=`-form; say so rather than no-op.
   const bareIdx = argvRest.indexOf('--body-file');
   if (bareIdx !== -1) fail('use --body-file=<path> (the =-form) — the space-separated form is not accepted');
   const bodyFileArg = (argvRest.find((a) => a.startsWith('--body-file=')) || '').slice('--body-file='.length);
+  // The other two variable-length inputs the durable comment renders. Read here ONLY so the size pre-flight
+  // below can be a real upper bound (#1056 M2) — `runReviewLabelCli` re-parses them and owns their validation.
+  const projActor = (argvRest.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length) || DEFAULT_ACTOR;
+  const projReason = (argvRest.find((a) => a.startsWith('--reason=')) || '').slice('--reason='.length);
   let verdictBody = '';
   if (bodyFileArg) {
     // Constrain the path: this file's contents are published to a PUBLIC PR and cannot be unpublished. A stale
@@ -342,27 +530,30 @@ if (IS_CLI) {
     try { verdictBody = readFileSync(abs, 'utf8'); }
     catch (e) { fail(`--body-file=${bodyFileArg} is unreadable (${String((e && e.message) || e).split('\n')[0]})`); }
     if (!verdictBody.trim()) fail(`--body-file=${bodyFileArg} is empty — pass the verdict write-up, or omit the flag for the one-line record`);
-    // GitHub rejects a comment body over 65536 chars. Catching it here means the label is never applied against
-    // a comment that cannot post; catching it later would leave exactly the accepted-without-a-marker state above.
-    // Project with the ACTUAL `--actor`, not an assumed 64-char stand-in. `--actor` is unbounded caller input and
-    // is rendered verbatim into the attribution line, so a stand-in makes this an ESTIMATE rather than the upper
-    // bound the guard needs — and it errs in the one direction that matters. Measured on this file before the fix:
-    // a 400-char actor renders 336 chars LONGER than the projection, so a body sized to pass here posts over the
-    // cap, `gh pr edit` having already applied the label. That is precisely the accepted-without-a-marker state
-    // the comment above says this check exists to prevent. Mirror `runReviewLabelCli`'s own parse so the projection
-    // and the render cannot disagree about who the actor is (`defaultActor` below is the same fallback).
-    const projectedActor = (argvRest.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length) || DEFAULT_ACTOR;
-    const projected = buildVerdictComment({ to: 'accepted', actor: projectedActor, headSha: 'f'.repeat(40), body: verdictBody }).length;
-    if (projected > GH_COMMENT_MAX) {
-      fail(`--body-file=${bodyFileArg} renders a ${projected}-char comment, over GitHub's ${GH_COMMENT_MAX} limit — trim it (the label is not applied)`);
-    }
+  }
+  // GitHub rejects a comment body over 65536 chars, and it rejects it AFTER the swap has landed. The authoritative
+  // guard is on the RENDERED bytes in `runReviewLabelCli`; this argv projection is belt-and-braces, kept because it
+  // fires before ANY gh call and can name the flag to trim. UNCONDITIONAL — PR #1057 review: it used to sit inside
+  // the `if (bodyFileArg)` branch above, so `--reason`, added later and just as unbounded, was unguarded whenever
+  // no `--body-file` was passed. Projected over the WHOLE target set AND every free-text argv input; see
+  // `projectVerdictCommentLength`.
+  const projected = projectVerdictCommentLength({ body: verdictBody, actor: projActor, reason: projReason });
+  if (projected > GH_COMMENT_MAX) {
+    const flag = [[verdictBody.length, `--body-file=${bodyFileArg}`], [projReason.length, '--reason'],
+      [projActor.length, '--actor']].sort((a, b) => b[0] - a[0])[0][1];
+    fail(`${flag} renders a ${projected}-char comment, over GitHub's ${GH_COMMENT_MAX} limit — trim it (the label is not applied)`);
   }
   runReviewLabelCli({
     defaultActor: DEFAULT_ACTOR,
-    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes [--actor=<name>] [--body-file=<path>]  (pr must be a positive integer)',
-    buildComment: ({ to, actor, headSha }) => buildVerdictComment({ to, actor, headSha, body: verdictBody }),
+    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--body-file=<path>]  (pr must be a positive integer; clear-human additionally requires --actor and --reason=<stated reason>)',
+    buildComment: ({ to, actor, headSha, reason }) => buildVerdictComment({ to, actor, headSha, reason, body: verdictBody }),
     successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
     refusalResult: ({ decision }) => ({ error: decision.reason }),
+    // #2895 — UNCONDITIONAL, so every shell invocation of this CLI is opted in, including one run for
+    // `--to=accepted`. The opt-in therefore constrains nothing here; it exists so an IMPORTER of
+    // `runReviewLabelCli` has to name the capability in its own source. See `allowClearHuman` on that function
+    // for exactly how far that goes (not far — it is not a barrier).
+    allowClearHuman: true,
   });
 }
 
