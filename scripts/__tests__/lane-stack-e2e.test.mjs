@@ -77,10 +77,17 @@ function buildOrigin(dir, withMarker) {
 function hashName(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return h; }
 
 /** A "lane" = a fresh clone of origin, optionally reset HARD onto a predecessor's pushed tip sha. */
-function makeLane(name, fromSha) {
+function makeLane(name, fromSha, leasePurpose) {
   const dir = join(base, 'lanes', name);
   git(['clone', '--quiet', originDir, dir]);
   if (fromSha) git(['reset', '--hard', fromSha], dir);
+  // #2900 — a lane clone is defined by the LEASE MARKER `lane-pool.mjs acquire` writes when it hands the folder
+  // out, not by its path. The seams now check for it, so the fixture must write one too. This is a fix to the
+  // fixture, not a concession: it previously modelled a lane as "any clone", which is exactly the gap that let
+  // the primary checkout pass for one. `purpose` carries the item, as the pool's own slug does.
+  writeFileSync(join(dir, '.git', '.lane-lease'), JSON.stringify({
+    session: `test:${name}`, purpose: leasePurpose || `${name}-e2e`, acquiredAt: '2026-08-03T00:00:00Z', ttlMinutes: 240,
+  }));
   return dir;
 }
 
@@ -462,5 +469,131 @@ describe('lane-stack e2e (#2684) — couple-open overlap seam (impl-first, WE st
   it('requires --impl-repo (exit 3)', () => {
     const r = runStack(['couple-open', '--impl-ref=HEAD'], primaryDir);
     expect(r.code).toBe(3);
+  });
+});
+
+describe('lane-stack e2e (#2900) — the seams must tell the truth about which tree they measured', () => {
+  // The incident: `recheck` was run from the PRIMARY checkout with an (invented, silently-ignored)
+  // `--lane=<path>`. It diffed origin/main...origin/main, recorded `"actual": []`, and printed the SAME
+  // `clean — push` line a real certification prints. `record` then pinned the chain frontier to the primary's
+  // HEAD instead of the lane tip, so the next stacked child would acquire at a base missing its parent's
+  // commit. A vacuous pass on a safety gate is indistinguishable from a real one — that is the whole defect.
+  const seedPlannedItem = () => {
+    expect(runStack(['init', `--plan=${planPath}`], primaryDir).code).toBe(0);
+    expect(runStack(['plan-item', `--plan=${planPath}`, '--id=A', '--files=we:a.txt'], primaryDir).code).toBe(0);
+    const laneA = makeLane('A', null);
+    writeFile(laneA, 'a.txt', 'a\n');
+    commitAll(laneA, 'A: a');
+    return laneA;
+  };
+
+  it('A2 — a base that resolves to HEAD is refused: an EMPTY diff can never be a certification', () => {
+    seedPlannedItem();
+    // A tree sitting exactly at origin/main (the primary's shape) — `origin/main...HEAD` is a no-op, so the
+    // actual set is empty and `actual ⊆ declared` passes trivially. THIS is what used to print "clean — push".
+    // A genuine LEASED lane that simply carries no commits of its own — so the lease guard passes and A2 is
+    // demonstrably the thing that refuses it. A2 is the belt that works even inside a legitimate lane.
+    const atBase = makeLane('at-base', null);
+    const r = runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main'], atBase);
+    expect(r.code, 'a vacuous certification must hard-fail, never print success').toBe(3);
+    expect(r.json.detail).toMatch(/same commit as HEAD/);
+    expect(r.json.detail).toMatch(/certify NOTHING/);
+  });
+
+  it('A2 — `record` is guarded too, so a vacuous run cannot pin the chain frontier to the wrong tip', () => {
+    seedPlannedItem();
+    const atBase = makeLane('at-base-rec', null);
+    const r = runStack(['record', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--tip-ref=lane/A'], atBase);
+    expect(r.code).toBe(3);
+    expect(r.json.detail).toMatch(/same commit as HEAD/);
+    // The frontier was NOT advanced — the plan is untouched by a refused record.
+    expect(JSON.parse(readFileSync(planPath, 'utf8')).items.A.tips ?? null).toBe(null);
+  });
+
+  it('A3 — an unknown flag is a hard error, not silently absorbed (the `--lane` that started this)', () => {
+    seedPlannedItem();
+    const r = runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--laneDir=/tmp/nope'], primaryDir);
+    expect(r.code, 'an unrecognised flag must be refused before any work').toBe(3);
+    expect(r.json.detail).toMatch(/unknown flag\(s\)/);
+    expect(r.json.detail).toMatch(/--laneDir/);
+  });
+
+  it('A3 — the accepted set is listed in the refusal, so the operator can fix it in one read', () => {
+    seedPlannedItem();
+    const r = runStack(['record', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--typo=1'], primaryDir);
+    expect(r.code).toBe(3);
+    expect(r.json.detail).toMatch(/accepted: .*--base/);
+    expect(r.json.detail).toMatch(/--tip-ref/);
+  });
+
+  it('A3/A1 — `--lane=<path>` is now REAL: it aims the measurement at that tree', () => {
+    const laneA = seedPlannedItem();
+    // Run from a DIFFERENT cwd, pointing --lane at the real lane clone. Previously the flag was ignored and
+    // the primary was measured; now the lane's own diff is what gets certified.
+    const r = runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main', `--lane=${laneA}`], primaryDir);
+    expect(r.code, r.err).toBe(0);
+    expect(r.json.verdict).toBe('clean');
+    // Proof it measured the LANE and not the primary: the lane's actual set is non-empty.
+    const rec = runStack(['record', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--tip-ref=lane/A', `--lane=${laneA}`], primaryDir);
+    expect(rec.code, rec.err).toBe(0);
+    expect(rec.json.tips.we.sha, 'the recorded tip is the LANE head, not the base').toBe(git(['rev-parse', 'HEAD'], laneA));
+    expect(rec.json.tips.we.sha).not.toBe(mainSha0);
+  });
+
+  it('the #2900 INCIDENT itself is now refused: an unleased tree (the primary) cannot certify', () => {
+    // The primary checkout carries no lane lease. Under the old path guess this was ALLOWED whenever the
+    // running script lived in a lane clone — the repo's normal execution context — so the guard was off exactly
+    // when it should fire. `primaryDir` is a plain clone with no marker, which is what a primary is.
+    seedPlannedItem();
+    const r = runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main'], primaryDir);
+    expect(r.code, 'an unleased tree must be refused').toBe(3);
+    expect(r.json.detail).toMatch(/not a leased lane clone/);
+  });
+
+  it('a lane leased for a DIFFERENT item is refused — aiming --lane at the wrong lane', () => {
+    // Real ids (NNN / xNNNNNN) — the lease's purpose slug carries the item exactly as `lane-pool acquire
+    // --purpose=2899-resolve-on-land` writes it, which is what makes ownership checkable at all.
+    expect(runStack(['init', `--plan=${planPath}`], primaryDir).code).toBe(0);
+    expect(runStack(['plan-item', `--plan=${planPath}`, '--id=2899', '--files=we:a.txt'], primaryDir).code).toBe(0);
+    const mine = makeLane('lane-2899', null, '2899-resolve-on-land');
+    writeFile(mine, 'a.txt', 'a\n');
+    commitAll(mine, '2899: a');
+    const theirs = makeLane('lane-2900', null, '2900-lane-stack-tree-truth');
+    writeFile(theirs, 'a.txt', 'other\n');
+    commitAll(theirs, '2900: a');
+
+    const wrong = runStack(['recheck', `--plan=${planPath}`, '--id=2899', '--base=origin/main', `--lane=${theirs}`], primaryDir);
+    expect(wrong.code, "certifying item 2899 against 2900's lane must be refused").toBe(3);
+    expect(wrong.json.detail).toMatch(/leased for #2900/);
+    expect(wrong.json.detail).toMatch(/certifying #2899/);
+
+    // ...and the item's OWN lane still certifies.
+    expect(runStack(['recheck', `--plan=${planPath}`, '--id=2899', '--base=origin/main', `--lane=${mine}`], primaryDir).code).toBe(0);
+  });
+
+  it('`apply-rebase` — the seam that REWRITES history — is guarded too', () => {
+    seedPlannedItem();
+    const r = runStack(['apply-rebase', `--plan=${planPath}`, '--id=A', '--onto=B', '--base=origin/main'], primaryDir);
+    expect(r.code, 'a history-rewriting seam must not run on an unleased tree').toBe(3);
+    expect(r.json.detail).toMatch(/not a leased lane clone/);
+  });
+
+  it('`--lane` with a missing path or a bare flag is refused, not left to throw ENOENT', () => {
+    seedPlannedItem();
+    const missing = runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--lane=/tmp/no-such-lane-xyz'], primaryDir);
+    expect(missing.code).toBe(3);
+    expect(missing.json.detail).toMatch(/does not exist/);
+    const bare = runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--lane'], primaryDir);
+    expect(bare.code).toBe(3);
+    expect(bare.json.detail).toMatch(/needs a path/);
+  });
+
+  it('A4 — the genuine lane-clone run is unchanged: it passes and records the lane tip, not the base', () => {
+    const laneA = seedPlannedItem();
+    expect(runStack(['recheck', `--plan=${planPath}`, '--id=A', '--base=origin/main'], laneA).code).toBe(0);
+    const rec = runStack(['record', `--plan=${planPath}`, '--id=A', '--base=origin/main', '--tip-ref=lane/A'], laneA);
+    expect(rec.code, rec.err).toBe(0);
+    expect(rec.json.tips.we.sha).toBe(git(['rev-parse', 'HEAD'], laneA));
+    expect(rec.json.tips.we.sha).not.toBe(mainSha0);
   });
 });
