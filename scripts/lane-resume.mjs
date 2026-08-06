@@ -61,7 +61,7 @@ import { REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
 // #2383 — reuse the SAME constellation repo-resolution as `/drain` (`merge-ai-prs.mjs`), so `/finish` sweeps
 // all 3 repos (WE + frontierui + plateau-app) by default instead of only the cwd repo. `merge-ai-prs.mjs` is
 // CLI-guarded (runs nothing on import), so this is a pure function import.
-import { resolveRepos } from './merge-ai-prs.mjs';
+import { resolveRepos, latestRequiredCheck } from './merge-ai-prs.mjs';
 // #2399 — the ONE remote-manifest `gh api` argv, shared with the drain so the two readers never drift.
 // Re-exported to keep this file's public surface (and its tests' import site) stable.
 import { remoteManifestApiArgs } from './lib/remote-manifest.mjs';
@@ -388,6 +388,28 @@ export function rebuildDescendant({ laneRef, ontoSha, run = gitRunner, ...rest }
 }
 
 /**
+ * The `testConclusion` to feed {@link landDecision} / {@link classifyLane}, read off a `gh pr view` / `gh pr list`
+ * PR object through the drain's OWN shared selector (`latestRequiredCheck`, #xkfv491) — never a local
+ * `.find(...)`. This is the ONE extraction seam both lane-resume rollup readers now go through, so the enqueue
+ * side cannot disagree with the lander about which entry is "the" `test` check.
+ *
+ * Why it matters: a head SHA routinely carries SEVERAL runs of one check — a workflow `concurrency` group cancels
+ * the in-flight run when a push supersedes it, leaving a `CANCELLED` entry ahead of the `SUCCESS` that actually
+ * finished. Taking the first entry made `land <pr>` return `red` and REFUSE to enqueue a genuinely green PR, and
+ * made `classifyLane` re-bucket every overlap-descendant behind that phantom broken link (#2396) — the #1042 jam
+ * one layer earlier than the drain. Pure.
+ *
+ * @param {{statusCheckRollup?: Array<object>}|null|undefined} pr the parsed gh PR object
+ * @param {string} requiredCheck the check name to read (default `test`)
+ * @returns {string|null} the latest run's conclusion/state, or `null` when the check has not reported at all
+ *   (in-flight — `requiredCheckState` maps that to `not-green`, never to `red`).
+ */
+export function testConclusionOf(pr, requiredCheck = 'test') {
+  const check = latestRequiredCheck(pr, requiredCheck);
+  return check ? (check.conclusion || check.state || null) : null;
+}
+
+/**
  * Decide how to land ONE lane PR from its GitHub signals (#2202). Pure. Only the required `test` check gates —
  * `UNSTABLE` (a non-required check like `cla`/Workers-Builds red) is still mergeable.
  *   'red'       — required `test` failed → NEVER land (a real bug; the finisher fixes code first).
@@ -397,6 +419,7 @@ export function rebuildDescendant({ laneRef, ontoSha, run = gitRunner, ...rest }
  * #2410 slice D — the required-`test` classification (red / not-green / green) is single-sourced through
  * `requiredCheckState` (lane-drain.mjs), retiring lane-resume's own FAIL list (the strand the capstone folds into
  * the unified land condition). The mergeable/rebuild half stays here (it is lane-resume-specific).
+ * Its `testConclusion` argument comes from {@link testConclusionOf} at both shell call sites.
  * @param {{mergeable:string, mergeState:string, testConclusion:string|null}} sig
  */
 export function landDecision({ mergeable, mergeState, testConclusion } = {}) {
@@ -436,8 +459,7 @@ export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/mai
   if (hasReviewLabel(prInfo.labels, REVIEW_LABELS.changes))
     return { action: 'review-changes', pr: prNum, merged: false, reason: 'review:changes — a human bounced this diff; repair + re-review before any land (#2396)' };
   const laneRef = prInfo.headRefName;
-  const testCheck = (prInfo.statusCheckRollup || []).find((c) => (c.name || c.context) === 'test');
-  const decision = landDecision({ mergeable: prInfo.mergeable, mergeState: prInfo.mergeStateStatus, testConclusion: testCheck ? (testCheck.conclusion || testCheck.state || null) : null });
+  const decision = landDecision({ mergeable: prInfo.mergeable, mergeState: prInfo.mergeStateStatus, testConclusion: testConclusionOf(prInfo) });
 
   if (decision.action === 'red') return { action: 'red', pr: prNum, merged: false, reason: decision.reason };
   if (decision.action === 'not-green') return { action: 'not-green', pr: prNum, merged: false, reason: decision.reason };
@@ -553,10 +575,9 @@ function discover(asJson, { repos = null, singleRepo = false } = {}) {
     const prs = shJSON('gh', ['pr', 'list', ...repoFlag, '--label', READY_LABEL, '--state', 'open', '--json', 'number,mergeable,mergeStateStatus,headRefName,statusCheckRollup,labels', '--limit', '200'], []);
     for (const p of prs) {
       const man = readManifest(p.headRefName, { repo: isLocal ? null : repo }) || { item: null, repos: [], blockedBy: [], stackParents: [] };
-      const test = (p.statusCheckRollup || []).find((c) => (c.name || c.context) === 'test');
       const lane = classifyLane({
         num: p.number, mergeable: p.mergeable, mergeState: p.mergeStateStatus,
-        testConclusion: test ? (test.conclusion || test.state || null) : null,
+        testConclusion: testConclusionOf(p),
         item: man.item, repos: man.repos, blockedBy: man.blockedBy,
         stackParents: man.stackParents, reviewChanges: hasReviewLabel(p.labels, REVIEW_LABELS.changes),
       }, resolved);

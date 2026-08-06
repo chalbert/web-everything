@@ -5,10 +5,13 @@ status: open
 dateOpened: "2026-08-05"
 tags: [drain, ci, gate, conveyor]
 scope:
-  - we:scripts/conveyor/pr-watch.mjs
-  - we:scripts/lane-resume.mjs
   - we:scripts/readiness/conveyor-state.mjs
-  - we:scripts/check-standards-rules.mjs
+  - we:scripts/readiness/__tests__/conveyor-state.test.mjs
+  - we:scripts/fetch-parked.mjs
+  - we:scripts/__tests__/fetch-parked.test.mjs
+  - we:scripts/pr-state.mjs
+  - we:scripts/__tests__/pr-state.test.mjs
+  - we:scripts/merge-ai-prs.mjs
 ---
 
 # Three rollup readers still take the first entry per check name, so the #1042 jam survives outside the drain
@@ -37,26 +40,67 @@ finished. Reading the first entry picks the cancelled one. Each of these still d
   any `CANCELLED` one, so the conveyor reads a superseded-but-green PR as CI-failed for as long as the
   cancelled entry exists.
 
+The same defect has a SECOND shape: readers that fold EVERY rollup entry into one verdict instead of selecting
+one. "Take the first entry" and "fold all the entries" are the same bug — both let a superseded `CANCELLED`
+outrank the `SUCCESS` that actually finished:
+
+- **`we:scripts/fetch-parked.mjs:57`** (`rollupToCheckRows`) maps every rollup entry to a `{name, bucket}` row
+  and hands the whole list to `classifyChecks` (**`we:scripts/pr-land.mjs:419`**), which is `some(isFail)` over
+  all rows. One cancelled entry beside a later green one therefore reads red. Verified against unmodified `main`:
+  `rollupToCheckRows([{__typename:'CheckRun',name:'test',conclusion:'CANCELLED'}, {…,conclusion:'SUCCESS'}])`
+  → `[{name:'test',bucket:'cancel'},{name:'test',bucket:'pass'}]`, and `classifyChecks` of that →
+  `{status:'failed', reason:'a required check failed'}`. Filtering to the required set does not help — both rows
+  are named `test`.
+- Two live readers inherit that fold: **`we:scripts/fetch-parked.mjs:189`** (`assembleParked`) — the `/review`
+  bundle, which the review tooling itself consumes — and **`we:scripts/pr-state.mjs:55`** (`prStateRecord`) — the
+  drain's `checks=` state line. Both report a genuinely green PR as `failed`.
+
+NOT affected, and deliberately out of scope: **`we:scripts/pr-land.mjs:822`** and **`we:scripts/wait-green.mjs`**
+also call `classifyChecks`, but they feed it `gh pr checks --required` output, which `gh` has already collapsed to
+one row per check name. `classifyChecks` is correct for the row shape it was built for and must NOT be changed.
+**`we:scripts/readiness/conveyor-instrument.mjs:474`** (`ciWindow`) scans every entry for the min `startedAt` /
+max `completedAt`, which is the right thing to do with a full rollup — it derives no verdict and is not the
+defect class.
+
 Found by two independent review panels on PR #1049 (the hand-run `/review` panel and the
-`we:scripts/workflows/review-parked-prs.mjs` convergence loop both surfaced it).
+`we:scripts/workflows/review-parked-prs.mjs` convergence loop both surfaced it), and the fold-all shape by the
+round-4 re-review of the same PR.
 
 ## Build
 
-- Import the shared `latestRequiredCheck` from `we:scripts/merge-ai-prs.mjs` in
+- ~~Import the shared `latestRequiredCheck` from `we:scripts/merge-ai-prs.mjs` in
   `we:scripts/conveyor/pr-watch.mjs` and `we:scripts/lane-resume.mjs` (both call sites) instead of
-  re-deriving the lookup. Delete the local `.find(...)`.
+  re-deriving the lookup. Delete the local `.find(...)`.~~ **Delivered** by PR #1049 round 4 (the `#xkfv491`
+  lane): `we:scripts/conveyor/pr-watch.mjs` imports the helper, and both `we:scripts/lane-resume.mjs` sites go
+  through one tested seam, `testConclusionOf`. The false parity claim in that docstring is corrected too.
 - `ciRollup` needs a different shape — it distils ALL checks to one token rather than picking one check — so
-  give it a per-name collapse (keep only the last entry for each name) before the pass/fail/pending fold.
-- Add a `check:standards` rule: error on any `statusCheckRollup` consumer under `we:scripts/` that selects a
-  check by name outside the shared helper (`statusCheckRollup` combined with `.find(` or a name-match loop),
-  allowlisting `latestRequiredCheck` itself. `statusCheckRollup` appears nowhere in
-  `we:scripts/check-standards-rules.mjs` today.
+  give it a per-name collapse (keep only the latest entry for each name) before the pass/fail/pending fold.
+- `rollupToCheckRows` (`we:scripts/fetch-parked.mjs`) needs the SAME per-name collapse, for the same reason and
+  ahead of the same fold: collapse the rollup to the latest entry per check name FIRST, then map to `{name,
+  bucket}` rows. Fixing that one seam repairs BOTH open readers — `we:scripts/fetch-parked.mjs:189` and
+  `we:scripts/pr-state.mjs:55` both route through it. Do NOT "fix" this inside `classifyChecks`
+  (`we:scripts/pr-land.mjs`): its other callers are fed `gh`-collapsed rows that carry no `__typename` or
+  ordering to collapse on, so rollup semantics do not belong there.
+- Both collapses want ONE named seam so the two items and the drain cite the same rule rather than three
+  hand-rolled copies. Proposed: **`collapseRollupToLatestPerName`**, exported from `we:scripts/merge-ai-prs.mjs`
+  beside `latestRequiredCheck`, with `latestRequiredCheck` reduced to a by-name lookup over its output. The rule
+  is exactly the one `latestRequiredCheck` already implements, generalised from one name to every name: within a
+  name, take the FIRST non-empty `rollupRowKind` tier (`CheckRun` → untagged → `StatusContext`) and then the LAST
+  entry in that tier. Latest-wins stays principled, not "ignore CANCELLED" — if the newest run is cancelled the
+  check genuinely has no current verdict.
+- **Not implemented by PR #1049**, which is prose-only from round 4 onward; this item owns building all of it.
+- The `check:standards` rule over `statusCheckRollup` consumers is carved out to
+  [#xjblya4](xjblya4-gate-any-statuscheckrollup-consumer-that-selects-a-check-out.md) — the PREVENTION outlives
+  the specific readers it was written for, so it is tracked on its own rather than inside this repair.
 
 ## Acceptance
 
 - A rollup with a superseded `CANCELLED` entry beside a later `SUCCESS` reads green in
-  `we:scripts/conveyor/pr-watch.mjs`, `we:scripts/lane-resume.mjs` (both sites) and
-  `we:scripts/readiness/conveyor-state.mjs`, matching the drain.
+  `we:scripts/conveyor/pr-watch.mjs`, `we:scripts/lane-resume.mjs` (both sites),
+  `we:scripts/readiness/conveyor-state.mjs`, `we:scripts/fetch-parked.mjs` (the `/review` bundle's
+  `checks.status`) and `we:scripts/pr-state.mjs` (the `checks=` token), matching the drain.
+- `we:scripts/pr-land.mjs:822` and `we:scripts/wait-green.mjs` are UNCHANGED and still green — the repair must
+  not alter `classifyChecks` itself.
 - The CheckRun-over-StatusContext preference from PR #1049 rides along wherever the shared helper is adopted,
   so a posted `test` commit status cannot clear any of these paths either.
 - The new gate fires on a re-introduced `.find(...)` over `statusCheckRollup` and is green on the repaired
