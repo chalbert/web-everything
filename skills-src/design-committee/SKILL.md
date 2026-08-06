@@ -1,6 +1,6 @@
 ---
 name: design-committee
-description: Right-size and run a design proposal panel — several agents each proposing a mock, blind to each other, then judged on rendered pixels. STARTS BY ASKING whether a panel is warranted at all; "no panel, just author it" is the most common answer. Use when the user asks for "a few design options", "some takes on this screen", "propose a couple of designs", "explore variants", "convene the design committee", or otherwise wants more than one design candidate. NOT the requirements committee (that is build-ui phase 0, persona needs) and NOT the judging jury (that is /jury).
+description: Right-size and run a design proposal panel — several agents each proposing a mock, blind to each other, then judged on rendered pixels. STARTS BY ASKING whether a panel is warranted at all; "no panel, just author it" is the most common answer. Use when the user asks for "a few design options", "some takes on this screen", "propose a couple of designs", "explore variants", "convene the design committee", or otherwise wants more than one design candidate. NOT the whole build-UI method — a brand-new surface ("build a new UI", "design a console/screen") is /build-ui, which owns domain modelling, integration and convergence; this skill is only its mock-proposal phase, so use /build-ui when the surface itself is new and this one when the mocks are all you need. NOT the requirements committee (that is build-ui phase 0, persona needs) and NOT the judging jury (that is /jury).
 ---
 
 # /design-committee — right-size, then run the proposal panel
@@ -13,16 +13,25 @@ Don't restate the rubric here; if the method changes, edit those docs. Canonical
 This skill exists so the right-sizing rules fire **without the operator restating them** every time they ask
 for "a couple of options".
 
+> **Runs in a lane — set it up FIRST (#2123).** Every seat writes a mock file, so the whole panel works in an
+> isolated lane clone, never the shared primary checkout (`we:scripts/guard-lane.mjs` denies a primary
+> `Edit`): `node we:scripts/lane-pool.mjs status --json` → pick a clean lane → seat every agent there → land
+> via PR. A seat that hits the deny takes the lane, **never `LANE_GUARD_OFF`**. The mocks themselves live in
+> the **product repo** (plateau-app) — WE holds zero implementation (#1282).
+
 ## The loop
 
 1. **Right-size first — default to no panel.** Pick a rung from *build-ui.md → 2*: none / one proposer / two /
-   more. State **which rung and why** in one line before doing anything else. A tweak, a single component, or
-   an already-obvious call is rung zero.
-2. **Ask before climbing.** Any rung above "no panel" spends the operator's budget — get their **OK** first.
-   Never silently upgrade mid-run either.
-3. **Rung zero → just author the mock** the *build-ui.md → 2* way and skip to step 6. This is the common exit.
-4. **Fan out** one agent per seat, each with a **distinct assigned angle** and **blind** to the siblings' work,
-   each producing a self-contained mock per *build-ui.md → 2*.
+   more, with a **hard ceiling of four seats**. State **which rung and why** in one line before doing anything
+   else.
+2. **Ask before climbing.** Any rung above "no panel" needs the operator's explicit **OK** first
+   (*build-ui.md → 2*) — never a silent upgrade mid-run. **No operator channel reachable → rung zero**; a
+   question nobody could answer never reads as OK.
+3. **Rung zero → just author the mock** the *build-ui.md → 2* way and skip to step 5. This is the common exit.
+4. **Fan out** one agent per seat — a **distinct assigned angle** each, **blind** to the siblings' work, one
+   self-contained mock each per *build-ui.md → 2*. Give every seat **its own output path**
+   (`docs/mocks/<surface>-seat-<N>.html` in the product repo, one seat number per seat) so two blind seats
+   cannot write the same file.
 5. **Screenshot every candidate, both themes** — *build-ui.md → 3*. The candidates are the PNGs, never the HTML.
 6. **Judge on the rendered pixels** — hand the PNGs to `/jury` with `subject: design-pixels` (or, for a fork
    between candidates, the explainer channel in *build-ui.md → 4*).
@@ -30,8 +39,7 @@ for "a couple of options".
 
 ## Stop rules
 
-- **Never present a candidate you did not render.** A fork ruled against a described-but-unbuilt option was
-  imagined, not ruled (*build-ui.md → Honesty clauses*).
-- **A blind proposer that peeked is not a second angle.** If an agent read a sibling's mock, you have one
-  candidate and an edit of it — say so rather than reporting spread you don't have.
+- **Never present a candidate you did not render** — *build-ui.md → Honesty clauses*.
+- **A blind proposer that peeked is not a second angle.** If a seat read a sibling's mock, report one candidate
+  and an edit of it — not spread you don't have.
 - **Scale by count, never by dropping model strength.** See *build-ui.md → 2*.
