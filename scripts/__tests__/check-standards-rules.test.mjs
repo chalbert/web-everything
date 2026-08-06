@@ -46,6 +46,7 @@ import {
   validatePolyglotWideningGate, POLYGLOT_WIDENING_TAG, PILOT_EVIDENCE_NUMS,
   validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
+  validateDeclaredModuleContract,
 } from '../check-standards-rules.mjs';
 import { execFileSync } from 'node:child_process';
 
@@ -1812,5 +1813,53 @@ describe('validatePlaywrightContainerPin — container image tag ↔ installed v
     });
     const res = validatePlaywrightContainerPin({ installedVersion, filesReferences });
     expect(res.errors).toEqual([]);
+  });
+});
+
+// ── Declared module contract vs. actual imports (PR #1064 review, cosmetic 1) ────────────────────
+describe('validateDeclaredModuleContract', () => {
+  const mod = (declared, imported) => ({
+    file: 'scripts/lib/x.mjs',
+    content: `/**\n * A module.\n *\n *   from we:scripts/lib/jury-core.mjs — ${declared}\n *   from we:scripts/lib/review-core.mjs — \`growOnlyRoster\`.\n */\n`
+      + `import { ${imported} } from './jury-core.mjs';\n`
+      + `import { growOnlyRoster } from './review-core.mjs';\n`,
+  });
+
+  it('passes when every imported specifier is declared', () => {
+    expect(validateDeclaredModuleContract([mod('`deriveVerdict`, `VERDICTS`.', 'deriveVerdict, VERDICTS')]).errors).toEqual([]);
+  });
+
+  it('FAILS on an imported specifier the declared block does not name — the drift that shipped', () => {
+    const res = validateDeclaredModuleContract([mod('`deriveVerdict`.', 'deriveVerdict, normalizeFindings')]);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0].message).toMatch(/normalizeFindings/);
+    expect(res.errors[0].descriptor).toMatchObject({ kind: 'declared-contract-drift', undeclared: ['normalizeFindings'] });
+  });
+
+  it('is one-directional — a declared name that is not imported is fine', () => {
+    expect(validateDeclaredModuleContract([mod('`deriveVerdict`, `VERDICTS`, `NEVER_IMPORTED`.', 'deriveVerdict, VERDICTS')]).errors).toEqual([]);
+  });
+
+  it('attributes each undeclared name to the RIGHT declared block', () => {
+    const res = validateDeclaredModuleContract([{
+      file: 'scripts/lib/x.mjs',
+      content: '/**\n *   from we:scripts/lib/jury-core.mjs — `a`.\n *   from we:scripts/lib/review-core.mjs — `b`.\n */\n'
+        + "import { a } from './jury-core.mjs';\nimport { b, c } from './review-core.mjs';\n",
+    }]);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0].descriptor.target).toBe('scripts/lib/review-core.mjs');
+    expect(res.errors[0].descriptor.undeclared).toEqual(['c']);
+  });
+
+  it('ignores a module with no header or no declared contract', () => {
+    expect(validateDeclaredModuleContract([{ file: 'a.mjs', content: "import { x } from './y.mjs';\n" }]).errors).toEqual([]);
+    expect(validateDeclaredModuleContract([{ file: 'a.mjs', content: "/** plain header */\nimport { x } from './y.mjs';\n" }]).errors).toEqual([]);
+  });
+
+  it('the real scripts/lib modules stay clean (standing guard, mirrors the check-standards.mjs wiring)', () => {
+    const dir = join(ROOT, 'scripts', 'lib');
+    const mods = readdirSync(dir).filter((f) => f.endsWith('.mjs'))
+      .map((f) => ({ file: `scripts/lib/${f}`, content: readFileSync(join(dir, f), 'utf8') }));
+    expect(validateDeclaredModuleContract(mods).errors).toEqual([]);
   });
 });
