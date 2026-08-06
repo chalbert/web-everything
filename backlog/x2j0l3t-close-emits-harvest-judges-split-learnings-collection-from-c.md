@@ -2,10 +2,12 @@
 kind: story
 size: 5
 parent: "2612"
-status: active
+status: resolved
 scaffoldedBy: "feedback-pool-collect-triage-split"
 dateScaffolded: "2026-08-06"
 dateOpened: "2026-08-06"
+dateResolved: "2026-08-06"
+graduatedTo: scripts/conveyor/learnings-harvest.mjs (npm run harvest) + skills-src/harvest-learnings + emit-only closing-session
 tags: [conveyor, agent-memory, learnings, close-session, feedback]
 ---
 
