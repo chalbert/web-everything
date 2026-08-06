@@ -16,7 +16,7 @@ scope:
 
 # Three rollup readers still take the first entry per check name, so the #1042 jam survives outside the drain
 
-`#xkfv491` fixed the drain's `isRequiredCheckGreen` / `isRequiredCheckFailed` to read the LAST rollup entry
+`#2932` fixed the drain's `isRequiredCheckGreen` / `isRequiredCheckFailed` to read the LAST rollup entry
 per check name, but three sibling readers still call `.find(...)` and get the OLDEST run. So the jam that
 held PRs #1042/#1046/#1012 is only half gone: the lander moved, the enqueue path and the fast-drain trigger
 did not. Add the `check:standards` rule that would have caught the split, so the assumption cannot drift
@@ -29,7 +29,7 @@ in-flight run when a new push supersedes it, leaving a `CANCELLED` entry beside 
 finished. Reading the first entry picks the cancelled one. Each of these still does:
 
 - **`we:scripts/conveyor/pr-watch.mjs:135`** — its own JSDoc says it *"Mirrors merge-ai-prs
-  `isRequiredCheckGreen` … so the trigger and the lander read green identically."* After `#xkfv491` that
+  `isRequiredCheckGreen` … so the trigger and the lander read green identically."* After `#2932` that
   sentence is false. `isReadyToLand` never flips, so the fast-drain trigger does not fire and landing
   degrades to the resident daemon's sweep.
 - **`we:scripts/lane-resume.mjs:439`** (`landDecision`) and **`we:scripts/lane-resume.mjs:556`**
@@ -70,7 +70,7 @@ round-4 re-review of the same PR.
 
 - ~~Import the shared `latestRequiredCheck` from `we:scripts/merge-ai-prs.mjs` in
   `we:scripts/conveyor/pr-watch.mjs` and `we:scripts/lane-resume.mjs` (both call sites) instead of
-  re-deriving the lookup. Delete the local `.find(...)`.~~ **Delivered** by PR #1049 round 4 (the `#xkfv491`
+  re-deriving the lookup. Delete the local `.find(...)`.~~ **Delivered** by PR #1049 round 4 (the `#2932`
   lane): `we:scripts/conveyor/pr-watch.mjs` imports the helper, and both `we:scripts/lane-resume.mjs` sites go
   through one tested seam, `testConclusionOf`. The false parity claim in that docstring is corrected too.
 - `ciRollup` needs a different shape — it distils ALL checks to one token rather than picking one check — so
@@ -90,7 +90,7 @@ round-4 re-review of the same PR.
   check genuinely has no current verdict.
 - **Not implemented by PR #1049**, which is prose-only from round 4 onward; this item owns building all of it.
 - The `check:standards` rule over `statusCheckRollup` consumers is carved out to
-  [#xjblya4](xjblya4-gate-any-statuscheckrollup-consumer-that-selects-a-check-out.md) — the PREVENTION outlives
+  [#2931](2931-gate-any-statuscheckrollup-consumer-that-selects-a-check-out.md) — the PREVENTION outlives
   the specific readers it was written for, so it is tracked on its own rather than inside this repair.
 
 ## Acceptance

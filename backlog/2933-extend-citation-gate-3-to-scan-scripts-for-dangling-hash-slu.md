@@ -1,4 +1,5 @@
 ---
+bornAs: xs7x7mg
 kind: task
 status: open
 dateOpened: "2026-08-05"
@@ -21,7 +22,7 @@ listed `we:reports/`, `we:src/_data/researchTopics/` and `we:src/_includes/resea
 to add. **`we:scripts/` was not on that list, and it is the largest live instance of the class.**
 
 A source file is exactly where an in-flight item's hash gets written, because the code comment that explains a
-fix is authored in the same lane as the fix. PR #1049 alone leaves **13** `#xkfv491` citations across
+fix is authored in the same lane as the fix. PR #1049 alone leaves **13** `#2932` citations across
 `we:scripts/merge-ai-prs.mjs`, `we:scripts/lane-resume.mjs`, `we:scripts/conveyor/pr-watch.mjs` and their three
 test files. The moment the drain lands that item as a real `NNN`, every one of them points at an id that no
 longer exists — in the very docstrings a future reader consults to understand why the selector works the way it
@@ -48,7 +49,7 @@ rewrite-proof-fixture problem — a rewriter that eats its own test is the failu
 
 ## Acceptance
 
-- After `#xkfv491` lands as an `NNN`, no `#xkfv491` remains anywhere under `we:scripts/`.
+- After `#2932` lands as an `NNN`, no `#2932` remains anywhere under `we:scripts/`.
 - The sweep is idempotent and touches no un-landed hash (an item still in flight keeps its hash).
 - Any fixture that must retain a literal hash slug survives the sweep, and there is a test proving it does.
 - `npm run check:standards` stays at 0 errors.

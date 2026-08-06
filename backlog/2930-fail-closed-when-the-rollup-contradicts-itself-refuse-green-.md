@@ -1,4 +1,5 @@
 ---
+bornAs: x4njmrs
 kind: task
 status: open
 dateOpened: "2026-08-05"
@@ -15,7 +16,7 @@ unpinned bet: if any matching CheckRun is red with a strictly later `startedAt`,
 
 ## Why it is owed
 
-`#xkfv491` deliberately chose "the LAST matching entry is the newest" and deleted the timestamp ranking that
+`#2932` deliberately chose "the LAST matching entry is the newest" and deleted the timestamp ranking that
 preceded it. That ranking bought three defects and no observed benefit, so the deletion was right — but it
 leaves one assumption unpinned: **GitHub returns `statusCheckRollup` in creation order.** Nothing in the API
 contract guarantees it, and nothing in the repo would notice if it changed. If it ever does, the drain reads a
@@ -51,6 +52,6 @@ an unpinned ordering bet rather than fixing a regression. Filed here so the hedg
 - A rollup of `[CheckRun test SUCCESS @18:35, CheckRun test FAILURE @18:40]` reads NOT green, in either array
   order.
 - A rollup of `[CheckRun test FAILURE @18:34, CheckRun test SUCCESS @18:35]` (the PR #1042 shape) still reads
-  GREEN — the veto must not undo `#xkfv491`.
+  GREEN — the veto must not undo `#2932`.
 - Stamp-less, sentinel-stamped and unparseable-stamped rollups behave exactly as they do today.
 - A `StatusContext` never vetoes a `CheckRun` (it is not in the CheckRun tier).

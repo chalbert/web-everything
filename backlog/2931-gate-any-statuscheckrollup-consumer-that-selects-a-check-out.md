@@ -1,4 +1,5 @@
 ---
+bornAs: xjblya4
 kind: task
 status: open
 dateOpened: "2026-08-05"
@@ -16,7 +17,7 @@ lookup and silently disagree with the drain again — as five already did, in tw
 
 ## Why it is owed
 
-`#xkfv491` fixed the drain to read the LATEST rollup entry per check name. The same assumption was hand-rolled
+`#2932` fixed the drain to read the LATEST rollup entry per check name. The same assumption was hand-rolled
 in three sibling readers as `roll.find((c) => (c?.name || c?.context) === requiredCheck)`, i.e. the FIRST entry,
 and all three were wrong in the same way for months without anything noticing. PR #1049 adopted the shared
 `latestRequiredCheck` in two of them ([we:scripts/conveyor/pr-watch.mjs](../scripts/conveyor/pr-watch.mjs) and
@@ -77,7 +78,7 @@ the PREVENTION — it must outlive the specific readers it was written for.
 ## Acceptance
 
 - The gate fires on a re-introduced `roll.find((c) => (c?.name || c?.context) === requiredCheck)` in a new
-  `we:scripts/` file, and on the exact pre-#xkfv491 text of `we:scripts/lane-resume.mjs:439`.
+  `we:scripts/` file, and on the exact pre-#2932 text of `we:scripts/lane-resume.mjs:439`.
 - The gate fires on a rollup FOLD that skips the per-name collapse — e.g. the exact pre-repair text of
   `ciRollup` (`we:scripts/readiness/conveyor-state.mjs`) or `rollupToCheckRows` (`we:scripts/fetch-parked.mjs`).
 - The gate is green on the repaired tree — i.e. once #2925 has given those two their per-name collapse. `ciWindow`
