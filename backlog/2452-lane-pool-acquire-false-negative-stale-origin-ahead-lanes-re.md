@@ -70,3 +70,11 @@ not the durable `ownerSession` (`CLAUDE_CODE_SESSION_ID`) signal `isForeignLease
 `--force` (observed twice, 2026-07-12 — lane-20 and lane-21). Port `cmdRelease` (and any other
 `leaseOwnedBy` callers) onto the `ownerSession` comparison, with the same fail-open degraded
 mode as #2367.
+
+**Observed again 2026-08-06.** Two separate fix sub-agents each had to pass `--force` to release a lane they
+had **just acquired themselves** in the same session. Same mechanism: `defaultSession()`
+(`we:scripts/lane-pool.mjs:474` — `flags.session || LANE_SESSION || hostname():ppid`) is recomputed per
+process, and every Bash tool call is a fresh shell, so the release invocation's host:pid never matches the
+acquire invocation's. `CLAUDE_CODE_SESSION_ID` — the `ownerSession` signal already stamped on the lease — was
+stable and set across all of those calls. A fresh sighting of the already-diagnosed Gap 2, recorded as
+evidence that it still bites in normal agent use; the fix direction above is unchanged.
