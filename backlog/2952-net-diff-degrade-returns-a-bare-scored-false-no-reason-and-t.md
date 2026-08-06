@@ -64,8 +64,29 @@ Byte-identical to what a foreign clone with no head ref returns. Switching to
 3. `we:skills-src/review/SKILL.md` step 1 spells the shape inline, e.g.
    `const exec = (cmd, args, opts) => execFileSync(cmd, args, opts)`, and says explicitly that a
    `scored:false` whose reason is `exec-contract` is a **caller bug to fix**, not a licence to fall back.
+4. **Give the net basis a COMMAND surface, so no caller injects `exec` at all** (added 2026-08-06 — see
+   the second evidence section below). A `net-diff` subcommand that takes a ref and prints
+   `{ scored, reason, base, rev, paths, text }` removes this item's whole defect class rather than
+   documenting around it: an operator who never writes the wrapper cannot get its arity wrong. Pair it with
+   exposing `netChangedFiles` on `review-core-cli mandate` (`--net-changed-files=` or, better, `--pr=<N>`
+   deriving them), which is the other half every panel seeding needs and today cannot reach from a CLI.
+
+## Second evidence — the missing command surface is why the wrapper gets hand-written (2026-08-06)
+
+The `/review` of **WE PR #1046** and its convergence rounds needed the net basis repeatedly, and there is no
+way to get it except writing a throwaway module. In one session that meant **three** hand-written scratch
+scripts, each re-declaring the same `exec` wrapper — and **four** separate inline `node -e` blocks importing
+`buildPanelMandate` purely because `netChangedFiles` is not reachable from `we:scripts/review-core-cli.mjs`,
+even though `mandate --lens=` already exists.
+
+That is the root of the contract bug above: the `exec` shape is only a hazard because every caller re-writes
+it. The **PR #1056** review also showed the cost of not having it at hand — `gh pr view --json files` reported
+**45 files** where the net set was **12**, the same inflation #2450/#2901 exist to prevent, and only a
+hand-rolled script could tell the difference.
 
 ## Verification
 
 A unit test that injects a 2-arity `exec` and asserts `{ scored: false, reason: 'exec-contract' }`, alongside
-the existing foreign-clone case asserting `reason: 'ref-unresolved'`.
+the existing foreign-clone case asserting `reason: 'ref-unresolved'`. For (4): a CLI test that
+`net-diff <ref> --json` returns the same `paths` as a direct `computeNetDiffPaths` call, and that
+`mandate --lens=correctness --net-changed-files=a,b` embeds the ground-truth set.
