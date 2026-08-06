@@ -59,6 +59,37 @@ the spacing that finally read right, the glyph that won, the tuned hierarchy —
 already fixed. Edit the ratified artifact *forward* so craft accretes across rounds instead of resetting to
 zero. The spec is the record of what was decided; it is not a regeneration seed.
 
+**How many mocks? Right-size the proposal panel to the ask — and start at zero.** Fanning several agents out
+to each propose a design is a *cost lever you must earn*, not the default shape of this phase. Pick a rung and
+**say which rung you picked and why** before you spawn anything:
+
+- **No panel** — you author the mock. The right answer for a tweak, a single component, or a call that is
+  already obvious. Most of the time this is the rung.
+- **One proposer** — a second pair of eyes when you want a check, not a spread.
+- **Two proposers** — the real minimum when you want *spread*: two mocks, two **distinct assigned angles**
+  (e.g. density-first vs novice-first), each author **blind to the other's work** so the second isn't an edit
+  of the first.
+- **More than two** — a genuinely contested or high-stakes surface only, and **never more than four seats**.
+  Four is the hard ceiling, not a soft guideline: past four you are paying for candidates nobody will actually
+  hold side by side, and the extra angles stop being decorrelated anyway. A surface that seems to need five is
+  a surface whose fork is under-specified — sharpen the ask, don't buy more seats.
+
+**Never climb a rung without asking the human first.** Escalation spends real budget and time, so it is their
+call, not a silent upgrade. And when there is **no operator channel to ask on** — an unattended `/workflow`
+lane, a conveyor run, a drain subagent — the answer is rung zero. Absence of an answer is a refusal, never a
+licence to proceed.
+
+**The front door is the `/design-committee` skill** (`skills-src/design-committee`) — it runs this
+right-sizing ladder and the blind fan-out for you. Invoke it rather than hand-rolling the panel.
+
+**Right-size by count, not by model tier.** The reason a panel helps is **decorrelated angles**, not more total
+brainpower — and that only pays off if each mock is good enough that *seeing it rendered* changes your mind. A
+weak candidate teaches nothing: you glance at it, reject it, and the fork is no better ruled than before. So
+scale the *number* of proposers and leave each one at full strength; one strong proposer beats three lesser
+ones. (This is the mirror of the jury's rigor gate, which sizes the *judging* panel — see
+*jury-refinement-method.md → When to run the full jury*. Same instinct, different half of the loop: that dial
+is a derivation in the engine, this one is your explicit, asked-for choice.)
+
 ### 3. Review the pixels, not the source — screenshot matrix × both themes → PNGs to reviewers
 
 Render the mock and **screenshot every cell of the matrix in BOTH light and dark themes** (Playwright). Hand
@@ -205,6 +236,8 @@ The build-UI work is edit-action work, so it obeys the standard delivery discipl
   page. Its lesson for a *new* surface: build it *into* the established product chrome, not beside it.
 - Rubric the pixel review scores against: *vision-tiers.md → Design-critique rubric* (#1034), driven by
   `skills-src/review-design`.
+- Front door for the phase-2 proposal panel (the rung ladder + the blind fan-out): the `/design-committee`
+  skill, `skills-src/design-committee` — right-sizes first and defaults to no panel.
 - The fork-ruling technique (plugs into phase 4): the jury-refinement method —
   [jury-refinement-method.md](jury-refinement-method.md) (#2576, parent epic #2577 "Plateau Ruler") —
   multi-lens jury, per-option 1–5 ratings, weak-flag→candidate-search, human-gate; how the §6e icon grammar
