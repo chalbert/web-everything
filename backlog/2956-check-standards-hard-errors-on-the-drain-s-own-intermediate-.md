@@ -23,8 +23,8 @@ Make the gate tolerate the drain's own in-flight numbering.
 
 The window is real and structural, not a rare race. Measured across recent lands, the numbering commit trails
 its merge commit by **7-73 seconds** — e.g. merge `269a4f1a` at 09:53:14 followed by
-`3394feee drain: JIT-number x3dvojd→#2954 at land (#2288)` at 09:54:24. `git ls-tree 269a4f1a -- backlog/`
-lists `backlog/x3dvojd-…md` hash-led, so a fetch landing on that merge commit legitimately sees a stranded
+`3394feee drain: JIT-number 2954→#2954 at land (#2288)` at 09:54:24. `git ls-tree 269a4f1a -- backlog/`
+lists `backlog/2954-…md` hash-led, so a fetch landing on that merge commit legitimately sees a stranded
 hash that is about to be numbered.
 
 **The primary checkout is pinned into the window by design.** `we:scripts/pr-land.mjs` fires
@@ -34,7 +34,7 @@ fast-forwarded to the merge commit *before* the numbering commit is pushed — a
 not "until it settles on its own".
 
 Observed twice in one session (2026-08-06): once as **5 errors**, matching a numbering commit that handled
-exactly five items, and once as a single error for `x3dvojd`, numbered to #2954 a minute later. Both were
+exactly five items, and once as a single error for `2954`, numbered to #2954 a minute later. Both were
 transient and neither was the checkout's fault.
 
 The `catch { }` fail-soft on the `ls-tree` covers only an **unresolvable** `origin/main` (a fresh or offline
