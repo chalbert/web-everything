@@ -169,7 +169,7 @@ const VERDICT_STRINGS = new Set(Object.values(VERDICTS));
  * @param {{ activeLenses?: string[], lensVerdicts?: object, findings?: object[], rounds?: number }} [state]
  * @returns {object[]} schema-valid raw jury-ledger events
  */
-export function buildReviewLedgerEvents({ activeLenses, lensVerdicts = {}, findings = [], rounds = 1 } = {}) {
+export function buildReviewLedgerEvents({ activeLenses, lensVerdicts = {}, findings = [], rounds = 1, reviewedSha } = {}) {
   const lenses = Array.isArray(activeLenses) && activeLenses.length ? [...new Set(activeLenses)] : [...REVIEW_PANEL_LENSES];
   const jid = (lens) => `${lens}#1`;
   const finalRound = Math.max(0, (Number.isFinite(rounds) ? Math.floor(rounds) : 1) - 1);
@@ -178,6 +178,12 @@ export function buildReviewLedgerEvents({ activeLenses, lensVerdicts = {}, findi
     type: JURY_EVENT_TYPES.ROSTER_PICKED,
     round: 0,
     jurors: lenses.map((lens) => ({ id: jid(lens), lens, charter: REVIEW_LENS_CHARTER[lens] || `judge the "${lens}" lens` })),
+    // #2864 — the reviewed head sha. THIS is the writer the review pipeline actually uses (the `record` CLI and
+    // review-parked-prs.mjs both come through here), so without it the field is write-dead: every ledger the repo
+    // produces folds to `reviewedSha: null`, and a `null` from a CURRENT writer is indistinguishable from a `null`
+    // on a legacy pre-field event. A freshness gate could then only fail closed on 100% of PRs. Omitted when the
+    // caller has no sha (a design or decision subject has no commit) — the field stays optional in the schema.
+    ...(reviewedSha != null ? { reviewedSha } : {}),
   }];
   for (let r = 1; r <= finalRound; r += 1) events.push(roundAdvancedEvent({ round: r }));
   for (const lens of lenses) {
@@ -342,6 +348,10 @@ function strictestVerdict(verdicts) {
  * @property {'accept'|'changes'|'needs-human'|null} panelVerdict - the strictest verdict across ALL jurors, or null.
  * @property {{ pending: number, running: number, found: number }} counts - juror count by derived status.
  * @property {number} findingCount - total findings across the roster.
+ * @property {string|null} reviewedSha - #2864: the head sha the LATEST roster was seated over, or null when the
+ *   stream predates the field / the subject has no commit. A consumer that acts on a verdict MUST compare this
+ *   with the subject's observed head — a fold is a statement about the tree the jurors saw, not about the tree
+ *   the caller is holding.
  */
 
 /**
@@ -370,6 +380,7 @@ export function foldJuryLedger(events) {
   const findingsByJuror = new Map();
   let rosterKnown = false;
   let round = 0;
+  let reviewedSha = null;
 
   const ensureFindingMap = (id) => {
     let m = findingsByJuror.get(id);
@@ -387,6 +398,10 @@ export function foldJuryLedger(events) {
     switch (ev.type) {
       case JURY_EVENT_TYPES.ROSTER_PICKED: {
         rosterKnown = true;
+        // #2864 — the latest roster is authoritative about WHICH TREE the jury was seated over, exactly as it is
+        // about who sits on it. `null` when the stream predates the field or the subject has no commit (a design
+        // or decision subject) — the consumer decides what an unknown sha means; the fold only reports it.
+        reviewedSha = ev.reviewedSha != null ? String(ev.reviewedSha) : null;
         // The latest roster is authoritative. Re-seat, preserving any status/verdict/findings already derived for a
         // juror the new roster still names (a re-pick — e.g. a #2640 grown jury — keeps prior jurors' progress).
         const kept = new Map(jurors);
@@ -451,7 +466,7 @@ export function foldJuryLedger(events) {
   let findingCount = 0;
   for (const j of jurorList) { counts[j.status] += 1; findingCount += j.findings.length; }
 
-  return { rosterKnown, round, jurors: jurorList, lensVerdicts, panelVerdict, counts, findingCount };
+  return { rosterKnown, round, jurors: jurorList, lensVerdicts, panelVerdict, counts, findingCount, reviewedSha };
 }
 
 /**
