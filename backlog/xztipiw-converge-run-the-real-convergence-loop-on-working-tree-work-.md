@@ -38,9 +38,23 @@ convergence should ever gate PR-open is a separate decision, not this item.
 The improvement over the prose brief is **boundedness**, not enforcement: a coded loop with a round cap, a
 real panel reduction, and a ledger, instead of instructions a model follows by hand.
 
-## Open question — the care floor
+## Open question — the care floor → **carried out to #2954**
 
 `working-tree` material has no escalation reasons, so the care dial has no signal and would fall to baseline —
 the lowest rigor, on work nothing has judged yet. Deriving care from the touch-set (as the subject adapters
 already do for lens selection) is the likely answer, but it needs its own call before this ships at anything
 above advisory.
+
+**This question is NOT closed by this item's resolution.** It lives on as **#2954** (derive the care level for
+working-tree convergence from the touch-set), because a resolved item drops out of `check:readiness` selection
+and off the burndown — an open question left inside a closing artifact reads as disclosed while being
+unreachable. The interim mitigation shipped in PR #1064's review fixes: the CLI's default band is `elevated`
+(the weakest band at which an editor round can happen at all), and `--jurors` / `--round-cap` can only RAISE
+rigor, never lower it.
+
+## What this item did NOT deliver — **#xmjiqhc**
+
+`graduatedTo` above records where the CODE went. It does **not** mean the named consumer was connected:
+`we:skills-src/conveyor/delivery-agent-brief.md` step 6 — the prose loop this item's problem statement names —
+is unchanged, and `#xyihiji` covers only `we:scripts/workflows/review-parked-prs.mjs`. `/converge` therefore
+ships with zero production callers. **#xmjiqhc** is the wiring item.
