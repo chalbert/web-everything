@@ -1,11 +1,13 @@
 ---
 kind: story
 size: 5
-status: active
+status: resolved
 scaffoldedBy: "converge-skill"
 dateScaffolded: "2026-08-06"
 blockedBy: ["x2mo71w"]
 dateOpened: "2026-08-06"
+graduatedTo: the /converge skill and its working-tree transport
+dateResolved: "2026-08-06"
 tags: []
 ---
 

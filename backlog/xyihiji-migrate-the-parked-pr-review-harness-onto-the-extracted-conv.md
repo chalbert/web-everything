@@ -2,7 +2,6 @@
 kind: story
 size: 3
 status: open
-blockedBy: ["xztipiw"]
 dateOpened: "2026-08-06"
 tags: []
 ---
