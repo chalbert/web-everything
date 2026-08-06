@@ -49,6 +49,7 @@ import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
 import { numberPendingHashes, landedNumberFor } from './lane-drain.mjs';
 import { laneGuardDecision, resolveReal } from './guard-lane.mjs';
 import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig, orderQueueDetailed } from './lib/build-queue.mjs';
+import { localToday } from './lib/local-date.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
@@ -67,7 +68,7 @@ const verb = argv[0];
 const flag = (name) => { const m = argv.find((a) => a.startsWith(`--${name}=`)); return m ? m.slice(name.length + 3) : undefined; };
 const positional = argv.slice(1).filter((a) => !a.startsWith('--'));
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localToday();
 const files = () => readdirSync(DIR).filter((f) => f.endsWith('.md'));
 
 /**
@@ -447,7 +448,7 @@ function prepareStamp() {
   const before = readFileSync(abs, 'utf8');
   let after = setFrontmatterField(before, 'status', 'open', { after: ['kind', 'size'] });
   if (after == null) die(`#${idFromName(file)} — could not splice frontmatter (no frontmatter block?)`);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   after = setFrontmatterField(after, 'preparedDate', `"${today}"`, { after: ['status', 'dateStarted', 'dateOpened'] });
   writeBacklogMd(abs, rel, after);
   ok({ verb: 'prepare-stamp', num: idFromName(file), preparedDate: today },
