@@ -86,8 +86,36 @@ applies a label). The same module also renders the operator-facing notice for yo
      fix back to the **author lane** (the drain does no editing here — that convergence loop is v2, epic #2285).
    - The CLI **refuses** an `accepted` verdict on a `review:human` PR and changes nothing (INVARIANT 2). That
      refusal is the gate-self protection, and it only binds callers that come through this module — which is
-     exactly why the swap must not be hand-rolled. Clearing a gate-self PR has **no tool yet** (#2895): until
-     it does, stop and hand the decision to the operator rather than routing around the refusal to make it quiet.
+     exactly why the swap must not be hand-rolled.
+
+   **Clearing a `review:human` PR — `--to=clear-human` (#2895).** There IS a tool now; it is the third target,
+   and the ONLY thing that removes `review:human`:
+
+   ```
+   npm run review:clear -- <PR> --repo=<owner/name> --actor="<operator>" --reason="<quoted instruction>" --body-file=<findings.md>
+   ```
+
+   (The wrapper supplies only `--to=clear-human`, so the target cannot be typo'd. It deliberately does NOT bake
+   in a repo: the first `--repo=` on the line wins, so a hardcoded one would silently override yours and clear a
+   PR in the wrong repo.)
+
+   **Nothing in the tool checks who ran it.** #2895 ruled the unforgeable actor signal DEFERRED — no local
+   construct survives an agent with shell access on this machine, so a flag, a token, or a terminal check are
+   all things you could satisfy. Do not go looking; there is nothing there. What binds you is this rule:
+
+   > **You may run `clear-human` ONLY on an explicit in-conversation instruction from the operator naming that
+   > PR, and you must pass that instruction verbatim as `--reason`.** No instruction, or an instruction about a
+   > different PR: prepare the findings file, hand the operator the command line above, and stop. Clearing your
+   > own review unbidden is the thing the whole gate exists to prevent, and doing it now takes a fabricated
+   > quote — which is a lie, not an oversight.
+
+   `--actor` and `--reason` are both mandatory; the tool refuses without either. Both land verbatim in the
+   durable comment, which states in as many words what the record proves — that the sanctioned path was
+   followed — and what it does NOT prove: that a human followed it. Do not describe it as proof of a human
+   anywhere. Do not route around the tool with a raw `gh pr edit` either (`check:standards` errors when this
+   file spells that): the tool carries the `review:accepted` label, the `reviewed-sha` stamp, and the attributed
+   comment that the raw command loses. The durable fix for the missing signal is #2946 (a hardware
+   human-presence gesture), filed `someday`; #2945 is the out-of-session console.
 
    **Why not a raw label edit.** Two things ride on the CLI that adding the label by hand silently drops.
    (a) The `reviewed-sha` marker: it is the ONLY record of which tree the acceptance covered, and at land the
