@@ -13,11 +13,20 @@ Don't restate the rubric here; if the method changes, edit those docs. Canonical
 This skill exists so the right-sizing rules fire **without the operator restating them** every time they ask
 for "a couple of options".
 
-> **Runs in a lane — set it up FIRST (#2123).** Every seat writes a mock file, so the whole panel works in an
-> isolated lane clone, never the shared primary checkout (`we:scripts/guard-lane.mjs` denies a primary
-> `Edit`): `node we:scripts/lane-pool.mjs status --json` → pick a clean lane → seat every agent there → land
-> via PR. A seat that hits the deny takes the lane, **never `LANE_GUARD_OFF`**. The mocks themselves live in
-> the **product repo** (plateau-app) — WE holds zero implementation (#1282).
+> **Runs in a LEASED lane — set it up FIRST (#2123).** Every seat writes a mock file, so the whole panel works
+> in an isolated lane clone, never the shared primary checkout (`we:scripts/guard-lane.mjs` denies a primary
+> `Edit`). The mocks live in the **product repo** (plateau-app) — WE holds zero implementation (#1282) — so
+> lease from **that repo's** pool, hold the lease for the whole panel, and hand it back at the end:
+>
+> ```
+> node we:scripts/lane-pool.mjs acquire --repo=~/workspace/plateau-app --purpose=design-committee --session=<panel-slug> --json   # → {lane, path, …}; seat every agent in .path
+> …fan out (step 4) → screenshot → judge → land via PR…
+> node we:scripts/lane-pool.mjs release --repo=~/workspace/plateau-app --lane=<lane> --session=<panel-slug>
+> ```
+>
+> Never `status --json` → "pick a clean lane": that takes no lease, so a concurrent drain/conveyor `acquire`
+> can reset the lane out from under the seats. A seat that hits the deny takes the lane, **never
+> `LANE_GUARD_OFF`**.
 
 ## The loop
 
@@ -30,8 +39,8 @@ for "a couple of options".
 3. **Rung zero → just author the mock** the *build-ui.md → 2* way and skip to step 5. This is the common exit.
 4. **Fan out** one agent per seat — a **distinct assigned angle** each, **blind** to the siblings' work, one
    self-contained mock each per *build-ui.md → 2*. Give every seat **its own output path**
-   (`docs/mocks/<surface>-seat-<N>.html` in the product repo, one seat number per seat) so two blind seats
-   cannot write the same file.
+   (`plateau-app:docs/mocks/<surface>-seat-<N>.html` in the leased lane, one seat number per seat) so two
+   blind seats cannot write the same file.
 5. **Screenshot every candidate, both themes** — *build-ui.md → 3*. The candidates are the PNGs, never the HTML.
 6. **Judge on the rendered pixels** — hand the PNGs to `/jury` with `subject: design-pixels` (or, for a fork
    between candidates, the explainer channel in *build-ui.md → 4*).
