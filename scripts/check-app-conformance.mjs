@@ -33,6 +33,7 @@ import { loadBlocks } from './lib/blocks-loader.cjs';
 import { loadIntents } from './lib/intents-loader.cjs';
 import { loadProtocols } from './lib/protocols-loader.cjs';
 import { idFromName } from './backlog/id.mjs';
+import { localToday } from './lib/local-date.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -186,7 +187,7 @@ const queue = conformance
 if (BURNDOWN) {
   const bpath = join(ROOT, 'reports/app-conformance-burndown.json');
   const log = readJson('reports/app-conformance-burndown.json', {});
-  (log[APP_REL] ||= []).push({ date: new Date().toISOString().slice(0, 10), score, fails: fails.length, gaps: gaps.length, candidates: candidates.length });
+  (log[APP_REL] ||= []).push({ date: localToday(), score, fails: fails.length, gaps: gaps.length, candidates: candidates.length });
   writeFileSync(bpath, JSON.stringify(log, null, 2) + '\n');
 }
 
