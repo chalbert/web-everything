@@ -11,6 +11,7 @@
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { localToday } from './lib/local-date.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,7 +20,7 @@ const { validateWorkflowInvariants } = require('./lib/workflow-invariants.cjs');
 
 const AS_JSON = process.argv.includes('--json');
 const items = Array.isArray(loadBacklog) ? loadBacklog : (typeof loadBacklog === 'function' ? loadBacklog() : []);
-const today = new Date().toISOString().slice(0, 10);
+const today = localToday();
 const { errors, warnings } = validateWorkflowInvariants(items, { today });
 
 if (AS_JSON) {
