@@ -99,7 +99,8 @@ export function checkReviewLabelSingleHome(docs = []) {
     for (const m of content.matchAll(RAW_SWAP_RE)) {
       errors.push(
         `${file}:${lineOf(content, m.index)}: instructs a raw review-label swap with \`gh pr edit\` — route it through the single home \`we:${SINGLE_HOME}\` `
-        + `(\`<pr> --repo=<owner/name> --to=accepted|changes [--actor=<name>] [--body-file=<path>]\`). The raw path skips the `
+        + `(\`<pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--body-file=<path>]\`; \`clear-human\` `
+        + `is the #2895 gate-self clearance and additionally requires \`--actor\` and \`--reason=<stated reason>\`). The raw path skips the `
         + `\`reviewed-sha\` stamp the drain's staleness gate reads (#2409) and bypasses INVARIANT 2, which only binds callers that come through `
         + `\`decideSetLabel\` (#2644/#2882).`,
       );

@@ -4,13 +4,16 @@
  *   review:human PR is never cleared to accepted here) — is decided in the pure decider and unit-tested here
  *   against fixtures, no network.
  */
-import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import { writeFileSync, unlinkSync } from 'node:fs';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers } from '../review-set-label.mjs';
+import {
+  decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers,
+  runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
+} from '../review-set-label.mjs';
 import { parseReviewedSha } from '../lib/review-escalation.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
@@ -98,6 +101,115 @@ describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRea
   });
 });
 
+// #2895 — the gate-self clearance target. The pair of invariants that matter: `clear-human` is the ONLY target
+// that removes review:human, and adding it must not have loosened `accepted` (which stays refused on gate-self).
+describe('decideSetLabel — clear-human (#2895, the ONE target that drops review:human)', () => {
+  it('clears a gate-self PR: adds accepted, drops human + pending, keepsHuman false', () => {
+    const d = decideSetLabel({ to: 'clear-human', currentLabels: human });
+    expect(d.allowed).toBe(true);
+    expect(d.addLabel).toBe(REVIEW_LABELS.accepted);
+    expect(d.removeLabels).toContain(REVIEW_LABELS.human);
+    expect(d.keepsHuman).toBe(false);
+  });
+
+  it('also drops a live review:changes — a cleared PR must not still read as a bounce', () => {
+    const d = decideSetLabel({ to: 'clear-human', currentLabels: [...human, { name: REVIEW_LABELS.changes }] });
+    expect(presentRemoveLabels(d.removeLabels, [...human, { name: REVIEW_LABELS.changes }]))
+      .toEqual([REVIEW_LABELS.human, REVIEW_LABELS.changes]);
+  });
+
+  it('REFUSES on a PR with no review:human — it is not a backdoor accept for an ordinary parked PR', () => {
+    const d = decideSetLabel({ to: 'clear-human', currentLabels: pending });
+    expect(d.allowed).toBe(false);
+    expect(d.addLabel).toBe('');
+    expect(d.reason).toMatch(/no review:human/);
+  });
+
+  // The regression that would matter most: adding this target must not have made `accepted` clearable.
+  it('did NOT loosen INVARIANT 2 — accepted is still refused on the very same gate-self PR', () => {
+    expect(decideSetLabel({ to: 'accepted', currentLabels: human }).allowed).toBe(false);
+  });
+
+});
+
+// #2895 — the `clear-human` PRECONDITIONS, asserted behaviourally. Two separate things are pinned here and it
+// matters that they are not confused:
+//   • the `allowClearHuman` opt-in — an ACCIDENT guard. A caller that did not ask for the target gets a clean
+//     refusal instead of stumbling into it. It is NOT a trust boundary: it is an ordinary parameter, so an
+//     importer that wants it passes it, and #2895 accepted that when it deferred the unforgeable actor signal.
+//   • the HONESTY TAX — `--actor` and `--reason` are mandatory, so a clearance nobody authorised takes a
+//     fabricated name and a fabricated quote rather than a silent label add. This is the mitigation that
+//     replaces the missing signal, so its refusals are load-bearing, not cosmetic.
+// Both refuse through the `{"error":…}` JSON contract and BEFORE the first `gh` call, so no network, no mocking.
+describe('runReviewLabelCli — the clear-human preconditions (#2895)', () => {
+  const CFG = {
+    defaultActor: 'test',
+    usage: 'usage: test',
+    buildComment: () => 'unused',
+    successResult: (o) => ({ ok: true, ...o }),
+    refusalResult: ({ decision }) => ({ error: decision.reason }),
+  };
+
+  /** Run the harness with stdout + process.exit captured. Returns the parsed JSON payload and the exit code. */
+  function runCli(cfg) {
+    const chunks = [];
+    const realWrite = process.stdout.write.bind(process.stdout);
+    const realExit = process.exit.bind(process);
+    process.stdout.write = (s) => { chunks.push(String(s)); return true; };
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = null;
+    let threw = null;
+    try { runReviewLabelCli({ ...CFG, ...cfg }); }
+    catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else threw = e; }
+    finally { process.stdout.write = realWrite; process.exit = realExit; }
+    if (threw) throw threw;
+    return { exitCode, payload: JSON.parse(chunks.join('') || '{}') };
+  }
+
+  it('a caller that did not opt in REFUSES through the JSON contract, and reaches no gh call', () => {
+    const { exitCode, payload } = runCli({ argv: ['1048', '--repo=o/n', '--to=clear-human'] });
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toMatch(/did not opt in/);
+  });
+
+  // m1 — a caller PINNING the target skipped the `!fixedTo &&`-guarded validation entirely in the first cut and
+  // blew up with a TypeError after `gh pr view`. Every clear-human precondition is checked at the point of use.
+  it('a caller PINNING fixedTo:clear-human refuses too — not a TypeError, and not after a gh mutation', () => {
+    const { exitCode, payload } = runCli({ argv: ['1048', '--repo=o/n'], fixedTo: 'clear-human' });
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toMatch(/did not opt in/);
+  });
+
+  // THE HONESTY TAX, refusal 1 of 2. The default actor must NOT satisfy it: the record has to name whoever
+  // asked, and 'loop-console operator' names nobody.
+  it('REFUSES an opted-in clear-human with no --actor — the default actor is not an answer', () => {
+    const { exitCode, payload } = runCli({
+      argv: ['1048', '--repo=o/n', '--to=clear-human', '--reason=operator said accept 1048'],
+      allowClearHuman: true,
+    });
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toMatch(/requires an explicit --actor/);
+  });
+
+  // THE HONESTY TAX, refusal 2 of 2. A blank/whitespace reason is the same as none — otherwise `--reason=` is a
+  // one-character way to satisfy the thing whose whole purpose is that it has to be written out.
+  it('REFUSES an opted-in clear-human with no stated reason, including a whitespace-only one', () => {
+    for (const reasonArg of [[], ['--reason='], ['--reason=   ']]) {
+      const { exitCode, payload } = runCli({
+        argv: ['1048', '--repo=o/n', '--to=clear-human', '--actor=Nicolas Gilbert', ...reasonArg],
+        allowClearHuman: true,
+      });
+      expect(exitCode).not.toBe(0);
+      expect(payload.error).toMatch(/requires --reason/);
+    }
+  });
+
+  it('the ordinary targets are unaffected — the opt-in gates clear-human only', () => {
+    const { payload } = runCli({ argv: ['1048', '--repo=o/n', '--to=nonsense'] });
+    expect(payload.error).toMatch(/invalid --to — expected 'accepted' or 'changes'/);
+  });
+});
+
 describe('presentRemoveLabels — intersect the decision removals with the labels actually present', () => {
   it('a removeLabel NOT in currentLabels is not passed through (never handed to gh)', () => {
     // changes wants to drop [pending, accepted], but the PR only carries pending → accepted must not survive.
@@ -179,59 +291,327 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
   });
 });
 
-describe('--body-file size pre-flight projects with the ACTUAL actor (the partial-swap guard)', () => {
-  // The projection is inside the `IS_CLI` block, so the only honest test is to RUN the CLI. It refuses before
-  // the first `gh` call (the body-file checks all precede `runReviewLabelCli`), so no stub is needed.
-  //
-  // The bug this pins: the projection used to assume `actor: 'x'.repeat(64)` while `--actor` is unbounded caller
-  // input rendered verbatim into the attribution line. That made the check an ESTIMATE, not the upper bound the
-  // guard needs — and it erred in the one direction that matters. A body sized to pass the estimate posts OVER
-  // GitHub's cap, by which point `gh pr edit` has already applied the label: the PR is left `review:accepted`
-  // with NO `reviewed-sha` marker, and `acceptanceCoversHead` fails OPEN on a missing marker, so the drain lands
-  // it. That is exactly the accepted-without-a-marker state this pre-flight exists to prevent.
-  // vitest hands `import.meta.url` as a bare path in some modes, so only run it through `fileURLToPath` when it
-  // really is a file: URL. Deriving from this module's own location keeps the test cwd-independent.
-  const HERE = import.meta.url.startsWith('file:') ? dirname(fileURLToPath(import.meta.url)) : dirname(import.meta.url);
-  const CLI = join(HERE, '..', 'review-set-label.mjs');
+// PR #1056 review, M2 — ENUM TOTALITY over the label-swap target set. The `GH_COMMENT_MAX` pre-flight exists to
+// guarantee the durable comment can actually POST before the label swap is applied, because the failure mode is
+// the worst one this module has: label applied, comment rejected, PR left `review:accepted` with NO
+// `reviewed-sha` marker — and `acceptanceCoversHead` fails OPEN on a missing marker, silently disarming the
+// staleness gate. The first cut projected `to: 'accepted'` only, so a `clear-human` comment (a longer heading
+// plus its attribution) was under-counted and a body just under the cap walked straight into that state. This
+// asserts the projection is an UPPER BOUND over EVERY target AND over the other unbounded argv inputs (`actor`,
+// `reason`), so neither a new target nor a long free-text field can re-open the hole.
+describe('projectVerdictCommentLength — total over REVIEW_LABEL_TARGETS (#1056 M2)', () => {
+  const SHA = 'abf7d85700a3336a0ec77d94ab455162d4b8e00d';
+  const ACTOR = 'Nicolas Gilbert';
+  const REASON = 'operator in-session: "accept 1048"';
 
-  /** Run the CLI with a body file of `bodyLen` chars and an actor of `actorLen` chars. Returns parsed stdout. */
-  const runWithBody = (bodyLen, actorLen) => {
-    // Under the repo root — the CLI constrains --body-file to the cwd or the temp dir (a public-PR leak guard).
-    const file = join(tmpdir(), `review-set-label-size-${bodyLen}-${actorLen}.md`);
-    writeFileSync(file, 'x'.repeat(bodyLen));
+  it('has at least one target it must cover, and covers the whole declared set', () => {
+    expect(REVIEW_LABEL_TARGETS.length).toBeGreaterThan(0);
+    expect(REVIEW_LABEL_TARGETS).toContain('clear-human');
+  });
+
+  for (const to of REVIEW_LABEL_TARGETS) {
+    it(`projected >= actual for to='${to}' — the pre-flight can never under-count it`, () => {
+      for (const body of ['', 'x', '## Findings\n\nsomething\n', 'y'.repeat(60000)]) {
+        const actual = buildVerdictComment({ to, actor: ACTOR, headSha: SHA, body, reason: REASON }).length;
+        expect(projectVerdictCommentLength({ body, actor: ACTOR, reason: REASON }))
+          .toBeGreaterThanOrEqual(actual);
+      }
+    });
+  }
+
+  // The concrete regression: a body sized so `accepted` fits under the cap but `clear-human` does not. Under the
+  // first cut this passed the pre-flight; it must now be rejected.
+  it('rejects the band where accepted fits but clear-human does not — the exact M2 window', () => {
+    const at = (to, n) => buildVerdictComment({
+      to, actor: ACTOR, headSha: 'f'.repeat(40), body: 'y'.repeat(n), reason: REASON,
+    });
+    // Solve for the body that renders to exactly the cap as `accepted` (the chrome is a fixed additive amount,
+    // so one correction step lands it exactly — asserted below rather than assumed).
+    const guess = GH_COMMENT_MAX - at('accepted', 0).length;
+    const n = guess - (at('accepted', guess).length - GH_COMMENT_MAX);
+    expect(at('accepted', n).length).toBe(GH_COMMENT_MAX);
+    expect(at('clear-human', n).length).toBeGreaterThan(GH_COMMENT_MAX);
+    expect(projectVerdictCommentLength({ body: 'y'.repeat(n), actor: ACTOR, reason: REASON }))
+      .toBeGreaterThan(GH_COMMENT_MAX);
+  });
+
+  // The second dimension the first cut missed: `--actor` and `--reason` are argv, so they are unbounded too. A
+  // fixed-width placeholder in the projection would under-count exactly the same way the fixed target did.
+  it('covers a long actor and a long reason — both are unbounded argv, not fixed-width chrome', () => {
+    const body = 'y'.repeat(1000);
+    const actor = 'a'.repeat(4000);
+    const reason = 'r'.repeat(8000);
+    const actual = buildVerdictComment({ to: 'clear-human', actor, headSha: SHA, body, reason }).length;
+    expect(projectVerdictCommentLength({ body, actor, reason })).toBeGreaterThanOrEqual(actual);
+    // and the short-input projection would have MISSED it — that is the whole point of passing them through.
+    expect(projectVerdictCommentLength({ body })).toBeLessThan(actual);
+  });
+});
+
+// #2895 — the honesty tax in the durable record itself. The comment is the only thing a future reader sees, so
+// it must state what it proves and refuse to imply more. These are prose assertions on purpose: this is the
+// exact class of over-claim that dogged PR #1046 for four rounds and #1056 for three.
+describe('buildVerdictComment — a clear-human record must not over-claim (#2895)', () => {
+  const SHA = 'abf7d85700a3336a0ec77d94ab455162d4b8e00d';
+  const render = (o) => buildVerdictComment({
+    to: 'clear-human', actor: 'Nicolas Gilbert', headSha: SHA,
+    reason: 'operator in-session: "accept 1048"', ...o,
+  });
+
+  it('quotes the stated reason verbatim and names the actor', () => {
+    const c = render({});
+    expect(c).toMatch(/Nicolas Gilbert/);
+    expect(c).toMatch(/> operator in-session: "accept 1048"/);
+  });
+
+  it('says the sanctioned path was followed and explicitly NOT that a human followed it', () => {
+    const c = render({});
+    expect(c).toMatch(/does NOT prove: that a human performed/i);
+    expect(c).toMatch(/free text and nothing verifies/i);
+  });
+
+  it('makes no unforgeability claim anywhere — no "cannot", no terminal confirmation, no structural barrier', () => {
+    const c = render({ body: '## Findings\n\nall good\n' });
+    expect(c).not.toMatch(/confirmed at a terminal/i);
+    expect(c).not.toMatch(/no agent can/i);
+    expect(c).not.toMatch(/unforgeable(?! actor signal)/i);
+    expect(c).not.toMatch(/structural/i);
+  });
+
+  it('still stamps the reviewed-sha marker — the clearance IS an acceptance (#2409)', () => {
+    expect(parseReviewedSha([{ body: render({}) }])).toBe(SHA);
+  });
+});
+
+// PR #1057 review — WHERE the size guard is called, which is a different claim from whether the projection is
+// correct. The projection above was already total (no target could be under-counted); the defect was that its ONE
+// call site sat inside the CLI's `if (bodyFileArg)` branch, so `--reason` — a second unbounded free-text input,
+// added later — walked around it whenever no `--body-file` was passed. Reproduced against a `gh` that enforces
+// GitHub's cap: `gh pr edit` landed (review:human removed), `gh pr comment` was rejected, and the PR was left
+// ACCEPTED with no `reviewed-sha` marker — the fail-OPEN state the pre-flight exists to prevent, made worse by
+// `clear-human` then refusing to re-run ("nothing to clear"). Hermetic: a fake `gh` on PATH records every call,
+// so "refused before any gh call" and "refused before the SWAP" are both observable rather than asserted.
+describe('the GH_COMMENT_MAX guard is reachable-around by nothing (PR #1057)', () => {
+  const FAKE_GH = `#!/usr/bin/env node
+const fs = require('fs');
+const a = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_CALL_LOG, a.slice(0, 2).join(' ') + '\\n');
+if (a[0] === 'pr' && a[1] === 'view') {
+  process.stdout.write(JSON.stringify({ labels: [{ name: 'review:human' }], headRefOid: 'f'.repeat(40) }));
+  process.exit(0);
+}
+process.exit(0);
+`;
+  let shimDir;
+  let logPath;
+
+  beforeAll(() => {
+    shimDir = mkdtempSync(join(tmpdir(), 'review-label-shim-'));
+    writeFileSync(join(shimDir, 'gh'), FAKE_GH);
+    chmodSync(join(shimDir, 'gh'), 0o755);
+    logPath = join(shimDir, 'gh-calls.log');
+  });
+  afterAll(() => { try { rmSync(shimDir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+
+  const ghCalls = () => (existsSync(logPath) ? readFileSync(logPath, 'utf8').split('\n').filter(Boolean) : []);
+  beforeEach(() => { try { rmSync(logPath, { force: true }); } catch { /* first run */ } });
+
+  // THE UNCOVERED BOUNDARY CASE: a long `--reason` and NO `--body-file`. Drives the REAL entrypoint, because the
+  // hole was in the entrypoint's control flow — an in-process call to the harness would have missed it entirely.
+  it('a long --reason with NO --body-file is refused, and reaches no gh call at all', () => {
+    const script = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'review-set-label.mjs');
+    // Under the cap on its own — GitHub only rejects the RENDERED comment, which adds the clear-human chrome.
+    const reason = 'r'.repeat(65200);
+    expect(reason.length).toBeLessThan(GH_COMMENT_MAX);
+    const r = spawnSync('node', [script, '1048', '--repo=o/n', '--to=clear-human', '--actor=Nicolas Gilbert',
+      `--reason=${reason}`], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GH_CALL_LOG: logPath },
+    });
+    expect(r.status).not.toBe(0);
+    const payload = JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop());
+    expect(payload.error).toMatch(/--reason/);
+    expect(payload.error).toMatch(new RegExp(`over GitHub's ${GH_COMMENT_MAX} limit`));
+    expect(ghCalls()).toEqual([]);
+  });
+
+  // And the guard that makes it unskippable: the check on the RENDERED bytes inside the harness. No free-text
+  // argv here at all, so an argv projection could not possibly catch this — an importer with its own
+  // `buildComment` is exactly the call path the CLI-block-only guard left open.
+  it('an importer whose buildComment renders over the cap is refused BEFORE the label swap', () => {
+    const chunks = [];
+    const realWrite = process.stdout.write.bind(process.stdout);
+    const realExit = process.exit.bind(process);
+    const realPath = process.env.PATH;
+    process.env.PATH = `${shimDir}:${realPath}`;
+    process.env.GH_CALL_LOG = logPath;
+    process.stdout.write = (s) => { chunks.push(String(s)); return true; };
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = null;
     try {
-      const out = execFileSync(process.execPath, [
-        CLI, '999', '--repo=o/n', '--to=accepted', `--actor=${'a'.repeat(actorLen)}`, `--body-file=${file}`,
-      ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-      return JSON.parse(out);
-    } catch (e) {
-      // A refusal exits non-zero with the machine-readable error on stdout.
-      return JSON.parse(String(e.stdout || '{}'));
-    } finally { unlinkSync(file); }
-  };
+      runReviewLabelCli({
+        argv: ['1048', '--repo=o/n', '--to=clear-human', '--actor=op', '--reason=operator said clear it'],
+        allowClearHuman: true,
+        defaultActor: 'test',
+        usage: 'usage: test',
+        buildComment: () => 'z'.repeat(GH_COMMENT_MAX + 1),
+        successResult: (o) => ({ ok: true, ...o }),
+        refusalResult: ({ decision }) => ({ error: decision.reason }),
+      });
+    } catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
+    finally {
+      process.stdout.write = realWrite; process.exit = realExit; process.env.PATH = realPath;
+      delete process.env.GH_CALL_LOG;
+    }
+    expect(exitCode).not.toBe(0);
+    expect(JSON.parse(chunks.join('')).error).toMatch(/rendered comment is \d+ chars/);
+    // It observed the PR (a read), and then stopped: no `pr edit` swap, no `pr comment`.
+    expect(ghCalls()).toEqual(['pr view']);
+  });
+});
 
-  it('REFUSES a body that only overflows because of a long --actor', () => {
-    // 65000-char body + 400-char actor renders 65537 — one char over. The old 64-char stand-in projected 65201
-    // and let it through.
-    const res = runWithBody(65000, 400);
-    expect(res.error).toMatch(/over GitHub's 65536 limit/);
-    expect(res.error).toMatch(/65537-char comment/);
-    expect(res.ok).toBeUndefined();
+// PR #1056 review, round 4 / C3 — THE SUCCESS PATH. Every other CLI-level `clear-human` assertion in this file is
+// a REFUSAL, and the recorded `gh` calls top out at `['pr view']` or `[]`. That is structurally the SAME defect as
+// round 1's blocking B1 on this PR: *a refusal looks identical whether the gate works or is dead*, so a
+// refusal-only suite cannot tell "clear-human is correctly wired" apart from "clear-human is unreachable". These
+// tests drive the REAL entrypoint all the way THROUGH the impure half against a recording fake `gh` and assert the
+// three things that actually have to land: the label swap, the attributed comment, and the `reviewed-sha` stamp.
+// (`xsfp7k0` is the general rule this instantiates.) They double as the size pre-flight's missing NEGATIVE
+// CONTROL: a body that FITS must be let through, or the guard above could pass its tests by refusing everything.
+describe('clear-human drives the swap END-TO-END (#2895, PR #1056 C3)', () => {
+  const SHA = 'abf7d85700a3336a0ec77d94ab455162d4b8e00d';
+  const ACTOR = 'Nicolas Gilbert';
+  const REASON = 'operator in-session: "read the panel, clear 1048"';
+
+  // Records the FULL argv of every call (not just the verb pair), flips the observed labels once `pr edit` has
+  // run so the post-swap re-read is honest, and copies the posted `--body-file` out so the durable comment can be
+  // read back through the real `parseReviewedSha`.
+  const FAKE_GH = `#!/usr/bin/env node
+const fs = require('fs');
+const a = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_CALL_LOG, JSON.stringify(a) + '\\n');
+if (a[0] === 'pr' && a[1] === 'view') {
+  const labels = fs.existsSync(process.env.GH_EDIT_FLAG)
+    ? [{ name: 'review:accepted' }, { name: 'ready-to-merge' }]
+    : [{ name: 'review:human' }, { name: 'review:pending' }, { name: 'ready-to-merge' }];
+  process.stdout.write(JSON.stringify({ labels, headRefOid: process.env.GH_HEAD_SHA }));
+  process.exit(0);
+}
+if (a[0] === 'pr' && a[1] === 'edit') { fs.writeFileSync(process.env.GH_EDIT_FLAG, '1'); process.exit(0); }
+if (a[0] === 'pr' && a[1] === 'comment') {
+  fs.writeFileSync(process.env.GH_COMMENT_BODY, fs.readFileSync(a[a.indexOf('--body-file') + 1], 'utf8'));
+  process.exit(0);
+}
+process.exit(0);
+`;
+
+  const script = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'review-set-label.mjs');
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  let dir;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'review-label-success-'));
+    writeFileSync(join(dir, 'gh'), FAKE_GH);
+    chmodSync(join(dir, 'gh'), 0o755);
+  });
+  afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+  beforeEach(() => {
+    for (const f of ['gh-calls.log', 'edited', 'comment.md']) {
+      try { rmSync(join(dir, f), { force: true }); } catch { /* first run */ }
+    }
   });
 
-  it('the projected length it reports MATCHES what buildVerdictComment actually renders', () => {
-    const res = runWithBody(65000, 400);
-    const actual = buildVerdictComment({
-      to: 'accepted', actor: 'a'.repeat(400), headSha: 'f'.repeat(40), body: 'x'.repeat(65000),
-    }).length;
-    // The number in the refusal is the projection; it must be the real render, not an estimate near it.
-    expect(res.error).toContain(`${actual}-char comment`);
+  const env = () => ({
+    ...process.env,
+    PATH: `${dir}:${process.env.PATH}`,
+    GH_CALL_LOG: join(dir, 'gh-calls.log'),
+    GH_EDIT_FLAG: join(dir, 'edited'),
+    GH_COMMENT_BODY: join(dir, 'comment.md'),
+    GH_HEAD_SHA: SHA,
+  });
+  /** Every recorded call as its full argv array. */
+  const calls = () => (existsSync(join(dir, 'gh-calls.log'))
+    ? readFileSync(join(dir, 'gh-calls.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+    : []);
+  /** The values that FOLLOW each occurrence of `flag` in an argv array (adjacency, not mere presence). */
+  const valuesOf = (argv, flag) => argv.flatMap((a, i) => (a === flag ? [argv[i + 1]] : []));
+  const runClear = (extra) => spawnSync('node', [script, '1048', '--repo=o/n', '--to=clear-human',
+    `--actor=${ACTOR}`, `--reason=${REASON}`, ...extra], { encoding: 'utf8', env: env() });
+
+  it('returns ok:true and lands the label swap, the attributed comment and the reviewed-sha stamp', () => {
+    const bodyPath = join(dir, 'findings.md');
+    writeFileSync(bodyPath, '## Findings\n\nNo blocking issues; the panel reduced to accept.\n', 'utf8');
+    const r = runClear([`--body-file=${bodyPath}`]);
+
+    // 1. The payload is a SUCCESS, not a refusal — the assertion the whole suite was missing.
+    expect(r.status).toBe(0);
+    const payload = JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop());
+    expect(payload).toMatchObject({ ok: true, pr: 1048, to: 'clear-human' });
+    expect(payload.labels).toContain(REVIEW_LABELS.accepted);
+    expect(payload.labels).not.toContain(REVIEW_LABELS.human);
+
+    // 2. The swap that actually reached `gh`: accepted ADDED and human REMOVED, on one `pr edit`.
+    const edit = calls().find((c) => c[0] === 'pr' && c[1] === 'edit');
+    expect(edit).toBeDefined();
+    expect(valuesOf(edit, '--add-label')).toEqual([REVIEW_LABELS.accepted]);
+    expect(valuesOf(edit, '--remove-label')).toContain(REVIEW_LABELS.human);
+    // The parked state goes too — a cleared PR must not still read as awaiting review.
+    expect(valuesOf(edit, '--remove-label')).toContain(REVIEW_LABELS.pending);
+    // `review:changes` was NOT on the PR, so `presentRemoveLabels` must have dropped it (gh errors on an absent
+    // label), and the whole arc ran in order: observe → edit → comment → re-read.
+    expect(valuesOf(edit, '--remove-label')).not.toContain(REVIEW_LABELS.changes);
+    expect(calls().map((c) => c.slice(0, 2).join(' ')))
+      .toEqual(['pr view', 'pr edit', 'pr comment', 'pr view']);
+
+    // 3. The durable comment — the honesty tax as it is actually posted, not as the module describes it.
+    const comment = readFileSync(join(dir, 'comment.md'), 'utf8');
+    expect(comment).toContain(`Cleared by ${ACTOR} via \`review-set-label.mjs --to=clear-human\` (#2895).`);
+    expect(comment).toContain(`> ${REASON}`);
+    expect(comment).toContain('What it does NOT prove: that a human performed it.');
+    expect(comment).toContain('## Findings');
+    // A well-formed marker, proven through the REAL reader rather than a substring check.
+    expect(parseReviewedSha([{ body: comment }])).toBe(SHA);
   });
 
-  it('still ACCEPTS a body that fits once the real actor is accounted for', () => {
-    // Same body, a short actor — under the cap, so the size gate must not fire. It gets past the pre-flight and
-    // fails later on the fake repo, which is proof enough that the size check passed.
-    const res = runWithBody(65000, 4);
-    expect(String(res.error || '')).not.toMatch(/over GitHub's/);
+  // THE NEGATIVE CONTROL for the size pre-flight (dropped, not replaced, when the ceremony block was deleted —
+  // PR #1056 round 4). A guard that refuses everything passes every refusal test ever written; this pins the
+  // other side at the exact boundary — the largest body that still renders under the cap must go THROUGH.
+  it('lets a body that renders exactly AT the cap through — the size guard is not a blanket refusal', () => {
+    const at = (body) => projectVerdictCommentLength({ body, actor: ACTOR, reason: REASON });
+    const guess = GH_COMMENT_MAX - at('');
+    const body = 'y'.repeat(guess - (at('y'.repeat(guess)) - GH_COMMENT_MAX));
+    expect(at(body)).toBe(GH_COMMENT_MAX); // exactly at the cap, not one char under
+    const bodyPath = join(dir, 'max-findings.md');
+    writeFileSync(bodyPath, body, 'utf8');
+
+    const r = runClear([`--body-file=${bodyPath}`]);
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop()).ok).toBe(true);
+    expect(calls().map((c) => c.slice(0, 2).join(' '))).toContain('pr comment');
+    expect(readFileSync(join(dir, 'comment.md'), 'utf8').length).toBeLessThanOrEqual(GH_COMMENT_MAX);
+  });
+
+  // PR #1056 review, C2 — the DOCUMENTED invocation, exercised as documented. `npm run <script>` writes its two
+  // banner lines to STDOUT ahead of the payload, so the wrapper the skill hands the operator used to break the
+  // module's stated contract (`{"ok":…}`/`{"error":…}` as the whole of stdout): an agent parsed stdout, threw on
+  // a clearance that had in fact landed, and a naive retry then hit "nothing to clear" — reading like a second
+  // failure. The class is "a package.json wrapper around a JSON-contract CLI is never exercised as documented".
+  it('the documented `npm run --silent review:clear` wrapper puts ONLY JSON on stdout', () => {
+    const r = spawnSync('npm', ['run', '--silent', 'review:clear', '--',
+      '1048', '--repo=o/n', `--actor=${ACTOR}`], { cwd: repoRoot, encoding: 'utf8', env: env() });
+    expect(r.status).not.toBe(0);
+    // The WHOLE of stdout must parse — a banner line ahead of the payload is exactly what this catches.
+    const payload = JSON.parse(r.stdout);
+    expect(payload.error).toMatch(/requires --reason/);
+    expect(calls()).toEqual([]); // refused before any gh call
+  }, 60000);
+
+  // …and the pin that keeps the DOC honest, which no amount of testing npm itself would give: if the skill ever
+  // documents the wrapper without `--silent`, the banner problem is back and the test above stops covering it.
+  it('the /review skill never documents the wrapper without --silent', () => {
+    const skill = readFileSync(join(repoRoot, 'skills-src', 'review', 'SKILL.md'), 'utf8');
+    for (const m of skill.matchAll(/npm run[^\n]*review:clear/g)) {
+      expect(m[0]).toContain('--silent');
+    }
   });
 });
