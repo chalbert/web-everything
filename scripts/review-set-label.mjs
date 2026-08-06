@@ -497,8 +497,6 @@ if (IS_CLI) {
   // no marker — and `acceptanceCoversHead` fails open on a missing marker, so the drain then lands it. That
   // would contradict this module's own "no partial swap" promise. PR #1005 review, minors 2-4.
   const argvRest = process.argv.slice(2);
-  // Single-sourced so the size PROJECTION below and the `defaultActor` the render actually uses can never drift.
-  const DEFAULT_ACTOR = 'loop-console operator';
   // The bare `--body-file <path>` form is REJECTED, not silently ignored: ignoring it posts a verdict with the
   // findings missing and still exits 0. Every other flag in the harness is `=`-form; say so rather than no-op.
   const bareIdx = argvRest.indexOf('--body-file');
