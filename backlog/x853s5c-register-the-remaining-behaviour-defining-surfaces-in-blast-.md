@@ -2,7 +2,7 @@
 kind: task
 status: open
 dateOpened: "2026-08-05"
-blockedBy: [xzsnnta]
+blockedBy: ["xzsnnta"]
 tags: []
 scope: ["we:scripts/lib/review-escalation.mjs", "we:scripts/lib/__tests__/review-escalation.test.mjs", "we:scripts/lib/review-policy.contract.json"]
 ---
@@ -31,7 +31,7 @@ Same shape as the PR #1040 / PR #1043 / PR #1045 regression #2909 fixed, one sur
 
 ## The design call is NOT decided here — it is #xzsnnta
 
-How wide the net should be is a live either/or (enumerate the named paths vs. invert `(^|\/)\.claude\/` to default-deny with an exemption list), and it is **carved out to the `kind: decision` item [#xzsnnta](backlog/xzsnnta-how-wide-should-the-blast-radius-net-over-the-agent-instruct.md)**, which this item `blockedBy`-waits on. The two forks — how the net treats an *unregistered* surface, and whether non-statute `we:docs/agent/` is registered whole or behind a router predicate — live there with their options and bold defaults.
+How wide the net should be is a live either/or (enumerate the named paths vs. invert `(^|\/)\.claude\/` to default-deny with an exemption list), and it is **carved out to the `kind: decision` item [#xzsnnta](/backlog/xzsnnta/)**, which this item `blockedBy`-waits on. The two forks — how the net treats an *unregistered* surface, and whether non-statute `we:docs/agent/` is registered whole or behind a router predicate — live there with their options and bold defaults.
 
 The reason for the carve: this item is `kind: task`, so an agent may claim and build it. If the call sat here, that agent would hit it mid-lane and either stall or rule on it unratified. This item becomes mechanical the moment #xzsnnta is ruled: register whatever line the ruling draws, and pin it.
 

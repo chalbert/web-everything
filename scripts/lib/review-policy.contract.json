@@ -26,7 +26,7 @@
       "token": "blast-radius",
       "family": "sensitivity",
       "clearance": "agent",
-      "description": "The diff touches a high-blast-radius surface (scripts, the agent-behaviour trees — skills and agent memory, in BOTH their .claude/ link spelling and their skills-src/ + agent-memory-src/ source spelling, #2909 — hooks, CI, the statute layer, standards defs, and the gate's own DEFINITION: the ROOT package.json, which declares the `test` + `check:standards` scripts CI runs as the required check, plus any vitest config, which declares which tests that check includes) OR the engine tier of the trust chain (the lander). Escalation-worthy — a bad merge here is costlier than a leaf edit — but agent-reviewable: a converged verdict lands (#2445 two-tier flip). The statute layer is the exception that is ALSO human-gated: it is blast-radius here and separately carries the `statute` token's human clearance."
+      "description": "The diff touches a high-blast-radius surface (scripts, the agent-behaviour trees — skills and agent memory, in BOTH their .claude/ link spelling and their skills-src/ + agent-memory-src/ source spelling, #2909 — hooks, CI, the statute layer, standards defs) OR the engine tier of the trust chain (the lander). Escalation-worthy — a bad merge here is costlier than a leaf edit — but agent-reviewable: a converged verdict lands (#2445 two-tier flip). The statute layer is the exception that is ALSO human-gated: it is blast-radius here and separately carries the `statute` token's human clearance."
     },
     {
       "token": "size",

@@ -6,7 +6,7 @@ tags: []
 scope: ["we:scripts/lib/review-escalation.mjs", "we:scripts/lib/__tests__/review-escalation.test.mjs", "we:scripts/lib/review-policy.contract.json"]
 ---
 
-# How wide should the blast-radius net over the agent-instruction surfaces be — enumerate named paths, or invert the .claude/ anchor to default-deny?
+# How wide should the blast-radius net over the agent-instruction surfaces be — enumerate named paths, or invert the we:.claude/ anchor to default-deny?
 
 A named-path blast-radius list is correct only while someone remembers to register each future behaviour-defining surface, and three regressions proved that memory unreliable. This decides whether to keep enumerating or invert the we:.claude/ anchor to default-deny with an exemption list, and settles the same question for we:AGENTS.md, we:CLAUDE.md and non-statute we:docs/agent/.
 
@@ -20,7 +20,7 @@ The branches genuinely cannot coexist. A *list* fails **open** on an unregistere
 
 `isBlastRadiusPath` returns `false` for every one of: `we:.claude/settings.json` (registers the `PreToolUse(Edit|Write)` write-gate hooks), `we:.claude/commands/`, `we:AGENTS.md`, `we:CLAUDE.md`, and non-statute `we:docs/agent/`. #x853s5c carries the full table and what each surface controls.
 
-The recurrence pattern is the actual evidence: this class was closed **one surface at a time** — PR #1040 / PR #1043 / PR #1045 (the agent-memory corpus, unregistered) → #2909 (the two agent-behaviour trees, both spellings) → PR #1048's own round-4 review (the root `we:package.json` and the vitest config, where the gates are *defined*). Three rounds of the same review found three different unregistered surfaces. Each fix was correct and none of them predicted the next.
+The recurrence pattern is the actual evidence: this class was closed **one surface at a time** — PR #1040 / PR #1043 / PR #1045 (the agent-memory corpus, unregistered) → #2909 (the two agent-behaviour trees, both spellings) → PR #1048's own round-4 review (the files the required check's *resolution* depends on — now carved out to [#x9mmdu2](/backlog/x9mmdu2/), still unregistered). Three rounds of the same review found three different unregistered surfaces. Each fix was correct and none of them predicted the next.
 
 ## Fork 1 — how the blast-radius net treats a surface nobody registered
 

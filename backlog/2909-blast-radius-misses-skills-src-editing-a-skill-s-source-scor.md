@@ -156,20 +156,9 @@ escalates and earns `review:pending` at PR-open. No "source and build output lan
 written, per the bullet's explicit warning. Negative cases keep the optional separator from swallowing a sibling
 name (`we:.claude/skills-notes.md`, `we:skills-src-notes.md`).
 
-### Bullet 5 — and one surface further, where the gate is *defined*
+### Bullet 5 — the other source/build pair with the same shape
 
 `we:agent-memory-src/` was the other source/build pair with this symlink shape, registered in the same change.
-
-Round 4 of PR #1048's review then found that every pattern above protects a surface the gate **reads**, and none
-protected where the gate is **invoked**. `we:package.json` declares `"test": "vitest"` and `"check:standards"` —
-the scripts CI runs as the required check — and `we:vitest.config.ts` declares which tests that check includes.
-Both scored `false`. A one-line PR flipping `"test"` to `"exit 0"`, or dropping `scripts/lib/__tests__/**` from
-the vitest `include`, therefore merged with **no** `review:*` label under a **green** required check — green
-because it now ran nothing, including the regression tests on this very list. Both are registered here:
-`^package\.json$` (root only — the nested `we:contracts/`, `we:webcases/`, `we:capability-manifest/` and
-`we:validation-generation/` manifests are npm *publish* manifests and define no required check; repo-relative
-scoring is what makes the `^` anchor cover a sibling repo's own root manifest) and
-`(^|\/)vitest\.config\.[cm]?[jt]s$`.
 
 The three prose enumerations of the surface set were updated in the same change so the spec cannot drift from the
 code that reads it: the cross-repo bullet and `scoreEscalation`'s reason doc in
@@ -188,6 +177,11 @@ Because this item resolves here, an obligation left only in this closing note wo
   `we:docs/agent/` remain unregistered behaviour-defining surfaces — **#x853s5c**, which `blockedBy`-waits on
   **#xzsnnta**, the carved-out design call: enumerate the named paths, or invert the `we:.claude/` anchor to
   default-deny so the next unregistered surface fails closed instead of open.
+- Every pattern here protects a surface the gate **reads**; nothing protects what the required check *resolves
+  to* when it runs — the manifest, the lockfile CI installs from (`npm ci` reads it strictly), and the vitest /
+  playwright configs that decide which tests are collected. All four still score `false` — **#x9mmdu2**, which
+  states the rule rather than a path list. A first cut of that widening was made in this PR's round 4 on a
+  wrong premise (that `npm test` is the script CI runs — no workflow invokes it) and was carved back out.
 - The drain's content-resolve write-back emptied this very item to 0 bytes on the rebase that produced
   `836ae978`, where the pure merge library replays the same stages cleanly — **#2923** (a sibling lane filed the
   same incident first; the verified reproduction localising it to the write-back path is folded into that item).
