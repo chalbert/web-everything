@@ -172,18 +172,18 @@ machine-diffable spec whose per-entry prose *is* its meaning (#2564/#2566). Leav
 Because this item resolves here, an obligation left only in this closing note would leave the backlog at merge.
 
 - The **tier question**: the newly-registered trees score `review:pending`, which is agent-clearable, so an agent
-  can still clear a diff to the very rule it is governed by — **#xn4b7xp**.
+  can still clear a diff to the very rule it is governed by — **#2937**.
 - `we:AGENTS.md`, `we:CLAUDE.md`, `we:.claude/settings.json`, `we:.claude/commands/` and non-statute
-  `we:docs/agent/` remain unregistered behaviour-defining surfaces — **#x853s5c**, which `blockedBy`-waits on
-  **#xzsnnta**, the carved-out design call: enumerate the named paths, or invert the `we:.claude/` anchor to
+  `we:docs/agent/` remain unregistered behaviour-defining surfaces — **#2939**, which `blockedBy`-waits on
+  **#2938**, the carved-out design call: enumerate the named paths, or invert the `we:.claude/` anchor to
   default-deny so the next unregistered surface fails closed instead of open.
 - Every pattern here protects a surface the gate **reads**; nothing protects what the required check *resolves
   to* when it runs — the manifest, the lockfile CI installs from (`npm ci` reads it strictly), and the vitest /
-  playwright configs that decide which tests are collected. All four still score `false` — **#x9mmdu2**, which
+  playwright configs that decide which tests are collected. All four still score `false` — **#2935**, which
   states the rule rather than a path list. A first cut of that widening was made in this PR's round 4 on a
   wrong premise (that `npm test` is the script CI runs — no workflow invokes it) and was carved back out.
 - The drain's content-resolve write-back emptied this very item to 0 bytes on the rebase that produced
   `836ae978`, where the pure merge library replays the same stages cleanly — **#2923** (a sibling lane filed the
   same incident first; the verified reproduction localising it to the write-back path is folded into that item).
 - [`we:scripts/lib/invariant-catalogue.json`](scripts/lib/invariant-catalogue.json) still claims the lane guard
-  exempts agent memory (removed 2026-07-09; the guard denies it) — **#xl1ru2l**.
+  exempts agent memory (removed 2026-07-09; the guard denies it) — **#2936**.
