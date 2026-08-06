@@ -109,8 +109,13 @@ describe('VERDICT_MARKERS is prototype-proof (round-2 finding 5)', () => {
 describe('STATUS_MARKERS is prototype-proof (round-4 finding 4)', () => {
   const PROTO_KEYS = ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__', 'isPrototypeOf', 'propertyIsEnumerable'];
 
-  it('every exported lookup table in this module is null-prototype — asserted as a class, not one table', () => {
-    for (const [name, table] of Object.entries({ STATUS_MARKERS, VERDICT_MARKERS })) {
+  it('every exported lookup table in this module is null-prototype — asserted as a class, not one table', async () => {
+    // The table set is DERIVED from the module's own exports (every non-function export), not hand-listed: a
+    // THIRD marker table added later is covered without anyone remembering to add it here — which is precisely
+    // the omission that let `STATUS_MARKERS` through the round-2 sweep.
+    const tables = Object.entries(await import('../jury-tree.mjs')).filter(([, v]) => v && typeof v === 'object');
+    expect(tables.map(([n]) => n).sort()).toEqual(['STATUS_MARKERS', 'VERDICT_MARKERS']); // pins the derivation itself
+    for (const [name, table] of tables) {
       expect(Object.getPrototypeOf(table), `${name} must be null-prototype`).toBe(null);
       for (const key of PROTO_KEYS) expect(table[key], `${name}.${key}`).toBeUndefined();
     }

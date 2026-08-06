@@ -349,8 +349,11 @@ export function deriveVerdict({ findings = [], humanRequired = false, bar = PREV
  * nor filed as a future item)? Pure. A finding with no `prevention` names no guard, so it is never reported here —
  * an old-shape finding (pre-#2823) is unaffected.
  *
- * THE WIDE HALF of the notice-wide / verdict-narrow split (#xdompzx): every REPORTING surface reads this predicate;
- * only the VERDICT reducers read the narrower `blocksAcceptance`. The rationale for the split — and the
+ * THE WIDE HALF of the notice-wide / verdict-narrow split (#xdompzx): where a reporting surface filters at all it
+ * filters on THIS predicate (today: `renderPreventionSummary` in `we:scripts/lib/review-core.mjs`, and the drain's
+ * auto-land emission test) — never on the narrower `blocksAcceptance`, which only the VERDICT reducers read.
+ * `renderFindingLine` filters on neither: it prints whatever `prevention` a finding carries, which is wider still.
+ * The rule to keep is the direction — no reporting surface may narrow by the BAR. The rationale for the split — and the
  * compensating control that makes it safe — is stated ONCE at `blocksAcceptance` below. Read it there.
  * @param {Finding|null|undefined} finding
  * @returns {boolean}
@@ -364,9 +367,9 @@ export function hasUncapturedPrevention(finding) {
  *
  * THE SPLIT, STATED ONCE (this is its owning symbol; `hasUncapturedPrevention`, `renderPreventionSummary` and
  * `renderFindingLine` point back here rather than restating it):
- *   - NOTICE-WIDE — `hasUncapturedPrevention` is the pure "names a guard nobody has captured" predicate. Every
- *     REPORTING surface reads it, so no uncaptured guard is filtered OUT of what a rendered review shows,
- *     whatever it would cost to ship — the bar narrows the verdict, never the report.
+ *   - NOTICE-WIDE — `hasUncapturedPrevention` is the pure "names a guard nobody has captured" predicate. It is the
+ *     WIDEST filter any reporting surface is allowed to apply, so no uncaptured guard is filtered OUT of what a
+ *     rendered review shows, whatever it would cost to ship — the bar narrows the verdict, never the report.
  *   - VERDICT-NARROW — this predicate adds "…and shipping it costs `PREVENTION_IMPACT_BAR` or more". Only the
  *     VERDICT reducers (`deriveVerdict`, `derivePanelVerdict`) read it.
  * So a reporting surface can legitimately name a guard the verdict did NOT stop for. That is the intended shape,
@@ -380,8 +383,10 @@ export function hasUncapturedPrevention(finding) {
  *   - INPUT: `buildSubjectMandate` demands `rootCause`/`prevention`/`preventionCaptured` on EVERY finding, at every
  *     impact, unconditionally. The bar is the CALLER's dial, never something a reviewer pre-applies by omitting a
  *     field — a demand conditioned on the bar starves this predicate of the very guards it exists to report.
- *   - OUTPUT: `renderFindingLine` (`review-render.mjs`) prints `impactIfUnfixed` and the owed `prevention` for every
- *     finding in the posted PR comment, and the drain's auto-land branch (`skills-src/drain/SKILL.md`, step 3
+ *   - OUTPUT: `renderFindingLine` (`review-render.mjs`) prints `impactIfUnfixed` and the owed `prevention` on every
+ *     finding in the posted PR comment THAT CARRIES THEM — the fields are printed when present, never suppressed by
+ *     the bar (an old-shape finding that declares neither simply has nothing to print), and the drain's auto-land
+ *     branch (`skills-src/drain/SKILL.md`, step 3
  *     `land` → `autoLand: true`) MUST post that comment BEFORE it applies the accept labels whenever any finding
  *     satisfies `hasUncapturedPrevention(f) && !blocksAcceptance(f)` — i.e. whenever the bar is what un-blocked it.
  *     That emission is CONDITIONAL, deliberately: a clean accept with no bar-un-blocked guard posts nothing, so an

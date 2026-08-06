@@ -315,9 +315,11 @@ export const T = Object.freeze({ accept: 1, changes: 2, 'needs-human': 3, 'preve
     expect(sites[0].referenced.sort()).toEqual(Object.values(VERDICTS).sort());
   });
 
-  it('(b, general) a member the source plainly spells is never reported missing, across key-literal shapes', () => {
-    // The structural property behind (b), over the three ways a JS object literal can spell these keys: bare,
-    // quoted, and multi-line. Guards against any future filter that could yield a partial reference set.
+  it('(b) a member spelled bare, quoted or multi-line is not reported missing — the shapes the key pass reads', () => {
+    // The structural property behind (b), over the three spellings the key pass actually reads: bare, quoted, and
+    // the same two across lines. Guards against any future filter that could yield a partial reference set.
+    // NOT covered here, and deliberately: computed/template-literal keys (`['accept']:`) are invisible to the
+    // matcher — a pre-existing limit of its reach (see `keyRefsEnabled`), not a property this test claims.
     const shapes = [
       `Object.freeze({ accept: 1, changes: 2, 'needs-human': 3, 'prevention-outstanding': 4 })`,
       `Object.freeze({ 'accept': 1, 'changes': 2, 'needs-human': 3, 'prevention-outstanding': 4 })`,

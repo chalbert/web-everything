@@ -79,6 +79,35 @@ describe('blockquoteBlockAt — scoping a negative assertion to the block that m
   it('returns "" for an absent marker, so a scoped not.toMatch cannot vacuously pass on a typo', () => {
     expect(blockquoteBlockAt(doc, 'NO SUCH MARKER')).toBe('');
   });
+
+  // ── the two doc clauses, one test each (#xdompzx round-5, finding 3) ────────────────────────────────
+  it('CONTINUES across a blank line, so a later paragraph of the SAME passage is inside a scoped negative', () => {
+    const split = [
+      '     > **THE CHECK.** first paragraph, entirely innocent.',
+      '     >',
+      '     > second paragraph — always visible, which is the over-claim the scoped assertion exists to catch.',
+      '',
+      '     > still the same passage after a bare blank line.',
+      '',
+      '  2. a later step, not a blockquote.',
+      '',
+      '     > a different block.',
+    ].join('\n');
+    const block = blockquoteBlockAt(split, 'THE CHECK');
+    expect(block).toMatch(/always visible/i); // the truncating version stopped before this and passed the check
+    expect(block).toContain('still the same passage after a bare blank line');
+  });
+
+  it('TERMINATES at the first line that is neither blank nor a blockquote, and drops the trailing blanks', () => {
+    const split = [
+      '     > **THE CHECK.** one line.',
+      '',
+      '  2. a later step, not a blockquote.',
+      '     > a nested quote under the LATER step, which is not part of the passage.',
+    ].join('\n');
+    const block = blockquoteBlockAt(split, 'THE CHECK');
+    expect(block).toBe('     > **THE CHECK.** one line.'); // no trailing blank, no bleed into step 2
+  });
 });
 
 describe('functionNamesInCodeSpans', () => {

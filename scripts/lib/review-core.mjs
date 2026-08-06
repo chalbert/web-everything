@@ -21,8 +21,10 @@
  * whose return schemas are `additionalProperties: true` — the drain panel reviewer (`scripts/workflows/review-parked-prs.mjs`)
  * and the subject-jury jurors/red-team (`skills-src/jury/subject-jury.workflow.js`), whose prompts AND return
  * schemas DO ask for the fields so `normalizeFinding` picks them up and `deriveVerdict` can reach
- * `prevention-outstanding`. ADDING A FIELD TO THE FINDING SHAPE MEANS EDITING ALL THREE PRODUCERS BY HAND — there
- * is no import edge from them to this contract (both are Workflow-harness bodies that cannot `import`), and
+ * `prevention-outstanding`. ADDING A FIELD TO THE FINDING SHAPE MEANS EDITING BOTH OF THOSE FILES BY HAND, in two
+ * places each — the return schema AND the prompt sentence that asks for it (`subject-jury.workflow.js` has two such
+ * prompts, juror and red-team). There is no import edge from them to this contract (both are Workflow-harness
+ * bodies that cannot `import`), and
  * `additionalProperties: true` means an omitted field raises no error, so the omission is silent. #xdompzx's
  * `impactIfUnfixed` shipped inert for exactly that reason (review blocker 1); the deterministic guard that would
  * make the parity mechanical is filed as its own backlog item. On the
@@ -81,9 +83,12 @@ import { deriveCareLevel, CARE_LEVELS, CARE_LEVEL_ORDER } from './review-escalat
 // this module is the facade that skill's callers import from. `hasUncapturedPrevention` was re-exported and
 // `blocksAcceptance` was not, so the instruction named a symbol that threw on import — the round-2 blocker shape
 // (a control wired to a path nobody walks) one layer out. `blocksAcceptance`, its dial `PREVENTION_IMPACT_BAR`,
-// and the `IMPACT_LEVELS` enum an author needs to read a finding's declared impact are therefore re-exported too,
-// and `review-core.facade.test.mjs` pins the general rule: every function the drain skill's terminal-branch
-// blockquotes name must be reachable from here.
+// and the `IMPACT_LEVELS` enum an author needs to read a finding's declared impact are therefore re-exported too.
+// The guard lives in `we:scripts/lib/__tests__/jury-core.test.mjs`, in the describe block `the below-bar
+// prevention control is wired on the auto-land branch`:
+// every function named in a code span inside the skill's INDENTED branch blockquotes must be exported by this
+// facade or by `we:scripts/lib/review-render.mjs` — the two modules the skill points its reader at — and the two
+// predicates the bar-un-blocked check is DEFINED by must resolve from this facade specifically.
 import {
   VERDICTS,
   IMPACT_LEVELS,

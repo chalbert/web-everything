@@ -47,10 +47,16 @@ export function proseContains(md, phrase) {
 }
 
 /**
- * The slice of `md` from the line containing `startMarker` through the end of that contiguous BLOCK — the run of
- * lines up to (not including) the first line that is neither blank nor a blockquote continuation at the same or
- * deeper indent. Use this to SCOPE a negative assertion (`must not say X`) to the passage that makes the claim,
- * rather than to a 400-line document where an unrelated future use of the same words would fail it.
+ * The slice of `md` from the line containing `startMarker` through the end of that BLOCKQUOTE PASSAGE. The scan
+ * takes blockquote lines (`>` at any indent) and CONTINUES ACROSS BLANK LINES, so a passage a blank line splits
+ * into two paragraphs comes back whole; it stops at the first line that is neither blank nor a blockquote line.
+ * Trailing blank lines are dropped. Indent is NOT compared — a re-nest of the passage must not change the slice.
+ * Use this to SCOPE a negative assertion (`must not say X`) to the passage that makes the claim, rather than to a
+ * 400-line document where an unrelated future use of the same words would fail it.
+ *
+ * The blank-line continuation is what makes the negative direction honest: truncating at the first blank line
+ * leaves an over-claiming sentence in a later paragraph of the SAME passage outside the assertion that exists to
+ * catch it, while a positive assertion on that sentence false-fails as "the safety control is missing".
  *
  * Returns `''` when the marker is absent, so a `not.toMatch` over the result cannot vacuously pass on a typo —
  * assert the slice is non-empty first.
@@ -60,7 +66,7 @@ export function proseContains(md, phrase) {
  * and silently under-scope every assertion made against it.
  *
  * @param {string} md
- * @param {string} startMarker - a distinctive substring on the block's first line.
+ * @param {string} startMarker - a distinctive substring on the passage's first line.
  * @returns {string}
  */
 export function blockquoteBlockAt(md, startMarker) {
@@ -69,9 +75,10 @@ export function blockquoteBlockAt(md, startMarker) {
   if (start === -1) return '';
   const out = [lines[start]];
   for (let i = start + 1; i < lines.length; i++) {
-    if (!/^\s*>/.test(lines[i])) break;
-    out.push(lines[i]);
+    if (/^\s*>/.test(lines[i]) || lines[i].trim() === '') out.push(lines[i]);
+    else break;
   }
+  while (out.length && out[out.length - 1].trim() === '') out.pop(); // a trailing blank run belongs to no passage
   return out.join('\n');
 }
 

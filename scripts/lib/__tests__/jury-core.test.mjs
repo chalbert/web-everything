@@ -767,11 +767,18 @@ describe('the below-bar prevention control is wired on the auto-land branch (rou
   // ── round-4 finding 2 — A NAMED FUNCTION THE DOCUMENTED DOOR CANNOT REACH IS NOT A CONTROL. ──────────
   // The skill told the auto-land branch to test `blocksAcceptance(f)`, but `import { blocksAcceptance } from
   // 'scripts/lib/review-core.mjs'` — the facade the skill documents — threw. Same failure mode as the round-2
-  // blocker, one layer out. This is the general guard, derived from both sides: extract every function name the
-  // skill's BRANCH-ATTACHED blockquotes name in a code span, and require each to be a real export of a module the
-  // skill points its reader at. No hand list on either side, so a future instruction naming an unreachable symbol
-  // fails here rather than at 3am on a land.
-  it('every function the branch blockquotes name is importable from a module the skill points at', async () => {
+  // blocker, one layer out. The guard: extract every function name the skill's BRANCH-ATTACHED blockquotes name in
+  // a code span, and require each to be a real export of one of the modules the skill points its reader at.
+  //
+  // WHAT IS DERIVED AND WHAT IS NOT. Derived: the NAMES (read out of the live skill text) and the EXPORTS (read
+  // off the live modules) — so a new instruction naming an unreachable symbol, or an export quietly dropped from
+  // the facade, fails here rather than at 3am on a land. NOT derived: `doors`, which is a hand-written list of the
+  // two modules that count. It is hand-written on purpose — deriving it from the `we:scripts/**.mjs` paths those
+  // same blockquotes cite yields {jury-core, review-core-cli}, which does not export `renderPanelComment`, so the
+  // derived set is not the door set. Cost of the hand list: adding a THIRD facade the skill points at needs this
+  // line updated, and until then a symbol reachable only from it reads as unreachable (a false FAIL, not a false
+  // pass — the safe direction).
+  it('every function the branch blockquotes name is exported by one of the two modules listed in `doors`', async () => {
     const md = drainSkill();
     // Branch-attached blockquotes are the INDENTED ones (nested in a step); the column-0 blockquotes are
     // document-level callouts, not instructions to call something.

@@ -19,9 +19,12 @@
  *      explicit opt-out `@verdicts-partial <reason>`) — an UNMARKED consumer is itself an ERROR. THIS is what makes
  *      coverage derived: you cannot introduce a new verdict-total structure without either annotating it (→ checked)
  *      or being flagged. WHAT "DISCOVERS" MEANS, EXACTLY (it is not magic): a symbol counts as a consumer when the
- *      scan sees ≥2 members either SYMBOLICALLY (`ENUM.MEMBER`) or, when the enrolment allows it, as bare
- *      object-literal KEYS. For `VERDICTS` both are always on, so a forgotten new consumer can't slip past a stale
- *      list. For an enum whose members are ordinary English words the key half is narrowed — see `keyRefsEnabled`.
+ *      scan sees ≥2 members either SYMBOLICALLY (`ENUM.MEMBER`, incl. `[ENUM.MEMBER]:`) or, when the enrolment
+ *      allows it, as bare/quoted object-literal KEYS (`accept:`, `'needs-human':`). For `VERDICTS` both passes are
+ *      on, so a new consumer written in either spelling is discovered without anyone updating a list. THE REACH IS
+ *      NOT UNIVERSAL — it is a regex over source text, so other spellings are invisible; what it does and does not
+ *      see is written out at `keyRefsEnabled`, which also covers why the key half is narrowed for an enum whose
+ *      members are ordinary English words.
  *   2. TOTALITY. For each `@verdicts-total` symbol, assert every `VERDICTS` member is referenced — as an object-literal
  *      KEY (`[VERDICTS.X]:` or `'accept':`) for a table, or in a branch (`=== VERDICTS.X` / `case VERDICTS.X`) for a
  *      reducer. A branch reducer with ONE documented default may declare it: `@verdicts-total fallthrough=changes`
@@ -84,8 +87,10 @@ const IMPACT_PARTIAL_MARKER = '@impact-partial';
  *  a surprise.
  *
  *  WHAT IT STILL BUYS, and why the enrolment is not merely decorative: a THIRD structure total over the enum,
- *  written the way every real consumer in this repo writes one (`frozenLookup({ [IMPACT_LEVELS.COSMETIC]: … })`),
- *  IS discovered and must carry `@impact-total`. The module-load loop in `jury-core.mjs` cannot catch that — it
+ *  written the way both of today's real consumers are (`frozenLookup({ [IMPACT_LEVELS.COSMETIC]: … })` — the form
+ *  `IMPACT_STRICTNESS` and `IMPACT_GLOSS` use), IS discovered and must carry `@impact-total`. A third table written
+ *  some other way is subject to the same reach limits as any other span (see `keyRefsEnabled`) — the enrolment buys
+ *  discovery of the SYMBOLIC form, not of every form. The module-load loop in `jury-core.mjs` cannot catch it — it
  *  asserts `IMPACT_STRICTNESS` and `IMPACT_GLOSS` BY NAME, so it is total-checking the two tables it was written
  *  next to and blind to any third. The division of labour is therefore: the module-load assert is the coverage for
  *  the two NAMED tables (including a fifth level added to the enum); this gate is the coverage for a NEW symbolic
@@ -148,9 +153,16 @@ function verdictKeyRefs(span, values) {
  *   (c) It bought the new tenant nothing anyway (see `IMPACT_ENROLMENT`).
  *
  * (b) is the structural lesson and is why this predicate returns a BOOLEAN FOR THE WHOLE SPAN: key discovery is
- * either fully on for a span (every value matchable) or fully off (no value matchable, so the span simply is not a
- * consumer). A span can therefore never end up with a half-collected reference set that the totality check then
- * misreads as a real omission. Symbolic (`ENUM.MEMBER`) matching is unaffected and always runs.
+ * either fully on for a span (no value skipped on account of its spelling) or fully off (the key pass does not run,
+ * so the span is a consumer only via its symbolic refs). WHAT THAT BUYS, EXACTLY: this FLAG can no longer be the
+ * thing that half-collects a span's reference set — it never leaves some members matchable and others not.
+ *
+ * IT IS NOT A PROMISE THAT EVERY TOTAL TABLE IS SEEN AS TOTAL. The key pass reads two spellings only — bare
+ * (`accept:`) and quoted (`'needs-human':`), in key position; the separate symbolic pass reads `VERDICTS.ACCEPT`
+ * (incl. `[VERDICTS.ACCEPT]:`). A computed or template-literal key (`['accept']:`) is read by NEITHER, so a table
+ * mixing spellings — `{ [VERDICTS.ACCEPT]: 1, ['needs-human']: 2 }` — still collects a partial set and can still
+ * error "NOT total", and one written entirely in computed keys collects nothing and is never discovered. That is
+ * the matcher's reach, verified identical at this PR's merge-base; widening it is out of scope here.
  *
  * @param {boolean} genericKeysNeedSymbol - the ENROLMENT's opt-in (see `IMPACT_ENROLMENT`), not a property of a value.
  * @param {boolean} spanNamesEnum - does the span reference the enum symbol itself?
