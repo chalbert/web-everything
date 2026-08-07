@@ -102,8 +102,11 @@ the per-item chat-rename — a batch labels the session **once**.
    (*backlog-workflow.md → Stopping*): the fixed terse shape — header (`cost X/budget · stop: <rule>`), one
    `✓`/`~`/`→` line per item (carry-forwards tagged with a drop-reason), the Next line, the single calibration
    line. **No bespoke essay**; expand only for a red gate or on request. **Calibrate — SERIAL `/batch` ONLY:**
-   calibration maps a context-% reading → points resolved, which only holds when the **main loop does the
-   work**. A `/workflow` (parallel) batch resolves its points in **subagent contexts** (worktree lanes), so
+   calibration maps a context-% reading → points resolved, which only holds while **the loop's own context
+   grows with each item resolved** — serial `/batch` keeps that link even when each item's *execution* is
+   delegated, since the loop still does claim → brief → summary → close-review per item, in sequence
+   (*backlog-workflow.md → Calibrating the budget*). A `/workflow` (parallel) batch resolves its points in
+   **subagent contexts** (worktree lanes) the orchestrator never sequences through, so
    the orchestrator's context-% measures only pack/plan/land overhead — it is **decoupled** from throughput
    and a reading there is meaningless (and would pollute the estimate). So for **`/workflow` (parallel): SKIP
    calibration entirely** — no context-% ask, no `calibrate` call; its ceiling is the token/agent budget, not
