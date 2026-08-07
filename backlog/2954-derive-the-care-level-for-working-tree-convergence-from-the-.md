@@ -38,7 +38,7 @@ never decides a band by hand.
 
 ## Why this is filed separately
 
-The question was raised and left open inside #xztipiw, which shipped and resolved. A resolved item drops out of
+The question was raised and left open inside #2971, which shipped and resolved. A resolved item drops out of
 selection and its open questions are treated as historical (`findBuriedForkSections` in
 we:scripts/check-standards-rules.mjs exempts resolved items from the buried-fork gate), so the question was
 captured but no longer actionable. This item makes it selectable again.

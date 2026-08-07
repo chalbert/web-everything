@@ -1,4 +1,5 @@
 ---
+bornAs: x43il30
 kind: story
 size: 2
 status: open
@@ -8,7 +9,7 @@ tags: []
 
 # Emit /converge rounds as durable jury-ledger events instead of a private temp trail
 
-The extracted convergence core keeps its own history and dismissed trail inside an ad-hoc temp state file rather than emitting the repo's durable jury ledger events (JURY_EVENT_TYPES / we:scripts/lib/jury-ledger.mjs). So the conveyor's jury tree and the #2642 console show NOTHING for pre-PR convergence work, and the parked-PR migration under #xyihiji would inherit two parallel trails for one loop. Emit the same ledger events the parked-PR path already appends, keeping the in-state history as the pure core's own audit record.
+The extracted convergence core keeps its own history and dismissed trail inside an ad-hoc temp state file rather than emitting the repo's durable jury ledger events (JURY_EVENT_TYPES / we:scripts/lib/jury-ledger.mjs). So the conveyor's jury tree and the #2642 console show NOTHING for pre-PR convergence work, and the parked-PR migration under #2970 would inherit two parallel trails for one loop. Emit the same ledger events the parked-PR path already appends, keeping the in-state history as the pure core's own audit record.
 
 ## Where the seam is
 

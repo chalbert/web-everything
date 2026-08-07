@@ -1,10 +1,11 @@
 ---
+bornAs: xztipiw
 kind: story
 size: 5
 status: resolved
 scaffoldedBy: "converge-skill"
 dateScaffolded: "2026-08-06"
-blockedBy: ["x2mo71w"]
+blockedBy: ["2965"]
 dateOpened: "2026-08-06"
 graduatedTo: the /converge skill and its working-tree transport
 dateResolved: "2026-08-06"
@@ -52,9 +53,9 @@ unreachable. The interim mitigation shipped in PR #1064's review fixes: the CLI'
 (the weakest band at which an editor round can happen at all), and `--jurors` / `--round-cap` can only RAISE
 rigor, never lower it.
 
-## What this item did NOT deliver — **#xmjiqhc**
+## What this item did NOT deliver — **#2969**
 
 `graduatedTo` above records where the CODE went. It does **not** mean the named consumer was connected:
 `we:skills-src/conveyor/delivery-agent-brief.md` step 6 — the prose loop this item's problem statement names —
-is unchanged, and `#xyihiji` covers only `we:scripts/workflows/review-parked-prs.mjs`. `/converge` therefore
-ships with zero production callers. **#xmjiqhc** is the wiring item.
+is unchanged, and `#2970` covers only `we:scripts/workflows/review-parked-prs.mjs`. `/converge` therefore
+ships with zero production callers. **#2969** is the wiring item.

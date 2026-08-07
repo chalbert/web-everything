@@ -1,4 +1,5 @@
 ---
+bornAs: x2mo71w
 kind: story
 size: 5
 status: resolved

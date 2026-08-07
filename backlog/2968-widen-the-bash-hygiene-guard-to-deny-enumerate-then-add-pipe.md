@@ -1,4 +1,5 @@
 ---
+bornAs: xb7cima
 kind: story
 size: 3
 status: open
