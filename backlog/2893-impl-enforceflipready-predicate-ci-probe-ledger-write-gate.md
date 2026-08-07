@@ -3,7 +3,7 @@ bornAs: xva71x1
 kind: task
 status: open
 dateOpened: "2026-08-02"
-blockedBy: ["2892", "2864"]
+blockedBy: ["2892", "2864", "2964"]
 tags: [governance, mechanization, enforce-flip, land-mode, ci-probe, check-standards]
 ---
 
@@ -14,6 +14,12 @@ Mechanical follow-on that enforces the ratified enforce-flip gate
 reviewShadowLedger })` readiness predicate, the impure CI-status probe that feeds it, the durable
 review-seam ledger it reads, and the `check:standards` write gate that refuses `landMode: enforce` unless
 the predicate is ready. Code only, committee-cleared under the two-PR rule.
+
+**`blockedBy: 2964` (added by #2964's review-followup pass).** #2964 fixes the non-atomic verdict-label seam in
+`we:scripts/review-set-label.mjs`, where a failure between the label swap and the `reviewed-sha` comment leaves an
+accepted PR with no marker — which `acceptanceCoversHead` fails OPEN on, so the drain merges with the #2409
+staleness gate disarmed. That is survivable only while `landMode` is `shadow` and a human sees every non-zero
+exit. This item is what arms the unattended writer, so it must not land first.
 
 ## Scope
 
