@@ -18,6 +18,21 @@
  *     subagent runs `node scripts/fetch-parked.mjs` / `node scripts/review-core-cli.mjs …` and returns
  *     structured data. Small PURE orchestration helpers are inlined as top-level `function` declarations.
  *
+ * ⚠️ @duplicate-of we:scripts/lib/converge-core.mjs — migrate under #xyihiji.
+ *
+ * THIS FILE IS NO LONGER THE ONLY HOME OF THE CONVERGENCE LOOP. `we:scripts/lib/converge-core.mjs` is the
+ * extracted, unit-tested, PURE core of the same control flow (#x2mo71w), and it is where the next fail-closed bug
+ * in this family (#2639 / #2640 / #2450) will be fixed — it is the file with tests and the file the `/converge`
+ * skill points every reader at. This harness body cannot import it (top-level `return` ⇒ not an ES module), so
+ * FOUR invariants are MIRRORED here rather than shared, each tagged `@duplicate-of` at its site:
+ *   • the ABSENT-mandatory-lens derivation (`reducePanelRound`, ~:807  ↔ `deriveRoundObservations`)
+ *   • the round-cap BACKSTOP (the converge loop, ~:959         ↔ `deriveNegotiationOutcome`, single-sourced there)
+ *   • the GROW-ONLY roster union (~:983                        ↔ `applyJurorInvite`)
+ *   • the invite round-cap spend (~:989                        ↔ `applyJurorInvite`)
+ * If you are about to change one of them HERE, change it THERE too — or better, do the #xyihiji migration and
+ * delete the copy. The divergence is otherwise visible only to someone who already knows both homes exist, and
+ * nothing fails when they drift. (PR #1064 review, blocker 8.)
+ *
  * THE CONVERGENCE LOOP (#2639, epic #2285) — the linchpin of the autonomous jury chain. Per parked PR:
  *   1. the fresh-context multi-lens panel judges the CURRENT diff → one reduced verdict;
  *   2. `deriveNegotiationOutcome({ verdict, round, roundCap })` (shelled via `review-core-cli reduce --round`)
@@ -805,6 +820,7 @@ async function reducePanelRound(pr, repo, lensResults, escalationReason, fetchOk
   // scheduled saw zero failures and could reduce to accept → land with NO correctness/security review. Deriving from
   // the OK set (present ∧ ran) closes that: a mandatory lens absent for ANY reason → degrade to needs-human.
   // MIRRORS the tested spec `absentMandatoryLenses(ranOkLenses)` in review-core.mjs.
+  // @duplicate-of we:scripts/lib/converge-core.mjs (`deriveRoundObservations` → `panel.absentMandatory`) — migrate under #xyihiji.
   const okLensSet = new Set(lensResults.filter((r) => r.ok).map((r) => r.lens));
   const absentMandatory = MANDATORY_LENSES.filter((l) => !okLensSet.has(l));
   const degrade = absentMandatory.length > 0 || !fetchOk;
@@ -956,6 +972,10 @@ async function convergePr(item) {
     // shelled via `reduce --round`), but this loop must be bounded by THIS body too, never solely by an outcome an
     // LLM returns. If a reduce agent ever returns `continue` AT or past the cap, force the escalate the cap mandates
     // (a deadlock → review:human) rather than trusting the agent to have applied the bound.
+    // @duplicate-of we:scripts/lib/converge-core.mjs — migrate under #xyihiji. NOTE: the extracted core DELETED its
+    // equivalent branch as mutation-verified dead and pinned the guarantee as a contract test on
+    // `deriveNegotiationOutcome` instead (PR #1064 review). Here the reduce runs behind an AGENT, so the value is
+    // genuinely untrusted and the backstop is genuinely reachable — do not delete this one by analogy.
     if (last.outcome === OUTCOME_CONTINUE && round >= roundCap) {
       log(`  ${prTag(item)}: round ${round} reached the round cap (${roundCap}) — forcing escalate (deadlock → review:human).`);
       last = { ...last, outcome: OUTCOME_ESCALATE, verdict: 'needs-human', disposition: { mode: 'human', autoLand: false } };
@@ -981,11 +1001,15 @@ async function convergePr(item) {
         // add. Keep only lenses the diff-text panel can seat (a perspective lens needs a grounding method not run
         // here) — but a mandatory lens, always seatable, can never be filtered out of the current roster.
         // MIRRORS the tested spec `growOnlyRoster` in review-core.mjs (union, never replace).
+        // @duplicate-of we:scripts/lib/converge-core.mjs (`applyJurorInvite`) — migrate under #xyihiji. The core's
+        // seatability filter was fixed (PR #1064 review) so it can never shrink below the INCUMBENT roster; this
+        // copy already unions with `activeLenses`, so the two agree — keep them agreeing.
         const grownSeatable = grown.seatedLenses.filter((l) => LENSES.includes(l));
         activeLenses = [...new Set([...activeLenses, ...grownSeatable])];
         log(`  ${prTag(item)}: round ${round} JUROR INVITE (${invite.from} → ${invite.lens}, cited: "${invite.citedFinding.slice(0, 80)}") accepted — care→${careLevel}, ${jurorsPerLens} juror(s)/lens; re-reviewing with the grown jury (spends a round, does NOT reset the counter).`);
         round += 1;
         // The grown jury lives under the SAME round cap — an invite cannot dodge it by restarting the budget.
+        // @duplicate-of we:scripts/lib/converge-core.mjs (`applyJurorInvite`'s `round > roundCap` escalate) — migrate under #xyihiji.
         if (round > roundCap) {
           log(`  ${prTag(item)}: the invite would exceed the round cap (${roundCap}) — escalating (deadlock → review:human).`);
           last = { ...last, outcome: OUTCOME_ESCALATE, verdict: 'needs-human', disposition: { mode: 'human', autoLand: false } };
