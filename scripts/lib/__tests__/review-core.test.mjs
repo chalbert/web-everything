@@ -551,6 +551,29 @@ describe('buildPanelMandate (#2310)', () => {
     expect(() => buildPanelMandate({ lens: 'vibes' })).toThrow(/unknown lens/);
   });
 
+  describe('#2950 — the goal + round pass-through', () => {
+    it('threads the goal into the mandate the juror actually reads', () => {
+      const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, goal: 'derive care from the touch-set' });
+      expect(text).toContain('WHAT THIS DIFF IS TRYING TO DO: derive care from the touch-set');
+    });
+
+    it('threads the round, so round 2+ gets the anti-spiral clause through this seam', () => {
+      const r2 = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, round: 2 });
+      expect(r2).toContain('ROUND 2 — YOU ARE CHECKING A FIX');
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, round: 1 })).not.toContain('CHECKING A FIX');
+    });
+
+    it('leaves the mandate BYTE-FOR-BYTE unchanged when goal/round are omitted (existing callers unaffected)', () => {
+      const explicit = buildPanelMandate({ lens: MANDATE_LENSES.SECURITY, goal: '', round: 1 });
+      expect(explicit).toBe(buildPanelMandate({ lens: MANDATE_LENSES.SECURITY }));
+    });
+
+    it('asks every juror for a disposition, so the round-narrowing reduction has a field to read', () => {
+      const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS });
+      expect(text).toContain('DISPOSITION (required, for EVERY finding)');
+    });
+  });
+
   describe('#2450 — optional netChangedFiles ground-truth block', () => {
     it('appends the GROUND TRUTH net changed-file set and the do-not-flag-scope-creep instruction', () => {
       const text = buildPanelMandate({
