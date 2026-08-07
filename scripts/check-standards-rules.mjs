@@ -2205,3 +2205,65 @@ export function validatePlaywrightContainerPin({ installedVersion, filesReferenc
   }
   return { errors, warnings: [] };
 }
+
+// ── DECLARED MODULE CONTRACT vs. actual imports (PR #1064 review, cosmetic 1) ──────────────────────────────────
+// A few `scripts/lib/*.mjs` modules declare, in their header prose, the CONTRACT they depend on:
+//
+//     from we:scripts/lib/jury-core.mjs   — `deriveVerdict` (…), `derivePanelVerdict` (…), `VERDICTS`.
+//
+// The block exists so a maintainer greping declared contracts before changing a shared export SEES every
+// consumer, and so a semantic change to a shared export has a named tripwire. It is worthless the moment it
+// drifts from the real import list — and the first one shipped ALREADY drifted (`normalizeFindings` imported,
+// called, undeclared), which is precisely the false negative it was written to prevent.
+//
+// "Does the declared list cover every specifier the module actually imports from that module?" is fully
+// script-decidable, so per #51 it belongs in a deterministic gate rather than in a reviewer's attention.
+// DELIBERATELY ONE-DIRECTIONAL: an UNDECLARED import is an error (the block under-reports a real dependency);
+// a declared name that is not imported is NOT (a header may legitimately name a contract member it depends on
+// the MEANING of without importing the symbol).
+
+/** The header block-comment of a module — the only place a declared contract lives. */
+function headerComment(src) {
+  const m = /^\s*\/\*\*([\s\S]*?)\*\//.exec(src);
+  return m ? m[1] : '';
+}
+
+/**
+ * Diff each module's DECLARED contract block against its actual import specifiers. Pure.
+ * @param {Array<{file: string, content: string}>} modules
+ * @returns {{errors: Array<{message: string, descriptor?: object}>, warnings: Array<object>}}
+ */
+export function validateDeclaredModuleContract(modules = []) {
+  const errors = [];
+  for (const { file, content } of modules) {
+    const header = headerComment(content);
+    if (!header) continue;
+    // Every `from we:<path> — …` declaration in the header, each running to the next one (or the block's end).
+    const decls = [...header.matchAll(/from\s+we:(\S+\.mjs)\s*[—-]/g)];
+    if (!decls.length) continue;
+    for (let i = 0; i < decls.length; i += 1) {
+      const target = decls[i][1];                                   // e.g. scripts/lib/jury-core.mjs
+      const body = header.slice(decls[i].index, i + 1 < decls.length ? decls[i + 1].index : header.length);
+      const declared = new Set([...body.matchAll(/`([A-Za-z0-9_$]+)`/g)].map((m) => m[1]));
+      // The matching real import. Modules import each other by relative specifier, so match on basename.
+      const base = target.split('/').pop();
+      const importRe = new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*'[^']*${base.replace(/\./g, '\\.')}'`, 's');
+      const im = importRe.exec(content);
+      if (!im) continue;                                            // declared a contract it does not import from
+      const imported = im[1].split(',').map((s) => s.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean);
+      const undeclared = imported.filter((n) => !declared.has(n));
+      if (undeclared.length) {
+        errors.push({
+          message:
+            `declared-contract drift: ${file} imports ${undeclared.map((n) => `\`${n}\``).join(', ')} from ` +
+            `we:${target} but its header's declared contract block does not name ${undeclared.length > 1 ? 'them' : 'it'}. ` +
+            `The block is the tripwire a maintainer greps before changing a shared export — an undeclared ` +
+            `consumer is exactly the false negative it exists to prevent (PR #1064). Add the name(s) to the ` +
+            `\`from we:${target} —\` line, or drop the import.`,
+          descriptor: { kind: 'declared-contract-drift', file, target, undeclared },
+        });
+      }
+    }
+  }
+  return { errors, warnings: [] };
+}

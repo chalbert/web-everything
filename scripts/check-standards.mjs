@@ -17,7 +17,7 @@
  *                         registry joins) to notes — a lane in its own worktree can't cause a cross-lane
  *                         invariant, so those are the MERGE gate's job, not the lane's.
  */
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
@@ -59,6 +59,7 @@ import {
   duplicateBacklogNums,
   strandedHashesOnMain,
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
+  validateDeclaredModuleContract,
 } from './check-standards-rules.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
@@ -1728,6 +1729,26 @@ try {
   }
   const { errors: rle } = checkReviewLabelSingleHome(docs);
   for (const e of rle) err(e);
+}
+
+// ── 16. A DECLARED module contract must cover every specifier the module imports (PR #1064) ─────
+// A `scripts/lib/*.mjs` header that declares "from we:<module> — `a`, `b`" is a tripwire: it is what a
+// maintainer greps before changing a shared export, and what names the dependency a semantic change would
+// break. It is worthless once it drifts, and the first one shipped ALREADY had (`normalizeFindings` imported,
+// called, undeclared). Script-decidable ⇒ a gate, not a reviewer's attention (#51). Pure rule in
+// check-standards-rules.mjs; the fs read stays here.
+{
+  const libDir = join(ROOT, 'scripts', 'lib');
+  const mods = [];
+  if (existsSync(libDir)) {
+    for (const name of readdirSync(libDir)) {
+      if (!name.endsWith('.mjs')) continue;
+      const abs = join(libDir, name);
+      try { if (!statSync(abs).isFile()) continue; } catch { continue; }
+      mods.push({ file: `scripts/lib/${name}`, content: readFileSync(abs, 'utf8') });
+    }
+  }
+  for (const e of validateDeclaredModuleContract(mods).errors) err(e.message, e.descriptor);
 }
 
 // ── Scope attribution (#952, ratified #949 Fork 3-A) ───────────────────────────
