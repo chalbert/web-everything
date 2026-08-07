@@ -61,7 +61,9 @@ Enumerate the program's finite goal-set, map each element to a live child **and*
 ## 3. Candidate-card skeletons (scaffold only the newly-appeared items)
 
 Run: `node scripts/backlog.mjs scaffold --kind=<kind> --size=<n> --parent=<program-NNN>
---title="<title>" --digest="<lead prose, no **Label:** lead>"`, then fill the body.
+--title='<title>' --digest='<lead prose, no **Label:** lead>'`, then fill the body. **Single quotes** —
+a watch summarises *external* material into these values, and item text in a double-quoted value still
+runs `` ` `` / `$(…)` through bash (*backlog-workflow.md → Authoring an item → The quoting rule*).
 
 ### 3a. Story (a buildable slice the watch surfaced)
 
