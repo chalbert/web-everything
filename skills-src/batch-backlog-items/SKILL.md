@@ -13,8 +13,10 @@ completed item"**). Don't restate the rubric here; if the method changes, edit t
 Invoked as `/batch [P]`, `/batch-next [P] [NNN-slug]`, or `/workflow [P] [NNN-slug]`: a bare number `P`
 overrides the **points budget** (not an item count; default = the calibrated `capacityPoints × targetFraction`);
 a `NNN`/`NNN-slug` **seeds** the chain's first item (skip its selection). **The command picks the execute
-model:** `/batch` + `/batch-next` run the **linear / serial inline loop** (the default); **`/workflow` runs the
-parallel orchestrator** (provably-disjoint lanes on the `Workflow` tool — see *Parallel lanes* below). The
+model:** `/batch` + `/batch-next` run the **serial per-item loop** (the default — "serial" is the item cadence;
+each item's *execution* still delegates to a sub-agent, per *backlog-workflow.md → Model routing*);
+**`/workflow` runs the parallel orchestrator** (provably-disjoint lanes on the `Workflow` tool — see
+*Parallel lanes* below). The
 `--parallel` / `--serial` flags are explicit per-invocation overrides on either command. **Open
 `backlog-workflow.md` only for an edge case**
 (empty pool → surface one decision; a stop-rule judgment call); the happy path is the loop below. A batch
@@ -255,7 +257,7 @@ unattended in one session instead of as one-item handoffs. Full method: *backlog
 
 ## Parallel lanes — the `/workflow` orchestrator (opt-in; `/batch` stays linear) (reliability first, speed second)
 
-**`/workflow` (or `--parallel`) runs the parallel execute model; `/batch` runs the inline serial loop (the
+**`/workflow` (or `--parallel`) runs the parallel execute model; `/batch` runs the serial per-item loop (the
 default).** Parallel was once the default (#1147) but has been **re-split into its own command** so the choice
 is explicit per invocation — `/batch` for linear, `/workflow` for parallel (this is the documented "flip back
 to opt-in" path the *Reversible default* note below always reserved). Under **#2183 (slice #2189)** the parallel model is now a **PR fan-out**: every packed item runs in its own
