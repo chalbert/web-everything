@@ -3,8 +3,7 @@ bornAs: x6gp3oa
 kind: story
 size: 2
 status: open
-blockedBy: ["2895"]
-relatedTo: ["2555", "2470"]
+relatedTo: ["2555", "2470", "2895"]
 priority: low
 scope:
   - we:scripts/review-console.mjs

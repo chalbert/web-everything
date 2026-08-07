@@ -54,6 +54,35 @@ is present, so the bare-orphan backstop saw nothing to hold. This is a fresh liv
 analysis, not new information — the ruled fix below (refuse the transition, require an explicit `rearm`) is
 still the right one and this sighting does not change it.
 
+**Observed again 2026-08-06 — PR #1056 (sighting #5), and this one DOES change the blast radius.** Same
+mechanism, same tool: `--to=accepted` through
+[we:scripts/review-set-label.mjs](scripts/review-set-label.mjs) returned
+`{"ok":true,"pr":1056,"to":"accepted","labels":["ready-to-merge","review:accepted","review:changes"]}`, and the
+PR merged. The ruled fix below is unchanged and still right.
+
+What is new is **evidence against this item's own "merge-path only" framing**. The #1062 note above concluded
+the stale label was inert once `review:accepted` is present, on the strength of `hasUnclearedReviewLabel`
+returning false. That holds for the MERGE path and nowhere else. Four consumers key on `review:changes` WITHOUT
+consulting `review:accepted` at all:
+
+- [we:scripts/conveyor/pr-watch.mjs](scripts/conveyor/pr-watch.mjs) — `PARK_LABELS` includes `review:changes`
+  and `classifyPr` returns `parked` on any park label. The file contains **zero** occurrences of the string
+  `accepted` — it has no concept of `review:accepted`. So an accepted, mergeable PR exits `EXIT_PARKED`, and
+  `isReadyToLand` (same predicate) never fires the fast-drain trigger for it.
+- [we:scripts/conveyor/tick-core.mjs](scripts/conveyor/tick-core.mjs) — `routeWatcherExit`'s `case 2` routes on
+  `ls.includes(REVIEW_CHANGES_LABEL)` alone, so the conveyor **dispatches a fix agent at an already-accepted
+  PR**. That is burned agent time, and it means the phantom bounce actively re-triggers the fix/rearm loop
+  rather than sitting inert.
+- [we:scripts/lane-resume.mjs](scripts/lane-resume.mjs) — `land()` hard-refuses with
+  `{ action: 'review-changes', merged: false }`, so an accepted PR cannot be enqueued through that path; and
+  `reviewChanges: true` feeds `classifyLane`, after which `markStackDescendantsBlocked` re-buckets every
+  overlap-descendant to `blocked` behind a link that is not actually broken.
+- [we:scripts/conveyor/status-board.mjs](scripts/conveyor/status-board.mjs) surfaces it under NEEDS YOU.
+
+Failure directions are conservative (refuse / park) except the wasted fix dispatch, so this is still not a
+merge-safety hole. But it upgrades the item from "the labels look untidy after an accept" to "the conveyor acts
+on a phantom bounce", which is the part worth pricing when this is scheduled.
+
 **Fix: REFUSE the transition, do NOT strip the label.** An earlier draft of this item said "the accept branch must also strip `review:changes` so the two review-axis verdicts can never coexist". Do not build that — it puts a label-clearing power in shared code that a machine inherits:
 
 - [we:scripts/review-set-label.mjs](scripts/review-set-label.mjs) `decideSetLabel` is **single-sourced** for BOTH the human `/review` path and the automated disposition seam — [we:scripts/lib/disposition-land-seam.mjs](scripts/lib/disposition-land-seam.mjs) calls it with `to: 'accepted'`, and [we:scripts/lib/auto-land-seam.mjs](scripts/lib/auto-land-seam.mjs) shells [we:scripts/review-set-label.mjs](scripts/review-set-label.mjs) with `--to=accepted --actor="auto-land seam (enforce)"` in ENFORCE mode, with no human actor.
