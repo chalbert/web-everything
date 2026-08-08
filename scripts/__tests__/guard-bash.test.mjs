@@ -10,6 +10,7 @@ import {
   isVerificationRun, isBackgrounded, backgroundedVerificationReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
+  splitSegments,
 } from '../guard-bash.mjs';
 
 describe('guard-bash — backgrounded verification is denied (#2833 finding 3)', () => {
@@ -597,6 +598,43 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       'tee config/app.json', 'tee -a config/app.json', 'tee /tmp/x config/app.json',
       'tee -a -- config/app.json',
     ],
+    // #2994 — the recall half of the quote-aware split. A REAL unquoted redirect after a REAL unquoted pipe
+    // must still deny. The quote-blind split used to TEAR at a quoted pipe and leave the tail fragment with
+    // an unbalanced quote that SWALLOWED the trailing redirect — so these were wrongly ALLOWED before, and
+    // the split fix closes that hole in the same stroke it clears the false denies below.
+    'a real unquoted pipe into a real unquoted write (#2994, recall half)': [
+      'ls | grep x > config/app.json', 'cat a.txt | tee config/app.json',
+      'ls | grep x | tee -a config/app.json', 'echo hi | sed -i s/a/b/ config/app.json',
+      "gh pr list --jq '.[] | .number' > config/app.json",
+      "gh pr list --jq '.[] | select(.n > 5)' | tee config/app.json",
+      "echo 'a | b' > config/app.json", 'echo "a|b" > config/app.json',
+      "jq '.a | .b' x.json > config/app.json",
+      "perl -i -pe 's/x|y/z/' config/app.json",
+      'ls; npm run build', 'ls && echo hi > config/app.json',
+    ],
+    // #2986(2) — the recall half of the script-name scan: every real build alias, in every runner spelling.
+    'a real build alias, only the script-name position (#2986/2, recall half)': [
+      'npm run build', 'npm run-script build', 'npm run --silent build', 'npm run build -- --mode=prod',
+      'pnpm build', 'pnpm run build', 'yarn build', 'yarn run build:docs', 'run-s lint build',
+      'run-s build build:check', 'npm-run-all --parallel build:demo', 'npm run build-docs',
+      // …and the runner-`exec`/`dlx` form, whose remainder is a COMMAND, not a script name.
+      'pnpm exec vite build', 'npm exec -- vite build', 'yarn dlx eleventy', 'pnpm dlx vite build',
+    ],
+    // #2986(1) — the recall half of the empty-operand drop: a BSD `-i ''` edit of a TRACKED file still denies.
+    "BSD in-place `-i ''` on a TRACKED path (#2986/1, recall half)": [
+      "sed -i '' s/a/b/ config/app.json", 'sed -i "" s/a/b/ config/app.json',
+      "sed -i '' -e s/a/b/ config/app.json", "sed -i '' s/a/b/ /tmp/x config/app.json",
+      "sed -i '' -e 's/a|b/c/' config/app.json", "tee '' config/app.json",
+    ],
+    // #2986(3) — the recall half of the eleventy flag allowlist: the flags that REALLY write the site dir.
+    'eleventy flags that really WRITE the site dir (#2986/3, recall half)': [
+      'eleventy', 'eleventy --serve', 'eleventy --watch', 'eleventy --serve --port=8080',
+      'eleventy --quiet', 'eleventy --incremental', '11ty --watch', 'npx eleventy',
+      // …and `--serve`/`--watch` WIN over the no-write allowlist — they keep writing regardless.
+      'eleventy --dryrun --serve', 'eleventy --version --serve', 'eleventy --help --watch',
+      // a flag that merely STARTS with an allowlisted name is not on the allowlist
+      'eleventy --versionx', 'eleventy --serveme',
+    ],
   };
 
   // MUST NEVER DENY — the mirror side: pure-scratch / read-only work in every flag spelling.
@@ -622,6 +660,47 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       'MAIN_SESSION_BUILD_OK=1 npm run build', 'env MAIN_SESSION_BUILD_OK=1 npm run build',
       'MAIN_SESSION_BUILD_OK=1 sed -i s/x/y/ config/app.json',
       'MAIN_SESSION_BUILD_OK=1 node scripts/gen-inventory.mjs',
+    ],
+    // ── the four #2986/#2994 false-deny classes. The corpus proved RECALL well (41/41 must-deny) and
+    // precision barely at all, which is exactly how all four shipped. These are the mirror side.
+    // #2994 — a `|` and a `>` in the SAME quoted argument. Neither alone tripped it; both always did.
+    // `--jq '.[] | select(…)'` is *the* house idiom for reading GitHub state, so this one was hit live.
+    'a pipe AND an angle bracket inside one quoted argument (#2994)': [
+      "gh pr list --jq '.[] | select(.n > 5)' --state open",
+      'gh pr list --jq ".[] | select(.n > 5)"',
+      "gh pr list --state merged --json number,mergedAt --jq '.[] | select(.mergedAt > \"2026-08-07\") | .number'",
+      "jq '.[] | select(.size > 8)' items.json",
+      "echo 'a | b > c'", 'echo "a | b > c"',
+      "git log --pretty='%h | %s' --since='2026-08-01'",
+      "awk -F'|' '$2 > 3 { print }' data.txt",
+      "node scripts/backlog.mjs list --filter='size > 8 | open'",
+      // …and a real pipe into a real SCRATCH write is still fine
+      "gh pr list --jq '.[] | select(.n > 5)' | tee /tmp/prs.json",
+      'ls | grep x > /tmp/out.log', 'ls | grep x | tee -a /tmp/out.log',
+      'git commit -m "fix: pipe | and > in one message"',
+    ],
+    // #2986(2) — the word `build` ANYWHERE in a package-runner segment used to fire the arm. Only the
+    // runner's script-name argument position is a script name; a path, a package, or a flag is not.
+    'the word `build` outside the runner script-name position (#2986/2)': [
+      'npm run test:unit -- src/build-graph.test.ts',
+      'npm run test:unit scripts/__tests__/build-manifest.test.mjs',
+      'npm run test:unit -- --reporter=verbose src/rebuild.test.ts',
+      'npm run lint src/build/', 'yarn run lint packages/buildkit',
+      'npm install esbuild', 'npm install --build-from-source better-sqlite3',
+      'npm ls esbuild', 'pnpm add node-gyp-build',
+    ],
+    // #2986(1) — BSD's in-place suffix is an EMPTY quoted argument. Counting it as a file operand shifted
+    // the `files.slice(1)` so the sed SCRIPT read as the write target.
+    "BSD in-place `-i ''` with an empty suffix, on a SCRATCH path (#2986/1)": [
+      "sed -i '' s/a/b/ /tmp/scratch.txt", 'sed -i "" s/a/b/ /tmp/scratch.txt',
+      "sed -i '' 's/a/b/' /private/tmp/claude-501/sess/x.md",
+      "sed -i '' -e s/a/b/ /tmp/scratch.txt",
+    ],
+    // #2986(3) — bare `eleventy` with a flag that writes nothing. The arm allowed only a scratch `--output=`.
+    'eleventy with a NON-build flag (#2986/3)': [
+      'eleventy --version', 'eleventy --help', 'eleventy --dryrun', 'eleventy --dry-run',
+      'npx eleventy --version', '11ty --version', './node_modules/.bin/eleventy --help',
+      'env eleventy --version', 'eleventy --output=_site --dryrun',
     ],
   };
 
@@ -668,6 +747,61 @@ describe('guard-bash — the shared normalizers the #2788 arms and canonicalGitO
     expect(canonicalGitOp('env FOO=1 /usr/bin/git -C /x reset --hard')).toBe('git reset --hard');
     expect(canonicalGitOp('npm run build')).toBe('');
     expect(canonicalGitOp('')).toBe('');
+  });
+
+  it('splitSegments cuts on UNQUOTED separators only (#2994)', () => {
+    // the ordinary separators still cut, and a run of them collapses to one cut
+    expect(splitSegments('a && b').map((s) => s.trim())).toEqual(['a', 'b']);
+    expect(splitSegments('a || b; c | d & e\nf').map((s) => s.trim())).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    // …but a separator INSIDE quotes is text, in either quote style — this is the whole bug
+    expect(splitSegments("gh pr list --jq '.[] | select(.n > 5)'")).toHaveLength(1);
+    expect(splitSegments('gh pr list --jq ".[] | select(.n > 5)"')).toHaveLength(1);
+    expect(splitSegments("echo 'a; b && c'")).toHaveLength(1);
+    // the RAW text (quotes intact) is returned — every caller re-parses it
+    expect(splitSegments("echo 'a | b' > x")[0]).toBe("echo 'a | b' > x");
+    // a redirect operator run is consumed whole, so its glued `|`/`&` is never a separator
+    expect(splitSegments('cmd >| x')).toHaveLength(1);
+    expect(splitSegments('cmd 2>&1')).toHaveLength(1);
+    expect(splitSegments('echo hi &> x')).toHaveLength(1);
+    expect(splitSegments('cmd >> x')).toHaveLength(1);
+    // an unterminated quote runs to end of string rather than dropping the tail
+    expect(splitSegments("echo 'a | b")).toHaveLength(1);
+    expect(splitSegments('')).toEqual(['']);
+  });
+
+  it('the quote-aware split closes a real hole, not just the false denies (#2994)', () => {
+    // BEFORE: the tear at the quoted pipe left the tail fragment with an UNBALANCED quote that swallowed
+    // the trailing redirect, so a genuine primary-tree write was ALLOWED. Both directions are asserted.
+    expect(decide("gh pr list --jq '.[] | .number' > config/app.json", { primaryCwd: true })).toMatch(/writing a file/);
+    expect(decide("perl -i -pe 's/x|y/z/' config/app.json", { primaryCwd: true })).toMatch(/writing a file/);
+    expect(decide("gh pr list --jq '.[] | .number' > /tmp/prs.json", { primaryCwd: true })).toBeNull();
+  });
+
+  it('isTreeWritingBuildRun reads only the runner SCRIPT-NAME position (#2986/2)', () => {
+    expect(isTreeWritingBuildRun('npm run build')).toBe(true);
+    expect(isTreeWritingBuildRun('yarn build')).toBe(true);          // yarn takes a bare script name
+    expect(isTreeWritingBuildRun('run-s lint build')).toBe(true);    // every positional is a script name
+    expect(isTreeWritingBuildRun('npm run lint src/build/')).toBe(false);
+    expect(isTreeWritingBuildRun('npm install --build-from-source better-sqlite3')).toBe(false);
+    expect(isTreeWritingBuildRun('npm install esbuild')).toBe(false); // npm has no bare-script form
+    expect(isTreeWritingBuildRun('pnpm add node-gyp-build')).toBe(false);
+    expect(isTreeWritingBuildRun('pnpm exec vite build')).toBe(true); // `exec` remainder is a COMMAND
+  });
+
+  it('the eleventy no-write flag allowlist, and what overrides it (#2986/3)', () => {
+    expect(isTreeWritingBuildRun('eleventy --version')).toBe(false);
+    expect(isTreeWritingBuildRun('eleventy --dryrun')).toBe(false);
+    expect(isTreeWritingBuildRun('eleventy')).toBe(true);
+    expect(isTreeWritingBuildRun('eleventy --serve')).toBe(true);
+    expect(isTreeWritingBuildRun('eleventy --dryrun --serve')).toBe(true); // writing flags win
+    expect(isTreeWritingBuildRun('eleventy --versionx')).toBe(true);       // prefix ≠ allowlisted
+  });
+
+  it("fileOperands drops an EMPTY operand, so BSD `sed -i ''` doesn't shift the target slice (#2986/1)", () => {
+    expect(isFileWriteRedirect("sed -i '' s/a/b/ /tmp/scratch.txt")).toBe(false);
+    expect(isFileWriteRedirect("sed -i '' s/a/b/ config/app.json")).toBe(true);
+    expect(isFileWriteRedirect("sed -i '' -e s/a/b/ /tmp/scratch.txt")).toBe(false);
+    expect(isFileWriteRedirect("tee '' config/app.json")).toBe(true);
   });
 
   it('shellTokens: quoting is resolved and redirect operators are split out with their fd prefix', () => {
