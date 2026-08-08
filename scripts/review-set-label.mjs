@@ -41,6 +41,10 @@ import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker } from './lib/review-escalation.mjs';
+// #2979 — the NET diff vs current main, NOT `gh pr diff`'s three-dot output (see the fingerprint block in
+// `runReviewLabelCli` for why that distinction is the whole point). Imported from the CLI that owns it, the same
+// way `we:scripts/fetch-parked.mjs` already does — it is the single home of the #2450 net-diff basis.
+import { computeNetDiffText } from './merge-ai-prs.mjs';
 
 /**
  * we:scripts/review-set-label.mjs#REVIEW_LABEL_TARGETS — the CLOSED set of label-swap targets `decideSetLabel`
@@ -315,12 +319,16 @@ export function runReviewLabelCli({
   // acceptance later if the head advances past it. One extra json field on the existing call — no extra gh hop.
   let currentLabels;
   let headSha = '';
+  let headRefName = '';
   try {
     const parsed = JSON.parse(execFileSync('gh', [
-      'pr', 'view', pr, '--repo', repo, '--json', 'labels,headRefOid',
+      'pr', 'view', pr, '--repo', repo, '--json', 'labels,headRefOid,headRefName',
     ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
     currentLabels = Array.isArray(parsed.labels) ? parsed.labels : [];
     headSha = typeof parsed.headRefOid === 'string' ? parsed.headRefOid : '';
+    // #2979 — the branch name the NET diff is resolved against (see the fingerprint block below). Same gh call,
+    // one more json field, no extra hop.
+    headRefName = typeof parsed.headRefName === 'string' ? parsed.headRefName : '';
   } catch (e) {
     fail(ghErr(e, 'gh pr view failed'), 1);
   }
@@ -338,16 +346,37 @@ export function runReviewLabelCli({
   // manifest-drop pass, which fires within seconds of an accept) advances the head and invalidates the accept,
   // putting the queue in a re-review treadmill.
   //
-  // FAIL-SOFT, DELIBERATELY: a diff-fetch miss leaves `reviewedDiff` empty, so no marker is stamped and the gate
-  // falls back to SHA identity — i.e. exactly the pre-#x169fqe behaviour, which is the STRICTER one. A read
-  // failure can therefore only ever cost a false re-park, never honour an accept it should not. Fetched only for
-  // a verdict that actually records an acceptance, so a `changes` verdict pays no extra gh hop.
+  // THE NET DIFF, NOT `gh pr diff` (#2979 — the defect that made the first cut of this barely work). `gh pr diff`
+  // returns the THREE-DOT diff, which still lists a sibling lane's file that has ALREADY landed on main as if
+  // this PR added it (#2450 — the same phantom that burns negotiation rounds). Fingerprinting that means the
+  // fingerprint changes every time ANY OTHER LANE LANDS, so an accept went stale for reasons having nothing to do
+  // with this PR's content — measured on PR #1080, whose three-dot diff had grown to include four backlog items
+  // and three script files from other PRs. `computeNetDiffText` is the repo's existing answer: the two-tree
+  // `git diff <forkpoint> <head>`, content-only and ancestry-independent. Both SIDES of the comparison must use
+  // it — this stamp and the drain's live read — or they are not comparing the same thing.
+  //
+  // FAIL-SOFT, DELIBERATELY: an unscored basis leaves `reviewedDiff` empty, so no marker is stamped and the gate
+  // falls back to SHA identity — exactly the pre-#x169fqe behaviour, which is the STRICTER one. A read failure
+  // can therefore only ever cost a false re-park, never honour an accept it should not. Computed only for a
+  // verdict that actually records an acceptance, so a `changes` verdict pays nothing.
   let reviewedDiff = '';
   if (to === 'accepted' || to === 'clear-human') {
     try {
-      reviewedDiff = execFileSync('gh', ['pr', 'diff', pr, '--repo', repo], {
-        encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+      // `exec` MUST be execFileSync-shaped — `(cmd, argsArray, opts)`. Passing a shell-exec here is the exact
+      // caller bug #2952 exists to make diagnosable: it throws a TypeError inside the try and degrades to an
+      // unscored basis, which here silently costs the fingerprint.
+      //
+      // NO EXPLICIT `cwd` HERE, AND THAT IS AN INVARIANT, NOT AN OVERSIGHT (PR #1087 review, note 2). This CLI is
+      // single-PR and operator-invoked, so it runs from the PR's own repo — unlike the drain, which sweeps three
+      // repos in one process and therefore MUST pin every git read to `escCwd` (see the matching block in
+      // merge-ai-prs.mjs, where omitting it was a real defect). If this CLI ever grows a `--repo` that can name a
+      // repo other than the cwd's, this call has to take a `cwd` with it, or it will fingerprint the wrong tree.
+      const net = computeNetDiffText({
+        exec: (cmd, args, opts) => execFileSync(cmd, args, opts),
+        rev: headRefName,
+        fetchExtraRefs: headRefName ? [headRefName] : [],
       });
+      reviewedDiff = net && net.scored ? net.text : '';
     } catch { reviewedDiff = ''; /* miss → no marker → SHA-identity fallback (the stricter path) */ }
   }
 

@@ -532,6 +532,36 @@ describe('#x169fqe — an accept survives a CONTENT-PRESERVING rebase', () => {
     }).covers).toBe(false);
   });
 
+  it('#2979 — sibling-lane content that already landed on main must not move the fingerprint', () => {
+    // THE DEFECT THIS PINS, measured on PR #1080. Both sides were fingerprinted from `gh pr diff`, whose
+    // THREE-DOT output still lists a file another lane has since landed on main as if THIS PR added it (#2450).
+    // So the fingerprint changed every time ANY OTHER LANE LANDED, and the accept went stale for reasons having
+    // nothing to do with this PR — #1080's diff had grown to include four backlog items and three script files
+    // belonging to other PRs. The fix is upstream of this function: both sides now feed it `computeNetDiffText`
+    // (the two-tree `git diff <forkpoint> <head>`), which never contains sibling content. This test pins the
+    // PROPERTY that makes that fix work — a diff carrying extra already-landed files is NOT the same content.
+    const own = [
+      'diff --git a/scripts/mine.mjs b/scripts/mine.mjs',
+      'index 1111111..2222222 100644',
+      '@@ -1 +1 @@',
+      '-const a = 1;',
+      '+const a = 2;',
+    ].join('\n');
+    const inflated = [
+      own,
+      'diff --git a/backlog/2977-a-sibling-item.md b/backlog/2977-a-sibling-item.md',
+      'new file mode 100644',
+      'index 0000000..3333333',
+      '@@ -0,0 +1 @@',
+      '+a sibling lane landed this on main',
+    ].join('\n');
+    // If these ever compared EQUAL, the fingerprint would be blind to real added files — the opposite failure.
+    expect(normalizeDiffFingerprint(own)).not.toBe(normalizeDiffFingerprint(inflated));
+    expect(acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb', acceptedDiff: own, headDiff: inflated,
+    }).covers).toBe(false);
+  });
+
   it('a mode-only change and a rename both change the fingerprint', () => {
     const modeOnly = ['diff --git a/s.sh b/s.sh', 'old mode 100644', 'new mode 100755'].join('\n');
     const other = ['diff --git a/s.sh b/s.sh', 'old mode 100755', 'new mode 100644'].join('\n');

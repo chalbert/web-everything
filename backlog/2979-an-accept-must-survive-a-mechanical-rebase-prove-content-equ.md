@@ -80,6 +80,36 @@ Fail-closed on every path: a missing, empty, or unparseable fingerprint on **eit
 pre-existing SHA-identity verdict. A read failure can therefore only ever cost a false re-park, never honour an
 accept it should not. Every pre-#2979 accept carries no fingerprint and so behaves exactly as before.
 
+## Follow-up (2026-08-08): the fingerprint was fed the WRONG DIFF
+
+The first cut fingerprinted `gh pr diff` on both sides. That is the THREE-DOT diff, which still lists a sibling
+lane's file that has already landed on main as if this PR added it — the exact phantom #2450 exists to strip. So
+the fingerprint changed **every time any other lane landed**, and an accept went stale for reasons having nothing
+to do with its own PR. The mechanism was sound and the input was polluted; #1086 only survived because it landed
+within minutes, before siblings moved main.
+
+Both sides now use `computeNetDiffText` — the two-tree `git diff <forkpoint> <head>`, content-only and
+ancestry-independent, which the repo already maintains for precisely this reason.
+
+Measured on the live board:
+
+| PR | `gh pr diff` files | net-diff files |
+|---|---|---|
+| #1080 | 24 | 0 |
+| #1075 | — | 10 |
+| #1070 | — | 5 |
+| #1021 | — | 3 |
+
+#1080's three-dot diff had grown to include four backlog items and three script files belonging to other PRs,
+including this very item. The net diff strips all of it.
+
+**A zero-file net diff is not a failure — it is a finding.** #1080 and #1081 both return empty, and both branch
+tips are provably ancestors of `origin/main`: their content already landed via sibling lanes, so those PRs are
+no-ops that should be closed rather than reviewed. The three-dot diff hid that behind 24 phantom files.
+
+Fail-soft is unchanged: an unscored or empty basis stamps no marker, and the gate falls back to the pre-existing
+SHA-identity check — the stricter path — so this can only ever cost a false re-park.
+
 ## Acceptance
 
 1. **Executable** — a vitest case where the same reviewed change replayed onto a newer base, with different
