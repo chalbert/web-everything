@@ -10,8 +10,9 @@ import {
   isVerificationRun, isBackgrounded, backgroundedVerificationReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
-  splitSegments, runnerInvocation,
+  splitSegments, runnerInvocation, parseSegments, unparseableReason, heredocScan,
 } from '../guard-bash.mjs';
+import { execFileSync } from 'node:child_process';
 
 describe('guard-bash — backgrounded verification is denied (#2833 finding 3)', () => {
   it('isVerificationRun matches the verification set (verify-lane / check:standards / test:unit), not a mention', () => {
@@ -659,6 +660,47 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       // …and the spellings that were ALREADY right, pinned so the rewrite keeps them
       'npm run --workspace=web build', 'npm --workspace=web run build', 'pnpm -r run build',
     ],
+    // ── #2994 review r3 — the PARSER'S OWN failure modes ──────────────────────────────────────────────
+    // Every round of this review closed one shape and opened another of the same class, because the corpus
+    // kept testing the class the author was thinking about (which tree writes count) and never the states
+    // the PARSER can reach. Not one row above exercises an unterminated quote, a `#` comment or a
+    // `\`+newline. These families do. Each was cross-checked against real `bash -c` before being written.
+    'an apostrophe in a `#` comment must not swallow the next line (r3 F1)': [
+      "# don't forget\nnpm run build",
+      "echo one # don't forget\nnpm run build",
+      "npm run build:check # don't\nvite build",
+      "ls # it's a comment\necho hi > config/app.json",
+      "ls # don't\nsed -i s/a/b/ config/app.json",
+      'ls # see the "docs"\nnpm run build',
+      "ls # don't; npm run build",              // a separator inside a comment still cuts, as it always did
+    ],
+    'a `#` that does NOT start a comment must not disarm the arm (r3 F1 mirror)': [
+      'echo a#b > config/app.json',             // bash: `a#b` is one word, not a comment
+      'echo "# not a comment" > config/app.json',
+      "sed -i 's/#a/#b/' config/app.json",
+      'npm run build "#tag"',
+      'echo ${#PATH} > config/app.json',
+    ],
+    'a `\\`+newline line continuation must not hide the tree write (r3 F2)': [
+      'echo a && \\\nnpm run build',            // after a separator — the reported F2 shape
+      'echo a; \\\nnpm run build',
+      'echo a || \\\nvite build',
+      'vite \\\nbuild',                         // mid-command — bash splices it into one word list
+      'npm run \\\ngen:inventory',
+      'echo hi > \\\nconfig/app.json',
+      'tee \\\nconfig/app.json',
+      'npm run build \\',                       // a LONE trailing backslash on a real build
+      'sed -i \\\ns/a/b/ config/app.json',
+    ],
+    'a phantom heredoc must not swallow the rest of the command (r3 audit)': [
+      'echo "x << EOF"\nnpm run build',         // the `<<` is inside quotes — not an opener
+      "echo 'a << b'\nvite build",
+      'ls # see <<EOF\nnpm run build',          // …nor inside a comment
+    ],
+    'a subshell CLOSER must not defeat the arm (r3 audit — found by the differential fuzz)': [
+      '(pnpm --filter web exec vite build)', '(npm exec vite build)', '(vite build)', '(vite build) \\',
+      '{ npm run build; }', '(env "FOO=a b" npm run build)', 'sudo -u "some user" npm run build',
+    ],
     'eleventy flags that really WRITE the site dir (#2986/3, recall half)': [
       'eleventy', 'eleventy --serve', 'eleventy --watch', 'eleventy --serve --port=8080',
       'eleventy --quiet', 'eleventy --incremental', '11ty --watch', 'npx eleventy',
@@ -752,6 +794,19 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
     ],
     // #2994 r2 precision mirror — the exec/dlx rewrite must not turn every flagged runner form into a deny:
     // what matters is the TOOL it lands on, not that a flag was present.
+    // ── #2994 review r3 — the precision mirror of the parser's own failure modes ──────────────────────
+    // Cross-checked against real `bash -c`: `echo a#b` prints `a#b`; `echo a #b` prints `a`; `echo ${#x}`
+    // prints a length; `echo a \`⏎`b` prints `a b`; `echo a \` (lone trailing backslash) prints `a`.
+    "the parser's own failure modes, on commands that write NOTHING (r3 audit)": [
+      'echo a#b', 'curl https://example.com/#frag', 'git commit -m "fix #123"',
+      'echo "# not a comment"', "echo '# nor this'", 'echo ${#PATH}', 'echo $#',
+      "ls # don't forget", 'ls # a "quoted" word', 'git status # npm run build:check',
+      "ls -la # it's fine\ngit status",
+      'echo ok \\', 'ls -la \\', 'echo hello \\\n  world', 'ls -la \\\n  --color=auto',
+      "gh pr list \\\n  --jq '.[] | select(.n > 5)'",
+      'git status \\\n  --short',
+      "cat > /tmp/body.md <<'EOF'\ndon't do it — it's a trap\na \"quoted\" line\nnpm run build\nEOF",
+    ],
     'a runner exec/dlx form whose tool writes nothing (#2994 r2)': [
       'npm exec --package=vitest vitest run', 'npm exec -- tsc --noEmit', 'pnpm exec eslint src/',
       'npm exec --package=vite vite preview', 'yarn workspace web test', 'pnpm --filter web exec eslint .',
@@ -990,5 +1045,109 @@ describe('guard-bash — the shared normalizers the #2788 arms and canonicalGitO
     // …so heredoc PROSE can never produce a phantom denial, while the heredoc's own target still can
     expect(decide(cmd, { primaryCwd: true })).toBeNull();
     expect(decide(cmd.replace('/tmp/body.md', 'config/app.json'), { primaryCwd: true })).toMatch(/writing a file/);
+  });
+});
+
+// ── #2994 review r3 — the parser must FAIL CLOSED, never silently degrade ───────────────────────────────
+// The mechanism behind every loosening this review found: the scanner reached a state it could not
+// represent, consumed to end-of-string, and handed the deny arms ONE opaque blob in which nothing is
+// anchored at command position — so the tree-write arm, the push arm, the rm-backlog arm and (via
+// `hasDestructiveLaneOp`) the entire lane-clobber lease check all missed at once. These assertions pin the
+// PROPERTY (an unrepresentable state denies), not the two shapes that happened to be reported.
+describe('guard-bash — the parser fails CLOSED on input it cannot represent (#2994 r3)', () => {
+  const CONTEXTS = [
+    ['primary cwd', { primaryCwd: true }],
+    ['a plain lane cwd', { primaryCwd: false }],
+    ['a lane with a foreign unmarked lease (#2367)', { primaryCwd: false, foreignLiveLease: true }],
+    ['a lane with a marked workflowLane lease (#2413)', { primaryCwd: false, markedLeaseSlug: 'wf-x1' }],
+  ];
+
+  it('an UNTERMINATED quote is denied in EVERY context — bash rejects the identical input', () => {
+    const cmds = [
+      "echo 'abc", 'echo "abc', "echo $'abc", 'echo $"abc',
+      "echo 'abc\nnpm run build",                     // …and it can no longer swallow the next line
+      'echo "abc\ngit reset --hard origin/main',
+      "git commit -m 'oops\ngit push origin main",
+      "npm run lint --msg='unclosed",
+      'ls "a\nrm backlog/1234-a.md',
+    ];
+    for (const [label, ctx] of CONTEXTS)
+      for (const c of cmds)
+        expect(decide(c, ctx), `${label}: ${JSON.stringify(c)}`).toMatch(/UNTERMINATED quote/);
+  });
+
+  it('a BALANCED quote — including an apostrophe in a comment or a heredoc body — is NOT that state', () => {
+    for (const c of [
+      "echo 'abc'", 'echo "abc"', "echo $'a\\'b'", 'echo "a\\"b"', "echo 'a\\'",
+      "ls # don't forget", 'ls # a "quoted" word', "ls # don't\nnpm run test:unit",
+      "cat > /tmp/b.md <<'EOF'\ndon't do it\nit's fine — a \"quote\" too\nEOF",
+      'git commit -m "it\'s fine"',
+    ]) expect(unparseableReason(c), JSON.stringify(c)).toBeNull();
+  });
+
+  it('there is NO escape hatch for an unparseable command (there is no legitimate one)', () => {
+    for (const esc of ['MAIN_SESSION_BUILD_OK=1 ', 'LANE_CLOBBER_OK=1 ', 'MAIN_PUSH_OK=1 ', 'STALE_LANE_OK=1 '])
+      expect(decide(`${esc}echo 'abc`, { primaryCwd: true })).toMatch(/UNTERMINATED quote/);
+  });
+
+  it('parseSegments REPORTS its state instead of consuming to end of string', () => {
+    expect(parseSegments("echo 'a | b").unterminated).toBe(true);
+    expect(parseSegments("echo 'a | b'").unterminated).toBe(false);
+    // F1 — the comment no longer opens a phantom quoted run, so the newline still cuts.
+    const f1 = parseSegments("ls # don't\nnpm run build");
+    expect(f1.unterminated).toBe(false);
+    expect(f1.segments.map((s) => s.trim())).toEqual(["ls # don't", 'npm run build']);
+    // …and a comment's text and separators are STILL handed on, so nothing is hidden from a deny rule.
+    expect(parseSegments('ls # a; b').segments.map((s) => s.trim())).toEqual(['ls # a', 'b']);
+    // F2 — `\`+newline is spliced the way bash splices it.
+    const f2 = parseSegments('echo a && \\\nnpm run build');
+    expect(f2.continued).toBe(true);
+    expect(f2.segments.map((s) => s.trim())).toEqual(['echo a', 'npm run build']);
+    expect(parseSegments('echo a \\\nb').segments).toEqual(['echo a b']);
+    // …and the NAIVE reading, which `decide` also checks, reproduces the pre-#2994 text exactly.
+    expect(parseSegments('echo a \\\nb', { spliceContinuations: false }).segments)
+      .toEqual(['echo a \\', 'b']);
+    // A lone trailing backslash is not a continuation at all.
+    expect(parseSegments('echo a \\').segments).toEqual(['echo a \\']);
+    expect(parseSegments('echo a \\').continued).toBe(false);
+  });
+
+  it('heredocScan only opens a heredoc at an UNQUOTED, un-commented `<<`', () => {
+    expect(heredocScan('echo "x << EOF"\nnpm run build').text).toBe('echo "x << EOF"\nnpm run build');
+    expect(heredocScan('ls # see <<EOF\nnpm run build').text).toBe('ls # see <<EOF\nnpm run build');
+    expect(heredocScan("cat <<'EOF'\nbody\nEOF\nls").text).toBe("cat <<'EOF'\nls");
+    // …and it reports an unterminated quote in the COMMAND text (a body's apostrophe is data, not a quote)
+    expect(heredocScan('echo "abc\ncat <<EOF\nx\nEOF').unterminated).toBe(true);
+    expect(heredocScan("cat <<'EOF'\ndon't\nEOF").unterminated).toBe(false);
+  });
+
+  it('canonicalCommand is quote-aware, and peels a subshell CLOSER as well as its opener', () => {
+    expect(canonicalCommand('(pnpm --filter web exec vite build)')).toBe('pnpm --filter web exec vite build');
+    expect(canonicalCommand('(vite build) \\')).toBe('vite build');
+    expect(canonicalCommand('{ npm run build }')).toBe('npm run build');
+    expect(canonicalCommand('sudo -u "some user" npm run build')).toBe('npm run build');
+    expect(canonicalCommand('env "FOO=a b" npm run build')).toBe('npm run build');
+    expect(canonicalCommand('echo "a)"')).toBe('echo "a)"');          // a bracket in quotes is not a closer
+    expect(canonicalCommand("sed -i '' s/a/b/ /tmp/x")).toBe("sed -i '' s/a/b/ /tmp/x");  // quoting preserved
+  });
+
+  it("matches real bash on every parse state it models (bash -c, not an assumption)", () => {
+    let bash;
+    try { bash = (s) => execFileSync('bash', ['-c', s], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
+    catch { return; }
+    // `#` starts a comment only at a WORD boundary…
+    expect(bash('echo a#b')).toBe('a#b');
+    expect(bash('echo a #b')).toBe('a');
+    expect(bash('x=abc; echo ${#x}')).toBe('3');
+    expect(bash("echo 'a # b'")).toBe('a # b');
+    // …an apostrophe inside one is not a quote, and the NEXT line really does run (F1)
+    expect(bash("echo one # don't forget\necho two")).toBe('one\ntwo');
+    // `\`+newline is a splice (F2), and a lone trailing backslash is dropped
+    expect(bash('echo a && \\\necho b')).toBe('a\nb');
+    expect(bash('echo a \\\nb')).toBe('a b');
+    expect(bash('echo a \\')).toBe('a');
+    // an unterminated quote is a SYNTAX ERROR — denying it denies nothing that would have run
+    expect(() => bash("echo 'abc")).toThrow();
+    expect(() => bash('echo "abc')).toThrow();
   });
 });
