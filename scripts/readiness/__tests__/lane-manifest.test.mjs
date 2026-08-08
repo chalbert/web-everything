@@ -9,8 +9,34 @@ import {
   MANIFEST_FILENAME, INTEGRATION_ORDER,
   buildManifest, validateManifest, orderedRepos, parseManifest, serializeManifest,
   MANIFEST_BODY_BEGIN, MANIFEST_BODY_END, manifestBodyBlock, embedManifestInBody, extractManifestFromBody,
-  manifestAuditLine,
+  manifestAuditLine, isItemId, asItemId,
 } from '../lane-manifest.mjs';
+
+describe('isItemId — the fail-closed item-id oracle (#xc7p3q9 B4, review-integrity)', () => {
+  // B4 — the OLD `isHash(String(v)) || Number.isFinite(Number(v))` returned TRUE for the entire coercion corpus
+  // below (since `Number(null) === 0` etc.), so it could not distinguish a nameable carrier from an unnameable
+  // one — and a missing manifest item (`NaN` → JSON `null` → re-read `0`) read as nameable, landing an impl whose
+  // couple could not be positively named. Every non-id below MUST read false (fail closed).
+  it('rejects the whole non-id coercion corpus (null/undefined/blank/empty-collection/false/0/NaN/Infinity)', () => {
+    for (const v of [null, undefined, '', ' ', '   ', [], {}, false, true, 0, -1, 1.5, NaN, Infinity, -Infinity, '0', 'x', 'xc7p3', 'xc7p3q9a', 'abc', '-3', '2.5']) {
+      expect(isItemId(v)).toBe(false);
+    }
+  });
+  it('accepts real item ids only: a positive NNN (number or digit-string) or an xNNNNNN hash', () => {
+    for (const v of [1, 42, 2874, 99999, '1', '2874', 'xc7p3q9', 'x000000', 'xq985wu']) {
+      expect(isItemId(v)).toBe(true);
+    }
+  });
+  it('agrees with the value asItemId computes — a missing item round-trips to `null`/`0`, still unnameable', () => {
+    // the production NaN→JSON→re-read path: buildManifest stamps NaN, JSON prints null, re-read normalizes toward 0.
+    const built = buildManifest({ item: undefined, repos: [{ repo: 'we', ref: 'lane/x-we' }] });
+    expect(Number.isNaN(built.item)).toBe(true);
+    const reread = JSON.parse(JSON.stringify(built));  // "item": null
+    expect(reread.item).toBe(null);
+    expect(isItemId(reread.item)).toBe(false);          // null → unnameable (was TRUE before the fix)
+    expect(isItemId(asItemId(reread.item))).toBe(false); // and via asItemId (0) → still unnameable
+  });
+});
 
 describe('lane-manifest primitive (#2138 Fork 2)', () => {
   const crossRepo = buildManifest({
