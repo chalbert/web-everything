@@ -6,7 +6,7 @@
   "title": "Web Everything — progress board",
   "repo": "chalbert/web-everything",
   "artifactUrl": "https://claude.ai/code/artifact/633d3d18-3e12-4675-9fb0-c96575978931",
-  "nextRuling": 8,
+  "nextRuling": 9,
   "phases": {
     "1": "Merge-gate correctness",
     "2": "Review routing",
@@ -263,6 +263,34 @@
       "detail": "Ruled: do it, but when the priority is right — clear the other blockers first.",
       "ifNothing": "every parked PR keeps waiting for the operator personally.",
       "ruling": "R7"
+    },
+    {
+      "id": "the-command-guard-how-should-it-handle-text-the-",
+      "title": "The command guard: how should it handle text the shell re-executes?",
+      "status": "awaiting",
+      "question": "Six rounds have tried to enumerate every way a command hands a hidden script to the shell. Should the guard keep enumerating, refuse what it cannot resolve, or stop at the holes it has already closed?",
+      "ifNothing": "#1092 cannot land, and base keeps the confirmed write hole where a quoted pipe lets a redirect through to the shared checkout.",
+      "ruling": "R8",
+      "why": "Every round's evidence looked overwhelming and every next round found more holes. The sixth reviewer found why: the fuzz generator's wrapper list was literally the classes the previous fix had just implemented, so three million pairs could only re-prove what was already handled. Enumeration cannot be completed from inside the thing being enumerated. Six positions are still unrecursed (bash -o pipefail -c, a pipe or here-string into a shell, trap, process substitution, find -exec, nohup/exec), and both recursion caps fail OPEN — past depth 4 or 64 nodes the scanner stops and allows.",
+      "options": [
+        {
+          "label": "Refuse what it cannot resolve",
+          "detail": "Apply the guard's own ratified doctrine — unparseable means deny — to nested execution. Stop listing positions to recurse into; deny at the primary checkout when a command contains shell re-execution the guard cannot fully resolve. Ends the enumeration game. Cost: some everyday shell-rc idioms would be denied at the primary cwd, and the false-deny sweep would have to be re-run to size that.",
+          "recommended": true
+        },
+        {
+          "label": "A seventh round of enumeration",
+          "detail": "The six missing positions and the fail-open caps are all named with small fixes. But the same reasoning justified rounds five and six, and the generator problem means the next round's evidence will be built from the next round's list."
+        },
+        {
+          "label": "Keep only what is proven, drop the recursion",
+          "detail": "Keep the splitter (it closes four confirmed holes base has), the runner work, the corpus and thirteen false-deny fixes. But dropping the recursion leaves head WORSE than base on bash -c and eval, because base caught those by accident through its sloppy quote-blind split. Not a clean retreat."
+        }
+      ],
+      "evidence": [
+        "145 everyday commands swept, zero newly denied — precision is not the problem",
+        "9/9 prior holes closed, 13/13 intended fixes hold, 33/33 attack spellings deny"
+      ]
     }
   ]
 }
