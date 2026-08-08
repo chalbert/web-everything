@@ -48,6 +48,8 @@
     "check:memory": "node scripts/check-memory.mjs",
     "check:memory-freshness": "node scripts/check-memory-freshness.mjs",
     "reflect": "node scripts/memory-reflect.mjs",
+    "harvest": "node scripts/conveyor/learnings-harvest.mjs",
+    "harvest:status": "node scripts/conveyor/learnings-harvest.mjs --status",
     "check:item": "node scripts/check-backlog-item.mjs",
     "check:app-conformance": "node scripts/check-app-conformance.mjs",
     "check:demos": "node scripts/check-demos.mjs",

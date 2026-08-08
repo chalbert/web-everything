@@ -14,8 +14,9 @@
  * cluster only when it matches EVERY current member (not just one) — this stops the single-link failure
  * where A~B and B~C but A≁C chain all three into one blob through the B bridge (#2614 review fix 8). Each
  * cluster emits { kind, area, summary, suggestion } from its representative (the longest/most-specific
- * summary) plus `count`, the member `summaries`, and the distinct member `suggestions` (so a member's
- * DISTINCT suggestion still reaches the red-team). Output is ranked by count desc, then first-seen (stable).
+ * summary) plus `count`, the member `summaries`, the distinct member `suggestions` (so a member's DISTINCT
+ * suggestion still reaches the red-team), and the distinct source `sessions` (empty unless the caller tagged
+ * entries — the cross-session harvest does). Output is ranked by count desc, then first-seen (stable).
  *
  * Usage (CLI):
  *   node scripts/conveyor/learnings-dedup.mjs <drop-box.jsonl> [--threshold=0.6] [--json]
@@ -94,6 +95,11 @@ export function dedup(entries, { threshold = DEFAULT_THRESHOLD } = {}) {
       count: c.members.length,
       summaries: c.members.map((m) => m.summary),
       suggestions: [...new Set(c.members.map((m) => m.suggestion))],
+      // Distinct SOURCE SESSIONS that hit this cluster (#x2j0l3t). Empty for callers whose entries carry no
+      // `session` tag (the single-session close sweep) — the cross-session harvest ranks by its length,
+      // because "three different sessions hit this" is real recurrence evidence and "one session said it
+      // three times" is not.
+      sessions: [...new Set(c.members.map((m) => m.session).filter(Boolean))],
       _first: c.first,
     };
   });
