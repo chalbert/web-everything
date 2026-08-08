@@ -84,6 +84,7 @@ import {
   leaseBody,
   describeLease,
   leaseOwnedBy,
+  leaseOwnedByCaller,
 } from './lib/lane-lease.mjs';
 // #2560 — lane-pool may freely import readiness (confirmed no circular import): the advisory scope-lease check
 // at acquire. normScope normalizes the declared `--scope`; candidateLaunch is the pure overlap-at-launch query.
@@ -1103,8 +1104,11 @@ function cmdRelease(repo) {
   const session = defaultSession();
   const force = !!flags.force;
   let targets;
-  if (flags.all) targets = existingLanes(repo).filter((n) => readLease(laneDir(repo, n))); // every held lane
-  else if (flags.lane !== undefined) targets = [Number(flags.lane)];
+  // #2452 review — `targeted` is load-bearing for ownership, not cosmetic: only a release that NAMES one lane
+  // may use the durable-`ownerSession` fallback below. A `--all` sweep keeps the exact-`session` rule.
+  let targeted;
+  if (flags.all) { targets = existingLanes(repo).filter((n) => readLease(laneDir(repo, n))); targeted = false; } // every held lane
+  else if (flags.lane !== undefined) { targets = [Number(flags.lane)]; targeted = true; }
   else return fail('release needs --lane=N or --all');
   let released = 0;
   for (const n of targets) {
@@ -1122,13 +1126,24 @@ function cmdRelease(repo) {
     // is a fixed slug, so the human un-reserving is typically a different session). It must NOT double as a
     // `--force` for an ordinary FOREIGN lease — that still requires the explicit `--force`.
     const bypassOwnership = force || (flags['release-reserved'] && isReservedLease(lease));
-    // #2452 Gap 2 (the release-ownership relaxation) is NOT in this PR — it ships separately. Its review found
-    // that widening ownership to the durable `ownerSession` lets a bare `release --all` drop a SIBLING's live
-    // lease without `--force`, after which a fresh acquire does `checkout -B --force` + `clean -fd` on that
-    // clone. That is a new way to destroy another actor's work, so it needs its own scrutiny rather than riding
-    // the stale-ahead fix, which only ever makes MORE lanes available and destroys nothing.
-    if (!bypassOwnership && !leaseOwnedBy(lease, session)) {
-      log(`  lane-${n}: ${describeLease(lease)} — not yours; pass --force to break`);
+    // #2452 (Gap 2) — ownership is decided by `leaseOwnedByCaller`, NOT the bare `leaseOwnedBy(lease, session)`
+    // exact-string match: `session` here is `defaultSession()`, which falls back to `${hostname()}:${process.ppid}`
+    // when no `--session`/`LANE_SESSION` is given, and a shell's ppid differs across separate invocations — so
+    // the very session that ACQUIRED a lease read as foreign on a later `release` call and had to `--force`.
+    // `leaseOwnedByCaller` still honors an exact `session` match FIRST (the minted slug a MARKED workflow-lane
+    // lease requires), then — ONLY for a `--lane=N`-targeted release — falls back to the durable `ownerSession`
+    // (`CLAUDE_CODE_SESSION_ID`) signal #2367 already uses for foreign-lease detection, stable across a
+    // session's separate Bash-tool calls. #2452 review — the `--all` SWEEP is deliberately excluded: sibling
+    // conveyor lanes are UNMARKED yet share one `ownerSession`, so a bare `release --all` would otherwise drop
+    // a sibling's live hold with no `--force`. Naming the lane is what makes the intent unambiguous.
+    const mySessionId = process.env.CLAUDE_CODE_SESSION_ID || null;
+    if (!bypassOwnership && !leaseOwnedByCaller({ lease, session, mySessionId, targeted })) {
+      log(
+        `  lane-${n}: ${describeLease(lease)} — not yours; pass --force to break` +
+        (!targeted && leaseOwnedByCaller({ lease, session, mySessionId, targeted: true })
+          ? ` (a --all sweep never releases on the ownerSession match alone — re-run as \`release --lane=${n}\` to release just this one)`
+          : ''),
+      );
       continue;
     }
     rmSync(LEASE_MARKER(dir), { force: true });
