@@ -97,7 +97,7 @@ today.** Today's guard does the opposite on purpose: `we:scripts/guard-bash.mjs`
 unparseable input"*, and `canonicalCommand` / `canonicalGitOp` deliberately do not chase `$(echo git)` or
 `bash -c "…"`. The nested-command scanner that makes the question answerable at all — with its two bounded
 recursion caps (depth 4, 64 expansions) and its explicit refusal to escalate a nested string that does not
-parse — **arrives with #2986 / #2994 (PR #1092, open and at `review:changes`)**. This rule converts all three
+parse — **arrives with #2986 / #2994 (PR #1092, open and unlanded)**. This rule converts all three
 of those fail-opens to fail-closed, and is built as **#3002**. The nearest existing precedent for the posture
 is a *different* guard: `we:scripts/lib/lane-verify.mjs` refuses a corrupt verification marker rather than
 failing open.
@@ -110,14 +110,15 @@ is unbounded, so the unknown case must fall closed.
 
 **The ordering is part of the rule, not an implementation detail.** "Refuse what it cannot resolve" says
 nothing about *who decides it cannot be resolved*, and that — not how often real re-execution happens — sets
-the cost. Over the local session corpus a **quote-blind** scan flags substantially more calls as shell
-re-entry than a **quote-aware** one does, and the excess is text that was never shell (a JavaScript `=>` in a
-quoted argument, an fd-dup `2>&1`, a heredoc body). *No over-flag percentage is carried here:* the ratio moves
-with the token list used and no committed script reproduces it — see #3002 for the measured range and its
-provenance. The **direction** is what this rule rests on, and it is not in doubt. So the deny-flip lands
-**only behind** the quote-aware segment splitter (#2986 / #2994, shipping in the still-open, still-bounced
-PR #1092), never in front of it — tightening the default on a parser that misreads ordinary text amplifies
-the false-deny problem instead of fixing the security one. **A guard may only be made more eager to deny in the same change as, or after, the parser that
+the cost. Over the local session corpus a **quote-blind** scan flags substantially more calls for
+re-execution or redirection than a **quote-aware** one does, and the excess is text that was never shell
+(a JavaScript `=>` in a quoted argument, an fd-dup `2>&1`, a heredoc body). *No over-flag percentage is
+carried here:* the ratio moves with the token list used and no committed script reproduces it — see #3002
+for the measured range and its provenance. The **direction** is what this rule rests on, and it is not
+in doubt. So the deny-flip lands **only behind** the quote-aware segment splitter (#2986 / #2994,
+shipping in the still-open, unlanded PR #1092), never in front of it — tightening the default on a
+parser that misreads ordinary text amplifies the false-deny problem instead of fixing the security one.
+**A guard may only be made more eager to deny in the same change as, or after, the parser that
 makes its "I can't read this" honest.** After any such flip, **re-run the false-deny sweep** rather than
 inheriting the prior estimate. Lineage: ruled by the operator as **R8**, 2026-08-08 → built as #3002 ·
 measurement #3001 · #2749 (4th arm) · #2986 · #2994 · #2203.

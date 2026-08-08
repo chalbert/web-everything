@@ -43,11 +43,13 @@ process substitution, `find -exec`, and `nohup`/`exec`.
 guard does no re-entry recursion at all. They describe the tree this build lands on top of.)*
 
 Both recursion caps **fail open** — past depth 4 or 64 nodes the scanner stops and *allows*
-(`NESTED_DEPTH_CAP` / `NESTED_NODE_CAP`, PR #1092 `we:scripts/guard-bash.mjs:781-782`). And there is a
-**third**: `withNestedCommands` (`we:scripts/guard-bash.mjs:962-963`) states outright that *"a nested string
-that does not parse is NOT escalated to the unparseable deny — its segments are still handed to the arms"* —
-which is precisely the R8 case, the guard allowing text it could not read. So even a complete enumeration is
-undone at the margin by machinery that permits. This is the real argument for the ruling, and it is stronger
+(`NESTED_DEPTH_CAP` / `NESTED_NODE_CAP`, `we:scripts/guard-bash.mjs#NESTED_DEPTH_CAP` on PR #1092's
+`lane/guard-false-denies`). And there is a **third**: `withNestedCommands`
+(`we:scripts/guard-bash.mjs#withNestedCommands` on PR #1092's `lane/guard-false-denies`) states outright
+that *"a nested string that does not parse is NOT escalated to the unparseable deny — its segments are
+still handed to the arms"* — which is precisely the R8 case, the guard allowing text it could not read.
+So even a complete enumeration is undone at the margin by machinery that permits. This is the real
+argument for the ruling, and it is stronger
 than the six missing positions: **deny-on-unresolvable makes all three fail closed by construction.** A
 seventh round of enumeration leaves the fail-open behaviour intact.
 
@@ -134,11 +136,11 @@ the everyday-idiom friction is real but small.
   and asserts denial.
 - **Unparseable nested text denies.** A nested string `withNestedCommands` cannot parse escalates to the
   unparseable deny rather than being split into segments for the arms — today it does the opposite by design
-  (`we:scripts/guard-bash.mjs:962-963` in PR #1092). Add a test that asserts denial for nested text that does
-  not parse.
+  (`we:scripts/guard-bash.mjs#withNestedCommands` on PR #1092's `lane/guard-false-denies`). Add a test
+  that asserts denial for nested text that does not parse.
 - **The quote-aware splitter is in the same change or already landed.** The flip must not reach `main` on
   top of a quote-blind resolver — see *Sequencing* above. The splitter ships in **PR #1092**, which is open
-  and at `review:changes`, so this criterion is currently **unmet**. Assert it directly: a command whose only
+  and not yet on `main`, so this criterion is currently **unmet**. Assert it directly: a command whose only
   re-execution token sits inside a quoted string (`node -e "… d => s += d …"`) must still **clear**.
 - The false-deny sweep is re-run over the 145-command corpus and the newly-denied set is reported, not
   merely counted.
