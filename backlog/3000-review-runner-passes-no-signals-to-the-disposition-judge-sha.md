@@ -78,3 +78,15 @@ This is **not a live merge hole**. `runnerShadowPlan` is hard-coded to `LAND_MOD
 - Parent epic: #2572 (wire the scheduled converge-and-label runner).
 - Sibling #2830-review finding, same shape: #2864 (ledger-freshness binding before the enforce flip) — filed, not fixed, per the same "design gap the shadow's fail-closed behaviour keeps non-blocking" reasoning.
 - `we:scripts/lib/gate-config.mjs` — leash-defining policy-tier registration for the files this fix touches.
+- **Same call site, filed separately (2026-08-08, PR #1113 review):** #x7snbvd — `runShadowPass` also
+  passes no `authorId`/`clearerId` to `runnerShadowPlan`, which matters once PR #1100 (#2844) lands and
+  adds a self-clear-refusal rail keyed on those ids. Not folded into this item: that fix needs
+  `authorId`/`clearerId` to exist as `runnerShadowPlan` parameters at all, which only PR #1100 adds —
+  this item's `signals` fix needs nothing that isn't already on `main` today. Merging them would either
+  force an unwanted `blockedBy` onto this item's already-actionable fix, or leave part of a merged item's
+  acceptance criteria structurally unclosable until #1100 lands. Same scope files
+  (`we:scripts/review-runner.mjs`, `we:scripts/lib/review-runner-core.mjs`), so the two should not be
+  worked concurrently — the dispatcher's scope-overlap hold covers that.
+- Related, different file, same review pass: #x62n6v6 — the converge daemon's persisted `shadow.jsonl`
+  (`we:scripts/converge-daemon-pass.mjs`, shipped by PR #1113, not yet on `main`) drops per-PR detail and
+  cannot feed the ratified `computeAgreementMetric` gate (#2838) in its current shape either.
