@@ -166,6 +166,7 @@ const ITEM_RESULT_SCHEMA = {
           pr: { type: 'number', description: 'the opened PR number in THAT repo' },
           url: { type: 'string', description: 'the PR url' },
           labelled: { type: 'boolean', description: 'true if the ready-to-merge label was applied' },
+          held: { type: 'boolean', description: '#984 — true if pr-land reported `held:true`: the PR is DELIBERATELY held for review (a review-hold verdict stripped ready-to-merge). Distinct from labelled:false, which means the label apply failed. A held PR is NOT re-labelled by Finalize.' },
         },
       },
       description: 'one entry per repo this item opened a ready-to-merge PR in (we + any frontierui/plateau-app). For a WE-only item this is just the we entry. The we entry\'s PR is the one whose BODY carries the lane manifest the drain reads (xnsk54v — off the PR body, not a committed file).',
@@ -480,8 +481,10 @@ function laneItemPrompt(it, laneDirs) {
     `   --base=origin/main > /tmp/pr-body-${laneKeyOf(it)}.md\` (best-effort; if it fails, skip --body-file).`,
     `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --manifest-file=/tmp/lane-manifest-${laneKeyOf(it)}.json --body-file=/tmp/pr-body-${laneKeyOf(it)}.md --json\``,
     `     (publishes your HEAD → the lane ref, opens the PR, waits for required checks, labels when green — no merge).`,
-    `     Parse the PR number (\`pr\`) and \`labelApplied\` from its JSON. reason:"labelled-on-green" = labelled OK;`,
+    `     Parse the PR number (\`pr\`), \`labelApplied\`, and \`held\` from its JSON. reason:"labelled-on-green" = labelled OK;`,
     `     reason:"check-red"/"check-timeout" = PR open but UNLABELLED (carried for labelling — the lane's CI wasn't green).`,
+    `     #984 — if the JSON carries \`held:true\`, the PR is DELIBERATELY held for review (a review-hold verdict stripped`,
+    `     ready-to-merge): report \`held:true\` on that PR and labelled:false. A held PR is held ON PURPOSE — do NOT re-label it.`,
     `   • HOW TO WAIT ON pr-land (#2429): it BLOCKS until its required checks resolve — often minutes, past the Bash`,
     `     timeout — so launch it as a BACKGROUND task (the Bash tool's run_in_background) and let the harness RESUME`,
     `     you with the task's completion notification, then read the finished task output for the JSON. Do NOT wrap it`,
@@ -509,7 +512,8 @@ function laneItemPrompt(it, laneDirs) {
     ...implRepos.map((r) => `   • ${r}: \`LANE_SESSION=${laneSlug} node scripts/lane-pool.mjs release --lane=${laneNumFromDir(laneDirs[r])} --repo=${REPOS[r].path}\`.`),
     ``,
     `Report: num (${seed ? 'the NNN the in-lane scaffold ALLOCATED — the real number, not the placeholder' : `${it.num}`}), status ("pr-open" if the WE PR opened, else`,
-    `"carried"/"dropped"), cost, prs (one {repo, ref, pr, url, labelled} per repo you opened a PR in),`,
+    `"carried"/"dropped"), cost, prs (one {repo, ref, pr, url, labelled, held} per repo you opened a PR in — set`,
+    `held:true only when pr-land's JSON reported held:true, i.e. the PR is deliberately held for review),`,
     `resolveCommit (git rev-parse HEAD in the WE clone after the manifest commit), changedFiles (REPO-QUALIFIED`,
     `"<repo>:<path>"), dismissedFindings, gate (green/red). Return ONLY the structured object.`,
   );
@@ -559,6 +563,7 @@ const toQueue = []; // { num, weRef } — items with an open WE PR (get a local 
 // reconciles each such PR (label it once its checks are green) or carries it as a DEFINITE `carried-for-label`
 // outcome for /resume — never a silent drop.
 const toReconcile = []; // { num, repo, ref, pr, url, _entry, _pr } per OPEN PR a lane left labelled:false
+const heldStrands = []; // #984 minor 5 — { num, repo, pr, url } per DELIBERATELY-held PR (visibility, below)
 for (let i = 0; i < results.length; i++) {
   const cr = results[i];
   const it = workItems[i];
@@ -574,7 +579,16 @@ for (let i = 0; i < results.length; i++) {
     ledger.push(entry);
     // Any opened PR the lane could NOT label (labelled:false) is a drain-invisible strand — queue it for the
     // #2216 reconcile below. `!p.labelled` also catches an un-reported labelled state (treat unknown as unsafe).
-    for (const p of prs) if (p.pr && !p.labelled) toReconcile.push({ num, repo: p.repo, ref: p.ref, pr: p.pr, url: p.url, _entry: entry, _pr: p });
+    // #984 finding 4 — EXCEPT a DELIBERATELY-held PR (`p.held`): pr-land stripped ready-to-merge because the
+    // escalation verdict is a review-hold, so it is labelled:false ON PURPOSE. Re-running `pr-land --label-on-green`
+    // on it would re-add the go-ahead the hold just stripped (a held↔ready flip-flop) and record a false
+    // `carried-for-label`. A held PR is held for review, not an un-labelled strand — leave it alone.
+    for (const p of prs) if (p.pr && !p.labelled && !p.held) toReconcile.push({ num, repo: p.repo, ref: p.ref, pr: p.pr, url: p.url, _entry: entry, _pr: p });
+    // #984 minor 5 — a held PR is deliberately skipped by the reconcile above, so WITHOUT this it would appear in
+    // no Finalize output at all — the operator would have no signal that a strand is waiting on their review, and a
+    // mis-set `held:true` would silently opt a genuinely-stranded PR out of the liveness reconcile unseen. Record
+    // each held PR so Finalize LOGS it (below) and the operator can eyeball it against the parked-PR queue.
+    for (const p of prs) if (p.pr && p.held) heldStrands.push({ num, repo: p.repo, pr: p.pr, url: p.url });
   } else {
     ledger.push({ num, status: 'carried', drop: cr ? (cr.drop || 'no-we-pr') : 'no-result', cost: cr && cr.cost, lane: laneLabel });
   }
@@ -582,6 +596,10 @@ for (let i = 0; i < results.length; i++) {
 
 const prsOpened = ledger.filter((l) => l.status === 'pr-open').length;
 log(`Fan-out complete: ${prsOpened}/${workItems.length} item(s) are now OPEN ready-to-merge PR(s); ${workItems.length - prsOpened} carried. ZERO commits to main; no drain launched.`);
+// #984 minor 5 — surface DELIBERATELY-held PRs (a review-hold verdict stripped ready-to-merge): they are NOT
+// re-labelled by the reconcile below (that would flip-flop the hold), so this is the ONE place the operator sees
+// a strand waiting on their review — never a silent drop.
+if (heldStrands.length) log(`Held for review (${heldStrands.length}): ${heldStrands.map((h) => `${h.repo}#${h.pr} (${h.num})`).join(', ')} — held ON PURPOSE (ready-to-merge withheld); clear the review hold to let the drain land them. NOT re-labelled here.`);
 
 // ── #2478 — LABEL RECONCILE (#2216's liveness reconcile, wired into the parallel Finalize) ──────────────────
 // For every PR a lane left labelled:false whose required checks have SINCE gone green, re-run
