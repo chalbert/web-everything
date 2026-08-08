@@ -59,11 +59,40 @@ describe('static conformance — contract shape + vocabulary', () => {
     expect(REVIEW_POLICY.disposition.description.trim().length).toBeGreaterThan(0);
   });
 
-  it('the contract token vocabulary EXACTLY matches REVIEW_REASONS (no drift between data and code enum)', () => {
-    const contractTokens = [...POLICY_REASON_TOKENS].sort();
-    const codeTokens = Object.values(REVIEW_REASONS).sort();
-    expect(contractTokens).toEqual(codeTokens);
+  // #2839 ENABLEMENT — this pin used to be exact set equality, and that is what made the ratified
+  // "principle and impl land in separate PRs" rule unenforceable: a change needing a new reason token had to
+  // move the CONTRACT (a spec file, human-gated) and the CODE ENUM (derivation code) in ONE commit, or the
+  // suite went red in between. So spec and impl were welded together by their own conformance test.
+  //
+  // The relaxation is DIRECTIONAL, and the direction is the whole point:
+  //   • every CODE token MUST be declared in the contract — code may never do something the spec has not
+  //     declared. This is the safety half and it is UNCHANGED in strength.
+  //   • a CONTRACT token with no code enum yet is LEGAL — "declared, not yet implemented". This is what lets
+  //     the spec PR land first and the impl PR follow.
+  // Equality is therefore replaced by containment in the safe direction only. An undeclared code token still
+  // reddens this suite exactly as it did before.
+  it('every REVIEW_REASONS token is DECLARED in the contract (code may never outrun the spec)', () => {
+    const contractTokens = new Set(POLICY_REASON_TOKENS);
+    const undeclared = Object.values(REVIEW_REASONS).filter((t) => !contractTokens.has(t)).sort();
+    expect(undeclared).toEqual([]);
   });
+
+  // The other direction is deliberately NOT an error — that is what makes the split possible. Prove BOTH
+  // directions against synthetic sets, because asserting only against today's real vocabulary would pass
+  // whatever the rule was: the live sets are currently equal, so equality and containment are indistinguishable
+  // there. The relaxation is only real if an undeclared CODE token still fails.
+  const undeclaredCodeTokens = (contract, code) => code.filter((t) => !new Set(contract).has(t)).sort();
+
+  it('the relaxation is directional — a contract token ahead of the code PASSES (#2839)', () => {
+    // The spec PR landed first: the contract declares a token the enum has not caught up to yet.
+    expect(undeclaredCodeTokens(['a', 'b', 'not-yet-implemented'], ['a', 'b'])).toEqual([]);
+  });
+
+  it('the safety half is UNCHANGED — a code token the contract never declared still FAILS', () => {
+    // The direction that must never be allowed: code doing something the spec does not declare.
+    expect(undeclaredCodeTokens(['a', 'b'], ['a', 'b', 'undeclared'])).toEqual(['undeclared']);
+  });
+
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
