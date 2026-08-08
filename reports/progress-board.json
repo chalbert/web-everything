@@ -172,7 +172,7 @@
     {
       "id": "review-independence-vs-the-working-pattern",
       "title": "Review independence vs the working pattern",
-      "status": "awaiting",
+      "status": "taken",
       "question": "Once the self-approval check lands, how do reviews get cleared?",
       "ifNothing": "#1100 cannot land, and #1098's narrowing rests on convention rather than a check.",
       "why": "Subagents inherit the parent session's CLAUDE_CODE_SESSION_ID. PRs are opened by subagents and verdicts recorded from the same session, so author and clearer are the same id. PR #1100 refuses that as a self-clear — correctly. It means the current pattern of \"subagent reviews, main session records the accept\" stops working.",
@@ -196,7 +196,9 @@
         "`CLAUDE_CODE_CHILD_SESSION=1` is a boolean flag, not a finer id",
         "both `--to=accepted` and `--to=clear-human` were refused on PR #1100's real body"
       ],
-      "ruling": "R4"
+      "ruling": "R4",
+      "detail": "RULED 2026-08-08: reviews move to a Claude Code CLI invocation. Verified mechanically rather than assumed — a headless claude -p run mints its OWN session id and its child processes see that id in CLAUDE_CODE_SESSION_ID, which is the exact variable the #2844 guard reads. Parent 01f39b97 vs child f4386de9. So the independence is real, and it needs no manual session and no daemon prerequisite. A subagent spawned from the session does NOT qualify: it inherits the parent id verbatim. Follow-on work is filed as the CLI-optimisation epic.",
+      "takenAt": "2026-08-08"
     },
     {
       "id": "fork-b-rebuild-or-drop",
