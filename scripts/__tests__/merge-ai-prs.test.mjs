@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, latestRequiredCheck, rollupRowKind, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, latestRequiredCheck, rollupRowKind, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, computeNetDiffPaths, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -1178,7 +1178,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
       'git diff --numstat origin/main FETCH_HEAD': { stdout: '' },
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
-    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] });
+    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [], reason: 'ref-unresolved' });
     expect(calls.some((c) => c.key === 'git diff --numstat origin/main FETCH_HEAD')).toBe(false);
   });
 
@@ -1188,7 +1188,7 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
       'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
     });
     const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x' }); // no fetchExtraRefs
-    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] });
+    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [], reason: 'ref-unresolved' });
     expect(calls.some((c) => c.key === 'git diff --numstat origin/main FETCH_HEAD')).toBe(false);
   });
 
@@ -1197,6 +1197,47 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     const { exec, calls } = fakeExec();
     expect(computeNetDiffChangedFiles({ exec })).toEqual({ changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] });
     expect(calls.length).toBe(0);
+  });
+
+  // #2952 — the fixable case: a caller-side `exec`-contract violation used to be BYTE-IDENTICAL to a legitimately
+  // absent ref (both `{ scored: false }`, no signal) — reproduced live in the human review of WE PR #1063
+  // (2026-08-06), where a shell-exec shaped `(cmd, opts) => execSync(cmd, opts)` was injected in place of the
+  // documented `(cmd, args, opts) => execFileSync(cmd, args, opts)` contract. Called 3-arg, it received the ARGS
+  // ARRAY in its `opts` position; Node's own `execSync` argument validation then throws
+  // `TypeError [ERR_INVALID_ARG_TYPE]` for a non-object `options` — reproduced directly here without touching a
+  // real subprocess, since the classification (`isExecContractError`) keys off `instanceof TypeError`, not the
+  // specific message.
+  it('#2952 — exec-contract: a wrongly-shaped `exec` (2-arity, treating the args ARRAY as the options object) throws a TypeError, and the degrade reports reason:"exec-contract" instead of looking identical to an absent ref', () => {
+    const badExec = (cmd, optsShapedAsArgsArray) => {
+      if (!optsShapedAsArgsArray || Array.isArray(optsShapedAsArgsArray)) {
+        throw new TypeError('The "options" argument must be of type object. Received an instance of Array');
+      }
+      return '';
+    };
+    const r = computeNetDiffChangedFiles({ exec: badExec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r).toEqual({ changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [], reason: 'exec-contract' });
+  });
+
+  it('#2952 — a NORMAL git failure (unresolvable candidates) is classified "ref-unresolved", never "exec-contract" — a well-shaped exec throwing a plain Error (not TypeError) is the legitimately-absent-ref case', () => {
+    const { exec } = fakeExec({
+      'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
+      'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r.reason).toBe('ref-unresolved');
+  });
+
+  it('#2952 — additive only: a consumer that destructures just `scored` (the pre-#2952 contract) sees no behavior change — `reason` is a new field, every other field is untouched', () => {
+    const { exec } = fakeExec({
+      'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
+      'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
+    });
+    const r = computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    const { scored } = r; // a consumer that reads ONLY `scored`, exactly as every consumer did pre-#2952
+    expect(scored).toBe(false);
+    expect(r.changedFiles).toEqual([]);
+    expect(r.diffLines).toBe(0);
+    expect(r.humanBasisFiles).toEqual([]);
   });
 
   // PR #1031 review, finding 1 — `fetchExtraRefs` carries a branch name straight off the `gh` API, and a
@@ -1413,7 +1454,7 @@ describe('computeNetDiffText (#2450 — reviewer-facing NET diff TEXT, SAME basi
       'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
     });
     const r = computeNetDiffText({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
-    expect(r).toEqual({ text: '', base: null, rev: null, scored: false });
+    expect(r).toEqual({ text: '', base: null, rev: null, scored: false, reason: 'ref-unresolved' });
     expect(calls.some((c) => ['checkout', 'switch'].includes(c.args[0]))).toBe(false);
   });
 
@@ -1423,13 +1464,87 @@ describe('computeNetDiffText (#2450 — reviewer-facing NET diff TEXT, SAME basi
       'git diff origin/main deadbeef': { throw: 'diff exploded' }, // but the text diff fails
     });
     const r = computeNetDiffText({ exec, rev: 'deadbeef' });
-    expect(r).toEqual({ text: '', base: null, rev: null, scored: false });
+    expect(r).toEqual({ text: '', base: null, rev: null, scored: false, reason: 'diff-failed' });
   });
 
   it('no exec / no rev → scored:false without touching git at all', () => {
     expect(computeNetDiffText({})).toEqual({ text: '', base: null, rev: null, scored: false });
     const { exec, calls } = fakeExec();
     expect(computeNetDiffText({ exec })).toEqual({ text: '', base: null, rev: null, scored: false });
+    expect(calls.length).toBe(0);
+  });
+
+  // #2952 — the `reason` classification is shared (`resolveNetDiffBasis`), so it must show up identically here,
+  // not just on `computeNetDiffChangedFiles`.
+  it('#2952 — exec-contract propagates through computeNetDiffText too — same wrongly-shaped exec, same reason', () => {
+    const badExec = (cmd, optsShapedAsArgsArray) => {
+      if (!optsShapedAsArgsArray || Array.isArray(optsShapedAsArgsArray)) {
+        throw new TypeError('The "options" argument must be of type object. Received an instance of Array');
+      }
+      return '';
+    };
+    const r = computeNetDiffText({ exec: badExec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r).toEqual({ text: '', base: null, rev: null, scored: false, reason: 'exec-contract' });
+  });
+});
+
+describe('computeNetDiffPaths (#2901/#1031 — NET changed-file list as plain paths, SAME basis as the score/text)', () => {
+  const fakeExec = (script = {}) => {
+    const calls = [];
+    const exec = (cmd, args, opts) => {
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
+      const h = script[`${cmd} ${intent.join(' ')}`];
+      if (h && h.throw) throw new Error(h.throw);
+      if (h && 'stdout' in h) return h.stdout;
+      if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      return '';
+    };
+    return { exec, calls };
+  };
+
+  it('resolves the same basis as computeNetDiffText/computeNetDiffChangedFiles and returns plain NUL-separated paths', () => {
+    const { exec } = fakeExec({
+      'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' },
+      'git diff --name-only -z origin/main..deadbeef': { stdout: 'README.md\0' },
+    });
+    const r = computeNetDiffPaths({ exec, rev: 'deadbeef' });
+    expect(r).toEqual({ paths: ['README.md'], base: 'origin/main', rev: 'deadbeef', scored: true });
+  });
+
+  it('#2952 — degrades with reason:"ref-unresolved" when neither candidate resolves (legitimately absent — a foreign/sibling clone with no head ref)', () => {
+    const { exec } = fakeExec({
+      'git diff --numstat origin/main lane/x': { throw: 'unknown revision' },
+      'git diff --numstat origin/main origin/lane/x': { throw: 'unknown revision' },
+    });
+    const r = computeNetDiffPaths({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r).toEqual({ paths: [], base: null, rev: null, scored: false, reason: 'ref-unresolved' });
+  });
+
+  it('#2952 — degrades with reason:"diff-failed" when the basis resolves but the name-only diff itself fails', () => {
+    const { exec } = fakeExec({
+      'git diff --numstat origin/main deadbeef': { stdout: '1\t0\tREADME.md\n' }, // basis resolves
+      'git diff --name-only -z origin/main..deadbeef': { throw: 'diff exploded' }, // but this diff fails
+    });
+    const r = computeNetDiffPaths({ exec, rev: 'deadbeef' });
+    expect(r).toEqual({ paths: [], base: null, rev: null, scored: false, reason: 'diff-failed' });
+  });
+
+  it('#2952 — exec-contract propagates through computeNetDiffPaths too — same wrongly-shaped exec, same reason', () => {
+    const badExec = (cmd, optsShapedAsArgsArray) => {
+      if (!optsShapedAsArgsArray || Array.isArray(optsShapedAsArgsArray)) {
+        throw new TypeError('The "options" argument must be of type object. Received an instance of Array');
+      }
+      return '';
+    };
+    const r = computeNetDiffPaths({ exec: badExec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(r).toEqual({ paths: [], base: null, rev: null, scored: false, reason: 'exec-contract' });
+  });
+
+  it('no exec / no rev → scored:false without touching git at all', () => {
+    expect(computeNetDiffPaths({})).toEqual({ paths: [], base: null, rev: null, scored: false });
+    const { exec, calls } = fakeExec();
+    expect(computeNetDiffPaths({ exec })).toEqual({ paths: [], base: null, rev: null, scored: false });
     expect(calls.length).toBe(0);
   });
 });

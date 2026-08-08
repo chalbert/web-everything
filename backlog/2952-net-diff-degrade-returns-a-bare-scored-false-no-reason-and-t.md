@@ -2,8 +2,9 @@
 bornAs: x4vqdgd
 kind: story
 size: 2
-status: open
+status: active
 dateOpened: "2026-08-06"
+dateStarted: "2026-08-07"
 relatedTo: ["2450", "2901", "2912", "2914", "2326"]
 scope:
   - we:scripts/merge-ai-prs.mjs
