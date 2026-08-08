@@ -375,11 +375,45 @@ export function hasLabel(pr, label) {
  */
 export function latestRequiredCheck(pr, requiredCheck = 'test') {
   const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
-  const matches = roll.filter((c) => (c?.name || c?.context) === requiredCheck);
-  if (!matches.length) return null;
-  const tier = (k) => matches.filter((c) => rollupRowKind(c) === k);
-  const pool = [tier('CheckRun'), tier('untagged'), matches].find((t) => t.length);
-  return pool[pool.length - 1];
+  const collapsed = collapseRollupToLatestPerName(roll);
+  return collapsed.find((c) => (c?.name || c?.context) === requiredCheck) || null;
+}
+
+/**
+ * #2925 — the SAME per-name collapse `latestRequiredCheck` implements above, generalised from ONE check name to
+ * EVERY name in the rollup. `latestRequiredCheck` is now a by-name lookup over this function's output — ONE
+ * implementation, no fork. Exists because a reader that folds every rollup ENTRY into one verdict (rather than
+ * picking one check out) has the SAME defect as `.find(...)`-picks-the-first: a superseded `CANCELLED` entry
+ * beside a later `SUCCESS` outranks the run that actually finished, whether it is read first or folded in at all.
+ * `we:scripts/fetch-parked.mjs#rollupToCheckRows` and `we:scripts/readiness/conveyor-state.mjs#ciRollup` both fold
+ * every entry — collapse to the latest entry per name FIRST, then fold.
+ *
+ * Within a name: take the FIRST non-empty tier of `CheckRun` → untagged → `StatusContext` ({@link rollupRowKind}),
+ * then the LAST entry (creation order, #xkfv491) in that tier. Pure. Order of the returned rows is NOT the input
+ * order — one row per distinct name, in first-seen order.
+ *
+ * A row with NEITHER `name` NOR `context` (unreachable off a real `gh pr view --json statusCheckRollup` — every
+ * live row carries one or the other) is passed through UNCOLLAPSED, one output row per such input row: there is
+ * no name to group it by, so grouping it with any other nameless row would silently fold two unrelated checks
+ * into one and grouping it under a shared empty-string key would do the same. Each gets its own group.
+ * @param {Array<object>|null|undefined} rollup
+ * @returns {Array<object>} one collapsed entry per distinct check name (nameless rows pass through 1:1).
+ */
+export function collapseRollupToLatestPerName(rollup) {
+  const roll = Array.isArray(rollup) ? rollup : [];
+  const byName = new Map();
+  for (const c of roll) {
+    const name = c?.name || c?.context || Symbol('nameless-rollup-row'); // ungroupable — its own singleton group
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name).push(c);
+  }
+  const out = [];
+  for (const matches of byName.values()) {
+    const tier = (k) => matches.filter((c) => rollupRowKind(c) === k);
+    const pool = [tier('CheckRun'), tier('untagged'), matches].find((t) => t.length);
+    out.push(pool[pool.length - 1]);
+  }
+  return out;
 }
 
 /**
