@@ -26,9 +26,9 @@ scopeRationale: >-
   a plist renderer. Still deliberately excludes every routing file.
 dateOpened: "2026-07-19"
 dateStarted: "2026-08-04"
-costTokens: "in:194 cw:159973 cr:11664592 out:74205"
-costUsd: 9.29
-costSessions: 1
+costTokens: "in:230 cw:232386 cr:12732292 out:83017"
+costUsd: 10.77
+costSessions: 2
 tags: []
 ---
 
