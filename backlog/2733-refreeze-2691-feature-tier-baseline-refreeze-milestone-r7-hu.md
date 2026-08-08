@@ -4,7 +4,7 @@ kind: story
 size: 2
 parent: "2705"
 status: open
-blockedBy: ["2691", "xjnkr8p", "2721", "2732", "2726", "2729", "2723"]
+blockedBy: ["2691", "2998", "2721", "2732", "2726", "2729", "2723"]
 scope: ["plateau-app:tests/visual/baselines/", "plateau-app:src/feature-tracker/feature-tracking.baselines.ts"]
 dateOpened: "2026-07-27"
 tags: []
