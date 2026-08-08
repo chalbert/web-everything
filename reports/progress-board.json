@@ -10,7 +10,8 @@
   "phases": {
     "1": "Merge-gate correctness",
     "2": "Review routing",
-    "3": "Tooling and follow-ups"
+    "3": "Tooling and follow-ups",
+    "4": "Awaiting your verdict — every human-hold PR, with a recommendation"
   },
   "items": [
     {
@@ -162,6 +163,70 @@
       "status": "in-progress",
       "startedAt": "2026-08-08",
       "note": "Measured 2026-08-08: #1104, #1106 and #1113 each carry review:human with ZERO review comments. Technical passes now running on all three."
+    },
+    {
+      "id": "clear-it-1104-the-memory-admission-ruling",
+      "title": "CLEAR IT — #1104, the memory-admission ruling",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1104,
+      "note": "7 markdown files, no code — your ruling written down, and the reviewer verified it against your actual transcript turns. One caveat, YOUR call: the statute says the check is against a file the harness writes, but that is true of the file and not its contents. The same quote was found in three places, including an agent's own turn. Fix is one constraint — the grounding turn must be a non-sidechain user entry. I recommend taking it. Bookkeeping (a phantom item id, an ordering hazard, a stale edge) already fixed."
+    },
+    {
+      "id": "confirm-first-1106-the-converge-editor",
+      "title": "CONFIRM FIRST — #1106, the converge editor",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1106,
+      "note": "Do not clear until you confirm what you agreed to. The option you approved was WITHDRAWN mid-discussion as unimplementable — verified: the round cap forces escalate before the editor is reached, and 'low' gets one round. What shipped is looser and leaves the editor ON at 'elevated', the band where #1018 failed. No record the substitution was ratified, and the item's only skeptic verdict argues against it."
+    },
+    {
+      "id": "hold-1113-the-converge-daemon-as-a-scheduled-job",
+      "title": "HOLD — #1113, the converge daemon as a scheduled job",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1113,
+      "note": "Safe to merge — it installs nothing and cannot touch GitHub (read-only gh calls, three independent layers). But it exists to produce a soak record, and the moment #1100 lands every shadow decision becomes 'refused, unknown clearer' while the log still reports N would-have-cleared. Filed as #1121. Hold until #1100 lands, then re-review."
+    },
+    {
+      "id": "not-yet-1112-the-contract-todo-marker-r6",
+      "title": "NOT YET — #1112, the contract todo marker (R6)",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1112,
+      "note": "Engineering is sound and your premise was reproduced twice. Held on two ~5-minute fixes now in flight: the injection sweep misses a real production importer outside the tree it walks (three injections landed green), and the follow-up card filed to fix an honesty finding contains a fresh fabricated function name. Six false citations across four rounds — being addressed as a pattern, with a pre-push grep rule."
+    },
+    {
+      "id": "review-running-1119-a-clearance-survives-a-rebas",
+      "title": "REVIEW RUNNING — #1119, a clearance survives a rebase",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1119,
+      "note": "THE ONE THAT MATTERS — it stops the drain revoking your clearances. Round 1 said do-not-clear and found two collision classes; round 2 closed both, refused the accepted+pending pair it had exempted, and rebased onto today's main. Round 2 review is running. Recommendation follows."
+    },
+    {
+      "id": "confirm-the-ruling-exists-1118-codifies-r8-into-",
+      "title": "CONFIRM THE RULING EXISTS — #1118 codifies R8 into the statute",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1118,
+      "note": "This PR states you ruled R8 on 2026-08-08 and writes it into platform-decisions.md; #2999 makes the same claim for R5. The board has BOTH still awaiting you and this session has no record of either. Do not clear until you confirm the rulings are real. The work itself is good — it measured 64,752 shell calls and found the quote-blind guard over-flags by 45%, a stronger argument than the decision card had."
+    },
+    {
+      "id": "blocked-not-yours-yet-1100-the-self-clear-refusa",
+      "title": "BLOCKED, NOT YOURS YET — #1100, the self-clear refusal",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1100,
+      "note": "You already cleared this at 14:38:35; the drain revoked it at 14:41:42. It needs three things in its own lane before it returns to you: fix the lane-stack-e2e red, rebase and fix the at-cap fixture to solve with the real clearer id, then re-run --to=clear-human AFTER #1119 lands — only then is the clearance durable."
+    },
+    {
+      "id": "needs-a-ruling-not-a-review-1103-fork-b",
+      "title": "NEEDS A RULING, NOT A REVIEW — #1103, Fork B",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1103,
+      "note": "This is R5's subject, not a review queue item. Answer R5 and the PR follows: drop it and close, or rebase and give the markdown-it build one security review. I recommend dropping after five breaks."
     }
   ],
   "decisions": [
