@@ -115,12 +115,26 @@ describe('decideSetLabel — totality over REVIEW_LABEL_TARGETS × starting labe
       it(`${label} — never leaves review:accepted and review:changes together, and never drops human unless clear-human`, () => {
         const currentLabels = names.map((name) => ({ name }));
         const d = decideSetLabel({ to, currentLabels });
-        // Sanity: a non-review label is never named in a decision's removals, whether allowed or refused.
-        expect(d.removeLabels).not.toContain('ready-to-merge');
+        // #2832 supersedes this assertion's original form. #2974 wrote it as "a non-review label is NEVER named
+        // in a decision's removals" — true until #2832 made the hold/go-ahead pair self-consistent BY
+        // CONSTRUCTION: writing a review-hold label must atomically strip `ready-to-merge`, because a hold and a
+        // go-ahead on one PR is the contradiction that merged WE #956 and plateau-app #134. So the rule is now
+        // conditional on the target, and asserting it in BOTH directions is strictly stronger than the blanket
+        // form it replaces — it pins which targets strip and which must not.
+        const HOLD_PRODUCING = new Set(['changes', 'rearm']);   // the targets whose addLabel IS a review hold
         if (!d.allowed) {
-          // A refusal changes nothing — the resulting set IS the starting set.
+          // A refusal changes nothing — the resulting set IS the starting set, and it names NO removals at all
+          // (not even the go-ahead: a refused hold must never strip anything).
+          expect(d.removeLabels).toEqual([]);
           if (names.includes(REVIEW_LABELS.human)) expect(names).toContain(REVIEW_LABELS.human);
           return;
+        }
+        if (HOLD_PRODUCING.has(to)) {
+          expect(d.removeLabels).toContain(READY_TO_MERGE_LABEL);
+        } else {
+          // `accepted` and `clear-human` CLEAR a hold — they must leave the go-ahead alone, or accepting a PR
+          // would strip the very label the drain collects it by.
+          expect(d.removeLabels).not.toContain(READY_TO_MERGE_LABEL);
         }
         const removals = presentRemoveLabels(d.removeLabels, currentLabels);
         const after = new Set([...names.filter((n) => !removals.includes(n)), d.addLabel]);
