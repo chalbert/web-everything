@@ -15,6 +15,7 @@
  *
  * SUBCOMMANDS
  *   init  --lane=<path> --state=<file> [--care=<band>] [--jurors=N] [--round-cap=N] [--base-ref=<ref>]
+ *         [--goal=<what the work is trying to do>]
  *         Seed the run. Prints the roster and the shell command the caller runs to read the material.
  *   step  --state=<file> --obs=<file>
  *         Feed one round's observations in, get the next action out, and advance the persisted state.
@@ -221,8 +222,13 @@ function panelInstruction(state, envelope, material) {
     // `buildPanelMandate` only knows the four PANEL_LENSES. A touch-set perspective lens is seated with its
     // GROUNDING METHOD instead — the driver runs that tool and reports the lens `ok: false` if it cannot, which
     // is non-blocking for an advisory lens and visible in the ledger either way.
+    // #2950 — `goal` and `round` reach the mandate from the envelope/state, never from a local: the goal is what
+    // stops a juror judging against an ideal, and `round` ≥ 2 fires the anti-spiral clause (judge only the last
+    // round's fix), which is what lets the loop end on agreement instead of on the round cap.
     const mandate = PANEL_LENSES.includes(lens)
-      ? seedWithMaterial(buildPanelMandate({ lens, netChangedFiles }), material)
+      ? seedWithMaterial(buildPanelMandate({
+        lens, netChangedFiles, goal: envelope.ctx.goal, round: state.round,
+      }), material)
       : null;
     return {
       lens,
@@ -272,7 +278,11 @@ function init(flags) {
     mandatoryLenses: [...MANDATORY_LENSES],
   });
 
-  const ctx = { laneRoot: target.laneRoot, baseRef, changedFiles };
+  // #2950 — the GOAL the lane's work serves, carried on the envelope so EVERY round's panel mandate states it.
+  // A bare `--goal` (no value) parses to `true`, which must not stringify into the mandate as "true"; anything
+  // that is not a non-empty string reads as "no goal stated" and the mandate falls back to its pre-#2950 text.
+  const goal = typeof flags.goal === 'string' && flags.goal.trim() ? flags.goal.trim() : '';
+  const ctx = { laneRoot: target.laneRoot, baseRef, changedFiles, goal };
   const envelope = {
     transport: transportName,
     ctx,

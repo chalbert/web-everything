@@ -40,7 +40,8 @@ the whole run — it carries the round counter and the roster.
 
 ```bash
 STATE=$(mktemp -t converge)   # keep this path for every later call
-node scripts/converge-cli.mjs init --lane="$LANE" --state="$STATE" --care=elevated
+node scripts/converge-cli.mjs init --lane="$LANE" --state="$STATE" --care=elevated \
+  --goal="what this lane's work is trying to do"
 ```
 
 `--lane` must be the **absolute root of a lane clone** (`…/.lanes/<repo>/lane-N`). The CLI proves it: a relative
@@ -56,6 +57,12 @@ in the run's `dialOverrides` so a hand-tuned run cannot report itself as a plain
 > the run at one round, so the first finding escalates before the editor ever runs). Use `high` for anything
 > touching a trust boundary, a gate, a contract, or a shared derivation. (Deriving care from the touch-set is an
 > open backlog item, not yet built — [#2954](../../../backlog/2954-derive-the-care-level-for-working-tree-convergence-from-the-.md).)
+
+> **State the `--goal`.** Without it a juror judges the work against an implicit ideal, which is what produces
+> findings that are true, unhelpful and expensive. With it, every round's mandate names what the work is FOR, and
+> jurors judge against that plus the base the lane started from. One sentence from the backlog item's lead
+> paragraph is enough. Omitting it is allowed and changes nothing about how the loop runs — it just costs you the
+> cheapest accuracy available (#2950).
 
 ### 2. Loop until the action is `land` or `escalate`
 

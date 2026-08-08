@@ -44,6 +44,10 @@ import { CARE_LEVELS } from './review-escalation.mjs';
  * @property {string} [prevention] - #2823 the cheapest durable guard that would have caught this CLASS (a deterministic gate preferred over a lens over a doc note).
  * @property {boolean} [preventionCaptured] - #2823 true when the prevention already EXISTS as a gate or is filed; false ⇒ neither built nor filed ⇒ blocks a clean accept at or above `PREVENTION_IMPACT_BAR`.
  * @property {'cosmetic'|'degraded'|'broken'|'unrecoverable'} [impactIfUnfixed] - #xdompzx what it COSTS to ship this finding (an `IMPACT_LEVELS` member; see `IMPACT_GLOSS` for each level's definition). An unrecognised or absent value adds no key and reads as UNDECLARED, which `blocksAcceptance` treats as fail-closed.
+ * @property {'blocker'|'carve-out'|'nit'} [disposition] - #2950 whether this finding earns a negotiation ROUND (a `DISPOSITIONS` member). Normally ROUTED by `deriveFindingDisposition` from the three answers below rather than self-declared; an unrecognised or absent value adds no key and reads as UNDECLARED, which `earnsRound` treats as fail-closed (blocking).
+ * @property {boolean} [introduced] - #2950 direction test (a): did THIS change introduce the problem (vs. pre-existing on untouched material)?
+ * @property {boolean} [worseThanBase] - #2950 direction test (b): is the result NET WORSE than the base — not merely less than ideal?
+ * @property {boolean} [parallelizable] - #2950 direction test (c): can it be fixed independently, in a parallel lane, without holding this change?
  */
 
 /** The review verdicts (#2325). `needs-human` is the #2285 conflict-of-interest escalation: humanRequired
@@ -245,6 +249,83 @@ export function impactStrictness(level) {
  */
 export const PREVENTION_IMPACT_BAR = IMPACT_LEVELS.BROKEN;
 
+/**
+ * FINDING DISPOSITION (#2950) — does this finding earn a negotiation ROUND, or is it merely filed?
+ *
+ * The loop's cost problem is that a finding is binary today: raise it and the whole subject bounces into an
+ * editor↔reviewer round, or stay quiet. That prices every true observation as a blocker, which is what makes the
+ * panel argue and what lets a subject grow under review. A juror instead answers three DIRECTION tests per finding
+ * (asked in `buildSubjectMandate`), and the answers route it:
+ *
+ *   • `blocker`   — ALL THREE hold: this change INTRODUCED it, it leaves things WORSE than the base, and it CANNOT
+ *                   be fixed in an independent parallel lane. Only a blocker earns a round.
+ *   • `carve-out` — real, but not this change's problem to fix here (pre-existing, or better-than-base-but-not-ideal,
+ *                   or independently fixable). Reported and filed; never blocks.
+ *   • `nit`       — worth saying, never worth a round. Rides a round a blocker already opened, never opens one.
+ *
+ * VERDICT-NARROW, exactly like `blocksAcceptance` (#xdompzx): the disposition narrows what BLOCKS, never what is
+ * REPORTED. Every finding — carve-outs and nits included — still reaches the notice, the ledger and the posted
+ * comment. Do not filter a reporting surface on `earnsRound`.
+ */
+export const DISPOSITIONS = Object.freeze({
+  BLOCKER: 'blocker',
+  CARVE_OUT: 'carve-out',
+  NIT: 'nit',
+});
+
+/**
+ * Which dispositions earn a round. A `frozenLookup` (null-prototype) because the key arrives as free-form model
+ * JSON: on a normal literal `TABLE['constructor']` would answer with an inherited truthy member and a
+ * non-blocking word would silently read as blocking (or worse, the reverse). Read via `earnsRound` only.
+ */
+const DISPOSITION_EARNS_ROUND = frozenLookup({
+  [DISPOSITIONS.BLOCKER]: true,
+  [DISPOSITIONS.CARVE_OUT]: false,
+  [DISPOSITIONS.NIT]: false,
+});
+
+/**
+ * #2950 — ROUTE the three direction tests to a disposition. Pure, and the reason the disposition is not something a
+ * juror talks itself into: the juror answers three FACTUAL questions about the finding, and this function — not the
+ * model — decides whether that earns a round. Same discipline as the hookable-vs-judgment rule applied to review
+ * itself: keep the judgment (is this true?) with the model, and put the routing in code where it cannot drift.
+ *
+ * Exactly ONE of the eight combinations is a blocker: the change INTRODUCED it, it is WORSE than the base, and it
+ * CANNOT be fixed in parallel. Every other combination is a `carve-out` — real, reported, filed, but not this
+ * change's problem to fix here.
+ *
+ * FAIL-CLOSED on an incomplete answer set: if any of the three is not a strict boolean the routing is UNDECIDED
+ * (returns `undefined`), which leaves the finding's disposition undeclared, which `earnsRound` reads as blocking.
+ * A juror cannot un-block a finding by omitting an answer.
+ *
+ * @param {{introduced?: boolean, worseThanBase?: boolean, parallelizable?: boolean}} [o]
+ * @returns {'blocker'|'carve-out'|undefined}
+ */
+export function deriveFindingDisposition({ introduced, worseThanBase, parallelizable } = {}) {
+  const answered = [introduced, worseThanBase, parallelizable].every((a) => typeof a === 'boolean');
+  if (!answered) return undefined;
+  return (introduced && worseThanBase && !parallelizable) ? DISPOSITIONS.BLOCKER : DISPOSITIONS.CARVE_OUT;
+}
+
+/**
+ * #2950 — does this finding EARN a negotiation round? Pure, and FAIL-CLOSED on an undeclared disposition.
+ *
+ * A finding with no `disposition` (every pre-#2950 finding shape, and any juror that ignores the new field) blocks
+ * exactly as it did before, so this is a STRICT RELAXATION: it can only ever un-block a finding whose juror
+ * explicitly declared it non-blocking. Same discipline as `blocksAcceptance`'s undeclared-impact branch — the
+ * new field is the caller's dial to turn on, never something that changes a verdict nobody opted into.
+ *
+ * @param {Finding|null|undefined} finding
+ * @returns {boolean}
+ */
+export function earnsRound(finding) {
+  const declared = finding && finding.disposition;
+  if (declared === undefined || declared === null) return true; // undeclared ⇒ fail closed, pre-#2950 behaviour
+  const k = String(declared);
+  if (!Object.hasOwn(DISPOSITION_EARNS_ROUND, k)) return true; // an invented word is UNDECLARED, not "non-blocking"
+  return DISPOSITION_EARNS_ROUND[k];
+}
+
 /** A finding is OUTSTANDING unless a fix pass explicitly resolved it (`outcome: 'fixed'|'no_change_needed'`). The
  *  SINGLE definition every consumer shares — `deriveVerdict` (the accept gate), `renderPreventionSummary` (the
  *  operator notice), `derivePanelVerdict` (the panel prevention scan), and `disposition-judge.reduceLedger`. Sharing
@@ -296,6 +377,36 @@ export function normalizeFinding(raw) {
   if (raw.impactIfUnfixed != null && Object.hasOwn(IMPACT_STRICTNESS, String(raw.impactIfUnfixed))) {
     out.impactIfUnfixed = String(raw.impactIfUnfixed);
   }
+  // #2950 — THE THREE DIRECTION TESTS, carried so the routing is auditable after the fact (a reader can see WHY a
+  // finding was carved out, not just that it was). Strict booleans only; anything else adds no key, which leaves
+  // the routing undecided and the finding blocking.
+  for (const k of ['introduced', 'worseThanBase', 'parallelizable']) {
+    if (typeof raw[k] === 'boolean') out[k] = raw[k];
+  }
+  // #2950 — DISPOSITION, the round key. Validated against the enum by `Object.hasOwn` on the null-prototype table
+  // (same reason as `impactIfUnfixed` above: this arrives as free-form model JSON, and a bare read would accept
+  // 'constructor' as a real disposition). An unrecognised or absent value adds NO key and reads as UNDECLARED,
+  // which `earnsRound` treats as fail-closed (blocking) — never as a silent free pass.
+  const declared = raw.disposition != null && Object.hasOwn(DISPOSITION_EARNS_ROUND, String(raw.disposition))
+    ? String(raw.disposition)
+    : undefined;
+  // THE ROUTING DECIDES; A SELF-DECLARED WORD MAY ONLY EVER MAKE A FINDING *MORE* BLOCKING (PR #1082 review,
+  // blocker 1). A juror that answered the three questions has already said everything that decides this, so its
+  // own `disposition` word cannot override them — that is self-certification, the anchoring problem the
+  // `dismissed-findings` signal exists to catch.
+  //
+  // THE HOLE THIS CLOSES, precisely: an earlier draft honoured ANY declared disposition when the three answers
+  // were absent, so `{summary: 'this diff drops the auth check', disposition: 'carve-out'}` — no facts at all —
+  // normalized to a non-blocking finding and accepted. A juror taking the obvious LLM shortcut (answer the label,
+  // skip the booleans) could therefore silently un-block a finding that blocks on `main` today, on EVERY review,
+  // since the disposition instructions are unconditional. Un-blocking must be EARNED by the three facts; nothing
+  // else buys it. So the only self-declared word honoured without facts is `blocker`, which is the safe direction.
+  const derived = deriveFindingDisposition(out);
+  if (derived === DISPOSITIONS.BLOCKER || declared === DISPOSITIONS.BLOCKER) out.disposition = DISPOSITIONS.BLOCKER;
+  // `nit` is a FINER LABEL on something the routing ALREADY carved out — never a route to non-blocking on its own.
+  else if (derived === DISPOSITIONS.CARVE_OUT) out.disposition = declared === DISPOSITIONS.NIT ? DISPOSITIONS.NIT : derived;
+  // derived === undefined and no declared `blocker`: the finding stays UNDECLARED, which `earnsRound` reads as
+  // blocking. A bare `carve-out`/`nit` with no answers is dropped on the floor, exactly like an invented word.
   return out;
 }
 
@@ -317,9 +428,11 @@ export function normalizeFindings(rawList) {
  *
  *   - `humanRequired` → `needs-human`, ALWAYS (checked first — a gate-self edit is never agent-cleared no
  *     matter how clean the findings look; mirrors `we:scripts/lib/review-escalation.mjs`'s `decideReviewGate`).
- *   - otherwise: any finding still OUTSTANDING (no `outcome`, or `outcome: 'skipped'`) → `changes`.
- *     A first-pass review has no `outcome` yet, so ANY finding present outstands it; a RE-report after fixes
- *     (`outcome: 'fixed'|'no_change_needed'`) resolves that finding, leaving only genuinely unaddressed ones.
+ *   - otherwise: any finding still OUTSTANDING (no `outcome`, or `outcome: 'skipped'`) *that EARNS a round*
+ *     (#2950 — `disposition: 'blocker'`, or undeclared, which fails closed) → `changes`.
+ *     A first-pass review has no `outcome` yet, so any BLOCKING finding present outstands it; a RE-report after
+ *     fixes (`outcome: 'fixed'|'no_change_needed'`) resolves that finding, leaving only genuinely unaddressed ones.
+ *     A `carve-out`/`nit` finding is reported everywhere but never bounces the subject into another round.
  *   - all findings resolved BUT one still names an uncaptured, filable PREVENTION guard → `prevention-outstanding`
  *     (#2823, the accept-gated-on-capture negotiation): a clean accept is withheld until the guard is captured or
  *     filed. See `hasUncapturedPrevention`. This is the ONE place the acceptance gate is enforced, so every
@@ -334,7 +447,11 @@ export function normalizeFindings(rawList) {
 export function deriveVerdict({ findings = [], humanRequired = false, bar = PREVENTION_IMPACT_BAR } = {}) {
   if (humanRequired) return VERDICTS.NEEDS_HUMAN;
   const list = normalizeFindings(findings);
-  const outstanding = list.filter(isFindingOutstanding);
+  // #2950 — only a BLOCKER earns a round. A finding the juror dispositioned `carve-out` or `nit` is still
+  // reported, still ledgered, still in the notice; it simply does not bounce the subject into another
+  // editor↔reviewer pass. Undeclared ⇒ blocking (`earnsRound` fails closed), so this is byte-stable for every
+  // pre-#2950 finding shape.
+  const outstanding = list.filter((f) => isFindingOutstanding(f) && earnsRound(f));
   if (outstanding.length > 0) return VERDICTS.CHANGES;
   // #2823 — accept is GATED ON PREVENTION CAPTURE. Even with every finding resolved, a finding whose named
   // prevention is neither already captured (an existing gate) nor filed as a future item withholds a clean
@@ -1192,8 +1309,19 @@ export function validateSubjectAdapter(adapter) {
  * adapter's #2336 no-checkout constraint). The reference PR-diff `buildMandate` (review-core.mjs) calls this with
  * the diff-specific values, reproducing its prior text byte-for-byte — that is what "re-home the mandate framing,
  * factoring shared logic into the core rather than duplicating" means.
+ *
+ * #2950 — THE GOAL AND THE THREE DIRECTION TESTS. Two additive, opt-in parameters close the "open-ended mandate"
+ * hole that made this the most expensive brief a model can be handed:
+ *   • `goal` — what the change is TRYING to do. Without it a juror judges against an implicit ideal, which is what
+ *     generates findings that are true, unhelpful and expensive. Omitting it leaves the text byte-stable.
+ *   • `round` — at round 2+ the ANTI-SPIRAL clause fires: the juror may judge only the fix that the previous
+ *     round's findings asked for. Anything else it notices is a carve-out BY CONSTRUCTION, not an argument. This is
+ *     what makes the loop terminate on agreement rather than on the round cap: without it every round re-reads the
+ *     whole subject and mints brand-new blockers, so convergence is structurally unreachable.
+ * Both default to the pre-#2950 behaviour (no goal block; round 1 = no anti-spiral clause).
+ *
  * @param {{subjectNoun?: string, mandate?: string|string[], defaultMandate?: string, isolationLine?: string,
- *   findingAnchor?: string, bodyLines?: string[]}} [o]
+ *   findingAnchor?: string, bodyLines?: string[], goal?: string, round?: number}} [o]
  * @returns {string}
  */
 export function buildSubjectMandate({
@@ -1203,17 +1331,61 @@ export function buildSubjectMandate({
   isolationLine = '',
   findingAnchor = 'file',
   bodyLines = [],
+  goal = '',
+  round = 1,
 } = {}) {
   const mandates = (Array.isArray(mandate) ? mandate : [mandate]).filter(Boolean);
   const mandateLine = mandates.length ? mandates.join(', ') : defaultMandate;
   const body = Array.isArray(bodyLines) ? bodyLines.filter((l) => typeof l === 'string' && l.length) : [];
+  const roundNo = Number.isFinite(Number(round)) ? Math.floor(Number(round)) : 1;
   return [
     `You are reviewing a ${subjectNoun} against this mandate: ${mandateLine}.`,
     ...(isNonEmptyString(isolationLine) ? [isolationLine] : []),
     ...body,
+    // #2950 — WHAT THE CHANGE IS FOR. The scope test downstream ("does this finding trace to the goal?") is
+    // unanswerable without it, so the goal is stated before anything is asked of the juror.
+    ...(isNonEmptyString(goal)
+      ? [
+        `WHAT THIS ${String(subjectNoun).toUpperCase()} IS TRYING TO DO: ${String(goal).trim()}`,
+        'Judge it against THAT goal and against the base it started from — never against an ideal implementation you',
+        'would have written. A change can be imperfect and still be the right thing to accept.',
+      ]
+      : []),
     `Judge only: report concrete findings (${findingAnchor}, one-sentence summary, the failure scenario it causes) and`,
     'nothing about labels, merge policy, or who may clear this change — that is the caller\'s decision, not yours.',
     'Report an empty findings list if nothing survives scrutiny; do not pad with stylistic nitpicks.',
+    // #2950 — DISPOSITION, the round key. Single-sourced here for the same reason as the prevention block below:
+    // every surface that frames a mandate through this skeleton must ask the three direction tests, or the whole
+    // "only a blocker earns a round" reduction is starved of the field it reduces on and silently fails closed
+    // (every finding blocking, i.e. exactly today's cost).
+    'DISPOSITION (required, for EVERY finding) — answer THREE booleans and let the routing decide; do NOT decide',
+    'yourself whether this blocks. (a) `introduced`: did THIS change introduce the problem, or was it already there',
+    'on material the change did not touch? (b) `worseThanBase`: are we NET WORSE than the base — not "less than',
+    'ideal", actually worse than what was there before? (c) `parallelizable`: could this be fixed independently, in',
+    'a parallel lane, without holding this change?',
+    `Exactly one combination earns a round (\`${DISPOSITIONS.BLOCKER}\`): introduced AND worse-than-base AND NOT`,
+    `parallelizable. Everything else routes to \`${DISPOSITIONS.CARVE_OUT}\` — real, reported, filed, but not this`,
+    'change\'s problem to fix here.',
+    'Answer (b) honestly: judging against an ideal instead of against the base is the single most expensive mistake',
+    'a reviewer makes here. Better-but-imperfect is a carve-out, not a blocker.',
+    'THE THREE ANSWERS ARE THE ONLY WAY TO UN-BLOCK A FINDING. Omitting any of them leaves it BLOCKING, and writing',
+    `a \`disposition\` word yourself does NOT substitute for them: a bare \`${DISPOSITIONS.CARVE_OUT}\` or`,
+    `\`${DISPOSITIONS.NIT}\` with no answers is DISCARDED and the finding blocks. The one word that is honoured on`,
+    `its own is \`${DISPOSITIONS.BLOCKER}\` — you may always declare something blocking. So silence costs a round`,
+    `rather than saving one. \`${DISPOSITIONS.NIT}\` is a finer label you may add ALONGSIDE three answers that`,
+    'already route to a carve-out, for something worth saying and never worth a round.',
+    'SCOPE IS THE GOAL, NOT THE FILE COUNT: a fix that serves the stated goal is in scope however many files it',
+    'takes; a fix that introduces a NEW goal is a carve-out.',
+    // #2950 — THE ANTI-SPIRAL GUARD. Round 2+ exists to check the round-1 fix, nothing else. Without this the panel
+    // re-reads the whole subject each round and mints new blockers, so the loop can only ever end at the round cap.
+    ...(roundNo >= 2
+      ? [
+        `ROUND ${roundNo} — YOU ARE CHECKING A FIX, NOT RE-REVIEWING THE SUBJECT. Judge ONLY whether the findings`,
+        'from the previous round were actually addressed. Anything else you notice — however real — is a `carve-out`',
+        'by construction: report it with that disposition and do NOT open another round for it. A finding you raise',
+        'now that does not trace to a previous-round finding may never be a `blocker`.',
+      ]
+      : []),
     // #2823 — MANDATORY PREVENTION INTROSPECTION, single-sourced here so EVERY review surface that frames a
     // mandate through this skeleton (the diff reviewer, the panel lenses, any future subject) inherits it — it
     // cannot be skipped. Tuned per finding-class: a citation miscite earns a deterministic gate; a design-fidelity
