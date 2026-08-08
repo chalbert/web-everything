@@ -1,0 +1,11 @@
+{
+  "id": "reexec-command-substitution",
+  "cmd": "OUT=\"$(cd . && npm run build)\"",
+  "ctx": {
+    "primaryCwd": true
+  },
+  "basis": "r5 F1 — bash re-executes a `$( … )` body. Confirmed really building under real bash.",
+  "expect": {
+    "reason": "a build that WRITES the shared PRIMARY tree is blocked at primary cwd (#2749/#2788) — `npm run build`/`build:docs`/`build:demo` (and the `vite build`/`eleventy` they delegate to) emits into the tree (dist/_site) at the shared checkout. Run it with the lane cwd made EXPLICIT — `cd <lane-path> && <cmd>` (a leading `cd` is what this guard resolves, #2335); if you have no lane, acquire one (`node scripts/lane-pool.mjs acquire`). Sanctioned override (rare): prefix `MAIN_SESSION_BUILD_OK=1`."
+  }
+}
