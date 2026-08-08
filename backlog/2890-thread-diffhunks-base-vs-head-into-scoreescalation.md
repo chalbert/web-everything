@@ -1,8 +1,10 @@
 ---
 bornAs: xpa89kw
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateStarted: "2026-08-08"
+dateResolved: "2026-08-08"
 tags: [governance, mechanization, review-escalation, diff-plumbing, precondition]
 ---
 

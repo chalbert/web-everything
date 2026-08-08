@@ -2891,7 +2891,18 @@ async function runCli() {
           humanBasisFiles = changedFiles;
         } catch { /* signal-fetch miss → score on the manifest signals alone */ }
       }
-      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo });
+      // #2890 — the net diff TEXT (base-vs-head CONTENT, not just changed-file names + a line count), fetched
+      // ONCE here and threaded into `scoreEscalation` as `diffHunks` — the shared precondition #2839's
+      // `assertNotPrincipleAndImpl` and #2840's `isPrincipleSurface` need (both read hunk content). Reused
+      // below by the anti-test-gaming scan (was its own separate `computeNetDiffText` call) rather than
+      // re-fetched, so the escalation score and the gaming scan can never see a different diff. Same
+      // best-effort posture as every sibling signal here: no local/sibling clone ⇒ `scored:false` ⇒ `text:''`.
+      let netDiffText = { text: '', scored: false };
+      if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
+        const textExec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts });
+        netDiffText = computeNetDiffText({ exec: textExec, rev: v.headRef, fetchExtraRefs: [v.headRef] });
+      }
+      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffHunks: netDiffText.text });
       // #2414 — first-drain-sighting manifest baseline gate. The manifest values (`v.hasManifest`/
       // `dismissedFindings`/`crossRepo`/`blockedBy`) are re-read from the LIVE PR body every pass
       // (readPrManifest), so we can capture what the drain FIRST saw for a ready-to-merge PR and diff a later
@@ -2943,27 +2954,25 @@ async function runCli() {
       // trust-chain concern the agent panel must not clear for itself; a human clears a legit removal. Best-
       // effort like the manifest gate: only when a local/sibling clone is present to read the diff text (no
       // clone ⇒ no text ⇒ the scan is a no-op — the same fail-open the manifest baseline gate documents).
-      if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
-        const exec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts });
-        const net = computeNetDiffText({ exec, rev: v.headRef, fetchExtraRefs: [v.headRef] });
-        const gaming = scanTestTampering({ diffText: net.text });
-        if (net.scored && gaming.tampered) {
-          v.decision = 'skip';
-          v.escalated = 'yes';
-          v.humanRequired = true;
-          v.escalateReasons = gaming.reasons;
-          v.reason = `test-gaming suspected — CI-green may be manufactured by tampering with tests: ${gaming.reasons.join('; ')}`;
-          if (!DRY_RUN) {
-            if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
-              try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
-            }
-            const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
-            if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} test-gaming reason stamped on PR\n`);
+      // #2890 — `netDiffText` was already fetched above (feeding `scoreEscalation`'s `diffHunks`); reused here
+      // rather than re-fetched, so this scan and the escalation score can never disagree on what changed.
+      const gaming = scanTestTampering({ diffText: netDiffText.text });
+      if (netDiffText.scored && gaming.tampered) {
+        v.decision = 'skip';
+        v.escalated = 'yes';
+        v.humanRequired = true;
+        v.escalateReasons = gaming.reasons;
+        v.reason = `test-gaming suspected — CI-green may be manufactured by tampering with tests: ${gaming.reasons.join('; ')}`;
+        if (!DRY_RUN) {
+          if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
-          parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: gaming.reasons });
-          if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked — anti-test-gaming gate tripped (HUMAN required): ${gaming.reasons.join('; ')}\n`);
-          continue;
+          const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
+          if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} test-gaming reason stamped on PR\n`);
         }
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: gaming.reasons });
+        if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked — anti-test-gaming gate tripped (HUMAN required): ${gaming.reasons.join('; ')}\n`);
+        continue;
       }
       // #2409 — the reviewed-commit gate. A `review:accepted` verdict only vouches for the tree the reviewer
       // looked at (the head SHA `review-set-label.mjs` stamped into the accept comment). Before the land cascade
