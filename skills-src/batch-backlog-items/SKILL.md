@@ -13,8 +13,10 @@ completed item"**). Don't restate the rubric here; if the method changes, edit t
 Invoked as `/batch [P]`, `/batch-next [P] [NNN-slug]`, or `/workflow [P] [NNN-slug]`: a bare number `P`
 overrides the **points budget** (not an item count; default = the calibrated `capacityPoints × targetFraction`);
 a `NNN`/`NNN-slug` **seeds** the chain's first item (skip its selection). **The command picks the execute
-model:** `/batch` + `/batch-next` run the **linear / serial inline loop** (the default); **`/workflow` runs the
-parallel orchestrator** (provably-disjoint lanes on the `Workflow` tool — see *Parallel lanes* below). The
+model:** `/batch` + `/batch-next` run the **serial per-item loop** (the default — "serial" is the item cadence;
+each item's *execution* still delegates to a sub-agent, per *backlog-workflow.md → Model routing*);
+**`/workflow` runs the parallel orchestrator** (provably-disjoint lanes on the `Workflow` tool — see
+*Parallel lanes* below). The
 `--parallel` / `--serial` flags are explicit per-invocation overrides on either command. **Open
 `backlog-workflow.md` only for an edge case**
 (empty pool → surface one decision; a stop-rule judgment call); the happy path is the loop below. A batch
@@ -100,8 +102,11 @@ the per-item chat-rename — a batch labels the session **once**.
    (*backlog-workflow.md → Stopping*): the fixed terse shape — header (`cost X/budget · stop: <rule>`), one
    `✓`/`~`/`→` line per item (carry-forwards tagged with a drop-reason), the Next line, the single calibration
    line. **No bespoke essay**; expand only for a red gate or on request. **Calibrate — SERIAL `/batch` ONLY:**
-   calibration maps a context-% reading → points resolved, which only holds when the **main loop does the
-   work**. A `/workflow` (parallel) batch resolves its points in **subagent contexts** (worktree lanes), so
+   calibration maps a context-% reading → points resolved, which only holds while **the loop's own context
+   grows with each item resolved** — serial `/batch` keeps that link even when each item's *execution* is
+   delegated, since the loop still does claim → brief → summary → close-review per item, in sequence
+   (*backlog-workflow.md → Calibrating the budget*). A `/workflow` (parallel) batch resolves its points in
+   **subagent contexts** (worktree lanes) the orchestrator never sequences through, so
    the orchestrator's context-% measures only pack/plan/land overhead — it is **decoupled** from throughput
    and a reading there is meaningless (and would pollute the estimate). So for **`/workflow` (parallel): SKIP
    calibration entirely** — no context-% ask, no `calibrate` call; its ceiling is the token/agent budget, not
@@ -255,7 +260,7 @@ unattended in one session instead of as one-item handoffs. Full method: *backlog
 
 ## Parallel lanes — the `/workflow` orchestrator (opt-in; `/batch` stays linear) (reliability first, speed second)
 
-**`/workflow` (or `--parallel`) runs the parallel execute model; `/batch` runs the inline serial loop (the
+**`/workflow` (or `--parallel`) runs the parallel execute model; `/batch` runs the serial per-item loop (the
 default).** Parallel was once the default (#1147) but has been **re-split into its own command** so the choice
 is explicit per invocation — `/batch` for linear, `/workflow` for parallel (this is the documented "flip back
 to opt-in" path the *Reversible default* note below always reserved). Under **#2183 (slice #2189)** the parallel model is now a **PR fan-out**: every packed item runs in its own

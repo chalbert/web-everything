@@ -281,13 +281,14 @@ emit an empty table for it.
 
 On a non-trivial session, scan the transcript for two evidence-based shapes of avoidable overhead (cite
 the actual turn/command; never a plausible-sounding guess backfilled after the fact):
-- **(a) Main-loop steps that should have been delegated** — execution that ran inline on the primary loop
-  but was mechanically clear + bounded (single locus, no contract/shared-gate decision, already prepared)
-  — exactly what a `Task`/sub-agent call would have kept off the expensive main-loop context. Where the
-  project documents a routing split (`docs/agent/backlog-workflow.md` → **"Model routing"**, the
-  Opus-orchestrates/Sonnet-executes pattern), name the concrete `#NNN`s so the next claim routes them
-  down — but this half fires on **any** project: it's a general main-loop-vs-delegate check, not
-  contingent on that doc existing.
+- **(a) Main-loop steps that should have been delegated** — work that ran inline on the primary loop
+  when it was **not** one of the things that must stay there. The test is *delegate-by-default*, not
+  "did it qualify for a cheap model". Where the project documents the split
+  (`docs/agent/backlog-workflow.md` → **"Model routing"**), read its lane table for what stays inline
+  rather than judging from memory, and **skip this half** when that section's *one override* applied
+  (the harness forbade the Agent tool — nothing could have been delegated). Name the concrete `#NNN`s
+  so the next claim routes them down — but this half fires on **any** project: it's a general
+  main-loop-vs-delegate check, not contingent on that doc existing.
 - **(b) Ad-hoc command sequences that should be scripted** — the same shell/`node -e` incantation (or a
   close variant) hand-run more than once this session, or a multi-step manual sequence a script/CLI
   subcommand could wrap in one call. Name the repeated command and where a script/CLI addition would
