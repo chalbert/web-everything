@@ -1,4 +1,5 @@
 ---
+bornAs: xs1gx91
 kind: story
 size: 3
 status: resolved
@@ -15,7 +16,7 @@ tags: [backlog, skill, agent-workflow]
 A `/consolidate` skill (the inverse of `/split`): sweep the open backlog, cluster items that are really
 one job, and propose an **umbrella epic** or a **batch pack** per cluster — report always, mutate only on
 approval. **Fold** (retiring a true near-duplicate) is reported-only here, pending the retirement decision
-#xm3vnk8.
+#2982.
 
 ## Why
 
@@ -32,7 +33,7 @@ only (*[we:docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → R
    `kind: epic` and set `parent:` on the members. Pure existing mechanism.
 2. **Pack** — items that stay separate but should be worked in one pass → make the real prerequisites
    `blockedBy` edges and name the pack for `/batch`.
-3. **Fold** — one item's scope sits entirely inside another's. **Reported only** until #xm3vnk8 rules on
+3. **Fold** — one item's scope sits entirely inside another's. **Reported only** until #2982 rules on
    how a folded item retires; the report names the survivor and the cross-refs.
 
 Same discipline as `/split`: investigate the real code before claiming two items are one job, apply a

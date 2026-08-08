@@ -3,7 +3,7 @@ bornAs: x93eptj
 kind: story
 size: 3
 status: open
-relatedTo: ["xs1gx91"]
+relatedTo: ["2983"]
 scope:
   - we:scripts/backlog-guard.mjs
   - we:docs/agent/backlog-workflow.md
@@ -14,7 +14,7 @@ dateOpened: "2026-08-06"
 
 # Guard cross-session backlog frontmatter edits so a sweep cannot rewire an item another lane owns
 
-`/consolidate` (#xs1gx91) defines its candidate set as every item with `status` ≠ `resolved`, then writes
+`/consolidate` (#2983) defines its candidate set as every item with `status` ≠ `resolved`, then writes
 `parent:` and `blockedBy:` into each clustered member. That set includes items another lane currently owns
 (`status: active`, plus soft-held and reserved cards), so a board-wide sweep can rewrite frontmatter in files a
 concurrent session is editing. Nothing detects it: the failure is a merge conflict at land, or the grouping edit

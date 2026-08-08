@@ -1,4 +1,5 @@
 ---
+bornAs: xm3vnk8
 kind: decision
 status: open
 dateOpened: "2026-08-06"
@@ -7,7 +8,7 @@ tags: [backlog, schema, burndown]
 
 # How a folded-duplicate backlog item retires — foldedInto pointer vs cross-ref only
 
-When `/consolidate` (#xs1gx91) finds two open items whose scope is genuinely the same job, the backlog has
+When `/consolidate` (#2983) finds two open items whose scope is genuinely the same job, the backlog has
 **no honest way to retire the absorbed one**. This decides whether to add a retirement state for it, or to
 rule that a near-duplicate simply stays open and cross-referenced.
 

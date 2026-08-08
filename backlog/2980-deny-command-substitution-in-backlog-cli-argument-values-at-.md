@@ -5,7 +5,7 @@ status: open
 dateOpened: "2026-08-07"
 scope: ["we:scripts/guard-bash.mjs"]
 tags: [guard, security, backlog]
-relatedTo: ["xs1gx91"]
+relatedTo: ["2983"]
 ---
 
 # Deny command substitution in backlog CLI argument values at the bash guard
