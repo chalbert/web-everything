@@ -11,6 +11,7 @@ import {
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
   splitSegments, runnerInvocation, parseSegments, unparseableReason, heredocScan,
+  nestedCommandStrings,
 } from '../guard-bash.mjs';
 import { execFileSync } from 'node:child_process';
 
@@ -701,6 +702,32 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       '(pnpm --filter web exec vite build)', '(npm exec vite build)', '(vite build)', '(vite build) \\',
       '{ npm run build; }', '(env "FOO=a b" npm run build)', 'sudo -u "some user" npm run build',
     ],
+    // r5 F2 — the r3 fix above was POSITIONAL: `canonicalCommand` peeled a `)` only when it was the LAST
+    // character of the segment, so ONE trailing token re-opened the hole while the r3 test kept passing.
+    // Every shape below was confirmed to really build under real bash in a PATH-stubbed sandbox.
+    'a subshell closer with a TRAILING token after it (r5 F2)': [
+      '(pnpm exec vite build) >/dev/null', '(pnpm exec vite build) 2>/dev/null',
+      '(pnpm exec vite build) #x', '(npm exec -- vite build) #x', '(vite build) >/dev/null 2>&1',
+      '(npm run build) >/dev/null', '(eleventy) 2>/dev/null', '{ npm run build; } >/dev/null',
+      'time (npm run build)', '(pnpm dlx eleventy) | cat',
+      // …and the other half of the class: the group's LAST command keeps the closer glued to it when the
+      // split cuts the group at a separator inside it.
+      '(gh pr list --json number; pnpm dlx eleventy) >/dev/null',
+      '(git status; vite build) >/dev/null',
+    ],
+    // r5 F1 — the text bash RE-EXECUTES. The quote-BLIND split of base tore these open at the separator
+    // inside the quoted argument and denied by accident; making the split correct lost that coverage.
+    // Recursing into the script-string positions restores it structurally — and covers the separator-free
+    // spelling (`bash -c "npm run build"`) that base never caught at all.
+    'a command bash RE-EXECUTES from a script string or substitution (r5 F1)': [
+      'bash -c "npm run build"', 'sh -c "npm run build"', "bash -c 'npm run build'",
+      'bash -c "cd src && npm run build"', 'bash -ec "vite build"', 'sh -c "eleventy"',
+      'eval "npm run build"', "eval 'vite build'", 'eval "echo done; echo hi > config/app.json"',
+      'OUT="$(cd . && npm run build)"', 'echo "$(npm run build)"', 'X=$(vite build)',
+      'echo `npm run build`', 'X=`vite build`', 'echo "`eleventy`"',
+      'echo $(gh pr list --json number; node scripts/gen-inventory.mjs)',
+      "npm exec -c 'vite build'", 'xargs -n1 bash -c "npm run build"',
+    ],
     'eleventy flags that really WRITE the site dir (#2986/3, recall half)': [
       'eleventy', 'eleventy --serve', 'eleventy --watch', 'eleventy --serve --port=8080',
       'eleventy --quiet', 'eleventy --incremental', '11ty --watch', 'npx eleventy',
@@ -806,6 +833,34 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       "gh pr list \\\n  --jq '.[] | select(.n > 5)'",
       'git status \\\n  --short',
       "cat > /tmp/body.md <<'EOF'\ndon't do it — it's a trap\na \"quoted\" line\nnpm run build\nEOF",
+    ],
+    // ── r5 precision mirrors — the recursion must not turn every nested command into a deny ─────────
+    // The re-execution recursion (F1) reads a `$( )`/backtick body, a subshell body and an
+    // `eval`/`sh -c`/`bash -c` string at command position. That is a lot of new text reaching the deny
+    // arms, so these are the commands an agent really runs through those same positions.
+    'a script string / substitution whose command writes NOTHING (r5 F1)': [
+      'echo "$(git rev-parse --short HEAD)"', 'BR="$(git branch --show-current)"; echo "$BR"',
+      'N=$(gh pr list --json number --jq "length"); echo $N',
+      'test -n "$(git status --porcelain)" && echo dirty',
+      'echo `git rev-parse HEAD`', 'X=`date +%s`; echo $X',
+      'bash -c "npm run test:unit"', 'sh -c "git status"', 'bash -lc "node --version"',
+      'bash scripts/setup.sh', 'eval "$(direnv hook bash)"', 'eval "echo hi"',
+      'echo "$(npm run build:check)"', 'for f in $(ls scripts); do echo $f; done',
+      // a `"…"` script string arrives with its `\"` escapes RESOLVED, exactly as the inner shell sees it —
+      // otherwise the `|` in this message reads as an unquoted separator and #2994's false deny returns
+      // one level down.
+      'sh -c "git commit -m \\"fix: a | b > c\\""',
+      'bash -c "gh pr list --jq \'.[] | select(.n > 5)\'"',
+      // …and the sanctioned escape is EXPORTED into the re-executed command, so it must still disarm it
+      // (verified: `FOO=1 bash -c \'echo $FOO\'` prints 1).
+      'MAIN_SESSION_BUILD_OK=1 bash -c "npm run build"', 'MAIN_SESSION_BUILD_OK=1 eval "npm run build"',
+      'MAIN_SESSION_BUILD_OK=1 sh -c "npm run build && npm run build:docs"',
+      'MAIN_PUSH_OK=1 bash -c "git push origin main"',
+    ],
+    'a subshell with a trailing token whose command writes NOTHING (r5 F2)': [
+      '(cd /tmp && ls) >/dev/null', '(npm run test:unit) 2>&1', '(git status; git diff) | head -40',
+      '{ echo a; echo b; } > /tmp/out.txt', '(eleventy --version) >/dev/null',
+      '(eleventy --dryrun) 2>/dev/null', '(npm run build:check) >/dev/null', '(git status) #x',
     ],
     'a runner exec/dlx form whose tool writes nothing (#2994 r2)': [
       'npm exec --package=vitest vitest run', 'npm exec -- tsc --noEmit', 'pnpm exec eslint src/',
@@ -1145,9 +1200,150 @@ describe('guard-bash — the parser fails CLOSED on input it cannot represent (#
     // `\`+newline is a splice (F2), and a lone trailing backslash is dropped
     expect(bash('echo a && \\\necho b')).toBe('a\nb');
     expect(bash('echo a \\\nb')).toBe('a b');
-    expect(bash('echo a \\')).toBe('a');
+    // r5 F3 — a LONE trailing backslash at end-of-input is bash-VERSION-dependent, so it is not a
+    // fidelity fact this suite can pin: bash 3.2 (macOS, the author's shell) DROPS it and prints `a`;
+    // bash 5 (the Linux CI runner) keeps it as literal text and prints `a \`. POSIX leaves it undefined.
+    // Asserting `'a'` made CI red on this PR's own new test while passing locally — a suite that only
+    // passes on one machine is worse than no suite. Both readings are accepted; what the GUARD does with
+    // it is asserted separately (canonicalCommand peels it; the tokenizers keep it as literal text).
+    expect(['a', 'a \\']).toContain(bash('echo a \\'));
     // an unterminated quote is a SYNTAX ERROR — denying it denies nothing that would have run
     expect(() => bash("echo 'abc")).toThrow();
     expect(() => bash('echo "abc')).toThrow();
+  });
+});
+
+// ── #2994 review r5 — the text bash RE-EXECUTES, and the STRUCTURAL subshell closer ─────────────────────
+// Round 4 made the segment split quote-CORRECT, which lost coverage the quote-BLIND split of base had by
+// ACCIDENT: base tore `bash -c "git status && git push origin main"` at the `&&` inside the quoted
+// argument, so the tail landed on the `git push` arm at command position. Reading the quoting properly
+// keeps it as one argument of `bash`, which no arm inspects — while bash still really pushes. Every shape
+// below was confirmed under REAL bash in a PATH-stubbed sandbox whose stubs log NUL-separated argv: a
+// regression counted only when bash genuinely executed something the guard denies at command position.
+describe('guard-bash — the guard follows the text bash re-executes (#2994 r5 F1)', () => {
+  it('nestedCommandStrings reads every re-execution position', () => {
+    expect(nestedCommandStrings('echo "$(git push origin main)"')).toContain('git push origin main');
+    expect(nestedCommandStrings('echo `npm run build`')).toContain('npm run build');
+    expect(nestedCommandStrings('bash -c "npm run build"')).toContain('npm run build');
+    expect(nestedCommandStrings("sh -c 'vite build'")).toContain('vite build');
+    expect(nestedCommandStrings('bash -ec "vite build"')).toContain('vite build');
+    expect(nestedCommandStrings('eval "npm run build"')).toContain('npm run build');
+    expect(nestedCommandStrings("npm exec -c 'vite build'")).toContain('vite build');
+    expect(nestedCommandStrings('xargs -n1 bash -c "npm run build"')).toContain('npm run build');
+    // a SCRIPT FILE argument is not a `-c` string
+    expect(nestedCommandStrings('bash scripts/setup.sh')).toEqual([]);
+    // …and a single-quoted body expands NOTHING, so there is no substitution inside it
+    expect(nestedCommandStrings("echo '$(npm run build)'")).toEqual([]);
+  });
+
+  it('a `"…"` script string arrives with its escapes RESOLVED, the way the inner shell reads it', () => {
+    // Keeping the `\"` verbatim made the `|` read as an unquoted separator and the tail `b > c\"` as a
+    // real redirect — #2994's own false deny, re-created one level down.
+    expect(nestedCommandStrings('sh -c "git commit -m \\"fix: a | b > c\\""'))
+      .toContain('git commit -m "fix: a | b > c"');
+    // a `\'…\'` string resolves nothing, so it is passed through verbatim
+    expect(nestedCommandStrings("sh -c 'echo \\\"x\\\"'")).toContain('echo \\"x\\"');
+  });
+
+  it('a leading env-assignment is EXPORTED into the re-executed command, so the escape still disarms it', () => {
+    // Verified against real bash: `FOO=1 bash -c 'echo $FOO'` prints 1 — and it reaches EVERY command in
+    // the string, not just the first.
+    expect(nestedCommandStrings('MAIN_SESSION_BUILD_OK=1 bash -c "npm run build && vite build"'))
+      .toEqual(expect.arrayContaining([expect.stringContaining('MAIN_SESSION_BUILD_OK=1')]));
+    expect(decide('MAIN_SESSION_BUILD_OK=1 bash -c "npm run build"', { primaryCwd: true })).toBeNull();
+    expect(decide('MAIN_SESSION_BUILD_OK=1 sh -c "npm run build && npm run build:docs"', { primaryCwd: true })).toBeNull();
+    expect(decide('MAIN_PUSH_OK=1 bash -c "git push origin main"', { primaryCwd: true })).toBeNull();
+    // …but a substitution is expanded BEFORE the prefix applies, so it does NOT inherit it
+    // (`FOO=1 echo "$(echo $FOO)"` prints empty) — assuming it did would be a loosening.
+    expect(decide('MAIN_SESSION_BUILD_OK=1 echo "$(npm run build)"', { primaryCwd: true })).toMatch(/WRITES the shared PRIMARY tree/);
+  });
+
+  it('the five shapes that really executed under bash while the guard allowed them', () => {
+    const at = (c) => decide(c, { primaryCwd: true });
+    expect(at('bash -c "git status && git push origin main"')).toMatch(/direct push to `main`/);
+    expect(at('bash -c "cd src && npm run build"')).toMatch(/WRITES the shared PRIMARY tree/);
+    expect(at('eval "echo done; echo hi > config/app.json"')).toMatch(/redirect/);
+    expect(at('OUT="$(cd . && npm run build)"')).toMatch(/WRITES the shared PRIMARY tree/);
+    expect(at('echo "$(git status && git push origin main)"')).toMatch(/direct push to `main`/);
+    // …and the separator-free spelling base never caught either
+    expect(at('bash -c "npm run build"')).toMatch(/WRITES the shared PRIMARY tree/);
+  });
+
+  it('a substitution inside a DOUBLE-QUOTED run whose body has its own quotes is still read', () => {
+    // Consuming the `"…"` run as one opaque span ended it at the `"` before `*.ts`, so the
+    // substitution's tail (a real build) was never seen.
+    expect(decide('echo "`find . -name "*.ts"; yarn build`"', { primaryCwd: true }))
+      .toMatch(/WRITES the shared PRIMARY tree/);
+    // …and an apostrophe in a `#` comment must not open a phantom quoted run over the NEXT line
+    expect(decide("# a note — don't forget\necho `pnpm exec vite build`", { primaryCwd: true }))
+      .toMatch(/WRITES the shared PRIMARY tree/);
+  });
+
+  it('the expansion is BOUNDED — a pathological nest neither wedges nor throws', () => {
+    let cmd = 'npm run build';
+    for (let i = 0; i < 200; i++) cmd = `bash -c "${cmd.replace(/"/g, '\\"')}"`;
+    expect(() => decide(cmd, { primaryCwd: true })).not.toThrow();
+    let subst = 'npm run build';
+    for (let i = 0; i < 200; i++) subst = `echo "$(${subst})"`;
+    expect(() => decide(subst, { primaryCwd: true })).not.toThrow();
+  });
+});
+
+describe('guard-bash — a subshell closer is matched STRUCTURALLY, not positionally (#2994 r5 F2)', () => {
+  it('one trailing token after the `)` no longer re-opens the hole', () => {
+    const at = (c) => decide(c, { primaryCwd: true });
+    for (const c of ['(pnpm exec vite build) >/dev/null', '(pnpm exec vite build) 2>/dev/null',
+      '(pnpm exec vite build) #x', '(npm exec -- vite build) #x', '(vite build) >/dev/null 2>&1',
+      '(pnpm exec vite build)'])
+      expect(at(c)).toMatch(/WRITES the shared PRIMARY tree/);
+  });
+
+  it('…and the group\'s LAST command, which keeps the closer glued to it after the split', () => {
+    expect(decide('(git status; pnpm dlx eleventy) >/dev/null', { primaryCwd: true }))
+      .toMatch(/WRITES the shared PRIMARY tree/);
+    expect(decide('(pkill vite; git status) #x', {})).toMatch(/Never kill the running dev server/);
+  });
+
+  it('the flag allowlists terminate on a group closer too, so a no-write command stays allowed', () => {
+    // The same positional bug on the precision side: `--version)` was not recognised as `--version`.
+    expect(decide('(eleventy --version) >/dev/null', { primaryCwd: true })).toBeNull();
+    expect(decide('(eleventy --dryrun) 2>/dev/null', { primaryCwd: true })).toBeNull();
+    // …and `--serve)` must still DENY — it really writes the site dir.
+    expect(decide('(eleventy --serve) >/dev/null', { primaryCwd: true })).toMatch(/WRITES the shared PRIMARY tree/);
+    // a flag that merely starts with an allowlisted name is still not on the allowlist
+    expect(decide('(eleventy --versionx) >/dev/null', { primaryCwd: true })).toMatch(/WRITES the shared PRIMARY tree/);
+    // …and `vite --outDir build-out` is not a `build` subcommand
+    expect(isTreeWritingBuildRun('vite --outDir build-out preview')).toBe(false);
+  });
+
+  it('a quoted bracket is never a group closer', () => {
+    expect(decide('echo "a)"', { primaryCwd: true })).toBeNull();
+    expect(decide("git commit -m 'fix (a) thing'", { primaryCwd: true })).toBeNull();
+    expect(nestedCommandStrings('echo "a)"')).toEqual([]);
+  });
+});
+
+describe('guard-bash — the wrapper-peeled command word reaches every anchored arm (#2994 r5)', () => {
+  it('a wrapper no longer hides pkill / rm / mv / sed / git push from their arm', () => {
+    expect(decide('time rm backlog/2986-x.md', {})).toMatch(/Never delete a backlog/);
+    expect(decide('time pkill -f vite', {})).toMatch(/Never kill the running dev server/);
+    expect(decide('env FOO=1 git push origin main', {})).toMatch(/direct push to `main`/);
+    expect(decide('/usr/bin/git push origin main', {})).toMatch(/direct push to `main`/);
+    expect(decide('(pkill vite)', {})).toMatch(/Never kill the running dev server/);
+  });
+
+  it('a trailing token after the mv operands no longer disarms the renumber rule', () => {
+    // The rule compared the first and LAST TOKEN, so a trailing comment word became the "destination",
+    // carried no NNN, and a real renumber was allowed (confirmed executing under real bash).
+    expect(decide('mv backlog/2986-x.md backlog/9999-y.md # trailing note', {})).toMatch(/Never renumber/);
+    expect(decide('git mv backlog/2986-x.md backlog/9999-y.md >/dev/null', {})).toMatch(/Never renumber/);
+    // …and a same-NNN slug rename is still fine
+    expect(decide('git mv backlog/2986-x.md backlog/2986-y.md', {})).toBeNull();
+  });
+
+  it('a MENTION is still not an invocation', () => {
+    expect(decide('git commit -m "stop using pkill vite"', {})).toBeNull();
+    expect(decide('echo "rm backlog/2986-x.md"', {})).toBeNull();
+    expect(decide('grep -rn "git push origin main" docs/', {})).toBeNull();
   });
 });
