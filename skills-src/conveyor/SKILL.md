@@ -744,10 +744,14 @@ reports the daemon's residency; if it reads `"unavailable"`, tell the operator t
 **Escalation discipline — `review:human` is a good-reason hold, not a default.** Because every delivery agent
 runs the adversarial review before opening its PR, a **clean, reviewed, non-statute PR with a green `test`
 auto-lands via the daemon with no human in the loop** — that is the norm. Agents escalate `review:human` ONLY
-for good reason — a **statute-touching** change, a **gate-red** PR, a **review finding that needs human
-judgment**, or **genuine uncertainty** — and **never blanket-park** a clean PR "so a human can see it"
-(over-parking makes the human the bottleneck the conveyor exists to remove and dilutes the label). Whether to
-escalate is **judgment**, kept with the agent rather than a script
+for good reason — a **statute-touching** change, a **gate-red** PR, a **review finding that turns on a named
+taste/product/policy call**, or **genuine uncertainty about one specific taste/product/policy call** (never a
+blanket hedge) — and **never blanket-park** a clean PR "so a human can see it" (over-parking makes the human
+the bottleneck the conveyor exists to remove and dilutes the label). **Diff size, line count, file count, or
+unfamiliarity with the touched area are never grounds on their own** — `CARE_WEIGHTS.size`
+(`scripts/lib/review-escalation.mjs`) already makes the committee look harder at a large diff, and the scored
+rubric caps size at `review:pending`, never `review:human` (#2563); see the delivery-agent brief's Escalations
+section for the full rule. Whether to escalate is **judgment**, kept with the agent rather than a script
 ([we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
 A parked PR the runner surfaces (§3) is handled by its label: a `review:human` / `review:pending` park is
 surfaced for `/review` in this session (never auto-landed — a human-only gate); a `review:changes` bounce is
