@@ -2,9 +2,7 @@
 bornAs: xbzq6pc
 kind: decision
 size: 3
-status: active
-scaffoldedBy: "agent-operation-catalog"
-dateScaffolded: "2026-08-08"
+status: open
 dateOpened: "2026-08-08"
 preparedDate: "2026-08-08"
 tags: [guard, agent-surface, orchestrator-mechanization, security]
