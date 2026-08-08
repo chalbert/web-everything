@@ -126,7 +126,7 @@ Measured on the PR's own diff (1313 added lines). Only the first row is supersed
 | the corpus + DOM oracle in `we:scripts/__tests__/pr-land.test.mjs` | 389 | **keep** — this item's acceptance harness |
 | INVARIANT 13 in `we:scripts/lib/__tests__/gate-invariants.test.mjs` | 247 | **keep** — predicate-level mirror |
 | `makeRenderer` / `preprocessInlineAnchors` exports in `we:scripts/lib/rules-loader.cjs` | 5 | **keep** — lets a test drive the real render path |
-| two unrelated backlog items filed during review (`x9nlwgi`, `x7oktlo`) | 231 | **keep** — nothing to do with Fork B |
+| two unrelated backlog items filed during review (`2997`, `2996`) | 231 | **keep** — nothing to do with Fork B |
 
 The 87-row corpus is a permanent test, not a one-off script: every row rides the real
 `we:docs/agent/platform-decisions.md` through a real `git diff` and the real producer stack, and each row's
