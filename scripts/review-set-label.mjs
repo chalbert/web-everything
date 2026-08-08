@@ -2,7 +2,9 @@
  * review-set-label.mjs — swap a PR's review label, INVARIANT-2 guarded (#2470, increment 2 of 2). Also the
  * SINGLE HOME of the shared review-label CLI harness (#2644): a PURE `decideSetLabel` decides the swap for a
  * reviewer verdict (`accepted` / `changes`) OR the fix-agent re-arm (`rearm`), and a thin `runReviewLabelCli`
- * does the `gh` observe→edit→comment→re-read arc. The conveyor's `rearm-review.mjs` is now a THIN shim over
+ * does the `gh` observe→write→re-read arc (the two writes are the comment and the label swap; which one goes
+ * first is decided per-PR by the #2964 ordering rule — see `runReviewLabelCli`). The conveyor's
+ * `rearm-review.mjs` is now a THIN shim over
  * both (it used to clone this file byte-for-byte). Single-sourced in WE (Native-First / zero standard-impl here
  * — this is a definition + write tool, not product code) so the plateau console and the conveyor fix agent both
  * shell/import it rather than re-implementing how a label swap lands.
@@ -51,9 +53,12 @@ import { computeNetDiffText } from './merge-ai-prs.mjs';
  * understands. Exported so anything that must be TOTAL over the targets (the comment-size projection below, and
  * its enum-totality test) enumerates this one list instead of hardcoding a member — PR #1056 review, M2: the
  * `GH_COMMENT_MAX` pre-flight hardcoded `to: 'accepted'` and therefore under-counted a `clear-human` comment by
- * the 132 chars of extra chrome, so a body in the 65,405–65,536 band passed the check, the label swap landed,
- * and `gh pr comment` then failed — leaving an ACCEPTED PR with no `reviewed-sha` marker, which
- * `acceptanceCoversHead` fails OPEN on. Add a member here and the projection covers it automatically.
+ * the 132 chars of extra chrome, so a body in the 65,405–65,536 band passed the check and `gh pr comment` then
+ * failed on GitHub's cap. Under the then-current swap-first order that left an ACCEPTED PR with no `reviewed-sha`
+ * marker, which `acceptanceCoversHead` fails OPEN on. #2964 reordered the writes so a first accept can no longer
+ * reach that state (see `runReviewLabelCli`), but the projection still has to be total: an under-counted body now
+ * costs a failed run and a lost record, and on an ALREADY-accepted PR — the one case that still swaps first — it
+ * costs exactly the old partial state. Add a member here and the projection covers it automatically.
  */
 export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm', 'clear-human']);
 
@@ -212,16 +217,23 @@ export function presentRemoveLabels(removeLabels, currentLabels) {
 
 /**
  * we:scripts/review-set-label.mjs#runReviewLabelCli — the SHARED review-label CLI harness (#2644). Both this
- * file's reviewer-verdict CLI and the conveyor `rearm-review.mjs` run this SAME observe→decide→edit→comment→
- * re-read arc against `gh`; only three things differ and they arrive as config (exactly the deltas #2644 names):
+ * file's reviewer-verdict CLI and the conveyor `rearm-review.mjs` run this SAME observe→decide→write→re-read arc
+ * against `gh`; only three things differ and they arrive as config (exactly the deltas #2644 names):
  *   • `defaultActor` — who the durable comment is attributed to;
  *   • `buildComment({ to, actor, decision }) => string` — the comment body;
  *   • `repoOptional` — when true a missing `--repo` is derived from the cwd repo (`gh repo view`; the fix agent
  *     runs inside its own lane clone, so cwd IS the PR's repo); when false `--repo` is required.
  * `fixedTo` pins the verdict (rearm) or, when null, the harness parses + validates `--to` (accepted/changes).
  * The printed payload shapes stay the caller's, via `successResult`/`refusalResult`. Impure (shells gh); the
- * PURE `decideSetLabel` above owns every invariant, so this harness only moves bytes. Fails closed — every input
- * is validated BEFORE any gh mutation, and any gh error exits non-zero without a partial swap.
+ * PURE `decideSetLabel` above owns every invariant, so this harness only moves bytes.
+ *
+ * Fails closed on INPUT — every input is validated BEFORE any gh mutation. It does NOT promise atomicity, and
+ * saying it did was false (#2964): the swap and the durable comment are two non-atomic `gh` calls, so a gh error
+ * between them exits non-zero with ONE of the two already landed. What #2964 bought is that the half left behind
+ * is the SAFE one to lose — comment first on a PR that is not yet accepted (an orphan marker is never read), swap
+ * first on one that already is (an orphan marker there would freshen the #2409 gate's coverage for an acceptance
+ * that never landed). See the ordering block in the body for the full argument; the seam is not sealed, only
+ * pointed the safe way.
  *
  * `allowClearHuman` is the opt-in for the #2895 gate-self clearance. SAY WHAT IT ACTUALLY IS (PR #1056 review,
  * round 4 — the earlier wording over-claimed): it binds IMPORTERS ONLY, and today it binds nobody. This file's
@@ -419,10 +431,15 @@ export function runReviewLabelCli({
   // that are size-checked, written and posted are the same bytes.
   const commentBody = buildComment({ to, actor, decision, headSha, reason: clearReason, reviewedDiff });
 
-  // we:scripts/review-set-label.mjs#runReviewLabelCli — THE SIZE GUARD, on the RENDERED bytes, before the swap.
-  // GitHub rejects a comment over `GH_COMMENT_MAX`, and the swap lands FIRST — so an oversize comment leaves the
-  // PR `review:accepted` with NO `reviewed-sha` marker, which `acceptanceCoversHead` fails OPEN on, and the drain
-  // then merges with the staleness gate disarmed. PR #1057 review: the only guard used to be an argv projection
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — THE SIZE GUARD, on the RENDERED bytes, before ANY write.
+  // GitHub rejects a comment over `GH_COMMENT_MAX`. The cause this guard exists for: an oversize comment used to
+  // be discovered AFTER the swap had landed (the swap went first), leaving the PR `review:accepted` with NO
+  // `reviewed-sha` marker, which `acceptanceCoversHead` fails OPEN on, and the drain then merged with the
+  // staleness gate disarmed. #2964 reordered the writes, so on a first accept an oversize body can no longer
+  // reach that state — but the guard EARNS ITS KEEP MORE, not less: checking here means an oversize comment now
+  // fails before ANY write at all (no orphan record, nothing to re-run around), and on an ALREADY-accepted PR the
+  // swap still goes first, so this is the only thing standing between an oversize body and the old partial state.
+  // PR #1057 review: the only guard used to be an argv projection
   // sitting inside the CLI's `if (bodyFileArg)` branch, so a long `--reason` with no `--body-file` walked straight
   // around it (reproduced: `gh pr edit` succeeded, `gh pr comment` 422'd, and re-running `clear-human` then
   // refused — "nothing to clear" — so recovery needed the raw `gh pr comment` this whole item exists to forbid).
@@ -433,30 +450,80 @@ export function runReviewLabelCli({
     fail(`the rendered comment is ${commentBody.length} chars, over GitHub's ${GH_COMMENT_MAX} limit — trim the body/--reason/--actor (nothing was changed)`);
   }
 
-  // we:scripts/review-set-label.mjs#runReviewLabelCli — apply the swap: add the verdict label, remove the stale
-  // ones (argv array, no shell). Intersect the decision's removals with the labels the PR ACTUALLY carries so
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — THE SWAP: add the verdict label, remove the stale ones
+  // (argv array, no shell). Intersect the decision's removals with the labels the PR ACTUALLY carries so
   // `gh pr edit --remove-label` is never handed an absent label (which errors).
   const removals = presentRemoveLabels(decision.removeLabels, currentLabels);
-  const editArgs = ['pr', 'edit', pr, '--repo', repo, '--add-label', decision.addLabel];
-  for (const rm of removals) { editArgs.push('--remove-label', rm); }
-  try {
-    execFileSync('gh', editArgs, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-  } catch (e) {
-    fail(ghErr(e, 'gh pr edit failed'), 1);
-  }
+  const applySwap = () => {
+    const editArgs = ['pr', 'edit', pr, '--repo', repo, '--add-label', decision.addLabel];
+    for (const rm of removals) { editArgs.push('--remove-label', rm); }
+    try {
+      execFileSync('gh', editArgs, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+    } catch (e) {
+      fail(ghErr(e, 'gh pr edit failed'), 1);
+    }
+  };
 
-  // we:scripts/review-set-label.mjs#runReviewLabelCli — post a DURABLE comment. Write the body to a temp file to
-  // dodge shell-quoting pitfalls (emoji/newlines), then `--body-file`.
-  const tmp = join(tmpdir(), `review-label-${pr}-${Date.now()}.md`);
-  try {
-    writeFileSync(tmp, commentBody, 'utf8');
-    execFileSync('gh', ['pr', 'comment', pr, '--repo', repo, '--body-file', tmp], {
-      encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
-    });
-  } catch (e) {
-    fail(ghErr(e, 'gh pr comment failed'), 1);
-  } finally {
-    try { unlinkSync(tmp); } catch { /* best-effort cleanup */ }
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — THE DURABLE RECORD. Write the body to a temp file to dodge
+  // shell-quoting pitfalls (emoji/newlines), then `--body-file`. This is the half that carries the `reviewed-sha`
+  // (and `reviewed-diff`) marker the #2409 staleness gate reads.
+  const postComment = () => {
+    const tmp = join(tmpdir(), `review-label-${pr}-${Date.now()}.md`);
+    try {
+      writeFileSync(tmp, commentBody, 'utf8');
+      execFileSync('gh', ['pr', 'comment', pr, '--repo', repo, '--body-file', tmp], {
+        encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
+      });
+    } catch (e) {
+      fail(ghErr(e, 'gh pr comment failed'), 1);
+    } finally {
+      try { unlinkSync(tmp); } catch { /* best-effort cleanup */ }
+    }
+  };
+
+  // #2964 — THE ORDER THESE TWO LAND IN IS THE SAFETY PROPERTY, and it is NOT the same order in both cases.
+  //
+  // They are two non-atomic `gh` calls with no rollback and no retry, so one of them can land alone. Which half is
+  // SAFE TO LOSE depends on one thing: whether `review:accepted` is ALREADY live on this PR.
+  //
+  //   • NOT already accepted (the ordinary first accept, and every `changes` / `rearm` / `clear-human` bounce) —
+  //     COMMENT FIRST. An orphan comment is INERT: `parseReviewedSha` is only ever reached behind a live
+  //     `review:accepted` check (lazily, inside `if (hasReviewLabel(...accepted))` in `we:scripts/merge-ai-prs.mjs`,
+  //     and again inside `decideReviewGate`'s accepted branch), so a marker with no label behind it is never read
+  //     and the command stays re-runnable. An orphan LABEL is not inert: `review:accepted` with no marker makes
+  //     `acceptanceCoversHead` fail OPEN, and the drain then merges with the #2409 staleness gate disarmed. Under
+  //     the old edit-first order that was the reachable state — the exact hole this item was filed for.
+  //
+  //   • ALREADY accepted (the re-accept-after-a-fix flow: accepted at an older head, a commit rode in, the reviewer
+  //     re-verdicts) — SWAP FIRST, the pre-#2964 order, deliberately kept HERE and only here. The swap degenerates
+  //     to an idempotent `--add-label review:accepted`, so comment-first would post a marker naming the LIVE head
+  //     while the acceptance is already live: `parseReviewedSha` takes the LATEST marker, `acceptanceCoversHead`
+  //     flips to `covers: true`, and a run whose `gh pr edit` then FAILED would have FRESHENED the coverage of an
+  //     acceptance it never applied — the drain lands a tree no successful swap vouched for. Swap-first keeps the
+  //     marker on the swap side of that seam: a failed edit exits before the comment, the durable marker still
+  //     names the OLD head, and the gate correctly re-parks. (Losing the comment after a successful swap here
+  //     costs a RECORD, not the gate: the marker stays stale, which is the strict direction.)
+  //
+  // This is shape 1 from the item ("keep the marker on the swap side of the seam"), narrowed to the one case where
+  // the marker is not inert. Shape 1 applied UNCONDITIONALLY — record first without the marker, swap, then stamp
+  // the marker in a second comment — was rejected because it leaves the headline hole open: a failed marker post
+  // after a successful swap is still `review:accepted` + no marker + fail-open. Shape 2 (refuse the run outright
+  // when the PR is already accepted) was rejected because it removes the re-accept path the #2409 gate depends on
+  // to un-stick a re-parked PR, and the item says that needs its own replacement.
+  //
+  // The test is keyed on the LABEL, not on `to`, on purpose: `buildComment` is caller-supplied, so this harness
+  // cannot know whether a given importer's body stamps a marker. Assuming it might is the conservative direction.
+  //
+  // SAY WHAT THIS DOES NOT BUY: the act is STILL NOT ATOMIC. Two non-atomic calls remain two non-atomic calls —
+  // this relocates the partial state onto the half that is safe to lose in each case, it does not eliminate it.
+  // Closing it fully needs reconciliation or rollback, which is not what this is.
+  const acceptanceAlreadyLive = hasReviewLabel(currentLabels, REVIEW_LABELS.accepted);
+  if (acceptanceAlreadyLive) {
+    applySwap();
+    postComment();
+  } else {
+    postComment();
+    applySwap();
   }
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — re-read the labels so the printed result reflects the
@@ -575,10 +642,13 @@ export function stripReviewedShaMarkers(body) {
  *
  * Total over the target set, and over every unbounded input, on purpose (PR #1056 review, M2). The first cut
  * projected `to: 'accepted'` only, while `clear-human` renders a longer heading plus its attribution — a body in
- * the 65,405–65,536 band therefore PASSED the pre-flight, the label swap landed, and `gh pr comment` then failed
- * on GitHub's cap, leaving an ACCEPTED PR with no `reviewed-sha` marker. `acceptanceCoversHead` fails OPEN on a
- * missing marker, so that silently disarms the staleness gate — exactly the partial-swap state the pre-flight
- * exists to prevent. `actor` and `reason` are argv and therefore unbounded too, so they are projected from what
+ * the 65,405–65,536 band therefore PASSED the pre-flight and `gh pr comment` then failed on GitHub's cap. Under
+ * the swap-first order of the day that left an ACCEPTED PR with no `reviewed-sha` marker; `acceptanceCoversHead`
+ * fails OPEN on a missing marker, so it silently disarmed the staleness gate — exactly the partial state the
+ * pre-flight exists to prevent. #2964 moved the comment ahead of the swap on a PR that is not already accepted,
+ * so an under-count there now costs a failed run rather than a disarmed gate; on an ALREADY-accepted PR the swap
+ * still goes first and the original consequence stands unchanged. `actor` and `reason` are argv and therefore
+ * unbounded too, so they are projected from what
  * was actually passed rather than from a fixed-width placeholder that a long one would overrun. Over-estimating
  * is the safe direction: the cost is asking the operator to trim a body that would just barely have fitted.
  * @param {{body?:string, actor?:string, reason?:string}} o - the caller-supplied variable-length inputs
@@ -595,10 +665,13 @@ export function projectVerdictCommentLength({ body = '', actor = '', reason = ''
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) {
   // #2882 — the OPTIONAL `--body-file=<path>` carries the caller's write-up (see `buildVerdictComment`). Every
-  // check happens HERE, before any gh mutation, because this flag fails in the worst direction: the label is
-  // applied first and the comment posted second, so a body problem discovered late leaves an ACCEPTED PR with
-  // no marker — and `acceptanceCoversHead` fails open on a missing marker, so the drain then lands it. That
-  // would contradict this module's own "no partial swap" promise. PR #1005 review, minors 2-4.
+  // check happens HERE, before any gh mutation, because this flag used to fail in the worst direction: the label
+  // was applied first and the comment posted second, so a body problem discovered late left an ACCEPTED PR with
+  // no marker — and `acceptanceCoversHead` fails open on a missing marker, so the drain then landed it. #2964
+  // reordered the writes and that path is closed for a first accept, but it is NOT closed on an already-accepted
+  // PR (which still swaps first, deliberately — see `runReviewLabelCli`), and even where it is closed a late body
+  // failure still costs an orphan record and a re-run. Checking before any write is cheaper than either.
+  // PR #1005 review, minors 2-4.
   const argvRest = process.argv.slice(2);
   // The bare `--body-file <path>` form is REJECTED, not silently ignored: ignoring it posts a verdict with the
   // findings missing and still exits 0. Every other flag in the harness is `=`-form; say so rather than no-op.
@@ -632,7 +705,7 @@ if (IS_CLI) {
   if (projected > GH_COMMENT_MAX) {
     const flag = [[verdictBody.length, `--body-file=${bodyFileArg}`], [projReason.length, '--reason'],
       [projActor.length, '--actor']].sort((a, b) => b[0] - a[0])[0][1];
-    fail(`${flag} renders a ${projected}-char comment, over GitHub's ${GH_COMMENT_MAX} limit — trim it (the label is not applied)`);
+    fail(`${flag} renders a ${projected}-char comment, over GitHub's ${GH_COMMENT_MAX} limit — trim it (nothing was changed: no comment, no label)`);
   }
   runReviewLabelCli({
     defaultActor: DEFAULT_ACTOR,
