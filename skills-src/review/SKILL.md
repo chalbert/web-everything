@@ -110,6 +110,21 @@ applies a label). The same module also renders the operator-facing notice for yo
      refusal is the gate-self protection, and it only binds callers that come through this module — which is
      exactly why the swap must not be hand-rolled.
 
+   **The second refusal on `accepted`: a self-cleared verdict (#2844).** The CLI also refuses `--to=accepted`
+   when the clearing actor is provably the PR's own **author**. The actor id is `CLAUDE_CODE_SESSION_ID`, and a
+   **subagent inherits its parent's**, so this is a *session-level* comparison: if the PR was opened from the
+   session you are running in — including by a subagent you spawned — `--to=accepted` will refuse, and nothing
+   is written. That is the guard working, not a bug. **Two routes clear such a PR, and there is no `--force`:**
+
+   1. **The human ceremony** — `--to=clear-human` (below) is **exempt** from this refusal. It is the operator's
+      normal path and it stays open. It is refused when the PR does **not** carry `review:human`.
+   2. **A different session** — run the review, and the CLI, from a session that did not open the PR. Its own
+      session id then becomes the clearing actor and the independence bar is genuinely met.
+
+   Do **not** go looking for a third way. Clearing `CLAUDE_CODE_SESSION_ID` out of the environment does not buy
+   independence — it only downgrades the record to *"Independence NOT established"*, which every reader of that
+   PR then has to discount. It is not a sanctioned path and must not be used or recommended.
+
    **Clearing a `review:human` PR — `--to=clear-human` (#2895).** There IS a tool now; it is the fourth target,
    and the ONLY thing that removes `review:human`. Same invocation shape as the two lines above — one form for
    this tool everywhere, so `JSON.parse(stdout)` always works:
@@ -138,7 +153,14 @@ applies a label). The same module also renders the operator-facing notice for yo
    `--actor` and `--reason` are both mandatory; the tool refuses without either. Both land verbatim in the
    durable comment, which states in as many words what the record proves — that the sanctioned path was
    followed — and what it does NOT prove: that a human followed it. Do not describe it as proof of a human
-   anywhere. Do not route around the tool with a raw `gh pr edit` either (`check:standards` errors when this
+   anywhere.
+
+   **When this target clears a PR your own session opened** (the ordinary case — a subagent inherits its
+   parent's session id), the durable comment says so: *"Cleared by the HUMAN CEREMONY, not by an
+   established-independent agent (#2844)"*. That line is the honest record of what happened, and it is exactly
+   why `clear-human` is allowed to be exempt where `--to=accepted` is not — the ceremony demands the named
+   actor, the quoted reason, and a PR that already carries `review:human`. Do not describe such a clearance as
+   an independent review. Do not route around the tool with a raw `gh pr edit` either (`check:standards` errors when this
    file spells that): the tool carries the `review:accepted` label, the `reviewed-sha` stamp, and the attributed
    comment that the raw command loses. The durable fix for the missing signal is #2946 (a hardware
    human-presence gesture), filed `someday`; #2945 is the out-of-session console.
@@ -203,3 +225,8 @@ What actually matters:
   by a `lane/*` clone (an AI actor) and cleared by the human via this skill has a diff-producer distinct from its
   clearer. That holds *regardless* of the shared git login. This is the sanctioned path — present the verdict and,
   on the operator's OK, swap the label. Raise no author-self-accept caveat.
+- **…but the machine check is coarser than that judgement, and you will meet it.** #2844 compares
+  `CLAUDE_CODE_SESSION_ID`, which a subagent inherits from its parent, so a PR your session opened is a
+  *session-level* self-clear even when the human is the one clearing it. `--to=accepted` therefore refuses;
+  `--to=clear-human` does not (step 4 spells out both routes). Take the refusal at face value and use a route,
+  never a workaround.

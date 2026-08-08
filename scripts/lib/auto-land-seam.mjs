@@ -23,6 +23,15 @@
  *      allowed accept swap (its INVARIANT-2 refusal converts a would-be accept on a `review:human` PR into a
  *      keep-parked intent upstream), and the default label writer shells `review-set-label.mjs`, whose CLI
  *      re-enforces INVARIANT 2 at write time — a double lock.
+ *   4. NEVER auto-lands a SELF-CLEARED verdict (#2844). The clearing actor must be PROVABLY not the PR's author
+ *      — the #2439 bar, applying #2398's distinct-fresh-validator rule. Before #2844, INVARIANT 2 was the only
+ *      identity-shaped guard and it only binds a `review:human` PR; a `review:pending` PR had NO reviewer-identity
+ *      check at all, so this seam would have written `review:accepted` on a diff its own session authored,
+ *      including a diff to this very file. The rail is STRICT FAIL-CLOSED: `decideClearerIndependence` must return
+ *      `independent` — a proven self-clear AND both "cannot establish it" statuses (no author stamp on the PR, no
+ *      actor id in this process) all yield observe-only, in shadow AND enforce. A machine that cannot PROVE
+ *      independence does not land. See `we:scripts/lib/review-independence.mjs` for what the id rests on, and for
+ *      the plainly-stated residual (it is not an unforgeable signal; #2895 deferred that, #2946 is the fix).
  *
  * TRUST-CHAIN MEMBER (POLICY tier). This file is the acting end of the auto-dispose leash — it decides whether a
  * clean intent actually LANDS or only observes. Registered in `gate-config.mjs` `TRUST_CHAIN` as `tier: 'policy'`,
@@ -40,6 +49,7 @@ import { dirname, join } from 'node:path';
 import { REVIEW_LABELS } from './review-escalation.mjs';
 import { LAND_ACTIONS, decideDispositionLabel } from './disposition-land-seam.mjs';
 import { resolveDispositionConfig } from './review-policy.mjs';
+import { currentActorId, decideClearerIndependence } from './review-independence.mjs';
 
 /**
  * The two operating modes of the auto-land seam (#2675) — the GLOBAL `careJury.disposition.landMode` knob's values.
@@ -73,11 +83,14 @@ function observeOnly({ mode, action, reason, observation }) {
  * PURE: no I/O, deterministic — the same intent + mode always yield the same plan. It RETURNS the plan; it does NOT
  * apply it (that is `applyAutoLand`).
  *
- * @param {{ intent: import('./disposition-land-seam.mjs').DispositionLabelIntent, mode?: string }} o
+ * @param {{ intent: import('./disposition-land-seam.mjs').DispositionLabelIntent, mode?: string,
+ *           authorId?: string, clearerId?: string }} o
  *   `intent` is the #2674 intent; `mode` is the resolved `landMode` (`shadow` | `enforce`; anything else → shadow).
+ *   #2844 — `authorId` is the actor that OPENED the PR (the `authored-by-actor` stamp `pr-land.mjs` writes into
+ *   the PR body) and `clearerId` is the actor running THIS seam; both are required for a clear (SAFETY RAIL 4).
  * @returns {AutoLandPlan}
  */
-export function decideAutoLand({ intent, mode } = {}) {
+export function decideAutoLand({ intent, mode, authorId, clearerId } = {}) {
   // Normalize the mode FIRST — fail-closed: only the exact `enforce` string enables acting; everything else
   // (undefined, null, a typo, a future/unknown mode) is treated as SHADOW, the safe observe-only default.
   const effectiveMode = mode === LAND_MODES.ENFORCE ? LAND_MODES.ENFORCE : LAND_MODES.SHADOW;
@@ -118,6 +131,23 @@ export function decideAutoLand({ intent, mode } = {}) {
     });
   }
 
+  // SAFETY RAIL 4 (#2844) — the SELF-CLEAR refusal. The clearing actor must be PROVABLY distinct from the PR's
+  // author (#2439). Evaluated BEFORE the shadow branch on purpose: shadow is the DRY RUN of enforce, so a plan
+  // that would be refused in enforce must be recorded as refused in shadow too — a shadow line reading
+  // "WOULD write review:accepted" for a verdict enforce would never write is exactly the false confidence the
+  // observation period exists to avoid. Strict fail-closed: `unknown-author` and `unknown-clearer` refuse just
+  // like a proven `self-clear` — a machine that cannot PROVE independence does not land.
+  const independence = decideClearerIndependence({ authorId, clearerId });
+  if (!independence.independent) {
+    return observeOnly({
+      mode: effectiveMode,
+      action: intent.action,
+      reason: `self-clear-refused: ${independence.status}`,
+      observation: `auto-land: REFUSED to auto-clear — ${independence.reason}. No accept written (fail-closed; `
+        + 'the PR stays parked for an independent clearer or a human).',
+    });
+  }
+
   // SHADOW (the default) — OBSERVE only: log what it WOULD dispose, apply no label, merge nothing. A human clears.
   if (effectiveMode === LAND_MODES.SHADOW) {
     return observeOnly({
@@ -150,7 +180,11 @@ export function buildSetLabelArgs({ pr, repo }) {
 /** The default impure label writer — shell the existing INVARIANT-2-guarded `review-set-label.mjs` CLI to swap the
  *  parked review to `review:accepted` (it observes the PR's fresh labels, re-enforces INVARIANT 2, edits the labels,
  *  and posts a durable verdict comment). Single-sources the accept WRITE rather than re-implementing the `gh` calls.
- *  Throws on a non-zero exit (e.g. an INVARIANT-2 refusal) — `applyAutoLand` catches it and fails closed. */
+ *  Throws on a non-zero exit (e.g. an INVARIANT-2 refusal) — `applyAutoLand` catches it and fails closed.
+ *  #2844 — SAFETY RAIL 4 is double-locked the same way INVARIANT 2 is: the child inherits this process's
+ *  environment, so its own `currentActorId()` IS this seam's actor, and it re-reads the PR's `authored-by-actor`
+ *  stamp from `gh pr view` at write time. A self-clear that somehow got past the decider (a caller supplying a
+ *  bogus `authorId`) is refused again at the CLI, and that non-zero exit arrives here as a fail-closed error. */
 function defaultWriteAccept({ pr, repo }) {
   const cli = join(dirname(fileURLToPath(import.meta.url)), '..', 'review-set-label.mjs');
   execFileSync('node', [cli, ...buildSetLabelArgs({ pr, repo })], {
@@ -163,17 +197,27 @@ function defaultWriteAccept({ pr, repo }) {
  * line / the enforce log), and — ONLY on `apply` (a clean CLEAR in enforce) — invoke the label writer. FAIL-CLOSED:
  * any writer error is caught and returned as `{ landed:false, error }` (the PR stays parked); this never throws.
  *
- * @param {{ intent: object, mode?: string, pr: (number|string), repo: string }} o
+ * #2844 — the CLEARER's id is resolved HERE, from the harness session (`currentActorId()`), not taken from a
+ * caller-supplied flag: the whole point is an id the acting process cannot simply assert about itself in argv.
+ * A caller may still pass `clearerId` explicitly (the tests do, and a future host that runs the seam out of
+ * process needs to), which is a deliberate seam, not a bypass — supplying a WRONG id can only ever cause a
+ * refusal or a false self-clear match, never launder one; the value that would let a write through is the one
+ * the environment already holds. `authorId` comes from the PR's `authored-by-actor` body stamp; when the caller
+ * cannot supply it, SAFETY RAIL 4 refuses (fail-closed), which is the intended behaviour, not a gap.
+ *
+ * @param {{ intent: object, mode?: string, pr: (number|string), repo: string,
+ *           authorId?: string, clearerId?: string }} o
  * @param {{ writeAccept?: (o:{pr:(number|string),repo:string,setLabel:object})=>void, log?: (msg:string)=>void }} [deps]
  *   `writeAccept` is the injected label writer (default: shell review-set-label.mjs); `log` sinks the observation
  *   (default: stderr — the shadow ledger stream, kept off stdout so a JSON result stays clean).
  * @returns {{ landed: boolean, plan: AutoLandPlan, error?: string }}
  */
-export function applyAutoLand({ intent, mode, pr, repo } = {}, deps = {}) {
+export function applyAutoLand({ intent, mode, pr, repo, authorId, clearerId } = {}, deps = {}) {
   const writeAccept = typeof deps.writeAccept === 'function' ? deps.writeAccept : defaultWriteAccept;
   const log = typeof deps.log === 'function' ? deps.log : (msg) => process.stderr.write(`${msg}\n`);
 
-  const plan = decideAutoLand({ intent, mode });
+  const actor = typeof clearerId === 'string' ? clearerId : currentActorId();
+  const plan = decideAutoLand({ intent, mode, authorId, clearerId: actor });
   log(plan.observation);
 
   if (!plan.apply) return { landed: false, plan };
@@ -197,13 +241,17 @@ export function applyAutoLand({ intent, mode, pr, repo } = {}, deps = {}) {
  *
  * @param {{
  *   ledger?: Array<object>, signals?: object, mandatoryLenses?: string[], currentLabels?: Array,
- *   band?: string, override?: object, pr: (number|string), repo: string
+ *   band?: string, override?: object, pr: (number|string), repo: string,
+ *   authorId?: string, clearerId?: string
  * }} o - `ledger`/`signals`/`mandatoryLenses`/`currentLabels` feed #2674; `band`/`override` feed the config resolver
- *   (landMode is global-only, so neither changes it); `pr`/`repo` name the PR to act on.
+ *   (landMode is global-only, so neither changes it); `pr`/`repo` name the PR to act on. #2844 —
+ *   `authorId`/`clearerId` feed SAFETY RAIL 4; omitting `authorId` refuses the clear (fail-closed).
  * @param {object} [deps] - forwarded to `applyAutoLand` (`writeAccept`, `log`).
  * @returns {{ landed: boolean, plan: AutoLandPlan, intent: object, error?: string }}
  */
-export function runAutoLandSeam({ ledger, signals, mandatoryLenses, currentLabels, band, override, pr, repo } = {}, deps = {}) {
+export function runAutoLandSeam({
+  ledger, signals, mandatoryLenses, currentLabels, band, override, pr, repo, authorId, clearerId,
+} = {}, deps = {}) {
   // FAIL-CLOSED at the OUTER boundary too — decideDispositionLabel is fail-closed by construction, but
   // resolveDispositionConfig CAN throw on a bad band/override. A throw here must NEVER escape into the caller's
   // land loop (INVARIANT 4): catch it, act on nothing, keep the PR parked.
@@ -217,6 +265,6 @@ export function runAutoLandSeam({ ledger, signals, mandatoryLenses, currentLabel
     return { landed: false, plan: null, intent: null, error };
   }
   const intent = decideDispositionLabel({ ledger, config, signals, mandatoryLenses, currentLabels });
-  const res = applyAutoLand({ intent, mode: config.landMode, pr, repo }, deps);
+  const res = applyAutoLand({ intent, mode: config.landMode, pr, repo, authorId, clearerId }, deps);
   return { ...res, intent };
 }

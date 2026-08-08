@@ -91,19 +91,26 @@ export function partitionRunnerPRs(prs) {
  * `plan.action === 'clear'` (it records WOULD-clear) but is never applied. Flipping the runner to act is a
  * separate ratified step; this slice cannot.
  *
+ * #2844 — `authorId`/`clearerId` ride through to the seam's SELF-CLEAR rail. The runner passes whatever it can
+ * observe; when it can observe neither (the common case today — a PR opened before the `authored-by-actor` stamp
+ * existed), the seam records a REFUSED-to-clear shadow line instead of a WOULD-write one. That is the honest
+ * dry run: it reports what an enforce runner would actually do, which is refuse.
+ *
  * @param {{ ledger?: Array<object>, config: object, signals?: object, mandatoryLenses?: string[],
- *           currentLabels?: Array }} o - `config` is a RESOLVED #2651 disposition config
- *   (`resolveDispositionConfig`); `currentLabels` are the PR's OBSERVED labels (enforces the INVARIANT-2 refusal
- *   on the clear branch via `decideDispositionLabel`).
+ *           currentLabels?: Array, authorId?: string, clearerId?: string }} o - `config` is a RESOLVED #2651
+ *   disposition config (`resolveDispositionConfig`); `currentLabels` are the PR's OBSERVED labels (enforces the
+ *   INVARIANT-2 refusal on the clear branch via `decideDispositionLabel`).
  * @returns {{ intent: import('./disposition-land-seam.mjs').DispositionLabelIntent,
  *             plan: import('./auto-land-seam.mjs').AutoLandPlan }}
  */
-export function runnerShadowPlan({ ledger = [], config, signals = {}, mandatoryLenses, currentLabels = [] } = {}) {
+export function runnerShadowPlan({
+  ledger = [], config, signals = {}, mandatoryLenses, currentLabels = [], authorId, clearerId,
+} = {}) {
   const intent = decideDispositionLabel({ ledger, config, signals, mandatoryLenses, currentLabels });
   // FORCED SHADOW — the runner NEVER passes enforce (see the module header). decideAutoLand normalizes any
   // non-`enforce` mode to shadow, but we pass the explicit SHADOW constant to make the observe-only intent
   // unmistakable at the call site: the returned plan is ALWAYS apply:false.
-  const plan = decideAutoLand({ intent, mode: LAND_MODES.SHADOW });
+  const plan = decideAutoLand({ intent, mode: LAND_MODES.SHADOW, authorId, clearerId });
   return { intent, plan };
 }
 
