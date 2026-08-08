@@ -60,6 +60,47 @@ const DISPOSITION_KNOB_KEYS = ['lensWeights', 'dissentThreshold', 'resolutionMod
 // here and read straight from the global default, never merged through the override precedence.
 const VALID_LAND_MODES = new Set(['shadow', 'enforce']);
 
+// The NOT-YET-IMPLEMENTED marker (`todo` + `owedTo`). `TODO_MARKER_SECTIONS` is the closed set of contract
+// sections the marker may be declared legal on — the contract's own `todoMarker.appliesTo` must be a subset, so a
+// typo there ("reason", "resons") is a load-time error rather than a marker that silently applies to nothing.
+const TODO_MARKER_SECTIONS = new Set(['reasons']);
+// A backlog item reference: a landed `NNN` number or an in-flight `xNNNNNN` hash (#2288), with an optional
+// leading `#`. Deliberately a SHAPE check only — whether the item is still OPEN is not knowable here.
+// review-policy.mjs is a trust-chain LEAF that imports only fs/path; reading the backlog directory at import time
+// would couple the gate's own loader to the tracker and make a malformed item file able to break the gate. The
+// still-OPEN check is the conformance suite's job (`review-policy.conformance.test.mjs`), mirroring how #2844
+// keeps its `isOpenItem` predicate injected rather than baked into the pure rule.
+const OWED_TO_RE = /^#?(?:\d{3,}|x[0-9a-z]{6,8})$/;
+
+/**
+ * Validate ONE entry's not-yet-implemented marker (`todo` + `owedTo`). The two fields are inseparable in BOTH
+ * directions, and each direction is a distinct failure worth its own message:
+ *   • `todo` without `owedTo` is the free pass the marker exists to prevent — a declaration with nobody owing it.
+ *   • `owedTo` without `todo` claims an entry that IS implemented still owes work — a stale pointer that reads as
+ *     debt while nothing is outstanding.
+ * `todo` must be the literal `true`; `todo: false` is refused so "implemented" has exactly one spelling (absent).
+ * @param {*} entry the contract entry (a reason today)
+ * @param {(msg: string) => never} fail
+ * @param {string} where a label for error messages
+ */
+function validateTodoMarker(entry, fail, where) {
+  const hasTodo = entry.todo !== undefined;
+  const hasOwedTo = entry.owedTo !== undefined;
+  if (!hasTodo && !hasOwedTo) return;
+  if (hasTodo && entry.todo !== true) {
+    fail(`${where}.todo must be the literal true when present (omit the field entirely for an implemented entry)`);
+  }
+  if (hasTodo && !hasOwedTo) {
+    fail(`${where} is marked todo but has no owedTo — a todo entry must name the OPEN backlog item that owes it`);
+  }
+  if (hasOwedTo && !hasTodo) {
+    fail(`${where} has owedTo "${entry.owedTo}" but is not marked todo — owedTo is meaningless on an implemented entry`);
+  }
+  if (typeof entry.owedTo !== 'string' || !OWED_TO_RE.test(entry.owedTo.trim())) {
+    fail(`${where}.owedTo must name a backlog item as "NNN" or "xNNNNNN" (an optional leading # is allowed)`);
+  }
+}
+
 /**
  * Validate the disposition-config knob shape (#2651) — shared by the global default block and each optional
  * per-band override (a band override is PARTIAL: any knob it omits inherits the global default). `require` gates
@@ -115,10 +156,16 @@ function validateDispositionKnobs(d, fail, where, require) {
 /**
  * Validate the parsed contract's SHAPE (the meta-schema / static-conformance check, done in plain JS to stay
  * dependency-free). Throws on any structural defect so a broken contract can never load and silently mis-gate.
+ *
+ * EXPORTED for the conformance suite only. Nothing in the runtime path calls it — the module invokes it once at
+ * import, below. It is exported so the suite can drive MALFORMED contracts through it as fixtures; the
+ * `todo`/`owedTo` pairing rule in particular is only a real rule if a contract that breaks it is proven to be
+ * REFUSED, and a rule proven by prose alone is exactly what this contract exists to stop being.
+ *
  * @param {*} c
  * @returns {object} the same object (for chaining), once proven well-formed.
  */
-function validateContract(c) {
+export function validateContract(c) {
   const fail = (msg) => { throw new Error(`review-policy contract invalid: ${msg}`); };
   if (!c || typeof c !== 'object') fail('not an object');
 
@@ -131,7 +178,22 @@ function validateContract(c) {
     if (typeof entry.value !== 'number' || !Number.isFinite(entry.value)) fail(`threshold "${key}".value must be a finite number`);
   }
 
-  // reasons — a non-empty array of unique { token, family, clearance, description }
+  // todoMarker — the not-yet-implemented marker's prose home + the sections it is legal on. REQUIRED: the marker
+  // is part of the contract's vocabulary whether or not any entry currently uses it, and a reader hitting a `todo`
+  // field must have somewhere to look up what it costs. `appliesTo` is DATA so "where may an entry declare itself
+  // unbuilt?" is answerable by reading the contract, not by reading this validator.
+  const tm = c.todoMarker;
+  if (!tm || typeof tm !== 'object' || Array.isArray(tm)) fail('missing todoMarker');
+  if (typeof tm.description !== 'string' || !tm.description.trim()) fail('todoMarker has no description prose');
+  if (!Array.isArray(tm.appliesTo) || tm.appliesTo.length === 0) fail('todoMarker.appliesTo must be a non-empty array');
+  for (const section of tm.appliesTo) {
+    if (!TODO_MARKER_SECTIONS.has(section)) fail(`todoMarker.appliesTo names unknown section "${section}"`);
+  }
+  if (new Set(tm.appliesTo).size !== tm.appliesTo.length) fail('todoMarker.appliesTo has duplicates');
+  const todoAllowedOnReasons = tm.appliesTo.includes('reasons');
+
+  // reasons — a non-empty array of unique { token, family, clearance, description }, each OPTIONALLY marked
+  // not-yet-implemented via { todo: true, owedTo }.
   if (!Array.isArray(c.reasons) || c.reasons.length === 0) fail('reasons must be a non-empty array');
   const seen = new Set();
   for (const r of c.reasons) {
@@ -142,6 +204,12 @@ function validateContract(c) {
     if (!VALID_FAMILIES.has(r.family)) fail(`reason "${r.token}" has invalid family "${r.family}"`);
     if (!VALID_CLEARANCES.has(r.clearance)) fail(`reason "${r.token}" has invalid clearance "${r.clearance}"`);
     if (typeof r.description !== 'string' || !r.description.trim()) fail(`reason "${r.token}" has no description prose`);
+    // A `todo` reason still declares a FULL entry (family, clearance, prose) — the marker says the CODE has not
+    // caught up, not that the spec is half-written. So the checks above run first and unconditionally.
+    if ((r.todo !== undefined || r.owedTo !== undefined) && !todoAllowedOnReasons) {
+      fail(`reason "${r.token}" carries a todo marker, but todoMarker.appliesTo does not include "reasons"`);
+    }
+    validateTodoMarker(r, fail, `reason "${r.token}"`);
   }
 
   // disposition.precedence — an ordered, non-empty list of { match, mode, autoLand }
@@ -325,23 +393,100 @@ function mergeLensWeights(base, patch) {
   return out;
 }
 
-/** token → { family, clearance }, for O(1) classification lookups. */
-const REASON_META = new Map(REVIEW_POLICY.reasons.map((r) => [r.token, { family: r.family, clearance: r.clearance }]));
+/**
+ * THE TODO PARTITION. Every derived constant below splits the contract's reason entries in two, and which side an
+ * entry lands on is the whole point of the marker:
+ *
+ *   • LIVE entries (no `todo`) are the policy the code realizes. They flow into every constant the impl imports.
+ *   • TODO entries (`todo: true` + `owedTo`) are DECLARED VOCABULARY WITH NO CODE BEHIND THEM YET. They are INERT:
+ *     excluded from the token list, the family groups, the human-clearance set, and the disposition oracle's
+ *     lookup map — so a not-yet-implemented reason can never reach runtime classification, can never be
+ *     canonicalized out of a decorated string, and can never change a single PR's disposition. Declaring one
+ *     reserves the token and names the debt; it does nothing else.
+ *
+ * That inertness is what makes the marker safe to hand to an author mid-split, and it is also what lets the
+ * conformance suite pin `POLICY_REASON_TOKENS` EXACTLY equal to the code enum again — the containment relaxation
+ * (#2839) survives as the `todo` escape hatch rather than as a permanently loose pin.
+ */
+/**
+ * Split a contract's reason entries into the LIVE half and the not-yet-implemented half. PURE and EXPORTED —
+ * every derived constant below is built from it, and the conformance suite drives it with synthetic entries. That
+ * matters more than it looks: zero real entries are marked `todo` today, so a partition wired only to the live
+ * contract would be tested entirely against the empty case and could ship inverted without a red test.
+ * @param {Array<{token: string, todo?: boolean, owedTo?: string}>} reasons
+ * @returns {{live: Array<object>, todoOwedTo: Map<string, string>}} `todoOwedTo` maps a todo token → its backlog
+ *   item id with any leading `#` stripped.
+ */
+export function partitionReasons(reasons) {
+  const list = Array.isArray(reasons) ? reasons : [];
+  return {
+    live: list.filter((r) => r.todo !== true),
+    todoOwedTo: new Map(
+      list.filter((r) => r.todo === true).map((r) => [r.token, String(r.owedTo).trim().replace(/^#/, '')]),
+    ),
+  };
+}
 
-/** Every reason token, in contract order. Frozen — `review-core.mjs`'s ALL_REASON_TOKENS imports this. */
-export const POLICY_REASON_TOKENS = Object.freeze(REVIEW_POLICY.reasons.map((r) => r.token));
+/**
+ * The message for reason token(s) the oracle cannot dispose. PURE and EXPORTED so both branches are provable
+ * without a contract that carries a todo entry. The two cases must stay distinguishable: "unknown reason" sends
+ * the reader hunting for a typo, when the real answer may be "this reason is spec'd, nobody built it, and here is
+ * the item that owes it". Collapsing them would make the marker invisible at exactly the moment it matters.
+ * @param {string[]} unresolved tokens that produced no live classification
+ * @param {Map<string, string>} todoOwedTo token → owing backlog item, for the declared-but-unbuilt entries
+ * @returns {string}
+ */
+export function unresolvedReasonMessage(unresolved, todoOwedTo) {
+  const owed = unresolved.filter((t) => todoOwedTo.has(t));
+  if (owed.length) {
+    return 'derivePolicyDisposition: reason(s) declared NOT YET IMPLEMENTED in the contract: ' +
+      `${owed.map((t) => `${t} (owedTo #${todoOwedTo.get(t)})`).join(', ')} — ` +
+      'a todo reason is inert and cannot dispose a PR; land its impl and drop the todo marker first.';
+  }
+  return `derivePolicyDisposition: unknown reason(s): ${unresolved.join(', ')}`;
+}
 
-/** Reason tokens grouped by family — `{ sensitivity: [...], deadlock: [...] }`. Frozen (shallow arrays frozen too). */
+const { live: LIVE_REASONS, todoOwedTo: TODO_OWED_BY_TOKEN } = partitionReasons(REVIEW_POLICY.reasons);
+
+/** token → { family, clearance }, for O(1) classification lookups. LIVE reasons only (a todo entry is inert). */
+const REASON_META = new Map(LIVE_REASONS.map((r) => [r.token, { family: r.family, clearance: r.clearance }]));
+
+/** The not-yet-implemented marker block (prose + the sections it is legal on). Already deep-frozen via REVIEW_POLICY. */
+export const POLICY_TODO_MARKER = REVIEW_POLICY.todoMarker;
+
+/**
+ * Every reason token the code is expected to IMPLEMENT, in contract order — i.e. the declared reasons MINUS the
+ * ones marked `todo`. Frozen; `review-core.mjs`'s ALL_REASON_TOKENS imports this.
+ *
+ * NOTE the name kept its original spelling on purpose: this constant's CONTRACT has always been "the tokens the
+ * impl must know about", and that is unchanged — the todo marker only gives an entry a way to opt OUT of it. The
+ * full declared vocabulary (todo entries included) is `POLICY_DECLARED_REASON_TOKENS` below, which exists for
+ * spec-side readers, not for the impl.
+ */
+export const POLICY_REASON_TOKENS = Object.freeze(LIVE_REASONS.map((r) => r.token));
+
+/** EVERY token the contract declares, todo entries included — the spec-side vocabulary. Frozen. Use this only to
+ *  reason ABOUT the contract (docs, the conformance suite's partition checks); never to classify a real reason. */
+export const POLICY_DECLARED_REASON_TOKENS = Object.freeze(REVIEW_POLICY.reasons.map((r) => r.token));
+
+/** The tokens declared NOT YET IMPLEMENTED (`todo: true`), in contract order. Empty today. Frozen. */
+export const POLICY_TODO_REASON_TOKENS = Object.freeze([...TODO_OWED_BY_TOKEN.keys()]);
+
+/** token → the backlog item id that owes its implementation (`#` stripped), for every `todo` reason. Frozen. */
+export const POLICY_TODO_OWED_TO = Object.freeze(Object.fromEntries(TODO_OWED_BY_TOKEN));
+
+/** Reason tokens grouped by family — `{ sensitivity: [...], deadlock: [...] }`. LIVE reasons only.
+ *  Frozen (shallow arrays frozen too). */
 export const POLICY_REASONS_BY_FAMILY = Object.freeze({
-  sensitivity: Object.freeze(REVIEW_POLICY.reasons.filter((r) => r.family === 'sensitivity').map((r) => r.token)),
-  deadlock: Object.freeze(REVIEW_POLICY.reasons.filter((r) => r.family === 'deadlock').map((r) => r.token)),
+  sensitivity: Object.freeze(LIVE_REASONS.filter((r) => r.family === 'sensitivity').map((r) => r.token)),
+  deadlock: Object.freeze(LIVE_REASONS.filter((r) => r.family === 'deadlock').map((r) => r.token)),
 });
 
 /** The SENSITIVITY reasons that still require a human to clear (clearance:human ∧ family:sensitivity — gate-self,
  *  statute). Deadlock reasons are human too but are handled by the earlier precedence rule, so they are excluded
  *  here to mirror review-core.mjs's HUMAN_SENSITIVITY_REASONS exactly. Frozen. */
 export const POLICY_HUMAN_SENSITIVITY_REASONS = Object.freeze(
-  REVIEW_POLICY.reasons.filter((r) => r.family === 'sensitivity' && r.clearance === 'human').map((r) => r.token),
+  LIVE_REASONS.filter((r) => r.family === 'sensitivity' && r.clearance === 'human').map((r) => r.token),
 );
 
 /** Does a reason's meta satisfy a precedence rule's single-key match predicate? Pure. */
@@ -367,7 +512,9 @@ export function derivePolicyDisposition({ reason, reasons } = {}) {
   if (!raw.length) throw new Error('derivePolicyDisposition: at least one reason is required');
   const metas = raw.map((tok) => ({ tok, meta: REASON_META.get(tok) }));
   const unknown = metas.filter((m) => !m.meta).map((m) => m.tok);
-  if (unknown.length) throw new Error(`derivePolicyDisposition: unknown reason(s): ${unknown.join(', ')}`);
+  // A `todo` token is DECLARED but inert (see THE TODO PARTITION above), so it lands here alongside genuinely
+  // unknown tokens; `unresolvedReasonMessage` tells the two apart.
+  if (unknown.length) throw new Error(unresolvedReasonMessage(unknown, TODO_OWED_BY_TOKEN));
   for (const rule of REVIEW_POLICY.disposition.precedence) {
     if (metas.some((m) => matchesRule(rule.match, m.meta))) return { mode: rule.mode, autoLand: rule.autoLand };
   }
