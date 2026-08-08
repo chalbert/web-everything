@@ -7,8 +7,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, PARK_LABELS } from '../pr-land.mjs';
-import { REVIEW_LABELS, REVIEW_LABEL_META } from '../lib/review-escalation.mjs';
+import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, PARK_LABELS, decideHoldReadyStrip } from '../pr-land.mjs';
+import { REVIEW_LABELS, REVIEW_LABEL_META, READY_TO_MERGE_LABEL } from '../lib/review-escalation.mjs';
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
   it('a DECLARATIVE-LEASH diff (the roster — the encoded policy itself) → review:human, applied', () => {
@@ -50,6 +50,63 @@ describe('resolveProducerReviewLabel — #2307 deterministic review-escalation l
     const v = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10, currentLabels: [REVIEW_LABELS.pending] });
     expect(v.label).toBe(REVIEW_LABELS.pending);
     expect(v.apply).toBe(false);
+  });
+});
+
+describe('decideHoldReadyStrip — #2832/#984 findings 4+5 (held signal + observed-label strip gate)', () => {
+  const rtm = READY_TO_MERGE_LABEL;
+  it('#5 — a held PR that OBSERVABLY carries ready-to-merge is stripped, regardless of this run\'s applyLabel', () => {
+    // currentLabels reflects the PR (add succeeded on a prior run / this run); the strip fires off THAT, not a
+    // this-run `labelApplied` flag — so a transient add failure this pass can never leave a stale go-ahead.
+    for (const hold of [REVIEW_LABELS.human, REVIEW_LABELS.pending, REVIEW_LABELS.changes]) {
+      expect(decideHoldReadyStrip(hold, [rtm])).toEqual({ held: true, strip: true });
+    }
+  });
+  it('#4 — a held PR with NO ready-to-merge to strip is STILL flagged held (distinct from an apply failure)', () => {
+    // No go-ahead present ⇒ nothing to strip, but the PR is deliberately held — `held` stays true so the workflow
+    // never re-labels it. This is the signal that is NOT `labelApplied:false`.
+    expect(decideHoldReadyStrip(REVIEW_LABELS.human, [])).toEqual({ held: true, strip: false });
+    expect(decideHoldReadyStrip(REVIEW_LABELS.pending, ['some:other'])).toEqual({ held: true, strip: false });
+  });
+  it('a non-hold verdict (or null) is neither held nor a strip — a clean/accepted PR keeps its go-ahead', () => {
+    expect(decideHoldReadyStrip(null, [rtm])).toEqual({ held: false, strip: false });
+    expect(decideHoldReadyStrip(REVIEW_LABELS.accepted, [rtm])).toEqual({ held: false, strip: false });
+  });
+  it('handles {name}-shaped observed labels, not just strings', () => {
+    expect(decideHoldReadyStrip(REVIEW_LABELS.human, [{ name: rtm }])).toEqual({ held: true, strip: true });
+  });
+  it('#984 R4 — an OBSERVED hold is STICKY: a clean fresh verdict on an already-held PR is STILL held (and strips a stray go-ahead)', () => {
+    // The fresh rubric came back clean (verdict null / accepted), but the PR ALREADY carries review:human (a prior
+    // park, a #2409 re-park, a human). Without stickiness pr-land emits held:false and its unconditional
+    // applyLabel() leaves the PR held AND ready — the forbidden state. `held` must stay true off the observed hold.
+    expect(decideHoldReadyStrip(null, [REVIEW_LABELS.human, rtm])).toEqual({ held: true, strip: true });
+    expect(decideHoldReadyStrip(REVIEW_LABELS.accepted, [REVIEW_LABELS.pending])).toEqual({ held: true, strip: false });
+  });
+  it('#984 minor 1 — the strip is belt-and-braced on this-run labelApplied when the live label read FAILS OPEN to []', () => {
+    // A transient `gh pr view --json labels` miss caught to currentLabels=[] would (off observed labels alone)
+    // return strip:false and leave the go-ahead this run just stamped. `labelApplied` (this run added ready-to-merge)
+    // forces the strip so a held PR is never left ready on a read hiccup.
+    expect(decideHoldReadyStrip(REVIEW_LABELS.human, [], { labelApplied: true })).toEqual({ held: true, strip: true });
+    // …but without the go-ahead actually present or applied this run, there is nothing to strip.
+    expect(decideHoldReadyStrip(REVIEW_LABELS.human, [], { labelApplied: false })).toEqual({ held: true, strip: false });
+  });
+  // #984 F3 — THE MISSING SHAPE, and the exact boundary of what the `labelApplied` belt can cover. The belt
+  // engages only once `held` is true, and with a failed label read (`currentLabels` caught to `[]`) AND a clean
+  // fresh verdict there is NO hold evidence from either input — so a genuinely held PR this run just stamped is
+  // left held-and-ready. That is a real residual and it is pinned here rather than papered over.
+  //
+  // It is NOT fixable by widening: computing `strip` from `labelApplied` independently of `held` (the review's
+  // suggested shape) would strip the go-ahead from EVERY healthy PR the producer just stamped — the second
+  // assertion below is what that widening would break. The residual is covered DOWNSTREAM instead, by the
+  // drain's `decideParkReadyStrip` seam, which strips on observed holds every pass for all three hold labels
+  // with no dependence on this run's reads. The doc on `decideHoldReadyStrip` states exactly this scope.
+  it('#984 F3 — a clean fresh verdict + a failed label read is NOT held, so the belt does not engage', () => {
+    expect(decideHoldReadyStrip(null, [], { labelApplied: true })).toEqual({ held: false, strip: false });
+  });
+  it('#984 F3 — and it must stay that way: a healthy PR must never be un-queued by its own go-ahead stamp', () => {
+    // The happy path — clean rubric, no hold anywhere, this run added ready-to-merge. `strip` MUST be false.
+    expect(decideHoldReadyStrip(null, [READY_TO_MERGE_LABEL], { labelApplied: true })).toEqual({ held: false, strip: false });
+    expect(decideHoldReadyStrip(REVIEW_LABELS.accepted, [READY_TO_MERGE_LABEL], { labelApplied: true })).toEqual({ held: false, strip: false });
   });
 });
 
@@ -336,6 +393,17 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     expect(src).toMatch(/\/\^lane\\\//);        // enforces --ref starts with lane/
     expect(src).not.toMatch(/--force/);          // never force
   });
+  it('#2832/#984: a producer that applies a review-HOLD strips ready-to-merge (never leaves held AND ready)', () => {
+    // The strip decision comes from the pure `decideHoldReadyStrip` (findings 4+5, R4, minor-1): it is judged on
+    // the OBSERVED label set (`currentLabels`) — so a stale go-ahead on an already-ready held PR is stripped even
+    // when this run's add hit a transient gh failure (#984 #5) — AND, belt-and-braces, on this run's `labelApplied`
+    // so a PR THIS run just stamped is stripped even if the live label read failed OPEN to `[]` (#984 minor 1).
+    expect(src).toMatch(/const holdDecision = decideHoldReadyStrip\(verdict\.label, currentLabels, \{ labelApplied \}\)/);
+    expect(src).toMatch(/if \(holdDecision\.strip\)/);
+    expect(src).toMatch(/'--remove-label', READY_TO_MERGE_LABEL/);
+    // The pre-#984 round-1 guard (strip gated SOLELY on this-run's applyLabel via a forked predicate) stays gone.
+    expect(src).not.toMatch(/isReviewHoldLabel\(verdict\.label\) && labelApplied/);
+  });
   it('aborts on a red required check (never merges a red PR)', () => {
     expect(src).toMatch(/check-red/);            // the abort path exists
     // The functional guarantee that no --auto native-queue flag is ever emitted is covered by the
@@ -384,6 +452,12 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     // points can never disagree on the same flag/env pair.
     expect(src).toMatch(/resolveVerifyOptions\(\{ flags, env: process\.env \}\)/);
     expect(src).toMatch(/WE_LAND_UNVERIFIED/);
+  });
+  it('#984 R4: the --park emit carries held:true (a parked PR is held by definition → the workflow never re-labels it)', () => {
+    // The park branch emits `held: true` alongside `reason: 'parked'` so Finalize does not mistake a deliberate
+    // hold for a `labelApplied:false` un-labelled strand (which it would re-run pr-land --label-on-green on).
+    const parkBlock = src.slice(src.indexOf("reason: 'parked'"), src.indexOf("reason: 'parked'") + 700);
+    expect(parkBlock).toMatch(/label: null, labelApplied: false, held: true/);
   });
   it('#2622: every PARK_LABELS value has REVIEW_LABEL_META (so the park label provision never crashes on undefined)', () => {
     for (const label of PARK_LABELS) {
