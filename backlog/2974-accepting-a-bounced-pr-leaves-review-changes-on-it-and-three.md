@@ -37,6 +37,23 @@ accepted-check anywhere in the function:
 Accepted-first ordering is a property of two functions, not of the label set. Every consumer that does
 not replicate that ordering sees a PR that is simultaneously accepted and bounced.
 
+## Seen again, six more times (2026-08-08)
+
+An overnight review-and-merge pass hit this on every bounced PR it cleared — #1024, #1019, #1018,
+#1034, #1021, #1068 — and had to drop the label by hand with `gh pr edit --remove-label` each time.
+That hand-edit is exactly the out-of-band label mutation the CLI exists to prevent.
+
+One fact to fold into the fix: the `rearm` target (`changes → pending`, #2644) that would otherwise
+be the sanctioned way out **is unreachable from this CLI**. `REVIEW_LABEL_TARGETS` and
+`decideSetLabel`'s `rearm` branch both exist, and `we:scripts/conveyor/rearm-review.mjs` calls it via
+`fixedTo` — but the operator-facing argv parser only accepts `accepted|changes|clear-human` and
+fails with `invalid --to — expected 'accepted', 'changes', or 'clear-human'`. So today there is no
+supported path at all from `review:changes` to `review:accepted`.
+
+Worse than the stale label: `--to=accepted` on a bounced PR returns `{"ok":true,...}` while producing
+a self-contradictory label set. Whatever the fix, that call must not report success while leaving
+`accepted` and `changes` together.
+
 ## Fix
 
 Add `REVIEW_LABELS.changes` to the `accepted` branch's `removeLabels`. `presentRemoveLabels` already
@@ -48,3 +65,7 @@ decider is single-sourced, so one edit covers the CLI, the drain, and the convey
 - `decideSetLabel({ to: 'accepted' })` drops `review:changes` alongside `review:pending`.
 - A unit case pins it — accepting a PR carrying `changes` leaves neither `changes` nor `pending`.
 - The invariant that `accepted` never removes `review:human` is unchanged and still tested.
+- Either `rearm` is reachable from the CLI's `--to`, or the `accepted` target handles the bounced
+  case itself. A reviewer clearing a fixed PR never needs `gh pr edit`.
+- `--to=accepted` never returns `ok:true` while leaving `review:accepted` and `review:changes`
+  together.
