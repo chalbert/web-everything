@@ -40,6 +40,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { readQueueFile, resolveQueuePath, normNum } from '../conveyor/queue-store.mjs';
+import { collapseRollupToLatestPerName } from '../merge-ai-prs.mjs';
 // #2659 — the infra-blocked state: a delivery/prepare agent that PUSHED its lane ref but failed PR-open on an
 // outside dependency lands here (not a stall / gate-red). `deriveInfraByNum` is PURE (no fs/clock — it takes the
 // raw store + injected `now`), safe for the pure core; the IO shell reads the sidecar via `readInfraStore`.
@@ -157,11 +158,16 @@ export function reverseLaneItemMap(reg) {
  * Distill a `gh pr` `statusCheckRollup` array into ONE CI token: `pass` (all complete & successful), `fail` (any
  * definitively-failed check), `pending` (any still-running / queued check, none failed), or `none` (no checks).
  * A definitively-red conclusion wins over pending; pending wins over pass. Never throws on a malformed rollup.
+ *
+ * #2925 — COLLAPSED TO THE LATEST ENTRY PER CHECK NAME FIRST (`collapseRollupToLatestPerName`,
+ * `we:scripts/merge-ai-prs.mjs`), same rule `latestRequiredCheck` uses. This distils ALL checks into one token
+ * rather than picking one out, so without the per-name collapse a superseded `CANCELLED` entry beside a later
+ * `SUCCESS` for the same name still wins the `anyFail` fold even though the check that finished is green.
  * @param {Array<object>|null|undefined} statusCheckRollup
  * @returns {'pass'|'fail'|'pending'|'none'}
  */
 export function ciRollup(statusCheckRollup) {
-  const roll = Array.isArray(statusCheckRollup) ? statusCheckRollup : [];
+  const roll = collapseRollupToLatestPerName(statusCheckRollup);
   if (roll.length === 0) return 'none';
   const RED = new Set(['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
   const DONE_OK = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);

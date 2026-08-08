@@ -1,8 +1,10 @@
 ---
 bornAs: xd3yhmz
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-05"
+dateStarted: "2026-08-08"
+dateResolved: "2026-08-08"
 tags: [drain, ci, gate, conveyor]
 scope:
   - we:scripts/readiness/conveyor-state.mjs
