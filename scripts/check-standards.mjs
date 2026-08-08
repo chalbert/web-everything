@@ -38,6 +38,8 @@ import { loadSemantics } from './lib/semantics-loader.cjs';
 import { loadPresets } from './lib/presets-loader.cjs';
 import { loadDataRegistry } from './lib/registry-loader.cjs';
 import { loadAdapters } from './lib/adapters-loader.cjs';
+import { localToday } from './lib/local-date.mjs';
+import { findUtcDaySlices, utcDaySliceMessage } from './lib/utc-day-slice-scan.mjs';
 import {
   BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, validatePolyglotWideningGate, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance, computeDesignKnowledgeConformance,
@@ -843,12 +845,25 @@ for (const item of backlog) {
 // (standalone: `npm run check:backlog-workflow`).
 try {
   const { validateWorkflowInvariants } = require('./lib/workflow-invariants.cjs');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const { errors: we, warnings: ww } = validateWorkflowInvariants(backlog, { today });
   for (const e of we) err(e.message, e.descriptor);
   for (const w of ww) warn(w.message, w.descriptor);
 } catch (e) {
   err(`Backlog workflow-intent invariants check failed: ${e.message}`);
+}
+
+// Operator-local date stamps (#2747). The rule "a date-only stamp is the operator's calendar day, never
+// the runtime's UTC day" is enforced here rather than left as prose in `scripts/lib/local-date.mjs`: the
+// idiom it replaces is one line and re-introduces the bug silently (see lib/utc-day-slice-scan.mjs).
+try {
+  // Each hit carries its own `file`/`line`, so it MUST be attributed (#952/#1389/#1144): without a
+  // descriptor, `--scope=<slug>` classes it "unattributable" and reds a concurrent session on a file it
+  // never touched, while `--local --files=<lane set>` demotes it to a note — a false green at this seam.
+  for (const hit of findUtcDaySlices(join(ROOT, 'scripts'), ROOT))
+    err(utcDaySliceMessage(hit), { kind: 'utc-day-slice', fix: 'model', file: hit.file, line: hit.line });
+} catch (e) {
+  err(`UTC day-slice scan failed: ${e.message}`);
 }
 
 // Epic ↔ child status coherence (docs/agent/backlog-workflow.md → "Closing out" step 4):
