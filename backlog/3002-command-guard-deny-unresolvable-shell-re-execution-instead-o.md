@@ -5,6 +5,9 @@ size: 5
 parent: "2405"
 status: open
 dateOpened: "2026-08-08"
+costTokens: "in:106 cw:235577 cr:8979804 out:34802"
+costUsd: 7.72
+costSessions: 1
 relatedTo: ["2986", "2994", "2749", "2999"]
 scope: ["we:scripts/guard-bash.mjs", "we:scripts/__tests__/guard-bash.test.mjs"]
 tags: [guard, security, shell, re-execution, fail-closed, governance]

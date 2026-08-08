@@ -5,6 +5,9 @@ size: 5
 parent: "2405"
 status: open
 dateOpened: "2026-08-08"
+costTokens: "in:106 cw:235576 cr:8979804 out:34801"
+costUsd: 7.72
+costSessions: 1
 relatedTo: ["2771", "2785"]
 scope: ["we:scripts/backlog.mjs", "we:scripts/lib/gate-config.mjs", "we:scripts/lib/review-escalation.mjs", "we:scripts/pr-land.mjs"]
 tags: [codification, statute, review-human, escalation, provenance, governance]
