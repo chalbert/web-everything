@@ -786,6 +786,46 @@ Present the proposed slices + DAG for the candidate(s) and get **one "go"** befo
 
 A split **opens** items and (for a story) converts one — it never `resolve`s the original (its scope now lives in the children) and never deletes anything. Report the result as a net-flow line (`+<slices opened>`, original story → epic, or an already-epic left in place) and point `/batch` at the freshly-batchable slices.
 
+## Consolidating related items — group only when it's genuinely one job {#consolidating}
+
+> Use via the `consolidate-backlog-items` skill (`/consolidate`). Consolidation is the **inverse of splitting**: it takes items **already filed** that are really *one job* and groups them into a logical set — an **umbrella epic** or a **batch pack** — so they get worked together instead of drifting apart. As with `/split`, the output is **always a report** and the on-disk change is **gated on one "go"**. The conservative instinct **inverts**: a *needless* consolidation is the expensive mistake — it buries independently-deliverable work under an umbrella nobody can batch, and hides a real deliverable behind a parent that won't resolve until its slowest sibling lands. A *missed* consolidation just leaves two adjacent cards to pick up separately. So **when the cluster isn't obvious, leave the items alone** — record them as *left apart* with the signal that made them look related, and move on.
+
+**Why the backlog needs this at all.** The authoring-time defence (*Rules → Review before adding (dedup)*) only stops a *new* near-duplicate; it does nothing about the ones already on disk. Items accrete from independent sources — a gap sweep, a program watch, an ad-hoc filing — so the board grows *adjacent* cards nobody filed as a set.
+
+**Candidate set — cluster from signals, then judge.** Build clusters over open items (`status` ≠ `resolved`) from the machine signals first, strongest to weakest: **(a) overlapping `scope:`** — the same predicted touch-set is the strongest evidence two items are one job, and the dispatcher already computes exactly this overlap ([`we:scripts/readiness/dispatch-plan.mjs`](../../scripts/readiness/dispatch-plan.mjs)), so reuse its notion rather than inventing one; **(b) shared `parent` / `relatedProject` / `tags`**; **(c) title + digest term overlap** (`grep -rilE "<topic>" backlog/`); **(d) same-sweep provenance** — a run of items sharing a `dateOpened` and a filing style is often one analysis that was never grouped. A signal makes a *candidate cluster*, never a verdict — the rubric decides. `/consolidate <NNN>` clusters around one item; bare `/consolidate` sweeps the whole board.
+
+### The overlap-investigation pass — read the real work before calling two items one job
+
+> **"These are the same job" is a claim about the code, so look at the code before making it.** This is the mirror of *The work-investigation pass* and carries the same bar: for each cluster, read the surface its members name, and establish `file:line`-citable evidence that they touch the **same** work — not merely the same subsystem. Two items on `we:scripts/backlog.mjs` that change different commands are *neighbours*; two items that both rewrite the same function are *one job*. A cluster you can only justify from the bodies' wording is under-investigated — leave it apart.
+
+### The consolidation-safety rubric — group only if ALL five hold
+
+1. **One job, not one topic.** The cluster names a **single deliverable outcome**. If its members ship value independently — different consumers, separately demoable — they are neighbours, and adjacency is not a reason to couple them.
+2. **No decision is being merged away.** If the members differ because an **unresolved fork** sits between them, grouping buries it under an umbrella exactly as slicing would scatter it. → *left apart*; action: **carve the fork into its own `kind: decision`** and re-run after it resolves. (The same rule as split condition (1), read in the other direction.)
+3. **Every member stays independently claimable.** An umbrella must not make its children un-batchable: each member keeps its own `size`/`kind` and can still be picked up alone. A grouping whose only effect is that nothing can start until the whole set is planned has made the board worse.
+4. **No size laundering.** Consolidation **never merges scope into one bigger item**. If the combined work would be a `size > 8` story, that is an **epic with children**, not a story — folding N stories into one lump just manufactures a `/split` candidate. This is why the two skills cannot ping-pong: `/split`'s candidate set is oversized stories and childless epics, and a correct consolidation produces neither.
+5. **Nothing loses its home or its CTA.** Every member keeps its `NNN`, its body, and a call-to-action pill afterwards (*Principle-conformance pre-flight → CTA invariant*). A member that would end up claimable by nobody is being orphaned — stop.
+
+### The three outcomes — what a cluster becomes
+
+- **Umbrella** — coupled items that add up to one deliverable → scaffold (or reuse) a `kind: epic` and set `parent:` on each member. The epic carries **no `size`** (children hold the points) and stays `open` until the last child lands.
+- **Pack** — items that stay separate but are best worked in one pass (shared context, shared fixture) → lift the real prerequisites into `blockedBy` edges and name the pack in the report for `/batch`. **No epic** — a pack is a *scheduling* fact, not a hierarchy.
+- **Fold** — one member's scope sits entirely inside another's. **Report only, no mutation**, pending the retirement decision (*How a folded-duplicate backlog item retires*): `resolve` means *delivered* and feeds the burndown, so closing a never-built duplicate books points nobody earned. Name the survivor and the cross-refs in the report and stop there.
+
+### The report — always produced
+
+Write `reports/<YYYY-MM-DD>-backlog-consolidation-analysis.md`. Two tables: **Could consolidate** — one row per cluster: the members, the proposed outcome (umbrella / pack / fold), the umbrella's title + digest or the pack's edges, and what changes on each member. **Left apart** — one row per rejected cluster: the members, **which rubric condition failed**, and the **action that would make it groupable later** (*resolve decision X*, *land A so the shared surface exists*). The report is the deliverable even when **zero** clusters group.
+
+### Executing a consolidation — only after approval, mechanically
+
+Present the clusters and get **one "go"**. Then, per approved cluster:
+
+1. **Umbrella:** `node scripts/backlog.mjs scaffold --kind=epic --title="…" --digest="…"` (**no `--size`**, **no `--scope`** — an epic is sliced, not built), then set `parent: "<epic id>"` on each member's frontmatter and trim any member digest that now reads as if it were the whole job. **Reuse** an existing epic when one already covers the cluster rather than minting a sibling umbrella.
+2. **Pack:** add the `blockedBy` edges the investigation proved real (never a "see also" edge — that's `crossRef`), and record the pack in the report. Nothing else moves.
+3. **Gate:** `npm run check:standards` green (it errors on a sized epic with sized children, an unresolvable `parent`, a cycle, or an open item with no CTA). Re-evaluate `blockedBy` per *Keep the blocker DAG honest*.
+
+A consolidation **never** renumbers, deletes, or `resolve`s a member — it only adds an umbrella and rewires edges. Close with a net-flow line (`+1 epic`, *N* members re-parented, *M* clusters left apart) and point `/batch` at the grouped set.
+
 ## NNN collision — the standard resolution {#nnn-collision}
 
 Two parallel lane sessions can allocate the **same** backlog `NNN` for a *new* item: each computes `max(existing)+1` from its own base view and neither can see the other's not-yet-committed file, so when both land they collide on one number (the **id-storm**). Because `NNN` is immutable for life (see *Rules* → "Never renumber an existing item"), the sanctioned resolution is **"newer yields"**: the *later* of the two colliding **new** items is re-filed to a fresh id — a **refile** (write the new file + delete the old), never a `git mv` (guard-bash blocks a shell renumber) — and **every inbound reference is rewritten** (`#NNN` short-refs, `/backlog/NNN[/-]` URLs, `parent:`/`blockedBy:` edges), so no link dangles. A number **already on the merge base is never yielded** — a base id appearing twice is a real *edit* conflict git already flagged, not an allocation race.
