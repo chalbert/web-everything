@@ -230,6 +230,29 @@ export const TRUST_CHAIN = [
     desc: 'the scheduled shadow review runner CLI (#2830) — discovers review:pending PRs and shadow-disposes each; the `--enforce` REFUSAL is the second half of the zero-mutation guarantee (delete it and the runner can be flipped to act). Gate-deciding + leash-defining, so policy tier: flipping this mechanical slice to auto-clear is a separate ratified step (#2572 part 2) that must be human-reviewed',
     homes: ['scripts/review-runner.mjs'],
   },
+  // ── the converge daemon's SCHEDULING SUBSTRATE (WE #2572, ruling R7 of 2026-08-08) ────────────────────────────
+  // The two files that make the shadow runner actually FIRE, unattended, on the operator's machine with the
+  // operator's `gh` credentials. They decide nothing about disposition — the runner above stays the sole
+  // authority on what would clear, and it refuses `--enforce` — but they decide WHETHER and HOW OFTEN it runs and
+  // WHICH TREE it reads its ledger from, and a scheduled unattended process is exactly the class the drain
+  // daemon's own entries above are registered for. ENGINE tier, for the same reason `merge-ai-prs.mjs` is: they
+  // OBEY the leash rather than define it, so a converged agent panel may clear them, but registering the
+  // basenames forces every PR touching them to ESCALATE instead of silently self-clearing. Both basenames are
+  // UNIQUE (unlike the drain daemon's generic `cli.mjs`/`lib.mjs`), so neither over-escalates anything else.
+  {
+    role: 'converge-daemon-pass',
+    file: 'converge-daemon-pass.mjs',
+    tier: 'engine',
+    desc: 'ONE scheduled converge-daemon pass (#2572 R7) — refreshes the daemon\'s own clone (git reset --hard, which is why it REFUSES to run against the primary checkout) and SPAWNS the shadow runner unattended with the operator\'s gh credentials, pointing CONVEYOR_JURY_DIR at the tree that holds the real jury ledger. It builds the runner argv, so a change here is invocation-deciding in the drain daemon\'s sense; engine tier — review-runner.mjs stays the zero-mutation authority and the `--enforce` refusal is its backstop',
+    homes: ['scripts/converge-daemon-pass.mjs'],
+  },
+  {
+    role: 'converge-daemon-install',
+    file: 'converge-daemon-install.mjs',
+    tier: 'engine',
+    desc: 'the converge daemon\'s launchd installer (#2572 R7) — renders and bootstraps the periodic job that fires the pass above, so it fixes the schedule, the clone the daemon runs its own source from, and the ledger dir it reads. A change here can silently repoint the daemon at another tree or another cadence; engine tier for the same reason as the pass',
+    homes: ['scripts/converge-daemon-install.mjs'],
+  },
   // ── the check:standards GATE — its definition-of-green split into policy vs engine (WE #2769, #2625 fork (d)) ──
   // The repo-health gate (`npm run check:standards`) is itself trust-chain machinery: its rules decide whether a
   // change may land at all. #2625 ruled it should split like the auto-review gate — the IMPLEMENTATION stays
