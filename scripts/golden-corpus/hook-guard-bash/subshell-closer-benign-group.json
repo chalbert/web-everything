@@ -1,0 +1,11 @@
+{
+  "id": "subshell-closer-benign-group",
+  "cmd": "(git status; git diff) | head -40",
+  "ctx": {
+    "primaryCwd": true
+  },
+  "basis": "r5 F2 precision mirror — a read-only group with a trailing pipe.",
+  "expect": {
+    "reason": null
+  }
+}
