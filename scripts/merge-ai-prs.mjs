@@ -106,7 +106,10 @@ import { resolve, join, dirname } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { rebaseDropContent } from './lib/rebase-drop-content.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
-import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff } from './lib/review-escalation.mjs';
+// Rebase resolution (2026-08-08): the UNION of both sides. `parseReviewedDiff` is #2979's accept-fingerprint
+// reader, landed on main today; `READY_TO_MERGE_LABEL` / `isReviewHoldLabel` are this PR's hold-invariant
+// helpers. They are independent concerns on the same import line — neither supersedes the other.
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
@@ -1457,13 +1460,45 @@ export function decideBatchesIdleExit({ enabled = false, idlePass = false, consi
  *  timeout the PR is left green-eventually-but-UNLABELLED and stranded. A post-CI reconcile pass labels it the
  *  moment the required check is green — no human step. Only the PRODUCER'S OWN work (AI-generated) is labelled,
  *  never a human orphan, and never a PR that already carries the label. */
-export function shouldLabelOnGreen(pr, { requiredCheck = 'test', label = 'ready-to-merge' } = {}) {
-  if (!label || hasLabel(pr, label)) return false;    // already labelled (or no label configured) → nothing to do
+export function shouldLabelOnGreen(pr, opts = {}) {
+  return labelOnGreenVerdict(pr, opts).label === true;
+}
+
+/**
+ * #2832 — `shouldLabelOnGreen` with a REASON channel. Pure. Same decision, but it also says WHY it refused when
+ * the refusal is the new hold rule, so the caller can make a withheld go-ahead ANNOUNCE itself.
+ *
+ * Why the reason channel exists. Before #2832 a held PR still carried `ready-to-merge`, so it entered the
+ * candidate `verdicts`, was skipped by the merge gate, and got a park-reason comment ON THE PR. Refusing the
+ * stamp keeps it out of the `--label ready-to-merge`-scoped candidate set entirely — correct, but it also means
+ * nothing posts that comment any more, so the PR goes SILENT instead of saying why it is waiting. `reason:'held'`
+ * is what lets the reconcile post it instead. The order below matters for the reason, not the refusal: the hold
+ * is tested LAST, so `held` is reported only when the hold is the ONLY thing left standing between this PR and
+ * the label. A red or non-producer PR is not "stuck because held" — it is stuck for its own reason, which the
+ * ci-lifecycle labels already carry.
+ *
+ * `allowPendingReview` mirrors the #2423 per-PR relief valve exactly as `classifyPr` does. Without it the label
+ * half and the merge half DISAGREE: `--no-review-escalation=<pr#>` would still waive the merge predicate, but
+ * the PR would never be stamped, so the label-scoped drain would never see it and the ratified valve would be a
+ * no-op. The relief is narrow at both layers — it waives `review:pending` only, NEVER `review:changes` or
+ * `review:human` (`hasUnclearedReviewLabel`'s `allowPending` enforces that, not this function).
+ * @param {object} pr - a PR read (labels + commits + statusCheckRollup)
+ * @param {{requiredCheck?:string, label?:string, allowPendingReview?:boolean}} [o]
+ * @returns {{label:boolean, reason:(null|'held')}}
+ */
+export function labelOnGreenVerdict(pr, { requiredCheck = 'test', label = 'ready-to-merge', allowPendingReview = false } = {}) {
+  if (!label || hasLabel(pr, label)) return { label: false, reason: null };   // already labelled (or no label configured) → nothing to do
   // Only the producer's own AI PRs are auto-labelled — never a human orphan — EXCEPT a human-cleared parked PR
   // (review:accepted): the human clear IS the certification, so mint ready-to-merge on green even when the
   // AI-trailer heuristic reads non-AI (e.g. the drain's own `drain: rebase …` commit stranded it). #2196/#2326
-  if (!isAiGeneratedPr(pr) && !hasLabel(pr, REVIEW_LABELS.accepted)) return false;
-  return isRequiredCheckGreen(pr, requiredCheck);     // label the instant the required check is green
+  if (!isAiGeneratedPr(pr) && !hasLabel(pr, REVIEW_LABELS.accepted)) return { label: false, reason: null };
+  if (!isRequiredCheckGreen(pr, requiredCheck)) return { label: false, reason: null };
+  // #2832 — a held PR (review:pending/review:changes/review:human, uncleared by review:accepted) must NEVER be
+  // auto-stamped ready-to-merge: a hold and a go-ahead are contradictory. Refusing HERE is what keeps the
+  // CI-green reconcile from RE-ADDING the go-ahead while a hold still stands — the ADD-side of the write-time
+  // invariant, and the reason the pre-#2832 hand-strip was a race rather than a lock.
+  if (hasUnclearedReviewLabel(pr?.labels, { allowPending: allowPendingReview })) return { label: false, reason: 'held' };
+  return { label: true, reason: null };               // label the instant the required check is green
 }
 
 /** #2230 — should a `--label`-scoped ONE-SHOT drain re-poll once before concluding the queue is empty? GitHub's
@@ -2468,12 +2503,30 @@ async function runCli() {
       let touched = false;
       // ── The legacy #2216 branch: green-but-unlabelled → ready-to-merge (label lander's collection signal),
       //    UNCHANGED — see the `owned` note above for why this stays separate from the add/remove state below. ──
-      if (!hasLabel(p, label) && shouldLabelOnGreen(withCommits, { requiredCheck: REQUIRED, label })) {
+      // #2423/#2832 — thread the SAME per-PR relief the merge predicate uses (`classifyPr`'s `allowPendingReview`,
+      // wired identically in `buildDrainVerdicts`). Without this the two halves disagree: the operator's
+      // `--no-review-escalation=<pr#>` would waive the merge gate, but the stamp would still be refused, so the
+      // named PR would never enter the `--label`-scoped candidate set and the ratified #2423 valve would be dead.
+      const reliefAllowsPending = (escalationRelief.prs || []).includes(Number(p.number))
+        || (!!escalationRelief.passWide && !!label);
+      const greenVerdict = hasLabel(p, label)
+        ? { label: false, reason: null }
+        : labelOnGreenVerdict(withCommits, { requiredCheck: REQUIRED, label, allowPendingReview: reliefAllowsPending });
+      if (greenVerdict.label) {
         if (DRY_RUN) { touched = true; if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} would label "${label}" (required check green, was unlabelled)\n`); }
         else {
           try { execFileSync('gh', ['pr', 'edit', String(p.number), ...repoFlag(repo), '--add-label', label], { stdio: ['ignore', 'ignore', 'pipe'] }); touched = true; if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} labelled "${label}" (post-CI reconcile — required check went green after a label-on-green timeout)\n`); }
           catch { /* a label race/permission miss is non-fatal — the next pass retries */ }
         }
+      } else if (greenVerdict.reason === 'held') {
+        // #2832 — the go-ahead was WITHHELD because a hold stands. Say so ON THE PR. Before #2832 a held PR kept
+        // `ready-to-merge`, entered the candidate set, and got a park comment from the merge gate; refusing the
+        // stamp removes it from that set, so without this the PR would sit green and silent with nothing
+        // explaining the wait. `postDrainReasonComment` dedupes on (kind, reasonText), so a `--watch` loop
+        // re-reaching this branch every pass posts ONCE, not once per pass.
+        const heldReason = `held — a review hold (${(p.labels || []).map((l) => (typeof l === 'string' ? l : l?.name)).filter((n) => isReviewHoldLabel(n)).join(', ') || 'review'}) stands, so the "${label}" go-ahead is withheld even though the required check is green (#2832). Clear the review to release it.`;
+        if (!DRY_RUN) postDrainReasonComment(repo, p.number, 'park', heldReason, null);
+        if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(repo)}${p.number} green but HELD — "${label}" withheld (#2832)\n`);
       }
       // ── The #2421 TOTAL branch: every producer-owned open PR gets its checking/ci:failed/blocked state
       //    reconciled (mutually exclusive among themselves, cleared once none applies — e.g. once green). ──
@@ -2811,6 +2864,23 @@ async function runCli() {
   // through the existing blockedBy ordering. Signals: blast radius (diff files), size, dismissed findings +
   // cross-repo (manifest). Best-effort per candidate; a signal-fetch miss defaults to no-escalate.
   const parked = [];
+  // #2832 / #984 F2 — the ONE `ready-to-merge` strip seam every park site in the escalation pass goes through.
+  // Keyed on `decideParkReadyStrip` (the PR's OBSERVED labels PLUS this park's own writes), NEVER on whether the
+  // park happens to be applying a label. The shipped shape nested the strip inside `if (gate.applyLabel …)`,
+  // which excluded `review:changes` entirely — `decideReviewGate` returns `wait-author` with no `applyLabel` for
+  // it, so a PR that reached `review:changes` + `ready-to-merge` stayed contradictory forever with no sweeper
+  // (the per-pass reconcile strip was deliberately dropped from this PR — see `xtw8e93`). Routing all THREE park
+  // sites — the manifest-tamper park, the anti-test-gaming park, and the `decideReviewGate` park/wait-author
+  // branch — through one seam also closes the first two, which applied `review:human` and `continue`d past the
+  // strip, CREATING the contradictory state rather than merely failing to heal it.
+  // Best-effort, exactly like every other label write here: the merge gate re-checks the hold directly and parks
+  // a held PR whether or not `ready-to-merge` is present, so the label is a collection filter, never the land gate.
+  const stripReadyOnPark = (v, { applyLabel = null, staleAcceptance = false } = {}) => {
+    if (DRY_RUN) return;
+    if (!decideParkReadyStrip(v.prLabels, { applyLabel, staleAcceptance })) return;
+    try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--remove-label', READY_TO_MERGE_LABEL], { stdio: ['ignore', 'ignore', 'pipe'] }); }
+    catch { /* label best-effort */ }
+  };
   if (REVIEW_ESCALATION) {
     // #2262 fix (1/2) — the `review:*` verdict labels are never minted anywhere (unlike `ready-to-merge`,
     // which `pr-land.mjs` `gh label create`s before first use), so `gate.applyLabel` below silently no-ops:
@@ -2929,6 +2999,10 @@ async function runCli() {
           if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
+          // #2832 / #984 F2 — this park CREATES a hold (review:human) on a PR that, being in the
+          // `--label ready-to-merge` candidate set, carries the go-ahead. Strip it in the same operation, through
+          // the same seam the decideReviewGate park uses — this site `continue`s, so it never reached the strip.
+          stripReadyOnPark(v, { applyLabel: REVIEW_LABELS.human });
           const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
           if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} manifest-tamper baseline mismatch stamped on PR\n`);
         }
@@ -2957,6 +3031,9 @@ async function runCli() {
             if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
               try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
             }
+            // #2832 / #984 F2 — same as the manifest-tamper park above: this site CREATES a review:human hold on
+            // a go-ahead-carrying candidate and `continue`s, so it must strip through the shared seam here.
+            stripReadyOnPark(v, { applyLabel: REVIEW_LABELS.human });
             const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} test-gaming reason stamped on PR\n`);
           }
@@ -3049,6 +3126,11 @@ async function runCli() {
         // ALSO produce fresh escalation reasons (it may touch a blast-radius path), and the operator needs BOTH
         // — WHY the accept was invalidated AND what the new commit tripped — on the durable body/comment/log.
         const parkReasons = gate.staleAcceptance ? [gate.reason, ...score.reasons] : score.reasons;
+        // #2832 / #984 F2 — the go-ahead strip runs for EVERY park/wait-author outcome, OUTSIDE the
+        // `gate.applyLabel` guard below. `review:changes` reaches here as `wait-author` with NO `applyLabel`, so
+        // nesting the strip under that guard left it as the one hold label with no standing reconcile. Keyed on
+        // the observed labels plus this park's own writes (`gate.applyLabel`, and the #2409 accepted-drop below).
+        stripReadyOnPark(v, { applyLabel: gate.applyLabel, staleAcceptance: gate.staleAcceptance });
         // #2307 — a PR the PRODUCER already labelled at PR-open (or a prior drain pass already caught) is
         // already-scored: this pass is an idempotent backstop/reconcile, not the first applier, so skip the
         // redundant `gh pr edit --add-label` call when the verdict label is already present (never a
