@@ -155,4 +155,8 @@ function renderRootDoc({ id, file, title }) {
   return { id, file, title, html, headings };
 }
 
-module.exports = { loadRules, renderRootDoc, extractAnchors, githubSlug, RULE_DOCS, plainText };
+// `makeRenderer` + `preprocessInlineAnchors` are exported for ONE reason (#2785 review round 5): the codification
+// predicate's heading COUNT is pinned against the net `h1`…`h6` ELEMENT delta this render path produces for the
+// same source, in a real DOM. That oracle has to drive the genuine functions — re-deriving them in a test is
+// exactly the parser/renderer drift the whole exemption depends on not having.
+module.exports = { loadRules, renderRootDoc, extractAnchors, githubSlug, RULE_DOCS, plainText, makeRenderer, preprocessInlineAnchors };

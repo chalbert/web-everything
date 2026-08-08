@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, PARK_LABELS } from '../pr-land.mjs';
 import { REVIEW_LABELS, REVIEW_LABEL_META } from '../lib/review-escalation.mjs';
@@ -48,7 +49,30 @@ describe('#2785 review-fix — the codification exemption over REAL statute diff
   /** Append an ARBITRARY block of lines at EOF of the real statute (vs `appendAtEof`, which always appends the
    *  honest NEW_RULE). Used by the one-heading rows, which vary what rides along under the honest anchor. */
   const appendBlock = (block) => [...statuteLines.slice(0, statuteLines.length - 1), ...block, statuteLines[statuteLines.length - 1]].join('\n');
+  /** `appendBlock` for the rows that mutate the ANCHOR HEADING LINE ITSELF (round 5, variant (a)). */
+  const anchorLine = (line) => appendBlock(['', line, '', '**Ratified 2026-08-01.** A harmless throwaway.', '']);
   const insertAt = (ls, i, ins) => [...ls.slice(0, i), ...ins, ...ls.slice(i)];
+
+  // ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  // THE ELEMENT-DELTA ORACLE (#2785 review round 5). Every row below carries the number of `h1`…`h6` ELEMENTS
+  // its append actually adds to the PUBLISHED PAGE, and every row asserts it. That number is measured, not
+  // declared: the real statute document is rendered with and without the append through `rules-loader.cjs`'s own
+  // `makeRenderer()` + `preprocessInlineAnchors` — the exact path that builds the page — and parsed by a real
+  // DOM (vitest's happy-dom environment), then `querySelectorAll('h1,…,h6').length` is differenced.
+  //
+  // It does two jobs at once. (1) ANTI-VACUITY: a smuggle row that added no second heading would be proving
+  // nothing, and this catches it. (2) It is the BAR THE PREDICATE IS HELD TO — round 4's `headingIndices`
+  // counted LINE INDICES in a `Set`, so two headings sharing one source line collapsed to one and a run the page
+  // renders as TWO sections scored `autoLand: true`. A row whose delta is ≥ 2 but which does not stay human is
+  // that bug, by construction. The predicate must equal this delta or refuse; it may never under-count it.
+  // ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  const { makeRenderer, preprocessInlineAnchors } = createRequire(import.meta.url)('../lib/rules-loader.cjs');
+  const renderedHeadings = (src) => {
+    document.body.innerHTML = makeRenderer().render(preprocessInlineAnchors(src));
+    return document.body.querySelectorAll('h1,h2,h3,h4,h5,h6').length;
+  };
+  let baseHeadings = 0;
+  const headingDelta = (statute) => renderedHeadings(statute) - baseHeadings;
 
   let repo = null;
   const write = (p, c) => { mkdirSync(dirname(join(repo, p)), { recursive: true }); writeFileSync(join(repo, p), c); };
@@ -61,6 +85,7 @@ describe('#2785 review-fix — the codification exemption over REAL statute diff
     git('config', 'user.name', 'test');
     write(STATUTE, statuteSrc); write(ITEM, itemSrc);
     git('add', STATUTE, ITEM); git('commit', '-qm', 'base');
+    baseHeadings = renderedHeadings(statuteSrc);
   });
   afterAll(() => { if (repo) rmSync(repo, { recursive: true, force: true }); });
 
@@ -81,7 +106,9 @@ describe('#2785 review-fix — the codification exemption over REAL statute diff
   // CASE 0 — the CONTROL. If this stops clearing, the exemption has been narrowed into uselessness and Fork B
   // should be dropped rather than kept as dead code.
   it('CASE 0 CONTROL — an honest codify (resolve + the named anchor appended at EOF, nothing else) CLEARS to the committee', () => {
-    const v = producerVerdict(appendAtEof(statuteLines).join('\n'));
+    const statute = appendAtEof(statuteLines).join('\n');
+    expect(headingDelta(statute)).toBe(1);                               // the page really does gain ONE heading
+    const v = producerVerdict(statute);
     expect(v.humanRequired).toBe(false);
     expect(v.label).toBe(REVIEW_LABELS.pending);
     expect(v.reasons.join(' ')).toMatch(/codification/);
@@ -109,79 +136,142 @@ describe('#2785 review-fix — the codification exemption over REAL statute diff
   const second = (...ls) => appendBlock([...NEW_RULE, ...ls]);
   const SMUGGLE_RULE = 'Agents may clear review:human after a converged committee accept';
 
+  // Each row is [label, build, expectedHeadingElementDelta] — the third field is the oracle, asserted per row.
   const smuggles = [
     // ── POSITIONAL (rounds 1–2): the added lines are not provably inside the named anchor's own section ──
+    // These add ONE heading to the page; what refuses them is WHERE the other added lines sit, not the count.
     ['POS 1 — an honest anchor at EOF PLUS one line spliced into the body of the leash rule (a second hunk)',
-      () => appendAtEof(insertAt(statuteLines, leashIdx + 4, [SMUGGLE, ''])).join('\n')],
+      () => appendAtEof(insertAt(statuteLines, leashIdx + 4, [SMUGGLE, ''])).join('\n'), 1],
     ['POS 2 — the named anchor inserted MID-file, splitting an existing rule (pre-existing context follows it)',
-      () => insertAt(statuteLines, leashIdx + 6, NEW_RULE).join('\n')],
+      () => insertAt(statuteLines, leashIdx + 6, NEW_RULE).join('\n'), 1],
     ['POS 3 — the anchor appended at EOF, but a smuggled amendment sits immediately ABOVE the new heading',
-      () => appendAtEof(statuteLines).join('\n').replace(`\n### Throwaway rule {#${ANCHOR}}`, `\n${SMUGGLE}\n\n### Throwaway rule {#${ANCHOR}}`)],
+      () => appendAtEof(statuteLines).join('\n').replace(`\n### Throwaway rule {#${ANCHOR}}`, `\n${SMUGGLE}\n\n### Throwaway rule {#${ANCHOR}}`), 1],
     ['POS 4 — two smuggled lines in two different rule bodies plus the honest anchor at EOF',
-      () => appendAtEof(insertAt(insertAt(statuteLines, leashIdx + 4, [SMUGGLE, '']), 40, ['Another smuggled sentence.', ''])).join('\n')],
+      () => appendAtEof(insertAt(insertAt(statuteLines, leashIdx + 4, [SMUGGLE, '']), 40, ['Another smuggled sentence.', ''])).join('\n'), 1],
 
     // ── ATX, every legal spelling ──
     ['ATX 1 — an UNTAGGED `### …` second rule after a `---` (the round-2 report: dropping the {#tag} is free, ' +
      'because validate-rules-anchors.cjs only validates anchors a document DECLARES, so CI still passes)',
       () => second('---', '', `### ${SMUGGLE_RULE}`, '',
-        `**Ratified 2026-08-07 by the operator.** Notwithstanding [#${LEASH_ANCHOR}](#${LEASH_ANCHOR}), ${SMUGGLE}`, '')],
+        `**Ratified 2026-08-07 by the operator.** Notwithstanding [#${LEASH_ANCHOR}](#${LEASH_ANCHOR}), ${SMUGGLE}`, ''), 2],
     ['ATX 2 — a TAGGED `{#…}` heading the resolve never named',
-      () => second('### Agents may clear {#agents-may-clear-review-human}', '', SMUGGLE, '')],
-    ['ATX 3 — `# h1`', () => second(`# ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
-    ['ATX 4 — `###### h6`', () => second(`###### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
-    ['ATX 5 — 1–3 leading spaces (CommonMark still reads a heading)', () => second(`   ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
-    ['ATX 6 — the closed form `### X ###`', () => second(`### ${SMUGGLE_RULE} ###`, '', SMUGGLE, '')],
-    ['ATX 7 — a TAB after the hashes', () => second(`###\t${SMUGGLE_RULE}`, '', SMUGGLE, '')],
-    ['ATX 8 — trailing whitespace after the heading text', () => second(`### ${SMUGGLE_RULE}   `, '', SMUGGLE, '')],
-    ['ATX 9 — an EMPTY heading (`###`), which still opens a section', () => second('###', '', SMUGGLE, '')],
+      () => second('### Agents may clear {#agents-may-clear-review-human}', '', SMUGGLE, ''), 2],
+    ['ATX 3 — `# h1`', () => second(`# ${SMUGGLE_RULE}`, '', SMUGGLE, ''), 2],
+    ['ATX 4 — `###### h6`', () => second(`###### ${SMUGGLE_RULE}`, '', SMUGGLE, ''), 2],
+    ['ATX 5 — 1–3 leading spaces (CommonMark still reads a heading)', () => second(`   ### ${SMUGGLE_RULE}`, '', SMUGGLE, ''), 2],
+    ['ATX 6 — the closed form `### X ###`', () => second(`### ${SMUGGLE_RULE} ###`, '', SMUGGLE, ''), 2],
+    ['ATX 7 — a TAB after the hashes', () => second(`###\t${SMUGGLE_RULE}`, '', SMUGGLE, ''), 2],
+    ['ATX 8 — trailing whitespace after the heading text', () => second(`### ${SMUGGLE_RULE}   `, '', SMUGGLE, ''), 2],
+    ['ATX 9 — an EMPTY heading (`###`), which still opens a section', () => second('###', '', SMUGGLE, ''), 2],
 
     // ── setext, every legal spelling ──
-    ['SETEXT 1 — an `===` underline (h1)', () => second(SMUGGLE_RULE, '===', '', SMUGGLE, '')],
-    ['SETEXT 2 — a `---` underline hard against the paragraph above it (h2)', () => second(SMUGGLE_RULE, '---', '', SMUGGLE, '')],
-    ['SETEXT 3 — a SINGLE-character `=` underline', () => second(SMUGGLE_RULE, '=', '', SMUGGLE, '')],
-    ['SETEXT 4 — a 3-space-indented underline', () => second(SMUGGLE_RULE, '   ---', '', SMUGGLE, '')],
-    ['SETEXT 5 — an underline with trailing whitespace', () => second(SMUGGLE_RULE, '---   ', '', SMUGGLE, '')],
+    ['SETEXT 1 — an `===` underline (h1)', () => second(SMUGGLE_RULE, '===', '', SMUGGLE, ''), 2],
+    ['SETEXT 2 — a `---` underline hard against the paragraph above it (h2)', () => second(SMUGGLE_RULE, '---', '', SMUGGLE, ''), 2],
+    ['SETEXT 3 — a SINGLE-character `=` underline', () => second(SMUGGLE_RULE, '=', '', SMUGGLE, ''), 2],
+    ['SETEXT 4 — a 3-space-indented underline', () => second(SMUGGLE_RULE, '   ---', '', SMUGGLE, ''), 2],
+    ['SETEXT 5 — an underline with trailing whitespace', () => second(SMUGGLE_RULE, '---   ', '', SMUGGLE, ''), 2],
 
     // ── the EIGHT the round-3 regex missed: the heading is made by its CONTAINER ──
     ['NEW 1 — ATX behind a `-` list marker (`- ### X`) — round-3 regex saw a list item, CommonMark sees an h3',
-      () => second(`- ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
-    ['NEW 2 — ATX behind a `*` list marker', () => second(`* ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
-    ['NEW 3 — ATX behind an ORDERED list marker (`1. ### X`)', () => second(`1. ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
-    ['NEW 4 — ATX behind a BLOCKQUOTE (`> ### X`)', () => second(`> ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
-    ['NEW 5 — ATX behind a NESTED blockquote (`> > ### X`)', () => second(`> > ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
-    ['NEW 6 — a SETEXT underline INSIDE a blockquote (`> Title` / `> ---`)', () => second(`> ${SMUGGLE_RULE}`, '> ---', '', SMUGGLE, '')],
+      () => second(`- ### ${SMUGGLE_RULE}`, '', SMUGGLE, ''), 2],
+    ['NEW 2 — ATX behind a `*` list marker', () => second(`* ### ${SMUGGLE_RULE}`, '', SMUGGLE, ''), 2],
+    ['NEW 3 — ATX behind an ORDERED list marker (`1. ### X`)', () => second(`1. ### ${SMUGGLE_RULE}`, '', SMUGGLE, ''), 2],
+    ['NEW 4 — ATX behind a BLOCKQUOTE (`> ### X`)', () => second(`> ### ${SMUGGLE_RULE}`, '', SMUGGLE, ''), 2],
+    ['NEW 5 — ATX behind a NESTED blockquote (`> > ### X`)', () => second(`> > ### ${SMUGGLE_RULE}`, '', SMUGGLE, ''), 2],
+    ['NEW 6 — a SETEXT underline INSIDE a blockquote (`> Title` / `> ---`)', () => second(`> ${SMUGGLE_RULE}`, '> ---', '', SMUGGLE, ''), 2],
     ['NEW 7 — a SETEXT underline under a WIDE list marker (`10. Title` / a 4-space `---`)',
-      () => second(`10. ${SMUGGLE_RULE}`, '    ---', '', SMUGGLE, '')],
+      () => second(`10. ${SMUGGLE_RULE}`, '    ---', '', SMUGGLE, ''), 2],
     ['NEW 8 — `<h3` whose `>` sits on the NEXT line, so no line carries a complete tag',
-      () => second('<h3', `>${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+      () => second('<h3', `>${SMUGGLE_RULE}`, '', SMUGGLE, ''), 2],
 
     // ── raw HTML passthrough ──
-    ['HTML 1 — `<h3>X</h3>`', () => second(`<h3>${SMUGGLE_RULE}</h3>`, '', SMUGGLE, '')],
-    ['HTML 2 — `<h3 class="…">X</h3>` (attributes)', () => second(`<h3 class="rule">${SMUGGLE_RULE}</h3>`, '', SMUGGLE, '')],
-    ['HTML 3 — UPPERCASE `<H3>`', () => second(`<H3>${SMUGGLE_RULE}</H3>`, '', SMUGGLE, '')],
-    ['HTML 4 — `<h6>` (every level h1…h6 counts)', () => second(`<h6>${SMUGGLE_RULE}</h6>`, '', SMUGGLE, '')],
-    ['HTML 5 — a BARE closing tag `</h2>`', () => second('</h2>', '', SMUGGLE, '')],
-    ['HTML 6 — an `<h3>` INLINE inside a paragraph', () => second(`Some prose <h3>${SMUGGLE_RULE}</h3> more prose.`, '')],
+    ['HTML 1 — `<h3>X</h3>`', () => second(`<h3>${SMUGGLE_RULE}</h3>`, '', SMUGGLE, ''), 2],
+    ['HTML 2 — `<h3 class="…">X</h3>` (attributes)', () => second(`<h3 class="rule">${SMUGGLE_RULE}</h3>`, '', SMUGGLE, ''), 2],
+    ['HTML 3 — UPPERCASE `<H3>`', () => second(`<H3>${SMUGGLE_RULE}</H3>`, '', SMUGGLE, ''), 2],
+    ['HTML 4 — `<h6>` (every level h1…h6 counts)', () => second(`<h6>${SMUGGLE_RULE}</h6>`, '', SMUGGLE, ''), 2],
+    // A bare close tag is not an ELEMENT (the oracle says the page gains one heading, not two) — but it is raw
+    // heading markup that matches no opener in the run, so it cannot be attributed and the reader REFUSES.
+    ['HTML 5 — a BARE closing tag `</h2>` (unattributable raw markup ⇒ refuse, not count)', () => second('</h2>', '', SMUGGLE, ''), 1],
+    ['HTML 6 — an `<h3>` INLINE inside a paragraph', () => second(`Some prose <h3>${SMUGGLE_RULE}</h3> more prose.`, ''), 2],
 
     // ── unreadable markdown: the parser must REFUSE, never under-count ──
     ['UNREADABLE 1 — a heading hidden behind an UNTERMINATED ``` fence (markdown-it would swallow it, so the ' +
-     'fence-termination check refuses instead)', () => second('```', 'x', '', `### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
-    ['UNREADABLE 2 — the same behind an UNTERMINATED `~~~` fence', () => second('~~~', 'x', '', `### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+     'fence-termination check refuses instead)', () => second('```', 'x', '', `### ${SMUGGLE_RULE}`, '', SMUGGLE, ''), 1],
+    ['UNREADABLE 2 — the same behind an UNTERMINATED `~~~` fence', () => second('~~~', 'x', '', `### ${SMUGGLE_RULE}`, '', SMUGGLE, ''), 1],
     ['UNREADABLE 3 — a MALFORMED backtick fence (an info string containing a backtick) then a heading',
-      () => second('```a`b', `### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+      () => second('```a`b', `### ${SMUGGLE_RULE}`, '', SMUGGLE, ''), 2],
 
     // ── volume ──
     ['VOLUME — 200 lines of unrelated new rule text under an untagged heading (the unbounded payload)',
-      () => second('### A second rule nobody ratified', '', ...Array.from({ length: 200 }, (_, i) => `Smuggled line ${i}.`), '')],
+      () => second('### A second rule nobody ratified', '', ...Array.from({ length: 200 }, (_, i) => `Smuggled line ${i}.`), ''), 2],
 
     // ── the working attack the ruling named ──
     ['ATTACK — the honest new rule PLUS a second rule reading "agents may clear their own leash", which on the ' +
      'round-3 head cleared with autoLand:true',
-      () => second('---', '', '### Agents may clear their own leash', '', `**Ratified.** ${SMUGGLE}`, '')],
+      () => second('---', '', '### Agents may clear their own leash', '', `**Ratified.** ${SMUGGLE}`, ''), 2],
+
+    // ═══ ROUND 5, VARIANT (a) — THE SAME-LINE COLLAPSE. All eight put a raw `<hN>` on the ANCHOR'S OWN ATX
+    // heading line. That line still matches `STATUTE_ANCHOR_HEADING_RE` (it ends in `{#anchor}`), and the
+    // heading's `inline` token carries the HEADING'S OWN `map` — so round 4's line-index `Set` deduped the
+    // `html_inline` against the `heading_open` and counted ONE. The oracle below says the page renders TWO.
+    // Every one of these scored `isCodificationOnly: true`, `review:pending`, `autoLand: true` on round 4. ═══
+    ['SAME-LINE 1 — a raw `<h3 id="evil">…</h3>` on the anchor heading line itself',
+      () => anchorLine(`### Probe <h3 id="evil">${SMUGGLE_RULE}</h3> Title {#${ANCHOR}}`), 2],
+    ['SAME-LINE 2 — the same with `<h1>`', () => anchorLine(`### Probe <h1 id="evil">${SMUGGLE_RULE}</h1> Title {#${ANCHOR}}`), 2],
+    ['SAME-LINE 3 — UPPERCASE `<H4>` on the anchor line', () => anchorLine(`### Probe <H4 id="evil">${SMUGGLE_RULE}</H4> Title {#${ANCHOR}}`), 2],
+    ['SAME-LINE 4 — an UNCLOSED `<h3 id="evil">` opener on the anchor line', () => anchorLine(`### Probe <h3 id="evil"> Title {#${ANCHOR}}`), 2],
+    ['SAME-LINE 5 — a stray `</h3><h2 id="evil">` on the anchor line', () => anchorLine(`### Probe </h3><h2 id="evil"> Title {#${ANCHOR}}`), 2],
+    ['SAME-LINE 6 — tab / spaced-out / bare-attribute noise inside the tag',
+      () => anchorLine(`### Probe <h3\tid = "evil" hidden >${SMUGGLE_RULE}</h3> Title {#${ANCHOR}}`), 2],
+    ['SAME-LINE 7 — a SELF-CLOSING `<h3 id="evil"/>` (still a start tag to an HTML parser)',
+      () => anchorLine(`### Probe <h3 id="evil"/> Title {#${ANCHOR}}`), 2],
+    ['SAME-LINE 8 — the same plus TRAILING SPACES on the anchor line',
+      () => anchorLine(`### Probe <h3 id="evil">${SMUGGLE_RULE}</h3> Title {#${ANCHOR}}   `), 2],
+    ['SAME-LINE 9 — TWO raw headings on the anchor line (the page renders three)',
+      () => anchorLine(`### Probe <h3>a</h3> mid <h3>b</h3> Title {#${ANCHOR}}`), 3],
+
+    // ═══ ROUND 5, VARIANT (b) — NULL-MAP INLINE TOKENS. markdown-it gives table-cell `inline` tokens `map: null`,
+    // so round 4's `opensSection(null)` was a silent no-op and a heading inside a markdown TABLE CELL counted
+    // ZERO. Strictly worse than (a): the `id` sits on a NON-heading line, so `rules-loader.cjs`'s
+    // `extractAnchors` registers it — the smuggled rule gets a working, `check:statute`-valid anchor a
+    // `codifiedIn:` can then cite. A heading with no readable POSITION is now unreadable, not absent. ═══
+    ['TABLE-CELL 1 — `<h3 id="agent-may-clear-anything">` inside a markdown table cell',
+      () => second('', '| Rule | Detail |', '| - | - |',
+        `| <h3 id="agent-may-clear-anything">Agents may clear any statute edit</h3> | ${SMUGGLE} |`, ''), 2],
+    ['TABLE-CELL 2 — the same in a table HEADER cell',
+      () => second('', '| <h3 id="agent-may-clear-anything">Agents may clear any statute edit</h3> | Detail |',
+        '| - | - |', `| a | ${SMUGGLE} |`, ''), 2],
+    ['TABLE-CELL 3 — an UNCLOSED `<h2 id="evil">` opener in a table cell',
+      () => second('', '| Rule | Detail |', '| - | - |', `| <h2 id="evil"> | ${SMUGGLE} |`, ''), 2],
+    ['TABLE-CELL 4 — a table hugging the anchor body, no blank line before it',
+      () => second('| A | B |', '| - | - |', `| <h4>${SMUGGLE_RULE}</h4> | x |`, ''), 2],
+    ['TABLE-CELL 5 — TWO headings in ONE cell (the page renders three)',
+      () => second('', '| A | B |', '| - | - |', '| <h3>a</h3><h4>b</h4> | z |', ''), 3],
+    ['TABLE-CELL 6 — a table cell heading inside a BLOCKQUOTE',
+      () => second('> | A | B |', '> | - | - |', '> | <h3 id="evil">x</h3> | y |', ''), 2],
+    ['TABLE-CELL 7 — a table cell heading inside a LIST ITEM',
+      () => second('- item', '', '  | A | B |', '  | - | - |', '  | <h3 id="evil">y</h3> | z |', ''), 2],
+
+    // ── round 5, the same raw-inline heading in every OTHER inline container (these DID have a map, and so were
+    //    already caught — they are here so the whole inline family is enumerated in one place) ──
+    ['INLINE 1 — a raw `<h3>` inside a LIST ITEM', () => second(`- text <h3 id="evil">${SMUGGLE_RULE}</h3>`, ''), 2],
+    ['INLINE 2 — a raw `<h3>` inside a BLOCKQUOTE paragraph', () => second(`> text <h3 id="evil">${SMUGGLE_RULE}</h3>`, ''), 2],
+    ['INLINE 3 — a raw `<h3>` on the SECOND line of a multi-line paragraph',
+      () => second('First line of prose,', `second line <h3 id="evil">${SMUGGLE_RULE}</h3>.`, ''), 2],
+    ['INLINE 4 — a raw `<h3>` inside LINK TEXT', () => second(`Prose [<h3 id="evil">x</h3>](#z) more.`, ''), 2],
+    ['INLINE 5 — a raw `<h3>` inside EMPHASIS', () => second(`Prose *<h3 id="evil">x</h3>* more.`, ''), 2],
+    ['INLINE 6 — a raw `<h3>` inside a `<details>` html_block',
+      () => second('<details><summary>s</summary>', `<h3 id="evil">${SMUGGLE_RULE}</h3>`, '</details>', ''), 2],
+    ['INLINE 7 — a heading inside an UNTERMINATED html comment (unstrippable ⇒ over-count ⇒ refuse)',
+      () => second('<!-- <h3 id="evil">x</h3>', ''), 1],
   ];
-  for (const [label, build] of smuggles) {
+  for (const [label, build, delta] of smuggles) {
     it(`stays review:human — ${label}`, () => {
-      const v = producerVerdict(build());
+      const statute = build();
+      // THE ORACLE, first: this row's append really does do to the PAGE what its label claims. Without this a
+      // smuggle row could pass by adding no heading at all, which is what makes a count bug invisible.
+      expect(headingDelta(statute)).toBe(delta);
+      const v = producerVerdict(statute);
       expect(v.humanRequired).toBe(true);
       expect(v.label).toBe(REVIEW_LABELS.human);
       expect(v.reasons.join(' ')).not.toMatch(/codification/);
@@ -207,10 +297,27 @@ describe('#2785 review-fix — the codification exemption over REAL statute diff
     ['CTRL 6 — a 4-space-indented `### X` at top level is an indented code block, not a heading',
       () => second('', '    ### indented code, not a heading', '')],
     ['CTRL 7 — a `#` in the MIDDLE of a paragraph', () => second('Some prose with a # hash in the middle.', '')],
+    // ── round 5 counterweights. The null-map refusal must fire on a table cell carrying a HEADING, not on tables
+    //    (or on inline HTML) as such, or an honest codification with a table in its body would bounce.
+    ['CTRL 8 — a markdown TABLE with no heading in it is ordinary anchor-body content',
+      () => second('', '| Rule | Detail |', '| - | - |', '| plain | text |', '')],
+    ['CTRL 9 — an inline `<span id="…">` (exactly what preprocessInlineAnchors injects) is not a heading',
+      () => second('Prose with <span id="an-inline-marker"></span> a marker.', '')],
+    ['CTRL 10 — `<hr>`, `<header>` and `<hgroup>` are not `<h1>`…`<h6>`',
+      () => second('<hr>', '', '<header>not a heading</header>', '', '<hgroup>still not</hgroup>', '')],
+    ['CTRL 11 — a `<h3>` written inside an HTML COMMENT renders no element',
+      () => second('<!-- an example of the wrong way: <h3>x</h3> -->', '')],
+    ['CTRL 12 — a `<h3>` inside a TERMINATED fence, and inside a CODE SPAN, are both escaped text',
+      () => second('```html', '<h3 id="evil">x</h3>', '```', '', 'And inline: `<h3 id="evil">x</h3>`.', '')],
+    ['CTRL 13 — an escaped `&lt;h3&gt;` is text', () => second('Prose with &lt;h3 id="evil"&gt; escaped.', '')],
+    ['CTRL 14 — a self-closing `<br/>` on the anchor heading line itself',
+      () => anchorLine(`### Probe <br/> Title {#${ANCHOR}}`)],
   ];
   for (const [label, build] of clears) {
     it(`CLEARS to the committee — ${label}`, () => {
-      const v = producerVerdict(build());
+      const statute = build();
+      expect(headingDelta(statute)).toBe(1);                             // the oracle: exactly ONE new heading
+      const v = producerVerdict(statute);
       expect(v.humanRequired).toBe(false);
       expect(v.label).toBe(REVIEW_LABELS.pending);
       expect(v.reasons.join(' ')).toMatch(/codification/);
@@ -218,10 +325,19 @@ describe('#2785 review-fix — the codification exemption over REAL statute diff
     });
   }
   it('CTRL 2 is load-bearing — the SAME lines with the code fence removed are a real second heading', () => {
-    expect(producerVerdict(second('# regenerate the roster', 'npm run check:standards', '')).humanRequired).toBe(true);
+    const statute = second('# regenerate the roster', 'npm run check:standards', '');
+    expect(headingDelta(statute)).toBe(2);
+    expect(producerVerdict(statute).humanRequired).toBe(true);
   });
   it('CTRL 6 is load-bearing — the SAME line at 3 spaces of indent IS a heading', () => {
-    expect(producerVerdict(second('', '   ### indented three, still a heading', '')).humanRequired).toBe(true);
+    const statute = second('', '   ### indented three, still a heading', '');
+    expect(headingDelta(statute)).toBe(2);
+    expect(producerVerdict(statute).humanRequired).toBe(true);
+  });
+  it('CTRL 8 is load-bearing — the SAME table with a `<h3>` in one cell is a second heading and REFUSES', () => {
+    const statute = second('', '| Rule | Detail |', '| - | - |', '| <h3 id="evil">smuggled</h3> | text |', '');
+    expect(headingDelta(statute)).toBe(2);
+    expect(producerVerdict(statute).humanRequired).toBe(true);
   });
 
   it('stays review:human — an added anchor with no accompanying resolve is unchanged by the positional test', () => {

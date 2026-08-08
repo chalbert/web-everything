@@ -193,12 +193,29 @@ const PLATFORM_DECISIONS_PATH = 'docs/agent/platform-decisions.md';
  *  diff ADDS, so the codification test can require they be exactly the ones the resolved decision names. */
 const STATUTE_ANCHOR_HEADING_RE = /^#{2,6}\s+.*\{#([A-Za-z0-9][A-Za-z0-9._-]*)\}\s*$/;
 
-/** A RAW HTML heading tag, in the rendered markup markdown passes through. Only ever applied to the CONTENT of a
+/** RAW HTML heading tags, in the rendered markup markdown passes through. Only ever applied to the CONTENT of a
  *  token markdown-it has already classified as raw HTML (`html_block` / `html_inline`), never to a raw diff line —
- *  deciding WHETHER a line is raw HTML is the parser's job, not a regex's. Opening AND closing tags both count,
- *  and a `<h3` whose `>` sits on the next line is inside the same token, so the tag SHAPE never has to be
- *  matched: over-counting only ever refuses. */
-const HTML_HEADING_RE = /<\/?h[1-6](?![a-z0-9])/i;
+ *  deciding WHETHER a line is raw HTML is the parser's job, not a regex's. A `<h3` whose `>` sits on the next line
+ *  is inside the same token, so the tag SHAPE never has to be matched (`<h3 …`, `<H3>`, `<h3/>`, a tab or a bare
+ *  attribute after the name all match the same way): the NAME is the whole test.
+ *
+ *  START and CLOSE tags are counted SEPARATELY because they answer different questions (#2785 review round 5).
+ *  How many heading ELEMENTS a run adds to the page is the number of START tags — an unmatched `</h2>` adds no
+ *  element, it only closes one. But an unmatched close tag is markup we cannot attribute to anything we counted,
+ *  so `closes > opens` REFUSES rather than guessing. */
+const HTML_HEADING_OPEN_RE = /<h[1-6](?![a-z0-9])/gi;
+const HTML_HEADING_CLOSE_RE = /<\/h[1-6](?![a-z0-9])/gi;
+
+/** HTML comments produce no elements, so a `<h3>` written inside one is not a heading on the page. Stripped
+ *  before counting so an honest codification that *documents* a tag does not bounce. An UNTERMINATED comment does
+ *  not match and is therefore not stripped — which over-counts, i.e. refuses. */
+const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
+
+/** `{ opens, closes }` — the heading START and CLOSE tags in one raw-HTML token's content. */
+function rawHeadingTags(content) {
+  const s = String(content || '').replace(HTML_COMMENT_RE, '');
+  return { opens: (s.match(HTML_HEADING_OPEN_RE) || []).length, closes: (s.match(HTML_HEADING_CLOSE_RE) || []).length };
+}
 
 /** A fenced-code CLOSING delimiter for an opener of `markup`. Built from the token markdown-it already produced,
  *  and used for exactly one question the token model does not answer directly: was the fence CLOSED? */
@@ -222,10 +239,22 @@ function fenceCloseRe(markup) {
  * enumeration is also not closeable by hand: CommonMark admits ATX and setext headings under every container
  * (list item, blockquote, nested combinations) at every legal indent, plus raw-HTML passthrough.
  *
- * So detection now asks the SAME OBJECT THE PAGE IS BUILT FROM. If markdown-it says the appended run opens two
- * sections, the rendered statute page has two sections; the two cannot disagree, because they are one parser with
- * one configuration. A new smuggle would have to be a heading markdown-it does not render as a heading — in which
- * case it is not a second rule on the published page either.
+ * So detection now asks the SAME OBJECT THE PAGE IS BUILT FROM: same parser, same version, same options.
+ *
+ * WHERE THE PARITY IS NOT LITERAL, EXACTLY (round 5 — the earlier wording overstated it). Two differences exist,
+ * and both were measured rather than assumed:
+ *   1. The render path renders `preprocessInlineAnchors(src)`; this reads the RAW source. The preprocessor can
+ *      only rewrite a standalone `{#id}` marker on a NON-heading line into `<span id="…">` or `<a href="#…">` —
+ *      neither is an `<h1>`…`<h6>`, so it cannot add, remove or move a heading.
+ *   2. The render path adds one core rule, which only sets an `id` attribute on `heading_open` tokens the parser
+ *      already produced (and strips the `{#id}` suffix from the heading text). It creates no tokens.
+ * So the two agree on heading COUNT, which is the only thing asked here — not on the exact HTML. That equality is
+ * not left as an argument: the corpus in `scripts/__tests__/pr-land.test.mjs` renders the real statute document
+ * with and without each append through the render path's own `makeRenderer()` + `preprocessInlineAnchors`, counts
+ * `h1`…`h6` ELEMENTS in a real DOM, and pins every row's count against this function's.
+ *
+ * A new smuggle would therefore have to be a heading markdown-it does not render as a heading — in which case it
+ * is not a second rule on the published page either.
  */
 let statuteReaderCache;
 function statuteReader() {
@@ -244,15 +273,29 @@ function statuteReader() {
 }
 
 /**
- * #2785 review round 4 — the indices of every line in `run` that OPENS A SECTION *in the rendered document*, or
- * `null` when the markdown cannot be read confidently (the caller then refuses). `prevLine` is the pre-existing
- * file line immediately above the run; it is fed to the parser as the run's first line of context, because a
- * setext underline heads the paragraph ABOVE it and a list/blockquote marker above the run changes what the run's
- * own lines mean.
+ * #2785 review round 4/5 — ONE ENTRY PER HEADING the `run` adds to the rendered document, each entry being the
+ * run-relative line the heading is attributed to; or `null` when the markdown cannot be read confidently (the
+ * caller then refuses). `prevLine` is the pre-existing file line immediately above the run; it is fed to the
+ * parser as the run's first line of context, because a setext underline heads the paragraph ABOVE it and a
+ * list/blockquote marker above the run changes what the run's own lines mean.
  *
- * WHAT COUNTS AS OPENING A SECTION. Exactly what markdown-it emits: a `heading_open` token (ATX or setext, at any
- * level, under any container, at any legal indent), or a raw-HTML token whose markup contains an `<h1>`…`<h6>`
- * tag (markdown passes block HTML straight through, so `<h3>…` opens a rendered section with no `#` anywhere).
+ * IT IS A COUNT OF HEADINGS, NOT OF LINES (round 5 — THE blocker of round 4). The first cut collected line
+ * indices into a `Set`, which silently collapsed two headings that share one source line into one. That is not a
+ * corner case: a heading's `inline` token carries the HEADING'S OWN `map`, so an `html_inline` `<h3 id="evil">`
+ * sitting on the anchor's own ATX line deduped against its `heading_open` — the page rendered two headings and
+ * the predicate counted one, and `### Probe <h3 id="evil">Second</h3> Title {#anchor}` scored `autoLand: true`.
+ * The array therefore carries MULTIPLICITY: two headings on one line are two entries. `length` is the count the
+ * caller bounds; `[0]` is still the first heading's line, which is all the positional tests need.
+ *
+ * WHAT COUNTS AS A HEADING. Exactly what puts an `<h1>`…`<h6>` ELEMENT on the page: one `heading_open` token
+ * (ATX or setext, at any level, under any container, at any legal indent), plus every raw-HTML heading START tag
+ * in a token markdown-it classified as raw HTML (`html_block` / `html_inline` — markdown passes HTML straight
+ * through, so `<h3>…` opens a rendered section with no `#` anywhere). CLOSE tags are not elements and are not
+ * counted, but an UNMATCHED close tag (`closes > opens`) is markup that cannot be attributed to anything, so it
+ * refuses. This is the same number a real DOM reports for the run: the round-5 oracle renders the real statute
+ * document with and without the run through `rules-loader.cjs`'s own `makeRenderer()` + `preprocessInlineAnchors`
+ * and diffs `querySelectorAll('h1,h2,h3,h4,h5,h6').length`; this function must equal that delta or refuse.
+ *
  * A heading that lies ENTIRELY on the `prevLine` context row is excluded (it is pre-existing text, not something
  * the run added); a setext heading whose paragraph is `prevLine` and whose underline is the run's first line IS
  * counted, because the run is what turned it into a heading.
@@ -263,10 +306,16 @@ function statuteReader() {
  * every one of them blank-preceded, and ZERO setext underlines — so the parser, CommonMark, and the document's
  * own convention all agree, and an honest codification's `---` separator still clears.
  *
- * UNREADABLE ⇒ REFUSE. An UNTERMINATED fence is the one case the token stream alone would get wrong in the unsafe
- * direction: markdown-it swallows every following line into the `fence` token, so a heading hidden behind it
- * would simply not appear. Each `fence` token is therefore checked for an actual closing delimiter, and an
- * unterminated one returns `null`. A parser that will not load, or a parse that throws, refuses the same way.
+ * UNREADABLE ⇒ REFUSE. Three ways the token stream alone would be wrong in the unsafe direction, all closed:
+ *   • an UNTERMINATED fence — markdown-it swallows every following line into the `fence` token, so a heading
+ *     hidden behind it would simply not appear. Each `fence` token is checked for an actual closing delimiter.
+ *   • a NULL `map` on a token carrying a raw-HTML heading (round 5). markdown-it gives table-cell `inline` tokens
+ *     `map: null`, so a `<h3 id="…">` inside a markdown table cell had no position at all and was counted ZERO
+ *     times — the worse half of the blocker, because the id sits on a NON-heading line, which means
+ *     `rules-loader.cjs`'s `extractAnchors` registers it and the smuggled rule gets a working, `check:statute`-valid
+ *     anchor a `codifiedIn:` can cite. A heading we cannot ATTRIBUTE TO A POSITION is now unreadable, not absent.
+ *   • an unmatched raw-HTML heading close tag, as above.
+ * A parser that will not load, or a parse that throws, refuses the same way.
  */
 function headingIndices(run, prevLine) {
   const md = statuteReader();
@@ -282,20 +331,42 @@ function headingIndices(run, prevLine) {
     if (typeof last !== 'string' || !fenceCloseRe(t.markup).test(last)) return null;
   }
 
-  const idx = new Set();
-  // `map` is [startLine, endLine) over `lines`, whose index 0 is the pre-existing context row. A token that ends
-  // at or before line 1 lies wholly on that row, so the run did not add it.
-  const opensSection = (map) => { if (Array.isArray(map) && map[1] > 1) idx.add(Math.max(map[0], 1) - 1); };
+  // `map` is [startLine, endLine) over `lines`, whose index 0 is the pre-existing context row. `undefined` ⇒ the
+  // token has NO readable position (a `map: null` table-cell inline token) and the caller must refuse; `null` ⇒
+  // the token lies wholly on the context row, so the run did not add it.
+  const rowOf = (map) => {
+    if (!Array.isArray(map) || !Number.isInteger(map[0]) || !Number.isInteger(map[1])) return undefined;
+    if (map[1] <= 1) return null;
+    return Math.max(map[0], 1) - 1;
+  };
+
+  const at = [];                                                         // one entry PER HEADING, duplicates kept
+  let htmlOpens = 0;                                                     // RAW-HTML heading tags only: a markdown
+  let htmlCloses = 0;                                                    // `heading_open` is closed by the parser
   for (const t of tokens) {
-    if (t.type === 'heading_open') opensSection(t.map);
-    else if (t.type === 'html_block' && HTML_HEADING_RE.test(String(t.content || ''))) opensSection(t.map);
+    let mdHeading = 0;
+    let rawOpens = 0;
+    let rawCloses = 0;
+    if (t.type === 'heading_open') mdHeading = 1;
+    else if (t.type === 'html_block') ({ opens: rawOpens, closes: rawCloses } = rawHeadingTags(t.content));
     else if (t.type === 'inline' && Array.isArray(t.children)) {
       for (const c of t.children) {
-        if (c.type === 'html_inline' && HTML_HEADING_RE.test(String(c.content || ''))) { opensSection(t.map); break; }
+        if (c.type !== 'html_inline') continue;
+        const r = rawHeadingTags(c.content);
+        rawOpens += r.opens;
+        rawCloses += r.closes;
       }
     }
+    if (!mdHeading && !rawOpens && !rawCloses) continue;
+    const row = rowOf(t.map);
+    if (row === undefined) return null;                                  // a heading we cannot place → unreadable
+    if (row === null) continue;                                          // wholly pre-existing context
+    htmlOpens += rawOpens;
+    htmlCloses += rawCloses;
+    for (let i = 0; i < mdHeading + rawOpens; i++) at.push(row);
   }
-  return [...idx].sort((a, b) => a - b);
+  if (htmlCloses > htmlOpens) return null;                               // an unattributable raw close tag
+  return at.sort((a, b) => a - b);
 }
 
 /** A backlog item file — the only place a `kind: decision` resolve can live. */
@@ -389,9 +460,10 @@ function parseDiffSections(diffText) {
  * WHY THE COUNT COMES FROM THE REAL PARSER (round 4). "How many sections does this run open?" is a question about
  * the rendered document, and three rounds of regexes trying to answer it from raw diff lines each missed a new
  * class — a heading behind a list marker or a blockquote, a setext underline inside a blockquote or under a wide
- * list marker, a `<h3` whose `>` lands on the next line. `headingIndices` therefore renders `lineAboveRun + run`
- * through the SAME markdown-it configuration that builds the published statute page, so "opens a second section"
- * here and "has a second section" there are the same fact.
+ * list marker, a `<h3` whose `>` lands on the next line. `headingIndices` therefore parses `lineAboveRun + run`
+ * with the SAME markdown-it configuration that builds the published statute page (see `statuteReader` for the two
+ * places the two paths are not literally identical, and why neither can change a heading count), so "opens a
+ * second section" here and "has a second section" there are the same fact — pinned row by row against a real DOM.
  */
 function isSingleAnchorAppend(section) {
   const seq = Array.isArray(section?.seq) ? section.seq : null;

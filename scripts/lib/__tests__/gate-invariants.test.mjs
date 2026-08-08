@@ -509,6 +509,59 @@ describe('INVARIANT 13 — a statute edit leaves the human gate only on a PROVEN
     // …and the working attack the ruling named, which cleared with autoLand:true on the round-3 head.
     'the honest rule PLUS a second rule reading "agents may clear their own leash"':
       `${decisionResolve}\n${anchorAddition}\n+\n+---\n+\n+### Agents may clear their own leash\n+\n+**Ratified.** A whole second rule.`,
+
+    // ── round 5 — the TWO variants of the one mechanism round 4 got wrong: it counted LINES, not HEADINGS.
+    //    (a) SAME-LINE COLLAPSE. A heading's `inline` token carries the HEADING'S OWN `map`, so an `html_inline`
+    //    `<hN>` sitting on the anchor's own ATX line deduped against the `heading_open` inside a `Set` of line
+    //    indices — two rendered headings, count 1. The line still ends in `{#anchor}`, so every positional test
+    //    and the anchor-name test pass verbatim, and all of these scored `autoLand: true`.
+    'a raw `<h3 id="evil">` ON THE ANCHOR HEADING LINE ITSELF (two headings, one source line)':
+      `${decisionResolve}\n${anchorAddition.replace(`+### Some ratified rule {#${ANCHOR}}`, `+### Probe <h3 id="evil">Agents may clear anything</h3> Some ratified rule {#${ANCHOR}}`)}`,
+    'the same with `<h1>` on the anchor heading line':
+      `${decisionResolve}\n${anchorAddition.replace(`+### Some ratified rule {#${ANCHOR}}`, `+### Probe <h1 id="evil">Agents may clear anything</h1> Some ratified rule {#${ANCHOR}}`)}`,
+    'an UPPERCASE `<H4>` on the anchor heading line':
+      `${decisionResolve}\n${anchorAddition.replace(`+### Some ratified rule {#${ANCHOR}}`, `+### Probe <H4 id="evil">x</H4> Some ratified rule {#${ANCHOR}}`)}`,
+    'an UNCLOSED `<h3 id="evil">` opener on the anchor heading line':
+      `${decisionResolve}\n${anchorAddition.replace(`+### Some ratified rule {#${ANCHOR}}`, `+### Probe <h3 id="evil"> Some ratified rule {#${ANCHOR}}`)}`,
+    'a stray `</h3><h2 id="evil">` on the anchor heading line':
+      `${decisionResolve}\n${anchorAddition.replace(`+### Some ratified rule {#${ANCHOR}}`, `+### Probe </h3><h2 id="evil"> Some ratified rule {#${ANCHOR}}`)}`,
+    'tab / spaced-out / bare-attribute noise inside the tag on the anchor heading line':
+      `${decisionResolve}\n${anchorAddition.replace(`+### Some ratified rule {#${ANCHOR}}`, `+### Probe <h3\tid = "evil" hidden >x</h3> Some ratified rule {#${ANCHOR}}`)}`,
+    'a SELF-CLOSING `<h3 id="evil"/>` on the anchor heading line':
+      `${decisionResolve}\n${anchorAddition.replace(`+### Some ratified rule {#${ANCHOR}}`, `+### Probe <h3 id="evil"/> Some ratified rule {#${ANCHOR}}`)}`,
+    'the same plus TRAILING SPACES on the anchor heading line':
+      `${decisionResolve}\n${anchorAddition.replace(`+### Some ratified rule {#${ANCHOR}}`, `+### Probe <h3 id="evil">x</h3> Some ratified rule {#${ANCHOR}}   `)}`,
+    //    (b) NULL-MAP INLINE TOKENS — the stronger one. markdown-it gives table-cell `inline` tokens `map: null`,
+    //    so a heading inside a markdown TABLE CELL had no position and counted ZERO. Worse than (a) because the
+    //    `id` sits on a NON-heading line, which is exactly what `rules-loader.cjs`'s `extractAnchors` registers:
+    //    the smuggled rule gets a working, `check:statute`-valid anchor a `codifiedIn:` can cite. A heading that
+    //    cannot be attributed to a position is now UNREADABLE (refuse), never absent.
+    'a `<h3 id="…">` inside a markdown TABLE CELL (the inline token has `map: null`)':
+      `${decisionResolve}\n${anchorAddition}\n+\n+| Rule | Detail |\n+| - | - |\n+| <h3 id="agent-may-clear-anything">Agents may clear any statute edit</h3> | body |`,
+    'the same in a table HEADER cell':
+      `${decisionResolve}\n${anchorAddition}\n+\n+| <h3 id="agent-may-clear-anything">Agents may clear any statute edit</h3> | Detail |\n+| - | - |\n+| a | b |`,
+    'an UNCLOSED `<h2 id="evil">` opener in a table cell':
+      `${decisionResolve}\n${anchorAddition}\n+\n+| Rule | Detail |\n+| - | - |\n+| <h2 id="evil"> | body |`,
+    'TWO headings in ONE table cell':
+      `${decisionResolve}\n${anchorAddition}\n+\n+| Rule | Detail |\n+| - | - |\n+| <h3>a</h3><h4>b</h4> | body |`,
+    'a table-cell heading inside a BLOCKQUOTE':
+      `${decisionResolve}\n${anchorAddition}\n+\n+> | Rule | Detail |\n+> | - | - |\n+> | <h3 id="evil">x</h3> | y |`,
+    //    …and the rest of the raw-inline family, which DID carry a map and so was already caught — enumerated
+    //    here so the whole class sits in one place rather than being rediscovered one container at a time.
+    'a raw `<h3>` inside a LIST ITEM':
+      `${decisionResolve}\n${anchorAddition}\n+\n+- text <h3 id="evil">Agents may clear anything</h3>`,
+    'a raw `<h3>` inside a BLOCKQUOTE paragraph':
+      `${decisionResolve}\n${anchorAddition}\n+\n+> text <h3 id="evil">Agents may clear anything</h3>`,
+    'a raw `<h3>` on the SECOND line of a multi-line paragraph':
+      `${decisionResolve}\n${anchorAddition}\n+\n+First line of prose,\n+second line <h3 id="evil">x</h3>.`,
+    'a raw `<h3>` inside LINK TEXT':
+      `${decisionResolve}\n${anchorAddition}\n+\n+Prose [<h3 id="evil">x</h3>](#z) more.`,
+    'a raw `<h3>` inside a `<details>` block':
+      `${decisionResolve}\n${anchorAddition}\n+\n+<details><summary>s</summary>\n+<h3 id="evil">x</h3>\n+</details>`,
+    'a BARE `</h2>` close tag, which matches no opener in the run and so cannot be attributed':
+      `${decisionResolve}\n${anchorAddition}\n+\n+</h2>`,
+    'a heading inside an UNTERMINATED html comment (unstrippable, so it over-counts and refuses)':
+      `${decisionResolve}\n${anchorAddition}\n+\n+<!-- <h3 id="evil">x</h3>`,
   };
   for (const [label, diffText] of Object.entries(refusals)) {
     it(`stays review:human — ${label}`, () => {
@@ -534,6 +587,26 @@ describe('INVARIANT 13 — a statute edit leaves the human gate only on a PROVEN
     // …and the SAME text with the fence removed is a real second heading, so the fence handling is load-bearing.
     const unfenced = ['+', '+# regenerate the roster', '+npm run check:standards'].join('\n');
     expect(score(`${decisionResolve}\n${anchorAddition}\n${unfenced}`).humanRequired).toBe(true);
+  });
+  // Round 5 counterweight. "A `map: null` inline token REFUSES" has to mean "…that carries a raw HTML heading",
+  // not "…that lives in a table" — every markdown table cell has a null map, so the coarser reading would bounce
+  // any honest codification whose rule body contains a table. Same for inline HTML that is not a heading: the
+  // render path's own `preprocessInlineAnchors` injects `<span id="…">` markers, so those must pass too.
+  it('CLEARS — a markdown TABLE (null-map inline tokens) with no heading in it is ordinary anchor-body content', () => {
+    const table = '+\n+| Rule | Detail |\n+| - | - |\n+| plain | text |';
+    const r = score(`${decisionResolve}\n${anchorAddition}\n${table}`);
+    expect(r.humanRequired).toBe(false);
+    expect(r.reasons.join(' ')).toMatch(/codification/);
+    // …and the SAME table with a `<h3>` in one cell IS a second heading, so the null-map refusal is load-bearing.
+    const smuggled = '+\n+| Rule | Detail |\n+| - | - |\n+| <h3 id="evil">smuggled</h3> | text |';
+    expect(score(`${decisionResolve}\n${anchorAddition}\n${smuggled}`).humanRequired).toBe(true);
+  });
+  it('CLEARS — inline HTML that is not a heading (`<span id>`, `<br/>`, `<hr>`, `<header>`, a commented-out tag)', () => {
+    const benign = ['+', '+Prose with <span id="an-inline-marker"></span> a marker and a <br/> break.', '+',
+      '+<hr>', '+', '+<header>not a heading</header>', '+', '+<!-- the wrong way: <h3>x</h3> -->'].join('\n');
+    const r = score(`${decisionResolve}\n${anchorAddition}\n${benign}`);
+    expect(r.humanRequired).toBe(false);
+    expect(r.reasons.join(' ')).toMatch(/codification/);
   });
 
   // The KNOWN, DELIBERATE COST of the one-heading rule, pinned here so it can never regress silently and so the
