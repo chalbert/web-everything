@@ -2873,6 +2873,13 @@ async function runCli() {
       // to the old GitHub files-list read if neither is available.
       const escCwd = isLocalRepo(v.repo) ? undefined : siblingCloneDir(v.repo);
       let netScored = false;
+      // #2785 — the net diff TEXT over the same cumulative basis, forwarded to the rubric so the drain's
+      // backstop pass can PROVE the #2771 Fork B codification shape too. WITHOUT it here, the drain would
+      // re-derive humanRequired:true on a codify PR the producer correctly labelled review:pending and re-park
+      // it as review:human — the exemption has to hold on BOTH scoring paths or it does not hold at all. Null
+      // whenever the text cannot be read (the gh-files fallback below, a non-local repo with no sibling clone),
+      // which is the fail-closed input: the statute touch then keeps forcing a human.
+      let diffText = null;
       if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
         const exec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts });
         const net = computeNetDiffChangedFiles({ exec, rev: v.headRef, baseRev: v.base, fetchExtraRefs: [v.headRef] });
@@ -2880,6 +2887,10 @@ async function runCli() {
         diffLines = net.diffLines;
         humanBasisFiles = net.humanBasisFiles;
         netScored = net.scored;
+        if (netScored) {
+          const netText = computeNetDiffText({ exec, rev: v.headRef, fetchExtraRefs: [v.headRef] });
+          if (netText.scored) diffText = netText.text;
+        }
       }
       if (!netScored) {
         try {
@@ -2891,7 +2902,7 @@ async function runCli() {
           humanBasisFiles = changedFiles;
         } catch { /* signal-fetch miss → score on the manifest signals alone */ }
       }
-      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo });
+      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffText });
       // #2414 — first-drain-sighting manifest baseline gate. The manifest values (`v.hasManifest`/
       // `dismissedFindings`/`crossRepo`/`blockedBy`) are re-read from the LIVE PR body every pass
       // (readPrManifest), so we can capture what the drain FIRST saw for a ready-to-merge PR and diff a later

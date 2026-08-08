@@ -247,14 +247,23 @@ author-bounce with a bounded editor↔reviewer negotiation loop** (below). The o
 The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isGateSelfPath`) and emits it
 in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`.
 
+> **A CODIFY-SHAPE statute PR is NOT the operator's (#2771 Fork B, statute
+> [`#review-human-declarative-leash-only`](../../docs/agent/platform-decisions.md#review-human-declarative-leash-only)).**
+> A PR whose only `platform-decisions.md` change is the anchor a `kind: decision` resolve in the SAME diff names
+> parks `review:pending` and the independent committee clears it — bouncing it to the operator asks them to
+> re-approve their own ruling. Detection is script-decidable (`isCodificationOnly`) and fail-closed: anything
+> unprovable carries the `statute` reason and stays human. So read `humanRequired` / the `statute` vs
+> `codification` reason, never the file path.
+
 > **The converge-vs-human branch is ONE derivation (#2285).** Don't hand-branch on `humanRequired` — call
 > `deriveReviewDisposition({ reasons })` in `we:scripts/lib/review-core.mjs` and act on `{ mode, autoLand }`. It
 > is single-sourced so **every** review surface (this drain, `/review`, `/merge`) shares the policy, keyed on WHY
 > the PR escalated. `mode: 'converge'` → run the panel↔editor loop below; `mode: 'human'` → hand straight to a
 > human, no convergence. `autoLand: false` → an agent may FIX but never CLEAR it (a human gates the merge). Map
-> the drain's signals to reasons: `humanRequired` ⇒ `gate-self`; the escalation `reasons` (blast-radius / size /
-> dismissed-findings / cross-repo / sampling) are the sensitivity reasons; a negotiation that hits the round cap
-> or a mandate conflict (below) is `non-convergence` / `mandate-conflict`.
+> the drain's signals to reasons: don't re-derive them — the `parked` entry's `reasons` already carry the exact
+> decorated strings (`gate-self` / `statute` / `codification` / blast-radius / size / dismissed-findings /
+> cross-repo), and a negotiation that hits the round cap or a mandate conflict (below) adds `non-convergence` /
+> `mandate-conflict`. Pass them through verbatim.
 
 > **No park ever times out (x30jq9n, resolving #2412 Gap 1).** The old 30-minute merge-anyway window
 > (`--review-window-minutes`, #2262) is REMOVED: it raced the very review it was waiting for — observed

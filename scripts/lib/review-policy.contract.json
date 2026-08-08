@@ -17,10 +17,16 @@
       "description": "The diff edits the POLICY tier of the auto-review trust chain — the code that decides whether the gate fires and what clears it. An agent reviewing such a change would be policing an edit to its own leash (a conflict of interest), so a human is essential (#2285). Fires at classification time (before any review deadlock), so the panel may CONVERGE an advisory fix — but it never auto-lands."
     },
     {
+      "token": "codification",
+      "family": "sensitivity",
+      "clearance": "agent",
+      "description": "The diff's ONLY statute edit is the mechanical codification of a decision the human ALREADY ruled — the same PR resolves a kind:decision item (status → resolved with codifiedIn set to a statute anchor) and the only platform-decisions.md change is the addition of exactly that anchor. Ratified agent-clearable by #2771 Fork B: re-bouncing this to the human asks them to re-approve their own ruling (the #882/#885 bounce). The committee still reviews it — an independent panel checks the anchor faithfully records the resolved decision's ruling — but a CONVERGED panel accept lands it: this token falls through to the agent-clearance rule below (`converge`, `autoLand: true`) and no human gates the merge. That is the whole content of 'committee-clearable, not human-gated'; the only thing removed is the human, never the review. Detected script-decidably from the resolve+codify diff SHAPE (isCodificationOnly, review-escalation.mjs), never from a raw 'touches platform-decisions.md' test, and FAIL-CLOSED in both halves of the shape: any statute diff whose shape cannot be proven to be codification carries the `statute` token instead and stays human — including one whose added lines cannot be proven to BELONG TO the named anchor's own section (a second added run anywhere in the file, an added anchor followed by pre-existing context, or prose sitting above the new heading)."
+    },
+    {
       "token": "statute",
       "family": "sensitivity",
       "clearance": "human",
-      "description": "The diff edits the statute layer (platform-decisions.md / any statute doc) — a governance rule a human must ratify (#2412). Same disposition as gate-self: converge an advisory fix, never auto-land."
+      "description": "The diff edits the statute layer (platform-decisions.md / any statute doc) writing a NEW rule — a governance call a human must ratify (#2412). Same disposition as gate-self: converge an advisory fix, never auto-land. Since #2771/#2785 this token fires on every statute edit EXCEPT one whose diff shape proves it is the codification of an already-ruled decision (the `codification` token above); anything unprovable stays here, human-gated."
     },
     {
       "token": "blast-radius",
@@ -72,7 +78,7 @@
         "match": { "clearance": "human" },
         "mode": "converge",
         "autoLand": false,
-        "description": "A human-clearance SENSITIVITY reason (gate-self or statute — deadlock is already caught above): converge an ADVISORY fix, but a human must still clear the merge. The #2445 two-tier flip keeps ONLY these two sensitivity classes human; the lander (engine tier) falls through to the next rule."
+        "description": "A human-clearance SENSITIVITY reason (gate-self or statute — deadlock is already caught above): converge an ADVISORY fix, but a human must still clear the merge. The #2445 two-tier flip keeps ONLY these two sensitivity classes human; the lander (engine tier) falls through to the next rule, and since #2771 Fork B so does `codification` (a statute edit proven to record an already-ruled decision)."
       },
       {
         "match": { "family": "sensitivity" },

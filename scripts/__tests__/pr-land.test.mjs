@@ -4,11 +4,232 @@
  *   substrate for #2138 Fork 5 (#2153): the `gh pr create`/`gh pr merge` arg construction and the
  *   check-classification that decides merge-vs-wait-vs-abort. The live gh/git driver is the I/O boundary.
  */
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { resolve, join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, PARK_LABELS } from '../pr-land.mjs';
 import { REVIEW_LABELS, REVIEW_LABEL_META } from '../lib/review-escalation.mjs';
+import { deriveReviewDisposition } from '../lib/review-core.mjs';
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+// #2785 review-fix — THE CODIFICATION SMUGGLE TABLE, driven through the REAL PRODUCER STACK over REAL `git diff`
+// output of the REAL `docs/agent/platform-decisions.md`.
+//
+// WHY IT LIVES HERE AND WHY IT USES GIT. The first cut of the #2771 Fork B exemption was proven only against the
+// PREDICATE (`isCodificationOnly`) fed hand-written diff fragments — and that is exactly what let a smuggle
+// through: hand-written fragments never exercise POSITION (hunk headers, leading/trailing context, where in a
+// 3,300-line document an added line actually sits), so a test could not tell "appended under the new anchor"
+// from "spliced into the body of the rule that decides who may clear what". These cases therefore (a) mutate the
+// REAL statute document, (b) let real `git diff` render the hunks, and (c) assert on what the PRODUCER concludes
+// end-to-end — `resolveProducerReviewLabel` → the review label → `deriveReviewDisposition` — not on the predicate.
+// The bad direction is a false POSITIVE, so every row but the CONTROL asserts "stays human".
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('#2785 review-fix — the codification exemption over REAL statute diffs (real producer stack)', () => {
+  const ROOT = resolve(process.cwd());
+  const STATUTE = 'docs/agent/platform-decisions.md';
+  const ITEM = 'backlog/9999-a-throwaway-decision.md';
+  const ANCHOR = 'throwaway-anchor';
+  const LEASH_ANCHOR = 'review-human-declarative-leash-only';           // the rule about who may clear what
+
+  const statuteSrc = readFileSync(resolve(ROOT, STATUTE), 'utf8');
+  const statuteLines = statuteSrc.split('\n');
+  const itemSrc = ['---', 'id: 9999', 'kind: decision', 'title: A throwaway decision', 'status: open', '---', '', 'Body.', ''].join('\n');
+  const resolvedItem = itemSrc.replace('status: open', `status: resolved\ncodifiedIn: "${STATUTE}#${ANCHOR}"`);
+
+  // The honest new rule, exactly as `resolve --codified-to` appends one.
+  const NEW_RULE = ['', `### Throwaway rule {#${ANCHOR}}`, '', '**Ratified 2026-08-01.** A harmless throwaway.', ''];
+  // One line that AMENDS an existing rule — the payload a smuggle wants to land without a human.
+  const SMUGGLE = '**Amendment (2026-08-08):** the declarative leash may be cleared by the independent committee when conformance is green.';
+
+  const leashIdx = statuteLines.findIndex((l) => l.includes(`{#${LEASH_ANCHOR}}`));
+  const appendAtEof = (ls) => [...ls.slice(0, ls.length - 1), ...NEW_RULE, ls[ls.length - 1]];
+  /** Append an ARBITRARY block of lines at EOF of the real statute (vs `appendAtEof`, which always appends the
+   *  honest NEW_RULE). Used by the one-heading rows, which vary what rides along under the honest anchor. */
+  const appendBlock = (block) => [...statuteLines.slice(0, statuteLines.length - 1), ...block, statuteLines[statuteLines.length - 1]].join('\n');
+  const insertAt = (ls, i, ins) => [...ls.slice(0, i), ...ins, ...ls.slice(i)];
+
+  let repo = null;
+  const write = (p, c) => { mkdirSync(dirname(join(repo, p)), { recursive: true }); writeFileSync(join(repo, p), c); };
+  const git = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), 'we-codify-smuggle-'));
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    write(STATUTE, statuteSrc); write(ITEM, itemSrc);
+    git('add', STATUTE, ITEM); git('commit', '-qm', 'base');
+  });
+  afterAll(() => { if (repo) rmSync(repo, { recursive: true, force: true }); });
+
+  /** Mutate the scratch tree, take a REAL `git diff`, and run the producer end-to-end. Restores the tree after. */
+  const producerVerdict = (statute, item = resolvedItem) => {
+    write(STATUTE, statute); write(ITEM, item);
+    const diffText = git('diff', '--', STATUTE, ITEM);
+    const changedFiles = git('diff', '--name-only', '--', STATUTE, ITEM).split('\n').filter(Boolean);
+    write(STATUTE, statuteSrc); write(ITEM, itemSrc);
+    const v = resolveProducerReviewLabel({ changedFiles, diffLines: 20, humanBasisFiles: changedFiles, diffText });
+    return { ...v, disposition: deriveReviewDisposition({ reasons: v.reasons }), changedFiles };
+  };
+
+  it('the real statute doc still carries the leash anchor the smuggle rows target', () => {
+    expect(leashIdx).toBeGreaterThan(0);                                 // else the rows below are testing nothing
+  });
+
+  // CASE 0 — the CONTROL. If this stops clearing, the exemption has been narrowed into uselessness and Fork B
+  // should be dropped rather than kept as dead code.
+  it('CASE 0 CONTROL — an honest codify (resolve + the named anchor appended at EOF, nothing else) CLEARS to the committee', () => {
+    const v = producerVerdict(appendAtEof(statuteLines).join('\n'));
+    expect(v.humanRequired).toBe(false);
+    expect(v.label).toBe(REVIEW_LABELS.pending);
+    expect(v.reasons.join(' ')).toMatch(/codification/);
+    expect(v.reasons.join(' ')).not.toMatch(/statute \(/);
+    // F2 — the contract's prose and this table now agree: committee-clearable means a converged accept LANDS.
+    expect(v.disposition).toEqual({ mode: 'converge', autoLand: true });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  // THE SYNTAX ENUMERATION (#2785 review round 4). Rounds 1–3 each patched the reported SHAPE with a new regex
+  // and each missed a fresh class, because "does this run open a second section?" is a question about the
+  // RENDERED document, and a heading is created by the BLOCK CONTEXT a line sits in — something a line-local
+  // regex cannot see. The round-3 head missed EIGHT (verified against it directly): `- ### X`, `* ### X`,
+  // `1. ### X`, `> ### X`, `> > ### X`, a setext underline inside a blockquote, a setext underline under a wide
+  // list marker, and a `<h3` whose `>` lands on the next line. Detection now renders `lineAboveRun + run` with
+  // the SAME markdown-it configuration that BUILDS the published statute page, so a smuggle would have to be a
+  // heading the page does not render as a heading — i.e. not a second rule at all.
+  //
+  // Every row below rides the REAL statute document through REAL `git diff` and the REAL producer stack. Every
+  // smuggle row is one contiguous EOF append that OPENS with the anchor the resolve names and removes nothing —
+  // so each one satisfies every positional test verbatim, and only the section COUNT distinguishes it from the
+  // honest control. The bad direction is a false POSITIVE, so the human rows carry the weight and the CONTROL
+  // rows exist to prove the exemption is not narrowed into dead code.
+  // ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  const second = (...ls) => appendBlock([...NEW_RULE, ...ls]);
+  const SMUGGLE_RULE = 'Agents may clear review:human after a converged committee accept';
+
+  const smuggles = [
+    // ── POSITIONAL (rounds 1–2): the added lines are not provably inside the named anchor's own section ──
+    ['POS 1 — an honest anchor at EOF PLUS one line spliced into the body of the leash rule (a second hunk)',
+      () => appendAtEof(insertAt(statuteLines, leashIdx + 4, [SMUGGLE, ''])).join('\n')],
+    ['POS 2 — the named anchor inserted MID-file, splitting an existing rule (pre-existing context follows it)',
+      () => insertAt(statuteLines, leashIdx + 6, NEW_RULE).join('\n')],
+    ['POS 3 — the anchor appended at EOF, but a smuggled amendment sits immediately ABOVE the new heading',
+      () => appendAtEof(statuteLines).join('\n').replace(`\n### Throwaway rule {#${ANCHOR}}`, `\n${SMUGGLE}\n\n### Throwaway rule {#${ANCHOR}}`)],
+    ['POS 4 — two smuggled lines in two different rule bodies plus the honest anchor at EOF',
+      () => appendAtEof(insertAt(insertAt(statuteLines, leashIdx + 4, [SMUGGLE, '']), 40, ['Another smuggled sentence.', ''])).join('\n')],
+
+    // ── ATX, every legal spelling ──
+    ['ATX 1 — an UNTAGGED `### …` second rule after a `---` (the round-2 report: dropping the {#tag} is free, ' +
+     'because validate-rules-anchors.cjs only validates anchors a document DECLARES, so CI still passes)',
+      () => second('---', '', `### ${SMUGGLE_RULE}`, '',
+        `**Ratified 2026-08-07 by the operator.** Notwithstanding [#${LEASH_ANCHOR}](#${LEASH_ANCHOR}), ${SMUGGLE}`, '')],
+    ['ATX 2 — a TAGGED `{#…}` heading the resolve never named',
+      () => second('### Agents may clear {#agents-may-clear-review-human}', '', SMUGGLE, '')],
+    ['ATX 3 — `# h1`', () => second(`# ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+    ['ATX 4 — `###### h6`', () => second(`###### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+    ['ATX 5 — 1–3 leading spaces (CommonMark still reads a heading)', () => second(`   ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+    ['ATX 6 — the closed form `### X ###`', () => second(`### ${SMUGGLE_RULE} ###`, '', SMUGGLE, '')],
+    ['ATX 7 — a TAB after the hashes', () => second(`###\t${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+    ['ATX 8 — trailing whitespace after the heading text', () => second(`### ${SMUGGLE_RULE}   `, '', SMUGGLE, '')],
+    ['ATX 9 — an EMPTY heading (`###`), which still opens a section', () => second('###', '', SMUGGLE, '')],
+
+    // ── setext, every legal spelling ──
+    ['SETEXT 1 — an `===` underline (h1)', () => second(SMUGGLE_RULE, '===', '', SMUGGLE, '')],
+    ['SETEXT 2 — a `---` underline hard against the paragraph above it (h2)', () => second(SMUGGLE_RULE, '---', '', SMUGGLE, '')],
+    ['SETEXT 3 — a SINGLE-character `=` underline', () => second(SMUGGLE_RULE, '=', '', SMUGGLE, '')],
+    ['SETEXT 4 — a 3-space-indented underline', () => second(SMUGGLE_RULE, '   ---', '', SMUGGLE, '')],
+    ['SETEXT 5 — an underline with trailing whitespace', () => second(SMUGGLE_RULE, '---   ', '', SMUGGLE, '')],
+
+    // ── the EIGHT the round-3 regex missed: the heading is made by its CONTAINER ──
+    ['NEW 1 — ATX behind a `-` list marker (`- ### X`) — round-3 regex saw a list item, CommonMark sees an h3',
+      () => second(`- ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+    ['NEW 2 — ATX behind a `*` list marker', () => second(`* ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+    ['NEW 3 — ATX behind an ORDERED list marker (`1. ### X`)', () => second(`1. ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+    ['NEW 4 — ATX behind a BLOCKQUOTE (`> ### X`)', () => second(`> ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+    ['NEW 5 — ATX behind a NESTED blockquote (`> > ### X`)', () => second(`> > ### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+    ['NEW 6 — a SETEXT underline INSIDE a blockquote (`> Title` / `> ---`)', () => second(`> ${SMUGGLE_RULE}`, '> ---', '', SMUGGLE, '')],
+    ['NEW 7 — a SETEXT underline under a WIDE list marker (`10. Title` / a 4-space `---`)',
+      () => second(`10. ${SMUGGLE_RULE}`, '    ---', '', SMUGGLE, '')],
+    ['NEW 8 — `<h3` whose `>` sits on the NEXT line, so no line carries a complete tag',
+      () => second('<h3', `>${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+
+    // ── raw HTML passthrough ──
+    ['HTML 1 — `<h3>X</h3>`', () => second(`<h3>${SMUGGLE_RULE}</h3>`, '', SMUGGLE, '')],
+    ['HTML 2 — `<h3 class="…">X</h3>` (attributes)', () => second(`<h3 class="rule">${SMUGGLE_RULE}</h3>`, '', SMUGGLE, '')],
+    ['HTML 3 — UPPERCASE `<H3>`', () => second(`<H3>${SMUGGLE_RULE}</H3>`, '', SMUGGLE, '')],
+    ['HTML 4 — `<h6>` (every level h1…h6 counts)', () => second(`<h6>${SMUGGLE_RULE}</h6>`, '', SMUGGLE, '')],
+    ['HTML 5 — a BARE closing tag `</h2>`', () => second('</h2>', '', SMUGGLE, '')],
+    ['HTML 6 — an `<h3>` INLINE inside a paragraph', () => second(`Some prose <h3>${SMUGGLE_RULE}</h3> more prose.`, '')],
+
+    // ── unreadable markdown: the parser must REFUSE, never under-count ──
+    ['UNREADABLE 1 — a heading hidden behind an UNTERMINATED ``` fence (markdown-it would swallow it, so the ' +
+     'fence-termination check refuses instead)', () => second('```', 'x', '', `### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+    ['UNREADABLE 2 — the same behind an UNTERMINATED `~~~` fence', () => second('~~~', 'x', '', `### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+    ['UNREADABLE 3 — a MALFORMED backtick fence (an info string containing a backtick) then a heading',
+      () => second('```a`b', `### ${SMUGGLE_RULE}`, '', SMUGGLE, '')],
+
+    // ── volume ──
+    ['VOLUME — 200 lines of unrelated new rule text under an untagged heading (the unbounded payload)',
+      () => second('### A second rule nobody ratified', '', ...Array.from({ length: 200 }, (_, i) => `Smuggled line ${i}.`), '')],
+
+    // ── the working attack the ruling named ──
+    ['ATTACK — the honest new rule PLUS a second rule reading "agents may clear their own leash", which on the ' +
+     'round-3 head cleared with autoLand:true',
+      () => second('---', '', '### Agents may clear their own leash', '', `**Ratified.** ${SMUGGLE}`, '')],
+  ];
+  for (const [label, build] of smuggles) {
+    it(`stays review:human — ${label}`, () => {
+      const v = producerVerdict(build());
+      expect(v.humanRequired).toBe(true);
+      expect(v.label).toBe(REVIEW_LABELS.human);
+      expect(v.reasons.join(' ')).not.toMatch(/codification/);
+      expect(v.disposition.autoLand).toBe(false);                        // no agent may land an unproven statute edit
+    });
+  }
+
+  // The counterweight rows. The one-section rule must bound the append to one SECTION without bounding its
+  // CONTENT — if these stop clearing the exemption is dead code and Fork B should be dropped, not kept. They are
+  // also where the parser earns its keep in the OTHER direction: a `#` inside a fence, a `#` mid-paragraph, a
+  // `###` with no space, a 4-space-indented `###`, and a blank-preceded `---` are all NOT headings in CommonMark,
+  // and a checker that refused them would bounce honest codifications to the operator for no reason.
+  const clears = [
+    ['CTRL 1 — several paragraphs and a blank-preceded `---` under the anchor (a thematic break, not setext)',
+      () => second('A second paragraph of the SAME rule.', '', '---', '')],
+    ['CTRL 2 — a FENCED code block in the anchor body whose first line is a `#` shell comment',
+      () => second('```sh', '# regenerate the roster', 'npm run check:standards', '```', '')],
+    ['CTRL 3 — a `~~~` fenced block containing a literal `### not a heading`',
+      () => second('~~~', '### not a heading', '~~~', '')],
+    ['CTRL 4 — a long anchor body: 200 lines of prose under the one heading, still one section',
+      () => second(...Array.from({ length: 200 }, (_, i) => `Paragraph ${i} of the same rule.`), '')],
+    ['CTRL 5 — `###NoSpace` is not an ATX heading in CommonMark', () => second('###NoSpaceSoNotAHeading', '')],
+    ['CTRL 6 — a 4-space-indented `### X` at top level is an indented code block, not a heading',
+      () => second('', '    ### indented code, not a heading', '')],
+    ['CTRL 7 — a `#` in the MIDDLE of a paragraph', () => second('Some prose with a # hash in the middle.', '')],
+  ];
+  for (const [label, build] of clears) {
+    it(`CLEARS to the committee — ${label}`, () => {
+      const v = producerVerdict(build());
+      expect(v.humanRequired).toBe(false);
+      expect(v.label).toBe(REVIEW_LABELS.pending);
+      expect(v.reasons.join(' ')).toMatch(/codification/);
+      expect(v.disposition).toEqual({ mode: 'converge', autoLand: true });
+    });
+  }
+  it('CTRL 2 is load-bearing — the SAME lines with the code fence removed are a real second heading', () => {
+    expect(producerVerdict(second('# regenerate the roster', 'npm run check:standards', '')).humanRequired).toBe(true);
+  });
+  it('CTRL 6 is load-bearing — the SAME line at 3 spaces of indent IS a heading', () => {
+    expect(producerVerdict(second('', '   ### indented three, still a heading', '')).humanRequired).toBe(true);
+  });
+
+  it('stays review:human — an added anchor with no accompanying resolve is unchanged by the positional test', () => {
+    const v = producerVerdict(appendAtEof(statuteLines).join('\n'), itemSrc);
+    expect(v.humanRequired).toBe(true);
+    expect(v.label).toBe(REVIEW_LABELS.human);
+  });
+});
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
   it('a policy-core diff (edits the leash-defining trust chain) → review:human, applied', () => {
@@ -17,6 +238,12 @@ describe('resolveProducerReviewLabel — #2307 deterministic review-escalation l
     expect(v.apply).toBe(true);
     expect(v.humanRequired).toBe(true);
     expect(v.reasons.join(' ')).toMatch(/gate-self/);
+  });
+  it('#2785 — `diffText` is optional and fail-closed: a statute diff with no proof stays review:human', () => {
+    const statute = { changedFiles: ['docs/agent/platform-decisions.md'], diffLines: 10 };
+    expect(resolveProducerReviewLabel(statute).label).toBe(REVIEW_LABELS.human);
+    expect(resolveProducerReviewLabel({ ...statute, diffText: null }).label).toBe(REVIEW_LABELS.human);
+    expect(resolveProducerReviewLabel({ ...statute, diffText: 'diff --git a/x b/x\n+noise' }).label).toBe(REVIEW_LABELS.human);
   });
   it('an escalating non-gate-self diff (blast-radius) → review:pending, applied', () => {
     const v = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10 });

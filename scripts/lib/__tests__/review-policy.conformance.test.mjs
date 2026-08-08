@@ -148,6 +148,7 @@ describe('decorated-string conformance — the drain\'s real reason strings deri
   const DECORATED = {
     [REVIEW_REASONS.GATE_SELF]: 'gate-self (scripts/lib/review-escalation.mjs) — human review required',
     [REVIEW_REASONS.STATUTE]: 'statute (docs/agent/platform-decisions.md) — human review required',
+    [REVIEW_REASONS.CODIFICATION]: 'codification (docs/agent/platform-decisions.md) — records an already-ruled decision, independent committee review',
     [REVIEW_REASONS.BLAST_RADIUS]: 'blast-radius (scripts/foo.mjs, scripts/bar.mjs)',
     [REVIEW_REASONS.SIZE]: 'size (1080 ≥ 400 changed lines)',
     [REVIEW_REASONS.DISMISSED_FINDINGS]: 'dismissed-findings (2 pre-PR review finding(s) the lane dismissed)',
