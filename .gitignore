@@ -12,6 +12,14 @@ test-results/
 .cloudflare.env
 .browser-selection.json
 
+# Progress-board GENERATED output (item x9t5i5a) — the page is re-derived from
+# reports/progress-board.json plus live `gh` state on every run, so committing it would churn the tree on
+# every refresh (the timestamp alone changes each time) with nothing a reader could review. The cache
+# sidecar is the last good `gh` snapshot, machine-local, safe to lose — it only exists so a rate-limited or
+# offline run still renders a page. The hand-maintained state file itself IS tracked.
+reports/progress-board.html
+reports/.progress-board-cache.json
+
 # Parcel build cache (trait-enforcer #787 conformance harness)
 .parcel-cache/
 
