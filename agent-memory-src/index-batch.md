@@ -16,6 +16,7 @@ Batch · Commit · Git Hygiene cluster — open a leaf with `node scripts/memory
 - 102. Concurrent Sessions Sweep Staged Index — others' `git add -A` can swallow my staged work; commit tightly; #1147
 - 103. Concurrent Resolve Revert — concurrent write can revert `resolve` pre-commit; verify it persisted; #1742
 - 104. Edit-Work Runs In A Lane Clone — edits land via lane-clone → ready-to-merge PR, NEVER direct to main (#2183/#2190); never branch a shared checkout; [[single-session-should-use-a-lane]]
+- 147. `gh pr create` Lands Unreviewed — no `review:*` label = NOT a hold; drain mints ready-to-merge on green and merges; use `pr-land` or apply `review:pending` in the same step; #2929
 - [Lane→PR is universal delivery for ALL repos](lane-pr-is-universal-delivery-all-repos.md) — every repo (WE/FUI/plateau-app) delivers ONLY via lane→PR; the tooling is SHARED (`lane-pool`/`pr-land --repo=<repo>`), so a repo lacking its own script does NOT mean it lacks the flow — never assume a repo is exempt from a scripts/ glance; apply the loaded invariant, don't re-derive from local absence; 2026-07-19
 - 122. Batch Conflict Avoidance — per-item claim (status:active) dodges races, NOT git-status; splice data edits
 - [Monolith-split vs partition for parallel capacity](monolith-split-vs-partition-capacity.md) — only entry-COLLECTIONS split; for docs/matrices/sweeps the lever is a precise pairwise partition + optimistic merge, not splitting; #1949
