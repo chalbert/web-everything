@@ -178,7 +178,9 @@ an item*). The backlog file is the durable, resumable record — the item body *
 7. **Close it out when done — mark it `resolved`** (*backlog-workflow.md → Closing out a completed item*).
    Confirm done (tests + `check:standards` green), take a **careful last look for leftovers** and capture
    each as its **own new item** via **`node scripts/backlog.mjs scaffold --type=… --workitem=… --size=…
-   --title="…" --digest="…" [--blocked-by=NNN]`** — it allocates the next free `NNN` atomically and writes
+   --title='…' --digest='…' [--blocked-by=NNN]`** (**single quotes** — item text in a double-quoted value
+   still runs `` ` `` / `$(…)` through bash; *backlog-workflow.md → Authoring an item → The quoting rule*)
+   — it allocates the next free `NNN` atomically and writes
    a `check:standards`-shaped skeleton (or author by hand: re-`ls backlog/` right before writing, yield to
    the next free number on collision). **Never renumber an existing item** — `NNN` is immutable for life
    (*backlog-workflow.md → Adding an item* / *Rules*). Each new item needs a `workItem` (story/epic/task)
