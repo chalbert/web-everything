@@ -1,0 +1,11 @@
+{
+  "id": "reexec-eval-direnv-hook",
+  "cmd": "eval \"$(direnv hook bash)\"",
+  "ctx": {
+    "primaryCwd": true
+  },
+  "basis": "r5 F1 precision mirror — the standard `eval \"$(… hook …)\"` idiom runs nothing deniable.",
+  "expect": {
+    "reason": null
+  }
+}
