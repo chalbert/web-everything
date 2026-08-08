@@ -406,6 +406,19 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     // the eager pre-CI add-label call is gone from the open path (applyLabel is a deferred closure)
     expect(src).toMatch(/const applyLabel = \(\) =>/);
   });
+  // #2890-review-r2 finding 3 — the escalation inputs are derived by ONE shared function, and the review found
+  // nothing pinning that: removing `basis:` from all three production call sites failed zero of 551 tests. The
+  // durable guard is structural rather than a spelling grep — pr-land does not IMPORT the raw `{text, scored}`
+  // producer at all, so the mis-mapping the review caught is not expressible here.
+  it('#2890: derives the net-diff signals from the ONE shared function, and cannot hand-roll them', () => {
+    expect(src).toMatch(/import \{ computeNetDiffSignals \} from '\.\/merge-ai-prs\.mjs'/);
+    expect(src).toMatch(/computeNetDiffSignals\(\{ exec, remote: REMOTE, base: BASE, baseRev, rev: refSha \}\)/);
+    // The raw producers are deliberately OUT of scope in this file.
+    expect(src).not.toMatch(/\bcomputeNetDiffText\b\s*[,}]/);
+    expect(src).not.toMatch(/\bresolveNetDiffBasis\b\s*[,}]/);
+    // …and no `.text` can reach the diffHunks signal, whatever the spelling in between.
+    expect(src.match(/diffHunks\s*[:=][^;\n]*\.text\b/)).toBeNull();
+  });
   it('only ever pushes a lane/* head (guard carve-out) and never force-pushes', () => {
     expect(src).toMatch(/\/\^lane\\\//);        // enforces --ref starts with lane/
     expect(src).not.toMatch(/--force/);          // never force

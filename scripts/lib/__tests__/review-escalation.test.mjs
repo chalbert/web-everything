@@ -12,6 +12,7 @@ import {
   isGateSelfPath,
   scoreEscalation,
   diffHunksFrom,
+  plainDiffPath,
   coupleEscalation,
   hasReviewLabel,
   decideReviewGate,
@@ -311,17 +312,78 @@ describe('#2890-review-fix finding 1 — diffHunksFrom is the ONE mapping from a
     expect(diffHunksFrom({ scored: true })).toBeNull();          // scored but no text field at all
     expect(diffHunksFrom({ text: 'x', scored: 'yes' })).toBeNull(); // truthy-but-not-true never counts as scored
   });
-  it('the two call sites use the helper and NEVER a raw `.text` — the exact regression the review caught', async () => {
+  // #2890-review-r2 finding 4 — the ORIGINAL version of this test grepped for `diffHunks: <ident>.text` and was
+  // described as making it impossible for a third call site to reintroduce the bug. Measured against 12
+  // regression shapes it caught TWO (`x.text`, `x.text ?? ''`) and missed a ternary in either polarity,
+  // `x?.text`, a destructured `text`, `x['text']`, `(x||{}).text`, `String(x.text)` and `v.netDiff.text`; and it
+  // read two named files, so a third was never scanned at all. The claim is withdrawn. What replaces it: the
+  // BEHAVIOURAL tests on `computeNetDiffSignals` (merge-ai-prs.test.mjs — the one derivation both call sites
+  // now use, where a failed text diff really does yield `diffHunks:null` beside a populated `changedFiles`),
+  // and this deliberately-narrow structural guard, named for exactly what it checks.
+  it('neither of the two KNOWN call-site files builds the signal itself (a THIRD file is not scanned — see the note above)', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const { dirname, join } = await import('node:path');
     const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
     for (const f of ['pr-land.mjs', 'merge-ai-prs.mjs']) {
       const src = readFileSync(join(scriptsDir, f), 'utf8');
-      expect(src, `${f} must derive diffHunks via diffHunksFrom`).toMatch(/diffHunks\s*[:=]\s*diffHunksFrom\(/);
-      // `diffHunks: <anything>.text` is the fail-open shape: `''` on every producer failure path.
-      expect(src.match(/diffHunks\s*[:=]\s*[A-Za-z_$][\w$]*\.text\b/), `${f} passes a raw .text into diffHunks`).toBeNull();
+      expect(src, `${f} must read the signal off the shared derivation`).toMatch(/computeNetDiffSignals\(/);
+      // Any `.text` reaching `diffHunks` is the fail-open shape (`''` on every producer failure path), whatever
+      // the spelling in between — this now allows for member chains, optional chaining and a ternary tail.
+      expect(src.match(/diffHunks\s*[:=][^;\n]*\.text\b/), `${f} routes a raw .text into diffHunks`).toBeNull();
     }
+  });
+});
+
+// #2890-review-r2 finding 5 — `diffHunksBasisFiles` is published as the list a content detector pairs hunk
+// content with, so it must be spelled the way a hunk header spells a path. `humanBasisFiles` is `parseNumstat`
+// output, i.e. git's DISPLAY encoding, which this repo documents as WRONG for pairing in two places.
+describe('#2890-review-r2 finding 5 — plainDiffPath: numstat DISPLAY encoding → the plain new path', () => {
+  // Every input below was emitted by real git 2.50.1 (`git diff --numstat`) for the rename it describes.
+  it('leaves an already-plain path untouched', () => {
+    expect(plainDiffPath('scripts/lib/review-escalation.mjs')).toBe('scripts/lib/review-escalation.mjs');
+  });
+  it('decodes C-quoted octal BYTES as UTF-8, not codepoint-by-codepoint (which would give mojibake)', () => {
+    expect(plainDiffPath('"caf\\303\\251.md"')).toBe('café.md');
+    expect(plainDiffPath('"caf\\303\\251.md"')).not.toContain('Ã');
+  });
+  it('takes the NEW side of a compact brace rename', () => {
+    expect(plainDiffPath('docs/agent/{old-name.md => platform-decisions.md}')).toBe('docs/agent/platform-decisions.md');
+    expect(plainDiffPath('dir/{sub => other}/thing.md')).toBe('dir/other/thing.md');
+  });
+  it('handles a brace rename whose new side is EMPTY (a directory level removed) without a doubled slash', () => {
+    expect(plainDiffPath('dir/{sub => }/thing.md')).toBe('dir/thing.md');
+    expect(plainDiffPath('dir/{ => deep/deeper}/thing.md')).toBe('dir/deep/deeper/thing.md');
+  });
+  it('takes the NEW side of a QUOTED rename (git quotes each side in full and never braces it)', () => {
+    expect(plainDiffPath('"docs/caf\\303\\251.md" => "docs/caf\\303\\2512.md"')).toBe('docs/café2.md');
+  });
+  it('takes the new side of a plain unquoted rename', () => {
+    expect(plainDiffPath('docs/agent/old.md => docs/agent/new.md')).toBe('docs/agent/new.md');
+  });
+  it('never throws on junk', () => {
+    expect(() => plainDiffPath(null)).not.toThrow();
+    expect(plainDiffPath('')).toBe('');
+    expect(plainDiffPath('"unterminated')).toBe('"unterminated');
+  });
+
+  it('the verdict field is PLAIN, so a renamed statute file matches its own hunk header', () => {
+    const hunkHeader = 'diff --git a/docs/agent/old-name.md b/docs/agent/platform-decisions.md\n@@ -1 +1 @@\n-a\n+b\n';
+    const r = scoreEscalation({
+      changedFiles: ['docs/agent/{old-name.md => platform-decisions.md}', '"caf\\303\\251.md"'],
+      diffHunks: hunkHeader,
+    });
+    expect(r.diffHunksBasisFiles).toEqual(['docs/agent/platform-decisions.md', 'café.md']);
+    // The property the field exists for: #2840's `gateBasis.some(f => isPrincipleSurface(f, hunks))` shape can
+    // actually find the file in the hunk text. With the display encoding it never could.
+    expect(r.diffHunksBasisFiles.some((f) => hunkHeader.includes(`b/${f}`))).toBe(true);
+  });
+  it('the SCORING terms still read the raw display-encoded list — normalizing those is a gate change, not this item', () => {
+    // Deliberate and recorded: a renamed statute file is not caught by the statute term. That fail-open is
+    // PRE-EXISTING (it lives in `parseNumstat`'s output, not in this PR) and closing it changes gate behaviour.
+    const r = scoreEscalation({ changedFiles: ['docs/agent/{old.md => platform-decisions.md}'], diffHunks: 'x' });
+    expect(r.humanRequired).toBe(false);
+    expect(r.diffHunksBasisFiles).toEqual(['docs/agent/platform-decisions.md']);
   });
 });
 

@@ -61,6 +61,21 @@ export const DEFAULT_DIFF_MAX_BUFFER = 16 * 1024 * 1024;
  * difference — matching plain `diff(1)`, and that is the SUCCESS path here, not a failure: a caught error with
  * `status === 1` and real `stdout` is unwrapped and returned as the diff text.
  *
+ * THE TWO ARGV FLAGS THAT KEEP THE OUTPUT READABLE BY A DETECTOR (#2890-review-r2 finding 2 — both reproduced
+ * as SILENT CLEARANCES, i.e. `scored:true` with content a `hunks.includes(<term>)` check reads as "absent"):
+ *   • `--text` — ONE NUL byte anywhere in either text makes git call the file binary and emit
+ *     `Binary files … differ` INSTEAD of any `@@`/`+`/`-` lines. That is `scored:true` and a NON-empty string,
+ *     so neither the `null` contract nor an emptiness check fires, and the only property a content detector
+ *     reads — the hunk lines — is simply gone. This is a live hazard in this repo, not a hypothetical: a NUL
+ *     byte in a source file has already made `grep` treat it as binary here, and the review hit the same thing
+ *     again while probing this function. `--text` forces the real `+`/`-` hunks out. Safe here specifically
+ *     because the payload is ONE file bounded by `maxBuffer` — the whole-PR `computeNetDiffText` deliberately
+ *     does NOT force `--text`, where it would splat binary assets into the reviewer-facing diff.
+ *   • `--no-ext-diff` — `git diff --no-index` honours `diff.external` and `GIT_EXTERNAL_DIFF`, and a
+ *     `PreToolUse` hook inherits the developer's environment. Reproduced: with a one-line external driver this
+ *     returned `{text:'HIJACKED — no hunks here\n', scored:true}`, exit 0. delta / difftastic users really do
+ *     set this. A gate must never read a user-configurable RENDERING of the diff.
+ *
  * NOTE ON HEADER FIDELITY: the temp paths are flat basenames under throwaway `base/`/`head/` subdirectories,
  * not the file's real repo path, so the emitted `diff --git a/base/<name> b/head/<name>` header does not read
  * as the real path. That is a COSMETIC gap only — the `@@ …@@` hunk headers and every `+`/`-` line are
@@ -97,12 +112,14 @@ export function computeProposedFileDiffText({
     writeFileSync(baseFile, baseText, 'utf8');
     writeFileSync(headFile, headText, 'utf8');
     try {
-      const out = String(exec('git', ['diff', '--no-index', '--end-of-options', baseFile, headFile], { encoding: 'utf8', maxBuffer: cap, stdio: ['ignore', 'pipe', 'pipe'] }) || '');
+      const out = String(exec('git', ['diff', '--no-index', '--no-ext-diff', '--text', '--end-of-options', baseFile, headFile], { encoding: 'utf8', maxBuffer: cap, stdio: ['ignore', 'pipe', 'pipe'] }) || '');
       return overCap(out, cap) ? unscored('diff-too-large') : { text: out, scored: true };
     } catch (err) {
       // Over `maxBuffer`, Node SIGTERMs git and throws `ENOBUFS` (status `null`) carrying a TRUNCATED stdout —
       // returning that would hand a detector a diff missing its tail and call it complete. Checked FIRST,
-      // before the exit-1 unwrap, because a truncated run can surface either way.
+      // before the exit-1 unwrap, so an over-cap error can never be mistaken for the expected `--no-index`
+      // exit-1 success path (`overCap` below is the second, shape-based check, and records what it does and
+      // does not rest on).
       if (err && (err.code === 'ENOBUFS' || err.errno === -55)) return unscored('diff-too-large');
       // `--no-index` exits 1 (with the diff on stdout) precisely BECAUSE the two files differ — that is the
       // expected outcome we came here for, not an error. Anything else (git missing, a real failure) falls
@@ -120,10 +137,15 @@ export function computeProposedFileDiffText({
 }
 
 /**
- * Belt-and-braces truncation probe. `ENOBUFS` is the normal over-cap signal, but a child that exits on its own
- * as the pipe fills can instead surface as a plain non-zero exit with a short stdout, so any payload that
- * REACHES the cap is treated as truncated rather than trusted as complete. `Buffer.byteLength` because
- * `maxBuffer` counts BYTES while a JS string counts UTF-16 code units.
+ * Belt-and-braces truncation probe. `ENOBUFS` is the over-cap signal actually observed: EVERY over-cap run of
+ * real `git` reproduced here — and independently in review — raised it. The claim this guard once carried, that
+ * real git is also seen exiting on its own with a truncated stdout and NO `ENOBUFS`, could not be demonstrated
+ * by either party and is withdrawn. What IS demonstrated is the shape: a child that writes past the cap and
+ * exits 1 on its own surfaces as a plain non-zero exit with a SHORT stdout, which the exit-1 unwrap above would
+ * otherwise return as a complete diff (verified with a real subprocess). `execFileSync`'s buffer handling is
+ * not part of Node's public contract, so the guard stands on that shape rather than on a git scenario nobody
+ * has forced. Any payload that REACHES the cap is treated as truncated rather than trusted as complete.
+ * `Buffer.byteLength` because `maxBuffer` counts BYTES while a JS string counts UTF-16 code units.
  */
 function overCap(text, cap) {
   return typeof text === 'string' && Buffer.byteLength(text, 'utf8') >= cap;

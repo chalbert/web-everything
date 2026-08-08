@@ -8,8 +8,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled } from '../merge-ai-prs.mjs';
-import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
+import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled } from '../merge-ai-prs.mjs';
+import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 import { buildManifest } from '../readiness/lane-manifest.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -1169,11 +1169,12 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
   const fakeExec = (script = {}) => {
     const calls = [];
     const exec = (cmd, args, opts) => {
-      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options`. That flag is argv
-      // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
-      // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
-      // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
-      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options` and
+      // (#2890-review-r2 finding 2b) `--no-ext-diff`. Both are argv hygiene, not intent: encoding them in every
+      // fixture key means adding one guard to one more call site reds 17 unrelated tests and tempts the author
+      // to drop the guard instead of the fixtures. Each has its own dedicated assertion (`guards the git-diff
+      // argv…`, `computeNetDiffText passes --no-ext-diff`), which is where a regression must fail.
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify' && a !== '--no-ext-diff');
       calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
       const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
@@ -1516,11 +1517,12 @@ describe('computeNetDiffText (#2450 — reviewer-facing NET diff TEXT, SAME basi
   const fakeExec = (script = {}) => {
     const calls = [];
     const exec = (cmd, args, opts) => {
-      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options`. That flag is argv
-      // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
-      // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
-      // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
-      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options` and
+      // (#2890-review-r2 finding 2b) `--no-ext-diff`. Both are argv hygiene, not intent: encoding them in every
+      // fixture key means adding one guard to one more call site reds 17 unrelated tests and tempts the author
+      // to drop the guard instead of the fixtures. Each has its own dedicated assertion (`guards the git-diff
+      // argv…`, `computeNetDiffText passes --no-ext-diff`), which is where a regression must fail.
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify' && a !== '--no-ext-diff');
       calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
       const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
@@ -1609,7 +1611,7 @@ describe('resolveNetDiffBasis shared across both helpers (#2890-review-fix findi
   const fakeExec = (script = {}) => {
     const calls = [];
     const exec = (cmd, args, opts) => {
-      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify' && a !== '--no-ext-diff');
       calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
       const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
@@ -1658,7 +1660,7 @@ describe('resolveNetDiffBasis shared across both helpers (#2890-review-fix findi
   it('an UNRESOLVED shared basis still degrades with its reason — no silent scored:true', () => {
     const { exec } = fakeExec({}); // every diff probe throws ⇒ ref-unresolved
     const basis = resolveNetDiffBasis({ exec, rev: 'lane/gone' });
-    expect(basis).toEqual({ ok: false, reason: 'ref-unresolved' });
+    expect(basis).toMatchObject({ ok: false, reason: 'ref-unresolved' });
     expect(computeNetDiffText({ exec, rev: 'lane/gone', basis }))
       .toEqual({ text: '', base: null, rev: null, scored: false, reason: 'ref-unresolved' });
     expect(computeNetDiffChangedFiles({ exec, rev: 'lane/gone', basis }))
@@ -1666,11 +1668,230 @@ describe('resolveNetDiffBasis shared across both helpers (#2890-review-fix findi
   });
 });
 
+// #2890-review-r2 finding 1 — the `basis` option overrides `rev`, `remote` AND `base` outright, and nothing
+// checked the basis was resolved for the ref being asked about. Reproduced live against real git: a basis for
+// `main` handed to `computeNetDiffText({rev: <lane>})` returned `{scored:true, rev:'origin/main', text:''}`,
+// which `diffHunksFrom` maps to `''` — "COMPUTED, genuinely empty", the STRONGEST clearance the #2890 contract
+// can express — beside an empty file list. That is round 1's blocker reached through the door round 1's own fix
+// opened. No in-repo caller does it (both go through `computeNetDiffSignals`), but `resolveNetDiffBasis` is
+// exported and `basis` is a documented public option on two exported helpers.
+describe('#2890-review-r2 finding 1 — a basis resolved for a DIFFERENT request is REFUSED, never answered', () => {
+  const fakeExec = (script = {}) => {
+    const calls = [];
+    const exec = (cmd, args, opts) => {
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify' && a !== '--no-ext-diff');
+      calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
+      const h = script[`${cmd} ${intent.join(' ')}`];
+      if (h && h.throw) throw new Error(h.throw);
+      if (h && 'stdout' in h) return h.stdout;
+      if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      return '';
+    };
+    return { exec, calls };
+  };
+  // `main` resolves to an EMPTY self-diff (the reviewer's repro shape); the lane has a real, large diff.
+  const script = {
+    'git merge-base origin/main origin/main': { stdout: 'mainsha\n' },
+    'git diff --numstat mainsha origin/main': { stdout: '' },
+    'git diff mainsha origin/main': { stdout: '' },
+    'git merge-base origin/main origin/lane/x': { stdout: 'forkpoint\n' },
+    'git diff --numstat forkpoint origin/lane/x': { stdout: '90\t10\tdocs/agent/platform-decisions.md\n' },
+    'git diff forkpoint origin/lane/x': { stdout: 'diff --git a/docs/agent/platform-decisions.md b/docs/agent/platform-decisions.md\n@@ -1 +1 @@\n-old ruling\n+new ruling\n' },
+  };
+
+  it('the exact repro: a main-resolved basis asked about a lane is scored:false/basis-mismatch, NOT a scored EMPTY diff', () => {
+    const { exec } = fakeExec(script);
+    const mainBasis = resolveNetDiffBasis({ exec, rev: 'main' });
+    expect(mainBasis.ok).toBe(true);
+
+    const text = computeNetDiffText({ exec, rev: 'lane/x', basis: mainBasis });
+    expect(text.scored).toBe(false);
+    expect(text.reason).toBe('basis-mismatch');
+    expect(text.rev).toBeNull(); // never reports origin/main as though it were the lane
+
+    const files = computeNetDiffChangedFiles({ exec, rev: 'lane/x', basis: mainBasis });
+    expect(files.scored).toBe(false);
+    expect(files.reason).toBe('basis-mismatch');
+  });
+
+  it('and so the escalation verdict says NOT COMPUTED instead of clearing the lane', () => {
+    const { exec } = fakeExec(script);
+    const mainBasis = resolveNetDiffBasis({ exec, rev: 'main' });
+    const text = computeNetDiffText({ exec, rev: 'lane/x', basis: mainBasis });
+    const files = computeNetDiffChangedFiles({ exec, rev: 'lane/x', basis: mainBasis });
+    const score = scoreEscalation({
+      changedFiles: files.changedFiles,
+      humanBasisFiles: files.humanBasisFiles,
+      diffLines: files.diffLines,
+      diffHunks: diffHunksFrom(text),
+    });
+    // The whole point: `null` (a detector must over-fire), never `''` (a detector may clear).
+    expect(score.diffHunks).toBeNull();
+    expect(score.diffHunks).not.toBe('');
+    expect(score.diffHunksBasisFiles).toBeNull();
+  });
+
+  it('a mismatched REMOTE or BASE is refused too — the basis overrides those as well', () => {
+    const { exec } = fakeExec(script);
+    const basis = resolveNetDiffBasis({ exec, rev: 'lane/x' }); // origin / main
+    expect(computeNetDiffText({ exec, rev: 'lane/x', remote: 'upstream', basis }).reason).toBe('basis-mismatch');
+    expect(computeNetDiffText({ exec, rev: 'lane/x', base: 'release', basis }).reason).toBe('basis-mismatch');
+    expect(computeNetDiffChangedFiles({ exec, rev: 'lane/x', base: 'release', basis }).reason).toBe('basis-mismatch');
+  });
+
+  it('a hand-built basis carrying no identity is refused — a gate does not trust an unidentifiable basis', () => {
+    const { exec } = fakeExec(script);
+    const forged = { ok: true, baseRef: 'origin/main', diffBase: 'mainsha', candidate: 'origin/main', humanBasis: { changedFiles: [], diffLines: 0 } };
+    expect(computeNetDiffText({ exec, rev: 'lane/x', basis: forged }).reason).toBe('basis-mismatch');
+    expect(computeNetDiffChangedFiles({ exec, rev: 'lane/x', basis: forged }).reason).toBe('basis-mismatch');
+  });
+
+  it('an UNRESOLVED basis for the wrong ref is refused rather than reported as THIS ref being gone', () => {
+    // `ref-unresolved` means "this branch does not exist" — a different fact from "you asked with the wrong
+    // basis", so the identity rides the failure shape too.
+    const { exec } = fakeExec({});
+    const gone = resolveNetDiffBasis({ exec, rev: 'lane/gone' });
+    expect(gone.ok).toBe(false);
+    expect(computeNetDiffText({ exec, rev: 'lane/x', basis: gone }).reason).toBe('basis-mismatch');
+  });
+
+  it('the MATCHING basis is unaffected — same results as resolving independently', () => {
+    const { exec } = fakeExec(script);
+    const basis = resolveNetDiffBasis({ exec, rev: 'lane/x' });
+    const shared = computeNetDiffText({ exec, rev: 'lane/x', basis });
+    expect(shared.scored).toBe(true);
+    expect(shared.text).toContain('+new ruling');
+    const b = fakeExec(script);
+    expect(shared).toEqual(computeNetDiffText({ exec: b.exec, rev: 'lane/x' }));
+  });
+});
+
+// #2890-review-r2 finding 3 — both production call sites hand-assembled basis → changed files → text →
+// `diffHunksFrom`, and that assembly was pinned by NOTHING: removing `basis:` from all three call sites failed
+// zero of the 551 tests, and the only guard on the `diffHunks` mapping was a source-level grep for one literal
+// spelling. The assembly is now ONE exported function, so these are behaviour, not spelling.
+describe('computeNetDiffSignals — the ONE net-diff derivation both call sites use (#2890-review-r2 finding 3)', () => {
+  const fakeExec = (script = {}) => {
+    const calls = [];
+    const exec = (cmd, args, opts) => {
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify' && a !== '--no-ext-diff');
+      calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
+      const h = script[`${cmd} ${intent.join(' ')}`];
+      if (h && h.throw) throw new Error(h.throw);
+      if (h && 'stdout' in h) return h.stdout;
+      if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      return '';
+    };
+    return { exec, calls };
+  };
+  const script = {
+    'git merge-base origin/main origin/lane/x': { stdout: 'forkpoint\n' },
+    'git diff --numstat forkpoint origin/lane/x': { stdout: '3\t1\tREADME.md\n' },
+    'git diff forkpoint origin/lane/x': { stdout: 'diff --git a/README.md b/README.md\n@@ -1 +1 @@\n-a\n+b\n' },
+  };
+
+  it('costs ONE fetch, ONE merge-base, ONE numstat probe and ONE text diff — the shared basis, pinned by cost', () => {
+    const { exec, calls } = fakeExec(script);
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(sig.scored).toBe(true);
+    expect(calls.filter((c) => c.args[0] === 'fetch').length).toBe(1);
+    expect(calls.filter((c) => c.args[0] === 'merge-base').length).toBe(1);
+    expect(calls.filter((c) => c.key.startsWith('git diff --numstat')).length).toBe(1);
+    expect(calls.length).toBe(4);
+  });
+
+  it('returns the changed-file shape, the cumulative human basis, the text object AND the mapped hunks', () => {
+    const { exec } = fakeExec(script);
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(sig.changedFiles).toEqual(['README.md']);
+    expect(sig.diffLines).toBe(4);
+    expect(sig.humanBasisFiles).toEqual(['README.md']);
+    expect(sig.netDiffText.scored).toBe(true);          // the drain reuses this object for the gaming scan
+    expect(sig.diffHunks).toBe(sig.netDiffText.text);
+  });
+
+  it('THE regression, as behaviour: a FAILED text diff yields diffHunks null while changedFiles still populates', () => {
+    // This is round 1's blocker in the shape it actually reaches a detector — a real file list beside a content
+    // signal that must say "I could not look", not "there was nothing to see".
+    const { exec } = fakeExec({ ...script, 'git diff forkpoint origin/lane/x': { throw: 'diff exploded' } });
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(sig.changedFiles).toEqual(['README.md']);
+    expect(sig.scored).toBe(true);
+    expect(sig.diffHunks).toBeNull();
+    expect(sig.diffHunks).not.toBe('');
+    expect(scoreEscalation({ ...sig }).diffHunks).toBeNull();
+  });
+
+  it('a genuinely EMPTY but computed diff still comes through as \'\' — the other half of the contract', () => {
+    const { exec } = fakeExec({ ...script, 'git diff forkpoint origin/lane/x': { stdout: '' } });
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(sig.diffHunks).toBe('');
+    expect(sig.diffHunks).not.toBeNull();
+  });
+
+  it('an unresolvable ref degrades everything at once — no half-populated verdict', () => {
+    const { exec } = fakeExec({});
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/gone' });
+    expect(sig).toMatchObject({ changedFiles: [], diffLines: 0, humanBasisFiles: [], scored: false, diffHunks: null });
+  });
+
+  it('#2390 de-inflation is preserved: changedFiles narrows to baseRev…head, the hunks + human basis stay CUMULATIVE', () => {
+    const { exec } = fakeExec({
+      ...script,
+      'git merge-base --is-ancestor abc1234 origin/lane/x': { stdout: '' },
+      'git rev-parse abc1234': { stdout: 'abc1234\n' },
+      'git rev-parse origin/lane/x': { stdout: 'headsha\n' },
+      'git diff --numstat forkpoint origin/lane/x': { stdout: '3\t1\tREADME.md\n1\t0\tdocs/agent/platform-decisions.md\n' },
+      'git diff --numstat abc1234 origin/lane/x': { stdout: '3\t1\tREADME.md\n' },
+    });
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/x', baseRev: 'abc1234', fetchExtraRefs: ['lane/x'] });
+    expect(sig.changedFiles).toEqual(['README.md']);
+    expect(sig.humanBasisFiles).toEqual(['README.md', 'docs/agent/platform-decisions.md']);
+    // and the verdict pairs the hunks with the CUMULATIVE list, never the de-inflated one (#2890 finding 4).
+    expect(scoreEscalation({ ...sig }).diffHunksBasisFiles).toEqual(['README.md', 'docs/agent/platform-decisions.md']);
+  });
+
+  it('the drain\'s scoring loop reads the signal off this derivation, never assembling it inline', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
+    const loop = src.slice(src.indexOf('for (const v of verdicts)'));
+    expect(loop).toMatch(/computeNetDiffSignals\(/);
+    expect(loop.match(/diffHunks\s*[:=][^;\n]*\.text\b/)).toBeNull();
+  });
+});
+
+// #2890-review-r2 finding 2b — `computeNetDiffText` shares the `diff.external` / `GIT_EXTERNAL_DIFF` exposure
+// its write-time sibling had, and its output now feeds `diffHunks`, the reviewer panel AND the anti-test-gaming
+// scan — three readers that must never see a user-configurable RENDERING of the diff.
+describe('computeNetDiffText passes --no-ext-diff (#2890-review-r2 finding 2b)', () => {
+  it('the flag is on the argv, ahead of --end-of-options', () => {
+    const calls = [];
+    const exec = (cmd, args) => {
+      calls.push(args);
+      if (args[0] === 'diff' && args.includes('--numstat')) return '1\t0\tREADME.md\n';
+      return 'diff --git a/README.md b/README.md\n';
+    };
+    computeNetDiffText({ exec, rev: 'deadbeef' });
+    const textDiff = calls.find((a) => a[0] === 'diff' && !a.includes('--numstat'));
+    expect(textDiff).toContain('--no-ext-diff');
+    expect(textDiff.indexOf('--no-ext-diff')).toBeLessThan(textDiff.indexOf('--end-of-options'));
+  });
+  it('but NOT --text: a whole-PR diff must not force binary assets into the reviewer-facing text', () => {
+    const calls = [];
+    const exec = (cmd, args) => {
+      calls.push(args);
+      if (args[0] === 'diff' && args.includes('--numstat')) return '1\t0\tREADME.md\n';
+      return 'diff\n';
+    };
+    computeNetDiffText({ exec, rev: 'deadbeef' });
+    expect(calls.find((a) => a[0] === 'diff' && !a.includes('--numstat'))).not.toContain('--text');
+  });
+});
+
 describe('computeNetDiffPaths (#2901/#1031 — NET changed-file list as plain paths, SAME basis as the score/text)', () => {
   const fakeExec = (script = {}) => {
     const calls = [];
     const exec = (cmd, args, opts) => {
-      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify' && a !== '--no-ext-diff');
       calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
       const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
@@ -1756,11 +1977,12 @@ describe('regenDerivedOnLand — the drain owns post-land WE derived regen (#229
   const fakeExec = (script = {}) => {
     const calls = [];
     const exec = (cmd, args, opts) => {
-      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options`. That flag is argv
-      // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
-      // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
-      // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
-      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options` and
+      // (#2890-review-r2 finding 2b) `--no-ext-diff`. Both are argv hygiene, not intent: encoding them in every
+      // fixture key means adding one guard to one more call site reds 17 unrelated tests and tempts the author
+      // to drop the guard instead of the fixtures. Each has its own dedicated assertion (`guards the git-diff
+      // argv…`, `computeNetDiffText passes --no-ext-diff`), which is where a regression must fail.
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify' && a !== '--no-ext-diff');
       calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
       const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);
@@ -1955,11 +2177,12 @@ describe('resyncDetachedCwdForLand (#2348 — a lane clone\'s detached HEAD stra
   const fakeExec = (script = {}) => {
     const calls = [];
     const exec = (cmd, args, opts) => {
-      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options`. That flag is argv
-      // hygiene, not intent: encoding it in every fixture key means adding the guard to one more call site reds
-      // 17 unrelated tests and tempts the author to drop the guard instead of the fixtures. The guard has its own
-      // dedicated assertion (`guards the git-diff argv…`), which is where a regression must fail.
-      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      // The stub key names WHICH TREES are compared, deliberately ignoring `--end-of-options` and
+      // (#2890-review-r2 finding 2b) `--no-ext-diff`. Both are argv hygiene, not intent: encoding them in every
+      // fixture key means adding one guard to one more call site reds 17 unrelated tests and tempts the author
+      // to drop the guard instead of the fixtures. Each has its own dedicated assertion (`guards the git-diff
+      // argv…`, `computeNetDiffText passes --no-ext-diff`), which is where a regression must fail.
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify' && a !== '--no-ext-diff');
       calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
       const h = script[`${cmd} ${intent.join(' ')}`];
       if (h && h.throw) throw new Error(h.throw);

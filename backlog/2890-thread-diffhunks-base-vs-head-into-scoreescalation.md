@@ -57,6 +57,28 @@ Standing risk, recorded because shipping unwired is what creates it: nothing yet
 `computeProposedFileDiffText`'s exact signature. The mitigation is the shared return shape above plus
 `we:scripts/lib/review-escalation.mjs#diffHunksFrom`, the single mapping both halves must go through.
 
+### Carried to #2891 — the loud throw is UNCONTAINED in the drain
+
+Raised in review round 2 and deliberately NOT fixed here, because nothing reads `diffHunks` yet so there is no
+live failure to contain. The `null` contract's backstop is that `.includes()` on `null` THROWS rather than
+silently clearing — right for a gate. But there is no `try`/`catch` anywhere between `runCli()` and the
+`scoreEscalation` call in `we:scripts/merge-ai-prs.mjs` (the enclosing blocks are `runCli` → `sweepOnce` →
+`if (REVIEW_ESCALATION)` → `for (const v of verdicts)`), so a future detector's `null.includes(…)` would abort
+the ENTIRE sweep and leave every remaining queued PR unprocessed — not park the one PR. Loud *and* contained
+means a `try`/`catch` around the per-PR body that parks that PR with the error as its reason. **The item that
+adds the first reader of `diffHunks` (#2891) owns adding that containment in the same change.**
+
+### Correction — the over-cap TRUNCATION claim, narrowed to what is demonstrable
+
+Round 2 of this item claimed that a real `git` can exit on its own with a TRUNCATED stdout and no `ENOBUFS`,
+and used that to justify the byte-length check in `we:scripts/lib/diff-hunks.mjs#overCap`. Neither the author
+nor the reviewer could force real `git` into that state — every over-cap run raised `ENOBUFS`. The claim is
+**withdrawn**; the code comment now says so. What IS demonstrated, with a real subprocess, is the SHAPE: a
+child that writes past the cap and exits 1 on its own surfaces as a plain non-zero exit with a short stdout,
+which the exit-1 unwrap would otherwise return as a complete diff. The guard is kept on that basis (and
+because `execFileSync`'s buffer behaviour is not part of Node's public contract), not on an unproven git
+scenario.
+
 ## Preconditions / relationships
 
 Precondition of #2839's gate (the `assertNotPrincipleAndImpl` item) and #2840's gate (the

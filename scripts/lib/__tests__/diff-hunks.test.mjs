@@ -6,6 +6,10 @@
  *   the same `''`).
  */
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { computeProposedFileDiffText, DEFAULT_DIFF_MAX_BUFFER } from '../diff-hunks.mjs';
 
 describe('computeProposedFileDiffText — #2890 single-file base(disk)-vs-head(proposed) diff TEXT', () => {
@@ -144,5 +148,70 @@ describe('#2890-review-fix finding 2 — the over-maxBuffer diff is BOUNDED and 
     expect(r.scored).toBe(false);
     expect(r.reason).toBe('diff-too-large');
     expect(r.text).toBe('');
+  });
+});
+
+// #2890-review-r2 finding 2 — two SILENT CLEARANCES, both reproduced against real git before the fix. Neither
+// is caught by the `null` contract or by an emptiness check: each returns `scored:true` with a NON-empty string
+// that simply has no hunks in it, so the only property a content detector reads (`hunks.includes(<term>)`)
+// answers `false` for an edit that really did change the line. `''` being "at least reportable" is true of the
+// EMPTY string and irrelevant here.
+describe('#2890-review-r2 finding 2 — the diff a detector reads cannot be silenced by content or by config', () => {
+  const NUL = String.fromCharCode(0);
+
+  it('a NUL byte no longer collapses the diff to "Binary files … differ" — real git, --text', () => {
+    // Pre-fix, measured: {text: 'diff --git …\nBinary files … differ\n', scored: true} — non-empty, scored, and
+    // `.includes('New ruling')` false. This repo has been bitten by exactly this class before (a NUL byte
+    // making `grep` treat a source file as binary), and the review hit it again while probing this function.
+    const r = computeProposedFileDiffText({
+      filePath: 'platform-decisions.md',
+      baseText: `### Some Rule\n\nOld ruling.\n${NUL}\n`,
+      headText: `### Some Rule\n\nNew ruling.\n${NUL}\n`,
+    });
+    expect(r.scored).toBe(true);
+    expect(r.text).not.toContain('Binary files');
+    expect(r.text).toMatch(/@@ .* @@/);
+    // THE property — a content detector's own check, on the real term:
+    expect(r.text.includes('New ruling')).toBe(true);
+    expect(r.text).toContain('-Old ruling.');
+  });
+
+  it('a NUL-bearing edit whose content is UNCHANGED still reports the identical short-circuit, not a fake diff', () => {
+    const same = `a\n${NUL}b\n`;
+    expect(computeProposedFileDiffText({ filePath: 'x.md', baseText: same, headText: same })).toEqual({ text: '', scored: true });
+  });
+
+  it('a diff.external driver can no longer hijack the output — real git, --no-ext-diff', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-extdiff-test-'));
+    try {
+      const evil = join(dir, 'evil.sh');
+      writeFileSync(evil, '#!/bin/sh\necho "HIJACKED - no hunks here"\n');
+      chmodSync(evil, 0o755);
+      // Pre-fix, measured: {text: 'HIJACKED - no hunks here\n', scored: true} — exit 0, arbitrary content, no
+      // hunks. `diff.external` is a config a delta / difftastic user really does set.
+      const cfgExec = (cmd, args, opts) => execFileSync(cmd, ['-c', `diff.external=${evil}`, ...args], opts);
+      const viaConfig = computeProposedFileDiffText({ filePath: 'a.md', baseText: 'old\n', headText: 'new\n', exec: cfgExec });
+      expect(viaConfig.text).not.toContain('HIJACKED');
+      expect(viaConfig.text).toContain('+new');
+
+      // GIT_EXTERNAL_DIFF is the same hazard by another route, and a PreToolUse hook inherits the developer's
+      // whole environment — so this is the variant that needs no git config at all.
+      const envExec = (cmd, args, opts) => execFileSync(cmd, args, { ...opts, env: { ...process.env, GIT_EXTERNAL_DIFF: evil } });
+      const viaEnv = computeProposedFileDiffText({ filePath: 'a.md', baseText: 'old\n', headText: 'new\n', exec: envExec });
+      expect(viaEnv.text).not.toContain('HIJACKED');
+      expect(viaEnv.text).toContain('+new');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('both flags are on the argv, in front of --end-of-options', () => {
+    let seen = null;
+    const exec = (cmd, args) => { seen = args; return 'diff\n'; };
+    computeProposedFileDiffText({ baseText: 'a\n', headText: 'b\n', exec });
+    expect(seen).toContain('--no-ext-diff');
+    expect(seen).toContain('--text');
+    expect(seen.indexOf('--no-ext-diff')).toBeLessThan(seen.indexOf('--end-of-options'));
+    expect(seen.indexOf('--text')).toBeLessThan(seen.indexOf('--end-of-options'));
   });
 });

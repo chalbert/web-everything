@@ -85,9 +85,13 @@ import { numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs'; // 
 import { withNumberingLock } from './readiness/drain-lock.mjs'; // #2391 — the numbering-critical-section mutex (sole-serial-writer)
 export { isPostLandTreeDirty }; // re-exported for backward compat — callers/tests still import it off pr-land.mjs
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs'; // post-land dup-NNN tripwire (#2318)
-import { computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis } from './merge-ai-prs.mjs'; // SHARED net-diff basis w/ the drain, single source (#1821/#2373); resolveNetDiffBasis is that basis resolved ONCE and fed to both helpers, computeNetDiffText also feeds #2890's diffHunks
+// SHARED net-diff derivation w/ the drain, single source (#1821/#2373/#2890): ONE basis resolution feeding the
+// changed-file shape, the diff TEXT and the `diffHunks` contract mapping. Deliberately the ONLY net-diff import
+// here — pr-land does not hold `computeNetDiffText`/`resolveNetDiffBasis`, so it CANNOT hand-roll the mapping
+// the review caught (#2890-review-r2 finding 3); a source guard in pr-land.test.mjs holds that shut.
+import { computeNetDiffSignals } from './merge-ai-prs.mjs';
 import {
-  scoreEscalation, diffHunksFrom, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META, REVIEW_LABELS,
+  scoreEscalation, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META, REVIEW_LABELS,
   buildEscalationReasonBlock, bodyHasEscalationReason, reconcileRoster, ROSTER_TIMING,
   isReviewHoldLabel, READY_TO_MERGE_LABEL, readyMergeConflictsWithHold, hasUnclearedReviewLabel,
 } from './lib/review-escalation.mjs'; // #2307 — deterministic review-escalation label AT PR-OPEN; #2635 — roster bind+reconcile; #2832 — hold/ready self-consistency
@@ -479,7 +483,7 @@ export function classifyChecks(rows) {
  * #2890 — also accepts `diffHunks` (the net base-vs-head diff TEXT) and threads it straight into
  * `scoreEscalation`. Precondition plumbing only: no signal reads it yet. Per `scoreEscalation`'s contract the
  * default is `null` = NOT COMPUTED, distinct from `''` = computed and genuinely empty; callers derive it with
- * `diffHunksFrom(computeNetDiffText(...))`, never from a raw `.text` (#2890-review-fix finding 1).
+ * `computeNetDiffSignals(...).diffHunks`, never from a raw `.text` (#2890-review-fix finding 1).
  * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
  *          crossRepo?:boolean, currentLabels?:Array, diffHunks?:string|null}} o
  * @returns {{label:string|null, apply:boolean, reasons:string[], humanRequired:boolean}}
@@ -778,26 +782,26 @@ function runCli() {
     // the unchanged `origin/main` basis.
     const originSlug = (() => { try { const u = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); const m = u.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/); return m ? m[1] : null; } catch { return null; } })();
     const baseRev = manifestBaseForRepo(manifest, repoKeyFromSlug(originSlug));
-    // #2890-review-fix finding 3 — resolve the net-diff basis ONCE (one `git fetch`, one candidate probe) and
-    // hand the SAME resolved object to both helpers below. The first cut called them independently, which
-    // re-ran the whole of `resolveNetDiffBasis`: measured 5 → 11 git subprocesses and 1 → 2 network fetches per
-    // PR open. Sharing brings that to 6 subprocesses and 1 fetch — i.e. the changed-file shape and the diff
-    // TEXT really do read off ONE fetch now, which is what the earlier comment here claimed but did not do.
-    const netBasis = resolveNetDiffBasis({ exec, remote: REMOTE, base: BASE, rev: refSha });
-    const net = computeNetDiffChangedFiles({ exec, remote: REMOTE, base: BASE, baseRev, rev: refSha, basis: netBasis });
-    const changedFiles = net.changedFiles;
-    const diffLines = net.diffLines;
+    // #2890-review-fix finding 3 / #2890-review-r2 finding 3 — ALL of the net-diff escalation inputs come from
+    // the ONE shared derivation in merge-ai-prs.mjs (`computeNetDiffSignals`), which the drain's scoring loop
+    // also calls. It resolves the basis ONCE (one `git fetch`, one candidate probe) and feeds both the
+    // changed-file shape and the diff TEXT off it: the first cut called them independently and re-ran the whole
+    // of `resolveNetDiffBasis`, measured 5 → 11 git subprocesses and 1 → 2 network fetches per PR open; sharing
+    // brings that to 6 subprocesses and 1 fetch. Assembling it here instead would leave that sharing — and the
+    // `diffHunks` mapping below — pinned by nothing a test can observe at this call site.
+    const sig = computeNetDiffSignals({ exec, remote: REMOTE, base: BASE, baseRev, rev: refSha });
+    const changedFiles = sig.changedFiles;
+    const diffLines = sig.diffLines;
     // #2390-review-fix — the CUMULATIVE origin/main…head basis the gate-self/human trigger scores over; a
     // stacked base de-inflates SIZE (`changedFiles`) but can never shrink this.
-    const humanBasisFiles = net.humanBasisFiles;
-    // #2890 — that same basis's TEXT (not just the changed-file/line-count shape above), via the drain's own
-    // `computeNetDiffText`. #2890-review-fix finding 1 — `diffHunksFrom` maps `{text, scored}` onto the
-    // `diffHunks` contract: the text when it was really computed, `null` when it was NOT. Never `netText.text`,
-    // which is `''` on every failure path and so indistinguishable from a genuinely content-free diff. Still
-    // best-effort — an unresolvable basis degrades to `null` and never blocks a green land — but the signal now
-    // SAYS it is absent instead of impersonating an empty diff.
-    const netText = computeNetDiffText({ exec, remote: REMOTE, base: BASE, rev: refSha, basis: netBasis });
-    const diffHunks = diffHunksFrom(netText);
+    const humanBasisFiles = sig.humanBasisFiles;
+    // #2890 — that same basis's TEXT (not just the changed-file/line-count shape above). #2890-review-fix
+    // finding 1 — the shared derivation applies `diffHunksFrom`, so this is the text when it was really
+    // computed and `null` when it was NOT; never a raw `.text`, which is `''` on every failure path and so
+    // indistinguishable from a genuinely content-free diff. Still best-effort — an unresolvable basis degrades
+    // to `null` and never blocks a green land — but the signal now SAYS it is absent instead of impersonating
+    // an empty diff.
+    const diffHunks = sig.diffHunks;
     const crossRepo = manifest && Array.isArray(manifest.repos) ? manifest.repos.length > 1 : false;
     const dismissedFindings = manifest && Number.isFinite(Number(manifest.dismissedFindings)) ? Number(manifest.dismissedFindings) : 0;
     let currentLabels = [];
