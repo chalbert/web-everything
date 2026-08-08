@@ -1,0 +1,462 @@
+{
+  "_readme": "Hand-maintained HALF of the progress board — only what no API can know. Never hand-edit: use `node scripts/progress-board.mjs --start=<id> | --done=<id> | --block=<id> --why=… | --note=<id> --text=… | --add=… | --decide=<id> | --url=…`. Pull-request state is NOT stored here; it is derived live from `gh pr list` on every render.",
+  "_decisions": "ENFORCED, not requested — the script refuses to render a board whose `awaiting` decisions cannot be answered from the page. Every one must carry `question`, at least two real `options` with exactly one `recommended`, and `ifNothing`; a missing field exits 1 naming the id and the field. `why` and `evidence` are strongly encouraged, not blocking. Build one with `--decision-add=\"<title>\" --question=… --if-nothing=…` (lands as `draft`), then `--decision-option=<id> --label=… --detail=… [--recommend]`, `--decision-evidence=<id> --text=…`, `--decision-set=<id> --field=<title|question|why|ifNothing|detail|status|preparedDate> --value=…`, and finally `--decision-set=<id> --field=status --value=awaiting`. status: draft (being prepared, kept out of \"needs you\") | awaiting (outstanding, and therefore complete) | queued (RULED but deferred — its own section, never counted as needing you) | taken (absorbed into the plan, leaves the board).",
+  "_rulings": "`ruling` (R1, R2, …) is the handle the operator quotes in chat — \"R6 — as recommended\". Assigned once from `nextRuling`, persisted, NEVER renumbered and NEVER reused: a taken or dropped decision retires its number with it. Every verb accepts either handle, so `--decide=R6` and `--decide=2978` reach the same decision. Do not hand-edit `ruling` or `nextRuling`.",
+  "_artifactUrl": "Set once, with --url=<url>, right after the FIRST Artifact publish. Every later publish from a different session MUST pass this as the Artifact `url` parameter or a new URL is minted and the operator's bookmark dies.",
+  "title": "Web Everything — progress board",
+  "repo": "chalbert/web-everything",
+  "artifactUrl": "https://claude.ai/code/artifact/633d3d18-3e12-4675-9fb0-c96575978931",
+  "nextRuling": 9,
+  "phases": {
+    "1": "Merge-gate correctness",
+    "2": "Review routing",
+    "3": "Tooling and follow-ups",
+    "4": "Awaiting your verdict — every human-hold PR, with a recommendation"
+  },
+  "items": [
+    {
+      "id": "hold-invariant",
+      "title": "#2832 — a review-hold label must block merge regardless of ready-to-merge",
+      "phase": 1,
+      "status": "done",
+      "pr": 984,
+      "note": "PR #984 ACCEPTED after four rounds. Round 3 verified both of the author's refusals of review suggestions were correct, and confirmed two extra park sites the first enumeration missed.",
+      "startedAt": "2026-08-08",
+      "doneAt": "2026-08-08"
+    },
+    {
+      "id": "guard-false-denies",
+      "title": "#2986 / #2994 — four false denies in the tree-write guard arm",
+      "phase": 1,
+      "status": "in-progress",
+      "pr": 1092
+    },
+    {
+      "id": "review-human-rubric",
+      "title": "#2785 — narrow review:human to the declarative leash; gate derivation drops to the committee",
+      "phase": 2,
+      "status": "in-progress",
+      "pr": 1098
+    },
+    {
+      "id": "unweld-conformance-pin",
+      "title": "Unweld spec from impl — relax the conformance token pin to containment",
+      "phase": 2,
+      "status": "done",
+      "pr": 1099,
+      "note": "gate-self edit — only a human can clear this one",
+      "startedAt": "2026-08-08",
+      "doneAt": "2026-08-08"
+    },
+    {
+      "id": "self-cleared-verdict",
+      "title": "#2844 — the land seam refuses a self-cleared verdict",
+      "phase": 2,
+      "status": "in-progress",
+      "pr": 1100,
+      "note": "reviewer wants changes — back with the author lane"
+    },
+    {
+      "id": "overnight-review-items",
+      "title": "File the two items found during the overnight review pass",
+      "phase": 3,
+      "status": "in-progress",
+      "pr": 1097
+    },
+    {
+      "id": "progress-board",
+      "title": "Progress board — a mechanically-refreshed published status page (x9t5i5a)",
+      "phase": 3,
+      "status": "in-progress",
+      "note": "PR #1101 round 2. Round 1 got the unanswerable card onto a published page; the guard is now unconditional and the state error split into fatal vs partial, so the repair route still works. 131 tests."
+    },
+    {
+      "id": "todo-mode-for-unimplemented-contract-entries-a-d",
+      "title": "Todo mode for unimplemented contract entries — a declared-not-built marker the conformance gate enforces",
+      "phase": 2,
+      "status": "in-progress",
+      "note": "PR #1112, changes requested. Reviewer reproduced the tripwire: the guard existed but its own error message told you how to step over it. Blocking find — reversing the token split turns a human-review reason into an agent auto-land, suite still green.",
+      "startedAt": "2026-08-08"
+    },
+    {
+      "id": "2964-post-the-review-verdict-comment-before-the-",
+      "title": "#2964 — post the review verdict comment BEFORE the label swap, so the unsafe half never lands alone",
+      "phase": 1,
+      "status": "done",
+      "startedAt": "2026-08-08",
+      "doneAt": "2026-08-08",
+      "note": "PR #1114, ACCEPTED. The reviewer ran both mutations: swap-first-everywhere fails 4 of 6, unconditional comment-first fails the other 2, disjoint — so each branch is pinned independently."
+    },
+    {
+      "id": "2890-thread-the-diff-s-hunk-content-into-escalat",
+      "title": "#2890 — thread the diff's hunk CONTENT into escalation scoring, so routing reads what changed and not only how much",
+      "phase": 2,
+      "status": "in-progress",
+      "startedAt": "2026-08-08",
+      "note": "PR #1110, round 2. Round 1 found the content signal reported empty when it FAILED to compute — the fail-open shape, under two future gates. Now null = not computed."
+    },
+    {
+      "id": "2416-only-the-interactive-review-path-may-apply-",
+      "title": "#2416 — only the interactive review path may apply review:accepted (a closed set of callers, not actor provenance)",
+      "phase": 2,
+      "status": "todo"
+    },
+    {
+      "id": "2502-we-half-emit-each-pr-s-head-sha-in-the-merg",
+      "title": "#2502 (WE half) — emit each PR's head SHA in the merge sweep, so a thrashing lane is distinguishable from a waiting one",
+      "phase": 1,
+      "status": "todo"
+    },
+    {
+      "id": "skip-a-re-review-when-the-reviewed-diff-fingerpr",
+      "title": "Skip a re-review when the reviewed-diff fingerprint is unchanged (#2979 machinery) — the largest saving in the CLI epic",
+      "phase": 3,
+      "status": "todo"
+    },
+    {
+      "id": "review-runner-passes-no-actor-ids-to-the-shadow-",
+      "title": "review-runner passes no actor ids to the shadow plan, so every shadow line reads 'unknown clearer'",
+      "phase": 3,
+      "status": "done",
+      "startedAt": "2026-08-08",
+      "doneAt": "2026-08-08",
+      "note": "MERGED as #1108, filed as x9ns6bc. Title is wrong and there is no retitle verb: the real defect is no SIGNALS, not no actor ids — the shadow judge sees gate-self, human-required and non-convergence all undefined."
+    },
+    {
+      "id": "1107-move-agent-work-onto-the-claude-code-cli-an",
+      "title": "#1107 — move agent work onto the Claude Code CLI and optimise it (the epic R4 spawned)",
+      "phase": 3,
+      "status": "in-progress",
+      "startedAt": "2026-08-08",
+      "note": "PR #1107, re-armed. Bounced once for claiming #2844 was already enforced; it is open, and PR #1100 implements it."
+    },
+    {
+      "id": "a-re-score-must-not-revoke-a-human-clearance-cle",
+      "title": "A re-score must not revoke a human clearance — cleared 14:38:35, back in the queue by 14:41:42, every time",
+      "phase": 3,
+      "status": "in-progress",
+      "startedAt": "2026-08-08",
+      "note": "ROOT-CAUSED. The writer is the resident drain daemon's stale-acceptance branch. The reviewed-diff fingerprint hashes the BASE as well as the contribution, so when the drain rebases an accepted lane onto a moving main, a shifted hunk offset and one changed context line read as new content. Measured on #1100: two 130KB diffs differing in three lines, every +/- line identical. Fix is PR #1119 — hash the contribution only, and never let a re-score delete a human's record."
+    },
+    {
+      "id": "a-rebase-under-a-live-review-throws-the-round-aw",
+      "title": "A rebase under a live review throws the round away — pin a verdict to the head it actually covered",
+      "phase": 3,
+      "status": "todo"
+    },
+    {
+      "id": "three-files-serialize-the-whole-build-queue-most",
+      "title": "Three files serialize the whole build queue — most ready work collides in review-set-label, merge-ai-prs, review-escalation",
+      "phase": 3,
+      "status": "todo"
+    },
+    {
+      "id": "a-lane-lease-is-keyed-on-the-shell-s-pid-so-a-se",
+      "title": "A lane lease is keyed on the shell's PID, so a second acquire in one agent silently leaks a lane",
+      "phase": 3,
+      "status": "todo"
+    },
+    {
+      "id": "every-human-hold-pr-reaches-you-with-no-technica",
+      "title": "Every human-hold PR reaches you with NO technical pass — an agent should review before the ceremony, not instead of it",
+      "phase": 3,
+      "status": "in-progress",
+      "startedAt": "2026-08-08",
+      "note": "Measured 2026-08-08: #1104, #1106 and #1113 each carry review:human with ZERO review comments. Technical passes now running on all three."
+    },
+    {
+      "id": "clear-it-1104-the-memory-admission-ruling",
+      "title": "CLEAR IT — #1104, the memory-admission ruling",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1104,
+      "note": "7 markdown files, no code — your ruling written down, and the reviewer verified it against your actual transcript turns. One caveat, YOUR call: the statute says the check is against a file the harness writes, but that is true of the file and not its contents. The same quote was found in three places, including an agent's own turn. Fix is one constraint — the grounding turn must be a non-sidechain user entry. I recommend taking it. Bookkeeping (a phantom item id, an ordering hazard, a stale edge) already fixed."
+    },
+    {
+      "id": "confirm-first-1106-the-converge-editor",
+      "title": "CONFIRM FIRST — #1106, the converge editor",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1106,
+      "note": "Do not clear until you confirm what you agreed to. The option you approved was WITHDRAWN mid-discussion as unimplementable — verified: the round cap forces escalate before the editor is reached, and 'low' gets one round. What shipped is looser and leaves the editor ON at 'elevated', the band where #1018 failed. No record the substitution was ratified, and the item's only skeptic verdict argues against it."
+    },
+    {
+      "id": "hold-1113-the-converge-daemon-as-a-scheduled-job",
+      "title": "HOLD — #1113, the converge daemon as a scheduled job",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1113,
+      "note": "Safe to merge — it installs nothing and cannot touch GitHub (read-only gh calls, three independent layers). But it exists to produce a soak record, and the moment #1100 lands every shadow decision becomes 'refused, unknown clearer' while the log still reports N would-have-cleared. Filed as #1121. Hold until #1100 lands, then re-review."
+    },
+    {
+      "id": "not-yet-1112-the-contract-todo-marker-r6",
+      "title": "NOT YET — #1112, the contract todo marker (R6)",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1112,
+      "note": "Engineering is sound and your premise was reproduced twice. Held on two ~5-minute fixes now in flight: the injection sweep misses a real production importer outside the tree it walks (three injections landed green), and the follow-up card filed to fix an honesty finding contains a fresh fabricated function name. Six false citations across four rounds — being addressed as a pattern, with a pre-push grep rule."
+    },
+    {
+      "id": "review-running-1119-a-clearance-survives-a-rebas",
+      "title": "REVIEW RUNNING — #1119, a clearance survives a rebase",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1119,
+      "note": "THE ONE THAT MATTERS — it stops the drain revoking your clearances. Round 1 said do-not-clear and found two collision classes; round 2 closed both, refused the accepted+pending pair it had exempted, and rebased onto today's main. Round 2 review is running. Recommendation follows."
+    },
+    {
+      "id": "confirm-the-ruling-exists-1118-codifies-r8-into-",
+      "title": "CLEAR IT — #1118 codifies R8; the ruling is confirmed real",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1118,
+      "note": "WITHDRAWN CONCERN. I asked you to confirm this ruling; I have since found it — you ratified R8 at 19:32 on 2026-08-08 in a parallel session, answering a turn that put it as option 1 sequenced behind #1092's splitter. This PR is legitimate. It also strengthens the ruling: it measured 64,752 shell calls and found the quote-blind guard over-flags by 45% of its own hits, and it adds the constraint that a guard may only be made more eager to deny after the parser that makes 'I cannot read this' honest."
+    },
+    {
+      "id": "blocked-not-yours-yet-1100-the-self-clear-refusa",
+      "title": "BLOCKED, NOT YOURS YET — #1100, the self-clear refusal",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1100,
+      "note": "You already cleared this at 14:38:35; the drain revoked it at 14:41:42. It needs three things in its own lane before it returns to you: fix the lane-stack-e2e red, rebase and fix the at-cap fixture to solve with the real clearer id, then re-run --to=clear-human AFTER #1119 lands — only then is the clearance durable."
+    },
+    {
+      "id": "needs-a-ruling-not-a-review-1103-fork-b",
+      "title": "CLOSE IT? — #1103 is superseded by the R5 ruling",
+      "phase": 4,
+      "status": "todo",
+      "pr": 1103,
+      "note": "R5 was ruled and it was not 'drop' — the instrument changed: a trusted generator writes the rule text and the check becomes 'does this match what the tool would write'. Filed as x2ca7wh / PR #1109. #1103 is the superseded attempt; closing it was left as your call in that session and is still open. Say the word and I will close it."
+    }
+  ],
+  "decisions": [
+    {
+      "id": "2978",
+      "title": "Rule how a learning is admitted to agent memory — verify the note, rank by recurrence, block on nobody",
+      "preparedDate": "2026-08-07",
+      "status": "taken",
+      "detail": "RULED — as recommended: all four defaults ratified as one design. Verified grounding admits, recurrence ranks only, the pool entry carries the quoted turn, a cadence fires the harvest. Implemented in PR #1104, which is open and needs a human clear.",
+      "question": "Does a note reach agent memory on verified grounding, with recurrence demoted to ranking?",
+      "why": "#1068 moved judgment from the close to the harvest for three sound reasons, but the close's faithfulness filter — quote the grounding turn or be rejected — was silently replaced by a recurrence count, on the assumption the transcript was gone. It is not gone. Whether that filter is restored, and what recurrence is for instead, is a judgment call the item frames as four linked forks to ratify together or reject one of.",
+      "options": [
+        {
+          "label": "Ratify all four defaults as one design",
+          "detail": "verified grounding admits (1a), recurrence ranks only (2a), the pool entry carries the quoted turn (3a), a cadence fires the harvest (4a) — 1(a) is what makes 2(a) safe and 3(a) is what makes 1(a) cheap; it shrinks #1068 rather than repairing it",
+          "recommended": true
+        },
+        {
+          "label": "Keep the recurrence threshold as the admission gate",
+          "detail": "#1068 as built; but it authenticates nothing, and it structurally excludes the one-off user directive, which is how essentially the whole existing corpus was created"
+        },
+        {
+          "label": "Add a human approval step",
+          "detail": "the safest-sounding option, and the one the operator has refused three times — it reverses a ratified non-blocking directive whose own grounding case was this exact pipeline"
+        }
+      ],
+      "ifNothing": "#1068 stays as built: admission rests on a forgeable count, the faithfulness filter it replaced stays lost, and the branch keeps drifting (29 commits behind main).",
+      "evidence": [
+        "4,481 session transcripts exist; 4,477 modified in the last 30 days — faithfulness was never structurally impossible",
+        "`session` and `ts` are emitter-written — four hand-written lines manufacture '2 sessions across 2 days' in one second",
+        "the 240/60/400 pool-entry cap is justified by exactly one thing: the #2610 channel, which does not exist"
+      ],
+      "ruling": "R1",
+      "takenAt": "2026-08-08"
+    },
+    {
+      "id": "2908",
+      "title": "Converge loop — editor-enablement default by care band",
+      "preparedDate": "2026-08-04",
+      "status": "taken",
+      "detail": "RULED 2026-08-08 'as recommended' — but the recommendation on the page at that moment may no longer be what shipped. A technical pass on PR #1106 found the prepared default (editor below a care threshold, review-only at and above it) was WITHDRAWN during the decision turn as unimplementable, and verified why: the round cap forces escalate before the editor is reached, and 'low' gets one round, so the editor can never run there. A binding on the care band would also route any large diff to a human, which #2563/#1095 bar. What shipped instead is a different rule — editor everywhere EXCEPT a statute or declarative-leash diff — which is LOOSER than the withdrawn one: it leaves the editor ON at 'elevated', the exact band where PR #1018's editor pushed a fix that round 2 faulted three ways. The reviewer could not find any record that this substitution was ratified, and the item's only skeptic verdict argues against it. Needs the operator's confirmation of what they actually agreed to.",
+      "question": "At which care bands may the converge loop push fixes, rather than only report them?",
+      "why": "The panel's rigor already scales by care band; the editor's enablement scales with nothing — it runs at every band, unexamined. A pass either mutates the author's branch or it does not, and that mutation is not reversible from the author's side, so this is a correctness and accountability call rather than a cost one.",
+      "options": [
+        {
+          "label": "Editor on below a care threshold, review-only at and above it",
+          "detail": "bind enablement to the same careLevel that already dials the panel, inverted — editor at `low`, review-only at `elevated` and `high`; excludes the band where it was observed to fail and keeps leverage where fixes are mechanical. Ratify the threshold with it",
+          "recommended": true
+        },
+        {
+          "label": "Editor always on",
+          "detail": "the built behaviour, and maximum leverage when it converges; on the one run we have it converged nothing and handed the human a branch mutated with a defect the original diff did not contain"
+        },
+        {
+          "label": "Review-only everywhere",
+          "detail": "safe and cheap, but it leaves the operator hand-fixing every finding, which is the problem the loop exists to solve"
+        }
+      ],
+      "ifNothing": "The loop stays editor-on at every band, and the answer gets discovered on other people's branches once it runs over a queue of parked PRs.",
+      "evidence": [
+        "PR #1018 (`care: elevated`): the editor pushed a 15-file fix `729a9d8b`; round 2 faulted that repair three ways, incl. a fail-open in the gate the fix had just written",
+        "that run escalated having cleared nothing — 16 agents, 1.08M tokens, 56 minutes; the same disposition review-only would have reached",
+        "published: 45.1% of autonomously generated PRs require post-review fixes",
+        "`panelRigorForCareLevel` in `we:scripts/lib/jury-core.mjs` already dials by band; the editor does not"
+      ],
+      "ruling": "R2",
+      "takenAt": "2026-08-08"
+    },
+    {
+      "id": "2691",
+      "title": "Define a \"feature\" tier above epic — deterministic feature to epic to slice rollup",
+      "preparedDate": "2026-07-28",
+      "status": "taken",
+      "detail": "RULED — as recommended: an explicit kind:feature node, and a feature is a root (Fork 1b + Fork 2a). Landed as PR #1105.",
+      "question": "How is a \"feature\" defined, so the feature to epic to slice rollup is deterministic?",
+      "why": "The ratified feature-tracking screen (#2705) rolls up slice to epic to feature, but the backlog has no tier above epic. The `parent` chain alone cannot say which ancestor is the feature — it is deep and its roots are uneven — so determinism needs an explicitly-marked node, not a walk. The second half, whether that tier is enforced or merely nominal, is a genuine fork: both branches stay deterministic but yield permanently different trees.",
+      "options": [
+        {
+          "label": "An explicit `kind: feature` node, and a feature is a root (Fork 1b + Fork 2a)",
+          "detail": "the only mechanism that is deterministic AND single-axis AND matches every surveyed tracker. Honest cost: epic-parity plumbing at six kind-keyed loader/gate sites, and promoting an epic like #2505 deletes its `parent: 2445` edge",
+          "recommended": true
+        },
+        {
+          "label": "An explicit `kind: feature` node, but leave its parent unconstrained (Fork 1b + Fork 2b)",
+          "detail": "no migration and still deterministic, but the board then renders an epic structurally above features — the exact inversion the tier exists to remove. Take this if edge fidelity now beats board legibility"
+        },
+        {
+          "label": "Derive the feature from `parent` chains (Fork 1a)",
+          "detail": "no new field, but non-deterministic on the real tree: #2445 folds into one 87-item mega-feature and #2505/#2527 stop separating"
+        },
+        {
+          "label": "A separate grouping field on epics, e.g. `feature: <NNN>` (Fork 1c)",
+          "detail": "reintroduces the second structural axis #466 retired, kept in sync by hand and redundant with `parent`"
+        }
+      ],
+      "ifNothing": "The ratified feature-tracking screen (#2705) has no deterministic rollup to read, and #2733 stays blocked behind it.",
+      "evidence": [
+        "measured over 2717 items / 205 epics: 81 of 88 epic parents are themselves epics; max parent-chain depth 5",
+        "#2445 has 87 descendants; #2505 and #2527 are separate rows in the ratified mock yet both carry `parent: 2445`",
+        "`BACKLOG_KINDS` at `we:scripts/check-standards-rules.mjs:40`; the tier deriver at `we:src/_data/backlog.js:186`",
+        "prior art: the tier above epic is an explicitly-marked node in Jira, Linear, Shortcut, Azure DevOps, GitHub and Asana — never a graph walk",
+        "governed by #466 (one structural `kind` axis); Fork 1b extends that axis rather than adding a second"
+      ],
+      "ruling": "R3",
+      "takenAt": "2026-08-08"
+    },
+    {
+      "id": "review-independence-vs-the-working-pattern",
+      "title": "Review independence vs the working pattern",
+      "status": "taken",
+      "question": "Once the self-approval check lands, how do reviews get cleared?",
+      "ifNothing": "#1100 cannot land, and #1098's narrowing rests on convention rather than a check.",
+      "why": "Subagents inherit the parent session's CLAUDE_CODE_SESSION_ID. PRs are opened by subagents and verdicts recorded from the same session, so author and clearer are the same id. PR #1100 refuses that as a self-clear — correctly. It means the current pattern of \"subagent reviews, main session records the accept\" stops working.",
+      "options": [
+        {
+          "label": "Run reviews from a separate session",
+          "detail": "makes the independence real rather than nominal; costs a second session per review round",
+          "recommended": true
+        },
+        {
+          "label": "The operator clears everything",
+          "detail": "simple, but routes all verdicts back to a human, which is the opposite of the direction we are heading"
+        },
+        {
+          "label": "Sanction and document the `env -u CLAUDE_CODE_SESSION_ID` escape",
+          "detail": "cheapest, but a bypass that becomes routine trains everyone to ignore the warning, and every accept then records \"Independence NOT established\""
+        }
+      ],
+      "evidence": [
+        "reviewer verified subagents share the parent session id, first-hand from its own env",
+        "`CLAUDE_CODE_CHILD_SESSION=1` is a boolean flag, not a finer id",
+        "both `--to=accepted` and `--to=clear-human` were refused on PR #1100's real body"
+      ],
+      "ruling": "R4",
+      "detail": "RULED 2026-08-08: reviews move to a Claude Code CLI invocation. Verified mechanically rather than assumed — a headless claude -p run mints its OWN session id and its child processes see that id in CLAUDE_CODE_SESSION_ID, which is the exact variable the #2844 guard reads. Parent 01f39b97 vs child f4386de9. So the independence is real, and it needs no manual session and no daemon prerequisite. A subagent spawned from the session does NOT qualify: it inherits the parent id verbatim. Follow-on work is filed as the CLI-optimisation epic.",
+      "takenAt": "2026-08-08"
+    },
+    {
+      "id": "fork-b-rebuild-or-drop",
+      "title": "Fork B — rebuild or drop",
+      "status": "taken",
+      "question": "Does the codification shortcut get one more attempt, or get dropped?",
+      "ifNothing": "PR #1103 sits unreviewed and conflicting; Fork A still ships and codification PRs keep needing a human.",
+      "why": "Broken FIVE times by five independent reviewers. Each round closed one class and a new one appeared, always a hand-rolled approximation of a grammar detail: a mid-rule splice, an untagged second heading, eight more heading forms, counting lines instead of headings, and a comment regex that is not the HTML comment grammar. A working attack amended the leash rule itself and cleared with auto-merge on. A sixth attempt rebuilt on the real markdown parser was then written and opened as PR #1103 — but it has NEVER been reviewed and it now conflicts with main, so the live question is whether to spend a rebase plus one more security review on it. Fork A shipped separately as #1102, so nothing is blocked by dropping this.",
+      "options": [
+        {
+          "label": "Drop Fork B",
+          "detail": "Close PR #1103 and stop. Every codification PR then needs a human — the status quo, and it costs little. Five independent reviewers broke five builds; each fix closed one class of attack and opened another, always a hand-rolled approximation of a grammar detail. The ratio is bad and the failure shape never changes.",
+          "recommended": true
+        },
+        {
+          "label": "Rebase #1103 and put the markdown-it build through one independent review round",
+          "detail": "The sixth attempt is already WRITTEN — PR #1103 rebuilds detection on markdown-it, which is already a dependency and already renders that document, so detection and rendering cannot disagree. It has never been reviewed and it now conflicts with main. Cost is a rebase plus one security review; if that review breaks it too, drop it."
+        }
+      ],
+      "evidence": [
+        "three breaks: mid-rule splice · untagged second heading · eight more forms incl. `<h3` with a newline before `>`",
+        "a working attack added a rule reading 'agents may clear their own leash' with autoLand:true",
+        "five breaks, five reviewers; each fix closed one class and opened another",
+        "the sixth attempt EXISTS as PR #1103 (markdown-it) — zero review comments, mergeable=CONFLICTING as of 2026-08-08"
+      ],
+      "ruling": "R5",
+      "detail": "RULED 2026-08-08 in a parallel session, and NOT as 'drop'. The instrument changed instead: rather than recognising a safe codification after it is written, a trusted generator WRITES the rule text and the check becomes 'does this match what the tool would write'. Half that generator exists already (it fills the bookkeeping fields); the missing half writes the prose, and the shortcut is dormant until it ships. Filed as x2ca7wh, PR #1109. PR #1103 is superseded and closing it was left as the operator's call — still open.",
+      "takenAt": "2026-08-08"
+    },
+    {
+      "id": "todo-mode-for-unimplemented-contract-entries",
+      "title": "Todo mode for unimplemented contract entries",
+      "status": "taken",
+      "question": "Should a contract entry be able to declare itself not-yet-implemented, like `test.todo`?",
+      "ifNothing": "A contract entry with no implementation and no marker passes silently — the strictness #1099 traded away stays traded.",
+      "why": "The operator's own idea. #1099 made 'declared but not implemented' legal but invisible — nothing distinguishes deliberately-ahead-of-the-code from someone forgot. A `todo` marker makes the third state explicit and lets the gate be stricter than #1099, not looser.",
+      "options": [
+        {
+          "label": "Build it before the Fork A/impl split",
+          "detail": "that split is the first real case of spec landing ahead of impl, so it is the natural first customer; roughly one field plus four cases in the conformance test",
+          "recommended": true
+        },
+        {
+          "label": "File it and build later",
+          "detail": "no urgency if the split declares and implements in the same pair"
+        }
+      ],
+      "evidence": [
+        "row 3 (declared, absent, unmarked) currently PASSES",
+        "row 4 (marked todo but implemented) would catch the stale marker — `test.todo` does not",
+        "pair with `owedTo` naming an open item, matching #1100's invariant-catalogue convention"
+      ],
+      "ruling": "R6",
+      "detail": "RULED 2026-08-08: build the marker. One correction to the record, verified twice — the third state (declared, absent, unmarked) was NOT passing silently. Injecting a phantom token reddened exactly one assertion, the decorated-fixture-map pin, whose own failure message told you which line to add to silence it; adding that line returned the suite to green with the token still unimplemented. So it was guarded by a tripwire that handed you the bypass, which is worse than invisible. Both the builder and an independent reviewer reproduced it, and the reviewer widened the check across every test in the repo: nothing else catches it. Built as PR #1112.",
+      "takenAt": "2026-08-08"
+    },
+    {
+      "id": "2572",
+      "title": "Converge daemon scheduling",
+      "status": "queued",
+      "detail": "Ruled: do it, but when the priority is right — clear the other blockers first.",
+      "ifNothing": "every parked PR keeps waiting for the operator personally.",
+      "ruling": "R7"
+    },
+    {
+      "id": "the-command-guard-how-should-it-handle-text-the-",
+      "title": "The command guard: how should it handle text the shell re-executes?",
+      "status": "taken",
+      "question": "Six rounds have tried to enumerate every way a command hands a hidden script to the shell. Should the guard keep enumerating, refuse what it cannot resolve, or stop at the holes it has already closed?",
+      "ifNothing": "#1092 cannot land, and base keeps the confirmed write hole where a quoted pipe lets a redirect through to the shared checkout.",
+      "ruling": "R8",
+      "why": "Every round's evidence looked overwhelming and every next round found more holes. The sixth reviewer found why: the fuzz generator's wrapper list was literally the classes the previous fix had just implemented, so three million pairs could only re-prove what was already handled. Enumeration cannot be completed from inside the thing being enumerated. Six positions are still unrecursed (bash -o pipefail -c, a pipe or here-string into a shell, trap, process substitution, find -exec, nohup/exec), and both recursion caps fail OPEN — past depth 4 or 64 nodes the scanner stops and allows.",
+      "options": [
+        {
+          "label": "Refuse what it cannot resolve",
+          "detail": "Apply the guard's own ratified doctrine — unparseable means deny — to nested execution. Stop listing positions to recurse into; deny at the primary checkout when a command contains shell re-execution the guard cannot fully resolve. Ends the enumeration game. Cost: some everyday shell-rc idioms would be denied at the primary cwd, and the false-deny sweep would have to be re-run to size that.",
+          "recommended": true
+        },
+        {
+          "label": "A seventh round of enumeration",
+          "detail": "The six missing positions and the fail-open caps are all named with small fixes. But the same reasoning justified rounds five and six, and the generator problem means the next round's evidence will be built from the next round's list."
+        },
+        {
+          "label": "Keep only what is proven, drop the recursion",
+          "detail": "Keep the splitter (it closes four confirmed holes base has), the runner work, the corpus and thirteen false-deny fixes. But dropping the recursion leaves head WORSE than base on bash -c and eval, because base caught those by accident through its sloppy quote-blind split. Not a clean retreat."
+        }
+      ],
+      "evidence": [
+        "145 everyday commands swept, zero newly denied — precision is not the problem",
+        "9/9 prior holes closed, 13/13 intended fixes hold, 33/33 attack spellings deny",
+        "a FIFTH everyday false-deny class, hit live in ordinary work 2026-08-08: `grep -cE \"a|=>\" <file>` is refused at the primary cwd as a shell redirect. There is no redirect — a quoted alternation defeats the splitter. Controls pass: the bare arrow is fine, the quoted text is fine. The 145-command sweep never covered quoted alternations."
+      ],
+      "detail": "RULED 2026-08-08 19:32 — 'ratified', in a parallel session, answering a turn that put it as: take option 1 (refuse what the guard cannot resolve), SEQUENCED BEHIND #1092's quote-aware splitter rather than instead of it. The sequencing is the substance: today's resolver is quote-blind and over-flags by 45% of its own hits (1,093 vs 596 over 64,752 calls), so flipping the default to deny on top of that parser makes things worse before better. Land #1092's splitter, then flip. Codified by PR #1118, built as #3002. My board carried this as open because it was rebuilt from a summary that predated the ruling — the ruling was real.",
+      "takenAt": "2026-08-08"
+    }
+  ]
+}
