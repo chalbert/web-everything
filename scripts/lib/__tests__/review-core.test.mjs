@@ -1759,3 +1759,33 @@ describe('review-parked-prs.mjs — the sandbox mirrors the grow-only guards (so
     expect(src).toMatch(/const degrade = absentMandatory\.length > 0/);
   });
 });
+
+// PR #1034 review, finding 1: `reviewedSha` was WRITE-DEAD — the field validated on the event and folded on both
+// reductions, but no production path could populate it, so every ledger the repo writes folded to null. This loop
+// is that production path (it hands the converged state to `jury-ledger record`, which calls
+// `buildReviewLedgerEvents`). Same source-regression technique as the block above, for the same reason: the harness
+// body is not importable. (#2864)
+describe('review-parked-prs.mjs — the ledger it writes records WHICH TREE was judged (source regression, #2864)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '../../workflows/review-parked-prs.mjs'), 'utf8');
+
+  it('asks the fetch agent for the head sha, and declares it on the fetch schema', () => {
+    expect(src).toMatch(/headSha:\s*\{\s*type:\s*'string'/);
+    expect(src).toMatch(/Return ONLY \{ pr, diff, diffBasis, title, headSha, escalationReason, error\? \}/);
+  });
+
+  it('re-reads the sha on EVERY fetch — an editor push moves the head mid-loop', () => {
+    // Three fetch sites (round 1, the grown-jury re-fetch, the post-editor re-fetch); each must refresh the sha,
+    // or the ledger would claim the jury judged the tree round 1 opened on.
+    expect(src.match(/headSha = shaOf\(fetched\)/g) || []).toHaveLength(3);
+  });
+
+  it('validates the agent-returned sha before it can reach the schema (which THROWS on a bad one)', () => {
+    expect(src).toMatch(/const shaOf = \(f\) => \{/);
+    expect(src).toMatch(/\[0-9a-f\]\{7,64\}\$\/i\.test\(s\)/);
+  });
+
+  it('passes it to the ledger writer, and OMITS it rather than asserting a tree it does not know', () => {
+    expect(src).toMatch(/\.\.\.\(headSha \? \{ reviewedSha: headSha \} : \{\}\)/);
+  });
+});

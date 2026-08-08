@@ -986,6 +986,28 @@ export function validateJuryEvent(raw) {
         const seen = new Set();
         event.jurors = raw.jurors.map((j, i) => normalizeJurorSpec(j, i, errors, seen)).filter(Boolean);
       }
+      // #2864 — the REVIEWED head sha: which tree these jurors were actually seated over. The ledger carried no
+      // commit identity at all, so a clean fold written at head A read as `clear` at head B — enforced, that
+      // clears a diff no juror saw. `reviewed-sha` (#2409) cannot catch it either: that marker is stamped at
+      // WRITE time, so it certifies the unreviewed tree. OPTIONAL in the schema on purpose — every event already
+      // on disk predates this field, and rejecting them would erase the log rather than age it. The freshness
+      // GATE is a separate decision at the consumer (the #2864 decider slice); this slice only makes the fact
+      // recordable, so a ledger written from here on can be checked at all.
+      // CASE-INSENSITIVE, normalized to lowercase on the way in — the shape every other sha check in this repo
+      // accepts (`sameCommit` in fetch-parked.mjs, `readiness/lane-manifest.mjs`, `merge-ai-prs.mjs`) and the shape
+      // the #2409 `reviewed-sha` marker this field pairs with writes (`review-escalation.mjs` lowercases too). A
+      // case-SENSITIVE test would make an uppercase sha throw out of `rosterPickedEvent`, i.e. an optional
+      // decorative field taking down the mandatory roster event it rides on. (PR #1034 review, finding 3. The one
+      // shared `isCommitSha`/`normalizeCommitSha` primitive is filed separately as #2913; until it lands, this
+      // matches the repo's existing shape rather than inventing a stricter one.)
+      if (raw.reviewedSha != null) {
+        const sha = typeof raw.reviewedSha === 'string' ? raw.reviewedSha.toLowerCase() : '';
+        if (!/^[0-9a-f]{7,64}$/.test(sha)) {
+          errors.push('reviewedSha must be a hex commit sha (7-64 chars) when present');
+        } else {
+          event.reviewedSha = sha;
+        }
+      }
       break;
     }
     case JURY_EVENT_TYPES.JUROR_RUNNING: {
@@ -1205,11 +1227,15 @@ export function materializeRoster(plan, { charterForLens } = {}) {
  * @param {{round?: number, at?: string, charterForLens?: (lens: string) => string}} [o]
  * @returns {JuryEvent|null}
  */
-export function rosterPickedEvent(plan, { round = 0, at, charterForLens } = {}) {
+export function rosterPickedEvent(plan, { round = 0, at, charterForLens, reviewedSha } = {}) {
   const jurors = materializeRoster(plan, { charterForLens });
   if (!jurors.length) return null; // care `none` / no seats → no roster picked, nothing to record
   const raw = { type: JURY_EVENT_TYPES.ROSTER_PICKED, round, jurors };
   if (at != null) raw.at = at;
+  // #2864 — record WHICH TREE these jurors are being seated over, so a later reader can tell whether the verdict
+  // it is folding still describes the PR's current head. Optional: a caller with no sha to hand (a design or
+  // decision subject, where there is no commit) simply omits it and the ledger is unchanged.
+  if (reviewedSha != null) raw.reviewedSha = reviewedSha;
   const { valid, errors, event } = validateJuryEvent(raw);
   if (!valid) {
     throw new Error(`rosterPickedEvent: materialized roster failed the S2 schema: ${errors.join('; ')}`);

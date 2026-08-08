@@ -261,6 +261,10 @@ const FETCH_SCHEMA = {
     // producer and no consumer is not a safety feature. (PR #1039 review, finding 3.)
     diffBasis: { type: 'string', description: "'net' (the two-tree diff vs current main — what a reviewer must judge) or 'three-dot' (gh pr diff, DEGRADED: it lists sibling-lane files that already landed on main as if this PR added them)" },
     title: { type: 'string' },
+    // #2864 — the head commit THIS diff was read at, carried so the ledger this loop writes can record WHICH TREE
+    // the jury judged. Optional, unlike `diffBasis`: an absent sha degrades the ledger to "tree unknown" (the
+    // fail-closed reading), whereas an absent basis would silently upgrade a degraded diff to a good one.
+    headSha: { type: 'string', description: "the PR head commit sha the diff was read at, verbatim from fetch-parked's `headSha` ('' if absent)" },
     escalationReason: { type: 'array', items: { type: 'string' }, description: 'the bare decorated reasons under the PR body\'s "## Escalation reason" heading' },
     error: { type: 'string', description: 'set if fetch-parked could not read the PR' },
   },
@@ -507,8 +511,11 @@ function fetchPrompt(pr, repo, round = 1) {
     'basis must never read as the good one.',
     'Parse escalationReason from the `body`: the "- <reason>" bullet lines under the "## Escalation reason"',
     'heading (up to the next "##" heading), as bare strings (may be empty).',
+    'Copy its `headSha` through VERBATIM too (#2864) — the PR head commit this diff was read at. It is what the',
+    'jury ledger records as the tree the jurors were seated over, so a later reader can tell whether the verdict',
+    'still describes the PR\'s current head. Do NOT invent or shorten it; if the field is absent, return "".',
     'If the entry has an `error` field (the PR could not be read), return { pr, diff: "", diffBasis: "three-dot", error: <that message> }.',
-    'Do NOT `git checkout`/`switch` to the PR branch. Return ONLY { pr, diff, diffBasis, title, escalationReason, error? }.',
+    'Do NOT `git checkout`/`switch` to the PR branch. Return ONLY { pr, diff, diffBasis, title, headSha, escalationReason, error? }.',
   ].join('\n');
 }
 
@@ -946,6 +953,17 @@ async function convergePr(item) {
     log(`  ${prTag(item)}: FETCH failed${fetched && fetched.error ? ` (${fetched.error})` : ''} — no diff to judge; this PR degrades to needs-human.`);
   }
 
+  // #2864 — WHICH TREE this jury is judging. Re-read on EVERY round's fetch (an editor push moves the head), so the
+  // ledger records the commit the FINAL panel actually saw rather than the one round 1 opened on. `''` whenever the
+  // fetch reported no usable sha — including a failed re-fetch — because an unknown tree must read as unknown and
+  // never as a stale earlier commit. Validated here too: an agent-returned string is untrusted, and the schema
+  // throws on a malformed sha, which would take the whole roster event down with it.
+  const shaOf = (f) => {
+    const s = (f && typeof f.headSha === 'string') ? f.headSha.trim() : '';
+    return /^[0-9a-f]{7,64}$/i.test(s) ? s.toLowerCase() : '';
+  };
+  let headSha = shaOf(fetched);
+
   // The roster is MUTABLE across rounds — a juror-invite-on-discovery (#2640) can grow it mid-loop (raise care →
   // recompute rigor → spawn the delta). It starts at the PR's care-dialed size and only ever grows, bounded by the
   // per-care-band ceiling. `roundCap` is FIXED at loop start (an invite spends rounds against it, never extends it).
@@ -1018,6 +1036,7 @@ async function convergePr(item) {
         // Re-fetch the CURRENT diff (no editor this pass — the grown jury re-judges the same code) and re-review.
         fetched = await agent(fetchPrompt(pr, repo, round), { label: `fetch:${prTag(item)}:r${round}`, phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
         diff = (fetched && typeof fetched.diff === 'string') ? fetched.diff : diff;
+        headSha = shaOf(fetched); // #2864 — the grown jury re-judges at whatever head this re-fetch read.
         fetchOk = !!(fetched && !fetched.error && diff.length > 0);
         if (!fetchOk) log(`  ${prTag(item)}: round ${round} re-fetch failed — the round will degrade to needs-human.`);
         continue;
@@ -1041,6 +1060,7 @@ async function convergePr(item) {
     // Re-fetch the CURRENT (revised) diff for the next round's re-review.
     fetched = await agent(fetchPrompt(pr, repo, round), { label: `fetch:${prTag(item)}:r${round}`, phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
     diff = (fetched && typeof fetched.diff === 'string') ? fetched.diff : diff;
+    headSha = shaOf(fetched); // #2864 — the editor pushed, so the next round judges (and records) a NEW head.
     fetchOk = !!(fetched && !fetched.error && diff.length > 0);
     if (!fetchOk) log(`  ${prTag(item)}: round ${round} re-fetch failed — the round will degrade to needs-human.`);
   }
@@ -1058,6 +1078,12 @@ async function convergePr(item) {
   // the returned verdict, and touches NO GitHub state — INVARIANT 2 (no label/comment/merge) is intact.
   await recordJuryLedger(item, {
     activeLenses, lensVerdicts: last.lensVerdicts, findings: last.findings, rounds: round,
+    // #2864 — the tree this verdict describes. THIS is the production writer of the ledger, so without it the
+    // field is write-dead: every ledger the repo produces would fold to `reviewedSha: null`, and a null from a
+    // CURRENT writer is indistinguishable from a null on a legacy pre-field event — which would leave the #2572
+    // freshness gate no choice but to fail closed on 100% of PRs. Omitted (not null) when the head is unknown, so
+    // the ledger stays honest about not knowing rather than asserting a tree.
+    ...(headSha ? { reviewedSha: headSha } : {}),
   });
 
   return {
