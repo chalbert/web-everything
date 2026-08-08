@@ -465,9 +465,10 @@ process.exit(0);
     }
     expect(exitCode).not.toBe(0);
     expect(JSON.parse(chunks.join('')).error).toMatch(/rendered comment is \d+ chars/);
-    // It observed the PR and read the diff to fingerprint (#x169fqe) — both READS — and then stopped. What
-    // matters to this guard is that no MUTATION happened: no `pr edit` swap, no `pr comment`.
-    expect(ghCalls()).toEqual(['pr view', 'pr diff']);
+    // It observed the PR (a read) and then stopped. #2979 moved the fingerprint's diff read off `gh pr diff`
+    // onto `computeNetDiffText` (which shells `git`), so no `pr diff` appears in the gh log any more. What
+    // matters to this guard is unchanged and still asserted: no MUTATION happened.
+    expect(ghCalls()).toEqual(['pr view']);
     expect(ghCalls().some((c) => c === 'pr edit' || c === 'pr comment')).toBe(false);
   });
 });
@@ -563,9 +564,10 @@ process.exit(0);
     // label), and the whole arc ran in order: observe → edit → comment → re-read.
     expect(valuesOf(edit, '--remove-label')).not.toContain(REVIEW_LABELS.changes);
     expect(calls().map((c) => c.slice(0, 2).join(' ')))
-      // #x169fqe inserts the reviewed-diff READ between the observe and the swap — the mutation order
-      // (edit → comment) is unchanged, which is the property this assertion exists to pin.
-      .toEqual(['pr view', 'pr diff', 'pr edit', 'pr comment', 'pr view']);
+      // #2979 — the reviewed-diff read moved off `gh pr diff` onto `computeNetDiffText` (which shells `git`),
+      // so the GH call sequence is back to what it was before #x169fqe. The mutation order (edit → comment) is
+      // the property this assertion exists to pin, and it is unchanged throughout.
+      .toEqual(['pr view', 'pr edit', 'pr comment', 'pr view']);
 
     // 3. The durable comment — the honesty tax as it is actually posted, not as the module describes it.
     const comment = readFileSync(join(dir, 'comment.md'), 'utf8');
