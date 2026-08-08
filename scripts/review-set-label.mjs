@@ -365,6 +365,12 @@ export function runReviewLabelCli({
       // `exec` MUST be execFileSync-shaped — `(cmd, argsArray, opts)`. Passing a shell-exec here is the exact
       // caller bug #2952 exists to make diagnosable: it throws a TypeError inside the try and degrades to an
       // unscored basis, which here silently costs the fingerprint.
+      //
+      // NO EXPLICIT `cwd` HERE, AND THAT IS AN INVARIANT, NOT AN OVERSIGHT (PR #1087 review, note 2). This CLI is
+      // single-PR and operator-invoked, so it runs from the PR's own repo — unlike the drain, which sweeps three
+      // repos in one process and therefore MUST pin every git read to `escCwd` (see the matching block in
+      // merge-ai-prs.mjs, where omitting it was a real defect). If this CLI ever grows a `--repo` that can name a
+      // repo other than the cwd's, this call has to take a `cwd` with it, or it will fingerprint the wrong tree.
       const net = computeNetDiffText({
         exec: (cmd, args, opts) => execFileSync(cmd, args, opts),
         rev: headRefName,
