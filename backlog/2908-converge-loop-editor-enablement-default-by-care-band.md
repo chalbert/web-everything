@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-08-04"
 dateStarted: "2026-08-08"
 dateResolved: "2026-08-08"
-codifiedIn: "docs/agent/platform-decisions.md#converge-editor-gated-by-human-required"
+codifiedIn: "docs/agent/platform-decisions.md#converge-editor-enabled-at-low-only"
 preparedDate: "2026-08-04"
 tags: [review, conveyor, converge-loop, orchestrator-mechanization]
 relatedTo: ["2639", "2572", "2830", "2418"]
@@ -14,6 +14,8 @@ relatedReport: reports/2026-08-04-review-pipeline-unblock-plan.md
 scope:
   - we:scripts/workflows/review-parked-prs.mjs
   - we:scripts/lib/jury-core.mjs
+  - we:scripts/lib/review-core.mjs
+  - we:scripts/review-core-cli.mjs
 ---
 
 # Converge loop: editor-enablement default by care band
@@ -26,29 +28,46 @@ original framing**. Two candidates that looked like forks were **dissolved** dur
 
 ## Ruling (ratified 2026-08-08)
 
-**Fork 1 → (d): the editor is enabled everywhere EXCEPT a `humanRequired` diff.** The prepared default (c) was
-withdrawn as unimplementable and its repair (c′) was withdrawn on the operator's challenge; both corrections are
-recorded in place below rather than as a bottom-of-file addendum.
+**Fork 1 → (c′): the editor is enabled at `low` and NOWHERE ELSE, and `low` is given the 2-round budget it
+needs.** Mechanical fixes get repaired and re-judged; anything carrying a blast-radius or trust-chain signal
+gets a **report and the operator**, with the author's branch untouched.
 
-- **The switch is `humanRequired`, not the care band.** No editor on a **statute** or **declarative-leash**
-  diff; editor everywhere else. That is the smallest set containing the real hazard — a machine editing its own
-  constraints — and it is a strict subset of blast-radius.
-- **Care is restored to advisory-only.** It dials panel rigor and never decides who reviews. Blast-radius, diff
-  size, cross-repo and dismissed-findings therefore stop being routes to the operator, honouring #2563 / #1095
-  (diff size never routes to a human, because a human reviews a big diff worse than the panel does).
-- **Rider: an editor-enabled band needs ≥ 2 rounds** (push, then a fresh panel judges the push), carried on a
-  dedicated editor knob — never by raising the shared `panelRigorForCareLevel` dial that `/jury` and `/review`
-  also read.
-- **What now reaches the operator, exhaustively — four things.** By the diff: **(1)** a statute edit, **(2)** a
-  declarative-leash edit. By the loop failing: **(3)** deadlock (rounds spent, panel still at `changes`),
-  **(4)** breakage (the editor could not push, a mandatory correctness/security lens did not run, or the diff
-  could not be fetched — a dead reviewer never reads as an accept).
-- **Prevention strategies for (3) and (4) are deliberately OUT OF SCOPE** and filed as successors. The operator
-  asked whether to fold them in; they are several distinct mechanisms with their own tradeoffs, and folding them
-  in would ratify designs that were never prepared or red-teamed. Retry/transient-classification for (4) is a
-  build with no coherent alternative branch (a network blip should not spend the operator's attention), so it is
-  a story. Deadlock relief for (3) is a genuine fork — progress-gated round extension vs partial escalation of
-  only the disputed finding — so it is its own `decision` item.
+- **The switch is the CARE BAND.** The editor may push at `low`. `elevated`, `high`, `none` and any band that
+  cannot be resolved are **review-only**. The gate reads the *same resolved band the panel already dialed*
+  (`careLevelFromReasons` → the band, then both `panelRigorForCareLevel` and the new `editorPolicyForCareLevel`
+  read that one value) — never a second derivation, because a second derivation is a second thing to drift.
+- **Rider — enablement and round budget are ONE decision, on a DEDICATED knob.** An editor-enabled band needs
+  **≥ 2 rounds**: one to push the fix, one for a fresh panel to judge the push. That minimum is carried on
+  `EDITOR_MIN_ROUNDS` / `editorPolicyForCareLevel` in `we:scripts/lib/jury-core.mjs`, **never** by raising
+  `panelRigorForCareLevel`'s `low` entry from 1 to 2 — that dial is shared with `/jury`, `/review` and
+  `/converge` (`we:scripts/lib/jury-core.mjs` `resolveRoster` reads it), so raising it would silently double the
+  round budget of every other consumer to buy a property only this loop needs. The shared dial is unchanged:
+  `low` is still 1 panel round everywhere else.
+- **The gate FAILS CLOSED.** An absent, malformed or unresolvable care level means review-only, never editor-on.
+  This is load-bearing rather than decorative: `escalationReason` is produced by an LLM fetch agent and fails
+  open to `[]`, and the loop's only statute signal is that reason prose. Before this ruling the `low`/1-round
+  fallback protected against that **by accident** — the editor was unreachable at `low` anyway. Giving `low` two
+  rounds removes the accident, so the protection has to become deliberate. Mutating someone else's branch is not
+  reversible from their side.
+- **Review-only still REPORTS.** Turning the editor off changes what the loop *does* with the panel's findings,
+  never whether it produces them: the findings, the reduced verdict and the operator-facing comment ride out on
+  the escalation exactly as they do on a deadlock.
+- **Sub-decision — SETTLED: `low` only, not `low` + `elevated`.** Adding `elevated` would re-enable the editor
+  at precisely the band where it was observed to fail (PR #1018 below). The one run we have is an argument
+  against that band specifically, not a general one.
+
+### Two options were withdrawn, and one withdrawal was itself reversed — recorded in place, honestly
+
+1. **(c) "editor at `low`, review-only above" was withdrawn as unimplementable.** Correct, and the defect is
+   real: at `roundCap: 1` the loop forces `escalate` before the editor step, so (c) as written selects the one
+   band where the editor cannot run. See the first correction below.
+2. **(c′) — (c) plus the 2-round repair — was then withdrawn during the decision turn** on a diff-size
+   challenge, and (d) ("editor everywhere except a `humanRequired` diff") was ruled in its place.
+3. **The operator reversed that on 2026-08-08 and ratified (c′).** (d) is **not narrower** than the prepared
+   default, it is **looser**: `deriveCareLevel` returns `high` whenever `humanRequired`, so `{humanRequired}` is
+   a strict subset of `{high}` and (d) leaves the editor ON at `elevated` and at non-`humanRequired` `high` —
+   including the exact band of the only observed editor failure. The diff-size objection that carried (d) is
+   answered below rather than deleted.
 
 ## The axis
 
@@ -83,30 +102,49 @@ already governed by the round budget the same care dial sets.
   outcome means the final diff was signed off by a fresh-context panel that did not author it"*
   (`we:scripts/workflows/review-parked-prs.mjs:85`). **Enablement and round budget are one decision, not two.**
 
-### Second correction, folded at the decision turn — the care band must not be the editor's switch
+### The diff-size objection — raised at the decision turn, and ANSWERED (not deleted)
 
-(c′) was presented, and then withdrawn during the discussion on the operator's challenge. Binding the editor to
-the **care band** makes the band decide whether a human sees the PR — and the care level is documented as
-advisory only, dialing panel rigor and **never** changing route or land
-(`we:scripts/lib/review-escalation.mjs:244`). Two consequences made that fatal:
+(c′) was presented, withdrawn mid-discussion on the operator's challenge, and then re-ratified. The challenge is
+recorded here in full because it is a real constraint the implementation has to respect, not a bad argument that
+went away.
 
-- **It re-opens the door #1095 closed.** Diff size is deliberately barred from routing to a human: the scored
-  rubric caps size at `review:pending`, never `review:human` (#2563), and PR #1095 removed the last
-  self-park loophole on the ground that *a human reviews a big diff worse than the panel does*. But under a
-  care-band binding, size (weight 2) plus blast-radius (weight 3) reaches `high`, `high` is review-only, and
-  review-only is the operator. Size routes to a human again, through the band instead of the label.
-- **The exclusion set is far larger than the hazard.** The real conflict of interest is a machine editing *its
-  own constraints*. That is the `humanRequired` set — the declarative leash and the statute layer — and it is a
-  strict **subset** of blast-radius (`we:scripts/lib/review-escalation.mjs:315` fires the wide ring; only
-  `isDeclarativeLeashPath` / `isStatutePath` force a human, per the #2445 two-tier flip and the #2771/#2785
-  policy-tier split). Excluding the editor by care band excludes it from a much larger, fuzzier set that diff
-  size and file count feed into.
+**The challenge.** Binding the editor to the **care band** makes the band decide whether a human sees the PR —
+and the care level is documented as advisory only, dialing panel rigor and **never** changing route or land
+(`we:scripts/lib/review-escalation.mjs:244`). Under a band binding, size (`CARE_WEIGHTS.size` 2) plus
+blast-radius (3) reaches `high`, `high` is review-only, and review-only means the operator. So **diff size would
+route to a human again**, through the band instead of the label — which #2563 barred (the scored rubric caps
+size at `review:pending`, never `review:human`) and PR #1095 closed the last loophole on, on the ground that *a
+human reviews a big diff worse than the panel does*.
+
+**The answer, in three parts.**
+
+1. **The objection applies just as hard to (d), which is why it cannot be the reason to pick (d).** Under (d) a
+   big blast-radius diff still escalates to the operator whenever the loop deadlocks or breaks — and a `high`
+   band's 3-round cap with a 15-file editor patch to re-judge is exactly the deadlock generator #1018
+   demonstrated. (d) does not remove size from the path to a person; it removes the *honest, legible* place
+   where that happens.
+2. **Review-only is not the same route as `review:human`-by-label, and the rubric's bar is about the label.**
+   What #2563/#1095 barred is size *parking* a PR for a human. Under (c′) a review-only band still gets the full
+   AI panel, the full verdict and the full findings; a person is reached only on the paths that already reached
+   them — deadlock, breakage, statute, leash. The band decides whether a *machine writes to the branch*, which
+   is a different question from who reviews.
+3. **The residual is real and is accepted deliberately.** A `high`-band diff whose panel wants changes now
+   reaches the operator one round sooner than it would have with an editor attempt in between. That is the cost
+   of the ruling, it is bounded by the successors filed below (deadlock relief, transient retry), and the
+   operator ratified it with that cost stated.
+
+**And the exclusion-set argument, also answered.** (d)'s case was that `humanRequired` (statute + declarative
+leash) is the *narrowest* set containing the hazard, and that is true as far as it goes — but narrowness is only
+a virtue if the wider set is empty of hazard, and it is not. `{humanRequired}` is a strict **subset** of
+`{high}` (`deriveCareLevel` forces `high` on `humanRequired`), so (d) is strictly **looser** than (c′) — it
+leaves the editor running at `elevated` and at non-`humanRequired` `high`. The one failure we have observed sits
+inside exactly that difference.
 
 ### Recommended path at a glance
 
-| | recommended default | main alternative | confidence |
+| | ruled | main alternative | confidence |
 | --- | --- | --- | --- |
-| Fork 1 | **(d) editor enabled everywhere EXCEPT `humanRequired` (statute + declarative leash); care stays advisory and never routes; any editor-enabled band gets a 2-round minimum on a dedicated editor knob** | ~~(c′) editor by care band~~ — withdrawn: it turns the advisory dial into a routing dial | med-high |
+| Fork 1 | **(c′) editor at `low` ONLY, review-only at `elevated` and above, fail-closed on an unresolvable band; `low` gets a 2-round budget on a dedicated editor knob** | ~~(d) editor everywhere except `humanRequired`~~ — withdrawn: `{humanRequired} ⊊ {high}`, so it is *looser* than the prepared default and keeps the editor on at the one band where it was observed to fail | med-high |
 
 ## Fork 1 — When may the editor push fixes?
 
@@ -129,17 +167,25 @@ Published evidence points the same way: **45.1%** of autonomously generated PRs 
 *"the model that wrote the code is the one that introduced the bugs, which makes it less equipped to find them
 than an independent reviewer."*
 
-**What the ruling does with this evidence — stated plainly, because (d) does not exclude the band where the
-failure happened.** PR #1018 was `care: elevated`, therefore **not** `humanRequired` (a human-gated diff is
-forced to `high`), so under (d) the editor would still have run on it. The ruling accepts that, on three
-grounds. **(1) The loop's safety property held.** Round 2 caught the editor's bad repair; nothing defective
-landed. What #1018 demonstrates is an **efficiency** failure — 1.08M tokens for a disposition review-only would
-have reached — not a correctness one. **(2) One run is not a rate.** The 45.1% figure predicts recurrence but
-says nothing about which axis predicts it, and `humanRequired` is the only axis with a stated mechanism (a
-machine editing its own constraints) rather than a correlation. **(3) The efficiency failure is attacked
-directly, not by disabling the editor.** Deadlock relief and transient-failure retry are filed as successors;
-turning the editor off at `elevated` would buy the same disposition #1018 reached while routing every
-`elevated` finding to the operator — the cost the system exists to avoid.
+**What the ruling does with this evidence.** PR #1018 was `care: elevated`. Under the ratified rule the editor
+would **not** have run on it: `elevated` is review-only, the panel's three findings would have gone to the
+operator on round 1, and the branch would have been handed over clean instead of carrying a self-inflicted
+fail-open. That is the whole case for `low`-only, and it is why the sub-decision resolves against adding
+`elevated`: the one run we have is evidence about *that band*, and re-admitting it would re-enable the editor
+exactly where it misfired.
+
+Two honest qualifications, recorded so the ruling is not read as stronger than it is. **(1) One run is not a
+rate.** #1018 is a single observation; the 45.1% figure predicts recurrence but says nothing about which axis
+predicts it. **(2) #1018's safety property held** — round 2 caught the bad repair and nothing defective landed,
+so it evidences an *efficiency* failure (1.08M tokens for a disposition review-only would have reached) rather
+than a correctness one. The ruling treats a demonstrated efficiency failure plus an unmeasured correctness risk
+as sufficient to keep a machine off the branch at that band, and attacks the remaining efficiency cost directly
+through the successors (deadlock relief, transient-failure retry) rather than by widening the editor.
+
+**The statute/leash hazard is covered, not dropped.** (d)'s core insight — a machine editing its *own
+constraints* is the sharpest conflict of interest — survives intact under (c′), because `deriveCareLevel` forces
+`humanRequired` to `high`, and `high` is review-only. `{humanRequired} ⊊ {high} ⊆ {review-only}`: every diff (d)
+would have excluded is excluded here too, and then some.
 
 - **(a) Leave it as built.** Described in prep as "editor always on"; the correction above shows the built
   behaviour is actually **editor at `elevated` and `high`, never at `low`** — i.e. the editor is enabled *only*
@@ -154,11 +200,18 @@ turning the editor off at `elevated` would buy the same disposition #1018 reache
 - ~~**(c) Editor ON below a care threshold** — editor at `low`, review-only at `elevated`/`high`.~~ **Withdrawn
   as unimplementable.** `low` carries a 1-round cap, so the loop escalates before the editor step is reached;
   the option selects the one band where the editor cannot run. See the correction above.
-- ~~**(c′) Editor at `low` only, AND give `low` the 2-round budget.**~~ **Withdrawn at the decision turn.** It
-  was the recommended default for most of the discussion; the operator's challenge on diff size refuted it. See
-  the second correction above — binding enablement to the care band converts an advisory rigor dial into a
-  human-routing dial and re-admits diff size as grounds for reaching a person.
-- **(d) Editor enabled everywhere EXCEPT `humanRequired`.** **RULED.** The editor never runs on a diff that
+- **(c′) Editor at `low` only, AND give `low` the 2-round budget it needs.** **RULED.** The editor may push at
+  `low` and nowhere else; `elevated`, `high`, `none` and an unresolvable band are review-only. The 2-round
+  budget rides a **dedicated editor knob** (`EDITOR_MIN_ROUNDS` / `editorPolicyForCareLevel`), never the shared
+  `panelRigorForCareLevel` dial that `/jury`, `/review` and `/converge` read. It was withdrawn mid-turn on the
+  diff-size challenge and re-ratified by the operator on 2026-08-08 once that challenge was answered (above).
+  This is the narrowest option that keeps the editor useful on mechanical work while keeping it off the branch
+  at every band carrying a risk signal.
+- ~~**(d) Editor enabled everywhere EXCEPT `humanRequired`.**~~ **Withdrawn — it is looser than the prepared
+  default, not narrower.** `deriveCareLevel` forces `high` on `humanRequired`, so `{humanRequired} ⊊ {high}`:
+  (d) leaves the editor ON at `elevated` and at non-`humanRequired` `high`, including the band of the only
+  observed editor failure. Its insight is preserved under (c′) (statute/leash lands in `high`, which is
+  review-only). Its original statement, kept for the record: the editor never runs on a diff that
   edits the **statute layer** (`isStatutePath`) or the **declarative leash** (`isDeclarativeLeashPath`); it runs
   everywhere else regardless of band. This excludes exactly the hazard — a machine patching its own constraints
   — and nothing more. **Care returns to being purely advisory:** it dials how hard the panel looks and never
@@ -170,14 +223,23 @@ turning the editor off at `elevated` would buy the same disposition #1018 reache
   raising it would silently double the round budget of every other consumer to buy a property only this loop
   needs.
 
-**Sub-decision — DISSOLVED.** The threshold question (`low` only vs `low` + `elevated`) presupposed a care-band
-binding. Under (d) there is no threshold: the switch is `humanRequired`, not a band edge.
+**Sub-decision — SETTLED: `low` only.** The threshold question (`low` only vs `low` + `elevated`) is live again
+under (c′), and it resolves against `elevated`: that is the band where the editor was observed to fail (PR
+#1018 — a 15-file repair that the next round faulted three ways, including a fail-open in the gate the fix had
+just written). Adding `elevated` would re-enable the editor at precisely the observed failure point.
 
 **Skeptic:** `REFUTED → flipped to (c)`. The prep default was **(a)**, argued as *"the panel caught the editor's
 mistakes, so the loop worked."* The skeptic refused that framing: the *outcome* on #1018 was the same escalation
 review-only would have produced, at 1.08M tokens, plus a mutated branch — and `elevated` is precisely where round
 caps are tightest and where the 45.1% figure predicts recurrence rather than a fluke. The default was flipped
 before this item was stamped.
+
+**Standing of that skeptic pass, stated explicitly (raised by the independent technical review of PR #1106).**
+Under the withdrawn (d) this block was *stale and adverse* — it argued the editor should be OFF at `elevated`
+while (d) left it ON, and (d)'s ground (1) revived the very "the loop worked" framing the skeptic refused. Under
+the ratified (c′) the block is **current and concordant**: the editor is off at `elevated`, and the ruling above
+explicitly declines to lean on the "safety property held" framing as a reason to keep it on. It is left
+unedited — the argument is unchanged, only the option it now supports is.
 
 **Screen:** `clear`. Q1 (standard-vs-impl): no boundary issue — internal delivery tooling, and whether commits
 appear on the author's branch is fully observable, not a hidden impl detail. Q2 (merit-vs-prioritization): merit

@@ -108,6 +108,9 @@ import {
   PANEL_LENSES,
   AGGREGATION,
   panelRigorForCareLevel,
+  EDITOR_ENABLED_CARE_LEVELS,
+  EDITOR_MIN_ROUNDS,
+  editorPolicyForCareLevel,
   buildPanelFindings,
   derivePanelVerdict,
 } from './jury-core.mjs';
@@ -150,6 +153,9 @@ export {
   PANEL_LENSES,
   AGGREGATION,
   panelRigorForCareLevel,
+  EDITOR_ENABLED_CARE_LEVELS,
+  EDITOR_MIN_ROUNDS,
+  editorPolicyForCareLevel,
   buildPanelFindings,
   derivePanelVerdict,
 };
@@ -572,6 +578,31 @@ export function careLevelFromReasons(reasons) {
  */
 export function panelRigorFromReasons(reasons) {
   return panelRigorForCareLevel(careLevelFromReasons(reasons));
+}
+
+/**
+ * #2908 — the EDITOR POLICY for a set of escalation reasons: `careLevelFromReasons` → `editorPolicyForCareLevel`,
+ * in one call for the reasons-holding consumer (the parked-PR convergence loop, via `review-core-cli rigor`).
+ * Pure. The band is resolved ONCE, here, and both the panel dial and the editor gate read that same value — a
+ * second derivation would be a second thing to drift.
+ *
+ * AN EMPTY REASON LIST IS `unresolved`, NOT `none`. This is the fail-closed clause, and it is the whole point of
+ * having a bridge rather than calling `editorPolicyForCareLevel(careLevelFromReasons(r))` inline. In the loop the
+ * reason list is produced by an LLM fetch agent and fails open to `[]` on a degraded fetch
+ * (`we:scripts/workflows/review-parked-prs.mjs`), so `[]` is indistinguishable from "the signal did not arrive".
+ * Every PR the loop reviews is parked, and a parked PR HAS an escalation reason — so an empty list is evidence of
+ * a broken read, never of a safe diff. Resolving it to `none` (score 0) would look tidy and would be exactly the
+ * fail-open: a statute PR whose reason fetch flaked would present as the weakest band. Before #2908 that was
+ * harmless by accident, because the weakest band's 1-round cap made the editor unreachable anyway; giving an
+ * editor-enabled band its 2-round floor removes that accidental protection, so the clause has to be explicit.
+ *
+ * @param {string[]} reasons - the drain's escalation reasons for this PR.
+ * @returns {{careLevel: string|null, resolved: boolean, editorEnabled: boolean, rounds: number, reason: string}}
+ */
+export function editorPolicyFromReasons(reasons) {
+  const raw = (Array.isArray(reasons) ? reasons : reasons ? [reasons] : []).filter(Boolean);
+  if (!raw.length) return editorPolicyForCareLevel(null); // fail closed — see above
+  return editorPolicyForCareLevel(careLevelFromReasons(raw));
 }
 
 /**

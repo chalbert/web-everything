@@ -28,6 +28,10 @@ import {
   panelRigorForCareLevel,
   careLevelFromReasons,
   panelRigorFromReasons,
+  editorPolicyFromReasons,
+  editorPolicyForCareLevel,
+  EDITOR_ENABLED_CARE_LEVELS,
+  EDITOR_MIN_ROUNDS,
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
@@ -1795,5 +1799,130 @@ describe('review-parked-prs.mjs — the ledger it writes records WHICH TREE was 
 
   it('passes it to the ledger writer, and OMITS it rather than asserting a tree it does not know', () => {
     expect(src).toMatch(/\.\.\.\(headSha \? \{ reviewedSha: headSha \} : \{\}\)/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #2908 — the reasons → EDITOR-POLICY bridge. The parked-PR loop holds escalation REASONS, not a care band, so
+// this is the function `review-core-cli rigor` actually calls. It resolves the band ONCE and hands the same
+// value to the panel dial and the editor gate — one derivation, so there is nothing for a second one to drift
+// against.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('editorPolicyFromReasons — the editor gate, resolved from the drain\'s escalation reasons (#2908)', () => {
+  it('EDITOR ON for a reason set that bands to low', () => {
+    expect(careLevelFromReasons(['size (500 lines)'])).toBe('low');
+    const p = editorPolicyFromReasons(['size (500 lines)']);
+    expect(p.editorEnabled).toBe(true);
+    expect(p.careLevel).toBe('low');
+    expect(p.rounds).toBe(2);
+  });
+
+  it('REVIEW-ONLY for blast-radius (elevated) — the PR #1018 band', () => {
+    expect(careLevelFromReasons(['blast-radius (scripts/x.mjs)'])).toBe('elevated');
+    expect(editorPolicyFromReasons(['blast-radius (scripts/x.mjs)']).editorEnabled).toBe(false);
+  });
+
+  it('REVIEW-ONLY for a statute reason (high) — a machine never edits its own constraints', () => {
+    expect(careLevelFromReasons(['statute (docs/agent/platform-decisions.md) — human review required'])).toBe('high');
+    expect(editorPolicyFromReasons(['statute (docs/agent/platform-decisions.md) — human review required']).editorEnabled).toBe(false);
+  });
+
+  it('REVIEW-ONLY when size + blast-radius stack to high', () => {
+    expect(editorPolicyFromReasons(['size (500 lines)', 'blast-radius (scripts/x.mjs)']).editorEnabled).toBe(false);
+  });
+
+  // THE FAIL-OPEN THE TECHNICAL PASS FLAGGED, CLOSED. `escalationReason` is produced by an LLM fetch agent and
+  // fails open to `[]`; the loop's only statute signal is that reason prose. An empty list must therefore read
+  // as "the signal did not arrive", NOT as "no signals fired" — every PR this loop sees is parked, and a parked
+  // PR has a reason. `careLevelFromReasons([])` is `none` (correct for a rigor dial, which is advisory); the
+  // editor gate needs the stricter reading, because it authorizes writing to someone else\'s branch.
+  it('an EMPTY reason list is UNRESOLVED, not `none` — a degraded fetch must not enable the editor', () => {
+    expect(careLevelFromReasons([])).toBe('none'); // the rigor dial keeps its lenient reading
+    for (const empty of [[], null, undefined, '', ['', null]]) {
+      const p = editorPolicyFromReasons(empty);
+      expect(p.editorEnabled).toBe(false);
+      expect(p.resolved).toBe(false);
+      expect(p.reason).toBe('unresolved-care-level');
+    }
+  });
+
+  it('an unrecognized reason contributes nothing and cannot reach the editor-enabled band', () => {
+    // `none` is a resolved band, and it is review-only — so a junk reason set is still safe.
+    expect(editorPolicyFromReasons(['who knows what this is']).editorEnabled).toBe(false);
+  });
+
+  it('re-exports the knob so the CLI and the loop read ONE source', () => {
+    expect([...EDITOR_ENABLED_CARE_LEVELS]).toEqual(['low']);
+    expect(EDITOR_MIN_ROUNDS).toBe(2);
+    expect(editorPolicyForCareLevel('low').editorEnabled).toBe(true);
+  });
+
+  it('the SHARED panel dial is unchanged by any of this — /jury and /review keep low at 1 round', () => {
+    expect(panelRigorFromReasons(['size (500 lines)']).careLevel).toBe('low');
+    expect(panelRigorFromReasons(['size (500 lines)']).rounds).toBe(1);
+    expect(panelRigorFromReasons(['blast-radius (scripts/x.mjs)']).rounds).toBe(2);
+    expect(panelRigorFromReasons(['statute (x) — human review required']).rounds).toBe(3);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE-REGRESSION — same technique, and same reason, as the #2640/#2864 blocks above: the sandbox loop is not
+// importable. These prove the EDITOR GATE (#2908) is actually wired in the loop body, that the sandbox\'s
+// mirrored constants still match jury-core, and that there is exactly ONE door to the editor.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('review-parked-prs.mjs — the editor is gated on the care band (source regression, #2908)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '../../workflows/review-parked-prs.mjs'), 'utf8');
+
+  it('mirrors the enabled set and the round floor from jury-core, byte-for-byte in value', () => {
+    const enabled = /const EDITOR_ENABLED_CARE_LEVELS = \[([^\]]*)\]/.exec(src);
+    expect(enabled).not.toBeNull();
+    const mirrored = enabled[1].split(',').map((t) => t.trim().replace(/^'|'$/g, '')).filter(Boolean);
+    expect(mirrored).toEqual([...EDITOR_ENABLED_CARE_LEVELS]);
+    expect(src).toMatch(new RegExp(`const EDITOR_MIN_ROUNDS = ${EDITOR_MIN_ROUNDS};`));
+  });
+
+  it('there is exactly ONE call to editorRound, and the gate sits immediately before it', () => {
+    const calls = src.match(/await editorRound\(/g) || [];
+    expect(calls).toHaveLength(1);
+    // The gate must dominate the call: `if (!editorEnabled) { … break; }` then the editorRound call, with no
+    // other statement between them that could re-open the path.
+    expect(src).toMatch(/if \(!editorEnabled\) \{[\s\S]{0,900}?break;\n\s*\}\n\s*\n\s*\/\/ `continue` → an editor round[\s\S]{0,120}?const edit = await editorRound\(/);
+  });
+
+  it('the gate is resolved ONCE at loop start and is a const — nothing mid-loop can turn the editor on', () => {
+    expect(src).toMatch(/const editorEnabled = gate\.editorEnabled === true;/);
+    // EVERY assignment to `editorEnabled` in the file (`=`, not `===`) is a `const` binding, so it can never be
+    // reassigned mid-loop. There are exactly two: the gate in `careRigorFor`, and the loop's own const.
+    const assigns = src.match(/\w*\s*editorEnabled\s*=(?!=)/g) || [];
+    expect(assigns).toHaveLength(2);
+    expect(src.match(/const editorEnabled\s*=(?!=)/g) || []).toHaveLength(2);
+  });
+
+  it('careRigorFor FAILS CLOSED on an empty reason list — no more `low`/1-round short-circuit', () => {
+    // The pre-#2908 line was: `if (!escalationReason.length) return { careLevel: 'low', … }` — the fail-open.
+    expect(src).not.toMatch(/if \(!escalationReason\.length\) return \{ careLevel: 'low'/);
+    expect(src).toMatch(/if \(!escalationReason\.length\) \{[\s\S]{0,300}?careLevel: null,[\s\S]{0,200}?editorEnabled: false/);
+  });
+
+  it('an unresolvable band resolves to null, never to the one editor-enabled band', () => {
+    expect(src).toMatch(/const careLevel = KNOWN_CARE_LEVELS\.includes\(echoedLevel\) \? echoedLevel : null;/);
+    // the old fail-open default
+    expect(src).not.toMatch(/const careLevel = \(r && typeof r\.careLevel === 'string'\) \? r\.careLevel : 'low';/);
+  });
+
+  it('RE-DERIVES the gate from the allow-list — an agent echo can only VETO, never enable', () => {
+    expect(src).toMatch(/const editorEnabled = EDITOR_ENABLED_CARE_LEVELS\.includes\(careLevel\) && r != null && r\.editorEnabled === true;/);
+  });
+
+  it('floors the round cap on the EDITOR knob, and leaves the shared panel dial alone', () => {
+    expect(src).toMatch(/Math\.max\(panelRounds, EDITOR_MIN_ROUNDS, echoedEditorRounds\)/);
+    // a review-only band keeps the shared dial's number verbatim
+    expect(src).toMatch(/: panelRounds;/);
+  });
+
+  it('review-only still REPORTS — the escalation spreads `last`, so findings/commentBody survive', () => {
+    expect(src).toMatch(/if \(!editorEnabled\) \{[\s\S]{0,900}?last = \{ \.\.\.last, outcome: OUTCOME_ESCALATE/);
+    expect(src).toMatch(/REVIEW-ONLY: reporting \$\{last\.findings\.length\} finding\(s\)/);
   });
 });
