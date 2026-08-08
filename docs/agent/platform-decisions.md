@@ -88,6 +88,30 @@ sanctioned one-off escape, mirroring `MAIN_PUSH_OK` / `LANE_GUARD_OFF`. The un-s
 [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (#2607): enforced by absence (#2677) and
 a **warn** nudge, never a hard gate on an uncomputable predicate.
 
+### Nested shell re-execution the guard cannot resolve is DENIED — and the deny-flip ships behind a quote-aware resolver, never before it {#guard-unresolvable-reexecution-denies}
+
+**Stop enumerating the ways a command re-enters the shell; refuse the ones you cannot read.** At the primary
+checkout, `guard-bash.mjs` **denies** a command containing shell re-execution it cannot **fully** resolve —
+the same *unparseable means deny* doctrine the guard already applies elsewhere, extended to nested execution.
+This converts both recursion caps (depth 4, 64 nodes), which today stop scanning and **allow**, from
+fail-open to fail-closed. Ruled 2026-08-08 after **six** review rounds each closed one class of hole and each
+uncovered another; the sixth reviewer found the structural reason — the fuzz generator's wrapper list *was*
+the list of classes the previous fix had implemented, so three million generated pairs could only re-prove
+what was already handled. **An enumeration cannot be completed from inside the thing being enumerated:** a
+deny-list over shell is unbounded, so the unknown case must fall closed.
+
+**The ordering is part of the rule, not an implementation detail.** "Refuse what it cannot resolve" says
+nothing about *who decides it cannot be resolved*, and that — not how often real re-execution happens — sets
+the cost. Measured over 64,752 `Bash` invocations across 4,485 sessions, a **quote-blind** scan flags 1,093
+calls as shell re-entry where a **quote-aware** one flags 596: **45% of its own hits are text that was never
+shell** (a JavaScript `=>` in a quoted argument, an fd-dup `2>&1`, a heredoc body). So the deny-flip lands
+**only behind** the quote-aware segment splitter (#2986 / #2994), never in front of it — tightening the
+default on a parser that misreads ordinary text amplifies the false-deny problem instead of fixing the
+security one. **A guard may only be made more eager to deny in the same change as, or after, the parser that
+makes its "I can't read this" honest.** After any such flip, **re-run the false-deny sweep** rather than
+inheriting the prior estimate. Lineage: ruled by the operator as **R8**, 2026-08-08 → built as #3002 ·
+measurement #3001 · #2749 (4th arm) · #2986 · #2994 · #2203.
+
 ### Constellation placement {#constellation-placement}
 
 **The test — where does a thing live (WE / Frontier UI / Plateau)?**

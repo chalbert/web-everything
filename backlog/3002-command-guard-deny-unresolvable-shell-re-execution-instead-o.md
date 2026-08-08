@@ -8,7 +8,8 @@ dateOpened: "2026-08-08"
 costTokens: "in:106 cw:235577 cr:8979804 out:34802"
 costUsd: 7.72
 costSessions: 1
-relatedTo: ["2986", "2994", "2749", "2999"]
+relatedTo: ["2986", "2994", "2749", "2999", "3001"]
+codifiedIn: docs/agent/platform-decisions.md#guard-unresolvable-reexecution-denies
 scope: ["we:scripts/guard-bash.mjs", "we:scripts/__tests__/guard-bash.test.mjs"]
 tags: [guard, security, shell, re-execution, fail-closed, governance]
 ---
@@ -71,6 +72,34 @@ Known false-deny classes to fold into the sweep, beyond the four already filed i
 - **A `>` inside a quoted string argument.** Observed 2026-08-08: `node -e '…"<h3" + GT + ">"…'` was denied
   as a redirect at the primary cwd with no redirect present. Same quote-blind class #2994 covers; recorded
   here as a fifth instance so the sweep includes it.
+- **An fd-dup read as a write.** Observed 2026-08-08: `node we:scripts/lane-pool.mjs status --json 2>&1 | …`
+  denied at primary cwd. `2>&1` duplicates a descriptor and writes no file.
+- **A JavaScript arrow in a quoted argument.** Observed 2026-08-08: `node -e "…d => s += d…"` denied as a
+  redirect. Sixth instance of the quote-blind class; recorded because the trigger is `=>`, not `>`.
+- **`sed -n` read as an in-place edit.** Observed 2026-08-08: `sed -n '30,90p' backlog/<item>.md` denied by
+  the backlog-append arm. `sed -n` prints; only `sed -i` edits.
+
+### Sequencing: the deny-flip lands behind the quote-aware splitter, never in front of it
+
+"Refuse what it cannot resolve" says nothing about **who decides it cannot be resolved**, and that — not how
+often real re-execution happens — is what sets the cost. Measured over 64,752 `Bash` invocations from 4,485
+sessions ([report](../reports/2026-08-08-agent-command-surface-sizing.md), #3001):
+
+| Scan for shell re-entry | Calls flagged | Share |
+| --- | ---: | ---: |
+| Quote-blind (the guard today) | 1,093 | 1.69% |
+| Quote-aware | 596 | 0.92% |
+| **Over-flagged by quote-blindness** | **497** | **45% of its own hits** |
+
+On the tree-write arm the same gap is 2,801 calls. So making a **quote-blind** guard *more* eager to deny
+amplifies exactly the false-deny problem #2986 / #2994 exist to fix. The splitter is not merely "kept" — it
+is the **resolver this ruling depends on**, and the flip must ship with it or after it. (The 45% figure is an
+upper bound: the measuring splitter handles heredoc bodies imperfectly. Directionally solid, magnitude soft —
+which is why the sweep is re-run rather than this number reused.)
+
+For the genuine-cost side: real shell re-entry is **596 calls of 64,752 (0.92%)**, and the genuinely
+unparseable forms are ~120 (0.18%). The arm fires at the **primary checkout only** and real edit work runs in
+lane clones, so the everyday-idiom friction is real but small.
 
 ## Acceptance
 
@@ -80,6 +109,9 @@ Known false-deny classes to fold into the sweep, beyond the four already filed i
   because it is unresolvable.
 - Exhausting either recursion cap **denies**. Add a test that drives depth past 4 and node count past 64
   and asserts denial.
+- **The quote-aware splitter is in the same change or already landed.** The flip must not reach `main` on
+  top of a quote-blind resolver — see *Sequencing* above. Assert it directly: a command whose only
+  re-execution token sits inside a quoted string (`node -e "… d => s += d …"`) must still **clear**.
 - The false-deny sweep is re-run over the 145-command corpus and the newly-denied set is reported, not
   merely counted.
 - Red-team by an adversary who did not write the change, using cases **not** derived from this item's list
