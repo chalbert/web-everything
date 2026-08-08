@@ -2387,10 +2387,12 @@ async function runCli() {
       let liveHeadSha = null;
       let acceptedDiff = null;
       let liveHeadDiff = null;
+      let liveHeadRef = null;
       if (hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
         try {
-          const d = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'headRefOid,comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
+          const d = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'headRefOid,headRefName,comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
           liveHeadSha = typeof d.headRefOid === 'string' ? d.headRefOid : null;
+          liveHeadRef = typeof d.headRefName === 'string' ? d.headRefName : null;
           acceptedSha = parseReviewedSha(d.comments || []);
           acceptedDiff = parseReviewedDiff(d.comments || []);
         } catch { /* fetch miss → SHAs null → gate fails open */ }
@@ -2399,9 +2401,18 @@ async function runCli() {
         // (no fingerprint) never pays the hop, and neither does an accept whose head never moved. A miss leaves
         // the live diff null, which fails CLOSED into the SHA-identity verdict — a false re-park, never a false
         // honour.
-        if (acceptedDiff && liveHeadSha && acceptedSha && !liveHeadSha.startsWith(acceptedSha) && !acceptedSha.startsWith(liveHeadSha)) {
+        if (acceptedDiff && liveHeadRef && liveHeadSha && acceptedSha && !liveHeadSha.startsWith(acceptedSha) && !acceptedSha.startsWith(liveHeadSha)) {
           try {
-            liveHeadDiff = execFileSync('gh', ['pr', 'diff', String(v.num), ...repoFlag(v.repo)], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+            // #2979 — the NET diff, matching what `review-set-label.mjs` fingerprinted at accept time. It MUST be
+            // the same basis on both sides: `gh pr diff`'s three-dot output still lists a sibling lane's file
+            // that has since landed on main (#2450), so fingerprinting it made the accept go stale every time
+            // ANY other lane landed — nothing to do with this PR's own content.
+            const net = computeNetDiffText({
+              exec: (cmd, args, opts) => execFileSync(cmd, args, opts),
+              rev: liveHeadRef,
+              fetchExtraRefs: [liveHeadRef],
+            });
+            liveHeadDiff = net && net.scored ? net.text : null;
           } catch { /* miss → null → SHA-identity verdict (the stricter path) */ }
         }
       }
