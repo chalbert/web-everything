@@ -3,7 +3,10 @@
  *   the manifest-only case: auto-resolve a `git merge-tree` conflict whose every hunk is non-overlapping
  *   (disjoint base-line ranges), still skip a genuinely overlapping hunk for `/finish`.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   LANE_MANIFEST,
   splitLinesKeepEnds,
@@ -16,8 +19,10 @@ import {
   parseConflictStages,
   planContentMerges,
   rebaseDropContent,
+  checkMergeSanity,
   MAX_DIFF_LINES,
 } from '../rebase-drop-content.mjs';
+import { gitRun, gitBlobOid, EMPTY_BLOB_OID } from '../git-run.mjs';
 
 describe('splitLinesKeepEnds', () => {
   it('keeps trailing newlines so join("") reproduces the original bytes', () => {
@@ -250,6 +255,44 @@ function scriptedRun(script) {
 
 const MERGE_TREE_CLEAN = { 'merge-tree': { status: 0, stdout: 'cleanTree'.padEnd(40, '0') + '\n' } };
 
+/**
+ * #2923 — an HONEST write-back double. The old fixtures answered `hash-object` with a fixed fake oid
+ * (`'mergedBlob'.padEnd(40,'0')`) no matter what — a double that rubber-stamps the write it is supposed to be
+ * proving, which is precisely why the real bug (stdin dropped → git's EMPTY blob at exit 0) shipped green.
+ * This double behaves like git: it hashes the stdin it actually receives, remembers what `update-index`
+ * staged, and answers `ls-tree` from that record. Feed it a runner that loses the content and it reports the
+ * empty blob, exactly as git does.
+ */
+function honestWriteBack({ tree = 'resolvedTree'.padEnd(40, '0'), commit = 'newCommitSha'.padEnd(40, '0') } = {}) {
+  const staged = new Map();
+  return {
+    staged,
+    script: {
+      'read-tree': { status: 0 },
+      rm: { status: 0 },
+      'hash-object': (_args, opts) => ({ status: 0, stdout: gitBlobOid(opts?.input ?? '') + '\n' }),
+      'update-index': (args) => {
+        const m = String(args[args.indexOf('--cacheinfo') + 1] || '').match(/^(\d{6}),([0-9a-f]+),(.+)$/);
+        if (m) staged.set(m[3], { mode: m[1], oid: m[2] });
+        return { status: 0 };
+      },
+      'ls-tree': (args) => {
+        const path = args[args.length - 1];
+        const e = staged.get(path);
+        return { status: 0, stdout: e ? `${e.mode} blob ${e.oid}\t${path}\0` : '' };
+      },
+      'write-tree': { status: 0, stdout: tree + '\n' },
+      'commit-tree': { status: 0, stdout: commit + '\n' },
+      push: { status: 0 },
+    },
+  };
+}
+
+/** The runner `merge-ai-prs.mjs` used to inject (#2923): it names neither `input` nor `encoding`, so stdin is
+ *  silently discarded on the way to `git hash-object --stdin`. Wrapping an honest double in this reproduces
+ *  the live data loss end-to-end. */
+const stdinDroppingRunner = (inner) => (cmd, args, { env, cwd } = {}) => inner(cmd, args, { env, cwd });
+
 describe('rebaseDropContent', () => {
   it('a clean merge → skip (nothing to do — not a candidate at all)', () => {
     const { run } = scriptedRun({ ...MERGE_TREE_CLEAN });
@@ -280,12 +323,7 @@ describe('rebaseDropContent', () => {
     const { run, calls } = scriptedRun({
       'merge-tree': { status: 1, stdout: out },
       'cat-file': (args) => ({ status: 0, stdout: blobs[args[2]] ?? '' }),
-      'read-tree': { status: 0 },
-      'hash-object': { status: 0, stdout: 'mergedBlob'.padEnd(40, '0') + '\n' },
-      'update-index': { status: 0 },
-      'write-tree': { status: 0, stdout: 'resolvedTree'.padEnd(40, '0') + '\n' },
-      'commit-tree': { status: 0, stdout: 'newCommitSha'.padEnd(40, '0') + '\n' },
-      push: { status: 0 },
+      ...honestWriteBack().script,
     });
     const r = rebaseDropContent({ laneRef: 'lane/x-2371', run });
     expect(r.action).toBe('rebased');
@@ -295,7 +333,8 @@ describe('rebaseDropContent', () => {
     const ho = calls.find((c) => c.args[0] === 'hash-object');
     expect(ho.input).toBe('intro\nOURS verdict\nTHEIRS verdict\n');
     const up = calls.find((c) => c.args[0] === 'update-index');
-    expect(up.args).toEqual(['update-index', '--cacheinfo', `100644,${'mergedBlob'.padEnd(40, '0')},reports/2026-07-09-x.md`]);
+    // the oid staged is the REAL git blob id of the merged text — not a fixture constant (#2923).
+    expect(up.args).toEqual(['update-index', '--cacheinfo', `100644,${gitBlobOid('intro\nOURS verdict\nTHEIRS verdict\n')},reports/2026-07-09-x.md`]);
     // no manifest rm — it never conflicted.
     expect(calls.some((c) => c.args[0] === 'rm')).toBe(false);
     const ct = calls.find((c) => c.args[0] === 'commit-tree');
@@ -313,13 +352,7 @@ describe('rebaseDropContent', () => {
     const { run, calls } = scriptedRun({
       'merge-tree': { status: 1, stdout: out },
       'cat-file': (args) => ({ status: 0, stdout: blobs[args[2]] ?? '' }),
-      'read-tree': { status: 0 },
-      rm: { status: 0 },
-      'hash-object': { status: 0, stdout: 'mergedBlob'.padEnd(40, '0') + '\n' },
-      'update-index': { status: 0 },
-      'write-tree': { status: 0, stdout: 'resolvedTree'.padEnd(40, '0') + '\n' },
-      'commit-tree': { status: 0, stdout: 'newCommitSha'.padEnd(40, '0') + '\n' },
-      push: { status: 0 },
+      ...honestWriteBack().script,
     });
     const r = rebaseDropContent({ laneRef: 'lane/x-both', run });
     expect(r.action).toBe('rebased');
@@ -387,9 +420,7 @@ describe('rebaseDropContent', () => {
     const { run, calls } = scriptedRun({
       'merge-tree': { status: 1, stdout: out },
       'cat-file': (args) => ({ status: 0, stdout: blobs[args[2]] ?? '' }),
-      'read-tree': { status: 0 },
-      'hash-object': { status: 0, stdout: 'mergedBlob'.padEnd(40, '0') + '\n' },
-      'update-index': { status: 0 },
+      ...honestWriteBack().script,
       'write-tree': { status: 1, stderr: 'fatal: bad index' },
     });
     const r = rebaseDropContent({ laneRef: 'lane/x-err', run });
@@ -418,16 +449,202 @@ describe('rebaseDropContent', () => {
     const { run, calls } = scriptedRun({
       'merge-tree': { status: 1, stdout: out },
       'cat-file': (args) => ({ status: 0, stdout: blobs[args[2]] ?? '' }),
-      'read-tree': { status: 0 },
-      'hash-object': { status: 0, stdout: 'mergedBlob'.padEnd(40, '0') + '\n' },
-      'update-index': { status: 0 },
-      'write-tree': { status: 0, stdout: 'resolvedTree'.padEnd(40, '0') + '\n' },
-      'commit-tree': { status: 0, stdout: 'newCommitSha'.padEnd(40, '0') + '\n' },
-      push: { status: 0 },
+      ...honestWriteBack().script,
     });
     rebaseDropContent({ laneRef: 'lane/x-cwd', run, cwd: '/repos/frontierui' });
     for (const subcmd of ['fetch', 'merge-tree', 'cat-file', 'read-tree', 'hash-object', 'update-index', 'write-tree', 'commit-tree', 'push']) {
       expect(calls.find((c) => c.args[0] === subcmd)?.cwd).toBe('/repos/frontierui');
     }
+  });
+});
+
+// ── #2923 — the WRITE-BACK path, which is where the merged text actually died ────────────────────────────
+//
+// The pure merge library was never the culprit and every pure-library test passed while the drain was
+// emptying files, so these drive the imperative git boundary instead: the write, the staging, and the
+// verification that what got staged is what the merge produced.
+
+describe('checkMergeSanity (#2923 — "auto-resolved" must mean merged, for ANY content type)', () => {
+  it('a normal union merge passes', () => {
+    expect(checkMergeSanity('a\n', 'a\nO\n', 'a\nT\n', 'a\nO\nT\n').ok).toBe(true);
+  });
+  it('an EMPTY result from non-empty inputs is refused', () => {
+    const r = checkMergeSanity('a\n', 'a\nO\n', 'a\nT\n', '');
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/EMPTY/);
+  });
+  it('a result drastically smaller than both sides is refused', () => {
+    const big = 'x\n'.repeat(500);
+    const r = checkMergeSanity(big, big + 'O\n', big + 'T\n', 'x\n');
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/drastically smaller/);
+  });
+  it('all-empty inputs → an empty result is the CORRECT answer, not a refusal', () => {
+    expect(checkMergeSanity('', '', '', '').ok).toBe(true);
+  });
+  it('a modest shrink (both sides deleted different regions) is still allowed', () => {
+    const base = 'a\nb\nc\nd\n';
+    expect(checkMergeSanity(base, 'a\nc\nd\n', 'a\nb\nc\n', 'a\nc\n').ok).toBe(true);
+  });
+});
+
+describe('planContentMerges refuses a degenerate result (#2923)', () => {
+  it('a merge that would empty the file → not ok, names the path, no merge emitted', () => {
+    // Both sides delete everything the base had, in disjoint hunks — non-overlapping, so the resolver would
+    // happily "auto-resolve" it to nothing. That is a data loss, not a merge; park it for /finish instead.
+    const stages = { 'docs/x.md': { 1: { mode: '100644', oid: oid('base') }, 2: { mode: '100644', oid: oid('ours') }, 3: { mode: '100644', oid: oid('thr') } } };
+    const blobs = { [oid('base')]: 'a\nb\n', [oid('ours')]: 'b\n', [oid('thr')]: 'a\n' };
+    const r = planContentMerges(['docs/x.md'], stages, (o) => blobs[o] ?? null);
+    expect(r.ok).toBe(false);
+    expect(r.path).toBe('docs/x.md');
+    expect(r.reason).toMatch(/EMPTY/);
+  });
+});
+
+describe('rebaseDropContent write-back verification (#2923)', () => {
+  const CONFLICT = conflictOutStages([
+    { path: 'docs/shared.md', stages: {
+      1: { mode: '100644', oid: oid('base') },
+      2: { mode: '100644', oid: oid('ours') },
+      3: { mode: '100644', oid: oid('thr') },
+    } },
+  ]);
+  const BLOBS = { [oid('base')]: 'intro\n', [oid('ours')]: 'intro\nOURS\n', [oid('thr')]: 'intro\nTHEIRS\n' };
+  const MERGED = 'intro\nOURS\nTHEIRS\n';
+
+  function withRunner(wrap = (r) => r, overrides = {}) {
+    const honest = honestWriteBack();
+    const { run, calls } = scriptedRun({
+      'merge-tree': { status: 1, stdout: CONFLICT },
+      'cat-file': (args) => ({ status: 0, stdout: BLOBS[args[2]] ?? '' }),
+      ...honest.script,
+      ...overrides,
+    });
+    return { honest, calls, run: wrap(run) };
+  }
+
+  it('THE BUG: a runner that drops `input` (merge-ai-prs.mjs injected exactly that) → ERROR, nothing committed', () => {
+    // Regression pin for commit 836ae978. `git hash-object -w --stdin` on an EMPTY stdin exits 0 and returns
+    // git's empty blob, so the old `status !== 0` check saw a clean success and the drain committed a
+    // zero-byte file with a message claiming it auto-resolved the conflict. It must now ABORT.
+    const { run, calls, honest } = withRunner(stdinDroppingRunner);
+    const r = rebaseDropContent({ laneRef: 'lane/x-2923', run });
+    expect(r.action).toBe('error');
+    expect(r.reason).toMatch(/EMPTY stdin/);
+    expect(r.reason).toMatch(/#2923/);
+    // and — the whole point — no commit and no push happened.
+    expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(false);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
+    // nothing was staged either: the abort happens BEFORE update-index.
+    expect(honest.staged.size).toBe(0);
+  });
+
+  it('the same runner, unwrapped, stages the REAL merged blob and lands', () => {
+    const { run, honest } = withRunner();
+    const r = rebaseDropContent({ laneRef: 'lane/x-ok', run });
+    expect(r.action).toBe('rebased');
+    expect(honest.staged.get('docs/shared.md').oid).toBe(gitBlobOid(MERGED));
+    expect(honest.staged.get('docs/shared.md').oid).not.toBe(EMPTY_BLOB_OID);
+  });
+
+  it('a tree that does not carry the blob we staged → ERROR, no push (update-index silently did not take)', () => {
+    const { run, calls } = withRunner(undefined, { 'ls-tree': { status: 0, stdout: `100644 blob ${EMPTY_BLOB_OID}\tdocs/shared.md\0` } });
+    const r = rebaseDropContent({ laneRef: 'lane/x-tree', run });
+    expect(r.action).toBe('error');
+    expect(r.reason).toMatch(/EMPTY blob/);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+
+  it('a resolved tree missing the path entirely → ERROR (the write-back staged a different path)', () => {
+    const { run, calls } = withRunner(undefined, { 'ls-tree': { status: 0, stdout: '' } });
+    const r = rebaseDropContent({ laneRef: 'lane/x-path', run });
+    expect(r.action).toBe('error');
+    expect(r.reason).toMatch(/no entry for docs\/shared\.md/);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+});
+
+// ── #2923 — the same proof against REAL git, no doubles ──────────────────────────────────────────────────
+//
+// The bug survived a full suite of green unit tests because every one of them stubbed `hash-object` with a
+// canned oid, so none could observe that git had received nothing. This builds an actual repository with the
+// actual conflict and runs the actual plumbing. It is the test that would have caught it.
+
+describe('rebaseDropContent against a real git repository (#2923)', () => {
+  // The append/append case #2371 exists to auto-resolve: BOTH sides add a section at the SAME file tail, so
+  // git's merge-tree cannot order the two insertions and reports a conflict — yet neither side touched an
+  // EXISTING base line, so there is nothing to arbitrate. This is exactly the shape that emptied #2909.
+  const BASE = 'title\n\nshared body\n';
+  const OURS = BASE + '\n## From the main side\n';
+  const THEIRS = BASE + '\n## From the lane side\n';
+  const MERGED = BASE + '\n## From the main side\n' + '\n## From the lane side\n';
+  const FILE = 'docs/shared.md';
+
+  let dir;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rdc-2923-'));
+    const g = (...args) => {
+      const r = gitRun('git', args, { cwd: dir });
+      if (r.status !== 0) throw new Error(`git ${args.join(' ')} → ${r.stderr}`);
+      return String(r.stdout).trim();
+    };
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.email', 'test@example.com');
+    g('config', 'user.name', 'Test');
+    // Build base/ours/theirs with pure plumbing — no checkout, no branch creation.
+    const commitWith = (text, parent) => {
+      const blob = String(gitRun('git', ['hash-object', '-w', '--stdin'], { cwd: dir, input: text }).stdout).trim();
+      const idx = { GIT_INDEX_FILE: '.git/build-index' };
+      gitRun('git', ['read-tree', '--empty'], { cwd: dir, env: idx });
+      gitRun('git', ['update-index', '--add', '--cacheinfo', `100644,${blob},${FILE}`], { cwd: dir, env: idx });
+      const tree = String(gitRun('git', ['write-tree'], { cwd: dir, env: idx }).stdout).trim();
+      const args = ['commit-tree', tree, '-m', 'c', ...(parent ? ['-p', parent] : [])];
+      return String(gitRun('git', args, { cwd: dir }).stdout).trim();
+    };
+    const base = commitWith(BASE, null);
+    const ours = commitWith(OURS, base);
+    const theirs = commitWith(THEIRS, base);
+    g('update-ref', 'refs/heads/main', ours);
+    g('update-ref', 'refs/remotes/origin/lane/x-2923', theirs);
+  });
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+
+  // Never push in a test — the rest is the genuine article.
+  const noPush = (inner) => (cmd, args, opts) => (args[0] === 'push' ? { status: 0, stdout: '', stderr: '' } : inner(cmd, args, opts));
+  const opts = () => ({
+    laneRef: 'lane/x-2923', base: 'refs/heads/main', readRef: 'refs/remotes/origin/lane/x-2923',
+    fetch: false, cwd: dir, tmpIndex: '.git/rdc-test-index',
+  });
+  const stagedIn = (commit) => {
+    const ls = gitRun('git', ['ls-tree', commit, '--', FILE], { cwd: dir });
+    return (String(ls.stdout).trim().split(/\s+/)[2] || '');
+  };
+
+  it('the conflict really is the non-overlapping case this resolver claims to handle', () => {
+    const mt = gitRun('git', ['merge-tree', '--write-tree', 'refs/heads/main', 'refs/remotes/origin/lane/x-2923'], { cwd: dir });
+    expect(mt.status).not.toBe(0); // git itself calls it a conflict
+    expect(Object.keys(parseConflictStages(mt.stdout, mt.status))).toEqual([FILE]);
+  });
+
+  it('with a correct runner: the commit carries the MERGED bytes, both sides kept', () => {
+    const r = rebaseDropContent({ ...opts(), run: noPush(gitRun) });
+    expect(r.action).toBe('rebased');
+    const blob = stagedIn(r.newCommit);
+    expect(blob).toBe(gitBlobOid(MERGED));
+    expect(String(gitRun('git', ['cat-file', '-p', blob], { cwd: dir }).stdout)).toBe(MERGED);
+  });
+
+  it('THE BUG, against real git: a runner that drops `input` used to stage the EMPTY blob — now it aborts', () => {
+    // Proof the failure is real and not an artifact of the test double: run the exact same plumbing through
+    // the exact runner shape merge-ai-prs.mjs injected, and watch git hand back e69de29b at exit 0.
+    const dropped = stdinDroppingRunner(gitRun);
+    const probe = dropped('git', ['hash-object', '-w', '--stdin'], { cwd: dir, input: MERGED });
+    expect(probe.status).toBe(0);                                  // git is HAPPY …
+    expect(String(probe.stdout).trim()).toBe(EMPTY_BLOB_OID);      // … and returned the empty blob.
+
+    const r = rebaseDropContent({ ...opts(), run: noPush(dropped) });
+    expect(r.action).toBe('error');
+    expect(r.reason).toMatch(/EMPTY stdin/);
+    expect(r.newCommit).toBeUndefined();
   });
 });

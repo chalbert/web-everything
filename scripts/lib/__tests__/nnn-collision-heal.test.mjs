@@ -7,8 +7,9 @@
  *   asserted with a scripted runner.
  */
 import { describe, it, expect } from 'vitest';
+import { gitBlobOid } from '../git-run.mjs';
 import { allocateGapId, rewriteRefs, assertContentPreserved } from '../../backlog/renumber-collisions.mjs';
-import { planBaseCollisionHeal, backlogBasenames, healNnnCollision } from '../nnn-collision-heal.mjs';
+import { planBaseCollisionHeal, backlogBasenames, healNnnCollision, writePlanToIndex } from '../nnn-collision-heal.mjs';
 
 const mk = (num, slug, body = '') => ({
   name: `${num}-${slug}.md`,
@@ -215,7 +216,9 @@ describe('healNnnCollision — git boundary sequence', () => {
       'ls-tree': (args) => ({ status: 0, stdout: args.includes('origin/main') ? 'backlog/2218-a.md\nbacklog/2219-existing.md\nbacklog/2221-c.md\n' : `backlog/${laneName}\n` }),
       'cat-file': { status: 0, stdout: mk('2219', 'drain-finding', 'x').text },
       'read-tree': { status: 0 },
-      'hash-object': { status: 0, stdout: 'b'.repeat(40) + '\n' },
+      // #2923 — hash the stdin we ACTUALLY receive, like git does. A canned oid here is what let the
+      // renumber path stage git's empty blob (`adf2d758`, repaired by `14432ba9`) with every test green.
+      'hash-object': (_a, o) => ({ status: 0, stdout: gitBlobOid(o?.input ?? '') + '\n' }),
       'update-index': { status: 0 },
       rm: { status: 0 },
       'write-tree': { status: 0, stdout: 'tree'.padEnd(40, '0') + '\n' },
@@ -246,5 +249,53 @@ describe('healNnnCollision — git boundary sequence', () => {
     expect(r.action).toBe('error');
     expect(r.reason).toMatch(/fetch/);
     expect(calls.some((c) => c.args[0] === 'ls-tree')).toBe(false);
+  });
+});
+
+// ── #2923 — the renumber write-back, the instance that actually reached `main` ───────────────────────────
+
+describe('writePlanToIndex verifies what it staged (#2923)', () => {
+  const plan = { writes: [{ name: '2220-drain-finding.md', text: '---\nkind: story\n---\n# real content\n' }], deletes: [] };
+  const env = { GIT_INDEX_FILE: '.git/tmp-index' };
+
+  it('a runner that drops `input` → error naming the empty stdin, and NOTHING is staged', () => {
+    // This is `adf2d758` — "drain: rebase … renumber #2362→#2309" — which staged git's empty blob for the
+    // renumbered card, landed on `main`, and had to be hand-repaired by `14432ba9` ("restore #2309 story
+    // content emptied by the #2362->#2309 renumber"). Same root cause as the content resolver: the injected
+    // runner named neither `input` nor `encoding`, so `hash-object --stdin` read EOF and exited 0.
+    const calls = [];
+    const run = (cmd, args, { env: e, cwd } = {}) => { // NOTE: no `input` — the bug, verbatim
+      calls.push(args[0]);
+      if (args[0] === 'hash-object') return { status: 0, stdout: gitBlobOid('') + '\n' };
+      return { status: 0, stdout: '' };
+    };
+    const err = writePlanToIndex(run, env, plan);
+    expect(err).toMatch(/EMPTY stdin/);
+    expect(err).toMatch(/#2923/);
+    expect(calls).not.toContain('update-index');
+  });
+
+  it('a correct runner stages the real blob id of the renumbered content', () => {
+    const staged = [];
+    const run = (cmd, args, opts = {}) => {
+      if (args[0] === 'hash-object') return { status: 0, stdout: gitBlobOid(opts.input ?? '') + '\n' };
+      if (args[0] === 'update-index') staged.push(args[args.indexOf('--cacheinfo') + 1]);
+      return { status: 0, stdout: '' };
+    };
+    expect(writePlanToIndex(run, env, plan)).toBeNull();
+    expect(staged).toEqual([`100644,${gitBlobOid(plan.writes[0].text)},backlog/2220-drain-finding.md`]);
+  });
+
+  it('#2923 — a `cwd` reaches every git call, so a sibling-clone heal cannot write to the wrong repo', () => {
+    const seen = new Set();
+    const run = (cmd, args, opts = {}) => {
+      seen.add(`${args[0]}:${opts.cwd}`);
+      if (args[0] === 'hash-object') return { status: 0, stdout: gitBlobOid(opts.input ?? '') + '\n' };
+      return { status: 0, stdout: '' };
+    };
+    writePlanToIndex(run, env, { ...plan, deletes: ['2219-drain-finding.md'] }, { cwd: '/repos/frontierui' });
+    expect(seen).toContain('hash-object:/repos/frontierui');
+    expect(seen).toContain('update-index:/repos/frontierui');
+    expect(seen).toContain('rm:/repos/frontierui');
   });
 });

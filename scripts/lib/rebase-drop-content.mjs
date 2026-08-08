@@ -34,7 +34,7 @@
  * resolver, never a best-effort guess on a giant/binary/non-UTF-8 blob.
  */
 
-import { spawnSync } from 'node:child_process';
+import { gitRun as gitRunner, hashObjectVerified, verifyTreeBlob } from './git-run.mjs';
 import { LANE_MANIFEST, parseMergeTree } from './rebase-drop-manifest.mjs';
 
 export { LANE_MANIFEST };
@@ -160,6 +160,42 @@ export function decodeBlobTextStrict(raw) {
   return text;
 }
 
+/**
+ * The shrink floor: what fraction of the SMALLER surviving side a merge must retain to count as a merge. Pure
+ * union-merging two non-overlapping edits normally yields something at least as large as the smaller side; a
+ * result far below it means the composition ate content it should have kept. 0.5 is deliberately loose — this
+ * is a last-resort tripwire for a resolver gone wrong, not a style rule. Falling below it parks the lane for
+ * `/finish`, which is always safe: the worst case is a human merges by hand. */
+export const MIN_MERGE_RETENTION = 0.5;
+
+/**
+ * Belt-and-braces sanity on a computed merge, INDEPENDENT of content type (#2923). "Auto-resolved" must mean
+ * merged — never "silently dropped". A backlog card that lands empty is caught by its schema validator; an
+ * emptied doc, report or source file has NO such tripwire, so the resolver itself has to refuse. Pure.
+ *
+ * Refuses when:
+ *   - the merge is EMPTY but some side had content (nothing legitimately merges two real files into nothing);
+ *   - the merge retained less than `MIN_MERGE_RETENTION` of the smaller non-empty side.
+ * A genuinely empty result from genuinely empty inputs is fine and passes.
+ * @returns {{ok:true}|{ok:false, reason:string}}
+ */
+export function checkMergeSanity(baseText, oursText, theirsText, mergedText) {
+  const size = (t) => Buffer.byteLength(String(t ?? ''), 'utf8');
+  const merged = size(mergedText);
+  const ours = size(oursText);
+  const theirs = size(theirsText);
+  const biggestInput = Math.max(size(baseText), ours, theirs);
+  if (biggestInput === 0) return { ok: true }; // all sides empty — an empty merge is the correct answer
+  if (merged === 0) {
+    return { ok: false, reason: `merge produced an EMPTY result from non-empty inputs (base ${size(baseText)}B, ours ${ours}B, theirs ${theirs}B) — refusing to stage a zero-byte file` };
+  }
+  const smallestSide = Math.min(ours || Infinity, theirs || Infinity);
+  if (Number.isFinite(smallestSide) && merged < smallestSide * MIN_MERGE_RETENTION) {
+    return { ok: false, reason: `merge result (${merged}B) is drastically smaller than both sides (ours ${ours}B, theirs ${theirs}B) — content was lost, not merged` };
+  }
+  return { ok: true };
+}
+
 // ── merge-tree conflict-stage parsing ────────────────────────────────────────────────────────────────────
 
 /**
@@ -211,6 +247,10 @@ export function planContentMerges(paths, stages, readBlob) {
     if (base == null || ours == null || theirs == null) return { ok: false, reason: 'binary or non-UTF-8 content (not safe to round-trip as text)', path };
     const merged = mergeTextThreeWay(base, ours, theirs);
     if (!merged.ok) return { ok: false, reason: merged.reason, path };
+    // #2923 — a content-type-agnostic refusal to emit a degenerate result. Skipping here parks the lane as a
+    // real conflict for `/finish`, which is the safe direction; committing a silently-emptied file is not.
+    const sane = checkMergeSanity(base, ours, theirs, merged.text);
+    if (!sane.ok) return { ok: false, reason: sane.reason, path };
     merges[path] = merged.text;
   }
   return { ok: true, merges };
@@ -220,15 +260,11 @@ export function planContentMerges(paths, stages, readBlob) {
 
 const firstLine = (s) => String(s || '').split('\n')[0];
 
-/** The default real git runner — mirrors `rebase-drop-manifest.mjs`'s `gitRunner`, extended with `opts.input`
- *  (stdin, needed by `git hash-object --stdin`) so this file needs no direct filesystem access at all.
- *  `opts.encoding: 'buffer'` returns `stdout` as a raw `Buffer` (never utf8-decoded) — required to read blob
- *  content byte-exact, so non-UTF-8 bytes are caught by `decodeBlobTextStrict` instead of silently lossy. */
-export function gitRunner(cmd, args, { env, input, cwd, encoding = 'utf8' } = {}) {
-  const r = spawnSync(cmd, args, { encoding, input, env: env ? { ...process.env, ...env } : process.env, ...(cwd ? { cwd } : {}) });
-  const empty = encoding === 'buffer' ? Buffer.alloc(0) : '';
-  return { status: r.status == null ? 1 : r.status, stdout: r.stdout ?? empty, stderr: r.stderr == null ? '' : String(r.stderr) };
-}
+/** The default real git runner — now the ONE shared runner (`scripts/lib/git-run.mjs`), re-exported under the
+ *  historical name. #2923: this file used to define its own full-contract `gitRunner` while
+ *  `rebase-drop-manifest.mjs` exported a WEAKER function of the same name, and `merge-ai-prs.mjs` injected the
+ *  weak one here — silently dropping the `input` that carries the merged text to `hash-object --stdin`. */
+export { gitRunner };
 
 /**
  * Rebuild a lane PR's tip onto `<base>`, auto-resolving every conflicting NON-manifest path via a safe
@@ -302,16 +338,30 @@ export function rebaseDropContent({
   if (read.status !== 0) return { action: 'error', reason: `read-tree failed (${firstLine(read.stderr)})` };
   const droppedManifest = parsed.conflictPaths.includes(manifest);
   if (droppedManifest) run('git', ['rm', '--cached', '--ignore-unmatch', manifest], { env, cwd });
+  // #2923 — the WRITE-BACK is where the merged text used to die. `git hash-object -w --stdin` exits 0 on an
+  // EMPTY stdin and returns git's empty blob, so a `status !== 0` check cannot tell "wrote 6788 bytes" from
+  // "wrote nothing". `hashObjectVerified` compares git's answer against the object id computed in-process from
+  // the very string the merge produced, so the write is proven, not assumed.
+  const stagedOids = new Map();
   for (const [path, text] of Object.entries(plan.merges)) {
-    const ho = run('git', ['hash-object', '-w', '--stdin'], { env, input: text, cwd });
-    const oid = String(ho.stdout || '').trim();
-    if (ho.status !== 0 || !oid) return { action: 'error', reason: `hash-object ${path} failed (${firstLine(ho.stderr)})` };
-    const up = run('git', ['update-index', '--cacheinfo', `100644,${oid},${path}`], { env, cwd });
+    const written = hashObjectVerified(run, text, { env, cwd, label: path });
+    if (!written.ok) return { action: 'error', reason: written.reason };
+    const up = run('git', ['update-index', '--cacheinfo', `100644,${written.oid},${path}`], { env, cwd });
     if (up.status !== 0) return { action: 'error', reason: `update-index ${path} failed (${firstLine(up.stderr)})` };
+    stagedOids.set(path, written.oid);
   }
   const wt = run('git', ['write-tree'], { env, cwd });
   const resolvedTree = String(wt.stdout || '').trim();
   if (wt.status !== 0 || !resolvedTree) return { action: 'error', reason: `write-tree failed (${firstLine(wt.stderr)})` };
+
+  // #2923 — and prove the TREE we are about to commit really carries those blobs. This closes the rest of the
+  // path: an `update-index` that did not take, a staged path that differs from the written one, a temp index
+  // resolved in the wrong `cwd`. ABORT (never commit, never push) on any mismatch — the lane is left for
+  // `/finish`, exactly as an unsafe conflict would be. "Auto-resolved" may only be reported once verified.
+  for (const [path, oid] of stagedOids) {
+    const v = verifyTreeBlob(run, resolvedTree, path, oid, { cwd });
+    if (!v.ok) return { action: 'error', reason: `write-back verification failed: ${v.reason}` };
+  }
 
   const mergedPaths = Object.keys(plan.merges);
   const msg = message || `drain: rebase ${laneRef} onto ${base}, auto-resolve non-overlapping content conflict(s) in ${mergedPaths.join(', ')}${droppedManifest ? `, drop transient ${manifest}` : ''}`;

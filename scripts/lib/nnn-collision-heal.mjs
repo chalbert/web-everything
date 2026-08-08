@@ -23,7 +23,7 @@
  * inside the `guard-git-branch` single-branch rule, exactly like rebase-drop). The runner is injectable for tests.
  */
 
-import { spawnSync } from 'node:child_process';
+import { gitRun as gitRunner, hashObjectVerified } from './git-run.mjs';
 import { parseBacklogFilename, rewriteRefs, allocateGapId, assertContentPreserved } from '../backlog/renumber-collisions.mjs';
 
 /**
@@ -137,13 +137,10 @@ export function backlogBasenames(lsTreeStdout) {
   return out;
 }
 
-/** The default git runner — `spawnSync` so a non-zero exit is RETURNED (not thrown), and `opts.input` feeds
- *  stdin (needed by `git hash-object --stdin`) and `opts.env` is merged over `process.env`. Mirrors
- *  rebase-drop-manifest's `gitRunner`, extended with stdin. */
-export function gitRunner(cmd, args, { env, input } = {}) {
-  const r = spawnSync(cmd, args, { encoding: 'utf8', input, env: env ? { ...process.env, ...env } : process.env });
-  return { status: r.status == null ? 1 : r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
-}
+/** The default git runner. #2923 — this was a THIRD same-named local literal, this one dropping `cwd` and
+ *  `encoding`; the sibling-clone heal therefore ran `update-index` in the wrong directory. It is now the ONE
+ *  runner (`scripts/lib/git-run.mjs`). See that file for why three divergent `gitRunner`s emptied files. */
+export { gitRunner };
 
 const firstLine = (s) => String(s || '').split('\n')[0];
 
@@ -156,15 +153,19 @@ const firstLine = (s) => String(s || '').split('\n')[0];
  * @param {{GIT_INDEX_FILE:string}} env
  * @param {{writes:{name,text}[], deletes:string[]}} plan
  */
-export function writePlanToIndex(run, env, plan) {
+export function writePlanToIndex(run, env, plan, { cwd } = {}) {
   for (const w of plan.writes) {
-    const ho = run('git', ['hash-object', '-w', '--stdin'], { input: w.text });
-    const oid = String(ho.stdout || '').trim();
-    if (ho.status !== 0 || !oid) return `hash-object ${w.name} failed (${firstLine(ho.stderr)})`;
-    const up = run('git', ['update-index', '--add', '--cacheinfo', `100644,${oid},backlog/${w.name}`], { env });
+    // #2923 — VERIFY the object store received the bytes, do not merely check the exit status. This exact loop
+    // staged git's EMPTY blob in `adf2d758` (the #2362→#2309 renumber), which reached `main` and had to be
+    // hand-repaired by `14432ba9`: the injected runner dropped `input`, so `hash-object --stdin` read EOF,
+    // hashed the empty string and exited 0. `hashObjectVerified` compares the returned id against the id we
+    // computed from `w.text` in-process, so a lost/altered stdin can never be mistaken for a successful write.
+    const written = hashObjectVerified(run, w.text, { env, cwd, label: w.name });
+    if (!written.ok) return written.reason;
+    const up = run('git', ['update-index', '--add', '--cacheinfo', `100644,${written.oid},backlog/${w.name}`], { env, cwd });
     if (up.status !== 0) return `update-index ${w.name} failed (${firstLine(up.stderr)})`;
   }
-  for (const d of plan.deletes) run('git', ['rm', '--cached', '--ignore-unmatch', `backlog/${d}`], { env });
+  for (const d of plan.deletes) run('git', ['rm', '--cached', '--ignore-unmatch', `backlog/${d}`], { env, cwd });
   return null;
 }
 
@@ -180,11 +181,14 @@ export function writePlanToIndex(run, env, plan) {
  * @param {{GIT_INDEX_FILE:string}} o.env      the temp index the caller already `read-tree <tree>`'d.
  * @param {string} o.tree                      the tree-ish whose backlog to heal (the merged tree OID).
  * @param {string} [o.base='origin/main']      the merge base whose ids are immutable keepers.
+ * @param {string} [o.cwd]                     #2923 — run every git call in the caller's SIBLING clone. This
+ *                                             was missing, so a `cwd`-routed rebase-drop healed against the
+ *                                             WRONG repository's index.
  */
-export function applyCollisionHealToIndex({ run, env, tree, base = 'origin/main' }) {
-  const baseLs = run('git', ['ls-tree', '-r', '--name-only', base, '--', 'backlog/']);
+export function applyCollisionHealToIndex({ run, env, tree, base = 'origin/main', cwd }) {
+  const baseLs = run('git', ['ls-tree', '-r', '--name-only', base, '--', 'backlog/'], { cwd });
   if (baseLs.status !== 0) return { ok: false, reason: `ls-tree ${base} failed (${firstLine(baseLs.stderr)})` };
-  const treeLs = run('git', ['ls-tree', '-r', '--name-only', tree, '--', 'backlog/']);
+  const treeLs = run('git', ['ls-tree', '-r', '--name-only', tree, '--', 'backlog/'], { cwd });
   if (treeLs.status !== 0) return { ok: false, reason: `ls-tree ${tree} failed (${firstLine(treeLs.stderr)})` };
   const baseNames = backlogBasenames(baseLs.stdout);
   const names = backlogBasenames(treeLs.stdout);
@@ -194,7 +198,7 @@ export function applyCollisionHealToIndex({ run, env, tree, base = 'origin/main'
   if (!collides) return { ok: true, healed: [] };
   const files = [];
   for (const name of names) {
-    const cat = run('git', ['cat-file', '-p', `${tree}:backlog/${name}`]);
+    const cat = run('git', ['cat-file', '-p', `${tree}:backlog/${name}`], { cwd });
     if (cat.status !== 0) return { ok: false, reason: `cat-file backlog/${name} failed (${firstLine(cat.stderr)})` };
     files.push({ name, text: cat.stdout });
   }
@@ -209,7 +213,7 @@ export function applyCollisionHealToIndex({ run, env, tree, base = 'origin/main'
     return { ok: false, reason: `collision-heal plan refused (${firstLine(e?.message)})` };
   }
   if (plan.collisions.length === 0) return { ok: true, healed: [] };
-  const err = writePlanToIndex(run, env, plan);
+  const err = writePlanToIndex(run, env, plan, { cwd });
   if (err) return { ok: false, reason: err };
   return { ok: true, healed: plan.collisions.map((c) => ({ oldNum: c.oldNum, newNum: c.newNum, oldName: c.oldName, newName: c.newName })) };
 }
