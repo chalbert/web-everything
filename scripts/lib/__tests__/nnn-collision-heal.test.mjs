@@ -133,6 +133,25 @@ describe('planBaseCollisionHeal — collision on base ⇒ renumber-to-gap', () =
     expect(() => assertContentPreserved(original, tampered, moves, '2220-drain-finding.md')).toThrow(/#2546/);
   });
 
+  it('CONTENT-PRESERVING (#2746 review): a swept file that ALREADY references the gap id still plans cleanly', () => {
+    // `allocateGapId` recycles a HOLE below the frontier — precisely the ids stale `#NNN` refs still point at
+    // (88 such dangling in-range refs live in backlog/ today). With the naive mask the source side masked ONE
+    // occurrence and the result side TWO, so this byte-perfect rewrite was refused as "corruption" and — via
+    // the throw — took the whole drain pass down with it. It must plan, swapping ONLY the yielded ref.
+    const laneFiles = [
+      mk('2219', 'drain-finding', 'the storm-collision finding'),
+      { name: '1800-refs.md', text: '---\nkind: story\n---\n\n# refs\n\nSee #2219 for context; supersedes #2220.\n' },
+    ];
+    const plan = planBaseCollisionHeal(laneFiles, {
+      baseNums: ['2218', '2219', '2221'],
+      baseNames: ['2218-x.md', '2219-existing.md', '2221-z.md'],
+    });
+    expect(plan.collisions[0].newNum).toBe('2220');                        // the gap id IS the pre-referenced one
+    const ref = plan.writes.find((w) => w.name === '1800-refs.md');
+    expect(ref.text).toContain('See #2220 for context; supersedes #2220.'); // only the yielded ref moved
+    expect(ref.text).toBe(laneFiles[1].text.replace('#2219', '#2220'));     // every other byte survives
+  });
+
   it('two incoming collisions get distinct gap ids (no re-collision within the plan)', () => {
     const laneFiles = [mk('2219', 'a'), mk('2221', 'b')];
     const plan = planBaseCollisionHeal(laneFiles, {

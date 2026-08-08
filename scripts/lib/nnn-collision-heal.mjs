@@ -198,7 +198,16 @@ export function applyCollisionHealToIndex({ run, env, tree, base = 'origin/main'
     if (cat.status !== 0) return { ok: false, reason: `cat-file backlog/${name} failed (${firstLine(cat.stderr)})` };
     files.push({ name, text: cat.stdout });
   }
-  const plan = planBaseCollisionHeal(files, { baseNums: [...baseNumSet], baseNames });
+  // #2746 review — the planner's content guard (#2546) THROWS, but this is a merge-boundary helper whose
+  // whole contract is "signal failure by return value". An escaping throw would leave `merge-ai-prs.mjs` /
+  // `rebase-drop-manifest.mjs` with no enclosing try, killing the ENTIRE drain pass over one lane's corpus.
+  // Degrade to the existing error shape: the heal is skipped, the pass carries on.
+  let plan;
+  try {
+    plan = planBaseCollisionHeal(files, { baseNums: [...baseNumSet], baseNames });
+  } catch (e) {
+    return { ok: false, reason: `collision-heal plan refused (${firstLine(e?.message)})` };
+  }
   if (plan.collisions.length === 0) return { ok: true, healed: [] };
   const err = writePlanToIndex(run, env, plan);
   if (err) return { ok: false, reason: err };
@@ -263,7 +272,15 @@ export function healNnnCollision({
     if (cat.status !== 0) return { action: 'error', reason: `cat-file backlog/${name} failed (${firstLine(cat.stderr)})` };
     laneFiles.push({ name, text: cat.stdout });
   }
-  const plan = planBaseCollisionHeal(laneFiles, { baseNums: [...baseNumSet], baseNames });
+  // #2746 review — same boundary discipline as `applyCollisionHealToIndex`: the #2546 content guard throws,
+  // and every caller of this function only inspects the RETURNED object. Map the refusal onto `action:'error'`
+  // (documented as non-fatal) so one unhealable lane cannot take down the whole drain run.
+  let plan;
+  try {
+    plan = planBaseCollisionHeal(laneFiles, { baseNums: [...baseNumSet], baseNames });
+  } catch (e) {
+    return { action: 'error', reason: `collision-heal plan refused (${firstLine(e?.message)})` };
+  }
   if (plan.collisions.length === 0) return { action: 'none' };
 
   // Apply the plan to a TEMP index seeded from the lane tree — never touches HEAD or the working tree.
