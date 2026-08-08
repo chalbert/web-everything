@@ -2,7 +2,6 @@
 kind: story
 size: 3
 status: open
-blockedBy: ["2978"]
 dateOpened: "2026-08-08"
 tags: []
 ---

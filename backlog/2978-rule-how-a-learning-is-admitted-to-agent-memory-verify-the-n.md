@@ -177,7 +177,7 @@ fork touches it. Individual recall-gated note files are already unconstrained.
 ## Fork 4 — what fires the harvest?
 
 - **(a) RULED — a cadence, plus the manual command; lowest priority of the four.** A schedule, or a depth/age
-  threshold the conveyor tick already evaluates. Already filed as #x5nbg4n. The hook point exists:
+  threshold the conveyor tick already evaluates. Filed as #xay19t3. The hook point exists:
   `we:scripts/conveyor/tick-core.mjs` is the tick, and `poolStatus()`
   (`we:scripts/conveyor/learnings-harvest.mjs:173-182`) already returns the depth and age numbers a threshold
   would read — this is wiring, not new machinery. *Decider's framing, folded:* automatic firing is the
