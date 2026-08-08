@@ -13,6 +13,7 @@ import {
   leaseBody,
   describeLease,
   leaseOwnedBy,
+  leaseOwnedByCaller,
   isForeignLease,
   laneMarkedSlug,
   assertedLaneSlug,
@@ -159,6 +160,88 @@ describe('isForeignLease (#2367 r2 — durable ownerSession is the SOLE ownershi
     expect(isForeignLease({ lease: null, mySessionId: 'sess-A' })).toBe(false);
     expect(isForeignLease({})).toBe(false);
     expect(isForeignLease()).toBe(false);
+  });
+});
+
+describe('leaseOwnedByCaller (#2452 Gap 2 — release ownership survives a defaultSession() host:pid change)', () => {
+  const at = '2026-07-05T12:00:00.000Z';
+  it('exact session match wins first (legacy / explicit --session flow, unchanged)', () => {
+    const lease = leaseBody({ session: 'sess-a', acquiredAt: at });
+    expect(leaseOwnedByCaller({ lease, session: 'sess-a', mySessionId: null })).toBe(true);
+  });
+  it('an UNMARKED lease: the acquiring session releases it via ownerSession even though its host:pid `session` string changed', () => {
+    // Simulates: acquire ran as `host:111` (a since-exited pid), release runs as `host:222` — the exact bug
+    // (`defaultSession()`'s ppid differs per shell invocation). ownerSession (CLAUDE_CODE_SESSION_ID) is
+    // stable across both calls, so ownership is still recognized — for a TARGETED `--lane=N` release.
+    const lease = leaseBody({ session: 'host:111', acquiredAt: at, ownerSession: 'sess-uuid-A' });
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-A', targeted: true })).toBe(true);
+  });
+  it('an UNMARKED lease genuinely owned by a DIFFERENT session (different ownerSession, no session-string match) is NOT owned', () => {
+    const lease = leaseBody({ session: 'host:111', acquiredAt: at, ownerSession: 'sess-uuid-A' });
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-B', targeted: true })).toBe(false);
+  });
+
+  // #2452 review — the SWEEP carve-out. `workflowLane` is NOT the marker of a shared `ownerSession`: it is set
+  // only for `--purpose=workflow-lane`, while the conveyor's concurrently-dispatched lanes
+  // (`conveyor-delivery` / `conveyor-fix` / `conveyor-prepare-*`) are UNMARKED and still share one
+  // `ownerSession`, because #2413 says a spawned subagent inherits the parent's id verbatim. Keying the
+  // carve-out on `workflowLane` therefore left every unmarked sibling exposed: a bare `release --all` (which
+  // targets EVERY held lane) dropped their live holds with no `--force`, and the next acquire runs
+  // `checkout -B --force` + `clean -fd` on the clone the sibling was still working in. Two real lanes observed
+  // in this shape: lane-1 {purpose:'review-loop-model-tiers'} and lane-2 {purpose:'2864-ledger-sha'} — one
+  // ownerSession, different `session` strings, both unmarked.
+  it('two UNMARKED siblings sharing one ownerSession are NOT mutually owned in a SWEEP (targeted:false)', () => {
+    const sibling = leaseBody({ session: 'Mac:23707', acquiredAt: at, ownerSession: 'sess-uuid-shared' });
+    // the sweeping caller is the same session (shared id) but a different shell invocation / logical holder
+    expect(leaseOwnedByCaller({ lease: sibling, session: 'Mac:93309', mySessionId: 'sess-uuid-shared' })).toBe(false);
+    expect(leaseOwnedByCaller({ lease: sibling, session: 'Mac:93309', mySessionId: 'sess-uuid-shared', targeted: false })).toBe(false);
+    // …but naming that one lane explicitly still releases it — the fallback is preserved where intent is clear.
+    expect(leaseOwnedByCaller({ lease: sibling, session: 'Mac:93309', mySessionId: 'sess-uuid-shared', targeted: true })).toBe(true);
+  });
+  it('a SWEEP still releases on an exact `session` match — the pre-#2452 rule is untouched', () => {
+    const mine = leaseBody({ session: 'Mac:93309', acquiredAt: at, ownerSession: 'sess-uuid-shared' });
+    expect(leaseOwnedByCaller({ lease: mine, session: 'Mac:93309', mySessionId: 'sess-uuid-shared' })).toBe(true);
+  });
+  it('`targeted` defaults to false — the conservative posture for any caller that omits it', () => {
+    const lease = leaseBody({ session: 'host:111', acquiredAt: at, ownerSession: 'sess-uuid-A' });
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-A' })).toBe(false);
+  });
+  // #2452 review — this case previously asserted FAIL-OPEN (`toBe(true)`), inheriting isForeignLease's
+  // posture. That was an authorization weakening, not a fix: isForeignLease answers "is this PROVABLY someone
+  // else's?" and returns false on no signal, so `!isForeignLease(...)` handed ANY caller ownership of an
+  // unmarked lease that recorded no ownerSession — strictly weaker than the exact-session match this fallback
+  // was meant to supplement, and a live hold could be dropped without --force. Ownership now needs a POSITIVE
+  // match on both sides; no signal means not owned, so the explicit --force is required.
+  it('DEGRADED (no ownerSession recorded) is NOT owned — the durable-id fallback needs a positive match', () => {
+    const lease = leaseBody({ session: 'host:111', acquiredAt: at }); // no ownerSession recorded
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-B', targeted: true })).toBe(false);
+  });
+  it('DEGRADED (caller has no mySessionId) is NOT owned either — both sides must be present and equal', () => {
+    const lease = leaseBody({ session: 'host:111', acquiredAt: at, ownerSession: 'sess-uuid-A' });
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: null, targeted: true })).toBe(false);
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: '', targeted: true })).toBe(false);
+  });
+  it('a RESERVED lease is never owned via the ownerSession fallback — #2350 keeps --release-reserved the ONE un-reserve', () => {
+    // ownerSession is minted on EVERY lease, reserved ones included, so without this carve-out an ordinary
+    // `release` from the minting session would silently drop a PERMANENT reserved lane with no flag —
+    // exactly what "#2350: --force alone never drops one" forbids.
+    const lease = leaseBody({ session: 'reserved-slug', acquiredAt: at, ownerSession: 'sess-uuid-A', reserved: true });
+    expect(leaseOwnedByCaller({ lease, session: 'host:222', mySessionId: 'sess-uuid-A', targeted: true })).toBe(false);
+    // the exact minted-slug match still identifies it (the --release-reserved path does the un-reserving).
+    expect(leaseOwnedByCaller({ lease, session: 'reserved-slug', mySessionId: 'sess-uuid-A', targeted: true })).toBe(true);
+  });
+  it('a MARKED (workflowLane) lease is owned ONLY via its exact minted-slug session match — ownerSession never substitutes, because siblings share it', () => {
+    const lease = leaseBody({ session: 'batch-x-lane5', acquiredAt: at, ownerSession: 'sess-uuid-shared', workflowLane: true });
+    // A sibling lane under the SAME orchestrator session (shared ownerSession) but a DIFFERENT minted slug must
+    // NOT read as owned — that would let one sibling release another sibling's lane. True even when TARGETED.
+    expect(leaseOwnedByCaller({ lease, session: 'batch-x-lane6', mySessionId: 'sess-uuid-shared', targeted: true })).toBe(false);
+    // The correct slug, asserted as `session`, still owns it.
+    expect(leaseOwnedByCaller({ lease, session: 'batch-x-lane5', mySessionId: 'sess-uuid-shared', targeted: true })).toBe(true);
+  });
+  it('no lease ⇒ never owned; empty args never throw', () => {
+    expect(leaseOwnedByCaller({ lease: null, session: 's', mySessionId: 'x', targeted: true })).toBe(false);
+    expect(leaseOwnedByCaller({})).toBe(false);
+    expect(leaseOwnedByCaller()).toBe(false);
   });
 });
 
