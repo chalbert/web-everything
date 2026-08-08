@@ -614,6 +614,17 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       "perl -i -pe 's/x|y/z/' config/app.json",
       'ls; npm run build', 'ls && echo hi > config/app.json',
     ],
+    // The precision family above buys nothing unless its recall mirror holds: the SAME quoted alternation
+    // with a REAL trailing redirect must still deny. This is the direction the splitter could plausibly
+    // have broken — not cutting inside quotes must not mean failing to see the operator outside them.
+    'a quoted alternation followed by a REAL write (#2994 fifth class, recall half)': [
+      'grep -cE "a|=>" AGENTS.md > config/app.json',
+      'grep -cE "a|=>" AGENTS.md >> config/app.json',
+      "grep -cE 'a|=>' AGENTS.md | tee config/app.json",
+      'rg -e "x|y=>z" src > config/app.json',
+      'sed -n "/a|=>/p" f.txt > config/app.json',
+      'node -e \'console.log("a|b" + "=>")\' > config/app.json',
+    ],
     // #2986(2) — the recall half of the script-name scan: every real build alias, in every runner spelling.
     'a real build alias, only the script-name position (#2986/2, recall half)': [
       'npm run build', 'npm run-script build', 'npm run --silent build', 'npm run build -- --mode=prod',
@@ -753,6 +764,25 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       'echo "a > b"', 'sed -n "1,5p" config/app.json', 'grep -rn ">" src/',
       'node scripts/backlog.mjs list', 'git status', 'vite dev', 'vite preview',
       'perl -Mlist::Util -e "print 1" data.txt',
+    ],
+    // ── the fifth false-deny class, found in ordinary work on 2026-08-08 (#3002 sweep clause) ─────────
+    // A QUOTED ALTERNATION whose tail glues a character to `>`. Two conditions must coincide, which is
+    // why the 145-command sweep missed it — each half alone is already allowed:
+    //   1. a `|` inside quotes, which a quote-BLIND split tears the command at, and
+    //   2. an `=`/`-`/digit immediately followed by `>` in the tail, which then reads as a real redirect
+    //      operator (`=>`, `->`, `2>`) with the next word as its target.
+    // Neither `grep -c "=>" f` nor `grep -c "a|b" f` is denied on base; `grep -cE "a|=>" f` is. The
+    // splitter is what fixes it — it never cuts inside the quoted run, so no tail fragment exists.
+    'a quoted alternation whose tail glues a char to `>` (#2994 fifth class)': [
+      'grep -cE "a|=>" AGENTS.md', "grep -cE 'a|=>' AGENTS.md",
+      'grep -E "foo|bar=>baz" README.md', 'grep -cE "a|->" AGENTS.md',
+      'grep -cE "a|>=" AGENTS.md', 'grep -cE "a|2>" AGENTS.md',
+      'rg -e "x|y=>z" src', 'rg "handler|on[A-Z]\\w+=>" src',
+      'sed -n "/a|=>/p" f.txt', 'awk "/a|b/ { print }" f.txt',
+      'node -e \'console.log("a|b" + "=>")\'', 'jq -r \'.a | .b\' data.json',
+      'command grep -an "splitSegments|=>" scripts/guard-bash.mjs',
+      // the arrow shape plus a genuine fd redirect to /dev/null — still a scratch write, still allowed
+      'grep -cE "a|=>" AGENTS.md 2>/dev/null',
     ],
     'the excluded / separately-armed build targets': [
       `npm run ${CHECK}`, `run-s ${CHECK} ${CHECK}`, 'eleventy --output=/tmp/we-build-check --quiet',
@@ -1046,6 +1076,23 @@ describe('guard-bash — the shared normalizers the #2788 arms and canonicalGitO
     // an unterminated quote runs to end of string rather than dropping the tail
     expect(splitSegments("echo 'a | b")).toHaveLength(1);
     expect(splitSegments('')).toEqual(['']);
+  });
+
+  // The fifth false-deny class (#3002 sweep clause), pinned at the mechanism rather than the outcome.
+  // The quote-blind split cut at the `|` inside `"a|=>"`, leaving the tail `=>" AGENTS.md`, in which the
+  // `>` read as a redirect whose target was `AGENTS.md`. Cutting nothing keeps the `>` inside a quoted
+  // run, where no redirect scan can reach it.
+  it('splitSegments does not cut inside a quoted alternation, so a glued `=>` is not a redirect', () => {
+    for (const cmd of [
+      'grep -cE "a|=>" AGENTS.md', "grep -cE 'a|=>' AGENTS.md",
+      'grep -cE "a|->" AGENTS.md', 'grep -cE "a|2>" AGENTS.md',
+      'rg -e "x|y=>z" src',
+    ]) expect(splitSegments(cmd)).toEqual([cmd]);
+    // …and the operator OUTSIDE the quotes is still seen: one segment, redirect intact for the write scan
+    expect(splitSegments('grep -cE "a|=>" AGENTS.md > out.txt')).toEqual(['grep -cE "a|=>" AGENTS.md > out.txt']);
+    // the quoted `|` is not a separator, but an UNQUOTED one after it still is
+    expect(splitSegments('grep -cE "a|=>" f | tee out.txt').map((s) => s.trim()))
+      .toEqual(['grep -cE "a|=>" f', 'tee out.txt']);
   });
 
   it('the quote-aware split closes a real hole, not just the false denies (#2994)', () => {
