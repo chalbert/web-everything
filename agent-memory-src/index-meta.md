@@ -1,6 +1,6 @@
 ---
 name: index-meta
-description: "How the agent itself operates: memory-management policy + this index tree, propose-memory-on-reframe, context-meter (ask don’t estimate), hand-back-early in interactive loops, state-representing edits need no permission, persist-ratifiable-wording-live-in-decision-discussion, model routing (Opus orchestrates, Sonnet executes; always set the subagent model explicitly), right-sizing an agent panel (default zero, scale by count not model tier), model recurring cost, session cost-on-card accrual (close attributes session $ to the item worked), forward background progress, plain-language + review checklists, self-contained plans, POC-mode + demo-first pragmatism. Recall for working style, memory upkeep, or model/agent orchestration."
+description: "How the agent itself operates: memory-management policy + this index tree, propose-memory-on-reframe, context-meter (ask don’t estimate), hand-back-early in interactive loops, state-representing edits need no permission, persist-ratifiable-wording-live-in-decision-discussion, model routing (the loop orchestrates and delegates BY DEFAULT; always set the subagent model explicitly), right-sizing an agent panel (a SECOND agent on the SAME question — default zero, count not tier), model recurring cost, session cost-on-card accrual (close attributes session $ to the item worked), forward background progress, plain-language + review checklists, self-contained plans, POC-mode + demo-first pragmatism. Recall for working style, memory upkeep, or model/agent orchestration."
 metadata: 
   node_type: memory
   type: reference
@@ -20,7 +20,7 @@ Agent Meta · Memory · Model Routing cluster — open a leaf with `node scripts
 - 116. Demo-First Iteration — refine on a standalone demo/sandbox before bringing into real block pages
 - 117. Self-Contained Plans — handoff plans carry full context; lead title+goal, surface via backlog
 - 128. Forward Background Progress Into Chat — VS Code ext has NO /workflows TUI; forward via file-watcher re-invoke
-- 134. Opus Orchestrates, Sonnet Executes — exec→Sonnet subagent; judgment stays Opus
+- 134. Delegate By Default — inline = talk · the call · choose+brief · below-floor · the gate it reports; all else spawns; the CALL is never delegated; canon = backlog-workflow.md#model-routing
 - 135. Model Recurring Cost, Don't Gate It — recurring overhead MODELED (affine fit); every sample counts; #1505
 - 144. Session Cost-On-Card Accrual — close accrues session $ to the card(s) worked; decision/prepare accumulate, workflow even-splits, slice/resolve skip
 - [Parallel /workflow lane model](workflow-lane-model-policy.md) — Sonnet default, Opus for rare complex items, NEVER Fable for execution; orchestrator decides per-item
@@ -40,4 +40,4 @@ Agent Meta · Memory · Model Routing cluster — open a leaf with `node scripts
 - [Keep the prep pipeline full proactively](conveyor-keep-prep-pipeline-full-proactively.md) — scope/slice/prepare-decision/research continuously without being told; refill as waves complete; prep is parallel-safe (one file each)
 - [Conveyor main-drive cross-repo playbook](conveyor-main-drive-cross-repo-playbook.md) — main = THIN dispatcher (not a persistent operator-subagent); build agents hang at the gate → finalize-from-lane; console-board impl is cross-repo (plateau-app) → separate WE resolve (Haiku, cheap); READ the card body before briefing (slugs don't update on reversal)
 - [Land on no-regression, not on perfection](land-on-no-regression-not-perfection.md) — land bar = no regression + no new impact + no weakened gate; incompleteness is filed, not blocked
-- [Right-size the panel — count, not model tier](right-size-the-panel-count-not-model-tier.md) — fanning agents out is a cost lever to EARN: default to zero (no panel), ask the human before climbing a rung, and scale by COUNT with every agent at full strength — a panel pays off through decorrelated angles, not brainpower, so one strong agent beats three lesser ones. Governs how many seats exist; [[workflow-lane-model-policy]] governs which model fills one
+- [Right-size the panel — count, not tier](right-size-the-panel-count-not-model-tier.md) — a 2nd agent on the SAME question is a rung to EARN: default zero, ask before climbing, count not tier
