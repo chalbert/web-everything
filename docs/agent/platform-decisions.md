@@ -3018,6 +3018,52 @@ a headless runner, singleton-locked, no per-lane LLM) and the main-session retir
 
 ---
 
+### Delivery operations are declared once; every caller is a generated adapter {#operations-declared-once-callers-generated}
+
+**Ratified 2026-08-08 (operator, in session; #xu5gfu4).** The [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment)
+one-source clause, carried one step further: it already forbids a second *implementation*, and this forbids a
+second *wiring*. A delivery-loop operation — review a PR, claim an item, ratify a decision, dispatch a lane — is
+**declared once** (input schema + ordered steps + guards), and every caller is **generated** from that
+declaration. Four clauses:
+
+1. **One declaration, derived callers.** The command-line caller (agents, any clone, no server), the HTTP caller
+   (the console), the typed-tool caller, the input validation and the tests all fall out of the declaration. A
+   hand-written route or argv parser for an operation that *could* be declared is a defect, not a style choice.
+   This closes the gap the parent statute leaves open: today `plateau:vite.config.mts` and the drain daemon each
+   hand-roll their own argv and route glue over the same single-sourced scripts.
+2. **Four step kinds, closed.** `compute` (pure fn + declared reads, no model), `judge` (needs a model, needs
+   **no** tools), `confirm` (needs a person — the engine **suspends**, resumable from any surface), `effect`
+   (declares what should happen; the executor applies it keyed by run + step, so replay is safe). **An operation
+   that appears to need a fifth kind is a signal to change the model, not to extend the vocabulary.**
+3. **Model work splits on tools, never on surface.** Tool-free judgment (a mandate over a diff) is one turn with
+   no tools granted, identical wherever it was started; work needing a tree is an agent session per
+   [#agent-runner-cli-backend](#agent-runner-cli-backend). **The in-session reviewer is retired** — it inherits
+   the host session's instructions, memory and cwd, so the same operation behaves differently depending on who
+   started it, which is precisely what one-source exists to prevent. `--tools ""` also turns the review mandate's
+   never-check-out rule from prose the model must recall into something it cannot do.
+4. **Two tiers, one seam, nothing metered in tier one.** The solo tier spawns the subscription-funded
+   command-line backend on the operator's own machine; the hosted tier is key-billed behind the same seam. These
+   are two permanent products for different people — *not* a migration — so the seam is load-bearing from the
+   start rather than a deferred escape hatch.
+
+**Consequences worth naming.** The human stop stops being prose in `we:skills-src/review/SKILL.md` and becomes a
+suspend the engine performs; idempotent declared effects subsume both the *"a non-zero exit means re-run the same
+command"* instruction and the [#2964](/backlog/2964-post-the-review-verdict-comment-before-the-label-swap-the-un/)
+write-ordering rule; a run started on one surface can be finished on another, because the run record — not the
+caller — holds the state.
+
+**Lineage:** #xu5gfu4 (ratified in-session 2026-08-08; report
+`we:reports/2026-08-08-operation-engine-one-declaration-every-caller.md`; epic #xgm2t3f under program #2606).
+**Reconciled by citation, not competition:** this *applies* #deterministic-core-thin-judgment to the caller-wiring
+turf that statute does not reach, and composes with [#agent-runner-cli-backend](#agent-runner-cli-backend) (the
+backend a judge step spawns), [#conveyor-orchestration-mechanics-not-per-lane-agent](#conveyor-orchestration-mechanics-not-per-lane-agent)
+(no model in the mechanical loop) and [#state-lives-where-its-nature-dictates](#state-lives-where-its-nature-dictates)
+(the run record is a session-local sidecar behind a store module until the #2626 product trigger fires). The
+rejected branch — agents calling HTTP services — fails on lane clones (N checkouts, N ports, no answer to "which
+server acts on which clone") and on the session-free direction of #2701/#2703.
+
+---
+
 ### State lives where its nature dictates — transient intent goes session-local, durable readiness goes committed-upstream {#state-lives-where-its-nature-dictates}
 
 **Ratified 2026-07-22 (Nicolas, merit-based; #2615 + #2617).** *Where* a piece of state lives is
