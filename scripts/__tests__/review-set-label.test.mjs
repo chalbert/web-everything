@@ -33,19 +33,107 @@ describe('decideSetLabel — INVARIANT 2 (review:human is human-ceremony-only)',
 });
 
 describe('decideSetLabel — accepted', () => {
-  it('on a review:pending PR: adds review:accepted, removes review:pending', () => {
+  it('on a review:pending PR: adds review:accepted, removes review:pending (and the always-requested changes)', () => {
     const d = decideSetLabel({ to: 'accepted', currentLabels: pending });
     expect(d.allowed).toBe(true);
     expect(d.addLabel).toBe(REVIEW_LABELS.accepted);
-    expect(d.removeLabels).toEqual([REVIEW_LABELS.pending]);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.pending, REVIEW_LABELS.changes]);
   });
 
   it('with neither human nor pending: still allowed (no human gate), adds review:accepted', () => {
     const d = decideSetLabel({ to: 'accepted', currentLabels: neither });
     expect(d.allowed).toBe(true);
     expect(d.addLabel).toBe(REVIEW_LABELS.accepted);
-    expect(d.removeLabels).toEqual([REVIEW_LABELS.pending]);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.pending, REVIEW_LABELS.changes]);
   });
+
+  // #2974 — the bug: accepting a bounced-but-fixed PR left BOTH review:accepted and review:changes on it, and
+  // three consumers (lane-resume.mjs#land, pr-watch.mjs's PARK_LABELS/isReadyToLand, status-board.mjs) read
+  // review:changes raw with no accepted-first ordering, so a self-contradictory pair looked like a live bounce
+  // to every one of them. Observed live on PR #1064: labels after --to=accepted were
+  // [ready-to-merge, review:accepted, review:changes].
+  it('accepting a PR carrying review:changes drops BOTH review:changes and review:pending — neither survives', () => {
+    const changesAndPending = [{ name: REVIEW_LABELS.changes }, { name: REVIEW_LABELS.pending }, { name: 'ready-to-merge' }];
+    const d = decideSetLabel({ to: 'accepted', currentLabels: changesAndPending });
+    expect(d.allowed).toBe(true);
+    expect(d.addLabel).toBe(REVIEW_LABELS.accepted);
+    const finalLabels = presentRemoveLabels(d.removeLabels, changesAndPending);
+    expect(finalLabels).toContain(REVIEW_LABELS.changes);
+    expect(finalLabels).toContain(REVIEW_LABELS.pending);
+    // Simulate the resulting label set the way the CLI would apply it: the PR's current labels, minus the
+    // narrowed removals, plus the added label. Neither 'changes' nor 'pending' survives.
+    const current = changesAndPending.map((l) => l.name);
+    const after = new Set([...current.filter((n) => !finalLabels.includes(n)), d.addLabel]);
+    expect(after.has(REVIEW_LABELS.changes)).toBe(false);
+    expect(after.has(REVIEW_LABELS.pending)).toBe(false);
+    expect(after.has(REVIEW_LABELS.accepted)).toBe(true);
+  });
+
+  // #2974 — presentRemoveLabels already narrows removeLabels to what the PR actually carries, so requesting
+  // `changes` in the removal set unconditionally must never hand `gh pr edit --remove-label` an absent label.
+  it('requesting review:changes removal on a PR that never carried it narrows to nothing extra (no absent-label error)', () => {
+    const d = decideSetLabel({ to: 'accepted', currentLabels: pending });
+    const removals = presentRemoveLabels(d.removeLabels, pending);
+    expect(removals).toEqual([REVIEW_LABELS.pending]);
+    expect(removals).not.toContain(REVIEW_LABELS.changes);
+  });
+
+  // The sibling invariant this item explicitly protects: adding review:changes to accepted's removals must not
+  // have touched INVARIANT 2 — accepted stays refused on a review:human PR, unconditionally.
+  it('still REFUSES on a review:human PR — INVARIANT 2 is unmoved by the #2974 fix', () => {
+    const humanChanges = [{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.changes }];
+    const d = decideSetLabel({ to: 'accepted', currentLabels: humanChanges });
+    expect(d.allowed).toBe(false);
+    expect(d.removeLabels).toEqual([]);
+  });
+
+  // accepted must still never remove review:human even when it drops changes+pending.
+  it('never removes review:human on a non-human accept path (there is none to remove, but pin the shape)', () => {
+    const d = decideSetLabel({ to: 'accepted', currentLabels: pending });
+    expect(d.removeLabels).not.toContain(REVIEW_LABELS.human);
+  });
+});
+
+// #2974 — TOTALITY over REVIEW_LABEL_TARGETS × every starting label combination the four labels can form. Two
+// invariants must hold for EVERY (target, starting-set) pair, not just the fixtures above: (1) review:human is
+// NEVER removed unless the target IS clear-human, and (2) review:accepted and review:changes never coexist in
+// the RESULTING label set (simulated the way the CLI actually applies a swap: current labels, minus the
+// removals narrowed to what's present, plus the added label). This is what actually pins "accepted never
+// returns ok:true while leaving accepted and changes together" — over the whole space, not one fixture.
+describe('decideSetLabel — totality over REVIEW_LABEL_TARGETS × starting label sets (#2974)', () => {
+  const ALL = [REVIEW_LABELS.human, REVIEW_LABELS.pending, REVIEW_LABELS.accepted, REVIEW_LABELS.changes];
+  // Every subset of the four review labels (16 combinations, incl. empty), each plus a non-review label that
+  // must never be touched by any swap.
+  const powerset = (arr) => arr.reduce((acc, x) => acc.concat(acc.map((s) => [...s, x])), [[]]);
+  const startingSets = powerset(ALL).map((names) => [...names, 'ready-to-merge']);
+
+  for (const to of REVIEW_LABEL_TARGETS) {
+    for (const names of startingSets) {
+      const label = `to='${to}' starting=[${names.join(',')}]`;
+      it(`${label} — never leaves review:accepted and review:changes together, and never drops human unless clear-human`, () => {
+        const currentLabels = names.map((name) => ({ name }));
+        const d = decideSetLabel({ to, currentLabels });
+        // Sanity: a non-review label is never named in a decision's removals, whether allowed or refused.
+        expect(d.removeLabels).not.toContain('ready-to-merge');
+        if (!d.allowed) {
+          // A refusal changes nothing — the resulting set IS the starting set.
+          if (names.includes(REVIEW_LABELS.human)) expect(names).toContain(REVIEW_LABELS.human);
+          return;
+        }
+        const removals = presentRemoveLabels(d.removeLabels, currentLabels);
+        const after = new Set([...names.filter((n) => !removals.includes(n)), d.addLabel]);
+        // (1) review:human survives every allowed swap except clear-human.
+        if (names.includes(REVIEW_LABELS.human) && to !== 'clear-human') {
+          expect(after.has(REVIEW_LABELS.human)).toBe(true);
+        }
+        if (to === 'clear-human') {
+          expect(after.has(REVIEW_LABELS.human)).toBe(false);
+        }
+        // (2) THE #2974 INVARIANT: accepted and changes never coexist in the resulting set.
+        expect(after.has(REVIEW_LABELS.accepted) && after.has(REVIEW_LABELS.changes)).toBe(false);
+      });
+    }
+  }
 });
 
 describe('decideSetLabel — changes (a bounce lands nothing)', () => {
