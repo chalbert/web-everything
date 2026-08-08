@@ -2,14 +2,49 @@
 bornAs: xtucvux
 kind: decision
 parent: "2505"
-status: open
+status: resolved
 dateOpened: "2026-07-26"
+dateStarted: "2026-08-08"
+dateResolved: "2026-08-08"
+codifiedIn: "docs/agent/backlog-workflow.md#feature-tier"
 preparedDate: "2026-07-28"
 relatedReport: reports/2026-07-28-feature-tier-above-epic.md
 tags: [backlog, taxonomy, data-model, hierarchy, tooling]
 ---
 
 # Define a "feature" tier above epic — deterministic feature→epic→slice rollup
+
+## Ruling (2026-08-08)
+
+**Ratified as prepared: Fork 1(b) + Fork 2(a), plus the four settled rulings, as one design.**
+Codified as the statute rule [we:docs/agent/backlog-workflow.md#feature-tier](../docs/agent/backlog-workflow.md#feature-tier)
+— cite the anchor, not this `#NNN`.
+
+- **Fork 1 → (b) an explicit `kind: feature` node.** The tier is a marked node, never a graph walk.
+  Derive-from-chains (a) is rejected as non-deterministic on the real tree (`#2445` folds into one
+  87-item mega-feature; `#2505`/`#2527` stop separating), and a parallel grouping field (c) is
+  rejected as the second structural axis [#466](/backlog/466-collapse-backlog-type-workitem-into-one-kind-axis-retire-the/)
+  retired. Deterministic rule: **an epic's feature is its nearest `kind: feature` ancestor along
+  `parent`; none ⇒ Unassigned.**
+- **Fork 2 → (a) tier-monotonic — a feature is a ROOT** (carries no `parent` at all; the hole-free
+  form, since a `{story,epic,task}` blacklist leaks through `decision` and drifts as kinds are added).
+  The tier exists to be *legible*, and (b) would render an epic structurally above features — the exact
+  inversion this decision removes. **Accepted cost, stated not hidden:** promoting an epic like `#2505`
+  deletes its `parent: "2445"` edge, and `#2445`'s program-level containment is out of scope for the
+  3-level screen until the deferred `feature → feature` nesting extension is built.
+- **Settled rulings stand** — reuse `parent` (no new field), flat now with nesting a non-breaking
+  future extension, opt-in assignment with an Unassigned bucket, fix/feature *nature* stays on `tags`.
+- **Statute reconciliation:** composes with #466 rather than colliding — Fork 1(b) **adds a value to
+  the same single `kind` axis** #466 established and mints no parallel field, which is precisely why
+  (c) is rejected. #466 is `codifiedIn: one-off`, so there was no sibling anchor to amend.
+- **Red-team at ratification = confirmation** (per *Red-team the default*): both forks carry a prep-time
+  `Skeptic:` verdict (SURVIVES-WITH-AMENDMENT, amendments already folded in — the epic-parity plumbing
+  tax on Fork 1, and the leaky-blacklist → root-check plus the honest edge-deletion statement on
+  Fork 2). The discussion surfaced no new branch, so no fresh skeptic was owed.
+
+**Carved on close-out:** the six `check:standards` / loader additions in *Validation* below became their
+own buildable child. [#2733](/backlog/2733-refreeze-2691-feature-tier-baseline-refreeze-milestone-r7-hu/)
+(`blockedBy: 2691`) is unblocked by this ruling and re-baselines the screen once that child lands.
 
 **Prepared — ready to ratify.** This is a data-model call over the shipped backlog, not a greenfield
 standard. The ratified feature-tracking screen ([#2705](/backlog/2705-feature-tracking-screen-ratified/))
