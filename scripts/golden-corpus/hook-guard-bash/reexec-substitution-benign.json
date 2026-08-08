@@ -1,0 +1,11 @@
+{
+  "id": "reexec-substitution-benign",
+  "cmd": "echo \"$(git rev-parse --short HEAD)\"",
+  "ctx": {
+    "primaryCwd": true
+  },
+  "basis": "r5 F1 precision mirror — the house idiom for reading git state inside a command.",
+  "expect": {
+    "reason": null
+  }
+}
