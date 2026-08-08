@@ -206,6 +206,87 @@ const PLATFORM_DECISIONS_PATH = 'docs/agent/platform-decisions.md';
  *  diff ADDS, so the codification test can require they be exactly the ones the resolved decision names. */
 const STATUTE_ANCHOR_HEADING_RE = /^#{2,6}\s+.*\{#([A-Za-z0-9][A-Za-z0-9._-]*)\}\s*$/;
 
+/** ANY markdown heading that OPENS A SECTION — the second #2785 review-fix. `STATUTE_ANCHOR_HEADING_RE` above
+ *  only sees headings that carry a `{#anchor}` tag, and nothing in the repo REQUIRES one
+ *  (`we:scripts/lib/validate-rules-anchors.cjs` validates only the anchors that exist, so deleting the tag is
+ *  free and still passes `check:statute`). An UNTAGGED heading was therefore invisible to every check while still
+ *  opening a whole second rule in the rendered document — an unbounded smuggle. These three read the RAW added
+ *  line so a heading of any level, tagged or not, counts.
+ *
+ *  Deliberately BROADER than CommonMark where breadth only over-refuses:
+ *   • any leading indent counts (CommonMark caps an ATX heading at 3 spaces and treats 4+ as an indented code
+ *     block — but 4 spaces INSIDE a list item is ordinary content and DOES render as a heading, and the statute
+ *     doc's tail is a bullet list, so the distinction is not safely decidable from a diff);
+ *   • multi-line inline code spans are NOT modelled, so a line that begins with `#` while inside one counts as a
+ *     heading. Both directions of that error refuse, which is the safe side.
+ *  Fenced code IS modelled (see `headingIndices`) because a `#` inside a fence renders as literal text, so
+ *  counting it would refuse an honest anchor that merely quotes a shell snippet. */
+const ANY_HEADING_RE = /^[ \t]*#{1,6}(?:[ \t]|$)/;
+
+/** A setext underline — `===` (h1) or `---` (h2) — which turns the PARAGRAPH ABOVE IT into a heading, i.e. opens
+ *  a section without a single `#`. Only a heading when the preceding line is paragraph text; after a blank line
+ *  the same `---` is a thematic break. See `headingIndices` for which reading this document gets. */
+const SETEXT_UNDERLINE_RE = /^ {0,3}(?:=+|-+)[ \t]*$/;
+
+/** A fenced-code delimiter — ``` or ~~~ (3+), with the rest of the line as its info string. */
+const CODE_FENCE_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+/** A RAW HTML heading tag. Markdown passes block HTML straight through, so `<h3>Agents may clear…</h3>` opens a
+ *  second rendered section with no `#` and no setext underline anywhere — the same smuggle in a third syntax
+ *  (found and closed in the same pass). Opening AND closing tags both count: over-counting only refuses. */
+const HTML_HEADING_RE = /<\/?h[1-6](?=[\s/>])/i;
+
+/** Is `line` a paragraph that a following `---`/`===` would turn into a setext heading? Blank lines, ATX
+ *  headings, fences and underlines cannot carry a setext underline; everything else conservatively can. */
+function isSetextBase(line) {
+  if (typeof line !== 'string' || !line.trim()) return false;
+  return !ANY_HEADING_RE.test(line) && !SETEXT_UNDERLINE_RE.test(line) && !CODE_FENCE_RE.test(line);
+}
+
+/**
+ * #2785 review-fix (2) — the indices of every line in `run` that OPENS A SECTION, or `null` when the markdown
+ * cannot be read confidently (the caller then refuses). `prevLine` is the pre-existing file line immediately
+ * above the run, needed because a setext underline heads the paragraph ABOVE it.
+ *
+ * SETEXT, AND WHY `---` IS READ AS A THEMATIC BREAK HERE. `---` is genuinely ambiguous in markdown: after a
+ * blank line it is a horizontal rule, after paragraph text it is a setext `<h2>`. This module resolves it by
+ * the ACTUAL convention of the document it guards: `docs/agent/platform-decisions.md` contains 29 `---` lines,
+ * every one of them preceded by a blank line, and ZERO setext underlines. So the CommonMark reading and the
+ * document's own convention agree exactly — blank-then-`---` is the rule separator every honest codification
+ * writes, and `---` hard against a paragraph is not something the document ever does. Both are therefore
+ * implemented literally: blank-preceded ⇒ thematic break (clears), paragraph-preceded ⇒ setext heading
+ * (refuses). The smuggle that prompted this rule ends its second section with exactly the paragraph-preceded
+ * form, so it is caught twice over.
+ */
+function headingIndices(run, prevLine) {
+  const idx = [];
+  let fenceChar = null;
+  let fenceLen = 0;
+  let prev = prevLine;
+  for (let i = 0; i < run.length; i += 1) {
+    const line = run[i];
+    const fence = CODE_FENCE_RE.exec(line);
+    if (fenceChar) {
+      // Inside a fence only a run of the SAME character, at least as long, with nothing after it, closes.
+      if (fence && fence[1][0] === fenceChar && fence[1].length >= fenceLen && !fence[2].trim()) { fenceChar = null; fenceLen = 0; }
+      prev = line;
+      continue;
+    }
+    if (fence) {
+      if (fence[1][0] === '`' && fence[2].includes('`')) return null;   // not a valid backtick fence → unreadable
+      fenceChar = fence[1][0];
+      fenceLen = fence[1].length;
+      prev = line;
+      continue;
+    }
+    if (ANY_HEADING_RE.test(line) || HTML_HEADING_RE.test(line)) idx.push(i);
+    else if (SETEXT_UNDERLINE_RE.test(line) && isSetextBase(prev)) idx.push(i);
+    prev = line;
+  }
+  if (fenceChar) return null;                                            // unterminated fence → unreadable
+  return idx;
+}
+
 /** A backlog item file — the only place a `kind: decision` resolve can live. */
 const BACKLOG_ITEM_RE = /^backlog\/[^/]+\.md$/;
 
@@ -271,35 +352,63 @@ function parseDiffSections(diffText) {
  *     showing pre-existing text below the insertion point, i.e. the addition landed INSIDE the document rather
  *     than after it (the new-anchor-splits-an-existing-rule case), so what follows the new heading is somebody
  *     else's rule body and the new heading has annexed it;
- *   • at least one context line BEFORE the run. This proves the diff carries context at all: under `-U0` there
- *     is none, every insertion looks like an EOF append, and the trailing-context test would be vacuous;
- *   • inside the run, every line before the first anchor heading must be BLANK. A blank separator is how an
- *     append at EOF actually renders; any non-blank line above the heading is prose attaching to whatever rule
- *     precedes it, not to the new one.
+ *   • the event IMMEDIATELY before the run must be a context line. This proves the diff carries context at all
+ *     (under `-U0` there is none, every insertion looks like an EOF append and the trailing-context test would
+ *     be vacuous) AND that the line above the run is genuinely the pre-existing line the run attaches to, which
+ *     the setext reading below needs — context from an EARLIER hunk would not be adjacent;
+ *   • the run must contain EXACTLY ONE HEADING OF ANY LEVEL — `#`…`######` tagged or untagged, a setext
+ *     underline, or a raw `<h1>`…`<h6>` — and that one heading must BE the named anchor. See below;
+ *   • every line before that heading must be BLANK. A blank separator is how an append at EOF actually renders;
+ *     any non-blank line above the heading is prose attaching to whatever rule precedes it, not to the new one.
  * Everything else is unprovable and therefore human. `false` here is always the safe direction.
+ *
+ * WHY "EXACTLY ONE HEADING OF ANY LEVEL" AND NOT "ONE ANCHOR HEADING" (the second #2785 review-fix). The first
+ * cut looked only at lines BEFORE the first `{#anchor}` heading and, being built on
+ * `STATUTE_ANCHOR_HEADING_RE`, could only see headings that carry a tag. Nothing after the anchor heading was
+ * inspected by anything, and an UNTAGGED heading was invisible to the anchor-name check too — the two gaps
+ * compose into an unbounded smuggle: append the honest anchor, then `---`, then a second `### …` with its
+ * `{#…}` simply DELETED, then any amount of new rule text. That scored as codification with `autoLand: true`.
+ * Deleting the tag costs nothing: `we:scripts/lib/validate-rules-anchors.cjs` validates only the anchors a
+ * document actually declares, so an untagged heading passes `check:statute` and CI.
+ * The bound is structural rather than another shape-patch: a SECOND SECTION NECESSARILY NEEDS A SECOND HEADING,
+ * so capping the append at one heading closes the class, not the instance. Prose under the anchor with no
+ * heading of its own still clears — that text is inside the anchor's OWN section, which is the independent
+ * committee's remit under #2771, not a smuggle.
  */
 function isSingleAnchorAppend(section) {
   const seq = Array.isArray(section?.seq) ? section.seq : null;
   if (!seq || !seq.length) return false;                                    // unparsed section → human
   let runs = 0;
   let run = null;                                                            // the single added run, once found
-  let sawContextBeforeRun = false;
+  let lineAboveRun = null;                                                   // pre-existing line the run attaches to
+  let ctxImmediatelyBeforeRun = false;
   let contextAfterRun = false;
   let inRun = false;
+  let prevEvent = null;
   for (const ev of seq) {
     if (ev.kind === 'add') {
-      if (!inRun) { inRun = true; runs += 1; run = []; }
+      if (!inRun) {
+        inRun = true;
+        runs += 1;
+        run = [];
+        if (runs === 1 && prevEvent && prevEvent.kind === 'ctx') { ctxImmediatelyBeforeRun = true; lineAboveRun = prevEvent.text; }
+      }
       run.push(ev.text);
+      prevEvent = ev;
       continue;
     }
     inRun = false;                                                           // 'ctx', 'del' and 'hunk' all break the run
-    if (ev.kind === 'ctx') { if (runs === 0) sawContextBeforeRun = true; else contextAfterRun = true; }
+    if (ev.kind === 'ctx' && runs > 0) contextAfterRun = true;
+    prevEvent = ev;
   }
   if (runs !== 1 || !run) return false;                                      // zero, or a second edit elsewhere
   if (contextAfterRun) return false;                                         // the append landed INSIDE the document
-  if (!sawContextBeforeRun) return false;                                    // no context at all (-U0) → unprovable
-  const headingAt = run.findIndex((l) => STATUTE_ANCHOR_HEADING_RE.test(l));
-  if (headingAt < 0) return false;                                           // an extension with no anchor heading
+  if (!ctxImmediatelyBeforeRun) return false;                                // no adjacent context (-U0) → unprovable
+  const headings = headingIndices(run, lineAboveRun);
+  if (headings === null) return false;                                       // markdown we cannot read → human
+  if (headings.length !== 1) return false;                                   // zero headings, or a SECOND SECTION
+  const headingAt = headings[0];
+  if (!STATUTE_ANCHOR_HEADING_RE.test(run[headingAt])) return false;         // the one heading is not the named anchor
   return run.slice(0, headingAt).every((l) => !l.trim());                    // only blank separators may precede it
 }
 
@@ -350,6 +459,12 @@ function isSingleAnchorAppend(section) {
  *     annexing the rule text below it instead of being appended); non-blank added prose sitting above the new
  *     heading inside the same run (it attaches to the PRECEDING rule); and a context-free (`-U0`) statute diff,
  *     in which position cannot be read at all.
+ *   • A SECOND HEADING of ANY level in the append — tagged, untagged, setext, or raw HTML (#2785 review-fix 2)
+ *     → false. A
+ *     second section needs a second heading, so one heading per append bounds the exemption to exactly the one
+ *     anchor the resolve named. Untagged headings were previously invisible to BOTH halves of (ii), which let an
+ *     unbounded second rule ride along under an honest anchor. Markdown the reader cannot parse confidently — an
+ *     unterminated or malformed code fence — also refuses.
  *   • A backlog section whose hunks do not SHOW `kind: decision` → false. The `kind` line sits two lines from
  *     `status` in the front-matter so default context normally carries it; when it does not, the diff has not
  *     proven the resolved item is a decision, and an ordinary story resolve must never license a statute edit.

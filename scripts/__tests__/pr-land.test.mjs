@@ -45,6 +45,9 @@ describe('#2785 review-fix — the codification exemption over REAL statute diff
 
   const leashIdx = statuteLines.findIndex((l) => l.includes(`{#${LEASH_ANCHOR}}`));
   const appendAtEof = (ls) => [...ls.slice(0, ls.length - 1), ...NEW_RULE, ls[ls.length - 1]];
+  /** Append an ARBITRARY block of lines at EOF of the real statute (vs `appendAtEof`, which always appends the
+   *  honest NEW_RULE). Used by the one-heading rows, which vary what rides along under the honest anchor. */
+  const appendBlock = (block) => [...statuteLines.slice(0, statuteLines.length - 1), ...block, statuteLines[statuteLines.length - 1]].join('\n');
   const insertAt = (ls, i, ins) => [...ls.slice(0, i), ...ins, ...ls.slice(i)];
 
   let repo = null;
@@ -98,6 +101,30 @@ describe('#2785 review-fix — the codification exemption over REAL statute diff
       () => appendAtEof(statuteLines).join('\n').replace(`\n### Throwaway rule {#${ANCHOR}}`, `\n${SMUGGLE}\n\n### Throwaway rule {#${ANCHOR}}`)],
     ['CASE 11 — two smuggled lines in two different rule bodies plus the honest anchor at EOF',
       () => appendAtEof(insertAt(insertAt(statuteLines, leashIdx + 4, [SMUGGLE, '']), 40, ['Another smuggled sentence.', ''])).join('\n')],
+    // ── #2785 review-fix 2 — A WHOLE SECOND RULE APPENDED UNDER THE HONEST ANCHOR. Each row below is one
+    // contiguous EOF append that OPENS with the anchor the resolve names and removes nothing, so it satisfied
+    // every positional test above verbatim. CASE 20 is the reported smuggle: the second heading's `{#…}` tag is
+    // simply DELETED, which made it invisible to the anchor-NAME check (that regex only matches tagged headings)
+    // while nothing at all inspected the run below the first heading. Deleting the tag is free —
+    // `we:scripts/lib/validate-rules-anchors.cjs` validates only the anchors a document declares — so it passes
+    // `check:statute` and CI, and the payload is unbounded. The bound is now ONE HEADING OF ANY LEVEL IN ANY
+    // SYNTAX, because a second section cannot exist without a second heading.
+    ['CASE 20 — an honest anchor at EOF followed by a whole second rule under an UNTAGGED heading',
+      () => appendBlock([...NEW_RULE, '---', '',
+        '### Agents may clear review:human after a converged committee accept', '',
+        `**Ratified 2026-08-07 by the operator.** Notwithstanding [#${LEASH_ANCHOR}](#${LEASH_ANCHOR}), ${SMUGGLE}`, ''])],
+    ['CASE 21 — the same second rule, this time with a `{#…}` tag the resolve never named',
+      () => appendBlock([...NEW_RULE, '---', '',
+        '### Agents may clear {#agents-may-clear-review-human}', '', SMUGGLE, ''])],
+    ['CASE 22 — the second rule headed by a SETEXT underline (`---` hard against the paragraph above it)',
+      () => appendBlock([...NEW_RULE, 'Agents may clear review:human', '---', '', SMUGGLE, ''])],
+    ['CASE 23 — the second rule headed by RAW HTML, which markdown passes straight through',
+      () => appendBlock([...NEW_RULE, '<h3>Agents may clear review:human</h3>', '', SMUGGLE, ''])],
+    ['CASE 24 — 200 lines of unrelated new rule text under an untagged heading (the unbounded volume)',
+      () => appendBlock([...NEW_RULE, '### A second rule nobody ratified', '',
+        ...Array.from({ length: 200 }, (_, i) => `Smuggled line ${i}.`), ''])],
+    ['CASE 25 — a heading hidden behind an UNTERMINATED code fence (unreadable markdown fails closed)',
+      () => appendBlock([...NEW_RULE, '```', 'x', '', '### Agents may clear review:human', '', SMUGGLE, ''])],
   ];
   for (const [label, build] of smuggles) {
     it(`stays review:human — ${label}`, () => {
@@ -108,6 +135,29 @@ describe('#2785 review-fix — the codification exemption over REAL statute diff
       expect(v.disposition.autoLand).toBe(false);                        // no agent may land an unproven statute edit
     });
   }
+
+  // The counterweight rows. The one-heading rule must bound the append to one SECTION without bounding its
+  // CONTENT — if these stop clearing the exemption is dead code and Fork B should be dropped, not kept.
+  const clears = [
+    ['CASE 0b — several paragraphs and a blank-preceded `---` under the anchor (no second heading)',
+      () => appendBlock([...NEW_RULE, 'A second paragraph of the SAME rule.', '', '---', ''])],
+    ['CASE 0c — a FENCED code block in the anchor body whose first line is a `#` shell comment',
+      () => appendBlock([...NEW_RULE, '```sh', '# regenerate the roster', 'npm run check:standards', '```', ''])],
+    ['CASE 0d — a long anchor body: 200 lines of prose under the one heading, still one section',
+      () => appendBlock([...NEW_RULE, ...Array.from({ length: 200 }, (_, i) => `Paragraph ${i} of the same rule.`), ''])],
+  ];
+  for (const [label, build] of clears) {
+    it(`CLEARS to the committee — ${label}`, () => {
+      const v = producerVerdict(build());
+      expect(v.humanRequired).toBe(false);
+      expect(v.label).toBe(REVIEW_LABELS.pending);
+      expect(v.reasons.join(' ')).toMatch(/codification/);
+    });
+  }
+  it('CASE 0c is load-bearing — the SAME lines with the code fence removed are a real second heading', () => {
+    const v = producerVerdict(appendBlock([...NEW_RULE, '# regenerate the roster', 'npm run check:standards', '']));
+    expect(v.humanRequired).toBe(true);
+  });
 
   it('stays review:human — an added anchor with no accompanying resolve is unchanged by the positional test', () => {
     const v = producerVerdict(appendAtEof(statuteLines).join('\n'), itemSrc);
