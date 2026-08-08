@@ -42,7 +42,9 @@ import { resolve, sep } from 'node:path';
 import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker } from './lib/review-escalation.mjs';
+// Rebase resolution (2026-08-08): the UNION of both sides. `buildReviewedDiffMarker` is #2979's accept
+// fingerprint (landed today); `READY_TO_MERGE_LABEL` is this PR's hold invariant. Independent concerns.
+import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker, READY_TO_MERGE_LABEL } from './lib/review-escalation.mjs';
 // #2979 — the NET diff vs current main, NOT `gh pr diff`'s three-dot output (see the fingerprint block in
 // `runReviewLabelCli` for why that distinction is the whole point). Imported from the CLI that owns it, the same
 // way `we:scripts/fetch-parked.mjs` already does — it is the single home of the #2450 net-diff basis.
@@ -151,7 +153,10 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
     return {
       allowed: true,
       addLabel: REVIEW_LABELS.pending,
-      removeLabels: [REVIEW_LABELS.changes],
+      // #2832 — re-arm applies a review-hold (review:pending), so it must atomically strip ready-to-merge: a
+      // held PR may never carry the go-ahead. `presentRemoveLabels` narrows this to the labels the PR actually
+      // carries, so naming ready-to-merge here is a no-op when it is absent.
+      removeLabels: [REVIEW_LABELS.changes, READY_TO_MERGE_LABEL],
       keepsHuman: isHuman,
       reason: isHuman
         ? 're-armed — review:changes→review:pending; review:human KEPT (gate-self stays human-ceremony-only)'
@@ -196,7 +201,10 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
   return {
     allowed: true,
     addLabel: REVIEW_LABELS.changes,
-    removeLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.accepted],
+    // #2832 — a bounce applies a review-hold (review:changes), so it must atomically strip ready-to-merge too
+    // (alongside the stale pending/accepted): a held PR may never carry the go-ahead. `presentRemoveLabels`
+    // narrows to what the PR actually carries, so listing ready-to-merge is a no-op when it is absent.
+    removeLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL],
     keepsHuman: isHuman,
     reason: 'changes — author lane fixes hot-context and re-pushes',
   };
