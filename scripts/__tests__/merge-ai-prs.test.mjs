@@ -1317,13 +1317,15 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
 
   it('#2390-review-fix — a mis-set base==head is REJECTED (rev-parse equal ⇒ not a strict ancestor): the own-delta falls back to the cumulative basis, so an empty base…head can never silently under-score', () => {
     const { exec, calls } = fakeExec({
-      'git diff --numstat origin/main origin/lane/child': { stdout: '3\t0\tscripts/lib/review-escalation.mjs\n' },
+      // The fixture is the ROSTER (a declarative-leash file, #2771/#2785): the point of this case is that a
+      // mis-set base==head cannot under-score the HUMAN basis, so it needs a file that still forces a human.
+      'git diff --numstat origin/main origin/lane/child': { stdout: '3\t0\tscripts/lib/gate-config.mjs\n' },
       'git rev-parse cafebabecafe': { stdout: 'cafebabecafe\n' },
       'git rev-parse origin/lane/child': { stdout: 'cafebabecafe\n' }, // head resolves to the SAME sha as base
     });
     const net = computeNetDiffChangedFiles({ exec, rev: 'lane/child', baseRev: 'cafebabecafe', fetchExtraRefs: ['lane/child'] });
-    expect(net.changedFiles).toEqual(['scripts/lib/review-escalation.mjs']); // fell back to cumulative — NOT an empty under-score
-    expect(net.humanBasisFiles).toEqual(['scripts/lib/review-escalation.mjs']);
+    expect(net.changedFiles).toEqual(['scripts/lib/gate-config.mjs']); // fell back to cumulative — NOT an empty under-score
+    expect(net.humanBasisFiles).toEqual(['scripts/lib/gate-config.mjs']);
     expect(calls.some((c) => c.key === 'git diff --numstat cafebabecafe origin/lane/child')).toBe(false); // own-delta never attempted
     expect(scoreEscalation({ changedFiles: net.changedFiles, diffLines: net.diffLines, humanBasisFiles: net.humanBasisFiles }).humanRequired).toBe(true);
   });
