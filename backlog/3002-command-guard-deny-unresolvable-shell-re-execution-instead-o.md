@@ -92,4 +92,4 @@ PR #1092 (`review:changes`, back with the author lane). Base currently keeps a c
 quoted pipe lets a redirect through to the shared checkout, so landing this closes a live defect rather
 than only hardening a hypothetical.
 
-Related: `x2f9yxc` already files the recursion-depth bound; reconcile with it rather than double-building.
+Related: `3020` already files the recursion-depth bound; reconcile with it rather than double-building.
