@@ -103,4 +103,43 @@ describe('lane-pool release ownership via ownerSession (#2452 Gap 2)', () => {
     expect(forced.code).toBe(0);
     expect(forced.out + forced.err).not.toMatch(/not yours/);
   });
+
+  // #2452 review — the SWEEP blast radius. `ownerSession` is stamped on EVERY lease, and sibling conveyor
+  // lanes (`conveyor-delivery` / `conveyor-fix` / …) are UNMARKED yet share one `ownerSession`, because #2413
+  // says a spawned subagent inherits the parent id verbatim. Before this fix, an un-forced `release --all` from
+  // any of those siblings dropped ALL of their live leases — after which a fresh `acquire` runs
+  // `checkout -B --force` + `clean -fd` on a clone another sub-flow was still working in. The sweep must stay
+  // on the exact-`session` rule; only naming the lane may use the `ownerSession` fallback.
+  it('`release --all` does NOT drop a sibling lease that merely shares the caller\'s CLAUDE_CODE_SESSION_ID', () => {
+    const provision = runPool(['provision', '--count=1', ...poolArgs()], 'sess-uuid-shared');
+    expect(provision.code).toBe(0);
+
+    // the sibling acquires under the shared session id, with its own host:pid-style `session` string
+    const acquire = runPool(['acquire', ...poolArgs(), '--no-reset', '--session=sibling-host-A'], 'sess-uuid-shared');
+    expect(acquire.code).toBe(0);
+
+    // a DIFFERENT sub-flow of the same session sweeps: same CLAUDE_CODE_SESSION_ID, different `session` string
+    const sweep = runPool(['release', '--all', ...poolArgs(), '--session=sweeper-host-B', '--json'], 'sess-uuid-shared');
+    expect(sweep.code).toBe(0);
+    expect(JSON.parse(sweep.out).released).toBe(0);
+    expect(sweep.out + sweep.err).toMatch(/not yours/);
+    // …and the message points at the escape hatch rather than just refusing
+    expect(sweep.out + sweep.err).toMatch(/release --lane=1/);
+
+    // the lease really is still held — a targeted release still finds it there to drop
+    const targeted = runPool(['release', '--lane=1', ...poolArgs(), '--session=sweeper-host-B', '--json'], 'sess-uuid-shared');
+    expect(targeted.code).toBe(0);
+    expect(JSON.parse(targeted.out).released).toBe(1);
+  });
+
+  it('`release --all` still releases a lease whose exact `session` string matches the caller', () => {
+    const provision = runPool(['provision', '--count=1', ...poolArgs()], 'sess-uuid-shared');
+    expect(provision.code).toBe(0);
+    const acquire = runPool(['acquire', ...poolArgs(), '--no-reset', '--session=same-slug'], 'sess-uuid-shared');
+    expect(acquire.code).toBe(0);
+
+    const sweep = runPool(['release', '--all', ...poolArgs(), '--session=same-slug', '--json'], 'sess-uuid-shared');
+    expect(sweep.code).toBe(0);
+    expect(JSON.parse(sweep.out).released).toBe(1);
+  });
 });

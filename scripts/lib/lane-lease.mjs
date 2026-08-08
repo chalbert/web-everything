@@ -170,10 +170,25 @@ export function leaseOwnedBy(lease, session) {
  *      every sibling parallel lane intentionally SHARES `ownerSession` (see `laneMarkedSlug`'s doc), so
  *      `ownerSession` alone cannot tell one lane's own release from a sibling's; the minted slug (step 1) is
  *      that lease's sole ownership signal.
+ *
+ * @param targeted the caller named ONE specific lane (`release --lane=N`), rather than sweeping (`--all`).
+ *   REQUIRED for the step-2 `ownerSession` fallback; defaults to `false` (the conservative posture).
+ *
+ * #2452 review — why `targeted` gates step 2. `workflowLane` is NOT the marker of "siblings share this
+ * ownerSession"; it is set only for `--purpose=workflow-lane`, which only the parallel `/workflow` template
+ * passes. The conveyor dispatches concurrent lanes as `conveyor-delivery` / `conveyor-fix` /
+ * `conveyor-prepare-*` — UNMARKED, yet they share one `ownerSession` too, because #2413's ratified statute
+ * says a spawned subagent inherits its parent's id verbatim and so "no ambient env/process property can
+ * distinguish siblings". Without this gate a bare `release --all` (which targets EVERY held lane) dropped
+ * those siblings' live leases with no `--force`, after which a fresh acquire runs `checkout -B --force` +
+ * `clean -fd` on the clone a sibling was still working in. `ownerSession` answers "same session", never
+ * "this lane"; naming the lane supplies the missing half. A sweep therefore keeps the old exact-`session`
+ * rule (`leaseOwnedBy`) and anything else needs the explicit `--force`.
  */
-export function leaseOwnedByCaller({ lease, session, mySessionId } = {}) {
+export function leaseOwnedByCaller({ lease, session, mySessionId, targeted = false } = {}) {
   if (!lease) return false;
   if (leaseOwnedBy(lease, session)) return true;
+  if (!targeted) return false; // a SWEEP never widens past the exact-session match (see #2452 review, above)
   if (lease.workflowLane) return false; // marked lease: ownership is the minted slug ONLY (step 1 above)
   // #2452 review — a RESERVED lease is never releasable through the ownerSession fallback. #2350 makes
   // `release --release-reserved` the ONE deliberate un-reserve ("--force alone never drops one"), and

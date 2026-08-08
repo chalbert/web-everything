@@ -1104,8 +1104,11 @@ function cmdRelease(repo) {
   const session = defaultSession();
   const force = !!flags.force;
   let targets;
-  if (flags.all) targets = existingLanes(repo).filter((n) => readLease(laneDir(repo, n))); // every held lane
-  else if (flags.lane !== undefined) targets = [Number(flags.lane)];
+  // #2452 review — `targeted` is load-bearing for ownership, not cosmetic: only a release that NAMES one lane
+  // may use the durable-`ownerSession` fallback below. A `--all` sweep keeps the exact-`session` rule.
+  let targeted;
+  if (flags.all) { targets = existingLanes(repo).filter((n) => readLease(laneDir(repo, n))); targeted = false; } // every held lane
+  else if (flags.lane !== undefined) { targets = [Number(flags.lane)]; targeted = true; }
   else return fail('release needs --lane=N or --all');
   let released = 0;
   for (const n of targets) {
@@ -1128,11 +1131,19 @@ function cmdRelease(repo) {
     // when no `--session`/`LANE_SESSION` is given, and a shell's ppid differs across separate invocations — so
     // the very session that ACQUIRED a lease read as foreign on a later `release` call and had to `--force`.
     // `leaseOwnedByCaller` still honors an exact `session` match FIRST (the minted slug a MARKED workflow-lane
-    // lease requires), then falls back to the durable `ownerSession` (`CLAUDE_CODE_SESSION_ID`) signal #2367
-    // already uses for foreign-lease detection — stable across a session's separate Bash-tool calls.
+    // lease requires), then — ONLY for a `--lane=N`-targeted release — falls back to the durable `ownerSession`
+    // (`CLAUDE_CODE_SESSION_ID`) signal #2367 already uses for foreign-lease detection, stable across a
+    // session's separate Bash-tool calls. #2452 review — the `--all` SWEEP is deliberately excluded: sibling
+    // conveyor lanes are UNMARKED yet share one `ownerSession`, so a bare `release --all` would otherwise drop
+    // a sibling's live hold with no `--force`. Naming the lane is what makes the intent unambiguous.
     const mySessionId = process.env.CLAUDE_CODE_SESSION_ID || null;
-    if (!bypassOwnership && !leaseOwnedByCaller({ lease, session, mySessionId })) {
-      log(`  lane-${n}: ${describeLease(lease)} — not yours; pass --force to break`);
+    if (!bypassOwnership && !leaseOwnedByCaller({ lease, session, mySessionId, targeted })) {
+      log(
+        `  lane-${n}: ${describeLease(lease)} — not yours; pass --force to break` +
+        (!targeted && leaseOwnedByCaller({ lease, session, mySessionId, targeted: true })
+          ? ` (a --all sweep never releases on the ownerSession match alone — re-run as \`release --lane=${n}\` to release just this one)`
+          : ''),
+      );
       continue;
     }
     rmSync(LEASE_MARKER(dir), { force: true });
