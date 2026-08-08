@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, PARK_LABELS } from '../pr-land.mjs';
-import { REVIEW_LABELS, REVIEW_LABEL_META } from '../lib/review-escalation.mjs';
+import { REVIEW_LABELS, REVIEW_LABEL_META, scoreEscalation } from '../lib/review-escalation.mjs';
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
   it('a DECLARATIVE-LEASH diff (the roster — the encoded policy itself) → review:human, applied', () => {
@@ -60,6 +60,13 @@ describe('resolveProducerReviewLabel — #2307 deterministic review-escalation l
     expect(withHunks.humanRequired).toBe(withoutHunks.humanRequired);
     expect(withHunks.reasons).toEqual(withoutHunks.reasons);
     expect(() => resolveProducerReviewLabel({ diffHunks: undefined })).not.toThrow();
+  });
+  it('#2890-review-fix finding 1 — the producer-side default is null (NOT COMPUTED), never the fail-open \'\'', () => {
+    // `scoreEscalation` is what a follow-on detector reads, so the producer wrapper must not re-introduce the
+    // `''` default underneath it: a `resolveProducerReviewLabel` caller with no diff in hand must be
+    // distinguishable from one whose diff genuinely has no content.
+    expect(scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] }).diffHunks).toBeNull();
+    expect(scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], diffHunks: '' }).diffHunks).toBe('');
   });
 });
 
