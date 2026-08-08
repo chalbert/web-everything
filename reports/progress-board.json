@@ -1,0 +1,91 @@
+{
+  "_readme": "Hand-maintained HALF of the progress board — only what no API can know. Never hand-edit: use `node scripts/progress-board.mjs --start=<id> | --done=<id> | --block=<id> --why=… | --note=<id> --text=… | --add=… | --decide=<id> | --url=…`. Pull-request state is NOT stored here; it is derived live from `gh pr list` on every render.",
+  "_artifactUrl": "Set once, with --url=<url>, right after the FIRST Artifact publish. Every later publish from a different session MUST pass this as the Artifact `url` parameter or a new URL is minted and the operator's bookmark dies.",
+  "title": "Web Everything — progress board",
+  "repo": "chalbert/web-everything",
+  "artifactUrl": "https://claude.ai/code/artifact/633d3d18-3e12-4675-9fb0-c96575978931",
+  "phases": {
+    "1": "Merge-gate correctness",
+    "2": "Review routing",
+    "3": "Tooling and follow-ups"
+  },
+  "items": [
+    {
+      "id": "hold-invariant",
+      "title": "#2832 — a review-hold label must block merge regardless of ready-to-merge",
+      "phase": 1,
+      "status": "in-progress",
+      "pr": 984,
+      "note": "accepted; waiting on required checks"
+    },
+    {
+      "id": "guard-false-denies",
+      "title": "#2986 / #2994 — four false denies in the tree-write guard arm",
+      "phase": 1,
+      "status": "in-progress",
+      "pr": 1092
+    },
+    {
+      "id": "review-human-rubric",
+      "title": "#2785 — narrow review:human to the declarative leash; gate derivation drops to the committee",
+      "phase": 2,
+      "status": "in-progress",
+      "pr": 1098
+    },
+    {
+      "id": "unweld-conformance-pin",
+      "title": "Unweld spec from impl — relax the conformance token pin to containment",
+      "phase": 2,
+      "status": "done",
+      "pr": 1099,
+      "note": "gate-self edit — only a human can clear this one",
+      "startedAt": "2026-08-08",
+      "doneAt": "2026-08-08"
+    },
+    {
+      "id": "self-cleared-verdict",
+      "title": "#2844 — the land seam refuses a self-cleared verdict",
+      "phase": 2,
+      "status": "in-progress",
+      "pr": 1100,
+      "note": "reviewer wants changes — back with the author lane"
+    },
+    {
+      "id": "overnight-review-items",
+      "title": "File the two items found during the overnight review pass",
+      "phase": 3,
+      "status": "in-progress",
+      "pr": 1097
+    },
+    {
+      "id": "progress-board",
+      "title": "Progress board — a mechanically-refreshed published status page (x9t5i5a)",
+      "phase": 3,
+      "status": "in-progress",
+      "note": "generator + state file + skill; one Bash call plus one Artifact call per update"
+    }
+  ],
+  "decisions": [
+    {
+      "id": "2978",
+      "title": "Rule how a learning is admitted to agent memory — verify the note, rank by recurrence, block on nobody",
+      "preparedDate": "2026-08-07",
+      "status": "awaiting",
+      "detail": "prepared and ready to ratify"
+    },
+    {
+      "id": "2908",
+      "title": "Converge loop — editor-enablement default by care band",
+      "preparedDate": "2026-08-04",
+      "status": "awaiting",
+      "detail": "prepared and ready to ratify"
+    },
+    {
+      "id": "2691",
+      "title": "Define a \"feature\" tier above epic — deterministic feature to epic to slice rollup",
+      "preparedDate": "2026-07-28",
+      "status": "awaiting",
+      "detail": "prepared and ready to ratify"
+    }
+  ]
+}
