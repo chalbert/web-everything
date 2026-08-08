@@ -81,8 +81,11 @@ A single "go" authorizes the splits you presented. Per approved item, mechanical
    `check:standards` errors), refresh the digest only if needed, and go straight to scaffolding its child
    slices.
 2. **Scaffold each slice:** `node scripts/backlog.mjs scaffold --type=… --workitem=story|task
-   [--size=…] --title="…" --parent=<NNN> [--blocked-by=<NNN>,…] --scope=<coarse,prefix,shaped>
-   --digest="…"`. **Author the slice's predicted `scope:` here (#2619)** — pass the touch-set you recorded
+   [--size=…] --title='…' --parent=<NNN> [--blocked-by=<NNN>,…] --scope=<coarse,prefix,shaped>
+   --digest='…'`. **Single quotes, always** — item-derived text in a *double*-quoted value still runs
+   `` ` `` / `$(…)` through bash, and the backlog CLI is prefix-allow-listed so nothing prompts
+   (*backlog-workflow.md → Authoring an item → The quoting rule*).
+   **Author the slice's predicted `scope:` here (#2619)** — pass the touch-set you recorded
    in step-2 of *Quick path* as `--scope=` (comma-joined, repo-qualified prefixes, e.g.
    `--scope=we:scripts/readiness/,we:scripts/backlog.mjs`). The scaffold writes it onto the slice's
    frontmatter so it arrives at Definition of Ready already scoped — the human reviewing the split sees each
