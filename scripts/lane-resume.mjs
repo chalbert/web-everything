@@ -57,7 +57,7 @@ import { asItemId } from './readiness/lane-manifest.mjs';
 // #2396 — a broken stacked LINK is a lane the finisher must repair before its overlap-descendants can be
 // rebuilt onto the repaired tip. "Broken" = a red required `test` (a real bug) OR a `review:changes` label
 // (a human bounced the diff). Reuse the ratified verdict-label set + its tolerant reader, never re-parse names.
-import { REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
+import { REVIEW_LABELS, hasReviewLabel, readyMergeConflictsWithHold } from './lib/review-escalation.mjs';
 // #2383 — reuse the SAME constellation repo-resolution as `/drain` (`merge-ai-prs.mjs`), so `/finish` sweeps
 // all 3 repos (WE + frontierui + plateau-app) by default instead of only the cwd repo. `merge-ai-prs.mjs` is
 // CLI-guarded (runs nothing on import), so this is a pure function import.
@@ -458,6 +458,15 @@ export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/mai
   // drain's #2366 hard refusal at this earlier layer so `land <pr>` can't push a bounced diff into the queue.
   if (hasReviewLabel(prInfo.labels, REVIEW_LABELS.changes))
     return { action: 'review-changes', pr: prNum, merged: false, reason: 'review:changes — a human bounced this diff; repair + re-review before any land (#2396)' };
+  // #2832 / #984 finding 6 — this is a WRITE site for the go-ahead (`--add-label ready-to-merge` below). It added
+  // the label UNCONDITIONALLY, so `/finish` on a PR carrying an uncleared review HOLD (review:human / review:pending)
+  // made it "held AND ready" again — the exact self-inconsistent state #2832 removes — then the drain reconcile
+  // stripped it next pass, flip-flopping forever. Consult the SHARED invariant predicate BEFORE the add: if applying
+  // the go-ahead here would leave the PR both held and ready, refuse to enqueue and leave it held for the human.
+  // (review:changes is already refused above with its own bounce reason; this catches the remaining holds. Only the
+  // `ready-to-merge` go-ahead trips this — a non-go-ahead `label` never conflicts, so the predicate returns false.)
+  if (readyMergeConflictsWithHold([...(prInfo.labels || []), label]))
+    return { action: 'held', pr: prNum, merged: false, reason: `held for review — refusing to add ${label} to a PR carrying an uncleared review hold (a go-ahead + hold is contradictory, #2832); a human clears the hold before any land` };
   const laneRef = prInfo.headRefName;
   const decision = landDecision({ mergeable: prInfo.mergeable, mergeState: prInfo.mergeStateStatus, testConclusion: testConclusionOf(prInfo) });
 
