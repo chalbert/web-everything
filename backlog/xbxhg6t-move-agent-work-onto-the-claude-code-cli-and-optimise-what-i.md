@@ -8,13 +8,15 @@ tags: [conveyor, cost, review, orchestration]
 
 # Move agent work onto the Claude Code CLI and optimise what it costs
 
-The product direction is a UI-driven app invoking the CLI, so session-spawned subagents become CLI invocations. Cache-prefix stability measured 20x cheaper than a bespoke prompt. Needs current research on request optimisation, a cost baseline, and a sweep of which subagent calls and procedural steps move off the model.
+The product direction is a UI-driven app invoking the CLI, so session-spawned subagents become CLI invocations. One day's sample HINTS that cache-prefix stability beats a bespoke prompt by ~20x — a hypothesis to re-measure, not a finding. Needs current research on request optimisation, a cost baseline, and a sweep of which subagent calls and procedural steps move off the model.
 
 ## Why now, and why it is not optional
 
 The stated direction is a **UI-driven application** that drives work by invoking the Claude Code **CLI** first, and the Claude Code **API** later. Both eventually; the CLI is what gets built first. So the question is not *whether* to move agent work out of a chat session — that is already the destination — it is how to arrive there cheaply rather than arriving and then discovering the bill.
 
-A second forcing function landed the same day. #2844 refuses a verdict cleared by its own author, and subagents **inherit the parent session id**, so a subagent review is not independent. A CLI invocation **mints its own session id** — measured: parent `01f39b97…`, child `f4386de9…`, and the child's own `CLAUDE_CODE_SESSION_ID` env var carries the child's id, which is the exact variable the guard reads. So the CLI is not merely the product direction, it is the only mechanical way to get a genuinely independent reviewer without a human opening a window.
+A second forcing function is **coming, not yet in force**. #2844 (open, filed 2026-08-02) specifies a land seam that refuses a verdict cleared by its own author; its implementation is PR #1100, which is open and awaiting a human clear. Nothing in `we:scripts/review-set-label.mjs`, `we:scripts/lib/review-escalation.mjs`, `we:scripts/merge-ai-prs.mjs` or `we:scripts/pr-land.mjs` compares reviewer to author today, so no clear is refused on those grounds yet.
+
+What makes it a forcing function is what happens the moment it does land: subagents **inherit the parent session id**, so a subagent review would stop qualifying as independent. A CLI invocation **mints its own session id** — measured 2026-08-08: parent `01f39b97…`, child `f4386de9…`, and the child's own `CLAUDE_CODE_SESSION_ID` env var carries the child's id, which is the exact variable #2844 specifies reading. So the CLI is not merely the product direction; once #2844 lands it is the only mechanical way to get a genuinely independent reviewer without a human opening a window. That timing is the argument for doing this work before #1100 merges, not after.
 
 ## The one measurement we have (2026-08-08)
 
@@ -55,11 +57,11 @@ Worth having, but explicitly **not** a reason to hesitate: the move happens rega
 
 Enumerate every place the system spawns an agent today and decide, per call, whether it becomes a CLI invocation:
 
-- **Reviews** — first, because #2844's independence requirement forces it and reviews are the highest-volume agent call.
+- **Reviews** — first, because the independence requirement #2844 specifies will force it once #1100 lands, and reviews are the highest-volume agent call.
 - Fixers and builders acting on a review's findings.
 - Rebases and conflict resolution.
 - The scouting and item-selection passes.
-- The converge daemon (#2572), which is the unattended case and needs a **stable identity of its own** — verified 2026-08-08 that the resident drain daemon runs with **no** `CLAUDE_CODE_SESSION_ID` at all, and under #2844 absence reads as *unknown clearer*, not as independence.
+- The converge daemon (#2572), which is the unattended case and needs a **stable identity of its own** — verified 2026-08-08 that the resident drain daemon runs with **no** `CLAUDE_CODE_SESSION_ID` at all. Under #2844 **as specified**, an absent id is an unknown clearer rather than an independent one, so the daemon would not satisfy the check it is about to be measured against.
 
 ## Procedural steps that should leave the model entirely
 
