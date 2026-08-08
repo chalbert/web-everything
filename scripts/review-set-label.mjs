@@ -7,6 +7,12 @@
  * — this is a definition + write tool, not product code) so the plateau console and the conveyor fix agent both
  * shell/import it rather than re-implementing how a label swap lands.
  *
+ * #2844 — INVARIANT 2 says a `review:human` PR may not be machine-cleared; it says NOTHING about who clears a
+ * `review:pending` one, and before #2844 nothing else did either. This CLI now REFUSES an acceptance whose
+ * clearing actor is provably the PR's own author (`we:scripts/lib/review-independence.mjs`), stamps the clearing
+ * actor's id into the durable comment, and — when independence could not be established — says so in that
+ * comment rather than leaving a silence a reader would misread as independence.
+ *
  * INVARIANT 2 (the whole point): a `review:human` PR is NEVER cleared to `review:accepted` by anything but a
  * human's /review ceremony. `decideSetLabel` REFUSES `to==='accepted'` when the PR carries `review:human`
  * (`gate-self` is human-ceremony-only). The refusal lives in the PURE core so it is unbypassable — the CLI
@@ -41,6 +47,11 @@ import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker } from './lib/review-escalation.mjs';
+// #2844 — WHO cleared this verdict, and the refusal when that is the PR's own author. See that module's header
+// for what the id rests on (the harness session identity, NOT the free-text `--actor`) and for the residual.
+import {
+  currentActorId, parseAuthorActorId, buildClearerActorMarker, decideClearerIndependence, INDEPENDENCE,
+} from './lib/review-independence.mjs';
 // #2979 — the NET diff vs current main, NOT `gh pr diff`'s three-dot output (see the fingerprint block in
 // `runReviewLabelCli` for why that distinction is the whole point). Imported from the CLI that owns it, the same
 // way `we:scripts/fetch-parked.mjs` already does — it is the single home of the #2450 net-diff basis.
@@ -342,9 +353,10 @@ export function runReviewLabelCli({
   let headSha = '';
   let headRefName = '';
   let prState = '';
+  let prBody = '';
   try {
     const parsed = JSON.parse(execFileSync('gh', [
-      'pr', 'view', pr, '--repo', repo, '--json', 'labels,headRefOid,headRefName,state',
+      'pr', 'view', pr, '--repo', repo, '--json', 'labels,headRefOid,headRefName,state,body',
     ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
     currentLabels = Array.isArray(parsed.labels) ? parsed.labels : [];
     headSha = typeof parsed.headRefOid === 'string' ? parsed.headRefOid : '';
@@ -352,6 +364,9 @@ export function runReviewLabelCli({
     // one more json field, no extra hop.
     headRefName = typeof parsed.headRefName === 'string' ? parsed.headRefName : '';
     prState = typeof parsed.state === 'string' ? parsed.state : '';
+    // #2844 — the PR body carries the `authored-by-actor` stamp pr-land wrote at open. Same gh call, one more
+    // json field, no extra hop — the same "ride the existing read" pattern #2953 used for `state`.
+    prBody = typeof parsed.body === 'string' ? parsed.body : '';
   } catch (e) {
     fail(ghErr(e, 'gh pr view failed'), 1);
   }
@@ -366,6 +381,26 @@ export function runReviewLabelCli({
   if (prState !== 'OPEN') {
     fail(`PR ${pr} is ${prState}, not OPEN — a review verdict here would be inert (the merge, if any, already `
       + 'happened); open a new PR for the findings instead of relabeling this one', 1);
+  }
+
+  // #2844 — THE SELF-CLEAR REFUSAL, on the two targets that RECORD AN ACCEPTANCE (`accepted`, `clear-human`);
+  // a `changes` bounce and a `rearm` land nothing, so neither needs an independence bar. Checked HERE: after the
+  // OPEN-state gate, BEFORE the pure decision and therefore before ANY gh mutation, and refusing through the same
+  // `{"error":…}` JSON contract every other refusal here honours.
+  //
+  // ONLY a PROVEN self-clear is refused — the two "cannot establish it" statuses proceed, and say so verbatim in
+  // the durable comment (`buildVerdictComment`). That asymmetry with the autonomous seam
+  // (`we:scripts/lib/auto-land-seam.mjs`, which refuses all three) is deliberate and is argued in full in
+  // `we:scripts/lib/review-independence.mjs`'s header: refusing `unknown-author` HERE would strand every PR
+  // opened before the stamp existed with no way for a HUMAN to clear it, which trades a real hole for a worse
+  // one. The honest record is the mitigation, exactly the #2895 honesty-tax choice.
+  const clearerId = currentActorId();
+  const stampsAcceptance = to === 'accepted' || to === 'clear-human';
+  const independence = stampsAcceptance
+    ? decideClearerIndependence({ authorId: parseAuthorActorId(prBody), clearerId })
+    : null;
+  if (independence && independence.status === INDEPENDENCE.SELF_CLEAR) {
+    fail(`${independence.reason} — nothing was changed (#2844)`, 1);
   }
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — the PURE decision. A refusal (INVARIANT 2, or nothing to
@@ -417,7 +452,9 @@ export function runReviewLabelCli({
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — render the durable comment ONCE, here, so the bytes
   // that are size-checked, written and posted are the same bytes.
-  const commentBody = buildComment({ to, actor, decision, headSha, reason: clearReason, reviewedDiff });
+  const commentBody = buildComment({
+    to, actor, decision, headSha, reason: clearReason, reviewedDiff, clearerId, independence,
+  });
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — THE SIZE GUARD, on the RENDERED bytes, before the swap.
   // GitHub rejects a comment over `GH_COMMENT_MAX`, and the swap lands FIRST — so an oversize comment leaves the
@@ -505,12 +542,20 @@ export function runReviewLabelCli({
  *
  * The marker is omitted on `changes`, and when the head SHA is unavailable (`buildReviewedShaMarker` → '') the
  * gate fails open rather than reading a garbage marker.
- * @param {{to:string, actor:string, headSha?:string, body?:string, reason?:string, reviewedDiff?:string}} o -
+ * #2844 — an acceptance also stamps WHO cleared it (`cleared-by-actor`, the harness session id — NOT the
+ * free-text `--actor`, which is the point) and, when independence could NOT be established, says so in the
+ * attribution. A clearance record that names only a self-declared actor is the "asserted but unenforced" state
+ * this item exists to end; naming the id makes a later self-clear audit a machine read, not an archaeology.
+ *
+ * @param {{to:string, actor:string, headSha?:string, body?:string, reason?:string, reviewedDiff?:string,
+ *   clearerId?:string, independence?:{independent:boolean,status:string,reason:string}|null}} o -
  *   #x169fqe: `reviewedDiff` is the raw diff (or a precomputed fingerprint) the verdict was formed against.
  *   Omitted → no diff marker → the gate falls back to SHA identity, i.e. pre-#x169fqe behaviour.
  * @returns {string}
  */
-export function buildVerdictComment({ to, actor, headSha = '', body = '', reason = '', reviewedDiff = '' } = {}) {
+export function buildVerdictComment({
+  to, actor, headSha = '', body = '', reason = '', reviewedDiff = '', clearerId = '', independence = null,
+} = {}) {
   // #2895 — `clear-human` stamps the marker for the same reason `accepted` does: it IS an acceptance (it adds
   // review:accepted), so the drain must be able to refuse it later if the head advances past the cleared tree.
   // #x169fqe — the reviewed DIFF is stamped alongside the reviewed SHA, so a later content-preserving rebase
@@ -519,7 +564,15 @@ export function buildVerdictComment({ to, actor, headSha = '', body = '', reason
   // SHA and the gate behaves exactly as it did before this change.
   const stampsAcceptance = to === 'accepted' || to === 'clear-human';
   const marker = stampsAcceptance
-    ? [buildReviewedShaMarker(headSha), buildReviewedDiffMarker(reviewedDiff)].filter(Boolean).join('\n')
+    ? [buildReviewedShaMarker(headSha), buildReviewedDiffMarker(reviewedDiff), buildClearerActorMarker(clearerId)]
+      .filter(Boolean).join('\n')
+    : '';
+  // #2844 — the independence line. Printed ONLY when the bar was not met, so a clean record stays terse; a
+  // proven self-clear never reaches here (the CLI refuses it before any write), so this only ever explains an
+  // UNPROVEN clearance. Silence would be the failure mode: a reader must not infer independence from its absence.
+  const independenceNote = (stampsAcceptance && independence && independence.independent === false)
+    ? `\n\n⚠️ Independence NOT established for this clearance (#2844): ${independence.reason}. `
+      + 'This record does not show that a party other than the author cleared it.'
     : '';
   const text = stripReviewedShaMarkers(typeof body === 'string' ? body : '');
   const heading = to === 'clear-human'
@@ -542,7 +595,7 @@ export function buildVerdictComment({ to, actor, headSha = '', body = '', reason
   return [
     heading,
     '',
-    attribution,
+    attribution + independenceNote,
     ...(text ? ['', text] : []),
     ...(marker ? ['', marker] : []),
   ].join('\n');
@@ -581,13 +634,27 @@ export function stripReviewedShaMarkers(body) {
  * exists to prevent. `actor` and `reason` are argv and therefore unbounded too, so they are projected from what
  * was actually passed rather than from a fixed-width placeholder that a long one would overrun. Over-estimating
  * is the safe direction: the cost is asking the operator to trim a body that would just barely have fitted.
- * @param {{body?:string, actor?:string, reason?:string}} o - the caller-supplied variable-length inputs
+ * #2844 — the projection is ALSO total over the independence outcomes, for the same reason it is total over the
+ * targets: the `⚠️ Independence NOT established` note is extra chrome the earlier projection would have missed,
+ * and under-counting it is precisely the 65,405–65,536 band failure M2 documents. Both unproven statuses render
+ * a FIXED-length message (the proven `self-clear` never renders — the CLI refuses it before any write), so the
+ * worst case is computed here from the real decider rather than guessed at with a placeholder width.
+ * @param {{body?:string, actor?:string, reason?:string, clearerId?:string}} o - the caller-supplied
+ *   variable-length inputs
  * @returns {number} the largest length any target renders to
  */
-export function projectVerdictCommentLength({ body = '', actor = '', reason = '' } = {}) {
-  return Math.max(...REVIEW_LABEL_TARGETS.map((to) => buildVerdictComment({
-    to, actor, headSha: 'f'.repeat(40), body, reason,
-  }).length));
+export function projectVerdictCommentLength({ body = '', actor = '', reason = '', clearerId = '' } = {}) {
+  // The unproven-independence outcomes, worst case. `unknown-clearer` fires on an empty clearer id;
+  // `unknown-author` on a present clearer with no author stamp — and its message embeds the clearer id, so it
+  // is projected with the REAL one rather than a fixed-width stand-in.
+  const outcomes = [
+    null,
+    decideClearerIndependence({ authorId: '', clearerId: '' }),
+    decideClearerIndependence({ authorId: '', clearerId: clearerId || 'x' }),
+  ];
+  return Math.max(...REVIEW_LABEL_TARGETS.flatMap((to) => outcomes.map((independence) => buildVerdictComment({
+    to, actor, headSha: 'f'.repeat(40), body, reason, clearerId, independence,
+  }).length)));
 }
 
 // we:scripts/review-set-label.mjs — allow importing the pure decider + shared harness without running the CLI
@@ -628,7 +695,9 @@ if (IS_CLI) {
   // the `if (bodyFileArg)` branch above, so `--reason`, added later and just as unbounded, was unguarded whenever
   // no `--body-file` was passed. Projected over the WHOLE target set AND every free-text argv input; see
   // `projectVerdictCommentLength`.
-  const projected = projectVerdictCommentLength({ body: verdictBody, actor: projActor, reason: projReason });
+  const projected = projectVerdictCommentLength({
+    body: verdictBody, actor: projActor, reason: projReason, clearerId: currentActorId(),
+  });
   if (projected > GH_COMMENT_MAX) {
     const flag = [[verdictBody.length, `--body-file=${bodyFileArg}`], [projReason.length, '--reason'],
       [projActor.length, '--actor']].sort((a, b) => b[0] - a[0])[0][1];
@@ -637,7 +706,9 @@ if (IS_CLI) {
   runReviewLabelCli({
     defaultActor: DEFAULT_ACTOR,
     usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--body-file=<path>]  (pr must be a positive integer; clear-human additionally requires --actor and --reason=<stated reason>)',
-    buildComment: ({ to, actor, headSha, reason, reviewedDiff }) => buildVerdictComment({ to, actor, headSha, reason, reviewedDiff, body: verdictBody }),
+    buildComment: ({ to, actor, headSha, reason, reviewedDiff, clearerId, independence }) => buildVerdictComment({
+      to, actor, headSha, reason, reviewedDiff, clearerId, independence, body: verdictBody,
+    }),
     successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
     refusalResult: ({ decision }) => ({ error: decision.reason }),
     // #2895 — UNCONDITIONAL, so every shell invocation of this CLI is opted in, including one run for
