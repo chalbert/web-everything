@@ -14,16 +14,32 @@
  *     forces the author to also edit the contract (→ human). That is the spec-based-programming gate (#2564,
  *     first instance #2563 Fork 1) made mechanical.
  *
+ * THE THIRD STATE (#xonzpym). #2839 relaxed the reason-token pin from set equality to directional containment, so
+ * a spec PR may land ahead of its impl PR. That legalized an entry DECLARED in the contract, ABSENT from the code,
+ * and UNMARKED — which passed here, in the suite whose whole job is to be the deterministic backstop. The `todo` +
+ * `owedTo` marker makes that state a declaration instead of an accident, and this suite now enforces it in both
+ * directions: an unmarked gap FAILS, and a STALE marker (marked `todo`, actually implemented) FAILS too — the half
+ * `test.todo` itself never checks, since a passing todo is only ever reported as a note.
+ *
  * SELF-REFERENCE (load-bearing). This file's basename is registered on the trust-chain policy tier
  * (`../gate-config.mjs`), so weakening a conformance assertion here is itself a human-gated spec change — you
  * cannot quietly relax the bridge to make an impl diff pass. Do not do that; if the contract is genuinely wrong,
  * change the CONTRACT (a deliberate, human-reviewed spec edit), not this suite.
  */
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   REVIEW_POLICY,
   POLICY_THRESHOLDS,
   POLICY_REASON_TOKENS,
+  POLICY_DECLARED_REASON_TOKENS,
+  POLICY_TODO_REASON_TOKENS,
+  POLICY_TODO_OWED_TO,
+  POLICY_TODO_MARKER,
+  POLICY_REASONS_BY_FAMILY,
+  POLICY_HUMAN_SENSITIVITY_REASONS,
   POLICY_CARE_JURY,
   POLICY_CARE_BAND_NAMES,
   POLICY_DISPOSITION,
@@ -31,10 +47,41 @@ import {
   POLICY_LAND_MODE,
   derivePolicyDisposition,
   resolveDispositionConfig,
+  validateContract,
+  partitionReasons,
+  unresolvedReasonMessage,
 } from '../review-policy.mjs';
 import { DEFAULT_THRESHOLDS, CARE_LEVELS, CARE_LEVEL_ORDER } from '../review-escalation.mjs';
 import { REVIEW_REASONS, deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
 import { panelRigorForCareLevel, PANEL_LENSES } from '../jury-core.mjs';
+
+/**
+ * The backlog item ids that are still LIVE — any status other than resolved/dropped — keyed by both the landed
+ * `NNN` number and the in-flight `bornAs`/filename hash (#2288), since an `owedTo` may cite either. Mirrors
+ * `collectOpenItemIds` in we:scripts/lib/validate-rules-anchors.cjs (#2844); the rule that consumes it takes the
+ * predicate injected, so the rule itself stays fixture-testable without the real board.
+ * @returns {Set<string>}
+ */
+function openBacklogItemIds() {
+  const backlogDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backlog');
+  const open = new Set();
+  for (const name of readdirSync(backlogDir)) {
+    if (!name.endsWith('.md')) continue;
+    const fm = (readFileSync(join(backlogDir, name), 'utf8').match(/^---\n([\s\S]*?)\n---/) || [])[1] || '';
+    const status = (fm.match(/^status:\s*["']?([\w-]+)/m) || [])[1];
+    if (!status || status === 'resolved' || status === 'dropped') continue;
+    const id = (name.match(/^(\w+)-/) || [])[1];
+    if (id) open.add(id);
+    const born = (fm.match(/^bornAs:\s*["']?([\w-]+)/m) || [])[1];
+    if (born) open.add(born);
+  }
+  return open;
+}
+
+/** The contract's LIVE reason entries — every declared reason MINUS the ones marked not-yet-implemented. Any
+ *  assertion that hands a token to the impl (or to the oracle) must draw from here: a `todo` entry is inert
+ *  vocabulary with no code behind it, so feeding one to a derivation is a test bug, not a conformance failure. */
+const liveReasons = () => REVIEW_POLICY.reasons.filter((r) => r.todo !== true);
 
 /** Every non-empty subset of `items` (the powerset minus the empty set), as arrays — deterministic, no random. */
 function nonEmptyPowerset(items) {
@@ -59,40 +106,199 @@ describe('static conformance — contract shape + vocabulary', () => {
     expect(REVIEW_POLICY.disposition.description.trim().length).toBeGreaterThan(0);
   });
 
-  // #2839 ENABLEMENT — this pin used to be exact set equality, and that is what made the ratified
-  // "principle and impl land in separate PRs" rule unenforceable: a change needing a new reason token had to
-  // move the CONTRACT (a spec file, human-gated) and the CODE ENUM (derivation code) in ONE commit, or the
-  // suite went red in between. So spec and impl were welded together by their own conformance test.
+  // #2839 ENABLEMENT, then #xonzpym's correction of it. This pin used to be exact set equality, and that is what
+  // made the ratified "principle and impl land in separate PRs" rule unenforceable: a change needing a new reason
+  // token had to move the CONTRACT (a spec file, human-gated) and the CODE ENUM (derivation code) in ONE commit,
+  // or the suite went red in between. So spec and impl were welded together by their own conformance test. #2839
+  // replaced equality with DIRECTIONAL CONTAINMENT — code may never outrun the spec, the spec may outrun the code.
   //
-  // The relaxation is DIRECTIONAL, and the direction is the whole point:
-  //   • every CODE token MUST be declared in the contract — code may never do something the spec has not
-  //     declared. This is the safety half and it is UNCHANGED in strength.
-  //   • a CONTRACT token with no code enum yet is LEGAL — "declared, not yet implemented". This is what lets
-  //     the spec PR land first and the impl PR follow.
-  // Equality is therefore replaced by containment in the safe direction only. An undeclared code token still
-  // reddens this suite exactly as it did before.
-  it('every REVIEW_REASONS token is DECLARED in the contract (code may never outrun the spec)', () => {
-    const contractTokens = new Set(POLICY_REASON_TOKENS);
-    const undeclared = Object.values(REVIEW_REASONS).filter((t) => !contractTokens.has(t)).sort();
-    expect(undeclared).toEqual([]);
+  // WHAT THAT COST, MEASURED RATHER THAN ARGUED. Containment made a THIRD state legal: an entry declared in the
+  // contract, absent from the code, and UNMARKED. Injecting such a phantom token reddened exactly ONE assertion —
+  // the DECORATED-map pin further down — whose message reads "the decorated map does not silently miss a reason".
+  // An author following that message adds the one-line decorated fixture it asks for, and the suite goes fully
+  // GREEN with the token still unimplemented. The backstop's own error message was directions around it.
+  //
+  // THE CORRECTION. Equality comes back, but modulo an EXPLICIT marker: an entry may declare itself not-yet-built
+  // with `todo: true` + `owedTo: "<open item>"` (the contract's `todoMarker` block; the same honest-escape shape
+  // #2844 gives the invariant catalogue). Three defect classes, each its own row, each its own test below:
+  //   1. UNDECLARED      — a code token the contract never declared. The #2839 safety half, UNCHANGED in strength.
+  //   2. UNMARKED-ABSENT — declared, absent from the code, no marker. This is what silently passed; now it FAILS.
+  //   3. STALE-TODO      — marked `todo` but the code HAS implemented it. `test.todo` never catches this (a passing
+  //      todo is reported as a note, never a defect), so the marker would otherwise outlive its work forever.
+  // A `todo` entry with a live `owedTo` and no code is the one legal gap — #2839's relaxation, now declared.
+
+  /**
+   * The todo-aware pin as a PURE rule over synthetic inputs, so each row can be proven independently of today's
+   * real vocabulary. This matters: the live contract and enum are currently equal with zero todo entries, so
+   * asserting only against them would pass whatever the rule was — equality, containment, and this rule are
+   * indistinguishable there. Only fixtures can tell them apart.
+   * @param {Array<{token: string, todo?: boolean}>} contractEntries
+   * @param {string[]} codeTokens
+   * @returns {{undeclared: string[], unmarkedAbsent: string[], staleTodo: string[]}}
+   */
+  function conformanceDefects(contractEntries, codeTokens) {
+    const code = new Set(codeTokens);
+    const declared = new Set(contractEntries.map((e) => e.token));
+    return {
+      undeclared: [...code].filter((t) => !declared.has(t)).sort(),
+      unmarkedAbsent: contractEntries.filter((e) => e.todo !== true && !code.has(e.token)).map((e) => e.token).sort(),
+      staleTodo: contractEntries.filter((e) => e.todo === true && code.has(e.token)).map((e) => e.token).sort(),
+    };
+  }
+  const NONE = { undeclared: [], unmarkedAbsent: [], staleTodo: [] };
+
+  // ── the LIVE pin ────────────────────────────────────────────────────────────────────────────────────────────
+  it('the real contract and REVIEW_REASONS agree on all three rows (no undeclared, no unmarked gap, no stale todo)', () => {
+    expect(conformanceDefects([...REVIEW_POLICY.reasons], Object.values(REVIEW_REASONS))).toEqual(NONE);
   });
 
-  // The other direction is deliberately NOT an error — that is what makes the split possible. Prove BOTH
-  // directions against synthetic sets, because asserting only against today's real vocabulary would pass
-  // whatever the rule was: the live sets are currently equal, so equality and containment are indistinguishable
-  // there. The relaxation is only real if an undeclared CODE token still fails.
-  const undeclaredCodeTokens = (contract, code) => code.filter((t) => !new Set(contract).has(t)).sort();
-
-  it('the relaxation is directional — a contract token ahead of the code PASSES (#2839)', () => {
-    // The spec PR landed first: the contract declares a token the enum has not caught up to yet.
-    expect(undeclaredCodeTokens(['a', 'b', 'not-yet-implemented'], ['a', 'b'])).toEqual([]);
+  // ── row 1: the #2839 safety half, unchanged ─────────────────────────────────────────────────────────────────
+  it('UNDECLARED — a code token the contract never declared still FAILS (code may never outrun the spec)', () => {
+    const d = conformanceDefects([{ token: 'a' }, { token: 'b' }], ['a', 'b', 'rogue']);
+    expect(d.undeclared).toEqual(['rogue']);
   });
 
-  it('the safety half is UNCHANGED — a code token the contract never declared still FAILS', () => {
-    // The direction that must never be allowed: code doing something the spec does not declare.
-    expect(undeclaredCodeTokens(['a', 'b'], ['a', 'b', 'undeclared'])).toEqual(['undeclared']);
+  // ── row 2: the state that passed silently ───────────────────────────────────────────────────────────────────
+  it('UNMARKED-ABSENT — declared, absent from the code, and unmarked FAILS (the #2839 blind spot, closed)', () => {
+    // Before the marker this was the invisible third state: the spec claims a reason the gate can never fire.
+    const d = conformanceDefects([{ token: 'a' }, { token: 'phantom' }], ['a']);
+    expect(d.unmarkedAbsent).toEqual(['phantom']);
+    // And it is the MARKER that distinguishes it — nothing else about the entry differs.
+    expect(conformanceDefects([{ token: 'a' }, { token: 'phantom', todo: true }], ['a'])).toEqual(NONE);
   });
 
+  // ── row 3: the stale marker `test.todo` cannot catch ────────────────────────────────────────────────────────
+  it('STALE-TODO — marked `todo` but actually IMPLEMENTED FAILS (the half test.todo never checks)', () => {
+    // The impl PR landed and nobody dropped the marker. `test.todo` would report this as a passing note forever;
+    // here it is a defect, so the marker must be removed in the same PR that lands the code.
+    const d = conformanceDefects([{ token: 'a' }, { token: 'shipped', todo: true }], ['a', 'shipped']);
+    expect(d.staleTodo).toEqual(['shipped']);
+  });
+
+  // ── the legal gap ───────────────────────────────────────────────────────────────────────────────────────────
+  it('a `todo` entry the code has not implemented PASSES — #2839\'s spec-ahead-of-impl split, now declared', () => {
+    expect(conformanceDefects([{ token: 'a' }, { token: 'b' }, { token: 'owed', todo: true }], ['a', 'b'])).toEqual(NONE);
+  });
+
+  it('the three rows are independent — a contract can trip all of them at once and each is reported', () => {
+    // A one-sided rule that collapsed the rows into a single boolean would pass the cases above; this pins that
+    // each defect is surfaced on its own, so a fix for one never masks another.
+    const d = conformanceDefects(
+      [{ token: 'phantom' }, { token: 'shipped', todo: true }, { token: 'ok' }],
+      ['ok', 'shipped', 'rogue'],
+    );
+    expect(d).toEqual({ undeclared: ['rogue'], unmarkedAbsent: ['phantom'], staleTodo: ['shipped'] });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// TODO-MARKER CONFORMANCE — the marker's SHAPE is enforced at load, and its `owedTo` names a LIVE debt.
+// The marker is only worth having if it cannot be worn loosely: `todo` without an `owedTo` is the free pass it
+// exists to prevent, and an `owedTo` pointing at a resolved item is "we shipped the item and built nothing" —
+// the drift, not the exit from it. Both are proven against fixtures, because zero entries carry the marker today.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('todo-marker conformance — the marker cannot be worn loosely (#xonzpym)', () => {
+  /** A minimal well-formed contract, with `reasons` swapped for the fixture under test. */
+  const contractWithReasons = (reasons) => ({ ...structuredClone(REVIEW_POLICY), reasons });
+  const REASON = { family: 'sensitivity', clearance: 'agent', description: 'fixture prose' };
+
+  it('the todoMarker block loaded, is frozen, carries prose, and declares where the marker is legal', () => {
+    expect(Object.isFrozen(POLICY_TODO_MARKER)).toBe(true);
+    expect(POLICY_TODO_MARKER.description.trim().length).toBeGreaterThan(0);
+    expect([...POLICY_TODO_MARKER.appliesTo]).toEqual(['reasons']);
+  });
+
+  it('a well-formed marked entry LOADS (the marker is usable, not merely declared)', () => {
+    expect(() => validateContract(contractWithReasons([{ token: 'owed', ...REASON, todo: true, owedTo: 'x1a2b3c' }]))).not.toThrow();
+    expect(() => validateContract(contractWithReasons([{ token: 'owed', ...REASON, todo: true, owedTo: '#2839' }]))).not.toThrow();
+  });
+
+  it('`todo` WITHOUT `owedTo` is REFUSED at load — a todo entry is debt, not a free pass', () => {
+    expect(() => validateContract(contractWithReasons([{ token: 'owed', ...REASON, todo: true }])))
+      .toThrow(/marked todo but has no owedTo/);
+  });
+
+  it('`owedTo` WITHOUT `todo` is REFUSED — an implemented entry that claims to owe work is a stale pointer', () => {
+    expect(() => validateContract(contractWithReasons([{ token: 'a', ...REASON, owedTo: '2839' }])))
+      .toThrow(/not marked todo/);
+  });
+
+  it('`todo: false` is REFUSED — "implemented" has exactly one spelling, the absent field', () => {
+    expect(() => validateContract(contractWithReasons([{ token: 'a', ...REASON, todo: false, owedTo: '2839' }])))
+      .toThrow(/must be the literal true/);
+  });
+
+  it('an `owedTo` that is not a backlog item reference is REFUSED', () => {
+    for (const bad of ['', 'soon', 'see the epic', '12', 'xNOTAHASH']) {
+      expect(() => validateContract(contractWithReasons([{ token: 'a', ...REASON, todo: true, owedTo: bad }])))
+        .toThrow(/owedTo must name a backlog item/);
+    }
+  });
+
+  it('todoMarker.appliesTo is itself validated — an unknown section, an empty list, or a duplicate is REFUSED', () => {
+    // `appliesTo` is the DATA answer to "where may an entry declare itself unbuilt?", so a typo there must be a
+    // load error, not a marker that silently governs nothing.
+    const withAppliesTo = (appliesTo) => {
+      const c = contractWithReasons([{ token: 'a', ...REASON }]);
+      c.todoMarker = { ...c.todoMarker, appliesTo };
+      return () => validateContract(c);
+    };
+    expect(withAppliesTo(['resons'])).toThrow(/unknown section "resons"/);
+    expect(withAppliesTo(['thresholds'])).toThrow(/unknown section "thresholds"/);
+    expect(withAppliesTo([])).toThrow(/must be a non-empty array/);
+    expect(withAppliesTo(['reasons', 'reasons'])).toThrow(/duplicates/);
+    expect(withAppliesTo(['reasons'])).not.toThrow();
+  });
+
+  // The OPEN-ness of an owedTo is not knowable inside review-policy.mjs (a trust-chain leaf that imports only
+  // fs/path), so the rule lives here as a pure predicate over an injected `isOpenItem` — the same split #2844
+  // uses. Fixtures prove the rule; the live sweep below applies it to the real contract.
+  const staleOwedTo = (reasons, isOpenItem) => reasons
+    .filter((r) => r.todo === true && !isOpenItem(String(r.owedTo).replace(/^#/, '')))
+    .map((r) => r.token).sort();
+
+  it('an owedTo naming an OPEN item passes; one naming a resolved/absent item FAILS', () => {
+    const isOpen = (id) => id === '2839';
+    expect(staleOwedTo([{ token: 'a', todo: true, owedTo: '#2839' }], isOpen)).toEqual([]);
+    expect(staleOwedTo([{ token: 'a', todo: true, owedTo: '#0001' }], isOpen)).toEqual(['a']);
+  });
+
+  it('every `todo` entry in the REAL contract owes an item that is still OPEN', () => {
+    const open = openBacklogItemIds();
+    expect(open.size).toBeGreaterThan(10); // the reader actually found the board — a silent empty set would pass vacuously
+    expect(staleOwedTo([...REVIEW_POLICY.reasons], (id) => open.has(id))).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// TODO-INERTNESS — a `todo` entry reserves vocabulary and NOTHING ELSE. It must never reach runtime
+// classification: not the token list the impl canonicalizes against, not the family groups, not the
+// human-clearance set. These are PARTITION LAWS over whatever the contract happens to hold, so they stay
+// meaningful the day a real todo entry is added — unlike an assertion about today's (empty) todo set.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('todo inertness — a not-yet-implemented entry can never affect a disposition (#xonzpym)', () => {
+  it('the declared vocabulary partitions EXACTLY into implemented + todo (nothing lost, nothing double-counted)', () => {
+    expect([...POLICY_REASON_TOKENS, ...POLICY_TODO_REASON_TOKENS].sort())
+      .toEqual([...POLICY_DECLARED_REASON_TOKENS].sort());
+    const impl = new Set(POLICY_REASON_TOKENS);
+    expect(POLICY_TODO_REASON_TOKENS.filter((t) => impl.has(t))).toEqual([]);
+  });
+
+  it('no todo token leaks into the family groups or the human-clearance set the impl imports', () => {
+    const todo = new Set(POLICY_TODO_REASON_TOKENS);
+    const leaked = [
+      ...POLICY_REASONS_BY_FAMILY.sensitivity,
+      ...POLICY_REASONS_BY_FAMILY.deadlock,
+      ...POLICY_HUMAN_SENSITIVITY_REASONS,
+    ].filter((t) => todo.has(t));
+    expect(leaked).toEqual([]);
+  });
+
+  it('every todo token carries its owedTo in the derived map (the debt is addressable, not just flagged)', () => {
+    for (const token of POLICY_TODO_REASON_TOKENS) {
+      expect(POLICY_TODO_OWED_TO[token]).toMatch(/^(?:\d{3,}|x[0-9a-z]{6,8})$/);
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -326,20 +532,76 @@ describe('disposition-config conformance — the FF3 knobs load, validate, and m
   });
 });
 
+// These three walk the contract's reason entries DIRECTLY (not POLICY_REASON_TOKENS), so they must apply the same
+// todo partition the derived constants do — `liveReasons()`, never `REVIEW_POLICY.reasons`. A `todo` entry is
+// inert: it is absent from the oracle's lookup map, so handing one to derivePolicyDisposition throws
+// "declared NOT YET IMPLEMENTED" and these tests would fail on a contract that is perfectly well-formed. That is
+// a test bug, not a conformance failure — and it is exactly the trap a raw `.reasons` walk falls into.
 describe('the contract encodes the ratified two-tier flip (#2445)', () => {
   it('deadlock reasons ⇒ human, never auto-land', () => {
-    for (const token of REVIEW_POLICY.reasons.filter((r) => r.family === 'deadlock').map((r) => r.token)) {
+    for (const token of liveReasons().filter((r) => r.family === 'deadlock').map((r) => r.token)) {
       expect(derivePolicyDisposition({ reason: token })).toEqual({ mode: REVIEW_DISPOSITIONS.HUMAN, autoLand: false });
     }
   });
   it('human-clearance sensitivity reasons (gate-self/statute) ⇒ converge, never auto-land', () => {
-    for (const token of REVIEW_POLICY.reasons.filter((r) => r.family === 'sensitivity' && r.clearance === 'human').map((r) => r.token)) {
+    for (const token of liveReasons().filter((r) => r.family === 'sensitivity' && r.clearance === 'human').map((r) => r.token)) {
       expect(derivePolicyDisposition({ reason: token })).toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
     }
   });
   it('agent-clearance sensitivity reasons ⇒ converge, auto-land', () => {
-    for (const token of REVIEW_POLICY.reasons.filter((r) => r.family === 'sensitivity' && r.clearance === 'agent').map((r) => r.token)) {
+    for (const token of liveReasons().filter((r) => r.family === 'sensitivity' && r.clearance === 'agent').map((r) => r.token)) {
       expect(derivePolicyDisposition({ reason: token })).toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
     }
+  });
+
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// THE MARKER, END TO END, ON A CONTRACT THAT ACTUALLY CARRIES ONE (#xonzpym). Everything above proves the RULE;
+// zero real entries are marked `todo` today, so the derived constants and the oracle's todo path are never
+// exercised by the live contract. That is the classic way a marker ships broken: the gate is green because the
+// feature is unused. So load the module against a SYNTHETIC contract that does carry a todo reason, and drive the
+// whole pipeline — validation, the partition, the family groups, and the oracle's refusal — against it.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('the derivation itself, on reasons that really carry a `todo` (#xonzpym)', () => {
+  const OWED = { token: 'owed-reason', family: 'sensitivity', clearance: 'agent', description: 'fixture prose', todo: true, owedTo: '#xonzpym' };
+  const LIVE = { token: 'live-reason', family: 'sensitivity', clearance: 'agent', description: 'fixture prose' };
+
+  it('partitionReasons splits live from todo and strips the owedTo\'s leading #', () => {
+    const { live, todoOwedTo } = partitionReasons([LIVE, OWED]);
+    expect(live.map((r) => r.token)).toEqual(['live-reason']);
+    expect([...todoOwedTo]).toEqual([['owed-reason', 'xonzpym']]);
+  });
+
+  it('partitionReasons is what every derived constant is built from — the live contract round-trips through it', () => {
+    // Pins the wiring, not just the helper: if a constant were ever rebuilt off the raw `.reasons` again, this
+    // equality is what notices.
+    const { live, todoOwedTo } = partitionReasons([...REVIEW_POLICY.reasons]);
+    expect(live.map((r) => r.token)).toEqual([...POLICY_REASON_TOKENS]);
+    expect([...todoOwedTo.keys()]).toEqual([...POLICY_TODO_REASON_TOKENS]);
+    expect(Object.fromEntries(todoOwedTo)).toEqual({ ...POLICY_TODO_OWED_TO });
+  });
+
+  it('a todo reason is INERT — the partition keeps it out of the live set that becomes the impl vocabulary', () => {
+    // The failure mode worth pinning: a todo entry reaching classification and being treated as a matching
+    // agent-clearance sensitivity reason, which would flip a human gate to auto-land.
+    const { live } = partitionReasons([...REVIEW_POLICY.reasons, OWED]);
+    expect(live.map((r) => r.token)).not.toContain('owed-reason');
+    expect(live.map((r) => r.token)).toEqual([...POLICY_REASON_TOKENS]);
+  });
+
+  it('the oracle names the item that owes an unbuilt reason, and keeps "unknown" distinct from "unbuilt"', () => {
+    const { todoOwedTo } = partitionReasons([LIVE, OWED]);
+    // Unbuilt: say who owes it. "unknown reason" would send the reader hunting for a typo that isn't there.
+    expect(unresolvedReasonMessage(['owed-reason'], todoOwedTo))
+      .toMatch(/declared NOT YET IMPLEMENTED.*owed-reason \(owedTo #xonzpym\)/);
+    // Genuinely unknown: the original message, unchanged.
+    expect(unresolvedReasonMessage(['typo-reason'], todoOwedTo)).toMatch(/^derivePolicyDisposition: unknown reason\(s\): typo-reason$/);
+    // Mixed: the unbuilt one is the more actionable diagnosis, so it leads.
+    expect(unresolvedReasonMessage(['typo-reason', 'owed-reason'], todoOwedTo)).toMatch(/declared NOT YET IMPLEMENTED/);
+  });
+
+  it('the live oracle still rejects an unknown token with the plain message (no todo entries today)', () => {
+    expect(() => derivePolicyDisposition({ reason: 'no-such-reason' })).toThrow(/unknown reason\(s\): no-such-reason/);
   });
 });
