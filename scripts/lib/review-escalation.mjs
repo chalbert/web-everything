@@ -294,8 +294,17 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * `humanBasisFiles` is omitted it falls back to `changedFiles` (the non-stacked case, where the two are
  * identical), so every existing caller is unchanged.
  *
+ * #2890 — `diffHunks` (base-vs-head DIFF CONTENT, not just file names + a line count) is accepted and carried
+ * through to the returned verdict unchanged. This rubric does NOT read it for any signal today — that is
+ * deliberate: #2890 is PURE PLUMBING, the shared precondition #2839's `assertNotPrincipleAndImpl` and #2840's
+ * `isPrincipleSurface` need (both are content-reading detectors — a statute-anchor-body edit or a
+ * pre-existing-marker edit are base-vs-head FACTS no file name or line count can answer). Threading it here
+ * now, ahead of either detector landing, means neither follow-on has to touch this signature again — they
+ * only add a term that reads `diffHunks`. A caller with no diff text in hand (most existing callers, still)
+ * passes nothing and gets the unchanged, pre-#2890 behaviour: default `''`.
+ *
  * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
- *          crossRepo?:boolean, thresholds?:object}} o
+ *          crossRepo?:boolean, thresholds?:object, diffHunks?:string}} o
  */
 export function scoreEscalation({
   changedFiles = [],
@@ -304,6 +313,7 @@ export function scoreEscalation({
   dismissedFindings = 0,
   crossRepo = false,
   thresholds = {},
+  diffHunks = '',
 } = {}) {
   const t = { ...DEFAULT_THRESHOLDS, ...thresholds };
   const reasons = [];
@@ -351,7 +361,9 @@ export function scoreEscalation({
   // AI panel how hard to look — `panelRigorForCareLevel` — and never changes route or land).
   const careLevel = deriveCareLevel({ signals, humanRequired });
 
-  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals };
+  // #2890 — passthrough, not a signal: `producerReviewLabel(score)` and any other caller that receives this
+  // verdict object gets `diffHunks` for free, without a second signature change, once a future detector reads it.
+  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals, diffHunks };
 }
 
 /**
@@ -363,7 +375,10 @@ export function scoreEscalation({
  * the sticky `review:human` gate), and at open none exist yet — so the outcome collapses to the rubric's own
  * escalate/humanRequired verdict. `null` means no review label to apply (a plain `merge` PR —
  * `ready-to-merge` alone is enough).
- * @param {{escalate:boolean, humanRequired?:boolean}} score
+ *
+ * #2890 — called with the FULL `scoreEscalation` return, so `score.diffHunks` (the base-vs-head diff content)
+ * rides along unused: this function's label derivation is escalate/humanRequired-only and stays that way.
+ * @param {{escalate:boolean, humanRequired?:boolean, diffHunks?:string}} score
  * @returns {string|null}
  */
 export function producerReviewLabel({ escalate, humanRequired = false } = {}) {
