@@ -66,6 +66,12 @@
       "phase": 3,
       "status": "in-progress",
       "note": "generator + state file + skill; one Bash call plus one Artifact call per update"
+    },
+    {
+      "id": "todo-mode-for-unimplemented-contract-entries-a-d",
+      "title": "Todo mode for unimplemented contract entries — a declared-not-built marker the conformance gate enforces",
+      "phase": 2,
+      "status": "todo"
     }
   ],
   "decisions": [
@@ -236,7 +242,7 @@
     {
       "id": "todo-mode-for-unimplemented-contract-entries",
       "title": "Todo mode for unimplemented contract entries",
-      "status": "awaiting",
+      "status": "taken",
       "question": "Should a contract entry be able to declare itself not-yet-implemented, like `test.todo`?",
       "ifNothing": "A contract entry with no implementation and no marker passes silently — the strictness #1099 traded away stays traded.",
       "why": "The operator's own idea. #1099 made 'declared but not implemented' legal but invisible — nothing distinguishes deliberately-ahead-of-the-code from someone forgot. A `todo` marker makes the third state explicit and lets the gate be stricter than #1099, not looser.",
@@ -256,7 +262,9 @@
         "row 4 (marked todo but implemented) would catch the stale marker — `test.todo` does not",
         "pair with `owedTo` naming an open item, matching #1100's invariant-catalogue convention"
       ],
-      "ruling": "R6"
+      "ruling": "R6",
+      "detail": "RULED 2026-08-08: build it. The justification is the silent third row, NOT the Fork A/impl split named in the prepared recommendation — that split already shipped whole as PR #1102, which moved the contract entry and the REVIEW_REASONS enum in the same commit, so the 'natural first customer' came and went and the two vocabularies are equal today (9 tokens each). What stands on its own is that #1099 relaxed the conformance pin from equality to containment, which leaves 'declared, absent, unmarked' passing silently in the one suite whose whole job is being the deterministic backstop. A todo marker makes that third state explicit and makes the gate STRICTER than #1099, not looser: an unmarked absent entry fails, and a marker left behind after the code lands also fails — the stale-marker case test.todo does not catch. Pair the field with owedTo naming an open item, per #1100's invariant-catalogue convention. Note the build edits the declarative leash (the contract plus the conformance suite), so its PR fires gate-self and needs a human clear regardless.",
+      "takenAt": "2026-08-08"
     },
     {
       "id": "2572",
