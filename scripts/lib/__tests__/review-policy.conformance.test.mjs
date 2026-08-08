@@ -33,7 +33,7 @@ import { describe, it, expect } from 'vitest';
 import {
   REVIEW_POLICY,
   POLICY_THRESHOLDS,
-  POLICY_REASON_TOKENS,
+  POLICY_IMPLEMENTED_REASON_TOKENS,
   POLICY_DECLARED_REASON_TOKENS,
   POLICY_TODO_REASON_TOKENS,
   POLICY_TODO_OWED_TO,
@@ -52,7 +52,7 @@ import {
   unresolvedReasonMessage,
 } from '../review-policy.mjs';
 import { DEFAULT_THRESHOLDS, CARE_LEVELS, CARE_LEVEL_ORDER } from '../review-escalation.mjs';
-import { REVIEW_REASONS, deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
+import { REVIEW_REASONS, deriveReviewDisposition, REVIEW_DISPOSITIONS, canonicalizeReason } from '../review-core.mjs';
 import { panelRigorForCareLevel, PANEL_LENSES } from '../jury-core.mjs';
 
 /**
@@ -278,9 +278,9 @@ describe('todo-marker conformance — the marker cannot be worn loosely (#xonzpy
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 describe('todo inertness — a not-yet-implemented entry can never affect a disposition (#xonzpym)', () => {
   it('the declared vocabulary partitions EXACTLY into implemented + todo (nothing lost, nothing double-counted)', () => {
-    expect([...POLICY_REASON_TOKENS, ...POLICY_TODO_REASON_TOKENS].sort())
+    expect([...POLICY_IMPLEMENTED_REASON_TOKENS, ...POLICY_TODO_REASON_TOKENS].sort())
       .toEqual([...POLICY_DECLARED_REASON_TOKENS].sort());
-    const impl = new Set(POLICY_REASON_TOKENS);
+    const impl = new Set(POLICY_IMPLEMENTED_REASON_TOKENS);
     expect(POLICY_TODO_REASON_TOKENS.filter((t) => impl.has(t))).toEqual([]);
   });
 
@@ -321,7 +321,7 @@ describe('threshold conformance — DEFAULT_THRESHOLDS is sourced from the contr
 // precedence rule — fails here, on the specific reason set that exposes it.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 describe('disposition conformance — deriveReviewDisposition realizes the contract table over the full input space', () => {
-  const tokens = [...POLICY_REASON_TOKENS];
+  const tokens = [...POLICY_IMPLEMENTED_REASON_TOKENS];
 
   it('every single reason token: impl outcome === contract-oracle outcome', () => {
     for (const token of tokens) {
@@ -364,7 +364,7 @@ describe('decorated-string conformance — the drain\'s real reason strings deri
   };
 
   it('covers every token (the decorated map does not silently miss a reason)', () => {
-    expect(Object.keys(DECORATED).sort()).toEqual([...POLICY_REASON_TOKENS].sort());
+    expect(Object.keys(DECORATED).sort()).toEqual([...POLICY_IMPLEMENTED_REASON_TOKENS].sort());
   });
 
   it('each decorated reason derives the SAME disposition as its bare contract token', () => {
@@ -532,7 +532,7 @@ describe('disposition-config conformance — the FF3 knobs load, validate, and m
   });
 });
 
-// These three walk the contract's reason entries DIRECTLY (not POLICY_REASON_TOKENS), so they must apply the same
+// These three walk the contract's reason entries DIRECTLY (not POLICY_IMPLEMENTED_REASON_TOKENS), so they must apply the same
 // todo partition the derived constants do — `liveReasons()`, never `REVIEW_POLICY.reasons`. A `todo` entry is
 // inert: it is absent from the oracle's lookup map, so handing one to derivePolicyDisposition throws
 // "declared NOT YET IMPLEMENTED" and these tests would fail on a contract that is perfectly well-formed. That is
@@ -577,7 +577,7 @@ describe('the derivation itself, on reasons that really carry a `todo` (#xonzpym
     // Pins the wiring, not just the helper: if a constant were ever rebuilt off the raw `.reasons` again, this
     // equality is what notices.
     const { live, todoOwedTo } = partitionReasons([...REVIEW_POLICY.reasons]);
-    expect(live.map((r) => r.token)).toEqual([...POLICY_REASON_TOKENS]);
+    expect(live.map((r) => r.token)).toEqual([...POLICY_IMPLEMENTED_REASON_TOKENS]);
     expect([...todoOwedTo.keys()]).toEqual([...POLICY_TODO_REASON_TOKENS]);
     expect(Object.fromEntries(todoOwedTo)).toEqual({ ...POLICY_TODO_OWED_TO });
   });
@@ -587,7 +587,7 @@ describe('the derivation itself, on reasons that really carry a `todo` (#xonzpym
     // agent-clearance sensitivity reason, which would flip a human gate to auto-land.
     const { live } = partitionReasons([...REVIEW_POLICY.reasons, OWED]);
     expect(live.map((r) => r.token)).not.toContain('owed-reason');
-    expect(live.map((r) => r.token)).toEqual([...POLICY_REASON_TOKENS]);
+    expect(live.map((r) => r.token)).toEqual([...POLICY_IMPLEMENTED_REASON_TOKENS]);
   });
 
   it('the oracle names the item that owes an unbuilt reason, and keeps "unknown" distinct from "unbuilt"', () => {
@@ -597,11 +597,77 @@ describe('the derivation itself, on reasons that really carry a `todo` (#xonzpym
       .toMatch(/declared NOT YET IMPLEMENTED.*owed-reason \(owedTo #xonzpym\)/);
     // Genuinely unknown: the original message, unchanged.
     expect(unresolvedReasonMessage(['typo-reason'], todoOwedTo)).toMatch(/^derivePolicyDisposition: unknown reason\(s\): typo-reason$/);
-    // Mixed: the unbuilt one is the more actionable diagnosis, so it leads.
-    expect(unresolvedReasonMessage(['typo-reason', 'owed-reason'], todoOwedTo)).toMatch(/declared NOT YET IMPLEMENTED/);
+  });
+
+  it('the message is TOTAL — a typo alongside an unbuilt reason is reported, never swallowed by it', () => {
+    // The lossy version filtered `unresolved` down to the owed set and reported only that, so a real typo
+    // vanished whenever a todo token happened to sit beside it. Both groups must survive, in one message.
+    const { todoOwedTo } = partitionReasons([LIVE, OWED]);
+    const mixed = unresolvedReasonMessage(['typo-reason', 'owed-reason'], todoOwedTo);
+    // The unbuilt one still LEADS (it is the more actionable diagnosis — it names who owes the work)…
+    expect(mixed).toMatch(/declared NOT YET IMPLEMENTED.*owed-reason \(owedTo #xonzpym\)/);
+    // …and the typo is still there, in the unknown group, spelled out by name.
+    expect(mixed).toMatch(/unknown reason\(s\): typo-reason/);
+    // Every input token appears in the output, whichever group it belongs to — no silent drops, any order.
+    const many = unresolvedReasonMessage(['typo-one', 'owed-reason', 'typo-two'], todoOwedTo);
+    for (const token of ['typo-one', 'owed-reason', 'typo-two']) expect(many).toContain(token);
+    expect(many).toMatch(/unknown reason\(s\): typo-one, typo-two/);
   });
 
   it('the live oracle still rejects an unknown token with the plain message (no todo entries today)', () => {
     expect(() => derivePolicyDisposition({ reason: 'no-such-reason' })).toThrow(/unknown reason\(s\): no-such-reason/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// THE CANONICALIZATION VOCABULARY BINDING (#xonzpym). review-core.mjs canonicalizes every decorated reason
+// string against ONE token list, and there are now two lists to choose from that are interchangeable by shape:
+// POLICY_IMPLEMENTED_REASON_TOKENS (safe) and POLICY_DECLARED_REASON_TOKENS (unsafe). Nothing else in this suite
+// can tell them apart — every other pin ITERATES the implemented set, so it never sees the divergence, and
+// review-core.mjs is `tier: policy, leash: code`, i.e. a green suite is what clears an edit to it. So the
+// binding is pinned HERE, twice over: at source level (arms today, on any swap) and behaviourally (drives the
+// REAL matcher over both vocabularies against a contract that carries a todo entry, and shows what the wrong
+// one costs). This block is the reason the swap cannot ride in on a green suite.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('review-core canonicalizes against the IMPLEMENTED vocabulary, never the declared one (#xonzpym)', () => {
+  const CORE_SRC = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'review-core.mjs'), 'utf8');
+  const OWED = { token: 'owed-reason', family: 'sensitivity', clearance: 'agent', description: 'fixture prose', todo: true, owedTo: '#xonzpym' };
+
+  it('ALL_REASON_TOKENS is bound to POLICY_IMPLEMENTED_REASON_TOKENS, at source', () => {
+    expect(CORE_SRC).toMatch(/^const ALL_REASON_TOKENS = POLICY_IMPLEMENTED_REASON_TOKENS;$/m);
+  });
+
+  it('review-core does not so much as import the DECLARED vocabulary', () => {
+    // Import-level, not just use-level: the unsafe set must not even be in scope in the file that classifies.
+    // Comment lines may NAME it (they explain why it is the wrong choice); no line of CODE may mention it.
+    const codeMentions = CORE_SRC.split('\n')
+      .filter((line) => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
+      .filter((line) => line.includes('POLICY_DECLARED_REASON_TOKENS'));
+    expect(codeMentions).toEqual([]);
+  });
+
+  it('the counterfactual, on a contract that really carries a todo entry: declared vocab resolves what implemented vocab refuses', () => {
+    const declared = [...REVIEW_POLICY.reasons, OWED].map((r) => r.token);
+    const implemented = partitionReasons([...REVIEW_POLICY.reasons, OWED]).live.map((r) => r.token);
+    expect(declared).toContain('owed-reason');
+    expect(implemented).not.toContain('owed-reason');
+
+    // The decorated form the drain would actually carry for such a reason.
+    const decorated = 'owed-reason (scripts/lib/gate-config.mjs) — human review required';
+    // As shipped: unrecognized ⇒ deriveReviewDisposition throws. Fail-closed.
+    expect(canonicalizeReason(decorated, implemented)).toBeNull();
+    // Wired to the declared set: it resolves…
+    expect(canonicalizeReason(decorated, declared)).toBe('owed-reason');
+    // …and because a todo token is (correctly) in NEITHER family group nor the human-clearance set, it then
+    // falls through BOTH precedence branches to the permissive default — a silent AUTO-LAND of an unbuilt,
+    // human-review-shaped reason. That is the whole cost of the swap, stated as an assertion.
+    expect(POLICY_REASONS_BY_FAMILY.deadlock).not.toContain('owed-reason');
+    expect(POLICY_HUMAN_SENSITIVITY_REASONS).not.toContain('owed-reason');
+  });
+
+  it('the safe direction is what production does: a real decorated reason still canonicalizes with the default vocabulary', () => {
+    // Guards the counterfactual above from passing vacuously (e.g. if the matcher stopped matching anything).
+    expect(canonicalizeReason('gate-self (scripts/lib/gate-config.mjs) — human review required')).toBe(REVIEW_REASONS.GATE_SELF);
+    expect(canonicalizeReason('owed-reason (scripts/lib/gate-config.mjs) — human review required')).toBeNull();
   });
 });

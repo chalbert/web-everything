@@ -57,7 +57,7 @@
  * Pure, unit-tested in `we:scripts/lib/__tests__/review-core.test.mjs`.
  */
 import {
-  POLICY_REASON_TOKENS,
+  POLICY_IMPLEMENTED_REASON_TOKENS,
   POLICY_REASONS_BY_FAMILY,
   POLICY_HUMAN_SENSITIVITY_REASONS,
   POLICY_CARE_JURY,
@@ -454,8 +454,16 @@ const DEADLOCK_REASONS = POLICY_REASONS_BY_FAMILY.deadlock;
  *  Derived from the contract (clearance:human ∧ family:sensitivity). */
 const HUMAN_SENSITIVITY_REASONS = POLICY_HUMAN_SENSITIVITY_REASONS;
 
-/** Every known reason token (both families) — the canonical vocabulary a decorated reason string is matched against. */
-const ALL_REASON_TOKENS = POLICY_REASON_TOKENS;
+/**
+ * Every IMPLEMENTED reason token (both families) — the canonical vocabulary a decorated reason string is matched
+ * against. This MUST be the implemented set, never `POLICY_DECLARED_REASON_TOKENS`: a `todo` (declared-but-unbuilt)
+ * token is absent from `POLICY_REASONS_BY_FAMILY` and `HUMAN_SENSITIVITY_REASONS`, so canonicalizing one would drop
+ * it through both precedence branches below to the permissive `{ converge, autoLand: true }` default — an unbuilt,
+ * human-review-shaped reason silently auto-landing. Matching against the implemented set instead leaves it
+ * unrecognized, and `deriveReviewDisposition` throws (#xonzpym). The conformance suite pins this binding at source
+ * level ("the canonicalization vocabulary binding") precisely because the swap is otherwise invisible to it.
+ */
+const ALL_REASON_TOKENS = POLICY_IMPLEMENTED_REASON_TOKENS;
 
 /**
  * Canonicalize ONE raw reason string to its bare `REVIEW_REASONS` token, or `null` if unrecognized. Pure.
@@ -466,12 +474,19 @@ const ALL_REASON_TOKENS = POLICY_REASON_TOKENS;
  * Matches the LONGEST token prefix so that, should two tokens ever both prefix a string (none do today), the more
  * specific one wins rather than an arbitrary order. The boundary check keeps a token from matching a longer word
  * that merely starts with it (e.g. a hypothetical `sizeable` never reads as `size`).
+ *
+ * EXPORTED with the vocabulary INJECTABLE (#xonzpym) — production always uses the default (`ALL_REASON_TOKENS`,
+ * the implemented set). The parameter exists so the conformance suite can run the REAL matcher over BOTH
+ * vocabularies against a contract that really carries a `todo` entry, and prove the declared set resolves an
+ * unbuilt token that the implemented set correctly refuses. Mirroring this matcher in the test instead would let
+ * the mirror drift; injecting it cannot.
  * @param {string} raw
+ * @param {readonly string[]} [vocabulary] the token set to match against; defaults to the IMPLEMENTED set.
  * @returns {string|null} the bare token, or null if no known token prefixes it at a boundary.
  */
-function canonicalizeReason(raw) {
+export function canonicalizeReason(raw, vocabulary = ALL_REASON_TOKENS) {
   const s = String(raw).trim();
-  const matches = ALL_REASON_TOKENS
+  const matches = [...vocabulary]
     .filter((tok) => s === tok || (s.startsWith(tok) && /^[\s(]/.test(s.slice(tok.length))))
     .sort((a, b) => b.length - a.length);
   return matches[0] ?? null;

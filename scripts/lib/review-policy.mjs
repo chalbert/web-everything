@@ -7,7 +7,7 @@
  * place. This module reads that contract, VALIDATES its shape (static conformance — a malformed contract throws
  * loudly at import, never silently mis-gates), FREEZES it, and exposes two things:
  *
- *   1. the policy VALUES as derived constants (`POLICY_THRESHOLDS`, `POLICY_REASON_TOKENS`,
+ *   1. the policy VALUES as derived constants (`POLICY_THRESHOLDS`, `POLICY_IMPLEMENTED_REASON_TOKENS`,
  *      `POLICY_REASONS_BY_FAMILY`, `POLICY_HUMAN_SENSITIVITY_REASONS`) — the SINGLE SOURCE OF TRUTH the impl
  *      imports (`review-escalation.mjs` DEFAULT_THRESHOLDS; `review-core.mjs`'s reason sets) so a value exists
  *      exactly once. Flipping one is necessarily a diff to the contract → a human-gated spec change.
@@ -405,7 +405,7 @@ function mergeLensWeights(base, patch) {
  *     reserves the token and names the debt; it does nothing else.
  *
  * That inertness is what makes the marker safe to hand to an author mid-split, and it is also what lets the
- * conformance suite pin `POLICY_REASON_TOKENS` EXACTLY equal to the code enum again — the containment relaxation
+ * conformance suite pin `POLICY_IMPLEMENTED_REASON_TOKENS` EXACTLY equal to the code enum again — the containment relaxation
  * (#2839) survives as the `todo` escape hatch rather than as a permanently loose pin.
  */
 /**
@@ -432,18 +432,28 @@ export function partitionReasons(reasons) {
  * without a contract that carries a todo entry. The two cases must stay distinguishable: "unknown reason" sends
  * the reader hunting for a typo, when the real answer may be "this reason is spec'd, nobody built it, and here is
  * the item that owes it". Collapsing them would make the marker invisible at exactly the moment it matters.
+ *
+ * TOTAL over its input (#xonzpym): every unresolved token appears in the output, in exactly one of the two
+ * groups. An earlier draft filtered down to the owed group and reported only that, so a genuine TYPO alongside a
+ * `todo` token was silently swallowed — the unbuilt diagnosis erasing the unknown one is the same class of
+ * information loss the marker exists to prevent, pointed the other way.
  * @param {string[]} unresolved tokens that produced no live classification
  * @param {Map<string, string>} todoOwedTo token → owing backlog item, for the declared-but-unbuilt entries
  * @returns {string}
  */
 export function unresolvedReasonMessage(unresolved, todoOwedTo) {
   const owed = unresolved.filter((t) => todoOwedTo.has(t));
+  const unknown = unresolved.filter((t) => !todoOwedTo.has(t));
+  const parts = [];
+  // The unbuilt group leads: it is the more actionable diagnosis (it names who owes the work).
   if (owed.length) {
-    return 'derivePolicyDisposition: reason(s) declared NOT YET IMPLEMENTED in the contract: ' +
+    parts.push('reason(s) declared NOT YET IMPLEMENTED in the contract: ' +
       `${owed.map((t) => `${t} (owedTo #${todoOwedTo.get(t)})`).join(', ')} — ` +
-      'a todo reason is inert and cannot dispose a PR; land its impl and drop the todo marker first.';
+      'a todo reason is inert and cannot dispose a PR; land its impl and drop the todo marker first.');
   }
-  return `derivePolicyDisposition: unknown reason(s): ${unresolved.join(', ')}`;
+  // …but the unknown group is never dropped, even when an owed token is present alongside it.
+  if (unknown.length || !parts.length) parts.push(`unknown reason(s): ${unknown.join(', ')}`);
+  return `derivePolicyDisposition: ${parts.join(' Additionally, ')}`;
 }
 
 const { live: LIVE_REASONS, todoOwedTo: TODO_OWED_BY_TOKEN } = partitionReasons(REVIEW_POLICY.reasons);
@@ -455,18 +465,26 @@ const REASON_META = new Map(LIVE_REASONS.map((r) => [r.token, { family: r.family
 export const POLICY_TODO_MARKER = REVIEW_POLICY.todoMarker;
 
 /**
- * Every reason token the code is expected to IMPLEMENT, in contract order — i.e. the declared reasons MINUS the
- * ones marked `todo`. Frozen; `review-core.mjs`'s ALL_REASON_TOKENS imports this.
+ * Every reason token the code actually IMPLEMENTS, in contract order — i.e. the declared reasons MINUS the ones
+ * marked `todo`. Frozen. This is the RUNTIME vocabulary: `review-core.mjs` binds its `ALL_REASON_TOKENS` to it,
+ * and that binding is pinned at source level by the conformance suite (see "the canonicalization vocabulary
+ * binding" there) because swapping it for the declared set below is silent and dangerous, not merely wrong.
  *
- * NOTE the name kept its original spelling on purpose: this constant's CONTRACT has always been "the tokens the
- * impl must know about", and that is unchanged — the todo marker only gives an entry a way to opt OUT of it. The
- * full declared vocabulary (todo entries included) is `POLICY_DECLARED_REASON_TOKENS` below, which exists for
- * spec-side readers, not for the impl.
+ * The name says `IMPLEMENTED` on purpose (#xonzpym): the two sets are interchangeable at a call site by shape and
+ * differ only in safety, so the shorter, ambiguous `POLICY_REASON_TOKENS` was renamed away rather than defended in
+ * prose — a hazard you cannot spell is better than one a comment warns about.
  */
-export const POLICY_REASON_TOKENS = Object.freeze(LIVE_REASONS.map((r) => r.token));
+export const POLICY_IMPLEMENTED_REASON_TOKENS = Object.freeze(LIVE_REASONS.map((r) => r.token));
 
-/** EVERY token the contract declares, todo entries included — the spec-side vocabulary. Frozen. Use this only to
- *  reason ABOUT the contract (docs, the conformance suite's partition checks); never to classify a real reason. */
+/**
+ * EVERY token the contract declares, todo entries included — the SPEC-side vocabulary. Frozen.
+ *
+ * NEVER canonicalize or classify a real reason against this set. A `todo` token is deliberately absent from
+ * `POLICY_REASONS_BY_FAMILY` and `POLICY_HUMAN_SENSITIVITY_REASONS`, so resolving one here would fall straight
+ * through BOTH precedence branches of `deriveReviewDisposition` to the permissive default — turning an unbuilt,
+ * human-review-shaped reason into an agent AUTO-LAND. Use it only to reason ABOUT the contract (docs, the
+ * conformance suite's partition checks).
+ */
 export const POLICY_DECLARED_REASON_TOKENS = Object.freeze(REVIEW_POLICY.reasons.map((r) => r.token));
 
 /** The tokens declared NOT YET IMPLEMENTED (`todo: true`), in contract order. Empty today. Frozen. */
