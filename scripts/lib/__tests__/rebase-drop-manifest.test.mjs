@@ -5,6 +5,7 @@
  *   the merge-tree parse + the manifest-only-vs-real disposition + the plumbing SEQUENCE are decided here.
  */
 import { describe, it, expect } from 'vitest';
+import { gitBlobOid } from '../git-run.mjs';
 import {
   LANE_MANIFEST,
   parseMergeTree,
@@ -201,7 +202,9 @@ describe('rebaseDropManifest', () => {
         ? 'backlog/2218-a.md\nbacklog/2219-existing.md\nbacklog/2221-c.md\n'
         : 'backlog/2219-drain-finding.md\n' }),
       'cat-file': { status: 0, stdout: '---\nkind: story\n---\n# drain-finding\n' },
-      'hash-object': { status: 0, stdout: 'b'.repeat(40) + '\n' },
+      // #2923 — hash the stdin we ACTUALLY receive, like git does. A canned oid here is what let the
+      // renumber path stage git's empty blob (`adf2d758`, repaired by `14432ba9`) with every test green.
+      'hash-object': (_a, o) => ({ status: 0, stdout: gitBlobOid(o?.input ?? '') + '\n' }),
       'update-index': { status: 0 },
     });
     const r = rebaseDropManifest({ laneRef: 'lane/x-2276', healCollision: true, run });
