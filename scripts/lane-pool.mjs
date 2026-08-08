@@ -114,13 +114,15 @@ for (const a of rest) {
 }
 
 // ── git helpers (throw-on-error wrappers) ───────────────────────────────────────────────────────────
-const git = (args, cwd) =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+// `opts` merges into execFileSync's options (e.g. `{ timeout: 8000 }`) — needed by callers that must
+// never let a slow/hung git call stall a dispatch acquire, matching the adjacent `gh` call's timeout.
+const git = (args, cwd, opts = {}) =>
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
 const gitQuiet = (args, cwd) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'ignore', 'inherit'] });
-const tryGit = (args, cwd) => {
+const tryGit = (args, cwd, opts = {}) => {
   try {
-    return git(args, cwd);
+    return git(args, cwd, opts);
   } catch {
     return null;
   }
@@ -521,6 +523,18 @@ function laneDirtyOrAhead(dir, branch) {
  * `remoteShas` is the live `ls-remote` snapshot (taken ONCE per acquire pass, and only when some lane looks
  * ahead — so the no-per-lane-fetch cost profile is preserved in the common case). HEAD counts as pushed only
  * if it is a live remote tip or an ancestor of one. Fails CLOSED on any git fault: no proof ⇒ stay protected.
+ *
+ * #2920 — this used to be a per-remote-head `merge-base --is-ancestor` fan-out (one spawn per live remote
+ * head, per ahead lane): on the real 38-lane pool with 29 remote heads that was 677 git spawns / ~30s for
+ * one acquire pass. Containment is answerable in ONE spawn: `rev-list HEAD --not <shas...>` walks HEAD's
+ * ancestry once, excluding everything reachable from ANY of the given shas — empty output means HEAD (and
+ * everything under it) is already reachable from some remote head, i.e. exactly the OR-across-heads the old
+ * loop computed. `--ignore-missing` tolerates a remoteShas entry whose object isn't present in this lane's
+ * local object DB (e.g. a branch this lane never fetched) by dropping it from the exclusion set rather than
+ * failing the whole spawn — the same fail-open-per-candidate behavior the old per-sha loop had (a missing
+ * object just couldn't prove anything, but didn't stop OTHER candidates from proving it). Verified against
+ * the live pool + synthetic cases (fully pushed / one unpushed commit / deleted remote ref / detached HEAD /
+ * no remotes / empty repo / unresolvable sha mixed with a valid one) — zero verdict flips vs. the old loop.
  */
 function aheadIsProvablyPushed(dir, remoteShas) {
   if (!remoteShas || remoteShas.size === 0) return false;
@@ -528,16 +542,14 @@ function aheadIsProvablyPushed(dir, remoteShas) {
   if (!headRaw) return false;
   const head = headRaw.trim();
   if (remoteShas.has(head)) return true;
-  for (const sha of remoteShas) {
-    // `--is-ancestor` exits 0 when true, non-zero otherwise ⇒ tryGit returns null on false/unknown-object.
-    if (tryGit(['merge-base', '--is-ancestor', head, sha], dir) !== null) return true;
-  }
-  return false;
+  const out = tryGit(['rev-list', '--ignore-missing', '--max-count=1', 'HEAD', '--not', ...remoteShas], dir);
+  return out !== null && out.trim() === '';
 }
 
-/** Live remote tip SHAs (one network call). Returns an EMPTY set on any failure, so callers fail closed. */
+/** Live remote tip SHAs (one network call, `timeout` guarded like the adjacent `gh` call — #2920). Returns
+ *  an EMPTY set on any failure/timeout, so callers fail closed. */
 function liveRemoteShas(dir) {
-  const out = tryGit(['ls-remote', '--heads', 'origin'], dir);
+  const out = tryGit(['ls-remote', '--heads', 'origin'], dir, { timeout: 8000 });
   if (out === null) return new Set();
   return new Set(out.split('\n').filter(Boolean).map((l) => l.split(/\s+/)[0]).filter(Boolean));
 }
