@@ -31,7 +31,7 @@
 import { execFileSync } from 'node:child_process';
 // #2901 — the NET two-tree diff basis. merge-ai-prs.mjs guards its CLI behind `if (IS_CLI)`, so importing
 // this one function does not run the lander; the /review skill mandates the same import for the same reason.
-import { computeNetDiffText, computeNetDiffPaths } from './merge-ai-prs.mjs';
+import { computeNetDiffText, computeNetDiffPaths, collapseRollupToLatestPerName } from './merge-ai-prs.mjs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { classifyChecks } from './pr-land.mjs';
@@ -50,12 +50,17 @@ export function labelNames(labels) {
  * ∈ pass|fail|pending|skipping|cancel); a rollup row is instead a GraphQL `CheckRun` (`status`/`conclusion`, no
  * `bucket`/`state`) or `StatusContext` (`state`), so feeding the raw rollup would misread every check as passed.
  * This maps each rollup row to gh's own bucket vocabulary so `classifyChecks` stays the single green/red truth.
- * Tolerant of an absent/odd rollup (→ []).
+ *
+ * #2925 — COLLAPSED TO THE LATEST ENTRY PER CHECK NAME FIRST (`collapseRollupToLatestPerName`,
+ * `we:scripts/merge-ai-prs.mjs`), same rule `latestRequiredCheck` uses. `classifyChecks` folds ALL rows with
+ * `some(isFail)`, so without the collapse a superseded `CANCELLED` entry sitting beside a later `SUCCESS` for
+ * the same name reads the whole PR as failed even though the check that finished is green. Tolerant of an
+ * absent/odd rollup (→ []).
  * @param {Array<object>|null|undefined} rollup
  * @returns {Array<{name:string, bucket:string}>}
  */
 export function rollupToCheckRows(rollup) {
-  const rows = Array.isArray(rollup) ? rollup : [];
+  const rows = collapseRollupToLatestPerName(rollup);
   return rows.map((c) => {
     const name = String((c && (c.name || c.context)) || '');
     let bucket;
