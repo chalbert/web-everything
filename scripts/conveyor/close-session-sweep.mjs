@@ -2,6 +2,11 @@
 /**
  * close-session-sweep.mjs — the deterministic first half of the `/closing-session` learnings sweep (#2614).
  *
+ * ⚠️ SUPERSEDED by `learnings-harvest.mjs` (#x2j0l3t). The close no longer curates ANYTHING: it emits to the
+ * pool and stops, and the periodic `/harvest` adjudicates across ALL sessions. This module remains as the
+ * SINGLE-FILE sweep API (harvest is directory-scoped) and its tests still pin the re-scrub + dedup contract,
+ * but nothing in the close path calls it any more. Do not wire new callers to it — use the harvest.
+ *
  * WHAT THE CLOSE DELEGATES HERE (script-decidable, per we:docs/agent/platform-decisions.md
  * #deterministic-core-thin-judgment): read this session's delivery-agent drop-box (learnings-drop.mjs) →
  * re-validate every entry through the SAME scrub-gate the append used (defence in depth) → dedup/cluster the
@@ -78,7 +83,15 @@ function parseArgs(argv) {
 function main(argv) {
   const f = parseArgs(argv);
   const threshold = f.threshold != null ? Number(f.threshold) : DEFAULT_THRESHOLD;
-  const path = resolveDropboxPath({ file: f.file, session: f.session });
+  // `resolveDropboxPath` now REFUSES a missing session slug (there is no shared default file any more), so
+  // report that as a usage error rather than an uncaught throw.
+  let path;
+  try {
+    path = resolveDropboxPath({ file: f.file, session: f.session });
+  } catch (e) {
+    console.error(`close-session-sweep: ${e.message}`);
+    process.exit(2);
+  }
   let result;
   try {
     result = sweepFile(path, { threshold });
