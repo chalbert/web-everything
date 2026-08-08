@@ -106,7 +106,7 @@ import { resolve, join, dirname } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { rebaseDropContent } from './lib/rebase-drop-content.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
-import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha } from './lib/review-escalation.mjs';
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor } from './lane-drain.mjs';
@@ -2333,14 +2333,27 @@ async function runCli() {
       // null → the gate fails OPEN (never blocks a land on a transient read failure).
       let acceptedSha = null;
       let liveHeadSha = null;
+      let acceptedDiff = null;
+      let liveHeadDiff = null;
       if (hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
         try {
           const d = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'headRefOid,comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
           liveHeadSha = typeof d.headRefOid === 'string' ? d.headRefOid : null;
           acceptedSha = parseReviewedSha(d.comments || []);
+          acceptedDiff = parseReviewedDiff(d.comments || []);
         } catch { /* fetch miss → SHAs null → gate fails open */ }
+        // #x169fqe — the LIVE diff, read only when the accept actually recorded a fingerprint to compare it
+        // against AND the head has moved. Both conditions keep this off the common path: a pre-#x169fqe accept
+        // (no fingerprint) never pays the hop, and neither does an accept whose head never moved. A miss leaves
+        // the live diff null, which fails CLOSED into the SHA-identity verdict — a false re-park, never a false
+        // honour.
+        if (acceptedDiff && liveHeadSha && acceptedSha && !liveHeadSha.startsWith(acceptedSha) && !acceptedSha.startsWith(liveHeadSha)) {
+          try {
+            liveHeadDiff = execFileSync('gh', ['pr', 'diff', String(v.num), ...repoFlag(v.repo)], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+          } catch { /* miss → null → SHA-identity verdict (the stricter path) */ }
+        }
       }
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha });
+      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff });
       v.escalated = score.escalate ? 'yes' : 'no';
       // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
       // makes an already-applied review:human label win even when a rebase narrows the diff back to
