@@ -55,10 +55,19 @@ The disposition mechanism and the mandate that feeds it are built; the delivery 
   self-certify past a blocker — `nit` survives only as a finer label on an already-carved-out finding.
 - **Only a blocker earns a round.** `earnsRound` is a verdict-narrow predicate (the `blocksAcceptance` pattern), read
   by `deriveVerdict`. A panel whose findings are all carve-outs/nits now returns `accept` and opens zero rounds.
-- **Fail-closed throughout.** An absent, non-boolean, or invented answer leaves the finding blocking, so every
-  pre-#2950 finding shape verdicts exactly as before — a strict relaxation, reversible by ignoring the field.
+- **Un-blocking must be EARNED by the three answers.** An absent, non-boolean, or invented answer leaves the
+  finding blocking, so every pre-#2950 finding shape verdicts exactly as before. A juror's own `disposition` word
+  buys nothing on its own in the non-blocking direction: a bare `carve-out`/`nit` with no answers is discarded and
+  the finding blocks. Only `blocker` is honoured self-declared, because that is the safe direction. *(The first
+  draft of this slice got that wrong — it honoured any declared word when the answers were missing, which let a
+  juror silently un-block a real defect by writing the label and skipping the booleans. Caught by the independent
+  review on PR #1082 and fixed there; the regression tests are named after it.)*
 - **The mandate states the goal.** `buildSubjectMandate` takes `goal` and `round`; the juror is told what the change
-  is FOR and to judge against that and the base, never an ideal. `/converge` takes `--goal` and threads it.
+  is FOR and to judge against that and the base, never an ideal. `/converge` takes `--goal` and threads it. Note
+  what IS and IS NOT opt-in: the goal paragraph and the round-2+ anti-spiral paragraph are conditional, so omitting
+  `goal`/`round` leaves *those* byte-for-byte unchanged — but the DISPOSITION block is **unconditional** and reaches
+  every mandate from this slice onward. That is deliberate (the routing needs the answers everywhere), and it is why
+  the un-blocking rule above has to be strict.
 - **The anti-spiral guard.** At round ≥ 2 the mandate says: judge only the previous round's fix; anything else is a
   carve-out by construction. This is what lets the loop end on agreement instead of on the round cap.
 

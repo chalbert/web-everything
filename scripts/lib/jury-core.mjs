@@ -390,15 +390,23 @@ export function normalizeFinding(raw) {
   const declared = raw.disposition != null && Object.hasOwn(DISPOSITION_EARNS_ROUND, String(raw.disposition))
     ? String(raw.disposition)
     : undefined;
-  // THE DERIVED ROUTING WINS OVER THE SELF-DECLARED ONE. A juror that answered the three questions has already
-  // said everything that decides this; letting its own `disposition` word override them would be self-certification
-  // — the same anchoring problem the `dismissed-findings` signal exists to catch. `nit` is the one exception, and
-  // only in the non-blocking direction: it is a FINER LABEL on something the routing already carved out, never a
-  // way past a derived `blocker`.
+  // THE ROUTING DECIDES; A SELF-DECLARED WORD MAY ONLY EVER MAKE A FINDING *MORE* BLOCKING (PR #1082 review,
+  // blocker 1). A juror that answered the three questions has already said everything that decides this, so its
+  // own `disposition` word cannot override them — that is self-certification, the anchoring problem the
+  // `dismissed-findings` signal exists to catch.
+  //
+  // THE HOLE THIS CLOSES, precisely: an earlier draft honoured ANY declared disposition when the three answers
+  // were absent, so `{summary: 'this diff drops the auth check', disposition: 'carve-out'}` — no facts at all —
+  // normalized to a non-blocking finding and accepted. A juror taking the obvious LLM shortcut (answer the label,
+  // skip the booleans) could therefore silently un-block a finding that blocks on `main` today, on EVERY review,
+  // since the disposition instructions are unconditional. Un-blocking must be EARNED by the three facts; nothing
+  // else buys it. So the only self-declared word honoured without facts is `blocker`, which is the safe direction.
   const derived = deriveFindingDisposition(out);
-  if (derived === DISPOSITIONS.BLOCKER) out.disposition = DISPOSITIONS.BLOCKER;
+  if (derived === DISPOSITIONS.BLOCKER || declared === DISPOSITIONS.BLOCKER) out.disposition = DISPOSITIONS.BLOCKER;
+  // `nit` is a FINER LABEL on something the routing ALREADY carved out — never a route to non-blocking on its own.
   else if (derived === DISPOSITIONS.CARVE_OUT) out.disposition = declared === DISPOSITIONS.NIT ? DISPOSITIONS.NIT : derived;
-  else if (declared !== undefined) out.disposition = declared;
+  // derived === undefined and no declared `blocker`: the finding stays UNDECLARED, which `earnsRound` reads as
+  // blocking. A bare `carve-out`/`nit` with no answers is dropped on the floor, exactly like an invented word.
   return out;
 }
 
@@ -1357,11 +1365,15 @@ export function buildSubjectMandate({
     'a parallel lane, without holding this change?',
     `Exactly one combination earns a round (\`${DISPOSITIONS.BLOCKER}\`): introduced AND worse-than-base AND NOT`,
     `parallelizable. Everything else routes to \`${DISPOSITIONS.CARVE_OUT}\` — real, reported, filed, but not this`,
-    `change's problem to fix here. Add \`disposition: "${DISPOSITIONS.NIT}"\` for something worth saying and never`,
-    'worth a round; it is a finer label on a carve-out, and it can never downgrade a routed blocker.',
+    'change\'s problem to fix here.',
     'Answer (b) honestly: judging against an ideal instead of against the base is the single most expensive mistake',
-    'a reviewer makes here. Better-but-imperfect is a carve-out, not a blocker. OMITTING any of the three answers',
-    'leaves the finding BLOCKING — the routing fails closed, so silence costs a round rather than saving one.',
+    'a reviewer makes here. Better-but-imperfect is a carve-out, not a blocker.',
+    'THE THREE ANSWERS ARE THE ONLY WAY TO UN-BLOCK A FINDING. Omitting any of them leaves it BLOCKING, and writing',
+    `a \`disposition\` word yourself does NOT substitute for them: a bare \`${DISPOSITIONS.CARVE_OUT}\` or`,
+    `\`${DISPOSITIONS.NIT}\` with no answers is DISCARDED and the finding blocks. The one word that is honoured on`,
+    `its own is \`${DISPOSITIONS.BLOCKER}\` — you may always declare something blocking. So silence costs a round`,
+    `rather than saving one. \`${DISPOSITIONS.NIT}\` is a finer label you may add ALONGSIDE three answers that`,
+    'already route to a carve-out, for something worth saying and never worth a round.',
     'SCOPE IS THE GOAL, NOT THE FILE COUNT: a fix that serves the stated goal is in scope however many files it',
     'takes; a fix that introduces a NEW goal is a carve-out.',
     // #2950 — THE ANTI-SPIRAL GUARD. Round 2+ exists to check the round-1 fix, nothing else. Without this the panel
