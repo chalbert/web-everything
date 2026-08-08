@@ -11,6 +11,7 @@ import {
   isBlastRadiusPath,
   isGateSelfPath,
   scoreEscalation,
+  diffHunksFrom,
   coupleEscalation,
   hasReviewLabel,
   decideReviewGate,
@@ -246,6 +247,105 @@ describe('scoreEscalation', () => {
     expect(other.humanRequired).toBe(false);
     // a plain leaf → neither
     expect(scoreEscalation({ changedFiles: ['backlog/x.md'] }).humanRequired).toBe(false);
+  });
+});
+
+describe('#2890 — diffHunks (base-vs-head diff CONTENT) is accepted and threaded through, pure plumbing', () => {
+  it('defaults to null (NOT COMPUTED) when omitted — never \'\', which means "computed and empty"', () => {
+    // #2890-review-fix finding 1 — the original default was `''`, the SAME value every producer returns on its
+    // failure paths. A detector reading it could not tell "there is no principle touch" from "I never got a
+    // diff", and in the drain the second case coincides with a fully-populated `changedFiles` (the `gh` files
+    // fallback) — a silent fail-open on exactly the class #2839/#2840 exist to catch.
+    const r = scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20 });
+    expect(r.diffHunks).toBeNull();
+    expect(r.diffHunks).not.toBe('');
+  });
+  it('an EXPLICIT \'\' is preserved — "computed, and the content really is empty" stays distinguishable', () => {
+    const r = scoreEscalation({ changedFiles: ['backlog/x.md'], diffHunks: '' });
+    expect(r.diffHunks).toBe('');
+    expect(r.diffHunks).not.toBeNull();
+  });
+  it('is carried through UNCHANGED on the returned verdict when the caller has real text', () => {
+    const hunks = '@@ -1,2 +1,2 @@\n-old\n+new\n';
+    const r = scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20, diffHunks: hunks });
+    expect(r.diffHunks).toBe(hunks);
+  });
+  it('does NOT itself change escalate/humanRequired/reasons/signals — #2890 is plumbing, not a detector', () => {
+    const hunks = '@@ -1,2 +1,2 @@\n-### Some Rule {#some-rule}\n+### Some Other Rule {#some-rule}\n';
+    const withHunks = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'], diffHunks: hunks });
+    const withoutHunks = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'] });
+    expect(withHunks.escalate).toBe(withoutHunks.escalate);
+    expect(withHunks.humanRequired).toBe(withoutHunks.humanRequired);
+    expect(withHunks.reasons).toEqual(withoutHunks.reasons);
+    expect(withHunks.signals).toEqual(withoutHunks.signals);
+  });
+  it('anything that is NOT a string collapses to null — a caller that regresses to passing the raw result OBJECT lands on the safe side', () => {
+    expect(() => scoreEscalation({ diffHunks: null })).not.toThrow();
+    expect(scoreEscalation({ diffHunks: null }).diffHunks).toBeNull();
+    expect(scoreEscalation({ diffHunks: undefined }).diffHunks).toBeNull();
+    expect(scoreEscalation({ diffHunks: { text: '', scored: false } }).diffHunks).toBeNull();
+    expect(scoreEscalation({ diffHunks: 42 }).diffHunks).toBeNull();
+  });
+  it('producerReviewLabel is unaffected by diffHunks riding along on the score object it receives', () => {
+    const hunks = '@@ -1,2 +1,2 @@\n-old\n+new\n';
+    const withHunks = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], diffHunks: hunks });
+    const withoutHunks = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] });
+    expect(producerReviewLabel(withHunks)).toBe(producerReviewLabel(withoutHunks));
+  });
+});
+
+describe('#2890-review-fix finding 1 — diffHunksFrom is the ONE mapping from a producer result onto the contract', () => {
+  it('an UNSCORED producer result becomes null, whatever its (always-\'\') text says', () => {
+    for (const reason of ['exec-contract', 'ref-unresolved', 'diff-failed', 'diff-too-large', 'no-clone']) {
+      expect(diffHunksFrom({ text: '', scored: false, reason }), reason).toBeNull();
+    }
+  });
+  it('a SCORED result yields its text — including a genuinely empty one', () => {
+    expect(diffHunksFrom({ text: 'diff --git a/a b/a\n', scored: true })).toBe('diff --git a/a b/a\n');
+    expect(diffHunksFrom({ text: '', scored: true })).toBe('');
+  });
+  it('a missing / malformed result is null, never \'\'', () => {
+    expect(diffHunksFrom(null)).toBeNull();
+    expect(diffHunksFrom(undefined)).toBeNull();
+    expect(diffHunksFrom('a raw string')).toBeNull();
+    expect(diffHunksFrom({ scored: true })).toBeNull();          // scored but no text field at all
+    expect(diffHunksFrom({ text: 'x', scored: 'yes' })).toBeNull(); // truthy-but-not-true never counts as scored
+  });
+  it('the two call sites use the helper and NEVER a raw `.text` — the exact regression the review caught', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, join } = await import('node:path');
+    const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    for (const f of ['pr-land.mjs', 'merge-ai-prs.mjs']) {
+      const src = readFileSync(join(scriptsDir, f), 'utf8');
+      expect(src, `${f} must derive diffHunks via diffHunksFrom`).toMatch(/diffHunks\s*[:=]\s*diffHunksFrom\(/);
+      // `diffHunks: <anything>.text` is the fail-open shape: `''` on every producer failure path.
+      expect(src.match(/diffHunks\s*[:=]\s*[A-Za-z_$][\w$]*\.text\b/), `${f} passes a raw .text into diffHunks`).toBeNull();
+    }
+  });
+});
+
+describe('#2890-review-fix finding 4 — the hunks travel with the file list computed on the SAME basis', () => {
+  // `diffHunks` is always CUMULATIVE (`mergeBase(origin/main, head)…head`), while `changedFiles` may be
+  // DE-INFLATED to `baseRev…head` for a stacked couple (#2390). Zipping the two would report a principle edit
+  // on a file that is not in `changedFiles`. `diffHunksBasisFiles` is the list on the hunks' own basis.
+  it('diffHunksBasisFiles is humanBasisFiles (the cumulative list), NOT the de-inflated changedFiles', () => {
+    const r = scoreEscalation({
+      changedFiles: ['scripts/child-only.mjs'],
+      humanBasisFiles: ['scripts/child-only.mjs', 'docs/agent/platform-decisions.md'],
+      diffHunks: '@@ -1 +1 @@\n-a\n+b\n',
+    });
+    expect(r.diffHunksBasisFiles).toEqual(['scripts/child-only.mjs', 'docs/agent/platform-decisions.md']);
+    expect(r.diffHunksBasisFiles).not.toEqual(r.signals.blastRadius);
+  });
+  it('falls back to changedFiles in the NON-stacked case, where the two bases are identical', () => {
+    const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], diffHunks: 'diff\n' });
+    expect(r.diffHunksBasisFiles).toEqual(['scripts/pr-land.mjs']);
+  });
+  it('is null whenever the hunks are null — a real file list can never be paired with an absent content signal', () => {
+    const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], humanBasisFiles: ['scripts/pr-land.mjs'] });
+    expect(r.diffHunks).toBeNull();
+    expect(r.diffHunksBasisFiles).toBeNull();
   });
 });
 

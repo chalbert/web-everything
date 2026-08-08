@@ -294,8 +294,43 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * `humanBasisFiles` is omitted it falls back to `changedFiles` (the non-stacked case, where the two are
  * identical), so every existing caller is unchanged.
  *
+ * #2890 — `diffHunks` (base-vs-head DIFF CONTENT, not just file names + a line count) is accepted and carried
+ * through to the returned verdict unchanged. This rubric does NOT read it for any signal today — that is
+ * deliberate: #2890 is PURE PLUMBING, the shared precondition #2839's `assertNotPrincipleAndImpl` and #2840's
+ * `isPrincipleSurface` need (both are content-reading detectors — a statute-anchor-body edit or a
+ * pre-existing-marker edit are base-vs-head FACTS no file name or line count can answer). Threading it here
+ * now, ahead of either detector landing, means neither follow-on has to touch this signature again — they
+ * only add a term that reads `diffHunks`.
+ *
+ * #2890-review-fix finding 1 — THE `null` CONTRACT, and why it is `null` and not `''`. Every producer of this
+ * signal (`computeNetDiffText`, `computeProposedFileDiffText`) returns `text:''` on EVERY failure path
+ * (`exec-contract`, `ref-unresolved`, `diff-failed`, `diff-too-large`, no local/sibling clone) — the same `''`
+ * a genuinely content-free diff yields. Passing `.text` through would collapse "NOT COMPUTED" into "COMPUTED,
+ * EMPTY", and in the drain that happens exactly where `changedFiles` STILL populates (the `gh pr view --json
+ * files` fallback): a content-reading detector would then see a real file list beside a fake-empty content
+ * signal and conclude `principleTouch === false` — a silent fail-open on the precise class #2839/#2840 exist to
+ * catch. So the contract here is:
+ *   • `null`  — NOT COMPUTED. A detector MUST NOT read a clearance from this; treat it as unknown and
+ *               over-fire (escalate), never as "no principle touch". `.includes()` on it THROWS, loudly, which
+ *               is the point: there is no way to silently mistake it for an empty diff.
+ *   • `''`    — COMPUTED, and the base-vs-head content is genuinely empty (mode-only / rename-only diff).
+ *   • string  — COMPUTED unified-diff text.
+ * Callers must never hand-roll the `scored ? text : null` ternary — use `diffHunksFrom(netDiff)` below, which
+ * is the single place that maps a `{text, scored}` producer result onto this contract. Anything that is not a
+ * string is normalized to `null` here, so a caller that regresses to passing a raw result OBJECT lands on the
+ * safe side rather than stringifying garbage into the signal. A caller with no diff text in hand (most
+ * existing callers, still) passes nothing and gets `null`.
+ *
+ * #2890-review-fix finding 4 — WHICH FILE LIST THE HUNKS PAIR WITH. `diffHunks` is always CUMULATIVE
+ * (`mergeBase(origin/main, head)…head`), while `changedFiles` may be DE-INFLATED to `baseRev…head` for a
+ * stacked couple (#2390). They are therefore NOT the same basis and must not be zipped together. The verdict
+ * exposes `diffHunksBasisFiles` — the file list computed on the SAME basis as the hunks (`humanBasisFiles`,
+ * falling back to `changedFiles` in the non-stacked case where the two are identical) — so a detector reading
+ * hunk content pairs it with THAT list, never with `changedFiles`. The two travel together on one object
+ * precisely so the pairing cannot be got wrong by reading the wrong field.
+ *
  * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
- *          crossRepo?:boolean, thresholds?:object}} o
+ *          crossRepo?:boolean, thresholds?:object, diffHunks?:string|null}} o
  */
 export function scoreEscalation({
   changedFiles = [],
@@ -304,6 +339,7 @@ export function scoreEscalation({
   dismissedFindings = 0,
   crossRepo = false,
   thresholds = {},
+  diffHunks = null,
 } = {}) {
   const t = { ...DEFAULT_THRESHOLDS, ...thresholds };
   const reasons = [];
@@ -351,7 +387,34 @@ export function scoreEscalation({
   // AI panel how hard to look — `panelRigorForCareLevel` — and never changes route or land).
   const careLevel = deriveCareLevel({ signals, humanRequired });
 
-  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals };
+  // #2890 — passthrough, not a signal: `producerReviewLabel(score)` and any other caller that receives this
+  // verdict object gets `diffHunks` for free, without a second signature change, once a future detector reads it.
+  // #2890-review-fix finding 1 — anything that is not a string collapses to `null` (NOT COMPUTED); `''` is
+  // reserved for "computed, genuinely empty". A detector must branch on `=== null` before reading content.
+  const hunks = typeof diffHunks === 'string' ? diffHunks : null;
+  // #2890-review-fix finding 4 — the file list on the SAME (cumulative) basis as `hunks`. `null` when there are
+  // no hunks, so a detector can never pair a real file list with an absent content signal.
+  const diffHunksBasisFiles = hunks === null ? null : gateBasis;
+  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals, diffHunks: hunks, diffHunksBasisFiles };
+}
+
+/**
+ * #2890-review-fix finding 1 — the ONE mapping from a diff-text producer's result onto `scoreEscalation`'s
+ * `diffHunks` contract. Every producer (`computeNetDiffText`, `computeNetDiffPaths`'s sibling
+ * `computeProposedFileDiffText`) returns `{text, scored, reason?}` and sets `text:''` on EVERY failure path, so
+ * `.text` alone cannot distinguish "not computed" from "computed, empty". This collapses that correctly:
+ * `scored` ⇒ the text (possibly `''`), otherwise `null` (NOT COMPUTED).
+ *
+ * Call sites must use THIS rather than writing `netDiff.scored ? netDiff.text : null` inline — the ternary is
+ * exactly the thing the review found missing at both call sites, and one shared helper is the only way a third
+ * call site cannot reintroduce it. A missing/malformed result is `null`, never `''`.
+ * @param {{text?:string, scored?:boolean}|null|undefined} netDiff a `computeNetDiffText`-shaped result
+ * @returns {string|null} the diff text when it was actually computed, else `null`
+ */
+export function diffHunksFrom(netDiff) {
+  if (!netDiff || typeof netDiff !== 'object') return null;
+  if (netDiff.scored !== true) return null;
+  return typeof netDiff.text === 'string' ? netDiff.text : null;
 }
 
 /**
@@ -363,7 +426,10 @@ export function scoreEscalation({
  * the sticky `review:human` gate), and at open none exist yet — so the outcome collapses to the rubric's own
  * escalate/humanRequired verdict. `null` means no review label to apply (a plain `merge` PR —
  * `ready-to-merge` alone is enough).
- * @param {{escalate:boolean, humanRequired?:boolean}} score
+ *
+ * #2890 — called with the FULL `scoreEscalation` return, so `score.diffHunks` (the base-vs-head diff content)
+ * rides along unused: this function's label derivation is escalate/humanRequired-only and stays that way.
+ * @param {{escalate:boolean, humanRequired?:boolean, diffHunks?:string|null}} score
  * @returns {string|null}
  */
 export function producerReviewLabel({ escalate, humanRequired = false } = {}) {
