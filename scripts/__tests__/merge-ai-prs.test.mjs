@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled } from '../merge-ai-prs.mjs';
+import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 import { buildManifest } from '../readiness/lane-manifest.mjs';
 
@@ -1597,6 +1597,72 @@ describe('computeNetDiffText (#2450 — reviewer-facing NET diff TEXT, SAME basi
     };
     const r = computeNetDiffText({ exec: badExec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
     expect(r).toEqual({ text: '', base: null, rev: null, scored: false, reason: 'exec-contract' });
+  });
+});
+
+// #2890-review-fix finding 3 — the PR's first cut called `computeNetDiffChangedFiles` and `computeNetDiffText`
+// independently for the SAME ref, which re-ran the whole of `resolveNetDiffBasis`: measured 5 → 11 git
+// subprocesses and 1 → 2 network fetches per `pr-land` PR open, under a comment claiming the two read off ONE
+// fetch. `resolveNetDiffBasis` is now exported and both helpers accept the resolved object, so the claim is
+// true by construction.
+describe('resolveNetDiffBasis shared across both helpers (#2890-review-fix finding 3 — ONE fetch, one probe)', () => {
+  const fakeExec = (script = {}) => {
+    const calls = [];
+    const exec = (cmd, args, opts) => {
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify');
+      calls.push({ cmd, args, opts, key: `${cmd} ${intent.join(' ')}` });
+      const h = script[`${cmd} ${intent.join(' ')}`];
+      if (h && h.throw) throw new Error(h.throw);
+      if (h && 'stdout' in h) return h.stdout;
+      if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      return '';
+    };
+    return { exec, calls };
+  };
+  const script = {
+    'git merge-base origin/main origin/lane/x': { stdout: 'forkpoint\n' },
+    'git diff --numstat forkpoint origin/lane/x': { stdout: '3\t1\tREADME.md\n' },
+    'git diff forkpoint origin/lane/x': { stdout: 'diff --git a/README.md b/README.md\n@@ -1 +1 @@\n-a\n+b\n' },
+  };
+
+  it('sharing the basis makes ONE fetch and ONE candidate probe total, not two of each', () => {
+    const { exec, calls } = fakeExec(script);
+    const basis = resolveNetDiffBasis({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(basis.ok).toBe(true);
+    computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'], basis });
+    computeNetDiffText({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'], basis });
+    expect(calls.filter((c) => c.args[0] === 'fetch').length).toBe(1);
+    expect(calls.filter((c) => c.args[0] === 'merge-base').length).toBe(1);
+    expect(calls.filter((c) => c.key.startsWith('git diff --numstat')).length).toBe(1);
+    expect(calls.length).toBe(4); // fetch + merge-base + numstat probe + the text diff
+  });
+
+  it('the UNSHARED path costs strictly more — the measurement the review made, pinned', () => {
+    const { exec, calls } = fakeExec(script);
+    computeNetDiffChangedFiles({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    computeNetDiffText({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(calls.filter((c) => c.args[0] === 'fetch').length).toBe(2);
+    expect(calls.length).toBeGreaterThan(4);
+  });
+
+  it('a shared basis yields byte-identical results to resolving independently', () => {
+    const a = fakeExec(script);
+    const basis = resolveNetDiffBasis({ exec: a.exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    const sharedFiles = computeNetDiffChangedFiles({ exec: a.exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'], basis });
+    const sharedText = computeNetDiffText({ exec: a.exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'], basis });
+    const b = fakeExec(script);
+    expect(sharedFiles).toEqual(computeNetDiffChangedFiles({ exec: b.exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] }));
+    expect(sharedText).toEqual(computeNetDiffText({ exec: b.exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] }));
+  });
+
+  it('an UNRESOLVED shared basis still degrades with its reason — no silent scored:true', () => {
+    const { exec } = fakeExec({}); // every diff probe throws ⇒ ref-unresolved
+    const basis = resolveNetDiffBasis({ exec, rev: 'lane/gone' });
+    expect(basis).toEqual({ ok: false, reason: 'ref-unresolved' });
+    expect(computeNetDiffText({ exec, rev: 'lane/gone', basis }))
+      .toEqual({ text: '', base: null, rev: null, scored: false, reason: 'ref-unresolved' });
+    expect(computeNetDiffChangedFiles({ exec, rev: 'lane/gone', basis }))
+      .toEqual({ changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [], reason: 'ref-unresolved' });
   });
 });
 

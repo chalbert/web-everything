@@ -107,9 +107,10 @@ import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { rebaseDropContent } from './lib/rebase-drop-content.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // Rebase resolution (2026-08-08): the UNION of both sides. `parseReviewedDiff` is #2979's accept-fingerprint
-// reader, landed on main today; `READY_TO_MERGE_LABEL` / `isReviewHoldLabel` are this PR's hold-invariant
-// helpers. They are independent concerns on the same import line — neither supersedes the other.
-import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
+// reader, landed on main today; `READY_TO_MERGE_LABEL` / `isReviewHoldLabel` / `decideParkReadyStrip` are this
+// PR's hold-invariant helpers; `diffHunksFrom` is #2890's null-contract mapper. All independent concerns on the
+// same import line — none supersedes another.
+import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
@@ -1806,7 +1807,15 @@ function isExecContractError(err) {
   return err instanceof TypeError;
 }
 
-function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
+/**
+ * #2890-review-fix finding 3 — EXPORTED so a caller that needs BOTH the changed-file shape and the diff TEXT
+ * for one ref can resolve the basis ONCE and hand the same resolved object to both helpers (`basis` option
+ * below), instead of paying two full `resolveNetDiffBasis` runs — two network fetches and two candidate probes
+ * — for one ref. `pr-land.mjs#applyReviewEscalationLabel` and the drain's scoring loop both do exactly that.
+ * The result is a plain value with no hidden state, so sharing it cannot make the two helpers disagree — that
+ * is the point: one basis, one fetch, provably no drift.
+ */
+export function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
   if (typeof exec !== 'function' || !rev) return { ok: false, reason: 'ref-unresolved' };
   const baseRef = `${remote}/${base}`;
   try {
@@ -1859,11 +1868,13 @@ function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetc
   return { ok: false, reason: 'ref-unresolved' };
 }
 
-export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'main', baseRev = null, rev, fetchExtraRefs = [] } = {}) {
+export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'main', baseRev = null, rev, fetchExtraRefs = [], basis: sharedBasis = null } = {}) {
   const empty = { changedFiles: [], diffLines: 0, scored: false, humanBasisFiles: [] };
   if (typeof exec !== 'function' || !rev) return empty;
   const baseRevOk = typeof baseRev === 'string' && /^[0-9a-f]{7,64}$/i.test(baseRev);
-  const basis = resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
+  // #2890-review-fix finding 3 — reuse a basis the caller already resolved for this same ref (see
+  // `resolveNetDiffBasis`); absent one, resolve our own exactly as before.
+  const basis = sharedBasis || resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
   // #2952 — additive: `reason` distinguishes a fixable caller-side `exec`-contract violation ('exec-contract')
   // from a legitimately absent ref ('ref-unresolved'). Existing consumers that read only `scored` are untouched.
   if (!basis.ok) return { ...empty, reason: basis.reason };
@@ -1898,13 +1909,17 @@ export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'ma
  * `'ref-unresolved'` (neither candidate resolves — legitimately absent, unfixable, correctly falls back), or
  * `'diff-failed'` (the basis resolved but the text diff itself then failed). Existing consumers that read only
  * `scored` are untouched.
- * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
+ * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[], basis?:object|null}} opts
+ *   `basis` — an already-resolved `resolveNetDiffBasis` result for this same ref (#2890-review-fix finding 3);
+ *   pass it to share ONE fetch + candidate probe with `computeNetDiffChangedFiles` instead of resolving twice.
  * @returns {{text:string, base:string|null, rev:string|null, scored:boolean, reason?:'exec-contract'|'ref-unresolved'|'diff-failed'}}
  */
-export function computeNetDiffText({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
+export function computeNetDiffText({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [], basis: sharedBasis = null } = {}) {
   const unscored = { text: '', base: null, rev: null, scored: false };
   if (typeof exec !== 'function' || !rev) return unscored;
-  const basis = resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
+  // #2890-review-fix finding 3 — reuse a caller-resolved basis for this ref when given one (one fetch, one
+  // candidate probe, shared with `computeNetDiffChangedFiles`); otherwise resolve our own exactly as before.
+  const basis = sharedBasis || resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
   if (!basis.ok) return { ...unscored, reason: basis.reason }; // caller falls back to `gh pr diff`
   const { diffBase, candidate } = basis;
   try {
@@ -2943,13 +2958,28 @@ async function runCli() {
       // to the old GitHub files-list read if neither is available.
       const escCwd = isLocalRepo(v.repo) ? undefined : siblingCloneDir(v.repo);
       let netScored = false;
+      // #2890 — the net diff TEXT (base-vs-head CONTENT, not just changed-file names + a line count), needed as
+      // `scoreEscalation`'s `diffHunks`: the shared precondition #2839's `assertNotPrincipleAndImpl` and #2840's
+      // `isPrincipleSurface` need (both read hunk content). Resolved in the SAME block as the changed-file
+      // shape, off ONE shared `resolveNetDiffBasis` (#2890-review-fix finding 3) and ONE `exec` closure, and
+      // reused below by the anti-test-gaming scan (which used to run its own separate `computeNetDiffText`), so
+      // the score, the hunks, and the gaming scan can never see a different diff.
+      //
+      // No local/sibling clone ⇒ this stays `scored:false`. That is NOT the same posture as the sibling signals
+      // here: `changedFiles` has a `gh pr view --json files` FALLBACK that still populates in exactly that case,
+      // so `diffHunks` must travel as `null` (NOT COMPUTED) and never as `''` — `diffHunksFrom` is what
+      // enforces that (#2890-review-fix finding 1). A real file list beside a fake-empty content signal is how
+      // a content-reading detector silently concludes "no principle touch".
+      let netDiffText = { text: '', scored: false, reason: 'no-clone' };
       if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
         const exec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts });
-        const net = computeNetDiffChangedFiles({ exec, rev: v.headRef, baseRev: v.base, fetchExtraRefs: [v.headRef] });
+        const basis = resolveNetDiffBasis({ exec, rev: v.headRef, fetchExtraRefs: [v.headRef] });
+        const net = computeNetDiffChangedFiles({ exec, rev: v.headRef, baseRev: v.base, fetchExtraRefs: [v.headRef], basis });
         changedFiles = net.changedFiles;
         diffLines = net.diffLines;
         humanBasisFiles = net.humanBasisFiles;
         netScored = net.scored;
+        netDiffText = computeNetDiffText({ exec, rev: v.headRef, fetchExtraRefs: [v.headRef], basis });
       }
       if (!netScored) {
         try {
@@ -2961,18 +2991,12 @@ async function runCli() {
           humanBasisFiles = changedFiles;
         } catch { /* signal-fetch miss → score on the manifest signals alone */ }
       }
-      // #2890 — the net diff TEXT (base-vs-head CONTENT, not just changed-file names + a line count), fetched
-      // ONCE here and threaded into `scoreEscalation` as `diffHunks` — the shared precondition #2839's
-      // `assertNotPrincipleAndImpl` and #2840's `isPrincipleSurface` need (both read hunk content). Reused
-      // below by the anti-test-gaming scan (was its own separate `computeNetDiffText` call) rather than
-      // re-fetched, so the escalation score and the gaming scan can never see a different diff. Same
-      // best-effort posture as every sibling signal here: no local/sibling clone ⇒ `scored:false` ⇒ `text:''`.
-      let netDiffText = { text: '', scored: false };
-      if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
-        const textExec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts });
-        netDiffText = computeNetDiffText({ exec: textExec, rev: v.headRef, fetchExtraRefs: [v.headRef] });
-      }
-      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffHunks: netDiffText.text });
+      // #2890-review-fix finding 1 — `diffHunksFrom` (never a hand-rolled `scored ? text : null`) is the ONE
+      // mapping onto `scoreEscalation`'s contract: the text when it was actually computed, `null` when it was
+      // not. Finding 4 — the hunks are always CUMULATIVE while `changedFiles` may be de-inflated to
+      // `v.base…head`; the verdict's `diffHunksBasisFiles` (= `humanBasisFiles`, same basis as the hunks) is
+      // what a content detector pairs the hunks with.
+      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffHunks: diffHunksFrom(netDiffText) });
       // #2414 — first-drain-sighting manifest baseline gate. The manifest values (`v.hasManifest`/
       // `dismissedFindings`/`crossRepo`/`blockedBy`) are re-read from the LIVE PR body every pass
       // (readPrManifest), so we can capture what the drain FIRST saw for a ready-to-merge PR and diff a later

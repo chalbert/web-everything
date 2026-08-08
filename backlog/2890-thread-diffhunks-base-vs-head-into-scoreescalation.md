@@ -33,6 +33,30 @@ exactly the class they exist for. This is new plumbing, not a no-op signature ch
 - Thread the same base-vs-head signal into the `PreToolUse(Edit|Write)` write path so the shift-left gate
   and the whole-tree run read the same content (memory rule #43).
 
+## Residual on resolve — Scope bullet 3 (the write path) is DEFERRED to #2891
+
+Scope bullets 1 and 2 shipped in full. Bullet 3 — "thread the same base-vs-head signal into the
+`PreToolUse(Edit|Write)` write path" — shipped only as far as the CAPABILITY:
+`we:scripts/lib/diff-hunks.mjs#computeProposedFileDiffText` exists, is unit-tested, and returns the same
+`{text, scored, reason}` shape as the PR-time `computeNetDiffText`, so both halves feed one contract. It is
+**not wired into `we:.claude/settings.json`**, and nothing calls it in production today.
+
+Why deferred, not dropped: no `PreToolUse(Edit|Write)` hook reads a review-escalation signal at all (the five
+registered `Edit|Write` hooks — `we:scripts/guard-lane.mjs`, `we:scripts/lint-locus-prefix.mjs --pre`,
+`we:scripts/check-memory.mjs --pre`, `we:scripts/backlog-guard.mjs --pre`,
+`we:scripts/guard-backward-edge.mjs` — import neither `we:scripts/lib/review-escalation.mjs` nor
+`we:scripts/lib/diff-hunks.mjs`), and the write-time deny logic those hooks would run (#2839's
+`assertNotPrincipleAndImpl`, #2840's `isPrincipleSurface`) is explicitly out of this item's scope. Wiring a
+hook entry now would register a hook with no gate behind it.
+
+**Owner of the residual: #2891** (`blockedBy: 2890`), whose scope already reads "invoked from both the
+`PreToolUse(Edit|Write)` deny path". If #2891 is dropped or re-scoped away from the hook wiring, this residual
+comes back and must be re-filed — it does not disappear with this item's resolve.
+
+Standing risk, recorded because shipping unwired is what creates it: nothing yet proves #2891 will adopt
+`computeProposedFileDiffText`'s exact signature. The mitigation is the shared return shape above plus
+`we:scripts/lib/review-escalation.mjs#diffHunksFrom`, the single mapping both halves must go through.
+
 ## Preconditions / relationships
 
 Precondition of #2839's gate (the `assertNotPrincipleAndImpl` item) and #2840's gate (the
