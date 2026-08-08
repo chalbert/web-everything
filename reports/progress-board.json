@@ -71,7 +71,8 @@
       "id": "todo-mode-for-unimplemented-contract-entries-a-d",
       "title": "Todo mode for unimplemented contract entries — a declared-not-built marker the conformance gate enforces",
       "phase": 2,
-      "status": "todo"
+      "status": "todo",
+      "note": "R6 ruled 2026-08-08 — closes the silent row #1099 opened (declared, absent, unmarked passes); marker also catches the stale case. Leash edit, so its PR needs a human clear."
     }
   ],
   "decisions": [
