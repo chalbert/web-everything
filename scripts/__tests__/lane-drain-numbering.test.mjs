@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { numberPendingHashes, landedNumberFor } from '../lane-drain.mjs';
+import { numberPendingHashes, landedNumberFor, cardPathInTree } from '../lane-drain.mjs';
 
 const QUEUED_REL = '.claude/skills/batch-backlog-items/queued.json';
 const LEDGER_REL = '.claude/skills/batch-backlog-items/id-ledger.json';
@@ -278,5 +278,62 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     expect(res.assigned).toEqual([{ hash: 'xland01', nnn: '2201' }]);
     expect(backlogNames()).toContain('2201-item.md');
     expect(backlogNames()).toContain('xcruft1-wip.md'); // untracked cruft left as-is
+  });
+});
+
+describe('#2899 A1 — the card is located in the origin/main TREE, not the local INDEX', () => {
+  // The defect: `readResolveReachable` resolved the card with `git ls-files backlog/<NNN>-*.md`, a query against
+  // the LOCAL INDEX. A freshly JIT-numbered item's `<NNN>`-named file exists on main but has NEVER been in this
+  // checkout's index, so the probe reported it absent, the read returned `null` ("couldn't tell"), and the
+  // caller's `=== false` guard skipped the flip with no attempt and no warning. Reading the TREE is the fix.
+  //
+  // The setup below reproduces exactly that divergence: `origin/main` carries `backlog/2202-alpha.md` while the
+  // local index still carries only the pre-numbering hash name.
+  const seedDivergedRepo = () => {
+    const origin = mkdtempSync(join(tmpdir(), 'drain-origin-'));
+    execFileSync('git', ['init', '-q', '--bare'], { cwd: origin });
+    git('remote', 'add', 'origin', origin);
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: active\n---\n# Alpha\n');
+    git('add', 'backlog', '.gitignore'); git('commit', '-qm', 'pre-numbering');
+    git('push', '-q', 'origin', 'HEAD:main');
+    // main advances (a numbering commit landed there) while THIS checkout stays on the pre-numbering tree.
+    const other = mkdtempSync(join(tmpdir(), 'drain-other-'));
+    // `--branch main` is REQUIRED, not tidiness: a bare repo's HEAD follows the runner's `init.defaultBranch`,
+    // which is `master` on the CI image and `main` on this machine. Without the pin, the clone checks out an
+    // UNBORN branch and the `git mv` below dies with "fatal: bad source" — green locally, red on CI.
+    execFileSync('git', ['clone', '-q', '--branch', 'main', origin, other]);
+    const og = (...a) => execFileSync('git', a, { cwd: other, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    og('config', 'user.email', 'test@test'); og('config', 'user.name', 'Test'); og('config', 'commit.gpgsign', 'false');
+    execFileSync('git', ['mv', 'backlog/xhash01-alpha.md', 'backlog/2202-alpha.md'], { cwd: other });
+    og('commit', '-qm', 'drain: JIT-number xhash01→#2202 at land');
+    og('push', '-q', 'origin', 'HEAD:main');
+    git('fetch', '-q', 'origin');
+    return origin;
+  };
+
+  it('cardPathInTree finds a freshly-numbered card that `git ls-files` cannot see', () => {
+    seedDivergedRepo();
+    // The old probe: the index has only the HASH name, so the numbered lookup comes back empty — this is the
+    // exact input that made the old code return null and silently skip the flip.
+    expect(git('ls-files', 'backlog/2202-*.md').trim()).toBe('');
+    // The new probe reads origin/main's tree and finds it.
+    expect(cardPathInTree(repo, '2202')).toBe('backlog/2202-alpha.md');
+  });
+
+  it('returns null for a card genuinely absent from the tree (no false positive)', () => {
+    seedDivergedRepo();
+    expect(cardPathInTree(repo, '9999')).toBe(null);
+  });
+
+  it('reads the tree it is asked for — a different ref is a different answer', () => {
+    seedDivergedRepo();
+    // HEAD is still the pre-numbering tree, so the numbered name is absent there and the hash name is present.
+    expect(cardPathInTree(repo, '2202', { tree: 'HEAD' })).toBe(null);
+    expect(cardPathInTree(repo, 'xhash01', { tree: 'HEAD' })).toBe('backlog/xhash01-alpha.md');
+  });
+
+  it('is a null-verdict, not a throw, when the tree cannot be read at all', () => {
+    // No such ref → the git read fails → null ("couldn't tell"), never an exception that would unwind a land.
+    expect(cardPathInTree(repo, '2202', { tree: 'no/such/ref' })).toBe(null);
   });
 });

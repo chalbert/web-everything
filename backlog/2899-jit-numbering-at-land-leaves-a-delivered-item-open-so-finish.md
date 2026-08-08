@@ -2,14 +2,20 @@
 bornAs: xdxlevu
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-03"
+dateStarted: "2026-08-03"
+dateResolved: "2026-08-03"
 tags: [drain, jit-numbering, backlog-state, conveyor]
 relatedTo: ["2288", "2748", "2319"]
 scope:
   - we:scripts/lane-drain.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/backlog-stranded-sweep.mjs
   - we:scripts/__tests__/lane-drain-numbering.test.mjs
   - we:scripts/__tests__/lane-drain.test.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:scripts/__tests__/backlog-stranded-sweep.test.mjs
 ---
 
 # JIT-numbering at land leaves a delivered item open, so finished work is re-selected forever
@@ -84,6 +90,31 @@ sharp edge in the same function. But it is not what stranded #2880 and #2450, be
 route neither `readResolveReachable` nor the guard is ever reached: the module that lands those
 PRs does not import the flip at all.
 
+### Second, larger cause — there are TWO landers, and only one of them resolves
+
+Found while reviewing PR #1012 (2026-08-03). The analysis above is correct **for
+[`we:scripts/lane-drain.mjs`](scripts/lane-drain.mjs)** — but that is not the lander that landed either
+observed case. `resolveLandedItem` and `readResolveReachable` are defined **and called only inside**
+[`we:scripts/lane-drain.mjs`](scripts/lane-drain.mjs) (`:404-416`, `:804`, `:821`), the couple-queue drain
+the `/drain` skill itself describes as *"retired to a legacy no-op fallback"*.
+
+The lander that actually runs is the **label** lander,
+[`we:scripts/merge-ai-prs.mjs`](scripts/merge-ai-prs.mjs). It imports from
+[`we:scripts/lane-drain.mjs`](scripts/lane-drain.mjs) — but only `DERIVED_REGEN`, `DERIVED_OUTPUT_PATHS`,
+`numberPendingHashes`, `isPostLandTreeDirty`, `landedNumberFor` (`:112`). **Not the resolve flip.** It
+contains no [`we:scripts/backlog.mjs`](scripts/backlog.mjs) invocation and writes no item frontmatter at all.
+
+That is the whole shape of the bug in one line: **the two landers share the NUMBERING but not the
+RESOLVING.** `numberPendingHashes` was deliberately single-sourced ("shares lane-drain's
+`numberPendingHashes` — single source, never a fork", `we:scripts/merge-ai-prs.mjs:2555`); the resolve was
+not. So the live path assigns the NNN and never touches `status:` — exactly the observed `b4894dd8`
+signature, *"the number was assigned; the status was not."*
+
+Consequence for the fix as originally scoped: repairing `readResolveReachable` alone would close the
+lane-drain path and leave the operative one fully intact. Both must be closed, and the resolve must be
+single-sourced the way the numbering already is — one home, both callers — or this recurs the next time a
+third land path appears.
+
 ## Definition of done
 
 - **A1 — every land route flips the status.** The solo `/pr` and `/merge` route
@@ -104,9 +135,23 @@ PRs does not import the flip at all.
 - **A5 — retitle.** The title still says "JIT-numbering at land leaves a delivered item open", which
   the corrected diagnosis disproves. Rename to name the real cause (a land route that skips the
   resolve-on-land flip) as part of the fix, so the card stops teaching the wrong lesson.
+- **A6 — the LABEL lander resolves too, from ONE home.** `resolveLandedItem` is exported from
+  [`we:scripts/lane-drain.mjs`](scripts/lane-drain.mjs) and called by
+  [`we:scripts/merge-ai-prs.mjs`](scripts/merge-ai-prs.mjs) off its terminal land event, for every item it
+  landed this pass — single-sourced exactly as `numberPendingHashes` already is, never a fork. It runs
+  INSIDE the numbering critical section and AFTER numbering, so a freshly-minted NNN is the id it flips, and
+  the flip commit rides the same `HEAD:main` push. A6 is the operative half: without it A1/A2 repair a path
+  that no longer runs.
+- **A7 — the flip is TOTAL and never silent.** Every item the pass landed ends in exactly one observable
+  bucket — `resolved` / `alreadyResolved` / `deferred` / `failed` — reported on stderr AND in `--json`.
+  `flipped` means the flip is a COMMIT, so a failed commit is never logged as a resolve. A couple whose
+  sibling half is still open is DEFERRED rather than resolved (the whole couple must have landed), and that
+  deferral is announced, because it is terminal for the run and A4's sweep is its only recovery path. A
+  silent skip inside a fix for silent skips is the one outcome this item cannot ship.
 
 ## Boundary
 
 Not a change to JIT-numbering (#2288, resolved) — the corrected diagnosis removes it from the causal
 chain entirely. This is a **coverage** fix to #2748's resolve-on-land ownership: the mechanism is
-right, one land route just never calls it.
+right, one land route just never calls it. #2748's rule that the DRAIN owns the flip off its terminal
+land event is unchanged; A6 only makes the *live* drain one of the drains that obeys it.
