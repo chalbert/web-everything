@@ -59,8 +59,20 @@
  *     there is no reliable way to tell a delegated subagent's own primary-reporting verify apart from the main
  *     session's own laziness (#2335) — so this is a stderr nudge only, never a deny.
  *
+ *   • a command the PARSER CANNOT REPRESENT — today that is exactly one state: an unterminated quoted run
+ *     (#2994 review r3). Every loosening found across three rounds of that review reduced to ONE mechanism:
+ *     the scanner hit a state it had no representation for, silently degraded to "consume to end of
+ *     string", and handed every arm above a single opaque blob in which nothing sits at command position —
+ *     so the tree-write arm, the push arm, the rm-backlog arm and (through `hasDestructiveLaneOp`) the whole
+ *     lane-clobber lease check all missed at once, and another session's uncommitted work could be wiped.
+ *     The parser now FAILS CLOSED instead. This denies nothing real: bash rejects the identical input
+ *     (`unexpected EOF while looking for matching quote`), verified against `bash -c`. No override.
+ *
  * Input: PreToolUse JSON on stdin. Output: a deny decision (JSON) when blocked; nothing otherwise.
- * Fails open on unparseable input. The pure `reason`/`decide` are unit-tested (guard-bash.test.mjs).
+ * Fails open on unparseable INPUT ENVELOPE (bad JSON on stdin — a guard bug must never wedge the agent);
+ * fails CLOSED on an unparseable COMMAND (see above). The pure `reason`/`decide` are unit-tested
+ * (guard-bash.test.mjs), and the whole table is differentially fuzzed against `origin/main` across the
+ * three cwd/lease contexts.
  */
 import { readFileSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -181,18 +193,37 @@ function wrapperPrefixLength(words) {
  *  Pure. Peels the wrapper prefix (`wrapperPrefixLength`), strips surrounding quotes / a leading backslash
  *  off the program word and resolves a path-qualified program to its basename
  *  (`./node_modules/.bin/eleventy` → `eleventy`). Accidental-disguise forms only, matching the #2367
- *  threat model — it deliberately does NOT chase `$(echo git)` / `bash -c "…"`. */
+ *  threat model — it deliberately does NOT chase `$(echo git)` / `bash -c "…"`.
+ *
+ *  #2994 review r3 (parser audit) — the word split used to be a quote-BLIND `c.split(/\s+/)`, a state the
+ *  splitter could not represent: a quoted word containing a space became TWO tokens, which desynced the
+ *  wrapper peel and so disarmed every arm downstream. `sudo -u "some user" npm run build` and
+ *  `env "FOO=a b" npm run build` both read as safe. `headWords` is the same quote-aware scanner the runner
+ *  parse uses; the ARGUMENT TAIL is sliced RAW off the original string so quoting survives for the callers
+ *  that need it (`sed -i ''`, a quoted redirect target). */
 export function canonicalCommand(segment) {
   let c = String(segment || '').trim();
   if (!c) return '';
   c = c.replace(/^[({]\s*/, '').trim();                 // unwrap a leading subshell `(…` / brace group `{ …`
+  // …and its CLOSER. r3 audit (found by the differential fuzz) — only the opener was unwrapped, so the
+  // closing bracket stayed glued to the last argument and defeated every arm that anchors on a word
+  // boundary at end-of-segment: `(pnpm --filter web exec vite build)` reached the vite arm as `vite build)`,
+  // which `(?:^|\s)build(?:\s|$)` does not match, and a real tree-writing build read as safe. Quote-safe: a
+  // bracket inside a quoted argument (`echo "a)"`) leaves the string ending in the quote, not the bracket.
+  // …plus a LONE trailing backslash, which bash simply drops (`echo a \` prints `a`). Peeled in a loop so
+  // `(vite build) \` reduces all the way to `vite build`.
+  for (;;) {
+    const next = c.replace(/\s+$/, '').replace(/(?<!\\)[)}]$/, '').replace(/(?<!\\)\\$/, '');
+    if (next === c) break;
+    c = next;
+  }
   if (!c) return '';
-  const tokens = c.split(/\s+/);
-  const rest = tokens.slice(wrapperPrefixLength(tokens));
-  if (!rest.length) return '';
-  const prog = rest[0].replace(/^(['"])(.*)\1$/, '$2').replace(/^\\+/, '').replace(/^.*\//, '');
+  const words = headWords(c);
+  const k = wrapperPrefixLength(words.map((w) => w.text));
+  if (k >= words.length) return '';
+  const prog = words[k].text.replace(/^\\+/, '').replace(/^.*\//, '');
   if (!prog) return '';
-  return [prog, ...rest.slice(1)].join(' ');
+  return (prog + c.slice(words[k].end)).trim();
 }
 
 // (a) an actual RUN of the tree-writing `build` family. `build:check` (writes only `/tmp`, see package.json's
@@ -215,8 +246,139 @@ const BUILD_RUN_EXCLUDED = /^build:(?:check|plugs)$/;
 // NAME, not the effect: `vite build` / `eleventy` / `./node_modules/.bin/eleventy` wrote the same `dist/`
 // and `_site/` at the shared checkout and walked straight through. `eleventy --output=<scratch>` is the
 // `build:check` spelling and stays allowed.
-const VITE_BUILD_SUBCOMMAND = /(?:^|\s)build(?:\s|$)/;
+// r5 F2 — the terminator used to be `(?:\s|$)` alone, which is why an exec remainder of
+// `vite build) >/dev/null` missed: the `)` is neither whitespace nor end-of-line. The npm-SCRIPT path
+// survived the same shape only because it matches with `\bbuild\b`. A GROUP CLOSER is now a terminator
+// too — and only a closer, so `vite --outDir build-out` still does not read as a build subcommand.
+const VITE_BUILD_SUBCOMMAND = /(?:^|\s)build(?:[\s)}]|$)/;
 const OUTPUT_FLAG = /--(?:output|outDir|out-dir)(?:=|\s+)(\S+)/;
+
+// #2986(3) — bare `eleventy` writes `_site/`, so the arm denies it; but `--version`/`--help`/`--dryrun`
+// write NOTHING, and the arm allowed only an explicit scratch `--output=`. A small allowlist of flags that
+// suppress the write. `--serve`/`--watch` stay DENIED and take precedence — they really do write the site
+// directory (and keep writing it), so their presence overrides anything else on the line.
+// r5 F2 (same class as VITE_BUILD_SUBCOMMAND above) — a GROUP CLOSER terminates the flag too, or
+// `(eleventy --version) >/dev/null` reads `--version)` as an unknown flag and the no-write allowlist
+// misses, denying a command that writes nothing. `--serve)` must keep DENYING, so both get the closer.
+const ELEVENTY_NO_WRITE_FLAG = /(?:^|\s)--(?:version|help|dryrun|dry-run)(?=[\s=)}]|$)/;
+const ELEVENTY_WRITES_FLAG = /(?:^|\s)--(?:serve|watch)(?=[\s=)}]|$)/;
+
+// #2986(2) — what a package-runner invocation ACTUALLY runs: either a COMMAND (`exec`/`dlx`) or a set of
+// SCRIPT NAMES. Pure.
+// `BUILD_TARGETS_G` used to be matched against the WHOLE segment, so the word `build` ANYWHERE in a runner
+// line fired the arm: `npm run test:unit -- src/build-graph.test.ts`, `npm run lint src/build/`,
+// `npm install --build-from-source …`, `pnpm add node-gyp-build`. Scanning only the positions a runner
+// treats as a script name keeps every real alias (`npm run build`, `yarn build`, `run-s build:check build`)
+// while dropping the incidental mentions. An `exec`/`dlx` form is not a script name at all — the caller
+// re-canonicalizes its remainder so `pnpm exec vite build` still reaches the `vite` arm below.
+//
+// #2994 review r2 — the first cut of that narrowing was a regex (`^<runner> (exec|dlx) (--\s+)?(.+)$`) plus a
+// "first non-flag word is the script name" scan, and BOTH under-matched real, tree-writing builds that the
+// pre-#2986 guard denied:
+//   • any flag between `exec`/`dlx` and the tool made the FLAG the recursed program —
+//     `npm exec --package=vite vite build`, `npm exec --yes vite build`, `pnpm exec --silent vite build`,
+//     `pnpm dlx --package=vite vite build`, `yarn dlx -q eleventy` all read as safe.
+//   • `-c '<command>'` (npm's `--call`) hides the command in a quoted argument entirely.
+//   • a runner-level selector before the subcommand desynced the script-name scan —
+//     `pnpm --filter web exec vite build` (the `--filter` VALUE became the subcommand), and
+//     `yarn workspace web build` (the workspace NAME became the script name).
+// The replacement walks the invocation word by word, quote-aware, the way the runner itself does: skip
+// runner-level flags (consuming the VALUE of the ones that take a separate value word), see through
+// `workspace <name>`, then classify what is left as an `exec` command or a `run`/bare script name.
+const RUNNER_NAMES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'run-s', 'run-p', 'npm-run-all']);
+const MULTI_SCRIPT_RUNNERS = new Set(['run-s', 'run-p', 'npm-run-all']);
+/** Runner-level flags whose VALUE is a separate following word (so the value is not a subcommand/program). */
+const RUNNER_VALUE_FLAGS = new Set(['--package', '-p', '--filter', '-F', '--workspace', '-w', '--prefix', '-C', '--dir', '--cwd']);
+/** npm `exec --call/-c '<command>'` — the value is a COMMAND LINE, so it is recursed, not skipped. */
+const RUNNER_CALL_FLAGS = new Set(['--call', '-c']);
+
+/** Quote-aware word split of a command head that also reports each word's RAW `start`/`end` offsets in
+ *  `head`, so the `exec` remainder (and `canonicalCommand`'s argument tail) can be handed on VERBATIM —
+ *  rejoining unquoted words would drop a `sed -i ''` empty argument and re-open #2986/1. Shares the ONE
+ *  low-level run scanner below (`scanRun`), so `\"`, a `#` comment and a `\`+newline continuation are all
+ *  read the way bash reads them and can never desync a word boundary. */
+function headWords(s) {
+  const out = [];
+  let cur = '';
+  let start = -1;
+  let end = -1;
+  let quoted = false;
+  let dq = false;
+  let inComment = false;
+  const flush = () => { if (start >= 0) out.push({ text: cur, start, end, quoted, dq }); cur = ''; start = -1; end = -1; quoted = false; dq = false; };
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (/\s/.test(ch)) { flush(); if (ch === '\n') inComment = false; continue; }
+    const run = inComment ? null : scanRun(s, i, start < 0);
+    if (run && run.kind === 'continuation') { i = run.end; continue; }   // `\`+newline: spliced away entirely
+    if (run && run.kind === 'comment') inComment = true;                 // quoting is OFF from here to EOL
+    if (start < 0) start = i;
+    if (run && run.kind !== 'comment') {
+      cur += run.body;
+      if (run.kind === 'quote' || run.kind === 'unterminated') quoted = true;
+      // …and WHICH quote kind. A `"…"`/`$"…"` run resolves `\"`→`"` when bash reads the word; a `'…'` run
+      // resolves nothing. Only the re-execution recursion needs the distinction (r5), so `body` stays the
+      // verbatim inner text and the caller un-escapes when — and only when — bash would have.
+      if (run.raw[0] === '"' || run.raw.startsWith('$"')) dq = true;
+      end = run.end + 1;
+      i = run.end;
+      continue;
+    }
+    cur += ch;
+    end = i + 1;
+  }
+  flush();
+  return out;
+}
+
+/**
+ * Classify a package-runner invocation `head`. Pure. Returns:
+ *   • `{ exec: '<command line>' }` — an `exec`/`dlx`/`--call` form; the caller re-canonicalizes the command.
+ *   • `{ names: [...] }`          — the script-name argument positions (possibly empty).
+ *   • `null`                      — not a package runner at all.
+ */
+export function runnerInvocation(head) {
+  const words = headWords(String(head || ''));
+  if (!words.length) return null;
+  const runner = words[0].text;
+  if (!RUNNER_NAMES.has(runner)) return null;
+
+  if (MULTI_SCRIPT_RUNNERS.has(runner)) {                   // EVERY positional arg is a script name
+    const names = [];
+    for (let i = 1; i < words.length; i++) {
+      if (words[i].text === '--') break;
+      if (!words[i].text.startsWith('-')) names.push(words[i].text);
+    }
+    return { names };
+  }
+
+  let i = 1;
+  let sawExec = false;
+  let sawRun = false;
+  while (i < words.length) {
+    const w = words[i].text;
+    if (w === '--') { i += 1; if (sawExec) break; continue; }   // `npm exec -- vite build`
+    if (w.startsWith('-')) {
+      const eq = w.indexOf('=');
+      const flag = eq === -1 ? w : w.slice(0, eq);
+      if (RUNNER_CALL_FLAGS.has(flag)) {                       // the value IS a command line
+        return { exec: eq === -1 ? (words[i + 1] ? words[i + 1].text : '') : w.slice(eq + 1) };
+      }
+      if (eq === -1 && RUNNER_VALUE_FLAGS.has(flag)) i += 1;   // consume the flag's separate value word
+      i += 1;
+      continue;
+    }
+    if (w === 'exec' || w === 'dlx') { sawExec = true; i += 1; continue; }
+    if (w === 'workspace' || w === 'workspaces') { i += 2; continue; }  // `yarn workspace <name> <rest…>`
+    if (w === 'run' || w === 'run-script') { sawRun = true; i += 1; continue; }
+    break;                                                    // the subcommand / script-name position
+  }
+  if (i >= words.length) return { names: [] };
+  if (sawExec) return { exec: head.slice(words[i].start) };
+  if (sawRun) return { names: [words[i].text] };               // `npm run <script>` — ONLY the script name
+  // yarn/pnpm/bun accept a BARE script name (`yarn build`); npm does not (`npm install …` is never a script).
+  return { names: runner === 'npm' ? [] : [words[i].text] };
+}
 
 /**
  * #2788 review — is `name=1` present as a LEADING env-assignment prefix of `segment` (the documented
@@ -249,16 +411,27 @@ export function hasLeadingEnvEscape(segment, name) {
 export function isTreeWritingBuildRun(segment) {
   const cmd = canonicalCommand(segment);
   if (!cmd) return false;
-  const head = cmd.split(/[|;&]/)[0];                        // stay inside THIS segment
+  // Stay inside THIS segment — QUOTE-AWARELY. A blind `cmd.split(/[|;&]/)[0]` truncated the head at a
+  // separator that only exists INSIDE a quoted argument (`npm exec -c 'a && vite build'`), which silently
+  // shrank what the arms below could see. `splitSegments` is a no-op on an already-split segment. (r3 audit)
+  const head = splitSegments(cmd)[0];
   const prog = head.split(/\s+/)[0];
-  if (BUILD_RUNNER.test(head)) {                             // a package runner at command position
-    const targets = head.match(BUILD_TARGETS_G) || [];
+  // `npm exec … ` / `pnpm dlx …` / `npm exec -c '…'` runs its remainder as a COMMAND, not as a script name —
+  // re-canonicalize it so the tool arms below still see `vite build` / `eleventy`.
+  const inv = runnerInvocation(head);
+  if (inv && inv.exec !== undefined) return isTreeWritingBuildRun(inv.exec);
+  if (inv && BUILD_RUNNER.test(head)) {                      // a package runner at command position
+    // #2986(2) — only the runner's SCRIPT-NAME positions, never the whole segment.
+    const targets = inv.names.flatMap((n) => n.match(BUILD_TARGETS_G) || []);
     // Fire if ANY target is tree-writing — order-independent, so no placement of an excluded name disarms it.
     if (targets.some((t) => !BUILD_RUN_EXCLUDED.test(t))) return true;
   }
   // …and the same effect reached WITHOUT the alias (r3 finding 5).
   if (prog === 'vite') return VITE_BUILD_SUBCOMMAND.test(head.slice(prog.length));
   if (prog === 'eleventy' || prog === '11ty') {
+    const args = head.slice(prog.length);
+    if (ELEVENTY_WRITES_FLAG.test(args)) return true;        // `--serve`/`--watch` DO write the site dir
+    if (ELEVENTY_NO_WRITE_FLAG.test(args)) return false;     // #2986(3) `--version`/`--help`/`--dryrun`
     const out = (head.match(OUTPUT_FLAG) || [])[1];
     return !(out && isScratch(out));                         // `--output=<scratch>` is the build:check shape
   }
@@ -281,7 +454,7 @@ const GENERATOR_SCRIPT_PATH = /(?:^|\/)gen[-_]|generate|scaffold/i;
  *  SCRIPT PATH only, so a `scaffold` SUBCOMMAND argument (`node scripts/backlog.mjs scaffold 1234`) is not
  *  this arm's business (it is #2302's). */
 export function isGeneratorScriptRun(segment) {
-  const head = canonicalCommand(segment).split(/[|;&]/)[0];
+  const head = splitSegments(canonicalCommand(segment))[0];   // quote-aware (r3 audit — see the build arm)
   if (!head) return false;
   // the package-runner ALIAS for the same effect (`npm run gen:inventory`) — same alias-vs-effect pair as the
   // build arm above; blocking only the direct `node` spelling would block the name, not the write.
@@ -324,6 +497,109 @@ const SCRATCH_TARGET = /^(?:\/tmp\/|\/private\/tmp\/|\/var\/tmp\/|\/var\/folders
 const unquote = (t) => String(t || '').replace(/^(['"])(.*)\1$/, '$2');
 const isScratch = (t) => SCRATCH_TARGET.test(unquote(t));
 
+// ── the ONE quoted-run scanner both quote-aware parsers below share (#2994 review r2) ──────────────────
+// `shellTokens` and `splitSegments` each used to find the end of a quoted run with a bare
+// `s.indexOf(quote, i + 1)`. That is not how bash ends a quoted run, and the disagreement was a total
+// guard bypass rather than a rounding error:
+//   `git commit -m "guard: reject \"a|b\" input" && npm run build`
+// bash reads `\"` as a LITERAL quote inside the double-quoted run (verified: `bash -c 'echo "a\"b"'`
+// prints `a"b`), so the run ends at the FINAL `"`. `indexOf` stopped at the `"` of the `\"`, which left the
+// parser one quote out of phase; the NEXT `"` then opened a run with no closer and swallowed the entire
+// rest of the line as one blob. Every downstream arm — the tree-write deny, the `git push origin main`
+// deny, the `pkill`/`rm backlog/*.md` denies, and (via `hasDestructiveLaneOp`) the whole lane-clobber
+// lease check — reads that blob and sees nothing to deny. An EVEN number of escaped quotes does not
+// re-sync it either: each `\"` shifts the phase again.
+// The rules this encodes are bash's actual ones, and they are NOT uniform across quote kinds:
+//   • `"…"`   — a backslash escapes the next character; `\"` does not close the run.
+//   • `'…'`   — NOTHING is special, not even a backslash; the run ends at the very next `'`.
+//               (`echo 'a\'` is a complete word `a\`, so applying the double-quote rule here would be a
+//               NEW desync in the opposite direction.)
+//   • `$'…'`  — ANSI-C quoting; backslash escapes ARE honoured, so `\'` does not close the run.
+//   • `$"…"`  — locale translation; escapes behave as in `"…"`.
+// Same non-shell-parser threat model as before: no expansion, no command substitution.
+
+/** Does a quoted run START at `s[i]` — a `"`/`'`, or the `$` of a `$'…'`/`$"…"` run? Pure. */
+function quoteStartsAt(s, i) {
+  const ch = s[i];
+  if (ch === '"' || ch === "'") return true;
+  return ch === '$' && (s[i + 1] === "'" || s[i + 1] === '"');
+}
+
+/** Index of the CLOSING quote of the run starting at `s[i]`, or -1 if unterminated. Pure. */
+function quotedRunEnd(s, i) {
+  const dollar = s[i] === '$';
+  const q = dollar ? s[i + 1] : s[i];
+  // `"…"`, `$'…'` and `$"…"` honour a backslash escape; a plain `'…'` does not.
+  const escapes = dollar || q !== "'";
+  for (let j = (dollar ? i + 2 : i + 1); j < s.length; j++) {
+    if (escapes && s[j] === '\\' && j + 1 < s.length) { j += 1; continue; }
+    if (s[j] === q) return j;
+  }
+  return -1;
+}
+
+// ── the ONE run scanner: FAIL CLOSED, never silently degrade (#2994 review r3) ─────────────────────────
+// Rounds 1–3 of this review each closed one SHAPE and opened another of the same CLASS. The mechanism was
+// always identical: the scanner reached a state it could not represent, silently degraded to "consume to
+// end of string", and handed every deny arm downstream ONE opaque blob in which nothing is anchored at
+// command position — so the tree-write arm, the `git push origin main` arm, the `rm backlog/*.md` arm and
+// (via `hasDestructiveLaneOp`) the whole lane-clobber lease check all miss at once. A 600k-pair differential
+// fuzz produced 13 loosening signatures and every one reduced to that single mechanism.
+//
+// `scanRun` is the one place a "run" (a stretch of input that is not ordinary literal text) is recognised,
+// and it names every state EXPLICITLY, including the one that cannot be parsed:
+//   • 'quote'        — a terminated quoted run. bash's rules are NOT uniform across quote kinds:
+//                        `"…"`  a backslash escapes the next char; `\"` does not close the run.
+//                        `'…'`  NOTHING is special, not even a backslash; the run ends at the very next `'`.
+//                        `$'…'` ANSI-C quoting — backslash escapes ARE honoured.
+//                        `$"…"` locale translation — escapes behave as in `"…"`.
+//   • 'unterminated' — a quoted run with NO closer. bash itself REJECTS this input
+//                      (`bash -c "echo 'abc"` → "unexpected EOF while looking for matching `''"), so it is
+//                      not a command at all — the guard reports it and `decide` denies, rather than
+//                      degrading to the blob. Verified against real bash, not assumed.
+//   • 'comment'      — an unquoted `#` that BEGINS a word runs to end-of-line, and NOTHING inside it is
+//                      quoting. `# don't forget` ⏎ `npm run build` used to open a phantom quoted run at the
+//                      apostrophe and swallow the second line whole (F1). Verified against real bash:
+//                      `a#b` and `${#x}` are NOT comments (no word boundary); `a #b`, `a;#b`, `(#b` are.
+//                      NOTE the comment TEXT is deliberately still handed to the callers — only QUOTING is
+//                      switched off inside it. Suppressing the text as well would drop it from the
+//                      non-anchored deny rules and would itself be a loosening.
+//   • 'continuation' — `\` + newline is a LINE SPLICE: bash removes both characters and the next physical
+//                      line continues the same logical one (verified: `echo a && \`⏎`echo b` prints a then
+//                      b). Keeping it verbatim left the next segment starting with a literal `\`⏎ so every
+//                      `^`-anchored rule in `reason()` missed (F2).
+//   • 'escape'       — `\` + any other character. A LONE trailing `\` at end of input is NOT a run at all
+//                      (bash drops it); it falls through as literal text.
+// Same non-shell-parser threat model as before: no expansion, no command substitution.
+
+/** End-of-line index for a `#` comment starting at `i` (the newline, or end of string). Pure. */
+function commentEnd(s, i) {
+  const nl = s.indexOf('\n', i);
+  return nl === -1 ? s.length : nl;
+}
+
+/** Classify the run starting at `s[i]`, or null when `s[i]` is ordinary literal text. Pure.
+ *  `{ kind, end, raw, body }` — `end` is the index of the LAST consumed character, `raw` the verbatim text,
+ *  `body` the resolved (unquoted / unescaped) text. `atWordStart` is the caller's own word-boundary state:
+ *  bash only starts a comment at a `#` that BEGINS a word. */
+function scanRun(s, i, atWordStart) {
+  if (quoteStartsAt(s, i)) {
+    const close = quotedRunEnd(s, i);
+    if (close === -1) {
+      // The state the parser CANNOT represent. Report it; callers must deny, never degrade.
+      return { kind: 'unterminated', end: s.length - 1, raw: s.slice(i), body: s.slice(s[i] === '$' ? i + 2 : i + 1) };
+    }
+    return { kind: 'quote', end: close, raw: s.slice(i, close + 1), body: s.slice(s[i] === '$' ? i + 2 : i + 1, close) };
+  }
+  if (s[i] === '\\' && s[i + 1] === '\n') return { kind: 'continuation', end: i + 1, raw: '', body: '' };
+  if (s[i] === '\\' && i + 1 < s.length) return { kind: 'escape', end: i + 1, raw: s.slice(i, i + 2), body: s[i + 1] };
+  if (s[i] === '#' && atWordStart) {
+    const e = commentEnd(s, i);
+    return { kind: 'comment', end: e - 1, raw: s.slice(i, e), body: s.slice(i, e) };
+  }
+  return null;
+}
+
 /**
  * Split a command segment into quote-aware tokens. Pure. Each token is `{ text, quoted, op }`:
  *   • quoting is resolved (the surrounding quotes are removed and `quoted` is set) — so a `>` inside a
@@ -339,19 +615,27 @@ export function shellTokens(segment) {
   let cur = '';
   let started = false;
   let quoted = false;
+  let atWordStart = true;
+  let inComment = false;
   const flush = () => { if (started) out.push({ text: cur, quoted, op: false }); cur = ''; started = false; quoted = false; };
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
-    if (ch === '"' || ch === "'") {
-      const close = s.indexOf(ch, i + 1);
-      const end = close === -1 ? s.length : close;
-      cur += s.slice(i + 1, end);
+    // Inside a `#` comment ONLY quoting is switched off — whitespace still splits words and a redirect
+    // operator is still tokenized, so this changes nothing a caller can observe except that an apostrophe
+    // in a comment can no longer open a phantom quoted run (F1).
+    const run = inComment ? null : scanRun(s, i, atWordStart);
+    if (run && run.kind === 'comment') { inComment = true; }
+    else if (run && run.kind === 'continuation') { i = run.end; atWordStart = true; continue; }
+    else if (run && run.kind !== 'escape') {                    // 'quote' | 'unterminated'
+      cur += run.body;                                          // body only — the quotes are resolved away
       started = true;
       quoted = true;
-      i = end;
+      atWordStart = false;
+      i = run.end;
       continue;
+    } else if (run) {                                           // 'escape'
+      cur += run.body; started = true; atWordStart = false; i = run.end; continue;
     }
-    if (ch === '\\' && i + 1 < s.length) { cur += s[i + 1]; started = true; i += 1; continue; }
     if (ch === '>' || ch === '<') {
       let fd = '';
       if (started && !quoted && /^(?:[0-9]+|&)$/.test(cur)) { fd = cur; cur = ''; started = false; }  // `2>` / `&>`
@@ -362,29 +646,359 @@ export function shellTokens(segment) {
       if (s[j] === '|' || s[j] === '&') { op += s[j]; j += 1; }    // `>|` (noclobber override) / `>&` (fd dup)
       out.push({ text: op, quoted: false, op: true });
       i = j - 1;
+      atWordStart = true;
       continue;
     }
-    if (/\s/.test(ch)) { flush(); continue; }
+    if (/\s/.test(ch)) { flush(); atWordStart = true; if (ch === '\n') inComment = false; continue; }
     cur += ch;
     started = true;
+    atWordStart = false;
   }
   flush();
   return out;
 }
 
+/**
+ * Split a command line into its `&&`/`||`/`;`/`&`/`|`/newline-separated SEGMENTS, honouring quotes. Pure.
+ * Returns the RAW text of each segment (quotes intact) — every caller re-parses it (`canonicalCommand`,
+ * `shellTokens`, the anchored regexes in `reason`), so this must not consume the quoting it is respecting.
+ *
+ * #2994 — the whole point. The previous split was a quote-BLIND regex (`/(?:&&|\|\||[;&|]|\n)+/`) applied
+ * BEFORE the quote-aware `shellTokens` ever ran, so a `|` inside a quoted argument tore the command in two.
+ * The fragment after the tear starts in an unquoted tokenizer state, which broke BOTH ways:
+ *   • false DENY — `gh pr list --jq '.[] | select(.n > 5)'` tore at the jq pipe and the `>` in the tail
+ *     fragment read as a real redirect to a non-scratch path. That is *the* house idiom for reading GitHub
+ *     state, and every jq filter that both pipes and compares hit it.
+ *   • false ALLOW — `gh pr list --jq '.[] | .number' > config/app.json` tore at the same pipe, leaving the
+ *     tail fragment with an UNBALANCED quote that swallowed the REAL trailing redirect, so a genuine
+ *     primary-tree write walked through. Tokenizing quotes first closes the hole and the false deny at once.
+ *
+ * A redirect operator run (`>`, `>>`, `>|`, `>&`, `&>`, `<`, `<<`) is consumed whole, so the `|`/`&` glued
+ * into it is never mistaken for a separator (this is what retires `decide`'s old `>|`→`>` pre-normalization).
+ * Same non-shell-parser threat model as `shellTokens`: no expansion, no command substitution.
+ *
+ * #2994 review r3 — this is the function every loosening signature reduced to, so it no longer hides what it
+ * could not parse. It reports its own parse state alongside the segments:
+ *   • `unterminated` — a quoted run with no closer was hit. The old code consumed to end-of-string and
+ *     returned ONE blob in which nothing is at command position, so every deny arm missed. `decide` now
+ *     DENIES on this flag (fail closed) — and denies nothing real, because bash rejects the same input.
+ *   • `continued`    — a `\`+newline line splice was spliced away (bash's reading). `decide` also evaluates
+ *     the NAIVE per-physical-line reading of such a command, so the splice can never be a net loosening
+ *     against the pre-#2994 behaviour: whatever either reading denies, the command is denied.
+ * `splitSegments` stays as the segments-only view every existing caller and test uses.
+ */
+export function parseSegments(command, { spliceContinuations = true } = {}) {
+  const s = String(command || '');
+  const segs = [];
+  let cur = '';
+  let unterminated = false;
+  let continued = false;
+  let atWordStart = true;
+  let inComment = false;
+  // A comment switches quoting off until END OF LINE — a separator does NOT end it (bash agrees: `# a; b`
+  // is all comment). Only a newline clears it.
+  const cut = () => { segs.push(cur); cur = ''; atWordStart = true; };
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    // Inside a `#` comment ONLY quoting is switched off; the comment TEXT and every separator in it are
+    // still processed exactly as before, so this can never hide input from a deny rule (F1).
+    const run = inComment ? null : scanRun(s, i, atWordStart);
+    if (run && run.kind === 'comment') { inComment = true; }        // fall through: the `#` is literal text
+    else if (run && run.kind === 'continuation') {
+      continued = true;
+      i = run.end;                                                  // `\`+newline: both characters vanish
+      // …unless we're taking the NAIVE per-physical-line reading, which must reproduce the pre-#2994
+      // segment text EXACTLY — trailing `\` included — or it is not the superset it claims to be.
+      if (!spliceContinuations) { cur += '\\'; cut(); inComment = false; }
+      continue;
+    } else if (run) {                                               // 'quote' | 'unterminated' | 'escape'
+      if (run.kind === 'unterminated') unterminated = true;
+      cur += run.raw;                                               // kept VERBATIM — callers re-parse it
+      i = run.end;
+      atWordStart = false;
+      continue;
+    }
+    if (ch === '>' || ch === '<' || (ch === '&' && s[i + 1] === '>')) {
+      let j = i;
+      if (ch === '&') { cur += s[j]; j += 1; }                     // `&>` / `&>>`
+      cur += s[j]; j += 1;                                         // the `>` / `<`
+      if (s[j] === s[j - 1]) { cur += s[j]; j += 1; }               // `>>` / `<<`
+      if (s[j] === '|' || s[j] === '&') { cur += s[j]; j += 1; }    // `>|` (noclobber) / `>&` (fd dup)
+      i = j - 1;
+      atWordStart = true;
+      continue;
+    }
+    if (ch === ';' || ch === '&' || ch === '|' || ch === '\n') {
+      cut();
+      if (ch === '\n') inComment = false;
+      while (i + 1 < s.length && /[;&|\n]/.test(s[i + 1])) { if (s[i + 1] === '\n') inComment = false; i += 1; }
+      continue;
+    }
+    cur += ch;
+    atWordStart = /[\s()]/.test(ch);      // bash starts a comment at a `#` that BEGINS a word (`(#c` counts)
+  }
+  segs.push(cur);
+  return { segments: segs, unterminated, continued };
+}
+
+/** The segments-only view of `parseSegments` (the raw text of each `&&`/`||`/`;`/`&`/`|`/newline-separated
+ *  segment). Pure. Callers that must not silently trust an unparseable command use `parseSegments` and read
+ *  its `unterminated` flag. */
+export function splitSegments(command) {
+  return parseSegments(command).segments;
+}
+
+/** The fail-closed deny reason for a command the parser CANNOT represent, or null. Pure.
+ *  Today there is exactly one such state: an unterminated quoted run. It is not a judgement call — bash
+ *  rejects the identical input with `unexpected EOF while looking for matching quote`, so this denies
+ *  nothing that would ever have run, and it removes the only way a command can reach the deny arms as one
+ *  opaque blob. Deliberately has NO escape hatch: there is no legitimate command in this state. */
+export function unparseableReason(command) {
+  const hd = heredocScan(command);
+  if (!hd.unterminated && !parseSegments(hd.text).unterminated) return null;
+  return 'this command cannot be parsed — it contains an UNTERMINATED quote (a `\'`, `"`, `$\'` or `$"` run with no closing quote), so the guard cannot tell where one command ends and the next begins. bash rejects the same input outright (`unexpected EOF while looking for matching quote`), so nothing that would actually have run is being blocked. The guard fails CLOSED here rather than degrading to a single opaque blob in which no deny rule is anchored at command position (#2994 review r3) — that degradation is the mechanism behind every loosening found in this review. Fix the quoting and re-run. If the text is prose (a commit message, a PR body), pass it via a quoted heredoc (`<<\'EOF\'`), where an apostrophe is data.';
+}
+
+// ── #2994 review r5 — the text bash RE-EXECUTES ────────────────────────────────────────────────────────
+// The quote-aware split of r1–r4 is correct, and correctness LOST coverage the quote-BLIND split had by
+// accident. Base tore `bash -c "git status && git push origin main"` in half at the `&&` inside the quoted
+// argument, and the tail fragment (`git push origin main"`) landed on the `git push` arm at command
+// position — a right answer for a wrong reason. Reading the quoting properly keeps the whole thing as ONE
+// argument of `bash`, which no arm inspects, so the deny disappeared while bash still really pushed.
+// Confirmed under real bash in a PATH-stubbed sandbox, not inferred: `bash -c "…"`, `sh -c "…"`,
+// `eval "…"`, `$( … )` and `` ` … ` `` all execute their text as commands.
+//
+// The fix is the one the runner arm already uses for `pnpm exec` / `npm exec --call`: RECURSE into the
+// positions that are a script string, and hand what comes out back to the same deny arms at command
+// position. That is strictly more coverage than base had (base only ever saw a nested command that
+// happened to contain a SEPARATOR; `bash -c "npm run build"` walked through it), and it is structural
+// rather than accidental, so it does not depend on where the separators fall.
+const SHELL_PROGRAMS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'busybox']);
+/** `-c`, `-ec`, `-xc`… — the flag whose VALUE is a command line the shell executes. */
+const SHELL_C_FLAG = /^-[A-Za-z]*c$/;
+// Bounded so a pathological nest can never wedge the guard (the deep-`exec` RangeError is a known,
+// separately-filed follow-up; this expansion must not add a second one).
+const NESTED_DEPTH_CAP = 4;
+const NESTED_NODE_CAP = 64;
+
+/** Index of the `)` that closes the group / command substitution opened at `s[open]` (a `(`), or -1.
+ *  Quote-aware and nesting-aware. Pure. */
+function groupEnd(s, open) {
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '\\') { i += 1; continue; }
+    if (quoteStartsAt(s, i)) {
+      const e = quotedRunEnd(s, i);
+      if (e === -1) return -1;
+      i = e;
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    else if (ch === ')') { depth -= 1; if (depth === 0) return i; }
+  }
+  return -1;
+}
+
+/** Every COMMAND-SUBSTITUTION body in `s` — `$( … )` and `` ` … ` ``, at any nesting depth, INCLUDING
+ *  inside a double-quoted run (bash still expands there, which is exactly how `echo "$(git push origin
+ *  main)"` really pushes) but never inside a single-quoted one (bash expands nothing there). Pure.
+ *
+ *  Double quoting is tracked as a STATE, not consumed as a run: inside `"…"` a substitution is still
+ *  recognised, and the quotes INSIDE that substitution are its own. Treating the double-quoted run as
+ *  one opaque span instead lost `echo "`+"`"+`find . -name "*.ts"; yarn build`+"`"+`"` — the `"` before
+ *  `*.ts` read as the run's closer, so the substitution's tail (a real `yarn build`) was never seen.
+ *  `$'…'` is ANSI-C quoting, not a substitution, and falls through to the single-quote branch. */
+function substitutionBodies(s, out = []) {
+  let inDouble = false;
+  // …and it must read a `#` COMMENT the way the rest of the parser already does. Without this, the
+  // apostrophe in `# a note — don't forget` ⏎ `echo \`pnpm exec vite build\`` opened a phantom
+  // single-quoted run that swallowed the substitution on the NEXT line — the same F1 desync `scanRun`
+  // was built to end, re-introduced in a new scanner.
+  let inComment = false;
+  let atWordStart = true;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '\n') { if (!inDouble) { inComment = false; atWordStart = true; } continue; }
+    if (inComment) continue;
+    if (ch === '\\') { i += 1; atWordStart = false; continue; }
+    if (!inDouble && ch === '#' && atWordStart) { inComment = true; continue; }
+    if (!inDouble && ch === "'") { const e = s.indexOf("'", i + 1); if (e === -1) return out; i = e; atWordStart = false; continue; }
+    if (ch === '"') { inDouble = !inDouble; atWordStart = false; continue; }
+    if (ch === '$' && s[i + 1] === '(') {
+      const e = groupEnd(s, i + 1);
+      const body = s.slice(i + 2, e === -1 ? s.length : e);
+      out.push(body);
+      substitutionBodies(body, out);
+      if (e === -1) return out;
+      i = e;
+      continue;
+    }
+    if (ch === '`') {
+      let e = -1;
+      for (let j = i + 1; j < s.length; j++) { if (s[j] === '\\') { j += 1; continue; } if (s[j] === '`') { e = j; break; } }
+      const body = s.slice(i + 1, e === -1 ? s.length : e).replace(/\\([`$\\])/g, '$1');
+      out.push(body);
+      substitutionBodies(body, out);
+      if (e === -1) return out;
+      i = e;
+      continue;
+    }
+    atWordStart = /[\s();&|]/.test(ch);   // bash starts a comment at a `#` that BEGINS a word
+  }
+  return out;
+}
+
+/** The body of a GROUP (`( … )` / `{ … ; }`) that opens at the head of `s`, or null. Pure.
+ *  Structural, not positional — that is the r5 F2 fix. `canonicalCommand` peeled a `)` only when it was
+ *  the LAST character of the segment, so `(pnpm exec vite build) >/dev/null`, `… 2>/dev/null` and
+ *  `… #x` each re-hid a real build behind one trailing token. When the closer is not in this text at all
+ *  (the split cut the group in half at a separator inside it) the REMAINDER after the opener is the
+ *  body — strictly the same rule, just missing its right edge. */
+function leadingGroupBody(s) {
+  const t = String(s || '').replace(/^\s+/, '');
+  if (t.startsWith('(')) {
+    const e = groupEnd(t, 0);
+    return e === -1 ? t.slice(1) : t.slice(1, e);
+  }
+  if (t.startsWith('{') && /\s/.test(t[1] || '')) return t.slice(1);   // `{ …` (bash needs the space)
+  return null;
+}
+
+/** The command text before a `)` that closes a group opened in an EARLIER segment, or null. Pure.
+ *  The other half of the F2 class: when the split cuts a group at a separator inside it, the group's
+ *  LAST command keeps the closer glued to its final token — `(gh pr list …; pnpm dlx eleventy) >/dev/null`
+ *  reaches the arms as `pnpm dlx eleventy) >/dev/null`, whose exec remainder canonicalizes to the program
+ *  word `eleventy)` and matches nothing. Quote-aware, and a BALANCED `( … )` inside the segment (a
+ *  substitution, a `func()` header) is not a dangling closer. */
+function trailingGroupTail(s) {
+  const t = String(s || '');
+  let depth = 0;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (ch === '\\') { i += 1; continue; }
+    if (quoteStartsAt(t, i)) { const e = quotedRunEnd(t, i); if (e === -1) return null; i = e; continue; }
+    if (ch === '(') depth += 1;
+    else if (ch === ')') { if (depth === 0) return t.slice(0, i); depth -= 1; }
+  }
+  return null;
+}
+
+/**
+ * Every command line `segment` hands to a shell for RE-EXECUTION. Pure. Four positions, all verified
+ * against real bash:
+ *   • a command substitution — `$( … )` / `` ` … ` ``, at any depth, including inside `"…"`.
+ *   • a leading SUBSHELL group — `( … )`. Matched STRUCTURALLY (to its balanced closer), not
+ *     positionally, which is the r5 F2 fix: `canonicalCommand` only peeled a `)` that was the LAST
+ *     character of the segment, so any trailing token re-opened the hole — `(pnpm exec vite build)
+ *     >/dev/null`, `… 2>/dev/null`, `… #x` all read as safe while bash really built.
+ *   • an explicit script STRING — `eval "…"`, and `sh`/`bash`/`zsh`/`dash`/`ksh`/`ash` `-c "…"`.
+ *   • the package runner's own `exec`/`dlx`/`--call` remainder — the recursion `isTreeWritingBuildRun`
+ *     already did for the build arm, generalized so EVERY arm sees it (`npm exec -c 'git push origin
+ *     main'` reached no arm before).
+ * Deliberately NOT a shell: no expansion, no `$VAR` resolution — the #2367 accidental-collision threat
+ * model. It only reads text that bash will re-parse as a command, which is the coverage r1–r4 lost.
+ */
+export function nestedCommandStrings(segment) {
+  const s = String(segment || '');
+  if (!s.trim()) return [];
+  const out = substitutionBodies(s);
+
+  const group = leadingGroupBody(s);
+  if (group !== null) out.push(group);
+  const tail = trailingGroupTail(s);
+  if (tail !== null && tail.trim()) out.push(tail);
+
+  const cmd = canonicalCommand(s);
+  if (!cmd) return out;
+  // …and a group behind a WRAPPER (`time (npm run build)`, `sudo (…)`) — `canonicalCommand` peels the
+  // wrapper, so the opener is at the head of what it returns even when it was not at the head of `s`.
+  const wrapped = cmd === s ? null : leadingGroupBody(cmd);
+  if (wrapped !== null) out.push(wrapped);
+
+  // A leading `VAR=val` prefix is EXPORTED into the environment of the command it prefixes, so the
+  // sanctioned escapes (`MAIN_SESSION_BUILD_OK=1`, `MAIN_PUSH_OK=1`, …) really do reach a `-c`/`eval`
+  // string — verified: `FOO=1 bash -c 'echo $FOO'` prints 1. Carry the prefix onto the re-executed text,
+  // or `MAIN_SESSION_BUILD_OK=1 bash -c "npm run build"` becomes a deny with no way out. Deliberately NOT
+  // carried onto a `$( … )` body: bash expands a substitution BEFORE applying the prefix, so it does not
+  // see it there (`FOO=1 echo "$(echo $FOO)"` prints empty) — and assuming it did would be a loosening.
+  const envPrefix = (s.replace(/^\s+/, '').match(/^(?:env\s+)?((?:[A-Za-z_]\w*=\S*\s+)*)/) || [, ''])[1];
+  // The prefix reaches EVERY command in the re-executed string (`FOO=1 sh -c "a && b"` runs both a and b
+  // with FOO set), so it is stamped onto each SEGMENT rather than onto the string as a whole.
+  const reexec = (text) => {
+    if (!String(text).trim()) return;
+    if (!envPrefix) { out.push(text); return; }
+    for (const seg of parseSegments(text).segments) if (seg.trim()) out.push(envPrefix + seg);
+  };
+  /** The word as the inner shell RECEIVES it: a `"…"` word has already had `\"`, `\\`, `\$` and ``\` ``
+   *  resolved by the outer shell. Skipping that step re-created the very #2994 false deny this PR
+   *  removes, one level down: `sh -c "git commit -m \"fix: a | b > c\""` reached the arms with the
+   *  backslashes intact, the `|` read as an UNQUOTED separator, and the tail `b > c\"` read as a real
+   *  redirect to a non-scratch path. A `'…'` word resolves nothing, so it is passed through verbatim. */
+  const asShellSees = (w) => (w.dq ? w.text.replace(/\\(["\\$`])/g, '$1') : w.text);
+
+  const words = headWords(cmd);
+  const prog = words.length ? words[0].text : '';
+  if (prog === 'eval') {
+    // bash concatenates eval's arguments with a space and executes the result.
+    reexec(words.slice(1).map(asShellSees).join(' '));
+  } else if (SHELL_PROGRAMS.has(prog)) {
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i].text;
+      if (SHELL_C_FLAG.test(w)) { if (words[i + 1]) reexec(asShellSees(words[i + 1])); break; }
+      if (w.startsWith('-')) continue;
+      if (prog === 'busybox' && SHELL_PROGRAMS.has(w)) continue;   // `busybox sh -c '…'`
+      break;                                                        // a SCRIPT FILE, not a `-c` string
+    }
+  } else {
+    const inv = runnerInvocation(cmd);
+    if (inv && inv.exec) reexec(inv.exec);
+  }
+  return out;
+}
+
+/** `segments` plus every command line they hand to a shell for re-execution, transitively. Pure and
+ *  BOUNDED (depth ≤ `NESTED_DEPTH_CAP`, ≤ `NESTED_NODE_CAP` expansions total) so no input can wedge it.
+ *  A nested string that does not parse is NOT escalated to the unparseable deny — its segments are still
+ *  handed to the arms, so this can only ever ADD coverage, never invent a denial. */
+function withNestedCommands(segments, whole) {
+  const out = segments.slice();
+  let budget = NESTED_NODE_CAP;
+  const push = (text, depth) => {
+    if (budget <= 0 || depth > NESTED_DEPTH_CAP || !String(text).trim()) return;
+    budget -= 1;
+    const inner = parseSegments(text).segments;
+    out.push(...inner);
+    for (const seg of inner) for (const n of nestedCommandStrings(seg)) push(n, depth + 1);
+  };
+  // The WHOLE command first. A `$( … )` body — and a `( … )` group — may CONTAIN the very separators the
+  // segment split just cut on (`echo $(gh pr list; node scripts/gen-inventory.mjs)`), so their contents
+  // are not reachable from any single segment; only the unsplit text still has them intact.
+  const w = String(whole || '');
+  for (const n of substitutionBodies(w)) push(n, 1);
+  const g = leadingGroupBody(w);
+  if (g !== null) push(g, 1);
+  for (const seg of segments) for (const n of nestedCommandStrings(seg)) push(n, 1);
+  return out;
+}
+
 /** The file OPERANDS of a tokenized argument list — every non-flag token, honouring `--` and the options in
  *  `optsWithArg` (which swallow the token after them, e.g. `sed -e <script>`). Pure. A QUOTED token is never
- *  read as a flag (a quoted `-x` is a filename). */
+ *  read as a flag (a quoted `-x` is a filename).
+ *  #2986(1) — an EMPTY token is never a file operand either. BSD `sed -i '' <script> <file>` spells its
+ *  in-place suffix as an empty quoted argument; counting it as an operand shifted the `files.slice(1)` below
+ *  by one, so the sed SCRIPT read as the write target and a scratch-path edit was denied. */
 function fileOperands(args, optsWithArg = new Set()) {
   const files = [];
+  const push = (t) => { if (t !== '') files.push(t); };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (!a.quoted && a.text === '--') { for (const t of args.slice(i + 1)) files.push(t.text); break; }
+    if (!a.quoted && a.text === '--') { for (const t of args.slice(i + 1)) push(t.text); break; }
     if (!a.quoted && a.text.length > 1 && a.text.startsWith('-')) {
       if (optsWithArg.has(a.text)) i += 1;
       continue;
     }
-    files.push(a.text);
+    push(a.text);
   }
   return files;
 }
@@ -512,17 +1126,20 @@ export function laneRootFromCwd(cwd) {
 export function canonicalGitOp(cmd) {
   // Wrapper-peeling + program-word normalization is shared with the #2788 tree-write arms via
   // `canonicalCommand` (r3 finding 1 — the new arms reimplemented a strictly weaker stripper beside this one).
-  const tokens = canonicalCommand(cmd).split(/\s+/);
-  if (tokens[0] !== 'git') return '';
-  // Skip git's leading global flags to reach the real subcommand.
+  // r3 audit — the global-flag skip walks QUOTE-AWARE words, not a blind `/\s+/` split: a quoted value with a
+  // space (`git -c "user.name=a b" reset --hard`) desynced the skip by one and the whole op read as harmless.
+  // The subcommand tail is sliced RAW so quoting survives for the danger patterns below.
+  const c = canonicalCommand(cmd);
+  const words = headWords(c);
+  if (!words.length || words[0].text !== 'git') return '';
   let i = 1;
-  while (i < tokens.length) {
-    const t = tokens[i];
+  while (i < words.length) {
+    const t = words[i].text;
     if (t === '-C' || t === '-c' || t === '--git-dir' || t === '--work-tree' || t === '--namespace') { i += 2; continue; }
     if (t.startsWith('-')) { i += 1; continue; }        // `--git-dir=…` / `--no-pager` / `--paginate` / `-p`
     break;
   }
-  return 'git ' + tokens.slice(i).join(' ');
+  return i >= words.length ? 'git ' : 'git ' + c.slice(words[i].start);
 }
 
 /** Is this command segment a destructive git op that would CLOBBER a lane clone (working tree or its remote
@@ -534,14 +1151,17 @@ export function canonicalGitOp(cmd) {
 export function isDestructiveLaneGitOp(cmd) {
   const c = canonicalGitOp(cmd);
   if (!c) return false;
-  if (/^git\s+reset\b[^|;&]*--hard\b/.test(c)) return true;
+  // r3 audit — these used `[^|;&]*` as a "stay inside this segment" fence. The segment split is now
+  // quote-aware, so the ONLY `|`/`;`/`&` that can still appear here is one inside a QUOTED argument, where
+  // the fence stops the scan early and the op reads as harmless. The real fence is the line.
+  if (/^git\s+reset\b[^\n]*--hard\b/.test(c)) return true;
   // `clean` with a FORCE flag — deletes untracked files (`-f`/`-fx`) and, with `-d`, untracked dirs. A force
   // flag is the destructive trigger; `-d` alone (no force) is a no-op, so force-present is the whole test.
   if (/^git\s+clean\b/.test(c) && /(?:^|\s)(?:--force|-[a-zA-Z]*f[a-zA-Z]*)(?=\s|$)/.test(c)) return true;
   if (/^git\s+checkout\s+(?:\S+\s+)?(?:--\s+)?\.(?:\s|$)/.test(c)) return true;   // checkout [<ref>] [--] .
-  if (/^git\s+checkout\b[^|;&]*\s(?:-f|--force)(?=\s|$)/.test(c)) return true;    // checkout -f <ref>
-  if (/^git\s+restore\b[^|;&]*\s\.(?:\s|$)/.test(c)) return true;                 // restore [--worktree/--staged/--] .
-  if (/^git\s+switch\b[^|;&]*\s(?:-f|--force|--discard-changes)(?=\s|$)/.test(c)) return true; // switch -f <branch>
+  if (/^git\s+checkout\b[^\n]*\s(?:-f|--force)(?=\s|$)/.test(c)) return true;    // checkout -f <ref>
+  if (/^git\s+restore\b[^\n]*\s\.(?:\s|$)/.test(c)) return true;                 // restore [--worktree/--staged/--] .
+  if (/^git\s+switch\b[^\n]*\s(?:-f|--force|--discard-changes)(?=\s|$)/.test(c)) return true; // switch -f <branch>
   if (/^git\s+push\b/.test(c) &&
       (/(?:^|\s)(?:-f|--force|--force-with-lease)(?=\s|$)/.test(c) || /(?:^|\s)\+\S/.test(c))) return true; // force-push (flag or +refspec)
   return false;
@@ -553,9 +1173,15 @@ export function isDestructiveLaneGitOp(cmd) {
  *  segment straight to `isDestructiveLaneGitOp` — `canonicalGitOp` strips env/sudo/wrapper disguises itself. */
 export function hasDestructiveLaneOp(command) {
   if (!command) return false;
-  return String(command)
-    .split(/(?:&&|\|\||[;&|]|\n)+/)
-    .some((seg) => isDestructiveLaneGitOp(seg.trim()));
+  const parsed = parseSegments(command);
+  // r3 audit — this is a PRE-FILTER for the (impure) lease read, so its only failure mode that matters is a
+  // false NEGATIVE: no lease is read, `reason()` gets no lease context, and the lane-clobber arm cannot fire.
+  // An unparseable command therefore answers YES (pay for one lease read) rather than degrading to NO.
+  if (parsed.unterminated) return true;
+  const segments = parsed.segments.concat(
+    parsed.continued ? parseSegments(command, { spliceContinuations: false }).segments : [],
+  );
+  return segments.some((seg) => isDestructiveLaneGitOp(seg.trim()));
 }
 
 // #2335 — the harness resets the reported Bash cwd to the PRIMARY checkout between tool calls, so the
@@ -570,11 +1196,17 @@ export function hasDestructiveLaneOp(command) {
 // The fix is to invoke with a directly-resolvable `cd` (a literal absolute path, or `LANE=/abs; cd "$LANE"` —
 // the standard lane idiom every skill already teaches), not to reach for a removed override.
 export function resolveEffectiveCwd(command, reportedCwd, resolvePath = resolve) {
-  const cmd = String(command || '');
+  // r3 audit — a heredoc BODY is data. A `cd /elsewhere` line (or an apostrophe that desyncs the quote
+  // scanner) inside a PR-body heredoc must not steer, or break, the cwd resolution; `decide` already strips
+  // them before it parses, and this must agree with it. An unparseable command keeps the REPORTED cwd, which
+  // is the conservative answer (the primary-cwd arms stay armed) — and `decide` denies it outright anyway.
+  const cmd = stripHeredocBodies(String(command || ''));
   if (!cmd) return reportedCwd;
+  const parsed = parseSegments(cmd);
+  if (parsed.unterminated) return reportedCwd;
   // Collect simple literal `VAR=value` / `export VAR=value` assignments (no command-subst/globs) in order.
   const vars = Object.create(null);
-  for (const stmt of cmd.split(/(?:&&|\|\||[;&|]|\n)+/)) {
+  for (const stmt of parsed.segments) {
     const m = stmt.trim().match(/^(?:export\s+)?([A-Za-z_]\w*)=(.+)$/);
     if (!m) continue;
     let val = m[2].trim();
@@ -583,7 +1215,7 @@ export function resolveEffectiveCwd(command, reportedCwd, resolvePath = resolve)
     if (!/\s/.test(val)) vars[m[1]] = val;                    // single-token literal only
   }
   // First `cd <target>` statement wins (that is where the command lands before the mutation runs).
-  for (const stmt of cmd.split(/(?:&&|\|\||[;&|]|\n)+/)) {
+  for (const stmt of parsed.segments) {
     const cd = stmt.trim().match(/^cd\s+(.+)$/);
     if (!cd) continue;
     let target = cd[1].trim().split(/\s+/)[0];                // first arg only (ignore trailing redirs/opts)
@@ -631,6 +1263,16 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // actual INVOCATIONS (anchored at command position), not mentions buried in a quoted arg like a commit
   // message. `git commit -m "...pkill vite..."` has command `git`, so the pkill rule no longer fires.
   const cmd = s.replace(/^(?:\w+=\S+\s+)*(?:sudo\s+)?/, '');
+  // r5 — …and the SAME segment as `canonicalCommand` reads it. That stripper peels the full wrapper set
+  // (`env`/`time`/`command`/`builtin`/`nice`/`xargs`/`npx`/`sudo -u`), unwraps a leading `(`/`{`, and
+  // resolves a path-qualified or quoted program word to its basename, where the hand-rolled prefix above
+  // peels only `VAR=v` and `sudo`. `time rm backlog/2986-x.md`, `(pkill vite)` and `/usr/bin/git push
+  // origin main` all reached these arms with the wrapper still glued to the command word and read as
+  // safe — a hole base only ever covered by ACCIDENT, when its quote-blind split happened to tear the
+  // line somewhere useful. Both readings are tested, so this can only ever add a deny, never remove one.
+  const canon = canonicalCommand(s);
+  const heads = canon && canon !== cmd ? [cmd, canon] : [cmd];
+  const atCommand = (re) => heads.some((h) => re.test(h));
 
   // A destructive git op (reset --hard / clean -f[d] / checkout/restore/switch discard / force-push) run with
   // cwd inside a leased lane clone can clobber in-flight work. Two lease regimes, checked in precedence order:
@@ -669,35 +1311,43 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   }
 
   // Only an actual RUN of build:plugs (a runner invocation), not a mention (grep/echo/read).
-  if (/\b(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b[^|;&]*\bbuild:plugs\b/.test(s) || (/\btsc\b[^|;&]*-p\s+\S*tsconfig\.plugs\.json/.test(s) && !/--noEmit/.test(s)))
+  if (/\b(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b[^\n]*\bbuild:plugs\b/.test(s) || (/\btsc\b[^\n]*-p\s+\S*tsconfig\.plugs\.json/.test(s) && !/--noEmit/.test(s)))
     return 'build:plugs / `tsc -p tsconfig.plugs.json` emits shadow .js/.d.ts into the tree (breaks vitest, fakes a red gate). To typecheck plugs use `tsc --noEmit`.';
 
-  if (/^(?:pkill|killall)\b[^|;&]*\b(?:vite|node)\b/.test(cmd))
+  if (atCommand(/^(?:pkill|killall)\b[^\n]*\b(?:vite|node)\b/))
     return "Never kill the running dev server (pkill/killall vite|node). It's the user's own server — detect the already-running instance and probe its port (3000/4000/8080) instead.";
 
-  if (/^(?:git\s+)?rm\b/.test(cmd) && BACKLOG_MD.test(s))
+  if (atCommand(/^(?:git\s+)?rm\b/) && BACKLOG_MD.test(s))
     return "Never delete a backlog/*.md — a done item becomes status:resolved (the file stays as the record). Resolve it, don't rm it.";
 
-  const mv = cmd.match(/^(?:git\s+)?mv\s+(.+)/);
-  if (mv) {
-    const paths = mv[1].split(/\s+/).filter((p) => p && !p.startsWith('-'));
-    if (paths.length >= 2) {
-      const srcN = (paths[0].match(/backlog\/(\d+)-/) || [])[1];
-      const dstN = (paths[paths.length - 1].match(/backlog\/(\d+)-/) || [])[1];
-      if (srcN && dstN && srcN !== dstN)
-        return `Never renumber a backlog item (${srcN} → ${dstN}) — NNN is immutable. A new item takes the next free number; yield this one.`;
-    }
+  for (const h of heads) {
+    const mv = h.match(/^(?:git\s+)?mv\s+(.+)/);
+    if (!mv) continue;
+    // r5 — compare the first and last BACKLOG-numbered operand, not the first and last TOKEN. Taking the
+    // last token made any trailing word shift the destination off the end and disarm the rule outright:
+    // `mv backlog/2986-x.md backlog/9999-y.md # trailing note` read the comment word `note` as the
+    // destination, found no NNN in it, and allowed a real renumber (confirmed executing under real bash).
+    const nums = mv[1].split(/\s+/)
+      .filter((p) => p && !p.startsWith('-'))
+      .map((p) => (p.match(/backlog\/(\d+)-/) || [])[1])
+      .filter(Boolean);
+    if (nums.length < 2) continue;
+    const srcN = nums[0];
+    const dstN = nums[nums.length - 1];
+    if (srcN !== dstN)
+      return `Never renumber a backlog item (${srcN} → ${dstN}) — NNN is immutable. A new item takes the next free number; yield this one.`;
   }
 
-  if (/>>\s*(?:\.\/)?(?:backlog|reports)\//.test(s) || (/^(?:sed|tee|perl)\b/.test(cmd) && CORPUS_MD.test(s)))
+  if (/>>\s*(?:\.\/)?(?:backlog|reports)\//.test(s) || (atCommand(/^(?:sed|tee|perl)\b/) && CORPUS_MD.test(s)))
     return "Don't append/in-place-edit backlog|reports/*.md from the shell (>>, tee -a, sed -i, perl -pi) — it bypasses the locus-prefix write hook so bare code-paths leak to the gate. Use the Edit/Write tools.";
 
   // Direct push to a constellation `main` — blocked (strict lane-only, #2203). Everything reaches main via a
   // `lane/*` ref → PR → CI gate; a direct `git push … main` (or a bare `git push` from a checkout on main)
   // skips CI entirely. Only an explicit `lane/*` destination is allowed. Sanctioned override: prefix
   // `MAIN_PUSH_OK=1` (e.g. pr-land --fallback-git, or an emergency the user directs).
-  if (/^git\s+push\b/.test(cmd) && !/\bMAIN_PUSH_OK=1\b/.test(s)) {
-    const rest = cmd.replace(/^git\s+push\b/, '');
+  if (atCommand(/^git\s+push\b/) && !/\bMAIN_PUSH_OK=1\b/.test(s)) {
+    const pushHead = heads.find((h) => /^git\s+push\b/.test(h));
+    const rest = pushHead.replace(/^git\s+push\b/, '');
     const targetsMain = /(?::(?:refs\/heads\/)?main\b)|(?:\s(?:refs\/heads\/)?main\b)/.test(rest);
     const targetsLane = /lane\//.test(rest);
     if (targetsMain || !targetsLane)
@@ -713,21 +1363,73 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
  *  denials. Only `<<`/`<<-` with a plain, quoted, or bare-word delimiter is recognised (the forms an agent
  *  actually writes); anything else is left untouched, i.e. today's behaviour. */
 export function stripHeredocBodies(command) {
+  return heredocScan(command).text;
+}
+
+/** `stripHeredocBodies` plus the parse state it reached. Pure. Returns `{ text, unterminated }`.
+ *
+ *  r3 audit — this pass is ITSELF a parser (it has to be: only an unquoted, un-commented `<<` opens a
+ *  heredoc), so it has the same degrade-or-deny obligation as the splitter. An unterminated quoted run in
+ *  the COMMAND text stops it from ever seeing a later opener, and the heredoc BODY then gets re-parsed as
+ *  commands with the quoting one phase out — which the fuzz found reachable end-to-end (an apostrophe in
+ *  the body re-balanced the run and swallowed a `git checkout -f main`). `unterminated` reports it and
+ *  `decide` denies. Note this is deliberately scoped to the command text: an unterminated quote inside a
+ *  heredoc BODY is data and is never reported (that is the whole point of a heredoc). */
+export function heredocScan(command) {
   const text = String(command || '');
-  if (!text.includes('<<')) return text;
-  const OPENER = /<<-?\s*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z_]\w*))/;
+  if (!text.includes('<<')) return { text, unterminated: parseSegments(text).unterminated };
+  const OPENER = /^<<-?\s*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z_]\w*))/;
   const kept = [];
-  let delim = null;
-  for (const line of text.split('\n')) {
-    if (delim !== null) {
-      if (line.trim() === delim) delim = null;   // terminator — dropped along with the body
+  let line = '';
+  let atWordStart = true;
+  let inComment = false;
+  let pending = null;
+  let unterminated = false;
+  let i = 0;
+  // r3 audit — the opener used to be matched with a line-wide regex, so a `<<` that is not an operator at
+  // all (`echo "a << b"`, `# see <<EOF`) minted a phantom heredoc and DROPPED every following line from
+  // `decide`'s view: `echo "x << EOF"` ⏎ `npm run build` read as safe. The opener is now only recognised at
+  // an UNQUOTED, un-commented position — strictly fewer heredocs are detected, so strictly fewer lines are
+  // dropped. Text is otherwise preserved VERBATIM (a `\`+newline is left for the splitter to splice).
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\n') {
+      kept.push(line);
+      line = '';
+      atWordStart = true;
+      inComment = false;
+      i += 1;
+      if (pending !== null) {                                  // consume the heredoc BODY + its terminator
+        const delim = pending;
+        pending = null;
+        while (i < text.length) {
+          const nl = text.indexOf('\n', i);
+          const body = text.slice(i, nl === -1 ? text.length : nl);
+          i = nl === -1 ? text.length : nl + 1;
+          if (body.trim() === delim) break;
+        }
+      }
       continue;
     }
-    kept.push(line);
-    const m = line.match(OPENER);
-    if (m) delim = m[1] || m[2] || m[3];
+    const run = inComment ? null : scanRun(text, i, atWordStart);
+    if (run && run.kind === 'comment') { inComment = true; }
+    else if (run && run.kind === 'continuation') { line += '\\'; i += 1; continue; }  // keep raw; the `\n` ends the line
+    else if (run) {
+      if (run.kind === 'unterminated') unterminated = true;   // fail closed — `decide` denies, never degrades
+      line += run.raw;
+      i = run.end + 1;
+      atWordStart = false;
+      continue;
+    } else if (!inComment && ch === '<' && text[i + 1] === '<' && pending === null) {
+      const m = text.slice(i).match(OPENER);
+      if (m) { pending = m[1] || m[2] || m[3]; line += m[0]; i += m[0].length; atWordStart = false; continue; }
+    }
+    line += ch;
+    atWordStart = /[\s()]/.test(ch);
+    i += 1;
   }
-  return kept.join('\n');
+  kept.push(line);
+  return { text: kept.join('\n'), unterminated };
 }
 
 /** First deny reason across a command's `&&`/`|`/`;`-separated segments, or null. Pure. `ctx` is passed to
@@ -739,17 +1441,39 @@ export function decide(command, ctx = {}) {
   // newline as a separator, so a body line that happens to contain `>` (`Fix the > thing` in a PR-body
   // heredoc) would be read as a redirect. Drop the bodies first; the OPENER line stays, so
   // `cat > config/app.json <<'EOF'` is still caught as the tree write it is.
-  command = stripHeredocBodies(command);
-  // …and `>|` (the noclobber-override redirect) is a REDIRECT, not a pipe — but `|` is one of the segment
-  // separators below, so `>| config/app.json` was torn in half and the write vanished (r3 finding 2). `>|` is
-  // exactly equivalent to `>`, and the glued spelling is unambiguous, so normalize it before splitting.
-  command = command.replace(/>\|(?!\|)/g, '>');
+  const hd = heredocScan(command);
+  // r3 audit — the heredoc pass is a parser too, and an unterminated quote in the COMMAND text derails it
+  // (it never sees a later opener, and the body then re-parses as commands one quoting phase out). Deny
+  // before trusting anything it produced.
+  if (hd.unterminated) return unparseableReason(command);
+  command = hd.text;
+  // (`>|`, the noclobber-override redirect, used to be pre-normalized to `>` here because the quote-blind
+  // split tore it in half at its `|` — r3 finding 2. `splitSegments` consumes a redirect operator run whole,
+  // so the rewrite is no longer needed and no longer mangles a `>|` that appears inside a quoted argument.)
   // #2833 finding 3 — whole-command check FIRST: backgrounding is a property of the whole command (a trailing `&`
   // / the `run_in_background` tool param), which the per-segment split below would lose. Deny a backgrounded
   // verification-set run before anything else.
   const bg = backgroundedVerificationReason(command, ctx.runInBackground);
   if (bg) return bg;
-  for (const seg of String(command).split(/(?:&&|\|\||[;&|]|\n)+/)) {
+  // #2994 — QUOTE-AWARE split: tokenize quotes first, cut only on UNQUOTED separators.
+  const parsed = parseSegments(command);
+  // #2994 review r3 — FAIL CLOSED on a command the parser cannot represent. Every loosening signature this
+  // review found reduced to the opposite: the scanner degraded to "consume to end of string" and handed the
+  // deny arms one opaque blob. An unterminated quote is not a command bash would run, so this denies nothing
+  // real; it just removes the degradation path.
+  if (parsed.unterminated) return unparseableReason(command);
+  const segments = parsed.segments.slice();
+  // A `\`+newline is spliced the way bash splices it (F2). Where the two readings of a continuation can
+  // disagree — a MID-COMMAND splice joins a tail that the pre-#2994 per-line split saw as its own command —
+  // BOTH readings are checked, so the splice can never be a net loosening. Only pays for itself on the rare
+  // command that actually contains a line continuation.
+  if (parsed.continued) segments.push(...parseSegments(command, { spliceContinuations: false }).segments);
+  // #2994 review r5 — …and the text bash RE-EXECUTES: a `$( )`/backtick substitution, a subshell group's
+  // body, an `eval`/`sh -c`/`bash -c` script string, a runner's `exec` remainder. Making the split
+  // quote-CORRECT (r1–r4) lost the coverage the quote-BLIND split had by accident, because a nested
+  // command stopped being torn open at its separators. Recursing into those positions restores it
+  // structurally — and covers the `bash -c "npm run build"` shape base never caught at all.
+  for (const seg of withNestedCommands(segments, command)) {
     const r = reason(seg, ctx);
     if (r) return r;
   }
