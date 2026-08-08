@@ -16,7 +16,8 @@ silently paying for. Outside `/workflow` there is no test gate or drain to catch
 confident-but-wrong return, so the tier is the only control there.
 
 **How to apply:** route on the *shape of the return* — knowable before spawning — never on self-rated
-difficulty (self-rating is banned by [[feedback_model_routing_opus_loop_sonnet_execute]]).
+difficulty (self-rating is banned where the verdict is emitted — `docs/agent/backlog-workflow.md` §
+*Model routing*, the codified home of [[delegate-by-default-the-loop-only-orchestrates]]).
 
 - **Haiku** — returns pointers verifiable in seconds: locate a symbol, list/count files, "does X still
   exist", one mechanical edit with an exact spec.
@@ -27,8 +28,8 @@ difficulty (self-rating is banned by [[feedback_model_routing_opus_loop_sonnet_e
 - **Never Fable** for subagents — expensive/limited premium pool, never for execution.
 
 Tie-break: **when torn between two tiers, go up.** Over-spending costs a few tokens; under-spending returns
-a wrong answer that looks exactly like a right one. Same bias as
-[[feedback_model_routing_opus_loop_sonnet_execute]]. A cheap subagent's return is a *lead to verify*, not a
+a wrong answer that looks exactly like a right one. Same bias as the routing verdict's *when torn between
+tiers, go up* (`docs/agent/backlog-workflow.md` § *Model routing*). A cheap subagent's return is a *lead to verify*, not a
 fact — see [[verify-before-you-claim]].
 
 Structural backstop where it exists: pin `model:` frontmatter in `.claude/agents/*.md` so an agent type
