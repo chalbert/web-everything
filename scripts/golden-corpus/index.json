@@ -9,10 +9,10 @@
     "backlog-created": 12,
     "memory": 12,
     "hook-locus-prefix": 12,
-    "hook-guard-bash": 16,
+    "hook-guard-bash": 28,
     "hook-guard-lane": 4
   },
-  "total": 92,
+  "total": 104,
   "categories": {
     "backlog-claim": {
       "source": "git-mined",
@@ -52,7 +52,7 @@
     "hook-guard-bash": {
       "source": "spec-derived",
       "selfValidated": false,
-      "note": "guard-bash denies BEFORE a commit exists, so no historical \"denied\" commit is mineable; each case is grounded in an incident documented in guard-bash.mjs's own header comment, run through the real exported decide() at mine time."
+      "note": "guard-bash denies BEFORE a commit exists, so no historical \"denied\" commit is mineable; each case is grounded in an incident documented in guard-bash.mjs's own header comment, run through the real exported decide() at mine time. r5 adds the three shapes bash RE-EXECUTES ($( )/backtick, eval/sh -c/bash -c, a subshell with a trailing token), each with a must-allow mirror; those six were confirmed against real bash in a PATH-stubbed sandbox whose stubs log NUL-separated argv, not asserted from the guard's own reading."
     },
     "hook-guard-lane": {
       "source": "spec-derived-template",

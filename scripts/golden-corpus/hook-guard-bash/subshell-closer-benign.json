@@ -1,0 +1,11 @@
+{
+  "id": "subshell-closer-benign",
+  "cmd": "(eleventy --version) >/dev/null",
+  "ctx": {
+    "primaryCwd": true
+  },
+  "basis": "r5 F2 precision mirror — the eleventy no-write flag allowlist has to terminate on a group closer too, or `--version)` reads as an unknown flag and a command that writes nothing is denied.",
+  "expect": {
+    "reason": null
+  }
+}
