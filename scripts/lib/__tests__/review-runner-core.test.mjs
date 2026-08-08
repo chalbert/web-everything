@@ -114,7 +114,13 @@ describe('partitionRunnerPRs — fail-closed discovery filter (INVARIANT 2 / #24
 describe('runnerShadowPlan — THE ZERO-MUTATION GUARANTEE (forced shadow, never applies)', () => {
   it('a clean auto-dispose ledger yields a WOULD-CLEAR intent that is NEVER applied in shadow', () => {
     const { intent, plan } = runnerShadowPlan({
-      ledger: cleanDiverseLedger(), config: CONFIG, currentLabels: [REVIEW_LABELS.pending],
+      ledger: cleanDiverseLedger(),
+      config: CONFIG,
+      currentLabels: [REVIEW_LABELS.pending],
+      // #2844 — a WOULD-write shadow line requires a PROVABLY independent clearer; the seam refuses otherwise,
+      // so the ids are part of what makes this a would-clear case at all.
+      authorId: 'session-author-3f9c',
+      clearerId: 'session-reviewer-a71b',
     });
     // the seams' INTENT is to clear (WOULD clear) …
     expect(intent.action).toBe(LAND_ACTIONS.CLEAR);
@@ -124,6 +130,23 @@ describe('runnerShadowPlan — THE ZERO-MUTATION GUARANTEE (forced shadow, never
     expect(plan.mode).toBe('shadow');
     expect(plan.observation).toMatch(/SHADOW/);
     expect(plan.observation).toMatch(/WOULD write/);
+  });
+
+  it('#2844 — the SAME clean ledger with the AUTHOR as clearer records a REFUSED line, never WOULD-write', () => {
+    // The runner is the scheduled process that will eventually be flipped to enforce. Its shadow record must
+    // report what an enforce run would ACTUALLY do — refuse a self-clear — or the confidence it builds is false.
+    const { intent, plan } = runnerShadowPlan({
+      ledger: cleanDiverseLedger(),
+      config: CONFIG,
+      currentLabels: [REVIEW_LABELS.pending],
+      authorId: 'session-author-3f9c',
+      clearerId: 'session-author-3f9c',
+    });
+    expect(intent.action).toBe(LAND_ACTIONS.CLEAR); // the judge is still clean — only the clearer is wrong
+    expect(plan.apply).toBe(false);
+    expect(plan.reason).toContain('self-clear');
+    expect(plan.observation).toMatch(/REFUSED/);
+    expect(plan.observation).not.toMatch(/WOULD write/);
   });
 
   it('a review:human PR is kept parked even on a clean ledger (INVARIANT 2), never applied', () => {
