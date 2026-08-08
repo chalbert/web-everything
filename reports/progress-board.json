@@ -3,7 +3,7 @@
   "_artifactUrl": "Set once, with --url=<url>, right after the FIRST Artifact publish. Every later publish from a different session MUST pass this as the Artifact `url` parameter or a new URL is minted and the operator's bookmark dies.",
   "title": "Web Everything — progress board",
   "repo": "chalbert/web-everything",
-  "artifactUrl": null,
+  "artifactUrl": "https://claude.ai/code/artifact/633d3d18-3e12-4675-9fb0-c96575978931",
   "phases": {
     "1": "Merge-gate correctness",
     "2": "Review routing",
