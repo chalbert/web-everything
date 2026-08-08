@@ -88,26 +88,36 @@ sanctioned one-off escape, mirroring `MAIN_PUSH_OK` / `LANE_GUARD_OFF`. The un-s
 [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (#2607): enforced by absence (#2677) and
 a **warn** nudge, never a hard gate on an uncomputable predicate.
 
-### Nested shell re-execution the guard cannot resolve is DENIED — and the deny-flip ships behind a quote-aware resolver, never before it {#guard-unresolvable-reexecution-denies}
+### At the primary checkout, nested shell re-execution the guard cannot resolve is DENIED — and the deny-flip ships behind a quote-aware resolver, never before it {#guard-unresolvable-reexecution-denies}
 
-**Stop enumerating the ways a command re-enters the shell; refuse the ones you cannot read.** At the primary
-checkout, `guard-bash.mjs` **denies** a command containing shell re-execution it cannot **fully** resolve —
-the same *unparseable means deny* doctrine the guard already applies elsewhere, extended to nested execution.
-This converts both recursion caps (depth 4, 64 nodes), which today stop scanning and **allow**, from
-fail-open to fail-closed. Ruled 2026-08-08 after **six** review rounds each closed one class of hole and each
-uncovered another; the sixth reviewer found the structural reason — the fuzz generator's wrapper list *was*
-the list of classes the previous fix had implemented, so three million generated pairs could only re-prove
-what was already handled. **An enumeration cannot be completed from inside the thing being enumerated:** a
-deny-list over shell is unbounded, so the unknown case must fall closed.
+**Stop enumerating the ways a command re-enters the shell; refuse the ones you cannot read.** The rule: at the
+primary checkout, `guard-bash.mjs` must **deny** a command containing shell re-execution it cannot **fully**
+resolve. **The rule is ratified ahead of the machinery it governs — none of that machinery is on `main`
+today.** Today's guard does the opposite on purpose: `we:scripts/guard-bash.mjs` states *"Fails open on
+unparseable input"*, and `canonicalCommand` / `canonicalGitOp` deliberately do not chase `$(echo git)` or
+`bash -c "…"`. The nested-command scanner that makes the question answerable at all — with its two bounded
+recursion caps (depth 4, 64 expansions) and its explicit refusal to escalate a nested string that does not
+parse — **arrives with #2986 / #2994 (PR #1092, open and at `review:changes`)**. This rule converts all three
+of those fail-opens to fail-closed, and is built as **#3002**. The nearest existing precedent for the posture
+is a *different* guard: `we:scripts/lib/lane-verify.mjs` refuses a corrupt verification marker rather than
+failing open.
+
+Ruled 2026-08-08 after **six** review rounds, each of which closed one class of hole and uncovered another;
+the sixth reviewer found the structural reason — the fuzz generator's wrapper list *was* the list of classes
+the previous fix had implemented, so three million generated pairs could only re-prove what was already
+handled. **An enumeration cannot be completed from inside the thing being enumerated:** a deny-list over shell
+is unbounded, so the unknown case must fall closed.
 
 **The ordering is part of the rule, not an implementation detail.** "Refuse what it cannot resolve" says
 nothing about *who decides it cannot be resolved*, and that — not how often real re-execution happens — sets
-the cost. Measured over 64,752 `Bash` invocations across 4,485 sessions, a **quote-blind** scan flags 1,093
-calls as shell re-entry where a **quote-aware** one flags 596: **45% of its own hits are text that was never
-shell** (a JavaScript `=>` in a quoted argument, an fd-dup `2>&1`, a heredoc body). So the deny-flip lands
-**only behind** the quote-aware segment splitter (#2986 / #2994), never in front of it — tightening the
-default on a parser that misreads ordinary text amplifies the false-deny problem instead of fixing the
-security one. **A guard may only be made more eager to deny in the same change as, or after, the parser that
+the cost. Over the local session corpus a **quote-blind** scan flags substantially more calls as shell
+re-entry than a **quote-aware** one does, and the excess is text that was never shell (a JavaScript `=>` in a
+quoted argument, an fd-dup `2>&1`, a heredoc body). *No over-flag percentage is carried here:* the ratio moves
+with the token list used and no committed script reproduces it — see #3002 for the measured range and its
+provenance. The **direction** is what this rule rests on, and it is not in doubt. So the deny-flip lands
+**only behind** the quote-aware segment splitter (#2986 / #2994, shipping in the still-open, still-bounced
+PR #1092), never in front of it — tightening the default on a parser that misreads ordinary text amplifies
+the false-deny problem instead of fixing the security one. **A guard may only be made more eager to deny in the same change as, or after, the parser that
 makes its "I can't read this" honest.** After any such flip, **re-run the false-deny sweep** rather than
 inheriting the prior estimate. Lineage: ruled by the operator as **R8**, 2026-08-08 → built as #3002 ·
 measurement #3001 · #2749 (4th arm) · #2986 · #2994 · #2203.
