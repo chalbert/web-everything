@@ -64,7 +64,8 @@ export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm
  * fix-agent `rearm` (#2644, was `decideRearm`), and the #2895 gate-self `clear-human`. Every return carries
  * `keepsHuman` — whether the swap leaves `review:human` in place.
  *   • `accepted` — INVARIANT 2: REFUSED on a `review:human` PR (only a human's /review may clear the gate);
- *     otherwise adds `review:accepted`, drops the parked `review:pending`.
+ *     otherwise adds `review:accepted`, drops the parked `review:pending` AND a stale `review:changes` (#2974 —
+ *     a bounce that was fixed and re-verdicted straight to `accepted` must not still read as awaiting changes).
  *   • `changes` — always allowed (a bounce lands nothing); adds `review:changes`, drops `review:pending` AND a
  *     stale `review:accepted`, but NEVER `review:human`.
  *   • `rearm` — the #2630 invariant: ONLY a live `review:changes` is re-armable (idempotent — a second call
@@ -165,12 +166,19 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
   }
 
   // we:scripts/review-set-label.mjs#decideSetLabel — accepted (no human gate): the reviewer accepted →
-  // add review:accepted, drop the parked review:pending.
+  // add review:accepted, drop the parked review:pending AND a stale review:changes (#2974). A PR reaching
+  // `accepted` may have gotten there straight from `pending`, OR via a bounce that was fixed and re-verdicted
+  // without going through `rearm` first — in either case `review:changes` must not survive next to
+  // `review:accepted`. `changes` (below) already strips a stale `accepted`; `accepted` was the one asymmetric
+  // target, under-clearing and leaving a self-contradictory label pair that three consumers
+  // (`lane-resume.mjs#land`, `pr-watch.mjs`'s `PARK_LABELS`/`isReadyToLand`, `status-board.mjs#reviewLabelOf`)
+  // read raw with no accepted-first ordering of their own. `presentRemoveLabels` narrows this to labels the PR
+  // actually carries, so listing `changes` unconditionally never risks an absent-label error from `gh`.
   if (to === 'accepted') {
     return {
       allowed: true,
       addLabel: REVIEW_LABELS.accepted,
-      removeLabels: [REVIEW_LABELS.pending],
+      removeLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.changes],
       keepsHuman: isHuman,
       reason: 'accepted — reviewer accepted; drain may merge',
     };
@@ -297,6 +305,17 @@ export function runReviewLabelCli({
   if (!fixedTo && !targetOk) {
     fail(`invalid --to — expected ${targets}`);
   }
+  // #2974 — `rearm` is DELIBERATELY still absent from this list. Before this item, a reviewer clearing a
+  // bounced-but-now-fixed PR had no sanctioned path: `--to=accepted` left the stale `review:changes` behind
+  // (the bug this item fixes), and `rearm` only swaps `changes → pending` (an independent re-review owed, per
+  // the #2630 invariant) — it can never emit `review:accepted`, so exposing it here would not have solved the
+  // reviewer's problem even if it had been reachable. Now that `accepted` drops `changes` itself, the reviewer's
+  // actual want — "clear this fixed, bounced PR" — is `--to=accepted`, same as any other parked PR; no second
+  // path is needed. `rearm` stays reachable only where it already was: `scripts/conveyor/rearm-review.mjs`
+  // (`fixedTo: 'rearm'`), for the conveyor fix agent handing a repair back for re-review, a DIFFERENT actor and
+  // a different intent (never-accept) from a reviewer's verdict. Opening `--to=rearm` here would let this CLI's
+  // caller re-park an accepted-track PR without ever verdicting it — a capability nobody asked for and the item
+  // said not to add both.
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — --repo optional: default to the cwd repo (the fix agent
   // runs inside its WE lane clone, so the current repo IS the PR's repo). Derived once, up front.

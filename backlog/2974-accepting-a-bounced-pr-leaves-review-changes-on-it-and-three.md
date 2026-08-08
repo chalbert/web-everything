@@ -2,10 +2,12 @@
 bornAs: x534qrf
 kind: story
 size: 2
-status: open
+status: resolved
 relatedTo: ["2882", "2896", "2644"]
 scope: ["we:scripts/review-set-label.mjs"]
 dateOpened: "2026-08-07"
+dateStarted: "2026-08-08"
+dateResolved: "2026-08-08"
 tags: [gate, review, drain]
 ---
 
