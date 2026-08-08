@@ -95,8 +95,11 @@ applies a label). The same module also renders the operator-facing notice for yo
 
 4. **Record the verdict** on the operator's OK (never inferred, always an explicit label — #2281) — **always
    through `we:scripts/review-set-label.mjs`, never a hand-rolled `gh pr edit`.** That module is the SINGLE HOME
-   of the review-label swap (#2644): it applies the label, stamps the `reviewed-sha` marker, and posts the
-   durable comment in one fail-closed arc. Write your findings write-up to a file first, then:
+   of the review-label swap (#2644): it posts the durable comment, stamps the `reviewed-sha` marker, and applies
+   the label. The two writes are not atomic, so #2964 orders them so the half that can survive a blip alone is
+   the harmless one — on an unaccepted PR the comment goes first (an orphan marker is never read), on an
+   already-accepted one the swap does. **A non-zero exit means re-run the same command**; it is safe.
+   Write your findings write-up to a file first, then:
 
    ```
    node scripts/review-set-label.mjs <PR> --repo=<owner/name> --to=accepted --actor="<operator>" --body-file=<findings.md>

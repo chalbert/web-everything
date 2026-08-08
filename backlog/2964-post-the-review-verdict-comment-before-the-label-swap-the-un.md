@@ -2,9 +2,11 @@
 bornAs: xme425q
 kind: story
 size: 2
-status: open
+status: resolved
 priority: high
 dateOpened: "2026-08-06"
+dateStarted: "2026-08-08"
+dateResolved: "2026-08-08"
 relatedTo: ["2409", "2750", "2838", "2893", "2895"]
 scope:
   - we:scripts/review-set-label.mjs
