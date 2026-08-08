@@ -20,6 +20,16 @@
  * fetch renders the cache behind a visible "stale" banner, and with no cache at all the page still renders
  * with an empty PR section and an honest note. A stale-but-rendered board beats a crash.
  *
+ * The HAND-MAINTAINED half degrades the same way, and it has to: that file is git-tracked, so an unresolved
+ * merge-conflict marker is enough to make it invalid JSON. `loadState` never throws — it returns the empty
+ * state carrying `[STATE_ERROR]`, the page renders behind a red "the plan could not be read" banner, and
+ * every verb is refused until it is fixed by hand (saving an empty plan over a recoverable one is the single
+ * unrecoverable move here). That is a DIFFERENT failure from an unanswerable decision — see `validateDecisions`.
+ *
+ * WHERE IT MAY WRITE. `--out=` and `--state=` are caller-controlled, so `assertWritablePath` refuses any path
+ * that lands inside this repository but outside `reports/` — a tracked file must never be overwritten.
+ * Outside the repository is allowed and normal: the board is published from a scratchpad path.
+ *
  * THE URL-STABILITY RULE (why `artifactUrl` lives in the state file). Re-publishing the same file path keeps
  * the artifact URL only WITHIN the conversation that first published it. From any other session the publisher
  * must pass the stored URL as the Artifact `url` parameter or a NEW url is minted and the operator's bookmark
@@ -35,12 +45,24 @@
  *   node scripts/progress-board.mjs --decide=<id>        # a decision was taken by the operator
  *   node scripts/progress-board.mjs --url=<artifact-url> # store the published URL (do this once, after publishing)
  *
+ * DECISIONS ARE THE PAGE'S ONLY ASK, so they carry more than a title, and that is ENFORCED rather than asked
+ * for. Anything marked `awaiting` must be answerable from the page alone — a `question`, at least two real
+ * `options` with exactly one recommended, and `ifNothing`. The tool refuses the flip to `awaiting` and
+ * refuses to render a board that carries an incomplete one (exit 1, naming the id and every missing field);
+ * an unfinished decision waits in `draft`, which never reaches the operator's section. `why` and `evidence`
+ * are strongly encouraged and not blocking. Every field has a verb; none is ever hand-typed into JSON:
+ *   node scripts/progress-board.mjs --decision-add="<title>" --question="…" --if-nothing="…" [--id=<id>] [--status=<s>]
+ *   node scripts/progress-board.mjs --decision-set=<id> --field=<name> --value="…"   # empty --value clears
+ *   node scripts/progress-board.mjs --decision-option=<id> --label="…" --detail="…" [--recommend]
+ *   node scripts/progress-board.mjs --decision-evidence=<id> --text="…"              # empty --text clears all
+ *
  * Flags: --state=<path> --out=<path> --no-gh --json --help.
  * Env:   WE_BOARD_NO_GH=1 (never shell out to gh), WE_BOARD_NOW=<iso> (freeze the stamp, for tests).
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -48,24 +70,196 @@ const DEFAULT_STATE = join(ROOT, 'reports', 'progress-board.json');
 const DEFAULT_OUT = join(ROOT, 'reports', 'progress-board.html');
 const cachePathFor = (statePath) => join(dirname(statePath), '.progress-board-cache.json');
 
+// ── Where this script may write ───────────────────────────────────────────────
+
+/** Lexical `..` cannot escape a symlinked directory, so resolve the PARENT for real and re-attach the name. */
+function realish(p) {
+  const abs = resolve(p);
+  const parent = dirname(abs);
+  try {
+    return join(realpathSync(parent), basename(abs));
+  } catch {
+    return abs; // the directory does not exist yet — nothing to follow, and mkdir will create it under ROOT rules
+  }
+}
+
+const within = (dir, p) => {
+  const rel = relative(dir, p);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+};
+
+/** Repo-relative inside the repo, absolute outside it — never a wall of `../..` back out of the checkout. */
+const shortPath = (p) => (within(ROOT, resolve(p)) ? relative(ROOT, resolve(p)) : resolve(p));
+
+/**
+ * `--out=` and `--state=` are the only paths a caller controls, and the thing worth protecting is a TRACKED
+ * repository file: `--out=./package.json` would silently overwrite it. Writing OUTSIDE the repo is not the
+ * danger and is in active use — the board is published from a scratchpad path — so the rule is deliberately
+ * narrow: inside the repo, only `reports/` is writable; outside the repo, anywhere.
+ *
+ * @returns {string} the resolved path to use.
+ */
+export function assertWritablePath(p, flag) {
+  const abs = realish(p);
+  const root = realish(ROOT);
+  if (!within(root, abs)) return abs; // outside the repository entirely — the caller's own disk, their call
+  if (within(join(root, 'reports'), abs)) return abs;
+  throw new Error(
+    `refusing ${flag}=${p} — it resolves to ${relative(root, abs)} inside the repository, and the board may only write ` +
+      `inside reports/ or to a path outside the repository entirely (overwriting a tracked file is never the intent).`,
+  );
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 /** Item lifecycle. `blocked` is the only one that pulls an item into the operator's section. */
 export const ITEM_STATUSES = ['todo', 'in-progress', 'blocked', 'done'];
 
+/**
+ * Decision lifecycle — four states, and the two middle ones carry the whole design:
+ *   • `draft`    — being prepared. Not yet answerable, so it may NOT sit in the operator's section; it
+ *                  renders low-emphasis near the bottom. This is the only place an incomplete decision may live.
+ *   • `awaiting` — outstanding, and therefore COMPLETE: see `decisionGaps`. The operator has not ruled.
+ *   • `queued`   — RULED, but deliberately deferred ("do it, when the priority is right"). It must stay on
+ *                  the page (the ruling is a fact worth seeing) while reading as settled, so it renders in
+ *                  its own section and is NEVER counted as needing the operator.
+ *   • `taken`    — ruled and absorbed into the plan; the plan item now carries it, so it leaves the board.
+ */
+export const DECISION_STATUSES = ['draft', 'awaiting', 'queued', 'taken'];
+
+/** The scalar decision fields `--decision-set` may write. `options` and `evidence` have their own verbs. */
+export const DECISION_FIELDS = ['title', 'question', 'why', 'ifNothing', 'detail', 'status', 'preparedDate'];
+
+/**
+ * THE ENFORCED CONTRACT. A decision presented to the operator has to be ANSWERABLE FROM THE PAGE — that is
+ * the whole reason the board exists, and it is not left to whoever writes the next entry to remember.
+ *
+ * Optional context is the same as no context: the next entry goes in as a bare title, the page slides back
+ * into a list of one-liners nobody can act on, and a convention in the skill will not stop it. So the fields
+ * are REQUIRED on anything marked `awaiting`, the tool refuses the run when one is missing, and the only way
+ * to hold an unfinished decision is `draft` — which never reaches the operator's section.
+ *
+ * `why` and `evidence` are strongly encouraged and deliberately NOT blocking: a decision can be genuinely
+ * self-evident in its question, and a hard requirement there would only train people to type filler.
+ *
+ * @returns {string[]} the missing pieces, in the order the operator would need them. Empty = answerable.
+ */
+export function decisionGaps(d) {
+  const gaps = [];
+  if (!d?.question) gaps.push('question (--decision-set --field=question)');
+  const options = d?.options ?? [];
+  if (options.length < 2) {
+    // One option is not a decision, it is an announcement — and two is a perfectly good answer. The rule is
+    // "at least two", never "pad to three".
+    gaps.push(`options: at least two, this has ${options.length} (--decision-option --label=… --detail=…)`);
+  } else if (options.filter((o) => o.recommended).length !== 1) {
+    gaps.push('exactly one option marked recommended (--decision-option --label=… --recommend)');
+  }
+  if (!d?.ifNothing) gaps.push('ifNothing — what breaks if it is never answered (--decision-set --field=ifNothing)');
+  return gaps;
+}
+
+/** Every unanswerable `awaiting` decision on the board, as one message each. Empty = the board may render. */
+export function validateDecisions(state) {
+  return (state.decisions ?? [])
+    .filter((d) => (d.status ?? 'awaiting') === 'awaiting')
+    .map((d) => [d, decisionGaps(d)])
+    .filter(([, gaps]) => gaps.length)
+    .map(([d, gaps]) => `decision "${d.id}" is awaiting the operator but cannot be answered from the page — missing ${gaps.join(' · ')}`);
+}
+
 const EMPTY_STATE = {
   title: 'Progress board',
   repo: null,
   artifactUrl: null,
+  nextRuling: 1,
   phases: {},
   items: [],
   decisions: [],
 };
 
+/**
+ * RULING NUMBERS — `R1`, `R2`, … — exist because the operator answers these in chat: "R6 — as recommended".
+ * A number derived from position (whatever order a message happened to list them in) means nothing the next
+ * day, so the number is IDENTITY, not position:
+ *   • assigned once, at creation, from a counter that lives in the state file, and persisted;
+ *   • never renumbered when the list is reordered or filtered;
+ *   • never reused. A decision that is taken or dropped RETIRES its number with it — the counter only ever
+ *     moves forward, so "R2" can never later mean something else.
+ * A decision that predates the scheme is backfilled once, on the next run, and then never moves again.
+ *
+ * @returns {number} how many numbers were assigned (non-zero means the state needs saving).
+ */
+export function ensureRulingNumbers(state) {
+  let assigned = 0;
+  let next = Number.isInteger(state.nextRuling) && state.nextRuling > 0 ? state.nextRuling : 1;
+  // Never hand back a number that is already in use — a hand-edited counter must not create a duplicate.
+  const taken = new Set((state.decisions ?? []).map((d) => d?.ruling).filter(Boolean));
+  for (const d of state.decisions ?? []) {
+    if (d.ruling) continue;
+    while (taken.has(`R${next}`)) next += 1;
+    d.ruling = `R${next}`;
+    taken.add(d.ruling);
+    next += 1;
+    assigned += 1;
+  }
+  state.nextRuling = next;
+  return assigned;
+}
+
+/**
+ * Carries "this state file could not be read" alongside the fallback state. A SYMBOL on purpose:
+ * `JSON.stringify` and `Object.keys` both skip it, so `saveState` can never write the complaint back into
+ * the file it is complaining about.
+ */
+export const STATE_ERROR = Symbol('progress-board.stateError');
+
+/**
+ * Read the hand-maintained half — and DEGRADE rather than die, the same contract the `gh` half already
+ * honours. The realistic trigger is not exotic: this file is git-tracked, so an unresolved merge-conflict
+ * marker makes it invalid JSON, and a crash there loses the whole page over a fixable typo.
+ *
+ * A broken file yields the empty state plus `[STATE_ERROR]`, which the CLI turns into a loud banner ON THE
+ * PAGE and a refusal to write verbs (writing an empty plan over a recoverable file is the one genuinely
+ * unrecoverable move). A well-formed file with an unanswerable decision is a DIFFERENT failure and is not
+ * routed through here — see `validateDecisions`.
+ */
 export function loadState(statePath) {
   if (!existsSync(statePath)) return { ...EMPTY_STATE };
-  const raw = JSON.parse(readFileSync(statePath, 'utf8'));
-  return { ...EMPTY_STATE, ...raw };
+
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(statePath, 'utf8'));
+  } catch (e) {
+    const broken = { ...EMPTY_STATE };
+    broken[STATE_ERROR] = `${shortPath(statePath)} is not valid JSON — ${e.message}`;
+    return broken;
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    const broken = { ...EMPTY_STATE };
+    broken[STATE_ERROR] = `${shortPath(statePath)} does not hold a JSON object`;
+    return broken;
+  }
+
+  // Right shape, wrong types: a string where a list belongs takes out every `.filter`/`.map` downstream.
+  // Normalise to something renderable and say which key was wrong — never guess at what it meant.
+  const state = { ...EMPTY_STATE, ...raw };
+  const wrong = [];
+  for (const key of ['items', 'decisions']) {
+    if (!Array.isArray(state[key])) {
+      wrong.push(key);
+      state[key] = [];
+    } else {
+      state[key] = state[key].filter((x) => x && typeof x === 'object' && !Array.isArray(x));
+      if (state[key].length !== raw[key]?.length) wrong.push(`${key} (entries that were not objects)`);
+    }
+  }
+  if (!state.phases || typeof state.phases !== 'object' || Array.isArray(state.phases)) {
+    wrong.push('phases');
+    state.phases = {};
+  }
+  if (wrong.length) state[STATE_ERROR] = `${shortPath(statePath)} has the wrong type for: ${wrong.join(', ')} — ignored`;
+  return state;
 }
 
 export function saveState(statePath, state) {
@@ -248,11 +442,20 @@ export function buildModel(state, prs) {
   const byPr = new Map(rows.map((r) => [r.number, r]));
   const items = (state.items ?? []).map((it) => ({ ...it, prRow: it.pr ? byPr.get(Number(it.pr)) ?? null : null }));
 
+  // A decision with no status recorded is outstanding — the safe default, since an un-set status must never
+  // quietly hide something the operator has not actually ruled on.
+  const decisions = (state.decisions ?? []).map((d) => ({ ...d, status: d.status ?? 'awaiting' }));
   const needsYou = {
-    decisions: (state.decisions ?? []).filter((d) => d.status !== 'taken'),
+    decisions: decisions.filter((d) => d.status === 'awaiting'),
     prs: rows.filter((r) => r.status === 'needs-human'),
     items: items.filter((i) => i.status === 'blocked'),
   };
+  // Ruled-and-queued decisions are shown, but OUTSIDE the operator's section and out of its count: the ask
+  // has already been answered, and re-presenting it as outstanding is exactly the noise the board exists to cut.
+  const ruled = decisions.filter((d) => d.status === 'queued');
+  // Drafts are the only place an unanswerable decision may sit, and they sit far away from the operator's
+  // section on purpose — a half-written question in "needs you" is worse than no entry at all.
+  const drafts = decisions.filter((d) => d.status === 'draft');
   // An in-progress item whose PR is on the board is ALREADY represented by that PR row (with a live status
   // the item cannot have). Listing both says the same thing twice, so only PR-less items appear here; the
   // plan table below is where every item, joined to its PR, is enumerated.
@@ -273,6 +476,7 @@ export function buildModel(state, prs) {
     title: state.title ?? EMPTY_STATE.title,
     repo: state.repo ?? null,
     artifactUrl: state.artifactUrl ?? null,
+    stateError: state[STATE_ERROR] ?? null,
     generatedAt: nowIso(),
     prs: { ...prs, rows },
     counts: {
@@ -282,6 +486,8 @@ export function buildModel(state, prs) {
       total: items.length,
     },
     needsYou,
+    ruled,
+    drafts,
     inFlight,
     landed,
     plan,
@@ -425,7 +631,36 @@ h2 { font-size: .8125rem; text-transform: uppercase; letter-spacing: .08em; colo
 
 .lbl { font-size: .6875rem; color: var(--ink-2); background: var(--surface-2); border-radius: 3px; padding: .0625rem .3125rem; margin-right: .25rem; }
 
+/* Decisions are the only thing on the page that ask the operator for an answer, so theirs is the only row
+   that earns more than two lines. Same stripe, same chips, same tokens — just the full case, stacked. */
+.row.decision { padding: .8125rem .875rem; }
+.row.decision .t { font-size: 1rem; line-height: 1.35; font-weight: 650; }
+/* The ruling number is how the operator ANSWERS — they read it off the page and reply "R6 — as recommended".
+   It has to be findable at a glance, so it is the one accent-coloured thing inside a decision card. */
+.rnum {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: .8125rem; font-weight: 700; letter-spacing: .02em; color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 3px; padding: .0625rem .3125rem; margin-right: .4375rem;
+  white-space: nowrap; vertical-align: .0625rem;
+}
+.dwhy { font-size: .8125rem; color: var(--ink-2); margin-top: .375rem; }
+.opts { list-style: none; margin: .625rem 0 0; padding: 0; }
+.opts li { background: var(--surface-2); border-radius: 4px; padding: .4375rem .5625rem; margin-bottom: .3125rem; font-size: .8125rem; color: var(--ink-2); }
+.opts li:last-child { margin-bottom: 0; }
+.opts li.rec { background: var(--ok-bg); }
+.opts .ol { color: var(--ink); font-weight: 650; }
+.opts .chip { margin-right: .375rem; vertical-align: .0625rem; }
+.breaks { margin-top: .625rem; font-size: .8125rem; color: var(--crit); }
+.breaks b { font-weight: 650; }
+/* On a ruled or still-draft decision the cost of inaction is context, not an alarm — keeping it red would
+   make a settled or unfinished row read as outstanding, which is what those two sections exist to prevent. */
+.row.ok .breaks, .row.muted .breaks { color: var(--ink-2); }
+.ev { margin-top: .5rem; }
+.ev .e { display: block; font-size: .6875rem; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
+.ev .e::before { content: "· "; }
+
 .banner { border: 1px solid var(--warn); background: var(--warn-bg); color: var(--warn); border-radius: 5px; padding: .5rem .75rem; font-size: .8125rem; margin-bottom: 1.5rem; }
+.banner.crit { border-color: var(--crit); background: var(--crit-bg); color: var(--crit); }
 
 .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
 table { border-collapse: collapse; width: 100%; min-width: 34rem; font-size: .875rem; }
@@ -470,15 +705,59 @@ function itemRowHtml(it) {
       </div>`;
 }
 
-function decisionRowHtml(d) {
-  const detail = [d.detail, d.preparedDate && `prepared ${d.preparedDate}`].filter(Boolean).join(' · ');
-  return `      <div class="row crit">
+/**
+ * A decision, in full. The standard the page has to hit is that the operator can ANSWER it here — without
+ * opening a backlog file, a PR or a diff. So when the rich fields are present this renders, in order: the
+ * question as the heading, why it is a judgment call at all, the real options with the recommended one
+ * marked, what breaks if nothing is done, and the grounding (loci, counts, prior rulings).
+ *
+ * Every field is optional and `detail` remains the fallback, so a bare `{id, title, detail}` entry — the
+ * shape the board shipped with — still renders exactly as it did.
+ */
+function decisionRowHtml(d, { sev = 'crit', chipLabel = 'decide' } = {}) {
+  // With a question present, the title stops being the heading and becomes the short handle for the
+  // decision; with no question the title IS the heading and `detail` carries whatever context exists.
+  const sub = [d.question ? d.title : d.detail, d.preparedDate && `prepared ${d.preparedDate}`]
+    .filter(Boolean)
+    .join(' · ');
+
+  const options = (d.options ?? []).length
+    ? `          <ul class="opts">
+${d.options
+  .map(
+    (o) =>
+      `            <li${o.recommended ? ' class="rec"' : ''}>${o.recommended ? chip('ok', 'recommended') : ''}<span class="ol">${esc(o.label)}</span>${o.detail ? ` — ${esc(o.detail)}` : ''}</li>`,
+  )
+  .join('\n')}
+          </ul>`
+    : '';
+
+  const evidence = (d.evidence ?? []).length
+    ? `          <div class="ev">${d.evidence.map((e) => `<span class="mono e">${esc(e)}</span>`).join('')}</div>`
+    : '';
+
+  // Both handles, deliberately: the R-number is what the operator quotes back in conversation, the backlog
+  // number is what the record is filed under. They are different things and neither substitutes for the other.
+  const rnum = d.ruling ? `<span class="rnum">${esc(d.ruling)}</span>` : '';
+  const filedAs = /^\d+$/.test(String(d.id)) ? `#${d.id}` : d.id;
+
+  const body = [
+    `          <div class="t">${rnum}${esc(d.question || d.title)}</div>`,
+    sub ? `          <div class="d">${esc(sub)}</div>` : '',
+    d.why ? `          <div class="dwhy">${esc(d.why)}</div>` : '',
+    options,
+    d.ifNothing ? `          <div class="breaks"><b>If nothing is done:</b> ${esc(d.ifNothing)}</div>` : '',
+    evidence,
+    `          <div class="d">${d.ruling ? `<span class="lbl">answer as ${esc(d.ruling)}</span>` : ''}<span class="lbl">filed as ${esc(filedAs)}</span></div>`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return `      <div class="row decision ${sev}">
         <div class="body">
-          <div class="t">${esc(d.title)}</div>
-          ${detail ? `<div class="d">${esc(detail)}</div>` : ''}
-          <div class="d"><span class="lbl">${esc(/^\d+$/.test(String(d.id)) ? `#${d.id}` : d.id)}</span></div>
+${body}
         </div>
-        ${chip('crit', 'decide')}
+        ${chip(sev, chipLabel)}
       </div>`;
 }
 
@@ -522,6 +801,35 @@ const sectionHtml = (title, sub, inner) =>
 ${inner}
     </section>`;
 
+/**
+ * THE PROVENANCE MARKER. The template lives in exactly one place — this file — and there is no example page
+ * anywhere for a future session to fork. The realistic failure is not someone editing the HTML; it is
+ * someone in a hurry hand-writing a page and publishing it to the board's URL, which silently drops every
+ * required field and is overwritten by the next real run anyway.
+ *
+ * So every generated page carries a marker whose fingerprint covers the body. A hand-written page has no
+ * marker; a marker copied onto hand-written content does not match. `--verify=<path>` turns that into a
+ * one-line check the skill can require BEFORE publishing.
+ */
+const MARKER_RE = /^<!-- progress-board:generated schema=(\d+) at=(\S+) decisions=(\d+) fingerprint=([0-9a-f]+) -->\n/;
+const SCHEMA = 1;
+
+const fingerprint = (body) => createHash('sha256').update(body, 'utf8').digest('hex').slice(0, 16);
+
+/**
+ * Is this file the real, script-generated board?
+ * @returns {{ ok: boolean, reason: string }}
+ */
+export function verifyPage(html) {
+  const m = MARKER_RE.exec(String(html ?? ''));
+  if (!m) return { ok: false, reason: 'no progress-board marker — this page was NOT generated by the board script' };
+  const body = String(html).slice(m[0].length);
+  if (Number(m[1]) !== SCHEMA) return { ok: false, reason: `marker is schema ${m[1]}, this script writes schema ${SCHEMA} — re-render it` };
+  const actual = fingerprint(body);
+  if (actual !== m[4]) return { ok: false, reason: `fingerprint ${m[4]} does not match the page body (${actual}) — the content was edited after it was generated` };
+  return { ok: true, reason: `generated ${m[2]}, ${m[3]} decision${m[3] === '1' ? '' : 's'}, fingerprint ${actual}` };
+}
+
 /** The whole page. A self-contained fragment: no external font, script, image or stylesheet (strict CSP). */
 export function renderPage(m) {
   const needsYou = [
@@ -530,16 +838,42 @@ export function renderPage(m) {
     ...m.needsYou.items.map(itemRowHtml),
   ].join('\n');
 
+  // Only rendered when there is something to show — an empty "Ruled" heading would read as a fourth thing
+  // the operator has to look at, which is the opposite of why it exists.
+  const ruled = m.ruled.length
+    ? sectionHtml(
+        'Ruled, queued',
+        'Already decided — kept visible because the ruling is the fact, but deliberately waiting behind other work. Nothing here is asking you anything.',
+        m.ruled.map((d) => decisionRowHtml(d, { sev: 'ok', chipLabel: 'ruled · queued' })).join('\n'),
+      ) + '\n'
+    : '';
+
+  // Deliberately far from "Needs you" and deliberately quiet: a draft is not an ask, it is a note that
+  // somebody is still assembling one.
+  const drafts = m.drafts.length
+    ? sectionHtml(
+        'Decisions being prepared',
+        'Not answerable yet, so not asked. The board will not let one of these into "Needs you" until it carries a question, at least two options with one recommended, and what breaks if nothing is done.',
+        m.drafts.map((d) => decisionRowHtml(d, { sev: 'muted', chipLabel: 'draft' })).join('\n'),
+      ) + '\n'
+    : '';
+
   const inFlight = [...m.inFlight.items.map(itemRowHtml), ...m.inFlight.prs.map(prRowHtml)].join('\n');
   const landed = [...m.landed.prs.map(prRowHtml), ...m.landed.items.map(itemRowHtml)].join('\n');
 
-  const banner = m.prs.fresh
-    ? ''
-    : `    <div class="banner">Pull-request state is <strong>stale</strong> — ${esc(m.prs.reason ?? 'the live lookup did not run')}${
-        m.prs.fetchedAt ? ` (snapshot from ${esc(stampOf(m.prs.fetchedAt))})` : ''
-      }.</div>\n`;
+  const banner =
+    // The plan half failing is worse than the PR half failing — a page that quietly shows an empty plan
+    // reads as "nothing is happening" rather than "I could not read the plan". Say it first and say it loud.
+    (m.stateError
+      ? `    <div class="banner crit"><strong>The plan and decisions could not be read</strong> — ${esc(m.stateError)}. Everything below this line is the live pull-request half only; the plan half is missing, not empty.</div>\n`
+      : '') +
+    (m.prs.fresh
+      ? ''
+      : `    <div class="banner">Pull-request state is <strong>stale</strong> — ${esc(m.prs.reason ?? 'the live lookup did not run')}${
+          m.prs.fetchedAt ? ` (snapshot from ${esc(stampOf(m.prs.fetchedAt))})` : ''
+        }.</div>\n`);
 
-  return `<title>${esc(m.title)}</title>
+  const body = `<title>${esc(m.title)}</title>
 <style>${css()}</style>
 <div class="wrap">
   <header class="board">
@@ -559,10 +893,10 @@ ${banner}  <div class="tiles">
 
 ${sectionHtml(
   'Needs you',
-  'Nothing here moves without the operator: decisions to take, reviews only a human can clear, work that is stuck.',
+  'Nothing here moves without the operator: decisions to take, reviews only a human can clear, work that is stuck. Answer a decision by its ruling number — "R6 — as recommended" is enough.',
   needsYou || '      <p class="empty">Nothing is waiting on you.</p>',
 )}
-
+${ruled}
 ${sectionHtml(
   'In flight',
   'Work under way. Ordered by how hard it is stuck — bounced and red first, quietly-queued last.',
@@ -570,15 +904,19 @@ ${sectionHtml(
 )}
 
 ${sectionHtml('The plan', 'Every item, by phase, joined to its pull request where one exists.', planTableHtml(m.plan))}
-
+${drafts}
 ${sectionHtml('Landed', 'Recently merged pull requests and finished plan items.', landed || '      <p class="empty">Nothing landed yet.</p>')}
 
   <footer class="board">
     Generated by <span class="mono">we:scripts/progress-board.mjs</span> from <span class="mono">we:reports/progress-board.json</span> plus live pull-request state.
+    Every decision here was rendered from data that the script refuses to leave incomplete — a hand-written page cannot say this, and is not the board.
     Pull-request state moves continuously — this page is a snapshot taken at the stamp above, not a live feed. Re-run the board to refresh it.
   </footer>
 </div>
 `;
+
+  const count = m.needsYou.decisions.length + m.ruled.length + m.drafts.length;
+  return `<!-- progress-board:generated schema=${SCHEMA} at=${m.generatedAt} decisions=${count} fingerprint=${fingerprint(body)} -->\n${body}`;
 }
 
 // ── Mutations ─────────────────────────────────────────────────────────────────
@@ -632,11 +970,94 @@ export function applyVerb(state, verb, args = {}) {
       return `added ${id}`;
     }
     case 'decide': {
-      const d = (state.decisions ?? []).find((x) => String(x.id) === String(args.id));
-      if (!d) throw new Error(`no decision "${args.id}" — known: ${(state.decisions ?? []).map((x) => x.id).join(', ') || '(none)'}`);
+      const d = requireDecision(state, args.id);
       d.status = 'taken';
       d.takenAt ??= today;
       return `decided ${d.id}`;
+    }
+    case 'decision-add': {
+      // Keyed on the id, so re-running the same add is a no-op rather than a second copy of the question.
+      const id = args.id && args.id !== true ? String(args.id) : slugify(args.title);
+      // `R<n>` is the ruling-number namespace, handed out by the counter alone. Letting an --id squat there
+      // would make two different decisions answer to the same thing the operator types in chat.
+      if (/^R\d+$/i.test(id)) throw new Error(`--id="${id}" is reserved — R-numbers are assigned by the board, never chosen`);
+      const question = args.question === true ? '' : String(args.question ?? '');
+      const ifNothing = args.ifNothing === true ? '' : String(args.ifNothing ?? '');
+      const status = args.status && args.status !== true ? String(args.status) : 'draft';
+      if (!DECISION_STATUSES.includes(status)) throw new Error(`--status must be one of: ${DECISION_STATUSES.join(', ')}`);
+
+      // A decision that will need answering must arrive with the two fields only its author knows. Everything
+      // else can be built up afterwards, but a bare title is exactly the entry this board refuses to carry.
+      // Recording an already-RULED decision (`--status=queued|taken`) is a different act — it is a record of
+      // an answer, not a question, so it is not held to the same bar.
+      if ((status === 'draft' || status === 'awaiting') && (!question || !ifNothing)) {
+        throw new Error(
+          `--decision-add requires --question="…" and --if-nothing="…" (a title is not a decision). ` +
+            `Use --status=queued or --status=taken to record one that has already been ruled.`,
+        );
+      }
+
+      state.decisions ??= [];
+      const existing = state.decisions.find((x) => String(x.id) === id);
+      if (existing) {
+        if (question) existing.question = question;
+        if (ifNothing) existing.ifNothing = ifNothing;
+        return `already on the board: decision ${id}`;
+      }
+      const d = { id, title: String(args.title), status };
+      if (question) d.question = question;
+      if (ifNothing) d.ifNothing = ifNothing;
+      if (status === 'awaiting') requireAnswerable(d, 'add');
+      state.decisions.push(d);
+      return `added decision ${id} (${status})`;
+    }
+    case 'decision-set': {
+      const d = requireDecision(state, args.id);
+      const field = String(args.field ?? '');
+      if (!DECISION_FIELDS.includes(field)) {
+        throw new Error(`--field must be one of: ${DECISION_FIELDS.join(', ')} (options and evidence have their own verbs)`);
+      }
+      const value = args.value === true ? '' : String(args.value ?? '');
+      if (field === 'status' && value && !DECISION_STATUSES.includes(value)) {
+        throw new Error(`status must be one of: ${DECISION_STATUSES.join(', ')}`);
+      }
+      // The flip to `awaiting` is the moment a decision starts asking the operator for something, so it is
+      // the moment the contract is checked. Refusing here — before anything is written — is what keeps a
+      // half-built decision out of their section without ever needing a person to notice.
+      if (field === 'status' && value === 'awaiting') requireAnswerable({ ...d, status: 'awaiting' }, 'flip');
+      // Empty clears, exactly like `--note --text=` — one way to unset a field, not two.
+      if (value) d[field] = value;
+      else delete d[field];
+      return value ? `set ${field} on ${d.id}` : `cleared ${field} on ${d.id}`;
+    }
+    case 'decision-option': {
+      const d = requireDecision(state, args.id);
+      const label = args.label === true ? '' : String(args.label ?? '');
+      if (!label) throw new Error('--decision-option requires --label="<option>"');
+      d.options ??= [];
+      const detail = args.detail === true ? '' : String(args.detail ?? '');
+      const existing = d.options.find((o) => o.label === label);
+      const o = existing ?? { label };
+      if (!existing) d.options.push(o);
+      if (detail) o.detail = detail;
+      // Exactly one option can be the recommendation — a second `--recommend` MOVES it rather than adding one.
+      if (args.recommend) {
+        for (const other of d.options) delete other.recommended;
+        o.recommended = true;
+      }
+      return `${existing ? 'option updated on' : 'option added to'} ${d.id}: ${label}`;
+    }
+    case 'decision-evidence': {
+      const d = requireDecision(state, args.id);
+      const text = args.text === true ? '' : String(args.text ?? '');
+      if (!text) {
+        delete d.evidence;
+        return `evidence cleared on ${d.id}`;
+      }
+      d.evidence ??= [];
+      if (d.evidence.includes(text)) return `evidence already on ${d.id}`;
+      d.evidence.push(text);
+      return `evidence added to ${d.id}`;
     }
     case 'url': {
       state.artifactUrl = args.url;
@@ -651,6 +1072,41 @@ function requireItem(state, id) {
   const it = findItem(state, id);
   if (!it) throw new Error(`no item "${id}" — known ids: ${(state.items ?? []).map((i) => i.id).join(', ') || '(none)'}`);
   return it;
+}
+
+/**
+ * Find a decision by EITHER handle: the ruling number the operator quotes in chat (`R4`, case-insensitive)
+ * or the id under which it is filed (a backlog number, or a slug). Both are printed on the card precisely so
+ * that either one works here.
+ */
+export function findDecision(state, handle) {
+  const key = String(handle);
+  const lower = key.toLowerCase();
+  return (
+    (state.decisions ?? []).find((x) => String(x.id) === key) ??
+    (state.decisions ?? []).find((x) => String(x.ruling ?? '').toLowerCase() === lower) ??
+    null
+  );
+}
+
+function requireDecision(state, id) {
+  const d = findDecision(state, id);
+  if (!d) {
+    const known = (state.decisions ?? []).map((x) => (x.ruling ? `${x.ruling}/${x.id}` : x.id)).join(', ') || '(none)';
+    throw new Error(`no decision "${id}" — known: ${known}`);
+  }
+  return d;
+}
+
+/** Refuse to put an unanswerable decision in front of the operator, naming the id and every missing field. */
+function requireAnswerable(d, at) {
+  const gaps = decisionGaps(d);
+  if (!gaps.length) return;
+  const how = at === 'add' ? 'add "%s" as awaiting' : 'mark "%s" awaiting';
+  throw new Error(
+    `cannot ${how.replace('%s', d.id)} — it must be answerable from the page. Missing ${gaps.join(' · ')}. ` +
+      `Build it up first (it can sit as --field=status --value=draft meanwhile).`,
+  );
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
@@ -676,6 +1132,25 @@ const USAGE = `progress-board — the operator's published status page (one Bash
   node scripts/progress-board.mjs --decide=<id>      a decision was taken
   node scripts/progress-board.mjs --url=<url>        store the published artifact URL (once)
 
+  A decision the operator can ANSWER FROM THE PAGE. Enforced, not requested: anything marked "awaiting" must
+  carry a question, two or more real options with exactly one recommended, and ifNothing — or the run exits 1
+  naming the id and the missing field. Park an unfinished one as "draft"; it never reaches "needs you".
+
+  node scripts/progress-board.mjs --decision-add="<title>" --question="<one line>" --if-nothing="<what breaks>"
+                                  [--id=<id>] [--status=<s>]   (adds as draft; --status=queued|taken records a ruling)
+  node scripts/progress-board.mjs --decision-set=<id> --field=<name> --value="<text>"   (empty --value clears)
+        --field: ${DECISION_FIELDS.join(' | ')}
+        status:  ${DECISION_STATUSES.join(' | ')}
+                 draft = being prepared, kept out of "needs you" · queued = ruled but deferred
+  node scripts/progress-board.mjs --decision-option=<id> --label="<option>" --detail="<tradeoff>" [--recommend]
+  node scripts/progress-board.mjs --decision-evidence=<id> --text="<locus, count or prior ruling>"
+        then, once it is answerable: --decision-set=<id> --field=status --value=awaiting
+
+  <id> is EITHER handle: the ruling number the operator quotes ("R6", the board assigns it and never reuses
+  it) or the id it is filed under. So --decide=R6 and --decide=2978 reach the same decision.
+
+  node scripts/progress-board.mjs --verify=<path>    is that file the script-generated board? (exit 0 / 1)
+
   --state=<path>  --out=<path>  --no-gh  --json  --help`;
 
 export function main(argv = process.argv.slice(2)) {
@@ -685,8 +1160,30 @@ export function main(argv = process.argv.slice(2)) {
     return 0;
   }
 
-  const statePath = args.state ? String(args.state) : DEFAULT_STATE;
-  const outPath = args.out ? String(args.out) : DEFAULT_OUT;
+  let statePath;
+  let outPath;
+  try {
+    statePath = args.state ? assertWritablePath(String(args.state), '--state') : DEFAULT_STATE;
+    outPath = args.out ? assertWritablePath(String(args.out), '--out') : DEFAULT_OUT;
+  } catch (e) {
+    console.error(`✗ ${e.message}`);
+    return 1;
+  }
+  // `--verify` is a read-only question about a FILE, not about the board's state — answer it and stop.
+  if (args.verify) {
+    const target = resolve(String(args.verify));
+    let html;
+    try {
+      html = readFileSync(target, 'utf8');
+    } catch (e) {
+      console.error(`✗ cannot read ${shortPath(target)} — ${e.message}`);
+      return 1;
+    }
+    const v = verifyPage(html);
+    console[v.ok ? 'log' : 'error'](`${v.ok ? '✓' : '✗'} ${shortPath(target)}: ${v.ok ? 'is the generated board' : 'is NOT the generated board'} — ${v.reason}`);
+    return v.ok ? 0 : 1;
+  }
+
   const state = loadState(statePath);
 
   const verbs = [];
@@ -696,7 +1193,28 @@ export function main(argv = process.argv.slice(2)) {
   if (args.note) verbs.push(['note', { id: String(args.note), text: args.text === true ? '' : args.text }]);
   if (args.add) verbs.push(['add', { title: String(args.add), phase: args.phase }]);
   if (args.decide) verbs.push(['decide', { id: String(args.decide) }]);
+  if (args['decision-add'])
+    verbs.push([
+      'decision-add',
+      { title: String(args['decision-add']), id: args.id, question: args.question, ifNothing: args['if-nothing'], status: args.status },
+    ]);
+  if (args['decision-set']) verbs.push(['decision-set', { id: String(args['decision-set']), field: args.field, value: args.value }]);
+  if (args['decision-option'])
+    verbs.push([
+      'decision-option',
+      { id: String(args['decision-option']), label: args.label, detail: args.detail, recommend: args.recommend !== undefined && args.recommend !== 'false' },
+    ]);
+  if (args['decision-evidence']) verbs.push(['decision-evidence', { id: String(args['decision-evidence']), text: args.text }]);
   if (args.url) verbs.push(['url', { url: String(args.url) }]);
+
+  // A file we could not read is a file we must not overwrite: applying a verb here would save the EMPTY
+  // fallback state over a plan that is very likely one merge-conflict marker away from fine. Refuse the
+  // write, keep rendering (below) so the page still exists and says why.
+  const broken = state[STATE_ERROR];
+  if (broken && verbs.length) {
+    console.error(`✗ refusing to write: ${broken}. Fix the file by hand — applying a verb now would overwrite the plan with an empty one.`);
+    return 1;
+  }
 
   const confirmations = [];
   try {
@@ -705,7 +1223,28 @@ export function main(argv = process.argv.slice(2)) {
     console.error(`✗ ${e.message}`);
     return 1;
   }
-  if (verbs.length) saveState(statePath, state);
+  // Backfill any decision that predates the R-number scheme, once. Idempotent after the first run, which is
+  // why it can safely trigger a save even when no verb ran.
+  const numbered = broken ? 0 : ensureRulingNumbers(state);
+
+  // Save FIRST, validate second. The verbs are how an incomplete decision gets completed, so refusing to
+  // persist them would deadlock the only route out of a board that is already failing this check.
+  if (verbs.length || numbered) saveState(statePath, state);
+
+  // The render guard, and a DIFFERENT failure from an unreadable file: this one means the file parsed fine
+  // and someone put an unanswerable decision in front of the operator. It catches what the verb guards
+  // cannot — an entry that predates the rule, or one an editor wrote around the CLI. It hard-fails rather
+  // than warning, because a warning is read once and then never again.
+  const invalid = broken ? [] : validateDecisions(state);
+  if (invalid.length) {
+    console.error(`✗ ${invalid.length} decision${invalid.length === 1 ? '' : 's'} cannot be answered from the page — refusing to render:`);
+    for (const line of invalid) console.error(`    ${line}`);
+    console.error(
+      `  Fill the gaps with the verbs named above, or park it until it is ready:\n` +
+        `    node scripts/progress-board.mjs --decision-set=<id> --field=status --value=draft`,
+    );
+    return 1;
+  }
 
   const useGh = !args['no-gh'] && process.env.WE_BOARD_NO_GH !== '1';
   const prs = fetchPrs({ repo: state.repo, statePath, useGh });
@@ -722,7 +1261,9 @@ export function main(argv = process.argv.slice(2)) {
   const head = confirmations.length ? confirmations.join('; ') : 'rendered';
   const url = model.artifactUrl ? ` · publish to ${model.artifactUrl}` : ' · no artifact URL stored yet (--url=<url> after the first publish)';
   const staleness = prs.fresh ? '' : ' · PR state STALE';
-  console.log(`✓ ${head} → ${rel(outPath)} (${model.counts.needsYou} needs you, ${model.counts.inFlight} in flight)${staleness}${url}`);
+  // The page carries the loud version; this is the one line the model actually reads, so it has to carry it too.
+  const stateNote = broken ? ` · STATE FILE UNREADABLE: ${broken}` : '';
+  console.log(`${broken ? '⚠' : '✓'} ${head} → ${rel(outPath)} (${model.counts.needsYou} needs you, ${model.counts.inFlight} in flight)${stateNote}${staleness}${url}`);
   return 0;
 }
 

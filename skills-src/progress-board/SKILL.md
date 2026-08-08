@@ -8,6 +8,34 @@ description: Refresh and re-publish the operator's progress board — the fixed-
 One page, one URL, refreshed mechanically. **You never see or write the page's markup.** A generator owns
 every byte of it; your whole job is one CLI verb and one re-publish.
 
+## 🛑 NEVER publish a page you wrote yourself
+
+**The generator is the only thing allowed to produce the board.** There is exactly one template, it lives in
+`we:scripts/progress-board.mjs`, and there is deliberately no example page anywhere to copy.
+
+If you are ever tempted — the operator is blocked, the script is inconvenient, "just this once" — **do not.**
+This is the failure that has already happened, so it is worth being blunt about why:
+
+1. **A hand-written page silently drops the fields that make it usable.** The script refuses to render a
+   decision without a question, two or more options with one recommended, and what breaks if nothing is done.
+   You will not refuse yourself. The operator gets a thinner page and cannot tell.
+2. **It gets overwritten by the next real run anyway.** The work is wasted, and until then the record is
+   inconsistent — the page says one thing, `we:reports/progress-board.json` says another.
+3. **It is detectable, so it is not even a quiet shortcut.** Every generated page carries a provenance marker
+   whose fingerprint covers the body.
+
+**Publish only what the generator just wrote.** If you are not certain the file at that path came from this
+turn's run, check it — one Bash call, one line:
+
+```bash
+node scripts/progress-board.mjs --verify=reports/progress-board.html
+```
+
+Exit 0 and `is the generated board` → publish. Anything else → **do not publish**; re-run the generator.
+
+And if the board *cannot* render, the fix is to give the generator what it is asking for — it names the id
+and the missing field — never to route around it.
+
 ## The cost contract (this is the point of the skill)
 
 **One update = one `Bash` call + one `Artifact` call.** Nothing else.
@@ -17,6 +45,7 @@ every byte of it; your whole job is one CLI verb and one re-publish.
 - Do **not** hand-edit `we:reports/progress-board.json` with Edit/Write. Every field it holds has a verb.
   A hand edit is how the mechanical property dies.
 - Do **not** re-derive pull-request state in context. The generator reads it live from `gh` on every render.
+- Do **not** write the page yourself. See above.
 
 ## WHEN to run it
 
@@ -27,7 +56,10 @@ On a **state change**, never on a timer:
 - a plan item **gets blocked** → `--block=<id> --why="…"`; **unblocked** → `--start=<id>` (it clears the blocker)
 - **after a PR lands** → plain re-render (PR state is derived; nothing to type)
 - **after a review verdict** → plain re-render, plus `--done=<id>` if that closed the item
-- the operator **takes a decision** → `--decide=<id>`
+- the operator **takes a decision** → `--decide=<id>`; **rules it but defers the work** → `--decision-set=<id> --field=status --value=queued`
+  - `<id>` is **either handle**: the ruling number they quoted (`--decide=R6`) or the id it is filed under
+    (`--decide=2978`). When they reply "R6 — as recommended", `--decide=R6` is the whole translation.
+- a **new decision** surfaces → `--decision-add=…` plus the context verbs below
 - new work joins the plan → `--add="<title>" --phase=<n>`
 
 If nothing changed, do not run it. A re-render with no change is a wasted publish.
@@ -44,6 +76,60 @@ node scripts/progress-board.mjs --add="Ship the drain rewrite" --phase=2
 node scripts/progress-board.mjs --decide=2978
 ```
 
+### Decisions carry the whole case — and the tool enforces it
+
+A decision is the **only thing on the page that asks the operator for something**, so the bar is: they can
+**answer it from the page**, without opening a backlog file, a PR or a diff.
+
+> **You cannot forget this and you cannot opt out of it.** The script refuses to mark a decision `awaiting`,
+> and refuses to render a board that already carries one, unless it has a `question`, **at least two** real
+> `options` with **exactly one** recommended, and `ifNothing`. A missing field exits **1** naming the id and
+> the field. Nothing below is a convention to remember — it is the shape the CLI will accept.
+
+Build one in the order the tool expects. It lands as a **draft** and only becomes an ask once it is complete:
+
+```bash
+node scripts/progress-board.mjs --decision-add="Fork B — rebuild or drop" \
+      --question="Does the codification shortcut get one more attempt, or get dropped?" \
+      --if-nothing="Fork A still ships; codification PRs keep needing a human."
+node scripts/progress-board.mjs --decision-set=fork-b-rebuild-or-drop --field=why --value="Broken three times by three independent reviewers; each round closed one class and missed another."
+node scripts/progress-board.mjs --decision-option=fork-b-rebuild-or-drop --label="One round rebuilt on markdown-it" --detail="already a dependency, so detection and rendering cannot disagree" --recommend
+node scripts/progress-board.mjs --decision-option=fork-b-rebuild-or-drop --label="Drop Fork B now" --detail="the status quo; every codification PR then needs a human"
+node scripts/progress-board.mjs --decision-evidence=fork-b-rebuild-or-drop --text="three breaks: mid-rule splice · untagged second heading · eight more forms"
+node scripts/progress-board.mjs --decision-set=fork-b-rebuild-or-drop --field=status --value=awaiting   # now it asks
+```
+
+| Field | Verb | What it must say | Required to ask? |
+| --- | --- | --- | --- |
+| `question` | `--decision-add --question=…` | the call, in one line, ending in a question mark | **yes** |
+| `options[]` | `--decision-option --label=… --detail=… [--recommend]` | the **real** options with their tradeoffs — never padded to three; two if it is binary. A second `--recommend` moves the mark rather than adding one | **yes — 2+, exactly one recommended** |
+| `ifNothing` | `--decision-add --if-nothing=…` | what breaks if the operator never answers | **yes** |
+| `why` | `--decision-set --field=why` | why it is a **judgment call** and not mechanical | strongly encouraged |
+| `evidence[]` | `--decision-evidence --text=…` | the grounding — a `file:line`, a count, a prior ruling | strongly encouraged |
+| `detail` | `--decision-set --field=detail` | the fallback one-liner, for a `draft`/`queued`/`taken` entry with none of the above | no |
+
+`--decision-set --field=status` moves it through the lifecycle: **`draft`** (being prepared — renders
+low-emphasis below the plan, never in "needs you"; this is where an unfinished one waits), **`awaiting`**
+(outstanding, and therefore complete — this is what "needs you" counts), **`queued`** (ruled but
+deliberately deferred: its own *Ruled, queued* section, and it stops being an ask), **`taken`** (absorbed
+into the plan; it leaves the board — `--decide=<id>` is the shorthand). Recording an already-ruled call takes
+`--decision-add=… --status=queued`, which is exempt from the contract: it is a record of an answer, not a
+question. An empty `--value=` / `--text=` clears, exactly like `--note`.
+
+**If a run exits 1 with "cannot be answered from the page"**, the board is telling you a decision on it is
+unanswerable. Fill the named gaps, or park it with `--field=status --value=draft`. The verb you just ran was
+still saved, so you fix forward — you are never stuck.
+
+### Ruling numbers — how the operator answers
+
+Every decision gets an `R<n>` the moment it is created, from a counter in the state file. It is **identity,
+not position**: never renumbered when the list changes, and **never reused** — a decision that is taken or
+dropped retires its number with it, so `R2` can never later mean something else. The card shows both handles:
+the **R-number to answer with**, prominently at the top, and the **item number it is filed under** at the
+bottom, for the record.
+
+So when the operator replies **"R6 — as recommended"**, that is unambiguous: `--decide=R6`.
+
 Every verb re-renders the page and prints **one line**: what changed, where the page was written, the
 counts, whether PR state is stale, and **the stored artifact URL**. That line is your whole read of the
 result — nothing else needs opening. Verbs are idempotent; running one twice is safe.
@@ -51,6 +137,16 @@ result — nothing else needs opening. Verbs are idempotent; running one twice i
 The page is always written to the same fixed path: **`we:reports/progress-board.html`**.
 
 ## HOW — step 2, the Artifact call
+
+Publish **only** a page the generator just wrote. The `✓` line from step 1 is that proof — if you have it,
+publish; the budget stays at one Bash call plus one Artifact call.
+
+If you do **not** have it — you did not run the generator this turn, or you are unsure what is at that path —
+spend one extra Bash call before publishing rather than publishing blind:
+
+```bash
+node scripts/progress-board.mjs --verify=reports/progress-board.html
+```
 
 > ### ⚠️ THE URL-STABILITY RULE — READ THIS BEFORE EVERY PUBLISH
 >
@@ -94,9 +190,21 @@ blind. A minted duplicate URL cannot be undone.
 - **`we:reports/progress-board.html`** — generated output at a fixed path. Not tracked in git, never read
   by you, never edited by hand.
 
+`--out=` and `--state=` may point inside `reports/` or anywhere **outside** the repository (publishing from
+a scratchpad path is normal); a path inside the repository but outside `reports/` is refused, so the board
+can never overwrite a tracked file. If the state file itself is unreadable — an unresolved merge-conflict
+marker is the usual cause — the page still renders, carries a red *"the plan and decisions could not be
+read"* banner, and every verb is refused until it is fixed by hand, so an empty save can never overwrite a
+recoverable plan.
+
 ## The page's own contract
 
-It is **operated, not read**: *Needs you* first (decisions and human-only reviews), then *In flight*, then
-the plan table, then *Landed*. State is carried in form — a severity stripe and a chip — so it reads at a
-glance. It is theme-aware and fully self-contained (no external font, script, or image), which is what the
-Artifact CSP requires.
+It is **operated, not read**: *Needs you* first (decisions and human-only reviews), then *Ruled, queued*
+(decisions already answered but deferred — shown only when there are some), then *In flight*, then the plan
+table, then *Landed*. State is carried in form — a severity stripe and a chip — so it reads at a glance. It
+is theme-aware and fully self-contained (no external font, script, or image), which is what the Artifact CSP
+requires.
+
+Decisions are the heaviest rows on the page on purpose: the question is the heading, the options are a
+scannable list with the recommendation marked, what-breaks gets the same red treatment a blocker gets, and
+the grounding sits underneath in small monospace.
