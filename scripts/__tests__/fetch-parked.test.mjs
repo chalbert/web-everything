@@ -60,6 +60,20 @@ describe('rollupToCheckRows — normalizes the GraphQL rollup to gh bucket rows'
     expect(classifyChecks(rollupToCheckRows(pendingRollup)).status).toBe('pending');
     expect(classifyChecks(rollupToCheckRows(failedRollup)).status).toBe('failed');
   });
+
+  // #2925 — the decisive case: a superseded CANCELLED entry beside the SUCCESS that actually finished, same
+  // check name. Before the fix this mapped to TWO rows (`{name:'test',bucket:'cancel'}` and
+  // `{name:'test',bucket:'pass'}`) and `classifyChecks`' `some(isFail)` read the whole PR as failed even though
+  // the check that finished is green — exactly the #1042 jam, one layer inside `/review`'s bundle and the
+  // drain's `checks=` token.
+  it('a superseded CANCELLED entry beside a later SUCCESS for the SAME name collapses to ONE green row', () => {
+    const cancelledThenSuccess = [
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'CANCELLED' },
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    ];
+    expect(rollupToCheckRows(cancelledThenSuccess)).toEqual([{ name: 'test', bucket: 'pass' }]);
+    expect(classifyChecks(rollupToCheckRows(cancelledThenSuccess)).status).toBe('passed');
+  });
 });
 
 describe('filterToRequired — narrows rows to the required set (#2482)', () => {

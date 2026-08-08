@@ -4,6 +4,7 @@ kind: story
 size: 2
 status: open
 dateOpened: "2026-08-06"
+dateStarted: "2026-08-08"
 relatedTo: ["2326", "2433", "2644", "2882", "2750"]
 scope:
   - we:scripts/review-set-label.mjs

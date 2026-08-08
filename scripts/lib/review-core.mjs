@@ -1059,10 +1059,16 @@ export function renderPreventionSummary({ findings = [], verdict } = {}) {
  * verdict token. Passing no `findings` (every existing caller) leaves the line byte-for-byte unchanged. Note this
  * is the ESCALATED event only — a below-bar guard on a clean accept never reaches here, which is why the posted PR
  * comment (`renderFindingLine`, review-render.mjs) carries the impact + guard on the merge path (#xdompzx).
+ * #2953 — `outcome` ALSO accepts `'accepted'` (normalized to `'accept'`), not just `'accept'`. The `/review`
+ * skill's own step 4 uses `--to=accepted` (the `review-set-label.mjs` CLI's target vocabulary) and step 6 carries
+ * that same word into this call — so the documented sequence threw on its own first use. `'accepted'` is the
+ * ONLY extra spelling accepted; an omitted or otherwise-misspelled outcome (e.g. `'change'`) still throws rather
+ * than failing open to "accepted" (unchanged from before).
  * @param {{event: 'escalated'|'cleared', pr: number|string, repo?: string, verdict?: string,
  *   disposition?: {mode: 'converge'|'human', autoLand: boolean}, reasons?: string[],
- *   outcome?: 'accept'|'changes', actor?: string, findings?: Array<object>}} o — `outcome` is required (and
- *   strictly validated) for the `cleared` event; anything else throws rather than failing open to "accepted".
+ *   outcome?: 'accept'|'accepted'|'changes', actor?: string, findings?: Array<object>}} o — `outcome` is
+ *   required (and strictly validated) for the `cleared` event; anything else throws rather than failing open to
+ *   "accepted".
  * @returns {string}
  */
 export function renderReviewNotice({ event, pr, repo, verdict, disposition, reasons = [], outcome, actor, findings = [] } = {}) {
@@ -1077,10 +1083,13 @@ export function renderReviewNotice({ event, pr, repo, verdict, disposition, reas
     return `PR ${tag} ${modeText}${reasonText}. Verdict: ${verdict ?? '(pending)'}.${renderPreventionSummary({ findings, verdict })}`;
   }
   if (event === REVIEW_NOTICE_EVENTS.CLEARED) {
-    if (outcome !== 'accept' && outcome !== 'changes') {
-      throw new Error(`renderReviewNotice: unknown outcome "${outcome}" — must be one of accept, changes`);
+    // #2953 — accept both the renderer's own `accept` and the CLI's `accepted` (never a silent fail-open: an
+    // omitted or misspelled outcome still throws below).
+    const normalizedOutcome = outcome === 'accepted' ? 'accept' : outcome;
+    if (normalizedOutcome !== 'accept' && normalizedOutcome !== 'changes') {
+      throw new Error(`renderReviewNotice: unknown outcome "${outcome}" — must be one of accept, changes, accepted`);
     }
-    const verb = outcome === 'changes' ? 'requested changes' : 'accepted';
+    const verb = normalizedOutcome === 'changes' ? 'requested changes' : 'accepted';
     const by = actor ? ` by ${actor}` : '';
     return `PR ${tag} — human review ${verb}${by}.`;
   }
