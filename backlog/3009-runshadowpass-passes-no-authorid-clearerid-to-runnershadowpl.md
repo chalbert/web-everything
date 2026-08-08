@@ -1,4 +1,5 @@
 ---
+bornAs: x7snbvd
 kind: story
 size: 2
 parent: "2572"
@@ -26,7 +27,7 @@ RAIL 4 exists to keep out of the shadow log, arriving through the one caller #11
 ## Same call site as #3000, filed separately
 
 This is the same call `runShadowPass` (`we:scripts/review-runner.mjs:181`) makes to `runnerShadowPlan`
-that #3000 (`x9ns6bc`) already covers — #3000 is the missing `signals` (`gateSelf`/`humanRequired`/
+that #3000 (`3000`) already covers — #3000 is the missing `signals` (`gateSelf`/`humanRequired`/
 `nonConvergence`), this item is the missing `authorId`/`clearerId`. Filed as a **separate** item rather
 than folded into #3000, for one concrete reason: readiness. #3000's fix needs nothing that does not
 already exist on `main` — `runnerShadowPlan` already accepts `signals` today. This item's fix needs
@@ -159,7 +160,7 @@ hood while `wouldClear` keeps saying `true`.
 
 ## Cross-references
 
-- Same call site, sibling gap: #3000 (`x9ns6bc`) — missing `signals`, not missing ids. Filed separately;
+- Same call site, sibling gap: #3000 (`3000`) — missing `signals`, not missing ids. Filed separately;
   see "Same call site as #3000, filed separately" above for why.
 - Related, different file: a sibling finding from the same PR #1113 review about
   `we:scripts/converge-daemon-pass.mjs` discarding per-PR records and the persisted shadow log's shape

@@ -1,9 +1,10 @@
 ---
+bornAs: xzrs9xf
 kind: decision
 size: 3
 status: open
 dateOpened: "2026-08-08"
-relatedTo: ["2948", "2830", "2820", "2979", "x3q28ce"]
+relatedTo: ["2948", "2830", "2820", "2979", "3007"]
 tags: [governance, review-integrity, drain, throughput, statute-candidate]
 ---
 
@@ -21,7 +22,7 @@ Un-prepared — run /prepare before ruling.
 
 - **Option 1 — detect-and-revert for the routine tier** (the delivery review's recommendation). Routine
   PRs (no statute, no gate-self, no dismissed findings) merge on: required `test` green + one review pass +
-  a ledger-recorded verdict (#x3q28ce). No re-review after content-identical rebases (#2979). A post-merge
+  a ledger-recorded verdict (#3007). No re-review after content-identical rebases (#2979). A post-merge
   audit pass reads what landed and files or reverts what it finds; the ledger is the audit trail. Hard
   prevention gates remain exactly where reversal is genuinely expensive: statute and gate-self changes
   (human gate), backlog numbering, branch deletion, pushes to a constellation `main`.

@@ -1,10 +1,11 @@
 ---
+bornAs: x3q28ce
 kind: story
 size: 5
 status: open
 parent: "2405"
 dateOpened: "2026-08-08"
-relatedTo: ["2841", "2416", "2750", "2820", "2745", "2979", "2830", "xzrs9xf"]
+relatedTo: ["2841", "2416", "2750", "2820", "2745", "2979", "2830", "3013"]
 scope: ["we:scripts/lib/verdict-ledger.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/lib/pr-merge-gate.mjs", "we:scripts/review-set-label.mjs", "we:scripts/__tests__/verdict-ledger.test.mjs"]
 tags: [review-integrity, drain, gate, governance, prevention]
 ---

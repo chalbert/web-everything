@@ -1,4 +1,5 @@
 ---
+bornAs: x62n6v6
 kind: story
 size: 2
 parent: "2572"
@@ -10,7 +11,7 @@ tags: [review, converge-daemon, shadow-mode, decision-routing, enforce-flip]
 # converge daemon pass discards per-PR shadow records — the persisted log cannot feed the ratified enforce-flip agreement metric either
 
 Found during the independent technical review of PR #1113 (the converge-daemon launchd substrate,
-2026-08-08), alongside the sibling finding #x7snbvd. Two distinct problems in the same function,
+2026-08-08), alongside the sibling finding #3009. Two distinct problems in the same function,
 `buildPassRecord` in `we:scripts/converge-daemon-pass.mjs` (PR #1113, **not yet merged** — see "Where
 this lives" below).
 
@@ -48,8 +49,8 @@ export function buildPassRecord({ startedAt, cfg, exitCode, summary, error }) {
 `summary.records` (the per-PR array `we:scripts/review-runner.mjs`'s `main()` already includes in its
 JSON output — verified: `records` is a key of the `summary` object written to stdout) is never read
 here. Only the pass-level aggregate counts (`wouldClear`/`wouldKeepParked`) survive into the persisted
-log; each PR's own `reason` (e.g. `self-clear-refused: …`, once #x7snbvd lands) and `subject`
-(`repo#pr`) are silently dropped. So even after #x7snbvd fixes the aggregate counts to move correctly,
+log; each PR's own `reason` (e.g. `self-clear-refused: …`, once #3009 lands) and `subject`
+(`repo#pr`) are silently dropped. So even after #3009 fixes the aggregate counts to move correctly,
 **the specific PR and the specific refusal reason are still invisible in `shadow.jsonl`** — an operator
 reading the log sees a lower `wouldClear` number with no way to tell which PR(s) account for the drop or
 why, and no way to correlate later against a human's actual decision on that PR.
@@ -128,10 +129,10 @@ gate.
 
 ## Cross-references
 
-- Sibling finding from the same PR #1113 review, same review pass, different file: #x7snbvd (missing
+- Sibling finding from the same PR #1113 review, same review pass, different file: #3009 (missing
   `authorId`/`clearerId` at the `runShadowPass` → `runnerShadowPlan` call site). That item's fix is a
   prerequisite for this one to matter in practice — Problem 1 here is about carrying a per-PR
-  `self-clear-refused` reason through, which only exists once #x7snbvd lands.
+  `self-clear-refused` reason through, which only exists once #3009 lands.
 - Parent epic: #2572 (schedule the converge-and-label runner) — Ruling R7 there is what PR #1113 ships.
 - #2838 — the ratified enforce-flip triple gate; condition (c) is what Problem 2 concerns.
 - #2893 (`blockedBy: 2892`) — the follow-on that owns building the actual durable `ShadowOutcomeRecord`

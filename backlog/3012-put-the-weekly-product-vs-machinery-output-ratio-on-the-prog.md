@@ -1,9 +1,10 @@
 ---
+bornAs: xzgt6zd
 kind: story
 size: 2
 status: open
 dateOpened: "2026-08-08"
-relatedTo: ["2606", "1855", "xh1d1el"]
+relatedTo: ["2606", "1855", "3010"]
 tags: [progress-board, metrics, throughput, governance]
 ---
 
@@ -32,4 +33,4 @@ the merged history is the source.
 
 The board is the one surface the operator already reads daily. #2606 (the throughput program) tracks
 latency; this is the missing *output-mix* axis. It is also the enforcement instrument for the process-work
-freeze / product-quota decision (#xh1d1el): a quota nobody can see is a quota nobody keeps.
+freeze / product-quota decision (#3010): a quota nobody can see is a quota nobody keeps.
