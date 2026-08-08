@@ -27,10 +27,13 @@
  *     returned, the page renders behind a red banner, and every verb is refused (saving an empty plan over a
  *     recoverable one is the single unrecoverable move here). There are no decisions, so there is nothing the
  *     answerability guard could wave through.
- *   • PARTIAL — the file parsed and has the right shape; one key held the wrong type and was normalised. The
- *     surviving items and decisions ARE the plan, so the verbs stay available (that is the repair route) and
- *     the answerability guard runs on them exactly as it would on a clean file. A soft type error is never a
- *     licence to publish an unanswerable ask.
+ *   • PARTIAL — the file parsed and has the right shape; one key held the wrong type and was normalised FOR
+ *     RENDERING ONLY. The surviving items and decisions ARE the plan, so the verbs stay available (that is
+ *     the repair route) and the answerability guard runs on them exactly as it would on a clean file. A soft
+ *     type error is never a licence to publish an unanswerable ask. The normalisation NEVER reaches the file:
+ *     the raw value of the key is re-emitted verbatim on save (`STATE_UNREADABLE`) and the verbs that write
+ *     to that one key are refused. Writing an emptied stand-in back over the operator's plan is the same
+ *     unrecoverable move the fatal branch exists to refuse, and it used to happen here on a no-op verb.
  * Both are a DIFFERENT failure from an unanswerable decision — see `validateDecisions`, which runs
  * UNCONDITIONALLY on whatever decisions reached the model.
  *
@@ -146,6 +149,16 @@ export const DECISION_STATUSES = ['draft', 'awaiting', 'queued', 'taken'];
 export const DECISION_FIELDS = ['title', 'question', 'why', 'ifNothing', 'detail', 'status', 'preparedDate'];
 
 /**
+ * A list field, read defensively. `d.options ?? []` is NOT enough: a string has a `.length` (so the
+ * "at least two" guard falls straight through) and then `.filter` throws a raw TypeError out of the
+ * renderer — dying on the operator's data instead of degrading on it, which is the opposite of the
+ * contract `loadState` states. `loadState` normalises the CONTAINER keys but deliberately never rewrites
+ * the inside of a decision, so a wrong type one level down reaches every reader raw. Every reader goes
+ * through here; the writers refuse instead (see `requireListField`).
+ */
+const asList = (v) => (Array.isArray(v) ? v : []);
+
+/**
  * THE ENFORCED CONTRACT. A decision presented to the operator has to be ANSWERABLE FROM THE PAGE — that is
  * the whole reason the board exists, and it is not left to whoever writes the next entry to remember.
  *
@@ -162,7 +175,7 @@ export const DECISION_FIELDS = ['title', 'question', 'why', 'ifNothing', 'detail
 export function decisionGaps(d) {
   const gaps = [];
   if (!d?.question) gaps.push('question (--decision-set --field=question)');
-  const options = d?.options ?? [];
+  const options = asList(d?.options);
   if (options.length < 2) {
     // One option is not a decision, it is an announcement — and two is a perfectly good answer. The rule is
     // "at least two", never "pad to three".
@@ -210,7 +223,11 @@ const EMPTY_STATE = {
  *   • a REMOVED decision. Deleting R2 drops it out of that `highest` scan, so the floor alone is not enough:
  *     the stored counter is the memory of numbers that are gone. The counter is written as the MAXIMUM of
  *     (what was read, the floor, where we got to) — it is monotonic by construction and can only move up.
- * `main` also reconciles the counter from the file AS READ, before any verb can delete the evidence.
+ *   • a NORMALISED `decisions` key. `loadState` empties a wrong-typed container, so a floor computed from
+ *     `state.decisions` is a floor over what SURVIVED normalisation, not over what the file said. With
+ *     `decisions` as an object map that floor was 1 and `R1` — already in use — was handed out again. The
+ *     floor is therefore also taken from the RAW value, whatever shape it had (`rulingFloor`).
+ * `main` reconciles the counter before any verb runs, so a removal cannot delete the evidence either.
  *
  * @returns {number} how many numbers were assigned (non-zero means the state needs saving).
  */
@@ -221,7 +238,8 @@ export function ensureRulingNumbers(state) {
     return m ? Number(m[1]) : 0;
   };
   const stored = Number.isInteger(state.nextRuling) && state.nextRuling > 0 ? state.nextRuling : 1;
-  const floor = Math.max(0, ...(state.decisions ?? []).map((d) => numberOf(d?.ruling))) + 1;
+  const asRead = Number.isInteger(state[STATE_RULING_FLOOR]) ? state[STATE_RULING_FLOOR] : 1;
+  const floor = Math.max(asRead, Math.max(0, ...(state.decisions ?? []).map((d) => numberOf(d?.ruling))) + 1);
   let next = Math.max(stored, floor);
   // Never hand back a number that is already in use — a hand-edited counter must not create a duplicate.
   const taken = new Set((state.decisions ?? []).map((d) => d?.ruling).filter(Boolean));
@@ -238,6 +256,32 @@ export function ensureRulingNumbers(state) {
 }
 
 /**
+ * The lowest ruling number that is safe to hand out, read from the `decisions` value AS IT WAS IN THE FILE —
+ * before any normalisation, and whatever shape it took. This exists because a wrong-typed container is
+ * emptied for rendering, and a counter reconciled from the emptied view re-issues numbers that are still in
+ * use elsewhere in the file. A reused R-number is worse than an ordinary bug: the operator answers "R4 — as
+ * recommended" in chat, so a number that means two things lands a ruling on the wrong decision.
+ *
+ * Deliberately shape-blind: an array, an object map (values AND keys — a hand-authored file keyed by ruling
+ * number is a real shape), and a bare string entry (`"R1 should we ship?"`) all give up their numbers.
+ */
+export function rulingFloor(rawDecisions) {
+  const candidates = Array.isArray(rawDecisions)
+    ? rawDecisions
+    : rawDecisions && typeof rawDecisions === 'object'
+      ? [...Object.values(rawDecisions), ...Object.keys(rawDecisions)]
+      : [];
+  let max = 0;
+  for (const v of candidates) {
+    // An object's number lives in `ruling` and must match exactly; a scalar entry is free text, so a leading
+    // `R<n>` token counts. Both directions only ever raise the floor, never lower it.
+    const m = v && typeof v === 'object' ? /^R(\d+)$/i.exec(String(v.ruling ?? '')) : /^R(\d+)\b/i.exec(String(v ?? ''));
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max + 1;
+}
+
+/**
  * Carries "this state file could not be read" alongside the fallback state. A SYMBOL on purpose:
  * `JSON.stringify` and `Object.keys` both skip it, so `saveState` can never write the complaint back into
  * the file it is complaining about.
@@ -251,6 +295,29 @@ export const STATE_ERROR = Symbol('progress-board.stateError');
  * (right-shape, wrong-type) read carries `STATE_ERROR` WITHOUT this, because its data is real.
  */
 export const STATE_FATAL = Symbol('progress-board.stateFatal');
+
+/**
+ * THE KEYS WHOSE NORMALISED VIEW IS A LIE, mapped to the value the file actually held. A `Map` under a
+ * symbol for the same reason as above: `saveState` must be able to reach it, and `JSON.stringify` must not.
+ *
+ * This is the fix for the worst bug this tool has had. `loadState` normalises a wrong-typed `items` or
+ * `decisions` to `[]` so the page can render — and `saveState` then wrote that `[]` back over the file.
+ * A single IDEMPOTENT NO-OP verb (`--board-title` on a board already so titled, which reported "already
+ * titled") permanently destroyed every plan row, at exit 0, with the page's own banner insisting that
+ * "the rest of the plan half below is the file as written". That is exactly the destruction the fatal
+ * branch refuses verbs to prevent, happening in the branch that told itself nothing was lost.
+ *
+ * So the normalisation is now RENDER-ONLY. Two rules, and they are the whole of it:
+ *   • `saveState` re-emits the raw value for every key in here, so a key the board could not read is
+ *     written back exactly as the operator wrote it. A key we do not understand is not ours to delete.
+ *   • `main` refuses any verb that writes to such a key (`VERB_TARGET`) — because the alternative is a verb
+ *     that reports success onto the emptied view and then has its work silently dropped by the re-emit.
+ * Verbs that write anywhere ELSE stay open, so the board stays usable and the deadlock stays closed.
+ */
+export const STATE_UNREADABLE = Symbol('progress-board.stateUnreadable');
+
+/** The ruling-number floor computed from the RAW `decisions` value — see `rulingFloor`. */
+export const STATE_RULING_FLOOR = Symbol('progress-board.stateRulingFloor');
 
 /**
  * Read the hand-maintained half — and DEGRADE rather than die, the same contract the `gh` half already
@@ -284,12 +351,15 @@ export function loadState(statePath) {
   }
 
   // Right shape, wrong types: a string where a list belongs takes out every `.filter`/`.map` downstream.
-  // Normalise to something renderable and say which key was wrong — never guess at what it meant.
+  // Normalise to something renderable and say which key was wrong — never guess at what it meant, and
+  // (see STATE_UNREADABLE) never write the guess back over the file either.
   const state = { ...EMPTY_STATE, ...raw };
   const wrong = [];
+  const unreadable = new Map();
   for (const key of ['items', 'decisions']) {
     if (!Array.isArray(state[key])) {
       wrong.push(key);
+      unreadable.set(key, raw[key]);
       state[key] = [];
     } else {
       state[key] = state[key].filter((x) => x && typeof x === 'object' && !Array.isArray(x));
@@ -298,22 +368,45 @@ export function loadState(statePath) {
       // (before the guard was made unconditional) one absent optional key was enough to disarm it.
       if (Array.isArray(raw[key]) && state[key].length !== raw[key].length) {
         wrong.push(`${key} (entries that were not objects)`);
+        // The dropped entries are unreadable, not disposable: re-emit the whole array as it was read. The
+        // surviving objects are shared by reference with it, so a verb's edit to one still persists.
+        unreadable.set(key, raw[key]);
       }
     }
   }
   if (!state.phases || typeof state.phases !== 'object' || Array.isArray(state.phases)) {
     wrong.push('phases');
+    unreadable.set('phases', raw.phases);
     state.phases = {};
   }
+  // One level DOWN, inside a decision. Not normalised — rewriting the inside of an entry is guessing, and
+  // guessing is what destroyed data here before. It is named in the banner, read through `asList`, and the
+  // writers refuse; the entry itself is left exactly as written, so it round-trips through `saveState`.
+  for (const d of state.decisions) {
+    for (const field of ['options', 'evidence']) {
+      if (d[field] !== undefined && !Array.isArray(d[field])) wrong.push(`decision "${d.id}".${field}`);
+    }
+  }
   if (wrong.length) state[STATE_ERROR] = `${shortPath(statePath)} has the wrong type for: ${wrong.join(', ')} — ignored`;
+  if (unreadable.size) state[STATE_UNREADABLE] = unreadable;
+  // Reconciled from the RAW value, so a container the board could not read still cannot cause a reissue.
+  state[STATE_RULING_FLOOR] = rulingFloor(raw.decisions);
   return state;
 }
 
 export function saveState(statePath, state) {
+  // A key the read could not understand is written back EXACTLY as it was found — the normalisation that
+  // made the page renderable never reaches the file. See STATE_UNREADABLE for what this is protecting.
+  const unreadable = state[STATE_UNREADABLE];
   // `_`-prefixed keys are notes to the next human reader; keep them at the TOP where they are read, rather
   // than wherever the merge with the defaults happens to leave them.
   const keys = Object.keys(state);
-  const ordered = Object.fromEntries([...keys.filter((k) => k.startsWith('_')), ...keys.filter((k) => !k.startsWith('_'))].map((k) => [k, state[k]]));
+  const ordered = Object.fromEntries(
+    [...keys.filter((k) => k.startsWith('_')), ...keys.filter((k) => !k.startsWith('_'))].map((k) => [
+      k,
+      unreadable?.has(k) ? unreadable.get(k) : state[k],
+    ]),
+  );
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(ordered, null, 2) + '\n');
 }
@@ -808,9 +901,9 @@ function decisionRowHtml(d, { sev = 'crit', chipLabel = 'decide', handle = 'answ
     .filter(Boolean)
     .join(' · ');
 
-  const options = (d.options ?? []).length
+  const options = asList(d.options).length
     ? `          <ul class="opts">
-${d.options
+${asList(d.options)
   .map(
     (o) =>
       `            <li${o.recommended ? ' class="rec"' : ''}>${o.recommended ? chip('ok', 'recommended') : ''}<span class="ol">${esc(o.label)}</span>${o.detail ? ` — ${esc(o.detail)}` : ''}</li>`,
@@ -819,8 +912,10 @@ ${d.options
           </ul>`
     : '';
 
-  const evidence = (d.evidence ?? []).length
-    ? `          <div class="ev">${d.evidence.map((e) => `<span class="mono e">${esc(e)}</span>`).join('')}</div>`
+  const evidence = asList(d.evidence).length
+    ? `          <div class="ev">${asList(d.evidence)
+        .map((e) => `<span class="mono e">${esc(e)}</span>`)
+        .join('')}</div>`
     : '';
 
   // Both handles, deliberately: the R-number is what the operator quotes back in conversation, the backlog
@@ -979,7 +1074,7 @@ export function renderPage(m) {
       ? `    <div class="banner crit"><strong>The plan and decisions could not be read</strong> — ${esc(m.stateError)}. ${
           m.stateFatal
             ? 'Everything below this line is the live pull-request half only; the plan half is missing, not empty.'
-            : 'Only the key named above was ignored — the rest of the plan half below is the file as written, and is still held to the same rules.'
+            : 'The key named above is not SHOWN below — but it is kept in the state file exactly as written, and any verb that would write to it is refused until it is repaired. The rest of the plan half below is the file as written, and is still held to the same rules.'
         }</div>\n`
       : '') +
     (m.prs.fresh
@@ -1051,21 +1146,27 @@ const findItem = (state, id) => (state.items ?? []).find((i) => i.id === id);
  */
 export function applyVerb(state, verb, args = {}) {
   const today = nowIso().slice(0, 10);
+  // `--date` corrects the three dates the board sets for you. They are `??=`-set at the first transition, so
+  // without this a `--done` on an item that was never `--start`ed pinned BOTH dates to the same day with no
+  // route back — the last three fields in the file that no verb could reach.
+  const on = dateArg(args.date, verb);
   switch (verb) {
     case 'start': {
       const it = requireItem(state, args.id);
       it.status = 'in-progress';
       delete it.blocker;
-      it.startedAt ??= today;
-      return `started ${it.id}`;
+      if (on) it.startedAt = on;
+      else it.startedAt ??= today;
+      return `started ${it.id}${on ? ` (started ${on})` : ''}`;
     }
     case 'done': {
       const it = requireItem(state, args.id);
       it.status = 'done';
       delete it.blocker;
-      it.startedAt ??= today;
-      it.doneAt ??= today;
-      return `done ${it.id}`;
+      it.startedAt ??= on ?? today;
+      if (on) it.doneAt = on;
+      else it.doneAt ??= today;
+      return `done ${it.id}${on ? ` (done ${on})` : ''}`;
     }
     case 'block': {
       const it = requireItem(state, args.id);
@@ -1089,6 +1190,17 @@ export function applyVerb(state, verb, args = {}) {
       }
       state.items.push({ id, title: String(args.title), phase: Number(args.phase ?? 0) || 0, status: 'todo' });
       return `added ${id}`;
+    }
+    // Re-phasing an existing row was only reachable as `--add="<the exact title>" --phase=n` — keyed on the
+    // title rather than the id every other verb takes, and presented in the usage text as an add-time option.
+    // Correct, and undiscoverable. This is the same field, reached the same way as everything else.
+    case 'rephase': {
+      const it = requireItem(state, args.id);
+      const n = Number(args.phase === true ? NaN : args.phase);
+      if (!Number.isInteger(n) || n < 0) throw new Error('--rephase requires --phase=<n>');
+      if ((it.phase ?? 0) === n) return `${it.id} is already in phase ${n}`;
+      it.phase = n;
+      return `moved ${it.id} → phase ${n}`;
     }
     // `items[].pr` IS THE JOIN between the two halves — the stored plan row and the live pull-request row.
     // Without a verb for it the only way to populate the field the plan table reads was a hand edit of the
@@ -1166,8 +1278,9 @@ export function applyVerb(state, verb, args = {}) {
     case 'decide': {
       const d = requireDecision(state, args.id);
       d.status = 'taken';
-      d.takenAt ??= today;
-      return `decided ${d.id}`;
+      if (on) d.takenAt = on;
+      else d.takenAt ??= today;
+      return `decided ${d.id}${on ? ` (taken ${on})` : ''}`;
     }
     case 'decision-add': {
       // Keyed on the id, so re-running the same add is a no-op rather than a second copy of the question.
@@ -1226,6 +1339,7 @@ export function applyVerb(state, verb, args = {}) {
     }
     case 'decision-option': {
       const d = requireDecision(state, args.id);
+      requireListField(d, 'options');
       const label = args.label === true ? '' : String(args.label ?? '');
       if (!label) throw new Error('--decision-option requires --label="<option>"');
       d.options ??= [];
@@ -1246,6 +1360,7 @@ export function applyVerb(state, verb, args = {}) {
     // repair is a hand-edit of the state file, which the board forbids.
     case 'decision-option-remove': {
       const d = requireDecision(state, args.id);
+      requireListField(d, 'options');
       const label = args.label === true ? '' : String(args.label ?? '');
       if (!label) throw new Error('--decision-option-remove requires --label="<option>"');
       const before = d.options?.length ?? 0;
@@ -1259,6 +1374,7 @@ export function applyVerb(state, verb, args = {}) {
     }
     case 'decision-evidence': {
       const d = requireDecision(state, args.id);
+      requireListField(d, 'evidence');
       const text = args.text === true ? '' : String(args.text ?? '');
       if (!text) {
         delete d.evidence;
@@ -1307,6 +1423,29 @@ export function applyVerb(state, verb, args = {}) {
     default:
       throw new Error(`unknown verb "${verb}"`);
   }
+}
+
+/** `--date=YYYY-MM-DD`, or null when it was not passed. A loose date would silently mis-sort the board. */
+function dateArg(v, verb) {
+  if (v === undefined) return null;
+  const s = v === true ? '' : String(v);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    throw new Error(`--date takes a calendar date as YYYY-MM-DD (e.g. --${verb}=… --date=2026-08-01) — got ${s ? `"${s}"` : 'no value at all'}`);
+  }
+  return s;
+}
+
+/**
+ * A writer's half of `asList`. A reader can degrade around a wrong-typed field; a writer cannot, because
+ * `d.options ??= []` does not fire on a string and `.push`/`.filter` then throws a raw stack trace — and by
+ * then a verb has already reported success. Refuse cleanly instead, and name the two routes out.
+ */
+function requireListField(d, field) {
+  if (d[field] === undefined || Array.isArray(d[field])) return;
+  throw new Error(
+    `decision "${d.id}" has a ${field} field that is not a list (${JSON.stringify(d[field])}) — the board will not guess at what it meant, ` +
+      `and will not overwrite it. Repair that one field by hand, or drop the decision with --decision-remove=${d.id} and re-add it.`,
+  );
 }
 
 function requireItem(state, id) {
@@ -1367,9 +1506,12 @@ const USAGE = `progress-board — the operator's published status page (one Bash
   node scripts/progress-board.mjs                    re-render from live state
   node scripts/progress-board.mjs --start=<id>       item → in progress (clears any blocker)
   node scripts/progress-board.mjs --done=<id>        item → done
+        --date=YYYY-MM-DD on --start/--done/--decide CORRECTS the date the board set for you (it is
+        otherwise stamped once, at the first transition, and a --done on a never-started item pins both)
   node scripts/progress-board.mjs --block=<id> --why="<reason>"
   node scripts/progress-board.mjs --note=<id> --text="<note>"    (empty --text clears it)
   node scripts/progress-board.mjs --add="<title>" [--phase=<n>]
+  node scripts/progress-board.mjs --rephase=<id> --phase=<n>      move an existing row to another phase
   node scripts/progress-board.mjs --retitle=<id> --to="<title>"   the id never moves — it is the join key
   node scripts/progress-board.mjs --remove=<id>      drop a plan item
   node scripts/progress-board.mjs --link=<id> --pr=<n>            join the item to its pull request
@@ -1406,6 +1548,33 @@ const USAGE = `progress-board — the operator's published status page (one Bash
 
   --state=<path>  --out=<path>  --no-gh  --json  --help`;
 
+/**
+ * Which state key each verb WRITES — the lookup behind the scoped refusal in `main`. `board-title`, `repo`
+ * and `url` write top-level scalars and are absent on purpose: they stay available while a container key is
+ * unreadable, because their save is now non-destructive. Anything added here later gets the guard for free;
+ * anything forgotten defaults to "writes nothing", so keep it in step with `applyVerb`.
+ */
+const VERB_TARGET = {
+  start: 'items',
+  done: 'items',
+  block: 'items',
+  note: 'items',
+  add: 'items',
+  rephase: 'items',
+  retitle: 'items',
+  remove: 'items',
+  link: 'items',
+  unlink: 'items',
+  decide: 'decisions',
+  'decision-add': 'decisions',
+  'decision-set': 'decisions',
+  'decision-option': 'decisions',
+  'decision-option-remove': 'decisions',
+  'decision-evidence': 'decisions',
+  'decision-remove': 'decisions',
+  'phase-title': 'phases',
+};
+
 export function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.help) {
@@ -1420,6 +1589,14 @@ export function main(argv = process.argv.slice(2)) {
     outPath = args.out ? assertWritablePath(String(args.out), '--out') : DEFAULT_OUT;
   } catch (e) {
     console.error(`✗ ${e.message}`);
+    return 1;
+  }
+  // The two caller-controlled paths must not be the same file. They are written by different code at
+  // different moments, so the collision was not a no-op: the page landed ON TOP of the state file and the
+  // plan was gone — including in the fatal branch, the one place the design promises never to overwrite a
+  // recoverable plan. Checked BEFORE the state is even read, so neither write can have happened.
+  if (outPath === statePath) {
+    console.error(`✗ --out and --state both point at ${shortPath(outPath)} — the page would be written over the state file. Give them different paths.`);
     return 1;
   }
   // `--verify` is a read-only question about a FILE, not about the board's state — answer it and stop.
@@ -1445,11 +1622,12 @@ export function main(argv = process.argv.slice(2)) {
   const state = loadState(statePath);
 
   const verbs = [];
-  if (args.start) verbs.push(['start', { id: String(args.start) }]);
-  if (args.done) verbs.push(['done', { id: String(args.done) }]);
+  if (args.start) verbs.push(['start', { id: String(args.start), date: args.date }]);
+  if (args.done) verbs.push(['done', { id: String(args.done), date: args.date }]);
   if (args.block) verbs.push(['block', { id: String(args.block), why: args.why === true ? '' : args.why }]);
   if (args.note) verbs.push(['note', { id: String(args.note), text: args.text === true ? '' : args.text }]);
   if (args.add) verbs.push(['add', { title: String(args.add), phase: args.phase }]);
+  if (args.rephase) verbs.push(['rephase', { id: String(args.rephase), phase: args.phase }]);
   if (args.retitle) verbs.push(['retitle', { id: String(args.retitle), to: args.to }]);
   if (args.remove) verbs.push(['remove', { id: String(args.remove) }]);
   if (args.link) verbs.push(['link', { id: String(args.link), pr: args.pr }]);
@@ -1457,7 +1635,7 @@ export function main(argv = process.argv.slice(2)) {
   if (args['phase-title']) verbs.push(['phase-title', { phase: args['phase-title'], to: args.to }]);
   if (args['board-title']) verbs.push(['board-title', { title: args['board-title'] }]);
   if (args.repo !== undefined) verbs.push(['repo', { repo: args.repo }]);
-  if (args.decide) verbs.push(['decide', { id: String(args.decide) }]);
+  if (args.decide) verbs.push(['decide', { id: String(args.decide), date: args.date }]);
   if (args['decision-add'])
     verbs.push([
       'decision-add',
@@ -1487,6 +1665,22 @@ export function main(argv = process.argv.slice(2)) {
   if (fatal && verbs.length) {
     console.error(`✗ refusing to write: ${broken}. Fix the file by hand — applying a verb now would overwrite the plan with an empty one.`);
     return 1;
+  }
+
+  // THE SAME REFUSAL, SCOPED TO ONE KEY. A verb that writes to a key the read could not understand would be
+  // writing onto the emptied stand-in, and `saveState` re-emits the raw value over the top — so the verb
+  // would report success and lose the work. Refuse it by name. Verbs that write anywhere else are unaffected,
+  // which is what keeps this from becoming the deadlock the fatal branch used to be.
+  const unreadable = state[STATE_UNREADABLE];
+  if (unreadable) {
+    const blocked = [...new Set(verbs.map(([v]) => VERB_TARGET[v]).filter((k) => k && unreadable.has(k)))];
+    if (blocked.length) {
+      console.error(
+        `✗ refusing to write ${blocked.join(' and ')}: ${broken}. That key is preserved in the state file exactly as written and will not be ` +
+          `overwritten — repair its type by hand, then the verb will apply. Verbs that do not write to ${blocked.join('/')} still work.`,
+      );
+      return 1;
+    }
   }
 
   // Reconcile the ruling counter from the file AS READ — before any verb can delete the decision that is the

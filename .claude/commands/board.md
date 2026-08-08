@@ -12,8 +12,10 @@ review verdict came back, a decision was taken.
 (pull-request state is derived live) and re-publish.
 
 The rest of the stored half has verbs too: `--link=<id> --pr=<n>` / `--unlink=<id>` (the join to the live
-half), `--retitle=<id> --to="…"`, `--remove=<id>`, `--phase-title=<n> --to="…"`, `--board-title="…"`,
-`--repo=<owner>/<name>`, `--decision-remove=<id>`.
+half), `--retitle=<id> --to="…"`, `--rephase=<id> --phase=<n>`, `--remove=<id>`, `--phase-title=<n> --to="…"`,
+`--board-title="…"`, `--repo=<owner>/<name>`, `--decision-remove=<id>`, and `--date=YYYY-MM-DD` on
+`--start`/`--done`/`--decide` to correct a date the board stamped for you (they are set once, at the first
+transition). Only `ruling` and `nextRuling` have no verb — those are the board's to assign.
 
 A decision must be **answerable from the page**, and the script enforces it: an `awaiting` decision without a
 `question`, two or more options with exactly one recommended, and `ifNothing` makes the run exit 1 naming the

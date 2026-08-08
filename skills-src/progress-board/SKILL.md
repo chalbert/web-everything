@@ -96,12 +96,19 @@ Every other field the state file holds has a verb too — there is no field left
 ```bash
 node scripts/progress-board.mjs --link=<id> --pr=1101      # the JOIN to the live half; --unlink=<id> removes it
 node scripts/progress-board.mjs --retitle=<id> --to="Corrected title"   # the id never moves — it is the key
+node scripts/progress-board.mjs --rephase=<id> --phase=3   # move an existing row between phases
 node scripts/progress-board.mjs --remove=<id>              # drop a plan row (a typo'd title, a dropped item)
 node scripts/progress-board.mjs --phase-title=2 --to="Merge-gate correctness"   # empty --to clears it
 node scripts/progress-board.mjs --board-title="Progress board"
 node scripts/progress-board.mjs --repo=chalbert/web-everything   # what `gh pr list --repo` is given
 node scripts/progress-board.mjs --decision-remove=<id>     # its R-number retires and is never reissued
+node scripts/progress-board.mjs --start=<id> --date=2026-08-01   # correct a date the board stamped for you
 ```
+
+The three dates the board sets for you — `startedAt`, `doneAt`, `takenAt` — are stamped **once**, at the
+first transition, so a `--done` on an item that was never `--start`ed pins both to the same day. `--date` on
+`--start`, `--done` or `--decide` corrects them. The only fields with no verb are `ruling` and `nextRuling`,
+which are the board's to assign and yours never to touch.
 
 `--url` is the one verb with a guard on top: it takes a real `https://…` value and **refuses to replace a
 URL that is already stored** unless you add `--force`. A minted duplicate cannot be undone, so replacing the
@@ -235,11 +242,20 @@ If the state file itself will not read, there are **two** outcomes and the CLI n
 | The file | The CLI says | What happens |
 | --- | --- | --- |
 | did not parse at all (an unresolved merge-conflict marker is the usual cause) | `STATE FILE UNREADABLE` | the page still renders, behind a red *"the plan and decisions could not be read"* banner, with **no** plan half. **Every verb is refused** — an empty save must never overwrite a recoverable plan. Fix it by hand. |
-| parsed, but one key held the wrong type | `STATE FILE PARTLY IGNORED` | only that key is dropped. The items and decisions are **real**, so the verbs still work (they are the repair route) and the page says exactly which key was ignored. |
+| parsed, but one key held the wrong type | `STATE FILE PARTLY IGNORED` | that key is not **shown**, but it is **kept in the file exactly as written** — the normalisation that makes the page renderable never reaches disk. Verbs that write to that one key are refused by name; every other verb still works. The page says which key it was. |
+
+**A key the board could not read is never overwritten.** This is the rule to hold on to, because the
+alternative broke the tool's whole promise: the emptied stand-in used to be saved back over the file, so a
+single **idempotent no-op verb** — one that reported "already titled" and changed nothing — permanently
+destroyed every plan row at exit 0. Anything the board does not understand it preserves and refuses to
+touch, so the worst a wrong type can cost you is the hand repair of that one key.
 
 **The answerability rule applies in both cases.** It is checked against whatever decisions actually loaded,
 never skipped because something else about the file was wrong — a wrong-typed key is not a licence to put an
 unanswerable ask in front of the operator.
+
+**`--out=` and `--state=` may not be the same path.** They are written by different code at different
+moments, so pointing them at one file wrote the page over the plan. It is refused before either is read.
 
 ## The page's own contract
 
