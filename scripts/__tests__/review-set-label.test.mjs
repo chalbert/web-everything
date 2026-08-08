@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +14,7 @@ import {
   decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers,
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
 } from '../review-set-label.mjs';
-import { parseReviewedSha } from '../lib/review-escalation.mjs';
+import { parseReviewedSha, decideReviewGate } from '../lib/review-escalation.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const human = [{ name: REVIEW_LABELS.human }, { name: 'ready-to-merge' }];
@@ -653,9 +653,11 @@ process.exit(0);
     expect(valuesOf(edit, '--remove-label')).not.toContain(REVIEW_LABELS.changes);
     expect(calls().map((c) => c.slice(0, 2).join(' ')))
       // #2979 — the reviewed-diff read moved off `gh pr diff` onto `computeNetDiffText` (which shells `git`),
-      // so the GH call sequence is back to what it was before #x169fqe. The mutation order (edit → comment) is
-      // the property this assertion exists to pin, and it is unchanged throughout.
-      .toEqual(['pr view', 'pr edit', 'pr comment', 'pr view']);
+      // so the GH call sequence carries no `pr diff`. #2964 — the MUTATION order is now comment → edit: this PR
+      // carries `review:human`/`review:pending` and NOT `review:accepted`, so the durable record (with its
+      // marker) goes first, where an orphan is inert. The dedicated ordering suite below owns that property; the
+      // pin is kept here so a silent re-flip cannot pass this end-to-end test.
+      .toEqual(['pr view', 'pr comment', 'pr edit', 'pr view']);
 
     // 3. The durable comment — the honesty tax as it is actually posted, not as the module describes it.
     const comment = readFileSync(join(dir, 'comment.md'), 'utf8');
@@ -765,5 +767,275 @@ process.exit(0);
     const payload = JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop());
     expect(payload.error).toMatch(/MERGED/);
     expect(ghCalls()).toEqual(['pr view']);
+  });
+});
+
+
+// #2964 — THE ORDER THE TWO WRITES LAND IN. `runReviewLabelCli` makes two non-atomic `gh` calls (the durable
+// verdict comment, which carries the `reviewed-sha` marker, and the label swap). Either can land alone, so the
+// ONLY thing that can be engineered is WHICH half is safe to lose — and the answer is not the same in both cases:
+//   • not yet accepted → COMMENT FIRST (an orphan marker with no `review:accepted` behind it is never read);
+//   • already accepted → SWAP FIRST (an orphan marker there would FRESHEN the #2409 coverage of an acceptance
+//     that never landed, handing the drain a tree no successful swap vouched for).
+// These tests assert the ORDER and its consequence — not merely that both calls happened, which the defective
+// pre-#2964 order satisfies just as well. The drain-side consequence is proven through the REAL
+// `parseReviewedSha` + `decideReviewGate`, so a change to how the gate reads a marker cannot leave them passing
+// vacuously.
+describe('runReviewLabelCli — the write ORDER is the safety property (#2964)', () => {
+  const OLD_SHA = '1111111111111111111111111111111111111111';
+  const NEW_SHA = '2222222222222222222222222222222222222222';
+  const ACTOR = 'Nicolas Gilbert';
+  /** The marker the PR ALREADY carries from an earlier accept — the "durable record" the hazard is about. */
+  const PRIOR_ACCEPT_COMMENT = { body: `✅ review — accepted\n\n<!-- reviewed-sha: ${OLD_SHA} -->` };
+
+  // `GH_FAIL_ON` names a verb pair ('pr edit' / 'pr comment') that exits 1 with a transient-looking stderr — the
+  // 5xx / rate-limit / network blip the item is about. `pr view` is always honest so the run gets that far, and
+  // (like the other fake-`gh` suites in this file) it reports NO `headRefName`, so the #2979 net-diff read is
+  // unscored and no `reviewed-diff` marker is stamped. That is deliberate on two counts: it keeps the run
+  // hermetic — a branch name here sends `computeNetDiffText` to the network for a ref that does not exist — and
+  // it isolates the ordering property on the `reviewed-sha` marker, which is the one `acceptanceCoversHead`
+  // fails OPEN on. Both markers ride the same comment, so ordering them is one act.
+  //
+  // /bin/sh, not node, unlike the other fake-`gh` shims in this file: the ordering tests below invoke `gh` ~20
+  // times, and a node shim pays a whole node startup on each. Nothing here needs node.
+  const FAKE_GH = `#!/bin/sh
+verb="$1 $2"
+printf '%s\\n' "$verb" >> "$GH_CALL_LOG"
+if [ "$verb" = 'pr view' ]; then
+  if [ -f "$GH_EDIT_FLAG" ]; then labels="$GH_LABELS_AFTER"; else labels="$GH_LABELS_BEFORE"; fi
+  printf '{"labels":%s,"headRefOid":"%s","state":"OPEN"}' "$labels" "$GH_HEAD_SHA"
+  exit 0
+fi
+if [ "$verb" = "$GH_FAIL_ON" ]; then
+  echo 'HTTP 502: Bad gateway - transient' >&2
+  exit 1
+fi
+if [ "$verb" = 'pr edit' ]; then : > "$GH_EDIT_FLAG"; exit 0; fi
+if [ "$verb" = 'pr comment' ]; then
+  prev=''
+  for a in "$@"; do
+    if [ "$prev" = '--body-file' ]; then body="$a"; fi
+    prev="$a"
+  done
+  mkdir -p "$GH_COMMENT_DIR"
+  n=$(find "$GH_COMMENT_DIR" -name '*.md' | wc -l | tr -d ' ')
+  cp "$body" "$GH_COMMENT_DIR/$n.md"
+  exit 0
+fi
+exit 0
+`;
+
+  const script = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'review-set-label.mjs');
+  let dir;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'review-label-order-'));
+    writeFileSync(join(dir, 'gh'), FAKE_GH);
+    chmodSync(join(dir, 'gh'), 0o755);
+  });
+  afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+  const reset = () => {
+    for (const f of ['gh-calls.log', 'edited']) {
+      try { rmSync(join(dir, f), { force: true }); } catch { /* first run */ }
+    }
+    try { rmSync(join(dir, 'comments'), { recursive: true, force: true }); } catch { /* first run */ }
+  };
+  beforeEach(reset);
+
+  /** The fake `gh`'s whole world: which labels `pr view` reports before/after the swap, the live head, and which
+   *  call (if any) blips. `before`/`after` are label-name arrays. */
+  const envFor = ({ before, after, headSha, failOn = '' }) => ({
+    PATH: `${dir}:${process.env.PATH}`,
+    GH_CALL_LOG: join(dir, 'gh-calls.log'),
+    GH_COMMENT_DIR: join(dir, 'comments'),
+    GH_EDIT_FLAG: join(dir, 'edited'),
+    GH_LABELS_BEFORE: JSON.stringify(before.map((name) => ({ name }))),
+    GH_LABELS_AFTER: JSON.stringify(after.map((name) => ({ name }))),
+    GH_HEAD_SHA: headSha,
+    GH_FAIL_ON: failOn,
+  });
+  const argvFor = (opts) => ['1099', '--repo=o/n', `--to=${opts.to || 'accepted'}`, `--actor=${ACTOR}`];
+
+  /** Drive the REAL CLI entrypoint in a child process. Reserved for the two headline pins — each spawn re-imports
+   *  this CLI's whole module graph (seconds), so the rest run in-process below. */
+  const runCli = (opts) => spawnSync('node', [script, ...argvFor(opts)],
+    { encoding: 'utf8', env: { ...process.env, ...envFor(opts) } });
+
+  /** Drive the SAME harness IN-PROCESS against the same fake `gh`. The ordering rule lives inside
+   *  `runReviewLabelCli`, not in the CLI block's argv handling, so this exercises the code under test exactly —
+   *  and it supplies the REAL `buildVerdictComment` (as the CLI block does), so the marker is the real one.
+   *  Mirrors the stdout/exit stubbing the size-guard suite above already uses. */
+  const runHarness = (opts) => {
+    const chunks = [];
+    const realWrite = process.stdout.write.bind(process.stdout);
+    const realExit = process.exit.bind(process);
+    const overrides = envFor(opts);
+    const saved = Object.fromEntries(Object.keys(overrides).map((k) => [k, process.env[k]]));
+    Object.assign(process.env, overrides);
+    process.stdout.write = (s) => { chunks.push(String(s)); return true; };
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let status = null;
+    try {
+      runReviewLabelCli({
+        argv: argvFor(opts),
+        defaultActor: 'test',
+        usage: 'usage: test',
+        buildComment: ({ to, actor, headSha, reason, reviewedDiff }) => buildVerdictComment({
+          to, actor, headSha, reason, reviewedDiff,
+        }),
+        successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
+        refusalResult: ({ decision }) => ({ error: decision.reason }),
+      });
+    } catch (e) {
+      if (typeof e.exitCode === 'number') status = e.exitCode; else throw e;
+    } finally {
+      process.stdout.write = realWrite;
+      process.exit = realExit;
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+    }
+    const line = chunks.join('').trim().split('\n').filter(Boolean).pop();
+    return { status, payload: line ? JSON.parse(line) : null };
+  };
+
+  /** The verb pair of every recorded gh call, in order. */
+  const verbs = () => (existsSync(join(dir, 'gh-calls.log'))
+    ? readFileSync(join(dir, 'gh-calls.log'), 'utf8').split('\n').filter(Boolean)
+    : []);
+  /** Every comment body that actually reached `gh pr comment`, oldest first — the PR's durable record, in the
+   *  `[{ body }]` shape `gh pr view --json comments` returns and `parseReviewedSha` consumes. */
+  const posted = () => (existsSync(join(dir, 'comments'))
+    ? readdirSync(join(dir, 'comments')).sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
+      .map((f) => ({ body: readFileSync(join(dir, 'comments', f), 'utf8') }))
+    : []);
+  /** What the drain would decide, reading the PR exactly as `merge-ai-prs.mjs` does. */
+  const drainVerdict = ({ labels, comments, headSha }) => decideReviewGate({
+    escalate: true, labels, headSha, acceptedSha: parseReviewedSha(comments),
+  });
+
+  const NOT_YET_ACCEPTED = {
+    before: [REVIEW_LABELS.pending, 'ready-to-merge'],
+    after: [REVIEW_LABELS.accepted, 'ready-to-merge'],
+    headSha: NEW_SHA,
+  };
+  const ALREADY_ACCEPTED = {
+    before: [REVIEW_LABELS.accepted, 'ready-to-merge'],
+    after: [REVIEW_LABELS.accepted, 'ready-to-merge'],
+    headSha: NEW_SHA,
+  };
+
+  // ── Case 1: the PR is NOT already accepted — the first accept, and the hole this item was filed for. ──────────
+
+  // THE REGRESSION PIN, driven through the REAL entrypoint. Under the old swap-first order `gh pr edit` had
+  // already landed by the time the comment failed, leaving `review:accepted` + no marker → `acceptanceCoversHead`
+  // fails OPEN → the drain merges with the #2409 gate disarmed. Comment-first makes that state unreachable: the
+  // failure happens before the swap exists.
+  it('a failed comment on a not-yet-accepted PR reaches NO pr edit — the label swap never happens', () => {
+    const r = runCli({ ...NOT_YET_ACCEPTED, failOn: 'pr comment' });
+    expect(r.status).not.toBe(0);
+    expect(JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop()).error).toMatch(/502|Bad gateway/);
+    // The whole assertion: the unsafe half never ran. Under the pre-#2964 order this list contains 'pr edit'.
+    expect(verbs()).not.toContain('pr edit');
+    expect(verbs()).toEqual(['pr view', 'pr comment']);
+    expect(existsSync(join(dir, 'edited'))).toBe(false);
+  }, 120000);
+
+  // The ordering itself, on the happy path — "both calls happened" is exactly what the defective order satisfies,
+  // so the assertion has to be positional.
+  it('the comment is issued BEFORE the label swap on a not-yet-accepted PR', () => {
+    const r = runHarness(NOT_YET_ACCEPTED);
+    expect(r.status).toBe(0);
+    expect(r.payload).toMatchObject({ ok: true, to: 'accepted' });
+    expect(verbs()).toEqual(['pr view', 'pr comment', 'pr edit', 'pr view']);
+    expect(verbs().indexOf('pr comment')).toBeLessThan(verbs().indexOf('pr edit'));
+    // And the acceptance it records is the one the drain will honour: marker at the live head, label live.
+    expect(parseReviewedSha(posted())).toBe(NEW_SHA);
+    expect(drainVerdict({ labels: [REVIEW_LABELS.accepted], comments: posted(), headSha: NEW_SHA }).action)
+      .toBe('merge');
+  });
+
+  // THE RE-RUNNABILITY QUALIFIER the item calls load-bearing: "a comment with no swap is inert and the command is
+  // re-runnable". Both halves are driven here, because the reorder is only justified if BOTH hold — an orphan
+  // record that were readable, or a first run that poisoned the second, would make comment-first the worse trade.
+  it('an orphan comment is inert AND the command is re-runnable — the qualifier the reorder rests on', () => {
+    // Run 1: the swap blips. The record is already durable — under the pre-#2964 order it would not exist at all.
+    const first = runHarness({ ...NOT_YET_ACCEPTED, failOn: 'pr edit' });
+    expect(first.status).not.toBe(0);
+    const orphan = posted();
+    expect(orphan).toHaveLength(1);
+    expect(parseReviewedSha(orphan)).toBe(NEW_SHA); // a real marker, naming the live head…
+    expect(existsSync(join(dir, 'edited'))).toBe(false); // …with NO review:accepted behind it.
+
+    // INERT: the drain reads the PR as it now stands — pending, plus that orphan marker — and does NOT merge.
+    // `parseReviewedSha` is only ever consulted behind a live `review:accepted` check, so the marker is not even
+    // read; this pins the outcome that fact produces rather than restating the fact.
+    const gate = drainVerdict({ labels: [REVIEW_LABELS.pending], comments: orphan, headSha: NEW_SHA });
+    expect(gate.action).not.toBe('merge');
+    expect(gate.action).toBe('park');
+
+    // RE-RUNNABLE: the identical command, run again against the same PR, succeeds and lands the swap. No
+    // "nothing to clear" dead end, no manual `gh` repair.
+    reset();
+    const second = runHarness(NOT_YET_ACCEPTED);
+    expect(second.status).toBe(0);
+    expect(second.payload.ok).toBe(true);
+    expect(verbs()).toContain('pr edit');
+    expect(existsSync(join(dir, 'edited'))).toBe(true);
+  });
+
+  // ── Case 2: the PR ALREADY carries review:accepted — the hazard the reorder INTRODUCES, and its closure. ──────
+
+  // THE HAZARD TEST the item demands, driven through the REAL entrypoint: already accepted + head advanced +
+  // `gh pr edit` fails must NOT leave a marker naming the live head. This is the test an UNCONDITIONAL
+  // comment-first implementation fails — there the comment is already durable when the swap blips,
+  // `parseReviewedSha` takes the latest marker, and the still-live `review:accepted` sends the drain straight to
+  // merge, a failed run having freshened the coverage of an acceptance it never applied. Keeping the swap first
+  // HERE is what closes it.
+  it('already accepted + head advanced + a failed pr edit does NOT advance the reviewed-sha marker', () => {
+    const r = runCli({ ...ALREADY_ACCEPTED, failOn: 'pr edit' });
+    expect(r.status).not.toBe(0);
+    // The swap was attempted FIRST and failed, so the run exited before writing anything durable.
+    expect(verbs()).toEqual(['pr view', 'pr edit']);
+    expect(verbs()).not.toContain('pr comment');
+    expect(posted()).toEqual([]);
+
+    // The consequence, read the way the drain reads it: the newest marker is still the PRIOR one, naming the OLD
+    // head, so the #2409 staleness gate re-parks instead of merging. This is the assertion that fails if the
+    // marker is ever allowed ahead of the swap on an already-accepted PR.
+    const comments = [PRIOR_ACCEPT_COMMENT, ...posted()];
+    expect(parseReviewedSha(comments)).toBe(OLD_SHA);
+    const gate = drainVerdict({ labels: [REVIEW_LABELS.accepted], comments, headSha: NEW_SHA });
+    expect(gate.action).toBe('park');
+    expect(gate.staleAcceptance).toBe(true);
+  }, 120000);
+
+  // The NEGATIVE CONTROL for the test above — a rule that simply never stamped anything would pass it. A
+  // SUCCESSFUL re-accept must still advance the marker, because that is how the #2409 gate un-sticks a re-parked
+  // PR after the fix; removing that path is the shape this implementation deliberately did not pick.
+  it('a SUCCESSFUL re-accept on an already-accepted PR does advance the marker (swap first, then the record)', () => {
+    const r = runHarness(ALREADY_ACCEPTED);
+    expect(r.status).toBe(0);
+    // Swap first HERE — the inverse of the not-yet-accepted case above, and deliberately so.
+    expect(verbs()).toEqual(['pr view', 'pr edit', 'pr comment', 'pr view']);
+    expect(verbs().indexOf('pr edit')).toBeLessThan(verbs().indexOf('pr comment'));
+    const comments = [PRIOR_ACCEPT_COMMENT, ...posted()];
+    expect(parseReviewedSha(comments)).toBe(NEW_SHA);
+    expect(drainVerdict({ labels: [REVIEW_LABELS.accepted], comments, headSha: NEW_SHA }).action).toBe('merge');
+  });
+
+  // A bounce carries no marker, so the ordering rule keys on the LABEL rather than on `to` — `buildComment` is
+  // caller-supplied, so the harness cannot know whether a given body stamps one, and assuming it might is the
+  // conservative direction. A `changes` verdict on a not-yet-accepted PR therefore comments first too.
+  it('a changes bounce on a pending PR comments first too — the rule keys on the label, not the verdict', () => {
+    const r = runHarness({
+      before: [REVIEW_LABELS.pending, 'ready-to-merge'],
+      after: [REVIEW_LABELS.changes, 'ready-to-merge'],
+      headSha: NEW_SHA,
+      to: 'changes',
+    });
+    expect(r.status).toBe(0);
+    expect(verbs()).toEqual(['pr view', 'pr comment', 'pr edit', 'pr view']);
+    expect(parseReviewedSha(posted())).toBe(null); // a bounce stamps nothing
   });
 });
