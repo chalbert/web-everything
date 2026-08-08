@@ -1,6 +1,6 @@
 ---
 name: closing-session
-description: Pre-close safety check — confirm nothing is lost before ending a session. Use when the user asks "can I close this session?", "is it safe to close?", "are we done?", "wrap up", "end of session", or runs /closing-session. Audits whether session context is durably captured, runs the repo health gate, and reports working state. A commit is never *required*, but it auto-commits this session's own work (tight pathspec, no push) when the state is clean. When the project has the lane machinery, substantive agent-memory improvements land automatically — each candidate is red-teamed, then the survivors ride a lane → PR (the one place the close opens a PR). On a session that touched the review/PR gate, it also surfaces concrete improvement candidates to that flow (advisory).
+description: Pre-close safety check — confirm nothing is lost before ending a session. Use when the user asks "can I close this session?", "is it safe to close?", "are we done?", "wrap up", "end of session", or runs /closing-session. Audits whether session context is durably captured, runs the repo health gate, and reports working state. A commit is never *required*, but it auto-commits this session's own work (tight pathspec, no push) when the state is clean. The close COLLECTS but never adjudicates: every lesson, improvement idea, and friction it notices is emitted to the cross-session learnings pool, which the separate periodic /harvest run dedups, red-teams, and routes. The close opens no PR.
 ---
 
 # Closing-Session Check
@@ -8,6 +8,30 @@ description: Pre-close safety check — confirm nothing is lost before ending a 
 Run when the user asks whether it's safe to close / end / wrap up a session. Goal: guarantee no
 **context** is lost, and report repo health and working state. Produce a short checklist and a clear
 verdict.
+
+## The governing rule: the close COLLECTS, it does not ADJUDICATE
+
+**A session records what it observed. It never decides what the observation is worth.** Worth is decided
+later, once, by the periodic `/harvest` (`we:skills-src/harvest-learnings/SKILL.md`) over the **whole
+cross-session pool**. Everything the close notices that isn't already durable — a lesson, a reusable
+principle, a friction, a doc/skill gap, a model-routing improvement — is **emitted** as one validated
+drop-box entry and left there. The close does **not** dedup it, red-team it, decide it's memory-worthy,
+file it, or land it.
+
+Three reasons the judgment moved off the close (2026-08-06, operator directive):
+
+1. **A subagent cannot run a close.** Curating here meant a delivery agent's observation only counted if
+   the session it rode under happened to close cleanly.
+2. **A session that never closes loses everything it noticed.**
+3. **Dedup-from-a-sample-of-one.** "Fresh angle or covered cluster?", "narrow one-off or recurring?" — the
+   red-team's own filters are recurrence questions a single session structurally cannot answer. A pool
+   answers them with a count.
+
+It also makes the single-tenant path identical in shape to the eventual multi-tenant one (#2610): many
+people experience, one owner adjudicates.
+
+**Reporting is not judging.** The close still *names what it emitted* and reports the pool's depth — that
+keeps the operator able to say "file that one now" without the close having decided anything.
 
 ## Hard rules
 - **A commit is never *required* to close — but auto-commit this session's own work when the state is
@@ -30,40 +54,51 @@ verdict.
   `reservations.json`): these are throwaway bookkeeping, not durable content, and stay a sanctioned local
   write (the guard's `MAIN_PUSH_OK`/local-signal path). **Substantive agent-memory *content* is NOT in this
   carve-out** — a new lesson/principle or an edited memory entry is durable, reviewable, git-tracked project
-  content (the `~/.claude/…/memory` symlink points into the repo's `.claude/agent-memory/`), so it lands via
-  the **red-team → lane → PR** path in **§1a**, never a direct write to the primary tree. This rule is a
-  no-op in a normal solo-on-`main` repo with no such lock — there the current-branch commit above still
-  applies, and §1a falls back to propose-with-go-ahead (no lane machinery).
+  content (the `~/.claude/…/memory` symlink points into the repo's `.claude/agent-memory/`), and the close
+  no longer writes it at all: the close **emits the lesson to the pool** (§1a) and `/harvest` lands it via
+  lane → PR. This rule is a no-op in a normal solo-on-`main` repo with no such lock — there the
+  current-branch commit above still applies.
+- **The close never opens a PR — no carve-out.** The former memory-PR exception is gone with §1a's
+  adjudication; a close that finds a lesson emits it, full stop.
 - The only real blockers are **uncaptured context** and a **red repo gate** (one that needs a real
   code/content decision — not a regenerable artifact, see step 2). Everything else is FYI.
+- **The close no longer red-teams, dedups, or gates anything.** Those are *judgments*, and judgment moved
+  to `/harvest`, where it runs against the whole pool instead of a sample of one. The close's job is to
+  **emit faithfully** — an observation you're unsure about still gets emitted, because deciding it doesn't
+  matter is exactly the call the close no longer makes. (This supersedes the 2026-07-10 "red-team every
+  proposal before surfacing it" directive, which presumed the close was the adjudicator.)
 - The check is otherwise read-only — the only changes it performs unprompted are (a) a **safe
-  generated-artifact regen** (step 2), (b) the **clean auto-commit** above, and (c) the **automatic
-  memory improvement** of §1a (draft → red-team → lane → PR — survivors auto-land on green with **no human
-  in the loop**, because the **red team is the reviewer**; the PR is only the audit/revert trail). Capturing missing context as a **backlog item**
-  still happens **with the user's go-ahead**; only **memory** capture is the automatic §1a path.
+  generated-artifact regen** (step 2), (b) the **clean auto-commit** above, and (c) **appending to the
+  learnings pool** (§1a) — a validated, untracked, machine-local JSONL append, never repo content.
+  **Nothing is filed, written to memory, or landed by the close.** A backlog item is created at close only
+  if the user explicitly asks for one this turn.
 
 ## Steps
 
 ### 1. Context-capture audit (the important one)
 Scan the session for anything durable that lives only in the conversation — decisions, findings,
 gotchas, deferred work, open threads — and verify each has a home in the repo (`backlog/`, `reports/`,
-`docs/agent/*.md`) or `memory/`. Specifically:
+`docs/agent/*.md`) or `memory/`.
+
+**Two different outputs, don't confuse them.** Something *already written down* is captured — say so and
+move on. Something **not** written down is an **observation**: emit it to the pool in §1a. What you never
+do here is decide *what it's worth* — not whether it dedups, not whether it earns a memory slot, not
+whether it deserves an item. Emit it and let `/harvest` decide.
+
+Specifically, scan for:
 - Any **open TodoWrite items**? Unfinished work that should be a backlog item or finished now.
 - Any **report** with open questions not registered in `/backlog/` (see `docs/agent/backlog-workflow.md`).
 - Any **decision/finding/deferred follow-up** discussed but never written down.
 - **Encountered-but-unfixed defects / inert gates** — a gate, check, test, or command this session
   **could not run, bypassed, or worked around** (e.g. "the locus `npm test` couldn't run — vitest isn't
   installed", a skipped/xfail'd test, a tool that errored and you routed around it). This is the most
-  common build-session leak: the fix exists and has an owner, so it is a **backlog item**, filed, not an
-  optional aside. Default to *proposing the concrete item* (title + ≤100-word digest) so the user
-  approves a real thing, not a vague "want me to note this?". **Routing rule:** a finding with a *fix or
-  an owner* → `backlog/` (file it); a finding about *how the user wants you to work* → `memory/`. Don't
-  send an actionable repo gap to memory, and don't downgrade it to an opt-in offer — an unfiled gate gap
-  is uncaptured context exactly like an unwritten decision. (**Routing, full form:** a finding with a
-  *fix or owner* → `backlog/`; a finding about *how the user wants you to work* **or a reusable
-  principle/correction the session established** → `memory/`.)
-- **Working-style preferences** the user expressed → these belong in `memory/` or `~/.claude/CLAUDE.md`,
-  **not** backlog.
+  common build-session leak. **Emit it** as `kind: friction` (or `missing-convention`) with a concrete
+  `suggestion` — the fix and its owner belong in the entry, so the harvest can file a real item without
+  re-deriving them. Do **not** file it here and do **not** ask whether to; an observation you emitted is
+  captured.
+- **Working-style preferences** the user expressed → emit as `kind: improvement`, `area: working style`.
+  (Only a preference the user asks you to remember *right now* is written directly — that's an explicit
+  instruction, not the close adjudicating.)
 - **Generalizable principles & reframes** — a *correction, reframe, or design principle that emerged this
   session and generalizes beyond the one item it surfaced on* belongs in `memory/`, **even when the
   specific decision was already written into a `backlog/` item.** This is the subtlest leak and the one
@@ -71,105 +106,80 @@ gotchas, deferred work, open threads — and verify each has a home in the repo 
   "captured" here (the file exists, the gate is green) but is **invisible to a future session reasoning
   about a different subject** — so the reusable lesson is lost while looking saved. The strongest trigger
   is **the user overturning or reframing your approach on the merits**: when a discussion changed *how
-  you'd decide the next case* (not just this one), that is a memory write, not merely an item edit. Ask:
-  "if a future session faced a *different* instance of this, would it benefit from what we just learned —
-  and is that lesson anywhere it would actually look?" If not, draft the concrete memory (name +
-  one-line description + body) as a **candidate** — it does not get proposed to the user and does not get
-  written directly; it enters the §1a queue (memory-worthiness gate → red team → lane → PR). Distinct from *Working-style preferences*
-  above: that captures *how the user wants you to work*; this captures *a reusable judgment/principle the
-  session established*. (Worked example: #1377's "authoring SoT = the standard form, impls are removable
-  adapters" reframe — written into the decision item, but the *principle* only reached memory because the
-  user asked; it should have been proposed when the reframe landed.)
+  you'd decide the next case* (not just this one), that is a lesson worth emitting, not merely an item
+  edit. Ask: "if a future session faced a *different* instance of this, would it benefit from what we just
+  learned — and is that lesson anywhere it would actually look?" If not, **emit it** as the generalized
+  principle (one sentence in `summary`, the recommendation in `suggestion`). Distinct from *Working-style
+  preferences* above: that captures *how the user wants you to work*; this captures *a reusable
+  judgment/principle the session established*. (Worked example: #1377's "authoring SoT = the standard form,
+  impls are removable adapters" reframe — written into the decision item, but the *principle* only reached
+  memory because the user asked; today it would simply be emitted when the reframe landed.)
 
-- **Memory-worthiness gate — the red team's first pass; never spend a slot that won't earn its keep.** A
-  memory candidate drafted above only advances to §1a (land via lane → PR) if it survives this check; a
-  candidate that fails is dropped — report it as "captured on-disk, not memory-worthy" and move on. This is
-  the deterministic front half of the red team; §1a adds an adversarial reviewer that re-runs these filters
-  *plus* a faithfulness check. The three filters (a candidate must pass all):
-  1. **Dedup against the existing cluster.** Read `MEMORY.md` and find the entries nearest the lesson. If
-     it's a *fresh angle on a principle already covered* by ≥1 entry (a 4th take on "verify real state",
-     "separate by default", etc.) rather than a **new axis**, it does not earn a slot — the existing
-     cluster already fires for the next session. Only a genuinely uncovered axis passes.
-  2. **Budget/eviction cost.** If the index is at/near its cap (the budget hook refuses the add, or it's
-     within a line or two of the limit), adding *evicts* an existing entry. Only propose if the candidate
-     **clearly outranks the weakest current entry** — a marginal lesson that forces an eviction is a net
-     loss, not a save. When unsure, don't.
-  3. **On-disk sufficiency.** If the *specific* fix already lives in a `backlog/`/`reports/` artifact that
-     anyone working that area will see, and the principle is narrow or rare (a one-off race, not a
-     recurring decision pattern), leave it on-disk — memory is for the reusable-and-likely-to-recur, not
-     for everything true.
-  Net: advance the high-value, uncovered, recurring lessons to §1a; silently leave the rest on-disk. Saving a
-  lesson that isn't worth keeping is itself a cost (it crowds the index and dilutes recall).
+  **This is the bullet the emit-only rule most improves.** Under the old shape you had to decide, from one
+  session, whether a reframe was a new axis or a fourth take on a covered cluster — from a sample of one.
+  Now you just record that it happened. If it's real, another session will hit it too, and the harvest will
+  see the count.
 
-### 1a. Automatic memory improvement — red-team → lane → PR
-**Runs only when the project has the lane machinery (`scripts/lane-pool.mjs`).** Without it (a normal
-solo repo), skip §1a and fall back to the legacy path — *propose* each surviving candidate to the user
-with a name + one-line description and write it directly on go-ahead. With it, memory improvement is
-**fully automatic and non-blocking**: no per-candidate "want me to save this?", and **no human in the
-loop** — **the red team is the reviewer** and the PR **auto-lands on green**. The human never gates a
-batch; the PR + git history are a *retrospective audit trail* (spot-check anytime, one-command revert if
-the red team ever lets a bad entry through), not a review step the loop waits on.
+### 1a. Emit to the learnings pool — the ONE thing the close does with an observation
 
-Agent memory is **git-tracked project content** (`.claude/agent-memory/`, where the `~/.claude/…/memory`
-symlink points), so a memory edit lands the same way every tracked change does — a **lane clone → PR**,
-never a direct write to the primary tree. For **memory candidates only** (backlog captures still ask):
+Everything §1 surfaced that isn't already written down becomes **one validated drop-box entry**. That is
+the whole step. No gate, no red team, no dedup, no lane, no PR.
 
-1. **Draft** every candidate that cleared the memory-worthiness gate above — the concrete file(s) (name +
-   frontmatter + body with `[[links]]`) *and* the `MEMORY.md` / sub-index pointer line. Draft in-session;
-   do not write to the primary tree.
-2. **Red-team each candidate — one skeptic sub-agent per candidate, mandate = kill it, default to REJECT.**
-   Spawn an `Agent` (Sonnet is fine — it's bounded) that must clear **all four** or the candidate is dropped:
-   - **Dedup** — a fresh *angle* on a cluster already covered (not a new axis)? → reject.
-   - **Budget/eviction** — would adding it evict a stronger existing entry (index at/near cap)? → reject.
-   - **On-disk sufficiency** — does the specific lesson already live where anyone in that area will see it,
-     and is it narrow/rare? → reject.
-   - **Faithfulness** — did *this session actually establish* this, in the transcript — not a
-     plausible-sounding generalization the model backfilled? It must **quote the grounding turn** or → reject.
-   Reject on any uncertainty (mirrors the gate's "when unsure, don't"). **Escalate to a 3-vote panel only
-   when the budget filter fires** (the add would force an eviction) — a marginal lesson that costs an
-   existing slot needs a majority to survive. Record each verdict + one-line rationale for the report.
-3. **Land the survivors via lane → PR (automatic, no ask).** Use the standard transport `/pr` documents:
-   - Provision/reuse a lane clone: `node scripts/lane-pool.mjs provision --count=1 --json` (or a mapped
-     lane), then `git reset --hard origin/main` in that clone. **All writes happen in the clone**, never primary.
-   - Write the survivor file(s) + the index pointer **in the clone**; commit **tight-pathspec** (`git add`
-     the exact memory paths — **never** `-A`), message `memory: <the lesson, one line>`.
-   - `node scripts/pr-land.mjs --ref=lane/memory-<slug> --sha=HEAD --base=main --body-file=<digest> --label-on-green`
-     — opens the PR and **auto-lands it on green** via the standard self-approval, **with no human in the
-     loop**. Memory carries no runtime/CI risk, so it rides the normal drain like any AI PR. The red team
-     (step 2) is the gate; the merged PR is just the audit trail + revert path, never a review the loop
-     waits on. One PR per close is fine (batch the survivors); title it `memory: <N> lesson(s)`.
-   - If **zero** candidates survive the red team, do nothing and say so — an empty pass is the common,
-     correct outcome, not a failure.
-   Report the memory PR in **Footprint** (`memory PR #NNN: <slugs>`), and note any red-team rejections in
-   **Context capture** as "left on-disk (red-team rejected: <reason>)". This is the **one** place the close
-   opens a PR — the Hard-rules "never open a PR" carve-out, memory only. Backlog capture, cost attribution,
-   and the session's own auto-commit are unchanged.
+```bash
+node scripts/conveyor/learnings-drop.mjs \
+  --kind=friction|missing-convention|doc-gap|skill-gap|improvement \
+  --area="<coarse label — the subsystem or activity, ≤60 chars>" \
+  --summary="<the observation, one sentence, ≤240 chars>" \
+  --suggestion="<what you'd do about it, ≤400 chars>"
+```
 
-### 1b. Delivery-agent learnings sweep — the conveyor drop-box feeds the SAME memory intake (#2614)
-**Runs when a conveyor delivery run wrote a learnings drop-box this session** (the file resolved by
-`node scripts/conveyor/close-session-sweep.mjs` — `--file`, else `$LEARNINGS_DROPBOX`, else
-`.conveyor/learnings/<session>.jsonl`; **absent = skip silently**, the common case). Conveyor delivery
-agents (#2608) can't each run a session close — N micro-closes would land N unvetted duplicates — so
-**capture is distributed** (every agent appends one generalized-lesson entry via
-`scripts/conveyor/learnings-drop.mjs`) and **curation is centralized here**: this one vetted close sweeps,
-dedups, and red-teams the pile. Do **not** build a parallel pipeline — this step only produces *extra
-memory candidates*; they ride the EXISTING §1 gate → §1a red-team → lane → PR unchanged.
+**Writing the entry well is the close's actual skill.** The harvest can only judge what you recorded, so:
 
-1. **Sweep (deterministic, scripted).** Run
-   `node scripts/conveyor/close-session-sweep.mjs [--session=<slug>] --json`. It re-scrubs every entry
-   through the same tenant-ready gate the append used (rejects any secret/token/absolute-path/code-looking
-   value — belt-and-braces on the write seam), clusters near-duplicates (same `kind` + `area`, similar
-   `summary`, **complete-link** so no A–B–C chaining), and returns a **deduped, ranked** `candidates[]`
-   (each `{ kind, area, summary, suggestion, count, summaries, suggestions }`; `count` = how many agents hit
-   it = a priority signal; `suggestions` carries every distinct member fix so none is lost). Per
-   `docs/agent/platform-decisions.md#deterministic-core-thin-judgment` this clustering is script-decidable,
-   so the close **shells the script** — it never re-derives the dedup in prose.
-2. **Feed survivors into §1's candidate drafting.** Treat each swept candidate as a drafted memory
-   candidate: run it through the **memory-worthiness gate** above (dedup vs the existing cluster,
-   budget/eviction, on-disk sufficiency), then the survivors enter **§1a** (red-team → lane → PR) with the
-   session's own candidates — one memory PR, one close. A candidate that fails the gate/red-team is dropped
-   exactly as any other (report it "left on-disk, not memory-worthy" / "red-team rejected: <reason>").
-3. **Empty pass is the norm.** Zero drop-box, zero survivors → do nothing and say so; not a failure.
+- **Generalize.** `summary` is the lesson, not the incident: "the lane gate reruns the full suite for a
+  docs-only diff", not "PR #1064 took 9 minutes". A future session must recognise its own case in it.
+- **One observation per entry.** Two frictions in one `summary` cluster with neither.
+- **Keep `area` coarse and stable.** It is the clustering key — "lane gating", "memory index", "backlog
+  readiness". A too-specific area (a file name, an item number) never clusters with anything and the
+  observation dies alone in the pool.
+- **Always fill `suggestion`.** Every distinct member suggestion survives clustering, so yours reaches the
+  harvest even if another entry becomes the representative.
+- **Emit when unsure.** The floor for emitting is "I actually observed this", not "this is important".
+  Importance is the harvest's call, and an entry nothing else corroborates simply never recurs.
+
+**The schema is the privacy boundary, and it is enforced.** Only `kind`/`area`/`summary`/`suggestion`
+exist — there is deliberately no field for code, diffs, paths, or secrets — and the append runs a
+deterministic scrub that **rejects on hit** (secret-shaped values, absolute or repo-identifying paths,
+high-entropy tokens, over-long fields). A rejected entry is never written. If the helper rejects yours,
+**rewrite it more generally** — do not work around the gate. This is the same seam that later ships to the
+multi-tenant inbox (#2610), where minimal-by-construction is a hard requirement.
+
+**The pool is untracked, machine-local, and cumulative.** Entries land in
+`.conveyor/learnings/<session>.jsonl` (gitignored), one file per session so concurrent agents never
+contend. Nothing consumes them at close — only `/harvest` does, after it has acted. A cheap in-the-moment
+append cannot afford a lane→PR; the durable artifacts the harvest lands are what reaches git.
+
+**Any agent can emit, at any time.** A subagent that hits friction mid-task should drop an entry *then*,
+not hope its parent session closes cleanly. The close is simply the last emitter, not a privileged one.
+
+**Then report the pool, and stop:**
+
+```bash
+npm run harvest:status
+```
+
+Put the one-line result on the **Learnings** field of the verdict (§4). If the pool is deep or old, that
+number is the nudge to run `/harvest` — but **do not run the harvest as part of the close**, and do not
+start adjudicating the pool you just read. A close that ends by saying "23 entries, oldest 9 days" has
+done its whole job.
+
+**Zero entries is a perfectly good close.** A session where everything was already written down emits
+nothing. Say "nothing to emit" and move on — it is not a failure and not a caveat.
+
+### 1b. Artifact hygiene — is what THIS session wrote coherent?
+
+Distinct from §1a and **not** subject to the emit-only rule: these check the artifacts *this session
+itself produced*. Fixing your own half-written output is finishing your work, not adjudicating someone
+else's observation. Emit-only governs *lessons*; it never licenses leaving a broken edge behind.
 
 - **Blocker-edge audit** (if the session touched `backlog/`): did this session create items, resolve
   prerequisites, or surface a dependency stated only in prose? Verify the `blockedBy` edges reflect it —
@@ -293,18 +303,22 @@ the actual turn/command; never a plausible-sounding guess backfilled after the f
   subcommand could wrap in one call. Name the repeated command and where a script/CLI addition would
   collapse it (e.g. "5× inline `node -e` reductions → a `review-core.mjs reduce` subcommand").
 
-Emit findings as a **bounded table** (max 5 rows; if more genuine candidates exist, keep the 5
-highest-value and add "+N more, same shape" below it — never an unbounded dump):
+**Each finding is an emit, not a proposal** — `kind: improvement`, `area: model routing` or
+`area: scripted tooling`, the observation in `summary` and the fix in `suggestion`. Route it through §1a
+like every other observation; do **not** propose a backlog item, dedup it against existing memory, or
+decide whether it's worth acting on. Overhead that only shows up once is noise; overhead that shows up in
+session after session is a real cost, and only the pool can tell those apart.
+
+Show the findings in the close's own output as a **bounded table** (max 5 rows; if more genuine candidates
+exist, keep the 5 highest-value and add "+N more, same shape" below it — never an unbounded dump), so the
+operator can see what you emitted:
 
 | Type | What | Evidence | Suggested fix |
 |------|------|----------|----------------|
 | delegate \| script | <one-line description> | <the turn/command cited> | <e.g. "sub-agent", "scripts/foo.mjs subcommand"> |
 
-Route candidates the same way §1's routing rule does: a fix with a concrete owner → propose it as a
-`backlog/` item (dedup first, per §1's backlog-dedup step); a reusable working-pattern that generalizes
-beyond this one session → `memory/` via §1a. It is purely advisory — it never blocks the close and never
-forces a change this turn. If the session is non-trivial but the scan turns up nothing, say "nothing to
-flag" (not an empty table).
+Purely advisory — it never blocks the close and never forces a change this turn. If the session is
+non-trivial but the scan turns up nothing, say "nothing to flag" (not an empty table).
 
 ### 3b. Session cost (advisory, never a blocker)
 Report the session's **usage-equivalent** dollar cost — what it would cost if billed per-token on the API
@@ -346,8 +360,9 @@ The auto-review/merge gate (`scripts/lib/review-escalation.mjs`, `scripts/merge-
 `scripts/pr-land.mjs`, `scripts/lib/pr-merge-gate.mjs`, the `drain`/`merge`/`review`/`pr`/`finish` skills)
 is meant to get **stronger over time from the sessions that exercise it** — and the close is the cheapest
 place to capture that, because it is the one moment that sees the whole session's experience with the flow.
-A lesson about how the gate *should* work that surfaces mid-session and is never offered is exactly the leak
-§1 guards against, one dimension narrower. So when this session **touched the flow**, surface what it taught.
+A lesson about how the gate *should* work that surfaces mid-session and is never **recorded** is exactly the
+leak §1 guards against, one dimension narrower. So when this session **touched the flow**, emit what it
+taught.
 
 **Fire only on a relevant session — the deterministic half (rule #51).** Emit this step **only** when either
 holds; if neither, **omit it entirely** (no line, no verdict field — silence, like the efficiency line on a
@@ -375,17 +390,17 @@ session's experience says would make the flow *stronger or cheaper* next time. T
 - **A check/gate the session couldn't run, or a friction point the user hit** — the same leak §1 catches, but
   aimed squarely at the flow itself.
 
-**Route the candidates the normal way — do not invent a new channel** (this is §1's routing rule applied to
-the flow): a candidate with a **fix or an owner** → a **`backlog/` item** (propose it with the user's
-go-ahead, dedup first — file it under the open gate-hardening epic if there is one); a **reusable principle
-about how the flow should work** → **`memory/` via §1a** (red-team → lane → PR). It is purely advisory: it
-never blocks the close and never forces a change this turn.
+**Every candidate is an emit — do not invent a new channel and do not file anything.** Drop each through
+§1a as `kind: friction | missing-convention | improvement`, `area: review flow` (or `area: pr gating` — keep
+it coarse so entries from different sessions cluster). Do **not** propose a backlog item, dedup against the
+gate-hardening epic, or decide which candidates are worth acting on. The flow is meant to get stronger
+**from the sessions that exercise it**, and that only works when the evidence accumulates: one session's
+"this gate step felt like theater" is an opinion, five sessions' is a finding.
 
-**Render the line, don't hand-type it (#2433).** The judgment above (which candidates qualify, where each
-routes) stays yours; once decided, shape them as `{summary, route: 'backlog'|'memory', target}` (`target` the
-`#NNN`/slug you just filed or routed to) and pass the list to `renderCloseSessionFlowLine({ candidates })`
-(`we:scripts/lib/review-core.mjs`) for the **Flow improvements** line below — it also supplies the
-`"nothing to flag"` fallback when the array is empty, so that exact wording is never re-typed per close.
+**Render the line, don't hand-type it (#2433).** Shape the emitted candidates as `{summary, route: 'pool'}`
+and pass the list to `renderCloseSessionFlowLine({ candidates })` (`we:scripts/lib/review-core.mjs`) for the
+**Flow improvements** line below — it also supplies the `"nothing to flag"` fallback when the array is
+empty, so that exact wording is never re-typed per close.
 
 ### 4. Verdict
 Emit the close audit in **exactly this template** — fixed field order, fixed labels, verdict last.
@@ -394,13 +409,14 @@ Every close should look the same so the user can scan it without re-reading:
 ```
 ## Close audit
 
-**Footprint:** <files / new backlog items / reports / docs / commit shas / memory PR #NNN this session — the artifacts>
+**Footprint:** <files / new backlog items / reports / docs / commit shas this session — the artifacts>
 **Context capture:** <"all session context is in backlog/reports/memory" OR name exactly what isn't + where it should go>
+**Learnings emitted:** <N entries: "<kind>: <summary>" each — or "nothing to emit"; then the pool line from `npm run harvest:status`>
 **Repo gate:** <✅ N errors=0, M warnings (pre-existing/unrelated) | ❌ red — what failed>
 **Session cost:** <~$X.XX usage-equivalent (model, N turns) — from session-cost.mjs; + "→ #NNN" if accrued to a card (step 3c), or "not attributed (slice/resolve/no dominant item)">
 **Branch:** <branch name only — never list or count uncommitted files>
 **Efficiency:** <one line — N delegate/script candidates flagged this session (table above), or "nothing to flag", or omit entirely on a trivial session>
-**Flow improvements:** <one line — concrete review/PR-flow improvement candidate(s) this session suggests + where each routed (backlog/memory), or "nothing to flag"; OMIT the line entirely if the session didn't touch the flow (step 3d)>
+**Flow improvements:** <one line — concrete review/PR-flow improvement candidate(s) this session emitted, or "nothing to flag"; OMIT the line entirely if the session didn't touch the flow (step 3d)>
 **Follow-ups (open by design):** <items deliberately left open, e.g. a blockedBy chain — or "none">
 
 **Verdict:** ✅ Safe to close   |   ⚠️ Safe to close, with caveats — <only real caveats>
@@ -409,10 +425,14 @@ Every close should look the same so the user can scan it without re-reading:
 Rules for filling it:
 - **Footprint** — the session's artifacts at a glance; group as files / items / reports / commits.
 - **Context capture** — state it explicitly: either all context is durably saved, or name precisely
-  what leaked and where it belongs (and offer to capture it). This is the line that matters most. A lesson
-  the memory-worthiness gate **deliberately left on-disk** (failed dedup/budget/sufficiency) is **captured,
-  not leaked** — do not report it as uncaptured context and do not let it trigger ⚠️; if useful, note it in
-  one clause as "X left on-disk (not memory-worthy)", never as a follow-up to offer.
+  what leaked and where it belongs. This is the line that matters most. **A lesson emitted to the pool is
+  CAPTURED** — never report an emitted observation as uncaptured context and never let it trigger ⚠️. The
+  pool is a durable home; that it hasn't been adjudicated yet is the design, not a leak.
+- **Learnings emitted** — name each entry you dropped (kind + the one-line summary) so the operator can see
+  what you recorded, then the pool depth/age from `npm run harvest:status`. **Naming what you emitted is
+  not judging it** — do not rank the entries, do not say which "should" be acted on, and do not offer to
+  file any of them. "nothing to emit" is a fine and common value. This line is never a caveat in the
+  verdict; a deep or old pool is a nudge to run `/harvest`, not a close problem.
 - **Repo gate** — pass/fail; if green, note the warning count is pre-existing so it doesn't read as new.
 - **Session cost** — the one-line total from `session-cost.mjs` (usage-equivalent $; subscription isn't
   billed this). Advisory context-awareness only; never a caveat in the verdict.
@@ -422,7 +442,7 @@ Rules for filling it:
   line entirely on a trivial session (step 3a's skip).
 - **Flow improvements** — advisory only (step 3d). Present ONLY when the session touched the review/PR flow
   (edited a gate file, or exercised/bumped against it); otherwise **omit the line entirely**. When present,
-  name the concrete candidate(s) and where each routed, or "nothing to flag". Never a caveat in the verdict.
+  name the concrete candidate(s) you emitted, or "nothing to flag". Never a caveat in the verdict.
 - **Follow-ups** — only work *intentionally* left open (e.g. a filed `blockedBy` chain); "none" if clean.
 - **Verdict** — one line. ⚠️ only for real caveats: uncaptured context (offer to capture) or a red gate
   (offer to fix). Nothing after the verdict line.
