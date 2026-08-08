@@ -47,6 +47,41 @@ describe('findUtcDaySlices', () => {
     expect(scan()).toEqual([]);
   });
 
+  it('exempts a marker whose reason WRAPS onto a second comment line directly above', () => {
+    rmSync(join(dir, 'scripts'), { recursive: true, force: true });
+    put('wrapped.mjs', '// utc-day-slice-ok: UTC-anchored arithmetic on a stored date,\n'
+      + '// not a wall-clock read — re-projecting it would shift the day.\n'
+      + 'const due = d.toISOString().slice(0, 10);\n');
+    expect(scan()).toEqual([]);
+  });
+
+  it('does NOT leak the exemption onto the lines BELOW the one it annotates (#2747 review)', () => {
+    // The first cut matched the marker anywhere in a fixed 3-line window ending at the hit, so one
+    // justified exemption granted blanket amnesty to whatever landed on the next two source lines.
+    rmSync(join(dir, 'scripts'), { recursive: true, force: true });
+    put('leak.mjs', '// utc-day-slice-ok: UTC-anchored arithmetic\n'
+      + 'const due = d.toISOString().slice(0, 10);\n'
+      + 'const today = new Date().toISOString().slice(0, 10);\n'   // a REAL wall-clock stamp, one line below
+      + 'const other = new Date().toISOString().slice(0, 10);\n'); // and two lines below
+    expect(scan().map((h) => h.line)).toEqual([3, 4]);
+  });
+
+  it('does NOT exempt a hit separated from the marker by a non-comment line', () => {
+    rmSync(join(dir, 'scripts'), { recursive: true, force: true });
+    put('gap.mjs', '// utc-day-slice-ok: UTC-anchored arithmetic\n'
+      + 'const unrelated = 1;\n'
+      + 'const today = new Date().toISOString().slice(0, 10);\n');
+    expect(scan().map((h) => h.line)).toEqual([3]);
+  });
+
+  it('self-exempts the scanner by PATH, so a same-named file elsewhere is still scanned (#2747 review)', () => {
+    // The bare-basename skip was applied at every recursion depth, so any `scripts/**/utc-day-slice-scan.mjs`
+    // — a copy, a fork, a deliberately-named file — escaped the gate with no artefact and no reason.
+    rmSync(join(dir, 'scripts'), { recursive: true, force: true });
+    put('sub/utc-day-slice-scan.mjs', 'const today = new Date().toISOString().slice(0, 10);\n');
+    expect(scan().map((h) => h.file)).toEqual(['scripts/sub/utc-day-slice-scan.mjs']);
+  });
+
   it('does NOT exempt a bare marker with no reason', () => {
     rmSync(join(dir, 'scripts'), { recursive: true, force: true });
     put('bare.mjs', '// utc-day-slice-ok:\nconst due = d.toISOString().slice(0, 10);\n');

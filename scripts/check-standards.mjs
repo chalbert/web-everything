@@ -857,7 +857,11 @@ try {
 // the runtime's UTC day" is enforced here rather than left as prose in `scripts/lib/local-date.mjs`: the
 // idiom it replaces is one line and re-introduces the bug silently (see lib/utc-day-slice-scan.mjs).
 try {
-  for (const hit of findUtcDaySlices(join(ROOT, 'scripts'), ROOT)) err(utcDaySliceMessage(hit));
+  // Each hit carries its own `file`/`line`, so it MUST be attributed (#952/#1389/#1144): without a
+  // descriptor, `--scope=<slug>` classes it "unattributable" and reds a concurrent session on a file it
+  // never touched, while `--local --files=<lane set>` demotes it to a note — a false green at this seam.
+  for (const hit of findUtcDaySlices(join(ROOT, 'scripts'), ROOT))
+    err(utcDaySliceMessage(hit), { kind: 'utc-day-slice', fix: 'model', file: hit.file, line: hit.line });
 } catch (e) {
   err(`UTC day-slice scan failed: ${e.message}`);
 }
