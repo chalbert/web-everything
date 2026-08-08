@@ -113,7 +113,7 @@ import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTre
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
 import { withNumberingLock, withLandWriteLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2683) the merge-write mutex (withLandWriteLock, same lock key) + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
-import { extractManifestFromBody, manifestAuditLine, asItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
+import { extractManifestFromBody, manifestAuditLine, asItemId, isItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
 import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.mjs'; // #2681 — the RED-MAIN dispatch-freeze the sole writer consults (stop-the-line while main is red)
 // #2399 — the ONE remote-manifest `gh api` argv, shared with `/finish` (lane-resume) so the two readers never
 // drift. Re-exported to keep this file's public surface (and its tests' import site) stable.
@@ -617,20 +617,44 @@ export function isStackedWeCoupleHalf(v) {
  * manifest fields untouched. `manifestRefs` is the couple's lane-ref list (built in the collect loop from
  * `m.repos[].ref`); a PR with none defines no couple.
  *
- * @param {Array<{num:number, repo:(string|null), headRef?:string, hasManifest?:boolean, manifestRefs?:string[], item?:(number|string|null), blockedBy?:Array<number|string>, stackParents?:Array<number|string>}>} verdicts
+ * #xc7p3q9 (R13) — the second argument is a REQUIRED options bag, not an afterthought: a bare one-arg call
+ * `joinImplToCouples(verdicts)` runs with `carrierHealth=null, contextComplete=false`, which fails EVERY impl
+ * closed (`incomplete-context`) — never call it without threading the pass's real context.
+ *
+ * @param {Array<{num:number, repo:(string|null), headRef?:string, hasManifest?:boolean, manifestRefs?:string[], item?:(number|string|null), blockedBy?:Array<number|string>, stackParents?:Array<number|string>, decision?:string}>} verdicts
+ * @param {object} [opts]
+ * @param {Map|null} [opts.carrierHealth]   the blind-context carrier health index (`buildCarrierHealth`); the gate reads `held`/`nameable`/`degraded` from it, NEVER from the narrowed candidate list.
+ * @param {boolean} [opts.truncated]        the open-PR listing hit the `--limit` cap → fail closed (may be missing carriers).
+ * @param {boolean} [opts.contextComplete]  the blind context is PROVABLY complete → a carrier's ABSENCE reads as "landed"; false → absence is UNKNOWN → fail closed.
+ * @param {Set|null} [opts.openHeadRefs]    (R7) the head refs the blind context shows OPEN, so a carrier defers while a sibling `manifestRefs` entry is still an open, not-landing PR.
  * @returns {typeof verdicts}
  */
-export function joinImplToCouples(verdicts) {
+export function joinImplToCouples(verdicts, { carrierHealth = null, truncated = false, contextComplete = false, openHeadRefs = null } = {}) {
   const list = Array.isArray(verdicts) ? verdicts : [];
+  const health = carrierHealth instanceof Map ? carrierHealth : new Map();
+  const liveSet = new Set(list);                    // the live candidate verdicts (for the B7 two-sided defer)
+  const openRefs = openHeadRefs instanceof Set ? openHeadRefs : new Set();   // #xc7p3q9 (R7) — blind-context open head refs
   // Index every carrying PR (a WE couple manifest) by each of its couple's lane refs. First writer wins — a
   // lane ref belongs to exactly one couple, so a duplicate is defensive noise, never a real second couple.
   const byRef = new Map();
-  for (const v of list) {
-    if (!v || !v.hasManifest) continue;
+  const indexCarrier = (v) => {
+    if (!v || !v.hasManifest) return;
     for (const ref of Array.isArray(v.manifestRefs) ? v.manifestRefs : []) {
       if (ref && !byRef.has(ref)) byRef.set(ref, v);
     }
-  }
+  };
+  // #xc7p3q9 — index the LIVE candidate carriers (from `verdicts`) FIRST, then SUPPLEMENT from the label/only-
+  // BLIND `carrierHealth` (constellation-wide, single-sourced — B9 removes the redundant `buildExtraCoupleCarriers`
+  // projection). This is the couple-join twin of PR #999/xq985wu's ordering decouple: when a HELD WE carrier is
+  // STRIPPED of `ready-to-merge` (or merely NARROWED out of the `--only`/`--repos` candidate list), it leaves
+  // `verdicts` — so a byRef built from verdicts alone loses its couple's lane refs and the manifest-LESS impl half
+  // (frontierui/plateau-app) inherits NOTHING, reads as an always-ready orphan, and lands ALONE (no WE resolve,
+  // couple blockedBy/#2393 stackParents proof bypassed). Supplementing from the health map keeps a stripped/
+  // narrowed carrier indexable by its manifestRefs so the impl still inherits the couple edge. Candidate-FIRST
+  // ordering keeps a normal couple's LIVE carrier as the index target (so the B7 defer propagates to the real
+  // verdict, not a synthetic).
+  for (const v of list) indexCarrier(v);
+  for (const h of health.values()) indexCarrier({ num: h.num, repo: h.repo, hasManifest: true, manifestRefs: h.manifestRefs, item: h.item, blockedBy: h.blockedBy, stackParents: h.stackParents });
   for (const v of list) {
     if (!v || v.hasManifest) continue;             // a carrying PR keeps its own manifest
     const couple = v.headRef ? byRef.get(v.headRef) : null;
@@ -639,6 +663,50 @@ export function joinImplToCouples(verdicts) {
     v.blockedBy = Array.isArray(couple.blockedBy) ? couple.blockedBy.slice() : [];
     v.stackParents = Array.isArray(couple.stackParents) ? couple.stackParents.slice() : [];
     v.joinedToCouple = couple.item;                 // marks an impl PR gated via its couple (diagnostics/tests)
+    // #xc7p3q9 — the COUPLE-GATE decision, computed HERE (plan-prep time) from the carrier's HEALTH read out of
+    // the label/only/repo-BLIND `carrierHealth` map (sourced from `collectOpenPrContext`, which lists ALL open PRs
+    // constellation-wide) — NOT from the carrier's presence in the NARROWED candidate `list`. Fix-1: a carrier
+    // merely filtered out of `list` by `--only`/`--repos`/`--this-repo` but present-and-HEALTHY in the blind
+    // context must NOT defer the impl; only a carrier that is genuinely OPEN-AND-HELD, UNNAMEABLE, DEGRADED, in a
+    // TRUNCATED listing, or ABSENT-FROM-AN-INCOMPLETE-context (B1/B2/B3) defers it. The decision is stamped on the
+    // impl; `planLabelDrain` READS it and never re-derives from `list`.
+    v.coupleCarrier = { num: couple.num ?? null, repo: couple.repo ?? null, item: couple.item ?? null };
+    const key = `${couple.repo || 'cwd'}::${couple.num}`;
+    const h = health.get(key) ?? null;
+    const dec = carrierDeferDecision({ health: h, truncated, contextComplete });
+    v.coupleDefer = dec.defer;
+    v.coupleDeferReason = dec.reason;
+    v.coupleHumanTerminal = dec.humanTerminal === true;   // #xc7p3q9 (R9) — the carrier is HELD regardless of the winning reason
+    // #xc7p3q9 (B7) — the defer is TWO-SIDED: when a couple cannot fully land, the WE carrier must NOT land ahead
+    // of its held/undeferrable impl half (else main gets the item's active→resolved flip + the WE change with the
+    // impl still open). If the carrier is a LIVE candidate verdict, propagate the defer onto it too. A held-couple
+    // carrier is already `skip` (classifyPr) so this is a no-op there; the case that matters is a HEALTHY carrier
+    // whose impl fails closed on truncated/degraded/unnameable/incomplete-context — without this it would land
+    // WE-first. The reason is carried through (never 'held' here) so idle accounting keeps polling (may re-clear).
+    if (dec.defer && liveSet.has(couple)) {
+      couple.coupleDefer = true;
+      if (couple.coupleDeferReason !== 'held') couple.coupleDeferReason = dec.reason;
+    }
+  }
+  // #xc7p3q9 (R7) — the couple-level invariant, carrier side: before a carrier enters `ready`, EVERY `manifestRefs`
+  // entry other than its OWN head must be ABSENT from the blind context (its impl already landed/closed) or
+  // JOINED-AND-READY (a live impl verdict on that ref that is landing this pass). Under `--only=<carrierPR>` the
+  // impl half is NOT a candidate verdict, so the impl-verdict→carrier propagation (B7) above never fires — yet the
+  // impl PR is still OPEN in the blind context. Without this a WE carrier lands with the `active→resolved` flip
+  // while its impl PR sits open (B7's stated invariant, un-covered on the carrier-only narrow).
+  const readyImplRefs = new Set(list.filter((v) => v && !v.hasManifest && v.decision === 'merge' && v.coupleDefer !== true).map((v) => v.headRef).filter(Boolean));
+  for (const v of list) {
+    if (!v || !v.hasManifest) continue;               // carriers only
+    const own = v.headRef;
+    for (const ref of Array.isArray(v.manifestRefs) ? v.manifestRefs : []) {
+      if (!ref || ref === own) continue;
+      const implOpenNotLanding = openRefs.has(ref) && !readyImplRefs.has(ref);
+      if (implOpenNotLanding) {
+        v.coupleDefer = true;
+        if (v.coupleDeferReason !== 'held') v.coupleDeferReason = 'impl-open';
+        break;
+      }
+    }
   }
   return list;
 }
@@ -731,6 +799,361 @@ export function resolveIdsForLandedPass(o = {}) {
 }
 
 /**
+ * #xc7p3q9 — decide, from a carrier's HEALTH (read out of the label/only-blind full open-PR context),
+ * whether a coupled impl half must DEFER with it. Pure. The health object (from `buildCarrierHealth`) carries
+ * `{ held, nameable, degraded }`; `null` health means the carrier is ABSENT from the blind context entirely.
+ *
+ * COMPLETENESS IS A PROPERTY OF THE CONTEXT, NOT OF A ROW (B1/B2/B3 fix). The old code read `health === null`
+ * as "genuinely landed → NOT a defer" — a fail-OPEN on three independent paths, because a null health entry
+ * is ALSO what you get when (B2) a `gh pr list` threw and was swallowed to `[]`, (B1) a manifest read degraded
+ * so the carrier was dropped, or (B3) the context was never collected (`RECONCILE` false). So absence in the
+ * context is read as real "landed" ONLY when the context is PROVABLY complete (`contextComplete === true`);
+ * otherwise absence is UNKNOWN and we fail CLOSED. Fail-CLOSED order:
+ *   - `truncated` (the `--limit` cap was hit — the listing MAY be missing PRs) → DEFER.
+ *   - health `null` + `contextComplete` → NOT a defer: genuinely landed/closed (a COMPLETE blind context lists
+ *     ALL open PRs, so absence there is real absence). health `null` + NOT `contextComplete` → DEFER: absence is
+ *     unknowable (a swallowed listing error / a degraded read / an uncollected context could hide the carrier).
+ *   - `degraded` (a swallowed `gh` error left this carrier's read incomplete/unreadable) → DEFER (fail closed).
+ *   - not `nameable` (an invalid/`NaN`/`null`/`0` item id — the #2388 collapse hazard) → DEFER (fail closed —
+ *     never land an impl whose couple can't be positively named).
+ *   - `held` (a live `review:*` hold with no `review:accepted`) → DEFER — the carrier is not landing.
+ *   - otherwise → NOT a defer (present-and-healthy → the impl lands as the fast drain did before Fix 1).
+ * @param {{health:({held?:boolean,nameable?:boolean,degraded?:boolean}|null), truncated?:boolean, contextComplete?:boolean}} o
+ * @returns {{defer:boolean, reason:string}}
+ */
+export function carrierDeferDecision({ health = null, truncated = false, contextComplete = false } = {}) {
+  // #xc7p3q9 (R9) — `humanTerminal` = the carrier is HELD (a `review:*` hold), computed from `health.held`
+  // REGARDLESS of which defer reason won. A held carrier with ANY read noise (truncated/degraded) still defers on
+  // the noisier reason, but the hold will NOT clear by polling — so idle accounting must treat the couple as
+  // settled. Returned separately so the reason (which may re-clear) and the human-terminal fact don't collide.
+  const humanTerminal = !!(health && health.held);
+  if (truncated) return { defer: true, reason: 'truncated', humanTerminal };
+  if (!health) return contextComplete ? { defer: false, reason: 'absent-landed', humanTerminal: false } : { defer: true, reason: 'incomplete-context', humanTerminal: false };
+  if (health.degraded) return { defer: true, reason: 'degraded', humanTerminal };
+  if (!health.nameable) return { defer: true, reason: 'unnameable', humanTerminal };
+  if (health.held) return { defer: true, reason: 'held', humanTerminal: true };
+  return { defer: false, reason: 'healthy', humanTerminal: false };
+}
+
+/**
+ * #xc7p3q9 — the carrier-HEALTH index for the couple gate, built from the label/only/repo-BLIND full open-PR
+ * context (`collectOpenPrContext`), keyed `${repo||'cwd'}::${num}`. Pure. For every open PR carrying a couple
+ * manifest it records `{ held, nameable, degraded }` — the ONLY signals the gate reads (never the narrowed
+ * candidate list).
+ *   - `held` = an uncleared `review:*` hold on the PR's labels. B6 — computed with the SAME
+ *     `escalationRelief`/`--no-review-escalation` waiver `classifyPr` threads (`allowPending`), so this gate's
+ *     `held` and `classifyPr`'s `held` cannot disagree; otherwise the escape hatch lands the WE carrier while
+ *     the impl defers `held` → the couple lands WE-first, inverting impl-first/WE-last.
+ *   - `nameable` = a positively-named item id, derived from the SAME expression that computes `item` (B4) so the
+ *     two can never contradict; `isItemId` is FALSE for the `NaN`/`null`/`0` an item-less manifest yields.
+ *   - `degraded` = the PR's context read was a swallowed-error best-effort (from `openPrContext.degradedByPr`).
+ * B1 — a carrier whose manifest read DEGRADED (threw → `{manifest:null, degraded:true}`) is NOT dropped: it gets
+ * a `{ degraded:true, unreadable:true, nameable:false }` marker entry so the gate fails closed on it, instead of
+ * the old `continue` that erased the very case the `degraded` branch exists for.
+ * @param {{manifestByPr?:Map, prsByRepo?:Map, degradedByPr?:Map}} openPrContext
+ * @param {{escalationRelief?:{prs?:Array<number>, passWide?:boolean}, label?:(string|null)}} [opts]
+ * @returns {Map<string, {num:number, repo:(string|null), item:(number|string), manifestRefs:string[], blockedBy:Array, stackParents:Array, held:boolean, nameable:boolean, degraded:boolean, unreadable?:boolean, present:true}>}
+ */
+export function buildCarrierHealth(openPrContext = {}, { escalationRelief = { prs: [], passWide: false }, label = null, candidateHeldByKey = null } = {}) {
+  const health = new Map();
+  const ctx = openPrContext || {};
+  const relief = escalationRelief || { prs: [], passWide: false };
+  // #xc7p3q9 (R5) — for a carrier that is ALSO a live candidate this pass, its FINAL decision (skip/park from the
+  // escalation pass, which runs BEFORE this build now) is the authoritative `held`, not the pre-escalation label
+  // snapshot. `candidateHeldByKey` (key→held) carries that final truth; carriers OUTSIDE the candidate set fall
+  // back to the label read below.
+  const finalHeldFor = (key, labelHeld) => (candidateHeldByKey instanceof Map && candidateHeldByKey.has(key)) ? !!candidateHeldByKey.get(key) : labelHeld;
+  const manifestByPr = ctx.manifestByPr instanceof Map ? ctx.manifestByPr : new Map();
+  const degradedByPr = ctx.degradedByPr instanceof Map ? ctx.degradedByPr : new Map();
+  const labelsByKey = new Map();
+  if (ctx.prsByRepo instanceof Map) {
+    for (const [repo, prs] of ctx.prsByRepo) for (const p of (Array.isArray(prs) ? prs : [])) {
+      labelsByKey.set(`${repo || 'cwd'}::${p.number}`, Array.isArray(p.labels) ? p.labels : []);
+    }
+  }
+  for (const [key, manifest] of manifestByPr) {
+    const [repoK, numK] = String(key).split('::');
+    const num = Number(numK);
+    const repo = repoK === 'cwd' ? null : repoK;
+    const degraded = !!degradedByPr.get(key);
+    // B6 — the SAME waiver `classifyPr` uses (per-PR `--no-review-escalation=<pr#>` OR the pass-wide bare flag,
+    // gated on `!!label` exactly like the classify site) so the two `held` notions agree.
+    const allowPending = (relief.prs || []).includes(num) || (!!relief.passWide && !!label);
+    const held = finalHeldFor(key, hasUnclearedReviewLabel(labelsByKey.get(key) || [], { allowPending }));
+    const refs = manifest && Array.isArray(manifest.repos) ? manifest.repos.map((r) => r && r.ref).filter(Boolean) : [];
+    if (!manifest || !Array.isArray(manifest.repos) || !refs.length) {
+      // B1 — a DEGRADED/unreadable carrier read must stay VISIBLE and fail closed, not vanish. A clean read with
+      // no manifest is a plain non-carrier PR (an orphan / impl half) → not a carrier → skip.
+      if (degraded) health.set(key, { num, repo, item: NaN, manifestRefs: [], blockedBy: [], stackParents: [], held, nameable: false, degraded: true, unreadable: true, present: true });
+      continue;
+    }
+    // B4 — compute `item` ONCE, then derive `nameable` from it, so the two fields cannot contradict. `asItemId`
+    // of an item-less manifest is NaN; keep it (never coerce to null, which would read as "absent/landed").
+    const item = manifest.item != null ? asItemId(manifest.item) : NaN;
+    health.set(key, {
+      num,
+      repo,
+      item,
+      manifestRefs: refs,
+      blockedBy: Array.isArray(manifest.blockedBy) ? manifest.blockedBy.map(asItemId) : [],
+      stackParents: Array.isArray(manifest.stackParents) ? manifest.stackParents.map(asItemId) : [],
+      held,
+      nameable: isItemId(item),                     // derived from the same `item` expression (B4)
+      degraded,
+      present: true,
+    });
+  }
+  return health;
+}
+
+/**
+ * #xc7p3q9 (R4 structural) — the PURE reduction of the label/only-blind open-PR context. Given the per-repo
+ * `listings` (`[{repo, prs, failed}]`) and the per-PR `reads` (Map key→`{manifest, commits, degraded}`), compute
+ * the maps + flags the couple gate consumes. `contextComplete` is computed HERE, in ONE place — runCli's collector
+ * AND the test suite both call this, so nothing re-derives the formula (the round-1 hole: the closure computed it
+ * once and the test helper re-typed it, with nothing binding the two). `reconcileRan:false` (a bare `/merge`
+ * sweep or `--no-reconcile-labels`, where the context is never collected) is INCOMPLETE by construction (B3). Pure.
+ * @param {{listings?:Array<{repo:(string|null), prs?:Array, failed?:boolean}>, reads?:Map, reconcileRan?:boolean}} o
+ * @returns {{prsByRepo:Map, openItems:Set, manifestByPr:Map, commitsByPr:Map, degradedByPr:Map, truncated:boolean, contextComplete:boolean}}
+ */
+export function reduceOpenPrContext({ listings = [], reads = new Map(), reconcileRan = true } = {}) {
+  const prsByRepo = new Map();
+  const openItems = new Set();
+  const manifestByPr = new Map();
+  const commitsByPr = new Map();
+  const degradedByPr = new Map();
+  let listingTruncated = false;
+  let listingFailed = false;
+  const readsMap = reads instanceof Map ? reads : new Map();
+  for (const entry of (Array.isArray(listings) ? listings : [])) {
+    const repo = entry && 'repo' in entry ? entry.repo : null;
+    const open = entry && Array.isArray(entry.prs) ? entry.prs : [];
+    if (entry && entry.failed) listingFailed = true;                    // #xc7p3q9 (B2) — a swallowed `gh pr list` throw
+    if (isDegradedOpenPrListing(open.length)) listingTruncated = true;  // #999/xq985wu F3 — a full page MAY be truncated
+    prsByRepo.set(repo, open);
+    for (const p of open) {
+      const key = `${repo || 'cwd'}::${p.number}`;
+      const r = readsMap.get(key) || {};
+      const manifest = r.manifest ?? null;
+      const commits = Array.isArray(r.commits) ? r.commits : [];
+      manifestByPr.set(key, manifest);
+      commitsByPr.set(key, commits);
+      degradedByPr.set(key, !!r.degraded);   // #xc7p3q9 Fix 2 — a swallowed-error read → fail closed in the couple gate
+      if (manifest && manifest.item != null) openItems.add(asItemId(manifest.item));
+    }
+  }
+  const anyDegraded = [...degradedByPr.values()].some(Boolean);
+  // #xc7p3q9 (B1/B2/B3) — completeness is a property of the CONTEXT, computed HERE once. Complete only when the
+  // reconcile collection actually ran, every per-repo listing succeeded (B2), none was truncated at the `--limit`
+  // cap (the oldest held blockers may be missing), and no per-PR read degraded (B1). Incomplete → the couple gate
+  // reads a carrier's ABSENCE as UNKNOWN and fails closed, instead of as "landed" → orphan-land.
+  const contextComplete = !!reconcileRan && !listingFailed && !listingTruncated && !anyDegraded;
+  return { prsByRepo, openItems, manifestByPr, commitsByPr, degradedByPr, truncated: listingTruncated, contextComplete };
+}
+
+/**
+ * #xc7p3q9 (R4 structural) — collect the label/only-blind constellation-wide open-PR context. Extracted OUT of
+ * runCli's closure and made INJECTABLE (every gh dependency is a parameter) so the SAME code runCli runs is driven
+ * by the test suite. `listOpenPrs(repo)` lists a repo's open PRs (may THROW → the swallowed-listing `failed` flag,
+ * B2); `fetchReads(flat)` returns the per-PR read Map. A revert of the `failed` marker, or a narrowing of the
+ * CONTEXT repo set, now breaks a test (R4 — the closure was previously unreachable from any test). The pure
+ * reduction is {@link reduceOpenPrContext}; this owns only the async gh fan-out.
+ * @returns {Promise<ReturnType<typeof reduceOpenPrContext>>}
+ */
+export async function collectOpenPrContext({ contextRepos = [], listOpenPrs, fetchReads, reconcileRan = true, onListingFailed = () => {}, onListingTruncated = () => {} } = {}) {
+  const repos = Array.isArray(contextRepos) ? contextRepos : [];
+  const listings = await mapWithConcurrency(repos, Math.max(1, repos.length), async (repo) => {
+    try { return { repo, prs: await listOpenPrs(repo) }; }
+    catch { return { repo, prs: [], failed: true }; }   // #xc7p3q9 (B2) — a swallowed throw marks the context INCOMPLETE
+  });
+  for (const { repo, prs, failed } of listings) {
+    if (failed) onListingFailed(repo);
+    else if (isDegradedOpenPrListing((prs || []).length)) onListingTruncated(repo, (prs || []).length);
+  }
+  const flat = [];
+  for (const { repo, prs } of listings) for (const p of (prs || [])) flat.push({ repo, p });
+  const reads = typeof fetchReads === 'function' ? await fetchReads(flat) : new Map();
+  return reduceOpenPrContext({ listings, reads, reconcileRan });
+}
+
+/**
+ * #xc7p3q9 (R3) — is a thrown `gh api …/contents/.lane-manifest.json` a DEFINITIVE "no manifest" (a 404 — the
+ * file is confirmed absent from the ref's tree, exactly as the local-git fallback already treats a missing file)
+ * rather than a transport/auth failure? A 404 is a genuine answer → `degraded:false`; every OTHER throw (5xx,
+ * rate-limit, auth-scope, network) is `degraded:true` (fail closed, re-fetch next pass). Pure — inspects the
+ * error's exit metadata + stderr/stdout text. This is why `contextComplete` was false on EVERY pass with a
+ * manifest-less impl PR open (R3): the retired tree file 404s, and the old catch tagged that as degraded. */
+export function isContentsNotFound(err) {
+  if (!err) return false;
+  const text = `${err.stderr ?? ''}\n${err.stdout ?? ''}\n${err.message ?? ''}`;
+  return /\bHTTP\s*404\b|\b404\b|not\s*found/i.test(text);
+}
+
+/**
+ * #xc7p3q9 (R3) — read a REMOTE-repo PR's legacy tree-committed manifest off its head ref via the GitHub contents
+ * API (`gh api …/contents/.lane-manifest.json?ref=<headRef>` → base64 `.content`). Extracted + injectable (`exec`)
+ * so the ERROR TAXONOMY is unit-tested with a stubbed exec: a 404 is a DEFINITIVE "no manifest on this ref"
+ * (`degraded:false`) — the file was retired to the PR body (#2411), so it is legitimately absent from every ref's
+ * tree; every OTHER throw (5xx / rate-limit / auth / network) is `degraded:true` (fail closed, re-fetch). This is
+ * the root of the R2 livelock: the old blanket `degraded:true` made `contextComplete` false on EVERY pass with a
+ * manifest-less impl PR open. Returns `{manifest, degraded}`.
+ */
+export async function readRemoteManifestViaApi({ exec, repo, headRef, apiArgs = remoteManifestApiArgs } = {}) {
+  try {
+    const { stdout } = await exec('gh', apiArgs(repo, headRef), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const b64 = (stdout || '').trim();
+    if (b64) { const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); if (m && m.item != null) return { manifest: m, degraded: false }; }
+    return { manifest: null, degraded: false }; // API read SUCCEEDED → confirmed no manifest, not degraded
+  } catch (e) {
+    return { manifest: null, degraded: !isContentsNotFound(e) };
+  }
+}
+
+/**
+ * #xc7p3q9 — the couple half of the verdict build, extracted so runCli AND the test suite drive the SAME
+ * narrowing→classify→attach path (Fix 4: the round-5 regressions all came from tests hand-building verdicts that
+ * diverged from runCli's real wiring). Pure. `readOf(repo, num)` returns the per-PR `{ commits, manifest }` read.
+ * @param {{prsByRepo:Map, readOf:function, repos:Array, requiredCheck?:string, escalationRelief?:object, label?:(string|null), isLocalRepo?:function, localSlug?:(string|null)}} o
+ * @returns {Array} verdicts (classify + manifest fields attached; NOT yet couple-joined)
+ */
+export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null } = {}) {
+  const verdicts = [];
+  const relief = escalationRelief || { prs: [], passWide: false };
+  for (const repo of (Array.isArray(repos) ? repos : [])) {
+    const prs = (prsByRepo instanceof Map ? prsByRepo.get(repo) : null) || [];
+    for (const p of prs) {
+      const read = (typeof readOf === 'function' ? readOf(repo, p.number) : null) || {};
+      p.commits = read.commits || [];
+      const v = classifyPr(p, { requiredCheck, allowPendingReview: (relief.prs || []).includes(Number(p.number)) || (relief.passWide && !!label) });
+      v.repo = repo;               // null (local clone) or a slug — routes the merge/view/edit + the git-side gate
+      v.headRef = p.headRefName;
+      attachManifestToVerdict(v, read.manifest ?? null, { repo, isLocalRepo, localSlug });
+      v.prLabels = p.labels || [];
+      verdicts.push(v);
+    }
+  }
+  return verdicts;
+}
+
+/**
+ * #xc7p3q9 — attach a PR's `.lane-manifest.json` fields (backlog item + cross-item edges + couple refs +
+ * escalation-scoring inputs) onto its verdict. Pure MUTATE + return. Single-sourced (called by
+ * `buildDrainVerdicts`) so every verdict-build attaches identical fields (Fix 4). Not exported — B10: it was
+ * exported + imported by the test but never called there; it has no external caller now.
+ */
+function attachManifestToVerdict(v, m, { repo = null, isLocalRepo = () => false, localSlug = null } = {}) {
+  v.item = m && m.item != null ? asItemId(m.item) : null;
+  v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(asItemId) : [];
+  v.hasManifest = m != null;      // #2183 — carries the transient manifest on its head → must be stripped before merge
+  v.stackParents = m && Array.isArray(m.stackParents) ? m.stackParents.map(asItemId) : [];
+  v.manifestRefs = m && Array.isArray(m.repos) ? m.repos.map((r) => r && r.ref).filter(Boolean) : [];
+  v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
+  const local = typeof isLocalRepo === 'function' ? isLocalRepo(repo) : false;
+  v.base = manifestBaseForRepo(m, local ? (repoKeyFromSlug(localSlug) || 'we') : repoKeyFromSlug(repo));
+  v.dismissedFindings = m && Number.isFinite(Number(m.dismissedFindings)) ? Number(m.dismissedFindings) : 0;
+  return v;
+}
+
+/**
+ * #xc7p3q9 — the REAL `--only`/`--repos` narrowing of the per-repo listings, extracted (was inline in
+ * runCli) so tests exercise it too (Fix 4). Pure. `listings` is `[{repo, prs}]` (the sweep listing); returns the
+ * narrowed `Map<repo, PR[]>`. Mirrors runCli exactly: `--only` filters via `matchesOnlyTarget`, else pass-through.
+ * @param {Array<{repo:(string|null), prs:Array}>} listings
+ * @param {{onlyPr?:(string|null), onlyRepo?:(string|null), repos?:Array, isLocalRepo?:function}} o
+ * @returns {Map<(string|null), Array>}
+ */
+export function narrowPrsByRepo(listings, { onlyPr = null, onlyRepo = null, repos = [], isLocalRepo = () => false } = {}) {
+  const repoCount = (Array.isArray(repos) ? repos : []).length;
+  const out = new Map();
+  for (const { repo, prs } of (Array.isArray(listings) ? listings : [])) {
+    const l = Array.isArray(prs) ? prs : [];
+    out.set(repo, onlyPr ? l.filter((p) => matchesOnlyTarget({ prNumber: p.number, onlyPr, repo, onlyRepo, isLocal: (typeof isLocalRepo === 'function' ? isLocalRepo(repo) : false), repoCount })) : l);
+  }
+  return out;
+}
+
+/**
+ * #xc7p3q9 (Fix 4 / B12) — the narrow→classify→attach half of the pass. `narrowPrsByRepo → buildDrainVerdicts`.
+ * Deliberately does NOT couple-join or build carrier health: R5 moves the couple gate to AFTER the escalation/park
+ * pass, so `held` is read from each carrier's FINAL decision, not a pre-escalation label snapshot. The join +
+ * health + plan is {@link planDrainPass}, which runCli calls with the escalated verdicts. Pure. `readOf(repo,
+ * num)` returns the per-PR `{ commits, manifest }` read.
+ * @returns {{prsByRepo:Map, verdicts:Array}}
+ */
+export function prepareDrainVerdicts({ listings, repos = [], onlyPr = null, onlyRepo = null, readOf, requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null } = {}) {
+  const prsByRepo = narrowPrsByRepo(listings, { onlyPr, onlyRepo, repos, isLocalRepo });
+  const verdicts = buildDrainVerdicts({ prsByRepo, readOf, repos, requiredCheck, escalationRelief, label, isLocalRepo, localSlug });
+  return { prsByRepo, verdicts };
+}
+
+/**
+ * #xc7p3q9 (R4/R5) — the ONE production plan seam: build carrier HEALTH from the label/only-blind context, couple-
+ * JOIN the impl halves (stamping `coupleDefer` from the carrier's health), and PLAN the merge order — threading
+ * `truncated` + `contextComplete` + the plan-wide fail-closed invariant. runCli CALLS this (it is no longer a
+ * test-only function — R4: previously `planDrainPass` had zero production callers and the runCli half re-typed its
+ * own `planLabelDrain` wiring). Accepts EITHER pre-built `verdicts` (runCli's escalated verdicts — R5, the join
+ * runs after the park pass) OR builds them from `listings` (a one-shot / the test suite). `candidateHeldByKey`
+ * carries each live candidate's FINAL held (skip/park) so a carrier the escalation pass parked reads `held` (R5).
+ * Pure.
+ * @returns {{prsByRepo:Map, verdicts:Array, carrierHealth:Map, plan:{ready:Array, deferred:Array, staleLandedOpenItems:Array}}}
+ */
+export function planDrainPass({ verdicts = null, listings = null, openPrContext = {}, repos = [], onlyPr = null, onlyRepo = null, readOf, requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null, candidateHeldByKey = null, landedThisPass = new Set(), provenOnMain = new Set() } = {}) {
+  let prsByRepo = null;
+  let vs = verdicts;
+  if (!Array.isArray(vs)) {
+    const prep = prepareDrainVerdicts({ listings, repos, onlyPr, onlyRepo, readOf, requiredCheck, escalationRelief, label, isLocalRepo, localSlug });
+    vs = prep.verdicts;
+    prsByRepo = prep.prsByRepo;
+  }
+  const ctx = openPrContext || {};
+  const carrierHealth = buildCarrierHealth(ctx, { escalationRelief, label, candidateHeldByKey });
+  // #xc7p3q9 (R7) — the set of head refs the blind context shows OPEN, so a carrier cannot enter `ready` while a
+  // sibling ref named in its manifest is still an open, not-landing PR (the impl-open couple-level invariant).
+  const openHeadRefs = new Set();
+  if (ctx.prsByRepo instanceof Map) for (const prs of ctx.prsByRepo.values()) for (const p of (Array.isArray(prs) ? prs : [])) { if (p && p.headRefName) openHeadRefs.add(p.headRefName); }
+  joinImplToCouples(vs, { carrierHealth, truncated: !!ctx.truncated, contextComplete: !!ctx.contextComplete, openHeadRefs });
+  const plan = planLabelDrain(vs, { landedThisPass, provenOnMain, extraOpenItems: ctx.openItems, contextComplete: !!ctx.contextComplete, isWeRepo: isLocalRepo });
+  return { prsByRepo, verdicts: vs, carrierHealth, plan };
+}
+
+/**
+ * #xc7p3q9 (Fix 3) — is a pass IDLE for the purpose of `--max-idle` / `--until-batches-idle`, given its
+ * deferrals? A deferral `blocked SOLELY on a review-HELD carrier` (`heldCoupleOnly`, stamped by `planLabelDrain`)
+ * is not real progress-in-waiting — a human hold will not clear by polling — so a pass whose EVERY deferral is
+ * such a held-couple defer counts as idle. A degraded/truncated fail-closed defer does NOT count (it may clear on
+ * a re-fetch, so keep polling). Pure. Empty `deferred` is handled by the caller's own `=== 0` short-circuit.
+ * @param {Array<{heldCoupleOnly?:boolean}>} deferred
+ * @returns {boolean}
+ */
+export function deferralsAllHeldCouple(deferred) {
+  const list = Array.isArray(deferred) ? deferred : [];
+  return list.length > 0 && list.every((d) => d && d.heldCoupleOnly === true);
+}
+
+/**
+ * #xc7p3q9 (R4 structural / Fix 3) — is a `--watch` pass IDLE for `--max-idle`? Extracted OUT of the inline runCli
+ * expression so a revert of the held-couple allowance breaks a test (mutation 5). Idle = nothing merged, no tip
+ * rebuilt, and EITHER nothing deferred OR every deferral is a human-held couple (won't clear by polling). Pure.
+ */
+export function isPassIdle({ merged = 0, pendingRebased = 0, deferred = [] } = {}) {
+  const d = Array.isArray(deferred) ? deferred : [];
+  return merged === 0 && pendingRebased === 0 && (d.length === 0 || deferralsAllHeldCouple(d));
+}
+
+/**
+ * #xc7p3q9 (R4 structural / B5) — is the `--until-batches-idle` CONFIRM sweep settled (safe to STOP)? Extracted
+ * OUT of the inline runCli expression so a revert of the held-couple allowance breaks a test (mutation 6). Settled
+ * = nothing merged, no tip rebuilt, and the queue is empty OR blocked SOLELY on a human-held couple (on both the
+ * `considered` and the `deferred` reading). Pure.
+ */
+export function isConfirmSweepSettled({ merged = 0, pendingRebased = 0, considered = 0, deferred = [] } = {}) {
+  const d = Array.isArray(deferred) ? deferred : [];
+  return merged === 0 && pendingRebased === 0
+    && (considered === 0 || deferralsAllHeldCouple(d))
+    && (d.length === 0 || deferralsAllHeldCouple(d));
+}
+
+/**
  * Order a set of merge candidates for ONE cascade pass, honouring cross-item `blockedBy` (#2188) AND the
  * overlap-stacking proof-of-land gate (#2387 F5 / #2393). Pure.
  * This is the drain↔/merge convergence: the `ready-to-merge` label bounds the set, and each PR's
@@ -749,10 +1172,16 @@ export function resolveIdsForLandedPass(o = {}) {
  * the legacy unordered sweep when nothing carries a manifest.
  *
  * @param {Array<{num:number, item:(number|string|null), blockedBy:Array<number|string>, stackParents?:Array<number|string>, decision:'merge'|'skip'}>} candidates
- * @param {{landedThisPass?:Set, provenOnMain?:Set, extraOpenItems?:Iterable<number|string>}} [proof]  positive proof-of-land sets (both `asItemId`-keyed)
+ * #xc7p3q9 (R1) — the PLAN-WIDE fail-closed invariant: when `contextComplete === false`, a manifest-less verdict
+ * from a NON-WE repo (`!isWeRepo(repo)`) MIGHT be a coupled impl whose carrier we could not read, so it must never
+ * appear in `ready` — it defers, whether or not a couple-join stamped `coupleDefer`. This catches the un-joined
+ * orphan the per-carrier gate structurally misses (an unreadable/unlisted carrier has no `manifestRefs` to key a
+ * join on). #xc7p3q9 (R2) — a verdict's `waitOn` is NEVER allowed to name its OWN item (a self-referential wait is
+ * structurally unsatisfiable — the livelock); such an edge is stripped.
+ * @param {{landedThisPass?:Set, provenOnMain?:Set, extraOpenItems?:Iterable<number|string>, contextComplete?:boolean, isWeRepo?:function}} [proof]  positive proof-of-land sets (both `asItemId`-keyed)
  * @returns {{ready:Array, deferred:Array<{num,item,waitOn:Array<number|string>}>, staleLandedOpenItems:Array<number|string>}}  ready is ordered (item asc, then PR#); staleLandedOpenItems = items proven landed yet still named by an open PR (#999/xq985wu F2 stale-PR diagnostic).
  */
-export function planLabelDrain(candidates, { landedThisPass = new Set(), provenOnMain = new Set(), extraOpenItems = null } = {}) {
+export function planLabelDrain(candidates, { landedThisPass = new Set(), provenOnMain = new Set(), extraOpenItems = null, contextComplete = true, isWeRepo = () => false } = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
   // Every candidate still in play keeps its item "open" — a red/skip blocker must still defer its dependents,
   // so the open set is ALL candidate items, not just the mergeable ones. (A merged item is removed by the
@@ -810,9 +1239,35 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
     if (c.decision !== 'merge') continue; // @merge-gate-exempt builds the merge-ORDERING lists (ready/deferred); a held PR is `skip` and correctly not ordered for landing — it must not join the merge cascade
     const blockWait = (Array.isArray(c.blockedBy) ? c.blockedBy : []).map(asItemId).filter((b) => openItems.has(b) && !provenLanded(b));
     const stackWait = (Array.isArray(c.stackParents) ? c.stackParents : []).map(asItemId).filter((sp) => !stackProven(sp));
-    const waitOn = [...new Set([...blockWait, ...stackWait])];
+    // #xc7p3q9 — the COUPLE gate: a manifest-less impl PR joined to a WE couple defers with its carrier
+    // when `joinImplToCouples` stamped `coupleDefer` — a carrier that is OPEN-AND-HELD, unnameable, degraded, or
+    // in a truncated listing (all knowable from the label/only-blind context, NEVER from the narrowed `list`).
+    // This reads the PRECOMPUTED boolean; it does NOT re-derive the carrier's landing status from `list` (the
+    // Fix-1 hole: `--only`/`--repos` narrows `list` to the impl half, so a carrier-in-`list` test defers a
+    // perfectly healthy open carrier's impl forever). A carrier merely DEFERRED on its OWN edges keeps the impl
+    // bound via the inherited blockedBy/stackParents above — this gate only adds the carrier-NOT-LANDING case.
+    const coupleDeferred = c.coupleDefer === true;
+    // #xc7p3q9 (R2) — the couple-wait token references the CARRIER PR distinctly (never the impl's own — often
+    // INHERITED — item), so the self-wait strip below cannot erase a genuine couple defer while it still removes a
+    // literal self-referential edge.
+    const coupleWait = coupleDeferred ? [`couple-carrier:${c.coupleCarrier?.num ?? c.coupleCarrier?.item ?? 'unknown'}`] : [];
+    // #xc7p3q9 (R1) — PLAN-WIDE fail-closed backstop: in an INCOMPLETE context a manifest-less verdict from a
+    // NON-WE repo MIGHT be a coupled impl whose carrier we could not read → it must never enter `ready`, whether or
+    // not a join stamped `coupleDefer`. Catches the un-joined orphan the per-carrier gate structurally misses.
+    const blindImplDefer = contextComplete !== true && c.hasManifest !== true && !isWeRepo(c.repo);
+    const blindWait = blindImplDefer ? ['incomplete-context'] : [];
+    // #xc7p3q9 (R2) — a verdict may NEVER waitOn its OWN item (a self-referential wait is structurally
+    // unsatisfiable — the livelock). Strip any edge naming this verdict's own item.
+    const waitOn = [...new Set([...blockWait, ...stackWait, ...coupleWait, ...blindWait])].filter((w) => c.item == null || String(w) !== String(c.item));
     if (waitOn.length === 0) ready.push(c);
-    else deferred.push({ num: c.num, item: c.item, waitOn });
+    else {
+      // #xc7p3q9 (Fix 3) — a defer whose ONLY cause is a review-HELD carrier is flagged `heldCoupleOnly`
+      // so idle accounting can treat such a pass as idle (a human hold will not clear by polling). A defer that
+      // ALSO waits on a real blockedBy/stackParents edge, or that fails closed on degraded/truncated/incomplete
+      // (which MAY clear on a re-fetch), is NOT flagged — the watch keeps polling.
+      const heldCoupleOnly = blockWait.length === 0 && stackWait.length === 0 && blindWait.length === 0 && coupleDeferred && (c.coupleDeferReason === 'held' || c.coupleHumanTerminal === true);
+      deferred.push({ num: c.num, item: c.item, waitOn, ...(heldCoupleOnly ? { heldCoupleOnly: true } : {}) });
+    }
   }
   // Numeric items (landed NNNs) sort by number ascending, as before. A hash item has no numeric order yet
   // (JIT numbering assigns the real NNN only at land, #2288) so it sorts after every numbered item; ties
@@ -941,11 +1396,25 @@ export function readBatchFeed(path, { now = Date.now(), staleMs = 30_000, fs = {
 /** #2330 — should a `--until-batches-idle` watch EXIT now? Pure. The safe conjunction (all must hold):
  *  the pass was idle (merged/deferred/rebuilt nothing), the ready-to-merge queue is empty (`considered===0`,
  *  NOT "all nums resolved" — a dropped/parked item never lands and would hang the drain forever), and the
- *  batch feed has been observed KNOWN-and-non-running for `debounce` consecutive passes (absorbs feed lag). */
-export function decideBatchesIdleExit({ enabled = false, idlePass = false, considered = 0, batchNonRunningStreak = 0, debounce = 2 } = {}) {
+ *  batch feed has been observed KNOWN-and-non-running for `debounce` consecutive passes (absorbs feed lag).
+ *
+ *  #xc7p3q9 (B5) — the production launcher (`drain-push-at-close.mjs`) runs `--watch --until-batches-idle` with
+ *  NO `--max-idle`, so it exits HERE, not via `idlePass`/`--max-idle`. `considered` = `verdicts.length` counts
+ *  BOTH halves of a held couple, so a pass blocked SOLELY on a human-held couple never satisfied `considered===0`
+ *  and the drain ran to its `--max-runtime-min` cap holding the lease. Consult the SAME `deferralsAllHeldCouple`
+ *  allowance `idlePass` uses (the ONE shared helper): a non-empty queue whose ENTIRE remaining deferral set is
+ *  held-couple-only (a human hold that will not clear by polling) counts as settled. A degraded/truncated fail-
+ *  closed defer is NOT held-couple-only, so it still keeps the watch polling (it may clear on a re-fetch). */
+export function decideBatchesIdleExit({ enabled = false, idlePass = false, considered = 0, deferred = [], heldCoupleMembers = 0, batchNonRunningStreak = 0, debounce = 2 } = {}) {
   if (!enabled) return false;
   if (!idlePass) return false;        // still landing / rebuilding a tip → keep going
-  if (considered > 0) return false;   // queue not empty → keep going
+  // #xc7p3q9 (R6) — SUBTRACT the held couple's members (its deferred impl half + its `skip` carrier) from
+  // `considered`, rather than WAIVING the `considered>0` check wholesale (the round-1 regression). `considered =
+  // verdicts.length` still counts NON-held candidates whose CI is running (they classify `skip`, so they are
+  // neither `merged` nor in `deferred`) — a wholesale waiver exited with those in flight and dropped their PRs.
+  // Any in-flight work BEYOND the held couple keeps the watch polling.
+  const held = Number.isFinite(Number(heldCoupleMembers)) ? Number(heldCoupleMembers) : 0;
+  if (considered - held > 0) return false;   // queue not empty beyond the held couple → keep going
   return batchNonRunningStreak >= debounce;
 }
 
@@ -1069,7 +1538,12 @@ const CONSTELLATION_REPO_NAMES = ['web-everything', 'frontierui', 'plateau-app']
  */
 export function resolveRepos({ repos, singleRepo, self } = {}) {
   if (typeof repos === 'string' && repos.trim()) {
-    const list = repos.split(',').map((s) => s.trim()).filter(Boolean);
+    // #xc7p3q9 (R10) — NORMALIZE every `--repos` entry to `owner/name`. A short-name `--repos=frontierui` otherwise
+    // yields a bogus `frontierui` alongside the canonical `chalbert/frontierui`: its listing throws, and (pre-R3)
+    // latched `contextComplete:false` permanently. Prefix the local owner when an entry carries no `/`.
+    const owner = self && self.includes('/') ? self.split('/')[0] : null;
+    const norm = (s) => (s.includes('/') || !owner) ? s : `${owner}/${s}`;
+    const list = [...new Set(repos.split(',').map((s) => s.trim()).filter(Boolean).map(norm))];
     if (list.length) return list;
   }
   // #2287 — the constellation is the DEFAULT (the backlog is WE-global, so cross-repo blockedBy needs one
@@ -1079,6 +1553,26 @@ export function resolveRepos({ repos, singleRepo, self } = {}) {
   if (!owner) return [null]; // can't derive the constellation without an owner → stay single-repo (safe)
   const slugs = CONSTELLATION_REPO_NAMES.map((n) => `${owner}/${n}`);
   return [...new Set([self, ...slugs.filter((s) => s !== self)])]; // self first (the local clone), then the rest
+}
+
+/**
+ * #xc7p3q9 (B8) — the CONTEXT repo set for `collectOpenPrContext`: the candidate `repos` UNION'd with the full
+ * constellation (so the couple gate's blind health read still sees a carrier that `--only`/`--repos`/`--this-repo`
+ * narrowed OUT of the candidate set). Pure. CANONICALIZES the local repo's two interchangeable ids (`null` ≡
+ * `self`) to the ONE form `repos` already uses for it, so the union never holds BOTH — the old
+ * `[...new Set([...REPOS, ...resolveRepos({self})])]` listed the local repo TWICE under `--this-repo`
+ * (`REPOS=[null]` + the constellation's `self` slug), reading every local PR twice under two cache keys and
+ * doubling the `gh` traffic (the hottest path: `/pr`, `/finish`). Matching `repos`' representation (not blindly
+ * `r||self`) keeps the health keys agreeing with the candidate sweep's `couple.repo` — a `r||self` normalize
+ * would rekey the local repo to the slug while the `--this-repo` sweep keys it `null`, breaking the join lookup.
+ * @param {Array<string|null>} repos  the candidate repo set (REPOS)
+ * @param {string|null} self          the local repo slug (localSlug)
+ * @returns {Array<string|null>}
+ */
+export function resolveContextRepos(repos, self) {
+  const base = Array.isArray(repos) ? repos : [];
+  const localToken = base.includes(null) ? null : self;   // the form REPOS uses for the local repo
+  return [...new Set([...base, ...resolveRepos({ self })].map((r) => (r == null || r === self) ? localToken : r))];
 }
 
 /**
@@ -1656,6 +2150,9 @@ async function runCli() {
   // drain (it IS the reconcile point); `--no-reconcile-labels` disables both. Under `--watch` this re-labels
   // each interval — self-healing, with no human step and no per-check-tick `pr-land` write.
   const RECONCILE = label && !flags['no-reconcile-labels'];
+  // #xc7p3q9 (R2) — the operator escape hatch (symmetric to --no-review-escalation): force the couple gate to
+  // treat the open-PR context as COMPLETE, so a genuinely-stuck queue has a lever short of editing the script.
+  const ASSUME_COMPLETE_CONTEXT = !!flags['assume-complete-context'];
   // #2171 — DETERMINISTIC review-escalation rubric: before merging a ready PR, score it (blast radius, size,
   // dismissed pre-PR findings, cross-repo couple); an escalated PR PARKS ALIVE (labelled
   // review:pending, SKIPPED — non-blocking, the queue keeps flowing) until a reviewer applies review:accepted.
@@ -1684,6 +2181,14 @@ async function runCli() {
     } catch { return null; }
   })();
   const REPOS = resolveRepos({ repos: typeof flags.repos === 'string' ? flags.repos : null, singleRepo: !!flags['this-repo'], self: localSlug });
+  // #xc7p3q9 (Fix 1 / B8) — the CONTEXT repo set for `collectOpenPrContext` is the FULL constellation, UNION'd
+  // with REPOS, regardless of `--only`/`--repos`/`--this-repo` narrowing. The couple gate reads carrier HEALTH
+  // (held / nameable / degraded) out of this blind context, so a WE carrier NARROWED out of a `--repos=<impl>` /
+  // `--this-repo` candidate sweep is STILL visible here — its coupled impl half joins it and defers if it is held,
+  // instead of orphan-landing past a hidden held carrier. `resolveContextRepos` canonicalizes the local repo so
+  // it is never listed twice (B8). For the common full-constellation drain (REPOS === the constellation) this is a
+  // no-op — no extra listings.
+  const CONTEXT_REPOS = resolveContextRepos(REPOS, localSlug);
   // #2458 — THIS run's repo scope (`null` = the cwd repo → normalize to localSlug), recorded in the drain
   // lease so a differently-scoped launch can tell whether the holder actually covers its repos.
   const leaseScope = [...new Set(REPOS.map((r) => r || localSlug).filter(Boolean))].sort();
@@ -1789,12 +2294,10 @@ async function runCli() {
       // an impl/orphan PR carries no manifest → null → always ready (the legacy unordered behaviour).
       // #2399 — `remoteManifestApiArgs` (shared, `scripts/lib/remote-manifest.mjs`) makes the `--method GET`
       // explicit; one argv for both the drain and lane-resume so the readers never drift.
-      try {
-        const { stdout } = await execFileP('gh', remoteManifestApiArgs(repo, headRef), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-        const b64 = (stdout || '').trim();
-        if (b64) { const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); if (m && m.item != null) return { manifest: m, degraded: false }; }
-        return { manifest: null, degraded: false }; // API read SUCCEEDED → confirmed no manifest, not degraded
-      } catch { return { manifest: null, degraded: true }; } // API read threw → degraded → re-fetch next pass
+      // #xc7p3q9 (R3) — the error taxonomy (404 = definitive-absent → degraded:false; else degrade) lives in the
+      // extracted, unit-tested `readRemoteManifestViaApi`. This is the ROOT of the R2 livelock: the old blanket
+      // `degraded:true` made `contextComplete` false on EVERY pass with a manifest-less impl PR open.
+      return await readRemoteManifestViaApi({ exec: execFileP, repo, headRef });
     }
     const legacy = await readLegacyLocalManifest(headRef);
     if (legacy) return { manifest: legacy, degraded: false };
@@ -1845,58 +2348,41 @@ async function runCli() {
   // because this listing (like #2216's `reconcileGreenLabels` before it) is deliberately UNFILTERED-by-label,
   // so it must not depend on the (possibly `--label`-scoped) `verdicts` collected later this pass. Best-effort
   // throughout — a gh miss for one repo contributes nothing from that repo, never throws.
-  const collectOpenPrContext = async () => {
-    const prsByRepo = new Map();
-    const openItems = new Set();
-    const manifestByPr = new Map();
-    const commitsByPr = new Map();
-    // #2417 — list all repos CONCURRENTLY (was one-at-a-time). Each is an independent read; a failed listing
-    // still contributes nothing from that repo (the mint loop stays idempotent), exactly as before.
-    const listings = await mapWithConcurrency(REPOS, REPOS.length, async (repo) => {
-      try {
-        // #999/xq985wu F3 — `--limit OPEN_PR_LIST_LIMIT` (raised off the old silent 100). This listing is the SOLE
-        // cross-item ordering source on a full sweep since #xq985wu, so a truncated page is a MERGE-SAFETY hazard
-        // (oldest = long-lived held blockers drop out → a dependent reads the edge as landed and lands EARLY). A
-        // full page (`isDegradedOpenPrListing`) is flagged DEGRADED with a LOUD per-repo warning below — we do not
-        // silently trust a truncated page for the early-land decision (truncation is the unsafe direction).
-        const { stdout } = await execFileP('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(OPEN_PR_LIST_LIMIT), '--json', 'number,title,labels,statusCheckRollup,headRefName,headRefOid'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-        return [repo, JSON.parse(stdout.trim() || '[]')];
-      } catch { return [repo, []]; }
-    });
-    // #999/xq985wu F3 — LOUD degraded-read warning: any repo whose listing hit the cap MAY be truncated (gh lists
-    // newest-first, so the OLDEST — long-lived held — PRs are the ones silently dropped). Surfaced so a truncated
-    // ordering source is never trusted in silence. Best-effort log only (never throws / fails the drain).
-    let listingTruncated = false;
-    for (const [repo, open] of listings) {
-      if (isDegradedOpenPrListing(open.length)) {
-        listingTruncated = true;
-        if (!AS_JSON) process.stderr.write(`  ⚠️  DEGRADED open-PR listing for ${repoTag(repo) || 'cwd'}: ${open.length} PRs hit the --limit ${OPEN_PR_LIST_LIMIT} cap — the page MAY be truncated (oldest, longest-held blockers dropped first). The cross-item merge order derived from this listing is NOT trustworthy for the early-land decision this pass (#999/xq985wu F3).\n`);
-      }
-    }
-    // #2417 — fan out the per-PR manifest + commits reads across ALL repos' open PRs at once (bounded pool),
-    // cached across `--watch` passes on unchanged head SHA. `commits` is read HERE (once) so the reconcile pass
-    // reuses it instead of its own serial per-PR `gh pr view --json commits` (the #2421 double-read, collapsed).
-    const flat = [];
-    for (const [repo, open] of listings) { prsByRepo.set(repo, open); for (const p of open) flat.push({ repo, p }); }
-    const reads = await fetchPrReadsCached(flat, {
-      cache: ctxReadCache,
-      keyOf: ({ repo, p }) => prCacheKey(repo, p.number),
-      shaOf: ({ p }) => prHeadSha(p),
-      isDegraded: (v) => !!v?.degraded, // #2417 review — an error-path read is NOT cached (re-fetches next pass)
-      fetchOne: async ({ repo, p }) => {
-        const [manifestRes, commitsRes] = await Promise.all([readPrManifest(repo, p.headRefName), fetchPrCommits(repo, p.number)]);
-        return { manifest: manifestRes.manifest, commits: commitsRes.commits, degraded: manifestRes.degraded || commitsRes.degraded };
-      },
-    });
-    for (const [repo, open] of listings) for (const p of open) {
-      const key = prCacheKey(repo, p.number);
-      const { manifest = null, commits = [] } = reads.get(key)?.value || {};
-      manifestByPr.set(key, manifest);
-      commitsByPr.set(key, commits);
-      if (manifest && manifest.item != null) openItems.add(asItemId(manifest.item));
-    }
-    return { prsByRepo, openItems, manifestByPr, commitsByPr, truncated: listingTruncated };
-  };
+  // #xc7p3q9 (R4 structural) — a THIN wrapper over the exported, injectable `collectOpenPrContext`: it wires the
+  // real gh dependencies (list + cached per-PR reads) and the LOUD degraded/failed warnings, then delegates the
+  // pure reduction (maps + `contextComplete`) to `reduceOpenPrContext`. The reduction the couple gate depends on is
+  // now unit-tested through the SAME code (R4 — the old closure was unreachable from any test). Lists over
+  // CONTEXT_REPOS (the constellation ∪ REPOS), NOT the narrowed REPOS, so a carrier a `--repos`/`--this-repo`/
+  // `--only` sweep filtered out of the candidate set is still visible for the couple gate's health read.
+  const collectContext = () => collectOpenPrContext({
+    contextRepos: CONTEXT_REPOS,
+    reconcileRan: true,
+    // #999/xq985wu F3 — `--limit OPEN_PR_LIST_LIMIT` (raised off the old silent 100). This listing is the SOLE
+    // cross-item ordering source on a full sweep, so a truncated page is a MERGE-SAFETY hazard.
+    listOpenPrs: async (repo) => {
+      const { stdout } = await execFileP('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(OPEN_PR_LIST_LIMIT), '--json', 'number,title,labels,statusCheckRollup,headRefName,headRefOid'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      return JSON.parse(stdout.trim() || '[]');
+    },
+    // #2417 — fan out the per-PR manifest + commits reads across ALL repos' open PRs at once (bounded pool), cached
+    // across `--watch` passes on unchanged head SHA. Returns the reduced key→{manifest, commits, degraded} map.
+    fetchReads: async (flat) => {
+      const readsRaw = await fetchPrReadsCached(flat, {
+        cache: ctxReadCache,
+        keyOf: ({ repo, p }) => prCacheKey(repo, p.number),
+        shaOf: ({ p }) => prHeadSha(p),
+        isDegraded: (v) => !!v?.degraded, // #2417 review — an error-path read is NOT cached (re-fetches next pass)
+        fetchOne: async ({ repo, p }) => {
+          const [manifestRes, commitsRes] = await Promise.all([readPrManifest(repo, p.headRefName), fetchPrCommits(repo, p.number)]);
+          return { manifest: manifestRes.manifest, commits: commitsRes.commits, degraded: manifestRes.degraded || commitsRes.degraded };
+        },
+      });
+      const out = new Map();
+      for (const { repo, p } of flat) { const k = prCacheKey(repo, p.number); out.set(k, readsRaw.get(k)?.value || {}); }
+      return out;
+    },
+    onListingFailed: (repo) => { if (!AS_JSON) process.stderr.write(`  ⚠️  FAILED open-PR listing for ${repoTag(repo) || 'cwd'}: gh pr list threw — the couple gate treats the open-PR context as INCOMPLETE this pass (fail closed; #xc7p3q9 B2).\n`); },
+    onListingTruncated: (repo, n) => { if (!AS_JSON) process.stderr.write(`  ⚠️  DEGRADED open-PR listing for ${repoTag(repo) || 'cwd'}: ${n} PRs hit the --limit ${OPEN_PR_LIST_LIMIT} cap — the page MAY be truncated (oldest, longest-held blockers dropped first). The cross-item merge order derived from this listing is NOT trustworthy for the early-land decision this pass (#999/xq985wu F3).\n`); },
+  });
 
   // #2421 — POST-CI TOTAL CI-LIFECYCLE LABEL RECONCILE, generalizing #2216's green-only `reconcileGreenLabels`
   // per the #2281 ruling. Every open, PRODUCER-OWNED (AI-generated) PR is brought to the state
@@ -1995,7 +2481,17 @@ async function runCli() {
   // #2421 — the shared open-PR listing + manifest reads + cross-repo item-openness set the reconcile below
   // needs, computed ONCE for this pass (RECONCILE-gated — same cost profile as the reconcile it feeds: free on
   // a bare, unlabelled sweep).
-  const openPrContext = RECONCILE ? await collectOpenPrContext() : { prsByRepo: new Map(), openItems: new Set(), manifestByPr: new Map(), commitsByPr: new Map(), truncated: false };
+  // #xc7p3q9 (B3) — when the blind context is NEVER collected (`RECONCILE` false: a bare `/merge` sweep or
+  // `--no-reconcile-labels`), it is INCOMPLETE by construction — `contextComplete:false` — so the couple gate
+  // fails closed (a coupled impl defers rather than orphan-landing past a carrier the gate cannot see).
+  const openPrContext = RECONCILE ? await collectContext() : reduceOpenPrContext({ listings: [], reads: new Map(), reconcileRan: false });
+  // #xc7p3q9 (R2) — the operator escape hatch symmetric to `--no-review-escalation`: `--assume-complete-context`
+  // FORCES the context complete so a genuinely-stuck couple (e.g. a persistent read-noise fail-closed) can land
+  // short of editing the script. Prints a LOUD one-line waiver. Off by default; the fail-closed gate stays live.
+  if (ASSUME_COMPLETE_CONTEXT && !openPrContext.contextComplete) {
+    openPrContext.contextComplete = true;
+    if (!AS_JSON) process.stderr.write('  ⚠ --assume-complete-context: FORCING contextComplete=true — the couple gate will treat a carrier ABSENT from this pass\'s (possibly incomplete) open-PR context as LANDED. Operator waiver; use only to unstick a queue you have verified by hand (#xc7p3q9 R2).\n');
+  }
   // #2417 — list ALL repos CONCURRENTLY up front (was one `gh pr list` per repo, serial, interleaved with the
   // per-repo processing below). A single repo's list failure is a bad-env hard-fail (exit 3), preserved — but
   // now surfaced after the concurrent batch instead of mid-loop. The rollup + mergeable come from the list;
@@ -2016,8 +2512,9 @@ async function runCli() {
   // repo; a multi-repo default sweep with no `--only-repo` disambiguates to the LOCAL repo. This narrows the
   // MERGE candidate set to the one target PR (the fast-drain contract) while the full REPOS listing still feeds
   // the cross-repo ordering context below.
-  const prsByRepo = new Map(listings.map(({ repo, prs }) =>
-    [repo, onlyPr ? prs.filter((p) => matchesOnlyTarget({ prNumber: p.number, onlyPr, repo, onlyRepo, isLocal: isLocalRepo(repo), repoCount: REPOS.length })) : prs]));
+  // #xc7p3q9 (Fix 4) — the REAL `--only`/`--repos` narrowing is now `narrowPrsByRepo` (shared with the
+  // test suite so tests drive the same wiring runCli does).
+  const prsByRepo = narrowPrsByRepo(listings, { onlyPr, onlyRepo, repos: REPOS, isLocalRepo });
   // #2417 — fan out the per-PR commits + manifest reads across EVERY candidate PR at once (bounded pool),
   // cached across `--watch` passes on unchanged head SHA — was one serial `gh pr view --json commits` + one
   // serial manifest probe per PR, one repo at a time (~2×N serial `gh` round-trips a pass). The merge cascade
@@ -2034,58 +2531,29 @@ async function runCli() {
       return { commits: commitsRes.commits, manifest: manifestRes.manifest, degraded: commitsRes.degraded || manifestRes.degraded };
     },
   });
-  for (const repo of REPOS) {
-    reconciledLabels.push(...reconcileCiLifecycleLabels(repo, openPrContext)); // #2421 (generalizes #2216) — total ci-lifecycle relabel first
-    const prs = prsByRepo.get(repo) || [];
-    for (const p of prs) {
-      const read = sweepReads.get(prCacheKey(repo, p.number))?.value || {};
-      p.commits = read.commits || [];
-      // #2820 — thread BOTH forms of the #2423 review-escalation waiver into the hold predicate:
-      //   • per-PR (`--no-review-escalation=<pr#>`): the named PR may merge past `review:pending`.
-      //   • pass-wide bare (`--no-review-escalation`, `passWide`): the legacy operator override. #2820-review-fix
-      //     (finding 1) — WITHOUT this, a bare flag parses to `{ passWide:true, prs:[] }`, so `allowPendingReview`
-      //     was false for EVERY PR and `classifyPr` skipped a `review:pending` PR with `reviewHeld` BEFORE the
-      //     `!REVIEW_ESCALATION` backstop could honour the waiver — the backstop only downgrades merge→skip, so it
-      //     could never re-admit an already-skipped PR. The escape hatch (`--label ... --no-review-escalation` to
-      //     land a green pending PR with no reviewer coming) was dead. Gating the pass-wide waiver on `!!label`
-      //     mirrors the backstop's own `allowPending = !!label`: a truly-bare `/merge` sweep (no `--label`) has no
-      //     verdict owner, so it still refuses `review:pending`. `review:changes` / `review:human` stay held
-      //     regardless (the predicate never waives them), matching the backstop's human-only / rejected refusals.
-      const v = classifyPr(p, { requiredCheck: REQUIRED, allowPendingReview: escalationRelief.prs.includes(Number(p.number)) || (escalationRelief.passWide && !!label) });
-      v.repo = repo;               // null (local clone) or a slug — routes the merge/view/edit + the git-side gate
-      v.headRef = p.headRefName;
-      // #2188: attach the manifest (backlog `item` + cross-item `blockedBy`) so the GLOBAL cascade honours
-      // cross-repo dependencies. Only a WE lane carries one; the rest degrade to no-manifest → always ready.
-      const m = read.manifest ?? null;
-      // #2388 — `asItemId` (not a bare `Number()`) keeps a hash-keyed item (e.g. `x5lail9`, JIT numbering
-      // #2288) as its own distinct string; the legacy fallback path below reads a raw un-normalized manifest
-      // off `git show`/`gh api` (bypassing `buildManifest`'s own `asItemId` pass), so this coercion is still
-      // needed even though the PR-body path already normalized it.
-      v.item = m && m.item != null ? asItemId(m.item) : null;
-      v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(asItemId) : [];
-      v.hasManifest = m != null; // #2183 — carries the transient manifest on its head → must be stripped before merge
-      // #2393 — the overlap-stacking edge + the couple's lane refs. `stackParents` gates this PR behind its
-      // parents' proven land; `manifestRefs` (every repo's lane ref in this couple, impl-first/WE-last) is what
-      // `joinImplToCouples` indexes so a manifest-LESS impl PR inherits this couple's item/blockedBy/stackParents.
-      v.stackParents = m && Array.isArray(m.stackParents) ? m.stackParents.map(asItemId) : [];
-      v.manifestRefs = m && Array.isArray(m.repos) ? m.repos.map((r) => r && r.ref).filter(Boolean) : [];
-      // #2171 review-escalation signals off the manifest: cross-repo couple (>1 repo) + dismissed pre-PR findings.
-      v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
-      // #2390 — the SHA this repo's lane was cut from (a predecessor tip when overlap-stacked, #2387). Scoring
-      // from it below diffs the lane on its OWN delta, not the cumulative stack. `isLocalRepo` is the WE clone
-      // the drain runs in → key `we` (default when the origin slug is underivable); a sibling slug maps by short
-      // name. A missing/unmatched base is `null` → the scorer falls through to the unchanged `origin/main` basis.
-      v.base = manifestBaseForRepo(m, isLocalRepo(v.repo) ? (repoKeyFromSlug(localSlug) || 'we') : repoKeyFromSlug(v.repo));
-      v.dismissedFindings = m && Number.isFinite(Number(m.dismissedFindings)) ? Number(m.dismissedFindings) : 0;
-      v.prLabels = p.labels || [];
-      verdicts.push(v);
-    }
-  }
-  // #2393 — the impl-PR→WE-manifest `laneRef` join: a manifest-less impl PR (frontierui/plateau-app) INHERITS
-  // its couple's item + blockedBy + stackParents from the WE manifest that names its head ref in `repos[]`, so
-  // it is gated WITH its couple (couple-granular, impl-first/WE-last) instead of reading as an always-ready
-  // orphan. Runs once the GLOBAL candidate list is complete (a couple's impl + WE PRs can be in different repos).
-  joinImplToCouples(verdicts);
+  // #2421 (generalizes #2216) — total ci-lifecycle relabel first, per swept repo.
+  for (const repo of REPOS) reconciledLabels.push(...reconcileCiLifecycleLabels(repo, openPrContext));
+  // #xc7p3q9 (Fix 4 / B12) — the narrow→classify→attach→couple-join sequence is now `prepareDrainVerdicts`, the
+  // SAME wiring the test suite drives, so a future edit that drops `truncated`/`contextComplete` from the couple
+  // gate (or builds carrier health from the narrowed listings) breaks a test instead of silently regressing. The
+  // impl-PR→WE-manifest `laneRef` join inherits each manifest-less impl half's couple item + blockedBy +
+  // stackParents, and the couple gate reads carrier HEALTH from the label/only/repo-BLIND constellation-wide
+  // context (`buildCarrierHealth`) — NOT the narrowed list — so a stripped/narrowed-but-HEALTHY carrier lets the
+  // impl land (Fix 1) while a held/unnameable/degraded/truncated/absent-in-an-incomplete-context carrier defers
+  // BOTH halves (B7). The per-PR review-escalation waiver (#2820/#2423) is threaded via `escalationRelief`.
+  // #xc7p3q9 (R11) — build verdicts from the SINGLE `prsByRepo` narrowed above (no second narrow inside
+  // `prepareDrainVerdicts` — the round-1 double-narrow the reviewer flagged). The couple JOIN is deferred to
+  // `planDrainPass` AFTER the escalation/park pass (R5), so `held` is read from each carrier's final decision.
+  verdicts.push(...buildDrainVerdicts({
+    prsByRepo,
+    readOf: (repo, num) => sweepReads.get(prCacheKey(repo, num))?.value,
+    repos: REPOS,
+    requiredCheck: REQUIRED,
+    escalationRelief,
+    label,
+    isLocalRepo,
+    localSlug,
+  }));
   // #2393 — the `stackParents` proof-of-land gate's SECOND proof source: a parent that landed in a PRIOR drain
   // session, read off `origin/main`'s durable `bornAs:<hash>` record (#2392). Computed ONCE per pass over every
   // distinct stackParent hash (numeric ids are already-landed by construction — handled inside planLabelDrain;
@@ -2639,8 +3107,36 @@ async function runCli() {
     if (baselineStateChanged && !DRY_RUN) { try { writeFileSync(REVIEW_BASELINE_STATE_PATH, serializeBaselineState(baselineState)); } catch { /* best-effort local cache */ } }
   }
 
+  // #xc7p3q9 (R4/R5) — the couple JOIN runs HERE, AFTER the escalation/park pass, through the ONE shared seam
+  // `planDrainPass` (the same function the test suite drives). `candidateHeldByKey` carries each live candidate's
+  // FINAL held (its decision is now settled: skip/park from escalation), so a fresh carrier the escalation pass
+  // just parked reads `held` and its impl DEFERS — instead of the pre-escalation label snapshot that let the impl
+  // land while the carrier sat parked (R5). The join mutates `verdicts` in place (stamping `coupleDefer`); the
+  // cascade below re-orders those same stamped verdicts. This is runCli's SINGLE plan producer (R4) — the
+  // `replan` closure below only re-orders across merges, it never re-derives the join wiring.
+  const candidateHeldByKey = new Map();
+  for (const v of verdicts) candidateHeldByKey.set(`${v.repo || 'cwd'}::${v.num}`, v.decision !== 'merge');
+  const preparedPass = planDrainPass({
+    verdicts,
+    openPrContext,
+    escalationRelief,
+    label,
+    isLocalRepo,
+    localSlug,
+    candidateHeldByKey,
+    landedThisPass,
+    provenOnMain,
+  });
+  // #xc7p3q9 — the ONE re-plan wiring (shared by the dry-run report and the live cascade): re-orders the joined+
+  // stamped `verdicts` across merges, threading the SAME extraOpenItems + contextComplete + WE-repo predicate the
+  // seam used. No second, divergently-typed `planLabelDrain` invocation (R4).
+  const replan = (cands) => planLabelDrain(cands, { landedThisPass, provenOnMain, extraOpenItems: orderExtraOpenItems, contextComplete: !!openPrContext.contextComplete, isWeRepo: isLocalRepo });
   const toMerge = verdicts.filter((v) => v.decision === 'merge'); // @merge-gate-exempt the FINAL set actually merged; a held PR is `decision:'skip'` and MUST be excluded here — this is the hard AND that never lands a held PR
   const skipped = verdicts.filter((v) => v.decision === 'skip');
+  // #xc7p3q9 (R6) — the held couple's members (its `skip` carrier + its deferred impl half — both carry
+  // `coupleDeferReason:'held'`) so `decideBatchesIdleExit` can SUBTRACT them from `considered` rather than waive
+  // the queue-empty check wholesale.
+  const heldCoupleMembers = verdicts.filter((v) => v.coupleDeferReason === 'held').length;
 
   // #2313 — stamp the *why* onto every OTHER final skip too (a real non-manifest conflict, a red required
   // check, an unlandable merge state, …), not only the review-escalation park path above. Excludes: verdicts
@@ -2674,8 +3170,8 @@ async function runCli() {
   let deferred = [];
   if (DRY_RUN) {
     // Report the planned first-pass order (blockedBy + #2393 stackParents-honoured) without merging. Nothing has
-    // landed this run, so `landedThisPass` is empty — the plan reflects only prior-session `bornAs` proof.
-    const plan = planLabelDrain(verdicts, { landedThisPass, provenOnMain, extraOpenItems: orderExtraOpenItems });
+    // landed this run, so `landedThisPass` is empty — the plan reflects the shared seam's plan + prior-session proof.
+    const plan = preparedPass.plan;
     deferred = plan.deferred;
     if (!AS_JSON) {
       process.stderr.write(`  merge order: ${plan.ready.map((c) => repoTag(c.repo) + c.num + (c.item ? `→${c.item}` : '')).join(' → ') || '(none ready)'}\n`);
@@ -2692,7 +3188,7 @@ async function runCli() {
     const sameCand = (a, b) => a.num === b.num && a.repo === b.repo;
     let staleLandedOpenItems = [];
     for (;;) {
-      const plan = planLabelDrain(remaining, { landedThisPass, provenOnMain, extraOpenItems: orderExtraOpenItems });
+      const plan = replan(remaining);
       deferred = plan.deferred;
       staleLandedOpenItems = plan.staleLandedOpenItems || [];
       if (!plan.ready.length) break;
@@ -3006,7 +3502,7 @@ async function runCli() {
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 
@@ -3129,7 +3625,12 @@ async function runCli() {
       break;
     }
     // A pass that rebuilt a tip (pendingRebased) made progress — keep polling so it lands once CI re-runs.
-    const idlePass = merged.length === 0 && deferred.length === 0 && pendingRebased.length === 0;
+    // #xc7p3q9 (Fix 3) — a pass whose deferrals are ALL "blocked solely on a review-HELD carrier"
+    // (`deferralsAllHeldCouple`) counts as IDLE: a human hold will not clear by polling, so a `--watch
+    // --until-batches-idle` / `--max-idle` drain with one human-held couple must not run to its wall-clock cap
+    // holding the lease. A degraded/truncated fail-closed defer is NOT held-couple-only (it may clear on a
+    // re-fetch), so it keeps the pass non-idle — the watch keeps polling.
+    const idlePass = isPassIdle({ merged: merged.length, pendingRebased: pendingRebased.length, deferred });
     idle = idlePass ? idle + 1 : 0;
     if (MAX_IDLE != null && idle >= MAX_IDLE) break;
     // #2330 — batch-aware exit: stop once the active batch is fully delivered. Only trust a KNOWN, non-running
@@ -3143,7 +3644,7 @@ async function runCli() {
         process.stderr.write(`  · batch feed ${feed.reason || 'unavailable'} at ${BATCH_FEED} — --until-batches-idle is INERT (running unbounded until Ctrl-C). Point --batch-feed at the primary checkout's _site/active-progress.json.\n`);
       }
       batchNonRunningStreak = feed.known && feed.running.length === 0 ? batchNonRunningStreak + 1 : 0;
-      if (decideBatchesIdleExit({ enabled: true, idlePass, considered: result.considered, batchNonRunningStreak, debounce: BATCH_DEBOUNCE })) {
+      if (decideBatchesIdleExit({ enabled: true, idlePass, considered: result.considered, deferred, heldCoupleMembers: result.heldCoupleMembers, batchNonRunningStreak, debounce: BATCH_DEBOUNCE })) {
         // #2330 review (1) — the queue-empty signal (`considered === 0`) rides the SAME lagging label index
         // #2230 guards: after the producer resolves the LAST item its reservation drops (feed → non-running)
         // promptly, but that item's `ready-to-merge` label can stay invisible to `gh pr list --label` for
@@ -3160,7 +3661,11 @@ async function runCli() {
           if (!AS_JSON) process.stderr.write(`watch: STOPPING — duplicate id(s) survive on main (${summarizeDuplicates(lastDup)}); resolve by hand then re-run the drain.\n`);
           break;
         }
-        const confirmedEmpty = confirm.result.considered === 0 && confirm.merged.length === 0 && confirm.deferred.length === 0 && confirm.pendingRebased.length === 0;
+        // #xc7p3q9 (B5) — the confirm sweep uses the SAME held-couple allowance as `decideBatchesIdleExit`: a
+        // pass that landed/rebuilt nothing and whose only remaining deferral is a human-held couple is "settled"
+        // (the hold won't clear by polling). Without this, one held couple leaves `confirm.deferred.length > 0`
+        // forever and the confirm never fires — the drain spins to `--max-runtime-min` holding the lease.
+        const confirmedEmpty = isConfirmSweepSettled({ merged: confirm.merged.length, pendingRebased: confirm.pendingRebased.length, considered: confirm.result.considered, deferred: confirm.deferred });
         if (confirmedEmpty) {
           if (!AS_JSON) process.stderr.write(`watch: STOPPING — active batch idle, queue confirmed empty after repoll — batch fully delivered.\n`);
           break;

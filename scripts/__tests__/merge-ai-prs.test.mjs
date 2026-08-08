@@ -8,8 +8,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, planResolveOnLand, resolveIdsForLandedPass, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, latestRequiredCheck, rollupRowKind, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, computeNetDiffPaths, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
+import { isAiAuthor, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
+import { buildManifest } from '../readiness/lane-manifest.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -2604,5 +2605,447 @@ describe('#2899 jury J2/J4 — planResolveOnLand is TOTAL: nothing is silently w
   it('is total for the trivial cases too', () => {
     expect(planResolveOnLand()).toEqual({ resolve: [], deferred: [] });
     expect(planResolveOnLand({ landedItems: [null, undefined] })).toEqual({ resolve: [], deferred: [] });
+  });
+});
+
+describe('merge-ai-prs — #xc7p3q9: couple-join decoupled from the ready-to-merge / candidate scope', () => {
+  // Sibling of PR #2880/xq985wu (which decoupled merge-ORDERING). This decouples the COUPLE-JOIN gate: a coupled
+  // impl half must defer/land off its carrier's HEALTH read from the label/only/repo-BLIND, constellation-wide
+  // open-PR context — NOT off the carrier's presence in the `--only`/`--repos`-NARROWED candidate list. Every
+  // case drives the REAL runCli sequence through the SHARED `planDrainPass` (narrowPrsByRepo → buildDrainVerdicts
+  // (classifyPr + attach) → buildCarrierHealth → joinImplToCouples → planLabelDrain). No hand-built verdicts, no
+  // re-typed composition (B12) — a future edit that drops `truncated`/`contextComplete` from the join breaks here.
+  const WE = null;                                   // the local WE clone (repo=null, key 'cwd') — runCli's convention
+  const FUI = 'chalbert/frontierui';
+  const localSlug = 'chalbert/web-everything';
+  const isLocalRepo = (repo) => repo == null || repo === localSlug;
+  const claude = { authors: [{ name: 'Claude Opus 4.8', email: 'noreply@anthropic.com' }] };
+  const green = [{ name: 'test', conclusion: 'SUCCESS' }];
+  // a landable AI PR object shaped exactly as `gh pr list --json …` returns it (classifyPr rules it 'merge')
+  const ghPr = (number, headRefName, { labels = [] } = {}) =>
+    ({ number, title: 't', body: 'what changed and why', headRefName, statusCheckRollup: green, mergeable: 'MERGEABLE', mergeStateStatus: 'UNSTABLE', labels });
+
+  // The label/only-BLIND openPrContext (constellation-wide, as collectOpenPrContext produces over CONTEXT_REPOS)
+  // holding ONE WE carrier — present here regardless of how the candidate sweep was narrowed. It is built through
+  // the SHARED, exported `reduceOpenPrContext` (the ONE place `contextComplete` is computed), so the tests drive
+  // the real relationship, never a re-typed formula (R4 — the round-1 hole was a hand-computed `contextComplete`).
+  //   - `degradedRead:true`  → the REAL thrown-read shape `{manifest:null, degraded:true}` (readPrManifest threw).
+  //   - `degraded:true`      → the commits-only failure (valid manifest + degraded flag) — the harmless half.
+  //   - `listingFailed:true` → a swallowed `gh pr list` error (B2): the carrier is ABSENT from the context maps.
+  //   - `truncated:true`     → the listing hit the `--limit` cap (the REAL trigger: a padded, over-cap page).
+  //   - `extraOpenPrs`       → additional open PRs the blind context shows (e.g. the impl half, for R7).
+  const contextWithCarrier = ({ carrierNum = 77, carrierRepo = null, item = 'xcarr01', refs = ['lane/xcarr01-fui', 'lane/xcarr01-we'], labels = ['ready-to-merge'], manifest = null, degraded = false, degradedRead = false, truncated = false, listingFailed = false, extraOpenPrs = [] } = {}) => {
+    const m = degradedRead ? null : (manifest ?? { item, repos: refs.map((ref) => ({ repo: ref.endsWith('-we') ? 'we' : 'fui', ref })), blockedBy: [], stackParents: [] });
+    const key = `${carrierRepo || 'cwd'}::${carrierNum}`;
+    const isDeg = degraded || degradedRead;
+    const carrierRef = (m && m.repos.find((r) => r.repo === 'we')?.ref) || refs.find((r) => r.endsWith('-we')) || refs[0];
+    // build the per-repo listing + per-PR reads the way collectOpenPrContext does, then REDUCE via the ONE shared
+    // fn — so `truncated` is derived from a REAL over-cap page and `contextComplete` from the shared formula.
+    const carrierPr = ghPr(carrierNum, carrierRef, { labels });
+    const pad = truncated ? Array.from({ length: OPEN_PR_LIST_LIMIT }, (_, i) => ghPr(900000 + i, `lane/pad-${i}`, {})) : [];
+    const listings = [{ repo: carrierRepo, prs: listingFailed ? [] : [carrierPr, ...extraOpenPrs, ...pad], ...(listingFailed ? { failed: true } : {}) }];
+    const reads = new Map();
+    if (!listingFailed) reads.set(key, { manifest: m, commits: [], degraded: isDeg });
+    for (const p of extraOpenPrs) reads.set(`${carrierRepo || 'cwd'}::${p.number}`, { manifest: null, commits: [], degraded: false });
+    return reduceOpenPrContext({ listings, reads, reconcileRan: true });
+  };
+
+  // Faithful reproduction of runCli's post-listing sequence via the SHARED `planDrainPass` — the ONE wiring runCli
+  // itself calls (B12). Returns { verdicts, plan } so a test can assert the DISCRIMINATING per-verdict fields
+  // (coupleDeferReason / joinedToCouple / coupleCarrier), not just the ready/deferred number arrays.
+  const drivePlan = ({ listings, REPOS, onlyPr = null, onlyRepo = null, openPrContext, reads, escalationRelief = { prs: [], passWide: false }, label = 'ready-to-merge' }) =>
+    planDrainPass({
+      listings,
+      openPrContext,
+      repos: REPOS,
+      onlyPr,
+      onlyRepo,
+      readOf: (repo, num) => reads.get(`${repo || 'cwd'}::${num}`),
+      requiredCheck: 'test',
+      escalationRelief,
+      label,
+      isLocalRepo,
+      localSlug,
+    });
+
+  // #xc7p3q9 (B7 invariant) — for a plan built from >1-repo manifests, no carrier may be in `ready` while a verdict
+  // JOINED to it is in `deferred` (the couple would land WE-first with its impl still open).
+  const noWeFirstSplit = ({ verdicts, plan }) => {
+    const readyNums = new Set(plan.ready.map((c) => c.num));
+    const deferredNums = new Set(plan.deferred.map((d) => d.num));
+    return verdicts
+      .filter((v) => v.joinedToCouple != null && v.coupleCarrier && deferredNums.has(v.num))
+      .every((v) => !readyNums.has(v.coupleCarrier.num));
+  };
+
+  // `--only <impl half>` narrows the candidate list to the ONE frontierui PR; the WE carrier is absent from it
+  // (stripped / narrowed) but present in the blind context.
+  const implOnly = (openPrContext, { implNum = 55, headRef = 'lane/xcarr01-fui' } = {}) => ({
+    REPOS: [WE, FUI],
+    listings: [{ repo: WE, prs: [] }, { repo: FUI, prs: [ghPr(implNum, headRef)] }],
+    reads: new Map([[`${FUI}::${implNum}`, { commits: [claude, claude], manifest: null }]]),
+    onlyPr: String(implNum),
+    onlyRepo: FUI,
+    openPrContext,
+  });
+
+  it('carrierDeferDecision — the pure fail-closed table (truncated → absent×completeness → degraded → unnameable → held)', () => {
+    expect(carrierDeferDecision({ health: { held: false, nameable: true, degraded: false }, truncated: true })).toEqual({ defer: true, reason: 'truncated', humanTerminal: false });
+    // B1/B2/B3 — absence in an INCOMPLETE context is UNKNOWN → fail closed; only a COMPLETE context proves "landed".
+    expect(carrierDeferDecision({ health: null, contextComplete: false })).toEqual({ defer: true, reason: 'incomplete-context', humanTerminal: false });
+    expect(carrierDeferDecision({ health: null })).toEqual({ defer: true, reason: 'incomplete-context', humanTerminal: false });   // default: not proven complete
+    expect(carrierDeferDecision({ health: null, contextComplete: true })).toEqual({ defer: false, reason: 'absent-landed', humanTerminal: false });
+    expect(carrierDeferDecision({ health: { held: false, nameable: true, degraded: true }, contextComplete: true })).toEqual({ defer: true, reason: 'degraded', humanTerminal: false });
+    expect(carrierDeferDecision({ health: { held: false, nameable: false, degraded: false }, contextComplete: true })).toEqual({ defer: true, reason: 'unnameable', humanTerminal: false });
+    expect(carrierDeferDecision({ health: { held: true, nameable: true, degraded: false }, contextComplete: true })).toEqual({ defer: true, reason: 'held', humanTerminal: true });
+    expect(carrierDeferDecision({ health: { held: false, nameable: true, degraded: false }, contextComplete: true })).toEqual({ defer: false, reason: 'healthy', humanTerminal: false });
+    // #xc7p3q9 (R9) — a HELD carrier with read noise defers on the noisier reason, but `humanTerminal` still flags
+    // the hold (it won't clear by polling) so idle accounting treats the couple as settled.
+    expect(carrierDeferDecision({ health: { held: true, nameable: true, degraded: true }, contextComplete: true })).toEqual({ defer: true, reason: 'degraded', humanTerminal: true });
+    expect(carrierDeferDecision({ health: { held: true, nameable: true, degraded: false }, truncated: true })).toEqual({ defer: true, reason: 'truncated', humanTerminal: true });
+  });
+
+  it('AC1 (Fix 1) — `--only <impl>` with a HEALTHY open labelled carrier in a COMPLETE context → impl LANDS', () => {
+    const { verdicts, plan } = drivePlan(implOnly(contextWithCarrier({ labels: ['ready-to-merge'] })));
+    expect(plan.ready.map((c) => c.num)).toEqual([55]);
+    expect(plan.deferred).toEqual([]);
+    // B11 — DISCRIMINATING assertion so this fails on a diff-revert (not a baseline-guard): the impl was JOINED to
+    // the healthy carrier and cleared by its HEALTH read, not merely treated as an orphan.
+    const impl = verdicts.find((v) => v.num === 55);
+    expect(impl.joinedToCouple).toBe('xcarr01');
+    expect(impl.coupleDeferReason).toBe('healthy');
+  });
+
+  it('AC1-mirror (B3) — a FULL sweep with an EMPTY/INCOMPLETE context (RECONCILE false) → the impl DEFERS', () => {
+    // The old mirror asserted "empty context → impl ready" — that WAS the B3 fail-open. An incomplete context can
+    // never prove the carrier landed, so the coupled impl must fail closed. The carrier is a live candidate here
+    // (a full sweep), so the impl joins it and defers; the two-sided defer (B7) holds the carrier back too.
+    const emptyCtx = { prsByRepo: new Map(), manifestByPr: new Map(), degradedByPr: new Map(), openItems: new Set(), truncated: false, contextComplete: false };
+    const carrierManifest = { item: 'xcarr01', repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }], blockedBy: [], stackParents: [] };
+    const res = drivePlan({
+      REPOS: [WE, FUI],
+      listings: [{ repo: WE, prs: [ghPr(77, 'lane/xcarr01-we', { labels: ['ready-to-merge'] })] }, { repo: FUI, prs: [ghPr(55, 'lane/xcarr01-fui')] }],
+      onlyPr: null,
+      onlyRepo: null,
+      openPrContext: emptyCtx,
+      reads: new Map([[`cwd::77`, { commits: [claude, claude], manifest: carrierManifest }], [`${FUI}::55`, { commits: [claude, claude], manifest: null }]]),
+    });
+    expect(res.plan.ready).toEqual([]);                                   // neither half lands
+    expect(res.plan.deferred.map((d) => d.num).sort((a, b) => a - b)).toEqual([55, 77]);
+    expect(res.verdicts.find((v) => v.num === 55).coupleDeferReason).toBe('incomplete-context');
+    expect(noWeFirstSplit(res)).toBe(true);
+  });
+
+  it('AC2 — `--only <impl>` with a HELD carrier → impl DEFERS (the gate still fires when it should)', () => {
+    const { plan } = drivePlan(implOnly(contextWithCarrier({ labels: [REVIEW_LABELS.changes] })));
+    expect(plan.ready).toEqual([]);
+    expect(plan.deferred.map((d) => d.num)).toEqual([55]);
+    expect(plan.deferred[0].heldCoupleOnly).toBe(true);
+  });
+
+  it('AC3 (Fix 1/2) — `--repos=<implSlug>` scope where WE is NOT a candidate → fail CLOSED past a held carrier', () => {
+    // The candidate scope is frontierui ALONE (WE excluded), but the constellation-wide blind context still holds
+    // the held WE carrier — so the impl joins it and defers rather than orphan-landing.
+    const { plan } = drivePlan({
+      REPOS: [FUI],
+      listings: [{ repo: FUI, prs: [ghPr(55, 'lane/xcarr01-fui')] }],
+      onlyPr: null,
+      onlyRepo: null,
+      openPrContext: contextWithCarrier({ labels: [REVIEW_LABELS.human] }),
+      reads: new Map([[`${FUI}::55`, { commits: [claude, claude], manifest: null }]]),
+    });
+    expect(plan.ready).toEqual([]);
+    expect(plan.deferred.map((d) => d.num)).toEqual([55]);
+  });
+
+  it('AC4 (B4) — UNNAMEABLE carrier via the REAL NaN→JSON→"item":null→0 round-trip → fail CLOSED', () => {
+    // Reproduce the PRODUCTION shape end-to-end: buildManifest stamps `item: NaN`, JSON.stringify prints it as
+    // `"item": null`, and the drain RE-READS that off the PR body — so the manifest the gate sees carries
+    // `item: null`, which the OLD `isItemId` re-normalized to `0` (nameable:true → healthy → land). The fix reads
+    // it unnameable. Driving the full round-trip (not an in-memory NaN) is what the review required.
+    const built = buildManifest({ item: undefined, repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }] });
+    expect(Number.isNaN(built.item)).toBe(true);
+    const m = JSON.parse(JSON.stringify(built));        // the re-read shape the drain actually consumes
+    expect(m.item).toBe(null);                          // NaN serialized to null (NOT preserved as NaN)
+    // sanity: the health map derives `nameable` from the SAME item expression, and reads this shape unnameable.
+    const ctx = contextWithCarrier({ manifest: m, labels: ['ready-to-merge'] });
+    expect([...buildCarrierHealth(ctx).values()][0].nameable).toBe(false);
+    const { verdicts, plan } = drivePlan(implOnly(ctx));
+    expect(plan.ready).toEqual([]);
+    expect(plan.deferred.map((d) => d.num)).toEqual([55]);
+    expect(verdicts.find((v) => v.num === 55).coupleDeferReason).toBe('unnameable');
+    // NOT a held-couple defer (fail-closed on a bad id, not a human hold) → does NOT count as idle.
+    expect(plan.deferred[0].heldCoupleOnly).toBeUndefined();
+  });
+
+  it('AC5 (Fix 2) — a TRUNCATED listing → fail CLOSED (and NOT idle)', () => {
+    const t = drivePlan(implOnly(contextWithCarrier({ labels: ['ready-to-merge'], truncated: true })));
+    expect(t.plan.deferred.map((d) => d.num)).toEqual([55]);
+    expect(t.verdicts.find((v) => v.num === 55).coupleDeferReason).toBe('truncated');
+    expect(deferralsAllHeldCouple(t.plan.deferred)).toBe(false);
+  });
+
+  it('AC5b (B1) — the REAL degraded read `{manifest:null, degraded:true}` (readPrManifest THREW) → fail CLOSED', () => {
+    // The old `buildCarrierHealth` did `if (!manifest || !Array.isArray(manifest.repos)) continue;` — dropping the
+    // EXACT shape a thrown read emits BEFORE the `degraded` branch could fire, so the degraded branch was
+    // unreachable in the case it exists for. Drive that real shape through a FULL sweep (the carrier is a live
+    // candidate so its refs come from the sweep read; only the CONTEXT read threw). Both halves must fail closed.
+    const carrierManifest = { item: 'xcarr01', repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }], blockedBy: [], stackParents: [] };
+    const ctx = contextWithCarrier({ carrierNum: 77, degradedRead: true });   // manifestByPr → null + degradedByPr → true
+    expect(ctx.manifestByPr.get('cwd::77')).toBe(null);                        // the thrown-read shape (not a valid manifest)
+    expect([...buildCarrierHealth(ctx).values()][0]).toMatchObject({ degraded: true, unreadable: true, nameable: false });
+    const res = drivePlan({
+      REPOS: [WE, FUI],
+      listings: [{ repo: WE, prs: [ghPr(77, 'lane/xcarr01-we', { labels: ['ready-to-merge'] })] }, { repo: FUI, prs: [ghPr(55, 'lane/xcarr01-fui')] }],
+      onlyPr: null,
+      onlyRepo: null,
+      openPrContext: ctx,
+      reads: new Map([[`cwd::77`, { commits: [claude, claude], manifest: carrierManifest }], [`${FUI}::55`, { commits: [claude, claude], manifest: null }]]),
+    });
+    expect(res.plan.ready).toEqual([]);
+    expect(res.plan.deferred.map((d) => d.num).sort((a, b) => a - b)).toEqual([55, 77]);
+    expect(res.verdicts.find((v) => v.num === 55).coupleDeferReason).toBe('degraded');
+    expect(deferralsAllHeldCouple(res.plan.deferred)).toBe(false);            // an error may clear on re-fetch → keep polling
+    expect(noWeFirstSplit(res)).toBe(true);
+  });
+
+  it('AC6 (Fix 3) — a pass whose ONLY deferral is a human-held couple counts as IDLE; a fail-closed defer does not', () => {
+    const held = drivePlan(implOnly(contextWithCarrier({ labels: [REVIEW_LABELS.human] }))).plan;
+    expect(deferralsAllHeldCouple(held.deferred)).toBe(true);   // human hold won't clear by polling → idle
+    const trunc = drivePlan(implOnly(contextWithCarrier({ labels: ['ready-to-merge'], truncated: true }))).plan;
+    expect(deferralsAllHeldCouple(trunc.deferred)).toBe(false); // may clear on a re-fetch → keep polling
+    expect(deferralsAllHeldCouple([])).toBe(false);             // an empty deferred set is not "held-couple idle"
+  });
+
+  it('AC6b (B5/R6) — decideBatchesIdleExit SUBTRACTS the held couple\'s members from `considered` (not a wholesale waiver)', () => {
+    // The production launcher (drain-push-at-close) runs `--watch --until-batches-idle` with NO `--max-idle`, so it
+    // exits via `decideBatchesIdleExit` — where `considered = verdicts.length` counts BOTH held-couple halves. R6:
+    // subtract those members rather than waiving the queue-empty check wholesale (which exited with in-flight,
+    // still-running-CI candidates in the count).
+    const heldDeferred = drivePlan(implOnly(contextWithCarrier({ labels: [REVIEW_LABELS.human] }))).plan.deferred;
+    const truncDeferred = drivePlan(implOnly(contextWithCarrier({ labels: ['ready-to-merge'], truncated: true }))).plan.deferred;
+    // the whole queue IS the held couple (both members) → EXIT (was blocked forever on `considered>0`).
+    expect(decideBatchesIdleExit({ enabled: true, idlePass: true, considered: 2, deferred: heldDeferred, heldCoupleMembers: 2, batchNonRunningStreak: 2, debounce: 2 })).toBe(true);
+    // R6 REGRESSION — in-flight NON-held candidates (running CI) ALONGSIDE the held couple → NO exit (the wholesale
+    // waiver wrongly exited here, dropping the in-flight PRs).
+    expect(decideBatchesIdleExit({ enabled: true, idlePass: true, considered: 9, deferred: heldDeferred, heldCoupleMembers: 1, batchNonRunningStreak: 2, debounce: 2 })).toBe(false);
+    // a truncated fail-closed defer is NOT a held member (heldCoupleMembers 0) → keep polling.
+    expect(decideBatchesIdleExit({ enabled: true, idlePass: true, considered: 2, deferred: truncDeferred, heldCoupleMembers: 0, batchNonRunningStreak: 2, debounce: 2 })).toBe(false);
+    // an empty queue still exits (the pre-existing behaviour is preserved).
+    expect(decideBatchesIdleExit({ enabled: true, idlePass: true, considered: 0, heldCoupleMembers: 0, batchNonRunningStreak: 2, debounce: 2 })).toBe(true);
+    // a queue of non-held work (red PRs churning, nothing deferred) still keeps polling.
+    expect(decideBatchesIdleExit({ enabled: true, idlePass: true, considered: 3, heldCoupleMembers: 0, batchNonRunningStreak: 2, debounce: 2 })).toBe(false);
+  });
+
+  it('AC7 — no regression: FULL sweep, all couples healthy → same ready/deferred partition as the merge base', () => {
+    const item = 'xcarr01';
+    const carrierManifest = { item, repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }], blockedBy: [], stackParents: [] };
+    const { verdicts, plan } = drivePlan({
+      REPOS: [WE, FUI],
+      listings: [
+        { repo: WE, prs: [ghPr(77, 'lane/xcarr01-we', { labels: ['ready-to-merge'] })] },
+        { repo: FUI, prs: [ghPr(55, 'lane/xcarr01-fui')] },
+      ],
+      onlyPr: null,
+      onlyRepo: null,
+      openPrContext: contextWithCarrier({ carrierNum: 77, item, manifest: carrierManifest, labels: ['ready-to-merge'] }),
+      reads: new Map([
+        [`cwd::77`, { commits: [claude, claude], manifest: carrierManifest }],
+        [`${FUI}::55`, { commits: [claude, claude], manifest: null }],
+      ]),
+    });
+    expect(plan.ready.map((c) => c.num).sort((a, b) => a - b)).toEqual([55, 77]);   // carrier + impl both land
+    expect(plan.deferred).toEqual([]);
+    // B11 — DISCRIMINATING assertion (fails on a diff-revert): the impl actually JOINED the couple and cleared on
+    // its carrier's HEALTH, rather than passing merely because it read as an unjoined orphan.
+    const impl = verdicts.find((v) => v.num === 55);
+    expect(impl.joinedToCouple).toBe('xcarr01');
+    expect(impl.coupleDeferReason).toBe('healthy');
+  });
+
+  it('B2 — a SWALLOWED `gh pr list` failure (carrier ABSENT from an incomplete context) → fail CLOSED, not orphan-land', () => {
+    // `collectOpenPrContext`'s `catch { return [repo, [], true] }` now marks the context INCOMPLETE. The carrier is
+    // a live candidate in the SWEEP (so the impl joins it), but ABSENT from the CONTEXT maps (its listing threw).
+    // Absence in an incomplete context is UNKNOWN → defer. Contrast: the SAME absence in a COMPLETE context is a
+    // real land → the impl proceeds.
+    const carrierManifest = { item: 'xcarr01', repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }], blockedBy: [], stackParents: [] };
+    const listings = [{ repo: WE, prs: [ghPr(77, 'lane/xcarr01-we', { labels: ['ready-to-merge'] })] }, { repo: FUI, prs: [ghPr(55, 'lane/xcarr01-fui')] }];
+    const reads = new Map([[`cwd::77`, { commits: [claude, claude], manifest: carrierManifest }], [`${FUI}::55`, { commits: [claude, claude], manifest: null }]]);
+    const failed = drivePlan({ REPOS: [WE, FUI], listings, onlyPr: null, onlyRepo: null, reads, openPrContext: contextWithCarrier({ listingFailed: true }) });
+    expect(failed.plan.ready).toEqual([]);
+    expect(failed.plan.deferred.map((d) => d.num).sort((a, b) => a - b)).toEqual([55, 77]);
+    expect(failed.verdicts.find((v) => v.num === 55).coupleDeferReason).toBe('incomplete-context');
+    // the discriminating contrast: the SAME sweep with a COMPLETE context (listing succeeded, carrier present +
+    // healthy) → the impl reads its carrier's real HEALTH and lands (it is the FAILED-listing flag, not the
+    // absence itself, that fails the case closed).
+    const complete = drivePlan({ REPOS: [WE, FUI], listings, onlyPr: null, onlyRepo: null, reads, openPrContext: contextWithCarrier({ carrierNum: 77, item: 'xcarr01', manifest: carrierManifest, labels: ['ready-to-merge'] }) });
+    expect(complete.plan.ready.map((c) => c.num).sort((a, b) => a - b)).toEqual([55, 77]);
+    expect(complete.verdicts.find((v) => v.num === 55).coupleDeferReason).toBe('healthy');
+  });
+
+  it('B6 — the couple gate\'s `held` agrees with classifyPr\'s under the `--no-review-escalation` waiver', () => {
+    const carrierManifest = { item: 'xcarr01', repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }], blockedBy: [], stackParents: [] };
+    const listings = [{ repo: WE, prs: [ghPr(77, 'lane/xcarr01-we', { labels: ['ready-to-merge', REVIEW_LABELS.pending] })] }, { repo: FUI, prs: [ghPr(55, 'lane/xcarr01-fui')] }];
+    const reads = new Map([[`cwd::77`, { commits: [claude, claude], manifest: carrierManifest }], [`${FUI}::55`, { commits: [claude, claude], manifest: null }]]);
+    const ctx = contextWithCarrier({ carrierNum: 77, item: 'xcarr01', manifest: carrierManifest, labels: ['ready-to-merge', REVIEW_LABELS.pending] });
+    // WITHOUT the waiver: the carrier is review:pending → classifyPr skips it AND the gate reads it held → impl defers.
+    const noWaiver = drivePlan({ REPOS: [WE, FUI], listings, onlyPr: null, onlyRepo: null, reads, openPrContext: ctx });
+    expect(noWaiver.plan.ready).toEqual([]);
+    expect(noWaiver.verdicts.find((v) => v.num === 55).coupleDeferReason).toBe('held');
+    // WITH the pass-wide waiver + a label: classifyPr lands the carrier AND the gate must read it NOT held (else the
+    // couple lands WE-first — the B6 inversion). Both halves land; the two `held` notions agree.
+    const waiver = drivePlan({ REPOS: [WE, FUI], listings, onlyPr: null, onlyRepo: null, reads, openPrContext: ctx, escalationRelief: { prs: [], passWide: true }, label: 'ready-to-merge' });
+    expect(waiver.plan.ready.map((c) => c.num).sort((a, b) => a - b)).toEqual([55, 77]);
+    expect(waiver.verdicts.find((v) => v.num === 55).coupleDeferReason).toBe('healthy');
+  });
+
+  it('B7 — a healthy carrier whose impl fails closed (truncated) DEFERS BOTH halves (never lands WE-first)', () => {
+    const carrierManifest = { item: 'xcarr01', repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }], blockedBy: [], stackParents: [] };
+    const res = drivePlan({
+      REPOS: [WE, FUI],
+      listings: [{ repo: WE, prs: [ghPr(77, 'lane/xcarr01-we', { labels: ['ready-to-merge'] })] }, { repo: FUI, prs: [ghPr(55, 'lane/xcarr01-fui')] }],
+      onlyPr: null,
+      onlyRepo: null,
+      openPrContext: contextWithCarrier({ carrierNum: 77, item: 'xcarr01', manifest: carrierManifest, labels: ['ready-to-merge'], truncated: true }),
+      reads: new Map([[`cwd::77`, { commits: [claude, claude], manifest: carrierManifest }], [`${FUI}::55`, { commits: [claude, claude], manifest: null }]]),
+    });
+    // the carrier is HEALTHY (green, labelled, not held) — without the two-sided defer it would land alone.
+    expect(res.plan.ready).toEqual([]);
+    expect(res.plan.deferred.map((d) => d.num).sort((a, b) => a - b)).toEqual([55, 77]);
+    expect(noWeFirstSplit(res)).toBe(true);
+  });
+
+  it('B8 — resolveContextRepos never holds BOTH `null` and the local slug (no double-listing of the local repo)', () => {
+    const hasBoth = (arr) => arr.includes(null) && arr.includes(localSlug);
+    // `--this-repo` (REPOS=[null]) + the constellation self-slug: the local repo must appear ONCE (as null).
+    expect(hasBoth(resolveContextRepos([null], localSlug))).toBe(false);
+    // the default full constellation (REPOS carries the self slug): once, as the slug.
+    expect(hasBoth(resolveContextRepos([localSlug, FUI, 'chalbert/plateau-app'], localSlug))).toBe(false);
+    // `--repos=<implSlug>` (WE narrowed out): the constellation still adds WE once, never doubled.
+    expect(hasBoth(resolveContextRepos([FUI], localSlug))).toBe(false);
+    // and the widened context DOES still include the frontierui + plateau-app carriers for the blind health read.
+    expect(resolveContextRepos([null], localSlug)).toEqual(expect.arrayContaining([FUI, 'chalbert/plateau-app']));
+    // R10 — a short-name `--repos=frontierui` normalizes to `chalbert/frontierui`, so the context never holds a
+    // bogus short-name whose listing throws (which pre-R3 latched contextComplete:false permanently).
+    expect(resolveRepos({ repos: 'frontierui', self: localSlug })).toEqual([FUI]);
+    expect(resolveRepos({ repos: 'frontierui,chalbert/plateau-app', self: localSlug })).toEqual([FUI, 'chalbert/plateau-app']);
+  });
+
+  const carrierManifestFull = { item: 'xcarr01', repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }], blockedBy: [], stackParents: [] };
+
+  it('R4 structural — reduceOpenPrContext is the ONE place contextComplete is computed (binds mutations 2/3/4)', () => {
+    const carrierPr = ghPr(77, 'lane/xcarr01-we', { labels: ['ready-to-merge'] });
+    const okReads = new Map([['cwd::77', { manifest: carrierManifestFull, commits: [1], degraded: false }]]);
+    // healthy + reconcile ran + no failure/truncation/degrade → COMPLETE
+    expect(reduceOpenPrContext({ listings: [{ repo: null, prs: [carrierPr] }], reads: okReads, reconcileRan: true }).contextComplete).toBe(true);
+    // mutation 3 — reconcile never ran (a bare /merge sweep / --no-reconcile-labels) → INCOMPLETE by construction
+    expect(reduceOpenPrContext({ listings: [{ repo: null, prs: [carrierPr] }], reads: okReads, reconcileRan: false }).contextComplete).toBe(false);
+    // mutation 2 — a swallowed `gh pr list` (failed) → INCOMPLETE
+    expect(reduceOpenPrContext({ listings: [{ repo: null, prs: [], failed: true }], reads: new Map(), reconcileRan: true }).contextComplete).toBe(false);
+    // mutation 4 — a degraded per-PR read → INCOMPLETE, and degradedByPr records the truth
+    const deg = reduceOpenPrContext({ listings: [{ repo: null, prs: [carrierPr] }], reads: new Map([['cwd::77', { manifest: carrierManifestFull, commits: [1], degraded: true }]]), reconcileRan: true });
+    expect(deg.contextComplete).toBe(false);
+    expect(deg.degradedByPr.get('cwd::77')).toBe(true);
+  });
+
+  it('R4 structural — collectOpenPrContext (injectable) fails a THROWING listing CLOSED (binds the swallowed-listing catch)', async () => {
+    const good = await collectOpenPrContext({ contextRepos: [null, FUI], listOpenPrs: async () => [], fetchReads: async () => new Map() });
+    expect(good.contextComplete).toBe(true);
+    const failed = await collectOpenPrContext({
+      contextRepos: [null, FUI],
+      listOpenPrs: async (repo) => { if (repo === FUI) throw new Error('gh: server error (HTTP 500)'); return []; },
+      fetchReads: async () => new Map(),
+    });
+    expect(failed.contextComplete).toBe(false);   // a swallowed throw → INCOMPLETE (fail closed)
+  });
+
+  it('R3 — isContentsNotFound: a 404 is definitive-absent (degraded:false); other throws degrade', () => {
+    expect(isContentsNotFound({ stderr: 'gh: Not Found (HTTP 404)' })).toBe(true);
+    expect(isContentsNotFound({ message: 'HTTP 404' })).toBe(true);
+    expect(isContentsNotFound({ stderr: 'HTTP 500 Internal Server Error' })).toBe(false);
+    expect(isContentsNotFound({ stderr: 'could not connect to github.com' })).toBe(false);
+    expect(isContentsNotFound(null)).toBe(false);
+  });
+
+  it('R3 — readRemoteManifestViaApi error taxonomy: 404 → degraded:false; 5xx → degraded:true (stubbed exec)', async () => {
+    const throwing = (err) => async () => { throw err; };
+    const notFound = await readRemoteManifestViaApi({ exec: throwing(Object.assign(new Error('x'), { stderr: 'gh: Not Found (HTTP 404)' })), repo: FUI, headRef: 'lane/x-fui', apiArgs: () => [] });
+    expect(notFound).toEqual({ manifest: null, degraded: false });   // confirmed absent — NOT degraded (R3 root fix)
+    const serverErr = await readRemoteManifestViaApi({ exec: throwing(Object.assign(new Error('x'), { stderr: 'HTTP 502 Bad Gateway' })), repo: FUI, headRef: 'lane/x-fui', apiArgs: () => [] });
+    expect(serverErr).toEqual({ manifest: null, degraded: true });   // transport failure — fail closed
+    // a realistic constellation (WE carrier + a manifest-less impl half whose contents 404s) is NOT degraded → COMPLETE
+    const ctx = contextWithCarrier({ carrierNum: 77, item: 'xcarr01', manifest: carrierManifestFull, extraOpenPrs: [ghPr(55, 'lane/xcarr01-fui')] });
+    expect(ctx.contextComplete).toBe(true);   // a flag whose production value is a constant is not a gate
+  });
+
+  it('R1 — the PLAN-WIDE invariant: an UN-joined manifest-less non-WE verdict in an INCOMPLETE context DEFERS', () => {
+    // The un-joined orphan the per-carrier gate structurally misses (no carrier readable → no couple key to join).
+    const orphanImpl = { num: 55, repo: FUI, headRef: 'lane/x-fui', hasManifest: false, item: null, blockedBy: [], stackParents: [], decision: 'merge' };
+    const inc = planLabelDrain([orphanImpl], { contextComplete: false, isWeRepo: isLocalRepo });
+    expect(inc.ready).toEqual([]);                                   // fail closed — MIGHT be a coupled impl
+    expect(inc.deferred.map((d) => d.num)).toEqual([55]);
+    const comp = planLabelDrain([orphanImpl], { contextComplete: true, isWeRepo: isLocalRepo });
+    expect(comp.ready.map((c) => c.num)).toEqual([55]);             // a COMPLETE context proves absence → lands
+    // a WE-repo orphan is NOT force-deferred (only non-WE manifest-less verdicts might be a coupled impl half)
+    const weOrphan = { num: 7, repo: WE, headRef: 'lane/x-we', hasManifest: false, item: null, blockedBy: [], stackParents: [], decision: 'merge' };
+    expect(planLabelDrain([weOrphan], { contextComplete: false, isWeRepo: isLocalRepo }).ready.map((c) => c.num)).toEqual([7]);
+  });
+
+  it('R2 — a verdict never waitOn its OWN item (no self-referential livelock)', () => {
+    const selfBlock = { num: 9, repo: WE, item: 2200, blockedBy: [2200], stackParents: [], decision: 'merge', hasManifest: true };
+    // the self-edge is stripped — WITHOUT the strip this defers forever (structurally unsatisfiable, the livelock)
+    expect(planLabelDrain([selfBlock]).ready.map((c) => c.num)).toEqual([9]);
+    expect(planLabelDrain([selfBlock]).deferred).toEqual([]);
+  });
+
+  it('R2 — the --assume-complete-context escape hatch (forcing contextComplete) lands a couple stuck on an incomplete context', () => {
+    const ctx = contextWithCarrier({ listingFailed: true });   // carrier ABSENT from an incomplete context
+    const stuck = drivePlan(implOnly(ctx));
+    expect(stuck.plan.ready).toEqual([]);                       // normally fails closed (livelock territory)
+    const forced = drivePlan(implOnly({ ...ctx, contextComplete: true }));   // what --assume-complete-context does
+    expect(forced.plan.ready.map((c) => c.num)).toEqual([55]);  // absent-landed → the impl lands
+  });
+
+  it('R5 — the couple gate reads the carrier\'s FINAL decision (candidateHeldByKey), not the pre-escalation label', () => {
+    const refs = ['lane/xcarr01-we', 'lane/xcarr01-fui'];
+    const ctx = contextWithCarrier({ carrierNum: 77, item: 'xcarr01', manifest: carrierManifestFull, labels: ['ready-to-merge'] });
+    const mkVerdicts = () => ([
+      { num: 55, repo: FUI, headRef: 'lane/xcarr01-fui', hasManifest: false, item: null, blockedBy: [], stackParents: [], decision: 'merge', prLabels: [] },
+      { num: 77, repo: WE, headRef: 'lane/xcarr01-we', hasManifest: true, item: 'xcarr01', manifestRefs: refs, blockedBy: [], stackParents: [], decision: 'skip', prLabels: ['ready-to-merge'] },
+    ]);
+    // the carrier's LABELS read healthy (only ready-to-merge), but the escalation pass PARKED it → decision skip.
+    const held = new Map([['cwd::77', true], [`${FUI}::55`, false]]);
+    const withHeld = planDrainPass({ verdicts: mkVerdicts(), openPrContext: ctx, candidateHeldByKey: held, isLocalRepo, localSlug, label: 'ready-to-merge' });
+    expect(withHeld.plan.ready).toEqual([]);                                              // impl defers with its PARKED carrier
+    expect(withHeld.verdicts.find((v) => v.num === 55).coupleDeferReason).toBe('held');
+    // WITHOUT the final-decision override, the label read (healthy) would let the impl land while the carrier sits parked (the R5 bug).
+    const noOverride = planDrainPass({ verdicts: mkVerdicts(), openPrContext: ctx, isLocalRepo, localSlug, label: 'ready-to-merge' });
+    expect(noOverride.verdicts.find((v) => v.num === 55).coupleDeferReason).toBe('healthy');
+  });
+
+  it('R7 — a carrier must not enter ready while its impl half is OPEN in the blind context (carrier-only narrow)', () => {
+    const implPr = ghPr(55, 'lane/xcarr01-fui');
+    const ctx = contextWithCarrier({ carrierNum: 77, item: 'xcarr01', manifest: carrierManifestFull, labels: ['ready-to-merge'], extraOpenPrs: [implPr] });
+    const res = drivePlan({
+      REPOS: [WE, FUI],
+      listings: [{ repo: WE, prs: [ghPr(77, 'lane/xcarr01-we', { labels: ['ready-to-merge'] })] }, { repo: FUI, prs: [] }],
+      onlyPr: '77', onlyRepo: WE,
+      openPrContext: ctx,
+      reads: new Map([[`cwd::77`, { commits: [claude, claude], manifest: carrierManifestFull }]]),
+    });
+    expect(res.plan.ready).toEqual([]);                                                  // carrier defers — impl still open
+    expect(res.verdicts.find((v) => v.num === 77).coupleDeferReason).toBe('impl-open');
+  });
+
+  it('R4 structural — isPassIdle / isConfirmSweepSettled: the held-couple allowance both watch-exit paths consult (binds mutations 5/6)', () => {
+    const held = [{ num: 55, heldCoupleOnly: true }];
+    const real = [{ num: 55, waitOn: ['x'] }];   // a truncated/degraded fail-closed defer — may clear on re-fetch
+    expect(isPassIdle({ merged: 0, pendingRebased: 0, deferred: held })).toBe(true);    // human hold → idle
+    expect(isPassIdle({ merged: 0, pendingRebased: 0, deferred: real })).toBe(false);   // real defer → keep polling
+    expect(isPassIdle({ merged: 1, pendingRebased: 0, deferred: [] })).toBe(false);     // merged → not idle
+    expect(isPassIdle({ merged: 0, pendingRebased: 0, deferred: [] })).toBe(true);      // nothing → idle
+    expect(isConfirmSweepSettled({ merged: 0, pendingRebased: 0, considered: 2, deferred: held })).toBe(true);
+    expect(isConfirmSweepSettled({ merged: 0, pendingRebased: 0, considered: 2, deferred: real })).toBe(false);
+    expect(isConfirmSweepSettled({ merged: 0, pendingRebased: 0, considered: 0, deferred: [] })).toBe(true);
   });
 });
