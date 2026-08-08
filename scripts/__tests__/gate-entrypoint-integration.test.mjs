@@ -136,7 +136,13 @@ describe('the real drain entrypoint consults the gate before merging', () => {
         { number: 101, title: 'clean leaf', body: 'a real summary', headRefName: 'lane/a', baseRefName: 'main',
           mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
           labels: [{ name: 'ready-to-merge' }], _commits: AI_COMMIT, _files: [{ path: 'backlog/x.md', additions: 5, deletions: 1 }] },
+        // #2771/#2785 — the DECLARATIVE LEASH (the roster) is what "edits the gate policy itself" now means.
         { number: 102, title: 'edits the gate policy itself', body: 'a real summary', headRefName: 'lane/b', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }], _commits: AI_COMMIT, _files: [{ path: 'scripts/lib/gate-config.mjs', additions: 3, deletions: 1 }] },
+        // …while its DERIVATION CODE parks for the independent committee instead — the whole narrowing, proven
+        // end-to-end through the REAL entrypoint rather than against the pure scorer.
+        { number: 104, title: 'refactors the gate derivation code', body: 'a real summary', headRefName: 'lane/f', baseRefName: 'main',
           mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
           labels: [{ name: 'ready-to-merge' }], _commits: AI_COMMIT, _files: [{ path: 'scripts/lib/review-escalation.mjs', additions: 3, deletions: 1 }] },
         { number: 103, title: 'leaf but already human-gated', body: 'a real summary', headRefName: 'lane/c', baseRefName: 'main',
@@ -156,6 +162,13 @@ describe('the real drain entrypoint consults the gate before merging', () => {
     const p102 = r.parked.find((p) => Number(p.num) === 102);
     expect(p102).toBeTruthy();
     expect(p102.humanRequired).toBe(true);
+
+    // #2771/#2785 — the derivation-code PR ESCALATES (it never merges unreviewed) but parks agent-reviewable
+    expect(nums(r.toMerge)).not.toContain(104);
+    expect(nums(r.merged)).not.toContain(104);
+    const p104 = r.parked.find((p) => Number(p.num) === 104);
+    expect(p104).toBeTruthy();
+    expect(p104.humanRequired).toBe(false);
 
     // the already-human-labelled PR is held by the sticky veto too, even though its own diff is a leaf
     expect(nums(r.toMerge)).not.toContain(103);

@@ -36,7 +36,17 @@ import {
   decideReviewGate,
   producerReviewLabel,
   hasUnclearedReviewLabel,
+  isPolicySpecPath,
 } from '../review-escalation.mjs';
+import {
+  TRUST_CHAIN,
+  POLICY_LEASH,
+  POLICY_CORE_BASENAMES,
+  POLICY_SPEC_BASENAMES,
+  POLICY_DERIVATION_BASENAMES,
+  RATIFIED_POLICY_SPEC_FLOOR,
+  isTrustChainPath,
+} from '../gate-config.mjs';
 import { assertMayMerge, hasNonEmptyBody } from '../pr-merge-gate.mjs';
 import { classifyChecks } from '../../pr-land.mjs';
 import { classifyPr } from '../../merge-ai-prs.mjs';
@@ -51,20 +61,33 @@ function product(...arrays) {
   return arrays.reduce((acc, arr) => acc.flatMap((a) => arr.map((b) => [...a, b])), [[]]);
 }
 
-// #2445 two-tier flip — the trust chain has two tiers. POLICY-CORE files (the leash-defining code) force
-// review:human; ENGINE files (the lander, which obeys the gate) escalate + run the panel but a converged agent
-// verdict may clear them.
-const POLICY_CORE_FILES = [
-  'scripts/lib/review-escalation.mjs',
-  'scripts/lib/review-core.mjs',              // the converge-vs-human disposition router + round caps
-  'scripts/lib/review-policy.contract.json',  // #2566 — the review-escalation policy SPEC; a diff here is a policy change
-  'scripts/lib/review-policy.mjs',            // #2566 — the spec loader + executable oracle
-  'scripts/lib/disposition-land-seam.mjs',    // #2674 — the disposition→label router (auto-clear vs review:human); leash-defining
-  'scripts/lib/auto-land-seam.mjs',           // #2675 — the acting seam (writes review:accepted behind shadow|enforce); leash-defining
-  'scripts/lib/__tests__/review-policy.conformance.test.mjs', // #2566 — the conformance bridge (weakening it is a spec change)
-  'scripts/lib/gate-config.mjs',              // #2448 — the trust-chain roster; editing it is gate-self (the closure)
+// #2445 two-tier flip + the #2771/#2785 POLICY-tier split. The trust chain has two TIERS (policy / engine), and
+// the policy tier has two LEASHES:
+//   • DECLARATIVE LEASH (`leash: 'spec'`) — the encoded policy itself. Forces review:human. Permanently pinned
+//     by #2840 trigger 3: these files have no behaviour-preserving edit.
+//   • DERIVATION CODE (`leash: 'code'`) — the code that derives the gate from that leash. Still ESCALATES, but a
+//     converged INDEPENDENT committee verdict may clear it (#2771 Fork A) — it no longer forces a human.
+//   • ENGINE tier — the lander, which obeys the gate. Escalates, agent-reviewable (unchanged, #2445).
+const DECLARATIVE_LEASH_FILES = [
+  'scripts/lib/review-policy.contract.json',  // #2566 — the machine-diffable policy SPEC; a diff here IS a policy change
+  'scripts/lib/__tests__/review-policy.conformance.test.mjs', // #2566 — the impl↔contract bridge (weakening it is a spec change)
+  'scripts/lib/gate-config.mjs',              // #2448 — the trust-chain roster; editing it is the closure
   'scripts/lib/__tests__/gate-invariants.test.mjs', // THIS file — self-referenced (see header)
+  'scripts/check-standards.contract.json',    // #2769 — the check:standards definition-of-green contract
+  'scripts/lib/__tests__/check-standards.conformance.test.mjs', // #2769 — its conformance bridge
+  'scripts/lib/review-runner-core.mjs',       // #2830 — the forced-SHADOW zero-mutation guarantee (leash `spec` pending a #2840-trigger-2 ruling)
+  'scripts/review-runner.mjs',                // #2830 — the `--enforce` refusal, the other half of that guarantee
 ];
+const DERIVATION_CODE_FILES = [
+  'scripts/lib/review-escalation.mjs',        // the escalation rubric — derives the gate from the contract
+  'scripts/lib/review-core.mjs',              // the converge-vs-human disposition router + round caps
+  'scripts/lib/review-policy.mjs',            // #2566 — the spec loader + executable oracle
+  'scripts/lib/disposition-land-seam.mjs',    // #2674 — the disposition→label router
+  'scripts/lib/auto-land-seam.mjs',           // #2675 — the acting seam
+];
+// Both halves are still the POLICY TIER — `isGateSelfPath` (i.e. "is this the policy tier?") is true for every
+// one of them, and every one of them ESCALATES. Only `humanRequired` distinguishes the two.
+const POLICY_CORE_FILES = [...DECLARATIVE_LEASH_FILES, ...DERIVATION_CODE_FILES];
 const ENGINE_FILES = [
   'scripts/merge-ai-prs.mjs',                 // the lander — obeys the gate, so agent-reviewable (#2445 flip)
   'frontierui/scripts/merge-ai-prs.mjs',      // a repo-prefixed clone path still counts
@@ -74,10 +97,14 @@ const STATUTE_FILES = ['docs/agent/platform-decisions.md', 'docs/agent/2026-06-e
 // #2448 — a trust-chain member RELOCATED out of we:scripts/ (the #2445 coordinator: a plateau-app module, a
 // package dir, or its own repo). Basename-matched, so the TIER travels: a relocated POLICY file stays human, a
 // relocated ENGINE file still escalates (it can never silently drop out of review) but stays agent-reviewable.
-const RELOCATED_POLICY_FILES = [
-  'plateau-app/tools/loop/review-escalation.mjs',   // policy, extracted next to the dev-panel → still human
-  'plateau-loop/gate/gate-config.mjs',              // policy, its own repo → still human
+const RELOCATED_LEASH_FILES = [
+  'plateau-loop/gate/gate-config.mjs',              // the roster, its own repo → still human
+  'plateau-app/tools/loop/review-policy.contract.json', // the contract, extracted → still human
 ];
+const RELOCATED_DERIVATION_FILES = [
+  'plateau-app/tools/loop/review-escalation.mjs',   // derivation code, extracted → escalates, committee-clearable
+];
+const RELOCATED_POLICY_FILES = [...RELOCATED_LEASH_FILES, ...RELOCATED_DERIVATION_FILES];
 const RELOCATED_ENGINE_FILES = [
   'packages/plateau-loop/src/merge-ai-prs.mjs',     // engine, extracted into a package dir → escalates, agent-reviewable
 ];
@@ -106,15 +133,44 @@ describe('INVARIANT 1 — policy/statute ⇒ human; engine ⇒ escalate-but-agen
     for (const f of POLICY_CORE_FILES) expect(isGateSelfPath(f)).toBe(true);
     for (const f of ENGINE_FILES) expect(isGateSelfPath(f)).toBe(false);
   });
-  it('POLICY-CORE ⇒ humanRequired across arbitrary other signals + noise', () => {
-    for (const gateFile of POLICY_CORE_FILES) {
+  it('the DECLARATIVE LEASH ⇒ humanRequired across arbitrary other signals + noise (#2771/#2785)', () => {
+    for (const gateFile of DECLARATIVE_LEASH_FILES) {
       for (const noise of powerset(LEAF_FILES)) {
         for (const [diffLines, dismissedFindings, crossRepo] of noiseSignals) {
           const r = scoreEscalation({ changedFiles: [...noise, gateFile], diffLines, dismissedFindings, crossRepo });
-          expect(r.humanRequired).toBe(true); // leash-defining code — never falls to agent-reviewable
+          expect(r.humanRequired).toBe(true); // the encoded policy — never falls to agent-reviewable
           expect(r.escalate).toBe(true);
         }
       }
+    }
+  });
+  it('#2771 Fork A — policy-tier DERIVATION CODE ESCALATES but is NOT humanRequired, across noise', () => {
+    for (const gateFile of DERIVATION_CODE_FILES) {
+      for (const noise of powerset(LEAF_FILES)) {
+        for (const [diffLines, dismissedFindings, crossRepo] of noiseSignals) {
+          const r = scoreEscalation({ changedFiles: [...noise, gateFile], diffLines, dismissedFindings, crossRepo });
+          expect(r.escalate).toBe(true);       // still gets a full independent review…
+          expect(r.humanRequired).toBe(false); // …but the committee may clear it — the ratified narrowing
+        }
+      }
+    }
+  });
+  it('MIXED — a diff touching BOTH the leash and derivation code stays humanRequired (the strictest half wins)', () => {
+    for (const leash of DECLARATIVE_LEASH_FILES) {
+      for (const code of DERIVATION_CODE_FILES) {
+        for (const noise of powerset(LEAF_FILES).slice(0, 4)) {
+          const r = scoreEscalation({ changedFiles: [...noise, code, leash] });
+          expect(r.humanRequired).toBe(true);
+          // …and on the cumulative human basis too, where the leash rides an ancestor commit (#2390).
+          expect(scoreEscalation({ changedFiles: [code], humanBasisFiles: [code, leash] }).humanRequired).toBe(true);
+        }
+      }
+    }
+  });
+  it('the leash never LOSES its human gate to a de-inflated stacked base (#2390 — the human basis wins)', () => {
+    for (const leash of DECLARATIVE_LEASH_FILES) {
+      // own-delta looks innocuous; the cumulative basis carries the leash edit → still human.
+      expect(scoreEscalation({ changedFiles: ['demos/spa.html'], humanBasisFiles: ['demos/spa.html', leash] }).humanRequired).toBe(true);
     }
   });
   it('the STATUTE layer ⇒ humanRequired (a governance rule a human must ratify, #2412)', () => {
@@ -138,13 +194,20 @@ describe('INVARIANT 1 — policy/statute ⇒ human; engine ⇒ escalate-but-agen
       }
     }
   });
-  it('#2448/#2445 — the tier TRAVELS: a relocated POLICY file stays human; a relocated ENGINE file escalates but stays agent-reviewable', () => {
-    for (const moved of RELOCATED_POLICY_FILES) {
-      expect(isGateSelfPath(moved)).toBe(true);
+  it('#2448/#2445/#2785 — the tier AND the leash TRAVEL: a relocated LEASH file stays human; relocated derivation code + a relocated ENGINE file escalate but stay agent-reviewable', () => {
+    for (const moved of RELOCATED_POLICY_FILES) expect(isGateSelfPath(moved)).toBe(true);
+    for (const moved of RELOCATED_LEASH_FILES) {
       for (const noise of powerset(LEAF_FILES)) {
         const r = scoreEscalation({ changedFiles: [...noise, moved], diffLines: 0 });
         expect(r.humanRequired).toBe(true); // the coordinator can never auto-clear a change to its own leash
         expect(r.escalate).toBe(true);
+      }
+    }
+    for (const moved of RELOCATED_DERIVATION_FILES) {
+      for (const noise of powerset(LEAF_FILES)) {
+        const r = scoreEscalation({ changedFiles: [...noise, moved], diffLines: 0 });
+        expect(r.humanRequired).toBe(false); // derivation code — the committee clears it wherever it lives
+        expect(r.escalate).toBe(true);       // but it can never silently drop out of review
       }
     }
     for (const moved of RELOCATED_ENGINE_FILES) {
@@ -299,11 +362,18 @@ describe('INVARIANT 5 — hasUnclearedReviewLabel refuses un-cleared labels', ()
 // a drain sweeps it. An ENGINE (lander) open is review:pending (escalated, agent-reviewable — the #2445 flip).
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 describe('INVARIANT 6 — producerReviewLabel matches the score across both tiers', () => {
-  it('any POLICY-CORE or STATUTE diff ⇒ producer label review:human, across noise', () => {
-    for (const gateFile of [...POLICY_CORE_FILES, ...STATUTE_FILES]) {
+  it('any DECLARATIVE-LEASH or STATUTE diff ⇒ producer label review:human, across noise', () => {
+    for (const gateFile of [...DECLARATIVE_LEASH_FILES, ...STATUTE_FILES]) {
       for (const noise of powerset(LEAF_FILES)) {
         const score = scoreEscalation({ changedFiles: [...noise, gateFile] });
         expect(producerReviewLabel(score)).toBe(REVIEW_LABELS.human);
+      }
+    }
+  });
+  it('#2771 Fork A — a policy-tier DERIVATION-CODE diff ⇒ review:pending (committee), never review:human', () => {
+    for (const gateFile of DERIVATION_CODE_FILES) {
+      for (const noise of powerset(LEAF_FILES)) {
+        expect(producerReviewLabel(scoreEscalation({ changedFiles: [...noise, gateFile] }))).toBe(REVIEW_LABELS.pending);
       }
     }
   });
@@ -388,6 +458,50 @@ describe('INVARIANT 9 — a stale review:accepted never auto-merges (#2409)', ()
         const g = decideReviewGate({ escalate, humanRequired, labels, acceptedSha: 'abc1234', headSha: 'abc1234' });
         expect(g.action).toBe('merge');
       }
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// INVARIANT 12 — THE LEASH SPLIT IS FAIL-CLOSED AND CANNOT SHRINK (#2771/#2785, pinned permanent by #2840
+// trigger 3). The whole point of the narrowing is that a change to the ENCODED POLICY still reaches a human
+// while its IMPLEMENTATION does not. Those two guarantees are only as good as the roster's classification, so
+// this block pins the classification itself: the ratified leash floor is always human, the split partitions the
+// policy tier exactly, every policy member declares its side explicitly, and an UNCLASSIFIED member falls to
+// HUMAN rather than to the committee. A diff that has to weaken an assertion here is, by definition, moving the
+// human boundary — the one class of change a human must look at.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('INVARIANT 12 — the declarative-leash split is fail-closed and its floor cannot shrink', () => {
+  it('every basename #2771 ratified as the declarative leash is STILL in POLICY_SPEC_BASENAMES', () => {
+    for (const f of RATIFIED_POLICY_SPEC_FLOOR) {
+      expect(POLICY_SPEC_BASENAMES.has(f)).toBe(true);   // dropping one would let an agent clear a policy change
+      expect(POLICY_DERIVATION_BASENAMES.has(f)).toBe(false);
+      expect(isPolicySpecPath(`any/relocated/dir/${f}`)).toBe(true); // the floor travels, like every other member
+    }
+  });
+  it('every POLICY-tier member declares a VALID leash — an omission or a typo is a failing test, not a silent default', () => {
+    for (const m of TRUST_CHAIN.filter((e) => e.tier === 'policy')) {
+      expect([POLICY_LEASH.SPEC, POLICY_LEASH.CODE], `roster entry '${m.role}' must declare leash`).toContain(m.leash);
+    }
+  });
+  it('an ENGINE-tier member never carries a leash (the field is meaningless off the policy tier)', () => {
+    for (const m of TRUST_CHAIN.filter((e) => e.tier === 'engine')) expect(m.leash).toBeUndefined();
+  });
+  it('the two halves PARTITION the policy tier exactly — nothing lost, nothing double-counted', () => {
+    const union = new Set([...POLICY_SPEC_BASENAMES, ...POLICY_DERIVATION_BASENAMES]);
+    expect([...union].sort()).toEqual([...POLICY_CORE_BASENAMES].sort());
+    for (const f of POLICY_SPEC_BASENAMES) expect(POLICY_DERIVATION_BASENAMES.has(f)).toBe(false);
+    // …and every member of BOTH halves is still a trust-chain path, so both still ESCALATE.
+    for (const f of union) expect(isTrustChainPath(f)).toBe(true);
+  });
+  it('FAIL-CLOSED — an unclassified / misspelled policy leash resolves to the HUMAN half, never the committee', () => {
+    // The derivation predicate is `leash === 'code'` and the spec predicate is its complement WITHIN the policy
+    // tier, so every value that is not exactly 'code' lands on the human side. Proven over the shapes a bad edit
+    // actually produces rather than by re-reading the source.
+    for (const bad of [undefined, null, '', 'CODE', 'Code', 'derivation', 'impl', 'spec ', 0, false, {}]) {
+      const entry = { role: 'hypothetical', file: 'hypothetical.mjs', tier: 'policy', leash: bad };
+      const specSide = entry.tier === 'policy' && entry.leash !== POLICY_LEASH.CODE;
+      expect(specSide, `leash ${JSON.stringify(bad)} must fall to the HUMAN half`).toBe(true);
     }
   });
 });
