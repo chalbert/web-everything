@@ -7,7 +7,7 @@
  *   asserted with a scripted runner.
  */
 import { describe, it, expect } from 'vitest';
-import { allocateGapId } from '../../backlog/renumber-collisions.mjs';
+import { allocateGapId, rewriteRefs, assertContentPreserved } from '../../backlog/renumber-collisions.mjs';
 import { planBaseCollisionHeal, backlogBasenames, healNnnCollision } from '../nnn-collision-heal.mjs';
 
 const mk = (num, slug, body = '') => ({
@@ -94,6 +94,43 @@ describe('planBaseCollisionHeal — collision on base ⇒ renumber-to-gap', () =
     expect(mv.oldName).toBe('2293-lane-new-item.md');
     // the base-owned #2294's real edge to the keeper #2293 is NOT touched at all.
     expect(plan.writes.map((w) => w.name)).not.toContain('2294-dependent.md');
+  });
+
+  it('CONTENT-PRESERVING (#2546): a base-collision renumber keeps every authored body byte, only the ref changes', () => {
+    // Mirrors the renumber-collisions.test.mjs #2546 regression: the #558 land BLANKED files while rewriting
+    // cross-refs — the real damage was data loss, not the collision. This module's writes must go through
+    // the SAME assertContentPreserved guard so a rewrite bug here fails loudly instead of shipping an
+    // empty/partial file.
+    const body = 'A long authored body.\n\nSecond paragraph with detail worth keeping.\nSee #2219 for context.';
+    const laneFiles = [
+      mk('2219', 'drain-finding', 'the storm-collision finding'),
+      { name: '1800-refs.md', text: `---\nkind: story\n---\n\n# refs\n\n${body}\n` },
+    ];
+    const plan = planBaseCollisionHeal(laneFiles, {
+      baseNums: ['2218', '2219', '2221'],
+      baseNames: ['2218-x.md', '2219-existing-item.md', '2221-z.md'],
+    }); // does NOT throw — every write is content-preserving
+    const ref = plan.writes.find((w) => w.name === '1800-refs.md');
+    // the ONLY change is the ref swap; every other authored byte survives verbatim
+    expect(ref.text).toBe(laneFiles[1].text.replace('#2219', '#2220'));
+    expect(ref.text).toContain('Second paragraph with detail worth keeping.');
+    // the yielded file is re-filed with its full body intact
+    const yielded = plan.writes.find((w) => w.name === '2220-drain-finding.md');
+    expect(yielded.text).toContain('the storm-collision finding');
+    expect(yielded.text.length).toBeGreaterThan(0);
+  });
+
+  it('CONTENT-PRESERVING (#2546): a corrupted rewrite (non-ref byte altered) is refused loudly', () => {
+    // Simulate a broken rewrite by hand-corrupting what the sweep would produce, then feeding it through the
+    // SAME guard planBaseCollisionHeal uses, proving the guard actually catches a #558-style silent corruption
+    // rather than the plan happily returning a bad write.
+    const original = '---\nkind: story\n---\n\n# drain-finding\n\nAuthored body.\nSee #2219.\n';
+    const good = rewriteRefs(original, '2219', '2220', 'drain-finding');
+    const tampered = good.replace('Authored body.', 'Tampered body.');
+    const moves = [{ oldNum: '2219', newNum: '2220', slug: 'drain-finding' }];
+    // planBaseCollisionHeal itself only ever produces `good` (proved above); this asserts the SAME guard the
+    // module wires in (assertContentPreserved, exercised indirectly above) would reject a corrupted variant.
+    expect(() => assertContentPreserved(original, tampered, moves, '2220-drain-finding.md')).toThrow(/#2546/);
   });
 
   it('two incoming collisions get distinct gap ids (no re-collision within the plan)', () => {
