@@ -104,7 +104,9 @@ export function parseFlags(argv) {
  *
  * This guards BOTH call sites (`reduceReview`, `buildComment`) the SAME lenient way `careLevelFromReasons`
  * already tolerates unknowns: an unrecognized reason contributes NOTHING rather than crashing. It partitions
- * known from unknown WITHOUT re-implementing `canonicalizeReason` (private to review-core.mjs, the policy tier):
+ * known from unknown WITHOUT re-implementing `canonicalizeReason` (exported from review-core.mjs since #xonzpym,
+ * but only so the conformance suite can drive it over an injected vocabulary — production code, this CLI
+ * included, never calls it directly, and the suite pins that tree-wide):
  * a reason is "known" iff `deriveReviewDisposition({ reason })` does not throw for it alone. The strictest-wins
  * precedence is preserved by the final combined call over just the recognized reasons.
  *

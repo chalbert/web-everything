@@ -29,7 +29,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   REVIEW_POLICY,
   POLICY_THRESHOLDS,
@@ -57,9 +57,18 @@ import { panelRigorForCareLevel, PANEL_LENSES } from '../jury-core.mjs';
 
 /**
  * The backlog item ids that are still LIVE — any status other than resolved/dropped — keyed by both the landed
- * `NNN` number and the in-flight `bornAs`/filename hash (#2288), since an `owedTo` may cite either. Mirrors
- * `collectOpenItemIds` in we:scripts/lib/validate-rules-anchors.cjs (#2844); the rule that consumes it takes the
- * predicate injected, so the rule itself stays fixture-testable without the real board.
+ * `NNN` number and the in-flight `bornAs`/filename hash (#2288), since an `owedTo` may cite either.
+ *
+ * WHY "not resolved" AND NOT "open" (a `parked`/`someday` item still counts): two reasons, both checkable.
+ *   1. It is the repo's EXISTING definition of open. `we:scripts/check-standards.mjs` decides open-ness with the
+ *      same `status !== 'resolved'` test in six places, `openKids` among them. Board statuses in use today are
+ *      `open`, `active`, `parked`, `resolved`; a narrower predicate here would disagree with the health gate.
+ *   2. It is the right rule regardless. The debt an `owedTo` records is owed whether or not anyone intends to
+ *      build it soon — a marker pointing at a parked item is still an honest record of who owes the work.
+ *      Tightening this would turn the conformance gate red for a scheduling change on an unrelated board item.
+ *
+ * The rule that CONSUMES this takes the predicate injected (`staleOwedTo(reasons, isOpenItem)` below), so the rule
+ * stays fixture-testable without the real board and the fs read happens only in the one live-sweep test.
  * @returns {Set<string>}
  */
 function openBacklogItemIds() {
@@ -119,8 +128,12 @@ describe('static conformance — contract shape + vocabulary', () => {
   // GREEN with the token still unimplemented. The backstop's own error message was directions around it.
   //
   // THE CORRECTION. Equality comes back, but modulo an EXPLICIT marker: an entry may declare itself not-yet-built
-  // with `todo: true` + `owedTo: "<open item>"` (the contract's `todoMarker` block; the same honest-escape shape
-  // #2844 gives the invariant catalogue). Three defect classes, each its own row, each its own test below:
+  // with `todo: true` + `owedTo: "<open item>"` (the contract's `todoMarker` block). It is the same FAMILY of
+  // honest escape the invariant catalogue already uses — `status: "judgment-only"`, 6 entries in
+  // we:scripts/lib/invariant-catalogue.json — but strictly stronger: that one records only that a guarantee is
+  // unenforced, with no field naming who owes the work. Making it name an owing item is what #2844 PROPOSES
+  // (still `status: open` today, unbuilt); this marker is not modelled on it and does not depend on it.
+  // Three defect classes, each its own row, each its own test below:
   //   1. UNDECLARED      — a code token the contract never declared. The #2839 safety half, UNCHANGED in strength.
   //   2. UNMARKED-ABSENT — declared, absent from the code, no marker. This is what silently passed; now it FAILS.
   //   3. STALE-TODO      — marked `todo` but the code HAS implemented it. `test.todo` never catches this (a passing
@@ -251,8 +264,8 @@ describe('todo-marker conformance — the marker cannot be worn loosely (#xonzpy
   });
 
   // The OPEN-ness of an owedTo is not knowable inside review-policy.mjs (a trust-chain leaf that imports only
-  // fs/path), so the rule lives here as a pure predicate over an injected `isOpenItem` — the same split #2844
-  // uses. Fixtures prove the rule; the live sweep below applies it to the real contract.
+  // fs/path), so the rule lives here as a pure predicate over an injected `isOpenItem`.
+  // Fixtures prove the rule; the live sweep below applies it to the real contract.
   const staleOwedTo = (reasons, isOpenItem) => reasons
     .filter((r) => r.todo === true && !isOpenItem(String(r.owedTo).replace(/^#/, '')))
     .map((r) => r.token).sort();
@@ -625,9 +638,24 @@ describe('the derivation itself, on reasons that really carry a `todo` (#xonzpym
 // POLICY_IMPLEMENTED_REASON_TOKENS (safe) and POLICY_DECLARED_REASON_TOKENS (unsafe). Nothing else in this suite
 // can tell them apart — every other pin ITERATES the implemented set, so it never sees the divergence, and
 // review-core.mjs is `tier: policy, leash: code`, i.e. a green suite is what clears an edit to it. So the
-// binding is pinned HERE, twice over: at source level (arms today, on any swap) and behaviourally (drives the
-// REAL matcher over both vocabularies against a contract that carries a todo entry, and shows what the wrong
-// one costs). This block is the reason the swap cannot ride in on a green suite.
+// binding is pinned HERE, in three layers, and it is worth being exact about what each one actually closes:
+//
+//   • TWO SOURCE PINS (the first two tests) constrain SPELLING — one line must be present, one identifier must be
+//     absent from code. They are cheap and they arm instantly on the literal swap. They are also, on their own,
+//     NOT sufficient, and an earlier revision of this header wrongly claimed they were: both survive a default
+//     that has been widened some OTHER way. `[...ALL_REASON_TOKENS, ...POLICY_TODO_REASON_TOKENS]` under a fresh
+//     name spells the declared set without ever writing the banned identifier; an aliased import re-bound to the
+//     pinned name preserves the pinned line byte-for-byte. Both were demonstrated on a green suite.
+//   • THE BEHAVIOURAL PIN (third test) closes that. It reloads the WHOLE module graph over a contract that really
+//     carries a `todo` reason and asks the production entry point what it does with one. It constrains what
+//     `canonicalizeReason` DEFAULTS to, not how the default is written, so every route to the declared set fails
+//     — widened union, aliased shadow, or a spelling nobody has thought of yet.
+//   • THE INJECTION SWEEP (fourth test) covers the hazard's new shape. Making the vocabulary a parameter turned a
+//     private binding into public API on a function ~15 modules can import, several below the policy tier; the
+//     source pins only ever scanned review-core.mjs. No production file may pass a vocabulary at all.
+//
+// Together with the counterfactual (which shows what the wrong vocabulary COSTS), this block is what keeps the
+// swap off a green suite.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 describe('review-core canonicalizes against the IMPLEMENTED vocabulary, never the declared one (#xonzpym)', () => {
   const CORE_SRC = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'review-core.mjs'), 'utf8');
@@ -644,6 +672,67 @@ describe('review-core canonicalizes against the IMPLEMENTED vocabulary, never th
       .filter((line) => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
       .filter((line) => line.includes('POLICY_DECLARED_REASON_TOKENS'));
     expect(codeMentions).toEqual([]);
+  });
+
+  it('BEHAVIOUR, not spelling: the DEFAULT vocabulary refuses a todo token — real module graph, real contract shape', async () => {
+    // The two pins above are satisfiable while the effective default IS the declared set (measured, twice). This
+    // one cannot be: it never reads source. It rebuilds review-core.mjs over a contract that genuinely carries a
+    // `todo` reason and asks `deriveReviewDisposition` — the function the drain actually calls — what it does.
+    // A widened default resolves the token, finds it in neither family group nor the human-clearance set, and
+    // returns the permissive `{ converge, autoLand: true }`. The implemented set leaves it unrecognized and the
+    // entry point throws. Fail-closed is the assertion; how the default is spelled is not this test's business.
+    const doctored = JSON.parse(JSON.stringify(REVIEW_POLICY));
+    doctored.reasons.push({ ...OWED, clearance: 'human' });
+    vi.resetModules();
+    vi.doMock('node:fs', async (importOriginal) => {
+      const real = await importOriginal();
+      const readFileSync = (p, ...rest) => (String(p).endsWith('review-policy.contract.json')
+        ? JSON.stringify(doctored)
+        : real.readFileSync(p, ...rest));
+      return { ...real, readFileSync, default: { ...real.default, readFileSync } };
+    });
+    try {
+      const core = await import('../review-core.mjs');
+      const policy = await import('../review-policy.mjs');
+      // The doctored graph really loaded the todo entry — otherwise everything below passes vacuously.
+      expect(policy.POLICY_DECLARED_REASON_TOKENS).toContain(OWED.token);
+      expect(policy.POLICY_IMPLEMENTED_REASON_TOKENS).not.toContain(OWED.token);
+      // …and the graph is ALIVE: a real reason still disposes normally through it.
+      expect(core.deriveReviewDisposition({ reasons: [`${REVIEW_REASONS.GATE_SELF} (x) — human review required`] }))
+        .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
+      // THE PIN. Default vocabulary ⇒ the unbuilt token is not recognized, and the entry point refuses.
+      const decorated = `${OWED.token} (scripts/lib/gate-config.mjs) — human review required`;
+      expect(core.canonicalizeReason(decorated)).toBeNull();
+      expect(() => core.deriveReviewDisposition({ reasons: [decorated] })).toThrow(/unknown reason\(s\)/);
+    } finally {
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+    }
+  });
+
+  it('no production file injects a vocabulary — the parameter is the suite\'s, not an API surface', () => {
+    // `canonicalizeReason` is exported so THIS suite can drive it over both vocabularies. That made a private
+    // policy-tier binding into a public parameter on a function importable from well below the policy tier, where
+    // an edit may never even reach this committee. The default is pinned above; the injection POINT is pinned
+    // here: across every JS module under scripts/ (the only tree that imports review-core.mjs — verified: outside
+    // scripts/, the name appears solely in backlog/docs prose), no file outside __tests__ passes a vocabulary.
+    const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const offenders = [];
+    const walk = (dir) => {
+      for (const ent of readdirSync(dir, { withFileTypes: true })) {
+        if (ent.name === 'node_modules' || ent.name === '__tests__' || ent.name.startsWith('.')) continue;
+        const p = join(dir, ent.name);
+        if (ent.isDirectory()) { walk(p); continue; }
+        if (!/\.(mjs|cjs|js)$/.test(ent.name)) continue;
+        for (const line of readFileSync(p, 'utf8').split('\n')) {
+          // A second argument at the call site — `canonicalizeReason(raw, somethingElse)`. The declaration in
+          // review-core.mjs is `export function`, so it is excluded by the `function` guard, not by name.
+          if (/(?<!function\s)canonicalizeReason\([^)]*,/.test(line)) offenders.push(`${ent.name}: ${line.trim()}`);
+        }
+      }
+    };
+    walk(scriptsDir);
+    expect(offenders).toEqual([]);
   });
 
   it('the counterfactual, on a contract that really carries a todo entry: declared vocab resolves what implemented vocab refuses', () => {

@@ -68,8 +68,8 @@ const TODO_MARKER_SECTIONS = new Set(['reasons']);
 // leading `#`. Deliberately a SHAPE check only — whether the item is still OPEN is not knowable here.
 // review-policy.mjs is a trust-chain LEAF that imports only fs/path; reading the backlog directory at import time
 // would couple the gate's own loader to the tracker and make a malformed item file able to break the gate. The
-// still-OPEN check is the conformance suite's job (`review-policy.conformance.test.mjs`), mirroring how #2844
-// keeps its `isOpenItem` predicate injected rather than baked into the pure rule.
+// still-OPEN check is the conformance suite's job (`review-policy.conformance.test.mjs`), where it is a pure
+// predicate over an injected `isOpenItem` so the rule stays fixture-testable without the real board.
 const OWED_TO_RE = /^#?(?:\d{3,}|x[0-9a-z]{6,8})$/;
 
 /**
