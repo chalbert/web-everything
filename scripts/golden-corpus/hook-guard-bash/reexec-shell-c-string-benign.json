@@ -1,0 +1,11 @@
+{
+  "id": "reexec-shell-c-string-benign",
+  "cmd": "bash -c \"npm run test:unit\"",
+  "ctx": {
+    "primaryCwd": true
+  },
+  "basis": "r5 F1 precision mirror — the recursion reads a lot of new text at command position, so a nested command that writes nothing must stay allowed.",
+  "expect": {
+    "reason": null
+  }
+}
