@@ -21,10 +21,18 @@
  * with an empty PR section and an honest note. A stale-but-rendered board beats a crash.
  *
  * The HAND-MAINTAINED half degrades the same way, and it has to: that file is git-tracked, so an unresolved
- * merge-conflict marker is enough to make it invalid JSON. `loadState` never throws — it returns the empty
- * state carrying `[STATE_ERROR]`, the page renders behind a red "the plan could not be read" banner, and
- * every verb is refused until it is fixed by hand (saving an empty plan over a recoverable one is the single
- * unrecoverable move here). That is a DIFFERENT failure from an unanswerable decision — see `validateDecisions`.
+ * merge-conflict marker is enough to make it invalid JSON. `loadState` never throws. It distinguishes TWO
+ * degradations, and the difference is load-bearing:
+ *   • FATAL (`[STATE_FATAL]`) — the file did not parse at all, so NOTHING survived. The empty state is
+ *     returned, the page renders behind a red banner, and every verb is refused (saving an empty plan over a
+ *     recoverable one is the single unrecoverable move here). There are no decisions, so there is nothing the
+ *     answerability guard could wave through.
+ *   • PARTIAL — the file parsed and has the right shape; one key held the wrong type and was normalised. The
+ *     surviving items and decisions ARE the plan, so the verbs stay available (that is the repair route) and
+ *     the answerability guard runs on them exactly as it would on a clean file. A soft type error is never a
+ *     licence to publish an unanswerable ask.
+ * Both are a DIFFERENT failure from an unanswerable decision — see `validateDecisions`, which runs
+ * UNCONDITIONALLY on whatever decisions reached the model.
  *
  * WHERE IT MAY WRITE. `--out=` and `--state=` are caller-controlled, so `assertWritablePath` refuses any path
  * that lands inside this repository but outside `reports/` — a tracked file must never be overwritten.
@@ -42,6 +50,12 @@
  *   node scripts/progress-board.mjs --block=<id> --why="…"
  *   node scripts/progress-board.mjs --note=<id> --text="…"   # empty text clears the note
  *   node scripts/progress-board.mjs --add="<title>" [--phase=<n>]
+ *   node scripts/progress-board.mjs --retitle=<id> --to="<title>"   # the id (the join key) never moves
+ *   node scripts/progress-board.mjs --remove=<id>        # drop a plan item
+ *   node scripts/progress-board.mjs --link=<id> --pr=<n> # join a plan item to its pull request
+ *   node scripts/progress-board.mjs --unlink=<id>
+ *   node scripts/progress-board.mjs --phase-title=<n> --to="<title>"
+ *   node scripts/progress-board.mjs --board-title="<title>" · --repo=<owner/name>
  *   node scripts/progress-board.mjs --decide=<id>        # a decision was taken by the operator
  *   node scripts/progress-board.mjs --url=<artifact-url> # store the published URL (do this once, after publishing)
  *
@@ -55,6 +69,7 @@
  *   node scripts/progress-board.mjs --decision-set=<id> --field=<name> --value="…"   # empty --value clears
  *   node scripts/progress-board.mjs --decision-option=<id> --label="…" --detail="…" [--recommend]
  *   node scripts/progress-board.mjs --decision-evidence=<id> --text="…"              # empty --text clears all
+ *   node scripts/progress-board.mjs --decision-remove=<id>                          # retires its R-number with it
  *
  * Flags: --state=<path> --out=<path> --no-gh --json --help.
  * Env:   WE_BOARD_NO_GH=1 (never shell out to gh), WE_BOARD_NOW=<iso> (freeze the stamp, for tests).
@@ -188,11 +203,26 @@ const EMPTY_STATE = {
  *     moves forward, so "R2" can never later mean something else.
  * A decision that predates the scheme is backfilled once, on the next run, and then never moves again.
  *
+ * "NEVER REUSED" IS STRUCTURAL, NOT A CONVENTION. Two things could regress the counter, and both are closed
+ * here rather than left to whoever writes the next verb:
+ *   • a MISSING counter key. `nextRuling` absent used to mean "start at 1", which re-issued R1/R2/R3 over
+ *     decisions that already held them. The floor is therefore `highest R-number present + 1`, always.
+ *   • a REMOVED decision. Deleting R2 drops it out of that `highest` scan, so the floor alone is not enough:
+ *     the stored counter is the memory of numbers that are gone. The counter is written as the MAXIMUM of
+ *     (what was read, the floor, where we got to) — it is monotonic by construction and can only move up.
+ * `main` also reconciles the counter from the file AS READ, before any verb can delete the evidence.
+ *
  * @returns {number} how many numbers were assigned (non-zero means the state needs saving).
  */
 export function ensureRulingNumbers(state) {
   let assigned = 0;
-  let next = Number.isInteger(state.nextRuling) && state.nextRuling > 0 ? state.nextRuling : 1;
+  const numberOf = (r) => {
+    const m = /^R(\d+)$/i.exec(String(r ?? ''));
+    return m ? Number(m[1]) : 0;
+  };
+  const stored = Number.isInteger(state.nextRuling) && state.nextRuling > 0 ? state.nextRuling : 1;
+  const floor = Math.max(0, ...(state.decisions ?? []).map((d) => numberOf(d?.ruling))) + 1;
+  let next = Math.max(stored, floor);
   // Never hand back a number that is already in use — a hand-edited counter must not create a duplicate.
   const taken = new Set((state.decisions ?? []).map((d) => d?.ruling).filter(Boolean));
   for (const d of state.decisions ?? []) {
@@ -203,7 +233,7 @@ export function ensureRulingNumbers(state) {
     next += 1;
     assigned += 1;
   }
-  state.nextRuling = next;
+  state.nextRuling = Math.max(stored, floor, next);
   return assigned;
 }
 
@@ -215,14 +245,24 @@ export function ensureRulingNumbers(state) {
 export const STATE_ERROR = Symbol('progress-board.stateError');
 
 /**
+ * Set alongside `STATE_ERROR` when NOTHING survived the read — the file did not parse, so the returned state
+ * is the empty fallback and not a partial view of the operator's plan. This is the ONLY case in which a verb
+ * is refused, and it is exactly the case in which there is no surviving decision to validate. A partial
+ * (right-shape, wrong-type) read carries `STATE_ERROR` WITHOUT this, because its data is real.
+ */
+export const STATE_FATAL = Symbol('progress-board.stateFatal');
+
+/**
  * Read the hand-maintained half — and DEGRADE rather than die, the same contract the `gh` half already
  * honours. The realistic trigger is not exotic: this file is git-tracked, so an unresolved merge-conflict
  * marker makes it invalid JSON, and a crash there loses the whole page over a fixable typo.
  *
- * A broken file yields the empty state plus `[STATE_ERROR]`, which the CLI turns into a loud banner ON THE
+ * An UNPARSEABLE file yields the empty state plus `[STATE_ERROR]` and `[STATE_FATAL]`: a loud banner ON THE
  * PAGE and a refusal to write verbs (writing an empty plan over a recoverable file is the one genuinely
- * unrecoverable move). A well-formed file with an unanswerable decision is a DIFFERENT failure and is not
- * routed through here — see `validateDecisions`.
+ * unrecoverable move). A file that parsed but held one wrong-typed key yields `[STATE_ERROR]` ALONE — its
+ * items and decisions are the operator's real data, so the verbs stay open and the answerability guard
+ * applies in full. A well-formed file with an unanswerable decision is a DIFFERENT failure and is not routed
+ * through here at all — see `validateDecisions`.
  */
 export function loadState(statePath) {
   if (!existsSync(statePath)) return { ...EMPTY_STATE };
@@ -233,11 +273,13 @@ export function loadState(statePath) {
   } catch (e) {
     const broken = { ...EMPTY_STATE };
     broken[STATE_ERROR] = `${shortPath(statePath)} is not valid JSON — ${e.message}`;
+    broken[STATE_FATAL] = true;
     return broken;
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     const broken = { ...EMPTY_STATE };
     broken[STATE_ERROR] = `${shortPath(statePath)} does not hold a JSON object`;
+    broken[STATE_FATAL] = true;
     return broken;
   }
 
@@ -251,7 +293,12 @@ export function loadState(statePath) {
       state[key] = [];
     } else {
       state[key] = state[key].filter((x) => x && typeof x === 'object' && !Array.isArray(x));
-      if (state[key].length !== raw[key]?.length) wrong.push(`${key} (entries that were not objects)`);
+      // ABSENT is not WRONG. `items` omitted leaves the `[]` from EMPTY_STATE, and `0 !== undefined` used to
+      // report a type error for a key the file was simply allowed to leave out — a lie in the banner, and
+      // (before the guard was made unconditional) one absent optional key was enough to disarm it.
+      if (Array.isArray(raw[key]) && state[key].length !== raw[key].length) {
+        wrong.push(`${key} (entries that were not objects)`);
+      }
     }
   }
   if (!state.phases || typeof state.phases !== 'object' || Array.isArray(state.phases)) {
@@ -369,9 +416,21 @@ const toRow = (pr) => ({
   detail: prDetail(pr, classifyPr(pr)),
 });
 
+/** How many open PRs one page of the board can hold. At the limit the list may be truncated — say so. */
+export const OPEN_LIMIT = 30;
+
 /**
  * Fetch open + recently-merged PRs, cache on success, fall back to the cache on failure.
- * @returns {{ rows: object[], fresh: boolean, fetchedAt: string|null, reason: string|null }}
+ *
+ * TWO CALLS, SO THREE OUTCOMES, NOT TWO. Treating anything short of a total failure as success is how a board
+ * renders a confident-looking lie: with only the merged list failing, "Landed" said "Nothing landed yet",
+ * the header said the state was read live, and the truncated snapshot then OVERWROTE the last good cache —
+ * destroying the very rows the next failure would have fallen back to. So a partial read:
+ *   • keeps the landed rows from the cache rather than showing none,
+ *   • reports `fresh: false` with a reason that names what could not be read, and
+ *   • does NOT write the cache. A less complete snapshot must never replace a more complete one.
+ *
+ * @returns {{ rows: object[], fresh: boolean, partial: boolean, fetchedAt: string|null, reason: string|null, truncated: boolean }}
  */
 export function fetchPrs({ repo, statePath, useGh = true }) {
   const cacheFile = cachePathFor(statePath);
@@ -386,10 +445,17 @@ export function fetchPrs({ repo, statePath, useGh = true }) {
 
   if (!useGh) {
     const c = readCache();
-    return { rows: c?.rows ?? [], fresh: false, fetchedAt: c?.fetchedAt ?? null, reason: 'live PR lookup disabled for this run' };
+    return {
+      rows: c?.rows ?? [],
+      fresh: false,
+      fetchedAt: c?.fetchedAt ?? null,
+      reason: 'live PR lookup disabled for this run',
+      truncated: false,
+      partial: false,
+    };
   }
 
-  const open = ghPrList(repo, ['--state=open', '--limit', '30']);
+  const open = ghPrList(repo, ['--state=open', '--limit', String(OPEN_LIMIT)]);
   const merged = ghPrList(repo, ['--state=merged', '--limit', '6']);
   if (open === null) {
     const c = readCache();
@@ -398,10 +464,30 @@ export function fetchPrs({ repo, statePath, useGh = true }) {
       fresh: false,
       fetchedAt: c?.fetchedAt ?? null,
       reason: c ? 'GitHub was unreachable — showing the last good snapshot' : 'GitHub was unreachable and no snapshot was cached',
+      truncated: false,
+      partial: false,
     };
   }
 
-  const rows = [...open.map(toRow), ...(merged ?? []).map((pr) => ({ ...toRow(pr), status: 'landed', detail: prDetail(pr, 'landed') }))];
+  const openRows = open.map(toRow);
+  const truncated = openRows.length >= OPEN_LIMIT;
+
+  if (merged === null) {
+    const c = readCache();
+    const cachedLanded = (c?.rows ?? []).filter((r) => r?.status === 'landed');
+    return {
+      rows: [...openRows, ...cachedLanded],
+      fresh: false,
+      fetchedAt: c?.fetchedAt ?? null,
+      truncated,
+      partial: true,
+      reason: cachedLanded.length
+        ? 'the merged-pull-request list could not be read — open pull requests below are live, but "Landed" is from the last good snapshot'
+        : 'the merged-pull-request list could not be read — open pull requests below are live, but "Landed" is MISSING, not empty',
+    };
+  }
+
+  const rows = [...openRows, ...merged.map((pr) => ({ ...toRow(pr), status: 'landed', detail: prDetail(pr, 'landed') }))];
   const fetchedAt = nowIso();
   try {
     mkdirSync(dirname(cacheFile), { recursive: true });
@@ -409,7 +495,7 @@ export function fetchPrs({ repo, statePath, useGh = true }) {
   } catch {
     /* the cache is an optimisation — never fail a render over it */
   }
-  return { rows, fresh: true, fetchedAt, reason: null };
+  return { rows, fresh: true, fetchedAt, reason: null, truncated, partial: false };
 }
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -477,6 +563,7 @@ export function buildModel(state, prs) {
     repo: state.repo ?? null,
     artifactUrl: state.artifactUrl ?? null,
     stateError: state[STATE_ERROR] ?? null,
+    stateFatal: Boolean(state[STATE_FATAL]),
     generatedAt: nowIso(),
     prs: { ...prs, rows },
     counts: {
@@ -714,7 +801,7 @@ function itemRowHtml(it) {
  * Every field is optional and `detail` remains the fallback, so a bare `{id, title, detail}` entry — the
  * shape the board shipped with — still renders exactly as it did.
  */
-function decisionRowHtml(d, { sev = 'crit', chipLabel = 'decide' } = {}) {
+function decisionRowHtml(d, { sev = 'crit', chipLabel = 'decide', handle = 'answer as' } = {}) {
   // With a question present, the title stops being the heading and becomes the short handle for the
   // decision; with no question the title IS the heading and `detail` carries whatever context exists.
   const sub = [d.question ? d.title : d.detail, d.preparedDate && `prepared ${d.preparedDate}`]
@@ -748,7 +835,10 @@ ${d.options
     options,
     d.ifNothing ? `          <div class="breaks"><b>If nothing is done:</b> ${esc(d.ifNothing)}</div>` : '',
     evidence,
-    `          <div class="d">${d.ruling ? `<span class="lbl">answer as ${esc(d.ruling)}</span>` : ''}<span class="lbl">filed as ${esc(filedAs)}</span></div>`,
+    // "answer as R6" only where an answer is actually being asked for. In the ruled and draft sections it
+    // would contradict the section's own subtitle ("Nothing here is asking you anything"), so those say what
+    // the number IS rather than what to do with it.
+    `          <div class="d">${d.ruling ? `<span class="lbl">${esc(handle)} ${esc(d.ruling)}</span>` : ''}<span class="lbl">filed as ${esc(filedAs)}</span></div>`,
   ]
     .filter(Boolean)
     .join('\n');
@@ -802,22 +892,34 @@ ${inner}
     </section>`;
 
 /**
- * THE PROVENANCE MARKER. The template lives in exactly one place — this file — and there is no example page
- * anywhere for a future session to fork. The realistic failure is not someone editing the HTML; it is
- * someone in a hurry hand-writing a page and publishing it to the board's URL, which silently drops every
- * required field and is overwritten by the next real run anyway.
+ * THE PROVENANCE MARKER — AND EXACTLY WHAT IT IS WORTH.
  *
- * So every generated page carries a marker whose fingerprint covers the body. A hand-written page has no
- * marker; a marker copied onto hand-written content does not match. `--verify=<path>` turns that into a
- * one-line check the skill can require BEFORE publishing.
+ * The template lives in exactly one place — this file — and there is no example page anywhere for a future
+ * session to fork. Every generated page carries a marker whose fingerprint covers the marker's own fields
+ * AND the body, so `--verify=<path>` catches: a page with no marker at all, a marker copied onto different
+ * content, a body edited after generation, and a rewritten `at=` or `decisions=` (those used to sit outside
+ * the hash, so a genuine page could claim any date and any count).
+ *
+ * WHAT IT CANNOT DO, STATED PLAINLY: **this is not proof of authorship, and it cannot be made into one.** The
+ * digest is UNKEYED and the algorithm is published in this very file — the same file the skill tells an agent
+ * to read. Anyone who can write the page can recompute a matching marker, so a deliberately forged page
+ * verifies. A keyed digest would need a secret that neither the repository nor the published Artifact can
+ * hold (the page is public and self-contained; any key shipped with it is not a key).
+ *
+ * So `--verify` answers "was this file edited or hand-assembled by ACCIDENT?" — a real and common failure —
+ * and NOT "did the generator write this?". It is a tripwire, not an authorisation. The thing that actually
+ * keeps the board honest is the rule in the skill: publish only what the generator just wrote, this turn.
  */
 const MARKER_RE = /^<!-- progress-board:generated schema=(\d+) at=(\S+) decisions=(\d+) fingerprint=([0-9a-f]+) -->\n/;
 const SCHEMA = 1;
 
-const fingerprint = (body) => createHash('sha256').update(body, 'utf8').digest('hex').slice(0, 16);
+/** Hash the marker's own claims together with the body, so none of them can be rewritten independently. */
+const fingerprint = (schema, at, decisions, body) =>
+  createHash('sha256').update(`progress-board:${schema}\n${at}\n${decisions}\n`, 'utf8').update(body, 'utf8').digest('hex').slice(0, 16);
 
 /**
- * Is this file the real, script-generated board?
+ * Is this file internally consistent with the board's own generated format? See the caveat above: a `true`
+ * here rules out an accidental edit or a copied marker, NOT a deliberate forgery.
  * @returns {{ ok: boolean, reason: string }}
  */
 export function verifyPage(html) {
@@ -825,15 +927,22 @@ export function verifyPage(html) {
   if (!m) return { ok: false, reason: 'no progress-board marker — this page was NOT generated by the board script' };
   const body = String(html).slice(m[0].length);
   if (Number(m[1]) !== SCHEMA) return { ok: false, reason: `marker is schema ${m[1]}, this script writes schema ${SCHEMA} — re-render it` };
-  const actual = fingerprint(body);
-  if (actual !== m[4]) return { ok: false, reason: `fingerprint ${m[4]} does not match the page body (${actual}) — the content was edited after it was generated` };
-  return { ok: true, reason: `generated ${m[2]}, ${m[3]} decision${m[3] === '1' ? '' : 's'}, fingerprint ${actual}` };
+  const actual = fingerprint(m[1], m[2], m[3], body);
+  if (actual !== m[4]) {
+    return { ok: false, reason: `fingerprint ${m[4]} does not match the marker and body (${actual}) — the page or its marker was edited after it was generated` };
+  }
+  return {
+    ok: true,
+    reason:
+      `generated ${m[2]}, ${m[3]} decision${m[3] === '1' ? '' : 's'}, fingerprint ${actual} — the marker and body agree. ` +
+      `The digest is UNKEYED, so this rules out an edit or a copied marker, NOT a deliberately forged page.`,
+  };
 }
 
 /** The whole page. A self-contained fragment: no external font, script, image or stylesheet (strict CSP). */
 export function renderPage(m) {
   const needsYou = [
-    ...m.needsYou.decisions.map(decisionRowHtml),
+    ...m.needsYou.decisions.map((d) => decisionRowHtml(d)),
     ...m.needsYou.prs.map(prRowHtml),
     ...m.needsYou.items.map(itemRowHtml),
   ].join('\n');
@@ -844,7 +953,7 @@ export function renderPage(m) {
     ? sectionHtml(
         'Ruled, queued',
         'Already decided — kept visible because the ruling is the fact, but deliberately waiting behind other work. Nothing here is asking you anything.',
-        m.ruled.map((d) => decisionRowHtml(d, { sev: 'ok', chipLabel: 'ruled · queued' })).join('\n'),
+        m.ruled.map((d) => decisionRowHtml(d, { sev: 'ok', chipLabel: 'ruled · queued', handle: 'ruled as' })).join('\n'),
       ) + '\n'
     : '';
 
@@ -854,7 +963,7 @@ export function renderPage(m) {
     ? sectionHtml(
         'Decisions being prepared',
         'Not answerable yet, so not asked. The board will not let one of these into "Needs you" until it carries a question, at least two options with one recommended, and what breaks if nothing is done.',
-        m.drafts.map((d) => decisionRowHtml(d, { sev: 'muted', chipLabel: 'draft' })).join('\n'),
+        m.drafts.map((d) => decisionRowHtml(d, { sev: 'muted', chipLabel: 'draft', handle: 'reserved as' })).join('\n'),
       ) + '\n'
     : '';
 
@@ -864,14 +973,25 @@ export function renderPage(m) {
   const banner =
     // The plan half failing is worse than the PR half failing — a page that quietly shows an empty plan
     // reads as "nothing is happening" rather than "I could not read the plan". Say it first and say it loud.
+    // TWO different failures, so two different sentences: "missing, not empty" is only true when NOTHING
+    // parsed. In the wrong-type case the plan half below is real, minus the key that was ignored.
     (m.stateError
-      ? `    <div class="banner crit"><strong>The plan and decisions could not be read</strong> — ${esc(m.stateError)}. Everything below this line is the live pull-request half only; the plan half is missing, not empty.</div>\n`
+      ? `    <div class="banner crit"><strong>The plan and decisions could not be read</strong> — ${esc(m.stateError)}. ${
+          m.stateFatal
+            ? 'Everything below this line is the live pull-request half only; the plan half is missing, not empty.'
+            : 'Only the key named above was ignored — the rest of the plan half below is the file as written, and is still held to the same rules.'
+        }</div>\n`
       : '') +
     (m.prs.fresh
       ? ''
       : `    <div class="banner">Pull-request state is <strong>stale</strong> — ${esc(m.prs.reason ?? 'the live lookup did not run')}${
           m.prs.fetchedAt ? ` (snapshot from ${esc(stampOf(m.prs.fetchedAt))})` : ''
-        }.</div>\n`);
+        }.</div>\n`) +
+    // A silently truncated list under-reports rather than saying it under-reported, which is the same class
+    // of lie as a partial fetch rendering as a complete one.
+    (m.prs.truncated
+      ? `    <div class="banner">Only the first ${OPEN_LIMIT} open pull requests were read — the list may be <strong>truncated</strong>.</div>\n`
+      : '');
 
   const body = `<title>${esc(m.title)}</title>
 <style>${css()}</style>
@@ -881,7 +1001,7 @@ export function renderPage(m) {
     <div class="meta">
       ${m.repo ? `<span class="mono">${esc(m.repo)}</span>` : ''}
       <span class="stamp">Last refreshed <strong>${esc(stampOf(m.generatedAt))}</strong></span>
-      <span>${m.prs.fresh ? 'pull-request state read live' : 'pull-request state from cache'}</span>
+      <span>${m.prs.fresh ? 'pull-request state read live' : m.prs.partial ? 'pull-request state read live IN PART' : 'pull-request state from cache'}</span>
     </div>
   </header>
 
@@ -916,7 +1036,8 @@ ${sectionHtml('Landed', 'Recently merged pull requests and finished plan items.'
 `;
 
   const count = m.needsYou.decisions.length + m.ruled.length + m.drafts.length;
-  return `<!-- progress-board:generated schema=${SCHEMA} at=${m.generatedAt} decisions=${count} fingerprint=${fingerprint(body)} -->\n${body}`;
+  const fp = fingerprint(SCHEMA, m.generatedAt, count, body);
+  return `<!-- progress-board:generated schema=${SCHEMA} at=${m.generatedAt} decisions=${count} fingerprint=${fp} -->\n${body}`;
 }
 
 // ── Mutations ─────────────────────────────────────────────────────────────────
@@ -968,6 +1089,79 @@ export function applyVerb(state, verb, args = {}) {
       }
       state.items.push({ id, title: String(args.title), phase: Number(args.phase ?? 0) || 0, status: 'todo' });
       return `added ${id}`;
+    }
+    // `items[].pr` IS THE JOIN between the two halves — the stored plan row and the live pull-request row.
+    // Without a verb for it the only way to populate the field the plan table reads was a hand edit of the
+    // very file the skill forbids hand-editing, so the docs forbade the only thing that could produce them.
+    case 'link': {
+      const it = requireItem(state, args.id);
+      const n = Number(args.pr === true ? NaN : args.pr);
+      if (!Number.isInteger(n) || n <= 0) throw new Error('--link requires --pr=<pull-request number>');
+      if (it.pr === n) return `${it.id} is already linked to PR #${n}`;
+      it.pr = n;
+      return `linked ${it.id} → PR #${n}`;
+    }
+    case 'unlink': {
+      const it = requireItem(state, args.id);
+      if (it.pr == null) return `${it.id} has no pull request linked`;
+      const had = it.pr;
+      delete it.pr;
+      return `unlinked ${it.id} (was PR #${had})`;
+    }
+    // `--add` keys on slugify(title), so a typo'd title was otherwise a permanent row inflating counts.total
+    // forever. Retitling deliberately does NOT move the id: the id is the handle every other verb and the
+    // PR join use, and renaming it under them would break exactly what makes the row stable.
+    case 'retitle': {
+      const it = requireItem(state, args.id);
+      const to = args.to === true ? '' : String(args.to ?? '');
+      if (!to) throw new Error('--retitle requires --to="<new title>"');
+      if (it.title === to) return `${it.id} is already titled "${to}"`;
+      it.title = to;
+      return `retitled ${it.id} → "${to}"`;
+    }
+    case 'remove': {
+      const id = String(args.id);
+      const before = (state.items ?? []).length;
+      state.items = (state.items ?? []).filter((i) => i.id !== id);
+      if (state.items.length === before) {
+        return `no item "${id}" on the board — nothing to remove (known ids: ${state.items.map((i) => i.id).join(', ') || '(none)'})`;
+      }
+      return `removed ${id}`;
+    }
+    case 'phase-title': {
+      const n = String(args.phase === true ? '' : (args.phase ?? ''));
+      if (!/^\d+$/.test(n)) throw new Error('--phase-title=<n> takes the phase NUMBER, e.g. --phase-title=2 --to="Merge-gate correctness"');
+      const to = args.to === true ? '' : String(args.to ?? '');
+      state.phases ??= {};
+      if (!to) {
+        if (!(n in state.phases)) return `phase ${n} has no title`;
+        delete state.phases[n];
+        return `phase ${n} title cleared`;
+      }
+      if (state.phases[n] === to) return `phase ${n} is already titled "${to}"`;
+      state.phases[n] = to;
+      return `phase ${n} titled "${to}"`;
+    }
+    case 'board-title': {
+      const to = args.title === true ? '' : String(args.title ?? '');
+      if (!to) throw new Error('--board-title requires a value');
+      if (state.title === to) return `the board is already titled "${to}"`;
+      state.title = to;
+      return `board titled "${to}"`;
+    }
+    // `repo` is what `gh pr list --repo` is given, so bootstrapping a board used to need a hand edit before
+    // the live half could work at all.
+    case 'repo': {
+      const to = args.repo === true ? '' : String(args.repo ?? '');
+      if (!to) {
+        if (state.repo == null) return `no repository recorded`;
+        state.repo = null;
+        return `repository cleared — pull requests will be read from the current checkout`;
+      }
+      if (!/^[\w.-]+\/[\w.-]+$/.test(to)) throw new Error(`--repo must be <owner>/<name> — got "${to}"`);
+      if (state.repo === to) return `repository is already ${to}`;
+      state.repo = to;
+      return `repository set to ${to}`;
     }
     case 'decide': {
       const d = requireDecision(state, args.id);
@@ -1056,7 +1250,11 @@ export function applyVerb(state, verb, args = {}) {
       if (!label) throw new Error('--decision-option-remove requires --label="<option>"');
       const before = d.options?.length ?? 0;
       d.options = (d.options ?? []).filter((o) => o.label !== label);
-      if (d.options.length === before) throw new Error(`no option labelled "${label}" on ${d.id}`);
+      // Idempotent, like every other verb: a second removal of the same label is a no-op, not an error. The
+      // labels that ARE there are named, so a typo is still visible in the one line the model reads.
+      if (d.options.length === before) {
+        return `no option labelled "${label}" on ${d.id} — nothing to remove (options: ${d.options.map((o) => o.label).join(', ') || 'none'})`;
+      }
       return `option removed from ${d.id}: ${label}`;
     }
     case 'decision-evidence': {
@@ -1071,8 +1269,39 @@ export function applyVerb(state, verb, args = {}) {
       d.evidence.push(text);
       return `evidence added to ${d.id}`;
     }
+    // A decision can be filed in error, superseded, or duplicated, and until now removing one meant the hand
+    // edit the design forbids. Its R-number RETIRES with it and is never handed out again — `ensureRulingNumbers`
+    // makes the counter monotonic, and `main` reconciles it from the file as read, BEFORE this verb runs.
+    case 'decision-remove': {
+      const d = findDecision(state, args.id);
+      if (!d) {
+        const known = (state.decisions ?? []).map((x) => (x.ruling ? `${x.ruling}/${x.id}` : x.id)).join(', ') || '(none)';
+        return `no decision "${args.id}" on the board — nothing to remove (known: ${known})`;
+      }
+      state.decisions = (state.decisions ?? []).filter((x) => x !== d);
+      return `removed decision ${d.ruling ? `${d.ruling}/${d.id}` : d.id} — ${d.ruling ?? 'its number'} is retired and will never be reissued`;
+    }
+    // The loudest warning in the skill is that a minted duplicate URL cannot be undone, so this verb — the
+    // one that decides which URL the next session republishes to — gets a shape check and refuses to
+    // overwrite a different stored URL without being told to.
     case 'url': {
-      state.artifactUrl = args.url;
+      const url = args.url === true ? '' : String(args.url ?? '');
+      if (!/^https?:\/\/\S+$/.test(url)) {
+        throw new Error(`--url takes the full published URL (https://…) — got ${url ? `"${url}"` : 'no value at all'}`);
+      }
+      if (state.artifactUrl === url) return `artifact URL already stored`;
+      if (state.artifactUrl && args.force) {
+        const was = state.artifactUrl;
+        state.artifactUrl = url;
+        return `artifact URL replaced (was ${was})`;
+      }
+      if (state.artifactUrl) {
+        throw new Error(
+          `${state.artifactUrl} is already stored as this board's URL. Replacing it orphans the operator's bookmark, ` +
+            `and a minted duplicate cannot be undone — pass --force only if the board really was re-published to a new URL.`,
+        );
+      }
+      state.artifactUrl = url;
       return `artifact URL stored`;
     }
     default:
@@ -1141,8 +1370,15 @@ const USAGE = `progress-board — the operator's published status page (one Bash
   node scripts/progress-board.mjs --block=<id> --why="<reason>"
   node scripts/progress-board.mjs --note=<id> --text="<note>"    (empty --text clears it)
   node scripts/progress-board.mjs --add="<title>" [--phase=<n>]
+  node scripts/progress-board.mjs --retitle=<id> --to="<title>"   the id never moves — it is the join key
+  node scripts/progress-board.mjs --remove=<id>      drop a plan item
+  node scripts/progress-board.mjs --link=<id> --pr=<n>            join the item to its pull request
+  node scripts/progress-board.mjs --unlink=<id>
+  node scripts/progress-board.mjs --phase-title=<n> --to="<title>"   (empty --to clears it)
+  node scripts/progress-board.mjs --board-title="<title>"
+  node scripts/progress-board.mjs --repo=<owner>/<name>           what \`gh pr list --repo\` is given
   node scripts/progress-board.mjs --decide=<id>      a decision was taken
-  node scripts/progress-board.mjs --url=<url>        store the published artifact URL (once)
+  node scripts/progress-board.mjs --url=<url>        store the published artifact URL (once; --force to replace)
 
   A decision the operator can ANSWER FROM THE PAGE. Enforced, not requested: anything marked "awaiting" must
   carry a question, two or more real options with exactly one recommended, and ifNothing — or the run exits 1
@@ -1158,12 +1394,15 @@ const USAGE = `progress-board — the operator's published status page (one Bash
   node scripts/progress-board.mjs --decision-option-remove=<id> --label="<option>"   (labels match exactly, so
         re-wording an option ADDS a second one — remove the superseded label rather than hand-editing state)
   node scripts/progress-board.mjs --decision-evidence=<id> --text="<locus, count or prior ruling>"
+  node scripts/progress-board.mjs --decision-remove=<id>   drop it; its R-number retires and is never reissued
         then, once it is answerable: --decision-set=<id> --field=status --value=awaiting
 
   <id> is EITHER handle: the ruling number the operator quotes ("R6", the board assigns it and never reuses
   it) or the id it is filed under. So --decide=R6 and --decide=2978 reach the same decision.
 
-  node scripts/progress-board.mjs --verify=<path>    is that file the script-generated board? (exit 0 / 1)
+  node scripts/progress-board.mjs --verify=<path>    does that file's marker still match its own content?
+        A TRIPWIRE, NOT AN AUTHORISATION. The digest is unkeyed and its algorithm is in this file, so exit 0
+        rules out an accidental edit or a copied marker — it cannot rule out a deliberately forged page.
 
   --state=<path>  --out=<path>  --no-gh  --json  --help`;
 
@@ -1194,7 +1433,12 @@ export function main(argv = process.argv.slice(2)) {
       return 1;
     }
     const v = verifyPage(html);
-    console[v.ok ? 'log' : 'error'](`${v.ok ? '✓' : '✗'} ${shortPath(target)}: ${v.ok ? 'is the generated board' : 'is NOT the generated board'} — ${v.reason}`);
+    // The two directions are NOT equally strong, and the wording says so. A failure is conclusive: this file
+    // is definitely not an untouched generated board. A pass is not: it means the marker and the body agree,
+    // which an unkeyed digest published in this same file cannot turn into proof of who wrote them.
+    console[v.ok ? 'log' : 'error'](
+      `${v.ok ? '✓' : '✗'} ${shortPath(target)}: ${v.ok ? 'marker and body agree' : 'is NOT the generated board'} — ${v.reason}`,
+    );
     return v.ok ? 0 : 1;
   }
 
@@ -1206,6 +1450,13 @@ export function main(argv = process.argv.slice(2)) {
   if (args.block) verbs.push(['block', { id: String(args.block), why: args.why === true ? '' : args.why }]);
   if (args.note) verbs.push(['note', { id: String(args.note), text: args.text === true ? '' : args.text }]);
   if (args.add) verbs.push(['add', { title: String(args.add), phase: args.phase }]);
+  if (args.retitle) verbs.push(['retitle', { id: String(args.retitle), to: args.to }]);
+  if (args.remove) verbs.push(['remove', { id: String(args.remove) }]);
+  if (args.link) verbs.push(['link', { id: String(args.link), pr: args.pr }]);
+  if (args.unlink) verbs.push(['unlink', { id: String(args.unlink) }]);
+  if (args['phase-title']) verbs.push(['phase-title', { phase: args['phase-title'], to: args.to }]);
+  if (args['board-title']) verbs.push(['board-title', { title: args['board-title'] }]);
+  if (args.repo !== undefined) verbs.push(['repo', { repo: args.repo }]);
   if (args.decide) verbs.push(['decide', { id: String(args.decide) }]);
   if (args['decision-add'])
     verbs.push([
@@ -1221,16 +1472,28 @@ export function main(argv = process.argv.slice(2)) {
   if (args['decision-option-remove'])
     verbs.push(['decision-option-remove', { id: String(args['decision-option-remove']), label: args.label }]);
   if (args['decision-evidence']) verbs.push(['decision-evidence', { id: String(args['decision-evidence']), text: args.text }]);
-  if (args.url) verbs.push(['url', { url: String(args.url) }]);
+  if (args['decision-remove']) verbs.push(['decision-remove', { id: String(args['decision-remove']) }]);
+  if (args.url) verbs.push(['url', { url: args.url, force: Boolean(args.force) }]);
 
-  // A file we could not read is a file we must not overwrite: applying a verb here would save the EMPTY
+  // A file NOTHING survived is a file we must not overwrite: applying a verb here would save the EMPTY
   // fallback state over a plan that is very likely one merge-conflict marker away from fine. Refuse the
   // write, keep rendering (below) so the page still exists and says why.
+  //
+  // A PARTIAL read is deliberately NOT refused. Its items and decisions are the operator's real data, so a
+  // verb writes onto real data — and refusing here while the render guard (below) also refuses would leave
+  // the hand edit the whole design forbids as the only way out. The verbs ARE the repair route.
   const broken = state[STATE_ERROR];
-  if (broken && verbs.length) {
+  const fatal = Boolean(state[STATE_FATAL]);
+  if (fatal && verbs.length) {
     console.error(`✗ refusing to write: ${broken}. Fix the file by hand — applying a verb now would overwrite the plan with an empty one.`);
     return 1;
   }
+
+  // Reconcile the ruling counter from the file AS READ — before any verb can delete the decision that is the
+  // only surviving evidence a number was ever used. This is what makes "never reused" structural rather than
+  // a convention `--decision-remove` has to remember.
+  const rulingBefore = state.nextRuling;
+  let numbered = fatal ? 0 : ensureRulingNumbers(state);
 
   const confirmations = [];
   try {
@@ -1239,19 +1502,28 @@ export function main(argv = process.argv.slice(2)) {
     console.error(`✗ ${e.message}`);
     return 1;
   }
-  // Backfill any decision that predates the R-number scheme, once. Idempotent after the first run, which is
-  // why it can safely trigger a save even when no verb ran.
-  const numbered = broken ? 0 : ensureRulingNumbers(state);
+  // Backfill anything a verb just added. Idempotent after the first run, which is why it can safely trigger a
+  // save even when no verb ran — and the counter itself moving is a change worth persisting too.
+  numbered += fatal ? 0 : ensureRulingNumbers(state);
+  const counterMoved = !fatal && state.nextRuling !== rulingBefore;
 
   // Save FIRST, validate second. The verbs are how an incomplete decision gets completed, so refusing to
   // persist them would deadlock the only route out of a board that is already failing this check.
-  if (verbs.length || numbered) saveState(statePath, state);
+  //
+  // On a partial read, save only when a verb actually ran. A plain re-render must not silently rewrite the
+  // file and drop the wrong-typed key the operator may still want to look at.
+  if (verbs.length || ((numbered || counterMoved) && !broken)) saveState(statePath, state);
 
-  // The render guard, and a DIFFERENT failure from an unreadable file: this one means the file parsed fine
-  // and someone put an unanswerable decision in front of the operator. It catches what the verb guards
-  // cannot — an entry that predates the rule, or one an editor wrote around the CLI. It hard-fails rather
-  // than warning, because a warning is read once and then never again.
-  const invalid = broken ? [] : validateDecisions(state);
+  // THE RENDER GUARD, and a DIFFERENT failure from an unreadable file: this one means a decision reached the
+  // model that the operator cannot answer from the page. It catches what the verb guards cannot — an entry
+  // that predates the rule, or one an editor wrote around the CLI. It hard-fails rather than warning,
+  // because a warning is read once and then never again.
+  //
+  // IT RUNS UNCONDITIONALLY, on whatever decisions actually reached the model. It used to be skipped whenever
+  // STATE_ERROR was set, which meant one wrong-typed key — a key the soft branch normalises while PRESERVING
+  // every decision — turned the guard off and published the exact unanswerable card this board exists to make
+  // impossible, at exit 0, on every run. A fatal read has no decisions, so this is simply empty there.
+  const invalid = validateDecisions(state);
   if (invalid.length) {
     console.error(`✗ ${invalid.length} decision${invalid.length === 1 ? '' : 's'} cannot be answered from the page — refusing to render:`);
     for (const line of invalid) console.error(`    ${line}`);
@@ -1278,7 +1550,9 @@ export function main(argv = process.argv.slice(2)) {
   const url = model.artifactUrl ? ` · publish to ${model.artifactUrl}` : ' · no artifact URL stored yet (--url=<url> after the first publish)';
   const staleness = prs.fresh ? '' : ' · PR state STALE';
   // The page carries the loud version; this is the one line the model actually reads, so it has to carry it too.
-  const stateNote = broken ? ` · STATE FILE UNREADABLE: ${broken}` : '';
+  // Two different failures keep two different words: UNREADABLE means nothing survived; PARTLY IGNORED means
+  // the plan below is real and only the named key was dropped.
+  const stateNote = broken ? ` · STATE FILE ${fatal ? 'UNREADABLE' : 'PARTLY IGNORED'}: ${broken}` : '';
   console.log(`${broken ? '⚠' : '✓'} ${head} → ${rel(outPath)} (${model.counts.needsYou} needs you, ${model.counts.inFlight} in flight)${stateNote}${staleness}${url}`);
   return 0;
 }

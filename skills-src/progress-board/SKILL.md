@@ -21,17 +21,31 @@ This is the failure that has already happened, so it is worth being blunt about 
    You will not refuse yourself. The operator gets a thinner page and cannot tell.
 2. **It gets overwritten by the next real run anyway.** The work is wasted, and until then the record is
    inconsistent — the page says one thing, `we:reports/progress-board.json` says another.
-3. **It is detectable, so it is not even a quiet shortcut.** Every generated page carries a provenance marker
-   whose fingerprint covers the body.
+3. **An accidental one is detectable.** Every generated page carries a provenance marker whose fingerprint
+   covers the marker's own fields and the body, so an edited page or a copied marker is caught.
 
-**Publish only what the generator just wrote.** If you are not certain the file at that path came from this
-turn's run, check it — one Bash call, one line:
+**Publish only what the generator just wrote — the `✓` line from THIS turn's run is the only real proof.**
+
+### What `--verify` is worth, exactly
+
+If you are not certain the file at that path came from this turn's run, check it — one Bash call, one line:
 
 ```bash
 node scripts/progress-board.mjs --verify=reports/progress-board.html
 ```
 
-Exit 0 and `is the generated board` → publish. Anything else → **do not publish**; re-run the generator.
+The two directions are **not** equally strong, and the wording says so:
+
+- **Exit 1 (`is NOT the generated board`) is conclusive.** No marker, a copied marker, an edited body, a
+  rewritten `at=` or `decisions=` — **do not publish**; re-run the generator.
+- **Exit 0 (`marker and body agree`) is a tripwire, NOT an authorisation.** The digest is **unkeyed** and its
+  algorithm lives in `we:scripts/progress-board.mjs` — the very file you may have just been told to read. Any
+  page whose author recomputes the marker verifies. So exit 0 rules out an *accident* (a stray edit, a marker
+  pasted onto other content); it **cannot** tell you the generator wrote the file.
+
+This cannot be fixed by a stronger hash. A keyed digest needs a secret, and the board is a public,
+self-contained page in a public repository — any key shipped with it is not a key. **The rule above is the
+protection; `--verify` only catches the honest mistakes.**
 
 And if the board *cannot* render, the fix is to give the generator what it is asking for — it names the id
 and the missing field — never to route around it.
@@ -42,8 +56,9 @@ and the missing field — never to route around it.
 
 - Do **not** read `we:reports/progress-board.html`. It is generated output; reading it burns thousands of
   tokens and teaches you nothing the CLI does not already print.
-- Do **not** hand-edit `we:reports/progress-board.json` with Edit/Write. Every field it holds has a verb.
-  A hand edit is how the mechanical property dies.
+- Do **not** hand-edit `we:reports/progress-board.json` with Edit/Write. Every field it holds has a verb —
+  including `items[].pr`, `phases`, `title` and `repo`, and including removing and retitling a row (see the
+  verb list below). A hand edit is how the mechanical property dies.
 - Do **not** re-derive pull-request state in context. The generator reads it live from `gh` on every render.
 - Do **not** write the page yourself. See above.
 
@@ -75,6 +90,22 @@ node scripts/progress-board.mjs --note=<id> --text="rebased onto main"      # em
 node scripts/progress-board.mjs --add="Ship the drain rewrite" --phase=2
 node scripts/progress-board.mjs --decide=2978
 ```
+
+Every other field the state file holds has a verb too — there is no field left that needs a hand edit:
+
+```bash
+node scripts/progress-board.mjs --link=<id> --pr=1101      # the JOIN to the live half; --unlink=<id> removes it
+node scripts/progress-board.mjs --retitle=<id> --to="Corrected title"   # the id never moves — it is the key
+node scripts/progress-board.mjs --remove=<id>              # drop a plan row (a typo'd title, a dropped item)
+node scripts/progress-board.mjs --phase-title=2 --to="Merge-gate correctness"   # empty --to clears it
+node scripts/progress-board.mjs --board-title="Progress board"
+node scripts/progress-board.mjs --repo=chalbert/web-everything   # what `gh pr list --repo` is given
+node scripts/progress-board.mjs --decision-remove=<id>     # its R-number retires and is never reissued
+```
+
+`--url` is the one verb with a guard on top: it takes a real `https://…` value and **refuses to replace a
+URL that is already stored** unless you add `--force`. A minted duplicate cannot be undone, so replacing the
+stored one is a deliberate act, never a typo.
 
 ### Decisions carry the whole case — and the tool enforces it
 
@@ -143,7 +174,8 @@ Publish **only** a page the generator just wrote. The `✓` line from step 1 is 
 publish; the budget stays at one Bash call plus one Artifact call.
 
 If you do **not** have it — you did not run the generator this turn, or you are unsure what is at that path —
-spend one extra Bash call before publishing rather than publishing blind:
+spend one extra Bash call before publishing rather than publishing blind. Read its exit code with the caveat
+above in mind: a failure is conclusive, a pass only means the file has not been *accidentally* disturbed.
 
 ```bash
 node scripts/progress-board.mjs --verify=reports/progress-board.html
@@ -185,7 +217,10 @@ blind. A minted duplicate URL cannot be undone.
 - **`we:scripts/progress-board.mjs`** — owns the page. Derives every pull-request row live
   (`gh pr list`) and reduces each to one status: *awaiting your clear* / *changes requested* / *CI red* /
   *conflicted* / *awaiting review* / *queued to land* / *landed*. Degrades to the last cached snapshot,
-  behind a visible stale banner, when `gh` is unavailable — it never crashes the render.
+  behind a visible stale banner, when `gh` is unavailable — it never crashes the render. A **partial** read
+  (the open list came back, the merged one did not) is treated as stale too: the page says which half it
+  could not read, keeps the cached *Landed* rows, and does **not** overwrite the cache with the thinner
+  snapshot.
 - **`we:reports/progress-board.json`** — the small hand-maintained half: plan items, decisions awaiting the
   operator, and the artifact URL. Written only through the verbs above.
 - **`we:reports/progress-board.html`** — generated output at a fixed path. Not tracked in git, never read
@@ -193,10 +228,18 @@ blind. A minted duplicate URL cannot be undone.
 
 `--out=` and `--state=` may point inside `reports/` or anywhere **outside** the repository (publishing from
 a scratchpad path is normal); a path inside the repository but outside `reports/` is refused, so the board
-can never overwrite a tracked file. If the state file itself is unreadable — an unresolved merge-conflict
-marker is the usual cause — the page still renders, carries a red *"the plan and decisions could not be
-read"* banner, and every verb is refused until it is fixed by hand, so an empty save can never overwrite a
-recoverable plan.
+can never overwrite a tracked file.
+
+If the state file itself will not read, there are **two** outcomes and the CLI names which one you are in:
+
+| The file | The CLI says | What happens |
+| --- | --- | --- |
+| did not parse at all (an unresolved merge-conflict marker is the usual cause) | `STATE FILE UNREADABLE` | the page still renders, behind a red *"the plan and decisions could not be read"* banner, with **no** plan half. **Every verb is refused** — an empty save must never overwrite a recoverable plan. Fix it by hand. |
+| parsed, but one key held the wrong type | `STATE FILE PARTLY IGNORED` | only that key is dropped. The items and decisions are **real**, so the verbs still work (they are the repair route) and the page says exactly which key was ignored. |
+
+**The answerability rule applies in both cases.** It is checked against whatever decisions actually loaded,
+never skipped because something else about the file was wrong — a wrong-typed key is not a licence to put an
+unanswerable ask in front of the operator.
 
 ## The page's own contract
 

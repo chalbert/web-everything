@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -410,16 +410,44 @@ describe('ruling numbers', () => {
     expect(s.nextRuling).toBe(9);
   });
 
+  // The counter used to be written back UNCONDITIONALLY from a default of 1, so a state file with R1/R2/R3
+  // and no `nextRuling` key saved the counter as 1 — and the next three decisions were handed R1, R2, R3
+  // again. The floor is the highest number present, always, whatever the counter says.
+  it('never regresses the counter below the numbers already handed out', () => {
+    const s = st([{ id: 'a', ruling: 'R1' }, { id: 'b', ruling: 'R2' }, { id: 'c', ruling: 'R3' }]); // no nextRuling key
+    expect(ensureRulingNumbers(s)).toBe(0);
+    expect(s.nextRuling).toBe(4);
+
+    s.decisions.push({ id: 'd' });
+    ensureRulingNumbers(s);
+    expect(s.decisions.at(-1).ruling).toBe('R4');
+  });
+
+  // A hand-lowered counter is the same attack from the other side: the stored value is a FLOOR, never a
+  // licence to reissue.
+  it('ignores a counter that points below a number already in use', () => {
+    const s = st([{ id: 'a', ruling: 'R7' }], 2);
+    s.decisions.push({ id: 'b' });
+    ensureRulingNumbers(s);
+    expect(s.decisions.at(-1).ruling).toBe('R8');
+    expect(s.nextRuling).toBe(9);
+  });
+
   it('skips a number that is somehow already in use rather than minting a duplicate', () => {
     const s = st([{ id: 'a', ruling: 'R1' }, { id: 'b' }], 1);
     ensureRulingNumbers(s);
     expect(s.decisions[1].ruling).toBe('R2');
   });
 
-  it('backfills entries that predate the scheme, in list order', () => {
+  // Backfill goes ABOVE the highest number in use, in list order — it does not fill the gaps below it. A gap
+  // is not free space: the most likely reason R1..R8 are absent while R9 is present is that they were used
+  // and their decisions are gone, and handing R1 to something new is precisely the reuse the scheme forbids.
+  // Numbers are identity, not a dense sequence, so skipping eight of them costs nothing.
+  it('backfills entries that predate the scheme, in list order, above every number in use', () => {
     const s = st([{ id: '2978' }, { id: '2908', ruling: 'R9' }, { id: '2691' }]);
     ensureRulingNumbers(s);
-    expect(s.decisions.map((d) => d.ruling)).toEqual(['R1', 'R9', 'R2']);
+    expect(s.decisions.map((d) => d.ruling)).toEqual(['R10', 'R9', 'R11']);
+    expect(s.nextRuling).toBe(12);
   });
 
   it('resolves a decision by EITHER handle — the ruling number or the id it is filed under', () => {
@@ -463,7 +491,7 @@ describe('the generated-page marker', () => {
     const h = real();
     const v = verifyPage(h.replace('Needs you', 'Needs you (hand-tweaked)'));
     expect(v.ok).toBe(false);
-    expect(v.reason).toMatch(/does not match the page body/);
+    expect(v.reason).toMatch(/does not match the marker and body/);
   });
 
   it('rejects a marker from a different schema, rather than trusting it', () => {
@@ -474,6 +502,29 @@ describe('the generated-page marker', () => {
 
   it('counts the decisions in the marker, so a thinner page is visible from the marker alone', () => {
     expect(real()).toMatch(/decisions=1 /);
+  });
+
+  // The marker's own claims are only worth something if they are BOUND to the page. With the fingerprint
+  // covering the body alone, a genuine page could be re-dated to 1999 and re-counted to 999 decisions and
+  // still verify — the two fields the check actually prints back at the reader.
+  it('binds the marker\'s own at= and decisions= into the fingerprint, not just the body', () => {
+    const h = real();
+    const redated = verifyPage(h.replace(/ at=\S+ /, ' at=1999-01-01T00:00:00.000Z '));
+    expect(redated.ok).toBe(false);
+    expect(redated.reason).toMatch(/does not match the marker and body/);
+
+    const recounted = verifyPage(h.replace(/ decisions=\d+ /, ' decisions=999 '));
+    expect(recounted.ok).toBe(false);
+    expect(recounted.reason).toMatch(/does not match the marker and body/);
+  });
+
+  // The honest limit, asserted so nobody later "hardens" the wording back up: an unkeyed digest whose
+  // algorithm ships in the same repository cannot distinguish a generated page from a carefully forged one.
+  it('states plainly that a pass is not proof of authorship', () => {
+    const v = verifyPage(real());
+    expect(v.ok).toBe(true);
+    expect(v.reason).toMatch(/UNKEYED/);
+    expect(v.reason).toMatch(/NOT a deliberately forged page/);
   });
 });
 
@@ -612,6 +663,146 @@ describe('CLI verbs', () => {
     const first = page();
     cli();
     expect(page()).toBe(first);
+  });
+});
+
+/**
+ * A FIELD WITH NO VERB IS A HAND EDIT BY ANOTHER NAME. The PR body, `/board` and SKILL.md all say the state
+ * file is never hand-edited *because every field has a verb* — but `items[].pr` (the join between the stored
+ * half and the live half, and present on 6 of the 15 shipped rows), `phases`, `title` and `repo` had none,
+ * and nothing could remove or retitle a row. The shipped state file therefore HAD to be hand-authored in
+ * exactly the field the docs forbid. These are the missing verbs.
+ */
+describe('CLI verbs for the fields that had none', () => {
+  const item = (id) => state().items.find((i) => i.id === id);
+
+  it('--link joins a plan item to its pull request, and --unlink takes it off', () => {
+    expect(cli('--link=alpha', '--pr=1234').code).toBe(0);
+    expect(item('alpha').pr).toBe(1234);
+    expect(page()).toContain('#1234');
+    expect(cli('--link=alpha', '--pr=1234').out).toMatch(/already linked/); // idempotent
+
+    expect(cli('--unlink=alpha').code).toBe(0);
+    expect(item('alpha').pr).toBeUndefined();
+    expect(cli('--unlink=alpha').out).toMatch(/no pull request linked/); // idempotent
+  });
+
+  it('--link demands a real pull-request number', () => {
+    expect(cli('--link=alpha', '--pr=not-a-number').code).toBe(1);
+    expect(cli('--link=alpha').code).toBe(1);
+    expect(item('alpha').pr).toBeUndefined();
+  });
+
+  it('--retitle fixes a typo WITHOUT moving the id every other verb and the PR join use', () => {
+    expect(cli('--retitle=alpha', '--to=Alpha, corrected').code).toBe(0);
+    expect(item('alpha')).toMatchObject({ id: 'alpha', title: 'Alpha, corrected' });
+    expect(cli('--retitle=alpha', '--to=Alpha, corrected').out).toMatch(/already titled/); // idempotent
+    expect(cli('--retitle=alpha').code).toBe(1); // --to is not optional
+  });
+
+  it('--remove drops a row, so a typo\'d title stops inflating the plan total forever', () => {
+    expect(state().items).toHaveLength(2);
+    expect(cli('--remove=alpha').code).toBe(0);
+    expect(state().items.map((i) => i.id)).toEqual(['beta']);
+    const again = cli('--remove=alpha');
+    expect(again.code).toBe(0); // idempotent
+    expect(again.out).toMatch(/nothing to remove/);
+  });
+
+  it('--phase-title names a phase — the map `--add --phase=n` never writes', () => {
+    expect(cli('--phase-title=2', '--to=Merge-gate correctness').code).toBe(0);
+    expect(state().phases['2']).toBe('Merge-gate correctness');
+    cli('--add=Something in phase two', '--phase=2');
+    expect(page()).toContain('Phase 2 — Merge-gate correctness');
+    expect(cli('--phase-title=2', '--to=Merge-gate correctness').out).toMatch(/already titled/);
+    expect(cli('--phase-title=2', '--to=').out).toMatch(/title cleared/);
+    expect(state().phases['2']).toBeUndefined();
+    expect(cli('--phase-title=two', '--to=x').code).toBe(1);
+  });
+
+  it('--board-title and --repo bootstrap a board without a hand edit', () => {
+    expect(cli('--board-title=The plan').code).toBe(0);
+    expect(state().title).toBe('The plan');
+    expect(page()).toContain('<h1>The plan</h1>');
+
+    expect(cli('--repo=chalbert/frontierui').code).toBe(0);
+    expect(state().repo).toBe('chalbert/frontierui');
+    expect(cli('--repo=not a repo').code).toBe(1);
+    expect(state().repo).toBe('chalbert/frontierui'); // the bad value never landed
+    expect(cli('--repo=').out).toMatch(/repository cleared/);
+    expect(state().repo).toBeNull();
+  });
+
+  it('--decision-remove drops a decision — the other repair that needed a hand edit', () => {
+    expect(cli('--decision-remove=2978').code).toBe(0);
+    expect(state().decisions).toHaveLength(0);
+    const again = cli('--decision-remove=2978');
+    expect(again.code).toBe(0); // idempotent
+    expect(again.out).toMatch(/nothing to remove/);
+  });
+
+  /**
+   * THE DEMONSTRATED REUSE. A state file holding R1/R2/R3 with no `nextRuling` key saved the counter back as
+   * 1, so the numbers were re-issued; chained with a removal, a brand-new decision was handed R2 — and
+   * `--decide=R2` is what the operator types in chat. The counter is reconciled from the file AS READ, before
+   * the removal can delete the evidence, and it only ever moves forward.
+   */
+  it('retires a removed ruling number for good — the next decision never reuses it', () => {
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        ...SEED,
+        nextRuling: undefined, // the key is simply absent, as in a hand-authored or older file
+        decisions: [
+          { id: 'd1', ruling: 'R1', title: 'One', status: 'queued' },
+          { id: 'd2', ruling: 'R2', title: 'Two', status: 'queued' },
+          { id: 'd3', ruling: 'R3', title: 'Three', status: 'queued' },
+        ],
+      }),
+    );
+    expect(cli('--decision-remove=R2').code).toBe(0);
+    expect(state().decisions.map((d) => d.ruling)).toEqual(['R1', 'R3']);
+    expect(state().nextRuling).toBe(4); // NOT 1, and not 3 — the counter never walks back
+
+    expect(cli('--decision-add=A fourth call', '--question=Q?', '--if-nothing=nothing').code).toBe(0);
+    expect(state().decisions.at(-1).ruling).toBe('R4');
+  });
+
+  it('a plain re-render never walks the counter back either', () => {
+    writeFileSync(statePath, JSON.stringify({ ...SEED, nextRuling: undefined, decisions: [{ id: 'd1', ruling: 'R3', title: 'One', status: 'queued' }] }));
+    expect(cli().code).toBe(0);
+    expect(state().nextRuling).toBe(4);
+  });
+
+  it('--url refuses anything that is not a URL, including no value at all', () => {
+    const empty = cli('--url');
+    expect(empty.code).toBe(1);
+    expect(empty.err).toMatch(/full published URL/);
+    expect(state().artifactUrl).toBeNull(); // and NOT the literal string "true"
+
+    expect(cli('--url=probably-a-url').code).toBe(1);
+    expect(state().artifactUrl).toBeNull();
+  });
+
+  it('--url will not silently replace a stored URL — a minted duplicate cannot be undone', () => {
+    cli('--url=https://claude.ai/public/artifacts/abc');
+    expect(cli('--url=https://claude.ai/public/artifacts/abc').out).toMatch(/already stored/); // idempotent
+
+    const clash = cli('--url=https://claude.ai/public/artifacts/xyz');
+    expect(clash.code).toBe(1);
+    expect(clash.err).toContain('already stored');
+    expect(state().artifactUrl).toBe('https://claude.ai/public/artifacts/abc');
+
+    expect(cli('--url=https://claude.ai/public/artifacts/xyz', '--force').code).toBe(0);
+    expect(state().artifactUrl).toBe('https://claude.ai/public/artifacts/xyz');
+  });
+
+  it('does not tell the operator to "answer" a decision in a section that asks nothing', () => {
+    cli('--decision-set=2978', '--field=status', '--value=queued');
+    const h = page();
+    expect(h).toContain('Ruled, queued');
+    expect(h).toContain('ruled as R1');
+    expect(h).not.toContain('answer as');
   });
 });
 
@@ -770,10 +961,15 @@ describe('CLI decision verbs', () => {
     expect(page()).not.toContain('a re-wording that duplicated an option');
   });
 
-  it('--decision-option-remove refuses an unknown label rather than silently no-opping', () => {
-    const r = cli('--decision-option-remove=2978', '--label=Never added');
-    expect(r.code).toBe(1);
-    expect(r.err).toContain('no option labelled "Never added"');
+  // Idempotent like every other verb — a second removal of the same label is a no-op, not a failure. It still
+  // NAMES the options that are there, so a typo'd label is visible in the one line the model reads.
+  it('--decision-option-remove is idempotent — a repeat is a no-op that names what is actually there', () => {
+    expect(cli('--decision-option=2978', '--label=Maybe', '--detail=c').code).toBe(0);
+    expect(cli('--decision-option-remove=2978', '--label=Maybe').code).toBe(0);
+    const again = cli('--decision-option-remove=2978', '--label=Maybe');
+    expect(again.code).toBe(0);
+    expect(again.out).toContain('no option labelled "Maybe"');
+    expect(again.out).toContain('options: Yes, No');
     expect(state().decisions[0].options).toHaveLength(2);
   });
 
@@ -854,13 +1050,26 @@ describe('CLI decision verbs', () => {
     cli();
     const good = spawnSync(process.execPath, [CLI, `--verify=${outPath}`], { encoding: 'utf8' });
     expect(good.status).toBe(0);
-    expect(good.stdout).toContain('is the generated board');
+    expect(good.stdout).toContain('marker and body agree');
 
     const fake = join(sandbox, 'handrolled.html');
     writeFileSync(fake, '<title>Progress board</title><p>trust me</p>');
     const bad = spawnSync(process.execPath, [CLI, `--verify=${fake}`], { encoding: 'utf8' });
     expect(bad.status).toBe(1);
     expect(bad.stderr).toContain('is NOT the generated board');
+  });
+
+  // The two directions are not equally strong and the wording must not pretend otherwise: a FAILURE is
+  // conclusive, a PASS is only "the marker and the body agree". The digest is unkeyed and its algorithm is in
+  // the script the skill tells an agent to read, so a recomputed marker on hand-written content verifies —
+  // that is a property of unkeyed digests, not a bug to be patched, and the check has to say so out loud.
+  it('--verify does not claim to prove authorship — the unkeyed digest is named in the output', () => {
+    cli();
+    const good = spawnSync(process.execPath, [CLI, `--verify=${outPath}`], { encoding: 'utf8' });
+    expect(good.status).toBe(0);
+    expect(good.stdout).not.toContain('is the generated board');
+    expect(good.stdout).toMatch(/UNKEYED/);
+    expect(good.stdout).toMatch(/NOT a deliberately forged page/);
   });
 
   it('--decide still means TAKEN — the decision leaves the board entirely', () => {
@@ -902,6 +1111,97 @@ describe('degradation when gh is unavailable', () => {
     expect(page()).toContain('Cached pull request');
     expect(page()).toContain('snapshot from 2026-08-07 09:00 UTC');
     rmSync(join(sandbox, '.progress-board-cache.json'));
+  });
+});
+
+/**
+ * TWO `gh` CALLS MEAN THREE OUTCOMES, NOT TWO. `fetchPrs` only ever checked the open list, so with the
+ * merged list failing (a rate limit, a per-endpoint 5xx) the board rendered a confident lie: no stale
+ * banner, "pull-request state read live" in the header, "Nothing landed yet" under Landed, exit 0 — and the
+ * truncated snapshot then OVERWROTE the cache, destroying the last good landed rows so the NEXT failure fell
+ * back to a snapshot that was also missing them. Stripping `gh` from PATH only ever exercised total failure.
+ */
+describe('degradation when gh answers only half the question', () => {
+  const bin = join(sandbox, 'fake-bin');
+  const cacheFile = join(sandbox, '.progress-board-cache.json');
+  const GOOD_CACHE = {
+    fetchedAt: '2026-08-07T09:00:00.000Z',
+    rows: [
+      { number: 1000, title: 'Landed last week', labels: [], status: 'landed', detail: 'merged 2026-08-01' },
+      { number: 1001, title: 'Landed yesterday', labels: [], status: 'landed', detail: 'merged 2026-08-07' },
+    ],
+  };
+
+  beforeEach(() => {
+    // A `gh` that answers --state=open and fails --state=merged. Nothing else about the run changes.
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      join(bin, 'gh'),
+      '#!/bin/sh\nfor a in "$@"; do [ "$a" = "--state=merged" ] && exit 1; done\n' +
+        `echo '[{"number":1099,"title":"An open pull request","labels":[],"mergeStateStatus":"CLEAN","statusCheckRollup":[],"state":"OPEN"}]'\n`,
+    );
+    chmodSync(join(bin, 'gh'), 0o755);
+    rmSync(cacheFile, { force: true });
+  });
+  afterAll(() => rmSync(cacheFile, { force: true }));
+
+  /** The real CLI with the stub on PATH and the live lookup ENABLED — this is the only place gh is exercised. */
+  const run = () =>
+    spawnSync(process.execPath, [CLI, `--state=${statePath}`, `--out=${outPath}`], {
+      encoding: 'utf8',
+      env: { ...process.env, WE_BOARD_NOW: NOW, WE_BOARD_NO_GH: '', PATH: `${bin}:${process.env.PATH}` },
+    });
+
+  it('says what it could not read instead of rendering the gap as a fact', () => {
+    writeFileSync(cacheFile, JSON.stringify(GOOD_CACHE));
+    const r = run();
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('PR state STALE');
+
+    const h = page();
+    expect(h).toContain('is <strong>stale</strong>');
+    expect(h).toContain('merged-pull-request list could not be read');
+    expect(h).not.toContain('pull-request state read live<'); // the header must not claim a full live read
+    expect(h).toContain('An open pull request'); // …the half that DID come back is live
+  });
+
+  it('keeps the landed rows it could not re-read rather than reporting none', () => {
+    writeFileSync(cacheFile, JSON.stringify(GOOD_CACHE));
+    run();
+    const h = page();
+    expect(h).toContain('Landed last week');
+    expect(h).toContain('Landed yesterday');
+    expect(h).not.toContain('Nothing landed yet.');
+  });
+
+  it('never overwrites a more complete cache with the truncated snapshot', () => {
+    writeFileSync(cacheFile, JSON.stringify(GOOD_CACHE));
+    run();
+    expect(JSON.parse(readFileSync(cacheFile, 'utf8'))).toEqual(GOOD_CACHE);
+  });
+
+  it('says Landed is MISSING, not empty, when there is no snapshot to fall back on', () => {
+    const r = run();
+    expect(r.status).toBe(0);
+    expect(page()).toContain('MISSING, not empty');
+    expect(existsSync(cacheFile)).toBe(false); // and still writes no half-cache
+  });
+
+  // Same class of lie from the other end: a list capped at the limit under-reports without saying so.
+  it('says the open list may be truncated rather than quietly under-reporting', () => {
+    const rows = Array.from(
+      { length: 30 },
+      (_, i) => `{"number":${2000 + i},"title":"PR ${i}","labels":[],"mergeStateStatus":"CLEAN","statusCheckRollup":[],"state":"OPEN"}`,
+    );
+    writeFileSync(
+      join(bin, 'gh'),
+      `#!/bin/sh\nfor a in "$@"; do [ "$a" = "--state=merged" ] && { echo '[]'; exit 0; }; done\necho '[${rows.join(',')}]'\n`,
+    );
+    chmodSync(join(bin, 'gh'), 0o755);
+    const r = run();
+    expect(r.status).toBe(0);
+    expect(page()).toContain('may be <strong>truncated</strong>');
+    rmSync(cacheFile, { force: true });
   });
 });
 
@@ -964,8 +1264,101 @@ describe('degradation when the state file is malformed', () => {
   it('renders anyway when items or decisions hold the wrong type', () => {
     const r = broken(JSON.stringify({ title: 'T', items: 'not an array', decisions: { a: 1 } }));
     expect(r.code).toBe(0);
-    expect(r.out).toContain('STATE FILE UNREADABLE');
+    // PARTLY IGNORED, not UNREADABLE: the two words are the difference between "nothing survived" and
+    // "one key was dropped and the rest of the plan below is real".
+    expect(r.out).toContain('STATE FILE PARTLY IGNORED');
     expect(page()).toContain('wrong type for: items, decisions');
+  });
+
+  // The banner used to tell the operator "the plan half is missing, not empty" in BOTH branches. In the
+  // wrong-type branch the plan half renders in full, so that sentence was simply false.
+  it('does not claim the plan half is missing when it is right there on the page', () => {
+    broken(JSON.stringify({ ...SEED, phases: 'not an object' }));
+    const h = page();
+    expect(h).toContain('class="banner crit"');
+    expect(h).toContain('wrong type for: phases');
+    expect(h).not.toContain('the plan half is missing, not empty');
+    expect(h).toContain('Alpha'); // …because the plan half is, in fact, right there
+    // And the fatal branch keeps the sentence, because there it is true.
+    broken('{ not json');
+    expect(page()).toContain('the plan half is missing, not empty');
+  });
+
+  it('a key the file is allowed to omit is not a type error — absent is not wrong', () => {
+    // `items` omitted left the `[]` from the defaults and the length compare did `0 !== undefined`, so the
+    // banner reported a wrong type for a key nobody had got wrong. One absent optional key then reached the
+    // answerability guard, which used to switch itself off on any state error at all.
+    writeFileSync(statePath, JSON.stringify({ title: 'T', decisions: [] }));
+    const s = loadState(statePath);
+    expect(s[STATE_ERROR]).toBeUndefined();
+    const r = cli();
+    expect(r.code).toBe(0);
+    expect(r.out).not.toContain('STATE FILE');
+
+    writeFileSync(statePath, JSON.stringify({ title: 'T' })); // both optional keys absent
+    expect(loadState(statePath)[STATE_ERROR]).toBeUndefined();
+  });
+
+  /**
+   * THE HOLE THE SUITE USED TO REASON AROUND. The "does NOT swallow the decision contract" case uses a
+   * WELL-FORMED file; the "wrong type" case uses a state with NO decisions. Their intersection — a soft type
+   * error on one key, with `state.decisions` fully preserved — turned the render guard off entirely: the
+   * unanswerable card rendered in "Needs you" and the run exited 0, republishing it on every pass, while
+   * every verb was refused so the only way out was the hand edit the design forbids.
+   */
+  describe('a soft type error is not a licence to publish an unanswerable decision', () => {
+    const SOFT = {
+      title: 'Board',
+      nextRuling: 5,
+      phases: 'not an object', // the ONE thing wrong — decisions below survive untouched
+      items: [{ id: 'a', title: 'An item', phase: 1, status: 'in-progress' }],
+      decisions: [{ id: 'bad', ruling: 'R4', title: 'Should we ship it?', status: 'awaiting' }],
+    };
+
+    it('refuses to render, exactly as it would on a clean file', () => {
+      writeFileSync(statePath, JSON.stringify(SOFT));
+      const r = cli();
+      expect(r.code).toBe(1);
+      expect(r.err).toContain('cannot be answered from the page');
+      expect(r.err).toContain('"bad"');
+      expect(r.err).toMatch(/missing question/);
+      expect(r.err).toMatch(/at least two/);
+    });
+
+    it('never writes the unanswerable card to the page', () => {
+      writeFileSync(statePath, JSON.stringify(SOFT));
+      cli();
+      // Not "rendered without the card" — not rendered at all. Suppressing the decision while still
+      // publishing would leave the operator a page that silently lost their ask.
+      expect(existsSync(outPath)).toBe(false);
+    });
+
+    it('is NOT a deadlock — the verbs still work, because the surviving data is real', () => {
+      writeFileSync(statePath, JSON.stringify(SOFT));
+      // The whole reason a verb is refused on an unreadable file is that saving would overwrite a plan with
+      // an empty one. Here the plan parsed; refusing the verb AND the render is what would strand it.
+      const park = cli('--decision-set=bad', '--field=status', '--value=draft');
+      expect(park.code).toBe(0);
+      expect(state().decisions[0].status).toBe('draft');
+      expect(cli().code).toBe(0); // and the board renders again
+      expect(page()).toContain('Decisions being prepared');
+    });
+
+    it('still refuses every verb when NOTHING parsed — that file must not be overwritten', () => {
+      writeFileSync(statePath, '{ not json');
+      const r = cli('--decision-set=bad', '--field=status', '--value=draft');
+      expect(r.code).toBe(1);
+      expect(r.err).toContain('refusing to write');
+      expect(readFileSync(statePath, 'utf8')).toBe('{ not json');
+    });
+
+    it('an unparseable file has no decisions, so the guard has nothing to wave through', () => {
+      writeFileSync(statePath, '{ not json');
+      const r = cli();
+      expect(r.code).toBe(0); // degrades, as designed
+      expect(page()).toContain('Nothing is waiting on you.');
+      expect(page()).not.toContain('Should we ship it?');
+    });
   });
 
   it('drops non-object entries rather than choking on them', () => {
