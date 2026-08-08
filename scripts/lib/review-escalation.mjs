@@ -13,7 +13,7 @@
  * — start loose, tighten from data; they live here so a change is one edit + a test, never scattered.
  */
 import { createHash } from 'node:crypto';
-import { isTrustChainPath, isPolicyCorePath, basenameOf } from './gate-config.mjs';
+import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivationPath, basenameOf } from './gate-config.mjs';
 import { POLICY_THRESHOLDS } from './review-policy.mjs';
 // #x169fqe — the transient lane bookkeeping the reviewed-diff fingerprint excludes, imported rather than
 // re-spelled so the fingerprint and the rebase-drop pass that removes the file can never disagree on its name.
@@ -25,7 +25,7 @@ export const REVIEW_LABELS = {
   pending: 'review:pending',   // the drain parked this PR — an independent review is owed before merge
   accepted: 'review:accepted', // reviewer accepted → the drain may merge
   changes: 'review:changes',   // reviewer wants changes → the author lane fixes hot-context + re-pushes
-  human: 'review:human',       // #2285 v1 — the diff edits the gate's POLICY tier (an agent policing its own leash) or the STATUTE layer; only a HUMAN may clear it. The engine tier (the lander) is agent-reviewable (#2445 two-tier flip)
+  human: 'review:human',       // #2285 v1 — the diff edits the gate's DECLARATIVE LEASH (the contract / roster / invariant suites) or the STATUTE layer; only a HUMAN may clear it. Policy-tier derivation code (#2771/#2785) and the engine tier (#2445) are agent-reviewable
   redteamAccepted: 'redteam:accepted', // #2439 — the INDEPENDENT hardened validator (a fresh-context adversary that took no part in the negotiation and never saw the peers' self-assessment) signed off on the FINAL diff. The "non-author accepts" invariant, applied by the drain; enforcement (requiring it before an engine-tier auto-land) is #2412's concern
 };
 
@@ -173,16 +173,30 @@ export function isBlastRadiusPath(path) {
 /** The POLICY-CORE trust chain (#2285 v1, re-anchored #2448, narrowed by the #2445 two-tier flip). A diff
  *  touching one of these files edits the very machinery that DECIDES whether the review gate fires and what
  *  clears it — so an *agent* reviewing such a change would be policing an edit to its own leash (a genuine
- *  conflict of interest). These, and ONLY these (plus the statute layer, `isStatutePath`), force a HUMAN
- *  review (`review:human`). The ENGINE tier — the lander, which obeys the gate rather than defining it — is
- *  NOT here: a change there still escalates and runs the full adversarial panel, but a converged agent verdict
- *  may clear it. Every other blast-radius path is agent-reviewable too.
+ *  conflict of interest). NO LONGER THE HUMAN TRIGGER (#2771/#2785): this tier is now split, and only its
+ *  DECLARATIVE-LEASH half (`isDeclarativeLeashPath`, below) forces `review:human` — the derivation-code half
+ *  escalates to the independent committee. `isGateSelfPath` survives as the "is this the policy tier?" question
+ *  its non-rubric callers actually ask (the readiness deny-list, the roster tests). The ENGINE tier — the
+ *  lander, which obeys the gate rather than defining it — was never here: a change there still escalates and
+ *  runs the full adversarial panel, but a converged agent verdict may clear it.
  *
  *  #2448 — the roster (and the basename-based matcher that lets it TRAVEL when the engine is extracted out of
  *  `we:scripts/`, per the #2445 coordinator epic) lives in explicit, versioned config: ./gate-config.mjs.
  *  `isGateSelfPath` is that config's `isPolicyCorePath` under its historical name. See gate-config.mjs for the
  *  two tiers, the extraction contract, and the self-hosting design. */
 export const isGateSelfPath = isPolicyCorePath;
+
+/**
+ * #2771/#2785 — THE DECLARATIVE LEASH, the narrowed `review:human` path trigger. `isGateSelfPath` above is the
+ * whole POLICY TIER (it still answers "is this the policy tier?" for the callers that ask that, e.g. the
+ * readiness deny-list); this is the half of that tier for which a HUMAN is essential: the machine-diffable
+ * contract, the roster, and the invariant / conformance suites. Those files ARE the encoded policy, so there is
+ * no behaviour-preserving edit to them. The other half — the derivation CODE (`isPolicyDerivationPath`) — still
+ * escalates but routes to the sized independent committee. Re-exported here under the leash name so callers read
+ * the rubric's vocabulary; the roster and the classification live in gate-config.mjs.
+ */
+export const isDeclarativeLeashPath = isPolicySpecPath;
+export { isPolicyDerivationPath, isPolicySpecPath };
 
 /**
  * The advisory CARE-LEVEL an escalated PR carries (#2567, codified `#blast-radius-advisory-care-not-a-gate`,
@@ -262,11 +276,13 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * A PR escalates ONLY for one of these real reasons — there is no random/sampling floor (#xlno40g): a
  * clean, CI-green PR with no scored signal and no dismissed finding reaches no reviewer, it just lands.
  *
- * Also returns `humanRequired` (#2285 v1, narrowed by the #2445 two-tier flip): true iff the diff touches the
- * POLICY tier of the trust chain (`isGateSelfPath`) or the STATUTE layer (`isStatutePath`) — the classes where
- * a human is essential (an agent policing its own leash, or a governance rule a human must ratify). The ENGINE
- * tier (the lander) escalates but is agent-reviewable, so it does NOT set humanRequired. A *classification* of
- * an already-escalating PR (a policy/statute file is always blast-radius too), never a fresh escalation trigger.
+ * Also returns `humanRequired` (#2285 v1, narrowed by the #2445 two-tier flip and again by #2771/#2785): true
+ * iff the diff touches the DECLARATIVE LEASH (`isDeclarativeLeashPath` — the contract, the roster, the
+ * invariant/conformance suites) or the STATUTE layer (`isStatutePath` — a governance rule a human must ratify).
+ * Those are the classes where genuine human judgment is essential. Everything else escalates but is
+ * agent-reviewable and does NOT set humanRequired: the ENGINE tier (the lander) and the policy tier's DERIVATION
+ * CODE (#2771 Fork A — the rubric, the router, the loader, the seams). A *classification* of an already-escalating
+ * PR (a policy/statute file is always blast-radius too), never a fresh escalation trigger.
  *
  * #2390-review-fix — the gate-self / `humanRequired` trigger reads `humanBasisFiles` (the CUMULATIVE
  * `origin/main…head` file set), NOT the possibly-de-inflated own-delta `changedFiles`. A stacked lane may
@@ -303,11 +319,21 @@ export function scoreEscalation({
   // can never shrink it), falling back to `changedFiles` when no separate basis is supplied.
   // #2445 two-tier flip — ONLY the POLICY tier (isGateSelfPath) and the STATUTE layer force a human; the ENGINE
   // tier (the lander) escalated via blast-radius above but is agent-reviewable, so it is NOT counted here.
+  // #2771/#2785 — the POLICY tier is SPLIT. Only the DECLARATIVE LEASH (`isDeclarativeLeashPath`: the contract,
+  // the roster, the invariant/conformance suites) still forces a human; the DERIVATION CODE that realizes it
+  // escalates to the sized independent committee instead. Both sets come from the ONE roster in gate-config.mjs.
   const gateBasis = Array.isArray(humanBasisFiles) ? humanBasisFiles : (Array.isArray(changedFiles) ? changedFiles : []);
-  const gateSelfFiles = gateBasis.filter(isGateSelfPath);
+  const leashFiles = gateBasis.filter(isDeclarativeLeashPath);
+  const derivationFiles = gateBasis.filter(isPolicyDerivationPath);
   const statuteFiles = gateBasis.filter(isStatutePath);
-  const humanRequired = gateSelfFiles.length > 0 || statuteFiles.length > 0;
-  if (gateSelfFiles.length) { signals.gateSelf = gateSelfFiles; reasons.push(`gate-self (${gateSelfFiles.join(', ')}) — human review required`); }
+  // The STATUTE term is UNCHANGED by this narrowing (#2771 Fork A): every statute touch still forces a human,
+  // exactly as before. Only the first term moved — from the whole policy tier to its declarative-leash half.
+  const humanRequired = leashFiles.length > 0 || statuteFiles.length > 0;
+  if (leashFiles.length) { signals.gateSelf = leashFiles; reasons.push(`gate-self (${leashFiles.join(', ')}) — declarative leash, human review required`); }
+  // The derivation half keeps its own signal + reason so the PR still ESCALATES on a stacked basis where the
+  // file is in `humanBasisFiles` but not in the own-delta `changedFiles` that fed the blast-radius signal above.
+  // Its token's clearance is `agent` in the contract, so the panel may CLEAR it — that is the whole narrowing.
+  if (derivationFiles.length) { signals.gateDerivation = derivationFiles; reasons.push(`gate-derivation (${derivationFiles.join(', ')}) — gate derivation code, independent committee review`); }
   if (statuteFiles.length) { signals.statute = statuteFiles; reasons.push(`statute (${statuteFiles.join(', ')}) — human review required`); }
 
   if (Number(diffLines) >= t.diffLines) { signals.size = Number(diffLines); reasons.push(`size (${diffLines} ≥ ${t.diffLines} changed lines)`); }
