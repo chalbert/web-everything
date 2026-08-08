@@ -1,0 +1,11 @@
+{
+  "id": "reexec-escape-exported",
+  "cmd": "MAIN_SESSION_BUILD_OK=1 bash -c \"npm run build\"",
+  "ctx": {
+    "primaryCwd": true
+  },
+  "basis": "r5 F1 — a leading `VAR=1` prefix is EXPORTED into the re-executed command (verified: `FOO=1 bash -c 'echo $FOO'` prints 1), so the sanctioned escape must still disarm the arm through the recursion.",
+  "expect": {
+    "reason": null
+  }
+}
