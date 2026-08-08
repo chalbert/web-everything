@@ -30,7 +30,11 @@ import {
   panelRigorFromReasons,
   editorPolicyFromReasons,
   editorPolicyForCareLevel,
+  editorAllowedByReasons,
+  editorMayPush,
+  growOnlyCareLevel,
   EDITOR_ENABLED_CARE_LEVELS,
+  EDITOR_ENABLED_REASON_TOKENS,
   EDITOR_MIN_ROUNDS,
   normalizeFinding,
   normalizeFindings,
@@ -81,6 +85,7 @@ import {
   absentMandatoryLenses,
 } from '../review-core.mjs';
 import { validateSubjectAdapter, resolveAdapterRoster, IMPACT_LEVELS } from '../jury-core.mjs';
+import { CARE_LEVEL_ORDER } from '../review-escalation.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -1866,6 +1871,161 @@ describe('editorPolicyFromReasons — the editor gate, resolved from the drain\'
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PR #1106 review, F3 — THE BLOCKER. The editor gate was pinned as a `const` at loop start while the care band
+// it gates on stayed MUTABLE: an accepted juror invite (#2640) reassigns `careLevel`, typically `low → elevated`.
+// The loop therefore reached the editor step — which PUSHES to the author's branch — with its own state reading
+// `care=elevated`, the band the ruling excludes on evidence. No adversary needed; it was the documented intent.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('editorMayPush — care that GROWS mid-run turns the editor off (#2908, PR #1106 F3)', () => {
+  it('THE REGRESSION: gate resolved at low, an invite raises care to elevated → the editor must STOP', () => {
+    // Loop start: a `size`-only park bands to `low`, so the gate resolves editor-on with a 2-round budget.
+    const atStart = editorPolicyFromReasons(['size (500 lines)']);
+    expect(atStart.editorEnabled).toBe(true);
+    const pinned = atStart.editorEnabled; // what the loop pins as a `const`
+
+    // Round 1: a correctness juror cites a finding and invites the security lens. `deriveJurorInvite` accepts and
+    // raises the band by one — the loop reassigns `careLevel`.
+    const invite = deriveJurorInvite({
+      careLevel: 'low', seatedLenses: ['correctness'], jurorsPerLens: 1,
+      invitedLens: 'security', citedFinding: 'the new gate reads an agent-supplied band',
+    });
+    expect(invite.accepted).toBe(true);
+    expect(invite.toCareLevel).toBe('elevated');
+    const now = growOnlyCareLevel('low', invite.toCareLevel);
+    expect(now).toBe('elevated');
+
+    // The pin alone still says yes — that is exactly the bug. The GATE must say no.
+    expect(pinned).toBe(true);
+    expect(editorMayPush(pinned, now)).toBe(false);
+  });
+
+  it('keeps the pinned property too: nothing can turn the editor ON mid-run', () => {
+    // A review-only start stays review-only even if the band later reads `low` (it cannot, but prove it anyway).
+    expect(editorMayPush(false, 'low')).toBe(false);
+    expect(editorMayPush(false, 'elevated')).toBe(false);
+    // …and only the exact allow-listed band satisfies the second conjunct.
+    for (const band of ['none', 'elevated', 'high', null, undefined, '', 'LOW', 'lo w']) {
+      expect(editorMayPush(true, band)).toBe(false);
+    }
+    expect(editorMayPush(true, 'low')).toBe(true);
+  });
+
+  it('a non-boolean pin never satisfies the gate (an agent echo is not a truthy check)', () => {
+    for (const truthy of ['true', 1, {}, [], 'yes']) expect(editorMayPush(truthy, 'low')).toBe(false);
+  });
+});
+
+describe('growOnlyCareLevel — the invite\'s echoed band cannot hold care flat or lower it (#2640/#2908)', () => {
+  it('computes the raise LOCALLY — the echo is not needed for it', () => {
+    // Even an echo that lies "still low" yields the locally-computed raise.
+    expect(growOnlyCareLevel('low', 'low')).toBe('elevated');
+    expect(growOnlyCareLevel('low', undefined)).toBe('elevated');
+    expect(growOnlyCareLevel('low', 'not-a-band')).toBe('elevated');
+    expect(growOnlyCareLevel('none', 'none')).toBe('low');
+  });
+
+  it('the echo may raise FURTHER, never lower', () => {
+    expect(growOnlyCareLevel('low', 'high')).toBe('high');
+    expect(growOnlyCareLevel('elevated', 'none')).toBe('high'); // the local raise wins over a lowering echo
+    expect(growOnlyCareLevel('high', 'low')).toBe('high');      // capped at the ceiling, never lowered
+  });
+
+  it('agrees with the shared raise dial at every band', () => {
+    for (const band of CARE_LEVEL_ORDER) {
+      expect(growOnlyCareLevel(band, null)).toBe(raiseCareForDiscovery(band));
+    }
+  });
+
+  it('an UNRESOLVED current band stays unresolved — an echo may never resolve one', () => {
+    for (const bad of [null, undefined, '', 'critical', 0, {}]) {
+      expect(growOnlyCareLevel(bad, 'low')).toBe(null);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR #1106 review, F1 — the band the loop gates on is an AGENT ECHO, and re-deriving `editorEnabled` from the
+// allow-list re-derives it against that echo. A rigor agent reporting `{careLevel:'low'}` on a `blast-radius` PR
+// opened the editor at what is really `elevated`. The reason list is the half the loop holds itself.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('editorAllowedByReasons — the local, echo-independent half of the gate (#2908, PR #1106 F1)', () => {
+  it('agrees with the band derivation on every single-reason list', () => {
+    // The two that reach `low`…
+    for (const r of ['size (602 ≥ 400 changed lines)', 'cross-repo (frontierui)']) {
+      expect(careLevelFromReasons([r])).toBe('low');
+      expect(editorAllowedByReasons([r])).toBe(true);
+    }
+    // …and every other token, which bands elevated-or-above on its own.
+    for (const r of ['blast-radius (scripts/x.mjs)', 'dismissed-findings (1 x)', 'gate-derivation (x)',
+      'gate-self (x)', 'statute (x) — human review required', 'non-convergence (x)', 'mandate-conflict (x)']) {
+      expect(editorPolicyFromReasons([r]).editorEnabled).toBe(false);
+      expect(editorAllowedByReasons([r])).toBe(false);
+    }
+  });
+
+  it('THE ECHO CANNOT GRANT: PR #1018\'s own park is review-only whatever a rigor agent claims', () => {
+    // Measured, not assumed: blast-radius (3) + size (2) = 5, and CARE_BANDS.high is 5 — so this pair is `high`,
+    // not `elevated`. (The PR #1106 round-2 review's F2 table calls it `elevated`; the band label is wrong there,
+    // the finding is not — one dropped bullet still flips `high` → `low` and the gate with it.)
+    const parked = ['blast-radius (scripts/lib/review-core.mjs)', 'size (602 ≥ 400 changed lines)'];
+    expect(careLevelFromReasons(parked)).toBe('high');
+    expect(careLevelFromReasons(['size (602 ≥ 400 changed lines)'])).toBe('low'); // the dropped-bullet read
+    expect(editorAllowedByReasons(parked)).toBe(false);
+    // …and the gate is the AND, so an echoed `low` + echoed `editorEnabled:true` still cannot open the editor.
+    expect(editorAllowedByReasons(parked) && editorMayPush(true, 'low')).toBe(false);
+  });
+
+  it('size + cross-repo TOGETHER score elevated — both are allow-listed tokens, so the count matters', () => {
+    expect(careLevelFromReasons(['size (500 lines)', 'cross-repo (fui)'])).toBe('elevated');
+    expect(editorAllowedByReasons(['size (500 lines)', 'cross-repo (fui)'])).toBe(false);
+  });
+
+  it('is STRICTER than the advisory dial: an unweighable reason is review-only, not "contributes nothing"', () => {
+    // The shared dial is lenient because it only sizes a panel; this authorizes a WRITE.
+    expect(careLevelFromReasons(['size (500 lines)', 'who knows what this is'])).toBe('low');
+    expect(editorAllowedByReasons(['size (500 lines)', 'who knows what this is'])).toBe(false);
+    expect(editorAllowedByReasons(['who knows what this is'])).toBe(false);
+  });
+
+  it('fails closed on an empty / absent / junk-shaped list', () => {
+    for (const empty of [[], null, undefined, '', ['', null], 0]) {
+      expect(editorAllowedByReasons(empty)).toBe(false);
+    }
+  });
+
+  it('a duplicated reason is still ONE token (the dial de-dupes too, so the two agree)', () => {
+    expect(editorAllowedByReasons(['size (500 lines)', 'size (601 lines)'])).toBe(true);
+    expect(careLevelFromReasons(['size (500 lines)', 'size (601 lines)'])).toBe('low');
+  });
+
+  it('the allow-list is exactly {size, cross-repo}, and it is frozen', () => {
+    expect([...EDITOR_ENABLED_REASON_TOKENS]).toEqual(['size', 'cross-repo']);
+    expect(Object.isFrozen(EDITOR_ENABLED_REASON_TOKENS)).toBe(true);
+    // TOTALITY — derived, not asserted: exactly the allow-listed tokens reach an editor-enabled band alone.
+    const reach = Object.values(REVIEW_REASONS).filter((t) => editorPolicyFromReasons([`${t} (x)`]).editorEnabled);
+    expect(reach.sort()).toEqual([...EDITOR_ENABLED_REASON_TOKENS].sort());
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR #1106 review, F4 — the round cap took `max(…, echoedEditorRounds)`. Grow-only is the right monotone for
+// JURORS (more scrutiny); for EDITOR rounds growing means more machine pushes to someone else's branch.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('the editor round budget is DERIVED, never bought from an echo (#2908, PR #1106 F4)', () => {
+  it('the ratified budget at low is 2, and the derivation the loop mirrors produces exactly that', () => {
+    expect(editorPolicyFromReasons(['size (500 lines)']).rounds).toBe(2);
+    expect(Math.min(Math.max(panelRigorForCareLevel('low').rounds, EDITOR_MIN_ROUNDS), NEGOTIATION_ROUND_CAP)).toBe(2);
+  });
+
+  it('no band can reach the hard cap through the editor knob', () => {
+    for (const band of CARE_LEVEL_ORDER) {
+      expect(editorPolicyForCareLevel(band).rounds).toBeLessThanOrEqual(NEGOTIATION_ROUND_CAP);
+      if (editorPolicyForCareLevel(band).editorEnabled) expect(editorPolicyForCareLevel(band).rounds).toBe(EDITOR_MIN_ROUNDS);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SOURCE-REGRESSION — same technique, and same reason, as the #2640/#2864 blocks above: the sandbox loop is not
 // importable. These prove the EDITOR GATE (#2908) is actually wired in the loop body, that the sandbox\'s
 // mirrored constants still match jury-core, and that there is exactly ONE door to the editor.
@@ -1885,9 +2045,9 @@ describe('review-parked-prs.mjs — the editor is gated on the care band (source
   it('there is exactly ONE call to editorRound, and the gate sits immediately before it', () => {
     const calls = src.match(/await editorRound\(/g) || [];
     expect(calls).toHaveLength(1);
-    // The gate must dominate the call: `if (!editorEnabled) { … break; }` then the editorRound call, with no
+    // The gate must dominate the call: `if (!editorMayPush(…)) { … break; }` then the editorRound call, with no
     // other statement between them that could re-open the path.
-    expect(src).toMatch(/if \(!editorEnabled\) \{[\s\S]{0,900}?break;\n\s*\}\n\s*\n\s*\/\/ `continue` → an editor round[\s\S]{0,120}?const edit = await editorRound\(/);
+    expect(src).toMatch(/if \(!editorMayPush\(editorEnabled, careLevel\)\) \{[\s\S]{0,1200}?break;\n\s*\}\n\s*\n\s*\/\/ `continue` → an editor round[\s\S]{0,120}?const edit = await editorRound\(/);
   });
 
   it('the gate is resolved ONCE at loop start and is a const — nothing mid-loop can turn the editor on', () => {
@@ -1911,18 +2071,72 @@ describe('review-parked-prs.mjs — the editor is gated on the care band (source
     expect(src).not.toMatch(/const careLevel = \(r && typeof r\.careLevel === 'string'\) \? r\.careLevel : 'low';/);
   });
 
-  it('RE-DERIVES the gate from the allow-list — an agent echo can only VETO, never enable', () => {
-    expect(src).toMatch(/const editorEnabled = EDITOR_ENABLED_CARE_LEVELS\.includes\(careLevel\) && r != null && r\.editorEnabled === true;/);
+  it('RE-DERIVES the gate from the allow-list AND from the LOCAL reason read — an echo can only VETO', () => {
+    expect(src).toMatch(/const editorEnabled = reasonsAllowEditor && EDITOR_ENABLED_CARE_LEVELS\.includes\(careLevel\) && r != null && r\.editorEnabled === true;/);
+    // F1: the local half is computed BEFORE the agent runs, so nothing the agent returns can influence it.
+    const localIdx = src.indexOf('const reasonsAllowEditor = editorAllowedByReasons(escalationReason);');
+    const agentIdx = src.indexOf('const r = await agent(rigorPrompt(');
+    expect(localIdx).toBeGreaterThan(-1);
+    expect(localIdx).toBeLessThan(agentIdx);
   });
 
-  it('floors the round cap on the EDITOR knob, and leaves the shared panel dial alone', () => {
-    expect(src).toMatch(/Math\.max\(panelRounds, EDITOR_MIN_ROUNDS, echoedEditorRounds\)/);
+  it('does NOT let the echoed editorRounds raise the cap (F4) — the floor is derived locally', () => {
+    expect(src).toMatch(/Math\.min\(Math\.max\(panelRounds, EDITOR_MIN_ROUNDS\), NEGOTIATION_ROUND_CAP\)/);
+    // The pre-fix form let a confused echo buy up to NEGOTIATION_ROUND_CAP machine pushes at `low`.
+    expect(src).not.toMatch(/Math\.max\(panelRounds, EDITOR_MIN_ROUNDS, echoedEditorRounds\)/);
+    // …and the echo is not read for the cap AT ALL — no `echoedEditorRounds` binding survives.
+    expect(src).not.toMatch(/const echoedEditorRounds\s*=/);
     // a review-only band keeps the shared dial's number verbatim
     expect(src).toMatch(/: panelRounds;/);
   });
 
   it('review-only still REPORTS — the escalation spreads `last`, so findings/commentBody survive', () => {
-    expect(src).toMatch(/if \(!editorEnabled\) \{[\s\S]{0,900}?last = \{ \.\.\.last, outcome: OUTCOME_ESCALATE/);
+    expect(src).toMatch(/if \(!editorMayPush\(editorEnabled, careLevel\)\) \{[\s\S]{0,1200}?last = \{ \.\.\.last, outcome: OUTCOME_ESCALATE/);
     expect(src).toMatch(/REVIEW-ONLY: reporting \$\{last\.findings\.length\} finding\(s\)/);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // PR #1106 review — F3 (the blocker), F1 and F4, pinned in the loop body.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  it('F3 — the gate ANDs the pinned value with the CURRENT band, so a mid-run raise turns the editor off', () => {
+    // The pre-fix gate was `if (!editorEnabled) {`, which read only the band as it stood at loop START. An
+    // accepted #2640 invite reassigns `careLevel` (typically low → elevated) while the pin stays true, so the
+    // loop reached `editorRound` with its own state reading `care=elevated`.
+    expect(src).toMatch(/if \(!editorMayPush\(editorEnabled, careLevel\)\)/);
+    expect(src).not.toMatch(/\n\s*if \(!editorEnabled\) \{/);
+    // and the mirrored helper is the tested spec, both conjuncts present
+    expect(src).toMatch(/function editorMayPush\(pinned, careLevel\) \{\n\s*return pinned === true && EDITOR_ENABLED_CARE_LEVELS\.includes\(careLevel\);\n\}/);
+  });
+
+  it('F3 — an accepted invite\'s echoed band goes through the grow-only clamp, never straight into careLevel', () => {
+    expect(src).toMatch(/careLevel = growOnlyCareLevel\(careLevel, grown\.toCareLevel\);/);
+    expect(src).not.toMatch(/careLevel = grown\.toCareLevel;/);
+  });
+
+  it('mirrors the reason-token vocabulary and the editor-enabled subset from review-core', () => {
+    const vocab = /const REASON_TOKENS = \[([\s\S]*?)\];/.exec(src);
+    expect(vocab).not.toBeNull();
+    const mirrored = vocab[1].split(',').map((t) => t.trim().replace(/^'|'$/g, '')).filter(Boolean);
+    expect(mirrored.sort()).toEqual(Object.values(REVIEW_REASONS).sort());
+    const allowed = /const EDITOR_ENABLED_REASON_TOKENS = \[([^\]]*)\]/.exec(src);
+    expect(allowed).not.toBeNull();
+    expect(allowed[1].split(',').map((t) => t.trim().replace(/^'|'$/g, '')).filter(Boolean))
+      .toEqual([...EDITOR_ENABLED_REASON_TOKENS]);
+    // the band order the grow-only clamp indexes into must match the shared one
+    const bands = /const KNOWN_CARE_LEVELS = \[([^\]]*)\]/.exec(src);
+    expect(bands[1].split(',').map((t) => t.trim().replace(/^'|'$/g, '')).filter(Boolean))
+      .toEqual([...CARE_LEVEL_ORDER]);
+  });
+
+  it('the fetch agent COPIES fetch-parked\'s escalationReason instead of re-reading the body (F2)', () => {
+    expect(src).toMatch(/Copy its `escalationReason` array through VERBATIM/);
+    // the pre-fix instruction told the agent to parse the bullets itself
+    expect(src).not.toMatch(/Parse escalationReason from the `body`/);
+  });
+
+  it('the "a parked PR always has a reason" premise is gone from the loop\'s justification (F5)', () => {
+    expect(src).not.toMatch(/a parked PR always HAS a reason/i);
+    expect(src).toMatch(/--park=review:pending/);
   });
 });

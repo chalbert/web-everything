@@ -36,6 +36,11 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { classifyChecks } from './pr-land.mjs';
 import { REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
+// #2908 / PR #1106 review F2 — the DETERMINISTIC parser of the body's `## Escalation reason` block. It already
+// existed, unused by this module, while the convergence loop's fetch agent LLM-parsed the same bullets out of
+// the same body by eye. Imported, never re-implemented: `review-detail.mjs` guards its CLI behind `IS_CLI`, so
+// importing the pure parser does not run it (the same reason this file may import `merge-ai-prs.mjs`).
+import { parseEscalationReason } from './review-detail.mjs';
 
 /** Map a raw `gh` labels array (objects `{name}` or strings) to a plain name array. Pure, tolerant of absent. */
 export function labelNames(labels) {
@@ -176,10 +181,18 @@ export function reviewClassFromLabels(labels) {
  * PR #1018, where a juror flagged an "unrelated #2457 re-scope" that is not in the diff at all. The basis must
  * therefore travel WITH the diff: a degraded basis that looks identical to a good one is how a confident,
  * well-argued, wrong finding reaches a PR author.
+ * #2908 / PR #1106 review F2 — `escalationReason` is DETERMINISTICALLY PARSED here (`parseEscalationReason`),
+ * not left to the consumer's eye. The parked-PR convergence loop's fetch agent used to read the
+ * `## Escalation reason` bullets out of `body` itself, and since #2908 that list decides whether a machine may
+ * push to the author's branch: `['size']` bands to `low` (editor ON) while `['size','blast-radius']` scores
+ * 2 + 3 = 5 → `high` (editor OFF), so ONE dropped bullet flips the gate. PR #1018 — the PR the #2908 ruling is
+ * built on — was parked with exactly those two reasons. An LLM re-reading prose the repo already has an exact
+ * parser for is a fail-open with no signal, so the bundle carries the parsed list and the agent copies it.
+ *
  * @param {{view: object, diff?: string, requiredNames?: string[]|null, diffBasis?: string}} o
  * @returns {{number:number, title:string, body:string, files:Array, state:string,
  *   checks:{status:string, reason:string}, checksScope:string, diff:string, diffBasis:string, labels:string[],
- *   reviewClass:string, headRefName:string, mergeable:string}}
+ *   reviewClass:string, escalationReason:string[], headRefName:string, mergeable:string}}
  */
 export function assembleParked({ view, diff, requiredNames, diffBasis } = {}) {
   const v = view || {};
@@ -198,6 +211,16 @@ export function assembleParked({ view, diff, requiredNames, diffBasis } = {}) {
     diffBasis: diffBasis === 'net' ? 'net' : 'three-dot',
     labels,
     reviewClass: reviewClassFromLabels(labels),
+    // #2908 / PR #1106 F2 — the drain's `## Escalation reason` bullets, parsed EXACTLY (see the note above).
+    // `[]` when the PR carries no such block — which is a real state, not only a broken read:
+    // `pr-land --park=review:pending` (#2622) labels at open and writes no block. Consumers must fail closed
+    // on `[]` rather than read it as "no signals fired".
+    //
+    // KNOWN RESIDUAL, filed as `xx15niz`: the block itself is written ONCE (both writers guard on
+    // `bodyHasEscalationReason`), so a later re-park that scores MORE reasons updates the drain's park comment
+    // but not this block. Parsing it exactly cannot fix a stale list — observed on PR #1018, whose block lists
+    // `blast-radius` alone while the drain's comment lists `blast-radius; size (602 ≥ 400 changed lines)`.
+    escalationReason: parseEscalationReason(v.body),
     headRefName: String(v.headRefName || ''),
     // #2864 — the head commit this bundle's diff was read at, so the jury seated over it can RECORD which tree it
     // judged (`reviewedSha` on the roster-picked ledger event). Without it the ledger has no commit identity and a

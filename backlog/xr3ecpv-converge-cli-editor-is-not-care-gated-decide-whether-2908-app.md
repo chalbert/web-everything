@@ -28,5 +28,7 @@ The fork: **(a)** extend the gate into `convergeStep` so both loops share one ru
 `/converge --care=elevated` (its default) review-only, which substantially changes a tool in daily use;
 **(b)** leave `/converge` ungated and record *why* the two loops differ, in the statute, so the asymmetry is
 deliberate rather than an oversight; **(c)** gate it but move `/converge`'s default care to `low`. Note the two
-bodies are already flagged `@duplicate-of` and slated to merge under #xyihiji — whichever way this goes should
-land before that merge, or the merge will pick an answer by accident.
+bodies are already flagged `@duplicate-of` and slated to merge under **#2970** (filed as `xyihiji`) — whichever
+way this goes should land before that merge, or the merge will pick an answer by accident. **That ordering is
+now enforced, not merely asked for:** #2970 carries `blockedBy: ["xr3ecpv"]`, so it cannot land first and decide
+this fork by default.

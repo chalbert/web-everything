@@ -65,7 +65,13 @@
  *     `panelRigorForCareLevel`'s `low` entry, which `/jury`, `/review` and `/converge` share; that dial is
  *     unchanged, and `low` is still 1 panel round for every other consumer.
  *   • **FAIL CLOSED.** An absent, malformed or unresolvable care level means review-only, never editor-on — see
- *     `careRigorFor` for the three doors. Mutating someone else's branch is not reversible from their side.
+ *     `careRigorFor` for the four doors. Mutating someone else's branch is not reversible from their side.
+ *   • **AN AGENT ECHO MAY VETO, NEVER GRANT.** Both halves of the derivation are re-done from state this loop
+ *     holds: the enablement from the ESCALATION REASONS (`editorAllowedByReasons`) and the round budget from
+ *     `EDITOR_MIN_ROUNDS`. Nothing an agent returns can turn the editor on or buy it another push.
+ *   • **RE-CHECKED EVERY ROUND, not only at loop start.** `editorMayPush(editorEnabled, careLevel)` ANDs the
+ *     pinned gate with the CURRENT band, so an accepted juror invite that raises care mid-run turns the editor
+ *     off for the rest of the PR. The pin still means nothing can turn it back on.
  *   • **ONE DOOR.** `editorRound` is called from exactly one place, immediately behind this gate.
  *
  * THE BOUNDARY (epic #2418 / INVARIANT 2) — this workflow RETURNS a ledger of converged verdicts and NOTHING ELSE:
@@ -160,8 +166,22 @@ const EDITOR_ENABLED_CARE_LEVELS = ['low'];
 // One round to push the fix, one for a FRESH panel to judge the push. Carried HERE, on the editor's own knob —
 // NOT by raising `panelRigorForCareLevel`'s `low` entry, which `/jury`, `/review` and `/converge` also read.
 const EDITOR_MIN_ROUNDS = 2;
-// The care bands this loop recognizes. A band outside this set is UNRESOLVED → review-only (fail closed).
+// The care bands this loop recognizes, IN ORDER (weakest first — the order is load-bearing for the grow-only
+// band clamp below). A band outside this set is UNRESOLVED → review-only (fail closed). Mirrors
+// `CARE_LEVEL_ORDER` in we:scripts/lib/review-escalation.mjs, pinned equal by the source-regression suite.
 const KNOWN_CARE_LEVELS = ['none', 'low', 'elevated', 'high'];
+
+// The FULL escalation-reason token vocabulary — a literal mirroring `REVIEW_REASONS` in
+// we:scripts/lib/review-core.mjs (no import in the sandbox), pinned equal by the source-regression suite.
+const REASON_TOKENS = [
+  'gate-self', 'gate-derivation', 'statute', 'blast-radius', 'size', 'dismissed-findings', 'cross-repo',
+  'non-convergence', 'mandate-conflict',
+];
+// #2908 (PR #1106 review F1) — the ONLY reason tokens that can reach an editor-enabled band, and only ALONE.
+// Verified exhaustively against `review-core-cli rigor`: `size` → low, `cross-repo` → low, every other token
+// bands elevated-or-above on its own, and `size` + `cross-repo` together score 4 = elevated. Mirrors
+// `EDITOR_ENABLED_REASON_TOKENS` in we:scripts/lib/review-core.mjs.
+const EDITOR_ENABLED_REASON_TOKENS = ['size', 'cross-repo'];
 // The loop's HARD budget ceiling — a literal mirroring `NEGOTIATION_ROUND_CAP` in jury-core.mjs (no import in
 // the sandbox). Nothing, including the #2908 editor floor, may raise the round cap above it.
 const NEGOTIATION_ROUND_CAP = 5;
@@ -182,6 +202,73 @@ function prTag(item) {
 function repoPathFlag(repo) {
   const path = (REPOS[repo] && REPOS[repo].path) || '';
   return path ? ` --repo=${path}` : '';
+}
+
+/** Canonicalize one decorated escalation reason (`size (602 ≥ 400 changed lines)`) to its bare token (`size`),
+ *  or null if it matches none. MIRRORS `canonicalizeReason` in we:scripts/lib/review-core.mjs: a token matches
+ *  when the reason IS the token or STARTS with it followed by a space or `(`; longest match wins. */
+function canonicalReasonToken(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  const matches = REASON_TOKENS
+    .filter((tok) => s === tok || (s.startsWith(tok) && /^[\s(]/.test(s.slice(tok.length))))
+    .sort((a, b) => b.length - a.length);
+  return matches[0] ?? null;
+}
+
+/**
+ * #2908 (PR #1106 review F1) — may the editor push, judged from the ESCALATION REASONS THIS LOOP HOLDS? Pure.
+ * MIRRORS the tested spec `editorAllowedByReasons` in review-core.mjs.
+ *
+ * The care BAND reaches this loop as an agent echo, so re-deriving `editorEnabled` from the allow-list re-derives
+ * it against a number the agent supplied — a rigor agent reporting `{careLevel:'low'}` on a `blast-radius` PR
+ * would open the editor at what is really `elevated`. The reason list is the half of the derivation the loop
+ * holds ITSELF, so it is checked here, locally, and the echo is left able only to VETO.
+ *
+ * STRICTER than the shared dial on purpose: `careLevelFromReasons` lets an unrecognized reason contribute
+ * nothing (it is advisory, sizing a panel); a reason token we cannot weigh is a signal we cannot rule out, so
+ * here it is review-only.
+ */
+function editorAllowedByReasons(reasons) {
+  const raw = (Array.isArray(reasons) ? reasons : []).filter(Boolean);
+  if (!raw.length) return false; // fail closed — an empty list is unresolvable, never "no signals fired"
+  const tokens = [];
+  for (const r of raw) {
+    const token = canonicalReasonToken(r);
+    if (!token) return false;
+    if (!tokens.includes(token)) tokens.push(token);
+  }
+  return tokens.length === 1 && EDITOR_ENABLED_REASON_TOKENS.includes(tokens[0]);
+}
+
+/**
+ * #2908 (PR #1106 review F3, THE BLOCKER) — may the editor push on THIS round? Pure. MIRRORS the tested spec
+ * `editorMayPush` in review-core.mjs.
+ *
+ * TWO conjuncts, and both are needed. `pinned` is the gate resolved once at loop start, so nothing later can
+ * turn the editor ON. `careLevel` is the band as it stands on THIS round, so an accepted juror invite that
+ * raised it turns the editor OFF. The older single-conjunct form kept only the first property and let the loop
+ * push to the author's branch while its own state read `care=elevated`.
+ */
+function editorMayPush(pinned, careLevel) {
+  return pinned === true && EDITOR_ENABLED_CARE_LEVELS.includes(careLevel);
+}
+
+/**
+ * #2640 + #2908 (PR #1106 review F3) — the care band after an ACCEPTED juror invite. Pure. MIRRORS the tested
+ * spec `growOnlyCareLevel` in review-core.mjs.
+ *
+ * `toCareLevel` is an unvalidated agent string, and since #2908 the band is write-authorizing — so the loop
+ * computes the raise ITSELF rather than trusting the echo. An accepted invite raises care by exactly ONE band,
+ * capped at `high` (`raiseCareForDiscovery`), so: an unresolved current band stays unresolved (an echo may never
+ * RESOLVE one — that direction is the fail-open), and otherwise the result is the locally-raised band, or the
+ * echoed one only when it is a known band ABOVE that. The echo can raise, never lower, never hold flat.
+ */
+function growOnlyCareLevel(current, echoed) {
+  const idx = KNOWN_CARE_LEVELS.indexOf(current);
+  if (idx === -1) return null;
+  const raised = KNOWN_CARE_LEVELS[Math.min(idx + 1, KNOWN_CARE_LEVELS.length - 1)];
+  const echoedIdx = KNOWN_CARE_LEVELS.indexOf(echoed);
+  return echoedIdx > KNOWN_CARE_LEVELS.indexOf(raised) ? echoed : raised;
 }
 
 /**
@@ -303,7 +390,7 @@ const FETCH_SCHEMA = {
     // the jury judged. Optional, unlike `diffBasis`: an absent sha degrades the ledger to "tree unknown" (the
     // fail-closed reading), whereas an absent basis would silently upgrade a degraded diff to a good one.
     headSha: { type: 'string', description: "the PR head commit sha the diff was read at, verbatim from fetch-parked's `headSha` ('' if absent)" },
-    escalationReason: { type: 'array', items: { type: 'string' }, description: 'the bare decorated reasons under the PR body\'s "## Escalation reason" heading' },
+    escalationReason: { type: 'array', items: { type: 'string' }, description: 'fetch-parked\'s `escalationReason`, copied VERBATIM — the bare decorated reasons its deterministic `parseEscalationReason` read out of the PR body\'s "## Escalation reason" block. NOT to be re-parsed from `body` by eye: since #2908 this list decides whether the editor may push, and one dropped bullet flips the gate ([\'size\'] → editor on; [\'size\',\'blast-radius\'] → review-only). `[]` when absent — the loop fails closed on it' },
     error: { type: 'string', description: 'set if fetch-parked could not read the PR' },
   },
 };
@@ -426,7 +513,7 @@ const RIGOR_SCHEMA = {
     jurorsPerLens: { type: 'number', description: 'independent reviewers per lens the care-level dials (>=1)' },
     rounds: { type: 'number', description: 'the SHARED panel dial rounds (jury/review read this too) — not the editor budget' },
     editorEnabled: { type: 'boolean', description: '#2908 editor.editorEnabled — may the editor PUSH at this band (low only)' },
-    editorRounds: { type: 'number', description: '#2908 editor.rounds — the convergence loop round cap (>=2 on an editor-enabled band)' },
+    editorRounds: { type: 'number', description: '#2908 editor.rounds — the convergence loop round cap (>=2 on an editor-enabled band). REPORTED for the log/audit trail; the loop does NOT read it for the cap (PR #1106 F4 — an echo must not be able to buy extra machine pushes), it derives the same number locally from EDITOR_MIN_ROUNDS' },
     aggregation: { type: 'string', description: 'always diversity-selection — never a majority vote' },
     notes: { type: 'string' },
   },
@@ -552,8 +639,12 @@ function fetchPrompt(pr, repo, round = 1) {
     "holding: 'net' (the two-tree diff vs current main) or 'three-dot' (DEGRADED — lists sibling-lane files that",
     'already landed on main as if this PR added them). If the field is absent, return "three-dot": an unstated',
     'basis must never read as the good one.',
-    'Parse escalationReason from the `body`: the "- <reason>" bullet lines under the "## Escalation reason"',
-    'heading (up to the next "##" heading), as bare strings (may be empty).',
+    'Copy its `escalationReason` array through VERBATIM — do NOT read the bullets out of `body` yourself, and do',
+    'NOT reword, merge, split, drop or re-order an entry. fetch-parked PARSES that block deterministically',
+    '(`parseEscalationReason`, we:scripts/review-detail.mjs); since #2908 this list decides whether a machine may',
+    'push to the author\'s branch, and ONE dropped bullet flips it — ["size"] enables the editor, but',
+    '["size","blast-radius"] does not. If the field is absent, return [] (the loop fails closed on an empty list:',
+    'review-only, never editor-on).',
     'Copy its `headSha` through VERBATIM too (#2864) — the PR head commit this diff was read at. It is what the',
     'jury ledger records as the tree the jurors were seated over, so a later reader can tell whether the verdict',
     'still describes the PR\'s current head. Do NOT invent or shorten it; if the field is absent, return "".',
@@ -753,46 +844,75 @@ function editorPrompt(pr, repo, findings, round, roundCap) {
  * verdict wins — never a majority vote).
  *
  * FAILS CLOSED ON THE EDITOR, ALWAYS (#2908). Everything below defaults the editor to OFF, and only one narrow
- * path turns it on: a resolvable band that is in `EDITOR_ENABLED_CARE_LEVELS` **and** an echo that agrees. Three
- * doors are shut here:
+ * path turns it on: a resolvable band in `EDITOR_ENABLED_CARE_LEVELS`, a LOCAL read of the reason list that
+ * agrees, **and** an echo that agrees. Four doors are shut here:
  *
- *   1. **An EMPTY reason list.** `escalationReason` is produced by an LLM fetch agent and fails open to `[]` on a
- *      degraded fetch, and the loop's only statute/leash signal is that reason prose. This used to short-circuit
- *      to `careLevel: 'low'` / 1 round, which was harmless ONLY because a 1-round cap made the editor unreachable
- *      at `low`. #2908 gives an editor-enabled band 2 rounds, which removes exactly that accidental protection —
- *      so a statute PR whose reason fetch flaked would have had its branch machine-edited. It is now `null` /
- *      UNRESOLVED / editor OFF: a parked PR always HAS a reason, so an empty list is evidence of a broken read.
+ *   1. **An EMPTY reason list.** This used to short-circuit to `careLevel: 'low'` / 1 round, which was harmless
+ *      ONLY because a 1-round cap made the editor unreachable at `low`. #2908 gives an editor-enabled band 2
+ *      rounds, which removes exactly that accidental protection. It is now `null` / UNRESOLVED / editor OFF.
+ *
+ *      WHY, PRECISELY — the earlier justification here was that every parked PR necessarily carries a reason, so
+ *      `[]` could only be a broken read. That is FALSE, and the conclusion survives it anyway. `[]` has TWO
+ *      producers and this loop cannot tell them apart: (a) a degraded read — the list reaches the loop through
+ *      the fetch agent; and (b) a genuinely reason-less parked PR — `pr-land.mjs --park=review:pending` (#2622)
+ *      applies the review label AT OPEN and writes no `## Escalation reason` block at all (the block is appended
+ *      only on the separate `scoreEscalation` verdict path). Since one of the two producers is a broken read of
+ *      a possibly-statute diff, `[]` must fail closed. **Consequence, stated plainly:** a
+ *      `--park=review:pending` PR opened with no reason block is permanently REVIEW-ONLY here — its panel runs
+ *      and its findings reach the operator, it is simply never machine-edited.
  *   2. **An unresolvable band.** A missing/malformed/unrecognized `careLevel` no longer defaults to `'low'` (the
  *      one editor-enabled band!). It resolves to `null` → editor OFF.
  *   3. **A dishonest echo.** The gate is RE-DERIVED from `EDITOR_ENABLED_CARE_LEVELS` in this body, not taken from
  *      the agent's `editorEnabled` — same trust boundary as `applyJurorInvite`'s grow-only re-derivation. Both
  *      must say yes.
+ *   4. **AN ECHOED BAND THAT GRANTS** (PR #1106 review F1). Door 3 re-derives the gate from the allow-list, but
+ *      it checks the allow-list against a band the RIGOR AGENT supplied — so `{careLevel:'low'}` echoed on a PR
+ *      parked for `blast-radius` would open the editor at what is really `elevated`. "An agent's `editorEnabled`
+ *      can only veto" was true; "an agent echo can never enable" was not. The loop holds the REASON LIST itself,
+ *      so `editorAllowedByReasons` re-derives the enablement locally from that, and both derivations must agree.
+ *      The echo keeps its veto and loses its grant.
  *
  * Mutating someone else's branch is not reversible from their side, so "we could not work out how risky this is"
  * must mean "report it", never "edit it".
  */
 async function careRigorFor(item, escalationReason) {
-  // Door 1 — no reason list is an UNRESOLVED band (a broken read), never the weakest band.
+  // Door 1 — no reason list is an UNRESOLVED band, never the weakest band (see the docblock for why `[]` is
+  // ambiguous rather than simply broken: `--park=review:pending` produces a legitimately reason-less PR).
   if (!escalationReason.length) {
     return { careLevel: null, jurorsPerLens: 1, roundCap: 1, editorEnabled: false, aggregation: 'diversity-selection' };
   }
+  // Door 4 — the LOCAL, echo-independent half of the derivation, computed BEFORE the agent runs so nothing the
+  // agent returns can influence it. `false` here means review-only no matter what comes back.
+  const reasonsAllowEditor = editorAllowedByReasons(escalationReason);
   const r = await agent(rigorPrompt(item, escalationReason), { label: `rigor:${prTag(item)}`, phase: 'Converge', schema: RIGOR_SCHEMA }).catch(() => null);
   const jurorsPerLens = (r && Number.isFinite(Number(r.jurorsPerLens)) && Number(r.jurorsPerLens) >= 1) ? Math.floor(Number(r.jurorsPerLens)) : 1;
   // Door 2 — a band we do not recognize is UNRESOLVED (`null`), not `'low'`. `null` can never satisfy the gate.
   const echoedLevel = (r && typeof r.careLevel === 'string') ? r.careLevel.trim() : '';
   const careLevel = KNOWN_CARE_LEVELS.includes(echoedLevel) ? echoedLevel : null;
-  // Door 3 — the gate is re-derived HERE from the allow-list; the echo is only ever able to VETO, never to enable.
-  const editorEnabled = EDITOR_ENABLED_CARE_LEVELS.includes(careLevel) && r != null && r.editorEnabled === true;
+  // Door 3 (+ Door 4) — the gate is re-derived HERE from the allow-list AND from the local reason read; the echo
+  // is only ever able to VETO, never to enable. All three conjuncts must say yes.
+  const editorEnabled = reasonsAllowEditor && EDITOR_ENABLED_CARE_LEVELS.includes(careLevel) && r != null && r.editorEnabled === true;
+  if (!reasonsAllowEditor && r != null && r.editorEnabled === true && EDITOR_ENABLED_CARE_LEVELS.includes(careLevel)) {
+    // Worth a loud line: the echo said `low`/editor-on and the reasons this loop holds say otherwise. Either the
+    // rigor read is broken or the band is being misreported — both are review-only, and both want a human's eye.
+    log(`  ${prTag(item)}: rigor echo claims care=${careLevel} / editor-on, but the escalation reasons [${escalationReason.join('; ')}] do not permit the editor — REVIEW-ONLY (the local read wins; an echo may veto, never grant).`);
+  }
   // The SHARED panel dial (`/jury` and `/review` read the same number) — floored at 1 so at least one panel review
   // always runs (a `none`/0-round band still gets one review pass, just no editor round). Never trust a
   // non-finite or <1 value from the dial.
   const panelRounds = (r && Number.isFinite(Number(r.rounds)) && Number(r.rounds) >= 1) ? Math.floor(Number(r.rounds)) : 1;
   // THE EDITOR'S OWN BUDGET. An editor-enabled band is floored at EDITOR_MIN_ROUNDS here, in this loop — the
   // shared dial is left exactly as it was. A review-only band keeps the shared dial's number unchanged, so
-  // nothing about `elevated`/`high` moves. The echoed `editorRounds` may only RAISE the floor, never lower it.
-  const echoedEditorRounds = (r && Number.isFinite(Number(r.editorRounds)) && Number(r.editorRounds) >= 1) ? Math.floor(Number(r.editorRounds)) : 0;
+  // nothing about `elevated`/`high` moves.
+  //
+  // THE ECHOED `editorRounds` IS DELIBERATELY NOT READ (PR #1106 review F4). It used to sit inside the `max(…)`,
+  // "grow-only" by analogy with `floorGrowOnlyJurors`. That analogy is wrong: for JURORS growth means more
+  // scrutiny, so grow-only is the safe monotone; for EDITOR rounds growth means MORE MACHINE PUSHES to someone
+  // else's branch, so grow-only points at the hazard. The ratified budget is 2, an honest echo reports 2, and a
+  // confused one could buy 5 against a budget nobody ratified. The floor is derived here instead, from the same
+  // constants the CLI derives it from — so the echo is not needed, and cannot raise it.
   const roundCap = editorEnabled
-    ? Math.min(Math.max(panelRounds, EDITOR_MIN_ROUNDS, echoedEditorRounds), NEGOTIATION_ROUND_CAP)
+    ? Math.min(Math.max(panelRounds, EDITOR_MIN_ROUNDS), NEGOTIATION_ROUND_CAP)
     : panelRounds;
   const aggregation = (r && typeof r.aggregation === 'string') ? r.aggregation : 'diversity-selection';
   return { careLevel, jurorsPerLens, roundCap, editorEnabled, aggregation };
@@ -1048,11 +1168,17 @@ async function convergePr(item) {
   let careLevel = null;
   let jurorsPerLens = null;
   let roundCap = null;
-  // #2908 — THE EDITOR GATE, resolved ONCE from the SAME band the panel dial came from, and never recomputed.
-  // Deliberately NOT re-derived from `careLevel` at the editor step, and deliberately NOT raised by a juror
-  // invite: an invite can only RAISE care (low → elevated → high), and every raise moves AWAY from the one
-  // editor-enabled band. Recomputing mid-loop could therefore only ever turn the editor OFF — but pinning it at
-  // loop start also means no later mutation of `careLevel` can turn it ON, which is the direction that matters.
+  // #2908 — THE EDITOR GATE, resolved ONCE from the SAME band the panel dial came from. It is a `const`, so no
+  // later mutation of `careLevel` can turn the editor ON — that is the direction that matters.
+  //
+  // IT IS NOT THE WHOLE GATE (PR #1106 review F3). The earlier note here argued that pinning was safe because an
+  // invite can only RAISE care, so recomputing mid-loop "could only ever turn the editor OFF" — and then chose
+  // pinning INSTEAD of recomputing. That was a false dichotomy, and it cost the property it was trading for:
+  // `careLevel` is mutable (an accepted #2640 invite reassigns it, typically `low → elevated`) while this pin
+  // stayed `true`, so the loop pushed to the author's branch with its own state reading `care=elevated` — the
+  // band the ruling excludes on evidence — and the "EDITOR OFF" log line never fired. BOTH properties are
+  // available at once: `editorMayPush(editorEnabled, careLevel)` at the gate keeps the pin (nothing turns it on)
+  // and honours the current band (a mid-run raise turns it off).
   const gate = await careRigorFor(item, escalationReason);
   ({ careLevel, jurorsPerLens, roundCap } = gate);
   const editorEnabled = gate.editorEnabled === true;
@@ -1097,7 +1223,12 @@ async function convergePr(item) {
     if (invite) {
       const grown = await applyJurorInvite(item, careLevel, activeLenses, jurorsPerLens, invite);
       if (grown && grown.accepted && grown.addedLenses.length) {
-        careLevel = grown.toCareLevel;
+        // GROW-ONLY BAND (#2640 + PR #1106 F3): `toCareLevel` is an unvalidated agent string, and since #2908 the
+        // band is write-authorizing — so the raise is computed HERE from the loop's own state (an accepted invite
+        // raises care by exactly one band, `raiseCareForDiscovery`) and the echo may only push it higher. It can
+        // no longer hold the band flat at `low` while the roster grows, nor lower it on a later round.
+        // MIRRORS the tested spec `growOnlyCareLevel` in review-core.mjs.
+        careLevel = growOnlyCareLevel(careLevel, grown.toCareLevel);
         jurorsPerLens = grown.jurorsPerLens;
         // GROW-ONLY (gate-self fix, #2640): UNION the current roster with the grown set — NEVER replace it. Replacing
         // would let a shrunk/echoed roster DROP the mandatory correctness/security lenses mid-loop; a union can only
@@ -1109,7 +1240,7 @@ async function convergePr(item) {
         // copy already unions with `activeLenses`, so the two agree — keep them agreeing.
         const grownSeatable = grown.seatedLenses.filter((l) => LENSES.includes(l));
         activeLenses = [...new Set([...activeLenses, ...grownSeatable])];
-        log(`  ${prTag(item)}: round ${round} JUROR INVITE (${invite.from} → ${invite.lens}, cited: "${invite.citedFinding.slice(0, 80)}") accepted — care→${careLevel}, ${jurorsPerLens} juror(s)/lens; re-reviewing with the grown jury (spends a round, does NOT reset the counter).`);
+        log(`  ${prTag(item)}: round ${round} JUROR INVITE (${invite.from} → ${invite.lens}, cited: "${invite.citedFinding.slice(0, 80)}") accepted — care→${careLevel ?? 'UNRESOLVED'}, ${jurorsPerLens} juror(s)/lens${editorMayPush(editorEnabled, careLevel) ? '' : ' (the raised band is REVIEW-ONLY — the editor is now off for the rest of this PR)'}; re-reviewing with the grown jury (spends a round, does NOT reset the counter).`);
         round += 1;
         // The grown jury lives under the SAME round cap — an invite cannot dodge it by restarting the budget.
         // @duplicate-of we:scripts/lib/converge-core.mjs (`applyJurorInvite`'s `round > roundCap` escalate) — migrate under #xyihiji.
@@ -1141,8 +1272,13 @@ async function convergePr(item) {
     //    is REPORTED instead of applied, never that it is discarded: the operator gets strictly the same panel
     //    output, minus a machine-authored patch on their branch. `dismissedFindings` stays empty because nothing
     //    was dismissed — no editor ran to dismiss anything.
-    if (!editorEnabled) {
-      log(`  ${prTag(item)}: round ${round} — EDITOR OFF (care=${careLevel ?? 'UNRESOLVED'}; the editor may push at ${EDITOR_ENABLED_CARE_LEVELS.join('/')} only). REVIEW-ONLY: reporting ${last.findings.length} finding(s) to review:human with the branch untouched.`);
+    //
+    //    IT IS RE-EVALUATED EVERY ROUND, against the CURRENT band (PR #1106 review F3). `editorEnabled` alone is
+    //    the band as it stood at loop start; `careLevel` is the band as it stands NOW, and an accepted juror
+    //    invite raises it mid-run. Both conjuncts, so the pin still means nothing can turn the editor ON and the
+    //    raise means a grown-care PR stops here instead of being pushed to at `elevated`.
+    if (!editorMayPush(editorEnabled, careLevel)) {
+      log(`  ${prTag(item)}: round ${round} — EDITOR OFF (care=${careLevel ?? 'UNRESOLVED'}${editorEnabled && !EDITOR_ENABLED_CARE_LEVELS.includes(careLevel) ? ', RAISED mid-run past the editor band' : ''}; the editor may push at ${EDITOR_ENABLED_CARE_LEVELS.join('/')} only). REVIEW-ONLY: reporting ${last.findings.length} finding(s) to review:human with the branch untouched.`);
       last = { ...last, outcome: OUTCOME_ESCALATE, verdict: 'needs-human', disposition: { mode: 'human', autoLand: false } };
       break;
     }

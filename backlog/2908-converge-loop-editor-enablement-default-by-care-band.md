@@ -44,11 +44,16 @@ gets a **report and the operator**, with the author's branch untouched.
   round budget of every other consumer to buy a property only this loop needs. The shared dial is unchanged:
   `low` is still 1 panel round everywhere else.
 - **The gate FAILS CLOSED.** An absent, malformed or unresolvable care level means review-only, never editor-on.
-  This is load-bearing rather than decorative: `escalationReason` is produced by an LLM fetch agent and fails
-  open to `[]`, and the loop's only statute signal is that reason prose. Before this ruling the `low`/1-round
-  fallback protected against that **by accident** — the editor was unreachable at `low` anyway. Giving `low` two
-  rounds removes the accident, so the protection has to become deliberate. Mutating someone else's branch is not
-  reversible from their side.
+  This is load-bearing rather than decorative: the escalation-reason list reaches the loop through a fetch agent
+  and fails open to `[]`, and the loop's only statute signal is that reason prose. Before this ruling the
+  `low`/1-round fallback protected against that **by accident** — the editor was unreachable at `low` anyway.
+  Giving `low` two rounds removes the accident, so the protection has to become deliberate. Mutating someone
+  else's branch is not reversible from their side.
+- **An agent echo may VETO the editor, never GRANT it.** Wherever the band or the budget crosses an agent
+  boundary, the loop re-derives it from state it holds itself — the enablement from the escalation reasons, the
+  round budget from the 2-round floor — and the gate is re-evaluated on **every** round, so a juror invite
+  (#2640) that raises care mid-run turns the editor off for the rest of that PR. (Added at the PR #1106 review;
+  it is how the ruling above is enforced across an untrusted boundary, not a change to what it says.)
 - **Review-only still REPORTS.** Turning the editor off changes what the loop *does* with the panel's findings,
   never whether it produces them: the findings, the reduced verdict and the operator-facing comment ride out on
   the escalation exactly as they do on a deadlock.
@@ -101,6 +106,25 @@ already governed by the round budget the same care dial sets.
   machine-authored patch no panel re-read — which would break the loop's own stated invariant, *"a `land`
   outcome means the final diff was signed off by a fresh-context panel that did not author it"*
   (`we:scripts/workflows/review-parked-prs.mjs:85`). **Enablement and round budget are one decision, not two.**
+
+### Correction folded 2026-08-08 (PR #1106 review, F5) — "a parked PR always has a reason" is FALSE
+
+The fail-closed clause above was justified, in the statute and in two code docblocks, by the claim that every
+parked PR carries an escalation reason — so an empty list could only be a broken read. **That claim is wrong.**
+`we:scripts/pr-land.mjs`'s `--park=review:pending` (#2622) applies the review label **at open** and writes no
+`## Escalation reason` block at all: the block is appended only on the separate `scoreEscalation` verdict path,
+and `buildEscalationReasonBlock([])` returns `''`. A legitimately reason-less `review:pending` PR therefore
+exists, and this loop will see it.
+
+**The rule does not change — fail-closed is still right.** `[]` now has two producers the loop cannot tell
+apart (a degraded read, and a genuinely reason-less park), and one of them may be a statute diff, so `[]` must
+still mean review-only. What changes is the reasoning and the stated consequence:
+
+- The justification is now *"`[]` is ambiguous"*, not *"`[]` is evidence of a broken read"*.
+- **Consequence, previously unstated:** a `--park=review:pending` PR opened with no reason block is
+  **permanently review-only** under this ruling. Its panel still runs and its findings still reach the operator;
+  it is simply never machine-edited, and it escalates to `review:human` after its panel round. Accepted
+  deliberately — the alternative reads a broken fetch as a safe diff.
 
 ### The diff-size objection — raised at the decision turn, and ANSWERED (not deleted)
 
