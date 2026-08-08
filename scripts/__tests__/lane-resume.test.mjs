@@ -266,6 +266,34 @@ describe('lane-resume — land (#2202/#2290: enqueue + trigger the drain, never 
     expect(hasGhMerge(calls)).toBe(false); // still never merges directly (#2290)
   });
 
+  // #2832 / #984 finding 6 — /finish is a WRITE site for ready-to-merge; it must consult the shared hold
+  // predicate BEFORE adding the go-ahead. A held PR (review:human / review:pending) must NEVER be re-labelled
+  // ready-to-merge (which flip-flopped with the drain reconcile), even when it is green + mergeable.
+  it('a review:human-held PR → held, never enqueues (no label edit, no drain trigger) even green + mergeable (#984 #6)', () => {
+    const { run, calls } = scriptedRun({});
+    const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }], labels: [{ name: 'review:human' }] } });
+    expect(v.action).toBe('held');
+    expect(v.merged).toBe(false);
+    expect(v.reason).toMatch(/ready-to-merge/);
+    expect(hasLabelEdit(calls)).toBe(false); // never adds the go-ahead to a held PR
+    expect(hasDrainTrigger(calls)).toBe(false);
+  });
+
+  it('a review:pending-held PR → held, never enqueues (#984 #6)', () => {
+    const { run, calls } = scriptedRun({});
+    const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }], labels: [{ name: 'review:pending' }] } });
+    expect(v.action).toBe('held');
+    expect(hasLabelEdit(calls)).toBe(false);
+    expect(hasDrainTrigger(calls)).toBe(false);
+  });
+
+  it('a review:accepted PR (hold CLEARED) still enqueues — accepted is a sign-off, not a hold (#984 #6)', () => {
+    const { run, calls } = scriptedRun({ ...prView(), 'git merge-tree': { status: 0, stdout: 'x' } });
+    const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }], labels: [{ name: 'review:accepted' }] } });
+    expect(v.action).toBe('enqueued');
+    expect(hasLabelEdit(calls)).toBe(true);
+  });
+
   it('dry-run reports the enqueue plan without touching git/gh', () => {
     const { run, calls } = scriptedRun({});
     const v = land({ prNum: 5, run, dryRun: true, prInfo: { headRefName: 'lane/x-2202', mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] } });

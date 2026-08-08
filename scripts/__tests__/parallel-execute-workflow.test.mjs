@@ -98,4 +98,21 @@ describe('parallel-execute workflow — #2478/#2216 Finalize label reconcile', (
     expect(SRC).toMatch(/reconciledLabels,/);
     expect(SRC).toMatch(/carriedForLabel,/);
   });
+
+  it('#984 finding 4 — a DELIBERATELY-held PR (p.held) is NOT collected for reconcile (never re-labelled)', () => {
+    // The detection excludes a held strand: re-running pr-land on it would re-add the go-ahead the hold stripped
+    // (a held↔ready flip-flop) and record a false carried-for-label. `held` is the signal distinct from labelApplied:false.
+    expect(SRC).toMatch(/p\.pr\s*&&\s*!p\.labelled\s*&&\s*!p\.held/);
+    // the per-PR schema carries the `held` field, and the lane is told to set it from pr-land's JSON `held:true`
+    expect(SRC).toMatch(/held:\s*\{\s*type:\s*'boolean'/);
+    expect(SRC).toMatch(/held:true/);
+  });
+
+  it('#984 minor 5 — a held PR is SURFACED in Finalize (never a silent drop / silent liveness-reconcile opt-out)', () => {
+    // Held PRs are excluded from the reconcile, so without a visibility line the operator gets no signal a strand is
+    // waiting on their review — and a mis-set held:true would silently opt a stranded PR out of the reconcile unseen.
+    expect(SRC).toMatch(/heldStrands\s*=/);
+    expect(SRC).toMatch(/p\.pr\s*&&\s*p\.held/);         // collected
+    expect(SRC).toMatch(/Held for review/);              // logged
+  });
 });

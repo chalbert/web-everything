@@ -89,7 +89,8 @@ import { computeNetDiffChangedFiles } from './merge-ai-prs.mjs'; // SHARED net-d
 import {
   scoreEscalation, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META, REVIEW_LABELS,
   buildEscalationReasonBlock, bodyHasEscalationReason, reconcileRoster, ROSTER_TIMING,
-} from './lib/review-escalation.mjs'; // #2307 — deterministic review-escalation label AT PR-OPEN; #2635 — roster bind+reconcile
+  isReviewHoldLabel, READY_TO_MERGE_LABEL, readyMergeConflictsWithHold, hasUnclearedReviewLabel,
+} from './lib/review-escalation.mjs'; // #2307 — deterministic review-escalation label AT PR-OPEN; #2635 — roster bind+reconcile; #2832 — hold/ready self-consistency
 import { resolveJuryPlan } from './lib/review-core.mjs'; // #2635 — recompute the jury roster from the REAL diff at PR-open
 import { POLICY_CARE_JURY } from './lib/review-policy.mjs'; // #2635 — the care→jury contract's roster-timing mode (knob #4)
 import { parseManifest, embedManifestInBody, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs'; // xnsk54v — manifest rides the PR body, not a tracked file
@@ -317,6 +318,34 @@ export function buildMergeArgs({ pr, method }) {
 export function buildAddLabelArgs({ pr, label }) {
   if (!label || pr == null) return null;
   return ['pr', 'edit', String(pr), '--add-label', label];
+}
+
+/**
+ * #2832 / #984 findings 4+5 (+ R4/minor-1) — the producer's hold/go-ahead decision, as a pure function so the
+ * write-time invariant is unit-testable without the `gh` write. Given the escalation VERDICT label, the PR's
+ * OBSERVED labels, and whether THIS run just applied the go-ahead, decide two things:
+ *   - `held`  — is this PR held for review? True if the fresh verdict is a review-HOLD label OR the PR ALREADY
+ *     OBSERVABLY carries an uncleared review hold (`hasUnclearedReviewLabel`). The #984 R4 fix: an OBSERVED hold
+ *     is STICKY — a PR parked `review:human`/`review:pending` (by the drain, a #2409 re-park, a human, or a prior
+ *     `--park`) whose FRESH rubric happens clean is STILL held, so this must not emit `held:false` and let the
+ *     workflow Finalize re-run `pr-land --label-on-green` on it (re-adding the go-ahead a hold strips — the
+ *     flip-flop) or the unconditional `applyLabel()` leave it `held AND ready`. Distinct from a `ready-to-merge`
+ *     label-apply FAILURE (`labelApplied:false`) — a hold with a failed apply is STILL a hold.
+ *   - `strip` — must the producer STRIP `ready-to-merge`? True iff held AND the go-ahead is present, judged BOTH
+ *     from the OBSERVED set (`currentLabels` ∪ the just-decided hold — #984 finding 5, so a re-run against an
+ *     already-`ready-to-merge` held PR strips even when this run's add "failed") AND, belt-and-braces, from
+ *     `labelApplied` (#984 minor 1: the live `currentLabels` read FAILS OPEN to `[]` on a transient `gh` miss —
+ *     without this, a PR THIS run just stamped `ready-to-merge` would keep the stale go-ahead). Reuses the SHARED
+ *     `readyMergeConflictsWithHold` predicate (no fork).
+ * @param {string|null|undefined} verdictLabel - the producer's final review-escalation label (a hold, or null)
+ * @param {Array} currentLabels - the PR's OBSERVED labels (string or `{name}` shape)
+ * @param {{labelApplied?: boolean}} [opts] - did THIS run's `--add-label ready-to-merge` succeed?
+ * @returns {{held:boolean, strip:boolean}}
+ */
+export function decideHoldReadyStrip(verdictLabel, currentLabels, { labelApplied = false } = {}) {
+  const held = (!!verdictLabel && isReviewHoldLabel(verdictLabel)) || hasUnclearedReviewLabel(currentLabels);
+  const strip = held && (readyMergeConflictsWithHold([...(currentLabels || []), verdictLabel]) || labelApplied);
+  return { held, strip };
 }
 
 /** Build the argv for the post-land id-collision heal (#2071). Passes `--onto-ref=<pre-merge-main sha>` when
@@ -686,6 +715,14 @@ function runCli() {
   //     — NEVER eagerly at open. `applyLabel()` is the deferred, best-effort apply (ensure the label exists,
   //     then add it; a failure is recorded but never aborts — the PR is already open).
   let labelApplied = false;
+  // #2832 / #984 finding 4 — a DELIBERATELY-held PR (the escalation verdict is a review-hold, so the strip below
+  // removes `ready-to-merge`) needs its OWN signal, distinct from `labelApplied: false` (which also means "the
+  // `--add-label` call FAILED"). The parallel-workflow Finalize (`parallel-execute.workflow.js`) treats a
+  // `labelApplied:false` PR as a drain-invisible strand and RE-RUNS `pr-land --label-on-green` on it — which would
+  // re-add the go-ahead this hold just stripped (a flip-flop) and record a false `carried-for-label`. Emitting
+  // `held:true` lets that parser leave a held strand alone (it is held for review ON PURPOSE, not un-labelled by a
+  // gh hiccup).
+  let held = false;
   const applyLabel = () => {
     const addLabelArgs = buildAddLabelArgs({ pr: prNum, label: LABEL });
     if (!addLabelArgs) return;
@@ -765,6 +802,26 @@ function runCli() {
         if (!bodyHasEscalationReason(liveBody)) ghC(['pr', 'edit', String(prNum), '--body', liveBody + buildEscalationReasonBlock(verdict.reasons)]);
       } catch { /* best-effort — the label already carries the signal */ }
     }
+    // #2832 — the producer applies `ready-to-merge` (applyLabel, on green) BEFORE this escalation verdict. When
+    // the verdict is a review-HOLD (review:human/pending/changes), that go-ahead and the hold would coexist —
+    // the exact contradictory state this item removes. Strip `ready-to-merge` in the same producer step so the
+    // held-AND-ready window is closed at the source, not left to the next drain sweep. #984 review (reviewer B) —
+    // this is add-then-strip EVENTUAL CONSISTENCY, not construction-time atomicity: GitHub has no atomic
+    // multi-label swap, so there is a sub-second window where both labels coexist, and the strip is best-effort (a
+    // gh miss leaves the PR held-and-ready until the drain reconcile strips it next pass). It is never a merge-
+    // safety hole regardless: the drain's merge gate independently re-checks `hasUnclearedReviewLabel` and PARKS a
+    // held PR whether or not `ready-to-merge` is present — the label is only a collection filter, not the land gate.
+    //
+    // #984 findings 4+5 — `decideHoldReadyStrip` (pure) makes both calls off the OBSERVED label set: `held` (this
+    // PR is deliberately held for review — the #4 signal, distinct from `labelApplied:false` apply-failure) and
+    // `strip` (the PR observably carries `ready-to-merge` while held, so remove it — gated on what the PR actually
+    // holds, NOT on whether THIS run's applyLabel add succeeded, #5).
+    const holdDecision = decideHoldReadyStrip(verdict.label, currentLabels, { labelApplied });
+    if (holdDecision.held) held = true;
+    if (holdDecision.strip) {
+      try { ghC(['pr', 'edit', String(prNum), '--remove-label', READY_TO_MERGE_LABEL]); labelApplied = false; }
+      catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · #${prNum} held ${verdict.label} — could not strip ${READY_TO_MERGE_LABEL} (${String(e.message || e).split('\n')[0]}); the drain reconcile will strip it (#2832)\n`); }
+    }
     return verdict;
   };
 
@@ -798,7 +855,11 @@ function runCli() {
     catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply park label "${parkLabel}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — the PR IS open; set the label by hand\n`); }
     emit({
       repo: REPO, merged: false, reason: 'parked', pr: Number(prNum), ref: REF,
-      label: null, labelApplied: false, reviewLabel: parkLabel, reviewLabelApplied: parkApplied,
+      // #984 review (R4) — a `--park` PR is HELD by definition (opened straight into a review hold, never
+      // labelled ready-to-merge). Emit `held:true` — same as the escalation-verdict hold path — so the
+      // parallel-workflow Finalize treats it as a deliberate hold, NOT a `labelApplied:false` un-labelled strand
+      // to re-run `pr-land --label-on-green` on (which would stamp the go-ahead onto a held PR — the flip-flop).
+      label: null, labelApplied: false, held: true, reviewLabel: parkLabel, reviewLabelApplied: parkApplied,
       detail: `opened self-approved PR #${prNum} for ${REF} PARKED ${parkLabel} (${parkApplied ? `labelled ${parkLabel}` : 'label apply FAILED — set it by hand'}) — held for review, NOT waited/labelled ready-to-merge/landed; the drain numbers any born-as-hash item at land once a human clears the review`,
     }, 0);
   }
@@ -873,6 +934,9 @@ function runCli() {
   emit({
     repo: REPO, merged: false, reason: PLAN.triggerDrain ? 'enqueued' : 'labelled-on-green',
     pr: Number(prNum), ref: REF, label: LABEL, labelApplied,
+    // #984 finding 4 — `held:true` marks a DELIBERATE review-hold (ready-to-merge stripped on purpose), so the
+    // parallel-workflow Finalize does NOT mistake it for a `labelApplied:false` apply-failure to re-label.
+    ...(held ? { held: true } : {}),
     ...(reviewVerdict.label ? { reviewLabel: reviewVerdict.label, reviewLabelApplied: reviewVerdict.apply, escalateReasons: reviewVerdict.reasons, humanRequired: reviewVerdict.humanRequired } : {}),
     // #2635 — surface the bound jury roster + any expansion-past-registration (the ledger flag the #2641 durable
     // log will consume; observable today in the producer's JSON result). Emitted whenever a roster was bound.

@@ -745,6 +745,40 @@ export function hasUnclearedReviewLabel(labels, { allowPending = false } = {}) {
 }
 
 /**
+ * #2832 — the producer-certified go-ahead label (`ready-to-merge`, #2196) named ONCE here so every write site
+ * that must keep it self-consistent with the review-hold family (`pr-land`, the drain reconcile, the reviewer
+ * verdict CLI) derives the string from a single source and can never drift from it.
+ */
+export const READY_TO_MERGE_LABEL = 'ready-to-merge';
+
+/**
+ * #2832 — the three REVIEW-HOLD labels: applying ANY of them means "this PR is held, it may NOT merge". A held
+ * PR and `ready-to-merge` are contradictory (a hold AND a go-ahead at once), so wherever a hold label is
+ * written or observed, `ready-to-merge` must be refused/stripped. Frozen — the canonical hold set.
+ * (`review:accepted` is NOT a hold — it CLEARS one; `redteam:accepted` is an orthogonal sign-off, not a hold.)
+ */
+export const REVIEW_HOLD_LABELS = Object.freeze([REVIEW_LABELS.pending, REVIEW_LABELS.changes, REVIEW_LABELS.human]);
+
+/** #2832 — is `label` one of the three review-hold labels? Pure. Used by the write sites that must strip
+ *  `ready-to-merge` in the same operation they apply a hold. */
+export function isReviewHoldLabel(label) {
+  return REVIEW_HOLD_LABELS.includes(label);
+}
+
+/**
+ * #2832 — the self-consistency invariant, as a pure predicate: does this PR carry BOTH `ready-to-merge` AND an
+ * un-cleared review hold at once? That state is contradictory-by-construction and must never persist — the
+ * green-CI auto-stamp refuses to create it and the drain reconcile strips it. `review:accepted` clears the hold
+ * (so an accepted PR carrying `ready-to-merge` is CONSISTENT, not a conflict). Shared by the WE drain and the
+ * plateau-app resident daemon so the invariant reads identically constellation-wide.
+ * @param {Array} labels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
+ * @returns {boolean} true iff the label set is self-inconsistent (a hold and the go-ahead coexist)
+ */
+export function readyMergeConflictsWithHold(labels) {
+  return hasReviewLabel(labels, READY_TO_MERGE_LABEL) && hasUnclearedReviewLabel(labels);
+}
+
+/**
  * #2307 — should a caller (producer OR drain) actually ISSUE the `gh pr edit --add-label` call for a verdict
  * label? Pure. `false` when there is no label to apply, or the PR already carries it — the producer applies the
  * label at open, so a LATER drain pass re-scoring the same PR must treat it as already-scored and never

@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled } from '../merge-ai-prs.mjs';
+import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 import { buildManifest } from '../readiness/lane-manifest.mjs';
 
@@ -824,6 +824,80 @@ describe('shouldLabelOnGreen (#2216 — post-CI reconcile labels a stranded gree
   });
   it('a non-AI PR that is NOT human-cleared (review:pending) is still not labelled', () => {
     expect(shouldLabelOnGreen(aiPr({ commits: [claudeCommit(), humanCommit], labels: [{ name: 'review:pending' }] }), {})).toBe(false);
+  });
+  // #2832 — LABEL/HOLD SELF-CONSISTENCY (the ADD-side write-time invariant): a green, fully-AI PR carrying ANY
+  // review-hold label must NOT be auto-stamped ready-to-merge (a hold and a go-ahead are contradictory). This is
+  // the AI-generated case — distinct from the non-AI case above, which fails on authorship, not on the hold.
+  it('#2832 — green + fully-AI but review:pending → REFUSED (held PRs never get the go-ahead)', () => {
+    expect(shouldLabelOnGreen(aiPr({ labels: [{ name: 'review:pending' }] }), {})).toBe(false);
+  });
+  it('#2832 — green + fully-AI but review:changes → REFUSED', () => {
+    expect(shouldLabelOnGreen(aiPr({ labels: [{ name: 'review:changes' }] }), {})).toBe(false);
+  });
+  it('#2832 — green + fully-AI but review:human → REFUSED', () => {
+    expect(shouldLabelOnGreen(aiPr({ labels: [{ name: 'review:human' }] }), {})).toBe(false);
+  });
+  it('#2832 — a review:accepted PR is NOT held (the hold was cleared) → still labelled on green', () => {
+    expect(shouldLabelOnGreen(aiPr({ labels: [{ name: REVIEW_LABELS.accepted }] }), {})).toBe(true);
+  });
+  it('#2832 — a clean PR with NO review label is unaffected → labelled on green', () => {
+    expect(shouldLabelOnGreen(aiPr(), {})).toBe(true);
+  });
+});
+
+// #2832 — the REASON channel + the #2423 relief. Two regressions the bare refusal above would otherwise ship:
+//   1. a withheld go-ahead goes SILENT (pre-#2832 the held PR kept the label, entered the candidate set, and got
+//      a park comment from the merge gate; refusing the stamp removes it from that set, so nothing explains the
+//      wait any more) — `reason:'held'` is what lets the reconcile post it instead;
+//   2. the ratified #2423 valve dies (`--no-review-escalation=<pr#>` still waives the MERGE predicate, but an
+//      unstamped PR never enters the `--label`-scoped candidate set, so there is nothing left for it to waive).
+describe('labelOnGreenVerdict (#2832 — the reason channel and the #2423 relief)', () => {
+  it('green + fully-AI + review:pending → refused WITH reason "held" (so the reconcile can say why)', () => {
+    expect(labelOnGreenVerdict(aiPr({ labels: [{ name: 'review:pending' }] }), {})).toEqual({ label: false, reason: 'held' });
+  });
+
+  it('the #2423 relief re-opens the stamp for a NAMED review:pending PR — the valve stays alive', () => {
+    expect(labelOnGreenVerdict(aiPr({ labels: [{ name: 'review:pending' }] }), { allowPendingReview: true }))
+      .toEqual({ label: true, reason: null });
+  });
+
+  // The relief is narrow at BOTH layers, exactly as `classifyPr` has it: an operator flag waives an
+  // agent-reviewable pending park, never a reviewer's active rejection and never the human-only gate.
+  it('the relief NEVER waives review:changes', () => {
+    expect(labelOnGreenVerdict(aiPr({ labels: [{ name: 'review:changes' }] }), { allowPendingReview: true }))
+      .toEqual({ label: false, reason: 'held' });
+  });
+  it('the relief NEVER waives review:human', () => {
+    expect(labelOnGreenVerdict(aiPr({ labels: [{ name: 'review:human' }] }), { allowPendingReview: true }))
+      .toEqual({ label: false, reason: 'held' });
+  });
+
+  // A red or non-producer PR is NOT "stuck because held" — it is stuck for its own reason, which the
+  // ci-lifecycle labels already carry. Reporting `held` there would post a misleading comment on every pass.
+  it('a RED PR that also carries a hold reports NO reason (not stuck because held)', () => {
+    const red = { ...aiPr({ labels: [{ name: 'review:pending' }] }), statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] };
+    expect(labelOnGreenVerdict(red, {})).toEqual({ label: false, reason: null });
+  });
+  it('a non-AI PR that also carries a hold reports NO reason (it fails on authorship first)', () => {
+    const orphan = aiPr({ commits: [claudeCommit(), humanCommit], labels: [{ name: 'review:pending' }] });
+    expect(labelOnGreenVerdict(orphan, {})).toEqual({ label: false, reason: null });
+  });
+  it('an ALREADY-labelled held PR reports no reason — nothing is being withheld from it', () => {
+    const already = aiPr({ labels: [{ name: 'ready-to-merge' }, { name: 'review:pending' }] });
+    expect(labelOnGreenVerdict(already, {})).toEqual({ label: false, reason: null });
+  });
+
+  it('`shouldLabelOnGreen` is exactly the boolean projection of the verdict', () => {
+    const cases = [
+      aiPr(),
+      aiPr({ labels: [{ name: 'review:pending' }] }),
+      aiPr({ labels: [{ name: 'review:changes' }] }),
+      aiPr({ labels: [{ name: 'review:human' }] }),
+      aiPr({ labels: [{ name: REVIEW_LABELS.accepted }] }),
+      aiPr({ labels: [{ name: 'ready-to-merge' }] }),
+      aiPr({ commits: [claudeCommit(), humanCommit] }),
+    ];
+    for (const pr of cases) expect(shouldLabelOnGreen(pr, {})).toBe(labelOnGreenVerdict(pr, {}).label);
   });
 });
 

@@ -15,7 +15,9 @@ import {
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
 } from '../review-set-label.mjs';
 import { parseReviewedSha } from '../lib/review-escalation.mjs';
-import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
+// Rebase resolution (2026-08-08): HEAD's import set is a superset of this PR's; only `READY_TO_MERGE_LABEL`
+// (this PR's hold-invariant constant) had to be added to it.
+import { REVIEW_LABELS, READY_TO_MERGE_LABEL } from '../lib/review-escalation.mjs';
 
 const human = [{ name: REVIEW_LABELS.human }, { name: 'ready-to-merge' }];
 const pending = [{ name: REVIEW_LABELS.pending }, { name: 'ready-to-merge' }];
@@ -164,11 +166,12 @@ describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRea
   const changes = [{ name: REVIEW_LABELS.changes }, { name: 'ready-to-merge' }];
   const humanChanges = [{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.changes }];
 
-  it('re-arms a review:changes bounce → review:pending, dropping review:changes', () => {
+  it('re-arms a review:changes bounce → review:pending, dropping review:changes (and #2832 stripping ready-to-merge)', () => {
     const d = decideSetLabel({ to: 'rearm', currentLabels: changes });
     expect(d.allowed).toBe(true);
     expect(d.addLabel).toBe(REVIEW_LABELS.pending);
-    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes]);
+    // #2832 — re-arm applies review:pending (a hold), so ready-to-merge is stripped in the same swap.
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, READY_TO_MERGE_LABEL]);
     expect(d.keepsHuman).toBe(false);
   });
 
@@ -177,7 +180,7 @@ describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRea
     expect(d.allowed).toBe(true);
     expect(d.addLabel).toBe(REVIEW_LABELS.pending);
     expect(d.addLabel).not.toBe(REVIEW_LABELS.accepted);
-    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes]);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, READY_TO_MERGE_LABEL]);
     expect(d.removeLabels).not.toContain(REVIEW_LABELS.human);
     expect(d.keepsHuman).toBe(true);
   });
@@ -300,10 +303,11 @@ describe('runReviewLabelCli — the clear-human preconditions (#2895)', () => {
 
 describe('presentRemoveLabels — intersect the decision removals with the labels actually present', () => {
   it('a removeLabel NOT in currentLabels is not passed through (never handed to gh)', () => {
-    // changes wants to drop [pending, accepted], but the PR only carries pending → accepted must not survive.
+    // changes wants to drop [pending, accepted, ready-to-merge], but this PR carries only pending +
+    // ready-to-merge → accepted must not survive; #2832: the go-ahead IS carried, so it is stripped.
     const d = decideSetLabel({ to: 'changes', currentLabels: pending });
     const removals = presentRemoveLabels(d.removeLabels, pending);
-    expect(removals).toEqual([REVIEW_LABELS.pending]);
+    expect(removals).toEqual([REVIEW_LABELS.pending, READY_TO_MERGE_LABEL]);
     expect(removals).not.toContain(REVIEW_LABELS.accepted);
   });
 
@@ -316,6 +320,34 @@ describe('presentRemoveLabels — intersect the decision removals with the label
   it('never intersects review:human into the removals on a bounce', () => {
     const d = decideSetLabel({ to: 'changes', currentLabels: human });
     expect(presentRemoveLabels(d.removeLabels, human)).not.toContain(REVIEW_LABELS.human);
+  });
+});
+
+describe('#2832 — decideSetLabel keeps ready-to-merge self-consistent with the review-hold family', () => {
+  const readyPending = [{ name: REVIEW_LABELS.pending }, { name: READY_TO_MERGE_LABEL }];
+  const readyAccepted = [{ name: 'review:pending' }, { name: READY_TO_MERGE_LABEL }];
+  const readyChanges = [{ name: REVIEW_LABELS.changes }, { name: READY_TO_MERGE_LABEL }];
+
+  it('changes (a hold) atomically strips ready-to-merge alongside the review labels', () => {
+    const d = decideSetLabel({ to: 'changes', currentLabels: readyPending });
+    expect(d.addLabel).toBe(REVIEW_LABELS.changes);
+    expect(d.removeLabels).toContain(READY_TO_MERGE_LABEL);
+    // and once narrowed to the labels actually carried, ready-to-merge is really dropped
+    expect(presentRemoveLabels(d.removeLabels, readyPending)).toContain(READY_TO_MERGE_LABEL);
+  });
+
+  it('rearm (→ review:pending, a hold) atomically strips ready-to-merge', () => {
+    const d = decideSetLabel({ to: 'rearm', currentLabels: readyChanges });
+    expect(d.addLabel).toBe(REVIEW_LABELS.pending);
+    expect(presentRemoveLabels(d.removeLabels, readyChanges)).toContain(READY_TO_MERGE_LABEL);
+  });
+
+  it('accepted CLEARS the hold, so ready-to-merge is a consistent go-ahead → NOT stripped', () => {
+    const d = decideSetLabel({ to: 'accepted', currentLabels: readyAccepted });
+    expect(d.allowed).toBe(true);
+    expect(d.addLabel).toBe(REVIEW_LABELS.accepted);
+    expect(d.removeLabels).not.toContain(READY_TO_MERGE_LABEL);
+    expect(presentRemoveLabels(d.removeLabels, readyAccepted)).not.toContain(READY_TO_MERGE_LABEL);
   });
 });
 

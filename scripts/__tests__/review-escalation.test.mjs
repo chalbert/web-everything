@@ -5,7 +5,7 @@
  *   and a cheap marker check lets the gate verify the write actually landed.
  */
 import { describe, it, expect } from 'vitest';
-import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS } from '../lib/review-escalation.mjs';
+import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold } from '../lib/review-escalation.mjs';
 
 describe('review-escalation — #2324 escalation-reason-in-body', () => {
   it('builds a marked block listing every reason', () => {
@@ -60,6 +60,42 @@ describe('review-escalation — #2366 hasUnclearedReviewLabel (the concurrent-la
   it('accepts plain string labels too (not only {name} objects)', () => {
     expect(hasUnclearedReviewLabel([REVIEW_LABELS.pending])).toBe(true);
     expect(hasUnclearedReviewLabel([REVIEW_LABELS.accepted, REVIEW_LABELS.pending])).toBe(false);
+  });
+});
+
+describe('review-escalation — #2832 label/hold self-consistency primitives', () => {
+  it('REVIEW_HOLD_LABELS is exactly the three hold labels (accepted/redteam are NOT holds)', () => {
+    expect(REVIEW_HOLD_LABELS).toEqual([REVIEW_LABELS.pending, REVIEW_LABELS.changes, REVIEW_LABELS.human]);
+    expect(REVIEW_HOLD_LABELS).not.toContain(REVIEW_LABELS.accepted);
+  });
+  it('isReviewHoldLabel is true for each hold label, false for accepted/ready/anything else', () => {
+    expect(isReviewHoldLabel(REVIEW_LABELS.pending)).toBe(true);
+    expect(isReviewHoldLabel(REVIEW_LABELS.changes)).toBe(true);
+    expect(isReviewHoldLabel(REVIEW_LABELS.human)).toBe(true);
+    expect(isReviewHoldLabel(REVIEW_LABELS.accepted)).toBe(false);
+    expect(isReviewHoldLabel(READY_TO_MERGE_LABEL)).toBe(false);
+    expect(isReviewHoldLabel('some:other')).toBe(false);
+    expect(isReviewHoldLabel(undefined)).toBe(false);
+  });
+  describe('readyMergeConflictsWithHold — the contradictory (held AND ready) state', () => {
+    for (const hold of ['review:pending', 'review:changes', 'review:human']) {
+      it(`ready-to-merge + ${hold} → CONFLICT (must be stripped)`, () => {
+        expect(readyMergeConflictsWithHold([{ name: READY_TO_MERGE_LABEL }, { name: hold }])).toBe(true);
+      });
+      it(`${hold} WITHOUT ready-to-merge → no conflict (nothing to strip)`, () => {
+        expect(readyMergeConflictsWithHold([{ name: hold }])).toBe(false);
+      });
+    }
+    it('ready-to-merge alone (no hold) → consistent, not a conflict', () => {
+      expect(readyMergeConflictsWithHold([{ name: READY_TO_MERGE_LABEL }])).toBe(false);
+    });
+    it('review:accepted clears the hold, so ready-to-merge alongside it is consistent', () => {
+      expect(readyMergeConflictsWithHold([{ name: READY_TO_MERGE_LABEL }, { name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }])).toBe(false);
+    });
+    it('tolerant of a missing/odd labels shape (never throws)', () => {
+      expect(readyMergeConflictsWithHold(null)).toBe(false);
+      expect(readyMergeConflictsWithHold([])).toBe(false);
+    });
   });
 });
 
