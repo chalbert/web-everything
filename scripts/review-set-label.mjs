@@ -316,21 +316,37 @@ export function runReviewLabelCli({
   // we:scripts/review-set-label.mjs#runReviewLabelCli — observe the PR's current labels + head SHA (the I/O
   // boundary). #2409 — `headRefOid` is the tree the reviewer is looking at RIGHT NOW; on an `accepted` verdict
   // the reviewer-verdict comment stamps it (`buildReviewedShaMarker`) so the drain can refuse to honour the
-  // acceptance later if the head advances past it. One extra json field on the existing call — no extra gh hop.
+  // acceptance later if the head advances past it. #2953 — `state` rides the SAME call (one more json field, no
+  // extra gh hop) so a verdict on an already-merged/closed PR can fail closed below instead of silently reporting
+  // `{"ok":true}` for a label write that landed on an inert, already-decided PR.
   let currentLabels;
   let headSha = '';
   let headRefName = '';
+  let prState = '';
   try {
     const parsed = JSON.parse(execFileSync('gh', [
-      'pr', 'view', pr, '--repo', repo, '--json', 'labels,headRefOid,headRefName',
+      'pr', 'view', pr, '--repo', repo, '--json', 'labels,headRefOid,headRefName,state',
     ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
     currentLabels = Array.isArray(parsed.labels) ? parsed.labels : [];
     headSha = typeof parsed.headRefOid === 'string' ? parsed.headRefOid : '';
     // #2979 — the branch name the NET diff is resolved against (see the fingerprint block below). Same gh call,
     // one more json field, no extra hop.
     headRefName = typeof parsed.headRefName === 'string' ? parsed.headRefName : '';
+    prState = typeof parsed.state === 'string' ? parsed.state : '';
   } catch (e) {
     fail(ghErr(e, 'gh pr view failed'), 1);
+  }
+
+  // #2953 — FAIL CLOSED on anything but an OPEN PR. Every sanctioned caller (the hand-run `/review` skill, the
+  // conveyor's `rearm-review.mjs`, and `auto-land-seam.mjs`'s `defaultWriteAccept`, which applies `accepted`
+  // BEFORE the merge itself) only ever swaps a label on a PR that is still open — so this cannot break a
+  // legitimate caller. What it stops: a verdict posted on a PR the drain already merged (observed on WE PR #1073
+  // — `review:changes` landed six minutes after `mergedAt`) used to report `{"ok":true}`, which reads as a live
+  // bounce the drain ignored when in fact the merge gate was never involved. The findings belong on a NEW PR, not
+  // on the merged one.
+  if (prState !== 'OPEN') {
+    fail(`PR ${pr} is ${prState}, not OPEN — a review verdict here would be inert (the merge, if any, already `
+      + 'happened); open a new PR for the findings instead of relabeling this one', 1);
   }
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — the PURE decision. A refusal (INVARIANT 2, or nothing to

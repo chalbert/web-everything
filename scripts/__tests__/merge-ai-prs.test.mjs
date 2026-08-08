@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled } from '../merge-ai-prs.mjs';
+import { isAiAuthor, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 import { buildManifest } from '../readiness/lane-manifest.mjs';
 
@@ -2411,6 +2411,44 @@ describe('latestRequiredCheck — a superseded run must not outvote the one that
     const onlyCancelled = { statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED', startedAt: '2026-08-05T18:34:02Z' }] };
     expect(isRequiredCheckGreen(onlyCancelled)).toBe(false);
     expect(isRequiredCheckFailed(onlyCancelled)).toBe(true);
+  });
+});
+
+describe('collapseRollupToLatestPerName — the #2925 shared seam every rollup-folding reader routes through', () => {
+  // The decisive #2925 case: CANCELLED at index 0, SUCCESS at index 1 for the SAME name.
+  const cancelledThenSuccess = [
+    { __typename: 'CheckRun', name: 'test', conclusion: 'CANCELLED' },
+    { __typename: 'CheckRun', name: 'test', conclusion: 'SUCCESS' },
+  ];
+
+  it('collapses to ONE row per name, keeping the latest tier-preferred entry (CANCELLED at index 0 loses)', () => {
+    const collapsed = collapseRollupToLatestPerName(cancelledThenSuccess);
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0].conclusion).toBe('SUCCESS');
+  });
+
+  it('preserves EVERY distinct name — only within-name entries collapse', () => {
+    const roll = [
+      { __typename: 'CheckRun', name: 'test', conclusion: 'CANCELLED' },
+      { __typename: 'CheckRun', name: 'test', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'cla', conclusion: 'SUCCESS' },
+    ];
+    const collapsed = collapseRollupToLatestPerName(roll);
+    expect(collapsed).toHaveLength(2);
+    expect(collapsed.find((c) => c.name === 'test').conclusion).toBe('SUCCESS');
+    expect(collapsed.find((c) => c.name === 'cla').conclusion).toBe('SUCCESS');
+  });
+
+  it('is the SAME rule `latestRequiredCheck` uses — a by-name lookup over this output', () => {
+    const pr = { statusCheckRollup: cancelledThenSuccess };
+    expect(latestRequiredCheck(pr).conclusion)
+      .toBe(collapseRollupToLatestPerName(cancelledThenSuccess).find((c) => c.name === 'test').conclusion);
+  });
+
+  it('tolerant of an absent/odd rollup', () => {
+    expect(collapseRollupToLatestPerName(null)).toEqual([]);
+    expect(collapseRollupToLatestPerName(undefined)).toEqual([]);
+    expect(collapseRollupToLatestPerName([])).toEqual([]);
   });
 });
 

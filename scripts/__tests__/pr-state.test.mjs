@@ -58,6 +58,21 @@ describe('prStateRecord', () => {
     expect(prStateRecord(failView).checks).toBe('failed');
   });
 
+  // #2925 — the decisive case, one layer inside pr-state's `checks=` token: a superseded CANCELLED entry beside
+  // the SUCCESS that actually finished, same check name (routes through `rollupToCheckRows`'s
+  // `collapseRollupToLatestPerName` seam). Before the fix this read `failed` even though the check that
+  // finished is green.
+  it('a superseded CANCELLED entry beside a later SUCCESS reads GREEN, not failed (#2925)', () => {
+    const supersededThenGreen = {
+      ...greenView,
+      statusCheckRollup: [
+        { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'CANCELLED' },
+        { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      ],
+    };
+    expect(prStateRecord(supersededThenGreen).checks).toBe('passed');
+  });
+
   it('is tolerant of an empty view (never throws)', () => {
     const r = prStateRecord({});
     expect(r.number).toBe(0);

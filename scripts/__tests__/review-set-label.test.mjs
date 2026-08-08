@@ -4,7 +4,7 @@
  *   review:human PR is never cleared to accepted here) — is decided in the pure decider and unit-tested here
  *   against fixtures, no network.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -397,7 +397,7 @@ const fs = require('fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_CALL_LOG, a.slice(0, 2).join(' ') + '\\n');
 if (a[0] === 'pr' && a[1] === 'view') {
-  process.stdout.write(JSON.stringify({ labels: [{ name: 'review:human' }], headRefOid: 'f'.repeat(40) }));
+  process.stdout.write(JSON.stringify({ labels: [{ name: 'review:human' }], headRefOid: 'f'.repeat(40), state: 'OPEN' }));
   process.exit(0);
 }
 process.exit(0);
@@ -497,7 +497,7 @@ if (a[0] === 'pr' && a[1] === 'view') {
   const labels = fs.existsSync(process.env.GH_EDIT_FLAG)
     ? [{ name: 'review:accepted' }, { name: 'ready-to-merge' }]
     : [{ name: 'review:human' }, { name: 'review:pending' }, { name: 'ready-to-merge' }];
-  process.stdout.write(JSON.stringify({ labels, headRefOid: process.env.GH_HEAD_SHA }));
+  process.stdout.write(JSON.stringify({ labels, headRefOid: process.env.GH_HEAD_SHA, state: 'OPEN' }));
   process.exit(0);
 }
 if (a[0] === 'pr' && a[1] === 'edit') { fs.writeFileSync(process.env.GH_EDIT_FLAG, '1'); process.exit(0); }
@@ -619,5 +619,63 @@ process.exit(0);
     for (const m of skill.matchAll(/npm run[^\n]*review:clear/g)) {
       expect(m[0]).toContain('--silent');
     }
+  });
+});
+
+// #2953 — a verdict on an already-merged/closed PR must fail closed, not report `{"ok":true}` for a label swap
+// that is inert. Observed live on WE PR #1073: `review:changes` was applied six minutes after `mergedAt` and the
+// CLI reported success, which was read as a live bounce the drain had ignored — a false reproduction of #2750.
+// Hermetic: a fake `gh` on PATH reports a non-OPEN state, so both "refused" and "refused before any mutation"
+// are observable.
+describe('runReviewLabelCli fails closed on a non-OPEN PR (#2953)', () => {
+  const script = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'review-set-label.mjs');
+  const fakeGh = (state) => `#!/usr/bin/env node
+const fs = require('fs');
+const a = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_CALL_LOG, a.slice(0, 2).join(' ') + '\\n');
+if (a[0] === 'pr' && a[1] === 'view') {
+  process.stdout.write(JSON.stringify({ labels: [{ name: 'review:pending' }], headRefOid: 'f'.repeat(40), state: '${state}' }));
+  process.exit(0);
+}
+process.exit(0);
+`;
+  let shimDir;
+  let logPath;
+  const setUpShim = (state) => {
+    shimDir = mkdtempSync(join(tmpdir(), 'review-label-state-'));
+    writeFileSync(join(shimDir, 'gh'), fakeGh(state));
+    chmodSync(join(shimDir, 'gh'), 0o755);
+    logPath = join(shimDir, 'gh-calls.log');
+  };
+  afterEach(() => { try { rmSync(shimDir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+  const ghCalls = () => (existsSync(logPath) ? readFileSync(logPath, 'utf8').split('\n').filter(Boolean) : []);
+
+  for (const state of ['MERGED', 'CLOSED']) {
+    it(`refuses a --to=changes verdict on a ${state} PR, naming the state, and reaches no mutating gh call`, () => {
+      setUpShim(state);
+      const r = spawnSync('node', [script, '1073', '--repo=o/n', '--to=changes', '--actor=op'], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GH_CALL_LOG: logPath },
+      });
+      expect(r.status).not.toBe(0);
+      const payload = JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop());
+      expect(payload.error).toMatch(new RegExp(state));
+      expect(payload.error).toMatch(/not OPEN/);
+      expect(payload.ok).not.toBe(true);
+      // Observed once (the read) and stopped — no `pr edit` / `pr comment` mutation reached.
+      expect(ghCalls()).toEqual(['pr view']);
+    });
+  }
+
+  it('the decisive #2953 case: --to=accepted also refuses on a MERGED PR (not just the changes bounce)', () => {
+    setUpShim('MERGED');
+    const r = spawnSync('node', [script, '1073', '--repo=o/n', '--to=accepted', '--actor=op'], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GH_CALL_LOG: logPath },
+    });
+    expect(r.status).not.toBe(0);
+    const payload = JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop());
+    expect(payload.error).toMatch(/MERGED/);
+    expect(ghCalls()).toEqual(['pr view']);
   });
 });
