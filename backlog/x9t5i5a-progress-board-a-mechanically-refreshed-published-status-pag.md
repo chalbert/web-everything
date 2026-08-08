@@ -1,8 +1,10 @@
 ---
 kind: task
-status: active
+status: resolved
 dateOpened: "2026-08-08"
 dateStarted: "2026-08-08"
+dateResolved: "2026-08-08"
+graduatedTo: "we:scripts/progress-board.mjs"
 tags: [dx, reporting, artifact]
 scope:
   - we:scripts/progress-board.mjs
