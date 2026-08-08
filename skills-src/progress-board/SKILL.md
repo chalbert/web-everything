@@ -103,6 +103,7 @@ node scripts/progress-board.mjs --decision-set=fork-b-rebuild-or-drop --field=st
 | --- | --- | --- | --- |
 | `question` | `--decision-add --question=…` | the call, in one line, ending in a question mark | **yes** |
 | `options[]` | `--decision-option --label=… --detail=… [--recommend]` | the **real** options with their tradeoffs — never padded to three; two if it is binary. A second `--recommend` moves the mark rather than adding one | **yes — 2+, exactly one recommended** |
+| ↳ correcting one | `--decision-option-remove --label=…` | labels match **exactly**, so re-wording an option adds a *second* row and the page then offers the same choice twice. Remove the superseded label — never hand-edit the state file. The removal is checked by the same enforcement, so it refuses to strand the decision below two options or with no recommendation | — |
 | `ifNothing` | `--decision-add --if-nothing=…` | what breaks if the operator never answers | **yes** |
 | `why` | `--decision-set --field=why` | why it is a **judgment call** and not mechanical | strongly encouraged |
 | `evidence[]` | `--decision-evidence --text=…` | the grounding — a `file:line`, a count, a prior ruling | strongly encouraged |

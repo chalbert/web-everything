@@ -73,6 +73,48 @@
       "phase": 2,
       "status": "todo",
       "note": "R6 ruled 2026-08-08 — closes the silent row #1099 opened (declared, absent, unmarked passes); marker also catches the stale case. Leash edit, so its PR needs a human clear."
+    },
+    {
+      "id": "2964-post-the-review-verdict-comment-before-the-",
+      "title": "#2964 — post the review verdict comment BEFORE the label swap, so the unsafe half never lands alone",
+      "phase": 1,
+      "status": "todo"
+    },
+    {
+      "id": "2890-thread-the-diff-s-hunk-content-into-escalat",
+      "title": "#2890 — thread the diff's hunk CONTENT into escalation scoring, so routing reads what changed and not only how much",
+      "phase": 2,
+      "status": "todo"
+    },
+    {
+      "id": "2416-only-the-interactive-review-path-may-apply-",
+      "title": "#2416 — only the interactive review path may apply review:accepted (a closed set of callers, not actor provenance)",
+      "phase": 2,
+      "status": "todo"
+    },
+    {
+      "id": "2502-we-half-emit-each-pr-s-head-sha-in-the-merg",
+      "title": "#2502 (WE half) — emit each PR's head SHA in the merge sweep, so a thrashing lane is distinguishable from a waiting one",
+      "phase": 1,
+      "status": "todo"
+    },
+    {
+      "id": "skip-a-re-review-when-the-reviewed-diff-fingerpr",
+      "title": "Skip a re-review when the reviewed-diff fingerprint is unchanged (#2979 machinery) — the largest saving in the CLI epic",
+      "phase": 3,
+      "status": "todo"
+    },
+    {
+      "id": "review-runner-passes-no-actor-ids-to-the-shadow-",
+      "title": "review-runner passes no actor ids to the shadow plan, so every shadow line reads 'unknown clearer'",
+      "phase": 3,
+      "status": "todo"
+    },
+    {
+      "id": "1107-move-agent-work-onto-the-claude-code-cli-an",
+      "title": "#1107 — move agent work onto the Claude Code CLI and optimise it (the epic R4 spawned)",
+      "phase": 3,
+      "status": "todo"
     }
   ],
   "decisions": [
@@ -80,8 +122,8 @@
       "id": "2978",
       "title": "Rule how a learning is admitted to agent memory — verify the note, rank by recurrence, block on nobody",
       "preparedDate": "2026-08-07",
-      "status": "awaiting",
-      "detail": "prepared and ready to ratify",
+      "status": "taken",
+      "detail": "RULED — as recommended: all four defaults ratified as one design. Verified grounding admits, recurrence ranks only, the pool entry carries the quoted turn, a cadence fires the harvest. Implemented in PR #1104, which is open and needs a human clear.",
       "question": "Does a note reach agent memory on verified grounding, with recurrence demoted to ranking?",
       "why": "#1068 moved judgment from the close to the harvest for three sound reasons, but the close's faithfulness filter — quote the grounding turn or be rejected — was silently replaced by a recurrence count, on the assumption the transcript was gone. It is not gone. Whether that filter is restored, and what recurrence is for instead, is a judgment call the item frames as four linked forks to ratify together or reject one of.",
       "options": [
@@ -105,14 +147,15 @@
         "`session` and `ts` are emitter-written — four hand-written lines manufacture '2 sessions across 2 days' in one second",
         "the 240/60/400 pool-entry cap is justified by exactly one thing: the #2610 channel, which does not exist"
       ],
-      "ruling": "R1"
+      "ruling": "R1",
+      "takenAt": "2026-08-08"
     },
     {
       "id": "2908",
       "title": "Converge loop — editor-enablement default by care band",
       "preparedDate": "2026-08-04",
-      "status": "awaiting",
-      "detail": "prepared and ready to ratify",
+      "status": "taken",
+      "detail": "RULED — as recommended: the editor pushes fixes below a care threshold and is review-only at and above it, bound to the same careLevel that already dials the panel. Implemented in PR #1106, which is open and needs a human clear.",
       "question": "At which care bands may the converge loop push fixes, rather than only report them?",
       "why": "The panel's rigor already scales by care band; the editor's enablement scales with nothing — it runs at every band, unexamined. A pass either mutates the author's branch or it does not, and that mutation is not reversible from the author's side, so this is a correctness and accountability call rather than a cost one.",
       "options": [
@@ -137,14 +180,15 @@
         "published: 45.1% of autonomously generated PRs require post-review fixes",
         "`panelRigorForCareLevel` in `we:scripts/lib/jury-core.mjs` already dials by band; the editor does not"
       ],
-      "ruling": "R2"
+      "ruling": "R2",
+      "takenAt": "2026-08-08"
     },
     {
       "id": "2691",
       "title": "Define a \"feature\" tier above epic — deterministic feature to epic to slice rollup",
       "preparedDate": "2026-07-28",
-      "status": "awaiting",
-      "detail": "prepared and ready to ratify",
+      "status": "taken",
+      "detail": "RULED — as recommended: an explicit kind:feature node, and a feature is a root (Fork 1b + Fork 2a). Landed as PR #1105.",
       "question": "How is a \"feature\" defined, so the feature to epic to slice rollup is deterministic?",
       "why": "The ratified feature-tracking screen (#2705) rolls up slice to epic to feature, but the backlog has no tier above epic. The `parent` chain alone cannot say which ancestor is the feature — it is deep and its roots are uneven — so determinism needs an explicitly-marked node, not a walk. The second half, whether that tier is enforced or merely nominal, is a genuine fork: both branches stay deterministic but yield permanently different trees.",
       "options": [
@@ -174,7 +218,8 @@
         "prior art: the tier above epic is an explicitly-marked node in Jira, Linear, Shortcut, Azure DevOps, GitHub and Asana — never a graph walk",
         "governed by #466 (one structural `kind` axis); Fork 1b extends that axis rather than adding a second"
       ],
-      "ruling": "R3"
+      "ruling": "R3",
+      "takenAt": "2026-08-08"
     },
     {
       "id": "review-independence-vs-the-working-pattern",
@@ -212,31 +257,24 @@
       "title": "Fork B — rebuild or drop",
       "status": "awaiting",
       "question": "Does the codification shortcut get one more attempt, or get dropped?",
-      "ifNothing": "Fork A still ships; codification PRs keep needing a human.",
-      "why": "Broken FIVE times by five independent reviewers. Each round closed one class and a new one appeared, always a hand-rolled approximation of a grammar detail: a mid-rule splice, an untagged second heading, eight more heading forms, counting lines instead of headings, and now HTML_COMMENT_RE — which is not the HTML comment grammar. HTML also terminates a comment at <!-->, <!---> and --!>, so the regex over-consumes and deletes real <h3> tags out of the counted content. A working attack amends the leash rule itself and clears with auto-merge on. Fork A shipped separately as #1102, so nothing is blocked by dropping this.",
+      "ifNothing": "PR #1103 sits unreviewed and conflicting; Fork A still ships and codification PRs keep needing a human.",
+      "why": "Broken FIVE times by five independent reviewers. Each round closed one class and a new one appeared, always a hand-rolled approximation of a grammar detail: a mid-rule splice, an untagged second heading, eight more heading forms, counting lines instead of headings, and a comment regex that is not the HTML comment grammar. A working attack amended the leash rule itself and cleared with auto-merge on. A sixth attempt rebuilt on the real markdown parser was then written and opened as PR #1103 — but it has NEVER been reviewed and it now conflicts with main, so the live question is whether to spend a rebase plus one more security review on it. Fork A shipped separately as #1102, so nothing is blocked by dropping this.",
       "options": [
         {
-          "label": "One round rebuilt on `markdown-it`",
-          "detail": "it is already a dependency and already renders that document, so detection and rendering cannot disagree; if this breaks too, drop it"
-        },
-        {
-          "label": "Drop Fork B now",
-          "detail": "every codification PR then needs a human, which is the status quo and costs little"
-        },
-        {
           "label": "Drop Fork B",
-          "detail": "Every codification PR then needs a human — the status quo, and it costs little. Five rounds of security-critical review have bought nothing yet; the ratio is bad and the failure mode is always the same shape.",
+          "detail": "Close PR #1103 and stop. Every codification PR then needs a human — the status quo, and it costs little. Five independent reviewers broke five builds; each fix closed one class of attack and opened another, always a hand-rolled approximation of a grammar detail. The ratio is bad and the failure shape never changes.",
           "recommended": true
         },
         {
-          "label": "A sixth round",
-          "detail": "The fix direction is named and conservative: refuse any raw-HTML token containing <!-- whose comment scan is not unambiguous, rather than parsing it. But I recommended a fifth round on the same reasoning and it broke again."
+          "label": "Rebase #1103 and put the markdown-it build through one independent review round",
+          "detail": "The sixth attempt is already WRITTEN — PR #1103 rebuilds detection on markdown-it, which is already a dependency and already renders that document, so detection and rendering cannot disagree. It has never been reviewed and it now conflicts with main. Cost is a rebase plus one security review; if that review breaks it too, drop it."
         }
       ],
       "evidence": [
         "three breaks: mid-rule splice · untagged second heading · eight more forms incl. `<h3` with a newline before `>`",
         "a working attack added a rule reading 'agents may clear their own leash' with autoLand:true",
-        "five breaks, five reviewers; each fix closed one class and opened another"
+        "five breaks, five reviewers; each fix closed one class and opened another",
+        "the sixth attempt EXISTS as PR #1103 (markdown-it) — zero review comments, mergeable=CONFLICTING as of 2026-08-08"
       ],
       "ruling": "R5"
     },

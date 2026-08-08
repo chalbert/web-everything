@@ -758,6 +758,46 @@ describe('CLI decision verbs', () => {
     expect(r.err).toContain('--label');
   });
 
+  // Labels match exactly, so re-wording an option adds a SECOND row and the page offers the operator the
+  // same choice twice. Removal is the only mechanical repair — the alternative is hand-editing state.
+  it('--decision-option-remove drops the superseded label and leaves the rest', () => {
+    cli('--decision-option=2978', '--label=Do it now', '--detail=a re-wording that duplicated an option');
+    expect(state().decisions[0].options).toHaveLength(3);
+    const r = cli('--decision-option-remove=2978', '--label=Do it now');
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/option removed from 2978: Do it now/);
+    expect(state().decisions[0].options.map((o) => o.label)).toEqual(['Yes', 'No']);
+    expect(page()).not.toContain('a re-wording that duplicated an option');
+  });
+
+  it('--decision-option-remove refuses an unknown label rather than silently no-opping', () => {
+    const r = cli('--decision-option-remove=2978', '--label=Never added');
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('no option labelled "Never added"');
+    expect(state().decisions[0].options).toHaveLength(2);
+  });
+
+  it('--decision-option-remove demands a label', () => {
+    const r = cli('--decision-option-remove=2978');
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('--label');
+  });
+
+  // Removal is the one verb that can take a complete decision back to an incomplete one, so the same
+  // enforcement that guards --decision-add has to catch it — both ways it can strand the page.
+  it('removing down to one option is REFUSED by the answerable-from-the-page enforcement', () => {
+    const r = cli('--decision-option-remove=2978', '--label=No');
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('at least two');
+  });
+
+  it('removing the RECOMMENDED option is REFUSED — it leaves the page with no recommendation', () => {
+    cli('--decision-option=2978', '--label=Maybe', '--detail=c');
+    const r = cli('--decision-option-remove=2978', '--label=Yes');
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('recommended');
+  });
+
   it('--decision-evidence appends, dedups the same text, and an empty --text clears all of it', () => {
     cli('--decision-evidence=2978', '--text=row 3 currently PASSES');
     const again = cli('--decision-evidence=2978', '--text=row 3 currently PASSES');

@@ -1047,6 +1047,18 @@ export function applyVerb(state, verb, args = {}) {
       }
       return `${existing ? 'option updated on' : 'option added to'} ${d.id}: ${label}`;
     }
+    // Options match on the exact label, so re-wording one ADDS a second row rather than replacing the
+    // first — and the page then shows the operator the same choice twice. Without this verb the only
+    // repair is a hand-edit of the state file, which the board forbids.
+    case 'decision-option-remove': {
+      const d = requireDecision(state, args.id);
+      const label = args.label === true ? '' : String(args.label ?? '');
+      if (!label) throw new Error('--decision-option-remove requires --label="<option>"');
+      const before = d.options?.length ?? 0;
+      d.options = (d.options ?? []).filter((o) => o.label !== label);
+      if (d.options.length === before) throw new Error(`no option labelled "${label}" on ${d.id}`);
+      return `option removed from ${d.id}: ${label}`;
+    }
     case 'decision-evidence': {
       const d = requireDecision(state, args.id);
       const text = args.text === true ? '' : String(args.text ?? '');
@@ -1143,6 +1155,8 @@ const USAGE = `progress-board — the operator's published status page (one Bash
         status:  ${DECISION_STATUSES.join(' | ')}
                  draft = being prepared, kept out of "needs you" · queued = ruled but deferred
   node scripts/progress-board.mjs --decision-option=<id> --label="<option>" --detail="<tradeoff>" [--recommend]
+  node scripts/progress-board.mjs --decision-option-remove=<id> --label="<option>"   (labels match exactly, so
+        re-wording an option ADDS a second one — remove the superseded label rather than hand-editing state)
   node scripts/progress-board.mjs --decision-evidence=<id> --text="<locus, count or prior ruling>"
         then, once it is answerable: --decision-set=<id> --field=status --value=awaiting
 
@@ -1204,6 +1218,8 @@ export function main(argv = process.argv.slice(2)) {
       'decision-option',
       { id: String(args['decision-option']), label: args.label, detail: args.detail, recommend: args.recommend !== undefined && args.recommend !== 'false' },
     ]);
+  if (args['decision-option-remove'])
+    verbs.push(['decision-option-remove', { id: String(args['decision-option-remove']), label: args.label }]);
   if (args['decision-evidence']) verbs.push(['decision-evidence', { id: String(args['decision-evidence']), text: args.text }]);
   if (args.url) verbs.push(['url', { url: String(args.url) }]);
 
