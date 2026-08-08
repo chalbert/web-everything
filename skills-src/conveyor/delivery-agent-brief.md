@@ -354,6 +354,16 @@ is reviewed in the **main session**, never by you — ONLY when one of these hol
 clean PR "so a human can see it": over-parking makes the human the bottleneck the conveyor exists to remove
 and dilutes what `review:human` means.
 
+**Not grounds, on their own, ever: diff size, line count, or file count.** A big diff is not a reason to want
+"a human eye" — that impulse is exactly what the size-weighted committee already exists to satisfy. The scored
+rubric already prices size in: `CARE_WEIGHTS.size` (`scripts/lib/review-escalation.mjs`) raises the panel's
+rigor — more jurors per lens, more rounds — the moment a diff crosses the size threshold, and the rubric caps
+size at `review:pending` (agent-clearable, committee-reviewed), **never** `review:human`
+(#2563, [`#blast-radius-advisory-care-not-a-gate`](../../docs/agent/platform-decisions.md)). AI review scales
+with a large diff better than it does with a small one; a large, clean, reviewed diff auto-lands exactly like a
+small one. If you find yourself reaching for case 4 below because a diff is large or touches an area you don't
+know well, that is not a good reason — let the committee's already-elevated rigor do the work instead.
+
 0. **Not ready — the readiness pre-check failed (a PRE-BUILD stop, no PR).** The step-3 gate found the card
    drifted out from under its spec: a `blockedBy` **re-opened**, the spec is **stale/superseded**, its `scope:`
    is **wrong**, or it's **incoherent**. This is the one case that opens **no PR** — you release the claim
@@ -379,11 +389,23 @@ and dilutes what `review:human` means.
      lands unreviewed. So park it: re-run `pr-land` on the SAME `--ref` with `--park=review:human` (park mode
      skips the check-wait, so it labels a red PR immediately), **then confirm the label actually landed** (see
      the note below the list). Report the failing check and stop.
-3. **A review finding that needs human judgment** — the step-6 adversarial code review (or the step-7 visual
-   self-review, for a UI item) surfaced an issue you could not safely self-clear (you fixed what you could to
-   convergence; this one needs a human call). Open the PR parked `review:human` (`--park=review:human`).
-4. **Genuine uncertainty** — you are not confident the change is right and want a human eye before it lands.
-   Park it `review:human`. (Uncertainty is a *good reason*; "so a human can see a clean change" is not.)
+3. **A review finding that turns on human judgment** — the step-6 adversarial code review (or the step-7 visual
+   self-review, for a UI item) surfaced an issue that is a **taste, product, or policy call**, not a code
+   question — the review process itself has no way to resolve it. This is NOT "I'm not sure the code is
+   right" or "the reviewer found something I couldn't fully verify" — that is a review question: keep
+   converging (spawn another review round, reason it through) until it is resolved or you can name the specific
+   non-code call left standing. Name that call in the PR. Open the PR parked `review:human`
+   (`--park=review:human`).
+4. **Genuine uncertainty about a taste/product/policy call — never about code correctness, unfamiliarity, or
+   size.** You ran the review to convergence and the diff is clean, but one specific, name-able decision in it
+   is a judgment call no review process resolves (which of two valid UX treatments the product wants, whether a
+   naming/positioning choice is intentional, a policy tradeoff with no code-side right answer). Say what the
+   call is in your park comment — "genuine uncertainty" with no named call is not a park reason, it is a hedge.
+   This is never a stand-in for "the diff is large," "I'm not confident I found every issue," or "I want a
+   second opinion because this touches unfamiliar code" — those are exactly what the step-6/step-7 review and
+   the size-weighted committee (`CARE_WEIGHTS.size`, see above) already exist to handle, and a bigger or less
+   familiar diff earns MORE committee rigor, never a human. Park it `review:human` only once you can point at
+   the one taste/product/policy call a human, not a reviewer, must make.
 5. **`review:changes`** — a human bounced a prior version of this diff. As a fresh delivery agent you normally
    will NOT see this (you build a NEW item; a bounce lands on an ALREADY-open PR after you have exited). When a
    conveyor-launched PR is bounced `review:changes`, the conveyor auto-re-dispatches a dedicated **fix agent**
