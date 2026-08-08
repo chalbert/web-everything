@@ -13,6 +13,7 @@
  * — start loose, tighten from data; they live here so a change is one edit + a test, never scattered.
  */
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { isTrustChainPath, isPolicyCorePath, basenameOf } from './gate-config.mjs';
 import { POLICY_THRESHOLDS } from './review-policy.mjs';
 // #x169fqe — the transient lane bookkeeping the reviewed-diff fingerprint excludes, imported rather than
@@ -25,7 +26,7 @@ export const REVIEW_LABELS = {
   pending: 'review:pending',   // the drain parked this PR — an independent review is owed before merge
   accepted: 'review:accepted', // reviewer accepted → the drain may merge
   changes: 'review:changes',   // reviewer wants changes → the author lane fixes hot-context + re-pushes
-  human: 'review:human',       // #2285 v1 — the diff edits the gate's POLICY tier (an agent policing its own leash) or the STATUTE layer; only a HUMAN may clear it. The engine tier (the lander) is agent-reviewable (#2445 two-tier flip)
+  human: 'review:human',       // #2285 v1 — the diff edits the gate's POLICY tier (an agent policing its own leash) or writes a NEW statute rule; only a HUMAN may clear it. A proven codification (#2771 Fork B) and the engine tier (#2445 two-tier flip) are agent-reviewable
   redteamAccepted: 'redteam:accepted', // #2439 — the INDEPENDENT hardened validator (a fresh-context adversary that took no part in the negotiation and never saw the peers' self-assessment) signed off on the FINAL diff. The "non-author accepts" invariant, applied by the drain; enforcement (requiring it before an engine-tier auto-land) is #2412's concern
 };
 
@@ -173,16 +174,374 @@ export function isBlastRadiusPath(path) {
 /** The POLICY-CORE trust chain (#2285 v1, re-anchored #2448, narrowed by the #2445 two-tier flip). A diff
  *  touching one of these files edits the very machinery that DECIDES whether the review gate fires and what
  *  clears it — so an *agent* reviewing such a change would be policing an edit to its own leash (a genuine
- *  conflict of interest). These, and ONLY these (plus the statute layer, `isStatutePath`), force a HUMAN
- *  review (`review:human`). The ENGINE tier — the lander, which obeys the gate rather than defining it — is
- *  NOT here: a change there still escalates and runs the full adversarial panel, but a converged agent verdict
- *  may clear it. Every other blast-radius path is agent-reviewable too.
+ *  conflict of interest). These, and ONLY these (plus a NON-CODIFICATION statute edit, `isStatutePath` and
+ *  `isCodificationOnly`), force a HUMAN review (`review:human`). The ENGINE tier — the lander, which obeys the
+ *  gate rather than defining it — is NOT here: a change there still escalates and runs the full adversarial
+ *  panel, but a converged agent verdict may clear it. Every other blast-radius path is agent-reviewable too.
  *
  *  #2448 — the roster (and the basename-based matcher that lets it TRAVEL when the engine is extracted out of
  *  `we:scripts/`, per the #2445 coordinator epic) lives in explicit, versioned config: ./gate-config.mjs.
  *  `isGateSelfPath` is that config's `isPolicyCorePath` under its historical name. See gate-config.mjs for the
  *  two tiers, the extraction contract, and the self-hosting design. */
 export const isGateSelfPath = isPolicyCorePath;
+
+/** The statute doc whose anchors record a ratified decision — the ONE statute file a codification PR may touch.
+ *  Kept beside `STATUTE_PATHS` so the two can never name different documents. */
+const PLATFORM_DECISIONS_PATH = 'docs/agent/platform-decisions.md';
+
+/** A statute-anchor heading in `platform-decisions.md` — `### <title> {#the-anchor}`. Used to read the anchors a
+ *  diff ADDS, so the codification test can require they be exactly the ones the resolved decision names. */
+const STATUTE_ANCHOR_HEADING_RE = /^#{2,6}\s+.*\{#([A-Za-z0-9][A-Za-z0-9._-]*)\}\s*$/;
+
+/** A RAW HTML heading tag, in the rendered markup markdown passes through. Only ever applied to the CONTENT of a
+ *  token markdown-it has already classified as raw HTML (`html_block` / `html_inline`), never to a raw diff line —
+ *  deciding WHETHER a line is raw HTML is the parser's job, not a regex's. Opening AND closing tags both count,
+ *  and a `<h3` whose `>` sits on the next line is inside the same token, so the tag SHAPE never has to be
+ *  matched: over-counting only ever refuses. */
+const HTML_HEADING_RE = /<\/?h[1-6](?![a-z0-9])/i;
+
+/** A fenced-code CLOSING delimiter for an opener of `markup`. Built from the token markdown-it already produced,
+ *  and used for exactly one question the token model does not answer directly: was the fence CLOSED? */
+function fenceCloseRe(markup) {
+  const ch = markup[0] === '`' ? '`' : '~';
+  return new RegExp(`^ {0,3}\\${ch}{${markup.length},}[ \\t]*$`);
+}
+
+/**
+ * The markdown READER — a markdown-it built with the SAME options `we:scripts/lib/rules-loader.cjs` (`makeRenderer`,
+ * `markdown-it({ html: true, linkify: true, typographer: false })`) uses to RENDER `platform-decisions.md` into the
+ * published page. Lazily constructed and cached; `null` when the module cannot be loaded, which the caller treats
+ * as "unreadable" and therefore refuses.
+ *
+ * WHY A PARSER AND NOT A REGEX (#2785 review round 4 — the reviewer's diagnosis, accepted). Three rounds of
+ * anchored-prefix and tag-shape regexes each closed the reported instance and missed a new class, because
+ * **headings are a closed syntax in the AST, not on a raw diff line** — the previous fix reasoned about the wrong
+ * object. A raw line cannot tell you whether `- ### X`, `> ### X`, `10. Title` + a 4-space `---`, `> Title` +
+ * `> ---`, or a `<h3` whose `>` sits on the following line opens a section, because in every one of those the
+ * heading is created by the BLOCK CONTEXT the line sits in, which a line-local regex has no access to. The
+ * enumeration is also not closeable by hand: CommonMark admits ATX and setext headings under every container
+ * (list item, blockquote, nested combinations) at every legal indent, plus raw-HTML passthrough.
+ *
+ * So detection now asks the SAME OBJECT THE PAGE IS BUILT FROM. If markdown-it says the appended run opens two
+ * sections, the rendered statute page has two sections; the two cannot disagree, because they are one parser with
+ * one configuration. A new smuggle would have to be a heading markdown-it does not render as a heading — in which
+ * case it is not a second rule on the published page either.
+ */
+let statuteReaderCache;
+function statuteReader() {
+  if (statuteReaderCache !== undefined) return statuteReaderCache;
+  try {
+    // Lazily required, and a load failure REFUSES rather than throwing at import time. A static import would make
+    // a missing module break `pr-land` outright (fail-broken); this way the exemption simply stops firing and
+    // every statute touch keeps its human gate (fail-closed) — the same direction as every other refusal here.
+    const require_ = createRequire(import.meta.url);
+    const MarkdownIt = require_('markdown-it');
+    statuteReaderCache = new MarkdownIt({ html: true, linkify: true, typographer: false });
+  } catch {
+    statuteReaderCache = null;
+  }
+  return statuteReaderCache;
+}
+
+/**
+ * #2785 review round 4 — the indices of every line in `run` that OPENS A SECTION *in the rendered document*, or
+ * `null` when the markdown cannot be read confidently (the caller then refuses). `prevLine` is the pre-existing
+ * file line immediately above the run; it is fed to the parser as the run's first line of context, because a
+ * setext underline heads the paragraph ABOVE it and a list/blockquote marker above the run changes what the run's
+ * own lines mean.
+ *
+ * WHAT COUNTS AS OPENING A SECTION. Exactly what markdown-it emits: a `heading_open` token (ATX or setext, at any
+ * level, under any container, at any legal indent), or a raw-HTML token whose markup contains an `<h1>`…`<h6>`
+ * tag (markdown passes block HTML straight through, so `<h3>…` opens a rendered section with no `#` anywhere).
+ * A heading that lies ENTIRELY on the `prevLine` context row is excluded (it is pre-existing text, not something
+ * the run added); a setext heading whose paragraph is `prevLine` and whose underline is the run's first line IS
+ * counted, because the run is what turned it into a heading.
+ *
+ * SETEXT AND `---`. This is no longer a judgement call in this module: markdown-it implements CommonMark, so
+ * blank-then-`---` is a thematic break and paragraph-then-`---` is a setext `<h2>`, in every container. That
+ * reading was verified against the document itself — `docs/agent/platform-decisions.md` contains 29 `---` lines,
+ * every one of them blank-preceded, and ZERO setext underlines — so the parser, CommonMark, and the document's
+ * own convention all agree, and an honest codification's `---` separator still clears.
+ *
+ * UNREADABLE ⇒ REFUSE. An UNTERMINATED fence is the one case the token stream alone would get wrong in the unsafe
+ * direction: markdown-it swallows every following line into the `fence` token, so a heading hidden behind it
+ * would simply not appear. Each `fence` token is therefore checked for an actual closing delimiter, and an
+ * unterminated one returns `null`. A parser that will not load, or a parse that throws, refuses the same way.
+ */
+function headingIndices(run, prevLine) {
+  const md = statuteReader();
+  if (!md) return null;                                                  // no parser → unreadable → human
+  const lines = [typeof prevLine === 'string' ? prevLine : '', ...run];
+  let tokens;
+  try { tokens = md.parse(lines.join('\n'), {}); } catch { return null; }
+  if (!Array.isArray(tokens)) return null;
+
+  for (const t of tokens) {                                              // an unterminated fence HIDES content
+    if (t.type !== 'fence' || !Array.isArray(t.map) || typeof t.markup !== 'string' || !t.markup) continue;
+    const last = lines[t.map[1] - 1];
+    if (typeof last !== 'string' || !fenceCloseRe(t.markup).test(last)) return null;
+  }
+
+  const idx = new Set();
+  // `map` is [startLine, endLine) over `lines`, whose index 0 is the pre-existing context row. A token that ends
+  // at or before line 1 lies wholly on that row, so the run did not add it.
+  const opensSection = (map) => { if (Array.isArray(map) && map[1] > 1) idx.add(Math.max(map[0], 1) - 1); };
+  for (const t of tokens) {
+    if (t.type === 'heading_open') opensSection(t.map);
+    else if (t.type === 'html_block' && HTML_HEADING_RE.test(String(t.content || ''))) opensSection(t.map);
+    else if (t.type === 'inline' && Array.isArray(t.children)) {
+      for (const c of t.children) {
+        if (c.type === 'html_inline' && HTML_HEADING_RE.test(String(c.content || ''))) { opensSection(t.map); break; }
+      }
+    }
+  }
+  return [...idx].sort((a, b) => a - b);
+}
+
+/** A backlog item file — the only place a `kind: decision` resolve can live. */
+const BACKLOG_ITEM_RE = /^backlog\/[^/]+\.md$/;
+
+/** `codifiedIn: "docs/agent/platform-decisions.md#anchor"` (quotes optional) → the anchor. */
+const CODIFIED_IN_RE = /^codifiedIn:\s*["']?([^"'\s]+)["']?\s*$/;
+
+/**
+ * Split a raw unified diff into per-file sections. Pure, internal, deliberately dumb: it recognises only what
+ * `git diff` actually emits and treats anything it cannot parse as a reason to give up (the caller then fails
+ * closed). Returns `[{ path, added: string[], removed: string[], context: string[], seq: Array }]` where `path`
+ * is the POST-image path (`b/…`), which is what the changed-file lists this is cross-checked against also carry.
+ *
+ * `seq` is the ORDERED transcript of the section — `{ kind: 'add'|'del'|'ctx'|'hunk', text }` in diff order —
+ * which the flat `added`/`removed`/`context` buckets throw away. WHERE an added line sits is load-bearing for the
+ * codification proof (#2785 review-fix): "the only change is the addition of exactly that anchor" is a claim
+ * about POSITION — added prose sitting inside some OTHER rule's body is indistinguishable, in the flat buckets,
+ * from the same prose sitting under the new anchor. `hunk` markers are kept so two separate edits can never be
+ * read as one contiguous append just because the `@@` header between them was dropped.
+ */
+function parseDiffSections(diffText) {
+  const sections = [];
+  let cur = null;
+  for (const line of String(diffText).split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      // `diff --git a/<p> b/<p>` — take the b-side. A quoted/renamed/space-bearing path is NOT parsed; the
+      // section is recorded with a null path so the caller's "every statute file accounted for" check fails.
+      const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+      cur = { path: m ? m[2] : null, added: [], removed: [], context: [], seq: [] };
+      sections.push(cur);
+      continue;
+    }
+    if (!cur) continue;                                    // preamble before the first file header
+    if (line.startsWith('@@')) { cur.seq.push({ kind: 'hunk', text: line }); continue; }
+    if (line.startsWith('+++ ') || line.startsWith('--- ')) continue;
+    if (line.startsWith('index ') || line.startsWith('new file mode') || line.startsWith('deleted file mode')
+      || line.startsWith('old mode') || line.startsWith('new mode') || line.startsWith('similarity index')
+      || line.startsWith('rename from') || line.startsWith('rename to')
+      || line.startsWith('Binary files') || line === '\\ No newline at end of file') continue;
+    if (line.startsWith('+')) { cur.added.push(line.slice(1)); cur.seq.push({ kind: 'add', text: line.slice(1) }); }
+    else if (line.startsWith('-')) { cur.removed.push(line.slice(1)); cur.seq.push({ kind: 'del', text: line.slice(1) }); }
+    else if (line.startsWith(' ')) { cur.context.push(line.slice(1)); cur.seq.push({ kind: 'ctx', text: line.slice(1) }); }
+  }
+  return sections;
+}
+
+/**
+ * #2785 review-fix — does this `platform-decisions.md` diff section prove its added lines BELONG TO the named
+ * anchor's own section? Pure. This is the POSITIONAL half of #2771 condition (ii) ("the ONLY edit is the ADDITION
+ * / extension of exactly that anchor"), which the anchor-name check alone cannot see.
+ *
+ * WHY. The name check asks only "is every added anchor HEADING one a resolve named?". Added NON-heading prose is
+ * invisible to it, anywhere in the 3,300-line statute doc. That is a third case #2771's skeptic pass excluded by
+ * conjunction ("either a second anchor edit, or inside the one anchor") but which the diff actually permits: an
+ * honest anchor appended at EOF, PLUS one smuggled line spliced into the body of an EXISTING rule, with zero
+ * removals. Under the old test that scored `humanRequired: false` — letting an agent-clearable PR amend the very
+ * rule that decides what agents may clear.
+ *
+ * THE PROVABLE SHAPE, deliberately the narrowest one a unified diff can establish — the statute section must be
+ * exactly ONE contiguous append, at the end of the file, that OPENS with the named anchor:
+ *   • exactly one run of added lines in the whole section (a second run is a second edit somewhere else — the
+ *     mid-file splice above), and hunk boundaries break runs, so two `@@` hunks can never read as one append;
+ *   • that run must be the LAST thing in the section — NO context line after it. Trailing context is `git diff`
+ *     showing pre-existing text below the insertion point, i.e. the addition landed INSIDE the document rather
+ *     than after it (the new-anchor-splits-an-existing-rule case), so what follows the new heading is somebody
+ *     else's rule body and the new heading has annexed it;
+ *   • the event IMMEDIATELY before the run must be a context line. This proves the diff carries context at all
+ *     (under `-U0` there is none, every insertion looks like an EOF append and the trailing-context test would
+ *     be vacuous) AND that the line above the run is genuinely the pre-existing line the run attaches to, which
+ *     the setext reading below needs — context from an EARLIER hunk would not be adjacent;
+ *   • the run must OPEN EXACTLY ONE SECTION, as `markdown-it` reads it (`headingIndices`) — one heading of any
+ *     level, in any syntax, under any container — and that one heading must BE the named anchor. See below;
+ *   • every line before that heading must be BLANK. A blank separator is how an append at EOF actually renders;
+ *     any non-blank line above the heading is prose attaching to whatever rule precedes it, not to the new one.
+ * Everything else is unprovable and therefore human. `false` here is always the safe direction.
+ *
+ * WHY "EXACTLY ONE SECTION" AND NOT "ONE ANCHOR HEADING". The first cut looked only at lines BEFORE the first
+ * `{#anchor}` heading and, being built on `STATUTE_ANCHOR_HEADING_RE`, could only see headings that carry a tag.
+ * Nothing after the anchor heading was inspected by anything, and an UNTAGGED heading was invisible to the
+ * anchor-name check too — the two gaps compose into an unbounded smuggle: append the honest anchor, then `---`,
+ * then a second `### …` with its `{#…}` simply DELETED, then any amount of new rule text. That scored as
+ * codification with `autoLand: true`. Deleting the tag costs nothing:
+ * `we:scripts/lib/validate-rules-anchors.cjs` validates only the anchors a document actually declares, so an
+ * untagged heading passes `check:statute` and CI.
+ * The bound is structural rather than another shape-patch: a SECOND SECTION NECESSARILY NEEDS A SECOND HEADING,
+ * so capping the append at one heading closes the class, not the instance. Prose under the anchor with no
+ * heading of its own still clears — that text is inside the anchor's OWN section, which is the independent
+ * committee's remit under #2771, not a smuggle.
+ *
+ * WHY THE COUNT COMES FROM THE REAL PARSER (round 4). "How many sections does this run open?" is a question about
+ * the rendered document, and three rounds of regexes trying to answer it from raw diff lines each missed a new
+ * class — a heading behind a list marker or a blockquote, a setext underline inside a blockquote or under a wide
+ * list marker, a `<h3` whose `>` lands on the next line. `headingIndices` therefore renders `lineAboveRun + run`
+ * through the SAME markdown-it configuration that builds the published statute page, so "opens a second section"
+ * here and "has a second section" there are the same fact.
+ */
+function isSingleAnchorAppend(section) {
+  const seq = Array.isArray(section?.seq) ? section.seq : null;
+  if (!seq || !seq.length) return false;                                    // unparsed section → human
+  let runs = 0;
+  let run = null;                                                            // the single added run, once found
+  let lineAboveRun = null;                                                   // pre-existing line the run attaches to
+  let ctxImmediatelyBeforeRun = false;
+  let contextAfterRun = false;
+  let inRun = false;
+  let prevEvent = null;
+  for (const ev of seq) {
+    if (ev.kind === 'add') {
+      if (!inRun) {
+        inRun = true;
+        runs += 1;
+        run = [];
+        if (runs === 1 && prevEvent && prevEvent.kind === 'ctx') { ctxImmediatelyBeforeRun = true; lineAboveRun = prevEvent.text; }
+      }
+      run.push(ev.text);
+      prevEvent = ev;
+      continue;
+    }
+    inRun = false;                                                           // 'ctx', 'del' and 'hunk' all break the run
+    if (ev.kind === 'ctx' && runs > 0) contextAfterRun = true;
+    prevEvent = ev;
+  }
+  if (runs !== 1 || !run) return false;                                      // zero, or a second edit elsewhere
+  if (contextAfterRun) return false;                                         // the append landed INSIDE the document
+  if (!ctxImmediatelyBeforeRun) return false;                                // no adjacent context (-U0) → unprovable
+  const headings = headingIndices(run, lineAboveRun);
+  if (headings === null) return false;                                       // markdown we cannot read → human
+  if (headings.length !== 1) return false;                                   // zero headings, or a SECOND SECTION
+  const headingAt = headings[0];
+  if (!STATUTE_ANCHOR_HEADING_RE.test(run[headingAt])) return false;         // the one heading is not the named anchor
+  return run.slice(0, headingAt).every((l) => !l.trim());                    // only blank separators may precede it
+}
+
+/**
+ * #2771 Fork B (codified [`#review-human-declarative-leash-only`](../../docs/agent/platform-decisions.md#review-human-declarative-leash-only))
+ * — is this diff the MECHANICAL CODIFICATION of a decision the human already ruled, rather than an author
+ * writing a NEW statute rule? Pure, and FAIL-CLOSED in every ambiguous case (`false` ⇒ the statute touch keeps
+ * forcing `review:human`, i.e. today's behaviour).
+ *
+ * WHY IT EXISTS. `isStatutePath` fires on ANY `platform-decisions.md` touch, so a PR that merely RECORDS a
+ * ratified decision (`resolve --codified-to=<doc#anchor>`, the #911 gate) is treated exactly like a fresh rule —
+ * asking the operator to re-approve their own ruling (the #882/#885 bounce). The ruling exempts the codify SHAPE
+ * from the HUMAN gate only; the PR still escalates to the committee, which checks the anchor faithfully records
+ * the decision's ruling.
+ *
+ * THE SHAPE, both halves required (#2771's conjunction — either half alone is not codification):
+ *   (i)  the same diff flips a `kind: decision` backlog item from a non-resolved status to `status: resolved`
+ *        AND adds a `codifiedIn:` naming a statute anchor; and
+ *   (ii) the ONLY `platform-decisions.md` change is the ADDITION of exactly the anchor(s) those `codifiedIn`
+ *        lines name — no removed line anywhere in that file, no added anchor heading that is not one of them,
+ *        AND (the positional half, `isSingleAnchorAppend`) every added line provably BELONGS TO the named
+ *        anchor's own section: one contiguous append at the end of the document, opening with that heading.
+ *
+ * WHY (ii) HAS A POSITIONAL HALF (#2785 review-fix). Checking only the anchor NAMES leaves added non-heading
+ * prose unexamined anywhere in the 3,300-line document. #2771's skeptic pass believed the hole was closed by the
+ * disjunction "a smuggled rule is either a second anchor edit (fails (ii)) or lives inside the one anchor (the
+ * committee catches it)" — but a third case exists: an honest anchor appended at EOF PLUS one line spliced into
+ * the BODY of an existing rule, with zero removals. That scored as codification, which would have let an
+ * agent-clearable PR amend `#review-human-declarative-leash-only` — the rule about who may clear what.
+ *
+ * WHAT IT REFUSES (each of these is a deliberate false, not an oversight):
+ *   • No diff text at all (a caller that could not read one, or a drain path that does not plumb it) → false.
+ *     The exemption is opt-in on PROOF; absence of proof is never proof of absence.
+ *   • Any statute file in `changedFiles` that the diff text does not account for → false. A partial/stale diff
+ *     must not be able to hide a second statute edit from condition (ii).
+ *   • A statute doc other than `platform-decisions.md` (the `.*statute` pattern) → false. Only the
+ *     decisions document has anchors a `codifiedIn` can name.
+ *   • ANY removed line in `platform-decisions.md` → false. "Addition/extension of exactly that anchor" cannot
+ *     rewrite existing rule text; a rewrite is a new governance call.
+ *   • An added anchor heading whose anchor no resolved decision names → false (the smuggled-rule case #2771's
+ *     skeptic pass names).
+ *   • A statute edit that adds NO anchor heading at all → false. #2771 allows "addition / extension", but a
+ *     pure extension cannot be proven from a diff to sit inside the named anchor's section rather than inside a
+ *     neighbouring rule, so it stays human. The narrower, provable half is the one implemented.
+ *   • ANY added statute line that is not part of the ONE append opening with the named anchor → false. Concretely
+ *     that refuses: a second added run anywhere in the file (prose spliced into another rule's body, whether in
+ *     its own hunk or not); an added anchor followed by pre-existing context (the new heading inserted MID-file,
+ *     annexing the rule text below it instead of being appended); non-blank added prose sitting above the new
+ *     heading inside the same run (it attaches to the PRECEDING rule); and a context-free (`-U0`) statute diff,
+ *     in which position cannot be read at all.
+ *   • A SECOND SECTION in the append — any second heading markdown-it renders, of any level, in any syntax
+ *     (ATX tagged or untagged, setext, raw `<h1>`…`<h6>`), under any container (a list item, a blockquote, a
+ *     nested combination) → false. A second section needs a second heading, so one heading per append bounds the
+ *     exemption to exactly the one anchor the resolve named. Untagged headings were previously invisible to BOTH
+ *     halves of (ii), which let an unbounded second rule ride along under an honest anchor. Markdown the reader
+ *     cannot read confidently — an unterminated fence, a parse that throws, a parser that will not load — also
+ *     refuses.
+ *   • A backlog section whose hunks do not SHOW `kind: decision` → false. The `kind` line sits two lines from
+ *     `status` in the front-matter so default context normally carries it; when it does not, the diff has not
+ *     proven the resolved item is a decision, and an ordinary story resolve must never license a statute edit.
+ *
+ * @param {{diffText?: string|null, changedFiles?: string[]}} o - `changedFiles` is the same basis the human gate
+ *   scores over (`humanBasisFiles ?? changedFiles`), used only for the diff-completeness cross-check.
+ * @returns {boolean}
+ */
+export function isCodificationOnly({ diffText = null, changedFiles = [] } = {}) {
+  if (typeof diffText !== 'string' || !diffText.trim()) return false;      // no proof → human
+  const basis = (Array.isArray(changedFiles) ? changedFiles : []).map((f) => String(f || ''));
+  const statuteInBasis = basis.filter(isStatutePath);
+  if (!statuteInBasis.length) return false;                                 // nothing to exempt
+  if (statuteInBasis.some((f) => f !== PLATFORM_DECISIONS_PATH)) return false; // a non-decisions statute doc → human
+
+  const sections = parseDiffSections(diffText);
+  const statuteSections = sections.filter((s) => s.path != null && isStatutePath(s.path));
+  // The diff must ACCOUNT FOR every statute file the gate basis lists — otherwise (ii) is unverifiable.
+  const seen = new Set(statuteSections.map((s) => s.path));
+  if (statuteInBasis.some((f) => !seen.has(f))) return false;
+  if (statuteSections.some((s) => s.path !== PLATFORM_DECISIONS_PATH)) return false;
+  if (!statuteSections.length) return false;
+
+  // (i) — the resolve+codify half. Collect the anchors the resolved decision items name.
+  const codifiedAnchors = new Set();
+  for (const s of sections) {
+    if (s.path == null || !BACKLOG_ITEM_RE.test(s.path)) continue;
+    const isDecision = [...s.added, ...s.context].some((l) => /^kind:\s*["']?decision["']?\s*$/.test(l.trim()));
+    const becomesResolved = s.added.some((l) => /^status:\s*["']?resolved["']?\s*$/.test(l.trim()));
+    const wasUnresolved = s.removed.some((l) => /^status:\s*/.test(l.trim()) && !/^status:\s*["']?resolved["']?\s*$/.test(l.trim()));
+    if (!isDecision || !becomesResolved || !wasUnresolved) continue;
+    for (const l of s.added) {
+      const m = CODIFIED_IN_RE.exec(l.trim());
+      if (!m) continue;
+      const [doc, anchor] = m[1].split('#');
+      // The anchor must live in the decisions document (a bare `#anchor` is read as this document's).
+      if (anchor && (!doc || doc === PLATFORM_DECISIONS_PATH || doc.endsWith(`/${PLATFORM_DECISIONS_PATH}`))) codifiedAnchors.add(anchor);
+    }
+  }
+  if (!codifiedAnchors.size) return false;                                  // no resolve+codify → an author's new rule
+
+  // (ii) — the statute half: additions only, POSITIONED as one append that opens with the named anchor, and
+  // every added anchor heading is one the resolve named. The positional test (`isSingleAnchorAppend`) is what
+  // makes "the ONLY change is the addition of exactly that anchor" a claim about the whole file rather than only
+  // about the headings; without it, added prose spliced into another rule's body is unexamined (#2785 fix).
+  const addedAnchors = new Set();
+  for (const s of statuteSections) {
+    if (s.removed.length) return false;                                     // rewrote existing rule text → human
+    if (!isSingleAnchorAppend(s)) return false;                             // added lines not provably the anchor's
+    for (const l of s.added) {
+      const m = STATUTE_ANCHOR_HEADING_RE.exec(l);
+      if (m) addedAnchors.add(m[1]);
+    }
+  }
+  if (!addedAnchors.size) return false;                                     // unprovable pure extension → human
+  for (const a of addedAnchors) if (!codifiedAnchors.has(a)) return false;  // a smuggled extra rule → human
+  return true;
+}
 
 /**
  * The advisory CARE-LEVEL an escalated PR carries (#2567, codified `#blast-radius-advisory-care-not-a-gate`,
@@ -262,11 +621,13 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * A PR escalates ONLY for one of these real reasons — there is no random/sampling floor (#xlno40g): a
  * clean, CI-green PR with no scored signal and no dismissed finding reaches no reviewer, it just lands.
  *
- * Also returns `humanRequired` (#2285 v1, narrowed by the #2445 two-tier flip): true iff the diff touches the
- * POLICY tier of the trust chain (`isGateSelfPath`) or the STATUTE layer (`isStatutePath`) — the classes where
- * a human is essential (an agent policing its own leash, or a governance rule a human must ratify). The ENGINE
- * tier (the lander) escalates but is agent-reviewable, so it does NOT set humanRequired. A *classification* of
- * an already-escalating PR (a policy/statute file is always blast-radius too), never a fresh escalation trigger.
+ * Also returns `humanRequired` (#2285 v1, narrowed by the #2445 two-tier flip and again by #2771 Fork B): true
+ * iff the diff touches the POLICY tier of the trust chain (`isGateSelfPath`) or writes a NEW statute rule
+ * (`isStatutePath` and NOT the proven codification shape). Those are the classes where a human is essential (an
+ * agent policing its own leash, or a governance rule a human must ratify). The ENGINE tier (the lander)
+ * escalates but is agent-reviewable, and so is a statute edit proven to codify an already-ruled decision. A
+ * *classification* of an already-escalating PR (a policy/statute file is always blast-radius too), never a
+ * fresh escalation trigger.
  *
  * #2390-review-fix — the gate-self / `humanRequired` trigger reads `humanBasisFiles` (the CUMULATIVE
  * `origin/main…head` file set), NOT the possibly-de-inflated own-delta `changedFiles`. A stacked lane may
@@ -279,7 +640,10 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * identical), so every existing caller is unchanged.
  *
  * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
- *          crossRepo?:boolean, thresholds?:object}} o
+ *          crossRepo?:boolean, thresholds?:object, diffText?:string|null}} o - `diffText` (#2785) is the raw net
+ *   diff over the SAME basis as `humanBasisFiles`, supplied only so the #2771 Fork B codification shape can be
+ *   PROVEN. Omitting it is always safe: `isCodificationOnly` then returns false and a statute touch keeps its
+ *   human gate exactly as before.
  */
 export function scoreEscalation({
   changedFiles = [],
@@ -288,6 +652,7 @@ export function scoreEscalation({
   dismissedFindings = 0,
   crossRepo = false,
   thresholds = {},
+  diffText = null,
 } = {}) {
   const t = { ...DEFAULT_THRESHOLDS, ...thresholds };
   const reasons = [];
@@ -306,9 +671,16 @@ export function scoreEscalation({
   const gateBasis = Array.isArray(humanBasisFiles) ? humanBasisFiles : (Array.isArray(changedFiles) ? changedFiles : []);
   const gateSelfFiles = gateBasis.filter(isGateSelfPath);
   const statuteFiles = gateBasis.filter(isStatutePath);
-  const humanRequired = gateSelfFiles.length > 0 || statuteFiles.length > 0;
+  // #2771 Fork B — a statute edit PROVEN to be the codification of an already-ruled decision does not force a
+  // human (the committee still reviews it). Unproven for ANY reason — no diff text, an unparseable shape, a
+  // second statute edit — keeps the human gate: `isCodificationOnly` is fail-closed, so this can only ever
+  // narrow on evidence, never on absence of it.
+  const codificationOnly = statuteFiles.length > 0 && isCodificationOnly({ diffText, changedFiles: gateBasis });
+  const statuteForcesHuman = statuteFiles.length > 0 && !codificationOnly;
+  const humanRequired = gateSelfFiles.length > 0 || statuteForcesHuman;
   if (gateSelfFiles.length) { signals.gateSelf = gateSelfFiles; reasons.push(`gate-self (${gateSelfFiles.join(', ')}) — human review required`); }
-  if (statuteFiles.length) { signals.statute = statuteFiles; reasons.push(`statute (${statuteFiles.join(', ')}) — human review required`); }
+  if (statuteForcesHuman) { signals.statute = statuteFiles; reasons.push(`statute (${statuteFiles.join(', ')}) — human review required`); }
+  else if (codificationOnly) { signals.codification = statuteFiles; reasons.push(`codification (${statuteFiles.join(', ')}) — records an already-ruled decision, independent committee review`); }
 
   if (Number(diffLines) >= t.diffLines) { signals.size = Number(diffLines); reasons.push(`size (${diffLines} ≥ ${t.diffLines} changed lines)`); }
 
