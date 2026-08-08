@@ -218,6 +218,47 @@ const BUILD_RUN_EXCLUDED = /^build:(?:check|plugs)$/;
 const VITE_BUILD_SUBCOMMAND = /(?:^|\s)build(?:\s|$)/;
 const OUTPUT_FLAG = /--(?:output|outDir|out-dir)(?:=|\s+)(\S+)/;
 
+// #2986(3) — bare `eleventy` writes `_site/`, so the arm denies it; but `--version`/`--help`/`--dryrun`
+// write NOTHING, and the arm allowed only an explicit scratch `--output=`. A small allowlist of flags that
+// suppress the write. `--serve`/`--watch` stay DENIED and take precedence — they really do write the site
+// directory (and keep writing it), so their presence overrides anything else on the line.
+const ELEVENTY_NO_WRITE_FLAG = /(?:^|\s)--(?:version|help|dryrun|dry-run)(?=[\s=]|$)/;
+const ELEVENTY_WRITES_FLAG = /(?:^|\s)--(?:serve|watch)(?=[\s=]|$)/;
+
+// #2986(2) — the SCRIPT-NAME argument positions of a package-runner invocation. Pure.
+// `BUILD_TARGETS_G` used to be matched against the WHOLE segment, so the word `build` ANYWHERE in a runner
+// line fired the arm: `npm run test:unit -- src/build-graph.test.ts`, `npm run lint src/build/`,
+// `npm install --build-from-source …`, `pnpm add node-gyp-build`. Scanning only the positions a runner
+// treats as a script name keeps every real alias (`npm run build`, `yarn build`, `run-s build:check build`)
+// while dropping the incidental mentions. An `exec`/`dlx` form is not a script name at all — the caller
+// re-canonicalizes its remainder so `pnpm exec vite build` still reaches the `vite` arm below.
+const RUNNER_EXEC = /^(?:npm|pnpm|yarn|bun)\s+(?:exec|dlx)\s+(?:--\s+)?(.+)$/;
+function runnerScriptNames(head) {
+  const words = head.split(/\s+/).filter(Boolean);
+  const runner = words[0];
+  const names = [];
+  let i = 1;
+  if (runner === 'run-s' || runner === 'run-p' || runner === 'npm-run-all') {
+    for (; i < words.length; i++) {                       // EVERY positional arg is a script name
+      if (words[i] === '--') break;
+      if (!words[i].startsWith('-')) names.push(words[i]);
+    }
+    return names;
+  }
+  while (i < words.length && words[i].startsWith('-')) i += 1;   // runner-level global flags
+  const sub = words[i];
+  if (!sub) return names;
+  if (sub === 'run' || sub === 'run-script') {
+    i += 1;
+    while (i < words.length && words[i].startsWith('-')) i += 1; // `npm run --silent build`
+    if (i < words.length) names.push(words[i]);                  // …and ONLY the script name
+    return names;
+  }
+  // yarn/pnpm/bun accept a BARE script name (`yarn build`); npm does not (`npm install …` is never a script).
+  if (runner !== 'npm' && !sub.startsWith('-')) names.push(sub);
+  return names;
+}
+
 /**
  * #2788 review — is `name=1` present as a LEADING env-assignment prefix of `segment` (the documented
  * "prefix `VAR=1`" spelling), rather than merely appearing somewhere in the text? Pure.
@@ -251,14 +292,22 @@ export function isTreeWritingBuildRun(segment) {
   if (!cmd) return false;
   const head = cmd.split(/[|;&]/)[0];                        // stay inside THIS segment
   const prog = head.split(/\s+/)[0];
+  // `npm exec … ` / `pnpm dlx …` runs its remainder as a command, not as a script name — re-canonicalize it
+  // so the tool arms below still see `vite build` / `eleventy`.
+  const execd = head.match(RUNNER_EXEC);
+  if (execd) return isTreeWritingBuildRun(execd[1]);
   if (BUILD_RUNNER.test(head)) {                             // a package runner at command position
-    const targets = head.match(BUILD_TARGETS_G) || [];
+    // #2986(2) — only the runner's SCRIPT-NAME positions, never the whole segment.
+    const targets = runnerScriptNames(head).flatMap((n) => n.match(BUILD_TARGETS_G) || []);
     // Fire if ANY target is tree-writing — order-independent, so no placement of an excluded name disarms it.
     if (targets.some((t) => !BUILD_RUN_EXCLUDED.test(t))) return true;
   }
   // …and the same effect reached WITHOUT the alias (r3 finding 5).
   if (prog === 'vite') return VITE_BUILD_SUBCOMMAND.test(head.slice(prog.length));
   if (prog === 'eleventy' || prog === '11ty') {
+    const args = head.slice(prog.length);
+    if (ELEVENTY_WRITES_FLAG.test(args)) return true;        // `--serve`/`--watch` DO write the site dir
+    if (ELEVENTY_NO_WRITE_FLAG.test(args)) return false;     // #2986(3) `--version`/`--help`/`--dryrun`
     const out = (head.match(OUTPUT_FLAG) || [])[1];
     return !(out && isScratch(out));                         // `--output=<scratch>` is the build:check shape
   }
@@ -372,19 +421,77 @@ export function shellTokens(segment) {
   return out;
 }
 
+/**
+ * Split a command line into its `&&`/`||`/`;`/`&`/`|`/newline-separated SEGMENTS, honouring quotes. Pure.
+ * Returns the RAW text of each segment (quotes intact) — every caller re-parses it (`canonicalCommand`,
+ * `shellTokens`, the anchored regexes in `reason`), so this must not consume the quoting it is respecting.
+ *
+ * #2994 — the whole point. The previous split was a quote-BLIND regex (`/(?:&&|\|\||[;&|]|\n)+/`) applied
+ * BEFORE the quote-aware `shellTokens` ever ran, so a `|` inside a quoted argument tore the command in two.
+ * The fragment after the tear starts in an unquoted tokenizer state, which broke BOTH ways:
+ *   • false DENY — `gh pr list --jq '.[] | select(.n > 5)'` tore at the jq pipe and the `>` in the tail
+ *     fragment read as a real redirect to a non-scratch path. That is *the* house idiom for reading GitHub
+ *     state, and every jq filter that both pipes and compares hit it.
+ *   • false ALLOW — `gh pr list --jq '.[] | .number' > config/app.json` tore at the same pipe, leaving the
+ *     tail fragment with an UNBALANCED quote that swallowed the REAL trailing redirect, so a genuine
+ *     primary-tree write walked through. Tokenizing quotes first closes the hole and the false deny at once.
+ *
+ * A redirect operator run (`>`, `>>`, `>|`, `>&`, `&>`, `<`, `<<`) is consumed whole, so the `|`/`&` glued
+ * into it is never mistaken for a separator (this is what retires `decide`'s old `>|`→`>` pre-normalization).
+ * Same non-shell-parser threat model as `shellTokens`: no expansion, no command substitution.
+ */
+export function splitSegments(command) {
+  const s = String(command || '');
+  const segs = [];
+  let cur = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '"' || ch === "'") {                     // quoted run — kept verbatim, separators inside are TEXT
+      const close = s.indexOf(ch, i + 1);
+      const end = close === -1 ? s.length - 1 : close;  // unterminated quote runs to end of string
+      cur += s.slice(i, end + 1);
+      i = end;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < s.length) { cur += ch + s[i + 1]; i += 1; continue; }
+    if (ch === '>' || ch === '<' || (ch === '&' && s[i + 1] === '>')) {
+      let j = i;
+      if (ch === '&') { cur += s[j]; j += 1; }                     // `&>` / `&>>`
+      cur += s[j]; j += 1;                                         // the `>` / `<`
+      if (s[j] === s[j - 1]) { cur += s[j]; j += 1; }               // `>>` / `<<`
+      if (s[j] === '|' || s[j] === '&') { cur += s[j]; j += 1; }    // `>|` (noclobber) / `>&` (fd dup)
+      i = j - 1;
+      continue;
+    }
+    if (ch === ';' || ch === '&' || ch === '|' || ch === '\n') {
+      segs.push(cur);
+      cur = '';
+      while (i + 1 < s.length && /[;&|\n]/.test(s[i + 1])) i += 1;  // consume the whole separator run
+      continue;
+    }
+    cur += ch;
+  }
+  segs.push(cur);
+  return segs;
+}
+
 /** The file OPERANDS of a tokenized argument list — every non-flag token, honouring `--` and the options in
  *  `optsWithArg` (which swallow the token after them, e.g. `sed -e <script>`). Pure. A QUOTED token is never
- *  read as a flag (a quoted `-x` is a filename). */
+ *  read as a flag (a quoted `-x` is a filename).
+ *  #2986(1) — an EMPTY token is never a file operand either. BSD `sed -i '' <script> <file>` spells its
+ *  in-place suffix as an empty quoted argument; counting it as an operand shifted the `files.slice(1)` below
+ *  by one, so the sed SCRIPT read as the write target and a scratch-path edit was denied. */
 function fileOperands(args, optsWithArg = new Set()) {
   const files = [];
+  const push = (t) => { if (t !== '') files.push(t); };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (!a.quoted && a.text === '--') { for (const t of args.slice(i + 1)) files.push(t.text); break; }
+    if (!a.quoted && a.text === '--') { for (const t of args.slice(i + 1)) push(t.text); break; }
     if (!a.quoted && a.text.length > 1 && a.text.startsWith('-')) {
       if (optsWithArg.has(a.text)) i += 1;
       continue;
     }
-    files.push(a.text);
+    push(a.text);
   }
   return files;
 }
@@ -553,9 +660,7 @@ export function isDestructiveLaneGitOp(cmd) {
  *  segment straight to `isDestructiveLaneGitOp` — `canonicalGitOp` strips env/sudo/wrapper disguises itself. */
 export function hasDestructiveLaneOp(command) {
   if (!command) return false;
-  return String(command)
-    .split(/(?:&&|\|\||[;&|]|\n)+/)
-    .some((seg) => isDestructiveLaneGitOp(seg.trim()));
+  return splitSegments(command).some((seg) => isDestructiveLaneGitOp(seg.trim()));
 }
 
 // #2335 — the harness resets the reported Bash cwd to the PRIMARY checkout between tool calls, so the
@@ -574,7 +679,7 @@ export function resolveEffectiveCwd(command, reportedCwd, resolvePath = resolve)
   if (!cmd) return reportedCwd;
   // Collect simple literal `VAR=value` / `export VAR=value` assignments (no command-subst/globs) in order.
   const vars = Object.create(null);
-  for (const stmt of cmd.split(/(?:&&|\|\||[;&|]|\n)+/)) {
+  for (const stmt of splitSegments(cmd)) {
     const m = stmt.trim().match(/^(?:export\s+)?([A-Za-z_]\w*)=(.+)$/);
     if (!m) continue;
     let val = m[2].trim();
@@ -583,7 +688,7 @@ export function resolveEffectiveCwd(command, reportedCwd, resolvePath = resolve)
     if (!/\s/.test(val)) vars[m[1]] = val;                    // single-token literal only
   }
   // First `cd <target>` statement wins (that is where the command lands before the mutation runs).
-  for (const stmt of cmd.split(/(?:&&|\|\||[;&|]|\n)+/)) {
+  for (const stmt of splitSegments(cmd)) {
     const cd = stmt.trim().match(/^cd\s+(.+)$/);
     if (!cd) continue;
     let target = cd[1].trim().split(/\s+/)[0];                // first arg only (ignore trailing redirs/opts)
@@ -740,16 +845,16 @@ export function decide(command, ctx = {}) {
   // heredoc) would be read as a redirect. Drop the bodies first; the OPENER line stays, so
   // `cat > config/app.json <<'EOF'` is still caught as the tree write it is.
   command = stripHeredocBodies(command);
-  // …and `>|` (the noclobber-override redirect) is a REDIRECT, not a pipe — but `|` is one of the segment
-  // separators below, so `>| config/app.json` was torn in half and the write vanished (r3 finding 2). `>|` is
-  // exactly equivalent to `>`, and the glued spelling is unambiguous, so normalize it before splitting.
-  command = command.replace(/>\|(?!\|)/g, '>');
+  // (`>|`, the noclobber-override redirect, used to be pre-normalized to `>` here because the quote-blind
+  // split tore it in half at its `|` — r3 finding 2. `splitSegments` consumes a redirect operator run whole,
+  // so the rewrite is no longer needed and no longer mangles a `>|` that appears inside a quoted argument.)
   // #2833 finding 3 — whole-command check FIRST: backgrounding is a property of the whole command (a trailing `&`
   // / the `run_in_background` tool param), which the per-segment split below would lose. Deny a backgrounded
   // verification-set run before anything else.
   const bg = backgroundedVerificationReason(command, ctx.runInBackground);
   if (bg) return bg;
-  for (const seg of String(command).split(/(?:&&|\|\||[;&|]|\n)+/)) {
+  // #2994 — QUOTE-AWARE split: tokenize quotes first, cut only on UNQUOTED separators.
+  for (const seg of splitSegments(command)) {
     const r = reason(seg, ctx);
     if (r) return r;
   }
