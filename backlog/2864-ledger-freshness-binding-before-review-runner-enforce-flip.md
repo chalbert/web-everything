@@ -3,8 +3,9 @@ bornAs: xmnvd7x
 kind: story
 size: 3
 parent: "2572"
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateResolved: "2026-08-08"
 tags: [conveyor, orchestrator-mechanization, review, enforce-flip]
 scope:
   - we:scripts/lib/jury-ledger.mjs
