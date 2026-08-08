@@ -24,7 +24,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { parseBacklogFilename, rewriteRefs, allocateGapId } from '../backlog/renumber-collisions.mjs';
+import { parseBacklogFilename, rewriteRefs, allocateGapId, assertContentPreserved } from '../backlog/renumber-collisions.mjs';
 
 /**
  * Build the renumber PLAN for an incoming lane whose NEW backlog item reuses an id already on the merge base.
@@ -86,6 +86,9 @@ export function planBaseCollisionHeal(laneFiles, { baseNums = [], baseNames = []
   // #2316 — NEVER rewrite inside a base-owned file (`baseNameSet`): its refs predate the collision and can
   // only mean the base's own real item (the keeper), never the incoming yielder.
   const contentByName = new Map(files.map((f) => [f.name, f.text]));
+  // Snapshot the pre-rewrite content, keyed by name — the content-preservation guard (#2546) diffs every
+  // write against this ORIGINAL, so a rewrite that blanks/corrupts a file is caught before the plan returns.
+  const originalByName = new Map(files.map((f) => [f.name, f.text]));
   const renamed = new Map(moves.map((m) => [m.oldName, m.newName]));
   const touched = new Set();
   for (const mv of moves) {
@@ -96,9 +99,23 @@ export function planBaseCollisionHeal(laneFiles, { baseNums = [], baseNames = []
     }
   }
   const writes = [];
-  for (const name of touched) writes.push({ name: renamed.get(name) || name, text: contentByName.get(name) });
+  for (const name of touched) {
+    const finalName = renamed.get(name) || name;
+    const text = contentByName.get(name);
+    // #2546 — a rewrite must ONLY swap refs; refuse to emit a blanked/corrupted file (fail loudly).
+    assertContentPreserved(originalByName.get(name), text, moves, finalName);
+    writes.push({ name: finalName, text });
+  }
   for (const mv of moves) {
-    if (!touched.has(mv.oldName)) writes.push({ name: mv.newName, text: contentByName.get(mv.oldName) });
+    if (!touched.has(mv.oldName)) {
+      // #2746 review — this file was NOT touched by the ref sweep, so emit the ORIGINAL bytes explicitly
+      // rather than the mutable working copy. Two things follow, both by construction rather than by
+      // convention: a rename-only move can never carry a partial rewrite, and a content guard here would be
+      // vacuous (it previously compared `contentByName.get(x)` against `originalByName.get(x)` — for an
+      // untouched file those are the same string, so the assertion could never fire). The guard that matters
+      // is on the rewritten branch above, where the bytes actually change.
+      writes.push({ name: mv.newName, text: originalByName.get(mv.oldName) });
+    }
   }
   const deletes = moves.map((m) => m.oldName);
 
@@ -181,7 +198,16 @@ export function applyCollisionHealToIndex({ run, env, tree, base = 'origin/main'
     if (cat.status !== 0) return { ok: false, reason: `cat-file backlog/${name} failed (${firstLine(cat.stderr)})` };
     files.push({ name, text: cat.stdout });
   }
-  const plan = planBaseCollisionHeal(files, { baseNums: [...baseNumSet], baseNames });
+  // #2746 review — the planner's content guard (#2546) THROWS, but this is a merge-boundary helper whose
+  // whole contract is "signal failure by return value". An escaping throw would leave `merge-ai-prs.mjs` /
+  // `rebase-drop-manifest.mjs` with no enclosing try, killing the ENTIRE drain pass over one lane's corpus.
+  // Degrade to the existing error shape: the heal is skipped, the pass carries on.
+  let plan;
+  try {
+    plan = planBaseCollisionHeal(files, { baseNums: [...baseNumSet], baseNames });
+  } catch (e) {
+    return { ok: false, reason: `collision-heal plan refused (${firstLine(e?.message)})` };
+  }
   if (plan.collisions.length === 0) return { ok: true, healed: [] };
   const err = writePlanToIndex(run, env, plan);
   if (err) return { ok: false, reason: err };
@@ -246,7 +272,15 @@ export function healNnnCollision({
     if (cat.status !== 0) return { action: 'error', reason: `cat-file backlog/${name} failed (${firstLine(cat.stderr)})` };
     laneFiles.push({ name, text: cat.stdout });
   }
-  const plan = planBaseCollisionHeal(laneFiles, { baseNums: [...baseNumSet], baseNames });
+  // #2746 review — same boundary discipline as `applyCollisionHealToIndex`: the #2546 content guard throws,
+  // and every caller of this function only inspects the RETURNED object. Map the refusal onto `action:'error'`
+  // (documented as non-fatal) so one unhealable lane cannot take down the whole drain run.
+  let plan;
+  try {
+    plan = planBaseCollisionHeal(laneFiles, { baseNums: [...baseNumSet], baseNames });
+  } catch (e) {
+    return { action: 'error', reason: `collision-heal plan refused (${firstLine(e?.message)})` };
+  }
   if (plan.collisions.length === 0) return { action: 'none' };
 
   // Apply the plan to a TEMP index seeded from the lane tree — never touches HEAD or the working tree.
