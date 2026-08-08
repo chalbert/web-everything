@@ -111,13 +111,53 @@ The volume justifies it: **112 codification-shaped commits to the statute in the
   scores `review:human`; a raw new-rule statute diff scores `review:human`.
 - A PR that adds a *new* `status: resolved` decision item and its anchor in one commit scores `review:human`
   (the base-non-resolved check).
-- All five historical break cases are added as regression fixtures and score `review:human`.
+- Every smuggle row in PR #1103's corpus (below) scores `review:human` under provenance. They should pass
+  cheaply — a hand-edited byte fails byte-equality — which is the point.
 - Editing the generator scores `review:human`.
 - `npm run check:standards` and the review-escalation suite green.
 
+## Salvage from PR #1103 — do NOT bare-close it
+
+Measured on the PR's own diff (1313 added lines). Only the first row is superseded by this ruling:
+
+| what | lines | disposition |
+| --- | --- | --- |
+| the detector in `we:scripts/lib/review-escalation.mjs` | 489 | **drop** — superseded by provenance |
+| the corpus + DOM oracle in `we:scripts/__tests__/pr-land.test.mjs` | 389 | **keep** — this item's acceptance harness |
+| INVARIANT 13 in `we:scripts/lib/__tests__/gate-invariants.test.mjs` | 247 | **keep** — predicate-level mirror |
+| `makeRenderer` / `preprocessInlineAnchors` exports in `we:scripts/lib/rules-loader.cjs` | 5 | **keep** — lets a test drive the real render path |
+| two unrelated backlog items filed during review (`x9nlwgi`, `x7oktlo`) | 231 | **keep** — nothing to do with Fork B |
+
+The 87-row corpus is a permanent test, not a one-off script: every row rides the real
+`we:docs/agent/platform-decisions.md` through a real `git diff` and the real producer stack, and each row's
+expected value is the net h1–h6 **element delta** the append makes to the published page, measured through
+`makeRenderer` + a real DOM. On top of it, 16,000 randomised runs across four seeds scored zero
+under-counts. That harness is the right acceptance bar for the provenance check too, and rebuilding it
+would cost more than the generator.
+
+Correct disposition: bounce #1103 to its author lane (`review:changes`) to strip the detector and keep the
+harness — not a close.
+
+## Two governance questions #1103 raised that survive this ruling
+
+Both were explicitly flagged for the operator rather than decided in-PR:
+
+1. **Must `kind: decision` pre-date the resolve?** A diff that converts an existing story to `kind: decision`
+   while flipping it to `resolved` satisfies half of #2771's conjunction. Under provenance this closes *if*
+   the generator reads `kind` from **`base`** — regenerating against a base that says `story` produces no
+   codification, so the diff cannot match. **Make that explicit in Arm B**: `kind`, `status` and the item's
+   identity all come from `base`, never from the PR.
+2. **May one PR codify two decisions?** #1103's "exactly one heading" rule sends that to a human. A reviewer
+   confirmed relaxing it to "every heading must be an anchor the resolve named" reopens no prior smuggle.
+   Under provenance the question dissolves — the generator emits whatever the resolved items require and the
+   check is still byte-equality — so Arm A should simply support N decisions in one run.
+
 ## Follow-ups
 
-- **Close PR #1103** (the parser approach) — superseded, not fixable.
 - Red-team the shipped provenance check with an adversary who did not write it, using cases not derived
   from this item's list. The R8 lesson: a generator whose case list is the fix's own implementation can only
   re-prove what is already handled.
+- **Verify the auto-merge question.** #1103's corpus scores cleared codifications `autoLand: true`, but
+  #2771 clause 2 says a codification PR is *"NOT auto-merged and NOT human-gated"* — it should park
+  `review:pending` for the committee. The PR body asserts the latter while the corpus table shows the
+  former. Resolve which is true before Arm B lands.
