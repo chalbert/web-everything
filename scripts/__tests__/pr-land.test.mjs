@@ -7,8 +7,60 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, PARK_LABELS } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, withAuthorStamp, composePrBody, PARK_LABELS } from '../pr-land.mjs';
 import { REVIEW_LABELS, REVIEW_LABEL_META } from '../lib/review-escalation.mjs';
+import { buildAuthorActorMarker, parseAuthorActorId } from '../lib/review-independence.mjs';
+
+// ── #2844 · the AUTHOR STAMP pr-land writes at PR-open ─────────────────────────────────────────────────────────
+// PR #1100 review: this half had ZERO coverage. `withAuthorStamp` was module-private and read a module-scope
+// marker, so mutating it to stop stamping passed all 65 pr-land tests — while silently disarming the whole
+// self-clear mechanism, which needs BOTH halves (this stamp, and review-set-label's comparison against it) to
+// mean anything. The producer's half is proved here, round-trip through the REAL reader, plus the wiring that
+// puts it on the body `gh pr create` actually receives.
+describe('#2844 — pr-land stamps the PR author into the body at open', () => {
+  const MARKER = buildAuthorActorMarker('sess-author-1');
+
+  it('THE STAMP IS WRITTEN, and the real reader gets the author id back (round-trip, not substring)', () => {
+    const stamped = withAuthorStamp('Resolve #1: something real.', MARKER);
+    expect(stamped).not.toBe('Resolve #1: something real.');
+    expect(parseAuthorActorId(stamped)).toBe('sess-author-1');
+    // The human body survives intact — the stamp is appended, never a replacement.
+    expect(stamped).toContain('Resolve #1: something real.');
+  });
+
+  it('is IDEMPOTENT — a re-run never appends a second stamp, and never re-attributes an existing one', () => {
+    const once = withAuthorStamp('body', MARKER);
+    expect(withAuthorStamp(once, MARKER)).toBe(once);
+    // A DIFFERENT session re-running the producer must not overwrite the original attribution.
+    const other = withAuthorStamp(once, buildAuthorActorMarker('sess-later'));
+    expect(other).toBe(once);
+    expect(parseAuthorActorId(other)).toBe('sess-author-1');
+  });
+
+  it('no session id → NO marker, and an empty body is left untouched (never a marker-only #2324 body)', () => {
+    expect(withAuthorStamp('body', '')).toBe('body');
+    for (const empty of ['', '   ', null, undefined]) expect(withAuthorStamp(empty, MARKER)).toBe(empty);
+  });
+
+  it('THE WIRING: composePrBody — the body gh actually receives carries BOTH the manifest and the stamp', () => {
+    // The mutation this catches is "the composition stops calling withAuthorStamp" — the create body is what the
+    // reviewer's independence check later reads, so a stamp that exists but is never attached buys nothing.
+    const manifest = { schema: 1, repos: [] };
+    const composed = composePrBody('Resolve #1: real.', manifest, MARKER);
+    expect(parseAuthorActorId(composed)).toBe('sess-author-1');
+    expect(composed).toContain('Resolve #1: real.');
+    // …and with no manifest the stamp is still attached (the ordinary single-repo lane).
+    expect(parseAuthorActorId(composePrBody('Resolve #1: real.', null, MARKER))).toBe('sess-author-1');
+  });
+
+  it('SOURCE CONTRACT: the create body and the re-run backfill BOTH go through composePrBody', () => {
+    // Belt-and-braces on the one thing a pure test cannot see: that the module-scope CREATE_BODY, and the
+    // best-effort edit that backfills an already-open PR, are built by the composer rather than around it.
+    const src = readFileSync(resolve(process.cwd(), 'scripts/pr-land.mjs'), 'utf8');
+    expect(src).toMatch(/const CREATE_BODY = composePrBody\(BODY\)/);
+    expect(src).toMatch(/const updated = composePrBody\(liveBody\)/);
+  });
+});
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
   it('a policy-core diff (edits the leash-defining trust chain) → review:human, applied', () => {

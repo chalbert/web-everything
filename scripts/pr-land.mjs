@@ -93,7 +93,7 @@ import {
 import { resolveJuryPlan } from './lib/review-core.mjs'; // #2635 — recompute the jury roster from the REAL diff at PR-open
 import { POLICY_CARE_JURY } from './lib/review-policy.mjs'; // #2635 — the care→jury contract's roster-timing mode (knob #4)
 import { parseManifest, embedManifestInBody, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs'; // xnsk54v — manifest rides the PR body, not a tracked file
-import { currentActorId, buildAuthorActorMarker, parseAuthorActorId } from './lib/review-independence.mjs'; // #2844 — the author stamp the self-clear refusal compares against
+import { currentActorId, buildAuthorActorMarker, readAuthorActorStamps } from './lib/review-independence.mjs'; // #2844 — the author stamp the self-clear refusal compares against
 import { classifyPrOpenFailure, recordInfraBlockIO, infraStorePath, primaryRootFromClone, originSlugOf } from './conveyor/infra-blocked.mjs'; // #2659 — a post-push PR-open failure on an outside dependency → the infra-blocked state (recorded for auto-retry/resume), not a hard fail
 import { join } from 'node:path';
 import { verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs'; // #2833 — the lane-verification finish-guard: refuse to land a HEAD whose synchronous suite run never finished (or, under --require-verified, was never recorded green). readVerifyMarker/resolveVerifyOptions are the SHARED marker reader + option resolver (findings 2/5) both this gate and verify-lane use, so the two can never drift (readVerifyMarker owns the VERIFY_FILENAME path — no bare JSON.parse of the marker here).
@@ -152,19 +152,39 @@ const LANE_MANIFEST = typeof flags['manifest-file'] === 'string'
 // harness supplies no session id, in which case no marker is written and the autonomous seam refuses to
 // auto-clear the PR (fail-closed, by design). See `we:scripts/lib/review-independence.mjs`.
 const AUTHOR_MARKER = buildAuthorActorMarker(currentActorId());
-/** Append the #2844 author stamp to a PR body, idempotently (a body that already carries one is returned
- *  unchanged — pr-land is re-run routinely, and a second stamp must never appear). Pure. */
-function withAuthorStamp(body) {
+/**
+ * we:scripts/pr-land.mjs#withAuthorStamp — append the #2844 author stamp to a PR body, idempotently (a body that
+ * already carries one is returned unchanged — pr-land is re-run routinely, and a second stamp must never appear).
+ * PURE, with the marker INJECTABLE so the stamp is unit-testable (PR #1100 review): it was module-private and
+ * read the module-scope `AUTHOR_MARKER` directly, so mutating it to stop stamping passed all 65 pr-land tests
+ * while silently disarming half of the whole self-clear mechanism. `composePrBody` is the exported entry point.
+ * @param {string} body
+ * @param {string} [marker] - the rendered author marker ('' when the harness supplied no session id).
+ */
+export function withAuthorStamp(body, marker = AUTHOR_MARKER) {
   // A null/empty body is returned UNTOUCHED: `prCreateBodyGuard` refuses a bodyless create anyway (#2332), and
   // synthesising a marker-only body here would turn that hard refusal into a PR whose whole description is an
   // HTML comment — the #2324 stall this producer exists to prevent.
-  if (!AUTHOR_MARKER || typeof body !== 'string' || !body.trim()) return body;
-  if (parseAuthorActorId(body)) return body;
-  return `${body}\n\n${AUTHOR_MARKER}\n`;
+  if (!marker || typeof body !== 'string' || !body.trim()) return body;
+  // PRESENCE, not the resolved id (`readAuthorActorStamps`, not `parseAuthorActorId`): a body carrying two
+  // CONFLICTING stamps resolves to '' by design, and asking for the id there would append a THIRD stamp on every
+  // re-run. Any stamp at all means this producer has already stamped, or someone else has — either way, hands off.
+  if (readAuthorActorStamps(body).length) return body;
+  return `${body}\n\n${marker}\n`;
 }
-// The body actually shipped to `gh pr create` — the human body with the manifest block embedded. The
-// #2332/#2324 body guards still run on the HUMAN `BODY` (a manifest-only body must not pass as real content).
-const CREATE_BODY = withAuthorStamp(LANE_MANIFEST ? embedManifestInBody(BODY, LANE_MANIFEST) : BODY);
+/**
+ * we:scripts/pr-land.mjs#composePrBody — the body actually shipped to `gh pr create` AND to the re-run backfill
+ * edit: the human body with the lane manifest block embedded (xnsk54v) and the #2844 author stamp appended. PURE,
+ * with both inputs injectable so BOTH halves of the composition are provable without shelling the CLI. The
+ * #2332/#2324 body guards still run on the HUMAN `BODY` (a manifest-only body must not pass as real content).
+ * @param {string} body
+ * @param {object|null} [manifest]
+ * @param {string} [marker]
+ */
+export function composePrBody(body, manifest = LANE_MANIFEST, marker = AUTHOR_MARKER) {
+  return withAuthorStamp(manifest ? embedManifestInBody(body, manifest) : body, marker);
+}
+const CREATE_BODY = composePrBody(BODY);
 // Post-land id-collision self-heal (#2071, generalized to EVERY land route). After a clean merge, heal any
 // NEW-item backlog id collision the land created against `main` (two files claiming one NNN) — the exact
 // heal the parallel integrator runs at Phase 4b, now shared so `/pr`, `/drain` (which reuses this) AND a
@@ -698,7 +718,7 @@ function runCli() {
     // enforces on the read side.
     try {
       const liveBody = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'body'])).body || '';
-      const updated = withAuthorStamp(LANE_MANIFEST ? embedManifestInBody(liveBody, LANE_MANIFEST) : liveBody);
+      const updated = composePrBody(liveBody);
       if (updated !== liveBody) ghC(['pr', 'edit', String(prNum), '--body', updated]);
     } catch { /* best-effort — drain ref fallback covers a miss */ }
   }
