@@ -906,6 +906,14 @@ describe('renderReviewNotice (#2433)', () => {
     expect(n).toBe('PR #3 — human review requested changes.');
   });
 
+  // #2953 — the /review skill's own step 4 uses `--to=accepted` (the review-set-label.mjs CLI vocabulary) and
+  // step 6 carries that same word into this call, so the documented sequence threw on its own first use. Fix:
+  // accept both spellings, with the SAME rendered output as 'accept'.
+  it('also accepts "accepted" (the review-set-label.mjs CLI spelling), same rendering as "accept" (#2953)', () => {
+    const n = renderReviewNotice({ event: REVIEW_NOTICE_EVENTS.CLEARED, pr: 3, repo: 'we', outcome: 'accepted', actor: 'the operator' });
+    expect(n).toBe('PR we#3 — human review accepted by the operator.');
+  });
+
   it('throws on an unknown event', () => {
     expect(() => renderReviewNotice({ event: 'bogus', pr: 1 })).toThrow(/unknown event/);
   });

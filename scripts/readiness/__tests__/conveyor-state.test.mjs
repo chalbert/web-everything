@@ -251,6 +251,16 @@ describe('ciRollup — statusCheckRollup → one CI token', () => {
     expect(ciRollup([{ status: 'COMPLETED' }])).toBe('pending');
     expect(ciRollup([{ status: 'COMPLETED', conclusion: null }])).toBe('pending');
   });
+
+  // #2925 — the decisive case: a superseded CANCELLED entry beside the SUCCESS that actually finished, same
+  // check name. Before the fix `ciRollup` folded EVERY entry with no per-name collapse, so this read `fail` for
+  // as long as the cancelled entry sat in the rollup even though the check that finished is green.
+  it('a superseded CANCELLED entry beside a later SUCCESS for the SAME name reads pass, not fail (#2925)', () => {
+    expect(ciRollup([
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'CANCELLED' },
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    ])).toBe('pass');
+  });
 });
 
 describe('transcriptMentionsItem — ANCHORED item-id match (no #26-masks-#2611 false hit)', () => {
