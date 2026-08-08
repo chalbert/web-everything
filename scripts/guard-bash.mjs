@@ -225,38 +225,108 @@ const OUTPUT_FLAG = /--(?:output|outDir|out-dir)(?:=|\s+)(\S+)/;
 const ELEVENTY_NO_WRITE_FLAG = /(?:^|\s)--(?:version|help|dryrun|dry-run)(?=[\s=]|$)/;
 const ELEVENTY_WRITES_FLAG = /(?:^|\s)--(?:serve|watch)(?=[\s=]|$)/;
 
-// #2986(2) — the SCRIPT-NAME argument positions of a package-runner invocation. Pure.
+// #2986(2) — what a package-runner invocation ACTUALLY runs: either a COMMAND (`exec`/`dlx`) or a set of
+// SCRIPT NAMES. Pure.
 // `BUILD_TARGETS_G` used to be matched against the WHOLE segment, so the word `build` ANYWHERE in a runner
 // line fired the arm: `npm run test:unit -- src/build-graph.test.ts`, `npm run lint src/build/`,
 // `npm install --build-from-source …`, `pnpm add node-gyp-build`. Scanning only the positions a runner
 // treats as a script name keeps every real alias (`npm run build`, `yarn build`, `run-s build:check build`)
 // while dropping the incidental mentions. An `exec`/`dlx` form is not a script name at all — the caller
 // re-canonicalizes its remainder so `pnpm exec vite build` still reaches the `vite` arm below.
-const RUNNER_EXEC = /^(?:npm|pnpm|yarn|bun)\s+(?:exec|dlx)\s+(?:--\s+)?(.+)$/;
-function runnerScriptNames(head) {
-  const words = head.split(/\s+/).filter(Boolean);
-  const runner = words[0];
-  const names = [];
-  let i = 1;
-  if (runner === 'run-s' || runner === 'run-p' || runner === 'npm-run-all') {
-    for (; i < words.length; i++) {                       // EVERY positional arg is a script name
-      if (words[i] === '--') break;
-      if (!words[i].startsWith('-')) names.push(words[i]);
+//
+// #2994 review r2 — the first cut of that narrowing was a regex (`^<runner> (exec|dlx) (--\s+)?(.+)$`) plus a
+// "first non-flag word is the script name" scan, and BOTH under-matched real, tree-writing builds that the
+// pre-#2986 guard denied:
+//   • any flag between `exec`/`dlx` and the tool made the FLAG the recursed program —
+//     `npm exec --package=vite vite build`, `npm exec --yes vite build`, `pnpm exec --silent vite build`,
+//     `pnpm dlx --package=vite vite build`, `yarn dlx -q eleventy` all read as safe.
+//   • `-c '<command>'` (npm's `--call`) hides the command in a quoted argument entirely.
+//   • a runner-level selector before the subcommand desynced the script-name scan —
+//     `pnpm --filter web exec vite build` (the `--filter` VALUE became the subcommand), and
+//     `yarn workspace web build` (the workspace NAME became the script name).
+// The replacement walks the invocation word by word, quote-aware, the way the runner itself does: skip
+// runner-level flags (consuming the VALUE of the ones that take a separate value word), see through
+// `workspace <name>`, then classify what is left as an `exec` command or a `run`/bare script name.
+const RUNNER_NAMES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'run-s', 'run-p', 'npm-run-all']);
+const MULTI_SCRIPT_RUNNERS = new Set(['run-s', 'run-p', 'npm-run-all']);
+/** Runner-level flags whose VALUE is a separate following word (so the value is not a subcommand/program). */
+const RUNNER_VALUE_FLAGS = new Set(['--package', '-p', '--filter', '-F', '--workspace', '-w', '--prefix', '-C', '--dir', '--cwd']);
+/** npm `exec --call/-c '<command>'` — the value is a COMMAND LINE, so it is recursed, not skipped. */
+const RUNNER_CALL_FLAGS = new Set(['--call', '-c']);
+
+/** Quote-aware word split of a command head that also reports each word's RAW start offset in `head`, so the
+ *  `exec` remainder can be handed on verbatim (rejoining unquoted words would drop a `sed -i ''` empty
+ *  argument and re-open #2986/1). Shares the quoted-run scanner below, so `\"` never desyncs a boundary. */
+function headWords(s) {
+  const out = [];
+  let cur = '';
+  let start = -1;
+  const flush = () => { if (start >= 0) out.push({ text: cur, start }); cur = ''; start = -1; };
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (/\s/.test(ch)) { flush(); continue; }
+    if (start < 0) start = i;
+    if (quoteStartsAt(s, i)) {
+      const close = quotedRunEnd(s, i);
+      const end = close === -1 ? s.length : close;
+      cur += s.slice(s[i] === '$' ? i + 2 : i + 1, end);
+      i = end;
+      continue;
     }
-    return names;
+    if (ch === '\\' && i + 1 < s.length) { cur += s[i + 1]; i += 1; continue; }
+    cur += ch;
   }
-  while (i < words.length && words[i].startsWith('-')) i += 1;   // runner-level global flags
-  const sub = words[i];
-  if (!sub) return names;
-  if (sub === 'run' || sub === 'run-script') {
-    i += 1;
-    while (i < words.length && words[i].startsWith('-')) i += 1; // `npm run --silent build`
-    if (i < words.length) names.push(words[i]);                  // …and ONLY the script name
-    return names;
+  flush();
+  return out;
+}
+
+/**
+ * Classify a package-runner invocation `head`. Pure. Returns:
+ *   • `{ exec: '<command line>' }` — an `exec`/`dlx`/`--call` form; the caller re-canonicalizes the command.
+ *   • `{ names: [...] }`          — the script-name argument positions (possibly empty).
+ *   • `null`                      — not a package runner at all.
+ */
+export function runnerInvocation(head) {
+  const words = headWords(String(head || ''));
+  if (!words.length) return null;
+  const runner = words[0].text;
+  if (!RUNNER_NAMES.has(runner)) return null;
+
+  if (MULTI_SCRIPT_RUNNERS.has(runner)) {                   // EVERY positional arg is a script name
+    const names = [];
+    for (let i = 1; i < words.length; i++) {
+      if (words[i].text === '--') break;
+      if (!words[i].text.startsWith('-')) names.push(words[i].text);
+    }
+    return { names };
   }
+
+  let i = 1;
+  let sawExec = false;
+  let sawRun = false;
+  while (i < words.length) {
+    const w = words[i].text;
+    if (w === '--') { i += 1; if (sawExec) break; continue; }   // `npm exec -- vite build`
+    if (w.startsWith('-')) {
+      const eq = w.indexOf('=');
+      const flag = eq === -1 ? w : w.slice(0, eq);
+      if (RUNNER_CALL_FLAGS.has(flag)) {                       // the value IS a command line
+        return { exec: eq === -1 ? (words[i + 1] ? words[i + 1].text : '') : w.slice(eq + 1) };
+      }
+      if (eq === -1 && RUNNER_VALUE_FLAGS.has(flag)) i += 1;   // consume the flag's separate value word
+      i += 1;
+      continue;
+    }
+    if (w === 'exec' || w === 'dlx') { sawExec = true; i += 1; continue; }
+    if (w === 'workspace' || w === 'workspaces') { i += 2; continue; }  // `yarn workspace <name> <rest…>`
+    if (w === 'run' || w === 'run-script') { sawRun = true; i += 1; continue; }
+    break;                                                    // the subcommand / script-name position
+  }
+  if (i >= words.length) return { names: [] };
+  if (sawExec) return { exec: head.slice(words[i].start) };
+  if (sawRun) return { names: [words[i].text] };               // `npm run <script>` — ONLY the script name
   // yarn/pnpm/bun accept a BARE script name (`yarn build`); npm does not (`npm install …` is never a script).
-  if (runner !== 'npm' && !sub.startsWith('-')) names.push(sub);
-  return names;
+  return { names: runner === 'npm' ? [] : [words[i].text] };
 }
 
 /**
@@ -292,13 +362,13 @@ export function isTreeWritingBuildRun(segment) {
   if (!cmd) return false;
   const head = cmd.split(/[|;&]/)[0];                        // stay inside THIS segment
   const prog = head.split(/\s+/)[0];
-  // `npm exec … ` / `pnpm dlx …` runs its remainder as a command, not as a script name — re-canonicalize it
-  // so the tool arms below still see `vite build` / `eleventy`.
-  const execd = head.match(RUNNER_EXEC);
-  if (execd) return isTreeWritingBuildRun(execd[1]);
-  if (BUILD_RUNNER.test(head)) {                             // a package runner at command position
+  // `npm exec … ` / `pnpm dlx …` / `npm exec -c '…'` runs its remainder as a COMMAND, not as a script name —
+  // re-canonicalize it so the tool arms below still see `vite build` / `eleventy`.
+  const inv = runnerInvocation(head);
+  if (inv && inv.exec !== undefined) return isTreeWritingBuildRun(inv.exec);
+  if (inv && BUILD_RUNNER.test(head)) {                      // a package runner at command position
     // #2986(2) — only the runner's SCRIPT-NAME positions, never the whole segment.
-    const targets = runnerScriptNames(head).flatMap((n) => n.match(BUILD_TARGETS_G) || []);
+    const targets = inv.names.flatMap((n) => n.match(BUILD_TARGETS_G) || []);
     // Fire if ANY target is tree-writing — order-independent, so no placement of an excluded name disarms it.
     if (targets.some((t) => !BUILD_RUN_EXCLUDED.test(t))) return true;
   }
@@ -373,6 +443,47 @@ const SCRATCH_TARGET = /^(?:\/tmp\/|\/private\/tmp\/|\/var\/tmp\/|\/var\/folders
 const unquote = (t) => String(t || '').replace(/^(['"])(.*)\1$/, '$2');
 const isScratch = (t) => SCRATCH_TARGET.test(unquote(t));
 
+// ── the ONE quoted-run scanner both quote-aware parsers below share (#2994 review r2) ──────────────────
+// `shellTokens` and `splitSegments` each used to find the end of a quoted run with a bare
+// `s.indexOf(quote, i + 1)`. That is not how bash ends a quoted run, and the disagreement was a total
+// guard bypass rather than a rounding error:
+//   `git commit -m "guard: reject \"a|b\" input" && npm run build`
+// bash reads `\"` as a LITERAL quote inside the double-quoted run (verified: `bash -c 'echo "a\"b"'`
+// prints `a"b`), so the run ends at the FINAL `"`. `indexOf` stopped at the `"` of the `\"`, which left the
+// parser one quote out of phase; the NEXT `"` then opened a run with no closer and swallowed the entire
+// rest of the line as one blob. Every downstream arm — the tree-write deny, the `git push origin main`
+// deny, the `pkill`/`rm backlog/*.md` denies, and (via `hasDestructiveLaneOp`) the whole lane-clobber
+// lease check — reads that blob and sees nothing to deny. An EVEN number of escaped quotes does not
+// re-sync it either: each `\"` shifts the phase again.
+// The rules this encodes are bash's actual ones, and they are NOT uniform across quote kinds:
+//   • `"…"`   — a backslash escapes the next character; `\"` does not close the run.
+//   • `'…'`   — NOTHING is special, not even a backslash; the run ends at the very next `'`.
+//               (`echo 'a\'` is a complete word `a\`, so applying the double-quote rule here would be a
+//               NEW desync in the opposite direction.)
+//   • `$'…'`  — ANSI-C quoting; backslash escapes ARE honoured, so `\'` does not close the run.
+//   • `$"…"`  — locale translation; escapes behave as in `"…"`.
+// Same non-shell-parser threat model as before: no expansion, no command substitution.
+
+/** Does a quoted run START at `s[i]` — a `"`/`'`, or the `$` of a `$'…'`/`$"…"` run? Pure. */
+function quoteStartsAt(s, i) {
+  const ch = s[i];
+  if (ch === '"' || ch === "'") return true;
+  return ch === '$' && (s[i + 1] === "'" || s[i + 1] === '"');
+}
+
+/** Index of the CLOSING quote of the run starting at `s[i]`, or -1 if unterminated. Pure. */
+function quotedRunEnd(s, i) {
+  const dollar = s[i] === '$';
+  const q = dollar ? s[i + 1] : s[i];
+  // `"…"`, `$'…'` and `$"…"` honour a backslash escape; a plain `'…'` does not.
+  const escapes = dollar || q !== "'";
+  for (let j = (dollar ? i + 2 : i + 1); j < s.length; j++) {
+    if (escapes && s[j] === '\\' && j + 1 < s.length) { j += 1; continue; }
+    if (s[j] === q) return j;
+  }
+  return -1;
+}
+
 /**
  * Split a command segment into quote-aware tokens. Pure. Each token is `{ text, quoted, op }`:
  *   • quoting is resolved (the surrounding quotes are removed and `quoted` is set) — so a `>` inside a
@@ -391,10 +502,10 @@ export function shellTokens(segment) {
   const flush = () => { if (started) out.push({ text: cur, quoted, op: false }); cur = ''; started = false; quoted = false; };
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
-    if (ch === '"' || ch === "'") {
-      const close = s.indexOf(ch, i + 1);
+    if (quoteStartsAt(s, i)) {
+      const close = quotedRunEnd(s, i);
       const end = close === -1 ? s.length : close;
-      cur += s.slice(i + 1, end);
+      cur += s.slice(s[i] === '$' ? i + 2 : i + 1, end);        // body only — the quotes are resolved away
       started = true;
       quoted = true;
       i = end;
@@ -446,8 +557,8 @@ export function splitSegments(command) {
   let cur = '';
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
-    if (ch === '"' || ch === "'") {                     // quoted run — kept verbatim, separators inside are TEXT
-      const close = s.indexOf(ch, i + 1);
+    if (quoteStartsAt(s, i)) {                          // quoted run — kept verbatim, separators inside are TEXT
+      const close = quotedRunEnd(s, i);
       const end = close === -1 ? s.length - 1 : close;  // unterminated quote runs to end of string
       cur += s.slice(i, end + 1);
       i = end;

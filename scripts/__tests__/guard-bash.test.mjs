@@ -10,7 +10,7 @@ import {
   isVerificationRun, isBackgrounded, backgroundedVerificationReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
-  splitSegments,
+  splitSegments, runnerInvocation,
 } from '../guard-bash.mjs';
 
 describe('guard-bash — backgrounded verification is denied (#2833 finding 3)', () => {
@@ -627,6 +627,38 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       "sed -i '' -e 's/a|b/c/' config/app.json", "tee '' config/app.json",
     ],
     // #2986(3) — the recall half of the eleventy flag allowlist: the flags that REALLY write the site dir.
+    // #2994 review r2 — an ESCAPED quote inside a quoted argument. `splitSegments`/`shellTokens` ended a
+    // quoted run at the first `"` they found, so `\"` (which bash reads as a LITERAL quote inside a
+    // double-quoted run — `bash -c 'echo "a\"b"'` prints `a"b`) left the parser one quote out of phase; the
+    // NEXT `"` then opened a run with no closer and swallowed the whole rest of the line as one blob, so
+    // EVERY deny arm below read a single unrecognisable segment. An EVEN number of escaped quotes does not
+    // re-sync it (`"a\"b\"c"` shifts the phase twice). Escaping a quote inside a commit message / `node -e`
+    // / `jq` filter is everyday work, which is what made this a live total bypass rather than a corner case.
+    'an escaped quote inside a quoted argument (#2994 r2, recall half)': [
+      'git commit -m "guard: reject \\"a|b\\" input" && npm run build',
+      'node -e "console.log(\\"hi\\")" && npm run build',
+      'jq -r "\\"x\\"" /tmp/a.json && echo y > src/foo.ts',
+      "echo \"a\\\"b\" && sed -i '' s/a/b/ config/app.json",
+      'echo "a\\"b" && eleventy',
+      'echo "a\\"b" && vite build',
+      "echo $'a\\'b' && npm run build",          // `$'…'` (ANSI-C) honours `\'` the same way
+      'echo "a\\"b\\"c" && npm run build',       // an EVEN count does NOT re-sync the old scanner
+      'echo "a\\"b" > config/app.json',          // the same desync in `shellTokens`, no separator involved
+    ],
+    // #2994 review r2 — the `exec`/`dlx` narrowing only matched `<runner> exec|dlx [--] <program>`, so ANY
+    // flag in between became the recursed "program", and the script-name scan took the first non-flag word,
+    // so a runner-level selector's VALUE (or a workspace NAME) was mistaken for the subcommand. Every row
+    // here is a real build that writes `dist/`/`_site/` at the cwd it runs in.
+    'a runner exec/dlx or workspace form with flags in the way (#2994 r2, recall half)': [
+      'npm exec --package=vite vite build', 'npm exec --package=vite -- vite build',
+      "npm exec -c 'vite build'", 'npm exec --yes vite build', 'npm exec --no vite build',
+      'pnpm exec --silent vite build', 'pnpm dlx --package=vite vite build',
+      'pnpm --filter web exec vite build', 'pnpm --filter web dlx vite build',
+      'yarn workspace web build', 'yarn dlx -q eleventy',
+      'npm exec --package=vite -- vite build --mode=prod',
+      // …and the spellings that were ALREADY right, pinned so the rewrite keeps them
+      'npm run --workspace=web build', 'npm --workspace=web run build', 'pnpm -r run build',
+    ],
     'eleventy flags that really WRITE the site dir (#2986/3, recall half)': [
       'eleventy', 'eleventy --serve', 'eleventy --watch', 'eleventy --serve --port=8080',
       'eleventy --quiet', 'eleventy --incremental', '11ty --watch', 'npx eleventy',
@@ -702,6 +734,32 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       'npx eleventy --version', '11ty --version', './node_modules/.bin/eleventy --help',
       'env eleventy --version', 'eleventy --output=_site --dryrun',
     ],
+    // #2994 r2 precision mirror — an escaped quote in a command that writes NOTHING must stay allowed, and
+    // the single-quote rule must stay DIFFERENT: bash honours no escape inside `'…'`, so `echo 'a\'` is a
+    // complete word and applying the double-quote rule there would be a new desync in the other direction.
+    'an escaped quote in a command that writes nothing (#2994 r2)': [
+      'git commit -m "guard: reject \\"a|b\\" input"',
+      'echo "he said \\"hi\\""',
+      'node -e "console.log(\\"hi\\")"',
+      'gh pr list --jq ".[] | select(.title | test(\\"fix\\"))"',
+      'git commit -m "fix \\"quoted\\" > thing"',
+      "echo 'a\\' && echo ok",
+      'jq -r "\\"x\\"" /tmp/a.json',
+      "printf '%s\\n' \"a\\\"b\"",
+      'echo "a\\"b" > /tmp/out.log',
+      'git commit -m "guard: reject \\"a|b\\" input" && npm run build:check',
+      "echo $'a\\'b' && npm run test:unit",
+    ],
+    // #2994 r2 precision mirror — the exec/dlx rewrite must not turn every flagged runner form into a deny:
+    // what matters is the TOOL it lands on, not that a flag was present.
+    'a runner exec/dlx form whose tool writes nothing (#2994 r2)': [
+      'npm exec --package=vitest vitest run', 'npm exec -- tsc --noEmit', 'pnpm exec eslint src/',
+      'npm exec --package=vite vite preview', 'yarn workspace web test', 'pnpm --filter web exec eslint .',
+      'npm run --workspace=web test:unit', "npm exec -c 'echo build'",
+      'npm exec --package=esbuild esbuild --version',
+      'pnpm dlx --package=@11ty/eleventy eleventy --version',
+      'npm exec', 'npm exec --', 'npm exec -c',
+    ],
   };
 
   for (const [family, cmds] of Object.entries(MUST_DENY)) {
@@ -730,6 +788,117 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       expect(at(cmd)).toMatch(/cd <lane-path> && <cmd>/);
     // …and that spelling really is allowed.
     expect(decide('cd /ws/.lanes/web-everything/lane-3 && npm run build', { primaryCwd: false })).toBeNull();
+  });
+});
+
+// ── #2994 review r2 — the escaped-quote desync, on the arms the corpus above cannot cover ───────────────
+// The MUST_DENY loop asserts every row is untouched in a lane clone, which is only true of the cwd-GATED
+// tree-write arm. These arms deny regardless of cwd (push/rm/pkill) or only inside a leased lane clone
+// (the #2367/#2413 clobber arm), so they get their own assertions — and the clobber arm is exactly where
+// the desync did the most damage, because `hasDestructiveLaneOp` is the CLI's pre-filter for reading the
+// lease at all: one unrecognisable blob ⇒ no lease read ⇒ a peer's clone clobbered with no deny.
+describe('guard-bash — an escaped quote must not bypass the cwd-independent arms (#2994 r2)', () => {
+  it('the push / backlog-rm / pkill arms still fire behind an escaped quote, at ANY cwd', () => {
+    const rows = [
+      ['git commit -m "guard: reject \\"a|b\\" input" && git push origin main', /lane\/\*|MAIN_PUSH_OK/],
+      ['echo "he said \\"hi\\"" && rm backlog/2986-x.md', /backlog/],
+      ['printf "%s\\n" "a\\"b" ; pkill -f vite', /dev server|pkill|kill/i],
+    ];
+    for (const [cmd, msg] of rows) {
+      expect(decide(cmd, { primaryCwd: true }), cmd).toMatch(msg);
+      expect(decide(cmd, { primaryCwd: false }), cmd).toMatch(msg);
+    }
+  });
+
+  it('hasDestructiveLaneOp (the CLI lease-read pre-filter) still sees the op behind an escaped quote', () => {
+    const rows = [
+      'echo "a\\"b" && git reset --hard origin/main',
+      'git commit -m "fix \\"x\\"" && git reset --hard',
+      'echo "a\\"b" && git clean -fd',
+      'echo "a\\"b" && git checkout -- .',
+      'echo "a\\"b" && git push --force origin lane/x',
+    ];
+    for (const cmd of rows) expect(hasDestructiveLaneOp(cmd), cmd).toBe(true);
+  });
+
+  it('the lane-clobber arm denies behind an escaped quote, in BOTH lease regimes', () => {
+    const rows = [
+      'echo "a\\"b" && git reset --hard origin/main',
+      'git commit -m "fix \\"x\\"" && git reset --hard',
+      'echo "a\\"b" && git clean -fd',
+      'echo "a\\"b" && git checkout -- .',
+      'echo "a\\"b" && git push --force origin lane/x',
+    ];
+    for (const cmd of rows) {
+      expect(decide(cmd, { foreignLiveLease: true }), cmd).toBeTruthy();        // #2367 unmarked-foreign
+      expect(decide(cmd, { markedLeaseSlug: 'wf-slug-abc' }), cmd).toBeTruthy(); // #2413 marked, slug unasserted
+    }
+    // …and the owning caller's slug assertion still passes, escaped quote and all (no new false deny).
+    expect(decide('echo "a\\"b" && LANE_SESSION=wf-slug-abc git reset --hard origin/main', { markedLeaseSlug: 'wf-slug-abc' })).toBeNull();
+    expect(decide('echo "a\\"b" && LANE_CLOBBER_OK=1 git reset --hard origin/main', { foreignLiveLease: true })).toBeNull();
+  });
+
+  it('splitSegments honours bash\'s ACTUAL escape rules — per quote kind, not one rule everywhere', () => {
+    // `"…"` — a backslash escapes the next char, so `\"` does NOT close the run.
+    expect(splitSegments('git commit -m "a \\"b|c\\" d" && npm run build'))
+      .toEqual(['git commit -m "a \\"b|c\\" d" ', ' npm run build']);
+    // `$'…'` (ANSI-C) — same, for `\'`.
+    expect(splitSegments("echo $'a\\'b' && npm run build")).toEqual(["echo $'a\\'b' ", ' npm run build']);
+    // `'…'` — NOTHING is special, not even a backslash: the run ends at the very next `'`.
+    // (verified against bash: `bash -c "echo 'a\\' && echo ok"` prints `a\` then `ok`.)
+    expect(splitSegments("echo 'a\\' && npm run build")).toEqual(["echo 'a\\' ", ' npm run build']);
+    // an unterminated run still consumes to end of string (unchanged fail-safe)
+    expect(splitSegments('echo "a && npm run build')).toEqual(['echo "a && npm run build']);
+  });
+
+  it('shellTokens ends a quoted token at the REAL closing quote (the same desync, one layer down)', () => {
+    expect(shellTokens('echo "a\\"b" > config/app.json').map((t) => t.text))
+      .toEqual(['echo', 'a\\"b', '>', 'config/app.json']);
+    expect(shellTokens("sed -i '' s/a/b/ /tmp/x").map((t) => t.text)).toEqual(['sed', '-i', '', 's/a/b/', '/tmp/x']);
+  });
+});
+
+// ── #2994 review r2 — the runner-invocation parse ───────────────────────────────────────────────────────
+describe('guard-bash — runnerInvocation reads a package-runner line the way the runner does (#2994 r2)', () => {
+  it('an exec/dlx form yields the COMMAND, past any runner-level flags', () => {
+    expect(runnerInvocation('pnpm exec vite build')).toEqual({ exec: 'vite build' });
+    expect(runnerInvocation('npm exec -- vite build')).toEqual({ exec: 'vite build' });
+    expect(runnerInvocation('npm exec --package=vite vite build')).toEqual({ exec: 'vite build' });
+    expect(runnerInvocation('npm exec --package=vite -- vite build')).toEqual({ exec: 'vite build' });
+    expect(runnerInvocation('npm exec --package vite vite build')).toEqual({ exec: 'vite build' });
+    expect(runnerInvocation('npm exec --yes vite build')).toEqual({ exec: 'vite build' });
+    expect(runnerInvocation('pnpm exec --silent vite build')).toEqual({ exec: 'vite build' });
+    expect(runnerInvocation('pnpm --filter web exec vite build')).toEqual({ exec: 'vite build' });
+    expect(runnerInvocation('yarn dlx -q eleventy')).toEqual({ exec: 'eleventy' });
+    // npm's `--call/-c` hides the command inside a quoted argument
+    expect(runnerInvocation("npm exec -c 'vite build'")).toEqual({ exec: 'vite build' });
+    expect(runnerInvocation('npm exec --call="vite build"')).toEqual({ exec: 'vite build' });
+    // the remainder is handed on VERBATIM — rejoining unquoted words would drop a `sed -i ''` empty argument
+    expect(runnerInvocation("npm exec -- sed -i '' s/a/b/ config/app.json")).toEqual({ exec: "sed -i '' s/a/b/ config/app.json" });
+  });
+
+  it('a script form yields ONLY the script-name positions', () => {
+    expect(runnerInvocation('npm run build')).toEqual({ names: ['build'] });
+    expect(runnerInvocation('npm run --silent build')).toEqual({ names: ['build'] });
+    expect(runnerInvocation('npm run --workspace=web build')).toEqual({ names: ['build'] });
+    expect(runnerInvocation('npm --workspace=web run build')).toEqual({ names: ['build'] });
+    expect(runnerInvocation('pnpm -r run build')).toEqual({ names: ['build'] });
+    expect(runnerInvocation('yarn workspace web build')).toEqual({ names: ['build'] });
+    expect(runnerInvocation('pnpm --filter web build')).toEqual({ names: ['build'] });
+    expect(runnerInvocation('yarn build')).toEqual({ names: ['build'] });
+    expect(runnerInvocation('run-s build:check build')).toEqual({ names: ['build:check', 'build'] });
+    expect(runnerInvocation('npm run test:unit -- src/build-graph.test.ts')).toEqual({ names: ['test:unit'] });
+    // npm has no bare-script form — `npm install …` is never a script name
+    expect(runnerInvocation('npm install --build-from-source better-sqlite3')).toEqual({ names: [] });
+    expect(runnerInvocation('npm ls esbuild')).toEqual({ names: [] });
+  });
+
+  it('degenerate / non-runner input never throws and never invents a command', () => {
+    expect(runnerInvocation('git status')).toBeNull();
+    expect(runnerInvocation('')).toBeNull();
+    expect(runnerInvocation('npm exec')).toEqual({ names: [] });
+    expect(runnerInvocation('npm exec --')).toEqual({ names: [] });
+    expect(runnerInvocation('npm exec -c')).toEqual({ exec: '' });
   });
 });
 
