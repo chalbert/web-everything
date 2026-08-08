@@ -9,7 +9,7 @@ tags: [citation-verification, check-standards, provenance, review-quality]
 
 # Provenance lint: a bare backticked identifier in prose must resolve against the tree, or be marked proposed
 
-Six false symbol/function citations across four review rounds of PR #1112 shared one generator: provenance written from memory and shipped in the past tense without a grep. `check:standards` #2821 gate 5 only resolves `we:path:line` loci, so a bare backticked identifier in prose (`collectOpenItemIds`, `validateTodoMarkerBlock`) is unreachable by any gate. Extend `we:scripts/lib/citation-check.mjs` with an identifier-resolution gate over backlog + docs prose: extract identifier-shaped backticked tokens, resolve each against the tree, and warn on the ones that do not, with an explicit escape for a deliberately-proposed name.
+Seven false symbol/function citations across four review rounds of PR #1112 shared one generator: provenance written from memory and shipped in the past tense without a grep. `check:standards` #2821 gate 5 only resolves `we:path:line` loci, so a bare backticked identifier in prose (`collectOpenItemIds`, `validateTodoMarkerBlock`) is unreachable by any gate. Extend `we:scripts/lib/citation-check.mjs` with an identifier-resolution gate over backlog + docs prose: extract identifier-shaped backticked tokens, resolve each against the tree, and warn on the ones that do not, with an explicit escape for a deliberately-proposed name.
 
 ## The failure this closes
 
@@ -60,7 +60,7 @@ false positives on the run that contains the real defect. That is the shape to b
 round-3 cite said the `appliesTo` walk lives in a separately-named block validator, and every individual
 symbol in that sentence exists. Grepping proves a name is real, never that the sentence about it is true. The
 same holds for counts ("35 fixtures"), for claims about what a prior item established, and for "verified:"
-prefaces. So this gate closes the **name-does-not-exist** class, which is where 3 of the 7 sat, and the
+prefaces. So this gate closes the **name-does-not-exist** class, which is where 2 of the 7 sat, and the
 remaining class stays a review-and-author discipline — carried by the agent-memory note filed alongside this
 item, not by a script.
 
@@ -70,17 +70,40 @@ item, not by a script.
   I/O-free like its siblings, with the symbol index injected by `we:scripts/check-standards.mjs`.
 - **Scope:** added prose lines only, in `backlog/*.md`, `docs/**/*.md`, and JSDoc/comment blocks of files on
   the `leash: spec` tier (`we:scripts/lib/gate-config.mjs`) — the three places the failure has actually
-  occurred. Not the whole corpus (see above).
+  occurred. Not the whole corpus (see above). Only the first two were measured before filing (the diff-scoped
+  run above is over `backlog/*.md` and `docs/**/*.md`); the `leash: spec` JSDoc surface is included by design,
+  not by measurement — see Known gaps.
 - **Extraction:** backticked spans matching camelCase or `SCREAMING_SNAKE`, outside fenced code blocks, with a
   trailing `()` tolerated.
 - **Resolution:** a token resolves if it appears anywhere in the tree's source files. Deliberately loose — the
-  gate answers "does this name exist at all?", which is the question the six misses failed, and a tighter
+  gate answers "does this name exist at all?", which is the question the seven misses failed, and a tighter
   "is it defined here" check re-introduces the proposed-name false positives.
 - **The escape, explicit:** a proposed name is written `` `newThing` (proposed) `` — or lives under a
   `## Done when` / `## Design` heading, which are already the conventional homes for names that do not exist
   yet. Both are cheap to detect and both make the author's intent legible to a reader too.
 - **Level:** warn first (the `CITATION_GATES_ENFORCED` pattern already in that file), with the diff scope
   making a clean baseline reachable immediately rather than after a corpus triage.
+
+## Known gaps
+
+Found by the round-4 review of `#xonzpym` (PR #1112), which asked that these be carried honestly rather than
+silently widened past what was actually measured:
+
+- **The `leash: spec` JSDoc surface is unmeasured.** The corpus-wide and diff-scoped numbers above (11,381
+  tokens / 1,074 unresolved; 19 tokens / 1 unresolved) both come from `git diff … -- 'backlog/*.md'
+  'docs/**/*.md'`. JSDoc/comment blocks of `leash: spec` files were never run through the extractor — they are
+  in the Design scope on judgment (round 3's biggest false claim lived in exactly such a comment), not because
+  the measurement covers them. Whoever builds this should either measure that surface too or file it as the
+  untested half.
+- **The escape set is under-specified for a name quoted as an example or a historical citation.** The declared
+  escapes are `` `name` (proposed) `` and living under a `## Done when` / `## Design` heading. Running the
+  design over this item's own body fires on three tokens that are none of the false-citation class it targets:
+  `collectOpenItemIds` and `validateTodoMarkerBlock` in the failure table above (quoted *as* the historical
+  defects being described) and `detectAnomalies` / `mountLaneBoard` in the "Is it mechanisable?" section
+  (quoted as examples of legitimately-proposed names). "Zero false positives" held for the diff this item
+  measured; it does not hold for this item's own prose. A third escape — a name quoted as an example or a
+  historical citation — is needed, or the residual false-positive rate should be carried honestly rather than
+  implied to be zero.
 
 ## Done when
 

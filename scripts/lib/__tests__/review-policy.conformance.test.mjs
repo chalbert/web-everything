@@ -241,8 +241,12 @@ function callHasSecondArgument(code, openIdx) {
  * @returns {{line: number, snippet: string}[]}
  */
 function vocabularyInjectionSites(src) {
-  // A file with no route to the function cannot call it: every route (named import, alias, re-export barrel
-  // consumed downstream, member access on a namespace import) spells the name somewhere in the file.
+  // FAST PATH: a file that spells `canonicalizeReason` literally is caught by every route below (named import,
+  // alias, a re-export barrel that keeps the name, member access on a namespace import). It is NOT true of
+  // every route to the function — a RENAMED re-export barrel consumed downstream (`export { X as y } from …`,
+  // then a consumer that only ever spells `y`) never puts the literal name in the consumer's source, and
+  // neither does a namespace-import destructure-rename (`const { X: y } = ns`) at the call site. Both are open
+  // gaps, measured rather than argued; see "WHAT IT DOES NOT COVER" on the sweep's own test below.
   if (!src.includes('canonicalizeReason')) return [];
   const code = stripNonCode(src);
   const sites = [];
@@ -935,18 +939,46 @@ describe('review-core canonicalizes against the IMPLEMENTED vocabulary, never th
     // an edit may never even reach this committee. The default is pinned above; the injection POINT is pinned here.
     //
     // WHAT THIS SWEEP ACTUALLY COVERS (stated exactly, because the sentence that used to sit here claimed more
-    // than it checked and a grep falsified it):
+    // than it checked and a grep falsified it — twice now; see below):
     //   • every `.mjs/.cjs/.js/.ts/.mts/.cts` file in EVERY tree of the repo — not `scripts/` — minus dependencies,
     //     generated output and `__tests__` (see SWEEP_SKIP_DIRS; the exemption is for this suite and its peers,
     //     which legitimately drive both vocabularies — no production module lives under a `__tests__`);
-    //   • calls through the IMPORTED BINDING, so an `as` alias, an `import()`/`require()` destructure rename, a
-    //     local re-alias and a `ns.canonicalizeReason(…)` member call are all caught, not just the literal name;
+    //   • calls through a binding imported DIRECTLY off a specifier matching `review-core.mjs` (CORE_MODULE_RE):
+    //     an `as` alias, an `import()`/`require()` destructure rename, a local re-alias (`const y = x;`) chased
+    //     to a fixpoint, and a `ns.canonicalizeReason(…)` member call are all caught in that file, not just the
+    //     literal name;
     //   • calls WRAPPED across lines: the scan is over the whole file with brackets matched, not line by line;
     //   • and it ignores comments, string literals and regex literals, so prose about the hazard is not an offence.
-    // WHAT IT DOES NOT COVER, honestly: computed dispatch (`core['canonicalize' + 'Reason'](…)`), the function
-    // passed as a VALUE into something that calls it with two arguments, `apply`/`call` with an argument array,
-    // and anything outside this repo. Those remain closed by the behavioural pin above, which constrains the
-    // DEFAULT rather than the call sites — this sweep is the second layer, not the only one.
+    // WHAT IT DOES NOT COVER, honestly — every route below was proven end-to-end on a green 60/60 suite with the
+    // injected function live at runtime (real module graph), not reasoned about from the source:
+    //   • a RENAMED re-export barrel consumed downstream — `export { X as y } from './review-core.mjs'` in one
+    //     file, `import { y } from '<that file>'` in another. `canonicalizeReasonBindings` only walks an
+    //     import/destructure clause whose OWN specifier matches `review-core.mjs`; the consumer's specifier
+    //     points at the barrel, not the core, so `y` is never added to ITS binding set — and the consumer's
+    //     source never spells `canonicalizeReason` at all, so the fast path above returns before any of this
+    //     even runs;
+    //   • a namespace-import destructure-rename, `import * as core …; const { canonicalizeReason: cz } = core;
+    //     cz(raw, DECLARED)` — the join of two routes this comment used to claim were each covered (the
+    //     `import()`/`require()` destructure rename, and the `ns.canonicalizeReason(…)` member call); neither
+    //     growth rule matches a destructure taken OFF a namespace binding;
+    //   • a comma-joined declaration, `const a = 1, canon = canonicalizeReason;` — the re-alias growth rule only
+    //     matches a lone `const|let|var NAME = …` declarator, not a second declarator sharing the keyword;
+    //   • object-property indirection, `const api = { canon: canonicalizeReason }; api.canon(raw, DECLARED)` —
+    //     the growth rule matches `NAME = NAME2` assignment, not a property value inside an object literal;
+    //   • a query-suffixed specifier, `'../review-core.mjs?v=1'` — CORE_MODULE_RE anchors on the literal
+    //     filename and does not match past a `?`, so an ALIASED import off such a specifier is not resolved
+    //     (an unaliased one still is, because the bare name `canonicalizeReason` is always in the binding set);
+    //   • computed dispatch (`core['canonicalize' + 'Reason'](…)`), the function passed as a VALUE into
+    //     something that calls it with two arguments, `apply`/`call` with an argument array, and anything
+    //     outside this repo.
+    // THE SEAM WITH THE BEHAVIOURAL PIN, stated correctly — an earlier revision of this comment argued the
+    // routes above "remain closed by the behavioural pin", which refutes itself: the pin constrains what
+    // `canonicalizeReason` DEFAULTS to when called with ONE argument, which is exactly why it cannot see any
+    // route above — every one is a CALL SITE passing an explicit second argument, and an explicit second
+    // argument overrides the default by construction. The pin closes the DEFAULT; this sweep closes the call
+    // sites it can resolve; a call site the sweep cannot resolve is closed by NEITHER layer. Two layers with a
+    // seam between them is still much better than one — with zero `todo` entries today the declared and
+    // implemented vocabularies are equal, so every gap above is latent, not live.
     const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
     const { filesWalked, importers, offenders } = sweepForVocabularyInjection(repoRoot);
 
