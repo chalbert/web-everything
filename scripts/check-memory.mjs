@@ -52,6 +52,28 @@ export function checkBudget(content) {
   return { v, bytes };
 }
 
+/**
+ * Is `file` the always-loaded memory INDEX? Pure + exported so the write-time gate's target match is
+ * TESTABLE — it previously lived inline as `/\/memory\/MEMORY\.md$/`, which matched only the user-level
+ * spelling. #2266 moved the corpus to `agent-memory-src/` and this predicate did not follow, so the gate
+ * has been DEAD for every lane-clone edit — i.e. for the only place memory is allowed to be edited at all
+ * (edit-work runs in a lane clone; a lane has a different PROJECT_KEY and no user-level memory dir, which
+ * is exactly why MEM_DIR above already grew the REPO_MEM_DIR fallback. The sweep half was made lane-aware;
+ * this half was not).
+ *
+ * ONE corpus, THREE spellings, each of which a hook event can legitimately carry:
+ *   • `~/.claude/projects/<key>/memory/MEMORY.md` — the user-level harness dir (a symlink; primary only)
+ *   • `<root>/.claude/agent-memory/MEMORY.md`     — the in-repo symlink
+ *   • `<root>/agent-memory-src/MEMORY.md`         — the tracked source of truth (what a lane clone edits)
+ *
+ * Match the SPELLING, never the resolved realpath: the hook event carries the path the tool was called
+ * with, and a lane-clone write to `agent-memory-src/MEMORY.md` never traverses a symlink to resolve.
+ */
+export function isMemoryIndexPath(file) {
+  return typeof file === 'string'
+    && /(?:^|\/)(?:memory|agent-memory|agent-memory-src)\/MEMORY\.md$/.test(file);
+}
+
 // #2273 — guard the CLI body behind an entry-point check (mirrors scripts/guard-bash.mjs) so importing
 // this module for its pure `checkBudget` export (the Tier-A golden-corpus snapshot harness) never also
 // runs the sweep / --pre gate / `process.exit(...)` as a side effect of the import.
@@ -63,7 +85,7 @@ if (process.argv.includes('--pre')) {
   let ev;
   try { ev = JSON.parse(readFileSync(0, 'utf8') || '{}'); } catch { process.exit(0); }
   const file = ev?.tool_input?.file_path;
-  if (!file || !/\/memory\/MEMORY\.md$/.test(file)) process.exit(0); // not the memory index
+  if (!isMemoryIndexPath(file)) process.exit(0); // not the memory index
   const ti = ev.tool_input ?? {};
   const onDisk = existsSync(file) ? readFileSync(file, 'utf8') : '';
   let proposed;
