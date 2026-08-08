@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ACTOR_ENV, currentActorId, AUTHOR_ACTOR_MARKER, CLEARER_ACTOR_MARKER,
   buildAuthorActorMarker, buildClearerActorMarker, parseAuthorActorId, parseClearerActorId,
-  decideClearerIndependence, INDEPENDENCE,
+  readAuthorActorStamps, decideClearerIndependence, INDEPENDENCE,
 } from '../review-independence.mjs';
 
 describe('currentActorId — the harness session identity, never an argv field', () => {
@@ -41,12 +41,39 @@ describe('the actor markers — a writer and a reader that agree (round-trip, no
     expect(parseClearerActorId([{ body: comment }])).toBe('sess-reviewer');
   });
 
-  it('the AUTHOR read is FIRST-wins — a later appended stamp cannot re-attribute authorship', () => {
-    // pr-land writes the stamp ONCE at open and never overwrites one. So a body carrying two can only be
-    // someone re-writing history, and the ORIGINAL must survive — otherwise the cheapest possible forge is
-    // "append your own id to the body, then clear your own PR".
-    const body = `${buildAuthorActorMarker('sess-original')}\n\nlater edit\n\n${buildAuthorActorMarker('sess-forger')}`;
-    expect(parseAuthorActorId(body)).toBe('sess-original');
+  // The AUTHOR read is AGREEMENT-OR-NOTHING, and the PR #1100 review is why it is not first-match-wins: a
+  // first match is POSITIONAL, not temporal, so the "a second stamp can only be someone re-writing history,
+  // therefore keep the earliest" reasoning was simply false — a PREPENDED forgery wins a first-match scan.
+  // These four pin the real property, including the proof that neither position can be bought.
+  it('a body stamped ONCE resolves to that id (the ordinary case)', () => {
+    expect(parseAuthorActorId(`x\n\n${buildAuthorActorMarker('sess-original')}\n`)).toBe('sess-original');
+  });
+
+  it('the SAME id stamped twice still resolves — duplication is not a conflict', () => {
+    const body = `${buildAuthorActorMarker('sess-a')}\n\nedit\n\n${buildAuthorActorMarker('sess-a')}`;
+    expect(parseAuthorActorId(body)).toBe('sess-a');
+    expect(readAuthorActorStamps(body)).toEqual(['sess-a']);
+  });
+
+  it("CONFLICTING stamps resolve to '' — ambiguity fails CLOSED, it does not pick a winner", () => {
+    // APPENDED forgery (what first-match-wins claimed to stop)…
+    const appended = `${buildAuthorActorMarker('sess-original')}\n\n${buildAuthorActorMarker('sess-forger')}`;
+    expect(parseAuthorActorId(appended)).toBe('');
+    // …and PREPENDED forgery (what first-match-wins actually HANDED to the forger — the PR #1100 proof).
+    const prepended = `${buildAuthorActorMarker('sess-forger')}\n\n${buildAuthorActorMarker('sess-original')}`;
+    expect(parseAuthorActorId(prepended)).toBe('');
+    // Neither forger gets attributed authorship, and neither does the original: the record is unproven, which
+    // the autonomous seam refuses outright and the CLI states verbatim in the durable comment.
+    expect(readAuthorActorStamps(prepended)).toEqual(['sess-forger', 'sess-original']);
+  });
+
+  it('readAuthorActorStamps answers PRESENCE, which is a different question from the resolved id', () => {
+    // `pr-land.mjs#withAuthorStamp` relies on exactly this distinction: an AMBIGUOUS body must not be re-stamped
+    // on every producer re-run just because its id will not resolve.
+    const ambiguous = `${buildAuthorActorMarker('a')}\n${buildAuthorActorMarker('b')}`;
+    expect(parseAuthorActorId(ambiguous)).toBe('');
+    expect(readAuthorActorStamps(ambiguous).length).toBe(2);
+    expect(readAuthorActorStamps('no stamp here')).toEqual([]);
   });
 
   it('the CLEARER read is LAST-wins across comments — the latest verdict is the operative one', () => {
@@ -94,6 +121,17 @@ describe('decideClearerIndependence — total over the four statuses, fail-close
     expect(d.independent).toBe(false);
     expect(d.status).toBe(INDEPENDENCE.SELF_CLEAR);
     expect(d.reason).toMatch(/SELF-CLEAR REFUSED/);
+  });
+
+  it('the SHARED self-clear reason states the FACT and prescribes no remedy (PR #1100 — it misdirected)', () => {
+    // The first cut ended "…or let a human clear it", which pointed at a door the same refusal had shut: a
+    // subagent inherits its parent's session id, so the human running /review IS the same actor. What works
+    // differs per caller, so each caller names its own routes; this shared string must not name any.
+    const d = decideClearerIndependence({ authorId: 'sess-a', clearerId: 'sess-a' });
+    expect(d.reason).not.toMatch(/let a human clear it/i);
+    // …and it DOES state the fact that makes the refusal comprehensible: session ids are inherited.
+    expect(d.reason).toMatch(/inherits/i);
+    expect(d.reason).toContain(ACTOR_ENV);
   });
 
   it('whitespace around an id does not defeat the match — trimmed on both sides', () => {

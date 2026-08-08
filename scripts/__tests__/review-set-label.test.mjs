@@ -1152,7 +1152,7 @@ const a = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_CALL_LOG, JSON.stringify(a) + '\\n');
 if (a[0] === 'pr' && a[1] === 'view') {
   process.stdout.write(JSON.stringify({
-    labels: [{ name: 'review:pending' }, { name: 'ready-to-merge' }],
+    labels: JSON.parse(process.env.GH_PR_LABELS).map((name) => ({ name })),
     headRefOid: process.env.GH_HEAD_SHA,
     headRefName: 'lane/x',
     state: 'OPEN',
@@ -1181,8 +1181,10 @@ process.exit(0);
     }
   });
 
-  const run = (sessionId, prBody = BODY) => spawnSync(
-    'node', [script, '1099', '--repo=o/n', '--to=accepted', '--actor=an agent'],
+  // Drive the REAL CLI with the recording fake `gh`. `labels` is what the fake PR carries, so the same harness
+  // covers the ordinary parked PR AND the `review:human` gate-self one the clear-human ceremony needs.
+  const runCli = (args, { sessionId, prBody = BODY, labels = ['review:pending', 'ready-to-merge'] }) => spawnSync(
+    'node', [script, '1099', '--repo=o/n', ...args],
     {
       encoding: 'utf8',
       env: {
@@ -1192,10 +1194,12 @@ process.exit(0);
         GH_COMMENT_BODY: join(dir, 'comment.md'),
         GH_HEAD_SHA: SHA,
         GH_PR_BODY: prBody,
+        GH_PR_LABELS: JSON.stringify(labels),
         CLAUDE_CODE_SESSION_ID: sessionId,
       },
     },
   );
+  const run = (sessionId, prBody = BODY) => runCli(['--to=accepted', '--actor=an agent'], { sessionId, prBody });
   const ghCalls = () => (existsSync(join(dir, 'gh-calls.log'))
     ? readFileSync(join(dir, 'gh-calls.log'), 'utf8').split('\n').filter(Boolean)
       .map((l) => JSON.parse(l).slice(0, 2).join(' '))
@@ -1236,21 +1240,77 @@ process.exit(0);
   });
 
   it('a `changes` BOUNCE is never blocked by the independence bar — a bounce lands nothing', () => {
-    const r = spawnSync('node', [script, '1099', '--repo=o/n', '--to=changes', '--actor=an agent'], {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        PATH: `${dir}:${process.env.PATH}`,
-        GH_CALL_LOG: join(dir, 'gh-calls.log'),
-        GH_COMMENT_BODY: join(dir, 'comment.md'),
-        GH_HEAD_SHA: SHA,
-        GH_PR_BODY: BODY,
-        CLAUDE_CODE_SESSION_ID: AUTHOR, // the author, bouncing its own PR — allowed, it clears nothing
-      },
-    });
+    // the author, bouncing its own PR — allowed, it clears nothing
+    const r = runCli(['--to=changes', '--actor=an agent'], { sessionId: AUTHOR });
     expect(r.status).toBe(0);
     expect(ghCalls()).toContain('pr edit');
     // And a bounce carries NO clearer stamp — there is no clearance to attribute.
     expect(readFileSync(join(dir, 'comment.md'), 'utf8')).not.toContain('cleared-by-actor');
+  });
+
+  // ── PR #1100 review, THE BLOCKER · the HUMAN CEREMONY is exempt ────────────────────────────────────────────
+  // A subagent INHERITS its parent's CLAUDE_CODE_SESSION_ID, so the comparison above is SESSION-level and the
+  // operator's own `/review` ceremony — which shells this CLI from inside the session that opened the PR — reads
+  // as a self-clear. The first cut refused `clear-human` on that basis too (`stampsAcceptance` gated the refusal),
+  // which meant NOTHING could be cleared through the sanctioned path, including the PR that introduced the guard.
+  // These drive the REAL CLI on a REAL `review:human` PR and pin the exemption, its record, and its limits.
+  const HUMAN_LABELS = ['review:human', 'review:pending', 'ready-to-merge'];
+  const clearHuman = (sessionId, labels = HUMAN_LABELS) => runCli(
+    ['--to=clear-human', '--actor=Nicolas', '--reason=clear it, I have reviewed it'],
+    { sessionId, labels },
+  );
+
+  it('THE BLOCKER: the author\'s OWN session may run --to=clear-human on a review:human PR — ALLOWED', () => {
+    const r = clearHuman(AUTHOR);
+    expect(r.status).toBe(0);
+    const payload = JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop());
+    expect(payload.ok).toBe(true);
+    // It actually swapped the label and posted the record — not a silent no-op dressed as success.
+    expect(ghCalls()).toContain('pr edit');
+    expect(ghCalls()).toContain('pr comment');
+  });
+
+  it('…and the durable comment records it as a HUMAN CEREMONY, not as an established-independent clearance', () => {
+    clearHuman(AUTHOR);
+    const comment = readFileSync(join(dir, 'comment.md'), 'utf8');
+    expect(comment).toMatch(/Cleared by the HUMAN CEREMONY/);
+    expect(comment).toMatch(/NOT as "an independent reviewer cleared it"/);
+    // It names the actor whose session cleared it, and quotes the operator instruction verbatim (#2895).
+    expect(comment).toContain(`<!-- cleared-by-actor: ${AUTHOR} -->`);
+    expect(comment).toContain('clear it, I have reviewed it');
+    // The WRONG record — the generic "could not be checked" warning — must NOT be what a reader sees here: this
+    // clearance's independence was not unknown, it was known-absent and deliberately exempted.
+    expect(comment).not.toMatch(/Independence NOT established/);
+  });
+
+  it('clear-human is STILL refused when the PR does not carry review:human — the exemption is narrow', () => {
+    const r = clearHuman(AUTHOR, ['review:pending', 'ready-to-merge']);
+    expect(r.status).not.toBe(0);
+    const payload = JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop());
+    expect(payload.error).toMatch(/no review:human label/);
+    // Refused by the PURE decider, so nothing was written.
+    expect(ghCalls()).toEqual(['pr view']);
+    expect(existsSync(join(dir, 'comment.md'))).toBe(false);
+  });
+
+  it('--to=accepted on that SAME review:human PR from the SAME session is still refused (#2439 intact)', () => {
+    const r = runCli(['--to=accepted', '--actor=Nicolas'], { sessionId: AUTHOR, labels: HUMAN_LABELS });
+    expect(r.status).not.toBe(0);
+    expect(JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop()).error).toMatch(/SELF-CLEAR REFUSED/);
+    expect(ghCalls()).toEqual(['pr view']);
+  });
+
+  it('the refusal message names ONLY routes that work, and promises no escape that does not exist', () => {
+    // The first cut said "hand the verdict to a different session, or let a human clear it" — and the human WAS
+    // in that session, so the second half pointed at a shut door. The message must name the two live routes…
+    const err = JSON.parse(run(AUTHOR).stdout.trim().split('\n').filter(Boolean).pop()).error;
+    expect(err).toMatch(/--to=clear-human/);
+    expect(err).toMatch(/review:human/);
+    expect(err).toMatch(/DIFFERENT SESSION/);
+    // …say plainly that no flag lifts it (there is no --force, and none is being invented)…
+    expect(err).toMatch(/no --force/);
+    // …and never advertise an env-var escape as sanctioned: unsetting the session id does not buy independence,
+    // it only downgrades the record to "not established", so the message must not offer it as a way through.
+    expect(err).not.toMatch(/env -u|unset|CLAUDE_CODE_SESSION_ID=/);
   });
 });

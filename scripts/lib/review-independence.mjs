@@ -35,10 +35,21 @@
  *     auto-land those — which is correct, and costs nothing operationally because `landMode` is
  *     SHADOW by default (ratified 2026-07-26) and no scheduled runner may flip it (#2830).
  *   • THE INVOKED CLI PATH (`we:scripts/review-set-label.mjs`, run by the operator's `/review` or by a
- *     conveyor agent) refuses a PROVEN `self-clear` and otherwise proceeds — but when independence could not
- *     be established it says so verbatim in the durable comment rather than staying silent. A hard refusal
- *     on `unknown-author` there would strand every PR opened before this file existed, with a human unable
- *     to clear it; the honest record is the mitigation, exactly as #2895 chose.
+ *     conveyor agent) refuses a PROVEN `self-clear` on `--to=accepted` and otherwise proceeds — but when
+ *     independence could not be established it says so verbatim in the durable comment rather than staying
+ *     silent. A hard refusal on `unknown-author` there would strand every PR opened before this file existed,
+ *     with a human unable to clear it; the honest record is the mitigation, exactly as #2895 chose.
+ *   • THE HUMAN CEREMONY (`--to=clear-human`) IS EXEMPT FROM THE REFUSAL, and that exemption is load-bearing
+ *     rather than a softening (PR #1100 review, THE BLOCKER). A SUBAGENT INHERITS ITS PARENT'S
+ *     `CLAUDE_CODE_SESSION_ID` — verified, and `CLAUDE_CODE_CHILD_SESSION` is a boolean flag, not a finer id —
+ *     so the comparison here is SESSION-level, and the operator's own `/review` ceremony shells the CLI from
+ *     inside the very session that opened the PR. Refusing `clear-human` too therefore refused the operator's
+ *     ENTIRE NORMAL WORKFLOW: nothing could be cleared through the sanctioned path, including the PR that
+ *     introduced this file. The exemption is safe because `clear-human` already carries a STRONGER human
+ *     signal than a session id: it is refused unless the PR actually carries `review:human`, and it demands
+ *     an explicit `--actor` plus a quoted `--reason`, both posted verbatim. The durable comment records the
+ *     exemption in as many words, so the audit trail reads "a human ceremony cleared it", never "an
+ *     established-independent agent cleared it". `--to=accepted` — the AGENT verdict path — stays refused.
  *
  * NOT YET TRUST-CHAIN REGISTERED, AND THAT IS AN OWED FOLLOW-UP, NOT A CHOICE. This module DECIDES what may
  * clear the gate, which is the textbook `policy` tier in `we:scripts/lib/gate-config.mjs`'s own words — an edit
@@ -90,15 +101,48 @@ export function buildAuthorActorMarker(id) { return buildActorMarker(AUTHOR_ACTO
 export function buildClearerActorMarker(id) { return buildActorMarker(CLEARER_ACTOR_MARKER, id); }
 
 /**
- * Read the AUTHOR's actor id out of a PR body. FIRST match wins — deliberately the opposite of
- * `parseReviewedSha`'s last-wins. The author stamp is written ONCE, at open; a second stamp appended later
- * can only be someone re-writing history, so the earliest one is the one that must survive. Pure.
+ * Every DISTINCT author-actor id a PR body carries, in the order first seen. Pure. Exported because the
+ * PRESENCE of a stamp and the RESOLVED id are different questions: `pr-land.mjs#withAuthorStamp` must not
+ * append a second stamp to a body that already carries one even when the body is ambiguous (see below), and
+ * asking `parseAuthorActorId` would answer '' there and re-stamp on every re-run.
  * @param {string} body - the PR body.
- * @returns {string} the id, or '' when the body carries no stamp.
+ * @returns {string[]}
+ */
+export function readAuthorActorStamps(body) {
+  const re = actorMarkerRe(AUTHOR_ACTOR_MARKER, 'g');
+  const ids = new Set();
+  let m;
+  while ((m = re.exec(String(body || ''))) !== null) ids.add(m[1].trim());
+  return [...ids];
+}
+
+/**
+ * Read the AUTHOR's actor id out of a PR body — AGREEMENT-OR-NOTHING. One id (however many times it appears)
+ * resolves; a body carrying two DIFFERENT author stamps is AMBIGUOUS and resolves to '' (i.e. `unknown-author`,
+ * which the autonomous seam refuses outright and the invoked CLI records as "Independence NOT established").
+ * Pure.
+ *
+ * SAY THE REAL PROPERTY, NOT A BIGGER ONE (PR #1100 review). The first cut selected the FIRST match and
+ * justified it as "the stamp is written once at open, so a later stamp can only be someone re-writing history".
+ * That reasoning is WRONG, and it was proved wrong: first-match is POSITIONAL, not temporal. A body has no
+ * clock in it, so "first in the text" says nothing about "written first in time" — a forger who PREPENDS a
+ * marker wins a first-match scan outright, which is the cheapest possible forge and precisely the one the old
+ * comment claimed to stop. Agreement-or-nothing gives up on picking a winner, because there is no honest basis
+ * to pick one, and fails CLOSED instead: a tampered body reads as unproven rather than as whichever id the
+ * tamperer managed to position correctly.
+ *
+ * WHAT THIS STILL DOES NOT BUY, stated plainly (the file header's #2895 discipline). This is not tamper-proof
+ * and cannot be: an actor able to edit the PR body can STRIP the original stamp and write its own, leaving a
+ * single, self-consistent, independent-looking record. What agreement-or-nothing buys is that the LAZY forge —
+ * adding a marker without removing the real one — no longer succeeds; it downgrades to unproven, where a
+ * reader is told so. #2946 (a hardware human-presence gesture) remains the durable fix.
+ *
+ * @param {string} body - the PR body.
+ * @returns {string} the id, or '' when the body carries no stamp OR carries conflicting ones.
  */
 export function parseAuthorActorId(body) {
-  const m = actorMarkerRe(AUTHOR_ACTOR_MARKER, '').exec(String(body || ''));
-  return m ? m[1].trim() : '';
+  const ids = readAuthorActorStamps(body);
+  return ids.length === 1 ? ids[0] : '';
 }
 
 /**
@@ -170,9 +214,15 @@ export function decideClearerIndependence({ authorId, clearerId } = {}) {
     return {
       independent: false,
       status: INDEPENDENCE.SELF_CLEAR,
+      // NO REMEDY IS NAMED HERE, on purpose (PR #1100 review). The first cut ended "hand the verdict to a
+      // different session, or let a human clear it" — and the second half MISDIRECTED, because a subagent
+      // inherits its parent's session id, so the human running `/review` IS this same actor and "let a human
+      // clear it" pointed at a door that was also shut. What actually works differs per caller (the CLI has the
+      // `clear-human` ceremony; the autonomous seam has no ceremony at all), so each caller names its own routes
+      // and this shared decider states only the FACT.
       reason: `SELF-CLEAR REFUSED — the clearing actor (${clearer}) is the PR's author; the clearing agent must not `
-        + 'be the author (#2439, applying #2398\'s distinct-fresh-validator bar). Hand the verdict to a different '
-        + 'session, or let a human clear it',
+        + 'be the author (#2439, applying #2398\'s distinct-fresh-validator bar). Note that a subagent INHERITS its '
+        + `parent's ${ACTOR_ENV}, so every agent spawned by the session that opened this PR is this same actor`,
     };
   }
   return {

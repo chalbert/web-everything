@@ -10,10 +10,20 @@
  * shell/import it rather than re-implementing how a label swap lands.
  *
  * #2844 — INVARIANT 2 says a `review:human` PR may not be machine-cleared; it says NOTHING about who clears a
- * `review:pending` one, and before #2844 nothing else did either. This CLI now REFUSES an acceptance whose
- * clearing actor is provably the PR's own author (`we:scripts/lib/review-independence.mjs`), stamps the clearing
- * actor's id into the durable comment, and — when independence could not be established — says so in that
+ * `review:pending` one, and before #2844 nothing else did either. This CLI now REFUSES an `--to=accepted` verdict
+ * whose clearing actor is provably the PR's own author (`we:scripts/lib/review-independence.mjs`), stamps the
+ * clearing actor's id into the durable comment, and — when independence could not be established — says so in that
  * comment rather than leaving a silence a reader would misread as independence.
+ *
+ * `--to=clear-human` IS EXEMPT FROM THAT REFUSAL (PR #1100 review). The actor id is `CLAUDE_CODE_SESSION_ID` and a
+ * SUBAGENT INHERITS ITS PARENT'S, so the comparison is SESSION-level and the operator's own `/review` ceremony —
+ * which shells this CLI from inside the session that opened the PR — is a self-clear by that measure. Refusing the
+ * human ceremony too made NOTHING clearable through the sanctioned path. The exemption is not a weakening: the
+ * ceremony is refused unless the PR carries `review:human` and requires an explicit `--actor` plus a quoted
+ * `--reason`, and the durable comment records that a HUMAN CEREMONY cleared it, never that an
+ * established-independent agent did. THERE IS NO `--force` AND NO FLAG that lifts the `--to=accepted` refusal:
+ * the two routes that clear a self-authored PR are the `clear-human` ceremony (on a `review:human` PR) and running
+ * the review from a session that did not open the PR. The refusal message names exactly those two.
  *
  * INVARIANT 2 (the whole point): a `review:human` PR is NEVER cleared to `review:accepted` by anything but a
  * human's /review ceremony. `decideSetLabel` REFUSES `to==='accepted'` when the PR carries `review:human`
@@ -407,24 +417,48 @@ export function runReviewLabelCli({
       + 'happened); open a new PR for the findings instead of relabeling this one', 1);
   }
 
-  // #2844 — THE SELF-CLEAR REFUSAL, on the two targets that RECORD AN ACCEPTANCE (`accepted`, `clear-human`);
-  // a `changes` bounce and a `rearm` land nothing, so neither needs an independence bar. Checked HERE: after the
-  // OPEN-state gate, BEFORE the pure decision and therefore before ANY gh mutation, and refusing through the same
-  // `{"error":…}` JSON contract every other refusal here honours.
+  // #2844 — THE SELF-CLEAR REFUSAL. Independence is EVALUATED for both targets that record an acceptance
+  // (`accepted`, `clear-human`) so the durable comment can state the outcome either way; a `changes` bounce and a
+  // `rearm` land nothing, so neither needs an independence bar at all. Checked HERE: after the OPEN-state gate,
+  // BEFORE the pure decision and therefore before ANY gh mutation, and refusing through the same `{"error":…}`
+  // JSON contract every other refusal here honours.
   //
-  // ONLY a PROVEN self-clear is refused — the two "cannot establish it" statuses proceed, and say so verbatim in
-  // the durable comment (`buildVerdictComment`). That asymmetry with the autonomous seam
-  // (`we:scripts/lib/auto-land-seam.mjs`, which refuses all three) is deliberate and is argued in full in
-  // `we:scripts/lib/review-independence.mjs`'s header: refusing `unknown-author` HERE would strand every PR
-  // opened before the stamp existed with no way for a HUMAN to clear it, which trades a real hole for a worse
-  // one. The honest record is the mitigation, exactly the #2895 honesty-tax choice.
+  // ONLY `--to=accepted` — the AGENT verdict path — is REFUSED, and only on a PROVEN self-clear. Two separate
+  // narrowings, each with its own reason:
+  //   • the two "cannot establish it" statuses PROCEED and say so verbatim in the durable comment
+  //     (`buildVerdictComment`). That asymmetry with the autonomous seam (`we:scripts/lib/auto-land-seam.mjs`,
+  //     which refuses all three) is argued in full in `we:scripts/lib/review-independence.mjs`'s header:
+  //     refusing `unknown-author` HERE would strand every PR opened before the stamp existed with no way for a
+  //     HUMAN to clear it, which trades a real hole for a worse one.
+  //   • `clear-human` is EXEMPT (PR #1100 review, THE BLOCKER). The comparison is SESSION-level — a subagent
+  //     inherits its parent's `CLAUDE_CODE_SESSION_ID` — and the operator's `/review` ceremony shells this CLI
+  //     from inside the session that opened the PR, so refusing `clear-human` too refused the operator's entire
+  //     normal workflow and left NOTHING clearable through the sanctioned path. The exemption costs nothing the
+  //     guard was buying, because `clear-human` already carries a stronger human signal than a session id: it is
+  //     refused unless the PR actually carries `review:human` (`decideSetLabel`, below — that refusal still
+  //     stands and is reached precisely because this one no longer fires first), and it demands an explicit
+  //     `--actor` plus a quoted `--reason`. `buildVerdictComment` RECORDS the exemption, so the trail says a
+  //     human ceremony cleared it rather than an established-independent agent.
   const clearerId = currentActorId();
   const stampsAcceptance = to === 'accepted' || to === 'clear-human';
   const independence = stampsAcceptance
     ? decideClearerIndependence({ authorId: parseAuthorActorId(prBody), clearerId })
     : null;
-  if (independence && independence.status === INDEPENDENCE.SELF_CLEAR) {
-    fail(`${independence.reason} — nothing was changed (#2844)`, 1);
+  if (to === 'accepted' && independence && independence.status === INDEPENDENCE.SELF_CLEAR) {
+    // THE MESSAGE NAMES ONLY ROUTES THAT ACTUALLY WORK (PR #1100 review). The first cut inherited the decider's
+    // "…or let a human clear it", which pointed at a door this same refusal had shut. There is deliberately NO
+    // `--force` and no flag on this command: an agent recording an accept on its own session's PR is not an
+    // independent review, and #2844 exists to stop that record being written as if it were.
+    fail(
+      `${independence.reason} — nothing was changed (#2844). TWO ROUTES ACTUALLY CLEAR THIS PR, and neither is a `
+      + 'flag on this command. (1) THE HUMAN CEREMONY: if the PR carries review:human, re-run with '
+      + '--to=clear-human --actor=<name> --reason="<the operator instruction authorising it>" — that target is '
+      + 'EXEMPT from this refusal and the durable comment records the clearance as a human ceremony; it is itself '
+      + 'refused when the PR does NOT carry review:human. (2) A DIFFERENT SESSION: run the review, and this '
+      + 'command, from a session that did not open the PR — its own session id is then the clearing actor and the '
+      + 'independence bar is genuinely met. There is no --force.',
+      1,
+    );
   }
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — the PURE decision. A refusal (INVARIANT 2, or nothing to
@@ -655,13 +689,29 @@ export function buildVerdictComment({
       buildClearerActorMarker(clearerId),
     ].filter(Boolean).join('\n')
     : '';
-  // #2844 — the independence line. Printed ONLY when the bar was not met, so a clean record stays terse; a
-  // proven self-clear never reaches here (the CLI refuses it before any write), so this only ever explains an
-  // UNPROVEN clearance. Silence would be the failure mode: a reader must not infer independence from its absence.
-  const independenceNote = (stampsAcceptance && independence && independence.independent === false)
-    ? `\n\n⚠️ Independence NOT established for this clearance (#2844): ${independence.reason}. `
-      + 'This record does not show that a party other than the author cleared it.'
-    : '';
+  // #2844 — the independence line. Printed ONLY when the bar was not met, so a clean record stays terse.
+  // Silence would be the failure mode: a reader must not infer independence from its absence.
+  //
+  // TWO SHAPES, because two different things happened (PR #1100 review). A `clear-human` self-clear is the
+  // EXEMPTION — the human ceremony ran on a PR opened by the same session, which is the operator's ordinary
+  // workflow (a subagent inherits its parent's session id), and the record must say THAT rather than filing it
+  // under the same ⚠️ as an accept whose independence merely could not be checked. Everything else that failed
+  // the bar keeps the ⚠️ wording. On `--to=accepted` a proven self-clear never reaches here at all — the CLI
+  // refuses it before any write — so that combination only ever renders in the size projection.
+  const humanCeremonyExemption = to === 'clear-human' && independence
+    && independence.status === INDEPENDENCE.SELF_CLEAR;
+  const independenceNote = !(stampsAcceptance && independence && independence.independent === false)
+    ? ''
+    : humanCeremonyExemption
+      ? '\n\n🧑 Cleared by the HUMAN CEREMONY, not by an established-independent agent (#2844). The clearing '
+        + `actor is this PR's own author (${clearerId}) — a subagent inherits its parent's session id, so the `
+        + 'operator clearing a PR their own session opened reads as a self-clear at the session level. '
+        + '`--to=clear-human` is EXEMPT from the self-clear refusal that binds `--to=accepted`, because it '
+        + 'carries a stronger signal than a session id: it is refused unless the PR carries `review:human`, and '
+        + 'it requires the explicit actor and the quoted reason above. Read this as "a human ceremony cleared '
+        + 'it", NOT as "an independent reviewer cleared it".'
+      : `\n\n⚠️ Independence NOT established for this clearance (#2844): ${independence.reason}. `
+        + 'This record does not show that a party other than the author cleared it.';
   const text = stripReviewedShaMarkers(typeof body === 'string' ? body : '');
   const heading = to === 'clear-human'
     ? '✅ review — `review:human` cleared via the sanctioned path'
@@ -739,13 +789,16 @@ export function projectVerdictCommentLength({ body = '', actor = '', reason = ''
   // shortcut in both `normalize*Fingerprint`s, so this renders exactly the bytes a real accept stamps; before,
   // the projection passed no diff, both markers rendered as '', and the estimate was ~180 chars short of what
   // the accept path actually posts — the same under-count class as the `to: 'accepted'`-only bug (#1056 M2).
-  // #2844 — the unproven-independence outcomes, worst case. `unknown-clearer` fires on an empty clearer id;
-  // `unknown-author` on a present clearer with no author stamp — and its message embeds the clearer id, so it
-  // is projected with the REAL one rather than a fixed-width stand-in.
+  // #2844 — the not-established outcomes, worst case. `unknown-clearer` fires on an empty clearer id;
+  // `unknown-author` on a present clearer with no author stamp; `self-clear` on two equal ids — which
+  // `--to=clear-human` now RENDERS (the PR #1100 human-ceremony exemption: it is no longer refused, so its note
+  // reaches the comment and must be counted, exactly the under-count M2 documents). All three messages embed the
+  // clearer id, so each is projected with the REAL one rather than a fixed-width stand-in.
   const outcomes = [
     null,
     decideClearerIndependence({ authorId: '', clearerId: '' }),
     decideClearerIndependence({ authorId: '', clearerId: clearerId || 'x' }),
+    decideClearerIndependence({ authorId: clearerId || 'x', clearerId: clearerId || 'x' }),
   ];
   return Math.max(...REVIEW_LABEL_TARGETS.flatMap((to) => outcomes.map((independence) => buildVerdictComment({
     to, actor, headSha: 'f'.repeat(40), body, reason, reviewedDiff: 'f'.repeat(64), clearerId, independence,
