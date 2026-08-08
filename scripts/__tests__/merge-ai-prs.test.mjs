@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled } from '../merge-ai-prs.mjs';
-import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
+import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip } from '../lib/review-escalation.mjs';
 import { buildManifest } from '../readiness/lane-manifest.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -474,7 +474,10 @@ describe('merge-ai-prs — #984 F2: the park strip is keyed on OBSERVED holds, n
   it('the strip does NOT live inside the `gate.applyLabel` guard (the review:changes hole)', () => {
     const start = src.indexOf('if (gate.applyLabel && !DRY_RUN) {');
     expect(start).toBeGreaterThan(-1);
-    const end = src.indexOf('// #2409 — drop the now-stale review:accepted', start);
+    // The block's closing anchor moved with #x9xqexm: what used to follow this guard was #2409's
+    // `--remove-label review:accepted`; a re-score no longer removes it, and the comment block explaining that
+    // now sits in its place. Anchored on the replacement so the scan still bounds the same region.
+    const end = src.indexOf('// #x9xqexm — A RE-SCORE NEVER REMOVES', start);
     expect(end).toBeGreaterThan(start);
     const guarded = src.slice(start, end);
     expect(guarded).not.toContain('stripReadyOnPark');
@@ -2543,29 +2546,82 @@ describe('#2423 per-PR --no-review-escalation relief valve', () => {
   });
 });
 
-describe('#2409 — the stale re-park label swap is ADD-FIRST / REMOVE-LAST', () => {
-  // The re-park swap lives in runCli's imperative park branch: it shells `gh pr edit` to apply the re-park
-  // label AND to drop the now-stale review:accepted. BOTH calls are best-effort (errors swallowed), so ORDER
-  // is the safety property — the pure gate functions above cannot express it. If the accepted label were
-  // removed FIRST and the add then threw (transient gh/network), the PR would carry NO review label: next pass
-  // `hasReviewLabel(accepted)` is false, the reviewed-SHA staleness check is skipped, and a de-escalated
-  // ride-in commit auto-lands (the exact hole #2409 closes). Add-first/remove-last means a partial failure
-  // leaves review:accepted in place, which safely re-triggers the stale check. This asserts that ordering at
-  // the source level (the only observable seam for an inline, side-effecting gh sequence).
+describe('#x9xqexm — a re-score never REMOVES review:accepted (superseding #2409\'s add-first/remove-last)', () => {
+  // WHAT THIS REPLACES. #2409's re-park swap did two `gh pr edit` calls: add the re-park label, then drop the
+  // now-stale `review:accepted`. Its safety property was the ORDER (add-first/remove-last), because both calls
+  // are best-effort and removing first could leave a PR with NO review label. #x9xqexm removes the second call
+  // entirely, which retires that ordering concern and closes a worse one: the drain was DELETING a human's
+  // recorded clearance minutes after the operator granted it (WE PR #1100 at 14:41:44, PR #984 at 14:41:51 —
+  // 2-3s after the matching add, exactly this swap).
+  //
+  // WHY THE MERGE IS STILL REFUSED WITHOUT THE REMOVAL. `decideReviewGate` checks `review:accepted` FIRST and
+  // returns `action:'park'` — never `'merge'` — for as long as `acceptanceCoversHead` says the accept is stale,
+  // so the land decision never depended on the label being gone. The one thing the removal did buy — keeping the
+  // NON-scoring paths from reading `accepted + human` as cleared — is now `hasUnclearedReviewLabel`'s job
+  // (gate-invariants INVARIANT 5). Source-level, because an inline side-effecting `gh` sequence has no other
+  // observable seam.
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
 
-  it('applies the re-park label (add) before removing review:accepted', () => {
-    const addIdx = src.indexOf("'--add-label', gate.applyLabel");
-    const removeStaleIdx = src.indexOf("'--remove-label', REVIEW_LABELS.accepted");
-    expect(addIdx).toBeGreaterThan(-1);      // the re-park add call is present
-    expect(removeStaleIdx).toBeGreaterThan(-1); // the stale-accepted remove call is present
-    // REMOVE-LAST: the stale-accepted drop must appear AFTER the re-park add in source order.
-    expect(removeStaleIdx).toBeGreaterThan(addIdx);
+  it('the re-park ADD is still there — a stale acceptance is still re-parked, it just is not un-accepted', () => {
+    expect(src.indexOf("'--add-label', gate.applyLabel")).toBeGreaterThan(-1);
   });
 
-  it('removes review:accepted exactly once in the park path (no duplicate swap)', () => {
-    const occurrences = src.split("'--remove-label', REVIEW_LABELS.accepted").length - 1;
-    expect(occurrences).toBe(1);
+  it('NO code path in the drain removes review:accepted, in any spelling', () => {
+    for (const forbidden of [
+      /--remove-label'\s*,\s*REVIEW_LABELS\.accepted/,
+      /--remove-label'\s*,\s*'review:accepted'/,
+      /--remove-label=review:accepted/,
+    ]) {
+      expect(src).not.toMatch(forbidden);
+    }
+  });
+
+  // ── ROUND-2 BLOCKER 1: the label pair the removal used to prevent, on the path that never scores. ─────────
+  // Keeping `review:accepted` through a re-park is only safe if every reader of the raw label set understands
+  // the resulting pair. `decideReviewGate` does — it re-derives `park` from the fingerprints every pass. The
+  // BARE `/merge` orphan sweep does not: `node scripts/merge-ai-prs.mjs` with no `--label` sets
+  // `REVIEW_ESCALATION = false` and never calls `decideReviewGate` at all, so `classifyPr` is the whole gate
+  // there — and it certifies on `review:accepted` ALONE (no `ready-to-merge` required, so stripping that label
+  // protects nothing). These are the two pairs a stale re-park can leave behind.
+  const bare = (names) => aiPr({ labels: names.map((name) => ({ name })) });
+
+  it('the bare sweep REFUSES a stale re-park pair [accepted, pending] — the PR #984 shape', () => {
+    // The drain applies `review:pending` on re-park whenever the fresh score is not `humanRequired`, which is
+    // the bulk of the queue. No sanctioned writer makes this pair: `--to=accepted` and `--to=clear-human` both
+    // REMOVE `pending` as they add `accepted`. So the pair means "a re-score found this accept stale" and the
+    // non-scoring path must read it that way.
+    const v = classifyPr(bare([REVIEW_LABELS.accepted, REVIEW_LABELS.pending]));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(true);
+    expect(v.reason).toMatch(/unsatisfied review hold/);
+  });
+
+  it('the bare sweep REFUSES a stale re-park pair [accepted, human] — the gate-self shape', () => {
+    const v = classifyPr(bare([REVIEW_LABELS.accepted, REVIEW_LABELS.human]));
+    expect(v.decision).toBe('skip');
+    expect(v.reviewHeld).toBe(true);
+  });
+
+  it('…and still MERGES a clean [accepted] — refusing the pairs costs no legitimate land', () => {
+    expect(classifyPr(bare([REVIEW_LABELS.accepted])).decision).toBe('merge');
+    // #2974 stays exactly as ratified: the reviewer verdict wins over a stale bounce.
+    expect(classifyPr(bare([REVIEW_LABELS.accepted, REVIEW_LABELS.changes])).decision).toBe('merge');
+  });
+
+  // ── ROUND-2 MINOR 5: the #2832 interaction, resolved rather than inherited. ───────────────────────────────
+  it('#2832 — a stale re-park still strips ready-to-merge, WITH or WITHOUT the staleAcceptance filter', () => {
+    // `decideParkReadyStrip`'s `staleAcceptance` option shipped filtering `review:accepted` out of the effective
+    // set BECAUSE "this same park is about to REMOVE it". #x9xqexm ends that removal, so the stated reason is
+    // gone. The filter is kept (see its docstring) but the OUTCOME must no longer depend on it — otherwise a
+    // future reader deleting the now-pointless filter silently leaves the go-ahead standing on a held PR. That
+    // independence is what `hasUnclearedReviewLabel` refusing `accepted + pending` buys, and it is pinned here.
+    const observed = [READY_TO_MERGE_LABEL, REVIEW_LABELS.accepted];
+    for (const applyLabel of [REVIEW_LABELS.pending, REVIEW_LABELS.human]) {
+      expect(decideParkReadyStrip(observed, { applyLabel, staleAcceptance: true })).toBe(true);
+      expect(decideParkReadyStrip(observed, { applyLabel, staleAcceptance: false })).toBe(true);
+    }
+    // …and a legitimately queued PR (accepted + go-ahead, no hold) is still never un-queued, either way.
+    expect(decideParkReadyStrip(observed, { applyLabel: null, staleAcceptance: false })).toBe(false);
   });
 });
 

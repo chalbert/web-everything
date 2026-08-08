@@ -14,9 +14,10 @@ import {
   decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers,
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
 } from '../review-set-label.mjs';
-import { parseReviewedSha, decideReviewGate } from '../lib/review-escalation.mjs';
-// Rebase resolution (2026-08-08): HEAD's import set is a superset of this PR's; only `READY_TO_MERGE_LABEL`
-// (this PR's hold-invariant constant) had to be added to it.
+import {
+  parseReviewedSha, decideReviewGate, parseReviewedDiff, parseReviewedContribution,
+  normalizeDiffFingerprint, normalizeContributionFingerprint,
+} from '../lib/review-escalation.mjs';
 import { REVIEW_LABELS, READY_TO_MERGE_LABEL } from '../lib/review-escalation.mjs';
 
 const human = [{ name: REVIEW_LABELS.human }, { name: 'ready-to-merge' }];
@@ -422,6 +423,44 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
     const bare = buildVerdictComment({ to: 'accepted', actor: 'op', headSha: SHA });
     expect(bare).toContain('Recorded by op via the Plateau Loop review console.');
     expect(readBack(bare)).toBe(SHA);
+  });
+
+  // #x9xqexm — the CONTRIBUTION stamp. Without it the drain has only the base-dependent `reviewed-diff` digest,
+  // which changes whenever `main` moves a context line or a hunk offset under the lane — so the drain's own
+  // rebase-drop pass revokes the clearance within minutes (observed on PR #1100, 3m07s after `--to=clear-human`).
+  describe('the contribution stamp (#x9xqexm)', () => {
+    const DIFF = ['diff --git a/f.mjs b/f.mjs', 'index 111..222 100644', '@@ -1,2 +1,2 @@', ' ctx', '-a', '+b'].join('\n');
+
+    it('BOTH acceptance targets stamp sha + diff + contribution, all three round-tripping', () => {
+      for (const to of ['accepted', 'clear-human']) {
+        const c = buildVerdictComment({ to, actor: 'op', headSha: SHA, reason: 'r', reviewedDiff: DIFF });
+        expect(parseReviewedSha([{ body: c }])).toBe(SHA);
+        expect(parseReviewedDiff([{ body: c }])).toBe(normalizeDiffFingerprint(DIFF));
+        expect(parseReviewedContribution([{ body: c }])).toBe(normalizeContributionFingerprint(DIFF));
+      }
+    });
+
+    it('the two digests are DISTINCT values — a contribution stamp is not a re-spelling of the diff stamp', () => {
+      expect(normalizeContributionFingerprint(DIFF)).not.toBe(normalizeDiffFingerprint(DIFF));
+    });
+
+    it('a `changes` verdict stamps neither, and an unreadable diff stamps no contribution marker', () => {
+      const bounce = buildVerdictComment({ to: 'changes', actor: 'op', headSha: SHA, reviewedDiff: DIFF });
+      expect(parseReviewedContribution([{ body: bounce }])).toBe(null);
+      // The fail-soft path: `computeNetDiffText` missed, so `reviewedDiff` is '' — the sha still stamps and the
+      // gate falls back to SHA identity, which is the STRICTER behaviour.
+      const noDiff = buildVerdictComment({ to: 'clear-human', actor: 'op', headSha: SHA, reason: 'r' });
+      expect(parseReviewedSha([{ body: noDiff }])).toBe(SHA);
+      expect(parseReviewedContribution([{ body: noDiff }])).toBe(null);
+    });
+
+    it('the size pre-flight counts the markers it now posts — never an under-count (#1056 M2 class)', () => {
+      const body = 'y'.repeat(1000);
+      const actual = buildVerdictComment({
+        to: 'clear-human', actor: 'op', headSha: SHA, body, reason: 'r', reviewedDiff: DIFF,
+      }).length;
+      expect(projectVerdictCommentLength({ body, actor: 'op', reason: 'r' })).toBeGreaterThanOrEqual(actual);
+    });
   });
 });
 

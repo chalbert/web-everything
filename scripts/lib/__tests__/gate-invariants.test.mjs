@@ -26,6 +26,9 @@
  *
  * Under #2162/#2171/#2285/#2366 (the auto-review gate) and #104 (gate-self ⇒ human).
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   REVIEW_LABELS,
@@ -37,6 +40,9 @@ import {
   producerReviewLabel,
   hasUnclearedReviewLabel,
   isPolicySpecPath,
+  acceptanceCoversHead,
+  normalizeDiffFingerprint,
+  normalizeContributionFingerprint,
 } from '../review-escalation.mjs';
 import {
   TRUST_CHAIN,
@@ -335,9 +341,39 @@ describe('INVARIANT 4 — only the drain may write to main', () => {
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 describe('INVARIANT 5 — hasUnclearedReviewLabel refuses un-cleared labels', () => {
   const all = [REVIEW_LABELS.pending, REVIEW_LABELS.human, REVIEW_LABELS.changes, REVIEW_LABELS.accepted];
-  it('review:accepted always clears — no label set with accepted is ever refused', () => {
-    for (const set of powerset(all).filter((s) => s.includes(REVIEW_LABELS.accepted))) {
+  // #x9xqexm — TIGHTENED on the two HOLD pairs, in the refusing direction only. `review:accepted` used to clear
+  // EVERY set it appeared in, which was safe only because the drain DELETED a stale accept whenever it re-parked.
+  // It no longer deletes one (see INVARIANT 13), so a contradictory `accepted + hold` pair can survive a re-park
+  // and this NON-SCORING predicate must fail closed on it — it is the only thing gating the bare `/merge` sweep,
+  // which never calls `decideReviewGate` and certifies on `review:accepted` alone.
+  // The rule is "could a SANCTIONED writer have produced this pair?":
+  //   • `accepted + human`   — no. `--to=clear-human` removes `human` as it adds `accepted`; `--to=accepted` is
+  //                            refused outright on a `review:human` PR.        ⇒ REFUSE
+  //   • `accepted + pending` — no. Both `--to=accepted` and `--to=clear-human` carry `pending` in `removeLabels`,
+  //                            so only the drain's stale re-park makes this pair — and that re-park is the COMMON
+  //                            one (it applies `pending` whenever the fresh score is not `humanRequired`, the PR
+  //                            #984 shape). Round-2 blocker 1.                  ⇒ REFUSE at allowPending:false
+  //   • `accepted + changes` — LEFT ALONE. #2974 ruled the reviewer verdict wins over a stale bounce.  ⇒ clear
+  it('review:accepted still clears a co-present review:changes (#2974 untouched)', () => {
+    for (const set of powerset(all).filter((s) => s.includes(REVIEW_LABELS.accepted)
+      && !s.includes(REVIEW_LABELS.human) && !s.includes(REVIEW_LABELS.pending))) {
       expect(hasUnclearedReviewLabel(set, { allowPending: false })).toBe(false);
+      expect(hasUnclearedReviewLabel(set, { allowPending: true })).toBe(false);
+    }
+  });
+  it('…but a CO-PRESENT review:human is refused even next to review:accepted', () => {
+    for (const set of powerset(all).filter((s) => s.includes(REVIEW_LABELS.accepted)
+      && s.includes(REVIEW_LABELS.human))) {
+      expect(hasUnclearedReviewLabel(set, { allowPending: false })).toBe(true);
+      expect(hasUnclearedReviewLabel(set, { allowPending: true })).toBe(true);
+    }
+  });
+  it('…and so is a CO-PRESENT review:pending — the stale re-park pair the bare sweep would otherwise land', () => {
+    for (const set of powerset(all).filter((s) => s.includes(REVIEW_LABELS.accepted)
+      && s.includes(REVIEW_LABELS.pending) && !s.includes(REVIEW_LABELS.human))) {
+      expect(hasUnclearedReviewLabel(set, { allowPending: false })).toBe(true);
+      // The #2423 relief valve still waives it: that is an operator naming ONE PR, the same waiver a bare
+      // `review:pending` gets. The pair is refused by DEFAULT, which is what the bare `/merge` sweep uses.
       expect(hasUnclearedReviewLabel(set, { allowPending: true })).toBe(false);
     }
   });
@@ -458,6 +494,131 @@ describe('INVARIANT 9 — a stale review:accepted never auto-merges (#2409)', ()
         const g = decideReviewGate({ escalate, humanRequired, labels, acceptedSha: 'abc1234', headSha: 'abc1234' });
         expect(g.action).toBe('merge');
       }
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// INVARIANT 13 — A RE-SCORE NEVER REVOKES A RECORDED CLEARANCE (#x9xqexm). Two halves, both observed failing on
+// WE PR #1100 (and PR #984) within 3m07s of a sanctioned `--to=clear-human` ceremony:
+//   (a) a clearance covers the PR's own CONTRIBUTION, not the base it sits on — the drain rebasing an accepted
+//       lane onto a newer `main` moves context lines and hunk offsets and must not invalidate the accept; and
+//   (b) no automated pass may DELETE `review:accepted`. Refusing to land is the gate's verdict; deleting a
+//       human's record is a reviewer action (`review-set-label.mjs --to=changes`) and nothing else.
+// The complement is pinned too: content that the clearance did NOT cover still re-escalates, so a stale
+// clearance can never launder a ride-in commit (the PR #368 hole stays shut — see INVARIANT 9).
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('INVARIANT 13 — a re-score never revokes a recorded clearance (#x9xqexm)', () => {
+  // The measured PR #1100 shape: the SAME contribution replayed onto a newer `main`. Three things move and none
+  // of them is the author's: the blob-pair headers, ONE CONTEXT LINE that main changed, and the hunk offsets
+  // (the file grew above the hunk on main).
+  const CLEARED = [
+    'diff --git a/scripts/lib/review-escalation.mjs b/scripts/lib/review-escalation.mjs',
+    'index 1fb268d1..191cf371 100644',
+    '--- a/scripts/lib/review-escalation.mjs',
+    '+++ b/scripts/lib/review-escalation.mjs',
+    '@@ -197,3 +219,8 @@ What actually matters:',
+    "  it('a policy-core diff (edits the leash-defining trust chain) → review:human, applied', () => {",
+    '-const stale = true;',
+    '+const stale = false;',
+  ].join('\n');
+  const REBASED_ONTO_NEWER_MAIN = [
+    'diff --git a/scripts/lib/review-escalation.mjs b/scripts/lib/review-escalation.mjs',
+    'index a18a829d..c79a543f 100644',                    // ← blob headers moved
+    '--- a/scripts/lib/review-escalation.mjs',
+    '+++ b/scripts/lib/review-escalation.mjs',
+    '@@ -203,3 +225,8 @@ What actually matters:',    // ← hunk offsets moved (the file grew on main)
+    "  it('a DECLARATIVE-LEASH diff (the roster — the encoded policy itself) → review:human, applied', () => {",
+    '-const stale = true;',                               // ← the contribution is byte-identical
+    '+const stale = false;',
+  ].join('\n');
+  const RIDE_IN = [
+    REBASED_ONTO_NEWER_MAIN,
+    '',
+    'diff --git a/scripts/lib/gate-config.mjs b/scripts/lib/gate-config.mjs',
+    'index aaaaaaa..bbbbbbb 100644',
+    '--- a/scripts/lib/gate-config.mjs',
+    '+++ b/scripts/lib/gate-config.mjs',
+    '@@ -1 +1 @@',
+    "-leash: 'spec',",
+    "+leash: 'code',",
+  ].join('\n');
+
+  const cleared = [REVIEW_LABELS.accepted]; // what `--to=clear-human` leaves behind: human dropped, accepted added
+
+  it('(a) a cleared PR survives a re-score at the SAME head — merge, no re-park', () => {
+    for (const [escalate, humanRequired] of product([false, true], [false, true])) {
+      const g = decideReviewGate({
+        escalate, humanRequired, labels: cleared, acceptedSha: 'abc1234', headSha: 'abc1234',
+      });
+      expect(g.action).toBe('merge');
+      expect(g.staleAcceptance).toBeFalsy();
+    }
+  });
+
+  it('(a) a cleared PR survives the drain rebasing it onto a newer main — the base moved, not the contribution', () => {
+    // The strict #x169fqe fingerprint CANNOT see this: it hashes the context and the hunk offsets too, which is
+    // exactly why the clearance was revoked on #1100 despite that escape already existing.
+    expect(normalizeDiffFingerprint(CLEARED)).not.toBe(normalizeDiffFingerprint(REBASED_ONTO_NEWER_MAIN));
+    expect(normalizeContributionFingerprint(CLEARED)).toBe(normalizeContributionFingerprint(REBASED_ONTO_NEWER_MAIN));
+    for (const [escalate, humanRequired] of product([false, true], [false, true])) {
+      const g = decideReviewGate({
+        escalate,
+        humanRequired, // even a fresh leash score does not re-assert the gate over content already cleared
+        labels: cleared,
+        acceptedSha: '10b97e6a',
+        headSha: '6b929515',
+        acceptedDiff: CLEARED,
+        headDiff: REBASED_ONTO_NEWER_MAIN,
+        acceptedContribution: CLEARED,
+        headContribution: REBASED_ONTO_NEWER_MAIN,
+      });
+      expect(g.action).toBe('merge');
+      expect(g.staleAcceptance).toBeFalsy();
+    }
+  });
+
+  it('(a) …but a cleared PR whose head ADVANCED onto a leash path DOES re-escalate, to review:human', () => {
+    // The ride-in edits `gate-config.mjs` — the declarative leash — so the fresh score is humanRequired.
+    const score = scoreEscalation({ changedFiles: ['scripts/lib/gate-config.mjs'] });
+    expect(score.humanRequired).toBe(true);
+    const g = decideReviewGate({
+      escalate: score.escalate,
+      humanRequired: score.humanRequired,
+      labels: cleared,
+      acceptedSha: '10b97e6a',
+      headSha: '6b929515',
+      acceptedDiff: CLEARED,
+      headDiff: RIDE_IN,
+      acceptedContribution: CLEARED,
+      headContribution: RIDE_IN,
+    });
+    expect(AUTO_MERGE_ACTIONS).not.toContain(g.action);
+    expect(g.staleAcceptance).toBe(true);
+    expect(g.applyLabel).toBe(REVIEW_LABELS.human);
+  });
+
+  it('(a) the contribution escape is FAIL-CLOSED — a missing side can never honour an accept', () => {
+    for (const args of [
+      { acceptedContribution: CLEARED },
+      { headContribution: REBASED_ONTO_NEWER_MAIN },
+      { acceptedContribution: CLEARED, headContribution: '' },
+      { acceptedContribution: null, headContribution: null }, // every pre-#x9xqexm accept
+    ]) {
+      expect(acceptanceCoversHead({ acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb', ...args }).covers).toBe(false);
+    }
+  });
+
+  it('(b) the drain issues NO `--remove-label review:accepted` anywhere — a re-score cannot strip a verdict', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'merge-ai-prs.mjs'), 'utf8');
+    // Every label write in the drain is an `execFileSync('gh', ['pr','edit', …])` argv array, so the removal
+    // this invariant forbids is literally the pair `'--remove-label', REVIEW_LABELS.accepted` (or the string).
+    for (const forbidden of [
+      /--remove-label'\s*,\s*REVIEW_LABELS\.accepted/,
+      /--remove-label'\s*,\s*'review:accepted'/,
+      /--remove-label=review:accepted/,
+    ]) {
+      expect(src).not.toMatch(forbidden);
     }
   });
 });
