@@ -1,8 +1,10 @@
 ---
 bornAs: xq4nv2t
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-05"
+dateStarted: "2026-08-08"
+dateResolved: "2026-08-08"
 tags: []
 scope: ["we:scripts/lib/rebase-drop-content.mjs", "we:scripts/lane-drain.mjs"]
 ---
@@ -74,3 +76,38 @@ a caught near-miss, not a landed regression — but it was caught by luck, not b
   the emptied file happening to be one with a validator. No zero-byte auto-resolve result is ever silent.
 - Check the other `auto-resolve` paths for the same shape — `git log --grep=auto-resolve` shows 11 commits since
   2026-07-01, and this failure mode would have been invisible in any of them.
+
+## Resolved 2026-08-08 — root cause, and it was wider than one resolver
+
+**Three functions named `gitRunner`, with three different option sets.** The write-back was correct; the
+runner injected into it was not.
+
+| module | signature | missing |
+| --- | --- | --- |
+| we:scripts/lib/rebase-drop-manifest.mjs | `(cmd, args, { env, cwd })` | `input`, `encoding` |
+| we:scripts/lib/nnn-collision-heal.mjs | `(cmd, args, { env, input })` | `cwd`, `encoding` |
+| we:scripts/lib/rebase-drop-content.mjs | `(cmd, args, { env, input, cwd, encoding })` | — |
+
+we:scripts/merge-ai-prs.mjs imported the FIRST and injected it into libraries needing the THIRD. Destructuring
+silently discards what it does not name, so the `{ input: mergedText }` that carries the merge to
+`git hash-object -w --stdin` evaporated. Git read EOF, hashed the empty string, **exited 0**, and returned
+`e69de29b` — so every `status !== 0` check passed and the drain staged, committed and reported success.
+
+**Reproduced** by driving the real write-back over `1eaa31c4`/`5adc3ec3`: with the manifest runner the staged
+blob is `e69de29b` (0 bytes); with a correct runner it is `2f76f7cf` (6826 bytes = the predicted 6788 chars).
+
+**Blast radius — the renumber path had already lost content on `main`.** Same root cause, second call site:
+`writePlanToIndex` is reached from `rebaseDropManifest({ healCollision })` with the same weak runner.
+- `adf2d758` (2026-07-09) added `backlog/2309-…md` as an EMPTY blob and **landed on main**; hand-repaired by
+  `14432ba9`, whose message is literally *"restore #2309 story content emptied by the #2362->#2309 renumber"*.
+  The cause was never traced then.
+- `836ae978` (backlog/2909) and `70bffbb8` (backlog/2895) — the content resolver; neither reached main.
+- No zero-byte file is on `main` today; every instance was caught by the backlog schema validator, which is
+  exactly the luck this item called out.
+
+**Fix.** One runner (we:scripts/lib/git-run.mjs) re-exported by all three modules, so no weaker same-named
+variant exists to inject. Plus verification that does not depend on the runner being right, only on it being
+checked: `hashObjectVerified` compares git's returned oid against the oid computed in-process from the bytes
+we meant to write, and `verifyTreeBlob` re-checks the resolved tree before commit-tree. Any mismatch aborts —
+no commit, no push. `checkMergeSanity` additionally refuses an empty or drastically-shrunk merge result for
+ANY content type, so the guard no longer depends on the file having a validator.

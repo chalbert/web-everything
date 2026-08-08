@@ -30,7 +30,7 @@
  * unit-testable without a real repo (see `scripts/lib/__tests__/rebase-drop-manifest.test.mjs`).
  */
 
-import { spawnSync } from 'node:child_process';
+import { gitRun as gitRunner } from './git-run.mjs';
 import { applyCollisionHealToIndex } from './nnn-collision-heal.mjs';
 
 export const LANE_MANIFEST = '.lane-manifest.json';
@@ -74,14 +74,14 @@ export function manifestConflictDisposition(parsed, manifest = LANE_MANIFEST) {
   return 'real';
 }
 
-/** The default real git runner — `spawnSync` (NOT execFileSync) so a non-zero exit (merge-tree on conflict
- *  is exit 1, expected) is returned, not thrown. `opts.env` is merged over `process.env`. `opts.cwd` (#2263)
- *  routes the git invocation at a SIBLING clone directory instead of `process.cwd()`, so the SAME plumbing
- *  can rebuild a remote-repo (frontierui/plateau-app) lane tip through that repo's own clone. */
-export function gitRunner(cmd, args, { env, cwd } = {}) {
-  const r = spawnSync(cmd, args, { encoding: 'utf8', env: env ? { ...process.env, ...env } : process.env, ...(cwd ? { cwd } : {}) });
-  return { status: r.status == null ? 1 : r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
-}
+/** The default real git runner. #2923 — this used to be a LOCAL `(cmd, args, { env, cwd })` literal that named
+ *  neither `input` nor `encoding`, so destructuring silently dropped them. `merge-ai-prs.mjs` imports THIS
+ *  symbol and injects it into `rebaseDropContent` / `applyCollisionHealToIndex`, whose write-back passes
+ *  `{ input: mergedText }` to `git hash-object -w --stdin` — the stdin vanished, git hashed the empty string
+ *  at exit 0, and the drain staged and committed git's empty blob while reporting a successful auto-resolve.
+ *  It is now a re-export of the ONE runner (`scripts/lib/git-run.mjs`), so no weaker same-named variant exists
+ *  to inject by accident. Callers keep importing `gitRunner` unchanged. */
+export { gitRunner };
 
 /**
  * Rebuild a lane PR's tip onto `<base>` with the manifest dropped, via pure plumbing. Does NOT merge (the
