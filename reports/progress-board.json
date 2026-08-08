@@ -17,9 +17,11 @@
       "id": "hold-invariant",
       "title": "#2832 — a review-hold label must block merge regardless of ready-to-merge",
       "phase": 1,
-      "status": "in-progress",
+      "status": "done",
       "pr": 984,
-      "note": "accepted; waiting on required checks"
+      "note": "PR #984 ACCEPTED after four rounds. Round 3 verified both of the author's refusals of review suggestions were correct, and confirmed two extra park sites the first enumeration missed.",
+      "startedAt": "2026-08-08",
+      "doneAt": "2026-08-08"
     },
     {
       "id": "guard-false-denies",
@@ -65,7 +67,7 @@
       "title": "Progress board — a mechanically-refreshed published status page (x9t5i5a)",
       "phase": 3,
       "status": "in-progress",
-      "note": "generator + state file + skill; one Bash call plus one Artifact call per update"
+      "note": "PR #1101 round 2. Round 1 got the unanswerable card onto a published page; the guard is now unconditional and the state error split into fatal vs partial, so the repair route still works. 131 tests."
     },
     {
       "id": "todo-mode-for-unimplemented-contract-entries-a-d",
@@ -132,7 +134,8 @@
       "title": "A re-score must not revoke a human clearance — cleared 14:38:35, back in the queue by 14:41:42, every time",
       "phase": 3,
       "status": "in-progress",
-      "startedAt": "2026-08-08"
+      "startedAt": "2026-08-08",
+      "note": "ROOT-CAUSED. The writer is the resident drain daemon's stale-acceptance branch. The reviewed-diff fingerprint hashes the BASE as well as the contribution, so when the drain rebases an accepted lane onto a moving main, a shifted hunk offset and one changed context line read as new content. Measured on #1100: two 130KB diffs differing in three lines, every +/- line identical. Fix is PR #1119 — hash the contribution only, and never let a re-score delete a human's record."
     },
     {
       "id": "a-rebase-under-a-live-review-throws-the-round-aw",
