@@ -11,6 +11,8 @@ import {
   isBlastRadiusPath,
   isGateSelfPath,
   scoreEscalation,
+  diffHunksFrom,
+  plainDiffPath,
   coupleEscalation,
   hasReviewLabel,
   decideReviewGate,
@@ -246,6 +248,166 @@ describe('scoreEscalation', () => {
     expect(other.humanRequired).toBe(false);
     // a plain leaf → neither
     expect(scoreEscalation({ changedFiles: ['backlog/x.md'] }).humanRequired).toBe(false);
+  });
+});
+
+describe('#2890 — diffHunks (base-vs-head diff CONTENT) is accepted and threaded through, pure plumbing', () => {
+  it('defaults to null (NOT COMPUTED) when omitted — never \'\', which means "computed and empty"', () => {
+    // #2890-review-fix finding 1 — the original default was `''`, the SAME value every producer returns on its
+    // failure paths. A detector reading it could not tell "there is no principle touch" from "I never got a
+    // diff", and in the drain the second case coincides with a fully-populated `changedFiles` (the `gh` files
+    // fallback) — a silent fail-open on exactly the class #2839/#2840 exist to catch.
+    const r = scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20 });
+    expect(r.diffHunks).toBeNull();
+    expect(r.diffHunks).not.toBe('');
+  });
+  it('an EXPLICIT \'\' is preserved — "computed, and the content really is empty" stays distinguishable', () => {
+    const r = scoreEscalation({ changedFiles: ['backlog/x.md'], diffHunks: '' });
+    expect(r.diffHunks).toBe('');
+    expect(r.diffHunks).not.toBeNull();
+  });
+  it('is carried through UNCHANGED on the returned verdict when the caller has real text', () => {
+    const hunks = '@@ -1,2 +1,2 @@\n-old\n+new\n';
+    const r = scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20, diffHunks: hunks });
+    expect(r.diffHunks).toBe(hunks);
+  });
+  it('does NOT itself change escalate/humanRequired/reasons/signals — #2890 is plumbing, not a detector', () => {
+    const hunks = '@@ -1,2 +1,2 @@\n-### Some Rule {#some-rule}\n+### Some Other Rule {#some-rule}\n';
+    const withHunks = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'], diffHunks: hunks });
+    const withoutHunks = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'] });
+    expect(withHunks.escalate).toBe(withoutHunks.escalate);
+    expect(withHunks.humanRequired).toBe(withoutHunks.humanRequired);
+    expect(withHunks.reasons).toEqual(withoutHunks.reasons);
+    expect(withHunks.signals).toEqual(withoutHunks.signals);
+  });
+  it('anything that is NOT a string collapses to null — a caller that regresses to passing the raw result OBJECT lands on the safe side', () => {
+    expect(() => scoreEscalation({ diffHunks: null })).not.toThrow();
+    expect(scoreEscalation({ diffHunks: null }).diffHunks).toBeNull();
+    expect(scoreEscalation({ diffHunks: undefined }).diffHunks).toBeNull();
+    expect(scoreEscalation({ diffHunks: { text: '', scored: false } }).diffHunks).toBeNull();
+    expect(scoreEscalation({ diffHunks: 42 }).diffHunks).toBeNull();
+  });
+  it('producerReviewLabel is unaffected by diffHunks riding along on the score object it receives', () => {
+    const hunks = '@@ -1,2 +1,2 @@\n-old\n+new\n';
+    const withHunks = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], diffHunks: hunks });
+    const withoutHunks = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] });
+    expect(producerReviewLabel(withHunks)).toBe(producerReviewLabel(withoutHunks));
+  });
+});
+
+describe('#2890-review-fix finding 1 — diffHunksFrom is the ONE mapping from a producer result onto the contract', () => {
+  it('an UNSCORED producer result becomes null, whatever its (always-\'\') text says', () => {
+    for (const reason of ['exec-contract', 'ref-unresolved', 'diff-failed', 'diff-too-large', 'no-clone']) {
+      expect(diffHunksFrom({ text: '', scored: false, reason }), reason).toBeNull();
+    }
+  });
+  it('a SCORED result yields its text — including a genuinely empty one', () => {
+    expect(diffHunksFrom({ text: 'diff --git a/a b/a\n', scored: true })).toBe('diff --git a/a b/a\n');
+    expect(diffHunksFrom({ text: '', scored: true })).toBe('');
+  });
+  it('a missing / malformed result is null, never \'\'', () => {
+    expect(diffHunksFrom(null)).toBeNull();
+    expect(diffHunksFrom(undefined)).toBeNull();
+    expect(diffHunksFrom('a raw string')).toBeNull();
+    expect(diffHunksFrom({ scored: true })).toBeNull();          // scored but no text field at all
+    expect(diffHunksFrom({ text: 'x', scored: 'yes' })).toBeNull(); // truthy-but-not-true never counts as scored
+  });
+  // #2890-review-r2 finding 4 — the ORIGINAL version of this test grepped for `diffHunks: <ident>.text` and was
+  // described as making it impossible for a third call site to reintroduce the bug. Measured against 12
+  // regression shapes it caught TWO (`x.text`, `x.text ?? ''`) and missed a ternary in either polarity,
+  // `x?.text`, a destructured `text`, `x['text']`, `(x||{}).text`, `String(x.text)` and `v.netDiff.text`; and it
+  // read two named files, so a third was never scanned at all. The claim is withdrawn. What replaces it: the
+  // BEHAVIOURAL tests on `computeNetDiffSignals` (merge-ai-prs.test.mjs — the one derivation both call sites
+  // now use, where a failed text diff really does yield `diffHunks:null` beside a populated `changedFiles`),
+  // and this deliberately-narrow structural guard, named for exactly what it checks.
+  it('neither of the two KNOWN call-site files builds the signal itself (a THIRD file is not scanned — see the note above)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, join } = await import('node:path');
+    const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    for (const f of ['pr-land.mjs', 'merge-ai-prs.mjs']) {
+      const src = readFileSync(join(scriptsDir, f), 'utf8');
+      expect(src, `${f} must read the signal off the shared derivation`).toMatch(/computeNetDiffSignals\(/);
+      // Any `.text` reaching `diffHunks` is the fail-open shape (`''` on every producer failure path), whatever
+      // the spelling in between — this now allows for member chains, optional chaining and a ternary tail.
+      expect(src.match(/diffHunks\s*[:=][^;\n]*\.text\b/), `${f} routes a raw .text into diffHunks`).toBeNull();
+    }
+  });
+});
+
+// #2890-review-r2 finding 5 — `diffHunksBasisFiles` is published as the list a content detector pairs hunk
+// content with, so it must be spelled the way a hunk header spells a path. `humanBasisFiles` is `parseNumstat`
+// output, i.e. git's DISPLAY encoding, which this repo documents as WRONG for pairing in two places.
+describe('#2890-review-r2 finding 5 — plainDiffPath: numstat DISPLAY encoding → the plain new path', () => {
+  // Every input below was emitted by real git 2.50.1 (`git diff --numstat`) for the rename it describes.
+  it('leaves an already-plain path untouched', () => {
+    expect(plainDiffPath('scripts/lib/review-escalation.mjs')).toBe('scripts/lib/review-escalation.mjs');
+  });
+  it('decodes C-quoted octal BYTES as UTF-8, not codepoint-by-codepoint (which would give mojibake)', () => {
+    expect(plainDiffPath('"caf\\303\\251.md"')).toBe('café.md');
+    expect(plainDiffPath('"caf\\303\\251.md"')).not.toContain('Ã');
+  });
+  it('takes the NEW side of a compact brace rename', () => {
+    expect(plainDiffPath('docs/agent/{old-name.md => platform-decisions.md}')).toBe('docs/agent/platform-decisions.md');
+    expect(plainDiffPath('dir/{sub => other}/thing.md')).toBe('dir/other/thing.md');
+  });
+  it('handles a brace rename whose new side is EMPTY (a directory level removed) without a doubled slash', () => {
+    expect(plainDiffPath('dir/{sub => }/thing.md')).toBe('dir/thing.md');
+    expect(plainDiffPath('dir/{ => deep/deeper}/thing.md')).toBe('dir/deep/deeper/thing.md');
+  });
+  it('takes the NEW side of a QUOTED rename (git quotes each side in full and never braces it)', () => {
+    expect(plainDiffPath('"docs/caf\\303\\251.md" => "docs/caf\\303\\2512.md"')).toBe('docs/café2.md');
+  });
+  it('takes the new side of a plain unquoted rename', () => {
+    expect(plainDiffPath('docs/agent/old.md => docs/agent/new.md')).toBe('docs/agent/new.md');
+  });
+  it('never throws on junk', () => {
+    expect(() => plainDiffPath(null)).not.toThrow();
+    expect(plainDiffPath('')).toBe('');
+    expect(plainDiffPath('"unterminated')).toBe('"unterminated');
+  });
+
+  it('the verdict field is PLAIN, so a renamed statute file matches its own hunk header', () => {
+    const hunkHeader = 'diff --git a/docs/agent/old-name.md b/docs/agent/platform-decisions.md\n@@ -1 +1 @@\n-a\n+b\n';
+    const r = scoreEscalation({
+      changedFiles: ['docs/agent/{old-name.md => platform-decisions.md}', '"caf\\303\\251.md"'],
+      diffHunks: hunkHeader,
+    });
+    expect(r.diffHunksBasisFiles).toEqual(['docs/agent/platform-decisions.md', 'café.md']);
+    // The property the field exists for: #2840's `gateBasis.some(f => isPrincipleSurface(f, hunks))` shape can
+    // actually find the file in the hunk text. With the display encoding it never could.
+    expect(r.diffHunksBasisFiles.some((f) => hunkHeader.includes(`b/${f}`))).toBe(true);
+  });
+  it('the SCORING terms still read the raw display-encoded list — normalizing those is a gate change, not this item', () => {
+    // Deliberate and recorded: a renamed statute file is not caught by the statute term. That fail-open is
+    // PRE-EXISTING (it lives in `parseNumstat`'s output, not in this PR) and closing it changes gate behaviour.
+    const r = scoreEscalation({ changedFiles: ['docs/agent/{old.md => platform-decisions.md}'], diffHunks: 'x' });
+    expect(r.humanRequired).toBe(false);
+    expect(r.diffHunksBasisFiles).toEqual(['docs/agent/platform-decisions.md']);
+  });
+});
+
+describe('#2890-review-fix finding 4 — the hunks travel with the file list computed on the SAME basis', () => {
+  // `diffHunks` is always CUMULATIVE (`mergeBase(origin/main, head)…head`), while `changedFiles` may be
+  // DE-INFLATED to `baseRev…head` for a stacked couple (#2390). Zipping the two would report a principle edit
+  // on a file that is not in `changedFiles`. `diffHunksBasisFiles` is the list on the hunks' own basis.
+  it('diffHunksBasisFiles is humanBasisFiles (the cumulative list), NOT the de-inflated changedFiles', () => {
+    const r = scoreEscalation({
+      changedFiles: ['scripts/child-only.mjs'],
+      humanBasisFiles: ['scripts/child-only.mjs', 'docs/agent/platform-decisions.md'],
+      diffHunks: '@@ -1 +1 @@\n-a\n+b\n',
+    });
+    expect(r.diffHunksBasisFiles).toEqual(['scripts/child-only.mjs', 'docs/agent/platform-decisions.md']);
+    expect(r.diffHunksBasisFiles).not.toEqual(r.signals.blastRadius);
+  });
+  it('falls back to changedFiles in the NON-stacked case, where the two bases are identical', () => {
+    const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], diffHunks: 'diff\n' });
+    expect(r.diffHunksBasisFiles).toEqual(['scripts/pr-land.mjs']);
+  });
+  it('is null whenever the hunks are null — a real file list can never be paired with an absent content signal', () => {
+    const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], humanBasisFiles: ['scripts/pr-land.mjs'] });
+    expect(r.diffHunks).toBeNull();
+    expect(r.diffHunksBasisFiles).toBeNull();
   });
 });
 
