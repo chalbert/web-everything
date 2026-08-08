@@ -5,7 +5,7 @@ size: 5
 parent: "2612"
 status: open
 dateOpened: "2026-08-02"
-blockedBy: ["xc7p3q9"]   # xc7p3q9 decouples the couple-join from the ready-to-merge scope; this item's `ready-to-merge` strip is only SAFE once carrier health is read from the blind context (reciprocal of xc7p3q9's "Blocks #2832"). The drain renumbers this hash → NNN at land.
+blockedBy: ["2989"]   # 2989 decouples the couple-join from the ready-to-merge scope; this item's `ready-to-merge` strip is only SAFE once carrier health is read from the blind context (reciprocal of 2989's "Blocks #2832"). The drain renumbers this hash → NNN at land.
 tags: [conveyor, orchestrator-mechanization, drain, review, ci-lifecycle, gate]
 ---
 

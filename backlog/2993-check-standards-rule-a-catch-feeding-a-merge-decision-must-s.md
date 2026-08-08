@@ -1,4 +1,5 @@
 ---
+bornAs: xn51la2
 kind: task
 status: open
 dateOpened: "2026-08-02"
@@ -8,7 +9,7 @@ scope: ["we:scripts/check-standards.mjs", "we:scripts/merge-ai-prs.mjs"]
 
 # check-standards rule — a catch feeding a merge decision must set a degradation flag
 
-review-integrity guard for the xc7p3q9 B1/B2/B3 fail-open-on-incomplete-context
+review-integrity guard for the 2989 B1/B2/B3 fail-open-on-incomplete-context
 class in `we:scripts/merge-ai-prs.mjs`.
 
 ## Why

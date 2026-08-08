@@ -19,14 +19,14 @@ a healthy open carrier that was merely filtered out of the candidate set defers
 its impl FOREVER — while a genuinely held / unnameable / degraded / truncated
 carrier can slip a stowaway impl onto main alone.
 
-This is the couple-join twin of [xq985wu / #2880](/backlog/2880-decouple-drain-ordering-from-ready-to-merge-label/),
+This is the couple-join twin of [2880 / #2880](/backlog/2880-decouple-drain-ordering-from-ready-to-merge-label/),
 which decoupled merge-ORDERING from the same label scope.
 
 **Blocks #2832** (and the `ready-to-merge` strip work tracked by PR #984). The
 strip (a held WE carrier stops advertising itself as landable) is only safe once
 the couple-join reads carrier health from the blind context, exactly as
-xq985wu / PR #999 made the *ordering* strip safe. Same relationship xq985wu /
-PR #999 has to PR #984. (The reciprocal `blockedBy: [xc7p3q9]` is recorded on
+2880 / PR #999 made the *ordering* strip safe. Same relationship 2880 /
+PR #999 has to PR #984. (The reciprocal `blockedBy: [2989]` is recorded on
 item 2832 so the conveyor cannot dispatch 2832's strip before this fix lands.)
 
 ## The problem
@@ -126,7 +126,7 @@ SHARED with `runCli` — never hand-built verdicts with `item: null` or a pre-se
 
 ## Delivery & the review-fix round
 
-This item is `active` (claimed / in-flight) while its own PR (`bornAs: xc7p3q9`)
+This item is `active` (claimed / in-flight) while its own PR (`bornAs: 2989`)
 is under review — so `check:readiness --select` drops it (no double-dispatch, S3)
 while the reciprocal `blockedBy` on item 2832 stays a LIVE block until this fix
 actually lands (S4). It graduates to `resolved` on land. The core design (carrier
@@ -205,4 +205,4 @@ code, then mutation-verifies.
   read noise still idles); `--repos` entries normalize to `owner/name`; single
   `prsByRepo` producer (no double-narrow); unused test imports removed;
   `joinImplToCouples` JSDoc documents the options bag; this item's `scope:`
-  now lists the lane-manifest test; `xn51la2`'s trigger restated file-scoped.
+  now lists the lane-manifest test; `2993`'s trigger restated file-scoped.

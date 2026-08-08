@@ -1,4 +1,5 @@
 ---
+bornAs: xcyqiis
 kind: task
 status: open
 dateOpened: "2026-08-02"
@@ -8,7 +9,7 @@ scope: ["we:scripts/check-standards.mjs", "we:scripts/merge-ai-prs.mjs"]
 
 # check-standards rule — every hasUnclearedReviewLabel call site must pass explicit options
 
-review-integrity guard for the xc7p3q9 B6 policy-predicate-extracted-without-its-
+review-integrity guard for the 2989 B6 policy-predicate-extracted-without-its-
 parameters class in `we:scripts/merge-ai-prs.mjs`.
 
 ## Why

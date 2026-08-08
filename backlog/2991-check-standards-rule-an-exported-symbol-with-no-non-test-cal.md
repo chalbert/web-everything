@@ -5,12 +5,12 @@ status: open
 dateOpened: "2026-08-03"
 tags: [review-integrity, check-standards, drain, gate]
 scope: ["we:scripts/check-standards.mjs"]
-relatedTo: ["xc7p3q9"]
+relatedTo: ["2989"]
 ---
 
 # check-standards rule — an exported symbol with no non-test caller (and an unused import) is a smell
 
-review-integrity guard for the xc7p3q9 R11/R12 class: a "shared seam" that no
+review-integrity guard for the 2989 R11/R12 class: a "shared seam" that no
 production code actually calls, and imports pulled in but never used.
 
 ## Why

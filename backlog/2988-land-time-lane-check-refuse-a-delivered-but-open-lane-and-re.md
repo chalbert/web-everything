@@ -1,4 +1,5 @@
 ---
+bornAs: x2ss0ma
 kind: task
 status: open
 dateOpened: "2026-08-02"
@@ -8,16 +9,16 @@ scope: ["we:scripts/check-standards.mjs", "we:scripts/merge-ai-prs.mjs"]
 
 # land-time lane check — refuse a delivered-but-open lane; require the reciprocal blockedBy
 
-review-integrity guard for the xc7p3q9 S3/S4 delivered-but-open + prose-only-Blocks
+review-integrity guard for the 2989 S3/S4 delivered-but-open + prose-only-Blocks
 class.
 
 ## Why
 
-The xc7p3q9 item lands `status: open` with no `dateStarted`/`dateResolved` even
+The 2989 item lands `status: open` with no `dateStarted`/`dateResolved` even
 though its own PR delivers it — so `check:readiness --select` offered
 already-delivered work for a fresh lane, and because its `scope` names the sole
 writer to main, the dispatcher would hold every other merge-engine item behind
-it. The sibling xq985wu landed the same way and needed a follow-up "verify …
+it. The sibling 2880 landed the same way and needed a follow-up "verify …
 already landed" commit. Separately, "Blocks #2832" was prose-only — no reciprocal
 `blockedBy` on 2832 — so the conveyor could dispatch 2832's `ready-to-merge`
 strip BEFORE this fix landed (the exact ordering the item declares unsafe). Both

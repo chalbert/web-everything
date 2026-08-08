@@ -1,4 +1,5 @@
 ---
+bornAs: xgor579
 kind: task
 status: open
 dateOpened: "2026-08-02"
@@ -8,16 +9,16 @@ scope: ["we:scripts/check-standards.mjs"]
 
 # citation-gate — a #token in scripts must resolve to a numeric item or a hash
 
-review-integrity guard extending the #2821 citation-gate family for the xc7p3q9
+review-integrity guard extending the #2821 citation-gate family for the 2989
 S1 invented-marker class.
 
 ## Why
 
-The xc7p3q9 PR shipped 18 comment sites reading `#couple-decouple` — an invented
+The 2989 PR shipped 18 comment sites reading `#couple-decouple` — an invented
 marker that resolves to NOTHING (not a numeric item, not a hash filename, not a
 `bornAs` value, not even the item's slug). A reader following the citation lands
-nowhere. The sibling (PR #999/xq985wu) correctly used the hash `#xq985wu`. Fixed
-this round by replacing all 18 with `#xc7p3q9`.
+nowhere. The sibling (PR #999/2880) correctly used the hash `#2880`. Fixed
+this round by replacing all 18 with `#2989`.
 
 ## The guard
 

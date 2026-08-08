@@ -48,7 +48,7 @@ shipped a silently-capped sweep in #1017 a few hours later, in the same session.
   [we:scripts/lane-stack.mjs](scripts/lane-stack.mjs)): a function whose name matches `plan*` / `*ForLandedPass`
   and which iterates an input collection must either return every input key across its returned partitions, or
   carry an explicit `@partial <reason>` marker. Decidable by AST over the return shape — **no taint analysis**,
-  which is the trap that made `xn51la2` unbuildable as first written.
+  which is the trap that made `2993` unbuildable as first written.
 - **A2 — the caller half.** A returned `deferred` / `failed` / `skipped` array that is never read is itself the
   defect. Flag a call site that destructures only the positive bucket.
 - **A3 — a real corpus.** The three shapes above, each asserted to be caught by the rule *before* #2899's fix and
