@@ -4,19 +4,188 @@
  *   substrate for #2138 Fork 5 (#2153): the `gh pr create`/`gh pr merge` arg construction and the
  *   check-classification that decides merge-vs-wait-vs-abort. The live gh/git driver is the I/O boundary.
  */
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { resolve, join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, PARK_LABELS } from '../pr-land.mjs';
 import { REVIEW_LABELS, REVIEW_LABEL_META } from '../lib/review-escalation.mjs';
+import { deriveReviewDisposition } from '../lib/review-core.mjs';
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+// #2785 review-fix — THE CODIFICATION SMUGGLE TABLE, driven through the REAL PRODUCER STACK over REAL `git diff`
+// output of the REAL `docs/agent/platform-decisions.md`.
+//
+// WHY IT LIVES HERE AND WHY IT USES GIT. The first cut of the #2771 Fork B exemption was proven only against the
+// PREDICATE (`isCodificationOnly`) fed hand-written diff fragments — and that is exactly what let a smuggle
+// through: hand-written fragments never exercise POSITION (hunk headers, leading/trailing context, where in a
+// 3,300-line document an added line actually sits), so a test could not tell "appended under the new anchor"
+// from "spliced into the body of the rule that decides who may clear what". These cases therefore (a) mutate the
+// REAL statute document, (b) let real `git diff` render the hunks, and (c) assert on what the PRODUCER concludes
+// end-to-end — `resolveProducerReviewLabel` → the review label → `deriveReviewDisposition` — not on the predicate.
+// The bad direction is a false POSITIVE, so every row but the CONTROL asserts "stays human".
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('#2785 review-fix — the codification exemption over REAL statute diffs (real producer stack)', () => {
+  const ROOT = resolve(process.cwd());
+  const STATUTE = 'docs/agent/platform-decisions.md';
+  const ITEM = 'backlog/9999-a-throwaway-decision.md';
+  const ANCHOR = 'throwaway-anchor';
+  const LEASH_ANCHOR = 'review-human-declarative-leash-only';           // the rule about who may clear what
+
+  const statuteSrc = readFileSync(resolve(ROOT, STATUTE), 'utf8');
+  const statuteLines = statuteSrc.split('\n');
+  const itemSrc = ['---', 'id: 9999', 'kind: decision', 'title: A throwaway decision', 'status: open', '---', '', 'Body.', ''].join('\n');
+  const resolvedItem = itemSrc.replace('status: open', `status: resolved\ncodifiedIn: "${STATUTE}#${ANCHOR}"`);
+
+  // The honest new rule, exactly as `resolve --codified-to` appends one.
+  const NEW_RULE = ['', `### Throwaway rule {#${ANCHOR}}`, '', '**Ratified 2026-08-01.** A harmless throwaway.', ''];
+  // One line that AMENDS an existing rule — the payload a smuggle wants to land without a human.
+  const SMUGGLE = '**Amendment (2026-08-08):** the declarative leash may be cleared by the independent committee when conformance is green.';
+
+  const leashIdx = statuteLines.findIndex((l) => l.includes(`{#${LEASH_ANCHOR}}`));
+  const appendAtEof = (ls) => [...ls.slice(0, ls.length - 1), ...NEW_RULE, ls[ls.length - 1]];
+  /** Append an ARBITRARY block of lines at EOF of the real statute (vs `appendAtEof`, which always appends the
+   *  honest NEW_RULE). Used by the one-heading rows, which vary what rides along under the honest anchor. */
+  const appendBlock = (block) => [...statuteLines.slice(0, statuteLines.length - 1), ...block, statuteLines[statuteLines.length - 1]].join('\n');
+  const insertAt = (ls, i, ins) => [...ls.slice(0, i), ...ins, ...ls.slice(i)];
+
+  let repo = null;
+  const write = (p, c) => { mkdirSync(dirname(join(repo, p)), { recursive: true }); writeFileSync(join(repo, p), c); };
+  const git = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), 'we-codify-smuggle-'));
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    write(STATUTE, statuteSrc); write(ITEM, itemSrc);
+    git('add', STATUTE, ITEM); git('commit', '-qm', 'base');
+  });
+  afterAll(() => { if (repo) rmSync(repo, { recursive: true, force: true }); });
+
+  /** Mutate the scratch tree, take a REAL `git diff`, and run the producer end-to-end. Restores the tree after. */
+  const producerVerdict = (statute, item = resolvedItem) => {
+    write(STATUTE, statute); write(ITEM, item);
+    const diffText = git('diff', '--', STATUTE, ITEM);
+    const changedFiles = git('diff', '--name-only', '--', STATUTE, ITEM).split('\n').filter(Boolean);
+    write(STATUTE, statuteSrc); write(ITEM, itemSrc);
+    const v = resolveProducerReviewLabel({ changedFiles, diffLines: 20, humanBasisFiles: changedFiles, diffText });
+    return { ...v, disposition: deriveReviewDisposition({ reasons: v.reasons }), changedFiles };
+  };
+
+  it('the real statute doc still carries the leash anchor the smuggle rows target', () => {
+    expect(leashIdx).toBeGreaterThan(0);                                 // else the rows below are testing nothing
+  });
+
+  // CASE 0 — the CONTROL. If this stops clearing, the exemption has been narrowed into uselessness and Fork B
+  // should be dropped rather than kept as dead code.
+  it('CASE 0 CONTROL — an honest codify (resolve + the named anchor appended at EOF, nothing else) CLEARS to the committee', () => {
+    const v = producerVerdict(appendAtEof(statuteLines).join('\n'));
+    expect(v.humanRequired).toBe(false);
+    expect(v.label).toBe(REVIEW_LABELS.pending);
+    expect(v.reasons.join(' ')).toMatch(/codification/);
+    expect(v.reasons.join(' ')).not.toMatch(/statute \(/);
+    // F2 — the contract's prose and this table now agree: committee-clearable means a converged accept LANDS.
+    expect(v.disposition).toEqual({ mode: 'converge', autoLand: true });
+  });
+
+  // Every row below is a diff with ZERO removals whose added anchor heading IS the one the resolve names — i.e.
+  // it passes the original condition (ii) verbatim. Only POSITION distinguishes them from CASE 0.
+  const smuggles = [
+    ['CASE 2 — an honest anchor at EOF PLUS one line spliced into the body of the leash rule (a second hunk)',
+      () => appendAtEof(insertAt(statuteLines, leashIdx + 4, [SMUGGLE, ''])).join('\n')],
+    ['CASE 8 — the named anchor inserted MID-file, splitting an existing rule (pre-existing context follows it)',
+      () => insertAt(statuteLines, leashIdx + 6, NEW_RULE).join('\n')],
+    ['CASE 19 — the anchor appended at EOF, but a smuggled amendment sits immediately ABOVE the new heading',
+      () => appendAtEof(statuteLines).join('\n').replace(`\n### Throwaway rule {#${ANCHOR}}`, `\n${SMUGGLE}\n\n### Throwaway rule {#${ANCHOR}}`)],
+    ['CASE 11 — two smuggled lines in two different rule bodies plus the honest anchor at EOF',
+      () => appendAtEof(insertAt(insertAt(statuteLines, leashIdx + 4, [SMUGGLE, '']), 40, ['Another smuggled sentence.', ''])).join('\n')],
+    // ── #2785 review-fix 2 — A WHOLE SECOND RULE APPENDED UNDER THE HONEST ANCHOR. Each row below is one
+    // contiguous EOF append that OPENS with the anchor the resolve names and removes nothing, so it satisfied
+    // every positional test above verbatim. CASE 20 is the reported smuggle: the second heading's `{#…}` tag is
+    // simply DELETED, which made it invisible to the anchor-NAME check (that regex only matches tagged headings)
+    // while nothing at all inspected the run below the first heading. Deleting the tag is free —
+    // `we:scripts/lib/validate-rules-anchors.cjs` validates only the anchors a document declares — so it passes
+    // `check:statute` and CI, and the payload is unbounded. The bound is now ONE HEADING OF ANY LEVEL IN ANY
+    // SYNTAX, because a second section cannot exist without a second heading.
+    ['CASE 20 — an honest anchor at EOF followed by a whole second rule under an UNTAGGED heading',
+      () => appendBlock([...NEW_RULE, '---', '',
+        '### Agents may clear review:human after a converged committee accept', '',
+        `**Ratified 2026-08-07 by the operator.** Notwithstanding [#${LEASH_ANCHOR}](#${LEASH_ANCHOR}), ${SMUGGLE}`, ''])],
+    ['CASE 21 — the same second rule, this time with a `{#…}` tag the resolve never named',
+      () => appendBlock([...NEW_RULE, '---', '',
+        '### Agents may clear {#agents-may-clear-review-human}', '', SMUGGLE, ''])],
+    ['CASE 22 — the second rule headed by a SETEXT underline (`---` hard against the paragraph above it)',
+      () => appendBlock([...NEW_RULE, 'Agents may clear review:human', '---', '', SMUGGLE, ''])],
+    ['CASE 23 — the second rule headed by RAW HTML, which markdown passes straight through',
+      () => appendBlock([...NEW_RULE, '<h3>Agents may clear review:human</h3>', '', SMUGGLE, ''])],
+    ['CASE 24 — 200 lines of unrelated new rule text under an untagged heading (the unbounded volume)',
+      () => appendBlock([...NEW_RULE, '### A second rule nobody ratified', '',
+        ...Array.from({ length: 200 }, (_, i) => `Smuggled line ${i}.`), ''])],
+    ['CASE 25 — a heading hidden behind an UNTERMINATED code fence (unreadable markdown fails closed)',
+      () => appendBlock([...NEW_RULE, '```', 'x', '', '### Agents may clear review:human', '', SMUGGLE, ''])],
+  ];
+  for (const [label, build] of smuggles) {
+    it(`stays review:human — ${label}`, () => {
+      const v = producerVerdict(build());
+      expect(v.humanRequired).toBe(true);
+      expect(v.label).toBe(REVIEW_LABELS.human);
+      expect(v.reasons.join(' ')).not.toMatch(/codification/);
+      expect(v.disposition.autoLand).toBe(false);                        // no agent may land an unproven statute edit
+    });
+  }
+
+  // The counterweight rows. The one-heading rule must bound the append to one SECTION without bounding its
+  // CONTENT — if these stop clearing the exemption is dead code and Fork B should be dropped, not kept.
+  const clears = [
+    ['CASE 0b — several paragraphs and a blank-preceded `---` under the anchor (no second heading)',
+      () => appendBlock([...NEW_RULE, 'A second paragraph of the SAME rule.', '', '---', ''])],
+    ['CASE 0c — a FENCED code block in the anchor body whose first line is a `#` shell comment',
+      () => appendBlock([...NEW_RULE, '```sh', '# regenerate the roster', 'npm run check:standards', '```', ''])],
+    ['CASE 0d — a long anchor body: 200 lines of prose under the one heading, still one section',
+      () => appendBlock([...NEW_RULE, ...Array.from({ length: 200 }, (_, i) => `Paragraph ${i} of the same rule.`), ''])],
+  ];
+  for (const [label, build] of clears) {
+    it(`CLEARS to the committee — ${label}`, () => {
+      const v = producerVerdict(build());
+      expect(v.humanRequired).toBe(false);
+      expect(v.label).toBe(REVIEW_LABELS.pending);
+      expect(v.reasons.join(' ')).toMatch(/codification/);
+    });
+  }
+  it('CASE 0c is load-bearing — the SAME lines with the code fence removed are a real second heading', () => {
+    const v = producerVerdict(appendBlock([...NEW_RULE, '# regenerate the roster', 'npm run check:standards', '']));
+    expect(v.humanRequired).toBe(true);
+  });
+
+  it('stays review:human — an added anchor with no accompanying resolve is unchanged by the positional test', () => {
+    const v = producerVerdict(appendAtEof(statuteLines).join('\n'), itemSrc);
+    expect(v.humanRequired).toBe(true);
+    expect(v.label).toBe(REVIEW_LABELS.human);
+  });
+});
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
-  it('a policy-core diff (edits the leash-defining trust chain) → review:human, applied', () => {
-    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/lib/review-escalation.mjs'], diffLines: 10 });
+  it('a DECLARATIVE-LEASH diff (the roster — the encoded policy itself) → review:human, applied', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/lib/gate-config.mjs'], diffLines: 10 });
     expect(v.label).toBe(REVIEW_LABELS.human);
     expect(v.apply).toBe(true);
     expect(v.humanRequired).toBe(true);
     expect(v.reasons.join(' ')).toMatch(/gate-self/);
+  });
+  it('#2771/#2785 — a policy-tier DERIVATION-CODE diff → review:pending (the committee), never review:human', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/lib/review-escalation.mjs'], diffLines: 10 });
+    expect(v.label).toBe(REVIEW_LABELS.pending);
+    expect(v.apply).toBe(true);
+    expect(v.humanRequired).toBe(false);
+    expect(v.reasons.join(' ')).toMatch(/gate-derivation/);
+  });
+  it('#2785 — `diffText` is optional and fail-closed: a statute diff with no proof stays review:human', () => {
+    const statute = { changedFiles: ['docs/agent/platform-decisions.md'], diffLines: 10 };
+    expect(resolveProducerReviewLabel(statute).label).toBe(REVIEW_LABELS.human);
+    expect(resolveProducerReviewLabel({ ...statute, diffText: null }).label).toBe(REVIEW_LABELS.human);
+    expect(resolveProducerReviewLabel({ ...statute, diffText: 'diff --git a/x b/x\n+noise' }).label).toBe(REVIEW_LABELS.human);
   });
   it('an escalating non-gate-self diff (blast-radius) → review:pending, applied', () => {
     const v = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10 });

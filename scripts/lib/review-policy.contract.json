@@ -14,13 +14,25 @@
       "token": "gate-self",
       "family": "sensitivity",
       "clearance": "human",
-      "description": "The diff edits the POLICY tier of the auto-review trust chain — the code that decides whether the gate fires and what clears it. An agent reviewing such a change would be policing an edit to its own leash (a conflict of interest), so a human is essential (#2285). Fires at classification time (before any review deadlock), so the panel may CONVERGE an advisory fix — but it never auto-lands."
+      "description": "The diff edits the DECLARATIVE LEASH of the auto-review trust chain — the encoded policy itself: this contract, the gate-config roster, and the invariant / conformance suites (POLICY_SPEC_BASENAMES, gate-config.mjs). Those files ARE the policy, so there is no behaviour-preserving edit to them and 'did the spec change?' is exactly 'did this file change?' — a human is essential (#2285, narrowed to the leash by #2771/#2785). Fires at classification time (before any review deadlock), so the panel may CONVERGE an advisory fix — but it never auto-lands. NOTE the narrowing kept this token's NAME and its human clearance unchanged on purpose: a PR already parked with a `gate-self` reason before #2785 landed keeps its human gate, and only the newly-split `gate-derivation` token below is agent-clearable."
+    },
+    {
+      "token": "gate-derivation",
+      "family": "sensitivity",
+      "clearance": "agent",
+      "description": "The diff edits policy-tier DERIVATION CODE — the code that derives the gate from the declarative leash (the rubric review-escalation.mjs, the disposition router review-core.mjs, the contract loader review-policy.mjs, the two land seams). Ratified agent-clearable by #2771 Fork A (`#review-human-declarative-leash-only`): an independent, fresh-context committee that took no part in authoring the diff is sufficient independence for the CODE, PROVIDED the leash it implements stays human-gated (the `gate-self` token above) and the conformance suite stays green. The suite is the deterministic backstop — any change that alters the gate's BEHAVIOUR reddens conformance, which forces a contract diff, which is human-gated. So: escalates and runs the full panel, and a converged verdict lands; non-convergence still hands to a human."
+    },
+    {
+      "token": "codification",
+      "family": "sensitivity",
+      "clearance": "agent",
+      "description": "The diff's ONLY statute edit is the mechanical codification of a decision the human ALREADY ruled — the same PR resolves a kind:decision item (status → resolved with codifiedIn set to a statute anchor) and the only platform-decisions.md change is the addition of exactly that anchor. Ratified agent-clearable by #2771 Fork B: re-bouncing this to the human asks them to re-approve their own ruling (the #882/#885 bounce). The committee still reviews it — an independent panel checks the anchor faithfully records the resolved decision's ruling — but a CONVERGED panel accept lands it: like `gate-derivation`, this token falls through to the agent-clearance rule below (`converge`, `autoLand: true`) and no human gates the merge. That is the whole content of 'committee-clearable, not human-gated'; the only thing removed is the human, never the review. Detected script-decidably from the resolve+codify diff SHAPE (isCodificationOnly, review-escalation.mjs), never from a raw 'touches platform-decisions.md' test, and FAIL-CLOSED in both halves of the shape: any statute diff whose shape cannot be proven to be codification carries the `statute` token instead and stays human — including one whose added lines cannot be proven to BELONG TO the named anchor's own section (a second added run anywhere in the file, an added anchor followed by pre-existing context, or prose sitting above the new heading)."
     },
     {
       "token": "statute",
       "family": "sensitivity",
       "clearance": "human",
-      "description": "The diff edits the statute layer (platform-decisions.md / any statute doc) — a governance rule a human must ratify (#2412). Same disposition as gate-self: converge an advisory fix, never auto-land."
+      "description": "The diff edits the statute layer (platform-decisions.md / any statute doc) writing a NEW rule — a governance call a human must ratify (#2412). Same disposition as gate-self: converge an advisory fix, never auto-land. Since #2771/#2785 this token fires on every statute edit EXCEPT one whose diff shape proves it is the codification of an already-ruled decision (the `codification` token above); anything unprovable stays here, human-gated."
     },
     {
       "token": "blast-radius",
@@ -72,7 +84,7 @@
         "match": { "clearance": "human" },
         "mode": "converge",
         "autoLand": false,
-        "description": "A human-clearance SENSITIVITY reason (gate-self or statute — deadlock is already caught above): converge an ADVISORY fix, but a human must still clear the merge. The #2445 two-tier flip keeps ONLY these two sensitivity classes human; the lander (engine tier) falls through to the next rule."
+        "description": "A human-clearance SENSITIVITY reason (gate-self or statute — deadlock is already caught above): converge an ADVISORY fix, but a human must still clear the merge. The #2445 two-tier flip keeps ONLY these two sensitivity classes human; the lander (engine tier) falls through to the next rule, and since #2771/#2785 so do the two narrowed classes — `gate-derivation` (policy-tier code that is not the leash) and `codification` (a statute edit proven to record an already-ruled decision)."
       },
       {
         "match": { "family": "sensitivity" },

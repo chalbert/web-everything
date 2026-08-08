@@ -3,7 +3,7 @@ bornAs: xzcdvz7
 shortTitle: "Narrow review gate to spec-diff"
 kind: story
 size: 5
-status: open
+status: resolved
 blockedBy: []
 scope:
   - we:scripts/lib/gate-config.mjs
@@ -18,7 +18,8 @@ scope:
   - we:skills-src/drain/SKILL.md
   - we:skills-src/review/SKILL.md
 dateOpened: "2026-07-19"
-dateStarted: "2026-07-19"
+dateStarted: "2026-08-08"
+dateResolved: "2026-08-08"
 tags: []
 ---
 
