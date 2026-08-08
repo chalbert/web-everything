@@ -8,6 +8,8 @@ import {
   decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd, resolveEffectiveCwd,
   laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
   isVerificationRun, isBackgrounded, backgroundedVerificationReason,
+  isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
+  mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
 } from '../guard-bash.mjs';
 
 describe('guard-bash — backgrounded verification is denied (#2833 finding 3)', () => {
@@ -380,5 +382,310 @@ describe('guard-bash — direct-push-to-main block (#2203)', () => {
     expect(decide('git rm backlog/2200-foo.md')).toMatch(/Never delete a backlog/);
     expect(decide('git mv backlog/2200-a.md backlog/2201-a.md')).toMatch(/immutable/);
     expect(reason('sed -i s/x/y/ backlog/2200-a.md')).toMatch(/locus-prefix/);
+  });
+});
+
+describe('guard-bash — primary-tree-write build backstop (#2749/#2788, 4th arm)', () => {
+  it('isTreeWritingBuildRun: an actual RUN of build/build:docs/build:demo (npm/pnpm/yarn/run-s/run-p), excluding build:check + build:plugs', () => {
+    expect(isTreeWritingBuildRun('npm run build')).toBe(true);
+    expect(isTreeWritingBuildRun('npm run build:docs')).toBe(true);
+    expect(isTreeWritingBuildRun('npm run build:demo')).toBe(true);
+    expect(isTreeWritingBuildRun('pnpm build')).toBe(true);
+    expect(isTreeWritingBuildRun('yarn build')).toBe(true);
+    expect(isTreeWritingBuildRun('run-s build:docs build:demo')).toBe(true);
+    // excluded — /tmp output + already its own separate arm
+    expect(isTreeWritingBuildRun('npm run build:check')).toBe(false);
+    expect(isTreeWritingBuildRun('npm run build:plugs')).toBe(false);
+    // a mention, not a run
+    expect(isTreeWritingBuildRun('echo "run npm run build later"')).toBe(false);
+    expect(isTreeWritingBuildRun('git commit -m "wire npm run build into ci"')).toBe(false);
+    // an unrelated identifier that merely contains "build" is not a build run
+    expect(isTreeWritingBuildRun('npm run buildSomethingElse')).toBe(false);
+    expect(isTreeWritingBuildRun('npm test')).toBe(false);
+  });
+
+  it('isGeneratorScriptRun: a node invocation of a generate*/scaffold*.mjs script by name', () => {
+    expect(isGeneratorScriptRun('node scripts/generate-report.mjs')).toBe(true);
+    expect(isGeneratorScriptRun('node scripts/new-standard-scaffold.mjs --name=foo')).toBe(true);
+    expect(isGeneratorScriptRun('node scripts/Generate.js')).toBe(true);
+    // NOT a generator script: an unrelated script, or a `scaffold` SUBCOMMAND argument (not the script's own name)
+    expect(isGeneratorScriptRun('node scripts/backlog.mjs scaffold 1234')).toBe(false);
+    expect(isGeneratorScriptRun('node scripts/lane-pool.mjs acquire --lane=1')).toBe(false);
+  });
+
+  it('isFileWriteRedirect: sed -i / perl -pi / tee / a trailing shell redirect writing a non-scratch file', () => {
+    expect(isFileWriteRedirect('sed -i s/x/y/ config/app.json')).toBe(true);
+    expect(isFileWriteRedirect('perl -pi -e "s/x/y/" config/app.json')).toBe(true);
+    expect(isFileWriteRedirect('tee config/app.json')).toBe(true);
+    expect(isFileWriteRedirect('tee -a config/app.json')).toBe(true);
+    expect(isFileWriteRedirect('echo hello > config/app.json')).toBe(true);
+    expect(isFileWriteRedirect('cat template.json >> config/app.json')).toBe(true);
+    // scratch targets (/tmp, /dev) are allowed — the standard lane-workflow idiom for scratch files
+    expect(isFileWriteRedirect('sed -i s/x/y/ /tmp/scratch.json')).toBe(false);
+    expect(isFileWriteRedirect('tee /tmp/pr-body-2788.md')).toBe(false);
+    expect(isFileWriteRedirect('echo hello > /tmp/out.log')).toBe(false);
+    expect(isFileWriteRedirect('node scripts/x.mjs > /dev/null')).toBe(false);
+    // a literal `>` inside a quoted string is NOT a redirect (the trailing-anchor + closing-quote breaks it)
+    expect(isFileWriteRedirect('git commit -m "fix > bug"')).toBe(false);
+    expect(isFileWriteRedirect('git commit -m "fix > bug.txt"')).toBe(false);
+    // fd-duplication / combined redirects are not a file write
+    expect(isFileWriteRedirect('npm run check:standards > log.txt 2>&1')).toBe(true); // still writes log.txt
+    expect(isFileWriteRedirect('npm test 2>&1')).toBe(false);
+    // no redirect/tee/sed/perl at all
+    expect(isFileWriteRedirect('git status')).toBe(false);
+    expect(isFileWriteRedirect('')).toBe(false);
+  });
+
+  // ── #2788 review regressions ────────────────────────────────────────────────────────────────────
+  // Each case below FAILED on the first cut of this arm and was caught by the review jury.
+
+  it('isFileWriteRedirect: the REAL platform scratch roots are scratch, not primary-tree writes', () => {
+    // The sanctioned per-session scratchpad every agent is handed is spelled `/private/tmp/claude-<uid>/…`
+    // (macOS resolves `/tmp` through that symlink); `$TMPDIR` resolves to `/var/folders/<xx>/<yy>/T/…`.
+    // Matching only `^/tmp/` denied an agent's own scratchpad — the most common legitimate write there is.
+    expect(isFileWriteRedirect('echo hi > /private/tmp/claude-501/sess/scratch.txt')).toBe(false);
+    expect(isFileWriteRedirect('tee /private/tmp/claude-501/sess/body.md')).toBe(false);
+    expect(isFileWriteRedirect('echo hi > /var/folders/ab/cd/T/scratch.txt')).toBe(false);
+    expect(isFileWriteRedirect('echo hi > /var/tmp/scratch.txt')).toBe(false);
+    // …while a path that merely CONTAINS a temp-looking segment is still a tree write (anchored, not loose)
+    expect(isFileWriteRedirect('echo hi > docs/private/tmp/notes.md')).toBe(true);
+    expect(isFileWriteRedirect('echo hi > ./tmp/notes.md')).toBe(true);
+  });
+
+  it('isTreeWritingBuildRun: an excluded target named ELSEWHERE cannot disarm a real tree build', () => {
+    const CHECK = `build:${'check'}`;
+    const PLUGS = `build:${'plugs'}`;
+    // the exclusion is tested against the MATCHED target, never the whole segment
+    expect(isTreeWritingBuildRun(`npm run build && echo ${CHECK}`)).toBe(true);
+    expect(isTreeWritingBuildRun(`npm run build # see ${PLUGS}`)).toBe(true);
+    // a genuinely excluded target still excludes
+    expect(isTreeWritingBuildRun(`npm run ${CHECK}`)).toBe(false);
+    expect(isTreeWritingBuildRun(`npm run ${PLUGS}`)).toBe(false);
+  });
+
+  // ── #2788 review ROUND 2 regressions ────────────────────────────────────────────────────────────
+  // The round-1 fixes were themselves bypassable; each case below failed on that cut.
+
+  it('isTreeWritingBuildRun: NO placement of an excluded target can disarm a real build', () => {
+    const CHECK = `build:${'check'}`;
+    const PLUGS = `build:${'plugs'}`;
+    // r1 extracted ONE target (the first in a greedy match), so an excluded name placed BEFORE a real one
+    // disarmed the arm — the same bypass r1 was meant to close, one spelling further out.
+    expect(isTreeWritingBuildRun(`run-s ${CHECK} build`)).toBe(true);
+    expect(isTreeWritingBuildRun(`run-s build ${CHECK}`)).toBe(true);
+    expect(isTreeWritingBuildRun(`run-p ${PLUGS} build:docs`)).toBe(true);
+    // …while a segment whose targets are ALL excluded still stays quiet
+    expect(isTreeWritingBuildRun(`run-s ${CHECK} ${PLUGS}`)).toBe(false);
+    expect(isTreeWritingBuildRun(`npm run ${CHECK}`)).toBe(false);
+    // and a word merely CONTAINING "build" is not a build target
+    expect(isTreeWritingBuildRun('npm run test --rebuild-cache')).toBe(false);
+    expect(isTreeWritingBuildRun('git commit -m "npm run build"')).toBe(false);
+  });
+
+  it('isFileWriteRedirect: a QUOTED path is unquoted before the scratch allowlist sees it', () => {
+    // r1 tested the raw shell token against an anchored `^/tmp/`, so quoting a scratch path — ordinary
+    // hygiene, and required for a path with a space — read as a primary-tree write and was denied.
+    expect(isFileWriteRedirect('tee "/tmp/x"')).toBe(false);
+    expect(isFileWriteRedirect("tee '/tmp/x'")).toBe(false);
+    expect(isFileWriteRedirect('sed -i s/a/b/ "/tmp/x"')).toBe(false);
+    expect(isFileWriteRedirect('echo hi > "/private/tmp/claude-501/s.txt"')).toBe(false);
+    // …and the mirror bypass: a QUOTED tree target must still be caught (the old `[\w./-]+` class
+    // excluded quote chars, so a quoted redirect matched nothing at all).
+    expect(isFileWriteRedirect('echo hi > "config/app.json"')).toBe(true);
+    expect(isFileWriteRedirect('tee "docs/x.md"')).toBe(true);
+  });
+
+  it('hasLeadingEnvEscape: the escape counts only as a LEADING assignment, never as a mention', () => {
+    const V = 'MAIN_SESSION_BUILD_OK';
+    expect(hasLeadingEnvEscape(`${V}=1 npm run build`, V)).toBe(true);
+    expect(hasLeadingEnvEscape(`FOO=x ${V}=1 npm run build`, V)).toBe(true);
+    // a mention anywhere else must NOT disarm the guard
+    expect(hasLeadingEnvEscape(`git commit -m "see ${V}=1 in docs"`, V)).toBe(false);
+    expect(hasLeadingEnvEscape(`echo ${V}=1`, V)).toBe(false);
+    expect(hasLeadingEnvEscape(`grep ${V}=1 docs/agent/x.md`, V)).toBe(false);
+    // only the documented `=1` value opts out
+    expect(hasLeadingEnvEscape(`${V}=0 npm run build`, V)).toBe(false);
+    expect(hasLeadingEnvEscape('npm run build', V)).toBe(false);
+  });
+
+  it('primaryTreeWriteReason returns a reason for each of the three shapes, null otherwise', () => {
+    expect(primaryTreeWriteReason('npm run build')).toMatch(/WRITES the shared PRIMARY tree/);
+    expect(primaryTreeWriteReason('node scripts/generate-report.mjs')).toMatch(/generator\/scaffold script/);
+    expect(primaryTreeWriteReason('echo hi > config/app.json')).toMatch(/redirect.*writing a file/);
+    expect(primaryTreeWriteReason('npm run build:check')).toBeNull();
+    expect(primaryTreeWriteReason('git status')).toBeNull();
+  });
+
+  it('reason() denies the tree-write ONLY when cwd is primary; a lane clone is untouched', () => {
+    expect(reason('npm run build', { primaryCwd: true })).toMatch(/#2749\/#2788/);
+    expect(reason('npm run build', { primaryCwd: false })).toBeNull();
+    expect(reason('node scripts/generate-report.mjs', { primaryCwd: true })).toMatch(/generator\/scaffold script/);
+    expect(reason('node scripts/generate-report.mjs', { primaryCwd: false })).toBeNull();
+    expect(reason('echo hi > config/app.json', { primaryCwd: true })).toMatch(/writing a file/);
+    expect(reason('echo hi > config/app.json', { primaryCwd: false })).toBeNull();
+  });
+
+  it('the MAIN_SESSION_BUILD_OK=1 escape passes a primary-cwd tree-write through (mirrors MAIN_PUSH_OK)', () => {
+    expect(reason('MAIN_SESSION_BUILD_OK=1 npm run build', { primaryCwd: true })).toBeNull();
+    expect(reason('MAIN_SESSION_BUILD_OK=1 node scripts/generate-report.mjs', { primaryCwd: true })).toBeNull();
+    expect(reason('MAIN_SESSION_BUILD_OK=1 echo hi > config/app.json', { primaryCwd: true })).toBeNull();
+  });
+
+  it('decide() surfaces the tree-write denial across a full &&-chained command', () => {
+    expect(decide('cd /ws/webeverything && npm run build', { primaryCwd: true })).toMatch(/#2749\/#2788/);
+  });
+
+  it('does not fire on a genuinely unrelated primary-cwd command', () => {
+    expect(reason('git status', { primaryCwd: true })).toBeNull();
+    expect(reason('ls backlog', { primaryCwd: true })).toBeNull();
+    expect(reason('node scripts/lane-pool.mjs acquire --lane=1', { primaryCwd: true })).toBeNull();
+  });
+
+  it('mainSessionDelegateNudge: WARNS (never denies) on a verification-set run at primary cwd; null otherwise', () => {
+    expect(mainSessionDelegateNudge('npm run check:standards', { primaryCwd: true })).toMatch(/should delegate mechanical work/);
+    expect(mainSessionDelegateNudge('npm test', { primaryCwd: true })).toMatch(/WARN, not a denial/);
+    // not primary cwd → no nudge (a lane's own verify is sanctioned, nothing to nudge)
+    expect(mainSessionDelegateNudge('npm run check:standards', { primaryCwd: false })).toBeNull();
+    expect(mainSessionDelegateNudge('npm run check:standards')).toBeNull(); // default ctx
+    // not a verification run → no nudge
+    expect(mainSessionDelegateNudge('git status', { primaryCwd: true })).toBeNull();
+    // the nudge never feeds the deny channel — reason()/decide() are untouched by it
+    expect(reason('npm run check:standards', { primaryCwd: true })).toBeNull();
+    expect(decide('npm run check:standards', { primaryCwd: true })).toBeNull();
+  });
+});
+
+// ── #2788 review ROUND 3 — the two-sided fixture corpus ─────────────────────────────────────────────────
+// Round 3 found the same defect five ways: a hand-written regex validated against the examples it was
+// written from, so precision fixes silently ate recall and vice-versa. The durable guard is a TWO-SIDED
+// table — every family lists EQUIVALENT SPELLINGS of one effect and asserts they all decide identically —
+// so the two sides get tuned against each other instead of one example at a time.
+describe('guard-bash — #2788 r3: equivalent spellings decide identically', () => {
+  const CHECK = `build:${'check'}`;
+  const PLUGS = `build:${'plugs'}`;
+  const at = (cmd) => decide(cmd, { primaryCwd: true });
+
+  // MUST ALWAYS DENY — one family per row: the same tree write, spelled every way it is reachable.
+  const MUST_DENY = {
+    'wrapper-prefixed build (r3 finding 1)': [
+      'npm run build', 'env npm run build', 'time npm run build', 'command npm run build',
+      'nice npm run build', 'sudo npm run build', 'FOO=1 npm run build', 'npx run-s build:docs',
+      'xargs -n1 npm run build', '(npm run build)',
+    ],
+    'the build TOOL the alias delegates to (r3 finding 5)': [
+      'vite build', 'npx vite build', './node_modules/.bin/eleventy', 'npx eleventy',
+      'eleventy --output=_site', 'env vite build',
+    ],
+    'a redirect anywhere in the segment, not just at its end (r3 finding 2)': [
+      'echo hi > config/app.json', 'cat t.json >> config/app.json',
+      "cat > config/app.json <<'EOF'", '> config/app.json echo hi', '>| config/app.json',
+      'echo hi > "config/app.json"', 'echo hi>config/app.json', 'echo hi &> config/app.json',
+      'echo hi 2> config/app.json',
+    ],
+    "this repo's actual generators (r3 finding 3)": [
+      'node scripts/gen-inventory.mjs', 'node scripts/gen-reference-index.mjs',
+      'node scripts/gen-wrapper/cli.mjs', 'node scripts/gen-cem.mjs', 'npm run gen:inventory',
+      'node scripts/generate-report.mjs', 'node scripts/new-standard-scaffold.mjs --name=foo',
+      'env node scripts/gen-inventory.mjs',
+    ],
+    'multi-target / alternate-flag in-place writes (r3 finding 4)': [
+      'sed -i s/x/y/ config/app.json', 'sed -i s/x/y/ config/app.json /tmp/x',
+      'sed -i s/x/y/ /tmp/x config/app.json', 'sed --in-place s/x/y/ config/app.json',
+      'sed -i.bak s/x/y/ config/app.json', 'env sed -i s/x/y/ config/app.json',
+      "perl -pi -e 's/x/y/' config/app.json", "perl -i -pe 's/x/y/' config/app.json",
+      "perl -i.bak -pe 's/x/y/' config/app.json",
+      'tee config/app.json', 'tee -a config/app.json', 'tee /tmp/x config/app.json',
+      'tee -a -- config/app.json',
+    ],
+  };
+
+  // MUST NEVER DENY — the mirror side: pure-scratch / read-only work in every flag spelling.
+  const MUST_ALLOW = {
+    'scratch writes in every flag + quote spelling (r3 finding 6)': [
+      'tee /tmp/x.log', 'tee -a /tmp/x.log', 'tee --append /tmp/x.log', 'tee -a -- /tmp/x.log',
+      'tee -i -a /tmp/x.log', 'tee "/tmp/x.log"', "tee '/tmp/x.log'",
+      'tee /private/tmp/claude-501/sess/body.md', 'tee /var/folders/ab/cd/T/x',
+      'sed -i s/x/y/ /tmp/x.json', 'sed --in-place s/x/y/ /tmp/x.json',
+      "perl -pi -e 's/x/y/' /tmp/x.json",
+      'echo hi > /tmp/out.log', 'echo hi > /dev/null', 'echo hi > "/private/tmp/claude-501/s.txt"',
+    ],
+    'non-writes that merely LOOK like writes': [
+      'git commit -m "fix > bug"', 'git commit -m "npm run build"', 'npm test 2>&1',
+      'echo "a > b"', 'sed -n "1,5p" config/app.json', 'grep -rn ">" src/',
+      'node scripts/backlog.mjs list', 'git status', 'vite dev', 'vite preview',
+      'perl -Mlist::Util -e "print 1" data.txt',
+    ],
+    'the excluded / separately-armed build targets': [
+      `npm run ${CHECK}`, `run-s ${CHECK} ${CHECK}`, 'eleventy --output=/tmp/we-build-check --quiet',
+    ],
+    'the sanctioned escape, including through a wrapper': [
+      'MAIN_SESSION_BUILD_OK=1 npm run build', 'env MAIN_SESSION_BUILD_OK=1 npm run build',
+      'MAIN_SESSION_BUILD_OK=1 sed -i s/x/y/ config/app.json',
+      'MAIN_SESSION_BUILD_OK=1 node scripts/gen-inventory.mjs',
+    ],
+  };
+
+  for (const [family, cmds] of Object.entries(MUST_DENY)) {
+    it(`MUST DENY at primary cwd — ${family}`, () => {
+      const allowed = cmds.filter((c) => !at(c));
+      expect(allowed).toEqual([]);
+      // …and every one of them is untouched in a lane clone (the arm keys on WHERE the write lands).
+      expect(cmds.filter((c) => decide(c, { primaryCwd: false }))).toEqual([]);
+    });
+  }
+
+  for (const [family, cmds] of Object.entries(MUST_ALLOW)) {
+    it(`MUST NEVER DENY at primary cwd — ${family}`, () => {
+      expect(cmds.filter((c) => at(c))).toEqual([]);
+    });
+  }
+
+  it(`${PLUGS} still gets its OWN message, not the tree-write one`, () => {
+    expect(at(`npm run ${PLUGS}`)).toMatch(/shadow \.js\/\.d\.ts/);
+  });
+
+  it('the deny message names the ACTUAL remedy for a caller already in a lane (r3 finding 7)', () => {
+    // "Delegate to a lane clone" is useless advice to a delegated subagent whose reported cwd reset to
+    // primary (#2335); the remedy is to make the lane cwd explicit, which `resolveEffectiveCwd` honours.
+    for (const cmd of ['npm run build', 'node scripts/gen-inventory.mjs', 'echo hi > config/app.json'])
+      expect(at(cmd)).toMatch(/cd <lane-path> && <cmd>/);
+    // …and that spelling really is allowed.
+    expect(decide('cd /ws/.lanes/web-everything/lane-3 && npm run build', { primaryCwd: false })).toBeNull();
+  });
+});
+
+describe('guard-bash — the shared normalizers the #2788 arms and canonicalGitOp both use (r3 finding 1)', () => {
+  it('canonicalCommand peels the SAME wrapper table canonicalGitOp knows about', () => {
+    for (const w of ['env', 'time', 'command', 'builtin', 'nice', 'sudo', 'npx'])
+      expect(canonicalCommand(`${w} npm run build`)).toBe('npm run build');
+    expect(canonicalCommand('FOO=1 BAR=2 npm run build')).toBe('npm run build');
+    expect(canonicalCommand('env FOO=1 npm run build')).toBe('npm run build');
+    expect(canonicalCommand('./node_modules/.bin/eleventy --quiet')).toBe('eleventy --quiet');
+    expect(canonicalCommand('')).toBe('');
+  });
+
+  it('canonicalGitOp keeps its #2367 behaviour through the shared peeler', () => {
+    expect(canonicalGitOp('env FOO=1 /usr/bin/git -C /x reset --hard')).toBe('git reset --hard');
+    expect(canonicalGitOp('npm run build')).toBe('');
+    expect(canonicalGitOp('')).toBe('');
+  });
+
+  it('shellTokens: quoting is resolved and redirect operators are split out with their fd prefix', () => {
+    expect(shellTokens('echo hi > x').map((t) => t.text)).toEqual(['echo', 'hi', '>', 'x']);
+    expect(shellTokens('echo hi>x').map((t) => t.text)).toEqual(['echo', 'hi', '>', 'x']);
+    expect(shellTokens('cmd 2>&1').map((t) => t.text)).toEqual(['cmd', '2>&', '1']);
+    expect(shellTokens('cmd >| x').map((t) => t.text)).toEqual(['cmd', '>|', 'x']);
+    // a `>` inside quotes is TEXT, never an operator — this is what replaces the old end-of-segment anchor
+    expect(shellTokens('git commit -m "fix > bug"').map((t) => t.text)).toEqual(['git', 'commit', '-m', 'fix > bug']);
+    expect(shellTokens('git commit -m "fix > bug"').some((t) => t.op)).toBe(false);
+  });
+
+  it('stripHeredocBodies drops the BODY (and terminator) but keeps the opener line', () => {
+    const cmd = "cat > /tmp/body.md <<'EOF'\nFix the > thing\nsed -i s/a/b/ config/app.json\nEOF\necho done";
+    expect(stripHeredocBodies(cmd)).toBe("cat > /tmp/body.md <<'EOF'\necho done");
+    expect(stripHeredocBodies('echo hi')).toBe('echo hi');
+    // …so heredoc PROSE can never produce a phantom denial, while the heredoc's own target still can
+    expect(decide(cmd, { primaryCwd: true })).toBeNull();
+    expect(decide(cmd.replace('/tmp/body.md', 'config/app.json'), { primaryCwd: true })).toMatch(/writing a file/);
   });
 });
