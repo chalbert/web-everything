@@ -364,7 +364,10 @@ describe('sync-skills-deploy — PR #1024 review blockers', () => {
 
     let err;
     try {
-      execFileSync(process.execPath, ['--input-type=module', '-e', script], { timeout: 5000, encoding: 'utf8' });
+      // 20s, not 5s: under a full parallel suite run the child's Node boot + ESM import alone can
+      // exceed 5s, so the timeout kill fired with no hang present (three consecutive gate reds,
+      // 2026-08-08, #xhxuo1e). A real unbounded cycle walk still trips the bound — just later.
+      execFileSync(process.execPath, ['--input-type=module', '-e', script], { timeout: 20_000, encoding: 'utf8' });
     } catch (e) {
       err = e;
     }
@@ -374,5 +377,5 @@ describe('sync-skills-deploy — PR #1024 review blockers', () => {
     expect(err.signal).toBeNull();
     expect(err.status).toBe(1);
     expect(String(err.stderr)).toMatch(/cycle/i);
-  }, 10_000);
+  }, 30_000);
 });
