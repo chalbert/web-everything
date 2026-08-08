@@ -17,8 +17,21 @@
  *   1. NEVER auto-lands a KEEP-PARKED intent — a red-judge-refuted / contested / gate-self / judge-error PR (the
  *      #2674 intent already routed it to `review:human`) is never written to accepted here, in shadow OR enforce.
  *   2. FAIL-CLOSED — any error (a bad intent, or the label write itself throwing, e.g. the review-set-label
- *      INVARIANT-2 refusal on a `review:human` PR) yields NO auto-action: the PR stays parked, `landed:false`. An
- *      error NEVER becomes an auto-accept, and this module NEVER throws into the caller's land loop.
+ *      INVARIANT-2 refusal on a `review:human` PR) yields NO auto-action here: this seam applies nothing further
+ *      and reports `landed:false`. An error NEVER becomes an auto-accept, and this module NEVER throws into the
+ *      caller's land loop.
+ *
+ *      SAY WHAT `landed:false` ACTUALLY MEANS (#2964 — the earlier wording, "the PR stays parked", over-claimed).
+ *      It means THIS SEAM decided nothing and wrote nothing of its own. It does NOT mean the PR is untouched: the
+ *      writer it shells (`review-set-label.mjs`) performs TWO non-atomic `gh` calls — a durable verdict comment
+ *      and the label swap — so a writer that throws may have landed one of them. #2964 ordered those two so the
+ *      half that can survive alone is the SAFE one: on a PR not yet accepted the comment goes first, and an
+ *      orphan `reviewed-sha` marker with no `review:accepted` behind it is never read (the gate reads it lazily,
+ *      only inside an accepted-label check), so `landed:false` there really is inert. On a PR that ALREADY carries
+ *      `review:accepted` the swap goes first instead — a failed run can then have applied an idempotent re-add and
+ *      lost only the record, or (if the comment landed) have refreshed nothing, because the marker stays on the
+ *      swap side. What it can never do is freshen the #2409 coverage of an acceptance that did not land. So:
+ *      fail-closed on the GATE, not atomic on the WRITE.
  *   3. A `review:human` PR is never laundered to accepted: the CLEAR intent already carries `decideSetLabel`'s
  *      allowed accept swap (its INVARIANT-2 refusal converts a would-be accept on a `review:human` PR into a
  *      keep-parked intent upstream), and the default label writer shells `review-set-label.mjs`, whose CLI
@@ -161,7 +174,9 @@ function defaultWriteAccept({ pr, repo }) {
 /**
  * THE THIN IMPURE APPLIER (#2675) — run `decideAutoLand`, ALWAYS emit the plan's observation (the shadow ledger
  * line / the enforce log), and — ONLY on `apply` (a clean CLEAR in enforce) — invoke the label writer. FAIL-CLOSED:
- * any writer error is caught and returned as `{ landed:false, error }` (the PR stays parked); this never throws.
+ * any writer error is caught and returned as `{ landed:false, error }` and this never throws. `landed:false` means
+ * this seam took no auto-action — NOT that the writer left the PR byte-for-byte untouched; see SAFETY RAIL 2 in
+ * the file header for what a partially-applied writer can and cannot leave behind (#2964).
  *
  * @param {{ intent: object, mode?: string, pr: (number|string), repo: string }} o
  * @param {{ writeAccept?: (o:{pr:(number|string),repo:string,setLabel:object})=>void, log?: (msg:string)=>void }} [deps]
@@ -182,7 +197,9 @@ export function applyAutoLand({ intent, mode, pr, repo } = {}, deps = {}) {
     writeAccept({ pr, repo, setLabel: plan.setLabel });
     return { landed: true, plan };
   } catch (e) {
-    // FAIL-CLOSED — the accept write threw (an INVARIANT-2 refusal, a gh error, …). No auto-action: keep parked.
+    // FAIL-CLOSED — the accept write threw (an INVARIANT-2 refusal, a gh error, …). No auto-action from HERE; the
+    // writer's own two calls are not atomic, so read `landed:false` as "this seam applied nothing", not as "the PR
+    // is untouched" (#2964, SAFETY RAIL 2 in the header).
     const error = String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean).pop() || 'write failed';
     log(`auto-land: the review:accepted write FAILED — keeping the PR parked (fail-closed): ${error}`);
     return { landed: false, plan, error };
