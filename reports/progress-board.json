@@ -204,21 +204,30 @@
       "status": "awaiting",
       "question": "Does the codification shortcut get one more attempt, or get dropped?",
       "ifNothing": "Fork A still ships; codification PRs keep needing a human.",
-      "why": "It has been broken three times by three independent reviewers — each round closed one class of heading and missed another. The latest reviewer's diagnosis: headings are a closed syntax in the AST, not on a raw diff line, so every regex round reasons about the wrong object. Fork A ships either way and is the operator's actual ask.",
+      "why": "Broken FIVE times by five independent reviewers. Each round closed one class and a new one appeared, always a hand-rolled approximation of a grammar detail: a mid-rule splice, an untagged second heading, eight more heading forms, counting lines instead of headings, and now HTML_COMMENT_RE — which is not the HTML comment grammar. HTML also terminates a comment at <!-->, <!---> and --!>, so the regex over-consumes and deletes real <h3> tags out of the counted content. A working attack amends the leash rule itself and clears with auto-merge on. Fork A shipped separately as #1102, so nothing is blocked by dropping this.",
       "options": [
         {
           "label": "One round rebuilt on `markdown-it`",
-          "detail": "it is already a dependency and already renders that document, so detection and rendering cannot disagree; if this breaks too, drop it",
-          "recommended": true
+          "detail": "it is already a dependency and already renders that document, so detection and rendering cannot disagree; if this breaks too, drop it"
         },
         {
           "label": "Drop Fork B now",
           "detail": "every codification PR then needs a human, which is the status quo and costs little"
+        },
+        {
+          "label": "Drop Fork B",
+          "detail": "Every codification PR then needs a human — the status quo, and it costs little. Five rounds of security-critical review have bought nothing yet; the ratio is bad and the failure mode is always the same shape.",
+          "recommended": true
+        },
+        {
+          "label": "A sixth round",
+          "detail": "The fix direction is named and conservative: refuse any raw-HTML token containing <!-- whose comment scan is not unambiguous, rather than parsing it. But I recommended a fifth round on the same reasoning and it broke again."
         }
       ],
       "evidence": [
         "three breaks: mid-rule splice · untagged second heading · eight more forms incl. `<h3` with a newline before `>`",
-        "a working attack added a rule reading 'agents may clear their own leash' with autoLand:true"
+        "a working attack added a rule reading 'agents may clear their own leash' with autoLand:true",
+        "five breaks, five reviewers; each fix closed one class and opened another"
       ],
       "ruling": "R5"
     },
