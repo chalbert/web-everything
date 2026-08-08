@@ -50,6 +50,9 @@ import {
   derivePanelVerdict,
   buildPanelFindings,
   frozenLookup,
+  DISPOSITIONS,
+  earnsRound,
+  deriveFindingDisposition,
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
@@ -522,6 +525,240 @@ describe('buildSubjectMandate — the subject-neutral mandate skeleton (#2656, F
     expect(text).toContain('MIDDLE ONE MIDDLE TWO');
     // no isolation line supplied → no stray double-space before the body
     expect(text).not.toMatch(/ {2}/);
+  });
+});
+
+describe('deriveFindingDisposition — the three direction tests, routed by CODE not by the model (#2950)', () => {
+  const BOOLS = [true, false];
+
+  it('EXACTLY ONE of the eight combinations is a blocker: introduced ∧ worse-than-base ∧ ¬parallelizable', () => {
+    const table = [];
+    for (const introduced of BOOLS) {
+      for (const worseThanBase of BOOLS) {
+        for (const parallelizable of BOOLS) {
+          table.push({
+            answers: { introduced, worseThanBase, parallelizable },
+            got: deriveFindingDisposition({ introduced, worseThanBase, parallelizable }),
+          });
+        }
+      }
+    }
+    expect(table).toHaveLength(8);
+    const blockers = table.filter((row) => row.got === DISPOSITIONS.BLOCKER);
+    expect(blockers).toHaveLength(1);
+    expect(blockers[0].answers).toEqual({ introduced: true, worseThanBase: true, parallelizable: false });
+    // …and every other row carves out, none is left undecided.
+    for (const row of table.filter((r) => r !== blockers[0])) expect(row.got).toBe(DISPOSITIONS.CARVE_OUT);
+  });
+
+  it('FAILS CLOSED on an incomplete or non-boolean answer set — undecided, which reads as blocking', () => {
+    for (const answers of [
+      {},
+      { introduced: true },
+      { introduced: true, worseThanBase: true },
+      { introduced: true, worseThanBase: true, parallelizable: 'no' },
+      { introduced: 1, worseThanBase: 1, parallelizable: 0 },
+      { introduced: true, worseThanBase: true, parallelizable: null },
+    ]) {
+      expect(deriveFindingDisposition(answers)).toBeUndefined();
+      expect(earnsRound(normalizeFinding({ summary: 's', ...answers }))).toBe(true);
+    }
+  });
+
+  it('the ROUTED disposition beats a self-declared one — a juror cannot self-certify past a blocker', () => {
+    const f = normalizeFinding({
+      summary: 'this diff broke it',
+      introduced: true,
+      worseThanBase: true,
+      parallelizable: false,
+      disposition: DISPOSITIONS.NIT, // the juror's own word, contradicting its own answers
+    });
+    expect(f.disposition).toBe(DISPOSITIONS.BLOCKER);
+    expect(earnsRound(f)).toBe(true);
+  });
+
+  it('a BARE self-declared carve-out/nit with NO answers is discarded — the finding still blocks', () => {
+    // PR #1082 review, blocker 1. The un-blocking must be EARNED by the three facts. An earlier draft honoured
+    // any declared word when the answers were absent, so a juror taking the obvious shortcut (write the label,
+    // skip the booleans) silently un-blocked a real defect on every review.
+    for (const word of [DISPOSITIONS.CARVE_OUT, DISPOSITIONS.NIT]) {
+      const f = normalizeFinding({ summary: 'this diff drops the auth check', disposition: word });
+      expect(f).not.toHaveProperty('disposition');
+      expect(earnsRound(f)).toBe(true);
+      expect(deriveVerdict({ findings: [f] })).toBe(VERDICTS.CHANGES);
+    }
+  });
+
+  it('a PARTIAL answer set cannot be topped up with a declared word to reach non-blocking', () => {
+    const f = normalizeFinding({
+      summary: 'half-answered', introduced: false, disposition: DISPOSITIONS.CARVE_OUT,
+    });
+    expect(f).not.toHaveProperty('disposition');
+    expect(earnsRound(f)).toBe(true);
+  });
+
+  it('a self-declared `blocker` IS honoured without answers — the safe direction is always available', () => {
+    const f = normalizeFinding({ summary: 'I am sure this blocks', disposition: DISPOSITIONS.BLOCKER });
+    expect(f.disposition).toBe(DISPOSITIONS.BLOCKER);
+    expect(earnsRound(f)).toBe(true);
+  });
+
+  it('the mandate does NOT offer declaring a disposition as a substitute for the three answers', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
+    expect(text).toMatch(/THE THREE ANSWERS ARE THE ONLY WAY TO UN-BLOCK A FINDING/);
+    expect(text).toMatch(/is DISCARDED and the finding blocks/);
+  });
+
+  it('`nit` survives as a finer label on something the routing ALREADY carved out', () => {
+    const f = normalizeFinding({
+      summary: 'naming could be nicer',
+      introduced: true,
+      worseThanBase: false,
+      parallelizable: true,
+      disposition: DISPOSITIONS.NIT,
+    });
+    expect(f.disposition).toBe(DISPOSITIONS.NIT);
+    expect(earnsRound(f)).toBe(false);
+  });
+
+  it('a PRE-EXISTING finding on untouched material never reduces to `changes` (#2950 acceptance 4)', () => {
+    const findings = [{
+      summary: 'this was already broken before the change',
+      introduced: false,
+      worseThanBase: true,
+      parallelizable: false,
+    }];
+    expect(normalizeFinding(findings[0]).disposition).toBe(DISPOSITIONS.CARVE_OUT);
+    expect(deriveVerdict({ findings })).toBe(VERDICTS.ACCEPT);
+  });
+
+  it('carries the three answers through the canonical shape, so a carve-out is auditable after the fact', () => {
+    const f = normalizeFinding({ summary: 's', introduced: false, worseThanBase: true, parallelizable: true });
+    expect(f).toMatchObject({ introduced: false, worseThanBase: true, parallelizable: true });
+    // non-boolean answers add no key at all
+    expect(normalizeFinding({ summary: 's', introduced: 'yes' })).not.toHaveProperty('introduced');
+  });
+});
+
+describe('finding DISPOSITION — only a blocker earns a round (#2950)', () => {
+  it('undeclared disposition FAILS CLOSED — every pre-#2950 finding still blocks', () => {
+    expect(earnsRound({ summary: 'x' })).toBe(true);
+    expect(earnsRound({ summary: 'x', disposition: undefined })).toBe(true);
+    expect(earnsRound({ summary: 'x', disposition: null })).toBe(true);
+    expect(earnsRound(null)).toBe(true);
+  });
+
+  it('an INVENTED disposition reads as undeclared (blocking), never as a free pass', () => {
+    // The prototype-pollution shape the null-prototype table exists to stop: on a normal object literal
+    // `TABLE['constructor']` answers with an inherited truthy member, which would un-block the finding.
+    for (const bogus of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'minor', '']) {
+      expect(earnsRound({ summary: 'x', disposition: bogus })).toBe(true);
+    }
+  });
+
+  it('routes the three declared dispositions', () => {
+    expect(earnsRound({ summary: 'x', disposition: DISPOSITIONS.BLOCKER })).toBe(true);
+    expect(earnsRound({ summary: 'x', disposition: DISPOSITIONS.CARVE_OUT })).toBe(false);
+    expect(earnsRound({ summary: 'x', disposition: DISPOSITIONS.NIT })).toBe(false);
+  });
+
+  it('normalizeFinding carries a nit only when the ANSWERS routed a carve-out, and drops invalid words', () => {
+    const carved = { introduced: true, worseThanBase: false, parallelizable: true };
+    expect(normalizeFinding({ summary: 's', ...carved, disposition: 'nit' }).disposition).toBe('nit');
+    expect(normalizeFinding({ summary: 's', disposition: 'whatever' })).not.toHaveProperty('disposition');
+    expect(normalizeFinding({ summary: 's', disposition: 'constructor' })).not.toHaveProperty('disposition');
+    // a bare `nit` with no answers buys nothing (PR #1082 review, blocker 1)
+    expect(normalizeFinding({ summary: 's', disposition: 'nit' })).not.toHaveProperty('disposition');
+    // byte-stable for an old-shape finding: no key added
+    expect(normalizeFinding({ summary: 's' })).not.toHaveProperty('disposition');
+  });
+
+  it('deriveVerdict: a subject whose findings are ALL carve-outs/nits ACCEPTS — zero rounds opened', () => {
+    // Each finding must EARN its non-blocking routing with the three answers — a bare word does not (blocker 1).
+    const findings = [
+      { summary: 'pre-existing thing', introduced: false, worseThanBase: true, parallelizable: false },
+      {
+        summary: 'naming could be nicer', disposition: DISPOSITIONS.NIT,
+        introduced: true, worseThanBase: false, parallelizable: true,
+      },
+    ];
+    expect(findings.map((f) => normalizeFinding(f).disposition)).toEqual([DISPOSITIONS.CARVE_OUT, DISPOSITIONS.NIT]);
+    expect(deriveVerdict({ findings })).toBe(VERDICTS.ACCEPT);
+  });
+
+  it('deriveVerdict: ONE blocker among carve-outs still opens a round', () => {
+    const findings = [
+      { summary: 'pre-existing thing', introduced: false, worseThanBase: true, parallelizable: false },
+      { summary: 'this diff broke it', introduced: true, worseThanBase: true, parallelizable: false },
+    ];
+    expect(deriveVerdict({ findings })).toBe(VERDICTS.CHANGES);
+  });
+
+  it('is a STRICT RELAXATION — an undeclared-disposition finding verdicts exactly as before #2950', () => {
+    expect(deriveVerdict({ findings: [{ summary: 'legacy shape' }] })).toBe(VERDICTS.CHANGES);
+  });
+
+  it('humanRequired still wins over every disposition', () => {
+    const findings = [{ summary: 'nit only', disposition: DISPOSITIONS.NIT }];
+    expect(deriveVerdict({ findings, humanRequired: true })).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('a carve-out does NOT escape the prevention gate — reporting stays wide, only the ROUND is narrowed', () => {
+    // A resolved finding owing an uncaptured guard at/above the bar still withholds a clean accept, whatever its
+    // disposition: `earnsRound` narrows `changes`, never `prevention-outstanding`.
+    const findings = [{
+      summary: 'resolved but owes a guard',
+      outcome: 'fixed',
+      disposition: DISPOSITIONS.CARVE_OUT,
+      prevention: 'a check:standards rule',
+      preventionCaptured: false,
+      impactIfUnfixed: IMPACT_LEVELS.BROKEN,
+    }];
+    expect(deriveVerdict({ findings })).toBe(VERDICTS.PREVENTION_OUTSTANDING);
+  });
+});
+
+describe('the mandate asks for a disposition, a goal, and stops the round-2 spiral (#2950)', () => {
+  it('asks for the three direction ANSWERS (not a self-declared verdict) and names every enum member', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
+    expect(text).toContain('DISPOSITION (required, for EVERY finding)');
+    // the facts the routing reads — the model answers these, `deriveFindingDisposition` decides
+    for (const answer of ['introduced', 'worseThanBase', 'parallelizable']) expect(text).toContain(`\`${answer}\``);
+    expect(text).toMatch(/do NOT decide yourself whether this blocks/);
+    // every routed outcome is still named, so a juror knows what its answers buy
+    for (const d of Object.values(DISPOSITIONS)) expect(text).toContain(d);
+    // and omitting an answer must be stated as the EXPENSIVE choice, not the cheap one
+    expect(text).toMatch(/Omitting any of them leaves it BLOCKING/);
+  });
+
+  it('states the goal and the against-the-base direction test when a goal is supplied', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness', goal: 'cut review cost' });
+    expect(text).toContain('WHAT THIS DIFF IS TRYING TO DO: cut review cost');
+    expect(text).toMatch(/never against an ideal implementation/);
+  });
+
+  it('omits the goal block entirely when no goal is supplied (additive, no "undefined" leak)', () => {
+    const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness' });
+    expect(text).not.toContain('WHAT THIS DIFF IS TRYING TO DO');
+    expect(text).not.toMatch(/undefined|\[object Object\]/);
+  });
+
+  it('fires the ANTI-SPIRAL clause at round 2+ and never at round 1', () => {
+    const r1 = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness', round: 1 });
+    expect(r1).not.toMatch(/YOU ARE CHECKING A FIX/);
+    for (const round of [2, 3, 5]) {
+      const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness', round });
+      expect(text).toContain(`ROUND ${round} — YOU ARE CHECKING A FIX, NOT RE-REVIEWING THE SUBJECT.`);
+      expect(text).toMatch(/may never be a `blocker`/);
+    }
+  });
+
+  it('treats a junk round as round 1 rather than emitting "ROUND NaN"', () => {
+    for (const round of [undefined, null, 'abc', NaN]) {
+      const text = buildSubjectMandate({ subjectNoun: 'diff', mandate: 'correctness', round });
+      expect(text).not.toMatch(/YOU ARE CHECKING A FIX/);
+      expect(text).not.toMatch(/NaN/);
+    }
   });
 });
 

@@ -167,10 +167,12 @@ export const DEFAULT_MANDATE = 'correctness';
  * hand-rolling their own prose copy of the same mandate. Pure — returns the instruction string; SPAWNING the
  * subagent and reading its answer remains the caller's action (this module never calls a model, same split
  * `we:scripts/lane-review.mjs` documents for the pre-PR review seam).
- * @param {{contextIsolation?: string, mandate?: string|string[]}} [o]
+ * @param {{contextIsolation?: string, mandate?: string|string[], goal?: string, round?: number}} [o] - #2950:
+ *   `goal` is what the diff is trying to do (judged against that and the base, never an ideal); `round` ≥ 2 fires
+ *   the anti-spiral clause. Both additive — omitted, the text is what it was before #2950.
  * @returns {string}
  */
-export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE } = {}) {
+export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE, goal = '', round = 1 } = {}) {
   const isolationLine = contextIsolation === 'diff-only'
     ? 'You see ONLY the diff (and, if supplied, the PR description) — no author framing, no prior session context.'
     : `Context isolation: ${contextIsolation}.`;
@@ -185,6 +187,11 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
     defaultMandate: DEFAULT_MANDATE,
     isolationLine,
     findingAnchor: 'file',
+    // #2950 — the goal the diff serves and which negotiation round this is. Both pass straight through: the
+    // skeleton owns the wording (the goal block, the three direction tests, the round-2+ anti-spiral clause) so
+    // every subject asks the same questions. Omitted `goal` + round 1 leaves the text as it was before #2950.
+    goal,
+    round,
     bodyLines: [
       'Work from the diff text alone — do NOT `git checkout`, `git switch`, `git fetch`+checkout, or otherwise',
       'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain. If',
@@ -792,7 +799,10 @@ export const PR_DIFF_ADAPTER = Object.freeze({
   mandatoryLenses: MANDATORY_LENSES,
   extractTouchSet: (changedFiles) => classifyTouchSet(changedFiles).lenses,
   resolveMethods: (lens, ctx) => methodsForLens(lens, POLICY_CARE_JURY.bands[ctx?.careLevel]),
-  charterForLens: (lens) => `judge the diff under the "${lens}" lens`,
+  // #2950 — the seat's charter names the BASELINE, not just the lens. "Judge the diff under the X lens" is an
+  // open-ended brief that invites judging against an ideal; the comparison target is what makes a finding
+  // dispositionable at all (better-than-base-but-imperfect is a carve-out, not a blocker).
+  charterForLens: (lens) => `judge the diff under the "${lens}" lens — against the goal it serves and the base it started from, not against an ideal`,
   buildMandate,
   buildPanelMandate,
 });
@@ -803,20 +813,25 @@ export const PR_DIFF_ADAPTER = Object.freeze({
  * reviewer judges its OWN lens only and must not soften its verdict to pre-empt another lens's concern — a
  * genuine cross-mandate tradeoff is for a human to resolve, never for one reviewer to compromise away.
  *
+ * #2950 — the OPTIONAL `goal` and `round` params pass through to `buildSubjectMandate`, which owns their wording:
+ * `goal` states what the diff is TRYING to do (so a juror judges against that and the base, not against an ideal),
+ * and `round` ≥ 2 fires the anti-spiral clause (judge only the previous round's fix; anything else is a carve-out
+ * by construction). Both are additive — omitting them leaves the mandate as it was before #2950.
+ *
  * #2450 — the OPTIONAL `netChangedFiles` param appends a GROUND TRUTH block naming the PR's NET changed-file set
  * vs current main (the drain already computes it via `computeNetDiffChangedFiles`, `we:scripts/merge-ai-prs.mjs`)
  * and tells the reviewer NOT to report a diff-side file OUTSIDE that set as scope creep — such a file already
  * landed on main via a sibling lane and only shows in the three-dot diff, so a phantom scope-creep finding on it
  * burns a negotiation round for nothing. OMITTING the param (or passing an empty list) leaves the mandate
  * BYTE-FOR-BYTE unchanged, so every existing caller/test is unaffected — the block is purely additive.
- * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null}} o
+ * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null, goal?: string, round?: number}} o
  * @returns {string}
  */
-export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netChangedFiles = null } = {}) {
+export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netChangedFiles = null, goal = '', round = 1 } = {}) {
   if (!PANEL_LENSES.includes(lens)) {
     throw new Error(`buildPanelMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
   }
-  const base = buildMandate({ contextIsolation, mandate: lens });
+  const base = buildMandate({ contextIsolation, mandate: lens, goal, round });
   const parts = [
     base,
     `You are ONE of several independent mandate reviewers on this diff, each judging a single lens`,

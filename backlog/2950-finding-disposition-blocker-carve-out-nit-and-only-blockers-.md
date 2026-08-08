@@ -3,8 +3,9 @@ bornAs: xlcmu06
 kind: story
 size: 5
 parent: "2948"
-status: open
+status: active
 dateOpened: "2026-08-06"
+dateStarted: "2026-08-07"
 tags: []
 ---
 
@@ -43,6 +44,42 @@ A fix that serves the item's stated goal is in scope however many files it takes
 - we:scripts/lib/review-core.mjs — the juror charter carries the three questions and the better-than-`main` direction test
 - we:skills-src/jury/subject-jury.workflow.js — nits batch into an open round; a nits-only panel opens none
 - we:scripts/lib/__tests__/ — the disposition truth table, the nits-only zero-round case, the round-2 freeze
+
+## Delivered so far (2026-08-07) — the routing half
+
+The disposition mechanism and the mandate that feeds it are built; the delivery half is not. What landed:
+
+- **The routing is CODE, not the model's word.** `deriveFindingDisposition({introduced, worseThanBase, parallelizable})`
+  in we:scripts/lib/jury-core.mjs routes the three answers; exactly one combination is a `blocker`. A juror answers
+  three facts, the function decides. The routed disposition **overrides** a self-declared one so no juror can
+  self-certify past a blocker — `nit` survives only as a finer label on an already-carved-out finding.
+- **Only a blocker earns a round.** `earnsRound` is a verdict-narrow predicate (the `blocksAcceptance` pattern), read
+  by `deriveVerdict`. A panel whose findings are all carve-outs/nits now returns `accept` and opens zero rounds.
+- **Un-blocking must be EARNED by the three answers.** An absent, non-boolean, or invented answer leaves the
+  finding blocking, so every pre-#2950 finding shape verdicts exactly as before. A juror's own `disposition` word
+  buys nothing on its own in the non-blocking direction: a bare `carve-out`/`nit` with no answers is discarded and
+  the finding blocks. Only `blocker` is honoured self-declared, because that is the safe direction. *(The first
+  draft of this slice got that wrong — it honoured any declared word when the answers were missing, which let a
+  juror silently un-block a real defect by writing the label and skipping the booleans. Caught by the independent
+  review on PR #1082 and fixed there; the regression tests are named after it.)*
+- **The mandate states the goal.** `buildSubjectMandate` takes `goal` and `round`; the juror is told what the change
+  is FOR and to judge against that and the base, never an ideal. `/converge` takes `--goal` and threads it. Note
+  what IS and IS NOT opt-in: the goal paragraph and the round-2+ anti-spiral paragraph are conditional, so omitting
+  `goal`/`round` leaves *those* byte-for-byte unchanged — but the DISPOSITION block is **unconditional** and reaches
+  every mandate from this slice onward. That is deliberate (the routing needs the answers everywhere), and it is why
+  the un-blocking rule above has to be strict.
+- **The anti-spiral guard.** At round ≥ 2 the mandate says: judge only the previous round's fix; anything else is a
+  carve-out by construction. This is what lets the loop end on agreement instead of on the round cap.
+
+Still owed by this item:
+
+- **Blockers are DELIVERED, not negotiated** — carving a blocker into its own lane so the original change accepts.
+  Not built: a blocker still opens an editor round exactly as it did.
+- **Nits are FILED.** A nits-only panel accepts, and the nits reach the notice and the ledger, but nothing turns
+  them into backlog items yet — so today they are reported and then dropped on the floor.
+- **The round-2 freeze is a MANDATE, not a mechanism.** Round 2+ jurors are *told* to carve out anything unrelated
+  to the round-1 fix; nothing enforces it, because matching a round-2 finding to a round-1 finding is not
+  deterministic. Acceptance criterion 3 below is therefore met at the instruction level only.
 
 ## Acceptance
 
