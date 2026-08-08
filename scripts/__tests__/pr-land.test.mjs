@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, PARK_LABELS, decideHoldReadyStrip } from '../pr-land.mjs';
-import { REVIEW_LABELS, REVIEW_LABEL_META, READY_TO_MERGE_LABEL } from '../lib/review-escalation.mjs';
+import { REVIEW_LABELS, REVIEW_LABEL_META, READY_TO_MERGE_LABEL, scoreEscalation } from '../lib/review-escalation.mjs';
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
   it('a DECLARATIVE-LEASH diff (the roster — the encoded policy itself) → review:human, applied', () => {
@@ -50,6 +50,23 @@ describe('resolveProducerReviewLabel — #2307 deterministic review-escalation l
     const v = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10, currentLabels: [REVIEW_LABELS.pending] });
     expect(v.label).toBe(REVIEW_LABELS.pending);
     expect(v.apply).toBe(false);
+  });
+  it('#2890 — accepts diffHunks and is otherwise unaffected by it (pure plumbing, no detector reads it yet)', () => {
+    const hunks = '@@ -1,2 +1,2 @@\n-old\n+new\n';
+    const withHunks = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10, diffHunks: hunks });
+    const withoutHunks = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10 });
+    expect(withHunks.label).toBe(withoutHunks.label);
+    expect(withHunks.apply).toBe(withoutHunks.apply);
+    expect(withHunks.humanRequired).toBe(withoutHunks.humanRequired);
+    expect(withHunks.reasons).toEqual(withoutHunks.reasons);
+    expect(() => resolveProducerReviewLabel({ diffHunks: undefined })).not.toThrow();
+  });
+  it('#2890-review-fix finding 1 — the producer-side default is null (NOT COMPUTED), never the fail-open \'\'', () => {
+    // `scoreEscalation` is what a follow-on detector reads, so the producer wrapper must not re-introduce the
+    // `''` default underneath it: a `resolveProducerReviewLabel` caller with no diff in hand must be
+    // distinguishable from one whose diff genuinely has no content.
+    expect(scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] }).diffHunks).toBeNull();
+    expect(scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], diffHunks: '' }).diffHunks).toBe('');
   });
 });
 
@@ -388,6 +405,19 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     expect(src).toMatch(/opened UNLABELLED|UNLABELLED — CI not confirmed/);
     // the eager pre-CI add-label call is gone from the open path (applyLabel is a deferred closure)
     expect(src).toMatch(/const applyLabel = \(\) =>/);
+  });
+  // #2890-review-r2 finding 3 — the escalation inputs are derived by ONE shared function, and the review found
+  // nothing pinning that: removing `basis:` from all three production call sites failed zero of 551 tests. The
+  // durable guard is structural rather than a spelling grep — pr-land does not IMPORT the raw `{text, scored}`
+  // producer at all, so the mis-mapping the review caught is not expressible here.
+  it('#2890: derives the net-diff signals from the ONE shared function, and cannot hand-roll them', () => {
+    expect(src).toMatch(/import \{ computeNetDiffSignals \} from '\.\/merge-ai-prs\.mjs'/);
+    expect(src).toMatch(/computeNetDiffSignals\(\{ exec, remote: REMOTE, base: BASE, baseRev, rev: refSha \}\)/);
+    // The raw producers are deliberately OUT of scope in this file.
+    expect(src).not.toMatch(/\bcomputeNetDiffText\b\s*[,}]/);
+    expect(src).not.toMatch(/\bresolveNetDiffBasis\b\s*[,}]/);
+    // …and no `.text` can reach the diffHunks signal, whatever the spelling in between.
+    expect(src.match(/diffHunks\s*[:=][^;\n]*\.text\b/)).toBeNull();
   });
   it('only ever pushes a lane/* head (guard carve-out) and never force-pushes', () => {
     expect(src).toMatch(/\/\^lane\\\//);        // enforces --ref starts with lane/

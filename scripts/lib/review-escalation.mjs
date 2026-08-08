@@ -294,9 +294,116 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * `humanBasisFiles` is omitted it falls back to `changedFiles` (the non-stacked case, where the two are
  * identical), so every existing caller is unchanged.
  *
+ * #2890 — `diffHunks` (base-vs-head DIFF CONTENT, not just file names + a line count) is accepted and carried
+ * through to the returned verdict unchanged. This rubric does NOT read it for any signal today — that is
+ * deliberate: #2890 is PURE PLUMBING, the shared precondition #2839's `assertNotPrincipleAndImpl` and #2840's
+ * `isPrincipleSurface` need (both are content-reading detectors — a statute-anchor-body edit or a
+ * pre-existing-marker edit are base-vs-head FACTS no file name or line count can answer). Threading it here
+ * now, ahead of either detector landing, means neither follow-on has to touch this signature again — they
+ * only add a term that reads `diffHunks`.
+ *
+ * #2890-review-fix finding 1 — THE `null` CONTRACT, and why it is `null` and not `''`. Every producer of this
+ * signal (`computeNetDiffText`, `computeProposedFileDiffText`) returns `text:''` on EVERY failure path
+ * (`exec-contract`, `ref-unresolved`, `diff-failed`, `diff-too-large`, no local/sibling clone) — the same `''`
+ * a genuinely content-free diff yields. Passing `.text` through would collapse "NOT COMPUTED" into "COMPUTED,
+ * EMPTY", and in the drain that happens exactly where `changedFiles` STILL populates (the `gh pr view --json
+ * files` fallback): a content-reading detector would then see a real file list beside a fake-empty content
+ * signal and conclude `principleTouch === false` — a silent fail-open on the precise class #2839/#2840 exist to
+ * catch. So the contract here is:
+ *   • `null`  — NOT COMPUTED. A detector MUST NOT read a clearance from this; treat it as unknown and
+ *               over-fire (escalate), never as "no principle touch". `.includes()` on it THROWS, loudly, which
+ *               is the point: there is no way to silently mistake it for an empty diff.
+ *   • `''`    — COMPUTED, and the base-vs-head content is genuinely empty (mode-only / rename-only diff).
+ *   • string  — COMPUTED unified-diff text.
+ * Callers must never hand-roll the `scored ? text : null` ternary — use `diffHunksFrom(netDiff)` below, which
+ * is the single place that maps a `{text, scored}` producer result onto this contract. Anything that is not a
+ * string is normalized to `null` here, so a caller that regresses to passing a raw result OBJECT lands on the
+ * safe side rather than stringifying garbage into the signal. A caller with no diff text in hand (most
+ * existing callers, still) passes nothing and gets `null`.
+ *
+ * #2890-review-fix finding 4 — WHICH FILE LIST THE HUNKS PAIR WITH. `diffHunks` is always CUMULATIVE
+ * (`mergeBase(origin/main, head)…head`), while `changedFiles` may be DE-INFLATED to `baseRev…head` for a
+ * stacked couple (#2390). They are therefore NOT the same basis and must not be zipped together. The verdict
+ * exposes `diffHunksBasisFiles` — the file list computed on the SAME basis as the hunks (`humanBasisFiles`,
+ * falling back to `changedFiles` in the non-stacked case where the two are identical) — so a detector reading
+ * hunk content pairs it with THAT list, never with `changedFiles`. The two travel together on one object
+ * precisely so the pairing cannot be got wrong by reading the wrong field.
+ *
+ * #2890-review-r2 finding 5 — and it is handed back as PLAIN PATHS (`plainDiffPath`), not in git's display
+ * encoding. `humanBasisFiles` is `parseNumstat` output, where a rename renders `old.md => new.md` and a
+ * non-ASCII path is C-quoted (`"caf\303\251.md"`) — this repo documents that exact trap twice (see
+ * `computeNetDiffPaths`'s JSDoc and `we:skills-src/review/SKILL.md`). Publishing it as the pairing contract
+ * would have shipped a list that CANNOT match hunk headers, which spell plain paths (`b/docs/agent/x.md`): a
+ * renamed statute file would silently pair with nothing. The scoring terms above still read the raw
+ * display-encoded list — normalizing THOSE is a real behaviour change to the gate and is not smuggled in here.
+ *
+
  * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
- *          crossRepo?:boolean, thresholds?:object}} o
+ *          crossRepo?:boolean, thresholds?:object, diffHunks?:string|null}} o
  */
+/**
+ * #2890-review-r2 finding 5 — ONE numstat display-encoded entry → the PLAIN new path.
+ *
+ * `git diff --numstat` (which is what `parseNumstat`, and therefore `changedFiles`/`humanBasisFiles`, is built
+ * on) prints paths for HUMANS, not for matching. Measured against real git 2.50.1, the four shapes are:
+ *   `plain.md`                                     → `plain.md`            (unchanged)
+ *   `"caf\303\251.md"`                             → `café.md`             (C-quoted, octal bytes)
+ *   `docs/agent/{old-name.md => new-name.md}`      → `docs/agent/new-name.md`   (compact brace rename)
+ *   `dir/{sub => }/thing.md`                       → `dir/thing.md`        (brace, empty new side)
+ *   `"docs/caf\303\251.md" => "docs/caf\303\2512.md"` → `docs/café2.md`    (quoted rename — NOT braced)
+ * The new path is taken because that is what `computeNetDiffPaths` reports and what a hunk header spells.
+ *
+ * RESIDUAL, stated rather than hidden: the un-braced `old => new` form is AMBIGUOUS when a path itself contains
+ * ` => `. Real git emits `a => b.md => c => d.md` for renaming `a => b.md` to `c => d.md` and provides no way
+ * to re-split it (verified) — `--numstat -z` is the only unambiguous source, and moving the whole scoring path
+ * onto it is a gate-behaviour change, not this item's plumbing. Such a path also always renders UNQUOTED, so
+ * the split here is only attempted when the entry is not quoted-rename shaped, and the result is a best-effort
+ * suffix — never worse than the display string it replaces.
+ * @param {string} entry one `parseNumstat` changed-file entry
+ * @returns {string} the plain (unquoted, un-renamed) new path
+ */
+export function plainDiffPath(entry) {
+  if (typeof entry !== 'string' || !entry) return entry;
+  // Quoted rename: git quotes each SIDE in full and never uses the brace form when quoting is needed.
+  const quotedRename = entry.match(/^(".*")\s=>\s(".*")$/);
+  if (quotedRename) return unquoteGitPath(quotedRename[2]);
+  // Compact brace rename — `<prefix>{<old> => <new>}<suffix>`; either side may be empty. Non-greedy on the old
+  // side so the FIRST `{…}` group wins (git emits at most one).
+  const braced = entry.match(/^(.*?)\{(.*?) => (.*?)\}(.*)$/);
+  if (braced) return collapseSlashes(`${braced[1]}${braced[3]}${braced[4]}`);
+  // Plain rename (no quoting, no common prefix/suffix). See the residual above for the ` => `-in-path case.
+  const idx = entry.indexOf(' => ');
+  if (idx !== -1) return unquoteGitPath(entry.slice(idx + 4));
+  return unquoteGitPath(entry);
+}
+
+// `dir/{sub => }/thing.md` → `dir/` + `` + `/thing.md` → `dir//thing.md`; git's own rendering of the same
+// rename as a plain path has one slash.
+function collapseSlashes(p) { return p.replace(/\/{2,}/g, '/'); }
+
+/**
+ * Decode git's C-quoting (`core.quotePath`): a path with non-ASCII or control bytes is wrapped in `"` with each
+ * byte escaped as `\NNN` OCTAL, plus the usual `\n`/`\t`/`\\`/`\"` escapes. The octal escapes are BYTES of the
+ * UTF-8 encoding, so they must be reassembled as bytes and decoded once — decoding each `\303` to a codepoint
+ * would give mojibake (`cafÃ©`). An unquoted string passes through untouched.
+ */
+function unquoteGitPath(s) {
+  if (typeof s !== 'string' || s.length < 2 || s[0] !== '"' || s[s.length - 1] !== '"') return s;
+  const body = s.slice(1, -1);
+  const bytes = [];
+  const simple = { n: 0x0a, t: 0x09, r: 0x0d, f: 0x0c, b: 0x08, v: 0x0b, a: 0x07, '\\': 0x5c, '"': 0x22 };
+  for (let i = 0; i < body.length; i += 1) {
+    const c = body[i];
+    if (c !== '\\') { for (const b of Buffer.from(c, 'utf8')) bytes.push(b); continue; }
+    const next = body[i + 1];
+    const octal = body.slice(i + 1, i + 4);
+    if (/^[0-7]{3}$/.test(octal)) { bytes.push(parseInt(octal, 8)); i += 3; continue; }
+    if (next !== undefined && Object.prototype.hasOwnProperty.call(simple, next)) { bytes.push(simple[next]); i += 1; continue; }
+    bytes.push(0x5c); // a lone backslash git did not escape — keep it rather than eat the next char
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
 export function scoreEscalation({
   changedFiles = [],
   diffLines = 0,
@@ -304,6 +411,7 @@ export function scoreEscalation({
   dismissedFindings = 0,
   crossRepo = false,
   thresholds = {},
+  diffHunks = null,
 } = {}) {
   const t = { ...DEFAULT_THRESHOLDS, ...thresholds };
   const reasons = [];
@@ -351,7 +459,50 @@ export function scoreEscalation({
   // AI panel how hard to look — `panelRigorForCareLevel` — and never changes route or land).
   const careLevel = deriveCareLevel({ signals, humanRequired });
 
-  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals };
+  // #2890 — passthrough, not a signal: `producerReviewLabel(score)` and any other caller that receives this
+  // verdict object gets `diffHunks` for free, without a second signature change, once a future detector reads it.
+  // #2890-review-fix finding 1 — anything that is not a string collapses to `null` (NOT COMPUTED); `''` is
+  // reserved for "computed, genuinely empty". A detector must branch on `=== null` before reading content.
+  const hunks = typeof diffHunks === 'string' ? diffHunks : null;
+  // #2890-review-fix finding 4 — the file list on the SAME (cumulative) basis as `hunks`. `null` when there are
+  // no hunks, so a detector can never pair a real file list with an absent content signal.
+  // #2890-review-r2 finding 5 — as PLAIN paths, the only spelling that can match a hunk header.
+  const diffHunksBasisFiles = hunks === null ? null : gateBasis.map(plainDiffPath);
+  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals, diffHunks: hunks, diffHunksBasisFiles };
+}
+
+/**
+ * #2890-review-fix finding 1 — the ONE mapping from a diff-text producer's result onto `scoreEscalation`'s
+ * `diffHunks` contract. Every producer (`computeNetDiffText`, `computeNetDiffPaths`'s sibling
+ * `computeProposedFileDiffText`) returns `{text, scored, reason?}` and sets `text:''` on EVERY failure path, so
+ * `.text` alone cannot distinguish "not computed" from "computed, empty". This collapses that correctly:
+ * `scored` ⇒ the text (possibly `''`), otherwise `null` (NOT COMPUTED).
+ *
+ * Call sites must use THIS rather than writing `netDiff.scored ? netDiff.text : null` inline — the ternary is
+ * exactly the thing the review found missing at both call sites. A missing/malformed result is `null`, never
+ * `''`.
+ *
+ * WHAT ACTUALLY HOLDS THAT SHUT (#2890-review-r2 finding 4 — the earlier claim here, that "a third call site
+ * cannot reintroduce the bug", was FALSE and is withdrawn). A helper existing does not stop anyone hand-rolling
+ * the ternary, and the source-level grep that backed the claim was measured against 12 regression shapes and
+ * caught exactly two of them (`diffHunks: x.text`, `diffHunks: x.text ?? ''`) in two named files — not a
+ * ternary in either polarity, not `x?.text`, not a destructured `text`, not `v.netDiff.text`. The real defences
+ * are structural, and each is worth exactly what it is:
+ *   1. `computeNetDiffSignals` (merge-ai-prs.mjs) is the ONE derivation both production call sites use, and it
+ *      applies this helper itself. Its behaviour — a failed text diff yields `diffHunks:null` while
+ *      `changedFiles` still populates — is pinned by tests that call it, not by a regex.
+ *   2. `pr-land.mjs` no longer imports `computeNetDiffText` at all, so the raw `{text}` producer is not even in
+ *      scope there to be mis-mapped; a source guard keeps that import out.
+ *   3. `scoreEscalation` normalizes any non-string to `null`, so passing a raw result OBJECT fails safe.
+ * A genuinely NEW call site in a THIRD file remains unguarded by any of this — it is caught by review, not by
+ * a test. Say that plainly rather than claiming coverage that does not exist.
+ * @param {{text?:string, scored?:boolean}|null|undefined} netDiff a `computeNetDiffText`-shaped result
+ * @returns {string|null} the diff text when it was actually computed, else `null`
+ */
+export function diffHunksFrom(netDiff) {
+  if (!netDiff || typeof netDiff !== 'object') return null;
+  if (netDiff.scored !== true) return null;
+  return typeof netDiff.text === 'string' ? netDiff.text : null;
 }
 
 /**
@@ -363,7 +514,10 @@ export function scoreEscalation({
  * the sticky `review:human` gate), and at open none exist yet — so the outcome collapses to the rubric's own
  * escalate/humanRequired verdict. `null` means no review label to apply (a plain `merge` PR —
  * `ready-to-merge` alone is enough).
- * @param {{escalate:boolean, humanRequired?:boolean}} score
+ *
+ * #2890 — called with the FULL `scoreEscalation` return, so `score.diffHunks` (the base-vs-head diff content)
+ * rides along unused: this function's label derivation is escalate/humanRequired-only and stays that way.
+ * @param {{escalate:boolean, humanRequired?:boolean, diffHunks?:string|null}} score
  * @returns {string|null}
  */
 export function producerReviewLabel({ escalate, humanRequired = false } = {}) {
