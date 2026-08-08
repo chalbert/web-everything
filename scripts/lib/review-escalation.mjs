@@ -779,6 +779,43 @@ export function readyMergeConflictsWithHold(labels) {
 }
 
 /**
+ * #2832 / #984 F2 — must a drain PARK step strip `ready-to-merge`? Pure. This is the drain's whole
+ * hold-vs-go-ahead decision in one place, so the strip is keyed on the PR's POST-PARK label state rather than
+ * on whether this pass happens to be APPLYING a label.
+ *
+ * Why it is not simply `isReviewHoldLabel(applyLabel)`. That was the shipped shape, and it silently excluded
+ * `review:changes`: `decideReviewGate` returns `{action:'wait-author'}` for a `review:changes` PR with NO
+ * `applyLabel` (the author lane, not the drain, owns that label), so a strip nested inside an `applyLabel`
+ * guard never ran for it. `review:pending`/`review:human` self-heal every pass only because their `applyLabel`
+ * is re-returned every pass — an accident of gate shape, not a rule. Keying on the OBSERVED set makes all three
+ * holds behave identically and gives `review:changes` the standing reconcile it had none of.
+ *
+ * Why it is not simply `readyMergeConflictsWithHold(observedLabels)` either. Two park shapes are not yet
+ * visible in the observed set at decision time:
+ *   - a FRESH park (`applyLabel` = pending/human on a PR that carries no hold YET) — the hold is being written
+ *     in this same operation, so it must be folded in or the atomic park strip regresses;
+ *   - a #2409 STALE-ACCEPTANCE re-park — the PR still observably carries `review:accepted`, which
+ *     `hasUnclearedReviewLabel` treats as clearing every hold, but this same park is about to REMOVE it. Folding
+ *     the removal in is what keeps the re-park's go-ahead strip alive.
+ *
+ * `review:accepted` on any OTHER path is never caught: a legitimately queued PR (`review:accepted` +
+ * `ready-to-merge`, no hold) yields `false` here — and it never reaches a park branch at all, since
+ * `decideReviewGate` returns `action:'merge'` for it. Two independent reasons it cannot be un-queued.
+ * @param {Array} observedLabels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
+ * @param {{applyLabel?:(string|null), staleAcceptance?:boolean}} [o] - the park's own writes this operation:
+ *   the hold label it is applying (if any), and whether it is a #2409 re-park that drops `review:accepted`.
+ * @returns {boolean} true iff `ready-to-merge` must be removed
+ */
+export function decideParkReadyStrip(observedLabels, { applyLabel = null, staleAcceptance = false } = {}) {
+  const names = (Array.isArray(observedLabels) ? observedLabels : [])
+    .map((l) => (typeof l === 'string' ? l : l && l.name))
+    .filter((n) => typeof n === 'string');
+  const effective = staleAcceptance ? names.filter((n) => n !== REVIEW_LABELS.accepted) : names;
+  if (applyLabel) effective.push(applyLabel);
+  return readyMergeConflictsWithHold(effective);
+}
+
+/**
  * #2307 — should a caller (producer OR drain) actually ISSUE the `gh pr edit --add-label` call for a verdict
  * label? Pure. `false` when there is no label to apply, or the PR already carries it — the producer applies the
  * label at open, so a LATER drain pass re-scoring the same PR must treat it as already-scored and never

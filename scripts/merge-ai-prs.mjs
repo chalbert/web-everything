@@ -109,7 +109,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // Rebase resolution (2026-08-08): the UNION of both sides. `parseReviewedDiff` is #2979's accept-fingerprint
 // reader, landed on main today; `READY_TO_MERGE_LABEL` / `isReviewHoldLabel` are this PR's hold-invariant
 // helpers. They are independent concerns on the same import line — neither supersedes the other.
-import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, READY_TO_MERGE_LABEL, isReviewHoldLabel } from './lib/review-escalation.mjs';
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
@@ -2864,6 +2864,23 @@ async function runCli() {
   // through the existing blockedBy ordering. Signals: blast radius (diff files), size, dismissed findings +
   // cross-repo (manifest). Best-effort per candidate; a signal-fetch miss defaults to no-escalate.
   const parked = [];
+  // #2832 / #984 F2 — the ONE `ready-to-merge` strip seam every park site in the escalation pass goes through.
+  // Keyed on `decideParkReadyStrip` (the PR's OBSERVED labels PLUS this park's own writes), NEVER on whether the
+  // park happens to be applying a label. The shipped shape nested the strip inside `if (gate.applyLabel …)`,
+  // which excluded `review:changes` entirely — `decideReviewGate` returns `wait-author` with no `applyLabel` for
+  // it, so a PR that reached `review:changes` + `ready-to-merge` stayed contradictory forever with no sweeper
+  // (the per-pass reconcile strip was deliberately dropped from this PR — see `xtw8e93`). Routing all THREE park
+  // sites — the manifest-tamper park, the anti-test-gaming park, and the `decideReviewGate` park/wait-author
+  // branch — through one seam also closes the first two, which applied `review:human` and `continue`d past the
+  // strip, CREATING the contradictory state rather than merely failing to heal it.
+  // Best-effort, exactly like every other label write here: the merge gate re-checks the hold directly and parks
+  // a held PR whether or not `ready-to-merge` is present, so the label is a collection filter, never the land gate.
+  const stripReadyOnPark = (v, { applyLabel = null, staleAcceptance = false } = {}) => {
+    if (DRY_RUN) return;
+    if (!decideParkReadyStrip(v.prLabels, { applyLabel, staleAcceptance })) return;
+    try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--remove-label', READY_TO_MERGE_LABEL], { stdio: ['ignore', 'ignore', 'pipe'] }); }
+    catch { /* label best-effort */ }
+  };
   if (REVIEW_ESCALATION) {
     // #2262 fix (1/2) — the `review:*` verdict labels are never minted anywhere (unlike `ready-to-merge`,
     // which `pr-land.mjs` `gh label create`s before first use), so `gate.applyLabel` below silently no-ops:
@@ -2982,6 +2999,10 @@ async function runCli() {
           if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
+          // #2832 / #984 F2 — this park CREATES a hold (review:human) on a PR that, being in the
+          // `--label ready-to-merge` candidate set, carries the go-ahead. Strip it in the same operation, through
+          // the same seam the decideReviewGate park uses — this site `continue`s, so it never reached the strip.
+          stripReadyOnPark(v, { applyLabel: REVIEW_LABELS.human });
           const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
           if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} manifest-tamper baseline mismatch stamped on PR\n`);
         }
@@ -3010,6 +3031,9 @@ async function runCli() {
             if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
               try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
             }
+            // #2832 / #984 F2 — same as the manifest-tamper park above: this site CREATES a review:human hold on
+            // a go-ahead-carrying candidate and `continue`s, so it must strip through the shared seam here.
+            stripReadyOnPark(v, { applyLabel: REVIEW_LABELS.human });
             const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} test-gaming reason stamped on PR\n`);
           }
@@ -3102,6 +3126,11 @@ async function runCli() {
         // ALSO produce fresh escalation reasons (it may touch a blast-radius path), and the operator needs BOTH
         // — WHY the accept was invalidated AND what the new commit tripped — on the durable body/comment/log.
         const parkReasons = gate.staleAcceptance ? [gate.reason, ...score.reasons] : score.reasons;
+        // #2832 / #984 F2 — the go-ahead strip runs for EVERY park/wait-author outcome, OUTSIDE the
+        // `gate.applyLabel` guard below. `review:changes` reaches here as `wait-author` with NO `applyLabel`, so
+        // nesting the strip under that guard left it as the one hold label with no standing reconcile. Keyed on
+        // the observed labels plus this park's own writes (`gate.applyLabel`, and the #2409 accepted-drop below).
+        stripReadyOnPark(v, { applyLabel: gate.applyLabel, staleAcceptance: gate.staleAcceptance });
         // #2307 — a PR the PRODUCER already labelled at PR-open (or a prior drain pass already caught) is
         // already-scored: this pass is an idempotent backstop/reconcile, not the first applier, so skip the
         // redundant `gh pr edit --add-label` call when the verdict label is already present (never a
@@ -3110,14 +3139,6 @@ async function runCli() {
         if (gate.applyLabel && !DRY_RUN) {
           if (shouldApplyReviewLabel(gate.applyLabel, v.prLabels)) {
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
-          }
-          // #2832 — applying a review-hold label must ATOMICALLY strip ready-to-merge (held ⇒ not ready): a park
-          // that left the go-ahead on would leave a hold + go-ahead coexisting. Strip it HERE, in the SAME park
-          // operation, so the held-and-ready window is closed at the source (the write site that creates the hold),
-          // never left to a downstream reader. Best-effort — the merge gate independently re-checks the hold and
-          // parks regardless of ready-to-merge, so the label is a collection filter, never the land gate.
-          if (isReviewHoldLabel(gate.applyLabel) && hasLabel({ labels: v.prLabels }, READY_TO_MERGE_LABEL)) {
-            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--remove-label', READY_TO_MERGE_LABEL], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
           // #2313 — stamp the WHY + what-to-look-for onto the PR itself, not only this log line below.
           // #2333 — but ONLY for a NON-human (agent-reviewable) park: a review:human park already carries the

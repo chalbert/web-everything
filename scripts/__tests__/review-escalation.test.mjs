@@ -5,7 +5,7 @@
  *   and a cheap marker check lets the gate verify the write actually landed.
  */
 import { describe, it, expect } from 'vitest';
-import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold } from '../lib/review-escalation.mjs';
+import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate } from '../lib/review-escalation.mjs';
 
 describe('review-escalation — #2324 escalation-reason-in-body', () => {
   it('builds a marked block listing every reason', () => {
@@ -96,6 +96,78 @@ describe('review-escalation — #2832 label/hold self-consistency primitives', (
       expect(readyMergeConflictsWithHold(null)).toBe(false);
       expect(readyMergeConflictsWithHold([])).toBe(false);
     });
+  });
+});
+
+describe('review-escalation — #984 F2 decideParkReadyStrip (the drain park strip, keyed on OBSERVED holds)', () => {
+  // THE REGRESSION THIS BLOCK EXISTS FOR. The shipped strip lived inside `if (gate.applyLabel && !DRY_RUN)`,
+  // so it ran only for the two holds whose `applyLabel` decideReviewGate re-returns every pass
+  // (review:pending / review:human). `review:changes` returns `wait-author` with NO applyLabel — so a PR that
+  // reached `review:changes` + `ready-to-merge` stayed contradictory forever, with no sweeper (the per-pass
+  // reconcile strip was deliberately dropped from #984 — see backlog `xtw8e93`). PR #984 itself was in that
+  // state when the review that found this was recorded.
+  it('review:changes yields NO applyLabel from decideReviewGate, yet the go-ahead is still stripped', () => {
+    const labels = [REVIEW_LABELS.changes, READY_TO_MERGE_LABEL];
+    const gate = decideReviewGate({ escalate: true, labels });
+    // The precondition that made the applyLabel-nested strip unreachable for this hold:
+    expect(gate.action).toBe('wait-author');
+    expect(gate.applyLabel).toBeFalsy();
+    // The OLD key, spelled out: `isReviewHoldLabel(gate.applyLabel)` is FALSE here, so the shipped strip could
+    // not fire no matter how the surrounding guard was written.
+    expect(isReviewHoldLabel(gate.applyLabel)).toBe(false);
+    // The NEW key fires. This is the assertion that fails on the pre-hoist shape.
+    expect(decideParkReadyStrip(labels, { applyLabel: gate.applyLabel })).toBe(true);
+  });
+  it('a review:changes PR is stripped even when the drain applies nothing at all (no applyLabel argument)', () => {
+    expect(decideParkReadyStrip([REVIEW_LABELS.changes, READY_TO_MERGE_LABEL])).toBe(true);
+  });
+
+  for (const hold of REVIEW_HOLD_LABELS) {
+    it(`an ALREADY-held ${hold} PR carrying the go-ahead is stripped with no applyLabel (standing reconcile)`, () => {
+      expect(decideParkReadyStrip([{ name: hold }, { name: READY_TO_MERGE_LABEL }])).toBe(true);
+    });
+    it(`a FRESH ${hold} park (hold not yet observed) still strips — the atomic park strip survives the hoist`, () => {
+      expect(decideParkReadyStrip([{ name: READY_TO_MERGE_LABEL }], { applyLabel: hold })).toBe(true);
+    });
+    it(`${hold} WITHOUT the go-ahead is never a strip target (nothing to remove)`, () => {
+      expect(decideParkReadyStrip([{ name: hold }])).toBe(false);
+      expect(decideParkReadyStrip([], { applyLabel: hold })).toBe(false);
+    });
+  }
+
+  // THE HOISTING SAFETY PROPERTY the review asked to be proven: a legitimately QUEUED PR must never be
+  // un-queued by the widened key.
+  it('a legitimately queued PR (review:accepted + ready-to-merge) is NEVER stripped', () => {
+    expect(decideParkReadyStrip([REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL])).toBe(false);
+    // …and it does not even reach a park branch: decideReviewGate merges it.
+    expect(decideReviewGate({ escalate: true, labels: [REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL] }).action).toBe('merge');
+  });
+  it('review:accepted clears a stale hold too — an accepted PR with a leftover hold keeps its go-ahead', () => {
+    expect(decideParkReadyStrip([REVIEW_LABELS.pending, REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL])).toBe(false);
+  });
+  it('an unlabelled/clean PR carrying only the go-ahead is never stripped', () => {
+    expect(decideParkReadyStrip([READY_TO_MERGE_LABEL])).toBe(false);
+    expect(decideParkReadyStrip([READY_TO_MERGE_LABEL], { applyLabel: null })).toBe(false);
+  });
+
+  // #2409 — the stale-acceptance re-park REMOVES review:accepted in the same operation, so the strip decision
+  // must be made against the post-park set. Without the staleAcceptance input the still-present accepted label
+  // would clear the hold and the re-parked PR would keep its go-ahead.
+  it('a #2409 stale-acceptance re-park strips, because it drops review:accepted in the same operation', () => {
+    const labels = [REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL];
+    expect(decideParkReadyStrip(labels, { applyLabel: REVIEW_LABELS.human, staleAcceptance: true })).toBe(true);
+    expect(decideParkReadyStrip(labels, { applyLabel: REVIEW_LABELS.pending, staleAcceptance: true })).toBe(true);
+    // …and the gate really does produce that shape.
+    const gate = decideReviewGate({ escalate: true, labels, acceptedSha: 'a'.repeat(40), headSha: 'b'.repeat(40) });
+    expect(gate.staleAcceptance).toBe(true);
+    expect(decideParkReadyStrip(labels, { applyLabel: gate.applyLabel, staleAcceptance: gate.staleAcceptance })).toBe(true);
+  });
+
+  it('accepts plain-string and {name} label shapes alike, and never throws on an odd one', () => {
+    expect(decideParkReadyStrip([{ name: REVIEW_LABELS.human }, READY_TO_MERGE_LABEL])).toBe(true);
+    expect(decideParkReadyStrip(null)).toBe(false);
+    expect(decideParkReadyStrip(undefined, { applyLabel: REVIEW_LABELS.human })).toBe(false);
+    expect(decideParkReadyStrip([null, undefined, { name: null }, READY_TO_MERGE_LABEL], { applyLabel: REVIEW_LABELS.changes })).toBe(true);
   });
 });
 

@@ -90,6 +90,24 @@ describe('decideHoldReadyStrip — #2832/#984 findings 4+5 (held signal + observ
     // …but without the go-ahead actually present or applied this run, there is nothing to strip.
     expect(decideHoldReadyStrip(REVIEW_LABELS.human, [], { labelApplied: false })).toEqual({ held: true, strip: false });
   });
+  // #984 F3 — THE MISSING SHAPE, and the exact boundary of what the `labelApplied` belt can cover. The belt
+  // engages only once `held` is true, and with a failed label read (`currentLabels` caught to `[]`) AND a clean
+  // fresh verdict there is NO hold evidence from either input — so a genuinely held PR this run just stamped is
+  // left held-and-ready. That is a real residual and it is pinned here rather than papered over.
+  //
+  // It is NOT fixable by widening: computing `strip` from `labelApplied` independently of `held` (the review's
+  // suggested shape) would strip the go-ahead from EVERY healthy PR the producer just stamped — the second
+  // assertion below is what that widening would break. The residual is covered DOWNSTREAM instead, by the
+  // drain's `decideParkReadyStrip` seam, which strips on observed holds every pass for all three hold labels
+  // with no dependence on this run's reads. The doc on `decideHoldReadyStrip` states exactly this scope.
+  it('#984 F3 — a clean fresh verdict + a failed label read is NOT held, so the belt does not engage', () => {
+    expect(decideHoldReadyStrip(null, [], { labelApplied: true })).toEqual({ held: false, strip: false });
+  });
+  it('#984 F3 — and it must stay that way: a healthy PR must never be un-queued by its own go-ahead stamp', () => {
+    // The happy path — clean rubric, no hold anywhere, this run added ready-to-merge. `strip` MUST be false.
+    expect(decideHoldReadyStrip(null, [READY_TO_MERGE_LABEL], { labelApplied: true })).toEqual({ held: false, strip: false });
+    expect(decideHoldReadyStrip(REVIEW_LABELS.accepted, [READY_TO_MERGE_LABEL], { labelApplied: true })).toEqual({ held: false, strip: false });
+  });
 });
 
 describe('pr-land post-land dirty-probe (#2225 — deps-symlinked clone must still heal/regen)', () => {

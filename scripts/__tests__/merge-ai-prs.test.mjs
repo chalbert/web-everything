@@ -453,6 +453,41 @@ describe('merge-ai-prs — #xq985wu decouple merge-ordering from the ready-to-me
   });
 });
 
+// #984 F2 — the WIRING half of the park go-ahead strip. The decision itself is pure and covered in
+// `review-escalation.test.mjs` (`decideParkReadyStrip`); what a pure test cannot see is WHERE the drain calls
+// it, and that is exactly what broke: the strip was nested inside `if (gate.applyLabel && !DRY_RUN)`, so it
+// never ran for `review:changes` (a `wait-author` verdict with no `applyLabel`), and two other park sites
+// (`continue`-ing on manifest-tamper / test-gaming) never reached it at all. Source-contract assertions, the
+// same mechanism the AC3 check above and the #2409 add-first/remove-last check already use — the park loop
+// lives in `runCli`, which this file's standing norm leaves un-executed.
+describe('merge-ai-prs — #984 F2: the park strip is keyed on OBSERVED holds, not on gate.applyLabel', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
+
+  it('there is exactly ONE ready-to-merge removal site, and it is guarded by decideParkReadyStrip', () => {
+    expect(src.match(/'--remove-label', READY_TO_MERGE_LABEL/g) || []).toHaveLength(1);
+    const helper = src.slice(src.indexOf('const stripReadyOnPark = ('));
+    expect(helper).toMatch(/^const stripReadyOnPark = [\s\S]{0,600}?decideParkReadyStrip\(v\.prLabels, \{ applyLabel, staleAcceptance \}\)/);
+    // …and NOT on the shipped applyLabel-shaped key, which is what excluded review:changes.
+    expect(src).not.toMatch(/isReviewHoldLabel\(gate\.applyLabel\)/);
+  });
+
+  it('the strip does NOT live inside the `gate.applyLabel` guard (the review:changes hole)', () => {
+    const start = src.indexOf('if (gate.applyLabel && !DRY_RUN) {');
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf('// #2409 — drop the now-stale review:accepted', start);
+    expect(end).toBeGreaterThan(start);
+    const guarded = src.slice(start, end);
+    expect(guarded).not.toContain('stripReadyOnPark');
+    expect(guarded).not.toContain('READY_TO_MERGE_LABEL');
+  });
+
+  it('all THREE park sites route through the seam (gate park/wait-author, manifest tamper, test-gaming)', () => {
+    expect(src.match(/^\s*stripReadyOnPark\(v, \{/gm) || []).toHaveLength(3);
+    // The gate site passes the park's own writes through, so a fresh park and a #2409 re-park both still strip.
+    expect(src).toContain('stripReadyOnPark(v, { applyLabel: gate.applyLabel, staleAcceptance: gate.staleAcceptance })');
+  });
+});
+
 // #999 / xq985wu review — the LIVENESS regression the one-liner introduced. Decoupling ordering onto the
 // FROZEN full-open superset (`orderExtraOpenItems`, snapshot BEFORE any merge, never updated) is only safe if
 // the `blockedBy` path honours a proven-landed item the SAME way `stackParents` already does. Before the fix

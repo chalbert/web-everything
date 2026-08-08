@@ -334,9 +334,19 @@ export function buildAddLabelArgs({ pr, label }) {
  *   - `strip` — must the producer STRIP `ready-to-merge`? True iff held AND the go-ahead is present, judged BOTH
  *     from the OBSERVED set (`currentLabels` ∪ the just-decided hold — #984 finding 5, so a re-run against an
  *     already-`ready-to-merge` held PR strips even when this run's add "failed") AND, belt-and-braces, from
- *     `labelApplied` (#984 minor 1: the live `currentLabels` read FAILS OPEN to `[]` on a transient `gh` miss —
- *     without this, a PR THIS run just stamped `ready-to-merge` would keep the stale go-ahead). Reuses the SHARED
- *     `readyMergeConflictsWithHold` predicate (no fork).
+ *     `labelApplied` (#984 minor 1). Reuses the SHARED `readyMergeConflictsWithHold` predicate (no fork).
+ *
+ * EXACT SCOPE OF THE `labelApplied` BELT (#984 F3 — the doc claim, corrected). It covers the case where the live
+ * `gh pr view --json labels` read FAILS OPEN to `[]` **and this run's own verdict is a hold**: the hold is then
+ * known from `verdictLabel` even though the observed set is empty, so the go-ahead this run just stamped is still
+ * stripped. It does NOT — and provably cannot — cover a failed label read combined with a CLEAN fresh verdict
+ * (`decideHoldReadyStrip(null, [], {labelApplied:true})` → `{held:false, strip:false}`, pinned by test). In that
+ * composition there is NO evidence of a hold from either input: `verdictLabel` is null and `currentLabels` is
+ * empty because the read missed, and the function cannot tell that from a genuinely unheld PR. The reviewer's
+ * suggested widening — computing `strip` from `labelApplied` independently of `held` — must NOT be taken: it
+ * would strip the go-ahead from EVERY healthy PR the producer just stamped, un-queueing the whole happy path.
+ * The residual is covered downstream instead: the drain's park seam (`decideParkReadyStrip`) strips on the
+ * OBSERVED hold every pass, for all three hold labels, with no dependence on this run's reads.
  * @param {string|null|undefined} verdictLabel - the producer's final review-escalation label (a hold, or null)
  * @param {Array} currentLabels - the PR's OBSERVED labels (string or `{name}` shape)
  * @param {{labelApplied?: boolean}} [opts] - did THIS run's `--add-label ready-to-merge` succeed?
