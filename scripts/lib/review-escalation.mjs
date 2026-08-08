@@ -215,8 +215,15 @@ const CODIFIED_IN_RE = /^codifiedIn:\s*["']?([^"'\s]+)["']?\s*$/;
 /**
  * Split a raw unified diff into per-file sections. Pure, internal, deliberately dumb: it recognises only what
  * `git diff` actually emits and treats anything it cannot parse as a reason to give up (the caller then fails
- * closed). Returns `[{ path, added: string[], removed: string[], context: string[] }]` where `path` is the
- * POST-image path (`b/…`), which is what the changed-file lists this is cross-checked against also carry.
+ * closed). Returns `[{ path, added: string[], removed: string[], context: string[], seq: Array }]` where `path`
+ * is the POST-image path (`b/…`), which is what the changed-file lists this is cross-checked against also carry.
+ *
+ * `seq` is the ORDERED transcript of the section — `{ kind: 'add'|'del'|'ctx'|'hunk', text }` in diff order —
+ * which the flat `added`/`removed`/`context` buckets throw away. WHERE an added line sits is load-bearing for the
+ * codification proof (#2785 review-fix): "the only change is the addition of exactly that anchor" is a claim
+ * about POSITION — added prose sitting inside some OTHER rule's body is indistinguishable, in the flat buckets,
+ * from the same prose sitting under the new anchor. `hunk` markers are kept so two separate edits can never be
+ * read as one contiguous append just because the `@@` header between them was dropped.
  */
 function parseDiffSections(diffText) {
   const sections = [];
@@ -226,21 +233,74 @@ function parseDiffSections(diffText) {
       // `diff --git a/<p> b/<p>` — take the b-side. A quoted/renamed/space-bearing path is NOT parsed; the
       // section is recorded with a null path so the caller's "every statute file accounted for" check fails.
       const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
-      cur = { path: m ? m[2] : null, added: [], removed: [], context: [] };
+      cur = { path: m ? m[2] : null, added: [], removed: [], context: [], seq: [] };
       sections.push(cur);
       continue;
     }
     if (!cur) continue;                                    // preamble before the first file header
-    if (line.startsWith('+++ ') || line.startsWith('--- ') || line.startsWith('@@')) continue;
+    if (line.startsWith('@@')) { cur.seq.push({ kind: 'hunk', text: line }); continue; }
+    if (line.startsWith('+++ ') || line.startsWith('--- ')) continue;
     if (line.startsWith('index ') || line.startsWith('new file mode') || line.startsWith('deleted file mode')
       || line.startsWith('old mode') || line.startsWith('new mode') || line.startsWith('similarity index')
       || line.startsWith('rename from') || line.startsWith('rename to')
       || line.startsWith('Binary files') || line === '\\ No newline at end of file') continue;
-    if (line.startsWith('+')) cur.added.push(line.slice(1));
-    else if (line.startsWith('-')) cur.removed.push(line.slice(1));
-    else if (line.startsWith(' ')) cur.context.push(line.slice(1));
+    if (line.startsWith('+')) { cur.added.push(line.slice(1)); cur.seq.push({ kind: 'add', text: line.slice(1) }); }
+    else if (line.startsWith('-')) { cur.removed.push(line.slice(1)); cur.seq.push({ kind: 'del', text: line.slice(1) }); }
+    else if (line.startsWith(' ')) { cur.context.push(line.slice(1)); cur.seq.push({ kind: 'ctx', text: line.slice(1) }); }
   }
   return sections;
+}
+
+/**
+ * #2785 review-fix — does this `platform-decisions.md` diff section prove its added lines BELONG TO the named
+ * anchor's own section? Pure. This is the POSITIONAL half of #2771 condition (ii) ("the ONLY edit is the ADDITION
+ * / extension of exactly that anchor"), which the anchor-name check alone cannot see.
+ *
+ * WHY. The name check asks only "is every added anchor HEADING one a resolve named?". Added NON-heading prose is
+ * invisible to it, anywhere in the 3,300-line statute doc. That is a third case #2771's skeptic pass excluded by
+ * conjunction ("either a second anchor edit, or inside the one anchor") but which the diff actually permits: an
+ * honest anchor appended at EOF, PLUS one smuggled line spliced into the body of an EXISTING rule, with zero
+ * removals. Under the old test that scored `humanRequired: false` — letting an agent-clearable PR amend the very
+ * rule that decides what agents may clear.
+ *
+ * THE PROVABLE SHAPE, deliberately the narrowest one a unified diff can establish — the statute section must be
+ * exactly ONE contiguous append, at the end of the file, that OPENS with the named anchor:
+ *   • exactly one run of added lines in the whole section (a second run is a second edit somewhere else — the
+ *     mid-file splice above), and hunk boundaries break runs, so two `@@` hunks can never read as one append;
+ *   • that run must be the LAST thing in the section — NO context line after it. Trailing context is `git diff`
+ *     showing pre-existing text below the insertion point, i.e. the addition landed INSIDE the document rather
+ *     than after it (the new-anchor-splits-an-existing-rule case), so what follows the new heading is somebody
+ *     else's rule body and the new heading has annexed it;
+ *   • at least one context line BEFORE the run. This proves the diff carries context at all: under `-U0` there
+ *     is none, every insertion looks like an EOF append, and the trailing-context test would be vacuous;
+ *   • inside the run, every line before the first anchor heading must be BLANK. A blank separator is how an
+ *     append at EOF actually renders; any non-blank line above the heading is prose attaching to whatever rule
+ *     precedes it, not to the new one.
+ * Everything else is unprovable and therefore human. `false` here is always the safe direction.
+ */
+function isSingleAnchorAppend(section) {
+  const seq = Array.isArray(section?.seq) ? section.seq : null;
+  if (!seq || !seq.length) return false;                                    // unparsed section → human
+  let runs = 0;
+  let run = null;                                                            // the single added run, once found
+  let sawContextBeforeRun = false;
+  let contextAfterRun = false;
+  let inRun = false;
+  for (const ev of seq) {
+    if (ev.kind === 'add') {
+      if (!inRun) { inRun = true; runs += 1; run = []; }
+      run.push(ev.text);
+      continue;
+    }
+    inRun = false;                                                           // 'ctx', 'del' and 'hunk' all break the run
+    if (ev.kind === 'ctx') { if (runs === 0) sawContextBeforeRun = true; else contextAfterRun = true; }
+  }
+  if (runs !== 1 || !run) return false;                                      // zero, or a second edit elsewhere
+  if (contextAfterRun) return false;                                         // the append landed INSIDE the document
+  if (!sawContextBeforeRun) return false;                                    // no context at all (-U0) → unprovable
+  const headingAt = run.findIndex((l) => STATUTE_ANCHOR_HEADING_RE.test(l));
+  if (headingAt < 0) return false;                                           // an extension with no anchor heading
+  return run.slice(0, headingAt).every((l) => !l.trim());                    // only blank separators may precede it
 }
 
 /**
@@ -259,7 +319,16 @@ function parseDiffSections(diffText) {
  *   (i)  the same diff flips a `kind: decision` backlog item from a non-resolved status to `status: resolved`
  *        AND adds a `codifiedIn:` naming a statute anchor; and
  *   (ii) the ONLY `platform-decisions.md` change is the ADDITION of exactly the anchor(s) those `codifiedIn`
- *        lines name — no removed line anywhere in that file, and no added anchor heading that is not one of them.
+ *        lines name — no removed line anywhere in that file, no added anchor heading that is not one of them,
+ *        AND (the positional half, `isSingleAnchorAppend`) every added line provably BELONGS TO the named
+ *        anchor's own section: one contiguous append at the end of the document, opening with that heading.
+ *
+ * WHY (ii) HAS A POSITIONAL HALF (#2785 review-fix). Checking only the anchor NAMES leaves added non-heading
+ * prose unexamined anywhere in the 3,300-line document. #2771's skeptic pass believed the hole was closed by the
+ * disjunction "a smuggled rule is either a second anchor edit (fails (ii)) or lives inside the one anchor (the
+ * committee catches it)" — but a third case exists: an honest anchor appended at EOF PLUS one line spliced into
+ * the BODY of an existing rule, with zero removals. That scored as codification, which would have let an
+ * agent-clearable PR amend `#review-human-declarative-leash-only` — the rule about who may clear what.
  *
  * WHAT IT REFUSES (each of these is a deliberate false, not an oversight):
  *   • No diff text at all (a caller that could not read one, or a drain path that does not plumb it) → false.
@@ -275,6 +344,12 @@ function parseDiffSections(diffText) {
  *   • A statute edit that adds NO anchor heading at all → false. #2771 allows "addition / extension", but a
  *     pure extension cannot be proven from a diff to sit inside the named anchor's section rather than inside a
  *     neighbouring rule, so it stays human. The narrower, provable half is the one implemented.
+ *   • ANY added statute line that is not part of the ONE append opening with the named anchor → false. Concretely
+ *     that refuses: a second added run anywhere in the file (prose spliced into another rule's body, whether in
+ *     its own hunk or not); an added anchor followed by pre-existing context (the new heading inserted MID-file,
+ *     annexing the rule text below it instead of being appended); non-blank added prose sitting above the new
+ *     heading inside the same run (it attaches to the PRECEDING rule); and a context-free (`-U0`) statute diff,
+ *     in which position cannot be read at all.
  *   • A backlog section whose hunks do not SHOW `kind: decision` → false. The `kind` line sits two lines from
  *     `status` in the front-matter so default context normally carries it; when it does not, the diff has not
  *     proven the resolved item is a decision, and an ordinary story resolve must never license a statute edit.
@@ -316,10 +391,14 @@ export function isCodificationOnly({ diffText = null, changedFiles = [] } = {}) 
   }
   if (!codifiedAnchors.size) return false;                                  // no resolve+codify → an author's new rule
 
-  // (ii) — the statute half: additions only, and every added anchor heading is one the resolve named.
+  // (ii) — the statute half: additions only, POSITIONED as one append that opens with the named anchor, and
+  // every added anchor heading is one the resolve named. The positional test (`isSingleAnchorAppend`) is what
+  // makes "the ONLY change is the addition of exactly that anchor" a claim about the whole file rather than only
+  // about the headings; without it, added prose spliced into another rule's body is unexamined (#2785 fix).
   const addedAnchors = new Set();
   for (const s of statuteSections) {
     if (s.removed.length) return false;                                     // rewrote existing rule text → human
+    if (!isSingleAnchorAppend(s)) return false;                             // added lines not provably the anchor's
     for (const l of s.added) {
       const m = STATUTE_ANCHOR_HEADING_RE.exec(l);
       if (m) addedAnchors.add(m[1]);

@@ -565,6 +565,24 @@ describe('INVARIANT 13 — a statute edit leaves the human gate only on a PROVEN
       `${decisionResolve.replace('kind: decision', 'kind: story')}\n${anchorAddition}`,
     'an item that was ALREADY resolved (no non-resolved status removed)':
       `${decisionResolve.replace('-status: open', '-someOtherField: x')}\n${anchorAddition}`,
+    // ── the POSITIONAL half of condition (ii) (#2785 review-fix). Each of the four below has ZERO removals and
+    // adds ONLY the anchor heading the resolve names — they pass the anchor-NAME test verbatim. What refuses
+    // them is WHERE the added lines sit: only a single contiguous append that opens with the named heading and
+    // runs to the end of the document proves the addition belongs to that anchor's own section. The real-diff
+    // proof of the same four rows, driven end-to-end through the producer, is in pr-land.test.mjs.
+    'added prose ABOVE the new anchor heading (it attaches to the PRECEDING rule, not the new one)':
+      `${decisionResolve}\n${anchorAddition.replace(' previous rule body\n+', ' previous rule body\n+A smuggled amendment to the rule above.\n+')}`,
+    'the new anchor heading followed by PRE-EXISTING context (inserted mid-file, annexing the rule below it)':
+      `${decisionResolve}\n${anchorAddition}\n the next rule body`,
+    'a SECOND added run elsewhere in the statute file (one line spliced into another rule body)': [decisionResolve,
+      'diff --git a/docs/agent/platform-decisions.md b/docs/agent/platform-decisions.md',
+      '@@ -50,3 +50,4 @@', ' some other rule body', '+A smuggled amendment.', ' more of that rule',
+      '@@ -100,3 +100,5 @@', ' previous rule body', '+', `+### Some ratified rule {#${ANCHOR}}`, '+',
+      '+**Ratified 2026-08-08 by the operator.** The body of the rule.'].join('\n'),
+    'a context-free (-U0) statute diff, in which position cannot be read at all': [decisionResolve,
+      'diff --git a/docs/agent/platform-decisions.md b/docs/agent/platform-decisions.md',
+      '@@ -100,0 +101,4 @@', '+', `+### Some ratified rule {#${ANCHOR}}`, '+',
+      '+**Ratified 2026-08-08 by the operator.** The body of the rule.'].join('\n'),
   };
   for (const [label, diffText] of Object.entries(refusals)) {
     it(`stays review:human — ${label}`, () => {
