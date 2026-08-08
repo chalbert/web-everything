@@ -14,6 +14,7 @@
  */
 
 import { validateFidelityContract } from './lib/fidelity-contract.mjs';
+import { coversFile, isSubtreeEntry } from './readiness/scope-lease.mjs';
 
 // Backlog operational axis (not the implementation lifecycle) + agile sizing — see
 // docs/agent/backlog-workflow.md. Exported so the script and the tests share one definition.
@@ -2266,4 +2267,132 @@ export function validateDeclaredModuleContract(modules = []) {
     }
   }
   return { errors, warnings: [] };
+}
+
+// ── 15. Small-file preference: size+collision composite soft-warn (#2678 ruling, #2782) ─────────
+// #2678 Fork 1 ratified (b): a NON-blocking warn (never an error, never a deny) on a file that is BOTH
+// oversized AND scope-collision-heavy — the real conveyor serialization cost (a file named in many queued
+// items' `scope:` is a single lock point that holds those items apart even with zero real overlap). The
+// signal is the size+collision COMPOSITE, never raw line count (a large-but-cohesive, uncontended file
+// stays quiet). A `// @cohesive: <reason>` escape hatch IN THE FILE HEADER silences the warn for a
+// genuinely-cohesive file. Codified at docs/agent/platform-decisions.md#small-file-preference.
+
+/** Ratified illustrative defaults (#2678's own code sample) — override via `findLockPointFiles`'s `opts`
+ * for tests; the live wiring in check-standards.mjs uses these. */
+export const LOCK_POINT_CODE_LINES_THRESHOLD = 800;
+export const LOCK_POINT_COLLISIONS_THRESHOLD = 5;
+
+/** Count "code lines" in a file body — total lines minus blank lines and single-line `//` comment lines.
+ * Deliberately a simple proxy, NOT a tokenizer/parser (block comments are not stripped): #2678's own point
+ * is that this composite need only be truer than raw line count, not exact — it is a warn-only gate. */
+export function countCodeLines(text) {
+  if (typeof text !== 'string' || text === '') return 0;
+  return text.split('\n').filter((line) => {
+    const t = line.trim();
+    return t !== '' && !t.startsWith('//');
+  }).length;
+}
+
+/** Does the file's HEADER carry the `// @cohesive: <reason>` escape hatch (#2678)? A bare marker with no
+ * reason text does NOT suppress the warn — the author must actually state why the file is cohesive.
+ *
+ * POSITIONAL, not lexical (#2782 review r2). The marker only counts as a directive when it sits in the
+ * file header: the run of shebang / blank / `//` lines (and any leading `/* … *\/` block) before the first
+ * line of real content. Two earlier cuts answered "is this a directive?" by pattern alone and both were
+ * forgeable as DATA:
+ *   r0 matched `// @cohesive:` anywhere in the body, so every file that merely DOCUMENTS the hatch
+ *     exempted itself — including all three files this rule ships in.
+ *   r1 anchored to line-start, which still matched the marker inside a template literal, inside a
+ *     `/* … *\/` block, or inside a fenced ` ```js ` example in a `.md` file — any incidental line
+ *     permanently silencing the gate for a whole file.
+ * A header line cannot be smuggled in as content: a template literal, a fenced block and mid-file code all
+ * sit past the first real line, and block-comment interiors are skipped even in the header. #2678's own
+ * sample scanned the file head for exactly this reason; restoring that constraint makes the marker an
+ * author's deliberate declaration again rather than any string the file happens to contain. */
+export function hasCohesiveEscapeHatch(text) {
+  if (typeof text !== 'string' || text === '') return false;
+  const lines = text.split('\n');
+  let inBlockComment = false;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (inBlockComment) {
+      const end = t.indexOf('*/');
+      if (end === -1) continue; // block-comment interior — never a directive
+      inBlockComment = false;
+      if (t.slice(end + 2).trim() !== '') return false; // real content trails the block: header is over
+      continue;
+    }
+    if (t === '') continue;
+    if (i === 0 && t.startsWith('#!')) continue;
+    if (t.startsWith('//')) {
+      if (/^\/\/[ \t]*@cohesive:[ \t]*\S/.test(t)) return true;
+      continue;
+    }
+    if (t.startsWith('/*')) {
+      const end = t.indexOf('*/', 2);
+      if (end === -1) { inBlockComment = true; continue; }
+      if (t.slice(end + 2).trim() !== '') return false;
+      continue;
+    }
+    return false; // first line of real content — the header region ends here
+  }
+  return false;
+}
+
+/** Count how many backlog items' `scope:` entries NAME this file — the real serialization cost (#2678):
+ * each queued item whose predicted scope covers the file holds a lane apart from every other. Uses the
+ * same coverage matcher the scope-lease engine runs (`coversFile`, #2679), so a directory/glob scope entry
+ * that happens to cover the file counts too, not only an exact-path entry.
+ * @param file repo-qualified path (e.g. "we:scripts/merge-ai-prs.mjs").
+ * @param backlogScopes array of each (already status-filtered) item's `scope:` array.
+ */
+export function countScopeCollisions(file, backlogScopes) {
+  let n = 0;
+  for (const scopes of backlogScopes || []) {
+    if (Array.isArray(scopes) && scopes.some((s) => typeof s === 'string' && coversFile(s, file))) n++;
+  }
+  return n;
+}
+
+/** The candidate universe for the lock-point scan: every FILE-shaped (not directory/glob), `we:`-qualified
+ * scope entry named by ANY item in `backlogScopes`, deduped. Only a file some item explicitly names can
+ * ever cross the collision threshold, so this is both correct and far cheaper than walking every tracked
+ * file. Pure (no fs) and exported so the live wiring in check-standards.mjs and the real-repo calibration
+ * guard (#2782) select the SAME population — a drift here would silently un-guard the thresholds.
+ * @returns `string[]` of repo-qualified paths. */
+export function lockPointCandidatePaths(backlogScopes) {
+  const out = new Set();
+  for (const scopes of backlogScopes || [])
+    for (const s of scopes || [])
+      if (typeof s === 'string' && s.startsWith('we:') && !isSubtreeEntry(s)) out.add(s);
+  return [...out];
+}
+
+/**
+ * Find lock-point files: BOTH oversized (code lines over threshold) AND scope-collision-heavy (named by
+ * at least `collisionsThreshold` items' scopes), skipping any file whose HEADER carries the `@cohesive:`
+ * escape hatch.
+ * #2678 Fork 1 (b) — warn-only; the caller decides how to surface the result (never an error/deny).
+ *
+ * @param files array of `{ path, text }` — path repo-qualified, text the file body. Pass only FILE-shaped
+ *   candidates (e.g. filter with `!isSubtreeEntry(path)`) — a directory has no single "size" to measure.
+ * @param backlogScopes array of each queued item's `scope:` array — the collision universe. Callers
+ *   typically pass only non-resolved items (a resolved item no longer holds a live lane).
+ * @param opts.codeLinesThreshold / opts.collisionsThreshold override the ratified defaults (test seam).
+ * @returns `[{ path, codeLines, collisions }]`
+ */
+export function findLockPointFiles({ files, backlogScopes }, opts = {}) {
+  const codeLinesThreshold = opts.codeLinesThreshold ?? LOCK_POINT_CODE_LINES_THRESHOLD;
+  const collisionsThreshold = opts.collisionsThreshold ?? LOCK_POINT_COLLISIONS_THRESHOLD;
+  const out = [];
+  for (const f of files || []) {
+    if (!f || typeof f.path !== 'string' || isSubtreeEntry(f.path)) continue;
+    if (hasCohesiveEscapeHatch(f.text)) continue;
+    const codeLines = countCodeLines(f.text);
+    if (codeLines <= codeLinesThreshold) continue;
+    const collisions = countScopeCollisions(f.path, backlogScopes);
+    if (collisions < collisionsThreshold) continue;
+    out.push({ path: f.path, codeLines, collisions });
+  }
+  return out;
 }
