@@ -14,8 +14,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname, join as pathJoin } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { planSkill, applyPlan, listFilesRecursive, parseArgs, assertInsideRoot, buildPlans, formatPlans } from '../sync-skills-deploy.mjs';
+
+// NOT `new URL('../sync-skills-deploy.mjs', import.meta.url)` — Vite statically recognises that exact
+// asset-URL pattern and rewrites it to a `http://localhost:.../` dev-server URL at transform time, which
+// then fails `fileURLToPath` ("URL must be of scheme file"). Build the path by hand instead.
+const MODULE_PATH = pathJoin(dirname(fileURLToPath(import.meta.url)), '..', 'sync-skills-deploy.mjs');
 
 let root;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'sync-skills-')); });
@@ -277,4 +284,95 @@ describe('sync-skills-deploy — #2579 review r2', () => {
     mkdirSync(dest, { recursive: true });
     expect(() => assertInsideRoot(dest, join(dest, 'a', 'b', 'c.md'))).not.toThrow();
   });
+});
+
+// ── PR #1024 review blockers ────────────────────────────────────────────────────────────────────────
+// Both reproduced live against this repo's actual layout: `~/.claude/skills/<skill>` symlinked straight to
+// a `skills-src/<skill>` dir. Each case below hangs or corrupts data WITHOUT the fix.
+describe('sync-skills-deploy — PR #1024 review blockers', () => {
+  let root;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'sync-1024-')); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('blocker 1 — applyPlan checks containment against the DEPLOY ROOT, not the per-skill destDir', () => {
+    // Mirrors this repo's real layout: the deploy root (`~/.claude/skills`) has a per-skill entry that is
+    // itself a symlink to an entirely different tree (here: another "repo"'s own skills-src/drain). Checking
+    // containment against `destDir` alone is a tautology — the target is built FROM destDir, so it always
+    // resolves "inside" destDir's own realpath, even though destDir itself has walked outside the deploy root.
+    const deployRoot = join(root, 'home-claude-skills');
+    mkdirSync(deployRoot, { recursive: true });
+    const otherRepoSkillsSrc = join(root, 'other-repo', 'skills-src', 'drain');
+    mkdirSync(otherRepoSkillsSrc, { recursive: true });
+    writeFileSync(join(otherRepoSkillsSrc, 'SKILL.md'), 'PRIMARY REPO CONTENT — must survive');
+    // ~/.claude/skills/drain -> other-repo/skills-src/drain (the destDir IS the escape)
+    const destDir = join(deployRoot, 'drain');
+    symlinkSync(otherRepoSkillsSrc, destDir, 'dir');
+
+    // A stale-lane sync tries to push its own (different) drain content through that symlinked destDir.
+    const staleSrcDir = join(root, 'stale-lane', 'skills-src', 'drain');
+    mkdirSync(staleSrcDir, { recursive: true });
+    writeFileSync(join(staleSrcDir, 'SKILL.md'), 'STALE LANE CONTENT — must never land');
+
+    // buildPlans wires destRoot = the real deploy root; planSkill/applyPlan must honour it.
+    const plan = planSkill({
+      name: 'drain', srcDir: staleSrcDir, destDir, trackedRel: ['SKILL.md'], destRoot: deployRoot,
+    });
+    expect(plan.actions.length).toBeGreaterThan(0); // content differs, so a write would be attempted
+    expect(() => applyPlan(plan)).toThrow(/resolves outside the deploy root/);
+    // the primary repo's own file must be untouched
+    expect(readFileSync(join(otherRepoSkillsSrc, 'SKILL.md'), 'utf8')).toBe('PRIMARY REPO CONTENT — must survive');
+  });
+
+  it('blocker 1 — buildPlans threads the real destRoot into every plan (not just destDir)', () => {
+    const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+    git(['init', '-q']);
+    const srcRoot = join(root, 'skills-src');
+    mkdirSync(join(srcRoot, 'drain'), { recursive: true });
+    writeFileSync(join(srcRoot, 'drain', 'SKILL.md'), 'a');
+    git(['add', '-A']);
+    git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'seed']);
+    const destRoot = join(root, 'deploy');
+    mkdirSync(join(destRoot, 'drain'), { recursive: true });
+
+    const [plan] = buildPlans({ srcRoot, destRoot, repoRoot: root });
+    expect(plan.destRoot).toBe(destRoot);
+  });
+
+  it('blocker 2 — a symlink cycle fails fast with a clear error instead of hanging (bounded via a child process)', () => {
+    // realpathDeepest is not exported; drive it through assertInsideRoot, which is. A 2-node cycle makes
+    // EVERY individual readlinkSync() call succeed (no ELOOP from the kernel — we never invoke a syscall
+    // that itself resolves the chain), so an unbounded walk spins forever. Run it in a child process with a
+    // hard timeout so a regression here fails this test fast instead of hanging the whole CI run.
+    const dest = join(root, 'dest');
+    mkdirSync(dest, { recursive: true });
+    const a = join(dest, 'a');
+    const b = join(dest, 'b');
+    symlinkSync(b, a, 'dir'); // a -> b
+    symlinkSync(a, b, 'dir'); // b -> a  (2-node cycle)
+
+    const script = `
+      import { assertInsideRoot } from ${JSON.stringify(pathToFileURL(MODULE_PATH).href)};
+      try {
+        assertInsideRoot(${JSON.stringify(dest)}, ${JSON.stringify(join(a, 'x.md'))});
+        process.stderr.write('DID NOT THROW');
+        process.exit(2);
+      } catch (err) {
+        process.stderr.write(err.message);
+        process.exit(1);
+      }
+    `;
+
+    let err;
+    try {
+      execFileSync(process.execPath, ['--input-type=module', '-e', script], { timeout: 5000, encoding: 'utf8' });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    // Killed by the timeout (hang reproduced) vs. exited on its own (bounded, as fixed) are distinguishable —
+    // assert the FIXED behaviour: a clean exit with a clear error, not a timeout kill.
+    expect(err.signal).toBeNull();
+    expect(err.status).toBe(1);
+    expect(String(err.stderr)).toMatch(/cycle/i);
+  }, 10_000);
 });

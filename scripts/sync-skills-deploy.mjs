@@ -101,7 +101,7 @@ export function gitTrackedFiles(srcDir, repoRoot = REPO_ROOT) {
  * Pure diff: given the set of tracked-relative-paths for a skill and its src/dest dirs on disk, return the
  * add/update/remove actions that bring dest into sync with src. No git call here (testable with plain tmp dirs).
  */
-export function planSkill({ name, srcDir, destDir, trackedRel, prune = false }) {
+export function planSkill({ name, srcDir, destDir, trackedRel, prune = false, destRoot = destDir }) {
   const trackedSet = new Set(trackedRel);
   const destExisting = listFilesRecursive(destDir);
   const actions = [];
@@ -122,7 +122,7 @@ export function planSkill({ name, srcDir, destDir, trackedRel, prune = false }) 
   // `--check` and removed only when the operator explicitly asks.
   const stale = destExisting.filter((rel) => !trackedSet.has(rel));
   if (prune) for (const rel of stale) actions.push({ type: 'remove', rel });
-  return { name, srcDir, destDir, actions, stale, pruned: prune, alreadyDeployed: fs.existsSync(destDir) };
+  return { name, srcDir, destDir, destRoot, actions, stale, pruned: prune, alreadyDeployed: fs.existsSync(destDir) };
 }
 
 /**
@@ -134,12 +134,30 @@ export function planSkill({ name, srcDir, destDir, trackedRel, prune = false }) 
  * `copyFileSync` follow it, writing OUTSIDE the deploy root entirely. Resolve the deepest EXISTING ancestor
  * with `realpathSync` (the target itself usually does not exist yet) and require the result to stay inside
  * the realpath'd root. Fails CLOSED: an unresolvable path is refused, never written.
+ *
+ * Blocker fix (PR #1024 review) — the containment check MUST be against the deploy ROOT (`plan.destRoot`),
+ * never `plan.destDir`. A per-skill `destDir` can itself be a symlink (this repo's own layout: a home
+ * `~/.claude/skills/<skill>` entry symlinked straight to a `skills-src/<skill>` dir). Checking a target
+ * against `destDir` walks BOTH sides through the same symlink and always reports "contained" — a tautology
+ * that let a stale-lane sync overwrite this repo's own `skills-src/drain/SKILL.md` and let `--prune` delete
+ * files outside any real deploy tree. Checking against the resolved deploy root instead catches a `destDir`
+ * that itself resolves outside where the operator's `~/.claude/skills` (or `WE_SKILLS_DEPLOY_DIR`) really is.
  */
+// PR #1024 blocker fix — the hand-rolled symlink walk below follows one `readlinkSync` hop at a time and
+// none of those calls goes through the kernel's own bounded path resolution, so the OS's usual ELOOP
+// protection never fires: each individual `readlinkSync(probe)` succeeds and returns a perfectly valid
+// target, so a 2-node cycle (`a` -> `b`, `b` -> `a`) loops forever. Reproduced live: wired into
+// `.githooks/post-merge`, that hang wedges `git pull` / `git merge` indefinitely. Cap the hop count at the
+// same order of magnitude as the kernel's own limit (Linux/macOS use 40) and fail with a clear error the
+// instant it's exceeded, instead of spinning.
+const MAX_SYMLINK_HOPS = 40;
+
 /** Resolve `p` through symlinks as far as it EXISTS, re-appending the not-yet-created tail. Pure-ish (fs reads
  *  only). Used for both sides of the containment compare, since a first deploy creates the root and the leaf. */
 function realpathDeepest(p) {
   let probe = path.resolve(p);
   const parts = [];
+  let hops = 0;
   for (;;) {
     // #2579 review — probe with `lstat`, NOT `existsSync`. `existsSync` FOLLOWS the link and answers false
     // for a DANGLING symlink, so the walk stepped straight past a broken link without resolving it and
@@ -151,6 +169,15 @@ function realpathDeepest(p) {
     try { st = fs.lstatSync(probe); } catch { st = null; }
     if (st) {
       if (st.isSymbolicLink()) {
+        // PR #1024 blocker fix — bound the walk. A cycle (or a pathologically deep chain) never resolves to
+        // a non-symlink, so without this the loop below never terminates.
+        hops += 1;
+        if (hops > MAX_SYMLINK_HOPS) {
+          throw new Error(
+            `sync-skills-deploy: symlink cycle (or chain deeper than ${MAX_SYMLINK_HOPS} hops) resolving `
+            + `"${p}" — stuck at "${probe}". Refusing to loop forever; fix the symlink(s) under the deploy root.`,
+          );
+        }
         // Resolve the link by hand (realpathSync throws on a dangling target) and keep walking, so a chain
         // of links is followed to its real destination.
         let target;
@@ -188,13 +215,15 @@ export function assertInsideRoot(root, target) {
 
 /** Apply a plan's actions to disk (add/update copy from src, remove deletes from dest). */
 export function applyPlan(plan) {
+  const root = plan.destRoot ?? plan.destDir;
   for (const action of plan.actions) {
-    // #2579 review — every destructive/creative op is containment-checked against the deploy root first.
-    const destFile = assertInsideRoot(plan.destDir, path.join(plan.destDir, action.rel));
+    // #2579 review / PR #1024 blocker fix — every destructive/creative op is containment-checked against
+    // the DEPLOY ROOT (`plan.destRoot`), not the per-skill `plan.destDir` — see the note above `assertInsideRoot`.
+    const destFile = assertInsideRoot(root, path.join(plan.destDir, action.rel));
     if (action.type === 'remove') {
       fs.rmSync(destFile, { force: true });
     } else {
-      assertInsideRoot(plan.destDir, path.dirname(destFile));
+      assertInsideRoot(root, path.dirname(destFile));
       fs.mkdirSync(path.dirname(destFile), { recursive: true });
       fs.copyFileSync(path.join(plan.srcDir, action.rel), destFile);
     }
@@ -223,7 +252,7 @@ export function buildPlans({ srcRoot = SRC_ROOT, destRoot, only = null, all = fa
     const destDir = path.join(destRoot, name);
     if (!only && !all && !fs.existsSync(destDir)) continue; // default: keep already-deployed skills in sync only
     const trackedRel = gitTrackedFiles(srcDir, repoRoot);
-    plans.push(planSkill({ name, srcDir, destDir, trackedRel, prune }));
+    plans.push(planSkill({ name, srcDir, destDir, trackedRel, prune, destRoot }));
   }
   return plans;
 }
