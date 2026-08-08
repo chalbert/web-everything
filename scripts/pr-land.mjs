@@ -85,7 +85,7 @@ import { numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs'; // 
 import { withNumberingLock } from './readiness/drain-lock.mjs'; // #2391 — the numbering-critical-section mutex (sole-serial-writer)
 export { isPostLandTreeDirty }; // re-exported for backward compat — callers/tests still import it off pr-land.mjs
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs'; // post-land dup-NNN tripwire (#2318)
-import { computeNetDiffChangedFiles } from './merge-ai-prs.mjs'; // SHARED net-diff basis w/ the drain, single source (#1821/#2373)
+import { computeNetDiffChangedFiles, computeNetDiffText } from './merge-ai-prs.mjs'; // SHARED net-diff basis w/ the drain, single source (#1821/#2373); computeNetDiffText also feeds #2890's diffHunks
 import {
   scoreEscalation, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META, REVIEW_LABELS,
   buildEscalationReasonBlock, bodyHasEscalationReason, reconcileRoster, ROSTER_TIMING,
@@ -475,14 +475,17 @@ export function classifyChecks(rows) {
  * the SAME two the drain (`merge-ai-prs.mjs`) reads back later, so producer- and drain-applied verdicts can
  * never drift. `currentLabels` is normally empty at open (a fresh PR) but is honoured either way — re-running
  * pr-land against an already-labelled PR (e.g. a retried `--label-on-green`) must not double-apply.
+ *
+ * #2890 — also accepts `diffHunks` (the net base-vs-head diff TEXT, `computeNetDiffText`'s `.text`) and
+ * threads it straight into `scoreEscalation`. Precondition plumbing only: no signal reads it yet.
  * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
- *          crossRepo?:boolean, currentLabels?:Array}} o
+ *          crossRepo?:boolean, currentLabels?:Array, diffHunks?:string}} o
  * @returns {{label:string|null, apply:boolean, reasons:string[], humanRequired:boolean}}
  */
 export function resolveProducerReviewLabel({
-  changedFiles = [], diffLines = 0, humanBasisFiles = null, dismissedFindings = 0, crossRepo = false, currentLabels = [],
+  changedFiles = [], diffLines = 0, humanBasisFiles = null, dismissedFindings = 0, crossRepo = false, currentLabels = [], diffHunks = '',
 } = {}) {
-  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo });
+  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, diffHunks });
   const label = producerReviewLabel(score);
   // #2635 — expose the advisory care-level too, so the caller can recompute the jury roster (`resolveJuryPlan`)
   // for the SAME care band this rubric scored, then bind + reconcile it against the pre-registered roster.
@@ -779,11 +782,17 @@ function runCli() {
     // #2390-review-fix — the CUMULATIVE origin/main…head basis the gate-self/human trigger scores over; a
     // stacked base de-inflates SIZE (`changedFiles`) but can never shrink this.
     const humanBasisFiles = net.humanBasisFiles;
+    // #2890 — the SAME net-diff basis's TEXT (not just the changed-file/line-count shape above), reusing
+    // `computeNetDiffText` (already the drain's reviewer-facing-diff machinery, `merge-ai-prs.mjs`) rather than
+    // a new git call: the producer's escalation score and its PR-body diff now read off ONE fetch. Best-effort
+    // like every sibling signal here — `scored:false` degrades to `''`, never blocks a green land.
+    const netText = computeNetDiffText({ exec, remote: REMOTE, base: BASE, rev: refSha });
+    const diffHunks = netText.text;
     const crossRepo = manifest && Array.isArray(manifest.repos) ? manifest.repos.length > 1 : false;
     const dismissedFindings = manifest && Number.isFinite(Number(manifest.dismissedFindings)) ? Number(manifest.dismissedFindings) : 0;
     let currentLabels = [];
     try { currentLabels = (JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'labels'])).labels || []).map((l) => l.name); } catch { /* fresh PR — no labels yet */ }
-    const rubric = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, currentLabels });
+    const rubric = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, currentLabels, diffHunks });
 
     // #2635 — BIND + RECONCILE the jury roster against the REAL diff. The pre-registered roster (the item's
     // charter roster) rides the lane manifest when a prepare-time slice recorded it (`preRegisteredLenses`);

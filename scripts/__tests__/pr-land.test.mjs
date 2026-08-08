@@ -51,6 +51,16 @@ describe('resolveProducerReviewLabel — #2307 deterministic review-escalation l
     expect(v.label).toBe(REVIEW_LABELS.pending);
     expect(v.apply).toBe(false);
   });
+  it('#2890 — accepts diffHunks and is otherwise unaffected by it (pure plumbing, no detector reads it yet)', () => {
+    const hunks = '@@ -1,2 +1,2 @@\n-old\n+new\n';
+    const withHunks = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10, diffHunks: hunks });
+    const withoutHunks = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10 });
+    expect(withHunks.label).toBe(withoutHunks.label);
+    expect(withHunks.apply).toBe(withoutHunks.apply);
+    expect(withHunks.humanRequired).toBe(withoutHunks.humanRequired);
+    expect(withHunks.reasons).toEqual(withoutHunks.reasons);
+    expect(() => resolveProducerReviewLabel({ diffHunks: undefined })).not.toThrow();
+  });
 });
 
 describe('decideHoldReadyStrip — #2832/#984 findings 4+5 (held signal + observed-label strip gate)', () => {
