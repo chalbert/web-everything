@@ -71,20 +71,26 @@
       "id": "todo-mode-for-unimplemented-contract-entries-a-d",
       "title": "Todo mode for unimplemented contract entries — a declared-not-built marker the conformance gate enforces",
       "phase": 2,
-      "status": "todo",
-      "note": "R6 ruled 2026-08-08 — closes the silent row #1099 opened (declared, absent, unmarked passes); marker also catches the stale case. Leash edit, so its PR needs a human clear."
+      "status": "in-progress",
+      "note": "PR #1112, changes requested. Reviewer reproduced the tripwire: the guard existed but its own error message told you how to step over it. Blocking find — reversing the token split turns a human-review reason into an agent auto-land, suite still green.",
+      "startedAt": "2026-08-08"
     },
     {
       "id": "2964-post-the-review-verdict-comment-before-the-",
       "title": "#2964 — post the review verdict comment BEFORE the label swap, so the unsafe half never lands alone",
       "phase": 1,
-      "status": "todo"
+      "status": "done",
+      "startedAt": "2026-08-08",
+      "doneAt": "2026-08-08",
+      "note": "PR #1114, ACCEPTED. The reviewer ran both mutations: swap-first-everywhere fails 4 of 6, unconditional comment-first fails the other 2, disjoint — so each branch is pinned independently."
     },
     {
       "id": "2890-thread-the-diff-s-hunk-content-into-escalat",
       "title": "#2890 — thread the diff's hunk CONTENT into escalation scoring, so routing reads what changed and not only how much",
       "phase": 2,
-      "status": "todo"
+      "status": "in-progress",
+      "startedAt": "2026-08-08",
+      "note": "PR #1110, round 2. Round 1 found the content signal reported empty when it FAILED to compute — the fail-open shape, under two future gates. Now null = not computed."
     },
     {
       "id": "2416-only-the-interactive-review-path-may-apply-",
@@ -108,13 +114,51 @@
       "id": "review-runner-passes-no-actor-ids-to-the-shadow-",
       "title": "review-runner passes no actor ids to the shadow plan, so every shadow line reads 'unknown clearer'",
       "phase": 3,
-      "status": "todo"
+      "status": "done",
+      "startedAt": "2026-08-08",
+      "doneAt": "2026-08-08",
+      "note": "MERGED as #1108, filed as x9ns6bc. Title is wrong and there is no retitle verb: the real defect is no SIGNALS, not no actor ids — the shadow judge sees gate-self, human-required and non-convergence all undefined."
     },
     {
       "id": "1107-move-agent-work-onto-the-claude-code-cli-an",
       "title": "#1107 — move agent work onto the Claude Code CLI and optimise it (the epic R4 spawned)",
       "phase": 3,
+      "status": "in-progress",
+      "startedAt": "2026-08-08",
+      "note": "PR #1107, re-armed. Bounced once for claiming #2844 was already enforced; it is open, and PR #1100 implements it."
+    },
+    {
+      "id": "a-re-score-must-not-revoke-a-human-clearance-cle",
+      "title": "A re-score must not revoke a human clearance — cleared 14:38:35, back in the queue by 14:41:42, every time",
+      "phase": 3,
+      "status": "in-progress",
+      "startedAt": "2026-08-08"
+    },
+    {
+      "id": "a-rebase-under-a-live-review-throws-the-round-aw",
+      "title": "A rebase under a live review throws the round away — pin a verdict to the head it actually covered",
+      "phase": 3,
       "status": "todo"
+    },
+    {
+      "id": "three-files-serialize-the-whole-build-queue-most",
+      "title": "Three files serialize the whole build queue — most ready work collides in review-set-label, merge-ai-prs, review-escalation",
+      "phase": 3,
+      "status": "todo"
+    },
+    {
+      "id": "a-lane-lease-is-keyed-on-the-shell-s-pid-so-a-se",
+      "title": "A lane lease is keyed on the shell's PID, so a second acquire in one agent silently leaks a lane",
+      "phase": 3,
+      "status": "todo"
+    },
+    {
+      "id": "every-human-hold-pr-reaches-you-with-no-technica",
+      "title": "Every human-hold PR reaches you with NO technical pass — an agent should review before the ceremony, not instead of it",
+      "phase": 3,
+      "status": "in-progress",
+      "startedAt": "2026-08-08",
+      "note": "Measured 2026-08-08: #1104, #1106 and #1113 each carry review:human with ZERO review comments. Technical passes now running on all three."
     }
   ],
   "decisions": [
@@ -155,7 +199,7 @@
       "title": "Converge loop — editor-enablement default by care band",
       "preparedDate": "2026-08-04",
       "status": "taken",
-      "detail": "RULED — as recommended: the editor pushes fixes below a care threshold and is review-only at and above it, bound to the same careLevel that already dials the panel. Implemented in PR #1106, which is open and needs a human clear.",
+      "detail": "RULED 2026-08-08 'as recommended' — but the recommendation on the page at that moment may no longer be what shipped. A technical pass on PR #1106 found the prepared default (editor below a care threshold, review-only at and above it) was WITHDRAWN during the decision turn as unimplementable, and verified why: the round cap forces escalate before the editor is reached, and 'low' gets one round, so the editor can never run there. A binding on the care band would also route any large diff to a human, which #2563/#1095 bar. What shipped instead is a different rule — editor everywhere EXCEPT a statute or declarative-leash diff — which is LOOSER than the withdrawn one: it leaves the editor ON at 'elevated', the exact band where PR #1018's editor pushed a fix that round 2 faulted three ways. The reviewer could not find any record that this substitution was ratified, and the item's only skeptic verdict argues against it. Needs the operator's confirmation of what they actually agreed to.",
       "question": "At which care bands may the converge loop push fixes, rather than only report them?",
       "why": "The panel's rigor already scales by care band; the editor's enablement scales with nothing — it runs at every band, unexamined. A pass either mutates the author's branch or it does not, and that mutation is not reversible from the author's side, so this is a correctness and accountability call rather than a cost one.",
       "options": [
@@ -302,7 +346,7 @@
         "pair with `owedTo` naming an open item, matching #1100's invariant-catalogue convention"
       ],
       "ruling": "R6",
-      "detail": "RULED 2026-08-08: build it. The justification is the silent third row, NOT the Fork A/impl split named in the prepared recommendation — that split already shipped whole as PR #1102, which moved the contract entry and the REVIEW_REASONS enum in the same commit, so the 'natural first customer' came and went and the two vocabularies are equal today (9 tokens each). What stands on its own is that #1099 relaxed the conformance pin from equality to containment, which leaves 'declared, absent, unmarked' passing silently in the one suite whose whole job is being the deterministic backstop. A todo marker makes that third state explicit and makes the gate STRICTER than #1099, not looser: an unmarked absent entry fails, and a marker left behind after the code lands also fails — the stale-marker case test.todo does not catch. Pair the field with owedTo naming an open item, per #1100's invariant-catalogue convention. Note the build edits the declarative leash (the contract plus the conformance suite), so its PR fires gate-self and needs a human clear regardless.",
+      "detail": "RULED 2026-08-08: build the marker. One correction to the record, verified twice — the third state (declared, absent, unmarked) was NOT passing silently. Injecting a phantom token reddened exactly one assertion, the decorated-fixture-map pin, whose own failure message told you which line to add to silence it; adding that line returned the suite to green with the token still unimplemented. So it was guarded by a tripwire that handed you the bypass, which is worse than invisible. Both the builder and an independent reviewer reproduced it, and the reviewer widened the check across every test in the repo: nothing else catches it. Built as PR #1112.",
       "takenAt": "2026-08-08"
     },
     {
@@ -338,7 +382,8 @@
       ],
       "evidence": [
         "145 everyday commands swept, zero newly denied — precision is not the problem",
-        "9/9 prior holes closed, 13/13 intended fixes hold, 33/33 attack spellings deny"
+        "9/9 prior holes closed, 13/13 intended fixes hold, 33/33 attack spellings deny",
+        "a FIFTH everyday false-deny class, hit live in ordinary work 2026-08-08: `grep -cE \"a|=>\" <file>` is refused at the primary cwd as a shell redirect. There is no redirect — a quoted alternation defeats the splitter. Controls pass: the bare arrow is fine, the quoted text is fine. The 145-command sweep never covered quoted alternations."
       ]
     }
   ]
