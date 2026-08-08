@@ -374,10 +374,22 @@ describe('#2864 — the ledger records WHICH TREE the jury was seated over', () 
   });
 
   it('REJECTS a malformed sha rather than recording an unusable one', () => {
-    for (const bad of ['not-a-sha', 'ABC1234', 'abc', '', 'abc123g', 123, {}, 'a'.repeat(65)]) {
+    for (const bad of ['not-a-sha', 'abc', '', 'abc123g', 123, {}, 'a'.repeat(65)]) {
       const r = validateJuryEvent({ type: JURY_EVENT_TYPES.ROSTER_PICKED, round: 0, jurors: [juror], reviewedSha: bad });
       expect(r.valid, `reviewedSha=${JSON.stringify(bad)} must be rejected`).toBe(false);
     }
+  });
+
+  it('ACCEPTS an uppercase sha and normalizes it to lowercase', () => {
+    // PR #1034 review, finding 3: the first cut was case-SENSITIVE while every other sha check in the repo is not
+    // (`sameCommit`, the lane manifest, merge-ai-prs), and the #2409 marker this field pairs with lowercases. Since
+    // `rosterPickedEvent` THROWS on a schema failure, a stricter shape here meant an uppercase sha took down the
+    // whole roster event — an optional field killing a mandatory one.
+    const { valid, event } = roster({ reviewedSha: 'A1B2C3D4E5F6' });
+    expect(valid).toBe(true);
+    expect(event.reviewedSha).toBe('a1b2c3d4e5f6');
+    // Normalized on the way IN, so both folds compare a single spelling and never miss a match on case alone.
+    expect(foldJuryLedger([event]).reviewedSha).toBe('a1b2c3d4e5f6');
   });
 
   it('the LATEST roster is authoritative about the tree, as it is about the seats', () => {

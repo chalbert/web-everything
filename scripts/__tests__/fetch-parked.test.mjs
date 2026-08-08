@@ -273,6 +273,27 @@ describe('#2901 — diffBasis: the bundle must say WHICH diff it is carrying', (
   });
 });
 
+describe('#2864 — headSha: the bundle must say WHICH TREE its diff was read at', () => {
+  // PR #1034 review, finding 1: the ledger's `reviewedSha` was write-dead because no production path could supply
+  // a sha. The review loop reads its diff through THIS bundle, so the head it judged has to travel with the diff —
+  // otherwise the loop has nothing to record and every ledger folds to `reviewedSha: null`.
+  const view = { number: 7, title: 't', body: '', files: [], state: 'OPEN', labels: [], headRefName: 'lane/x', mergeable: 'MERGEABLE' };
+
+  it('carries the head commit gh reported', () => {
+    expect(assembleParked({ view: { ...view, headRefOid: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2' }, diff: 'd' }).headSha)
+      .toBe('a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2');
+  });
+
+  it("degrades to '' when gh reported none — an unknown tree must read as unknown, never as another commit", () => {
+    expect(assembleParked({ view, diff: 'd' }).headSha).toBe('');
+    expect(assembleParked({}).headSha).toBe('');
+  });
+
+  it('is present on every bundle, so a consumer can always ask', () => {
+    expect(assembleParked({ view })).toHaveProperty('headSha');
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PR #1031 review, finding 4 — the DECISION is now testable, not just its default.
 // The earlier repair asserted `assembleParked`'s one-line `diffBasis` ternary while everything that DECIDES the

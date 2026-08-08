@@ -993,11 +993,19 @@ export function validateJuryEvent(raw) {
       // on disk predates this field, and rejecting them would erase the log rather than age it. The freshness
       // GATE is a separate decision at the consumer (the #2864 decider slice); this slice only makes the fact
       // recordable, so a ledger written from here on can be checked at all.
+      // CASE-INSENSITIVE, normalized to lowercase on the way in — the shape every other sha check in this repo
+      // accepts (`sameCommit` in fetch-parked.mjs, `readiness/lane-manifest.mjs`, `merge-ai-prs.mjs`) and the shape
+      // the #2409 `reviewed-sha` marker this field pairs with writes (`review-escalation.mjs` lowercases too). A
+      // case-SENSITIVE test would make an uppercase sha throw out of `rosterPickedEvent`, i.e. an optional
+      // decorative field taking down the mandatory roster event it rides on. (PR #1034 review, finding 3. The one
+      // shared `isCommitSha`/`normalizeCommitSha` primitive is filed separately as #2913; until it lands, this
+      // matches the repo's existing shape rather than inventing a stricter one.)
       if (raw.reviewedSha != null) {
-        if (typeof raw.reviewedSha !== 'string' || !/^[0-9a-f]{7,64}$/.test(raw.reviewedSha)) {
-          errors.push('reviewedSha must be a lowercase hex commit sha (7-64 chars) when present');
+        const sha = typeof raw.reviewedSha === 'string' ? raw.reviewedSha.toLowerCase() : '';
+        if (!/^[0-9a-f]{7,64}$/.test(sha)) {
+          errors.push('reviewedSha must be a hex commit sha (7-64 chars) when present');
         } else {
-          event.reviewedSha = raw.reviewedSha;
+          event.reviewedSha = sha;
         }
       }
       break;
