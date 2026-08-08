@@ -1,4 +1,5 @@
 ---
+bornAs: xtrts6l
 kind: task
 status: open
 dateOpened: "2026-08-08"
@@ -38,7 +39,7 @@ gate reds. This is worth doing as part of the shared-helper work, not on its own
 ## What to consider
 
 - A CJS mirror of the operator-day helper is the same plumbing
-  /backlog/x0zc0fn-does-the-born-active-ttl-need-a-grace-day-for-operator-timez/ needs, and
+  /backlog/2985-does-the-born-active-ttl-need-a-grace-day-for-operator-timez/ needs, and
   that one has a stronger case. Do them together, or do this one after that ruling lands.
 - Widening the day-slice gate past `we:scripts/` is a separate call: it will surface more
   hits, and each needs either a fix or an amnesty marker. Scope that before turning it on.

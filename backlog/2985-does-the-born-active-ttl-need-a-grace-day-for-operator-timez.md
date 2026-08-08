@@ -1,4 +1,5 @@
 ---
+bornAs: x0zc0fn
 kind: decision
 status: open
 dateOpened: "2026-08-08"
@@ -48,7 +49,7 @@ option here, not a cop-out.
 - **Compare in the operator's day, not UTC.** Strictly more correct — it makes the ageing
   side agree with the stamping side #2747 already moved. Costs a shared operator-day
   helper reachable from the CJS invariants file, which is the same plumbing
-  /backlog/xtrts6l-burndown-data-reads-utc-while-its-inputs-are-operator-local/ needs.
+  /backlog/2987-burndown-data-reads-utc-while-its-inputs-are-operator-local/ needs.
 - **Leave it.** Accept the one-day skew as the price of an advisory-only check.
 
 Recommendation: option 2, folded in with the shared CJS date helper the burndown item also
