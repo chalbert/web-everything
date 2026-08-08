@@ -2274,8 +2274,8 @@ export function validateDeclaredModuleContract(modules = []) {
 // oversized AND scope-collision-heavy — the real conveyor serialization cost (a file named in many queued
 // items' `scope:` is a single lock point that holds those items apart even with zero real overlap). The
 // signal is the size+collision COMPOSITE, never raw line count (a large-but-cohesive, uncontended file
-// stays quiet). An in-file `// @cohesive: <reason>` escape hatch silences the warn for a genuinely-cohesive
-// file. Codified at docs/agent/platform-decisions.md#small-file-preference.
+// stays quiet). A `// @cohesive: <reason>` escape hatch IN THE FILE HEADER silences the warn for a
+// genuinely-cohesive file. Codified at docs/agent/platform-decisions.md#small-file-preference.
 
 /** Ratified illustrative defaults (#2678's own code sample) — override via `findLockPointFiles`'s `opts`
  * for tests; the live wiring in check-standards.mjs uses these. */
@@ -2293,18 +2293,50 @@ export function countCodeLines(text) {
   }).length;
 }
 
-/** Does the file body carry the `// @cohesive: <reason>` escape hatch (#2678)? A bare marker with no
- * reason text does NOT suppress the warn — the author must actually state why the file is cohesive. */
+/** Does the file's HEADER carry the `// @cohesive: <reason>` escape hatch (#2678)? A bare marker with no
+ * reason text does NOT suppress the warn — the author must actually state why the file is cohesive.
+ *
+ * POSITIONAL, not lexical (#2782 review r2). The marker only counts as a directive when it sits in the
+ * file header: the run of shebang / blank / `//` lines (and any leading `/* … *\/` block) before the first
+ * line of real content. Two earlier cuts answered "is this a directive?" by pattern alone and both were
+ * forgeable as DATA:
+ *   r0 matched `// @cohesive:` anywhere in the body, so every file that merely DOCUMENTS the hatch
+ *     exempted itself — including all three files this rule ships in.
+ *   r1 anchored to line-start, which still matched the marker inside a template literal, inside a
+ *     `/* … *\/` block, or inside a fenced ` ```js ` example in a `.md` file — any incidental line
+ *     permanently silencing the gate for a whole file.
+ * A header line cannot be smuggled in as content: a template literal, a fenced block and mid-file code all
+ * sit past the first real line, and block-comment interiors are skipped even in the header. #2678's own
+ * sample scanned the file head for exactly this reason; restoring that constraint makes the marker an
+ * author's deliberate declaration again rather than any string the file happens to contain. */
 export function hasCohesiveEscapeHatch(text) {
-  // #2782 review — the marker must be a real DIRECTIVE (its own comment line), never a mention. The first
-  // cut matched `// @cohesive:` ANYWHERE in the body, so any file that merely TALKS about the escape hatch
-  // exempted itself — including all three files this rule ships in: the rule's own doc comment, the warn
-  // string in check-standards.mjs that tells authors how to use it, and the test file. A 2,200-line
-  // check-standards-rules.mjs is exactly the kind of lock point this gate exists to surface, and it had made
-  // itself permanently invisible to it. Anchoring to line-start (optional indent, then `//`) excludes every
-  // one of those — a prose mention sits after ` * ` or a backtick — while a genuine directive on its own
-  // line still silences the warn.
-  return typeof text === 'string' && /^[ \t]*\/\/[ \t]*@cohesive:[ \t]*\S/m.test(text);
+  if (typeof text !== 'string' || text === '') return false;
+  const lines = text.split('\n');
+  let inBlockComment = false;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (inBlockComment) {
+      const end = t.indexOf('*/');
+      if (end === -1) continue; // block-comment interior — never a directive
+      inBlockComment = false;
+      if (t.slice(end + 2).trim() !== '') return false; // real content trails the block: header is over
+      continue;
+    }
+    if (t === '') continue;
+    if (i === 0 && t.startsWith('#!')) continue;
+    if (t.startsWith('//')) {
+      if (/^\/\/[ \t]*@cohesive:[ \t]*\S/.test(t)) return true;
+      continue;
+    }
+    if (t.startsWith('/*')) {
+      const end = t.indexOf('*/', 2);
+      if (end === -1) { inBlockComment = true; continue; }
+      if (t.slice(end + 2).trim() !== '') return false;
+      continue;
+    }
+    return false; // first line of real content — the header region ends here
+  }
+  return false;
 }
 
 /** Count how many backlog items' `scope:` entries NAME this file — the real serialization cost (#2678):
@@ -2322,9 +2354,24 @@ export function countScopeCollisions(file, backlogScopes) {
   return n;
 }
 
+/** The candidate universe for the lock-point scan: every FILE-shaped (not directory/glob), `we:`-qualified
+ * scope entry named by ANY item in `backlogScopes`, deduped. Only a file some item explicitly names can
+ * ever cross the collision threshold, so this is both correct and far cheaper than walking every tracked
+ * file. Pure (no fs) and exported so the live wiring in check-standards.mjs and the real-repo calibration
+ * guard (#2782) select the SAME population — a drift here would silently un-guard the thresholds.
+ * @returns `string[]` of repo-qualified paths. */
+export function lockPointCandidatePaths(backlogScopes) {
+  const out = new Set();
+  for (const scopes of backlogScopes || [])
+    for (const s of scopes || [])
+      if (typeof s === 'string' && s.startsWith('we:') && !isSubtreeEntry(s)) out.add(s);
+  return [...out];
+}
+
 /**
  * Find lock-point files: BOTH oversized (code lines over threshold) AND scope-collision-heavy (named by
- * at least `collisionsThreshold` items' scopes), skipping any file carrying the `@cohesive:` escape hatch.
+ * at least `collisionsThreshold` items' scopes), skipping any file whose HEADER carries the `@cohesive:`
+ * escape hatch.
  * #2678 Fork 1 (b) — warn-only; the caller decides how to surface the result (never an error/deny).
  *
  * @param files array of `{ path, text }` — path repo-qualified, text the file body. Pass only FILE-shaped

@@ -60,9 +60,8 @@ import {
   strandedHashesOnMain,
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
   validateDeclaredModuleContract,
-  findLockPointFiles,
+  findLockPointFiles, lockPointCandidatePaths,
 } from './check-standards-rules.mjs';
-import { isSubtreeEntry } from './readiness/scope-lease.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
   countSourceLines, CITATION_GATES_ENFORCED,
@@ -1756,7 +1755,7 @@ try {
 // ── 17. Small-file preference: size+collision composite soft-warn (#2678 ruling, #2782) ────────
 // #2678 Fork 1 ratified (b) — WARN (never error, never deny) on a file that is BOTH oversized and
 // scope-collision-heavy, keyed on a size+collision composite (never raw line count), with a
-// `// @cohesive: <reason>` escape hatch for a genuinely-cohesive large file. Pure rule
+// file-header `// @cohesive: <reason>` escape hatch for a genuinely-cohesive large file. Pure rule
 // (findLockPointFiles) lives in check-standards-rules.mjs; the fs reads + backlog scope gathering stay
 // here. Codified at docs/agent/platform-decisions.md#small-file-preference.
 try {
@@ -1764,12 +1763,8 @@ try {
   // so its historical scope is not a real serialization cost.
   const backlogScopes = backlog.filter((it) => it.status !== 'resolved').map((it) => it.scope || []);
   // Candidates: every FILE-shaped (not a directory/glob), "we:"-qualified scope entry named by ANY
-  // non-resolved item, deduped. Only a file explicitly named in some item's scope can ever cross the
-  // collision threshold, so this is both correct and far cheaper than walking every tracked file.
-  const candidatePaths = new Set();
-  for (const scopes of backlogScopes)
-    for (const s of scopes)
-      if (typeof s === 'string' && s.startsWith('we:') && !isSubtreeEntry(s)) candidatePaths.add(s);
+  // non-resolved item, deduped. Shared with the #2782 calibration guard so both select one population.
+  const candidatePaths = lockPointCandidatePaths(backlogScopes);
   // #2782 review — two hardenings on the read loop:
   //  (a) CONTAINMENT. `scope:` is repo-authored metadata, but it is still untrusted input to a filesystem
   //      read: `join(ROOT, p.slice(3))` on a `we:../../…` entry resolves outside the repo, turning a backlog
@@ -1795,7 +1790,8 @@ try {
       `(docs/agent/platform-decisions.md#small-file-preference) flags it as a throughput lock point: many ` +
       `items serialize on this one file even with zero real overlap between them. Split it along its ` +
       `responsibility seams so file-disjoint items can build in parallel, or, if it is genuinely cohesive, ` +
-      `silence this warn with an in-file \`// @cohesive: <reason>\` comment.`,
+      `silence this warn with a \`// @cohesive: <reason>\` comment in the file HEADER (the marker only ` +
+      `counts as a directive above the first line of real content — see #2782).`,
     );
 } catch (e) {
   warn(`Small-file preference lock-point scan failed: ${e.message}`);

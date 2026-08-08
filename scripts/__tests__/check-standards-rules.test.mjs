@@ -48,6 +48,7 @@ import {
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
   validateDeclaredModuleContract,
   countCodeLines, hasCohesiveEscapeHatch, countScopeCollisions, findLockPointFiles,
+  lockPointCandidatePaths,
 } from '../check-standards-rules.mjs';
 import { execFileSync } from 'node:child_process';
 
@@ -1899,9 +1900,43 @@ describe('hasCohesiveEscapeHatch — #2678 `// @cohesive: <reason>` marker', () 
     expect(hasCohesiveEscapeHatch('const help = "pass // @cohesive: reason";\n')).toBe(false);
   });
 
-  it('a REAL directive on its own line still exempts, indented or not', () => {
+  it('a REAL directive in the file header still exempts', () => {
     expect(hasCohesiveEscapeHatch('// @cohesive: one grammar, splitting scatters it\nconst a = 1;')).toBe(true);
-    expect(hasCohesiveEscapeHatch('const a = 1;\n  // @cohesive: indented but still a directive\n')).toBe(true);
+    // after a shebang, blank lines and a leading block comment — still the header
+    expect(hasCohesiveEscapeHatch(
+      '#!/usr/bin/env node\n/**\n * doc block\n */\n\n// @cohesive: one grammar\nimport x from "y";\n',
+    )).toBe(true);
+  });
+
+  // #2782 review r2 — the marker is POSITIONAL, not lexical. r1 anchored it to line-start, which still let
+  // any incidental line SMUGGLE the directive in as data and permanently silence the gate for a whole file.
+  // These three shapes were the ones demonstrated on the real repo; each must stay `false`.
+  it('cannot be smuggled in as DATA — template literal, block comment, or fenced markdown example', () => {
+    // (a) inside a template literal, past the first line of real content
+    expect(hasCohesiveEscapeHatch(
+      'const a = 1;\nconst help = `\n// @cohesive: smuggled through a template literal\n`;\n',
+    )).toBe(false);
+    // (b) inside a `/* … */` block comment — even a LEADING one, where the header region still runs
+    expect(hasCohesiveEscapeHatch(
+      '/*\n// @cohesive: smuggled inside a block comment\n*/\nconst a = 1;\n',
+    )).toBe(false);
+    // (c) inside a fenced ```js example in a .md file — a doc that teaches the hatch must not use it
+    expect(hasCohesiveEscapeHatch(
+      '# Small-file preference\n\nSilence it like so:\n\n```js\n// @cohesive: a documented example\n```\n',
+    )).toBe(false);
+  });
+
+  it('a directive BELOW the header does not exempt — the header region ends at the first real line', () => {
+    expect(hasCohesiveEscapeHatch('import x from "y";\n\n// @cohesive: too late, this is mid-file\n')).toBe(false);
+  });
+
+  // The three files this rule ships in are large and contended; none may exempt itself.
+  it('the rule\'s own three files are NOT self-exempt', () => {
+    for (const rel of [
+      'scripts/check-standards-rules.mjs',
+      'scripts/check-standards.mjs',
+      'scripts/__tests__/check-standards-rules.test.mjs',
+    ]) expect([rel, hasCohesiveEscapeHatch(readFileSync(join(ROOT, rel), 'utf8'))]).toEqual([rel, false]);
   });
 });
 
@@ -1954,5 +1989,50 @@ describe('findLockPointFiles — the #2678 Fork 1(b) soft-warn composite (flagge
       { codeLinesThreshold: 1, collisionsThreshold: 2 },
     );
     expect(out).toEqual([{ path: 'we:scripts/hot.mjs', codeLines: 2, collisions: 2 }]);
+  });
+});
+
+// #2782 review — CALIBRATION guard. Every case above asserts on SYNTHETIC fixtures, so nothing in the suite
+// could fail when the answer over the real repo is "flags nothing". The ratified thresholds (800 code lines
+// / 5 collisions) were measured over one population; the live wiring narrows that population to NON-RESOLVED
+// items. If the two ever drift apart again — thresholds re-tuned, the status filter widened or narrowed, the
+// candidate selection changed — the gate goes silently inert and the throughput debt it exists to expose
+// stops printing, which is exactly the "guideline-only" outcome #2678 Fork 1 rejected. This runs the real
+// rule over the REAL backlog and pins that it still trips, so that drift is a red test, not a silent no-op.
+describe('findLockPointFiles — calibration against the REAL repo backlog (#2782)', () => {
+  // #2678's own named targets. At least one must still be flagged; if a genuine split takes the last one
+  // off this list, re-measure the thresholds against the narrowed population and update the baseline —
+  // do not simply delete the assertion.
+  const NAMED_TARGETS_2678 = ['we:scripts/merge-ai-prs.mjs', 'we:scripts/lib/review-core.mjs'];
+
+  const liveLockPoints = () => {
+    const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));
+    const backlog = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
+    // Same status filter + same candidate selection the live wiring in check-standards.mjs uses.
+    const backlogScopes = backlog.filter((it) => it.status !== 'resolved').map((it) => it.scope || []);
+    const files = [];
+    for (const p of lockPointCandidatePaths(backlogScopes)) {
+      const abs = join(ROOT, p.slice('we:'.length));
+      if (!existsSync(abs)) continue;
+      try { files.push({ path: p, text: readFileSync(abs, 'utf8') }); } catch { /* directory / unreadable */ }
+    }
+    return { files, lockPoints: findLockPointFiles({ files, backlogScopes }) };
+  };
+
+  it('the ratified thresholds still trip over the live backlog — the gate is not inert', () => {
+    const { files, lockPoints } = liveLockPoints();
+    expect(files.length).toBeGreaterThan(0); // the candidate scan itself must not come back empty
+    expect(
+      lockPoints.length > 0 ? [] : ['findLockPointFiles flagged NOTHING over the real backlog'],
+    ).toEqual([]);
+  });
+
+  it("still flags at least one of #2678's named lock points", () => {
+    const flagged = liveLockPoints().lockPoints.map((lp) => lp.path);
+    expect(
+      NAMED_TARGETS_2678.some((t) => flagged.includes(t))
+        ? NAMED_TARGETS_2678
+        : [`none of ${NAMED_TARGETS_2678.join(', ')} flagged; flagged instead: ${flagged.join(', ') || '(nothing)'}`],
+    ).toEqual(NAMED_TARGETS_2678);
   });
 });
