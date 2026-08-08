@@ -536,40 +536,64 @@ export function parseReviewedSha(comments) {
  * #x169fqe — THE REVIEWED-DIFF FINGERPRINT: a stable digest of the content a reviewer actually judged, so an
  * accept can be checked against CONTENT rather than against the commit that happened to carry it.
  *
- * WHAT IS DELIBERATELY EXCLUDED, and why each exclusion is safe:
+ * EXACTLY TWO THINGS ARE EXCLUDED. Every exclusion is a potential COLLISION — two materially different diffs
+ * hashing the same — so the list is kept as short as the problem allows, and each entry has to earn its place:
  *   • `index <old>..<new> <mode>` lines — git blob-pair headers. They restate the hashes of content that is
  *     ALREADY in the diff body; identical bodies imply identical blobs, so dropping them removes noise, not
- *     signal. (They are not stable across a rebase in every git version, which is what forced this.)
- *   • the whole `.lane-manifest.json` file section — the transient lane bookkeeping the drain's rebase-drop pass
- *     exists to remove (`LANE_MANIFEST`, rebase-drop-manifest.mjs). It is never review-worthy content, and its
- *     removal is precisely the mechanical edit that was invalidating accepts.
- *   • trailing whitespace per line and a trailing newline — cosmetic transport differences.
- * NOTHING ELSE is normalized away. Hunk headers (`@@`) stay, because a changed line NUMBER means the surrounding
- * file moved and the reviewer's reading of it may no longer hold. File modes, renames, and every `+`/`-` line
- * stay. If a rebase changes any of those, the fingerprint changes and the accept correctly goes stale.
+ *     signal. This is the one that makes a rebase recognisable at all.
+ *   • the ROOT `.lane-manifest.json` file section — the transient lane bookkeeping the drain's rebase-drop pass
+ *     exists to remove (`LANE_MANIFEST`, rebase-drop-manifest.mjs). Never review-worthy, and its removal is
+ *     precisely the mechanical edit that was invalidating accepts.
  *
- * @param {string|null|undefined} diffText - raw unified diff, or a pre-computed 64-hex fingerprint (idempotent:
- *   passing a fingerprint back in returns it unchanged, so a caller may store either form).
+ * THE ROOT MATCH IS EXACT, NOT A SUBSTRING (PR #1086 review, blocker 1). The first cut tested
+ * `line.includes('/' + LANE_MANIFEST)`, which also matched a NESTED file — `some/dir/.lane-manifest.json` — so a
+ * ride-in commit adding a file at that suffix had its whole section dropped from both sides and collided with a
+ * diff that never contained it (reproduced: both sides hashed identically and the gate returned `covers: true`).
+ * Only git's exact root-file header is skipped now. Any other spelling simply is not skipped, which changes the
+ * fingerprint and costs a false re-park — the safe direction.
+ *
+ * NOTHING ELSE is normalized away, and in particular NOT trailing whitespace (PR #1086 review, blocker 2). The
+ * first cut stripped it from every line including `+`/`-` content, so a ride-in that changed ONLY a semantically
+ * meaningful trailing space — a markdown hard break, a fixture, a `.patch` file — collided. Whitespace is
+ * content. Hunk headers (`@@`) stay too, because a changed line NUMBER means the surrounding file moved and the
+ * reviewer's reading of it may no longer hold. File modes, renames, CRLF, and every `+`/`-` line stay. If a
+ * rebase changes any of those, the fingerprint changes and the accept correctly goes stale.
+ *
+ * @param {string|null|undefined} diffText - raw unified diff, or a pre-computed 64-hex fingerprint. THE
+ *   IDEMPOTENCE SHORTCUT BELOW ASSUMES a caller only ever passes real `gh pr diff` output (which always carries
+ *   `diff --git` headers) or a fingerprint this function produced. Do NOT pass untrusted free-form text: a
+ *   64-hex-shaped string would be taken as an already-computed digest rather than hashed.
  * @returns {string|null} a 64-char lowercase sha256, or `null` for absent/unusable input (→ fail closed).
  */
 export function normalizeDiffFingerprint(diffText) {
   if (typeof diffText !== 'string') return null;
-  const raw = diffText.trim();
-  if (!raw) return null;
+  const trimmed = diffText.trim();
+  if (!trimmed) return null;
   // Idempotent on an already-hashed value, so `acceptanceCoversHead` accepts either a raw diff or a stored digest.
-  if (/^[0-9a-f]{64}$/.test(raw)) return raw;
-  const lines = raw.split('\n');
+  if (/^[0-9a-f]{64}$/.test(trimmed)) return trimmed;
+  // The EXACT header git emits for the repo-root manifest, whatever the change kind (add/modify/delete all carry
+  // both sides). An exact-equality test cannot be widened by a crafted path the way a substring test was.
+  const MANIFEST_HEADER = `diff --git a/${LANE_MANIFEST} b/${LANE_MANIFEST}`;
+  // SPLIT THE RAW TEXT, NOT THE TRIMMED COPY (PR #1086 review, blocker 2 — second pass). Trimming the whole diff
+  // strips trailing whitespace off the LAST line, so a ride-in whose only change was a meaningful trailing space
+  // at end-of-diff still collided even after the per-line strip was removed. Whitespace is content everywhere,
+  // including the final line, so nothing here may trim the hashed text. `trimmed` above is used ONLY to decide
+  // emptiness and to detect an already-computed digest.
   const kept = [];
   let inManifestSection = false;
-  for (const line of lines) {
+  for (const line of diffText.split('\n')) {
     // A `diff --git` header opens a new file section and therefore always ends any skip in progress.
-    if (line.startsWith('diff --git ')) inManifestSection = line.includes(`/${LANE_MANIFEST}`) || line.endsWith(` ${LANE_MANIFEST}`);
+    if (line.startsWith('diff --git ')) inManifestSection = line === MANIFEST_HEADER;
     if (inManifestSection) continue;
     if (/^index [0-9a-f]+\.\.[0-9a-f]+/.test(line)) continue;
-    kept.push(line.replace(/[ \t]+$/, ''));
+    kept.push(line);
   }
-  const normalized = kept.join('\n').trim();
-  if (!normalized) return null;
+  // Drop trailing EMPTY lines only — `''`, never a line that carries whitespace. Skipping a manifest section
+  // that sits LAST leaves the blank that preceded it dangling, and the raw text may or may not end in a newline;
+  // neither is content. A line of spaces IS content (blocker 2) and is untouched by this.
+  while (kept.length && kept[kept.length - 1] === '') kept.pop();
+  const normalized = kept.join('\n');
+  if (!normalized.trim()) return null;
   return createHash('sha256').update(normalized, 'utf8').digest('hex');
 }
 

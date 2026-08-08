@@ -51,10 +51,29 @@ in after the accept still changes the diff and is still refused, so the PR #368 
 
 ## What the fingerprint normalizes away, and what it must not
 
-Excluded: git's `index <old>..<new>` blob headers (they restate hashes of content already in the diff body),
-the whole we:.lane-manifest.json file section (the transient bookkeeping the rebase-drop pass exists to remove),
-and trailing whitespace. Everything else is kept — hunk headers included, because a changed line number means the
-surrounding file moved and the reviewer's reading of it may no longer hold.
+**Every exclusion is a potential collision**, so the list is as short as the problem allows. Exactly two things
+are dropped: git's `index <old>..<new>` blob headers (they restate hashes of content already present in the diff
+body — this is the one that makes a rebase recognisable at all), and the **repo-root** we:.lane-manifest.json
+section, matched on git's exact header string. Everything else is kept — hunk headers, file modes, renames, CRLF,
+and all whitespace — because a changed line number means the surrounding file moved and the reviewer's reading of
+it may no longer hold.
+
+### Three collisions found in review, all pinned by tests
+
+The first cut of this was wrong twice, and the independent review of PR #1086 reproduced both with real inputs:
+
+1. **Nested manifest lookalike.** The skip tested `line.includes('/' + LANE_MANIFEST)`, which also matched a
+   manifest-named file in a SUBDIRECTORY. A ride-in commit adding a file at that suffix had its whole section
+   dropped from both sides and hashed identically to a diff that never contained it — the gate returned
+   `covers: true` on genuinely unreviewed content. Now only git's exact root header is skipped.
+2. **Trailing whitespace stripped from content lines.** A ride-in changing only a meaningful trailing space (a
+   markdown hard break, a fixture, a patch file) collided. Whitespace is content; the per-line strip is gone.
+3. **The whole-text `trim()`** (found while fixing 2). Trimming the diff before hashing strips trailing
+   whitespace off the LAST line, so the same attack still worked at end-of-diff. The hashed text is now never
+   trimmed; only trailing wholly-EMPTY lines are dropped, which carry nothing.
+
+The lesson worth keeping: on a fingerprint that gates trust, every normalization must be justified against "what
+two materially different inputs does this now make equal?", not against "what noise does this remove?"
 
 Fail-closed on every path: a missing, empty, or unparseable fingerprint on **either** side falls through to the
 pre-existing SHA-identity verdict. A read failure can therefore only ever cost a false re-park, never honour an
