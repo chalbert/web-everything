@@ -57,12 +57,21 @@ The result: no label-timing race can leave a PR carrying both a hold and `ready-
 
 ## Explicit NON-goals
 
-**A hand-added `ready-to-merge` is NOT re-stripped.** The two rules above are write-time (strip when a hold is
-WRITTEN) and stamp-time (never ADD while a hold stands). Neither removes a go-ahead an operator added by hand,
-and that is deliberate: it is the last-resort escape hatch for a PR the automation has wedged. Do not "tighten"
-this later into a continuous reconcile that re-strips on every pass — that is the change that turns a stuck PR
-into one that cannot be freed without editing code. If that tightening is ever wanted, it needs its own item and
-its own ruling, with a replacement escape hatch named first.
+**Hand-adding `ready-to-merge` is NOT an escape hatch, and never was.** An earlier draft of this section claimed
+the opposite; the PR #984 review disproved it. `decideReviewGate` returns the hold as `applyLabel` on EVERY pass
+for an already-held PR, and the park-site strip is not gated on `shouldApplyReviewLabel` — so a hand-added
+go-ahead is re-stripped on the next pass. That costs nothing real: since #2820 the merge predicate refuses a held
+PR *regardless* of `ready-to-merge`, so the hand-add never bought a merge in the first place.
+
+**The actual escape hatches are these, and they must all stay open:**
+
+- a reviewer verdict — `review-set-label --to=accepted` (or `--to=rearm` first, from `review:changes`);
+- the #2423 per-PR relief, `--no-review-escalation=<pr#>`, which both STAMPS and waives — and which short-circuits
+  before the park-site strip, so a relieved PR never has its go-ahead taken back mid-pass;
+- for `review:human`, a human. By design, and not negotiable.
+
+Do not close any of those without naming a replacement first. A held PR must always have a route out that does
+not require editing code.
 
 **`review:human` is never machine-clearable**, by this item or any other. Nothing here may widen what can clear
 a human gate; the strip is about the go-ahead label only.
