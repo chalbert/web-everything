@@ -1111,9 +1111,13 @@ function isStrictAncestor(exec, ancestor, descendant) {
  *      git object hash so a malformed manifest value can never become an injected `git` argument.
  * The base tracking-ref is ALWAYS force-updated (the cumulative basis needs it); `baseRev` reaches via the
  * fetched head ref. Any diff failure falls through to `scored:false`, the safe over-scoring direction.
+ * #2952 — additive: the unscored return now also carries `reason` — `'exec-contract'` (the injected `exec` isn't
+ * `(cmd, args, opts) => execFileSync(cmd, args, opts)`-shaped — a caller bug to FIX, not license to fall back) or
+ * `'ref-unresolved'` (neither candidate resolves — legitimately absent, unfixable, correctly falls back).
+ * Existing consumers that read only `scored` are untouched.
  * @param {{exec:Function, remote?:string, base?:string, baseRev?:string|null, rev:string, fetchExtraRefs?:string[]}} opts
  *   `exec(cmd, args, opts)` — inject `execFileSync`-shaped exec so this stays unit-testable with a fake.
- * @returns {{changedFiles:string[], diffLines:number, scored:boolean, humanBasisFiles:string[]}}
+ * @returns {{changedFiles:string[], diffLines:number, scored:boolean, humanBasisFiles:string[], reason?:'exec-contract'|'ref-unresolved'}}
  */
 /**
  * #2450 — the SHARED base-RESOLUTION half of the net diff, factored out of `computeNetDiffChangedFiles` so the
@@ -1124,14 +1128,36 @@ function isStrictAncestor(exec, ancestor, descendant) {
  * (`merge-base(<remote>/<base>, candidate)`) and probes candidate resolution with a cheap `git diff --numstat`
  * (which doubles as the human-gate basis). Returns the resolved `{ baseRef, diffBase, candidate, humanBasis }`
  * for the FIRST candidate (`<remote>/<rev>` first, then bare `rev` — the #2373-review-r2 order) that resolves,
- * or `null` when neither does (the caller degrades to the safe over-scoring / `gh pr diff` fallback). NEVER
- * checks out the PR branch (#2336): it only fetches tracking refs and diffs two trees in place. Pure aside from
- * the injected `exec`.
+ * or `{ ok:false, reason }` when it can't produce one (the caller degrades to the safe over-scoring / `gh pr diff`
+ * fallback). NEVER checks out the PR branch (#2336): it only fetches tracking refs and diffs two trees in place.
+ * Pure aside from the injected `exec`.
+ *
+ * #2952 — the failure `reason` distinguishes a FIXABLE caller-side bug from a legitimately absent ref, which
+ * used to be byte-identical (`{ scored: false }`, no signal). `isExecContractError` classifies which: the
+ * injected `exec` is contractually `(cmd, args, opts) => execFileSync(cmd, args, opts)` (see the `@param` below),
+ * and a caller that hands in a differently-shaped function (e.g. a shell-exec `(cmd, opts) => execSync(cmd,
+ * opts)`) receives the ARGS ARRAY in its `opts` position — that throws a `TypeError` from inside Node's own
+ * argument validation (or from the caller's body dereferencing a non-object), never the plain `Error` git itself
+ * raises for a real command failure (unknown revision, network unreachable, etc., which execFileSync surfaces
+ * with a numeric `.status`/`.signal`, not as a `TypeError`). So: a `TypeError` from ANY exec call here means the
+ * shape contract was violated — that is a caller bug to FIX, not license to fall back — and short-circuits
+ * immediately with `reason: 'exec-contract'` rather than continuing to the next candidate (every further exec
+ * call would throw the same way; retrying buys nothing and only obscures the real cause). A well-shaped `exec`
+ * whose candidates simply don't resolve (both diff probes throw a normal `Error`) exhausts the loop and returns
+ * `reason: 'ref-unresolved'` — the legitimately-absent-ref case, unfixable and correctly falls back.
  * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
- * @returns {{baseRef:string, diffBase:string, candidate:string, humanBasis:{changedFiles:string[],diffLines:number}}|null}
+ *   `exec(cmd, args, opts)` — inject `execFileSync`-shaped exec so this stays unit-testable with a fake.
+ * @returns {{ok:true, baseRef:string, diffBase:string, candidate:string, humanBasis:{changedFiles:string[],diffLines:number}}|{ok:false, reason:'exec-contract'|'ref-unresolved'}}
  */
+function isExecContractError(err) {
+  // A shape-violating `exec` (wrong arity / wrong positional meaning) fails inside Node's own argument
+  // validation or the caller's body dereferencing the wrong thing — both surface as a `TypeError`. A real git
+  // command failure via `execFileSync` throws a plain `Error` carrying `.status`/`.signal`, never `TypeError`.
+  return err instanceof TypeError;
+}
+
 function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
-  if (typeof exec !== 'function' || !rev) return null;
+  if (typeof exec !== 'function' || !rev) return { ok: false, reason: 'ref-unresolved' };
   const baseRef = `${remote}/${base}`;
   try {
     // ALWAYS force-update the base tracking-ref (#2373 opportunistic-fetch fix): the cumulative human-gate basis
@@ -1140,7 +1166,12 @@ function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetc
     // dash-leading refname is legal (`git check-ref-format 'refs/heads/--output=/tmp/pwn'` exits 0), so without
     // the guard git parses it as an option — `--upload-pack=<script>` EXECUTES. Verified against git 2.50.1.
     exec('git', ['fetch', '--quiet', '--end-of-options', remote, `+${base}:refs/remotes/${remote}/${base}`, ...fetchExtraRefs], { stdio: ['ignore', 'ignore', 'ignore'] });
-  } catch { /* degrade to whatever is locally cached — the diff attempts below still run */ }
+  } catch (err) {
+    // #2952 — a shape-violating exec fails EVERY call the same way; bail immediately rather than degrade to
+    // "whatever is locally cached", which would just re-throw on the very next call below.
+    if (isExecContractError(err)) return { ok: false, reason: 'exec-contract' };
+    /* a real fetch failure degrades to whatever is locally cached — the diff attempts below still run */
+  }
   const candidates = [`${remote}/${rev}`, rev];
   for (const candidate of candidates) {
     // #2404 — narrow the LEFT side of the diff to the provable fork point (`merge-base(baseRef, candidate)`)
@@ -1157,7 +1188,10 @@ function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetc
       // fallback, never wrong data, but avoidable).
       const mb = String(exec('git', ['merge-base', '--end-of-options', baseRef, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').split('\n')[0].trim();
       if (mb) diffBase = mb;
-    } catch { /* no common history, or candidate doesn't resolve yet — the diff below is the real probe */ }
+    } catch (err) {
+      if (isExecContractError(err)) return { ok: false, reason: 'exec-contract' };
+      /* no common history, or candidate doesn't resolve yet — the diff below is the real probe */
+    }
     // The cumulative `<mergeBase>…head` diff is BOTH the human-gate basis AND the candidate-resolves probe.
     let humanBasis;
     try {
@@ -1166,10 +1200,13 @@ function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', rev, fetc
       // file, and the swallowed numstat then reads EMPTY while the candidate still resolves — a zero blast-radius
       // score for a PR about to land, the exact de-inflation the #2390-review-fix comments assert is impossible.
       humanBasis = parseNumstat(exec('git', ['diff', '--numstat', '--end-of-options', diffBase, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
-    } catch { continue; /* candidate doesn't resolve — try the next one */ }
-    return { baseRef, diffBase, candidate, humanBasis };
+    } catch (err) {
+      if (isExecContractError(err)) return { ok: false, reason: 'exec-contract' };
+      continue; /* candidate doesn't resolve — try the next one */
+    }
+    return { ok: true, baseRef, diffBase, candidate, humanBasis };
   }
-  return null;
+  return { ok: false, reason: 'ref-unresolved' };
 }
 
 export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'main', baseRev = null, rev, fetchExtraRefs = [] } = {}) {
@@ -1177,7 +1214,9 @@ export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'ma
   if (typeof exec !== 'function' || !rev) return empty;
   const baseRevOk = typeof baseRev === 'string' && /^[0-9a-f]{7,64}$/i.test(baseRev);
   const basis = resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
-  if (!basis) return empty; // neither candidate resolves → the safe over-scoring fallback
+  // #2952 — additive: `reason` distinguishes a fixable caller-side `exec`-contract violation ('exec-contract')
+  // from a legitimately absent ref ('ref-unresolved'). Existing consumers that read only `scored` are untouched.
+  if (!basis.ok) return { ...empty, reason: basis.reason };
   const { candidate, humanBasis } = basis;
   // SIZE / blast-radius de-inflate to the OWN delta (`baseRev…head`) ONLY when `baseRev` provably is a STRICT
   // ancestor of head; otherwise use the cumulative basis (the safe over-scoring direction).
@@ -1203,21 +1242,28 @@ export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'ma
  * the basis can't be resolved OR the text diff itself fails — the caller then falls back to `gh pr diff`. Like
  * `computeNetDiffChangedFiles`, it NEVER checks out the PR branch (#2336): it only fetches tracking refs and
  * diffs two trees in place. `exec(cmd,args,opts)` is injected so this stays unit-testable with a fake.
+ *
+ * #2952 — additive: the unscored return now also carries `reason` — `'exec-contract'` (the injected `exec` isn't
+ * `(cmd, args, opts) => execFileSync(cmd, args, opts)`-shaped — a caller bug to FIX, not license to fall back),
+ * `'ref-unresolved'` (neither candidate resolves — legitimately absent, unfixable, correctly falls back), or
+ * `'diff-failed'` (the basis resolved but the text diff itself then failed). Existing consumers that read only
+ * `scored` are untouched.
  * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
- * @returns {{text:string, base:string|null, rev:string|null, scored:boolean}}
+ * @returns {{text:string, base:string|null, rev:string|null, scored:boolean, reason?:'exec-contract'|'ref-unresolved'|'diff-failed'}}
  */
 export function computeNetDiffText({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
   const unscored = { text: '', base: null, rev: null, scored: false };
   if (typeof exec !== 'function' || !rev) return unscored;
   const basis = resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
-  if (!basis) return unscored; // neither candidate resolves → caller falls back to `gh pr diff`
+  if (!basis.ok) return { ...unscored, reason: basis.reason }; // caller falls back to `gh pr diff`
   const { diffBase, candidate } = basis;
   try {
     // Same guard, same reason — this is the reviewer-facing diff TEXT, off the same caller-supplied candidate.
     const text = String(exec('git', ['diff', '--end-of-options', diffBase, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '');
     return { text, base: diffBase, rev: candidate, scored: true };
-  } catch {
-    return unscored; // the text diff failed even though the basis resolved → caller falls back to `gh pr diff`
+  } catch (err) {
+    // the text diff failed even though the basis resolved → caller falls back to `gh pr diff`
+    return { ...unscored, reason: isExecContractError(err) ? 'exec-contract' : 'diff-failed' };
   }
 }
 
@@ -1240,21 +1286,27 @@ export function computeNetDiffText({ exec, remote = 'origin', base = 'main', rev
  *
  * Same `resolveNetDiffBasis`, so the diff text, the score, and this list cannot drift. Never checks out the PR
  * branch (#2336). Degrades to `{ scored:false, paths:[] }` — the caller must then NOT claim a `net` basis.
+ *
+ * #2952 — additive: the unscored return now also carries `reason` — `'exec-contract'` (the injected `exec` isn't
+ * `(cmd, args, opts) => execFileSync(cmd, args, opts)`-shaped — a caller bug to FIX, not license to fall back),
+ * `'ref-unresolved'` (neither candidate resolves — legitimately absent, unfixable, correctly falls back), or
+ * `'diff-failed'` (the basis resolved but this name-only diff itself then failed). Existing consumers that read
+ * only `scored` are untouched.
  * @param {{exec:Function, remote?:string, base?:string, rev:string, fetchExtraRefs?:string[]}} opts
- * @returns {{paths:string[], base:string|null, rev:string|null, scored:boolean}}
+ * @returns {{paths:string[], base:string|null, rev:string|null, scored:boolean, reason?:'exec-contract'|'ref-unresolved'|'diff-failed'}}
  */
 export function computeNetDiffPaths({ exec, remote = 'origin', base = 'main', rev, fetchExtraRefs = [] } = {}) {
   const unscored = { paths: [], base: null, rev: null, scored: false };
   if (typeof exec !== 'function' || !rev) return unscored;
   const basis = resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
-  if (!basis) return unscored;
+  if (!basis.ok) return { ...unscored, reason: basis.reason };
   const { diffBase, candidate } = basis;
   try {
     const raw = exec('git', ['diff', '--name-only', '-z', '--end-of-options', `${diffBase}..${candidate}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     const paths = String(raw || '').split('\0').filter(Boolean);
     return { paths, base: diffBase, rev: candidate, scored: true };
-  } catch {
-    return unscored;
+  } catch (err) {
+    return { ...unscored, reason: isExecContractError(err) ? 'exec-contract' : 'diff-failed' };
   }
 }
 
