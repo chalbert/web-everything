@@ -3299,11 +3299,14 @@ async function runCli() {
         //
         // THE ONE THING THE REMOVAL DID BUY, closed elsewhere: the NON-scoring paths (the bare `/merge` orphan
         // sweep and the `--no-review-escalation` override) gate on `hasUnclearedReviewLabel`, which used to read
-        // a present `review:accepted` as "cleared" unconditionally. That would have let an `accepted + human`
-        // pair merge. `hasUnclearedReviewLabel` now refuses a co-present `review:human`/`review:changes`
-        // regardless of `review:accepted` (see its body), so the hole is shut by the predicate rather than by
-        // deleting a human's verdict. Retracting an acceptance stays what it always should have been: a
-        // REVIEWER action, `review-set-label.mjs --to=changes`, which strips it deliberately and says why.
+        // a present `review:accepted` as "cleared" unconditionally. That would have let a re-parked
+        // `accepted + human` OR `accepted + pending` pair merge — and `pending` is the common one, since this
+        // re-park applies it whenever the fresh score is not `humanRequired` (the PR #984 shape).
+        // `hasUnclearedReviewLabel` now refuses BOTH pairs regardless of `review:accepted` (see its body for
+        // why, and for why `accepted + changes` is deliberately left alone under #2974), so the hole is shut by
+        // the predicate rather than by deleting a human's verdict. Retracting an acceptance stays what it always
+        // should have been: a REVIEWER action, `review-set-label.mjs --to=changes`, which strips it
+        // deliberately and says why.
         // #2324 (guarantee 2) — a `review:human` park must STATE the escalation reason IN THE PR BODY, so the
         // operator opening it sees why a human is required without re-deriving it from the rubric. Augment
         // (never replace) the live body with the marked block at park time, then verify the write landed —

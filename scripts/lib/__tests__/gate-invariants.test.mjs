@@ -341,16 +341,22 @@ describe('INVARIANT 4 — only the drain may write to main', () => {
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 describe('INVARIANT 5 — hasUnclearedReviewLabel refuses un-cleared labels', () => {
   const all = [REVIEW_LABELS.pending, REVIEW_LABELS.human, REVIEW_LABELS.changes, REVIEW_LABELS.accepted];
-  // #x9xqexm — TIGHTENED on ONE pair, in the refusing direction only. `review:accepted` used to clear EVERY set
-  // it appeared in, which was safe only because the drain DELETED a stale accept whenever it re-parked. It no
-  // longer deletes one (see INVARIANT 13), so the contradictory pair `accepted + human` can exist and this
-  // non-scoring predicate must fail closed on it. No sanctioned writer produces that pair — `--to=clear-human`
-  // removes `human` as it adds `accepted`, and `--to=accepted` is refused outright on a `review:human` PR — so
-  // refusing it costs no legitimate land and closes the one hole not deleting the label would otherwise open.
-  // `accepted + changes` is deliberately NOT narrowed: #2974 ruled the reviewer verdict wins over a stale bounce.
-  it('review:accepted still clears — accepted alongside pending and/or changes is never refused', () => {
+  // #x9xqexm — TIGHTENED on the two HOLD pairs, in the refusing direction only. `review:accepted` used to clear
+  // EVERY set it appeared in, which was safe only because the drain DELETED a stale accept whenever it re-parked.
+  // It no longer deletes one (see INVARIANT 13), so a contradictory `accepted + hold` pair can survive a re-park
+  // and this NON-SCORING predicate must fail closed on it — it is the only thing gating the bare `/merge` sweep,
+  // which never calls `decideReviewGate` and certifies on `review:accepted` alone.
+  // The rule is "could a SANCTIONED writer have produced this pair?":
+  //   • `accepted + human`   — no. `--to=clear-human` removes `human` as it adds `accepted`; `--to=accepted` is
+  //                            refused outright on a `review:human` PR.        ⇒ REFUSE
+  //   • `accepted + pending` — no. Both `--to=accepted` and `--to=clear-human` carry `pending` in `removeLabels`,
+  //                            so only the drain's stale re-park makes this pair — and that re-park is the COMMON
+  //                            one (it applies `pending` whenever the fresh score is not `humanRequired`, the PR
+  //                            #984 shape). Round-2 blocker 1.                  ⇒ REFUSE at allowPending:false
+  //   • `accepted + changes` — LEFT ALONE. #2974 ruled the reviewer verdict wins over a stale bounce.  ⇒ clear
+  it('review:accepted still clears a co-present review:changes (#2974 untouched)', () => {
     for (const set of powerset(all).filter((s) => s.includes(REVIEW_LABELS.accepted)
-      && !s.includes(REVIEW_LABELS.human))) {
+      && !s.includes(REVIEW_LABELS.human) && !s.includes(REVIEW_LABELS.pending))) {
       expect(hasUnclearedReviewLabel(set, { allowPending: false })).toBe(false);
       expect(hasUnclearedReviewLabel(set, { allowPending: true })).toBe(false);
     }
@@ -360,6 +366,15 @@ describe('INVARIANT 5 — hasUnclearedReviewLabel refuses un-cleared labels', ()
       && s.includes(REVIEW_LABELS.human))) {
       expect(hasUnclearedReviewLabel(set, { allowPending: false })).toBe(true);
       expect(hasUnclearedReviewLabel(set, { allowPending: true })).toBe(true);
+    }
+  });
+  it('…and so is a CO-PRESENT review:pending — the stale re-park pair the bare sweep would otherwise land', () => {
+    for (const set of powerset(all).filter((s) => s.includes(REVIEW_LABELS.accepted)
+      && s.includes(REVIEW_LABELS.pending) && !s.includes(REVIEW_LABELS.human))) {
+      expect(hasUnclearedReviewLabel(set, { allowPending: false })).toBe(true);
+      // The #2423 relief valve still waives it: that is an operator naming ONE PR, the same waiver a bare
+      // `review:pending` gets. The pair is refused by DEFAULT, which is what the bare `/merge` sweep uses.
+      expect(hasUnclearedReviewLabel(set, { allowPending: true })).toBe(false);
     }
   });
   it('bare sweep (allowPending:false): ANY of pending/human/changes (without accepted) ⇒ refuse', () => {

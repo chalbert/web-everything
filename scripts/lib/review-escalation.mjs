@@ -713,14 +713,50 @@ export function parseReviewedSha(comments) {
 }
 
 /**
+ * #x9xqexm (round-2 review, major 3) — WHICH `index <old>..<new>` LINES MAY NOT BE DROPPED. Both fingerprints
+ * below drop blob-pair headers on the stated grounds that they "restate the hashes of content that is ALREADY in
+ * the diff body". For a BINARY file that premise is provably false: `computeNetDiffText` runs `git diff` without
+ * `--binary`, so the whole body of a binary section is the single constant sentence `Binary files … differ`,
+ * IDENTICAL for every possible payload. Dropping the `index` line there erases the only carrier of the content,
+ * and two totally different binaries hash the same (reproduced: a full payload swap left BOTH digests unchanged).
+ *
+ * That was inert while the strict digest changed on every rebase, so its escape never fired. #x9xqexm's
+ * contribution digest is DESIGNED to fire across a rebase, which makes it live: one push combining a
+ * rebase-shaped text move with a binary swap would otherwise read as `covers: true`.
+ *
+ * So: an `index` line is dropped ONLY when its file section carries a textual body. In a section that git
+ * rendered as binary (`Binary files … differ`, or `GIT binary patch` if a caller ever passes `--binary`) the
+ * blob pair IS the content and is hashed. Costs nothing on the text path — for a diff with no binary section the
+ * returned set is empty and both digests are byte-for-byte what they were.
+ * @param {string[]} lines - the raw diff already split on '\n'
+ * @returns {Set<number>} indices into `lines` of `index` lines that MUST be kept
+ */
+function binaryIndexLines(lines) {
+  const keep = new Set();
+  let pending = [];
+  let binary = false;
+  const flush = () => { if (binary) for (const i of pending) keep.add(i); pending = []; binary = false; };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('diff --git ')) { flush(); continue; }
+    if (/^index [0-9a-f]+\.\.[0-9a-f]+/.test(line)) { pending.push(i); continue; }
+    // Column 0 is unambiguous: a `+`/`-`/` ` line can never be mistaken for git's own binary notice.
+    if ((line.startsWith('Binary files ') && line.endsWith(' differ')) || line === 'GIT binary patch') binary = true;
+  }
+  flush();
+  return keep;
+}
+
+/**
  * #x169fqe — THE REVIEWED-DIFF FINGERPRINT: a stable digest of the content a reviewer actually judged, so an
  * accept can be checked against CONTENT rather than against the commit that happened to carry it.
  *
  * EXACTLY TWO THINGS ARE EXCLUDED. Every exclusion is a potential COLLISION — two materially different diffs
  * hashing the same — so the list is kept as short as the problem allows, and each entry has to earn its place:
- *   • `index <old>..<new> <mode>` lines — git blob-pair headers. They restate the hashes of content that is
- *     ALREADY in the diff body; identical bodies imply identical blobs, so dropping them removes noise, not
- *     signal. This is the one that makes a rebase recognisable at all.
+ *   • `index <old>..<new> <mode>` lines — git blob-pair headers, EXCEPT in a binary file section, where they are
+ *     the only carrier of the content (`binaryIndexLines`, #x9xqexm round-2 major 3). For a text section they
+ *     restate the hashes of content that is ALREADY in the diff body; identical bodies imply identical blobs, so
+ *     dropping them removes noise, not signal. This is the one that makes a rebase recognisable at all.
  *   • the ROOT `.lane-manifest.json` file section — the transient lane bookkeeping the drain's rebase-drop pass
  *     exists to remove (`LANE_MANIFEST`, rebase-drop-manifest.mjs). Never review-worthy, and its removal is
  *     precisely the mechanical edit that was invalidating accepts.
@@ -760,12 +796,15 @@ export function normalizeDiffFingerprint(diffText) {
   // including the final line, so nothing here may trim the hashed text. `trimmed` above is used ONLY to decide
   // emptiness and to detect an already-computed digest.
   const kept = [];
+  const lines = diffText.split('\n');
+  const keepIndexAt = binaryIndexLines(lines); // #x9xqexm major 3 — a binary section's blob pair IS its content
   let inManifestSection = false;
-  for (const line of diffText.split('\n')) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     // A `diff --git` header opens a new file section and therefore always ends any skip in progress.
     if (line.startsWith('diff --git ')) inManifestSection = line === MANIFEST_HEADER;
     if (inManifestSection) continue;
-    if (/^index [0-9a-f]+\.\.[0-9a-f]+/.test(line)) continue;
+    if (!keepIndexAt.has(i) && /^index [0-9a-f]+\.\.[0-9a-f]+/.test(line)) continue;
     kept.push(line);
   }
   // Drop trailing EMPTY lines only — `''`, never a line that carries whitespace. Skipping a manifest section
@@ -822,22 +861,46 @@ export function parseReviewedDiff(comments) {
  *
  * WHAT IS HASHED, and nothing else:
  *   • the per-file headers — `diff --git`, `---`/`+++`, mode / new-file / deleted-file / rename / similarity /
- *     `Binary files` lines. A file entering or leaving the diff, or changing mode, is content.
- *   • each hunk header with its OFFSETS STRIPPED but its LENGTHS KEPT — `@@ -197,3 +219,8 @@ foo` becomes
- *     `@@ -,3 +,8 @@`. The offsets are pure base position (they shift when `main` grows above the hunk); the
- *     lengths are shape (they change the moment the edit itself changes) and the trailing function context is
- *     base text, so it goes with the offsets.
+ *     `Binary files` lines. A file entering or leaving the diff, or changing mode, is content. A binary
+ *     section's `index` blob pair is kept too (`binaryIndexLines`) — there it IS the content.
+ *   • each hunk header rewritten as `@@ ~<gap> -,<oldLen> +,<newLen> @@<section heading>`. THREE parts, and the
+ *     split between them is the whole design (see POSITION, below): the ABSOLUTE offsets are dropped, the
+ *     LENGTHS are kept, the GAP to the previous hunk IN THE SAME FILE is kept (`*` for a file's first hunk), and
+ *     git's trailing SECTION HEADING is kept verbatim.
  *   • every `+` and `-` line inside a hunk, verbatim — including whitespace-only ones. This is the contribution.
  *   • `\ No newline at end of file`, which is content.
- * DROPPED: `index` blob-pair lines (restated hashes) and every CONTEXT line (base text the author did not write).
+ * DROPPED: `index` blob-pair lines of TEXT sections (restated hashes), every CONTEXT line (base text the author
+ * did not write), and the hunks' absolute file offsets.
  *
- * THE RESIDUAL, stated because dropping context is a real loosening: two diffs collide iff they touch the same
- * files in the same order with the same hunk COUNT, the same hunk LENGTHS, and byte-identical `+`/`-` lines,
- * differing only in where in the file those hunks sit and what surrounds them. That is exactly the shape of a
- * rebase and it is a very poor shape for a ride-in commit — a ride-in adds or changes at least one `+`/`-` line
- * or one hunk length, either of which changes this digest. It is checked LAST, after the SHA test and after the
- * strict `normalizeDiffFingerprint` test, so nothing that already passed behaves differently; it can only ever
- * honour an accept the strict test rejected, and only for a base-only move.
+ * POSITION — why the offsets are not simply thrown away (round-2 review, blocker 2). The first cut stripped the
+ * whole `@@` line down to its lengths, and that collides on a RELOCATION: for any hunk more than three lines
+ * from either file edge the length pair is position-invariant, so ONE ADDED GUARD LINE MOVED FROM LINE 10 TO
+ * LINE 30 produced a byte-identical digest and `covers: true` (reproduced with real `git diff` output). That is
+ * the "right line, wrong place" class — a guard moved below the call it guards, a `return` moved out of a
+ * branch — and it is not only adversarial: a 3-way rebase that misapplies a hunk to a clean-but-wrong offset
+ * produces exactly this shape with nobody attacking. Two position signals are kept, chosen because each is
+ * invariant under the base moving but variant under the contribution moving:
+ *   • THE SECTION HEADING (`@@ … @@ <heading>`). It names the enclosing function/section, so it travels WITH
+ *     the code rather than with the base: `main` inserting lines above does not change it, relocating into
+ *     another function does. If `main` RENAMES the enclosing function the heading changes and the escape simply
+ *     fails closed — the PR re-parks and the human re-clears, the safe direction.
+ *   • THE INTER-HUNK GAP (this hunk's old-side start minus the previous hunk's, within the same file). A
+ *     uniform whole-file displacement — the #1100 shape, `@@ -197,3` → `@@ -203,3` because the file grew above
+ *     the hunk — leaves every gap unchanged. Any hunk that moves relative to its siblings changes one.
+ *
+ * THE RESIDUAL, stated precisely because dropping context is a real loosening. Two diffs collide iff they touch
+ * the same files in the same order, with the same hunk count, the same hunk lengths, the same section headings,
+ * the same inter-hunk gaps, and byte-identical `+`/`-` lines. After the two signals above, what is left is ONE
+ * shape: a contribution that moves WITHIN a single section heading in a file where no sibling hunk records the
+ * move (in practice, a file with one hunk). That residual is NOT closable inside a fixed-size digest, and the
+ * reason is worth writing down rather than hand-waving: the only remaining witness to an intra-section move is
+ * the hunk's CONTEXT lines — and the #1100 case this whole escape exists for is one where `main` changed the
+ * context line IMMEDIATELY ADJACENT to the contribution. Tolerating that and detecting an intra-section move are
+ * the same measurement read in opposite directions; no digest can do both. Tracked as #x413mbt (with the
+ * directions worth costing) rather than left implicit, and pinned by a deliberately-passing test. What bounds it: this is checked LAST, after the SHA test and after the strict
+ * `normalizeDiffFingerprint` test, so nothing that already passed behaves differently; it can only ever honour
+ * an accept the strict test rejected, and only for a head advance whose every added/removed line, hunk length,
+ * section heading and inter-hunk gap is unchanged.
  *
  * @param {string|null|undefined} diffText - raw unified diff, or a 64-hex fingerprint this function produced.
  *   Same idempotence caveat as `normalizeDiffFingerprint`: do not pass untrusted free-form text, and never pass
@@ -850,16 +913,21 @@ export function normalizeContributionFingerprint(diffText) {
   if (!trimmed) return null;
   if (/^[0-9a-f]{64}$/.test(trimmed)) return trimmed;
   const MANIFEST_HEADER = `diff --git a/${LANE_MANIFEST} b/${LANE_MANIFEST}`;
-  // `@@ -<start>[,<len>] +<start>[,<len>] @@[ <function context>]` — git omits `,<len>` when it is exactly 1.
-  const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+  // `@@ -<start>[,<len>] +<start>[,<len>] @@[ <section heading>]` — git omits `,<len>` when it is exactly 1.
+  const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
   const kept = [];
+  const lines = diffText.split('\n');
+  const keepIndexAt = binaryIndexLines(lines); // #x9xqexm major 3 — a binary section's blob pair IS its content
   let inManifestSection = false;
   let inHunk = false;
-  for (const line of diffText.split('\n')) {
+  let prevOldStart = null; // per FILE section — the anchor for the inter-hunk gap
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (line.startsWith('diff --git ')) {
-      // A new file section always ends any skip AND any hunk in progress.
+      // A new file section always ends any skip AND any hunk in progress, and restarts the gap chain.
       inManifestSection = line === MANIFEST_HEADER;
       inHunk = false;
+      prevOldStart = null;
       if (!inManifestSection) kept.push(line);
       continue;
     }
@@ -867,15 +935,21 @@ export function normalizeContributionFingerprint(diffText) {
     const hunk = HUNK_RE.exec(line);
     if (hunk) {
       inHunk = true;
-      // Offsets out, lengths in. An omitted length means 1 (git's own shorthand) — spell it so `@@ -1 +1 @@`
-      // and `@@ -1,1 +1,1 @@` cannot hash differently for the same shape.
-      kept.push(`@@ -,${hunk[2] ?? '1'} +,${hunk[4] ?? '1'} @@`);
+      // Absolute offsets out; lengths, the inter-hunk GAP and the SECTION HEADING in (see POSITION above).
+      // An omitted length means 1 (git's own shorthand) — spell it so `@@ -1 +1 @@` and `@@ -1,1 +1,1 @@`
+      // cannot hash differently for the same shape. The gap is measured on the OLD side (the base pre-image);
+      // the new-side gap is derivable from it and the preceding lengths, so hashing it too would add no signal.
+      const oldStart = Number(hunk[1]);
+      const gap = prevOldStart === null ? '*' : String(oldStart - prevOldStart);
+      prevOldStart = oldStart;
+      kept.push(`@@ ~${gap} -,${hunk[2] ?? '1'} +,${hunk[4] ?? '1'} @@${hunk[5]}`);
       continue;
     }
     if (!inHunk) {
-      // Pre-hunk file headers. `index` lines restate blob hashes already implied by the body; everything else
-      // here (`---`/`+++`, modes, renames, `Binary files …`) is content and is kept verbatim.
-      if (/^index [0-9a-f]+\.\.[0-9a-f]+/.test(line)) continue;
+      // Pre-hunk file headers. A TEXT section's `index` line restates blob hashes already implied by the body
+      // and is dropped; a BINARY section's is the only carrier of its content and is kept (`binaryIndexLines`).
+      // Everything else here (`---`/`+++`, modes, renames, `Binary files …`) is content and is kept verbatim.
+      if (!keepIndexAt.has(i) && /^index [0-9a-f]+\.\.[0-9a-f]+/.test(line)) continue;
       kept.push(line);
       continue;
     }
@@ -990,8 +1064,9 @@ export function acceptanceCoversHead({
  * pass already parked it under `review:pending`/`review:human` (an owed independent review, never cleared) or
  * bounced it under `review:changes` (the author lane hasn't fixed it yet) — exactly how plateau#11 and
  * web-everything#290 shipped 2 bugs the review panel had already caught but never got to act on. `review:accepted`
- * clears a `review:pending` park (the reviewer's verdict wins), but NOT a co-present `review:human` /
- * `review:changes` — see the body for why that pair can now exist and must fail closed (#x9xqexm). Pure.
+ * still clears a co-present `review:changes` (#2974 — the reviewer verdict wins over a stale bounce), but NOT a
+ * co-present `review:human` or `review:pending` — see the body for why those pairs can now exist and must fail
+ * closed (#x9xqexm). Pure.
  *
  * A caller that DOES run `decideReviewGate` this pass (the label-scoped `/drain` role, escalation ON) must NOT
  * also apply this check — `decideReviewGate` already re-derives the correct verdict from a FRESH rubric score,
@@ -1019,23 +1094,38 @@ export function acceptanceCoversHead({
  * @returns {boolean} true iff this PR carries an un-cleared review-escalation label and must be refused
  */
 export function hasUnclearedReviewLabel(labels, { allowPending = false } = {}) {
-  // #x9xqexm — a CO-PRESENT `review:human` is refused EVEN NEXT TO `review:accepted`, and the order of these
-  // tests is the whole point. `review:accepted` used to short-circuit to `false` unconditionally, which was safe
-  // only because the drain DELETED the accept whenever it re-parked. It no longer does (deleting a human's
-  // recorded clearance was never what stopped the merge — the gate's verdict was), so the contradictory pair
-  // `accepted + human` can now exist on a re-parked PR, and this NON-SCORING path (the bare `/merge` sweep, the
-  // `--no-review-escalation` override) must not read it as cleared. No sanctioned writer produces that pair:
-  // `--to=clear-human` removes `human` as it adds `accepted`, and `--to=accepted` is refused outright on a
-  // `review:human` PR. So the pair means either a drain re-park (refuse — that is the point) or an out-of-band
-  // edit (refuse — fail closed). It is also the ONE pair narrowed here, deliberately:
-  //   • `review:pending` — an accept genuinely clears a pending park; that is the ordinary sequence.
-  //   • `review:changes` — #2974 RULED the reviewer verdict wins over a stale bounce and made `--to=accepted`
-  //     strip `changes` for exactly that reason. Refusing that pair here would reverse a ratified reading and
-  //     strand any PR still carrying the pre-#2974 pair, so it is left exactly as it was.
+  // #x9xqexm — A CO-PRESENT HOLD IS REFUSED EVEN NEXT TO `review:accepted`, and the ORDER of these tests is the
+  // whole point. `review:accepted` used to short-circuit to `false` unconditionally, which was safe only because
+  // the drain DELETED the accept whenever it re-parked. It no longer does (deleting a human's recorded clearance
+  // was never what stopped the merge — the gate's verdict was), so a contradictory `accepted + hold` pair can now
+  // survive a re-park, and this NON-SCORING path (the bare `/merge` sweep, the `--no-review-escalation`
+  // override) must not read it as cleared. That path is where it matters: a bare `node scripts/merge-ai-prs.mjs`
+  // sets `REVIEW_ESCALATION = false` and never calls `decideReviewGate` at all, and `classifyPr` certifies on
+  // `review:accepted` alone (it does not require `ready-to-merge`, so stripping THAT protects nothing) — so this
+  // predicate is the only thing standing between a stale re-park and a merge.
+  //
+  // WHICH PAIRS, and why the line falls where it does. The test is "could a SANCTIONED writer have produced this
+  // pair?" — if not, the pair can only come from a drain re-park (refuse: that is exactly the state being
+  // signalled) or an out-of-band edit (refuse: fail closed).
+  //   • `accepted + human` — refused. `--to=clear-human` removes `human` as it adds `accepted`, and
+  //     `--to=accepted` is refused outright on a `review:human` PR. No sanctioned writer makes this pair.
+  //   • `accepted + pending` — refused too (round-2 review, blocker 1). The first cut exempted it on the reading
+  //     that "an accept genuinely clears a pending park", but that does not survive this PR's own argument: the
+  //     sanctioned accept REMOVES `pending` (`review-set-label.mjs` `--to=accepted` and `--to=clear-human` both
+  //     carry it in `removeLabels`), so the pair is producible by no sanctioned writer either — only by the
+  //     drain's stale re-park, which applies `review:pending` whenever the fresh score is not `humanRequired`.
+  //     That is the PR #984 shape the backlog item itself cites, and it is the BULK of the queue, so exempting
+  //     it left #2409's hole open for the common case while closing it for the rare one. `allowPending: true`
+  //     still waives it — that is the #2423 relief valve, an operator naming one PR explicitly, and it is
+  //     deliberately checked BEFORE the accept short-circuit so the waiver reads identically with or without a
+  //     co-present accept.
+  //   • `accepted + changes` — NOT refused. #2974 RULED that the reviewer verdict wins over a stale bounce and
+  //     made `--to=accepted` strip `changes` for exactly that reason. Refusing it here would reverse a ratified
+  //     reading and strand any PR still carrying the pre-#2974 pair, so it is left exactly as it was.
   if (hasReviewLabel(labels, REVIEW_LABELS.human)) return true;
+  if (!allowPending && hasReviewLabel(labels, REVIEW_LABELS.pending)) return true;
   if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) return false;
-  return (!allowPending && hasReviewLabel(labels, REVIEW_LABELS.pending))
-    || hasReviewLabel(labels, REVIEW_LABELS.changes);
+  return hasReviewLabel(labels, REVIEW_LABELS.changes);
 }
 
 /**
@@ -1088,9 +1178,21 @@ export function readyMergeConflictsWithHold(labels) {
  * visible in the observed set at decision time:
  *   - a FRESH park (`applyLabel` = pending/human on a PR that carries no hold YET) — the hold is being written
  *     in this same operation, so it must be folded in or the atomic park strip regresses;
- *   - a #2409 STALE-ACCEPTANCE re-park — the PR still observably carries `review:accepted`, which
- *     `hasUnclearedReviewLabel` treats as clearing every hold, but this same park is about to REMOVE it. Folding
- *     the removal in is what keeps the re-park's go-ahead strip alive.
+ *   - a #2409 STALE-ACCEPTANCE re-park — the PR observably carries `review:accepted` alongside the hold this
+ *     park is applying.
+ *
+ * `staleAcceptance` — WHAT IT MEANS AFTER #x9xqexm, because its original justification is now FALSE and a stale
+ * justification is how the next author deletes a guard they no longer understand. It shipped reading "this same
+ * park is about to REMOVE `review:accepted`, so filter it out of the effective set". #x9xqexm ends that removal:
+ * a re-score never deletes a human's recorded clearance. The FLAG STAYS AND SO DOES THE FILTER, but the reason
+ * is now the narrower one: on a stale re-park the accept is known-stale, so it must not be read as clearing the
+ * hold being written in this same operation. The outcome is unchanged (strip), and — deliberately — it is now
+ * unchanged WITH OR WITHOUT the filter: `hasUnclearedReviewLabel` refuses `accepted + human` and
+ * `accepted + pending` directly (#x9xqexm), which are the only two labels a stale re-park ever applies. That
+ * redundancy is the point. The round-2 review flagged exactly this hazard — a reader resolving the #x9xqexm
+ * rebase could delete the "now-pointless" filter and leave `ready-to-merge` standing on an
+ * `[accepted, pending]` re-park — and the fix is to make the deletion HARMLESS rather than to forbid it.
+ * Both paths are pinned by test, so neither can regress silently.
  *
  * `review:accepted` on any OTHER path is never caught: a legitimately queued PR (`review:accepted` +
  * `ready-to-merge`, no hold) yields `false` here — and it never reaches a park branch at all, since

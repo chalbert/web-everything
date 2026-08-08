@@ -73,5 +73,17 @@ never fires in practice and the clearance is revoked on essentially every accept
 3. **A re-score never removes `review:accepted`.** The refusal to land is the gate's verdict, not the deletion of
    a human's record. Only a reviewer verdict (`--to=changes`) retracts an acceptance.
 
+## Carried forward — what this item did NOT close
+
+Rules 1 and 3 shipped. Rule 2 did not, and neither did one residual the fix's own review surfaced. Both are on
+the board as their own items, so nothing is deferred to a resolved parent:
+
+- **#xfdgdln** — rule 2. A stale-acceptance re-park still re-asserts `review:human` from the **whole-PR** score
+  rather than the paths the clearance did not cover. Narrowing it moves the declarative-leash boundary, which
+  is a ratification, not an impl call.
+- **#x413mbt** — the contribution fingerprint's remaining collision: a contribution that MOVES within a single
+  `@@` section heading in a single-hunk file. Relocation across files, across sections and relative to a
+  sibling hunk are all refused; this one shape is not, and it is pinned by a deliberately-passing test.
+
 Related: #2409 (reviewed-commit gate), #2416 (only a human clears a human gate), #2895 (the `clear-human`
 ceremony), #2771 / #2840 (what `review:human` is reserved for).

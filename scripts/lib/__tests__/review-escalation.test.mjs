@@ -857,6 +857,130 @@ describe('#x9xqexm — a clearance covers a CONTRIBUTION, not the base it sits o
     }).covers).toBe(true);
   });
 
+  // ── ROUND-2 BLOCKER 1: the digest must not collide on a RELOCATION of the contribution. ──────────────────
+  // All four fixtures below are REAL `git diff` output, captured from a scratch repo rather than hand-written:
+  // one added guard line, placed at two different points in the same file. Before the fix all of them produced
+  // a byte-identical contribution digest and `acceptanceCoversHead().covers === true`.
+  const GUARD = '+  if (!authorized) throw new Error("nope");';
+  const relocated = (start, heading, ctx) => [
+    'diff --git a/f.js b/f.js',
+    `index b5c3d22..${start === 7 ? '3dd3840' : '2eed9ef'} 100644`,
+    '--- a/f.js',
+    '+++ b/f.js',
+    `@@ -${start},6 +${start},7 @@ ${heading}`,
+    ...ctx.slice(0, 3).map((l) => ` ${l}`),
+    GUARD,
+    ...ctx.slice(3).map((l) => ` ${l}`),
+  ].join('\n');
+  const AT_LINE_10 = relocated(7, 'line6', ['line7', 'line8', 'line9', 'line10', 'line11', 'line12']);
+  const AT_LINE_30 = relocated(27, 'line26', ['line27', 'line28', 'line29', 'line30', 'line31', 'line32']);
+
+  it('BLOCKER 1 — the SAME added line at a DIFFERENT place in the file is NOT the same contribution', () => {
+    // The reviewer's measured repro: one guard line moved from line 10 to line 30 of a 40-line file. Every
+    // `+`/`-` line and both hunk lengths are identical, so a digest built from those alone collides — and
+    // "right line, wrong place" (a guard below the call it guards, a `return` out of its branch) is the class
+    // that hides there. A 3-way rebase misapplying a hunk to a clean-but-wrong offset has the same shape.
+    expect(normalizeContributionFingerprint(AT_LINE_10)).not.toBe(normalizeContributionFingerprint(AT_LINE_30));
+    expect(acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb',
+      acceptedContribution: AT_LINE_10, headContribution: AT_LINE_30,
+    }).covers).toBe(false);
+  });
+
+  it('BLOCKER 1 — relocating into a DIFFERENT FUNCTION is refused (the section heading is hashed)', () => {
+    const inAlpha = relocated(7, 'function alpha() {', ['a1();', 'a2();', 'a3();', 'a4();', 'a5();', 'a6();']);
+    const inBeta = relocated(7, 'function beta() {', ['a1();', 'a2();', 'a3();', 'a4();', 'a5();', 'a6();']);
+    expect(normalizeContributionFingerprint(inAlpha)).not.toBe(normalizeContributionFingerprint(inBeta));
+  });
+
+  it('BLOCKER 1 — a hunk moving relative to its SIBLINGS is refused (the inter-hunk gap is hashed)', () => {
+    const twoHunks = (secondStart) => [
+      'diff --git a/f.js b/f.js',
+      '--- a/f.js',
+      '+++ b/f.js',
+      '@@ -10,6 +10,7 @@ function only() {',
+      ' c1();', ' c2();', ' c3();', GUARD, ' c4();', ' c5();', ' c6();',
+      `@@ -${secondStart},6 +${secondStart + 1},7 @@ function only() {`,
+      ' d1();', ' d2();', ' d3();', '+  emit();', ' d4();', ' d5();', ' d6();',
+    ].join('\n');
+    expect(normalizeContributionFingerprint(twoHunks(50))).not.toBe(normalizeContributionFingerprint(twoHunks(70)));
+  });
+
+  it('…while a UNIFORM whole-file shift of BOTH hunks still reads as unchanged (the #1100 property)', () => {
+    // This is the case the escape exists for, kept alive at more than one hunk: `main` grew ABOVE the lane's
+    // hunks, so every offset moves by the same amount and every inter-hunk gap is untouched.
+    const shifted = (by) => [
+      'diff --git a/f.js b/f.js',
+      '--- a/f.js',
+      '+++ b/f.js',
+      `@@ -${10 + by},6 +${10 + by},7 @@ function only() {`,
+      ' c1();', ' c2();', ' c3();', GUARD, ' c4();', ' c5();', ' c6();',
+      `@@ -${50 + by},6 +${51 + by},7 @@ function only() {`,
+      ' d1();', ' d2();', ' d3();', '+  emit();', ' d4();', ' d5();', ' d6();',
+    ].join('\n');
+    expect(normalizeDiffFingerprint(shifted(0))).not.toBe(normalizeDiffFingerprint(shifted(6)));
+    expect(normalizeContributionFingerprint(shifted(0))).toBe(normalizeContributionFingerprint(shifted(6)));
+  });
+
+  it('THE KNOWN RESIDUAL, pinned: an intra-section move in a SINGLE-hunk file still collides (#x413mbt)', () => {
+    // Not a passing grade — a deliberately recorded limit, so nobody reads the two tests above as "relocation
+    // is solved". With the context lines dropped, the only witness to a move INSIDE one section heading is the
+    // context itself — and the #1100 case this escape exists for is one where `main` changed the context line
+    // immediately adjacent to the contribution. Tolerating that and detecting this are the same measurement
+    // read in opposite directions. Filed as #x413mbt; if that item lands, this expectation flips to `not.toBe`.
+    const sameHeading = (start) => [
+      'diff --git a/f.js b/f.js',
+      '--- a/f.js',
+      '+++ b/f.js',
+      `@@ -${start},6 +${start},7 @@ function only() {`,
+      ' x1();', ' x2();', ' x3();', GUARD, ' x4();', ' x5();', ' x6();',
+    ].join('\n');
+    expect(normalizeContributionFingerprint(sameHeading(4))).toBe(normalizeContributionFingerprint(sameHeading(13)));
+  });
+
+  // ── ROUND-2 MAJOR 3: binary content is invisible to a digest that drops the blob pair. ───────────────────
+  const binary = (blob) => [
+    'diff --git a/blob.bin b/blob.bin',
+    'new file mode 100644',
+    `index 0000000..${blob}`,
+    'Binary files /dev/null and b/blob.bin differ',
+  ].join('\n');
+
+  it('MAJOR 3 — swapping a BINARY payload changes both digests (the blob pair is its only content)', () => {
+    // `computeNetDiffText` runs `git diff` WITHOUT `--binary`, so the whole body of a binary section is one
+    // constant sentence, identical for every possible payload. Dropping the `index` line as "a restated hash"
+    // is sound only where a textual body exists to restate. Pre-existing on the strict digest, but inert there
+    // (it never fired across a rebase); the contribution digest is DESIGNED to fire, which makes it live.
+    expect(normalizeContributionFingerprint(binary('6a2ff36'))).not.toBe(normalizeContributionFingerprint(binary('0a03a2a')));
+    expect(normalizeDiffFingerprint(binary('6a2ff36'))).not.toBe(normalizeDiffFingerprint(binary('0a03a2a')));
+    expect(acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb',
+      acceptedDiff: binary('6a2ff36'), headDiff: binary('0a03a2a'),
+      acceptedContribution: binary('6a2ff36'), headContribution: binary('0a03a2a'),
+    }).covers).toBe(false);
+  });
+
+  it('MAJOR 3 — a TEXT section still drops its `index` line, so the #1100 rebase escape is untouched', () => {
+    // The narrowing is scoped to binary sections precisely so it costs nothing on the path that matters: the
+    // blob pair moves on every rebase, and keeping it there would re-break the whole escape.
+    expect(normalizeContributionFingerprint(CLEARED)).toBe(normalizeContributionFingerprint(REBASED));
+    const a = ['diff --git a/f b/f', 'index 1111111..2222222 100644', '@@ -1 +1 @@', '-a', '+b'].join('\n');
+    const b = ['diff --git a/f b/f', 'index 3333333..4444444 100644', '@@ -1 +1 @@', '-a', '+b'].join('\n');
+    expect(normalizeDiffFingerprint(a)).toBe(normalizeDiffFingerprint(b));
+    expect(normalizeContributionFingerprint(a)).toBe(normalizeContributionFingerprint(b));
+  });
+
+  it('MAJOR 3 — a binary swap riding in beside a rebase-shaped text move is refused as ONE push', () => {
+    // The reviewer's combined attack: the text half looks exactly like the drain's own rebase, so the escape
+    // would honour it and carry the unreviewed binary in with it.
+    const before = [CLEARED, '', binary('6a2ff36')].join('\n');
+    const after = [REBASED, '', binary('0a03a2a')].join('\n');
+    expect(acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb',
+      acceptedContribution: before, headContribution: after,
+    }).covers).toBe(false);
+  });
+
   it('it is checked LAST — the strict diff test still owns every verdict it can reach', () => {
     // Same contribution, and the strict digests ALSO match: the strict escape answers, with its own reason.
     const r = acceptanceCoversHead({
