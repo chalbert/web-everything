@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import {
   JURY_EVENT_TYPES,
   JUROR_STATUSES,
+  validateJuryEvent,
   VERDICTS,
   VERDICT_STRICTNESS,
 } from '../jury-core.mjs';
@@ -348,5 +349,90 @@ describe('fs append/read round-trip (temp CONVEYOR_JURY_DIR)', () => {
     const all = foldAllSubjects();
     expect(all).toHaveLength(2);
     expect(all.every((s) => s.ledger.rosterKnown)).toBe(true);
+  });
+});
+
+describe('#2864 — the ledger records WHICH TREE the jury was seated over', () => {
+  // Without this the ledger carries no commit identity, so a clean fold written at head A reads as `clear` at
+  // head B. Enforced (#2572), that clears a diff no juror saw — and `reviewed-sha` (#2409) cannot catch it,
+  // because that marker is stamped at WRITE time and so certifies the unreviewed tree.
+  const juror = { id: 'j1', lens: 'correctness', charter: 'c' };
+  const roster = (extra = {}) => validateJuryEvent({ type: JURY_EVENT_TYPES.ROSTER_PICKED, round: 0, jurors: [juror], ...extra });
+
+  it('carries the reviewed sha onto the fold', () => {
+    const { valid, event } = roster({ reviewedSha: 'a1b2c3d4e5f6' });
+    expect(valid).toBe(true);
+    expect(foldJuryLedger([event]).reviewedSha).toBe('a1b2c3d4e5f6');
+  });
+
+  it('is OPTIONAL — every event already on disk predates the field and must still fold', () => {
+    // Rejecting them would erase the log rather than age it.
+    const { valid, event } = roster();
+    expect(valid).toBe(true);
+    expect(foldJuryLedger([event]).reviewedSha).toBe(null);
+    expect(foldJuryLedger([]).reviewedSha).toBe(null);
+  });
+
+  it('REJECTS a malformed sha rather than recording an unusable one', () => {
+    for (const bad of ['not-a-sha', 'abc', '', 'abc123g', 123, {}, 'a'.repeat(65)]) {
+      const r = validateJuryEvent({ type: JURY_EVENT_TYPES.ROSTER_PICKED, round: 0, jurors: [juror], reviewedSha: bad });
+      expect(r.valid, `reviewedSha=${JSON.stringify(bad)} must be rejected`).toBe(false);
+    }
+  });
+
+  it('ACCEPTS an uppercase sha and normalizes it to lowercase', () => {
+    // PR #1034 review, finding 3: the first cut was case-SENSITIVE while every other sha check in the repo is not
+    // (`sameCommit`, the lane manifest, merge-ai-prs), and the #2409 marker this field pairs with lowercases. Since
+    // `rosterPickedEvent` THROWS on a schema failure, a stricter shape here meant an uppercase sha took down the
+    // whole roster event — an optional field killing a mandatory one.
+    const { valid, event } = roster({ reviewedSha: 'A1B2C3D4E5F6' });
+    expect(valid).toBe(true);
+    expect(event.reviewedSha).toBe('a1b2c3d4e5f6');
+    // Normalized on the way IN, so both folds compare a single spelling and never miss a match on case alone.
+    expect(foldJuryLedger([event]).reviewedSha).toBe('a1b2c3d4e5f6');
+  });
+
+  it('the LATEST roster is authoritative about the tree, as it is about the seats', () => {
+    // A re-pick (a grown jury, #2640) re-seats over the current head; the fold must not report the older tree.
+    const a = roster({ reviewedSha: 'aaaaaaa' }).event;
+    const b = validateJuryEvent({ type: JURY_EVENT_TYPES.ROSTER_PICKED, round: 1, jurors: [juror], reviewedSha: 'bbbbbbb' }).event;
+    expect(foldJuryLedger([a, b]).reviewedSha).toBe('bbbbbbb');
+  });
+
+  it('a later roster WITHOUT a sha clears it — never leaves a stale one standing', () => {
+    // Fail-closed direction: an unknown tree must read as unknown, not as the previous known one.
+    const a = roster({ reviewedSha: 'aaaaaaa' }).event;
+    const b = validateJuryEvent({ type: JURY_EVENT_TYPES.ROSTER_PICKED, round: 1, jurors: [juror] }).event;
+    expect(foldJuryLedger([a, b]).reviewedSha).toBe(null);
+  });
+});
+
+describe('#2864 — buildReviewLedgerEvents is the REAL writer, so the sha must ride it', () => {
+  // PR #1034 review, finding 1: the field was write-dead. It existed on `rosterPickedEvent`, but the path the
+  // review pipeline actually uses is this one (the `jury-ledger record` CLI and review-parked-prs.mjs both come
+  // through here). Without it every ledger the repo writes folds to null — and a null from a CURRENT writer is
+  // indistinguishable from a legacy pre-field null, so any freshness gate built on it could only ever fail
+  // closed, on 100% of PRs. The field being valid on the event is not the same claim as the field being written.
+  const args = {
+    activeLenses: ['correctness', 'security'],
+    lensVerdicts: { correctness: 'accept', security: 'accept' },
+    rounds: 1,
+  };
+
+  it('emits the sha on the roster-picked event it builds', () => {
+    const events = buildReviewLedgerEvents({ ...args, reviewedSha: 'deadbee' });
+    expect(events[0].type).toBe(JURY_EVENT_TYPES.ROSTER_PICKED);
+    expect(events[0].reviewedSha).toBe('deadbee');
+  });
+
+  it('carries end-to-end from the writer through the fold', () => {
+    const events = buildReviewLedgerEvents({ ...args, reviewedSha: 'deadbee' });
+    expect(foldJuryLedger(events).reviewedSha).toBe('deadbee');
+  });
+
+  it('omits it when the caller has none — a design or decision subject has no commit', () => {
+    const events = buildReviewLedgerEvents(args);
+    expect(events[0]).not.toHaveProperty('reviewedSha');
+    expect(foldJuryLedger(events).reviewedSha).toBe(null);
   });
 });

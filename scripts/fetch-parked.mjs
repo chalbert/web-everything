@@ -194,6 +194,11 @@ export function assembleParked({ view, diff, requiredNames, diffBasis } = {}) {
     labels,
     reviewClass: reviewClassFromLabels(labels),
     headRefName: String(v.headRefName || ''),
+    // #2864 — the head commit this bundle's diff was read at, so the jury seated over it can RECORD which tree it
+    // judged (`reviewedSha` on the roster-picked ledger event). Without it the ledger has no commit identity and a
+    // clean fold written at head A reads as clean at head B. `''` when gh did not report one — an unknown tree must
+    // read as unknown, never as some other commit.
+    headSha: String(v.headRefOid || ''),
     mergeable: String(v.mergeable || ''),
   };
 }
