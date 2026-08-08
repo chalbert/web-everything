@@ -126,12 +126,23 @@ Everything §1 surfaced that isn't already written down becomes **one validated 
 the whole step. No gate, no red team, no dedup, no lane, no PR.
 
 ```bash
+# ONE slug for this whole close, exported once — every drop below inherits it.
+export LEARNINGS_SESSION=close-$(date +%Y%m%d-%H%M%S)
+
 node scripts/conveyor/learnings-drop.mjs \
   --kind=friction|missing-convention|doc-gap|skill-gap|improvement \
   --area="<coarse label — the subsystem or activity, ≤60 chars>" \
   --summary="<the observation, one sentence, ≤240 chars>" \
-  --suggestion="<what you'd do about it, ≤400 chars>"
+  --suggestion="<what you'd do about it, ≤400 chars>" \
+  --session="$LEARNINGS_SESSION"
 ```
+
+**The session slug is not optional, and it is the whole ranking signal.** The pool ranks by *distinct
+sessions*, so entries with no slug of their own would all land in one file and read as one session forever —
+`sessions` pinned at 1, and `--min-sessions=2` (the recurrence floor `/harvest` advertises) filtering out
+every one of them. `learnings-drop.mjs` **refuses** an append it cannot attribute to a session, so a dropped
+flag fails loudly instead of silently flattening the pool. Give this close one slug and reuse it for every
+entry — a *new* slug per entry would be just as wrong in the other direction, faking recurrence.
 
 **Writing the entry well is the close's actual skill.** The harvest can only judge what you recorded, so:
 
@@ -154,9 +165,12 @@ high-entropy tokens, over-long fields). A rejected entry is never written. If th
 multi-tenant inbox (#2610), where minimal-by-construction is a hard requirement.
 
 **The pool is untracked, machine-local, and cumulative.** Entries land in
-`.conveyor/learnings/<session>.jsonl` (gitignored), one file per session so concurrent agents never
-contend. Nothing consumes them at close — only `/harvest` does, after it has acted. A cheap in-the-moment
-append cannot afford a lane→PR; the durable artifacts the harvest lands are what reaches git.
+`<pool>/<session>.jsonl` — one file per session so concurrent agents never contend — where `<pool>` is
+`$LEARNINGS_POOL`, else `~/.claude/conveyor/learnings`. It sits **outside every working copy on purpose**:
+one pool per machine, so a subagent that emitted from a lane clone and a close that emits from the primary
+checkout reach the same pool. Nothing consumes them at close — only `/harvest` does, after it has acted. A
+cheap in-the-moment append cannot afford a lane→PR; the durable artifacts the harvest lands are what
+reaches git.
 
 **Any agent can emit, at any time.** A subagent that hits friction mid-task should drop an entry *then*,
 not hope its parent session closes cleanly. The close is simply the last emitter, not a privileged one.

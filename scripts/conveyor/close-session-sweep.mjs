@@ -83,7 +83,15 @@ function parseArgs(argv) {
 function main(argv) {
   const f = parseArgs(argv);
   const threshold = f.threshold != null ? Number(f.threshold) : DEFAULT_THRESHOLD;
-  const path = resolveDropboxPath({ file: f.file, session: f.session });
+  // `resolveDropboxPath` now REFUSES a missing session slug (there is no shared default file any more), so
+  // report that as a usage error rather than an uncaught throw.
+  let path;
+  try {
+    path = resolveDropboxPath({ file: f.file, session: f.session });
+  } catch (e) {
+    console.error(`close-session-sweep: ${e.message}`);
+    process.exit(2);
+  }
   let result;
   try {
     result = sweepFile(path, { threshold });

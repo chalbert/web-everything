@@ -16,8 +16,10 @@
  *      covered cluster?", "narrow/rare → leave on-disk") that ONE session structurally cannot answer. A pool
  *      answers them with a count — `count` (entries) and `sessions` (distinct sessions) are that evidence.
  *
- * THE POOL. `<repo>/.conveyor/learnings/*.jsonl` — one file per session (so concurrent agents never contend
- * on one file), all read together. UNTRACKED and machine-local by design: an in-the-moment append cannot
+ * THE POOL. `$LEARNINGS_POOL || ~/.claude/conveyor/learnings` — `*.jsonl`, one file per session (so
+ * concurrent agents never contend on one file), all read together. The directory is MACHINE-fixed, NOT
+ * repo-anchored: every clone on the machine (primary checkout, every lane clone) emits into and harvests
+ * from the same pool. UNTRACKED and machine-local by design: an in-the-moment append cannot
  * afford a lane→PR, and the durable ARTIFACTS are what the harvest lands. When the multi-tenant transport of
  * #2610 exists it ships pool entries to the central inbox; the emit seam does not change. Entries are NOT
  * consumed by a close — only `--archive` (after a harvest actually acted) moves them to `harvested/<stamp>/`.
@@ -29,13 +31,17 @@
  * Usage:
  *   node scripts/conveyor/learnings-harvest.mjs [--dir=<pool>] [--threshold=0.6] [--min-sessions=1] [--json]
  *   node scripts/conveyor/learnings-harvest.mjs --status [--json]     # depth/age only — what a close reports
- *   node scripts/conveyor/learnings-harvest.mjs --archive --stamp=<iso>   # consume, AFTER acting
+ *   node scripts/conveyor/learnings-harvest.mjs --archive --stamp=<iso> --files=<a.jsonl,b.jsonl>
+ *   node scripts/conveyor/learnings-harvest.mjs --archive --stamp=<iso> --before=<iso>
+ *
+ * `--archive` consumes, AFTER acting, and requires an explicit bound (`--files=` — the `files[]` the harvest
+ * itself read — or a `--before=` mtime cutoff) so it cannot swallow entries appended mid-harvest.
  */
-import { existsSync, readdirSync, readFileSync, mkdirSync, renameSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { basename, isAbsolute, join } from 'node:path';
-import { validateEntry } from './learnings-drop.mjs';
+import { basename, dirname, isAbsolute, join } from 'node:path';
+import { validateEntry, poolDir as machinePoolDir } from './learnings-drop.mjs';
 import { dedup, DEFAULT_THRESHOLD } from './learnings-dedup.mjs';
 
 export const ARCHIVE_DIR = 'harvested';
@@ -50,14 +56,18 @@ function repoRoot() {
 }
 
 /**
- * resolvePoolDir({ dir, env, root }) → absolute path of the POOL DIRECTORY.
- * Precedence: explicit --dir → $LEARNINGS_POOL → <repo>/.conveyor/learnings. Pure given its inputs.
+ * resolvePoolDir({ dir, env, home }) → absolute path of the POOL DIRECTORY.
+ * Precedence: explicit --dir → the MACHINE-fixed pool (`poolDir` in learnings-drop.mjs, i.e.
+ * `$LEARNINGS_POOL || ~/.claude/conveyor/learnings`). Pure given its inputs.
  * Deliberately the DIRECTORY, not one file: the drop seam is per-session, the harvest seam is per-pool.
+ *
+ * IT SHELLS THE EMIT SEAM'S RESOLVER ON PURPOSE (review fix, PR #1068 blocker 1). Both ends used to derive
+ * the pool from the CWD's git root independently, so an agent emitting inside a lane clone and a harvest
+ * run from the primary checkout read two different pools and neither errored. One resolver, one pool.
  */
-export function resolvePoolDir({ dir, env = process.env, root } = {}) {
+export function resolvePoolDir({ dir, env = process.env, root, home } = {}) {
   if (dir) return isAbsolute(dir) ? dir : join(root || repoRoot(), dir);
-  if (env && env.LEARNINGS_POOL) return env.LEARNINGS_POOL;
-  return join(root || repoRoot(), '.conveyor', 'learnings');
+  return machinePoolDir({ env, home });
 }
 
 /**
@@ -77,8 +87,9 @@ export function poolFiles(dir) {
  * readPool(files, { read }) → { entries, stats }. Reads each pool file LINE-TOLERANTLY: one malformed line
  * (a half-written append, a crashed agent) must never cost the rest of the pool, so it is counted in
  * `stats.malformed` and skipped rather than thrown. Each surviving entry is re-validated through the SAME
- * scrub the append used, and tagged with its `session` (the file's basename) + `ts` for the age/recurrence
- * stats. `read` is injectable for tests.
+ * scrub the append used, and tagged with its `session` (the file's basename). `ts` arrives NORMALIZED out
+ * of `validateEntry` (strict ISO or null) — this reader deliberately performs NO `raw.*` read, so no field
+ * can route around the privacy boundary on its way to `stats.oldest`. `read` is injectable for tests.
  */
 export function readPool(files, { read = (p) => readFileSync(p, 'utf8') } = {}) {
   const entries = [];
@@ -97,7 +108,7 @@ export function readPool(files, { read = (p) => readFileSync(p, 'utf8') } = {}) 
       try { raw = JSON.parse(t); } catch { malformed++; continue; }
       const { ok, clean } = validateEntry(raw);
       if (!ok) { rejected++; continue; }
-      entries.push({ ...clean, session, ts: typeof raw?.ts === 'string' ? raw.ts : null });
+      entries.push({ ...clean, session });
     }
   }
   return { entries, stats: { files: files.length, received, valid: entries.length, malformed, rejected } };
@@ -172,14 +183,52 @@ export function poolStatus({ dir, now, env, root } = {}) {
 }
 
 /**
- * archivePool({ dir, stamp }) → { moved, to }. Moves every current pool file into `harvested/<stamp>/`, so a
- * re-run never re-processes what was already acted on. Called ONLY after the harvest actually routed its
- * survivors — archiving is the acknowledgement, never a side effect of reading.
+ * archivePool({ dir, stamp, files, before }) → { moved, to, missing }. Moves the BOUNDED set of pool files
+ * into `harvested/<stamp>/`, so a re-run never re-processes what was already acted on. Called ONLY after the
+ * harvest actually routed its survivors — archiving is the acknowledgement, never a side effect of reading.
+ *
+ * THE BOUND IS MANDATORY (review fix, PR #1068 blocker 5a). This used to call `poolFiles()` fresh at archive
+ * time, i.e. archive whatever is in the pool NOW rather than what the harvest actually READ. The harvest's
+ * red-team → route → lane → PR window is minutes long, and the red-team subagents themselves emit into the
+ * pool during it, so a bare re-enumeration moved unadjudicated entries into `harvested/` where no future
+ * harvest can ever see them. Callers must pass either the exact `files[]` `harvestPool` returned or a
+ * `before` mtime cutoff; a request for a file that has since vanished is reported in `missing`, not fatal.
+ *
+ * A MISSING POOL DIR IS AN ERROR HERE (review fix, PR #1068 blocker 5b), unlike in `poolFiles`. For a READER
+ * "no pool dir" is the correct empty case; for a MUTATOR it means the caller resolved the wrong pool, and
+ * printing "nothing to archive" + exit 0 would leave the real pool undrained — the next harvest then
+ * re-routes duplicate items and memory entries.
  */
-export function archivePool({ dir, stamp, env, root } = {}) {
-  const poolDir = resolvePoolDir({ dir, env, root });
-  const files = poolFiles(poolDir);
-  if (!files.length) return { moved: [], to: null };
+export function archivePool({ dir, stamp, files: requested, before, env, root, home } = {}) {
+  const poolDir = resolvePoolDir({ dir, env, root, home });
+  if (!existsSync(poolDir)) {
+    const err = new Error(`pool directory does not exist (${poolDir}) — refusing to archive, the real pool would be left undrained`);
+    err.code = 'ENOPOOL';
+    throw err;
+  }
+  const missing = [];
+  let files;
+  if (Array.isArray(requested)) {
+    for (const f of requested) {
+      const abs = isAbsolute(f) ? f : join(poolDir, f);
+      if (dirname(abs) === poolDir && abs.endsWith('.jsonl') && existsSync(abs)) continue;
+      missing.push(abs);
+    }
+    files = requested
+      .map((f) => (isAbsolute(f) ? f : join(poolDir, f)))
+      .filter((f) => !missing.includes(f));
+  } else if (before != null) {
+    const cutoff = new Date(before).getTime();
+    if (!Number.isFinite(cutoff)) throw new Error(`--before must be a parseable timestamp (got ${JSON.stringify(before)})`);
+    files = poolFiles(poolDir).filter((f) => statSync(f).mtimeMs <= cutoff);
+  } else {
+    throw new Error(
+      '--archive needs an explicit bound: pass --files=<the files[] the harvest read> or --before=<iso>. ' +
+      'A bare re-enumeration would consume entries appended AFTER the harvest read them (including the ' +
+      "red-team subagents' own drops), and archived entries are unrecoverable by any future harvest.",
+    );
+  }
+  if (!files.length) return { moved: [], to: null, missing };
   const label = String(stamp || 'harvest').replace(/[^A-Za-z0-9._-]/g, '-');
   const to = join(poolDir, ARCHIVE_DIR, label);
   mkdirSync(to, { recursive: true });
@@ -192,7 +241,7 @@ export function archivePool({ dir, stamp, env, root } = {}) {
     renameSync(f, dest);
     moved.push(dest);
   }
-  return { moved, to };
+  return { moved, to, missing };
 }
 
 // ── thin CLI ──────────────────────────────────────────────────────────────────────────────────────
@@ -212,9 +261,23 @@ function main(argv) {
   const dir = f.dir;
 
   if (f.archive) {
-    const result = archivePool({ dir, stamp: f.stamp });
+    // `--files=` is the primary form: the exact `files[]` the harvest read (step 1's --json). `--before=`
+    // is the mtime-cutoff alternative. One of the two is required — see archivePool.
+    const files = typeof f.files === 'string'
+      ? f.files.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    let result;
+    try {
+      result = archivePool({ dir, stamp: f.stamp, files, before: f.before });
+    } catch (e) {
+      console.error(`learnings-harvest: ${e.message}`);
+      process.exit(2);
+    }
     if (f.json) console.log(JSON.stringify(result, null, 2));
-    else console.log(result.moved.length ? `archived ${result.moved.length} pool file(s) → ${result.to}` : 'nothing to archive.');
+    else {
+      console.log(result.moved.length ? `archived ${result.moved.length} pool file(s) → ${result.to}` : 'nothing to archive.');
+      if (result.missing.length) console.log(`  (${result.missing.length} requested file(s) no longer in the pool — skipped)`);
+    }
     process.exit(0);
   }
 

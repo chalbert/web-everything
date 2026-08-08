@@ -10,7 +10,8 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  KINDS, ALLOWED_KEYS, FIELD_CAPS, scrubReasons, isHighEntropyToken, validateEntry, appendEntry, resolveDropboxPath,
+  KINDS, ALLOWED_KEYS, FIELD_CAPS, scrubReasons, isHighEntropyToken, validateEntry, appendEntry,
+  resolveDropboxPath, poolDir, normalizeTs,
 } from '../conveyor/learnings-drop.mjs';
 
 const good = {
@@ -25,10 +26,31 @@ describe('validateEntry — happy path', () => {
     const r = validateEntry(good);
     expect(r.ok).toBe(true);
     expect(r.errors).toEqual([]);
-    expect(r.clean).toEqual(good);
+    expect(r.clean).toEqual({ ...good, ts: null });
   });
   it('accepts every declared kind', () => {
     for (const kind of KINDS) expect(validateEntry({ ...good, kind }).ok).toBe(true);
+  });
+});
+
+describe('validateEntry — `ts` goes through the boundary too (no raw re-attach downstream)', () => {
+  it('normalizes a strict ISO stamp through to `clean`', () => {
+    expect(validateEntry({ ...good, ts: '2026-08-01T00:00:00.000Z' }).clean.ts).toBe('2026-08-01T00:00:00.000Z');
+    expect(validateEntry({ ...good, ts: '2026-08-01T00:00:00Z' }).clean.ts).toBe('2026-08-01T00:00:00Z');
+  });
+  it('nulls ANY non-ISO `ts` rather than passing the payload through — one bad stamp costs only its own entry', () => {
+    // The hostile case: a hand-written line whose `ts` is a payload. It used to reach `stats.oldest` intact
+    // (sorted first because it starts below '2') and be printed verbatim by `--json`.
+    expect(validateEntry({ ...good, ts: '!!! <script>alert(1)</script>' }).clean.ts).toBeNull();
+    // The everyday case: a half-written or hand-edited stamp.
+    expect(validateEntry({ ...good, ts: '2026-08-01' }).clean.ts).toBeNull();
+    expect(validateEntry({ ...good, ts: 'Aug 1 2026' }).clean.ts).toBeNull();
+    expect(validateEntry({ ...good, ts: 1754006400000 }).clean.ts).toBeNull();
+    // ISO SHAPE but not a real instant — shape alone is not enough.
+    expect(validateEntry({ ...good, ts: '2026-13-45T99:99:99Z' }).clean.ts).toBeNull();
+  });
+  it('normalizeTs is total — never throws on any input', () => {
+    for (const v of [undefined, null, 0, {}, [], 'x']) expect(normalizeTs(v)).toBeNull();
   });
 });
 
@@ -218,10 +240,39 @@ describe('appendEntry — write round-trip', () => {
 });
 
 describe('resolveDropboxPath — precedence', () => {
-  it('prefers --file, then env, then the gitignored session default', () => {
+  it('prefers --file, then env, then the session file inside the machine pool', () => {
     expect(resolveDropboxPath({ file: '/x/y.jsonl' })).toBe('/x/y.jsonl');
     expect(resolveDropboxPath({ env: { LEARNINGS_DROPBOX: '/e/box.jsonl' } })).toBe('/e/box.jsonl');
-    const p = resolveDropboxPath({ session: 'sess/weird id', env: {}, root: '/repo' });
-    expect(p).toBe('/repo/.conveyor/learnings/sess-weird-id.jsonl');
+    const p = resolveDropboxPath({ session: 'sess/weird id', env: {}, home: '/home/u' });
+    expect(p).toBe('/home/u/.claude/conveyor/learnings/sess-weird-id.jsonl');
+  });
+});
+
+describe('poolDir — ONE pool per machine, not one per working copy', () => {
+  it('is home-anchored, so a lane clone and the primary checkout resolve to the SAME pool', () => {
+    // The regression this pins: the old resolver used `git rev-parse --show-toplevel`, so a delivery agent
+    // in a lane clone appended somewhere the primary checkout's harvest could never see.
+    expect(poolDir({ env: {}, home: '/home/u' })).toBe('/home/u/.claude/conveyor/learnings');
+    expect(poolDir({ env: { HOME: '/home/u' } })).toBe('/home/u/.claude/conveyor/learnings');
+  });
+  it('$LEARNINGS_POOL is the single override', () => {
+    expect(poolDir({ env: { LEARNINGS_POOL: '/env/pool' }, home: '/home/u' })).toBe('/env/pool');
+  });
+});
+
+describe('the session slug is REQUIRED — a shared default file would collapse every session into one', () => {
+  it('refuses to resolve a drop-box path with no slug', () => {
+    expect(() => resolveDropboxPath({ env: {}, home: '/home/u' })).toThrow(/--session=<slug> is required/);
+    expect(() => resolveDropboxPath({ session: '   ', env: {}, home: '/home/u' })).toThrow(/required/);
+  });
+  it('accepts $LEARNINGS_SESSION as the slug source', () => {
+    expect(resolveDropboxPath({ env: { LEARNINGS_SESSION: 'conveyor-2614' }, home: '/home/u' }))
+      .toBe('/home/u/.claude/conveyor/learnings/conveyor-2614.jsonl');
+  });
+  it('an explicit --file still needs no slug (the caller named the target)', () => {
+    expect(resolveDropboxPath({ file: '/x/y.jsonl', env: {} })).toBe('/x/y.jsonl');
+  });
+  it('appendEntry surfaces the refusal rather than writing to a shared default', () => {
+    expect(() => appendEntry(good, { env: {}, home: '/home/u' })).toThrow(/--session=<slug> is required/);
   });
 });

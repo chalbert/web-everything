@@ -9,12 +9,13 @@
  *   reading.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   resolvePoolDir, poolFiles, readPool, ageStats, harvest, harvestPool, poolStatus, archivePool, ARCHIVE_DIR,
 } from '../conveyor/learnings-harvest.mjs';
+import { poolDir as dropPoolDir, resolveDropboxPath } from '../conveyor/learnings-drop.mjs';
 
 const e = (kind, area, summary, suggestion = 'fix it', ts = '2026-08-01T00:00:00.000Z') =>
   JSON.stringify({ kind, area, summary, suggestion, ts });
@@ -42,12 +43,22 @@ describe('pool discovery', () => {
     expect(r.stats.received).toBe(0);
   });
 
-  it('resolvePoolDir honours --dir, then $LEARNINGS_POOL, then the repo default', () => {
+  it('resolvePoolDir honours --dir, then $LEARNINGS_POOL, then the MACHINE-fixed home pool', () => {
     expect(resolvePoolDir({ dir: '/abs/pool' })).toBe('/abs/pool');
     expect(resolvePoolDir({ env: { LEARNINGS_POOL: '/env/pool' } })).toBe('/env/pool');
-    expect(resolvePoolDir({ env: {}, root: '/r' })).toBe('/r/.conveyor/learnings');
+    expect(resolvePoolDir({ env: {}, home: '/home/u' })).toBe('/home/u/.claude/conveyor/learnings');
     // an explicit --dir wins over the env var
     expect(resolvePoolDir({ dir: '/abs/pool', env: { LEARNINGS_POOL: '/env/pool' } })).toBe('/abs/pool');
+  });
+
+  it('the pool the HARVEST reads is the same one the EMIT seam writes — not the cwd repo root', () => {
+    // The blocker this pins (PR #1068 #1): both ends used to derive the dir from `git rev-parse
+    // --show-toplevel`, so an agent emitting in a lane clone and a harvest run from the primary checkout
+    // silently used two different pools. One resolver ⇒ they cannot drift apart again.
+    const env = {}; const home = '/home/u';
+    expect(resolvePoolDir({ env, home })).toBe(dropPoolDir({ env, home }));
+    expect(resolveDropboxPath({ session: 's1', env, home }))
+      .toBe(join(resolvePoolDir({ env, home }), 's1.jsonl'));
   });
 });
 
@@ -74,6 +85,27 @@ describe('readPool — line tolerance + re-scrub + session tagging', () => {
     const { entries, stats } = readPool(poolFiles(dir));
     expect(stats.rejected).toBe(1);
     expect(entries).toHaveLength(0);
+  });
+
+  it('`ts` goes through the validator too — a hostile stamp never reaches stats.oldest', () => {
+    // Blocker #4: `ts` used to be re-attached RAW off the pool line, so the one field that skipped the
+    // privacy boundary was also the one `--json` is guaranteed to print (stats.oldest sorts stamps as
+    // strings, and a payload starting below '2' sorts first).
+    writeFileSync(join(dir, 'sess-a.jsonl'), JSON.stringify({
+      kind: 'friction', area: 'gating', summary: 'the gate reruns everything every time',
+      suggestion: 'scope it', ts: '!!! /Users/someone/secret <script>',
+    }) + '\n');
+    const { entries, stats } = readPool(poolFiles(dir));
+    expect(stats.rejected).toBe(0);          // the ENTRY is fine — only its stamp is unusable
+    expect(entries[0].ts).toBeNull();
+    expect(ageStats(entries).oldest).toBeNull();
+  });
+
+  it('one non-ISO stamp costs only its own entry, not the whole pool age signal', () => {
+    session('sess-a', JSON.stringify({ kind: 'friction', area: 'gating', summary: 'the gate reruns everything every time', suggestion: 'scope it', ts: '2026-08-01' }));
+    session('sess-b', e('doc-gap', 'docs', 'the doc omits a rule about budgets'));
+    const { entries } = readPool(poolFiles(dir));
+    expect(ageStats(entries, { now: '2026-08-06T00:00:00.000Z' }).ageDays).toBe(5);
   });
 
   it('an unreadable pool file is counted, not thrown', () => {
@@ -147,29 +179,72 @@ describe('ageStats / poolStatus — depth and age are DATA, not judgment', () =>
   });
 });
 
-describe('archivePool — an explicit acknowledgement', () => {
-  it('moves consumed pool files under harvested/<stamp>/ and leaves the pool empty', () => {
+describe('archivePool — an explicit acknowledgement, bounded to what was actually read', () => {
+  it('moves the files it was given under harvested/<stamp>/ and leaves the pool empty', () => {
     session('sess-a', e('friction', 'gating', 'the gate reruns everything every time'));
     session('sess-b', e('doc-gap', 'docs', 'the doc omits a rule about budgets'));
-    const { moved, to } = archivePool({ dir, stamp: '2026-08-06' });
+    const { files } = harvestPool({ dir });
+    const { moved, to } = archivePool({ dir, stamp: '2026-08-06', files });
     expect(moved).toHaveLength(2);
     expect(to).toBe(join(dir, ARCHIVE_DIR, '2026-08-06'));
     expect(poolFiles(dir)).toEqual([]);
     expect(readdirSync(to).sort()).toEqual(['sess-a.jsonl', 'sess-b.jsonl']);
   });
 
+  it('NEVER consumes an entry appended after the harvest read the pool', () => {
+    // The blocker this pins (PR #1068 #5a): the red-team → route → lane → PR window is minutes long and the
+    // red-team subagents themselves emit into the pool. Re-enumerating at archive time swallowed those
+    // unadjudicated drops into harvested/, where no future harvest can ever see them again.
+    session('sess-a', e('friction', 'gating', 'the gate reruns everything every time'));
+    const { files } = harvestPool({ dir });
+    session('sess-late', e('improvement', 'naming', 'a drop that landed during the red team window'));
+    const { moved } = archivePool({ dir, stamp: '2026-08-06', files });
+    expect(moved).toHaveLength(1);
+    expect(poolFiles(dir).map((p) => p.split('/').pop())).toEqual(['sess-late.jsonl']);
+  });
+
+  it('REFUSES an unbounded archive rather than re-enumerating the pool', () => {
+    session('sess-a', e('friction', 'gating', 'the gate reruns everything every time'));
+    expect(() => archivePool({ dir, stamp: '2026-08-06' })).toThrow(/needs an explicit bound/);
+    expect(poolFiles(dir)).toHaveLength(1);   // nothing consumed by the refusal
+  });
+
+  it('accepts an mtime cutoff as the bound', () => {
+    session('sess-old', e('friction', 'gating', 'the gate reruns everything every time'));
+    session('sess-new', e('improvement', 'naming', 'a drop that landed during the red team window'));
+    const cutoff = Date.now();
+    utimesSync(join(dir, 'sess-old.jsonl'), new Date(cutoff - 60_000), new Date(cutoff - 60_000));
+    utimesSync(join(dir, 'sess-new.jsonl'), new Date(cutoff + 60_000), new Date(cutoff + 60_000));
+    const { moved } = archivePool({ dir, stamp: '2026-08-06', before: new Date(cutoff).toISOString() });
+    expect(moved).toHaveLength(1);
+    expect(poolFiles(dir).map((p) => p.split('/').pop())).toEqual(['sess-new.jsonl']);
+  });
+
   it('a second archive under the same stamp suffixes instead of clobbering', () => {
     session('sess-a', e('friction', 'gating', 'first round of observations here'));
-    archivePool({ dir, stamp: '2026-08-06' });
+    archivePool({ dir, stamp: '2026-08-06', files: poolFiles(dir) });
     session('sess-a', e('friction', 'gating', 'second round of observations here'));
-    const { moved } = archivePool({ dir, stamp: '2026-08-06' });
+    const { moved } = archivePool({ dir, stamp: '2026-08-06', files: poolFiles(dir) });
     expect(moved[0].endsWith('sess-a.1.jsonl')).toBe(true);
     expect(readdirSync(join(dir, ARCHIVE_DIR, '2026-08-06')).sort()).toEqual(['sess-a.1.jsonl', 'sess-a.jsonl']);
   });
 
-  it('archiving an empty pool is a no-op', () => {
-    expect(archivePool({ dir, stamp: 'x' })).toEqual({ moved: [], to: null });
+  it('archiving an empty file list is a no-op', () => {
+    expect(archivePool({ dir, stamp: 'x', files: [] })).toEqual({ moved: [], to: null, missing: [] });
     expect(existsSync(join(dir, ARCHIVE_DIR))).toBe(false);
+  });
+
+  it('a requested file that has since vanished is reported, not fatal', () => {
+    session('sess-a', e('friction', 'gating', 'the gate reruns everything every time'));
+    const r = archivePool({ dir, stamp: 'x', files: [join(dir, 'sess-a.jsonl'), join(dir, 'gone.jsonl')] });
+    expect(r.moved).toHaveLength(1);
+    expect(r.missing).toEqual([join(dir, 'gone.jsonl')]);
+  });
+
+  it('THROWS when the resolved pool dir does not exist — a mutator must not treat that as "nothing to do"', () => {
+    // Blocker #5b: inheriting the reader's "missing dir is the empty case" meant an archive run from the
+    // wrong cwd printed "nothing to archive", exited 0, and left the real pool undrained.
+    expect(() => archivePool({ dir: join(dir, 'nope'), stamp: 'x', files: [] })).toThrow(/does not exist/);
   });
 
   it('a harvest read alone never archives — only an explicit archive does', () => {

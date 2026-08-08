@@ -26,16 +26,22 @@
  *        --summary="lane gate re-runs the full suite even for a docs-only diff" \
  *        --area="lane gating / check:standards" \
  *        --suggestion="scope the lane gate to touched file-families" \
- *        [--session=<slug>] [--file=<path>] [--json]
+ *        --session=<slug> [--file=<path>] [--json]
  *   echo '{"kind":"doc-gap","summary":"…","area":"…","suggestion":"…"}' \
- *        | node scripts/conveyor/learnings-drop.mjs --stdin [--session=<slug>]
+ *        | node scripts/conveyor/learnings-drop.mjs --stdin --session=<slug>
+ *
+ * `--session` is REQUIRED (unless an explicit --file / $LEARNINGS_DROPBOX targets a file): distinct-session
+ * COUNT is the harvest's ranking signal, so a shared default file would silently collapse every session
+ * into one.
  *
  * The drop-box file is TRANSIENT session-meta (like claims.json) — it is NOT committed; the sweep consumes
- * it at close. Path resolves to `--file`, else $LEARNINGS_DROPBOX, else
- * `<repo>/.conveyor/learnings/<session||'session'>.jsonl` (gitignored).
+ * it at close. Path resolves to `--file`, else $LEARNINGS_DROPBOX, else `<pool>/<session>.jsonl` where
+ * `<pool>` is the MACHINE-fixed `$LEARNINGS_POOL || ~/.claude/conveyor/learnings` — deliberately outside any
+ * working copy, so a lane clone and the primary checkout append to the SAME pool (see `poolDir`).
  */
 import { existsSync, mkdirSync, appendFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { homedir } from 'node:os';
 import { dirname, join, isAbsolute } from 'node:path';
 
 // ── schema ────────────────────────────────────────────────────────────────────────────────────────
@@ -182,9 +188,32 @@ export function scrubReasons(value) {
   return [...new Set(reasons)];
 }
 
+// STRICT ISO-8601 UTC instant — the ONLY shape `ts` may carry. Deliberately narrow (not `Date.parse`,
+// which accepts almost anything): the stamp is machine-written, and a narrow shape is what makes
+// lexicographic ordering equal chronological ordering for every consumer that sorts stamps as strings.
+const ISO_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+
+/**
+ * normalizeTs(value) → the value when it is a strict ISO-8601 UTC stamp, else null. TOTAL: never throws,
+ * never passes anything through un-checked. `ts` is the one envelope field the validator emits, so it must
+ * go through the same boundary as the content fields — see validateEntry.
+ */
+export function normalizeTs(value) {
+  if (typeof value !== 'string' || !ISO_TS.test(value)) return null;
+  return Number.isFinite(Date.parse(value)) ? value : null;
+}
+
 /**
  * validateEntry(entry) → { ok, errors, clean }. Deterministic. `clean` is the normalized allow-listed
- * record (the exact object that would be appended, WITHOUT the `ts` stamp) when ok.
+ * record (the exact object that would be appended) when ok, INCLUDING a normalized `ts` (null when absent
+ * or malformed); `appendEntry` overwrites it with its own stamp.
+ *
+ * `ts` IS PART OF THE BOUNDARY (review fix, PR #1068 blocker 4). It used to be omitted from `clean`, so
+ * every reader had to re-attach it raw off the pool line — making the one field that skipped the scrub
+ * also the one guaranteed to be rendered (`--json` prints `stats.oldest` verbatim). Normalizing it here
+ * makes the validator TOTAL over the record: no consumer needs a `raw.*` read, so none can reintroduce the
+ * bypass. It also fixes the everyday failure — one non-ISO stamp anywhere used to null the age signal for
+ * the whole pool; now it nulls only its own entry.
  */
 export function validateEntry(entry) {
   const errors = [];
@@ -219,6 +248,7 @@ export function validateEntry(entry) {
     summary: entry.summary.trim(),
     area: entry.area.trim(),
     suggestion: entry.suggestion.trim(),
+    ts: normalizeTs(entry.ts),
   };
   return { ok: true, errors: [], clean };
 }
@@ -233,15 +263,47 @@ function repoRoot() {
 }
 
 /**
- * resolveDropboxPath({ file, session, env }) → absolute path of the session drop-box JSONL.
- * Precedence: explicit --file → $LEARNINGS_DROPBOX → <repo>/.conveyor/learnings/<session>.jsonl.
- * Pure given its inputs (env defaults to process.env).
+ * poolDir({ env, home }) → the ONE learnings pool directory for this MACHINE. THE single source of truth
+ * for where the pool lives; every emitter and the harvest resolve through here.
+ *
+ * MACHINE-FIXED, NOT REPO-ANCHORED (review fix, PR #1068 blocker 1). It used to be
+ * `<git rev-parse --show-toplevel>/.conveyor/learnings`, which silently forked the pool per WORKING COPY:
+ * a delivery agent running in a lane clone appended to that clone's pool, and a harvest run from the
+ * primary checkout never saw it — ~84% of real entries were invisible, with nothing erroring. Collection
+ * is cumulative in TIME (nothing consumes but `--archive`), so it must be cumulative in SPACE too.
+ * Anchoring on the home directory makes every clone on the machine one pool.
+ *
+ * Precedence: `$LEARNINGS_POOL` (the single env override, for tests/relocation) → `~/.claude/conveyor/learnings`.
  */
-export function resolveDropboxPath({ file, session, env = process.env, root } = {}) {
+export function poolDir({ env = process.env, home } = {}) {
+  if (env && env.LEARNINGS_POOL) return env.LEARNINGS_POOL;
+  return join(home || env?.HOME || homedir(), '.claude', 'conveyor', 'learnings');
+}
+
+/**
+ * resolveDropboxPath({ file, session, env }) → absolute path of the session drop-box JSONL.
+ * Precedence: explicit --file → $LEARNINGS_DROPBOX → <pool>/<session>.jsonl.
+ * Pure given its inputs (env defaults to process.env).
+ *
+ * THE SLUG IS REQUIRED (review fix, PR #1068 blocker 2). It used to default to the literal `session`, so
+ * an emitter that forgot `--session` appended to one shared `session.jsonl` — every close in every session
+ * collapsing into ONE apparent session. That silently zeroes the whole point of the pool: `sessions` stays
+ * 1 forever, distinct-session ranking never fires, and `--min-sessions=2` filters out 100% of those
+ * entries. Refusing is the only way the flag cannot be dropped again by the next emitter.
+ */
+export function resolveDropboxPath({ file, session, env = process.env, root, home } = {}) {
   if (file) return isAbsolute(file) ? file : join(root || repoRoot(), file);
   if (env && env.LEARNINGS_DROPBOX) return env.LEARNINGS_DROPBOX;
-  const slug = (session || env?.LEARNINGS_SESSION || 'session').replace(/[^A-Za-z0-9._-]/g, '-');
-  return join(root || repoRoot(), '.conveyor', 'learnings', `${slug}.jsonl`);
+  const raw = String(session || env?.LEARNINGS_SESSION || '').trim();
+  if (!raw) {
+    throw new Error(
+      'learnings-drop: --session=<slug> is required — without a distinct per-session file the pool cannot ' +
+      'count DISTINCT sessions, which is the whole ranking signal (pass --session, set $LEARNINGS_SESSION, ' +
+      'or target an explicit --file)',
+    );
+  }
+  const slug = raw.replace(/[^A-Za-z0-9._-]/g, '-');
+  return join(poolDir({ env, home }), `${slug}.jsonl`);
 }
 
 /**
