@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 2
-status: active
+status: resolved
 dateOpened: "2026-08-08"
 dateStarted: "2026-08-08"
+dateResolved: "2026-08-08"
 scope: ["we:scripts/lib/review-policy.contract.json", "we:scripts/lib/review-policy.mjs", "we:scripts/lib/__tests__/review-policy.conformance.test.mjs"]
 tags: [review-policy, conformance, spec-based-programming]
 ---
