@@ -175,9 +175,15 @@ applies a label). The same module also renders the operator-facing notice for yo
 ## Invariant
 
 A **`review:human` PR is never agent-cleared** — the core may render an *advisory* take (findings + verdict as a
-non-clearing comment), but the `review:accepted` label on a gate-self edit is applied **only** by a human via
-this skill. The conflict-of-interest rule in `we:scripts/lib/review-escalation.mjs` (`isGateSelfPath` →
-`humanRequired`) is unchanged; this skill is the sanctioned place the human acts on it.
+non-clearing comment), but the `review:accepted` label on such a PR is applied **only** by a human via this
+skill. That invariant is unchanged; this skill is the sanctioned place the human acts on it.
+
+What DID change is which statute PRs get there. Since #2771 Fork B (statute
+[`#review-human-declarative-leash-only`](../../docs/agent/platform-decisions.md#review-human-declarative-leash-only))
+a **codify-shape** statute PR — one whose only `platform-decisions.md` change is the anchor a `kind: decision`
+resolve in the SAME diff names — parks `review:pending` for the independent committee instead of you. Every
+other statute edit still fires `statute` and still reaches a human. Read the label and the escalation reason;
+never infer "this needs me" from the fact that a PR touches `platform-decisions.md`.
 
 ## Non-author-accepts (#2439) — independence is about the ACTOR, not the git login
 
