@@ -43,8 +43,12 @@ import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // Rebase resolution (2026-08-08): the UNION of both sides. `buildReviewedDiffMarker` is #2979's accept
-// fingerprint (landed today); `READY_TO_MERGE_LABEL` is this PR's hold invariant. Independent concerns.
-import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker, READY_TO_MERGE_LABEL } from './lib/review-escalation.mjs';
+// fingerprint, `READY_TO_MERGE_LABEL` is #2832's hold invariant, `buildReviewedContributionMarker` is
+// #x9xqexm's base-independent third marker. Independent concerns.
+import {
+  REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker,
+  buildReviewedContributionMarker, READY_TO_MERGE_LABEL,
+} from './lib/review-escalation.mjs';
 // #2979 — the NET diff vs current main, NOT `gh pr diff`'s three-dot output (see the fingerprint block in
 // `runReviewLabelCli` for why that distinction is the whole point). Imported from the CLI that owns it, the same
 // way `we:scripts/fetch-parked.mjs` already does — it is the single home of the #2450 net-diff basis.
@@ -592,9 +596,18 @@ export function buildVerdictComment({ to, actor, headSha = '', body = '', reason
   // (the drain's own manifest-drop pass) can be recognised as covered instead of invalidating this accept.
   // `buildReviewedDiffMarker` returns '' when no diff was supplied, in which case the record carries only the
   // SHA and the gate behaves exactly as it did before this change.
+  // #x9xqexm — the CONTRIBUTION fingerprint is stamped from the SAME `reviewedDiff` text (no extra git call), so
+  // the drain can tell "the base moved under this lane" from "new content arrived". Without it the `reviewed-diff`
+  // digest changes every time `main` shifts a context line or a hunk offset, which the drain's own rebase-drop
+  // pass causes within minutes of every accept — measured on PR #1100, where the clearance was revoked 3m07s
+  // after it was granted over three lines of pure base movement.
   const stampsAcceptance = to === 'accepted' || to === 'clear-human';
   const marker = stampsAcceptance
-    ? [buildReviewedShaMarker(headSha), buildReviewedDiffMarker(reviewedDiff)].filter(Boolean).join('\n')
+    ? [
+      buildReviewedShaMarker(headSha),
+      buildReviewedDiffMarker(reviewedDiff),
+      buildReviewedContributionMarker(reviewedDiff),
+    ].filter(Boolean).join('\n')
     : '';
   const text = stripReviewedShaMarkers(typeof body === 'string' ? body : '');
   const heading = to === 'clear-human'
@@ -663,8 +676,12 @@ export function stripReviewedShaMarkers(body) {
  * @returns {number} the largest length any target renders to
  */
 export function projectVerdictCommentLength({ body = '', actor = '', reason = '' } = {}) {
+  // #x9xqexm — project the DIFF + CONTRIBUTION markers at full width too. A 64-hex string is the idempotence
+  // shortcut in both `normalize*Fingerprint`s, so this renders exactly the bytes a real accept stamps; before,
+  // the projection passed no diff, both markers rendered as '', and the estimate was ~180 chars short of what
+  // the accept path actually posts — the same under-count class as the `to: 'accepted'`-only bug (#1056 M2).
   return Math.max(...REVIEW_LABEL_TARGETS.map((to) => buildVerdictComment({
-    to, actor, headSha: 'f'.repeat(40), body, reason,
+    to, actor, headSha: 'f'.repeat(40), body, reason, reviewedDiff: 'f'.repeat(64),
   }).length));
 }
 

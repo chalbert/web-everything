@@ -43,11 +43,22 @@ describe('review-escalation — #2366 hasUnclearedReviewLabel (the concurrent-la
   it('refuses a PR carrying review:changes alone', () => {
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.changes }])).toBe(true);
   });
-  it('review:accepted clears it, even alongside a stale review:pending/human/changes label', () => {
+  it('review:accepted clears it — and alongside a stale review:changes too (#2974)', () => {
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.accepted }])).toBe(false);
-    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }])).toBe(false);
-    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }])).toBe(false);
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.changes }, { name: REVIEW_LABELS.accepted }])).toBe(false);
+  });
+  // #x9xqexm — the two HOLD pairs no longer clear. Both are producible by NO sanctioned writer (`--to=accepted`
+  // and `--to=clear-human` remove `pending` as they add `accepted`, and `--to=accepted` is refused outright on a
+  // `review:human` PR), so each means "the drain re-parked a stale accept" — and since #x9xqexm the drain no
+  // longer deletes the accept, this NON-SCORING predicate is the only thing that reads that state. `pending` is
+  // the common one: the re-park applies it whenever the fresh score is not `humanRequired` (the PR #984 shape).
+  it('…but NOT alongside review:human, and NOT alongside review:pending', () => {
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }])).toBe(true);
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }])).toBe(true);
+    // The #2423 relief valve still waives the pending pair — an operator naming ONE PR explicitly, exactly as
+    // it waives a bare review:pending. It never waives the human pair.
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(false);
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(true);
   });
   it('a PR with no review labels at all is never refused', () => {
     expect(hasUnclearedReviewLabel([])).toBe(false);
@@ -59,7 +70,8 @@ describe('review-escalation — #2366 hasUnclearedReviewLabel (the concurrent-la
   });
   it('accepts plain string labels too (not only {name} objects)', () => {
     expect(hasUnclearedReviewLabel([REVIEW_LABELS.pending])).toBe(true);
-    expect(hasUnclearedReviewLabel([REVIEW_LABELS.accepted, REVIEW_LABELS.pending])).toBe(false);
+    expect(hasUnclearedReviewLabel([REVIEW_LABELS.accepted, REVIEW_LABELS.changes])).toBe(false);
+    expect(hasUnclearedReviewLabel([REVIEW_LABELS.accepted, REVIEW_LABELS.pending])).toBe(true); // #x9xqexm
   });
 });
 
@@ -89,8 +101,14 @@ describe('review-escalation — #2832 label/hold self-consistency primitives', (
     it('ready-to-merge alone (no hold) → consistent, not a conflict', () => {
       expect(readyMergeConflictsWithHold([{ name: READY_TO_MERGE_LABEL }])).toBe(false);
     });
-    it('review:accepted clears the hold, so ready-to-merge alongside it is consistent', () => {
-      expect(readyMergeConflictsWithHold([{ name: READY_TO_MERGE_LABEL }, { name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }])).toBe(false);
+    it('review:accepted clears a review:changes hold, so ready-to-merge alongside it is consistent (#2974)', () => {
+      expect(readyMergeConflictsWithHold([{ name: READY_TO_MERGE_LABEL }, { name: REVIEW_LABELS.changes }, { name: REVIEW_LABELS.accepted }])).toBe(false);
+      expect(readyMergeConflictsWithHold([{ name: READY_TO_MERGE_LABEL }, { name: REVIEW_LABELS.accepted }])).toBe(false);
+    });
+    it('…but accepted + pending IS contradictory since #x9xqexm — that pair is a stale re-park, not a clearance', () => {
+      // It inherits directly from `hasUnclearedReviewLabel`, which is the point: ONE hold predicate, so the
+      // go-ahead strip and the merge refusal can never disagree about what a label set means.
+      expect(readyMergeConflictsWithHold([{ name: READY_TO_MERGE_LABEL }, { name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }])).toBe(true);
     });
     it('tolerant of a missing/odd labels shape (never throws)', () => {
       expect(readyMergeConflictsWithHold(null)).toBe(false);
@@ -142,21 +160,33 @@ describe('review-escalation — #984 F2 decideParkReadyStrip (the drain park str
     // …and it does not even reach a park branch: decideReviewGate merges it.
     expect(decideReviewGate({ escalate: true, labels: [REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL] }).action).toBe('merge');
   });
-  it('review:accepted clears a stale hold too — an accepted PR with a leftover hold keeps its go-ahead', () => {
-    expect(decideParkReadyStrip([REVIEW_LABELS.pending, REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL])).toBe(false);
+  it('review:accepted clears a leftover review:changes — that accepted PR keeps its go-ahead (#2974)', () => {
+    expect(decideParkReadyStrip([REVIEW_LABELS.changes, REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL])).toBe(false);
+  });
+  it('…but a leftover review:pending next to accepted DOES strip since #x9xqexm', () => {
+    // The accept no longer deletes on re-park, so `[accepted, pending]` is a live state rather than a
+    // transient one — and it means the re-score found the accept stale. A held PR may not keep the go-ahead.
+    expect(decideParkReadyStrip([REVIEW_LABELS.pending, REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL])).toBe(true);
   });
   it('an unlabelled/clean PR carrying only the go-ahead is never stripped', () => {
     expect(decideParkReadyStrip([READY_TO_MERGE_LABEL])).toBe(false);
     expect(decideParkReadyStrip([READY_TO_MERGE_LABEL], { applyLabel: null })).toBe(false);
   });
 
-  // #2409 — the stale-acceptance re-park REMOVES review:accepted in the same operation, so the strip decision
-  // must be made against the post-park set. Without the staleAcceptance input the still-present accepted label
-  // would clear the hold and the re-parked PR would keep its go-ahead.
-  it('a #2409 stale-acceptance re-park strips, because it drops review:accepted in the same operation', () => {
+  // #2409 / #x9xqexm — a stale-acceptance re-park must strip the go-ahead. The `staleAcceptance` input shipped
+  // meaning "this same park is about to REMOVE review:accepted, so do not let it clear the hold". #x9xqexm ends
+  // that removal — a re-score never deletes a human's verdict — so the option's original reason is gone and its
+  // narrower one (the accept is KNOWN STALE, so it may not clear the hold being written) takes over. The
+  // OUTCOME must be identical either way: `hasUnclearedReviewLabel` now refuses `accepted + pending` and
+  // `accepted + human` directly, which are the only labels a stale re-park applies. That redundancy is
+  // deliberate — the round-2 review flagged that a reader could delete the now-pointless filter and leave the
+  // go-ahead standing on a held PR, and the fix is to make the deletion HARMLESS rather than to forbid it.
+  it('a #2409 stale-acceptance re-park strips — WITH the staleAcceptance filter and, since #x9xqexm, without it', () => {
     const labels = [REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL];
-    expect(decideParkReadyStrip(labels, { applyLabel: REVIEW_LABELS.human, staleAcceptance: true })).toBe(true);
-    expect(decideParkReadyStrip(labels, { applyLabel: REVIEW_LABELS.pending, staleAcceptance: true })).toBe(true);
+    for (const applyLabel of [REVIEW_LABELS.human, REVIEW_LABELS.pending]) {
+      expect(decideParkReadyStrip(labels, { applyLabel, staleAcceptance: true })).toBe(true);
+      expect(decideParkReadyStrip(labels, { applyLabel, staleAcceptance: false })).toBe(true);
+    }
     // …and the gate really does produce that shape.
     const gate = decideReviewGate({ escalate: true, labels, acceptedSha: 'a'.repeat(40), headSha: 'b'.repeat(40) });
     expect(gate.staleAcceptance).toBe(true);
@@ -188,9 +218,16 @@ describe('review-escalation — #2366 hasUnclearedReviewLabel { allowPending } (
   it('refuses review:human even when a stale review:pending rides alongside under the override', () => {
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.human }], { allowPending: true })).toBe(true);
   });
-  it('review:accepted still clears everything under the override', () => {
-    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(false);
+  it('review:accepted clears pending and a stale changes under the override (#2974: the verdict wins)', () => {
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(false);
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.changes }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(false);
+  });
+  // #x9xqexm — the ONE pair that is no longer cleared. The drain stopped DELETING a stale `review:accepted` when
+  // it re-parks (deleting a human's recorded clearance was never what stopped the merge), so `accepted + human`
+  // is now a state this non-scoring path can actually observe — and it must fail closed on it.
+  it('review:accepted does NOT clear a co-present review:human — the pair fails closed', () => {
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(true);
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }])).toBe(true);
   });
   it('default (allowPending omitted / false) is the bare-sweep behaviour — review:pending still refuses', () => {
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }])).toBe(true);
