@@ -45,6 +45,20 @@ applies a label). The same module also renders the operator-facing notice for yo
    `buildPanelMandate({ netChangedFiles })` as GROUND TRUTH, so a juror is told a real file is outside the net
    set.
 
+   **`exec` is not a shell-exec — spell its shape exactly, or the call throws inside a swallowed `try` and looks
+   like a degrade (#2952):**
+   ```js
+   const { execFileSync } = require('node:child_process'); // or `import` in an .mjs
+   const exec = (cmd, args, opts) => execFileSync(cmd, args, opts);
+   ```
+   `resolveNetDiffBasis` (inside `computeNetDiffText` / `computeNetDiffPaths` / `computeNetDiffChangedFiles`)
+   calls it as **`exec('git', ['diff', ...], { encoding: 'utf8', ... })`** — three positional args, `execFileSync`
+   shaped. The natural-looking but WRONG shape is a shell-exec, `(cmd, opts) => execSync(cmd, opts)`: called
+   3-arg, it receives the **args array** in its `opts` position and throws. Reproduced live in the review of WE PR
+   #1063 (2026-08-06): the wrong shape byte-for-byte matched a foreign clone with no head ref —
+   `{"paths": [], "base": null, "rev": null, "scored": false}` either way — until the `reason` field below made
+   them distinguishable.
+
    This is **not** `gh pr diff <PR>`'s three-dot merge-base diff. That one still lists a sibling-lane file that
    has since landed on `main` as if this PR added it, and the phantom scope-creep is not harmless framing — it
    hides the findings that matter. Observed on PR #1009: `gh pr diff` presented 4 files / 42 lines where the net
@@ -52,9 +66,17 @@ applies a label). The same module also renders the operator-facing notice for yo
    PR #1012, where `gh pr diff` reported three files the PR does not touch.
 
    The #2336 no-checkout constraint is intact: `computeNetDiffText` fetches tracking refs and diffs two trees in
-   place — it never moves HEAD in this shared checkout. If it returns **`scored:false`** (a foreign clone without
-   the head ref, or a diff failure) — and only then — fall back to `gh pr diff <PR> --repo <repo>`, and **say so
-   in your write-up**: the basis is degraded and the reader must know the file list may be inflated.
+   place — it never moves HEAD in this shared checkout. If it returns **`scored:false`**, check `reason` (#2952)
+   before falling back:
+   - **`reason: 'exec-contract'`** — the `exec` you passed in is not `(cmd, args, opts) =>
+     execFileSync(cmd, args, opts)`-shaped. This is **a bug in YOUR wrapper to fix**, not license to fall back —
+     fix the shape above and re-run step 1. Falling back here silently ships `gh pr diff`'s inflated three-dot
+     list, the exact false positive #2450/#2901 exist to prevent.
+   - **`reason: 'ref-unresolved'`** — neither `<remote>/<headRefName>` nor the bare ref resolved (a genuinely
+     foreign/sibling clone). Unfixable from here — fall back to `gh pr diff <PR> --repo <repo>`, and **say so in
+     your write-up**: the basis is degraded and the reader must know the file list may be inflated.
+   - **`reason: 'diff-failed'`** — the basis resolved but the diff call itself then failed (rare; treat like
+     `ref-unresolved` and fall back, but worth a note in your write-up since it is less expected).
 
    The escalation reasons ride the PR body's escalation block (and the `parked` entry in the drain's `--json`).
    Read the `🤖 advisory AI review (non-clearing)` comment if the drain already posted one.
