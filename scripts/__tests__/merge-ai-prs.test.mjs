@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, latestRequiredCheck, rollupRowKind, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, computeNetDiffPaths, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
+import { isAiAuthor, planResolveOnLand, resolveIdsForLandedPass, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, latestRequiredCheck, rollupRowKind, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, computeNetDiffPaths, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -2456,5 +2456,153 @@ describe('rollupRowKind — the union member comes off `__typename`, it is not g
   it('an all-untagged rollup still resolves latest-wins (fixtures / re-normalised rows keep working)', () => {
     const pr = { statusCheckRollup: [{ name: 'test', conclusion: 'CANCELLED' }, { name: 'test', conclusion: 'SUCCESS' }] };
     expect(isRequiredCheckGreen(pr)).toBe(true);
+  });
+});
+
+describe('#2899 A5 — resolveIdsForLandedPass: which ids the LABEL lander resolves after JIT numbering', () => {
+  // Context: this drain single-sourced lane-drain's NUMBERING but never its RESOLVING, so it assigned the NNN
+  // and left `status:` untouched — delivered work kept ranking Tier-A agent-ready and got re-packed (#2880,
+  // #2450). The flip now runs here, and it must target the id the card carries AFTER numbering, not before.
+  it('re-keys a hash-born item to the NNN numbering just minted for it', () => {
+    expect(resolveIdsForLandedPass({
+      landedItems: new Set(['xdxlevu']),
+      assigned: [{ hash: 'xdxlevu', nnn: '2899' }],
+    })).toEqual(['2899']);
+  });
+
+  it('leaves an already-numeric item alone', () => {
+    expect(resolveIdsForLandedPass({ landedItems: new Set([2880]), assigned: [] })).toEqual([2880]);
+  });
+
+  it('KEEPS a hash with no assignment rather than dropping it', () => {
+    // Numbering can legitimately be a no-op (the card landed already-numbered, or a concurrent lander minted
+    // it). Dropping the id here would silently re-open the stranded-item hole this closes; `resolveLandedItem`
+    // is itself a safe no-op when the path does not resolve, so keeping it costs nothing.
+    expect(resolveIdsForLandedPass({ landedItems: new Set(['xnomatch']), assigned: [{ hash: 'xother', nnn: '1' }] }))
+      .toEqual(['xnomatch']);
+  });
+
+  it('de-duplicates when a hash and its minted NNN both appear, preserving first-seen order', () => {
+    expect(resolveIdsForLandedPass({
+      landedItems: ['xaaa', 'xbbb', '2900', 'xaaa'],
+      assigned: [{ hash: 'xaaa', nnn: '2900' }, { hash: 'xbbb', nnn: '2901' }],
+    })).toEqual(['2900', '2901']);
+  });
+
+  it('is empty for a pass that landed nothing, and tolerates junk inputs', () => {
+    expect(resolveIdsForLandedPass({ landedItems: new Set(), assigned: [] })).toEqual([]);
+    expect(resolveIdsForLandedPass()).toEqual([]);
+    expect(resolveIdsForLandedPass({ landedItems: [null, undefined, 'x1'], assigned: null })).toEqual(['x1']);
+    expect(resolveIdsForLandedPass({ landedItems: ['x1'], assigned: [{ hash: 'x1' }, null, { nnn: '5' }] })).toEqual(['x1']);
+  });
+});
+
+describe('#2899 B5 — the resolve gate requires the WHOLE couple to have landed, not just the carrier', () => {
+  // PR #1012 round-3 review, B5. The original gate rested on a comment claiming "WE-last ordering means the
+  // carrier merges only after its impl half did". Running the cascade disproves it: the couple decision is
+  // computed once at PLAN time and the in-cascade `replan` re-runs planLabelDrain WITHOUT the couple join, so an
+  // impl whose `gh pr merge` throws flips to `skip` while the carrier still lands. Resolving off the carrier
+  // alone then marks the card resolved on main with the implementation PR still OPEN — nothing re-dispatches it,
+  // which is the forever-block this item exists to close, reappearing inside the fix.
+  const carrier = { item: 'xcarr01', headRef: 'lane/xcarr01-we', manifestRefs: ['lane/xcarr01-fui', 'lane/xcarr01-we'] };
+
+  it('DEFERS the flip when a sibling half is still open (the impl merge failed mid-cascade)', () => {
+    expect(resolveIdsForLandedPass({
+      landedItems: new Set(['xcarr01']),
+      assigned: [{ hash: 'xcarr01', nnn: '2910' }],
+      carriers: [carrier],
+      openHeadRefs: ['lane/xcarr01-fui'],          // the impl PR never merged — still open after the cascade
+    })).toEqual([]);
+  });
+
+  it('RESOLVES when every sibling ref has left the open set (the whole couple landed)', () => {
+    expect(resolveIdsForLandedPass({
+      landedItems: new Set(['xcarr01']),
+      assigned: [{ hash: 'xcarr01', nnn: '2910' }],
+      carriers: [carrier],
+      openHeadRefs: ['lane/unrelated-other'],
+    })).toEqual(['2910']);
+  });
+
+  it('ignores the carrier\'s OWN head ref — it is the half that just merged, not a blocker', () => {
+    expect(resolveIdsForLandedPass({
+      landedItems: new Set(['xcarr01']),
+      assigned: [],
+      carriers: [carrier],
+      openHeadRefs: ['lane/xcarr01-we'],           // the carrier itself, stale in the pass-start snapshot
+    })).toEqual(['xcarr01']);
+  });
+
+  it('is unchanged for a caller that supplies no couple shape (single-repo item, or an older caller)', () => {
+    expect(resolveIdsForLandedPass({ landedItems: new Set(['xsolo01']), assigned: [{ hash: 'xsolo01', nnn: '2911' }] }))
+      .toEqual(['2911']);
+    // A carrier entry with no refs blocks nothing.
+    expect(resolveIdsForLandedPass({
+      landedItems: new Set(['xsolo01']),
+      assigned: [],
+      carriers: [{ item: 'xsolo01', headRef: 'lane/xsolo01-we', manifestRefs: [] }],
+      openHeadRefs: ['lane/whatever'],
+    })).toEqual(['xsolo01']);
+  });
+
+  it('gates per couple — one blocked couple does not suppress a healthy one', () => {
+    const other = { item: 'xcarr02', headRef: 'lane/xcarr02-we', manifestRefs: ['lane/xcarr02-fui', 'lane/xcarr02-we'] };
+    expect(resolveIdsForLandedPass({
+      landedItems: ['xcarr01', 'xcarr02'],
+      assigned: [],
+      carriers: [carrier, other],
+      openHeadRefs: ['lane/xcarr01-fui'],          // only couple 01 is half-landed
+    })).toEqual(['xcarr02']);
+  });
+});
+
+describe('#2899 jury J2/J4 — planResolveOnLand is TOTAL: nothing is silently withheld', () => {
+  // The first cut returned only the ids to flip, so a couple the B5 gate withheld vanished with no log line, no
+  // --json key and no retry — while the comment claimed it would "defer to a later pass". That is false:
+  // `landedThisPass` is only populated when a carrier merges IN that pass, so a later pass never re-lists it.
+  // The deferral is right; the silence was the defect. A silent skip inside a fix for silent skips cannot ship.
+  const we = { item: 'xcarr01', repo: null, isWe: true, headRef: 'lane/xcarr01-we', manifestRefs: ['lane/xcarr01-fui', 'lane/xcarr01-we'] };
+
+  it('every landed item lands in exactly ONE bucket — resolve or deferred, never neither', () => {
+    const p = planResolveOnLand({
+      landedItems: ['xcarr01', 'xsolo01'],
+      assigned: [{ hash: 'xcarr01', nnn: '2910' }, { hash: 'xsolo01', nnn: '2911' }],
+      carriers: [we],
+      openHeadRefs: ['lane/xcarr01-fui'],
+    });
+    expect(p.resolve).toEqual(['2911']);
+    expect(p.deferred.map((d) => d.id)).toEqual(['2910']);
+    // TOTALITY: the union covers every distinct landed item, with no overlap.
+    expect([...p.resolve, ...p.deferred.map((d) => d.id)].sort()).toEqual(['2910', '2911']);
+  });
+
+  it('names the blocking ref in the deferral reason, so the report is actionable', () => {
+    const p = planResolveOnLand({ landedItems: ['xcarr01'], assigned: [], carriers: [we], openHeadRefs: ['lane/xcarr01-fui'] });
+    expect(p.deferred[0].reason).toMatch(/lane\/xcarr01-fui/);
+  });
+
+  it('J4 — the WE carrier wins the couple key even when the impl half is seen LAST', () => {
+    // Both halves carry a manifest for one item. With an item-only last-write-wins key the impl's headRef won,
+    // and the gate's `r !== couple.headRef` exemption then SKIPPED the still-open impl ref — the safety check
+    // disabling itself. Ordered impl-last on purpose: this is the input that used to pass.
+    const impl = { item: 'xcarr01', repo: 'chalbert/frontierui', isWe: false, headRef: 'lane/xcarr01-fui', manifestRefs: ['lane/xcarr01-fui', 'lane/xcarr01-we'] };
+    const p = planResolveOnLand({
+      landedItems: ['xcarr01'],
+      assigned: [],
+      carriers: [we, impl],
+      openHeadRefs: ['lane/xcarr01-fui'],       // the impl half never merged
+    });
+    expect(p.resolve).toEqual([]);
+    expect(p.deferred.map((d) => d.id)).toEqual(['xcarr01']);
+  });
+
+  it('the back-compat shim still returns just the ids to flip', () => {
+    expect(resolveIdsForLandedPass({ landedItems: ['xcarr01'], assigned: [], carriers: [we], openHeadRefs: ['lane/xcarr01-fui'] })).toEqual([]);
+    expect(resolveIdsForLandedPass({ landedItems: ['xcarr01'], assigned: [], carriers: [we], openHeadRefs: [] })).toEqual(['xcarr01']);
+  });
+
+  it('is total for the trivial cases too', () => {
+    expect(planResolveOnLand()).toEqual({ resolve: [], deferred: [] });
+    expect(planResolveOnLand({ landedItems: [null, undefined] })).toEqual({ resolve: [], deferred: [] });
   });
 });

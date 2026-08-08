@@ -109,7 +109,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
-import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor } from './lane-drain.mjs';
+import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
 import { withNumberingLock, withLandWriteLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2683) the merge-write mutex (withLandWriteLock, same lock key) + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
@@ -641,6 +641,93 @@ export function joinImplToCouples(verdicts) {
     v.joinedToCouple = couple.item;                 // marks an impl PR gated via its couple (diagnostics/tests)
   }
   return list;
+}
+
+/**
+ * #2899 A5 — which item ids should the label lander RESOLVE after this pass's JIT numbering? Pure.
+ *
+ * `landedItems` is the pass's `landedThisPass` set — item ids stamped on the WE-CARRIER merge. Two corrections
+ * turn that into the set safe to resolve:
+ *
+ * **1 — re-key hashes to their minted NNN.** A hash-born item (#2288) was JUST renamed to its real `<NNN>` by
+ * `numberPendingHashes`, so resolving under the pre-numbering hash would look for a file that no longer exists.
+ * Re-key through `assigned` (`[{hash, nnn}]`, the numbering's own report) and de-duplicate, preserving
+ * first-seen order so the emitted log line is stable. A hash with NO `assigned` entry is kept AS-IS rather than
+ * dropped: numbering can legitimately be a no-op (the card landed already-numbered, or a concurrent lander
+ * minted it), and `resolveLandedItem` is a safe no-op when the path does not resolve — whereas dropping it
+ * would silently re-open the stranded-item hole this closes.
+ *
+ * **2 — require the WHOLE couple to have landed, not just the carrier (PR #1012 round-3 review, B5).** The
+ * original gate rested on a comment claiming "WE-last ordering means the carrier merges only after its impl half
+ * did". That is FALSE, and it was disproved by running the cascade: `coupleDefer`/`readyImplRefs` are computed
+ * once at PLAN time from `decision === 'merge'` — a *planned* merge — and the in-cascade `replan` calls
+ * `planLabelDrain` only, so the couple join never re-runs. If the impl's `gh pr merge` throws (conflict, branch
+ * protection, CI flipping red between classify and merge), the handler sets its decision to `skip` and the
+ * carrier STILL lands. Resolving off the carrier alone then flips the card to `resolved` on main with the
+ * implementation PR still open — and nothing re-dispatches it, which is the exact forever-block this item
+ * exists to close, reappearing inside the fix.
+ *
+ * So a couple resolves only when every OTHER lane ref its manifest names is **no longer an open PR**: either it
+ * merged in this pass or it had already landed. A sibling ref still sitting in `openHeadRefs` is positive
+ * evidence the couple did not fully land, and it defers the flip to a later pass — the safe direction, since an
+ * unresolved card is a re-pack (annoying) while a wrongly-resolved one is a silent forever-block (harmful).
+ * A carrier with no `carriers` entry keeps the old behaviour, so a caller that cannot supply couple shape is
+ * unchanged rather than silently blocked.
+ *
+ * @param {{landedItems?: Iterable<number|string>,
+ *          assigned?: Array<{hash:(string|number), nnn:(string|number)}>,
+ *          carriers?: Array<{item:(number|string), headRef?:string, manifestRefs?:string[]}>,
+ *          openHeadRefs?: Iterable<string>}} o
+ * @returns {Array<number|string>} ids to flip, de-duplicated, in first-seen order
+ */
+export function planResolveOnLand({ landedItems = [], assigned = [], carriers = [], openHeadRefs = [] } = {}) {
+  const byHash = new Map();
+  for (const a of (Array.isArray(assigned) ? assigned : [])) {
+    if (a && a.hash != null && a.nnn != null) byHash.set(String(a.hash), a.nnn);
+  }
+  // Couple shape keyed by item — but the WE CARRIER wins on collision (jury J4). A non-WE PR can carry a body
+  // manifest too, so two verdicts can share one item id; if the impl half won, its ref became `headRef` and the
+  // exemption below skipped the very ref that proves the couple is incomplete.
+  const coupleByItem = new Map();
+  for (const c of (Array.isArray(carriers) ? carriers : [])) {
+    if (!c || c.item == null) continue;
+    const key = String(c.item);
+    const prev = coupleByItem.get(key);
+    if (prev && prev.isWe && !c.isWe) continue;          // keep the WE carrier
+    coupleByItem.set(key, {
+      isWe: !!c.isWe,
+      headRef: c.headRef || null,
+      refs: (Array.isArray(c.manifestRefs) ? c.manifestRefs : []).filter(Boolean),
+    });
+  }
+  const stillOpen = new Set([...(openHeadRefs || [])].filter(Boolean).map(String));
+  const resolve = [];
+  const deferred = [];
+  const seen = new Set();
+  for (const raw of (landedItems || [])) {
+    if (raw == null) continue;
+    const id = byHash.has(String(raw)) ? byHash.get(String(raw)) : raw;
+    const key = String(id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // B5 — a sibling half still OPEN proves the couple did not fully land this pass. Keyed on the PRE-numbering
+    // id, because that is what the manifest (and `landedThisPass`) carries. The withheld item is REPORTED, not
+    // dropped (jury J2): this deferral is terminal for the run, and the A4 stranded sweep is the recovery path.
+    const couple = coupleByItem.get(String(raw));
+    const blocking = couple ? couple.refs.filter((r) => r !== couple.headRef && stillOpen.has(String(r))) : [];
+    if (blocking.length) deferred.push({ id, reason: `couple half still open: ${blocking.join(', ')}` });
+    else resolve.push(id);
+  }
+  return { resolve, deferred };
+}
+
+/**
+ * #2899 A5 — back-compat shim: the ids to flip. Prefer `planResolveOnLand`, which also reports what it withheld
+ * — a caller that only takes this list cannot honour the totality rule (every landed item in exactly one
+ * observable bucket) that jury finding J2 exists to enforce.
+ */
+export function resolveIdsForLandedPass(o = {}) {
+  return planResolveOnLand(o).resolve;
 }
 
 /**
@@ -2769,20 +2856,108 @@ async function runCli() {
   // scaffolded in its lane) and push. Runs BEFORE the derived regen so the inventory reflects the final numbers.
   // Shares lane-drain's `numberPendingHashes` (single source, never a fork). Best-effort/non-fatal.
   let numbered = { assigned: [], committed: false };
+  // #2899 jury J2 — the resolve-on-land totality report: every id in `landedThisPass` ends in exactly one of
+  // these buckets, and every bucket reaches the operator (stderr) AND `--json`. A withheld item that appears in
+  // none of them is the silent skip this whole item was filed against.
+  let resolveOnLandReport = { resolved: [], alreadyResolved: [], deferred: [], failed: [] };
   if (landedLocal && !DRY_RUN) {
     // #2391 — number+publish is the NUMBERING CRITICAL SECTION (sole-serial-writer, #2288/#2290). Guard it with
     // the TTL-bounded numbering mutex so a concurrent drain/land never mints the same NNN off the same base.
     const numLock = withNumberingLock(() => {
       const n = numberPendingHashes(process.cwd());
-      if (n.committed) {
-        try {
-          execFileSync('git', ['push', 'origin', 'HEAD:main'], { env: { ...process.env, MAIN_PUSH_OK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
-          if (!AS_JSON) process.stderr.write(`  ✓ JIT-numbered ${n.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} + pushed to main (#2288)\n`);
-        } catch (e) {
-          if (!AS_JSON) process.stderr.write(`  ⚠ JIT numbering committed locally but push FAILED (${String(e.message || e).split('\n')[0]}) — push main by hand\n`);
+      // #2899 A5 — RESOLVE-ON-LAND for the LABEL lander. This drain single-sourced lane-drain's NUMBERING but
+      // never its RESOLVING, so it assigned the NNN and left `status:` untouched — delivered work kept ranking
+      // Tier-A agent-ready and was re-packed into batch after batch (observed on #2880 / #2450, each costing a
+      // full claim+lane+investigate cycle to change one frontmatter line). Flip every item whose WE CARRIER
+      // merged this pass, via the SAME `resolveLandedItem` lane-drain uses — one home, two callers.
+      //
+      // Ordering matters and is deliberate: this runs INSIDE the numbering critical section and AFTER
+      // `numberPendingHashes`, so a hash-born item is flipped under its freshly-minted `<NNN>` (the id its file
+      // now carries), and `publish:false` makes the flip commits ride the SAME push as the numbering commit —
+      // so main never shows a numbered-but-unresolved card. `sync:false` because this path already synced and
+      // holds an un-pushed numbering commit that a `pull --ff-only` has no business touching.
+      //
+      // THE GATE (corrected — PR #1012 round-3 review, B5). `landedThisPass` is stamped on the WE-CARRIER merge,
+      // and an earlier version of this comment claimed that was sufficient because "WE-last ordering means the
+      // carrier merges only after its impl half did". That is FALSE, and running the cascade disproves it: the
+      // couple decision is computed once at PLAN time, and the in-cascade `replan` re-runs `planLabelDrain`
+      // WITHOUT the couple join — so if the impl's merge throws, its decision flips to `skip` and the carrier
+      // still lands. Resolving off the carrier alone would then flip the card on main with the implementation PR
+      // still open, and nothing would re-dispatch it: the exact forever-block this item closes, reappearing
+      // inside the fix. So the gate now also requires every OTHER lane ref the couple's manifest names to be
+      // absent from the pass's OPEN-PR set — positive evidence the whole couple landed. A sibling still open
+      // defers the flip to a later pass, the safe direction (an unresolved card costs a re-pack; a wrongly
+      // resolved one is a silent forever-block). Best-effort/non-fatal throughout, as numbering is.
+      // #2899 jury J4 — key the couple map by ITEM+REPO, not item alone. `landedCarriers` is built from EVERY
+      // manifest-bearing verdict, and a non-WE PR can carry a body manifest too, so two verdicts can share one
+      // item id. With an item-only key the last writer won, and if that was the IMPL half then `couple.headRef`
+      // became the impl's ref — which the gate's `r !== couple.headRef` exemption then treats as "the half that
+      // just merged", skipping the very ref that proves the couple is incomplete. The safety check silently
+      // disabled itself. The WE carrier is preferred explicitly rather than left to iteration order.
+      const landedCarriers = verdicts.filter((v) => v && v.hasManifest && v.item != null)
+        .map((v) => ({ item: v.item, repo: v.repo || null, isWe: isLocalRepo(v.repo), headRef: v.headRef, manifestRefs: v.manifestRefs }));
+      // `openPrContext` is a PASS-START snapshot, so a sibling that merged during THIS pass is still listed in
+      // it. Subtract the refs merged this pass or the gate could never pass for the normal impl-first/WE-last
+      // couple — the whole point is to catch a sibling that is STILL open after the cascade finished.
+      // #2899 jury J5 — a `merged` entry that matches no verdict is an INTEGRITY failure, not a silent skip: it
+      // would leave that ref looking "still open", block its couple, and (pre-J2) drop the item with no trace.
+      // Surface it and fail the gate closed for this pass rather than guessing.
+      const mergedRefs = new Set();
+      const unmatchedMerges = [];
+      for (const m of merged) {
+        const v = verdicts.find((x) => x && x.num === m.num && (x.repo || null) === (m.repo || null));
+        if (v && v.headRef) mergedRefs.add(v.headRef);
+        else unmatchedMerges.push(`${m.repo || 'cwd'}#${m.num}`);
+      }
+      if (unmatchedMerges.length && !AS_JSON) {
+        process.stderr.write(`  ⚠ resolve-on-land: ${unmatchedMerges.join(', ')} merged but matched no verdict — cannot prove its couple landed; those items are DEFERRED (#2899)\n`);
+      }
+      const openHeadRefs = [];
+      for (const [, prs] of (openPrContext.prsByRepo instanceof Map ? openPrContext.prsByRepo : new Map())) {
+        for (const p of (Array.isArray(prs) ? prs : [])) {
+          if (p && p.headRefName && !mergedRefs.has(p.headRefName)) openHeadRefs.push(p.headRefName);
         }
       }
-      return n;
+      // #2899 jury J2/J3 — TOTALITY. Every id in `landedThisPass` must end in exactly ONE observable bucket:
+      // resolved / already-resolved / deferred / failed. The first cut returned only the ids to flip, so a
+      // couple withheld by the B5 gate vanished with no log line, no `--json` key and no retry — and the comment
+      // claimed it would "defer to a later pass", which is FALSE: `landedThisPass` is only populated when a
+      // carrier merges IN that pass, so a later pass never re-lists it. The deferral is correct (never resolve
+      // on partial evidence) but it is TERMINAL for this run, so it must be reported — the A4 stranded sweep is
+      // the recovery path, and it can only find what was announced. A silent skip inside a fix for silent skips
+      // is the one outcome this item cannot ship.
+      const plan = planResolveOnLand({ landedItems: landedThisPass, assigned: n.assigned, carriers: landedCarriers, openHeadRefs });
+      const resolvedOnLand = [];
+      const alreadyResolved = [];
+      const failedResolve = [];
+      for (const id of plan.resolve) {
+        try {
+          const flip = resolveLandedItem(process.cwd(), id, { sync: false, publish: false });
+          if (flip.flipped) resolvedOnLand.push(id);
+          else if (flip.alreadyResolved) alreadyResolved.push(id);
+          else failedResolve.push({ id, reason: flip.reason || 'resolve-refused' });
+        } catch (e) {
+          // Never unwinds a green land — but never silent either (J3).
+          failedResolve.push({ id, reason: String((e && e.message) || e).split('\n')[0] });
+        }
+      }
+      if (!AS_JSON && plan.deferred.length) {
+        process.stderr.write(`  · resolve-on-land DEFERRED ${plan.deferred.map((d) => `#${d.id} (${d.reason})`).join(', ')} — the couple did not fully land; \`node scripts/backlog-stranded-sweep.mjs\` finds these (#2899)\n`);
+      }
+      if (!AS_JSON && failedResolve.length) {
+        process.stderr.write(`  ⚠ resolve-on-land FAILED ${failedResolve.map((f) => `#${f.id} (${f.reason})`).join(', ')} — the card is NOT resolved on main; resolve it by hand (#2899)\n`);
+      }
+      resolveOnLandReport = { resolved: resolvedOnLand, alreadyResolved, deferred: plan.deferred, failed: failedResolve };
+      if (n.committed || resolvedOnLand.length) {
+        try {
+          execFileSync('git', ['push', 'origin', 'HEAD:main'], { env: { ...process.env, MAIN_PUSH_OK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+          if (!AS_JSON && n.committed) process.stderr.write(`  ✓ JIT-numbered ${n.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} + pushed to main (#2288)\n`);
+          if (!AS_JSON && resolvedOnLand.length) process.stderr.write(`  ✓ resolved on land ${resolvedOnLand.map((i) => `#${i}`).join(', ')} + pushed to main (#2899/#2748)\n`);
+        } catch (e) {
+          if (!AS_JSON) process.stderr.write(`  ⚠ numbering/resolve committed locally but push FAILED (${String(e.message || e).split('\n')[0]}) — push main by hand\n`);
+        }
+      }
+      return { ...n, resolvedOnLand };
     });
     numbered = numLock.result;
     if (numLock.contended && !AS_JSON) process.stderr.write(`  ⚠ numbering mutex not acquired (held by ${numLock.heldBy || '?'}) — numbered without it (#2391); the #2318 duplicate-NNN tripwire is the backstop\n`);
@@ -2831,7 +3006,7 @@ async function runCli() {
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 
