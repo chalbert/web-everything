@@ -1,0 +1,9 @@
+{
+  "id": "reexec-shell-c-string",
+  "cmd": "bash -c \"git status && git push origin main\"",
+  "ctx": {},
+  "basis": "r5 F1 — bash re-executes a `-c` script string; base denied it only by ACCIDENT (its quote-blind split tore the quoted argument at the `&&`), and the quote-aware split of r1–r4 lost that. Confirmed really pushing under real bash in a PATH-stubbed sandbox.",
+  "expect": {
+    "reason": "direct push to `main` is blocked (strict lane-only enforcement, #2203). Push to a `lane/*` ref and land via a PR so CI gates it: `git push origin HEAD:refs/heads/lane/<name>` then `pr-land`. Sanctioned override (rare): prefix `MAIN_PUSH_OK=1`."
+  }
+}
