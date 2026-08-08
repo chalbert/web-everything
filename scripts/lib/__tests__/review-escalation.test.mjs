@@ -249,6 +249,37 @@ describe('scoreEscalation', () => {
   });
 });
 
+describe('#2890 — diffHunks (base-vs-head diff CONTENT) is accepted and threaded through, pure plumbing', () => {
+  it('defaults to \'\' when omitted — every pre-#2890 caller is unaffected', () => {
+    const r = scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20 });
+    expect(r.diffHunks).toBe('');
+  });
+  it('is carried through UNCHANGED on the returned verdict, whatever shape the caller passes', () => {
+    const hunks = '@@ -1,2 +1,2 @@\n-old\n+new\n';
+    const r = scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20, diffHunks: hunks });
+    expect(r.diffHunks).toBe(hunks);
+  });
+  it('does NOT itself change escalate/humanRequired/reasons/signals — #2890 is plumbing, not a detector', () => {
+    const hunks = '@@ -1,2 +1,2 @@\n-### Some Rule {#some-rule}\n+### Some Other Rule {#some-rule}\n';
+    const withHunks = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'], diffHunks: hunks });
+    const withoutHunks = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'] });
+    expect(withHunks.escalate).toBe(withoutHunks.escalate);
+    expect(withHunks.humanRequired).toBe(withoutHunks.humanRequired);
+    expect(withHunks.reasons).toEqual(withoutHunks.reasons);
+    expect(withHunks.signals).toEqual(withoutHunks.signals);
+  });
+  it('a non-string diffHunks still returns SOMETHING (no throw) — defensive, not validated (the caller owns the shape)', () => {
+    expect(() => scoreEscalation({ diffHunks: null })).not.toThrow();
+    expect(scoreEscalation({ diffHunks: null }).diffHunks).toBe(null);
+  });
+  it('producerReviewLabel is unaffected by diffHunks riding along on the score object it receives', () => {
+    const hunks = '@@ -1,2 +1,2 @@\n-old\n+new\n';
+    const withHunks = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], diffHunks: hunks });
+    const withoutHunks = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] });
+    expect(producerReviewLabel(withHunks)).toBe(producerReviewLabel(withoutHunks));
+  });
+});
+
 describe('coupleEscalation — the strictest member wins', () => {
   it('escalates if ANY member escalates (half a couple never merges alone)', () => {
     const r = coupleEscalation([{ escalate: false, reasons: [] }, { escalate: true, reasons: ['blast-radius (scripts/x)'] }]);
