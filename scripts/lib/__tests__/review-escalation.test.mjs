@@ -29,6 +29,9 @@ import {
   normalizeDiffFingerprint,
   buildReviewedDiffMarker,
   parseReviewedDiff,
+  normalizeContributionFingerprint,
+  buildReviewedContributionMarker,
+  parseReviewedContribution,
   isDeclarativeLeashPath,
   isPolicyDerivationPath,
 } from '../review-escalation.mjs';
@@ -753,6 +756,116 @@ describe('#x169fqe — an accept survives a CONTENT-PRESERVING rebase', () => {
     expect(acceptanceCoversHead({
       acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb', acceptedDiff: stored, headDiff: REBASED,
     }).covers).toBe(true);
+  });
+});
+
+describe('#x9xqexm — a clearance covers a CONTRIBUTION, not the base it sits on', () => {
+  // The shape measured on WE PR #1100: the clearance at 14:38:35, the drain's own rebase-drop commit at
+  // 14:41:09, the revocation at 14:41:42. The two 130 KB net diffs differed in exactly three lines — two blob
+  // headers, one CONTEXT line main changed, one HUNK OFFSET — and in no `+`/`-` line at all.
+  const CLEARED = [
+    'diff --git a/scripts/lib/review-escalation.mjs b/scripts/lib/review-escalation.mjs',
+    'index 1fb268d1..191cf371 100644',
+    '--- a/scripts/lib/review-escalation.mjs',
+    '+++ b/scripts/lib/review-escalation.mjs',
+    '@@ -197,3 +219,8 @@ What actually matters:',
+    "  it('a policy-core diff (edits the leash-defining trust chain) → review:human', () => {",
+    '-const stale = true;',
+    '+const stale = false;',
+    ' trailing context',
+  ].join('\n');
+  const REBASED = [
+    'diff --git a/scripts/lib/review-escalation.mjs b/scripts/lib/review-escalation.mjs',
+    'index a18a829d..c79a543f 100644',
+    '--- a/scripts/lib/review-escalation.mjs',
+    '+++ b/scripts/lib/review-escalation.mjs',
+    '@@ -203,3 +225,8 @@ What actually matters:',
+    "  it('a DECLARATIVE-LEASH diff (the roster — the encoded policy itself) → review:human', () => {",
+    '-const stale = true;',
+    '+const stale = false;',
+    ' trailing context',
+  ].join('\n');
+
+  it('the base moving under a lane does not change the contribution fingerprint', () => {
+    // The strict #x169fqe digest CANNOT see this — that is precisely why the clearance was revoked anyway.
+    expect(normalizeDiffFingerprint(CLEARED)).not.toBe(normalizeDiffFingerprint(REBASED));
+    expect(normalizeContributionFingerprint(CLEARED)).toBe(normalizeContributionFingerprint(REBASED));
+  });
+
+  it('an omitted hunk length (git\'s `@@ -1 +1 @@` shorthand) hashes as the explicit `,1` form', () => {
+    const short = ['diff --git a/f b/f', '@@ -1 +1 @@', '-a', '+b'].join('\n');
+    const long = ['diff --git a/f b/f', '@@ -1,1 +1,1 @@', '-a', '+b'].join('\n');
+    expect(normalizeContributionFingerprint(short)).toBe(normalizeContributionFingerprint(long));
+  });
+
+  it('ANY change to an added/removed line changes it — the ride-in hole stays shut', () => {
+    const rideIn = REBASED.replace('+const stale = false;', '+const stale = false; rm_rf();');
+    expect(normalizeContributionFingerprint(REBASED)).not.toBe(normalizeContributionFingerprint(rideIn));
+    expect(acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb', acceptedContribution: CLEARED, headContribution: rideIn,
+    }).covers).toBe(false);
+  });
+
+  it('an added FILE changes it, even when every pre-existing hunk is untouched', () => {
+    const extra = [REBASED, '', 'diff --git a/new.mjs b/new.mjs', 'new file mode 100644', '@@ -0,0 +1 @@', '+pwn();'].join('\n');
+    expect(normalizeContributionFingerprint(REBASED)).not.toBe(normalizeContributionFingerprint(extra));
+  });
+
+  it('a changed HUNK LENGTH changes it — the edit itself grew, not just its position', () => {
+    const grown = REBASED.replace('@@ -203,3 +225,8 @@', '@@ -203,3 +225,9 @@');
+    expect(normalizeContributionFingerprint(REBASED)).not.toBe(normalizeContributionFingerprint(grown));
+  });
+
+  it('trailing whitespace on a CONTRIBUTED line is still content (the #1086 blocker-2 property holds here too)', () => {
+    const spaced = REBASED.replace('+const stale = false;', '+const stale = false;  ');
+    expect(normalizeContributionFingerprint(REBASED)).not.toBe(normalizeContributionFingerprint(spaced));
+  });
+
+  it('the root lane manifest is excluded, a NESTED lookalike is not (the #1086 blocker-1 property)', () => {
+    const withManifest = [
+      REBASED, '',
+      'diff --git a/.lane-manifest.json b/.lane-manifest.json',
+      '@@ -1 +1 @@', '-{"lane":9}', '+{"lane":9,"base":"old"}',
+    ].join('\n');
+    expect(normalizeContributionFingerprint(withManifest)).toBe(normalizeContributionFingerprint(REBASED));
+    const nested = withManifest.replace(/a\/\.lane-manifest\.json b\/\.lane-manifest\.json/, 'a/x/.lane-manifest.json b/x/.lane-manifest.json');
+    expect(normalizeContributionFingerprint(nested)).not.toBe(normalizeContributionFingerprint(REBASED));
+  });
+
+  it('absent / unusable input yields null, so the gate falls back to the stricter tests', () => {
+    for (const bad of [null, undefined, 42, '', '   ']) expect(normalizeContributionFingerprint(bad)).toBe(null);
+    // A diff whose ONLY section is the transient root manifest normalizes away to nothing, exactly as the
+    // strict digest does — a lane-bookkeeping-only "change" is not a contribution.
+    const manifestOnly = ['diff --git a/.lane-manifest.json b/.lane-manifest.json', '@@ -1 +1 @@', '-{}', '+{"a":1}'].join('\n');
+    expect(normalizeContributionFingerprint(manifestOnly)).toBe(null);
+  });
+
+  it('the marker round-trips through parse, latest wins, and feeds straight back into the gate', () => {
+    const marker = buildReviewedContributionMarker(CLEARED);
+    expect(marker).toMatch(/^<!-- reviewed-contribution: [0-9a-f]{64} -->$/);
+    expect(parseReviewedContribution([{ body: `✅ cleared\n\n${marker}` }]))
+      .toBe(normalizeContributionFingerprint(CLEARED));
+    const second = buildReviewedContributionMarker(REBASED.replace('+const stale = false;', '+const other = 1;'));
+    expect(parseReviewedContribution([{ body: marker }, { body: second }])).not.toBe(normalizeContributionFingerprint(CLEARED));
+    expect(parseReviewedContribution([{ body: 'no marker' }, {}, null])).toBe(null);
+    expect(buildReviewedContributionMarker('')).toBe('');
+    // The drain reads a STORED digest on the accept side and a RAW diff on the live side — both must land on
+    // the same value or the escape could never fire in production.
+    const stored = parseReviewedContribution([{ body: marker }]);
+    expect(acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb', acceptedContribution: stored, headContribution: REBASED,
+    }).covers).toBe(true);
+  });
+
+  it('it is checked LAST — the strict diff test still owns every verdict it can reach', () => {
+    // Same contribution, and the strict digests ALSO match: the strict escape answers, with its own reason.
+    const r = acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb',
+      acceptedDiff: REBASED, headDiff: REBASED,
+      acceptedContribution: CLEARED, headContribution: REBASED,
+    });
+    expect(r.covers).toBe(true);
+    expect(r.reason).toMatch(/content-preserving rebase/);
   });
 });
 

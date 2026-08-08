@@ -106,11 +106,11 @@ import { resolve, join, dirname } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { rebaseDropContent } from './lib/rebase-drop-content.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
-// Rebase resolution (2026-08-08): the UNION of both sides. `parseReviewedDiff` is #2979's accept-fingerprint
-// reader, landed on main today; `READY_TO_MERGE_LABEL` / `isReviewHoldLabel` / `decideParkReadyStrip` are this
-// PR's hold-invariant helpers; `diffHunksFrom` is #2890's null-contract mapper. All independent concerns on the
-// same import line — none supersedes another.
-import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
+// Rebase resolution (2026-08-08): the UNION of four independent concerns on one import line — #2979's accept
+// fingerprint reader (`parseReviewedDiff`), #2832/#984's hold-invariant helpers (`READY_TO_MERGE_LABEL`,
+// `isReviewHoldLabel`, `decideParkReadyStrip`), #2890's null-contract diff mapper (`diffHunksFrom`), and
+// #x9xqexm's contribution fingerprint reader (`parseReviewedContribution`). None supersedes another.
+import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
@@ -3170,6 +3170,10 @@ async function runCli() {
       let acceptedDiff = null;
       let liveHeadDiff = null;
       let liveHeadRef = null;
+      // #x9xqexm — the base-independent CONTRIBUTION fingerprints, read from the same comment scan and computed
+      // from the same live net-diff text as their `*Diff` siblings (no extra gh or git hop).
+      let acceptedContribution = null;
+      let liveHeadContribution = null;
       if (hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
         try {
           const d = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'headRefOid,headRefName,comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
@@ -3177,6 +3181,7 @@ async function runCli() {
           liveHeadRef = typeof d.headRefName === 'string' ? d.headRefName : null;
           acceptedSha = parseReviewedSha(d.comments || []);
           acceptedDiff = parseReviewedDiff(d.comments || []);
+          acceptedContribution = parseReviewedContribution(d.comments || []);
         } catch { /* fetch miss → SHAs null → gate fails open */ }
         // #x169fqe — the LIVE diff, read only when the accept actually recorded a fingerprint to compare it
         // against AND the head has moved. Both conditions keep this off the common path: a pre-#x169fqe accept
@@ -3191,7 +3196,10 @@ async function runCli() {
         // a same-named local ref genuinely scores rather than failing closed — and if that wrong-repo diff's
         // fingerprint happened to match the recorded one, the drain would honour the accept and land the sibling
         // PR's real, unreviewed head. That is the one direction this gate may never fail in.
-        if (acceptedDiff && liveHeadRef && liveHeadSha && acceptedSha
+        // #x9xqexm — `|| acceptedContribution`: an accept that recorded ONLY the contribution marker (or, later,
+        // only that one) must still pay for the live read, or its escape can never fire. Either marker present
+        // is enough; neither present still costs nothing.
+        if ((acceptedDiff || acceptedContribution) && liveHeadRef && liveHeadSha && acceptedSha
             && (isLocalRepo(v.repo) || escCwd)
             && !liveHeadSha.startsWith(acceptedSha) && !acceptedSha.startsWith(liveHeadSha)) {
           try {
@@ -3205,10 +3213,12 @@ async function runCli() {
               fetchExtraRefs: [liveHeadRef],
             });
             liveHeadDiff = net && net.scored ? net.text : null;
+            // Same bytes, second digest — `acceptanceCoversHead` normalizes each with its own function.
+            liveHeadContribution = liveHeadDiff;
           } catch { /* miss → null → SHA-identity verdict (the stricter path) */ }
         }
       }
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff });
+      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution });
       v.escalated = score.escalate ? 'yes' : 'no';
       // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
       // makes an already-applied review:human label win even when a rebase narrows the diff back to
@@ -3273,17 +3283,27 @@ async function runCli() {
             durableRecorded = true;
           }
         }
-        // #2409 — drop the now-stale review:accepted, ADD-FIRST / REMOVE-LAST: only AFTER the re-park label
-        // (gate.applyLabel) has been applied above. The order matters because BOTH `gh pr edit` calls are
-        // best-effort (errors swallowed). Removing accepted FIRST risked leaving the PR with NO review label if
-        // the add then threw (transient gh/network): next pass `hasReviewLabel(accepted)` is false, the
-        // reviewed-SHA staleness check is skipped, and a de-escalated ride-in commit auto-lands — the exact hole
-        // #2409 closes. Add-first/remove-last means a partial failure instead leaves review:accepted in place,
-        // which safely RE-TRIGGERS the stale check next pass rather than yielding a bare mergeable PR. Only when
-        // the PR actually still carries accepted.
-        if (gate.staleAcceptance && !DRY_RUN && hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
-          try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--remove-label', REVIEW_LABELS.accepted], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
-        }
+        // #x9xqexm — A RE-SCORE NEVER REMOVES `review:accepted`. This is where the drain used to
+        // `gh pr edit --remove-label review:accepted` on a stale acceptance (#2409), and it is the second half
+        // of the operator's longest-standing complaint: minutes after a `--to=clear-human` ceremony, an
+        // automated pass deleted the clearance it had just recorded. Observed on WE PR #1100 (14:41:44) and
+        // PR #984 (14:41:51), both 2–3s after the matching re-park label add.
+        //
+        // WHY DELETING IT WAS NEVER LOAD-BEARING. What stops the merge is the GATE'S VERDICT, not the label
+        // state: `decideReviewGate` checks `review:accepted` FIRST and, when `acceptanceCoversHead` says the
+        // acceptance is stale, returns `action:'park'` — never `'merge'` — for as long as it stays stale. The
+        // park label added just above is applied, `v.decision` is already `'skip'`, and `toMerge` filters on
+        // `decision === 'merge'`. So the removal changed no land decision on THIS path; it only destroyed the
+        // durable record that a human cleared this PR, and with it the `reviewed-sha`/`reviewed-diff`/
+        // `reviewed-contribution` machinery's ability to recognise the SAME clearance once the head settles.
+        //
+        // THE ONE THING THE REMOVAL DID BUY, closed elsewhere: the NON-scoring paths (the bare `/merge` orphan
+        // sweep and the `--no-review-escalation` override) gate on `hasUnclearedReviewLabel`, which used to read
+        // a present `review:accepted` as "cleared" unconditionally. That would have let an `accepted + human`
+        // pair merge. `hasUnclearedReviewLabel` now refuses a co-present `review:human`/`review:changes`
+        // regardless of `review:accepted` (see its body), so the hole is shut by the predicate rather than by
+        // deleting a human's verdict. Retracting an acceptance stays what it always should have been: a
+        // REVIEWER action, `review-set-label.mjs --to=changes`, which strips it deliberately and says why.
         // #2324 (guarantee 2) — a `review:human` park must STATE the escalation reason IN THE PR BODY, so the
         // operator opening it sees why a human is required without re-deriving it from the rubric. Augment
         // (never replace) the live body with the marked block at park time, then verify the write landed —

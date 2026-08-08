@@ -43,11 +43,12 @@ describe('review-escalation — #2366 hasUnclearedReviewLabel (the concurrent-la
   it('refuses a PR carrying review:changes alone', () => {
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.changes }])).toBe(true);
   });
-  it('review:accepted clears it, even alongside a stale review:pending/human/changes label', () => {
+  it('review:accepted clears it, even alongside a stale review:pending/changes label', () => {
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.accepted }])).toBe(false);
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }])).toBe(false);
-    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }])).toBe(false);
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.changes }, { name: REVIEW_LABELS.accepted }])).toBe(false);
+    // #x9xqexm — but NOT alongside review:human. See the override block below for why that one pair changed.
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }])).toBe(true);
   });
   it('a PR with no review labels at all is never refused', () => {
     expect(hasUnclearedReviewLabel([])).toBe(false);
@@ -188,9 +189,16 @@ describe('review-escalation — #2366 hasUnclearedReviewLabel { allowPending } (
   it('refuses review:human even when a stale review:pending rides alongside under the override', () => {
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.human }], { allowPending: true })).toBe(true);
   });
-  it('review:accepted still clears everything under the override', () => {
-    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(false);
+  it('review:accepted clears pending and a stale changes under the override (#2974: the verdict wins)', () => {
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(false);
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.changes }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(false);
+  });
+  // #x9xqexm — the ONE pair that is no longer cleared. The drain stopped DELETING a stale `review:accepted` when
+  // it re-parks (deleting a human's recorded clearance was never what stopped the merge), so `accepted + human`
+  // is now a state this non-scoring path can actually observe — and it must fail closed on it.
+  it('review:accepted does NOT clear a co-present review:human — the pair fails closed', () => {
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }], { allowPending: true })).toBe(true);
+    expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.accepted }])).toBe(true);
   });
   it('default (allowPending omitted / false) is the bare-sweep behaviour — review:pending still refuses', () => {
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }])).toBe(true);

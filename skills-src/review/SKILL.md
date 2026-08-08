@@ -155,6 +155,17 @@ applies a label). The same module also renders the operator-facing notice for yo
    precisely because the reader is last-match-wins. (b) INVARIANT 2, above. `check:standards` errors when this
    file spells a hand-rolled review-label edit (#2882), so the raw path cannot come back.
 
+   **What the clearance is durable against (#x9xqexm).** The CLI stamps three markers, not one: `reviewed-sha`
+   (which commit), `reviewed-diff` (the exact net diff), and `reviewed-contribution` (only the lines the PR
+   itself adds and removes). The third one is what makes a clearance survive the drain's own rebase-drop pass:
+   that pass replays the lane onto a newer `main` within minutes of an accept, which moves context lines and
+   hunk offsets and therefore changes `reviewed-diff` even though the author changed nothing. Before this the
+   clearance was revoked on essentially every accepted PR (PR #1100, 3m07s after `--to=clear-human`; PR #984,
+   the same pass). What still re-parks the PR — correctly — is a real change to the contribution: a commit that
+   rides in after the clearance is not covered by it, and no marker makes it so. And a re-score **never removes
+   `review:accepted`**: only your `--to=changes` retracts a verdict, so the record of a clearance outlives any
+   automated pass that declines to land on it.
+
 5. **The findings file you pass as `--body-file`** is the durable, readable record of the verdict on the PR —
    marked clearly as the human decision so it is never mistaken for the drain's `🤖 advisory AI review
    (non-clearing)` take. The CLI supplies the header line and the marker; your file supplies:

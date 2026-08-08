@@ -806,6 +806,115 @@ export function parseReviewedDiff(comments) {
 }
 
 /**
+ * #x9xqexm — THE CONTRIBUTION FINGERPRINT: a BASE-INDEPENDENT digest of what the PR itself adds and removes,
+ * so a clearance survives the drain moving the head onto a newer `main` without the author touching anything.
+ *
+ * WHY `normalizeDiffFingerprint` IS NOT ENOUGH, measured rather than argued. On WE PR #1100 the operator ran
+ * `--to=clear-human` at 14:38:35; the drain's own rebase-drop pass committed at 14:41:09 and the next daemon
+ * pass revoked the clearance at 14:41:42. The two 130 KB net diffs differ in exactly three lines and NOT ONE of
+ * them is this PR's content: two `index <old>..<new>` blob-pair lines (already excluded), one CONTEXT line that
+ * `main` changed underneath the lane, and one HUNK OFFSET (`@@ -197,3` → `@@ -203,3`) because that file grew on
+ * `main`. Every `+`/`-` line was byte-identical. `normalizeDiffFingerprint` deliberately keeps context lines and
+ * `@@` offsets — a defensible reading of "the surrounding file moved, so the reviewer's reading may not hold" —
+ * but the drain rebases every accepted lane onto `main` within minutes and `main` moves constantly, so in
+ * practice that escape almost never fires and EVERY clearance is revoked. #x169fqe's stated intent (recognise
+ * the drain's own content-preserving rebase) needs a digest that hashes the CONTRIBUTION, not the base it sits on.
+ *
+ * WHAT IS HASHED, and nothing else:
+ *   • the per-file headers — `diff --git`, `---`/`+++`, mode / new-file / deleted-file / rename / similarity /
+ *     `Binary files` lines. A file entering or leaving the diff, or changing mode, is content.
+ *   • each hunk header with its OFFSETS STRIPPED but its LENGTHS KEPT — `@@ -197,3 +219,8 @@ foo` becomes
+ *     `@@ -,3 +,8 @@`. The offsets are pure base position (they shift when `main` grows above the hunk); the
+ *     lengths are shape (they change the moment the edit itself changes) and the trailing function context is
+ *     base text, so it goes with the offsets.
+ *   • every `+` and `-` line inside a hunk, verbatim — including whitespace-only ones. This is the contribution.
+ *   • `\ No newline at end of file`, which is content.
+ * DROPPED: `index` blob-pair lines (restated hashes) and every CONTEXT line (base text the author did not write).
+ *
+ * THE RESIDUAL, stated because dropping context is a real loosening: two diffs collide iff they touch the same
+ * files in the same order with the same hunk COUNT, the same hunk LENGTHS, and byte-identical `+`/`-` lines,
+ * differing only in where in the file those hunks sit and what surrounds them. That is exactly the shape of a
+ * rebase and it is a very poor shape for a ride-in commit — a ride-in adds or changes at least one `+`/`-` line
+ * or one hunk length, either of which changes this digest. It is checked LAST, after the SHA test and after the
+ * strict `normalizeDiffFingerprint` test, so nothing that already passed behaves differently; it can only ever
+ * honour an accept the strict test rejected, and only for a base-only move.
+ *
+ * @param {string|null|undefined} diffText - raw unified diff, or a 64-hex fingerprint this function produced.
+ *   Same idempotence caveat as `normalizeDiffFingerprint`: do not pass untrusted free-form text, and never pass
+ *   a `reviewed-diff` digest here — the two digests are parsed into separate slots precisely so they cannot mix.
+ * @returns {string|null} a 64-char lowercase sha256, or `null` for absent/unusable input (→ fail closed).
+ */
+export function normalizeContributionFingerprint(diffText) {
+  if (typeof diffText !== 'string') return null;
+  const trimmed = diffText.trim();
+  if (!trimmed) return null;
+  if (/^[0-9a-f]{64}$/.test(trimmed)) return trimmed;
+  const MANIFEST_HEADER = `diff --git a/${LANE_MANIFEST} b/${LANE_MANIFEST}`;
+  // `@@ -<start>[,<len>] +<start>[,<len>] @@[ <function context>]` — git omits `,<len>` when it is exactly 1.
+  const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+  const kept = [];
+  let inManifestSection = false;
+  let inHunk = false;
+  for (const line of diffText.split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      // A new file section always ends any skip AND any hunk in progress.
+      inManifestSection = line === MANIFEST_HEADER;
+      inHunk = false;
+      if (!inManifestSection) kept.push(line);
+      continue;
+    }
+    if (inManifestSection) continue;
+    const hunk = HUNK_RE.exec(line);
+    if (hunk) {
+      inHunk = true;
+      // Offsets out, lengths in. An omitted length means 1 (git's own shorthand) — spell it so `@@ -1 +1 @@`
+      // and `@@ -1,1 +1,1 @@` cannot hash differently for the same shape.
+      kept.push(`@@ -,${hunk[2] ?? '1'} +,${hunk[4] ?? '1'} @@`);
+      continue;
+    }
+    if (!inHunk) {
+      // Pre-hunk file headers. `index` lines restate blob hashes already implied by the body; everything else
+      // here (`---`/`+++`, modes, renames, `Binary files …`) is content and is kept verbatim.
+      if (/^index [0-9a-f]+\.\.[0-9a-f]+/.test(line)) continue;
+      kept.push(line);
+      continue;
+    }
+    // Inside a hunk: the contribution is the `+`/`-` lines plus the no-newline marker. A leading space (or an
+    // empty line, which is how some producers spell an empty context line) is BASE text and is dropped.
+    if (line.startsWith('+') || line.startsWith('-') || line.startsWith('\\')) kept.push(line);
+  }
+  const normalized = kept.join('\n');
+  if (!normalized.trim()) return null;
+  return createHash('sha256').update(normalized, 'utf8').digest('hex');
+}
+
+/** The marker carrying the #x9xqexm CONTRIBUTION fingerprint, stamped beside `reviewed-sha` / `reviewed-diff`. */
+export const REVIEWED_CONTRIBUTION_MARKER = 'reviewed-contribution';
+const REVIEWED_CONTRIBUTION_RE = new RegExp(`<!--\\s*${REVIEWED_CONTRIBUTION_MARKER}:\\s*([0-9a-f]{64})\\s*-->`, 'g');
+
+/** Build the reviewed-contribution marker from a raw diff OR a precomputed fingerprint. Pure. Unusable input →
+ *  '' (nothing to stamp — the gate then falls back to the `reviewed-diff` / SHA tests, i.e. prior behaviour). */
+export function buildReviewedContributionMarker(diffOrFingerprint) {
+  const fp = normalizeContributionFingerprint(diffOrFingerprint);
+  return fp ? `<!-- ${REVIEWED_CONTRIBUTION_MARKER}: ${fp} -->` : '';
+}
+
+/** Extract the reviewed-contribution fingerprint from a PR's comments — LATEST marker wins, mirroring
+ *  `parseReviewedSha` / `parseReviewedDiff`. `null` when absent → the gate behaves exactly as it did before
+ *  #x9xqexm. Carries the same forge residual documented on `parseReviewedSha`. */
+export function parseReviewedContribution(comments) {
+  let latest = null;
+  for (const c of Array.isArray(comments) ? comments : []) {
+    const body = c && typeof c.body === 'string' ? c.body : '';
+    if (!body) continue;
+    let m;
+    REVIEWED_CONTRIBUTION_RE.lastIndex = 0;
+    while ((m = REVIEWED_CONTRIBUTION_RE.exec(body)) !== null) latest = m[1].toLowerCase();
+  }
+  return latest;
+}
+
+/**
  * #2409 — does a `review:accepted` verdict still cover the PR's LIVE head? Pure. The acceptance only vouches
  * for the tree the reviewer looked at; a commit that rode in AFTER accept is NOT covered (this is exactly the
  * PR #368 hole — a second, unrelated commit honoured under an accept that named only the first).
@@ -824,6 +933,7 @@ export function parseReviewedDiff(comments) {
  */
 export function acceptanceCoversHead({
   acceptedSha = null, headSha = null, acceptedDiff = null, headDiff = null,
+  acceptedContribution = null, headContribution = null,
 } = {}) {
   const a = typeof acceptedSha === 'string' ? acceptedSha.trim().toLowerCase() : '';
   const h = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
@@ -849,6 +959,22 @@ export function acceptanceCoversHead({
       reason: `head moved to ${h.slice(0, 12)} but the reviewed diff is byte-identical (${ad.slice(0, 12)}) — a content-preserving rebase, the acceptance still covers this tree`,
     };
   }
+  // #x9xqexm — THE CONTRIBUTION ESCAPE, checked LAST so it can only ever honour an accept the two stricter tests
+  // above already rejected. `normalizeDiffFingerprint` hashes the base the contribution sits on as well as the
+  // contribution, so it changes whenever `main` moves a context line or shifts a hunk offset under the lane —
+  // which the drain's own rebase-drop pass causes within minutes of every accept (measured on PR #1100: three
+  // differing lines across 130 KB, none of them the PR's own). This digest hashes only what the PR ADDS and
+  // REMOVES, so a base-only move is recognised as covered while any change to the contribution is not. Same
+  // FAIL-CLOSED shape as its sibling: both fingerprints must be present and equal, so an accept stamped before
+  // #x9xqexm (no contribution marker) behaves exactly as it did.
+  const ac = normalizeContributionFingerprint(acceptedContribution);
+  const hc = normalizeContributionFingerprint(headContribution);
+  if (ac && hc && ac === hc) {
+    return {
+      covers: true,
+      reason: `head moved to ${h.slice(0, 12)} but the PR's own added/removed lines are unchanged (contribution ${ac.slice(0, 12)}) — the base moved underneath it, the acceptance still covers this contribution`,
+    };
+  }
   return {
     covers: false,
     reason: `head advanced to ${h.slice(0, 12)} past the reviewed commit ${a.slice(0, 12)} — the acceptance did not cover the current tree`,
@@ -864,7 +990,8 @@ export function acceptanceCoversHead({
  * pass already parked it under `review:pending`/`review:human` (an owed independent review, never cleared) or
  * bounced it under `review:changes` (the author lane hasn't fixed it yet) — exactly how plateau#11 and
  * web-everything#290 shipped 2 bugs the review panel had already caught but never got to act on. `review:accepted`
- * always clears it (the reviewer's verdict wins over everything else). Pure.
+ * clears a `review:pending` park (the reviewer's verdict wins), but NOT a co-present `review:human` /
+ * `review:changes` — see the body for why that pair can now exist and must fail closed (#x9xqexm). Pure.
  *
  * A caller that DOES run `decideReviewGate` this pass (the label-scoped `/drain` role, escalation ON) must NOT
  * also apply this check — `decideReviewGate` already re-derives the correct verdict from a FRESH rubric score,
@@ -892,9 +1019,22 @@ export function acceptanceCoversHead({
  * @returns {boolean} true iff this PR carries an un-cleared review-escalation label and must be refused
  */
 export function hasUnclearedReviewLabel(labels, { allowPending = false } = {}) {
+  // #x9xqexm — a CO-PRESENT `review:human` is refused EVEN NEXT TO `review:accepted`, and the order of these
+  // tests is the whole point. `review:accepted` used to short-circuit to `false` unconditionally, which was safe
+  // only because the drain DELETED the accept whenever it re-parked. It no longer does (deleting a human's
+  // recorded clearance was never what stopped the merge — the gate's verdict was), so the contradictory pair
+  // `accepted + human` can now exist on a re-parked PR, and this NON-SCORING path (the bare `/merge` sweep, the
+  // `--no-review-escalation` override) must not read it as cleared. No sanctioned writer produces that pair:
+  // `--to=clear-human` removes `human` as it adds `accepted`, and `--to=accepted` is refused outright on a
+  // `review:human` PR. So the pair means either a drain re-park (refuse — that is the point) or an out-of-band
+  // edit (refuse — fail closed). It is also the ONE pair narrowed here, deliberately:
+  //   • `review:pending` — an accept genuinely clears a pending park; that is the ordinary sequence.
+  //   • `review:changes` — #2974 RULED the reviewer verdict wins over a stale bounce and made `--to=accepted`
+  //     strip `changes` for exactly that reason. Refusing that pair here would reverse a ratified reading and
+  //     strand any PR still carrying the pre-#2974 pair, so it is left exactly as it was.
+  if (hasReviewLabel(labels, REVIEW_LABELS.human)) return true;
   if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) return false;
   return (!allowPending && hasReviewLabel(labels, REVIEW_LABELS.pending))
-    || hasReviewLabel(labels, REVIEW_LABELS.human)
     || hasReviewLabel(labels, REVIEW_LABELS.changes);
 }
 
@@ -1026,7 +1166,7 @@ export function bodyHasEscalationReason(body) {
  */
 export function decideReviewGate({
   escalate, humanRequired = false, labels = [], acceptedSha = null, headSha = null,
-  acceptedDiff = null, headDiff = null,
+  acceptedDiff = null, headDiff = null, acceptedContribution = null, headContribution = null,
 } = {}) {
   // A reviewer verdict (whoever applied it — for a human-gated PR only a human can) always wins, and is checked
   // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
@@ -1040,7 +1180,9 @@ export function decideReviewGate({
     // #x169fqe — the diff fingerprints are passed through so a CONTENT-PRESERVING rebase (the drain's own
     // manifest-drop pass, which fires seconds after an accept) no longer invalidates the accept. Absent
     // fingerprints reduce this to the pre-#x169fqe SHA-identity test exactly.
-    const fresh = acceptanceCoversHead({ acceptedSha, headSha, acceptedDiff, headDiff });
+    const fresh = acceptanceCoversHead({
+      acceptedSha, headSha, acceptedDiff, headDiff, acceptedContribution, headContribution,
+    });
     if (!fresh.covers) {
       // Re-park for a fresh review: review:pending re-arms an agent panel; a gate-self/human-gated PR (fresh
       // humanRequired score, or a sticky review:human still present) re-parks review:human — only a human may

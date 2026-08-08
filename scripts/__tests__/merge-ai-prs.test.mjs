@@ -2543,29 +2543,34 @@ describe('#2423 per-PR --no-review-escalation relief valve', () => {
   });
 });
 
-describe('#2409 — the stale re-park label swap is ADD-FIRST / REMOVE-LAST', () => {
-  // The re-park swap lives in runCli's imperative park branch: it shells `gh pr edit` to apply the re-park
-  // label AND to drop the now-stale review:accepted. BOTH calls are best-effort (errors swallowed), so ORDER
-  // is the safety property — the pure gate functions above cannot express it. If the accepted label were
-  // removed FIRST and the add then threw (transient gh/network), the PR would carry NO review label: next pass
-  // `hasReviewLabel(accepted)` is false, the reviewed-SHA staleness check is skipped, and a de-escalated
-  // ride-in commit auto-lands (the exact hole #2409 closes). Add-first/remove-last means a partial failure
-  // leaves review:accepted in place, which safely re-triggers the stale check. This asserts that ordering at
-  // the source level (the only observable seam for an inline, side-effecting gh sequence).
+describe('#x9xqexm — a re-score never REMOVES review:accepted (superseding #2409\'s add-first/remove-last)', () => {
+  // WHAT THIS REPLACES. #2409's re-park swap did two `gh pr edit` calls: add the re-park label, then drop the
+  // now-stale `review:accepted`. Its safety property was the ORDER (add-first/remove-last), because both calls
+  // are best-effort and removing first could leave a PR with NO review label. #x9xqexm removes the second call
+  // entirely, which retires that ordering concern and closes a worse one: the drain was DELETING a human's
+  // recorded clearance minutes after the operator granted it (WE PR #1100 at 14:41:44, PR #984 at 14:41:51 —
+  // 2-3s after the matching add, exactly this swap).
+  //
+  // WHY THE MERGE IS STILL REFUSED WITHOUT THE REMOVAL. `decideReviewGate` checks `review:accepted` FIRST and
+  // returns `action:'park'` — never `'merge'` — for as long as `acceptanceCoversHead` says the accept is stale,
+  // so the land decision never depended on the label being gone. The one thing the removal did buy — keeping the
+  // NON-scoring paths from reading `accepted + human` as cleared — is now `hasUnclearedReviewLabel`'s job
+  // (gate-invariants INVARIANT 5). Source-level, because an inline side-effecting `gh` sequence has no other
+  // observable seam.
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
 
-  it('applies the re-park label (add) before removing review:accepted', () => {
-    const addIdx = src.indexOf("'--add-label', gate.applyLabel");
-    const removeStaleIdx = src.indexOf("'--remove-label', REVIEW_LABELS.accepted");
-    expect(addIdx).toBeGreaterThan(-1);      // the re-park add call is present
-    expect(removeStaleIdx).toBeGreaterThan(-1); // the stale-accepted remove call is present
-    // REMOVE-LAST: the stale-accepted drop must appear AFTER the re-park add in source order.
-    expect(removeStaleIdx).toBeGreaterThan(addIdx);
+  it('the re-park ADD is still there — a stale acceptance is still re-parked, it just is not un-accepted', () => {
+    expect(src.indexOf("'--add-label', gate.applyLabel")).toBeGreaterThan(-1);
   });
 
-  it('removes review:accepted exactly once in the park path (no duplicate swap)', () => {
-    const occurrences = src.split("'--remove-label', REVIEW_LABELS.accepted").length - 1;
-    expect(occurrences).toBe(1);
+  it('NO code path in the drain removes review:accepted, in any spelling', () => {
+    for (const forbidden of [
+      /--remove-label'\s*,\s*REVIEW_LABELS\.accepted/,
+      /--remove-label'\s*,\s*'review:accepted'/,
+      /--remove-label=review:accepted/,
+    ]) {
+      expect(src).not.toMatch(forbidden);
+    }
   });
 });
 
