@@ -1,4 +1,5 @@
 ---
+bornAs: x169fqe
 kind: story
 size: 3
 status: active
@@ -77,7 +78,7 @@ two materially different inputs does this now make equal?", not against "what no
 
 Fail-closed on every path: a missing, empty, or unparseable fingerprint on **either** side falls through to the
 pre-existing SHA-identity verdict. A read failure can therefore only ever cost a false re-park, never honour an
-accept it should not. Every pre-#x169fqe accept carries no fingerprint and so behaves exactly as before.
+accept it should not. Every pre-#2979 accept carries no fingerprint and so behaves exactly as before.
 
 ## Acceptance
 
