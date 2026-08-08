@@ -35,7 +35,26 @@ import { isHash } from '../backlog/id.mjs';
  * "open" bucket and every hash `blockedBy` edge spuriously matches every other hash item. `asItemId` keeps a
  * hash as its own distinct string so `Set.has`/`===` compare correctly. */
 export const asItemId = (v) => (isHash(String(v)) ? String(v) : Number(v));
-export const isItemId = (v) => isHash(String(v)) || Number.isFinite(Number(v));
+/**
+ * True ONLY for a real item id: a POSITIVE integer NNN, a positive-integer digit string, or an `xNNNNNN` hash.
+ *
+ * #xc7p3q9 (B4) — the old `isHash(String(v)) || Number.isFinite(Number(v))` returned TRUE for `null`, `''`,
+ * `' '`, `0`, `[]`, `false` (all coerce via `Number(...)` to a finite `0`) — so it could NOT tell a nameable
+ * carrier apart from an unnameable one. A missing manifest `item` becomes `NaN` (`asItemId(undefined)`), which
+ * `JSON.stringify` prints as `"item": null`, which re-normalizes to `0` on read — and the old predicate read
+ * that `0` as nameable, so a carrier with no positively-named backlog item read healthy and its coupled impl
+ * landed. This predicate is a fail-closed SECURITY oracle for the couple gate, so it must reject every value
+ * that is not a positively-identified item (`null/undefined/''/' '/0/[]/{}/false/NaN/Infinity` → false). Keep
+ * it in lock-step with the expression that COMPUTES the item (`asItemId`) so the two can never disagree.
+ */
+export const isItemId = (v) => {
+  if (typeof v === 'number') return Number.isInteger(v) && v > 0;
+  if (typeof v === 'string') {
+    const s = v.trim();
+    return isHash(s) || (/^\d+$/.test(s) && Number(s) > 0);
+  }
+  return false;
+};
 
 /** The manifest filename — a NEW file in the WE lane commit (one-sided add; drain deletes at landing). */
 export const MANIFEST_FILENAME = '.lane-manifest.json';

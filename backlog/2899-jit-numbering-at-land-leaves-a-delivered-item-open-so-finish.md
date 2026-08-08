@@ -155,3 +155,17 @@ Not a change to JIT-numbering (#2288, resolved) — the corrected diagnosis remo
 chain entirely. This is a **coverage** fix to #2748's resolve-on-land ownership: the mechanism is
 right, one land route just never calls it. #2748's rule that the DRAIN owns the flip off its terminal
 land event is unchanged; A6 only makes the *live* drain one of the drains that obeys it.
+
+## Scope widened by #xc7p3q9 R8 (2026-08-03)
+
+The couple-join review (R8) found the deeper half of this class: `resolveLandedItem` (#2748) lived
+ONLY in the retired `we:scripts/lane-drain.mjs`, so the LIVE **label** lander
+(`we:scripts/merge-ai-prs.mjs`, plus `we:scripts/pr-land.mjs`) never flipped a landed item at all —
+a reciprocal `blockedBy` therefore became a permanent block. #xc7p3q9 cut a first version of
+resolve-on-land on the label lander, then SPLIT IT BACK OUT (PR #1012 round-3 review, B5): it resolved
+off the WE carrier ALONE and ungated, so an impl half whose merge threw would still leave the card
+flipped with its PR open. This item carries resolve-on-land instead, and its scope includes
+`we:scripts/merge-ai-prs.mjs` so A1's every-land-route flip and A2's `null`-verdict handling are
+applied to the label-lander path too — through the shared `resolveLandedItem` (A6: one home, both
+callers), behind the couple-completeness gate, with A7's totality buckets. #xc7p3q9 keeps only the
+couple-join decoupling.
