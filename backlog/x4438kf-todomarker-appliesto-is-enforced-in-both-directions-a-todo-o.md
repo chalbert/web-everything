@@ -17,10 +17,11 @@ stray `owedTo`) it finds there.
 
 ## Where it is today
 
-`validateTodoMarkerBlock` / the reasons walk in
-[we:scripts/lib/review-policy.mjs](../scripts/lib/review-policy.mjs) validate `appliesTo` itself (non-empty, no
-duplicates, every entry in the closed `TODO_MARKER_SECTIONS` set) and then check, per reason entry, that a
-`todo` implies `appliesTo` includes `"reasons"`:
+In [we:scripts/lib/review-policy.mjs](../scripts/lib/review-policy.mjs), the `appliesTo` walk is **inline in
+`validateContract`** (lines ~185–193) — there is no separately named block validator. It checks `appliesTo` itself
+(non-empty, no duplicates, every entry in the closed `TODO_MARKER_SECTIONS` set) and then, in the per-reason loop
+just below (lines ~209–212, which also calls `validateTodoMarker` for the entry's own `todo`/`owedTo` shape),
+checks that a `todo` implies `appliesTo` includes `"reasons"`:
 
 ```
 fail(`reason "${r.token}" carries a todo marker, but todoMarker.appliesTo does not include "reasons"`)
@@ -37,7 +38,8 @@ a `leash: spec`, human-gated file — carry a declaration that reads as meaningf
 class of thing `#xonzpym` exists to abolish: a debt declared in prose with no mechanism behind it.
 
 The rank is also why this is a follow-up rather than part of `#xonzpym`: closing it means touching the loader's
-refusal surface, which that PR spent 35 load-time fixtures pinning.
+refusal surface, which that PR pinned with 15 load-time `validateContract` assertions (12 refusals, 3 accepts) in
+the conformance suite's todo-marker block.
 
 ## Done when
 
@@ -46,7 +48,7 @@ refusal surface, which that PR spent 35 load-time fixtures pinning.
 - `TODO_MARKER_SECTIONS` stays the closed vocabulary; adding a section to it is still a deliberate spec edit.
 - Conformance fixtures cover both directions: a marker on `thresholds` FAILS; the legal `reasons` marker still
   passes; `appliesTo: ["reasons"]` with a marker only on `reasons` is unchanged.
-- The existing positive-direction message and the 35 load-time refusal fixtures are unperturbed.
+- The existing positive-direction message and the 12 load-time refusal fixtures are unperturbed.
 
 ## Provenance
 

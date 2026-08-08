@@ -28,7 +28,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
 import {
   REVIEW_POLICY,
@@ -60,9 +60,12 @@ import { panelRigorForCareLevel, PANEL_LENSES } from '../jury-core.mjs';
  * `NNN` number and the in-flight `bornAs`/filename hash (#2288), since an `owedTo` may cite either.
  *
  * WHY "not resolved" AND NOT "open" (a `parked`/`someday` item still counts): two reasons, both checkable.
- *   1. It is the repo's EXISTING definition of open. `we:scripts/check-standards.mjs` decides open-ness with the
- *      same `status !== 'resolved'` test in six places, `openKids` among them. Board statuses in use today are
- *      `open`, `active`, `parked`, `resolved`; a narrower predicate here would disagree with the health gate.
+ *   1. It is the repo's EXISTING definition of open. `we:scripts/check-standards.mjs` decides open-ness with a
+ *      `status !== 'resolved'` test in SEVEN places (lines 750, 792, 883, 886, 888, 950, 1779 — `openKids` among
+ *      them). Board statuses in use today are `open`, `active`, `parked`, `resolved`; a narrower predicate here
+ *      would disagree with the health gate. The one divergence, stated rather than glossed: this reader also
+ *      skips `dropped`, which the gate's test does not. It is inert — there are zero `dropped` items on the board
+ *      — and it is the right side to err on: a marker owing a DROPPED item is stale debt, not live debt.
  *   2. It is the right rule regardless. The debt an `owedTo` records is owed whether or not anyone intends to
  *      build it soon — a marker pointing at a parked item is still an honest record of who owes the work.
  *      Tightening this would turn the conformance gate red for a scheduling change on an unrelated board item.
@@ -96,6 +99,198 @@ const liveReasons = () => REVIEW_POLICY.reasons.filter((r) => r.todo !== true);
 function nonEmptyPowerset(items) {
   const all = items.reduce((sets, item) => sets.concat(sets.map((s) => [...s, item])), [[]]);
   return all.filter((s) => s.length > 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// THE VOCABULARY-INJECTION DETECTOR (used by the injection sweep far below, and by its own self-test).
+// Factored out on purpose: a static scan is only worth the sentence written above it if that sentence is itself
+// checkable. The predecessor — one line-based regex, `/(?<!function\s)canonicalizeReason\([^)]*,/`, run over
+// `scripts/` — was walked through THREE ways on a fully green suite: a call in a file outside the walked tree, a
+// call a formatter had wrapped onto a second line, and a call through an aliased import. All three are fixtures
+// on the self-test now.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Blank out comments, string literals and regex literals so a call-site scan reads CODE only. Replacement is
+ * 1:1 per character (newlines preserved), so offsets and line numbers still map onto the original source.
+ * `${…}` interpolations are kept — those ARE code, and a call can hide in one.
+ * @param {string} src
+ * @returns {string}
+ */
+function stripNonCode(src) {
+  let out = '';
+  let i = 0;
+  const blank = (ch) => (ch === '\n' ? '\n' : ' ');
+  while (i < src.length) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (c === '/' && d === '/') { while (i < src.length && src[i] !== '\n') out += blank(src[i++]); continue; }
+    if (c === '/' && d === '*') {
+      const end = src.indexOf('*/', i + 2);
+      const stop = end === -1 ? src.length : end + 2;
+      while (i < stop) out += blank(src[i++]);
+      continue;
+    }
+    // A `/` opens a REGEX literal unless the previous meaningful character can end an operand (then it divides).
+    if (c === '/') {
+      const before = out.replace(/\s+$/, '');
+      const divides = /[\w$)\]]$/.test(before)
+        && !/\b(?:return|typeof|instanceof|case|in|of|do|else|new|delete|void|yield|await)$/.test(before);
+      if (!divides) {
+        out += ' '; i++;
+        let inClass = false;
+        while (i < src.length) {
+          const ch = src[i];
+          if (ch === '\\') { out += ' '; i++; if (i < src.length) out += blank(src[i++]); continue; }
+          if (ch === '\n') break; // unterminated — bail rather than swallow the rest of the file
+          out += blank(ch); i++;
+          if (ch === '[') inClass = true;
+          else if (ch === ']') inClass = false;
+          else if (ch === '/' && !inClass) break;
+        }
+        continue;
+      }
+    }
+    if (c === "'" || c === '"') {
+      out += ' '; i++;
+      while (i < src.length && src[i] !== c) {
+        if (src[i] === '\\') { out += ' '; i++; if (i < src.length) out += blank(src[i++]); continue; }
+        out += blank(src[i++]);
+      }
+      if (i < src.length) { out += ' '; i++; }
+      continue;
+    }
+    if (c === '`') {
+      out += ' '; i++;
+      while (i < src.length && src[i] !== '`') {
+        if (src[i] === '\\') { out += ' '; i++; if (i < src.length) out += blank(src[i++]); continue; }
+        if (src[i] === '$' && src[i + 1] === '{') {
+          let depth = 1;
+          let j = i + 2;
+          while (j < src.length) {
+            if (src[j] === '{') depth++;
+            else if (src[j] === '}' && --depth === 0) break;
+            j++;
+          }
+          out += `  ${stripNonCode(src.slice(i + 2, j))} `; // same length: '${' → '  ', '}' → ' '
+          i = j + 1;
+          continue;
+        }
+        out += blank(src[i++]);
+      }
+      if (i < src.length) { out += ' '; i++; }
+      continue;
+    }
+    out += c; i++;
+  }
+  return out;
+}
+
+const CORE_MODULE_RE = /(?:^|[./])review-core\.mjs$/;
+
+/**
+ * Every local name in `src` that can reach review-core's `canonicalizeReason`: the literal name (whatever route
+ * brought it in), any `as`/`:` alias on a named import or an `import()`/`require()` destructure of review-core,
+ * and any local re-aliasing of those to a fixpoint. Matching the BINDING rather than the literal spelling is what
+ * closes the aliased-import defeat.
+ * @param {string} src the RAW source (module specifiers live in string literals, so this runs before stripping)
+ * @returns {Set<string>}
+ */
+function canonicalizeReasonBindings(src) {
+  const names = new Set(['canonicalizeReason']);
+  const addClause = (clause) => {
+    for (const part of clause.split(',')) {
+      const m = part.trim().match(/^canonicalizeReason(?:\s+as\s+|\s*:\s*)([A-Za-z_$][\w$]*)$/);
+      if (m) names.add(m[1]);
+    }
+  };
+  for (const m of src.matchAll(/(?:import|export)\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) {
+    if (CORE_MODULE_RE.test(m[2])) addClause(m[1]);
+  }
+  for (const m of src.matchAll(/\{([^}]*)\}\s*=\s*(?:await\s+)?(?:import|require)\s*\(\s*['"]([^'"]+)['"]/g)) {
+    if (CORE_MODULE_RE.test(m[2])) addClause(m[1]);
+  }
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const m of src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\s*[;\n]/g)) {
+      const tail = m[2].split('.').pop();
+      if (!names.has(m[1]) && (names.has(m[2]) || names.has(tail))) { names.add(m[1]); grew = true; }
+    }
+  }
+  return names;
+}
+
+/** True iff the call whose `(` sits at `openIdx` has a comma at ARGUMENT depth — i.e. passes a second argument.
+ *  Bracket-matched rather than regex'd, so `f(g(a, b))` is one argument and a wrapped call is still one call. */
+function callHasSecondArgument(code, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < code.length; i++) {
+    const ch = code[i];
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') { if (--depth === 0) return false; }
+    else if (ch === ',' && depth === 1) return true;
+  }
+  return false;
+}
+
+/**
+ * Every place in one source file that CALLS `canonicalizeReason` (under any of its local bindings) with a second
+ * argument — i.e. injects a vocabulary. The declaration itself is excluded by the preceding `function` keyword,
+ * not by name.
+ * @param {string} src
+ * @returns {{line: number, snippet: string}[]}
+ */
+function vocabularyInjectionSites(src) {
+  // A file with no route to the function cannot call it: every route (named import, alias, re-export barrel
+  // consumed downstream, member access on a namespace import) spells the name somewhere in the file.
+  if (!src.includes('canonicalizeReason')) return [];
+  const code = stripNonCode(src);
+  const sites = [];
+  for (const name of canonicalizeReasonBindings(src)) {
+    // No `.` in the lookbehind: `ns.canonicalizeReason(a, b)` on a namespace import must be caught too.
+    for (const m of code.matchAll(new RegExp(`(?<![\\w$])${name}\\s*\\(`, 'g'))) {
+      if (/\bfunction\s+$/.test(code.slice(Math.max(0, m.index - 32), m.index))) continue;
+      if (!callHasSecondArgument(code, m.index + m[0].length - 1)) continue;
+      sites.push({
+        line: code.slice(0, m.index).split('\n').length,
+        snippet: src.slice(m.index, m.index + 90).replace(/\s+/g, ' ').trim(),
+      });
+    }
+  }
+  return sites.sort((a, b) => a.line - b.line);
+}
+
+/** Directories the sweep does not walk: dependencies and generated output. Dot-directories are skipped too —
+ *  `.claude/skills/` is a DEPLOY of `skills-src/` (swept), regenerated by `sync-skills-deploy`, not a source. */
+const SWEEP_SKIP_DIRS = new Set([
+  'node_modules', '__tests__', '_site', '_site-visual-fixtures', 'dist', 'coverage', 'playwright-report', 'test-results',
+]);
+
+/**
+ * Walk EVERY tree in the repo for vocabulary injections. Returns the offenders, plus the two numbers that keep
+ * the walk itself honest: how many files it actually read, and which of them import review-core.mjs (DERIVED,
+ * so the sweep never again has to assert which trees those are).
+ * @param {string} root the repo root
+ */
+function sweepForVocabularyInjection(root) {
+  const offenders = [];
+  const importers = [];
+  let filesWalked = 0;
+  const walk = (dir) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (ent.name.startsWith('.') || SWEEP_SKIP_DIRS.has(ent.name)) continue;
+      const p = join(dir, ent.name);
+      if (ent.isDirectory()) { walk(p); continue; }
+      if (!/\.(mjs|cjs|js|ts|mts|cts)$/.test(ent.name)) continue;
+      filesWalked++;
+      const src = readFileSync(p, 'utf8');
+      const rel = relative(root, p);
+      if (/['"][^'"]*review-core\.mjs['"]/.test(src)) importers.push(rel);
+      for (const site of vocabularyInjectionSites(src)) offenders.push(`${rel}:${site.line} — ${site.snippet}`);
+    }
+  };
+  walk(root);
+  return { filesWalked, importers: importers.sort(), offenders: offenders.sort() };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -650,9 +845,30 @@ describe('the derivation itself, on reasons that really carry a `todo` (#xonzpym
 //     carries a `todo` reason and asks the production entry point what it does with one. It constrains what
 //     `canonicalizeReason` DEFAULTS to, not how the default is written, so every route to the declared set fails
 //     — widened union, aliased shadow, or a spelling nobody has thought of yet.
+//
+//     WHY IT DOCTORS THE CONTRACT THROUGH `node:fs` RATHER THAN MOCKING review-policy.mjs — this is the actual
+//     reason the machinery is warranted, and an earlier revision of this header did not state it. The obvious
+//     lighter pin is `vi.doMock('../review-policy.mjs', …)` returning the real module with two exports overridden
+//     (~8 lines, no fs, no contract round-trip). Measured, it closes the widened union, the aliased shadow AND the
+//     literal swap exactly as well. What it CANNOT see is a widening performed INSIDE review-policy.mjs itself —
+//     e.g. `POLICY_IMPLEMENTED_REASON_TOKENS` rebuilt straight off `REVIEW_POLICY.reasons`, bypassing
+//     `partitionReasons` — because a module mock hands the module's own (now wrong) export back as ground truth.
+//     Doctoring the CONTRACT exercises the real loader, so that widening does show up here: the vacuity guard
+//     below (`POLICY_IMPLEMENTED_REASON_TOKENS` must NOT contain the todo token) goes red on it while the module
+//     mock stays green. That one defeat is what the weight buys. It is also why the guard is a guard and not
+//     decoration: it is load-bearing beyond vacuity.
+//
+//     HONEST LIMIT: the pin runs IN-PROCESS, so an in-process discriminator (`process.env.VITEST ? implemented :
+//     declared`) defeats it. Not a plausible edit — but it is the boundary of what "behaviour, not spelling" buys.
 //   • THE INJECTION SWEEP (fourth test) covers the hazard's new shape. Making the vocabulary a parameter turned a
-//     private binding into public API on a function ~15 modules can import, several below the policy tier; the
-//     source pins only ever scanned review-core.mjs. No production file may pass a vocabulary at all.
+//     private binding into public API on a function importable from well below the policy tier; the source pins
+//     only ever scanned review-core.mjs. The sweep walks EVERY tree in the repo. An earlier revision walked
+//     `scripts/` only and asserted, as verified fact, that `scripts/` was the only tree importing review-core.mjs.
+//     That was false — `skills-src/jury/resolve-roster.mjs` imports it, and it is production glue the review
+//     workflow shells — and it was one of three ways the sweep was walked through on a green suite (the others:
+//     a formatter-wrapped call and an aliased import, both of which beat a line-based, name-based regex). The
+//     sweep's exact coverage, and what it still does NOT cover, is stated on the test itself rather than claimed
+//     in the abstract, and its detector has its own self-test (fifth test) so the claim cannot rot into a no-op.
 //
 // Together with the counterfactual (which shows what the wrong vocabulary COSTS), this block is what keeps the
 // swap off a green suite.
@@ -703,7 +919,10 @@ describe('review-core canonicalizes against the IMPLEMENTED vocabulary, never th
       // THE PIN. Default vocabulary ⇒ the unbuilt token is not recognized, and the entry point refuses.
       const decorated = `${OWED.token} (scripts/lib/gate-config.mjs) — human review required`;
       expect(core.canonicalizeReason(decorated)).toBeNull();
-      expect(() => core.deriveReviewDisposition({ reasons: [decorated] })).toThrow(/unknown reason\(s\)/);
+      // THAT it refuses, not HOW it words the refusal. An earlier revision pinned /unknown reason\(s\)/ here,
+      // which false-redded a strictly SAFE improvement — leaving the vocabulary alone and only making the
+      // diagnostic name the owing item — i.e. the exact follow-up this block's header points a future author at.
+      expect(() => core.deriveReviewDisposition({ reasons: [decorated] })).toThrow();
     } finally {
       vi.doUnmock('node:fs');
       vi.resetModules();
@@ -713,26 +932,60 @@ describe('review-core canonicalizes against the IMPLEMENTED vocabulary, never th
   it('no production file injects a vocabulary — the parameter is the suite\'s, not an API surface', () => {
     // `canonicalizeReason` is exported so THIS suite can drive it over both vocabularies. That made a private
     // policy-tier binding into a public parameter on a function importable from well below the policy tier, where
-    // an edit may never even reach this committee. The default is pinned above; the injection POINT is pinned
-    // here: across every JS module under scripts/ (the only tree that imports review-core.mjs — verified: outside
-    // scripts/, the name appears solely in backlog/docs prose), no file outside __tests__ passes a vocabulary.
-    const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-    const offenders = [];
-    const walk = (dir) => {
-      for (const ent of readdirSync(dir, { withFileTypes: true })) {
-        if (ent.name === 'node_modules' || ent.name === '__tests__' || ent.name.startsWith('.')) continue;
-        const p = join(dir, ent.name);
-        if (ent.isDirectory()) { walk(p); continue; }
-        if (!/\.(mjs|cjs|js)$/.test(ent.name)) continue;
-        for (const line of readFileSync(p, 'utf8').split('\n')) {
-          // A second argument at the call site — `canonicalizeReason(raw, somethingElse)`. The declaration in
-          // review-core.mjs is `export function`, so it is excluded by the `function` guard, not by name.
-          if (/(?<!function\s)canonicalizeReason\([^)]*,/.test(line)) offenders.push(`${ent.name}: ${line.trim()}`);
-        }
-      }
-    };
-    walk(scriptsDir);
+    // an edit may never even reach this committee. The default is pinned above; the injection POINT is pinned here.
+    //
+    // WHAT THIS SWEEP ACTUALLY COVERS (stated exactly, because the sentence that used to sit here claimed more
+    // than it checked and a grep falsified it):
+    //   • every `.mjs/.cjs/.js/.ts/.mts/.cts` file in EVERY tree of the repo — not `scripts/` — minus dependencies,
+    //     generated output and `__tests__` (see SWEEP_SKIP_DIRS; the exemption is for this suite and its peers,
+    //     which legitimately drive both vocabularies — no production module lives under a `__tests__`);
+    //   • calls through the IMPORTED BINDING, so an `as` alias, an `import()`/`require()` destructure rename, a
+    //     local re-alias and a `ns.canonicalizeReason(…)` member call are all caught, not just the literal name;
+    //   • calls WRAPPED across lines: the scan is over the whole file with brackets matched, not line by line;
+    //   • and it ignores comments, string literals and regex literals, so prose about the hazard is not an offence.
+    // WHAT IT DOES NOT COVER, honestly: computed dispatch (`core['canonicalize' + 'Reason'](…)`), the function
+    // passed as a VALUE into something that calls it with two arguments, `apply`/`call` with an argument array,
+    // and anything outside this repo. Those remain closed by the behavioural pin above, which constrains the
+    // DEFAULT rather than the call sites — this sweep is the second layer, not the only one.
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+    const { filesWalked, importers, offenders } = sweepForVocabularyInjection(repoRoot);
+
+    // BOUNDARY GUARDS, and they are the whole reason the old claim rotted. The importer list is DERIVED from the
+    // walk, so "which trees import review-core.mjs?" is answered by measurement, never asserted from memory.
+    expect(filesWalked).toBeGreaterThan(400); // a walk that quietly stopped walking would otherwise pass vacuously
+    expect(importers.length).toBeGreaterThan(5);
+    // The one that would have caught the false claim: importers live OUTSIDE `scripts/` too — today
+    // `skills-src/jury/resolve-roster.mjs`, production glue the review-parked workflow shells.
+    expect(importers.filter((f) => !f.startsWith(`scripts${sep}`))).not.toEqual([]);
+
     expect(offenders).toEqual([]);
+  });
+
+  it('the sweep\'s detector really detects — every shape that walked through its predecessor', () => {
+    // A static scan is only worth its comment if the comment is checkable. These are the three defeats measured
+    // against the previous line-based regex, plus the shapes that must NOT red. If the detector is ever weakened
+    // back into a no-op, this reds before the sweep above goes quietly green.
+    const IMPORTED = "import { canonicalizeReason } from '../lib/review-core.mjs';\n";
+    const ALIASED = "import { canonicalizeReason as canon } from '../lib/review-core.mjs';\n";
+    const caught = (src) => vocabularyInjectionSites(src).length;
+
+    // ── the three that used to escape ──────────────────────────────────────────────────────────────────
+    expect(caught(`${IMPORTED}const x = canonicalizeReason(raw, DECLARED);\n`)).toBe(1); // (in ANY tree — see above)
+    expect(caught(`${IMPORTED}const x = canonicalizeReason(\n  raw,\n  DECLARED,\n);\n`)).toBe(1); // formatter-wrapped
+    expect(caught(`${ALIASED}const x = canon(raw, DECLARED);\n`)).toBe(1); // aliased import
+    // ── and the neighbouring routes to the same hazard ─────────────────────────────────────────────────
+    expect(caught(`${IMPORTED}const canon2 = canonicalizeReason;\nconst x = canon2(raw, DECLARED);\n`)).toBe(1);
+    expect(caught("import * as core from '../lib/review-core.mjs';\ncore.canonicalizeReason(raw, DECLARED);\n")).toBe(1);
+    expect(caught("const { canonicalizeReason: cz } = await import('./review-core.mjs');\ncz(raw, DECLARED);\n")).toBe(1);
+    expect(caught(`${IMPORTED}const s = \`x\${canonicalizeReason(raw, DECLARED)}y\`;\n`)).toBe(1);
+
+    // ── and what must stay quiet, or the sweep is a false-alarm generator nobody will keep ─────────────
+    expect(caught(`${IMPORTED}const x = canonicalizeReason(raw);\n`)).toBe(0); // the safe one-argument call
+    expect(caught(`${IMPORTED}const x = canonicalizeReason(decorate(a, b));\n`)).toBe(0); // nested call, ONE argument
+    expect(caught('export function canonicalizeReason(raw, vocabulary = ALL) {\n  return null;\n}\n')).toBe(0); // the declaration
+    expect(caught('// canonicalizeReason(raw, DECLARED) would be an injection\n')).toBe(0); // comment prose
+    expect(caught("const s = 'canonicalizeReason(raw, DECLARED)';\n")).toBe(0); // a string literal
+    expect(caught('const re = /canonicalizeReason\\(raw, D\\)/;\n')).toBe(0); // a regex literal
   });
 
   it('the counterfactual, on a contract that really carries a todo entry: declared vocab resolves what implemented vocab refuses', () => {
