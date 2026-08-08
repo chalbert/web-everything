@@ -207,9 +207,17 @@ function escapeRe(s) {
  * intended reference occurrence in BOTH texts down to one shared sentinel — the OLD id's ref shapes in the
  * source, the NEW id's ref shapes in the result — then requires the masked skeletons to be byte-identical.
  * A blanked or truncated result yields a shorter (or empty) skeleton that cannot match the source's, so it
- * is caught. This leans on the module's standing invariant that a yielded id's NEW number is FRESH
- * (`allocateFreeNum`/`allocateGapId` pick an unused id), so masking the new number can only hit the
- * occurrences THIS renumber created — never a pre-existing reference — which keeps the mask exact.
+ * is caught.
+ *
+ * MOVE-SCOPED NEW-SIDE MASK (#2746 review). The naive version masked only `oldNum` in the source and only
+ * `newNum` in the result, which is exact ONLY when `newNum` is unreferenced beforehand — true for
+ * `allocateFreeNum` (max+1, never previously named) but NOT for `allocateGapId`, which reuses a HOLE below
+ * the frontier, and holes are exactly the ids stale `#NNN` refs still point at. A file that already said
+ * `supersedes #<gapId>` then masked ONE occurrence on the old side and TWO on the new, so a byte-perfect
+ * rewrite was refused as "corruption". The fix: mask `newNum`'s ref shapes on the SOURCE side too, so a
+ * PRE-EXISTING `#newNum` reduces to the same sentinel on both sides and only the occurrences this renumber
+ * actually produced are compared. Strictness is unchanged — an un-swapped `#oldNum` in the result still
+ * masks on the old side but not the new, and a dropped or invented reference still shifts the skeleton.
  */
 const CONTENT_SENTINEL = '  REF  ';
 
@@ -238,7 +246,10 @@ export function assertContentPreserved(originalText, newText, moves, name = '<fi
       `(this would blank an authored file and lose data). Nothing written. (#2546)`,
     );
   }
-  const skeletonOld = maskRefs(originalText, moves, false);
+  // Neutralise any PRE-EXISTING `#newNum` reference on the source side first (gap ids are recycled holes, so
+  // one can already be referenced), then mask the intended old-side refs. The result side masks `newNum` as
+  // before — so both skeletons carry a sentinel exactly where a reference of either id stood.
+  const skeletonOld = maskRefs(maskRefs(originalText, moves, true), moves, false);
   const skeletonNew = maskRefs(newText, moves, true);
   if (skeletonOld !== skeletonNew) {
     throw new Error(
