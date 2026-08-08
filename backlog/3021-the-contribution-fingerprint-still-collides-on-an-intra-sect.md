@@ -1,4 +1,5 @@
 ---
+bornAs: x413mbt
 kind: story
 size: 2
 status: open
@@ -65,7 +66,7 @@ nobody reads the other cases as "relocation is solved".
 ## Why it is not a one-line fix
 
 The only remaining witness to an intra-section move is the hunk's **context lines** — and the case the whole
-escape exists for ([#x9xqexm](/backlog/x9xqexm-a-drain-re-score-revokes-a-human-clearance-a-content-preserv/),
+escape exists for ([#3023](/backlog/3023-a-drain-re-score-revokes-a-human-clearance-a-content-preserv/),
 WE PR #1100) is one where `main` changed the context line **immediately adjacent** to the contribution.
 Tolerating that and detecting an intra-section move are the same measurement read in opposite directions, so no
 fixed-size digest can do both.
@@ -87,5 +88,5 @@ The contribution escape is checked **last**, after the SHA test and the strict `
 so it can only ever honour an accept those already rejected — and only for a head advance in which every
 added/removed line, every hunk length, every section heading and every inter-hunk gap is unchanged.
 
-Related: [#x9xqexm](/backlog/x9xqexm-a-drain-re-score-revokes-a-human-clearance-a-content-preserv/) (parent),
+Related: [#3023](/backlog/3023-a-drain-re-score-revokes-a-human-clearance-a-content-preserv/) (parent),
 [#2409](/backlog/2409/).

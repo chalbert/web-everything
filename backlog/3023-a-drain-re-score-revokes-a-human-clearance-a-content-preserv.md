@@ -1,4 +1,5 @@
 ---
+bornAs: x9xqexm
 kind: story
 size: 5
 status: resolved
@@ -42,7 +43,7 @@ the stale-acceptance branch of the review-escalation pass: `--add-label <gate.ap
 ## Root cause — measured, not inferred
 
 `decideReviewGate` honours `review:accepted` only when `acceptanceCoversHead` says the acceptance covers the live
-head (#2409). The head-SHA test fails after any rebase, so #x169fqe added a content escape: compare
+head (#2409). The head-SHA test fails after any rebase, so #2979 added a content escape: compare
 `normalizeDiffFingerprint` of the reviewed net diff against the live one.
 
 Recomputing both sides for #1100:
@@ -59,7 +60,7 @@ The two 130 KB diffs differ in exactly three lines, and **none of them is the PR
 
 Every `+`/`-` line is identical. So the acceptance covered exactly this contribution — the fingerprint says
 otherwise only because it hashes the *base the contribution sits on* as well as the contribution. The drain
-rebases every accepted lane onto `main` within minutes and `main` moves constantly, so the #x169fqe escape almost
+rebases every accepted lane onto `main` within minutes and `main` moves constantly, so the #2979 escape almost
 never fires in practice and the clearance is revoked on essentially every accepted PR.
 
 ## The rule to implement
@@ -78,10 +79,10 @@ never fires in practice and the clearance is revoked on essentially every accept
 Rules 1 and 3 shipped. Rule 2 did not, and neither did one residual the fix's own review surfaced. Both are on
 the board as their own items, so nothing is deferred to a resolved parent:
 
-- **#xfdgdln** — rule 2. A stale-acceptance re-park still re-asserts `review:human` from the **whole-PR** score
+- **#3024** — rule 2. A stale-acceptance re-park still re-asserts `review:human` from the **whole-PR** score
   rather than the paths the clearance did not cover. Narrowing it moves the declarative-leash boundary, which
   is a ratification, not an impl call.
-- **#x413mbt** — the contribution fingerprint's remaining collision: a contribution that MOVES within a single
+- **#3021** — the contribution fingerprint's remaining collision: a contribution that MOVES within a single
   `@@` section heading in a single-hunk file. Relocation across files, across sections and relative to a
   sibling hunk are all refused; this one shape is not, and it is pinned by a deliberately-passing test.
 

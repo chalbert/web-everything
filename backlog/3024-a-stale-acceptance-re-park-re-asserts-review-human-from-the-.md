@@ -1,4 +1,5 @@
 ---
+bornAs: xfdgdln
 kind: story
 size: 3
 status: open
@@ -15,7 +16,7 @@ After a genuine head advance the drain re-parks `review:human` whenever the FRES
 
 ## Where this came from
 
-This is rule 2 of [#x9xqexm](/backlog/x9xqexm-a-drain-re-score-revokes-a-human-clearance-a-content-preserv/),
+This is rule 2 of [#3023](/backlog/3023-a-drain-re-score-revokes-a-human-clearance-a-content-preserv/),
 carried out of PR #1119 as its stated residual. That PR shipped rules 1 and 3 and resolved the parent; the
 round-1 review flagged (major 3) that a deferral under a resolved parent is a deferral that disappears. This is
 the item that keeps it on the board.
@@ -51,5 +52,5 @@ impl PR may not author it.
 
 Until (2) lands, the current whole-PR behaviour is the fail-closed one and stays.
 
-Related: [#x9xqexm](/backlog/x9xqexm-a-drain-re-score-revokes-a-human-clearance-a-content-preserv/) (parent),
+Related: [#3023](/backlog/3023-a-drain-re-score-revokes-a-human-clearance-a-content-preserv/) (parent),
 [#2840](/backlog/2840/), [#2409](/backlog/2409/), [#2771](/backlog/2771/).

@@ -26,7 +26,7 @@ Derivable from git alone, so the board generator can compute it mechanically:
 - A small "other" remainder is excluded from both.
 
 Render the current week's two numbers and a four-week mini-trend on the board (the generator the
-progress-board item x9t5i5a builds, in flight as PR #1101). No new data store — `git log --numstat` over
+progress-board item 3022 builds, in flight as PR #1101). No new data store — `git log --numstat` over
 the merged history is the source.
 
 ## Why on the board and not a report
