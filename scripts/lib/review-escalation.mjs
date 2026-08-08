@@ -880,24 +880,33 @@ export function parseReviewedDiff(comments) {
  * branch — and it is not only adversarial: a 3-way rebase that misapplies a hunk to a clean-but-wrong offset
  * produces exactly this shape with nobody attacking. Two position signals are kept, chosen because each is
  * invariant under the base moving but variant under the contribution moving:
- *   • THE SECTION HEADING (`@@ … @@ <heading>`). It names the enclosing function/section, so it travels WITH
- *     the code rather than with the base: `main` inserting lines above does not change it, relocating into
- *     another function does. If `main` RENAMES the enclosing function the heading changes and the escape simply
- *     fails closed — the PR re-parks and the human re-clears, the safe direction.
+ *   • THE SECTION HEADING (`@@ … @@ <heading>`). Git's default `xfuncname` heuristic (no `.gitattributes` in this
+ *     repo) picks the NEAREST PRECEDING LINE STARTING AT COLUMN 0 WITH A LETTER — a top-level declaration, not
+ *     "the enclosing function". It travels WITH the code rather than with the base, so `main` inserting lines
+ *     above does not change it — but it does NOT separate a relocation between two methods of the same class,
+ *     between two blocks of one long top-level function, or between any two hunks of an indented JSON/YAML file
+ *     (no line there starts at column 0, so the heading is EMPTY and identical across the whole file). Those
+ *     shapes collide; see THE RESIDUAL, below. If `main` RENAMES the top-level declaration the heading changes
+ *     and the escape simply fails closed — the PR re-parks and the human re-clears, the safe direction.
  *   • THE INTER-HUNK GAP (this hunk's old-side start minus the previous hunk's, within the same file). A
  *     uniform whole-file displacement — the #1100 shape, `@@ -197,3` → `@@ -203,3` because the file grew above
  *     the hunk — leaves every gap unchanged. Any hunk that moves relative to its siblings changes one.
  *
- * THE RESIDUAL, stated precisely because dropping context is a real loosening. Two diffs collide iff they touch
- * the same files in the same order, with the same hunk count, the same hunk lengths, the same section headings,
- * the same inter-hunk gaps, and byte-identical `+`/`-` lines. After the two signals above, what is left is ONE
- * shape: a contribution that moves WITHIN a single section heading in a file where no sibling hunk records the
- * move (in practice, a file with one hunk). That residual is NOT closable inside a fixed-size digest, and the
- * reason is worth writing down rather than hand-waving: the only remaining witness to an intra-section move is
- * the hunk's CONTEXT lines — and the #1100 case this whole escape exists for is one where `main` changed the
- * context line IMMEDIATELY ADJACENT to the contribution. Tolerating that and detecting an intra-section move are
- * the same measurement read in opposite directions; no digest can do both. Tracked as #x413mbt (with the
- * directions worth costing) rather than left implicit, and pinned by a deliberately-passing test. What bounds it: this is checked LAST, after the SHA test and after the strict
+ * THE RESIDUAL, stated at its true width because dropping context is a real loosening. Two diffs collide iff
+ * they touch the same files in the same order, with the same hunk count, the same hunk lengths, the same
+ * section headings, the same inter-hunk gaps, and byte-identical `+`/`-` lines. After the two signals above,
+ * what is left is a relocation that keeps a hunk's SECTION HEADING and its GAP to the previous hunk unchanged.
+ * That is wider than "one function, one hunk": it also covers a move between two methods of the same class, a
+ * move between two blocks of one long top-level function, ANY relocation inside an indented JSON/YAML file
+ * (the heading is empty and identical for the whole file, so no hunk in it is ever distinguished by heading),
+ * and a set of hunks that relocates UNIFORMLY — a two-hunk file shifted as a block collides the same way a
+ * single-hunk file does, because every gap is preserved by construction. That residual is NOT closable inside a
+ * fixed-size digest, and the reason is worth writing down rather than hand-waving: the only remaining witness to
+ * a within-heading move is the hunk's CONTEXT lines — and the #1100 case this whole escape exists for is one
+ * where `main` changed the context line IMMEDIATELY ADJACENT to the contribution. Tolerating that and detecting
+ * a within-heading move are the same measurement read in opposite directions; no digest can do both. Tracked as
+ * #x413mbt (with the directions worth costing) rather than left implicit, and pinned by a deliberately-passing
+ * test. What bounds it: this is checked LAST, after the SHA test and after the strict
  * `normalizeDiffFingerprint` test, so nothing that already passed behaves differently; it can only ever honour
  * an accept the strict test rejected, and only for a head advance whose every added/removed line, hunk length,
  * section heading and inter-hunk gap is unchanged.

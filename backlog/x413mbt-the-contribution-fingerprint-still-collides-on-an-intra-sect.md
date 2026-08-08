@@ -9,9 +9,17 @@ scope:
   - we:scripts/lib/__tests__/review-escalation.test.mjs
 ---
 
-# The contribution fingerprint still collides on an intra-section relocation in a single-hunk file
+# The contribution fingerprint still collides when a relocation keeps its `@@` heading and hunk gaps unchanged
 
-`normalizeContributionFingerprint` drops context lines so a clearance survives the drain rebasing a lane, and that leaves one collision open: a contribution that MOVES within a single `@@` section heading, in a file where no sibling hunk records the move. Closing it needs evidence the digest does not carry — the same context the #1100 case requires it to tolerate.
+`normalizeContributionFingerprint` drops context lines so a clearance survives the drain rebasing a lane, and
+that leaves one collision open: a contribution that MOVES while keeping the same `@@` section heading and the
+same gap to its sibling hunks. This is WIDER than "one function, one hunk" — git's `@@` heading is the nearest
+preceding line starting at column 0 with a letter (no `.gitattributes` in this repo), not "the enclosing
+function", so the collision also covers a move between two methods of the *same* class, a move between two
+blocks of one long top-level function, and **any** relocation inside an indented JSON/YAML file (no line there
+starts at column 0, so the heading is empty and identical for the whole file). It is not limited to single-hunk
+files either: a set of hunks that relocates uniformly preserves every gap and collides the same way. Closing it
+needs evidence the digest does not carry — the same context the #1100 case requires it to tolerate.
 
 ## The shape
 
@@ -32,8 +40,24 @@ byte-identical digest → `acceptanceCoversHead` returns `covers: true`. This is
 class narrowed down to what PR #1119 could not close: a guard moved below the call it guards, inside one
 function.
 
-PR #1119 closed the wider cases — relocation across files, across functions/sections (the `@@` section heading
-is hashed), and relative to a sibling hunk (the inter-hunk gap is hashed). This item is what remains, and it is
+The same class of collision also reproduces, with real `git diff` output, in three shapes that are not "one
+function, one hunk":
+
+- **Two methods of one class.** A guard line moved from `async transfer()` to `async close()` of the same class
+  — both hunks read `@@ … @@ export class AccountService {`, because git's heading tracks the nearest column-0
+  declaration (the class), not the method.
+- **Any relocation inside a JSON/YAML file.** Moving a line within this repo's own
+  [we:package.json](package.json) (2-space indented) produces a bare `@@ -9,6 +9,7 @@` — an **empty** heading,
+  because no line in the file starts at column 0 with a letter. No relocation inside any JSON/YAML file is ever
+  distinguished by heading.
+- **Multi-hunk files, not just single-hunk ones.** Two hunks relocated uniformly (e.g. old-side starts 7/48 →
+  197/238, same 41-line gap, same heading) produce a byte-identical digest, because the inter-hunk-gap signal is
+  preserved by construction under a uniform shift.
+
+PR #1119 closed relocation **across files**, **across top-level declarations** (a move between two separate
+top-level functions is caught, because their headings differ), and relocation **relative to a sibling hunk**
+whose gap actually changes. What is not closed is any relocation that keeps both signals unchanged — which, as
+above, is not limited to "an intra-section move in a single-hunk file". This item is what remains, and it is
 pinned by a deliberately-passing test in the unit suite for
 [we:scripts/lib/review-escalation.mjs](scripts/lib/review-escalation.mjs) ("THE KNOWN RESIDUAL, pinned") so
 nobody reads the other cases as "relocation is solved".
