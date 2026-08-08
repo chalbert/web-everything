@@ -12,8 +12,12 @@
  * second look is decided by rule, not by the merging agent eyeballing the diff). Thresholds are TUNING KNOBS
  * — start loose, tighten from data; they live here so a change is one edit + a test, never scattered.
  */
+import { createHash } from 'node:crypto';
 import { isTrustChainPath, isPolicyCorePath, basenameOf } from './gate-config.mjs';
 import { POLICY_THRESHOLDS } from './review-policy.mjs';
+// #x169fqe — the transient lane bookkeeping the reviewed-diff fingerprint excludes, imported rather than
+// re-spelled so the fingerprint and the rebase-drop pass that removes the file can never disagree on its name.
+import { LANE_MANIFEST } from './rebase-drop-manifest.mjs';
 
 /** The ratified reviewer-verdict labels (#2171). The reviewer's disposition is a LABEL, never comment-parsing:
  *  independent *disposition* (reviewer accepts/rejects) is split from hot-context *fixing* (the author lane). */
@@ -529,6 +533,75 @@ export function parseReviewedSha(comments) {
 }
 
 /**
+ * #x169fqe — THE REVIEWED-DIFF FINGERPRINT: a stable digest of the content a reviewer actually judged, so an
+ * accept can be checked against CONTENT rather than against the commit that happened to carry it.
+ *
+ * WHAT IS DELIBERATELY EXCLUDED, and why each exclusion is safe:
+ *   • `index <old>..<new> <mode>` lines — git blob-pair headers. They restate the hashes of content that is
+ *     ALREADY in the diff body; identical bodies imply identical blobs, so dropping them removes noise, not
+ *     signal. (They are not stable across a rebase in every git version, which is what forced this.)
+ *   • the whole `.lane-manifest.json` file section — the transient lane bookkeeping the drain's rebase-drop pass
+ *     exists to remove (`LANE_MANIFEST`, rebase-drop-manifest.mjs). It is never review-worthy content, and its
+ *     removal is precisely the mechanical edit that was invalidating accepts.
+ *   • trailing whitespace per line and a trailing newline — cosmetic transport differences.
+ * NOTHING ELSE is normalized away. Hunk headers (`@@`) stay, because a changed line NUMBER means the surrounding
+ * file moved and the reviewer's reading of it may no longer hold. File modes, renames, and every `+`/`-` line
+ * stay. If a rebase changes any of those, the fingerprint changes and the accept correctly goes stale.
+ *
+ * @param {string|null|undefined} diffText - raw unified diff, or a pre-computed 64-hex fingerprint (idempotent:
+ *   passing a fingerprint back in returns it unchanged, so a caller may store either form).
+ * @returns {string|null} a 64-char lowercase sha256, or `null` for absent/unusable input (→ fail closed).
+ */
+export function normalizeDiffFingerprint(diffText) {
+  if (typeof diffText !== 'string') return null;
+  const raw = diffText.trim();
+  if (!raw) return null;
+  // Idempotent on an already-hashed value, so `acceptanceCoversHead` accepts either a raw diff or a stored digest.
+  if (/^[0-9a-f]{64}$/.test(raw)) return raw;
+  const lines = raw.split('\n');
+  const kept = [];
+  let inManifestSection = false;
+  for (const line of lines) {
+    // A `diff --git` header opens a new file section and therefore always ends any skip in progress.
+    if (line.startsWith('diff --git ')) inManifestSection = line.includes(`/${LANE_MANIFEST}`) || line.endsWith(` ${LANE_MANIFEST}`);
+    if (inManifestSection) continue;
+    if (/^index [0-9a-f]+\.\.[0-9a-f]+/.test(line)) continue;
+    kept.push(line.replace(/[ \t]+$/, ''));
+  }
+  const normalized = kept.join('\n').trim();
+  if (!normalized) return null;
+  return createHash('sha256').update(normalized, 'utf8').digest('hex');
+}
+
+/** The marker carrying the #x169fqe reviewed-DIFF fingerprint, stamped beside `reviewed-sha` on an accept. */
+export const REVIEWED_DIFF_MARKER = 'reviewed-diff';
+const REVIEWED_DIFF_RE = new RegExp(`<!--\\s*${REVIEWED_DIFF_MARKER}:\\s*([0-9a-f]{64})\\s*-->`, 'g');
+
+/** Build the reviewed-diff marker line from a raw diff OR a precomputed fingerprint. Pure. Unusable input → ''
+ *  (nothing to stamp — the gate then falls back to SHA identity, i.e. today's behaviour). */
+export function buildReviewedDiffMarker(diffOrFingerprint) {
+  const fp = normalizeDiffFingerprint(diffOrFingerprint);
+  return fp ? `<!-- ${REVIEWED_DIFF_MARKER}: ${fp} -->` : '';
+}
+
+/** Extract the reviewed-diff fingerprint from a PR's comments — LATEST marker wins, mirroring `parseReviewedSha`
+ *  (a re-accept after a fix stamps a fresh pair). `null` when absent → the gate falls back to SHA identity.
+ *  Carries the SAME forge residual documented on `parseReviewedSha`: it is an ordinary comment, not a signed
+ *  artifact. It cannot make the gate LOOSER than that residual already allows — an actor who can forge a
+ *  `reviewed-sha` for the live head already defeats the gate outright, without needing this. */
+export function parseReviewedDiff(comments) {
+  let latest = null;
+  for (const c of Array.isArray(comments) ? comments : []) {
+    const body = c && typeof c.body === 'string' ? c.body : '';
+    if (!body) continue;
+    let m;
+    REVIEWED_DIFF_RE.lastIndex = 0;
+    while ((m = REVIEWED_DIFF_RE.exec(body)) !== null) latest = m[1].toLowerCase();
+  }
+  return latest;
+}
+
+/**
  * #2409 — does a `review:accepted` verdict still cover the PR's LIVE head? Pure. The acceptance only vouches
  * for the tree the reviewer looked at; a commit that rode in AFTER accept is NOT covered (this is exactly the
  * PR #368 hole — a second, unrelated commit honoured under an accept that named only the first).
@@ -545,12 +618,33 @@ export function parseReviewedSha(comments) {
  * reviewer never saw.
  * @param {{acceptedSha?:string|null, headSha?:string|null}} o
  */
-export function acceptanceCoversHead({ acceptedSha = null, headSha = null } = {}) {
+export function acceptanceCoversHead({
+  acceptedSha = null, headSha = null, acceptedDiff = null, headDiff = null,
+} = {}) {
   const a = typeof acceptedSha === 'string' ? acceptedSha.trim().toLowerCase() : '';
   const h = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
   if (!a || !h) return { covers: true, reason: '' };
   const n = Math.min(a.length, h.length);
   if (n >= 7 && (a.startsWith(h) || h.startsWith(a))) return { covers: true, reason: '' };
+  // #x169fqe — THE CONTENT-EQUIVALENCE ESCAPE, and the ONLY one. The head moved, so the SHA test above has
+  // failed; the accept survives anyway IFF the reviewed CONTENT is provably identical. Both fingerprints must be
+  // present and equal — a missing or unparseable one on either side falls straight through to the stale verdict
+  // below, so this is FAIL-CLOSED and every pre-#x169fqe accept behaves exactly as it did (there is no
+  // fingerprint to match, so nothing is newly honoured).
+  //
+  // WHY THIS IS NOT A LOOSENING OF #2409. The rule #2409 wrote down is "never honour an accept against a tree the
+  // reviewer never saw", and it enforced that with head-SHA identity — a PROXY, which also re-parks a benign
+  // rebase-onto-main that adds no review-worthy content. Comparing the normalized reviewed DIFF enforces the rule
+  // ITSELF: if the fingerprints match, the reviewer DID see this content, whatever commit now carries it. A
+  // commit that rides in after accept changes the diff and is still refused — the PR #368 hole stays shut.
+  const ad = normalizeDiffFingerprint(acceptedDiff);
+  const hd = normalizeDiffFingerprint(headDiff);
+  if (ad && hd && ad === hd) {
+    return {
+      covers: true,
+      reason: `head moved to ${h.slice(0, 12)} but the reviewed diff is byte-identical (${ad.slice(0, 12)}) — a content-preserving rebase, the acceptance still covers this tree`,
+    };
+  }
   return {
     covers: false,
     reason: `head advanced to ${h.slice(0, 12)} past the reviewed commit ${a.slice(0, 12)} — the acceptance did not cover the current tree`,
@@ -655,7 +749,10 @@ export function bodyHasEscalationReason(body) {
  * `/drain` with `--no-review-escalation` (see `hasUnclearedReviewLabel`'s `allowPending`) — never an auto-land.
  * @param {{escalate:boolean, humanRequired?:boolean, labels?:Array}} o
  */
-export function decideReviewGate({ escalate, humanRequired = false, labels = [], acceptedSha = null, headSha = null } = {}) {
+export function decideReviewGate({
+  escalate, humanRequired = false, labels = [], acceptedSha = null, headSha = null,
+  acceptedDiff = null, headDiff = null,
+} = {}) {
   // A reviewer verdict (whoever applied it — for a human-gated PR only a human can) always wins, and is checked
   // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
   // merge; review:changes → the author lane fixes + re-pushes.
@@ -665,7 +762,10 @@ export function decideReviewGate({ escalate, humanRequired = false, labels = [],
     // STALE: refuse the auto-land and re-park for a FRESH look instead of merging an unreviewed commit under a
     // stale accept. Fails OPEN when either SHA is unknown (accept predates this gate / applied out-of-band / a
     // head-read miss) so it never mass-re-parks pre-gate accepts and never blocks on a transient fetch miss.
-    const fresh = acceptanceCoversHead({ acceptedSha, headSha });
+    // #x169fqe — the diff fingerprints are passed through so a CONTENT-PRESERVING rebase (the drain's own
+    // manifest-drop pass, which fires seconds after an accept) no longer invalidates the accept. Absent
+    // fingerprints reduce this to the pre-#x169fqe SHA-identity test exactly.
+    const fresh = acceptanceCoversHead({ acceptedSha, headSha, acceptedDiff, headDiff });
     if (!fresh.covers) {
       // Re-park for a fresh review: review:pending re-arms an agent panel; a gate-self/human-gated PR (fresh
       // humanRequired score, or a sticky review:human still present) re-parks review:human — only a human may

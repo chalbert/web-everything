@@ -24,6 +24,9 @@ import {
   buildReviewedShaMarker,
   parseReviewedSha,
   acceptanceCoversHead,
+  normalizeDiffFingerprint,
+  buildReviewedDiffMarker,
+  parseReviewedDiff,
 } from '../review-escalation.mjs';
 
 describe('isBlastRadiusPath', () => {
@@ -407,6 +410,107 @@ describe('#2409 — acceptanceCoversHead', () => {
     expect(acceptanceCoversHead({ acceptedSha: null, headSha: 'abc1234' }).covers).toBe(true);
     expect(acceptanceCoversHead({ acceptedSha: 'abc1234', headSha: '' }).covers).toBe(true);
     expect(acceptanceCoversHead({}).covers).toBe(true);
+  });
+});
+
+describe('#x169fqe — an accept survives a CONTENT-PRESERVING rebase', () => {
+  // The exact shapes the drain produces: the same reviewed change, replayed onto a newer base (git rewrites the
+  // `index <old>..<new>` blob headers) with the transient lane manifest dropped.
+  const REVIEWED = [
+    'diff --git a/scripts/thing.mjs b/scripts/thing.mjs',
+    'index 1111111..2222222 100644',
+    '--- a/scripts/thing.mjs',
+    '+++ b/scripts/thing.mjs',
+    '@@ -1,2 +1,2 @@',
+    ' const a = 1;',
+    '-const b = 2;',
+    '+const b = 3;',
+    '',
+    'diff --git a/.lane-manifest.json b/.lane-manifest.json',
+    'index 5555555..6666666 100644',
+    '--- a/.lane-manifest.json',
+    '+++ b/.lane-manifest.json',
+    '@@ -1 +1 @@',
+    '-{"lane":9}',
+    '+{"lane":9,"base":"old"}',
+  ].join('\n');
+  const REBASED = [
+    'diff --git a/scripts/thing.mjs b/scripts/thing.mjs',
+    'index 9999999..8888888 100644',            // ← different blob headers, same content
+    '--- a/scripts/thing.mjs',
+    '+++ b/scripts/thing.mjs',
+    '@@ -1,2 +1,2 @@',
+    ' const a = 1;',
+    '-const b = 2;',
+    '+const b = 3;',
+  ].join('\n');                                  // ← manifest dropped entirely by the rebase pass
+  const RIDE_IN = [
+    REBASED,
+    '',
+    'diff --git a/scripts/other.mjs b/scripts/other.mjs',
+    'index aaaaaaa..bbbbbbb 100644',
+    '--- a/scripts/other.mjs',
+    '+++ b/scripts/other.mjs',
+    '@@ -1 +1 @@',
+    '-safe();',
+    '+rm_rf();',
+  ].join('\n');
+
+  it('the fingerprint ignores blob headers and the transient lane manifest', () => {
+    expect(normalizeDiffFingerprint(REVIEWED)).toBe(normalizeDiffFingerprint(REBASED));
+  });
+
+  it('…but NOT a real content change — the PR #368 ride-in hole stays shut', () => {
+    expect(normalizeDiffFingerprint(REBASED)).not.toBe(normalizeDiffFingerprint(RIDE_IN));
+    const r = acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb', acceptedDiff: REVIEWED, headDiff: RIDE_IN,
+    });
+    expect(r.covers).toBe(false);
+    expect(r.reason).toMatch(/advanced/i);
+  });
+
+  it('a moved head with an identical reviewed diff STILL covers, and says why', () => {
+    const r = acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb', acceptedDiff: REVIEWED, headDiff: REBASED,
+    });
+    expect(r.covers).toBe(true);
+    expect(r.reason).toMatch(/content-preserving rebase/);
+  });
+
+  it('FAILS CLOSED whenever the pair is incomplete — a missing side can never honour an accept', () => {
+    for (const args of [
+      { acceptedDiff: REVIEWED },                       // only the accept side recorded one
+      { headDiff: REBASED },                            // only the live side could be read
+      { acceptedDiff: REVIEWED, headDiff: '' },         // live read returned empty
+      { acceptedDiff: '', headDiff: REBASED },
+      { acceptedDiff: null, headDiff: null },           // every pre-#x169fqe accept
+    ]) {
+      expect(acceptanceCoversHead({ acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb', ...args }).covers).toBe(false);
+    }
+  });
+
+  it('a hunk-header move is NOT equivalence — the reviewer\'s reading of the surroundings may not hold', () => {
+    const moved = REBASED.replace('@@ -1,2 +1,2 @@', '@@ -40,2 +40,2 @@');
+    expect(normalizeDiffFingerprint(REBASED)).not.toBe(normalizeDiffFingerprint(moved));
+  });
+
+  it('the marker round-trips through parse, and latest wins (mirroring reviewed-sha)', () => {
+    const marker = buildReviewedDiffMarker(REVIEWED);
+    expect(marker).toMatch(/^<!-- reviewed-diff: [0-9a-f]{64} -->$/);
+    expect(parseReviewedDiff([{ body: `✅ accepted\n\n${marker}` }])).toBe(normalizeDiffFingerprint(REVIEWED));
+    const second = buildReviewedDiffMarker(RIDE_IN);
+    expect(parseReviewedDiff([{ body: marker }, { body: second }])).toBe(normalizeDiffFingerprint(RIDE_IN));
+    expect(parseReviewedDiff([{ body: 'no marker' }, {}, null])).toBe(null);
+    expect(buildReviewedDiffMarker('')).toBe('');
+  });
+
+  it('a parsed fingerprint feeds straight back into the gate (idempotent normalization)', () => {
+    // The drain reads a STORED fingerprint for the accept side and a RAW diff for the live side; both must land
+    // on the same value or the gate would never match in production.
+    const stored = parseReviewedDiff([{ body: buildReviewedDiffMarker(REVIEWED) }]);
+    expect(acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb', acceptedDiff: stored, headDiff: REBASED,
+    }).covers).toBe(true);
   });
 });
 

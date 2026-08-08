@@ -40,7 +40,7 @@ import { resolve, sep } from 'node:path';
 import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker } from './lib/review-escalation.mjs';
+import { REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker } from './lib/review-escalation.mjs';
 
 /**
  * we:scripts/review-set-label.mjs#REVIEW_LABEL_TARGETS — the CLOSED set of label-swap targets `decideSetLabel`
@@ -333,9 +333,27 @@ export function runReviewLabelCli({
     process.exit(1);
   }
 
+  // #x169fqe — capture the DIFF this verdict is being formed against, so the accept records WHAT was reviewed
+  // and not merely WHICH COMMIT carried it. Without this the drain's own content-preserving rebase (the
+  // manifest-drop pass, which fires within seconds of an accept) advances the head and invalidates the accept,
+  // putting the queue in a re-review treadmill.
+  //
+  // FAIL-SOFT, DELIBERATELY: a diff-fetch miss leaves `reviewedDiff` empty, so no marker is stamped and the gate
+  // falls back to SHA identity — i.e. exactly the pre-#x169fqe behaviour, which is the STRICTER one. A read
+  // failure can therefore only ever cost a false re-park, never honour an accept it should not. Fetched only for
+  // a verdict that actually records an acceptance, so a `changes` verdict pays no extra gh hop.
+  let reviewedDiff = '';
+  if (to === 'accepted' || to === 'clear-human') {
+    try {
+      reviewedDiff = execFileSync('gh', ['pr', 'diff', pr, '--repo', repo], {
+        encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch { reviewedDiff = ''; /* miss → no marker → SHA-identity fallback (the stricter path) */ }
+  }
+
   // we:scripts/review-set-label.mjs#runReviewLabelCli — render the durable comment ONCE, here, so the bytes
   // that are size-checked, written and posted are the same bytes.
-  const commentBody = buildComment({ to, actor, decision, headSha, reason: clearReason });
+  const commentBody = buildComment({ to, actor, decision, headSha, reason: clearReason, reviewedDiff });
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — THE SIZE GUARD, on the RENDERED bytes, before the swap.
   // GitHub rejects a comment over `GH_COMMENT_MAX`, and the swap lands FIRST — so an oversize comment leaves the
@@ -423,13 +441,22 @@ export function runReviewLabelCli({
  *
  * The marker is omitted on `changes`, and when the head SHA is unavailable (`buildReviewedShaMarker` → '') the
  * gate fails open rather than reading a garbage marker.
- * @param {{to:string, actor:string, headSha?:string, body?:string, reason?:string}} o
+ * @param {{to:string, actor:string, headSha?:string, body?:string, reason?:string, reviewedDiff?:string}} o -
+ *   #x169fqe: `reviewedDiff` is the raw diff (or a precomputed fingerprint) the verdict was formed against.
+ *   Omitted → no diff marker → the gate falls back to SHA identity, i.e. pre-#x169fqe behaviour.
  * @returns {string}
  */
-export function buildVerdictComment({ to, actor, headSha = '', body = '', reason = '' } = {}) {
+export function buildVerdictComment({ to, actor, headSha = '', body = '', reason = '', reviewedDiff = '' } = {}) {
   // #2895 — `clear-human` stamps the marker for the same reason `accepted` does: it IS an acceptance (it adds
   // review:accepted), so the drain must be able to refuse it later if the head advances past the cleared tree.
-  const marker = to === 'accepted' || to === 'clear-human' ? buildReviewedShaMarker(headSha) : '';
+  // #x169fqe — the reviewed DIFF is stamped alongside the reviewed SHA, so a later content-preserving rebase
+  // (the drain's own manifest-drop pass) can be recognised as covered instead of invalidating this accept.
+  // `buildReviewedDiffMarker` returns '' when no diff was supplied, in which case the record carries only the
+  // SHA and the gate behaves exactly as it did before this change.
+  const stampsAcceptance = to === 'accepted' || to === 'clear-human';
+  const marker = stampsAcceptance
+    ? [buildReviewedShaMarker(headSha), buildReviewedDiffMarker(reviewedDiff)].filter(Boolean).join('\n')
+    : '';
   const text = stripReviewedShaMarkers(typeof body === 'string' ? body : '');
   const heading = to === 'clear-human'
     ? '✅ review — `review:human` cleared via the sanctioned path'
@@ -546,7 +573,7 @@ if (IS_CLI) {
   runReviewLabelCli({
     defaultActor: DEFAULT_ACTOR,
     usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--body-file=<path>]  (pr must be a positive integer; clear-human additionally requires --actor and --reason=<stated reason>)',
-    buildComment: ({ to, actor, headSha, reason }) => buildVerdictComment({ to, actor, headSha, reason, body: verdictBody }),
+    buildComment: ({ to, actor, headSha, reason, reviewedDiff }) => buildVerdictComment({ to, actor, headSha, reason, reviewedDiff, body: verdictBody }),
     successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
     refusalResult: ({ decision }) => ({ error: decision.reason }),
     // #2895 — UNCONDITIONAL, so every shell invocation of this CLI is opted in, including one run for
