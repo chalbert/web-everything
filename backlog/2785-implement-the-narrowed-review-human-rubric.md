@@ -2,11 +2,13 @@
 bornAs: xfpxbji
 kind: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["2771", "2844"]
 relatedTo: ["2405", "2636"]
 scope: ["we:scripts/lib/gate-config.mjs", "we:scripts/lib/review-escalation.mjs", "we:scripts/pr-land.mjs"]
 dateOpened: "2026-07-28"
+dateStarted: "2026-08-08"
+dateResolved: "2026-08-08"
 tags: [review, escalation, review-human, trust-chain, gate-self, statute, codification]
 ---
 

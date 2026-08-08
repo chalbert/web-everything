@@ -13,7 +13,7 @@
  * — start loose, tighten from data; they live here so a change is one edit + a test, never scattered.
  */
 import { createHash } from 'node:crypto';
-import { isTrustChainPath, isPolicyCorePath, basenameOf } from './gate-config.mjs';
+import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivationPath, basenameOf } from './gate-config.mjs';
 import { POLICY_THRESHOLDS } from './review-policy.mjs';
 // #x169fqe — the transient lane bookkeeping the reviewed-diff fingerprint excludes, imported rather than
 // re-spelled so the fingerprint and the rebase-drop pass that removes the file can never disagree on its name.
@@ -25,7 +25,7 @@ export const REVIEW_LABELS = {
   pending: 'review:pending',   // the drain parked this PR — an independent review is owed before merge
   accepted: 'review:accepted', // reviewer accepted → the drain may merge
   changes: 'review:changes',   // reviewer wants changes → the author lane fixes hot-context + re-pushes
-  human: 'review:human',       // #2285 v1 — the diff edits the gate's POLICY tier (an agent policing its own leash) or the STATUTE layer; only a HUMAN may clear it. The engine tier (the lander) is agent-reviewable (#2445 two-tier flip)
+  human: 'review:human',       // #2285 v1 — the diff edits the gate's DECLARATIVE LEASH (the contract / roster / invariant suites) or writes a NEW statute rule; only a HUMAN may clear it. Policy-tier derivation code, a proven codification (#2771/#2785) and the engine tier (#2445) are all agent-reviewable
   redteamAccepted: 'redteam:accepted', // #2439 — the INDEPENDENT hardened validator (a fresh-context adversary that took no part in the negotiation and never saw the peers' self-assessment) signed off on the FINAL diff. The "non-author accepts" invariant, applied by the drain; enforcement (requiring it before an engine-tier auto-land) is #2412's concern
 };
 
@@ -173,16 +173,162 @@ export function isBlastRadiusPath(path) {
 /** The POLICY-CORE trust chain (#2285 v1, re-anchored #2448, narrowed by the #2445 two-tier flip). A diff
  *  touching one of these files edits the very machinery that DECIDES whether the review gate fires and what
  *  clears it — so an *agent* reviewing such a change would be policing an edit to its own leash (a genuine
- *  conflict of interest). These, and ONLY these (plus the statute layer, `isStatutePath`), force a HUMAN
- *  review (`review:human`). The ENGINE tier — the lander, which obeys the gate rather than defining it — is
- *  NOT here: a change there still escalates and runs the full adversarial panel, but a converged agent verdict
- *  may clear it. Every other blast-radius path is agent-reviewable too.
+ *  conflict of interest). NO LONGER THE HUMAN TRIGGER (#2771/#2785): this tier is now split, and only its
+ *  DECLARATIVE-LEASH half (`isDeclarativeLeashPath`, below) forces `review:human` — the derivation-code half
+ *  escalates to the independent committee. `isGateSelfPath` survives as the "is this the policy tier?" question
+ *  its non-rubric callers actually ask (the readiness deny-list, the roster tests). The ENGINE tier — the
+ *  lander, which obeys the gate rather than defining it — was never here: a change there still escalates and
+ *  runs the full adversarial panel, but a converged agent verdict may clear it.
  *
  *  #2448 — the roster (and the basename-based matcher that lets it TRAVEL when the engine is extracted out of
  *  `we:scripts/`, per the #2445 coordinator epic) lives in explicit, versioned config: ./gate-config.mjs.
  *  `isGateSelfPath` is that config's `isPolicyCorePath` under its historical name. See gate-config.mjs for the
  *  two tiers, the extraction contract, and the self-hosting design. */
 export const isGateSelfPath = isPolicyCorePath;
+
+/**
+ * #2771/#2785 — THE DECLARATIVE LEASH, the narrowed `review:human` path trigger. `isGateSelfPath` above is the
+ * whole POLICY TIER (it still answers "is this the policy tier?" for the callers that ask that, e.g. the
+ * readiness deny-list); this is the half of that tier for which a HUMAN is essential: the machine-diffable
+ * contract, the roster, and the invariant / conformance suites. Those files ARE the encoded policy, so there is
+ * no behaviour-preserving edit to them. The other half — the derivation CODE (`isPolicyDerivationPath`) — still
+ * escalates but routes to the sized independent committee. Re-exported here under the leash name so callers read
+ * the rubric's vocabulary; the roster and the classification live in gate-config.mjs.
+ */
+export const isDeclarativeLeashPath = isPolicySpecPath;
+export { isPolicyDerivationPath, isPolicySpecPath };
+
+/** The statute doc whose anchors record a ratified decision — the ONE statute file a codification PR may touch.
+ *  Kept beside `STATUTE_PATHS` so the two can never name different documents. */
+const PLATFORM_DECISIONS_PATH = 'docs/agent/platform-decisions.md';
+
+/** A statute-anchor heading in `platform-decisions.md` — `### <title> {#the-anchor}`. Used to read the anchors a
+ *  diff ADDS, so the codification test can require they be exactly the ones the resolved decision names. */
+const STATUTE_ANCHOR_HEADING_RE = /^#{2,6}\s+.*\{#([A-Za-z0-9][A-Za-z0-9._-]*)\}\s*$/;
+
+/** A backlog item file — the only place a `kind: decision` resolve can live. */
+const BACKLOG_ITEM_RE = /^backlog\/[^/]+\.md$/;
+
+/** `codifiedIn: "docs/agent/platform-decisions.md#anchor"` (quotes optional) → the anchor. */
+const CODIFIED_IN_RE = /^codifiedIn:\s*["']?([^"'\s]+)["']?\s*$/;
+
+/**
+ * Split a raw unified diff into per-file sections. Pure, internal, deliberately dumb: it recognises only what
+ * `git diff` actually emits and treats anything it cannot parse as a reason to give up (the caller then fails
+ * closed). Returns `[{ path, added: string[], removed: string[], context: string[] }]` where `path` is the
+ * POST-image path (`b/…`), which is what the changed-file lists this is cross-checked against also carry.
+ */
+function parseDiffSections(diffText) {
+  const sections = [];
+  let cur = null;
+  for (const line of String(diffText).split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      // `diff --git a/<p> b/<p>` — take the b-side. A quoted/renamed/space-bearing path is NOT parsed; the
+      // section is recorded with a null path so the caller's "every statute file accounted for" check fails.
+      const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+      cur = { path: m ? m[2] : null, added: [], removed: [], context: [] };
+      sections.push(cur);
+      continue;
+    }
+    if (!cur) continue;                                    // preamble before the first file header
+    if (line.startsWith('+++ ') || line.startsWith('--- ') || line.startsWith('@@')) continue;
+    if (line.startsWith('index ') || line.startsWith('new file mode') || line.startsWith('deleted file mode')
+      || line.startsWith('old mode') || line.startsWith('new mode') || line.startsWith('similarity index')
+      || line.startsWith('rename from') || line.startsWith('rename to')
+      || line.startsWith('Binary files') || line === '\\ No newline at end of file') continue;
+    if (line.startsWith('+')) cur.added.push(line.slice(1));
+    else if (line.startsWith('-')) cur.removed.push(line.slice(1));
+    else if (line.startsWith(' ')) cur.context.push(line.slice(1));
+  }
+  return sections;
+}
+
+/**
+ * #2771 Fork B (codified [`#review-human-declarative-leash-only`](../../docs/agent/platform-decisions.md#review-human-declarative-leash-only))
+ * — is this diff the MECHANICAL CODIFICATION of a decision the human already ruled, rather than an author
+ * writing a NEW statute rule? Pure, and FAIL-CLOSED in every ambiguous case (`false` ⇒ the statute touch keeps
+ * forcing `review:human`, i.e. today's behaviour).
+ *
+ * WHY IT EXISTS. `isStatutePath` fires on ANY `platform-decisions.md` touch, so a PR that merely RECORDS a
+ * ratified decision (`resolve --codified-to=<doc#anchor>`, the #911 gate) is treated exactly like a fresh rule —
+ * asking the operator to re-approve their own ruling (the #882/#885 bounce). The ruling exempts the codify SHAPE
+ * from the HUMAN gate only; the PR still escalates to the committee, which checks the anchor faithfully records
+ * the decision's ruling.
+ *
+ * THE SHAPE, both halves required (#2771's conjunction — either half alone is not codification):
+ *   (i)  the same diff flips a `kind: decision` backlog item from a non-resolved status to `status: resolved`
+ *        AND adds a `codifiedIn:` naming a statute anchor; and
+ *   (ii) the ONLY `platform-decisions.md` change is the ADDITION of exactly the anchor(s) those `codifiedIn`
+ *        lines name — no removed line anywhere in that file, and no added anchor heading that is not one of them.
+ *
+ * WHAT IT REFUSES (each of these is a deliberate false, not an oversight):
+ *   • No diff text at all (a caller that could not read one, or a drain path that does not plumb it) → false.
+ *     The exemption is opt-in on PROOF; absence of proof is never proof of absence.
+ *   • Any statute file in `changedFiles` that the diff text does not account for → false. A partial/stale diff
+ *     must not be able to hide a second statute edit from condition (ii).
+ *   • A statute doc other than `platform-decisions.md` (the `.*statute` pattern) → false. Only the
+ *     decisions document has anchors a `codifiedIn` can name.
+ *   • ANY removed line in `platform-decisions.md` → false. "Addition/extension of exactly that anchor" cannot
+ *     rewrite existing rule text; a rewrite is a new governance call.
+ *   • An added anchor heading whose anchor no resolved decision names → false (the smuggled-rule case #2771's
+ *     skeptic pass names).
+ *   • A statute edit that adds NO anchor heading at all → false. #2771 allows "addition / extension", but a
+ *     pure extension cannot be proven from a diff to sit inside the named anchor's section rather than inside a
+ *     neighbouring rule, so it stays human. The narrower, provable half is the one implemented.
+ *   • A backlog section whose hunks do not SHOW `kind: decision` → false. The `kind` line sits two lines from
+ *     `status` in the front-matter so default context normally carries it; when it does not, the diff has not
+ *     proven the resolved item is a decision, and an ordinary story resolve must never license a statute edit.
+ *
+ * @param {{diffText?: string|null, changedFiles?: string[]}} o - `changedFiles` is the same basis the human gate
+ *   scores over (`humanBasisFiles ?? changedFiles`), used only for the diff-completeness cross-check.
+ * @returns {boolean}
+ */
+export function isCodificationOnly({ diffText = null, changedFiles = [] } = {}) {
+  if (typeof diffText !== 'string' || !diffText.trim()) return false;      // no proof → human
+  const basis = (Array.isArray(changedFiles) ? changedFiles : []).map((f) => String(f || ''));
+  const statuteInBasis = basis.filter(isStatutePath);
+  if (!statuteInBasis.length) return false;                                 // nothing to exempt
+  if (statuteInBasis.some((f) => f !== PLATFORM_DECISIONS_PATH)) return false; // a non-decisions statute doc → human
+
+  const sections = parseDiffSections(diffText);
+  const statuteSections = sections.filter((s) => s.path != null && isStatutePath(s.path));
+  // The diff must ACCOUNT FOR every statute file the gate basis lists — otherwise (ii) is unverifiable.
+  const seen = new Set(statuteSections.map((s) => s.path));
+  if (statuteInBasis.some((f) => !seen.has(f))) return false;
+  if (statuteSections.some((s) => s.path !== PLATFORM_DECISIONS_PATH)) return false;
+  if (!statuteSections.length) return false;
+
+  // (i) — the resolve+codify half. Collect the anchors the resolved decision items name.
+  const codifiedAnchors = new Set();
+  for (const s of sections) {
+    if (s.path == null || !BACKLOG_ITEM_RE.test(s.path)) continue;
+    const isDecision = [...s.added, ...s.context].some((l) => /^kind:\s*["']?decision["']?\s*$/.test(l.trim()));
+    const becomesResolved = s.added.some((l) => /^status:\s*["']?resolved["']?\s*$/.test(l.trim()));
+    const wasUnresolved = s.removed.some((l) => /^status:\s*/.test(l.trim()) && !/^status:\s*["']?resolved["']?\s*$/.test(l.trim()));
+    if (!isDecision || !becomesResolved || !wasUnresolved) continue;
+    for (const l of s.added) {
+      const m = CODIFIED_IN_RE.exec(l.trim());
+      if (!m) continue;
+      const [doc, anchor] = m[1].split('#');
+      // The anchor must live in the decisions document (a bare `#anchor` is read as this document's).
+      if (anchor && (!doc || doc === PLATFORM_DECISIONS_PATH || doc.endsWith(`/${PLATFORM_DECISIONS_PATH}`))) codifiedAnchors.add(anchor);
+    }
+  }
+  if (!codifiedAnchors.size) return false;                                  // no resolve+codify → an author's new rule
+
+  // (ii) — the statute half: additions only, and every added anchor heading is one the resolve named.
+  const addedAnchors = new Set();
+  for (const s of statuteSections) {
+    if (s.removed.length) return false;                                     // rewrote existing rule text → human
+    for (const l of s.added) {
+      const m = STATUTE_ANCHOR_HEADING_RE.exec(l);
+      if (m) addedAnchors.add(m[1]);
+    }
+  }
+  if (!addedAnchors.size) return false;                                     // unprovable pure extension → human
+  for (const a of addedAnchors) if (!codifiedAnchors.has(a)) return false;  // a smuggled extra rule → human
+  return true;
+}
 
 /**
  * The advisory CARE-LEVEL an escalated PR carries (#2567, codified `#blast-radius-advisory-care-not-a-gate`,
@@ -262,11 +408,14 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * A PR escalates ONLY for one of these real reasons — there is no random/sampling floor (#xlno40g): a
  * clean, CI-green PR with no scored signal and no dismissed finding reaches no reviewer, it just lands.
  *
- * Also returns `humanRequired` (#2285 v1, narrowed by the #2445 two-tier flip): true iff the diff touches the
- * POLICY tier of the trust chain (`isGateSelfPath`) or the STATUTE layer (`isStatutePath`) — the classes where
- * a human is essential (an agent policing its own leash, or a governance rule a human must ratify). The ENGINE
- * tier (the lander) escalates but is agent-reviewable, so it does NOT set humanRequired. A *classification* of
- * an already-escalating PR (a policy/statute file is always blast-radius too), never a fresh escalation trigger.
+ * Also returns `humanRequired` (#2285 v1, narrowed by the #2445 two-tier flip and again by #2771/#2785): true
+ * iff the diff touches the DECLARATIVE LEASH (`isDeclarativeLeashPath` — the contract, the roster, the
+ * invariant/conformance suites) or writes a NEW statute rule (`isStatutePath` and NOT the proven codification
+ * shape). Those are the classes where genuine human judgment is essential. Everything else escalates but is
+ * agent-reviewable and does NOT set humanRequired: the ENGINE tier (the lander), the policy tier's DERIVATION
+ * CODE (#2771 Fork A — the rubric, the router, the loader, the seams), and a statute edit proven to codify an
+ * already-ruled decision (#2771 Fork B). A *classification* of an already-escalating PR (a policy/statute file
+ * is always blast-radius too), never a fresh escalation trigger.
  *
  * #2390-review-fix — the gate-self / `humanRequired` trigger reads `humanBasisFiles` (the CUMULATIVE
  * `origin/main…head` file set), NOT the possibly-de-inflated own-delta `changedFiles`. A stacked lane may
@@ -279,7 +428,10 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * identical), so every existing caller is unchanged.
  *
  * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
- *          crossRepo?:boolean, thresholds?:object}} o
+ *          crossRepo?:boolean, thresholds?:object, diffText?:string|null}} o - `diffText` (#2785) is the raw net
+ *   diff over the SAME basis as `humanBasisFiles`, supplied only so the #2771 Fork B codification shape can be
+ *   PROVEN. Omitting it is always safe: `isCodificationOnly` then returns false and a statute touch keeps its
+ *   human gate exactly as before.
  */
 export function scoreEscalation({
   changedFiles = [],
@@ -288,6 +440,7 @@ export function scoreEscalation({
   dismissedFindings = 0,
   crossRepo = false,
   thresholds = {},
+  diffText = null,
 } = {}) {
   const t = { ...DEFAULT_THRESHOLDS, ...thresholds };
   const reasons = [];
@@ -303,12 +456,27 @@ export function scoreEscalation({
   // can never shrink it), falling back to `changedFiles` when no separate basis is supplied.
   // #2445 two-tier flip — ONLY the POLICY tier (isGateSelfPath) and the STATUTE layer force a human; the ENGINE
   // tier (the lander) escalated via blast-radius above but is agent-reviewable, so it is NOT counted here.
+  // #2771/#2785 — the POLICY tier is SPLIT. Only the DECLARATIVE LEASH (`isDeclarativeLeashPath`: the contract,
+  // the roster, the invariant/conformance suites) still forces a human; the DERIVATION CODE that realizes it
+  // escalates to the sized independent committee instead. Both sets come from the ONE roster in gate-config.mjs.
   const gateBasis = Array.isArray(humanBasisFiles) ? humanBasisFiles : (Array.isArray(changedFiles) ? changedFiles : []);
-  const gateSelfFiles = gateBasis.filter(isGateSelfPath);
+  const leashFiles = gateBasis.filter(isDeclarativeLeashPath);
+  const derivationFiles = gateBasis.filter(isPolicyDerivationPath);
   const statuteFiles = gateBasis.filter(isStatutePath);
-  const humanRequired = gateSelfFiles.length > 0 || statuteFiles.length > 0;
-  if (gateSelfFiles.length) { signals.gateSelf = gateSelfFiles; reasons.push(`gate-self (${gateSelfFiles.join(', ')}) — human review required`); }
-  if (statuteFiles.length) { signals.statute = statuteFiles; reasons.push(`statute (${statuteFiles.join(', ')}) — human review required`); }
+  // #2771 Fork B — a statute edit PROVEN to be the codification of an already-ruled decision does not force a
+  // human (the committee still reviews it). Unproven for ANY reason — no diff text, an unparseable shape, a
+  // second statute edit — keeps the human gate: `isCodificationOnly` is fail-closed, so this can only ever
+  // narrow on evidence, never on absence of it.
+  const codificationOnly = statuteFiles.length > 0 && isCodificationOnly({ diffText, changedFiles: gateBasis });
+  const statuteForcesHuman = statuteFiles.length > 0 && !codificationOnly;
+  const humanRequired = leashFiles.length > 0 || statuteForcesHuman;
+  if (leashFiles.length) { signals.gateSelf = leashFiles; reasons.push(`gate-self (${leashFiles.join(', ')}) — declarative leash, human review required`); }
+  // The derivation half keeps its own signal + reason so the PR still ESCALATES on a stacked basis where the
+  // file is in `humanBasisFiles` but not in the own-delta `changedFiles` that fed the blast-radius signal above.
+  // Its token's clearance is `agent` in the contract, so the panel may CLEAR it — that is the whole narrowing.
+  if (derivationFiles.length) { signals.gateDerivation = derivationFiles; reasons.push(`gate-derivation (${derivationFiles.join(', ')}) — gate derivation code, independent committee review`); }
+  if (statuteForcesHuman) { signals.statute = statuteFiles; reasons.push(`statute (${statuteFiles.join(', ')}) — human review required`); }
+  else if (codificationOnly) { signals.codification = statuteFiles; reasons.push(`codification (${statuteFiles.join(', ')}) — records an already-ruled decision, independent committee review`); }
 
   if (Number(diffLines) >= t.diffLines) { signals.size = Number(diffLines); reasons.push(`size (${diffLines} ≥ ${t.diffLines} changed lines)`); }
 
