@@ -11,12 +11,25 @@ import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, bu
 import { REVIEW_LABELS, REVIEW_LABEL_META } from '../lib/review-escalation.mjs';
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
-  it('a policy-core diff (edits the leash-defining trust chain) → review:human, applied', () => {
-    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/lib/review-escalation.mjs'], diffLines: 10 });
+  it('a DECLARATIVE-LEASH diff (the roster — the encoded policy itself) → review:human, applied', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/lib/gate-config.mjs'], diffLines: 10 });
     expect(v.label).toBe(REVIEW_LABELS.human);
     expect(v.apply).toBe(true);
     expect(v.humanRequired).toBe(true);
     expect(v.reasons.join(' ')).toMatch(/gate-self/);
+  });
+  it('#2771/#2785 — a policy-tier DERIVATION-CODE diff → review:pending (the committee), never review:human', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/lib/review-escalation.mjs'], diffLines: 10 });
+    expect(v.label).toBe(REVIEW_LABELS.pending);
+    expect(v.apply).toBe(true);
+    expect(v.humanRequired).toBe(false);
+    expect(v.reasons.join(' ')).toMatch(/gate-derivation/);
+  });
+  it('#2771 Fork A — a STATUTE diff is UNCHANGED by the narrowing: still review:human', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: ['docs/agent/platform-decisions.md'], diffLines: 10 });
+    expect(v.label).toBe(REVIEW_LABELS.human);
+    expect(v.humanRequired).toBe(true);
+    expect(v.reasons.join(' ')).toMatch(/statute/);
   });
   it('an escalating non-gate-self diff (blast-radius) → review:pending, applied', () => {
     const v = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10 });

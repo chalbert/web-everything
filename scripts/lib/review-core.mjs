@@ -417,10 +417,11 @@ export const REVIEW_DISPOSITIONS = Object.freeze({
 /**
  * The escalation-reason vocabulary the disposition is keyed on (#2285). Two families:
  *   • SENSITIVITY reasons — a rule fired at classification time, BEFORE any review deadlock. An agent
- *     reviewer/editor is still independent and useful, so these CONVERGE. `gate-self` (the policy-tier trust
- *     chain, #2285) and `statute` (a governance rule, #2412) converge too, but as an ADVISORY fix that never
- *     auto-lands — a human gates the merge. Every other sensitivity reason (incl. the engine-tier lander via
- *     `blast-radius`) auto-lands on a converged verdict (the #2445 two-tier flip).
+ *     reviewer/editor is still independent and useful, so these CONVERGE. `gate-self` (the DECLARATIVE LEASH of
+ *     the trust chain, #2285 narrowed by #2771/#2785) and `statute` (a governance rule, #2412) converge too,
+ *     but as an ADVISORY fix that never auto-lands — a human gates the merge. Every other sensitivity reason
+ *     auto-lands on a converged verdict: the engine-tier lander via `blast-radius` (the #2445 two-tier flip) and
+ *     policy-tier derivation CODE via `gate-derivation` (#2771 Fork A).
  *   • DEADLOCK reasons — the panel↔editor loop ALREADY ran and could not agree. Re-converging just repeats the
  *     deadlock, so these go straight to a HUMAN.
  * These are the BARE (canonical) tokens; they are the un-decorated form of `scoreEscalation`'s fired signals
@@ -430,7 +431,8 @@ export const REVIEW_DISPOSITIONS = Object.freeze({
  */
 export const REVIEW_REASONS = Object.freeze({
   // sensitivity (pre-review) — converge
-  GATE_SELF: 'gate-self',
+  GATE_SELF: 'gate-self',              // the DECLARATIVE LEASH (contract / roster / suites) — human (#2771/#2785)
+  GATE_DERIVATION: 'gate-derivation',  // policy-tier derivation CODE — independent committee (#2771 Fork A)
   STATUTE: 'statute',
   BLAST_RADIUS: 'blast-radius',
   SIZE: 'size',
@@ -542,6 +544,13 @@ export function careLevelFromReasons(reasons) {
         break;
       }
       case REVIEW_REASONS.CROSS_REPO: signals.crossRepo = true; break;
+      // #2771/#2785 — the narrowed class is agent-clearable, so it must NOT set humanRequired; but it is a
+      // system-machinery change, so it must still earn a real panel. Mapping it onto the blast-radius weight
+      // lands it at `elevated` on its own, never at `none` — a reasons-only consumer that saw just
+      // `gate-derivation` would otherwise derive a ZERO-juror, ZERO-round rigor and the "independent committee"
+      // the ruling routes it to would not exist.
+      case REVIEW_REASONS.GATE_DERIVATION:
+        signals.blastRadius = true; break;
       case REVIEW_REASONS.GATE_SELF:
       case REVIEW_REASONS.STATUTE:
       case REVIEW_REASONS.NON_CONVERGENCE:

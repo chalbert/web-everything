@@ -244,17 +244,26 @@ author-bounce with a bounded editor↔reviewer negotiation loop** (below). The o
 > [`/review`](../review/SKILL.md)) — same module, same discipline: template the render, never hand-type the
 > prose.
 
-The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isGateSelfPath`) and emits it
-in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`.
+The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isDeclarativeLeashPath`) and
+emits it in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`.
+
+> **`humanRequired` is NARROWER than "touches the gate" (#2771/#2785, statute
+> [`#review-human-declarative-leash-only`](../../docs/agent/platform-decisions.md#review-human-declarative-leash-only)).**
+> Only the **declarative leash** — the policy contract, the `we:gate-config.mjs` roster, and the invariant /
+> conformance suites — forces a human. The gate's **derivation code** (`we:review-escalation.mjs`,
+> `we:review-core.mjs`, `we:review-policy.mjs`, the two land seams) parks `review:pending` and the independent
+> committee clears it, exactly like the engine tier. So do NOT tell the operator a PR is theirs merely because it
+> edits the gate — read `humanRequired` / the `gate-self` vs `gate-derivation` reason, never the file path.
 
 > **The converge-vs-human branch is ONE derivation (#2285).** Don't hand-branch on `humanRequired` — call
 > `deriveReviewDisposition({ reasons })` in `we:scripts/lib/review-core.mjs` and act on `{ mode, autoLand }`. It
 > is single-sourced so **every** review surface (this drain, `/review`, `/merge`) shares the policy, keyed on WHY
 > the PR escalated. `mode: 'converge'` → run the panel↔editor loop below; `mode: 'human'` → hand straight to a
 > human, no convergence. `autoLand: false` → an agent may FIX but never CLEAR it (a human gates the merge). Map
-> the drain's signals to reasons: `humanRequired` ⇒ `gate-self`; the escalation `reasons` (blast-radius / size /
-> dismissed-findings / cross-repo / sampling) are the sensitivity reasons; a negotiation that hits the round cap
-> or a mandate conflict (below) is `non-convergence` / `mandate-conflict`.
+> the drain's signals to reasons: don't re-derive them — the `parked` entry's `reasons` already carry the exact
+> decorated strings (`gate-self` / `gate-derivation` / `statute` / blast-radius / size / dismissed-findings /
+> cross-repo), and a negotiation that hits the round cap or a mandate conflict (below) adds `non-convergence` /
+> `mandate-conflict`. Pass them through verbatim.
 
 > **No park ever times out (x30jq9n, resolving #2412 Gap 1).** The old 30-minute merge-anyway window
 > (`--review-window-minutes`, #2262) is REMOVED: it raced the very review it was waiting for — observed

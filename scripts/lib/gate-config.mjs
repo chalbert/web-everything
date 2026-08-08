@@ -2,17 +2,41 @@
  * gate-config.mjs — the AUTO-REVIEW TRUST CHAIN as explicit, versioned config (#2448, under #2445).
  *
  * WHAT THIS IS. The trust chain is the machinery whose edits are too sensitive to auto-clear. It has TWO
- * tiers (#2445 two-tier flip):
- *   • POLICY tier — the code that DEFINES whether the gate fires and what clears it (the rubric, the
- *     disposition router, this roster, the invariants). Reviewing a change here, an auto-reviewer would be
- *     policing an edit to its own leash (a genuine conflict of interest), so a human is *essential*
- *     (`review:human`). `isPolicyCorePath` / `isGateSelfPath` select this tier.
+ * tiers (#2445 two-tier flip), and the POLICY tier is itself SPLIT IN TWO (#2771/#2785 — see below):
+ *   • POLICY tier — the machinery that DEFINES whether the gate fires and what clears it (the rubric, the
+ *     disposition router, this roster, the invariants). `isPolicyCorePath` / `isGateSelfPath` select this
+ *     tier, and a member of it ALWAYS escalates. Whether it forces a HUMAN is the `leash` split below.
  *   • ENGINE tier — the lander, which OBEYS the gate but does not define it. A change here still ESCALATES
  *     and runs the full adversarial panel, but a converged agent verdict may clear it (agent-reviewable);
  *     the policy-tier invariant suite (human-only) is the backstop that catches a lander edit that tries to
  *     bypass a verdict. This is the deliberate relaxation that lets the delivery engine improve itself
  *     without a mandatory human on every lander patch, while the leash-defining tier stays human.
  * This file is the SINGLE SOURCE OF TRUTH for both tiers; nothing else hardcodes the set.
+ *
+ * THE POLICY TIER'S `leash` SPLIT — DECLARATIVE LEASH vs DERIVATION CODE (#2771, built by #2785, codified
+ * [`#review-human-declarative-leash-only`](../../docs/agent/platform-decisions.md#review-human-declarative-leash-only)).
+ * "An agent might be policing its own leash" was the WHOLE policy tier's rationale for forcing a human, and it
+ * stranded the operator on routine derivation-code work (a lint, a refactor, a threshold *mechanic*) that the
+ * #2566 conformance suite already proves behaviour-preserving. The ratified narrowing splits the tier by what a
+ * member IS, recorded per-entry as `leash`:
+ *   • `leash: 'spec'`  — the DECLARATIVE LEASH: the machine-diffable contract, THIS roster, and the
+ *     invariant / conformance suites. These files ARE the encoded policy — there is no behaviour-preserving
+ *     edit to them, so "did the spec change?" collapses to "did this file change?". They force `review:human`
+ *     (`isPolicySpecPath`), and #2840 pins that floor PERMANENTLY (trigger 3).
+ *   • `leash: 'code'` — the DERIVATION CODE that realizes the leash: the rubric, the disposition router, the
+ *     contract loader, the land seams. A behaviour-preserving change here that keeps the conformance suite
+ *     green is cleared by the sized INDEPENDENT committee (`review:pending`, no self-approval), with a human
+ *     reached only on non-convergence. It still ESCALATES — it just no longer forces a human.
+ * The deterministic backstop is the conformance suite: any change that alters the gate's BEHAVIOUR necessarily
+ * reddens conformance, which forces a contract diff — and the contract is `leash: 'spec'`, i.e. human-gated.
+ * Green ⇒ implementation ⇒ committee.
+ *
+ * FAIL-CLOSED BY CONSTRUCTION. `POLICY_SPEC_BASENAMES` is derived as "every policy member whose `leash` is not
+ * exactly `'code'`", so a new policy entry that OMITS `leash`, or carries a typo, lands in the HUMAN set — the
+ * safe direction. Dropping to the committee is never the default; it must be claimed explicitly. The invariant
+ * suite additionally requires every policy member to declare a VALID `leash` (so the omission is caught at test
+ * time, not merely absorbed at runtime) and pins `RATIFIED_POLICY_SPEC_FLOOR` — the four basenames #2771 named
+ * — so no future edit can quietly move the contract, the roster, or a suite out of the human set.
  *
  * WHY IT LIVES HERE, AS CONFIG (#2448). Before this, the set was literal regexes buried in the scorer
  * (`GATE_SELF_PATHS` pinned to `scripts/lib/…` / `scripts/merge-ai-prs.mjs`). That silently un-anchors
@@ -34,8 +58,9 @@
  * SELF-HOSTING BOUNDARY — the #2285 invariant, ONE LEVEL UP (#2445 DoD, #2448, two-tier flip). When the
  * delivery engine becomes a resident coordinator that drains its own PRs, the coordinator must never be the
  * sole reviewer-and-lander of a change to the code that DEFINES its own leash. That is the POLICY tier: the
- * rubric, the disposition router, this roster, the invariants — register their basenames here as `policy` and
- * a PR editing them derives `humanRequired: true`, so the coordinator *cannot* auto-clear it; a human must.
+ * rubric, the disposition router, this roster, the invariants — register their basenames here as `policy`, and
+ * the `leash` field then decides the route: a `spec` member derives `humanRequired: true` (the coordinator
+ * *cannot* auto-clear it; a human must), while a `code` member escalates to the independent committee.
  * The coordinator's ENGINE (its lander) is a different case: it obeys the leash rather than defining it, so it
  * is `engine` tier — it still escalates and runs the full panel, but a converged verdict may land it. Enforced
  * by construction (the basename match follows the code across repos), not assumed. As the coordinator gains
@@ -57,17 +82,26 @@
  * update `homes` for the record; when a member is RENAMED, you must change `file` — the one edit basename
  * matching cannot do for you.
  *
- * Each member also carries a `tier`: `policy` (edits force `review:human` — the leash-defining code) or
- * `engine` (edits escalate + run the panel but a converged agent verdict may clear them — the lander that
- * obeys the leash). Keep the POLICY tier MINIMAL: `review:human` = "human judgment essential", not merely
- * "important" — a wider policy net just re-strands the queue on humans. Only code that decides *whether the
- * gate fires and what clears it* is `policy`; everything else (incl. the lander) is agent-reviewable.
+ * Each member also carries a `tier`: `policy` (the leash-defining machinery) or `engine` (edits escalate + run
+ * the panel but a converged agent verdict may clear them — the lander that obeys the leash). Keep the POLICY
+ * tier MINIMAL: it is the set whose membership even RAISES the human question — a wider policy net just
+ * re-strands the queue on humans. Only machinery that decides *whether the gate fires and what clears it* is
+ * `policy`; everything else (incl. the lander) is agent-reviewable.
+ *
+ * Every `policy` member ALSO carries `leash` (#2771/#2785) — `'spec'` (the declarative leash: forces
+ * `review:human`) or `'code'` (the derivation code: escalates to the independent committee). It is REQUIRED on
+ * a policy entry (the invariant suite fails an entry that omits it) and MUST NOT appear on an engine entry.
+ * When adding a policy member, ask #2771's question: is this file the *encoded policy* (a contract, a roster,
+ * an invariant / conformance suite — `'spec'`), or code that *derives* the gate from it (`'code'`)? If you
+ * cannot answer with confidence, leave it `'spec'` and file the classification as its own decision — the
+ * fail-closed direction is human, never committee.
  */
 export const TRUST_CHAIN = [
   {
     role: 'escalation-rubric',
     file: 'review-escalation.mjs',
     tier: 'policy',
+    leash: 'code',
     desc: 'the escalation rubric itself — decides whether the gate fires and what clears it',
     homes: ['scripts/lib/review-escalation.mjs'],
   },
@@ -75,6 +109,7 @@ export const TRUST_CHAIN = [
     role: 'disposition-router',
     file: 'review-core.mjs',
     tier: 'policy',
+    leash: 'code',
     desc: 'the converge-vs-human router (deriveReviewDisposition) + the negotiation round caps — decides whether an agent may clear an escalated PR or a human must; editing it changes what the gate does with an escalation',
     homes: ['scripts/lib/review-core.mjs'],
   },
@@ -82,6 +117,7 @@ export const TRUST_CHAIN = [
     role: 'policy-spec',
     file: 'review-policy.contract.json',
     tier: 'policy',
+    leash: 'spec',
     desc: 'the review-escalation policy CONTRACT (#2566) — the machine-diffable spec that OWNS the rubric thresholds, the reason families/clearance, and the disposition decision table. A diff here IS a policy change (the #2563 Fork 1 spec-based gate: "did the spec change?" is deterministic), so it forces review:human',
     homes: ['scripts/lib/review-policy.contract.json'],
   },
@@ -89,6 +125,7 @@ export const TRUST_CHAIN = [
     role: 'policy-spec-loader',
     file: 'review-policy.mjs',
     tier: 'policy',
+    leash: 'code',
     desc: 'the loader + executable form of the policy contract (#2566) — validates the contract shape and exposes derivePolicyDisposition (the oracle the conformance suite holds the impl to); editing it can change how the spec is interpreted, so it is policy tier',
     homes: ['scripts/lib/review-policy.mjs'],
   },
@@ -96,6 +133,7 @@ export const TRUST_CHAIN = [
     role: 'disposition-land-seam',
     file: 'disposition-land-seam.mjs',
     tier: 'policy',
+    leash: 'code',
     desc: 'the seam that wires the #2652 disposition judge into the review land path (#2674) — decideDispositionLabel turns a parked PR\'s jury verdict into a LABEL intent (auto-dispose → auto-clear/accept, escalate/red-refuted/gate-self → keep parked review:human). It DECIDES whether a PR auto-clears or goes to a human, so it is the disposition-to-label router — leash-defining policy tier: an agent may not clear an edit to its own auto-dispose leash. It is decision-only (returns an intent, applies nothing — #2675 applies it behind shadow mode)',
     homes: ['scripts/lib/disposition-land-seam.mjs'],
   },
@@ -103,6 +141,7 @@ export const TRUST_CHAIN = [
     role: 'auto-land-seam',
     file: 'auto-land-seam.mjs',
     tier: 'policy',
+    leash: 'code',
     desc: 'the seam that ACTS on a clean auto-dispose intent (#2675) — decideAutoLand/applyAutoLand turn the #2674 label intent into the actual review:accepted WRITE (so the drain merges it) behind the global shadow|enforce landMode knob, defaulting to SHADOW (observe-only). It is the acting end of the auto-dispose leash — it decides whether a clean intent LANDS or only observes — so it is leash-defining policy tier: an agent may not clear an edit to its own auto-land machinery. Safety rails hold in both modes (never auto-lands a keep-parked/red-refuted/gate-self intent; fail-closed on any write error) and INVARIANT 2 is double-locked (the intent carries decideSetLabel\'s guarded swap AND the default writer shells the INVARIANT-2-guarded review-set-label.mjs)',
     homes: ['scripts/lib/auto-land-seam.mjs'],
   },
@@ -110,6 +149,7 @@ export const TRUST_CHAIN = [
     role: 'policy-conformance',
     file: 'review-policy.conformance.test.mjs',
     tier: 'policy',
+    leash: 'spec',
     desc: 'the conformance suite (#2566) proving the derivation code realizes the contract table over the full input space — the bridge that makes an impl refactor agent-clearable (green) and a behaviour change human-gated (red forces a contract edit); weakening an assertion here is itself a spec change (the closure)',
     homes: ['scripts/lib/__tests__/review-policy.conformance.test.mjs'],
   },
@@ -164,10 +204,21 @@ export const TRUST_CHAIN = [
   // the seams it composes. Registered `policy` (NOT engine): a change to the mutation guarantee forces review:human, so
   // an agent panel can never clear the very edit that flips shadow→enforce. Basename-matched, so it follows the runner
   // if the enforce-era wiring relocates it (see file header).
+  //
+  // LEASH CLASSIFICATION — `spec`, PENDING A RULING (#2785). These two are the one case #2771 does not settle.
+  // They are CODE (not a contract, a roster, or a suite), so #2771's artifact-kind test reads `code`; but their
+  // policy registration (#2830) rests on a DECLARATIVE fact embedded IN that code — `runnerShadowPlan`'s
+  // hard-coded `LAND_MODES.SHADOW` and the CLI's `--enforce` refusal, together the zero-mutation guarantee. That
+  // guarantee has no conformance suite pinning it, so the #2771 backstop ("a behaviour change reddens conformance
+  // and forces a contract diff") does NOT hold here: a committee could clear the very edit that arms the runner.
+  // #2840 trigger 2 is the right long-term home (a `@principle`/`@invariant` marker on the constant, evaluated
+  // per-diff) and it is an unbuilt follow-on. Until then these stay `spec` — the fail-closed direction, and a
+  // strict no-op on today's behaviour. Reclassifying them is a separate, human-ratified call.
   {
     role: 'review-runner-core',
     file: 'review-runner-core.mjs',
     tier: 'policy',
+    leash: 'spec',
     desc: 'the PURE core of the scheduled shadow review runner (#2830) — `runnerShadowPlan` composes the disposition/auto-land seams with the mode HARD-CODED to LAND_MODES.SHADOW; that forced-shadow constant IS the zero-mutation guarantee (flip it to config.landMode and a scheduled run auto-writes review:accepted). It decides what clears the gate, so it is leash-defining policy tier — an agent may not clear an edit to its own mutation guarantee',
     homes: ['scripts/lib/review-runner-core.mjs'],
   },
@@ -175,6 +226,7 @@ export const TRUST_CHAIN = [
     role: 'review-runner-cli',
     file: 'review-runner.mjs',
     tier: 'policy',
+    leash: 'spec',
     desc: 'the scheduled shadow review runner CLI (#2830) — discovers review:pending PRs and shadow-disposes each; the `--enforce` REFUSAL is the second half of the zero-mutation guarantee (delete it and the runner can be flipped to act). Gate-deciding + leash-defining, so policy tier: flipping this mechanical slice to auto-clear is a separate ratified step (#2572 part 2) that must be human-reviewed',
     homes: ['scripts/review-runner.mjs'],
   },
@@ -190,6 +242,7 @@ export const TRUST_CHAIN = [
     role: 'check-standards-policy',
     file: 'check-standards.contract.json',
     tier: 'policy',
+    leash: 'spec',
     desc: 'the check:standards DEFINITION-OF-GREEN contract (#2769) — the machine-diffable spec that OWNS the gate\'s per-rule enforcement flags (error vs warn) and semantic thresholds. A diff here IS a definition-of-green change ("did the gate weaken?" is deterministic — did this file change), so it forces review:human',
     homes: ['scripts/check-standards.contract.json'],
   },
@@ -197,6 +250,7 @@ export const TRUST_CHAIN = [
     role: 'check-standards-conformance',
     file: 'check-standards.conformance.test.mjs',
     tier: 'policy',
+    leash: 'spec',
     desc: 'the conformance suite (#2769) pinning every contract knob to its live engine constant (and guarding that no *_ENFORCED knob escapes the contract) — the bridge that makes an engine refactor agent-clearable (green) and a definition change human-gated (red forces a contract edit); weakening an assertion here is itself a definition-of-green change (the closure)',
     homes: ['scripts/lib/__tests__/check-standards.conformance.test.mjs'],
   },
@@ -218,6 +272,7 @@ export const TRUST_CHAIN = [
     role: 'roster-config',
     file: 'gate-config.mjs',
     tier: 'policy',
+    leash: 'spec',
     desc: 'THIS file — the trust-chain roster; editing it is itself a trust-chain change (the closure)',
     homes: ['scripts/lib/gate-config.mjs'],
   },
@@ -225,6 +280,7 @@ export const TRUST_CHAIN = [
     role: 'invariants',
     file: 'gate-invariants.test.mjs',
     tier: 'policy',
+    leash: 'spec',
     desc: 'the tripwire suite proving the safety invariants of the members above (weakening one is human-only)',
     homes: ['scripts/lib/__tests__/gate-invariants.test.mjs'],
   },
@@ -235,11 +291,49 @@ export const TRUST_CHAIN = [
  *  whether a HUMAN is essential (policy) or a converged agent panel may clear it (engine). */
 export const TRUST_CHAIN_BASENAMES = Object.freeze(new Set(TRUST_CHAIN.map((m) => m.file)));
 
-/** The POLICY-tier basenames — the code that DEFINES whether the gate fires and what clears it. ONLY these
- *  (plus statute, handled in review-escalation.mjs) force `review:human`: an agent reviewing a change to the
- *  gate's own decision logic would be policing its own leash. The ENGINE tier (the lander) OBEYS the gate, so
- *  a change there is agent-reviewable like any other blast-radius edit. Frozen. */
+/** The POLICY-tier basenames — the machinery that DEFINES whether the gate fires and what clears it. Every one
+ *  of these ESCALATES; the `leash` split below decides which of them additionally force `review:human`. The
+ *  ENGINE tier (the lander) OBEYS the gate, so a change there is agent-reviewable like any other blast-radius
+ *  edit. Frozen. Note this set is NO LONGER the human trigger (#2771/#2785 narrowed that to
+ *  `POLICY_SPEC_BASENAMES`); it remains the tier membership, and `isPolicyCorePath`/`isGateSelfPath` still
+ *  answer "is this the policy tier?" for every caller that asks that question (e.g. test-selection's deny list). */
 export const POLICY_CORE_BASENAMES = Object.freeze(new Set(TRUST_CHAIN.filter((m) => m.tier === 'policy').map((m) => m.file)));
+
+/** The two halves of the policy tier (#2771/#2785). `spec` = the DECLARATIVE LEASH (human); `code` = the
+ *  DERIVATION CODE that realizes it (independent committee). See the file header for the ratified split. */
+export const POLICY_LEASH = Object.freeze({ SPEC: 'spec', CODE: 'code' });
+
+/** The declarative-leash basenames #2771 named by hand, pinned as a FLOOR that can never shrink. #2840 trigger 3
+ *  makes this floor permanent ("those files *are* the encoded principle and have no behaviour-preserving edit").
+ *  The invariant suite asserts every entry here is in `POLICY_SPEC_BASENAMES`, so a future roster edit cannot
+ *  quietly reclassify the contract, this roster, or either suite as derivation code and self-clear the change.
+ *  This is a FLOOR, not the whole set: later-registered leash files (e.g. the #2769 check:standards contract +
+ *  conformance suite) join `POLICY_SPEC_BASENAMES` via their `leash: 'spec'` entry without being listed here. */
+export const RATIFIED_POLICY_SPEC_FLOOR = Object.freeze([
+  'review-policy.contract.json',        // the machine-diffable spec (thresholds / reason clearance / disposition table)
+  'gate-config.mjs',                    // the roster (who is in the chain, at what tier, on which leash) — the closure
+  'gate-invariants.test.mjs',           // the safety tripwires
+  'review-policy.conformance.test.mjs', // the impl↔contract bridge
+]);
+
+/** The DECLARATIVE-LEASH basenames — the ONLY trust-chain half that forces `review:human` (#2771/#2785). The
+ *  contract, this roster, and the invariant / conformance suites: files that ARE the encoded policy, for which
+ *  "did the spec change?" is exactly "did this file change?".
+ *
+ *  FAIL-CLOSED: the predicate is `leash !== CODE`, not `leash === SPEC`, so a policy member with a MISSING or
+ *  MISSPELLED `leash` is treated as declarative leash and stays human. Dropping a policy file to the committee
+ *  is only ever possible by writing `leash: 'code'` on it explicitly — which is itself an edit to THIS file, and
+ *  therefore human-gated. Frozen. */
+export const POLICY_SPEC_BASENAMES = Object.freeze(new Set(
+  TRUST_CHAIN.filter((m) => m.tier === 'policy' && m.leash !== POLICY_LEASH.CODE).map((m) => m.file),
+));
+
+/** The policy-tier DERIVATION-CODE basenames — the code that derives the gate from the leash above. These still
+ *  ESCALATE (they are trust-chain members) but route to the sized independent committee (`review:pending`)
+ *  rather than forcing a human, per #2771 Fork A. Frozen. Disjoint from `POLICY_SPEC_BASENAMES` by construction. */
+export const POLICY_DERIVATION_BASENAMES = Object.freeze(new Set(
+  TRUST_CHAIN.filter((m) => m.tier === 'policy' && m.leash === POLICY_LEASH.CODE).map((m) => m.file),
+));
 
 /** The basename of a repo-relative (or repo-prefixed) path. Pure — `a/b/c.mjs` → `c.mjs`, `c.mjs` → `c.mjs`. */
 export function basenameOf(path) {
@@ -266,4 +360,24 @@ export function isTrustChainPath(path) {
  */
 export function isPolicyCorePath(path) {
   return POLICY_CORE_BASENAMES.has(basenameOf(path));
+}
+
+/**
+ * Does this repo-relative path edit the DECLARATIVE LEASH — the encoded policy itself (the contract, the roster,
+ * the invariant / conformance suites)? Pure. THIS, plus a non-codification statute edit, is the whole
+ * `review:human` trigger after #2771/#2785; `isPolicyCorePath` is no longer it. Basename-matched, so the leash
+ * keeps forcing a human wherever the extraction relocates it.
+ */
+export function isPolicySpecPath(path) {
+  return POLICY_SPEC_BASENAMES.has(basenameOf(path));
+}
+
+/**
+ * Does this repo-relative path edit policy-tier DERIVATION CODE — the code that derives the gate from the leash?
+ * Pure. Such a path ESCALATES (it is a trust-chain member) but is cleared by the independent committee, never
+ * forced to a human (#2771 Fork A). Exactly `isPolicyCorePath(p) && !isPolicySpecPath(p)`, spelled as its own
+ * predicate so the rubric can NAME the derivation basis in its escalation reason.
+ */
+export function isPolicyDerivationPath(path) {
+  return POLICY_DERIVATION_BASENAMES.has(basenameOf(path));
 }

@@ -27,7 +27,10 @@ import {
   normalizeDiffFingerprint,
   buildReviewedDiffMarker,
   parseReviewedDiff,
+  isDeclarativeLeashPath,
+  isPolicyDerivationPath,
 } from '../review-escalation.mjs';
+import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
 
 describe('isBlastRadiusPath', () => {
   // The agent-behaviour trees (skills + agent memory) are NOT re-asserted here: every spelling of both has one
@@ -158,7 +161,7 @@ describe('isBlastRadiusPath', () => {
 });
 
 describe('isGateSelfPath — the POLICY tier of the trust chain (#2285 v1, #2448, #2445 two-tier flip)', () => {
-  it('flags the POLICY-CORE files (rubric, router, roster, invariants) — human-required', () => {
+  it('flags the POLICY-CORE files (rubric, router, roster, invariants) — the tier, no longer the human trigger (#2785)', () => {
     expect(isGateSelfPath('scripts/lib/review-escalation.mjs')).toBe(true);
     expect(isGateSelfPath('scripts/lib/review-core.mjs')).toBe(true);
     expect(isGateSelfPath('scripts/lib/gate-config.mjs')).toBe(true);           // #2448 — the roster (the closure)
@@ -222,9 +225,9 @@ describe('scoreEscalation', () => {
     const r = scoreEscalation({ changedFiles: ['scripts/x.mjs'], diffLines: 500, dismissedFindings: 2, crossRepo: true });
     expect(r.reasons.length).toBe(4);
   });
-  it('humanRequired for POLICY-CORE or STATUTE, but NOT for the ENGINE lander (#2445 two-tier flip)', () => {
-    // a policy-core file → escalate AND humanRequired
-    const policy = scoreEscalation({ changedFiles: ['scripts/lib/review-core.mjs'] });
+  it('humanRequired for the DECLARATIVE LEASH or STATUTE, but NOT for the ENGINE lander (#2445 two-tier flip)', () => {
+    // a declarative-leash file (the roster) → escalate AND humanRequired (#2771/#2785)
+    const policy = scoreEscalation({ changedFiles: ['scripts/lib/gate-config.mjs'] });
     expect(policy.escalate).toBe(true);
     expect(policy.humanRequired).toBe(true);
     expect(policy.reasons.join(' ')).toMatch(/gate-self/);
@@ -699,8 +702,13 @@ describe('scoreEscalation carries the advisory careLevel (#2567 — additive)', 
   it('a blast-radius PR → elevated', () => {
     expect(scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] }).careLevel).toBe(CARE_LEVELS.ELEVATED);
   });
-  it('a gate-self (humanRequired) PR → high', () => {
-    expect(scoreEscalation({ changedFiles: ['scripts/lib/review-core.mjs'] }).careLevel).toBe(CARE_LEVELS.HIGH);
+  it('a declarative-leash (humanRequired) PR → high', () => {
+    expect(scoreEscalation({ changedFiles: ['scripts/lib/gate-config.mjs'] }).careLevel).toBe(CARE_LEVELS.HIGH);
+  });
+  it('#2771/#2785 — a derivation-CODE PR drops from high to elevated (committee rigor, not a human)', () => {
+    const r = scoreEscalation({ changedFiles: ['scripts/lib/review-core.mjs'] });
+    expect(r.humanRequired).toBe(false);
+    expect(r.careLevel).toBe(CARE_LEVELS.ELEVATED);
   });
   it('is ADDITIVE — the existing escalate/humanRequired/reasons/signals fields are unchanged', () => {
     const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'] });
@@ -786,5 +794,100 @@ describe('reconcileRoster — #2635 bind + reconcile the jury roster at PR-open 
     const r = reconcileRoster({ preRegistered: ['correctness'], recomputed: ['correctness', 'a11y'], mode: 'nonsense' });
     expect(r.mode).toBe(ROSTER_TIMING.UP_FRONT);
     expect(r.humanAlignmentRequired).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// THE TIER TABLE (#2771/#2785) — every row is a REAL path in this repo, pinned to the route it must get. This
+// is the one place to read "what does a human still see?" end to end: path → humanRequired → producer label.
+// The rows were chosen to cover each class the ruling distinguishes, INCLUDING the mixed row (a PR touching
+// both halves must stay human — the strictest half wins) and the ordinary leaf (no review at all).
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('the #2771/#2785 tier table — real repo paths, pinned route', () => {
+  const TABLE = [
+    // [what it is, changedFiles, expected humanRequired, expected producer label]
+    ['derivation code — the rubric itself', ['scripts/lib/review-escalation.mjs'], false, REVIEW_LABELS.pending],
+    ['derivation code — the disposition router', ['scripts/lib/review-core.mjs'], false, REVIEW_LABELS.pending],
+    ['derivation code — the contract loader', ['scripts/lib/review-policy.mjs'], false, REVIEW_LABELS.pending],
+    ['derivation code — the two land seams', ['scripts/lib/disposition-land-seam.mjs', 'scripts/lib/auto-land-seam.mjs'], false, REVIEW_LABELS.pending],
+    ['THRESHOLD constant — the contract owns the numbers', ['scripts/lib/review-policy.contract.json'], true, REVIEW_LABELS.human],
+    ['PATH PATTERN / roster — who is in the chain, at what tier', ['scripts/lib/gate-config.mjs'], true, REVIEW_LABELS.human],
+    ['the invariant tripwires', ['scripts/lib/__tests__/gate-invariants.test.mjs'], true, REVIEW_LABELS.human],
+    ['the impl↔contract conformance bridge', ['scripts/lib/__tests__/review-policy.conformance.test.mjs'], true, REVIEW_LABELS.human],
+    ['the check:standards definition-of-green contract', ['scripts/check-standards.contract.json'], true, REVIEW_LABELS.human],
+    ['MIXED — derivation code AND the contract in one PR', ['scripts/lib/review-escalation.mjs', 'scripts/lib/review-policy.contract.json'], true, REVIEW_LABELS.human],
+    ['MIXED — derivation code AND the roster in one PR', ['scripts/lib/review-core.mjs', 'scripts/lib/gate-config.mjs'], true, REVIEW_LABELS.human],
+    ['a statute doc (a NEW rule, no codify shape proven)', ['docs/agent/platform-decisions.md'], true, REVIEW_LABELS.human],
+    ['the ENGINE tier — the lander (unchanged, #2445)', ['scripts/merge-ai-prs.mjs'], false, REVIEW_LABELS.pending],
+    ['the check:standards rules impl (engine tier)', ['scripts/check-standards-rules.mjs'], false, REVIEW_LABELS.pending],
+    ['an ordinary blast-radius script', ['scripts/pr-land.mjs'], false, REVIEW_LABELS.pending],
+    ['an ordinary LEAF file — no review owed at all', ['demos/spa.html'], false, null],
+    ['a backlog item (ordinary leaf)', ['backlog/2785-implement-the-narrowed-review-human-rubric.md'], false, null],
+  ];
+  for (const [what, changedFiles, humanRequired, label] of TABLE) {
+    it(`${what} ⇒ humanRequired=${humanRequired}, label=${label}`, () => {
+      const r = scoreEscalation({ changedFiles });
+      expect(r.humanRequired).toBe(humanRequired);
+      expect(producerReviewLabel(r)).toBe(label);
+    });
+  }
+
+  it('an 800-line ORDINARY PR is still not a human problem — size never routes (#2563/#2567)', () => {
+    const r = scoreEscalation({ changedFiles: ['demos/spa.html', 'src/app.ts'], diffLines: 800 });
+    expect(r.humanRequired).toBe(false);
+    expect(producerReviewLabel(r)).toBe(REVIEW_LABELS.pending);   // escalates on size, but to the committee
+    expect(r.careLevel).toBe(CARE_LEVELS.LOW);                    // …as advisory care, per #2567
+  });
+  it('a 5-line THRESHOLD change is a human problem, however small (#2771 — the spec has no small edit)', () => {
+    const r = scoreEscalation({ changedFiles: ['scripts/lib/review-policy.contract.json'], diffLines: 5 });
+    expect(r.humanRequired).toBe(true);
+    expect(producerReviewLabel(r)).toBe(REVIEW_LABELS.human);
+  });
+
+  it('the split PARTITIONS the policy tier: every gate-self path is exactly one of leash / derivation', () => {
+    for (const [, files] of TABLE) {
+      for (const f of files) {
+        if (!isGateSelfPath(f)) { expect(isDeclarativeLeashPath(f) || isPolicyDerivationPath(f)).toBe(false); continue; }
+        expect(isDeclarativeLeashPath(f) !== isPolicyDerivationPath(f)).toBe(true);
+      }
+    }
+  });
+
+  it('EVERY emitted reason string canonicalizes — the drain can never choke on a new token', () => {
+    // deriveReviewDisposition THROWS on an unrecognized reason, and the drain hands it `reasons` verbatim. So
+    // every decorated string the rubric can emit must round-trip, and land on the clearance the ruling intends.
+    const humanRows = [['scripts/lib/gate-config.mjs'], ['docs/agent/platform-decisions.md']];
+    const agentRows = [['scripts/lib/review-escalation.mjs'], ['scripts/merge-ai-prs.mjs'], ['scripts/pr-land.mjs']];
+    for (const changedFiles of [...humanRows, ...agentRows]) {
+      const { reasons } = scoreEscalation({ changedFiles, diffLines: 900, dismissedFindings: 2, crossRepo: true });
+      expect(reasons.length).toBeGreaterThan(0);
+      for (const reason of reasons) expect(() => deriveReviewDisposition({ reason })).not.toThrow();
+    }
+    // A derivation-code-only PR converges AND auto-lands (the narrowing, at the disposition layer too)…
+    expect(deriveReviewDisposition({ reasons: scoreEscalation({ changedFiles: ['scripts/lib/review-core.mjs'] }).reasons }))
+      .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: true });
+    // …while the leash converges but a human still gates the merge.
+    expect(deriveReviewDisposition({ reasons: scoreEscalation({ changedFiles: ['scripts/lib/gate-config.mjs'] }).reasons }))
+      .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
+  });
+
+  it('a legacy `gate-self` reason parked BEFORE this shipped still means human (no retroactive loosening)', () => {
+    expect(deriveReviewDisposition({ reason: 'gate-self (scripts/lib/review-core.mjs) — human review required' }))
+      .toEqual({ mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false });
+  });
+
+  it('#2771 Fork A — the STATUTE term of `humanRequired` is UNCHANGED: every statute touch still forces a human', () => {
+    // The narrowing moved ONLY the first term (whole policy tier → its declarative-leash half). The statute term
+    // is `statuteFiles.length > 0`, exactly as on main, so this row must match main's behaviour byte for byte.
+    for (const s of ['docs/agent/platform-decisions.md', 'docs/agent/2026-06-example-statute.md']) {
+      const r = scoreEscalation({ changedFiles: [s] });
+      expect(r.humanRequired).toBe(true);
+      expect(producerReviewLabel(r)).toBe(REVIEW_LABELS.human);
+      expect(r.reasons.join(' ')).toMatch(/statute \(/);
+      // …and it survives every other signal, including a derivation-code file riding along.
+      expect(scoreEscalation({ changedFiles: [s, 'scripts/lib/review-escalation.mjs'], diffLines: 900 }).humanRequired).toBe(true);
+      // …and on the cumulative human basis (#2390), where the own-delta hides it.
+      expect(scoreEscalation({ changedFiles: ['demos/spa.html'], humanBasisFiles: ['demos/spa.html', s] }).humanRequired).toBe(true);
+    }
   });
 });

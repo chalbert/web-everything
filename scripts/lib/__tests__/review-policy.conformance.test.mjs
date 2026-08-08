@@ -146,7 +146,8 @@ describe('disposition conformance — deriveReviewDisposition realizes the contr
 describe('decorated-string conformance — the drain\'s real reason strings derive the contract outcome', () => {
   // One representative decorated string per token, in the exact shape scoreEscalation emits.
   const DECORATED = {
-    [REVIEW_REASONS.GATE_SELF]: 'gate-self (scripts/lib/review-escalation.mjs) — human review required',
+    [REVIEW_REASONS.GATE_SELF]: 'gate-self (scripts/lib/gate-config.mjs) — declarative leash, human review required',
+    [REVIEW_REASONS.GATE_DERIVATION]: 'gate-derivation (scripts/lib/review-escalation.mjs) — gate derivation code, independent committee review',
     [REVIEW_REASONS.STATUTE]: 'statute (docs/agent/platform-decisions.md) — human review required',
     [REVIEW_REASONS.BLAST_RADIUS]: 'blast-radius (scripts/foo.mjs, scripts/bar.mjs)',
     [REVIEW_REASONS.SIZE]: 'size (1080 ≥ 400 changed lines)',
