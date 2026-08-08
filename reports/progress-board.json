@@ -206,11 +206,11 @@
     },
     {
       "id": "confirm-the-ruling-exists-1118-codifies-r8-into-",
-      "title": "CONFIRM THE RULING EXISTS — #1118 codifies R8 into the statute",
+      "title": "CLEAR IT — #1118 codifies R8; the ruling is confirmed real",
       "phase": 4,
       "status": "todo",
       "pr": 1118,
-      "note": "This PR states you ruled R8 on 2026-08-08 and writes it into platform-decisions.md; #2999 makes the same claim for R5. The board has BOTH still awaiting you and this session has no record of either. Do not clear until you confirm the rulings are real. The work itself is good — it measured 64,752 shell calls and found the quote-blind guard over-flags by 45%, a stronger argument than the decision card had."
+      "note": "WITHDRAWN CONCERN. I asked you to confirm this ruling; I have since found it — you ratified R8 at 19:32 on 2026-08-08 in a parallel session, answering a turn that put it as option 1 sequenced behind #1092's splitter. This PR is legitimate. It also strengthens the ruling: it measured 64,752 shell calls and found the quote-blind guard over-flags by 45% of its own hits, and it adds the constraint that a guard may only be made more eager to deny after the parser that makes 'I cannot read this' honest."
     },
     {
       "id": "blocked-not-yours-yet-1100-the-self-clear-refusa",
@@ -222,11 +222,11 @@
     },
     {
       "id": "needs-a-ruling-not-a-review-1103-fork-b",
-      "title": "NEEDS A RULING, NOT A REVIEW — #1103, Fork B",
+      "title": "CLOSE IT? — #1103 is superseded by the R5 ruling",
       "phase": 4,
       "status": "todo",
       "pr": 1103,
-      "note": "This is R5's subject, not a review queue item. Answer R5 and the PR follows: drop it and close, or rebase and give the markdown-it build one security review. I recommend dropping after five breaks."
+      "note": "R5 was ruled and it was not 'drop' — the instrument changed: a trusted generator writes the rule text and the check becomes 'does this match what the tool would write'. Filed as x2ca7wh / PR #1109. #1103 is the superseded attempt; closing it was left as your call in that session and is still open. Say the word and I will close it."
     }
   ],
   "decisions": [
@@ -367,7 +367,7 @@
     {
       "id": "fork-b-rebuild-or-drop",
       "title": "Fork B — rebuild or drop",
-      "status": "awaiting",
+      "status": "taken",
       "question": "Does the codification shortcut get one more attempt, or get dropped?",
       "ifNothing": "PR #1103 sits unreviewed and conflicting; Fork A still ships and codification PRs keep needing a human.",
       "why": "Broken FIVE times by five independent reviewers. Each round closed one class and a new one appeared, always a hand-rolled approximation of a grammar detail: a mid-rule splice, an untagged second heading, eight more heading forms, counting lines instead of headings, and a comment regex that is not the HTML comment grammar. A working attack amended the leash rule itself and cleared with auto-merge on. A sixth attempt rebuilt on the real markdown parser was then written and opened as PR #1103 — but it has NEVER been reviewed and it now conflicts with main, so the live question is whether to spend a rebase plus one more security review on it. Fork A shipped separately as #1102, so nothing is blocked by dropping this.",
@@ -388,7 +388,9 @@
         "five breaks, five reviewers; each fix closed one class and opened another",
         "the sixth attempt EXISTS as PR #1103 (markdown-it) — zero review comments, mergeable=CONFLICTING as of 2026-08-08"
       ],
-      "ruling": "R5"
+      "ruling": "R5",
+      "detail": "RULED 2026-08-08 in a parallel session, and NOT as 'drop'. The instrument changed instead: rather than recognising a safe codification after it is written, a trusted generator WRITES the rule text and the check becomes 'does this match what the tool would write'. Half that generator exists already (it fills the bookkeeping fields); the missing half writes the prose, and the shortcut is dormant until it ships. Filed as x2ca7wh, PR #1109. PR #1103 is superseded and closing it was left as the operator's call — still open.",
+      "takenAt": "2026-08-08"
     },
     {
       "id": "todo-mode-for-unimplemented-contract-entries",
@@ -428,7 +430,7 @@
     {
       "id": "the-command-guard-how-should-it-handle-text-the-",
       "title": "The command guard: how should it handle text the shell re-executes?",
-      "status": "awaiting",
+      "status": "taken",
       "question": "Six rounds have tried to enumerate every way a command hands a hidden script to the shell. Should the guard keep enumerating, refuse what it cannot resolve, or stop at the holes it has already closed?",
       "ifNothing": "#1092 cannot land, and base keeps the confirmed write hole where a quoted pipe lets a redirect through to the shared checkout.",
       "ruling": "R8",
@@ -452,7 +454,9 @@
         "145 everyday commands swept, zero newly denied — precision is not the problem",
         "9/9 prior holes closed, 13/13 intended fixes hold, 33/33 attack spellings deny",
         "a FIFTH everyday false-deny class, hit live in ordinary work 2026-08-08: `grep -cE \"a|=>\" <file>` is refused at the primary cwd as a shell redirect. There is no redirect — a quoted alternation defeats the splitter. Controls pass: the bare arrow is fine, the quoted text is fine. The 145-command sweep never covered quoted alternations."
-      ]
+      ],
+      "detail": "RULED 2026-08-08 19:32 — 'ratified', in a parallel session, answering a turn that put it as: take option 1 (refuse what the guard cannot resolve), SEQUENCED BEHIND #1092's quote-aware splitter rather than instead of it. The sequencing is the substance: today's resolver is quote-blind and over-flags by 45% of its own hits (1,093 vs 596 over 64,752 calls), so flipping the default to deny on top of that parser makes things worse before better. Land #1092's splitter, then flip. Codified by PR #1118, built as #3002. My board carried this as open because it was rebuilt from a summary that predated the ruling — the ruling was real.",
+      "takenAt": "2026-08-08"
     }
   ]
 }
