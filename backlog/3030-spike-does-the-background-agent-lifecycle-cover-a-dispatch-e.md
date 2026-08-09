@@ -1,7 +1,8 @@
 ---
+bornAs: xm881ll
 kind: story
 size: 2
-parent: "xgm2t3f"
+parent: "3029"
 status: open
 dateOpened: "2026-08-08"
 scope:
@@ -14,7 +15,7 @@ tags: [plateau-loop, delivery, operations, spike, dispatch]
 
 Two-point spike, **no production code**. Establish whether the command-line tool's background-agent lifecycle
 (`--bg`, `claude agents`) already owns start / observe / stop for a long-running lane build. Its answer decides
-whether [#xynt0jj] needs a fifth step kind, a thin wrapper, or nothing at all.
+whether [#3037] needs a fifth step kind, a thin wrapper, or nothing at all.
 
 ## Why this is worth two points before the epic commits
 
@@ -48,6 +49,6 @@ not a task:
 ## Acceptance
 
 A short report in `we:reports/` recording which of the three answers holds, with the commands run and their real
-output pasted in — not a summary. It names the shape [#xynt0jj] should be built to, and the epic
-[#xgm2t3f] updates its slice-8 framing to match. If answer 3, it also states plainly what the missing kind would
+output pasted in — not a summary. It names the shape [#3037] should be built to, and the epic
+[#3029] updates its slice-8 framing to match. If answer 3, it also states plainly what the missing kind would
 have to be, so the decision to extend the vocabulary is made deliberately and in the open.

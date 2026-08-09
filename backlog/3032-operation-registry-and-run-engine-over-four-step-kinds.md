@@ -1,7 +1,8 @@
 ---
+bornAs: xzbzc7n
 kind: story
 size: 5
-parent: "xgm2t3f"
+parent: "3029"
 status: open
 dateOpened: "2026-08-08"
 scope:
@@ -12,8 +13,8 @@ tags: [plateau-loop, delivery, operations, engine]
 
 # Operation registry and run engine over four step kinds
 
-The foundation everything else in [#xgm2t3f] sits on: a registry of declared operations, and an engine that
-advances one run through its steps. Nothing is declared onto it in this slice — that is [#xqpw23c] — so this lands
+The foundation everything else in [#3029] sits on: a registry of declared operations, and an engine that
+advances one run through its steps. Nothing is declared onto it in this slice — that is [#3035] — so this lands
 with the engine plus its unit tests and no caller yet.
 
 ## Build
@@ -21,7 +22,7 @@ with the engine plus its unit tests and no caller yet.
 - **A declaration shape.** `op(name, { input, ...steps })` — an input schema and an ordered set of named steps,
   each of exactly one kind.
 - **Four step kinds, and no fifth.** `compute` (a pure function plus its declared reads), `judge` (returns a
-  mandate + input + shape for the helper in [#xdh8sim] to run), `confirm` (suspends the run and records what is
+  mandate + input + shape for the helper in [#3028] to run), `confirm` (suspends the run and records what is
   being asked and of whom), `effect` (returns a list of declared effects; performs none of them).
 - **The run record.** `{ id, op, input, cursor, findings, verdict, effects }`, persisted as a local file **behind
   a store module** — a pure core plus a thin io shell, the same discipline `we:scripts/conveyor/queue-store.mjs`

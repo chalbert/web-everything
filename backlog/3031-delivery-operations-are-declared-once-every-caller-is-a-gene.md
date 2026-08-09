@@ -1,4 +1,5 @@
 ---
+bornAs: xu5gfu4
 kind: decision
 status: resolved
 scaffoldedBy: "operation-engine"
@@ -66,7 +67,7 @@ implementation. Rejected on merit:
 
 ## Build
 
-Epic [#xgm2t3f] carries it, under program [#2606](/backlog/2606-delivery-throughput-latency-program/). Conversion
+Epic [#3029] carries it, under program [#2606](/backlog/2606-delivery-throughput-latency-program/). Conversion
 runs smallest-and-strangest first so the four-kind vocabulary is falsified early if it is wrong; the one genuine
 unknown — an effect that *starts* a long-running agent rather than completing — is gated behind a two-point spike.
 

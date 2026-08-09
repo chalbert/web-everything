@@ -3062,7 +3062,7 @@ a headless runner, singleton-locked, no per-lane LLM) and the main-session retir
 
 ### Delivery operations are declared once; every caller is a generated adapter {#operations-declared-once-callers-generated}
 
-**Ratified 2026-08-08 (operator, in session; #xu5gfu4).** The [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment)
+**Ratified 2026-08-08 (operator, in session; #3031).** The [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment)
 one-source clause, carried one step further: it already forbids a second *implementation*, and this forbids a
 second *wiring*. A delivery-loop operation — review a PR, claim an item, ratify a decision, dispatch a lane — is
 **declared once** (input schema + ordered steps + guards), and every caller is **generated** from that
@@ -3097,8 +3097,8 @@ command"* instruction and the [#2964](/backlog/2964-post-the-review-verdict-comm
 write-ordering rule; a run started on one surface can be finished on another, because the run record — not the
 caller — holds the state.
 
-**Lineage:** #xu5gfu4 (ratified in-session 2026-08-08; report
-`we:reports/2026-08-08-operation-engine-one-declaration-every-caller.md`; epic #xgm2t3f under program #2606).
+**Lineage:** #3031 (ratified in-session 2026-08-08; report
+`we:reports/2026-08-08-operation-engine-one-declaration-every-caller.md`; epic #3029 under program #2606).
 **Reconciled by citation, not competition:** this *applies* #deterministic-core-thin-judgment to the caller-wiring
 turf that statute does not reach, and composes with [#agent-runner-cli-backend](#agent-runner-cli-backend) (the
 backend a judge step spawns), [#conveyor-orchestration-mechanics-not-per-lane-agent](#conveyor-orchestration-mechanics-not-per-lane-agent)

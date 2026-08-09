@@ -1,7 +1,8 @@
 ---
+bornAs: xdh8sim
 kind: story
 size: 3
-parent: "xgm2t3f"
+parent: "3029"
 status: open
 dateOpened: "2026-08-08"
 scope:
@@ -43,7 +44,7 @@ and cheap, and what it protects is rate-limit headroom, which is the scarce reso
   **in a shared tree** ([we:skills-src/review/SKILL.md](../skills-src/review/SKILL.md), citing #2336) stops being
   prose the model has to recall and becomes something it cannot do. Note it is *stronger* than the mandate: the
   mandate permits a throwaway clone, and a tool-free juror cannot make one — that escalation path is deliberately
-  out of the judge contract (see [#xqpw23c]).
+  out of the judge contract (see [#3035]).
 - **The shape is enforced by the tool, not approximated.** `--json-schema` is implemented as a forced tool call
   (`stop_reason: tool_use`), so there is no prose to parse, no fences to strip, and no ask-and-validate loop to
   build. Retries are for genuine failures only.

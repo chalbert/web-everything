@@ -1,9 +1,10 @@
 ---
+bornAs: x1y4g3j
 kind: story
 size: 3
-parent: "xgm2t3f"
+parent: "3029"
 status: open
-blockedBy: ["xzbzc7n"]
+blockedBy: ["3032"]
 dateOpened: "2026-08-08"
 scope:
   - we:scripts/operations/
@@ -19,7 +20,7 @@ request, rather than calling the forge API on an existing one.
 
 ## What it probes
 
-The `record` step of [#xqpw23c] emits comment / label / ledger / event — all forge calls. If the effect executor
+The `record` step of [#3035] emits comment / label / ledger / event — all forge calls. If the effect executor
 has quietly grown up assuming that shape, this is where it shows. **An effect whose application is "open a PR and
 wait" must fit the same executor, keyed the same way, or the abstraction is thinner than it looks.**
 

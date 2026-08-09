@@ -1,9 +1,10 @@
 ---
+bornAs: xynt0jj
 kind: story
 size: 5
-parent: "xgm2t3f"
+parent: "3029"
 status: open
-blockedBy: ["xzbzc7n", "xm881ll"]
+blockedBy: ["3032", "3030"]
 dateOpened: "2026-08-08"
 scope:
   - we:scripts/operations/
@@ -22,7 +23,7 @@ Every other declared operation's effects are applied and done; this one hands of
 
 ## Gated on the spike
 
-`blockedBy` [#xm881ll] deliberately. That two-point spike establishes whether the command-line background-agent
+`blockedBy` [#3030] deliberately. That two-point spike establishes whether the command-line background-agent
 lifecycle already owns start / observe / stop, and its answer changes what gets built here:
 
 - **Lifecycle covers it** → the effect is "start a background agent, record the handle", the run completes

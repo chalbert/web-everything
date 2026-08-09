@@ -1,9 +1,10 @@
 ---
+bornAs: xtfu40d
 kind: story
 size: 3
-parent: "xgm2t3f"
+parent: "3029"
 status: open
-blockedBy: ["xzbzc7n", "xqpw23c"]
+blockedBy: ["3032", "3035"]
 dateOpened: "2026-08-08"
 scope:
   - we:scripts/operations/

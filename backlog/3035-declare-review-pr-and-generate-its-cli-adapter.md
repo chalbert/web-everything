@@ -1,9 +1,10 @@
 ---
+bornAs: xqpw23c
 kind: story
 size: 5
-parent: "xgm2t3f"
+parent: "3029"
 status: open
-blockedBy: ["xzbzc7n", "xdh8sim"]
+blockedBy: ["3032", "3028"]
 dateOpened: "2026-08-08"
 scope:
   - we:scripts/operations/
@@ -23,7 +24,7 @@ generates the command-line caller. **The existing scripts stay as the implementa
 | Step | Kind | Implementation |
 |---|---|---|
 | `read` | compute | `we:scripts/review-detail.mjs` for the park context, plus `computeNetDiffText`/`computeNetDiffPaths` from `we:scripts/merge-ai-prs.mjs` for the net-basis diff |
-| `judge` | judge | the [#xdh8sim] helper, seeded with `buildPanelMandate` per lens |
+| `judge` | judge | the [#3028] helper, seeded with `buildPanelMandate` per lens |
 | `reduce` | compute | `deriveVerdict` from `we:scripts/lib/review-core.mjs`, `humanRequired` from the labels |
 | `confirm` | confirm | actor is `human` when the PR carries the gate-self label, `agent` otherwise |
 | `record` | effect | a comment, a label swap via `decideSetLabel`, a ledger append, an event |
@@ -47,6 +48,6 @@ cannot reach `accepted`, and a replayed `record` step produces no duplicate comm
 
 ## Not in scope
 
-The HTTP adapter ([#xtfu40d]). The escalation path where a reviewer needs to reproduce something in a throwaway
+The HTTP adapter ([#3036]). The escalation path where a reviewer needs to reproduce something in a throwaway
 clone — genuinely tool-shaped, deliberately left out of the tool-free judge contract, and filed separately when
 it is actually wanted.

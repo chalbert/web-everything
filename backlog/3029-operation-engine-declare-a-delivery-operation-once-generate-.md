@@ -1,4 +1,5 @@
 ---
+bornAs: xgm2t3f
 kind: epic
 parent: "2606"
 status: open
@@ -9,7 +10,7 @@ tags: [plateau-loop, delivery, operations, engine, epic]
 
 # Operation engine — declare a delivery operation once, generate every caller
 
-The engine the [#xu5gfu4] ruling needs: a registry of declared operations, a run engine over four step kinds
+The engine the [#3031] ruling needs: a registry of declared operations, a run engine over four step kinds
 (`compute`, `judge`, `confirm`, `effect`), a durable run record, and **generated** command-line / HTTP / typed-tool
 adapters. Then it converts the delivery-loop operations onto it — smallest-and-strangest first, so the vocabulary
 is falsified early if it is wrong.
@@ -63,14 +64,14 @@ vocabulary does not fit it.
 
 Ordered to **falsify early**, since every operation converts eventually and the ordering is therefore free:
 
-1. [#xzbzc7n] — registry + run engine (foundation; blocks the rest)
-2. [#xdh8sim] — judge helper, the tool-free juror spawn
-3. [#xm881ll] — **spike**: does the background-agent lifecycle already cover a dispatch effect?
-4. [#xqpw23c] — declare `review-pr` + generate its command-line adapter
-5. [#xtfu40d] — generate the HTTP adapter, wire the console review route (**cross-locus**)
-6. [#x65hozr] — declare `claim` — the is-the-engine-too-heavy test
-7. [#x1y4g3j] — declare `ratify` — the do-effects-generalise test
-8. [#xynt0jj] — declare `dispatch` — the effect that starts rather than completes
+1. [#3032] — registry + run engine (foundation; blocks the rest)
+2. [#3028] — judge helper, the tool-free juror spawn
+3. [#3030] — **spike**: does the background-agent lifecycle already cover a dispatch effect?
+4. [#3035] — declare `review-pr` + generate its command-line adapter
+5. [#3036] — generate the HTTP adapter, wire the console review route (**cross-locus**)
+6. [#3034] — declare `claim` — the is-the-engine-too-heavy test
+7. [#3033] — declare `ratify` — the do-effects-generalise test
+8. [#3037] — declare `dispatch` — the effect that starts rather than completes
 
 **Run the spike first in practice**, whatever its slice number: two points, and it is the only item that can
 invalidate the vocabulary the other seven are built on.
