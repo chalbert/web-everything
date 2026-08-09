@@ -1,4 +1,5 @@
 ---
+bornAs: xonzpym
 kind: story
 size: 2
 status: resolved
@@ -49,11 +50,11 @@ The pin becomes todo-aware in three parts, replacing containment-only:
 
 ## Follow-ups filed out of this item
 
-- **`#x4438kf`** — `todoMarker.appliesTo` is enforced only in the POSITIVE direction (a `todo` on `reasons`
+- **`#3025`** — `todoMarker.appliesTo` is enforced only in the POSITIVE direction (a `todo` on `reasons`
   requires `appliesTo` to name `"reasons"`). Nothing refuses a `todo` sitting on a section `appliesTo` does *not*
   name; it loads silently and means nothing. Inert today (only `partitionReasons` reads the marker, and it walks
   `reasons` alone), so it is a spec-correctness gap rather than a safety gap — and closing it means touching the
   loader's refusal surface, which this item pinned with 35 load-time fixtures.
-- **`#x8918rc`** — filed out of round 4 of this item's review: a provenance lint for a bare backticked
-  identifier in prose, closing the class of false citation that round 4 found in `#x4438kf` itself (the "35
+- **`#3026`** — filed out of round 4 of this item's review: a provenance lint for a bare backticked
+  identifier in prose, closing the class of false citation that round 4 found in `#3025` itself (the "35
   load-time fixtures" miscount and `validateTodoMarkerBlock`, a symbol that never existed).

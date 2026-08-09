@@ -1,4 +1,5 @@
 ---
+bornAs: x4438kf
 kind: task
 status: open
 dateOpened: "2026-08-08"
@@ -8,7 +9,7 @@ tags: [review-policy, conformance, spec-based-programming]
 
 # todoMarker.appliesTo is enforced in BOTH directions — a todo on a section it does not name is refused at load
 
-The review-policy contract's `todoMarker.appliesTo` block (added by `#xonzpym`) declares, as data, which contract
+The review-policy contract's `todoMarker.appliesTo` block (added by `#3027`) declares, as data, which contract
 sections the not-yet-implemented marker is legal on — today exactly `["reasons"]`. The loader enforces only the
 POSITIVE direction: if a *reason* carries `todo`, `appliesTo` must include `"reasons"`. Nothing checks the
 negative direction, so a `todo` marker sitting on `thresholds`, `disposition.precedence`, or a `careJury` band
@@ -35,9 +36,9 @@ A marker outside `reasons` is **inert**: `partitionReasons` is the only thing th
 over `REVIEW_POLICY.reasons` alone. A `todo` on a threshold changes no derived constant, reaches no runtime
 classification, and cannot flip a disposition. So nothing mis-gates today. What it does do is let the contract —
 a `leash: spec`, human-gated file — carry a declaration that reads as meaningful and is not, which is exactly the
-class of thing `#xonzpym` exists to abolish: a debt declared in prose with no mechanism behind it.
+class of thing `#3027` exists to abolish: a debt declared in prose with no mechanism behind it.
 
-The rank is also why this is a follow-up rather than part of `#xonzpym`: closing it means touching the loader's
+The rank is also why this is a follow-up rather than part of `#3027`: closing it means touching the loader's
 refusal surface, which that PR pinned with 15 load-time `validateContract` assertions (12 refusals, 3 accepts) in
 the conformance suite's todo-marker block.
 
@@ -52,5 +53,5 @@ the conformance suite's todo-marker block.
 
 ## Provenance
 
-Surfaced as non-blocking observation #1 in the round-1 independent review of PR #1112 (`#xonzpym`), re-raised in
+Surfaced as non-blocking observation #1 in the round-1 independent review of PR #1112 (`#3027`), re-raised in
 round 2 when the promised follow-up could not be found on the board. Filed in round 3.

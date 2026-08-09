@@ -1,4 +1,5 @@
 ---
+bornAs: x8918rc
 kind: story
 size: 3
 parent: "2527"
@@ -13,14 +14,14 @@ Seven false symbol/function citations across four review rounds of PR #1112 shar
 
 ## The failure this closes
 
-PR #1112 (`#xonzpym`) bounced four times. Each round the technical substance held up under an independent
+PR #1112 (`#3027`) bounced four times. Each round the technical substance held up under an independent
 re-measurement, and each round the reviewer found at least one **citation that had never been grepped**:
 
 | round | the cite | reality |
 |---|---|---|
 | 2 | `collectOpenItemIds` — named as the existing helper the suite reuses | no such symbol, at head or at the merge base |
 | 3 | four further cites corrected at once (an item's ratified status, a sibling item's subject, a claimed prior shape, a claimed count) | each written from memory |
-| 3 | `validateTodoMarkerBlock` — in `#x4438kf`, the item filed to *remedy* round 2's honesty finding | the function is `validateTodoMarker`; the walk described is inline in `validateContract` |
+| 3 | `validateTodoMarkerBlock` — in `#3025`, the item filed to *remedy* round 2's honesty finding | the function is `validateTodoMarker`; the walk described is inline in `validateContract` |
 | 4 | `35 load-time fixtures` in the same item | measured: 15 assertions (12 refusals, 3 accepts) |
 
 The reviewer's read, which the author accepts: it is **not** fabricated cover — the substance behind each has
@@ -86,7 +87,7 @@ item, not by a script.
 
 ## Known gaps
 
-Found by the round-4 review of `#xonzpym` (PR #1112), which asked that these be carried honestly rather than
+Found by the round-4 review of `#3027` (PR #1112), which asked that these be carried honestly rather than
 silently widened past what was actually measured:
 
 - **The `leash: spec` JSDoc surface is unmeasured.** The corpus-wide and diff-scoped numbers above (11,381
@@ -119,7 +120,7 @@ silently widened past what was actually measured:
 
 ## Provenance
 
-Filed out of round 4 of the independent review of PR #1112 (`#xonzpym`), which asked for a durable fix rather
+Filed out of round 4 of the independent review of PR #1112 (`#3027`), which asked for a durable fix rather
 than a fifth round of per-case corrections. Sibling of `#2821` under the same epic; extends the same
 "a reference asserted without resolving it against the source it points at" root class to the one citation
 form the shipped subset does not reach. The judgment half of the same finding is recorded in agent memory as
