@@ -762,8 +762,11 @@ function runCli() {
     // #2844 — the same backfill carries the AUTHOR stamp, for the same reason: a PR this producer re-runs
     // against must not stay unstamped, or the autonomous seam refuses to ever auto-clear it. `withAuthorStamp`
     // is idempotent and never overwrites a stamp already present, so a re-run by a DIFFERENT session cannot
-    // quietly re-attribute authorship to itself — the first stamp wins, which is also what `parseAuthorActorId`
-    // enforces on the read side.
+    // quietly re-attribute authorship to itself — the stamp already on the body is left alone. Note this is a
+    // WRITE-side property only: the reader (`parseAuthorActorId`) is AGREEMENT-OR-NOTHING, NOT first-match — a
+    // body that somehow ends up carrying two conflicting stamps resolves to '' (`unknown-author`), because
+    // position in a body carries no temporal meaning. So the two halves agree on the outcome (the re-runner
+    // never becomes the recorded author) by different means, and neither one "picks the first stamp".
     try {
       const liveBody = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'body'])).body || '';
       const updated = composePrBody(liveBody);
