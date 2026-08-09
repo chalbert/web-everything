@@ -87,9 +87,8 @@ seventh round of enumeration leaves the fail-open behaviour intact.
 
 Some everyday shell-rc idioms will be denied at the primary cwd that are allowed today. **Re-run the
 false-deny sweep to size this before landing — do not inherit a number.** The headroom this change spends
-comes from the sweep #2986 / #2994 landed with (145 everyday commands, zero newly denied; 9/9 prior holes
-closed; 13/13 intended fixes hold; 33/33 attack spellings deny). Those figures describe the tree *before*
-the flip; they are the baseline to re-measure against, not evidence about the tree after it.
+comes from the sweep #2986 / #2994 landed with (zero newly denied). That describes the tree *before*
+the flip; it is the baseline to re-measure against, not evidence about the tree after it.
 
 Known false-deny classes, each **re-checked against `main` on 2026-08-08** by calling `decide()` with
 `{ primaryCwd: true }`:
@@ -99,7 +98,7 @@ Known false-deny classes, each **re-checked against `main` on 2026-08-08** by ca
 - **An fd-dup read as a write.** `node we:scripts/lane-pool.mjs status --json 2>&1 | …` was denied at primary
   cwd; `2>&1` duplicates a descriptor and writes no file. **Now clears.**
 - **A JavaScript arrow in a quoted argument.** `node -e "…d => s += d…"` was denied as a redirect; the
-  trigger is `=>`, not `>`. **Now clears** — this is the command the sequencing criterion below asserts on.
+  trigger is `=>`, not `>`. **Now clears** — the quote-aware split fixed it.
 - **`sed -n` read as an in-place edit.** `sed -n '30,90p' backlog/<item>.md` is **still denied** by the
   backlog-append arm. `sed -n` prints; only `sed -i` edits. Open, and the one class of the four this sweep
   still has to carry.
@@ -163,8 +162,10 @@ the everyday-idiom friction is real but small.
   top of a quote-blind resolver — see *Sequencing* above. **This precondition is satisfied:** the
   quote-aware splitter is on `main` (#2986 / #2994, both resolved), so the criterion no longer blocks the
   build. It stays an acceptance criterion because it must be **re-asserted, not assumed**: a command whose
-  only re-execution token sits inside a quoted string (`node -e "… d => s += d …"`) must still **clear**,
-  before and after the flip. Confirmed clearing against `main` on 2026-08-08.
+  only re-execution token sits inside a quoted string (`grep -n "bash -c 'npm run build'" we:scripts/guard-bash.mjs`)
+  must still **clear**, and the paired unquoted control (`bash -c 'npm run build'`) must still **DENY** —
+  before and after the flip, so the check has a negative half and cannot pass on a guard that denies nothing.
+  Confirmed both against `main` on 2026-08-08.
 - The false-deny sweep is re-run over the 145-command corpus and the newly-denied set is reported, not
   merely counted.
 - **The measuring script is committed with its token list**, so every sizing figure this item or the statute
@@ -175,7 +176,7 @@ the everyday-idiom friction is real but small.
   or from the fix's own implementation. This is the round-6 lesson and it is the acceptance criterion most
   likely to be skipped.
 
-## Standing
+## Dependencies
 
 **Nothing blocks this build.** The write hole it was once queued behind — a quoted pipe letting a redirect
 through to the shared checkout — is closed: #2986 / #2994 landed the quote-aware splitter that closes it, and
