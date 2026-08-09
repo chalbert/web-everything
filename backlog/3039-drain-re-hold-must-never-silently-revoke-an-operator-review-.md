@@ -1,4 +1,5 @@
 ---
+bornAs: xmnl36p
 kind: story
 size: 3
 status: open
@@ -30,14 +31,14 @@ Verified label + commit timeline from `gh api repos/chalbert/web-everything/issu
 00:41:28Z  labeled review:human            <- the clearance revoked, NO comment
 ```
 
-`review:accepted` survived — that is the `#x9xqexm` fix (PR #1119) holding. The residual failure is
+`review:accepted` survived — that is the `#3023` fix (PR #1119) holding. The residual failure is
 the *re-imposition* of the hold on top of it.
 
 ## Root cause
 
 1. The drain's own rebase-drop pass moved the head past the reviewed commit.
 2. `acceptanceCoversHead` (`we:scripts/lib/review-escalation.mjs#acceptanceCoversHead`) declared the
-   acceptance stale. The `#x9xqexm` contribution escape did not save it: the ONLY difference between
+   acceptance stale. The `#3023` contribution escape did not save it: the ONLY difference between
    the accept-time and post-rebase 137 KB net diffs is two inter-hunk GAP values
    (`~424 → ~439`, `~324 → ~328`) — `main` grew *between* the lane's own hunks. Not one `+`/`-`
    line, hunk length, section heading or file differs. (Re-verified in the PR #1124 review by
@@ -45,8 +46,8 @@ the *re-imposition* of the hold on top of it.
    contribution reproduces the stamped `b5d1eafe…` marker exactly, and precisely two projection
    lines differ — the two above.)
 
-   **This is NOT the residual filed as `#x413mbt`, and the first cut of this item mis-cited it.**
-   [#3021](/backlog/3021-the-contribution-fingerprint-still-collides-on-an-intra-sect/) (`x413mbt`)
+   **This is NOT the residual filed as `#3021`, and the first cut of this item mis-cited it.**
+   [#3021](/backlog/3021-the-contribution-fingerprint-still-collides-on-an-intra-sect/) (`3021`)
    tracks the digest COLLIDING — two genuinely different contributions hashing alike, a false
    *honour*, which is why it notes the gap signal is *preserved* under a uniform shift. The inverse
    fired here:
