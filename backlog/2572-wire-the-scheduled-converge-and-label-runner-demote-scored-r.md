@@ -7,8 +7,12 @@ scope:
   - we:scripts/review-runner.mjs
   - we:scripts/lib/review-runner-core.mjs
   - we:scripts/lib/gate-config.mjs
+  - we:scripts/converge-daemon-pass.mjs
+  - we:scripts/converge-daemon-install.mjs
+  - we:scripts/__tests__/converge-daemon.test.mjs
   - we:scripts/__tests__/review-runner.test.mjs
   - we:scripts/lib/__tests__/review-runner-core.test.mjs
+  - we:package.json
 scopeRationale: >-
   Narrowed 2026-08-04 when part 2 was struck. The routing files
   (we:scripts/lib/review-escalation.mjs, we:scripts/merge-ai-prs.mjs, we:scripts/pr-land.mjs
@@ -16,12 +20,15 @@ scopeRationale: >-
   here let an unblocked parent license the work its own body says not to do. What remains is
   the scheduling substrate plus the "shadow runner" → converge daemon rename, which touches
   the two runner files, the gate-config trust-chain registration that names them, and their
-  tests.
+  tests. Widened 2026-08-08 by ruling R7 for the substrate's own two files (the pass + the
+  launchd installer), their test, and the two npm aliases — the ruling says the daemon is
+  scheduled locally from a dedicated clone, and nothing in the pre-existing scope could hold
+  a plist renderer. Still deliberately excludes every routing file.
 dateOpened: "2026-07-19"
 dateStarted: "2026-08-04"
-costTokens: "in:194 cw:159973 cr:11664592 out:74205"
-costUsd: 9.29
-costSessions: 1
+costTokens: "in:230 cw:232386 cr:12732292 out:83017"
+costUsd: 10.77
+costSessions: 2
 tags: []
 ---
 
@@ -114,15 +121,54 @@ prevent. This is the one claim the 2026-08-04 skeptic attacked and conceded.
 Real order: **schedule the runner → soak in shadow → #2864 + #2893 land → flip to `enforce`.** The scheduling
 substrate is the only thing under this epic that is buildable now.
 
-## Still open — the scheduling substrate (this epic's remaining fork)
+## Ruling R7 — the substrate is a launchd job from a dedicated clone (operator, 2026-08-08)
 
-There is no ratified call on **where** the converge daemon is scheduled, and no wiring exists today: grep finds no
-`.github/workflows/*` reference, no `we:package.json` script, and no `we:scripts/conveyor/` caller — it is
-hand-run only. Candidates: local `launchd` spawning headless `claude` (matches
-[#agent-runner-cli-backend](../docs/agent/platform-decisions.md#agent-runner-cli-backend)'s
-subscription-funded CLI backend, but only runs while the Mac is awake); a Claude cloud routine; or a phase in the
-conveyor tick, which already spawns agents under a singleton lock. Take this fork next — with part 2 struck it is
-all that stands between here and a daemon that can start earning its shadow track record.
+**The call.** The converge daemon is scheduled as a **launchd job on the operator's Mac**, sibling to the resident
+drain daemon (`com.plateau.drain-daemon`), running from its **own dedicated single-lane clone** — the #2501
+Fork A(a) pattern applied to this daemon. Shipped here as `we:scripts/converge-daemon-pass.mjs` (one pass) plus
+`we:scripts/converge-daemon-install.mjs` (the schedule), both registered `engine` tier in the trust chain.
+
+**Why local, and what the reason is NOT.** The binding constraint is **auth**, not the ledger: the enforce-era pass
+spawns the `claude` CLI on the operator's *subscription*, and #2444
+([#agent-runner-cli-backend](../docs/agent/platform-decisions.md#agent-runner-cli-backend)) settled that
+SDK-on-subscription is broken rather than merely worse — so the daemon runs where that credential lives. A Claude
+cloud routine also fails *today* on the ledger (below), but that failure is contingent and fixable; the auth one is
+not. The conveyor-tick option was closed on a different ground: `we:skills-src/conveyor/runner.mjs` is deliberately
+no-LLM and *surfaces* decisions for a judgment layer that is a live main session, so scheduling there would tie an
+unattended daemon to the operator having a session open — the exact dependency the daemon exists to remove.
+
+**Explicitly an interim, and priced as one.** This is a single-node pet deployment: `RunAtLoad` + `StartInterval` is
+a systemd unit on one box, and pull-on-the-server (`fetch` + `reset --hard`) is the deploy method web practice left
+behind for immutable artifacts. Accepted knowingly — the substrate is two small files so that replacing it later is
+cheap, not so that it is permanent. Accepted cost: **it only runs while the Mac is awake**, and the daemon's clone
+can sit at a different commit than what was tested until its next refresh.
+
+**A periodic one-shot, NOT a resident daemon.** The shadow pass is a CLI that exits and already holds a TTL
+singleton lease, so overlapping fires no-op and `StartInterval` (900 s) *is* the whole daemon. The drain daemon's
+resident `KeepAlive` shape (#2501 Fork B) only earns its keep at the **enforce** flip, when a pass spawns a panel
+and an editor subagent and needs to survive across them. Building it now would be paying for a phase we have not
+reached.
+
+**The ledger is the one non-obvious wire, and it is the migration seam.** `runShadowPass` folds the durable jury log,
+which lives in a **working tree** at `<root>/.conveyor/jury/` and is gitignored ([`we:.gitignore`](../.gitignore)) —
+so the daemon's dedicated clone has its own **empty** one, every PR folds fail-closed to keep-parked, and a soak
+would record a wall of "keep parked" that looks healthy and means nothing. The pass therefore sets
+`CONVEYOR_JURY_DIR` ([`we:scripts/lib/jury-ledger.mjs:70`](../scripts/lib/jury-ledger.mjs)) to the **primary**
+checkout's ledger and reads it read-only. That env var is the whole reason the daemon is host-bound on the state
+axis, so **promoting the ledger to a shared store is the one change that would let any host run the shadow half** —
+including a scheduled CI job, since shadow spends no model context at all. **Filed as #xmhw1m5**; not done here.
+
+**Safety rails that ride the ruling.** A pass refreshes its clone with `reset --hard`, so both the pass and the
+installer **refuse to run against the operator's primary checkout** (the forced invariant that closed #2501 Fork
+A(b)); the wrapper never constructs `--enforce` (the runner's refusal is the backstop, this is defence in depth);
+the shadow log lives at `$HOME/.converge-daemon/shadow.jsonl`, **outside** the clone, so `git clean -fdq` cannot eat
+the soak record; and a pass that could not run (lease held, `gh` down) is *recorded* rather than dropped, because a
+gap the enforce-flip readiness predicate cannot see is a gap it cannot account for.
+
+**Not done under this ruling:** installing the job (an operator step — `npm run converge:daemon install`, after
+`node we:scripts/lane-pool.mjs provision --repo=<WE checkout> --name=we-converge-daemon --count=1`), and the
+"shadow runner" → converge
+daemon **rename**, which is the epic's remaining piece.
 
 ## The enforce flip is BLOCKED by #2864 — now in the DAG, not just in prose
 
