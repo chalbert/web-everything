@@ -88,6 +88,48 @@ sanctioned one-off escape, mirroring `MAIN_PUSH_OK` / `LANE_GUARD_OFF`. The un-s
 [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (#2607): enforced by absence (#2677) and
 a **warn** nudge, never a hard gate on an uncomputable predicate.
 
+### At the primary checkout, nested shell re-execution the guard cannot resolve is DENIED — and the deny-flip ships behind a quote-aware resolver, never before it {#guard-unresolvable-reexecution-denies}
+
+**Stop enumerating the ways a command re-enters the shell; refuse the ones you cannot read.** The rule: at the
+primary checkout, `guard-bash.mjs` must **deny** a command containing shell re-execution it cannot **fully**
+resolve. A bounded scanner has exactly three ways to stop short of an answer — it exhausts its **recursion
+depth bound**, it exhausts its **expansion-count bound**, or it meets **nested text its parser cannot
+represent** — and under this rule all three are *unresolvable*, which is a deny, never a pass. Stopping early
+is not the same as looking and finding nothing. Built as **#3002**; the concrete bound values and the
+per-case tests live there, not here, because a bound is an implementation constant and this rule is not.
+The posture — a component that cannot read its input refuses rather than waving it through — is the one
+`we:scripts/lib/lane-verify.mjs` already takes with a corrupt verification marker.
+
+Ruled 2026-08-08 after **six** review rounds, each of which closed one class of hole and uncovered another;
+the sixth reviewer found the structural reason — the fuzz generator's wrapper list *was* the list of classes
+the previous fix had implemented, so three million generated pairs could only re-prove what was already
+handled. **An enumeration cannot be completed from inside the thing being enumerated:** a deny-list over shell
+is unbounded, so the unknown case must fall closed.
+
+**The ordering is part of the rule, not an implementation detail.** "Refuse what it cannot resolve" says
+nothing about *who decides it cannot be resolved*, and that — not how often real re-execution happens — sets
+the cost. Over the local session corpus a **quote-blind** scan flags substantially more calls for
+re-execution or redirection than a **quote-aware** one does, and the excess is ordinary text misread — a
+JavaScript `=>` or a `>` inside a quoted argument taken for a redirect, an fd-dup `2>&1` taken for a write,
+a heredoc body taken for commands. *No over-flag percentage is carried here:* the ratio moves with the
+token list used and no committed script reproduces it — see #3002 for the measured range and its
+provenance. The **direction** is what this rule rests on, and it is not in doubt. So the deny-flip lands
+**only behind** the quote-aware segment splitter (#2986 / #2994), never in front of it — tightening the
+default on a parser that misreads ordinary text amplifies the false-deny problem instead of fixing the
+security one.
+**A guard may only be made more eager to deny in the same change as, or after, the parser that
+makes its "I can't read this" honest.** After any such flip, **re-run the false-deny sweep** rather than
+inheriting the prior estimate.
+
+**The precondition is a capability, not a schedule — and never a pull request's state.** The flip is
+permitted once a quote-aware splitter is *on `main`*: a condition you check by running the guard against a
+command whose only re-execution token sits inside a quoted string and watching it clear. Whether some pull
+request is open, bounced, re-armed or merged is not this rule's business, and no review label belongs in it —
+those change by the minute and would make the statute wrong without anyone editing it. Same for the guard's
+own internals: this anchor states the rule, and #3002 states what the code does about it.
+Lineage: ruled by the operator as **R8**, 2026-08-08 → built as #3002 ·
+measurement #3001 · #2749 (4th arm) · #2986 · #2994 · #2203.
+
 ### Constellation placement {#constellation-placement}
 
 **The test — where does a thing live (WE / Frontier UI / Plateau)?**
