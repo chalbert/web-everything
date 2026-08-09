@@ -30,14 +30,20 @@ claude -p \
   --append-system-prompt "$MANDATE"  # stable prefix; only the input varies
 ```
 
-Measured on subscription, identical prompt: `--safe-mode --tools ""` cuts the spawn from **30,226 → 5,521**
-context tokens and **11.0s → 6.1s**. Across a five-lens panel that is the difference between wasteful and cheap,
-and what it protects is rate-limit headroom, which is the scarce resource on the solo tier.
+On subscription, with an identical prompt, `--safe-mode --tools ""` cuts the spawn's loaded context by
+**roughly an order of magnitude** and shortens wall clock correspondingly. **No figure is carried here:** the
+session measurement and an independent re-run disagree on the absolute numbers, and no committed script
+reproduces either — see the backing report for both sets and their conditions. The **direction** is what this
+slice rests on and it reproduces every time. Across a five-lens panel that is the difference between wasteful
+and cheap, and what it protects is rate-limit headroom, which is the scarce resource on the solo tier.
 
 ## Two things this buys beyond tidiness
 
-- **`--tools ""` is a structural guarantee.** The review mandate's rule that a juror must never check the branch
-  out stops being prose the model has to recall and becomes something it cannot do.
+- **`--tools ""` is a structural guarantee.** The review mandate's rule that a juror never checks the branch out
+  **in a shared tree** ([we:skills-src/review/SKILL.md](../skills-src/review/SKILL.md), citing #2336) stops being
+  prose the model has to recall and becomes something it cannot do. Note it is *stronger* than the mandate: the
+  mandate permits a throwaway clone, and a tool-free juror cannot make one — that escalation path is deliberately
+  out of the judge contract (see [#xqpw23c]).
 - **The shape is enforced by the tool, not approximated.** `--json-schema` is implemented as a forced tool call
   (`stop_reason: tool_use`), so there is no prose to parse, no fences to strip, and no ask-and-validate loop to
   build. Retries are for genuine failures only.
@@ -54,6 +60,10 @@ fails with *"Not logged in"*. Tier one must use `--safe-mode`. A test should ass
 spawn's own error. Per-lens model and effort are parameters, so the jury's care→rigor dial becomes two flags
 rather than prompt tuning. Unit tests cover argv construction (pure, no spawning); one integration test covers a
 real spawn.
+
+**The measurement lands with the helper, or not at all.** A committed script — argv in, loaded-context and wall
+clock out — that anyone can re-run, plus its recorded conditions (cwd, model, prompt). Until that exists no
+figure goes on this item, in the report, or in the statute; only the direction does.
 
 ## Not in scope
 

@@ -31,7 +31,9 @@ worked around.
 
 ## Acceptance
 
-`claim` runs through the declared operation from both the command-line and the HTTP caller, with the ownership
-invariant enforced in the pure core. **The slice is not done until it records a verdict on the probe** — one
+`claim` runs through the declared operation from the **command-line** caller, with the ownership invariant
+enforced in the pure core. The HTTP caller is deliberately *not* an acceptance criterion here — it arrives with
+[#xtfu40d] and, if the epic's claim holds, needs nothing from this slice — which is why this item is blocked only
+on the engine and stays independently landable. **The slice is not done until it records a verdict on the probe** — one
 paragraph on the item saying whether the declaration felt proportionate, and if not, exactly what was heavy. A
 green build with no verdict recorded misses the point of the slice.

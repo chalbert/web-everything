@@ -21,15 +21,16 @@ Statute: [#operations-declared-once-callers-generated](../docs/agent/platform-de
 `we:scripts` already single-sources the *logic* — the review operation is the mature case, with
 `we:scripts/review-detail.mjs` and `we:scripts/review-set-label.mjs` shelled by both the skill and the console,
 and the gate-self invariant living in the pure core where no shell can route around it. What is **not**
-single-sourced is the *wiring*: `plateau:vite.config.mts` and `plateau:tools/drain-daemon/cli.mjs` each hand-roll
-argv building and route glue over those same scripts, and every new operation pays that cost again.
+single-sourced is the *wiring*: `plateau:tools/dev-panel/vite-plugin.ts` (the review routes, mounted from
+`plateau:vite.config.mts`) and `plateau:tools/drain-daemon/cli.mjs` each hand-roll argv building and route glue
+over those same scripts, and every new operation pays that cost again.
 
 The consequences show up as three concrete defects, all of which this epic removes structurally rather than by
 discipline:
 
 - **Capability drift between callers.** The agent path can *judge* a PR; the console path can only display and
   accept. Not a plumbing gap — the console has no model attached.
-- **The human stop is prose.** `we:skills-src/review/SKILL.md` says *"This is a stop point. Do not auto-proceed."*
+- **The human stop is prose.** `we:skills-src/review/SKILL.md` says *"This is a stop point … Do not auto-proceed."*
   A rule the model must hold rather than one the machinery enforces.
 - **Retry is an instruction.** *"A non-zero exit means re-run the same command"*, plus the #2964 hand-ordered
   comment-before-label sequencing, exist because the two writes are not atomic and nothing replays them.
@@ -37,14 +38,15 @@ discipline:
 ## Scope
 
 - Registry + run engine + the four step kinds, with the run record as a local file behind a store module
-  (per #2626 — it migrates when the product trigger fires, not before).
+  (the store-seam discipline #2626 proposes — it migrates when that decision's product trigger fires, not before;
+  #2626 is still **open**, so the seam is what this epic adopts, not the migration).
 - The judge helper: one tool-free juror spawn, measured, shared by every judge step.
 - Adapter generation for the command-line and HTTP callers.
 - `review-pr`, `claim`, `ratify`, `dispatch` declared onto the engine, in that order.
 
 ## Not in scope
 
-- Rewriting the existing scripts. They stay as the implementations behind `read` and `effect` steps — this epic
+- Rewriting the existing scripts. They stay as the implementations behind `compute` and `effect` steps — this epic
   re-declares, it does not re-implement.
 - Anything metered. Tier one is subscription-funded end to end; the hosted backend is a later substitution behind
   the same seam, and no slice here builds it.

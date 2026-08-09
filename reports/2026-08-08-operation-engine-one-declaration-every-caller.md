@@ -2,9 +2,6 @@
 
 **2026-08-08 · design session with Nicolas · backing report for the operations-declared-once decision and the operation-engine epic.**
 
-Rendered companion (diagrams + the traced flow): the design artifact published from this session. This report is
-the durable record; the artifact is the readable one.
-
 ---
 
 ## The question
@@ -56,7 +53,7 @@ An operation is a sequence of steps, each of exactly **four kinds** — the whol
 ### What this buys, beyond deduplication
 
 - **The human stop becomes structural.** It is prose in `we:skills-src/review/SKILL.md` today — *"This is a stop
-  point. Do not auto-proceed."* — a rule the model must hold. The engine suspends instead; forgetting is not a
+  point … Do not auto-proceed."* — a rule the model must hold. The engine suspends instead; forgetting is not a
   failure mode that exists.
 - **Retry stops being an instruction.** Effects are declared and idempotent per (run, step), so the documented
   *"a non-zero exit means re-run the same command"* and the hand-ordered #2964 comment-before-label sequencing
@@ -75,8 +72,11 @@ That was wrong. The right split:
 | `judge` | a diff and a mandate | **one turn, no tools granted** |
 | agentic build | working tree, shell, many turns | a full agent session (unchanged, #2444) |
 
-The review mandate already forbids the reviewer from checking the branch out — it is text in, findings out, so an
-agent loop buys nothing. **Spawning was never the problem; being *in-session* was**: an in-session reviewer
+The review mandate already forbids the reviewer from checking the branch out **in a shared tree**
+([we:skills-src/review/SKILL.md](../skills-src/review/SKILL.md), citing #2336) — it is text in, findings out, so an
+agent loop buys nothing for the judgment itself. (The mandate does permit a *throwaway clone* for a repro; a
+tool-free juror cannot make one, so that escalation path sits outside the judge contract by design and is filed
+separately when it is actually wanted.) **Spawning was never the problem; being *in-session* was**: an in-session reviewer
 inherits the host session's instructions, memory and working directory, so the same operation behaves differently
 depending on who started it.
 
@@ -89,7 +89,8 @@ Not a migration with a trigger. Two permanent tiers sold to different people:
 - **Tier two (later)** — hosted, no machine to spawn on, billed per token as a cost of goods.
 
 Nothing above the seam differs between them. This is the same shape as #2626 (local sidecar now, durable store at
-product, one swap behind a seam) and [`#agent-runner-cli-backend`](../docs/agent/platform-decisions.md#agent-runner-cli-backend)
+product, one swap behind a seam — note #2626 is itself still an **open** decision, so it is cited here as the
+proposed shape, not as settled law) and [`#agent-runner-cli-backend`](../docs/agent/platform-decisions.md#agent-runner-cli-backend)
 (#2444), which ratified the subscription-funded CLI backend *behind a deliberately backend-agnostic interface* so a
 key-billed one could slot in later. Tier two is that backend.
 
@@ -111,18 +112,34 @@ claude -p \
   --append-system-prompt "$MANDATE"  # stable prefix; only the diff varies
 ```
 
-Measured on subscription, identical prompt:
+On subscription, with an identical prompt, `--safe-mode --tools ""` cut the spawn's loaded context by **roughly
+an order of magnitude** and shortened wall clock correspondingly.
 
-| | default spawn | `--safe-mode --tools ""` |
-|---|---|---|
-| context loaded | 30,226 tok | **5,521 tok** |
-| wall clock | 11.0s | **6.1s** |
+**No figure is carried, and here is why.** The session run and an independent re-run disagree on the absolute
+numbers, and **no committed script reproduces either** — the same class of unsourced figure #1118 withdrew from
+the R8 statute on 2026-08-07. Both sets are recorded below as raw observations, not as findings, so nobody
+re-cites them as measurements:
 
-**Trap recorded:** `--bare` strips more but forces key-based auth and cannot see the subscription — it fails with
-*"Not logged in"*. Tier one must use `--safe-mode`.
+- *Session run (conditions not recorded — cwd, model and prompt were never written down, so it cannot be
+  re-run):* ≈30k → ≈5.5k context tokens, ≈11s → ≈6s wall clock.
+- *Independent re-run, 2026-08-09, review of PR #1122* — CLI 2.1.220, `--model sonnet`, prompt `"Reply with the
+  single word: ok"`, cwd `we:` primary checkout, context read as the sum of input + cache-read +
+  cache-creation tokens across `modelUsage`: **48,609 → 6,476** tokens; **17.8s → 2.0s** wall.
 
-**`--tools ""` is a structural guarantee**: the mandate's never-check-out rule stops being prose the model must
-recall and becomes something it cannot do.
+The two runs agree on nothing but the direction, which is the only thing the ruling and the judge-helper slice
+rest on. No figure returns to this report, to an item, or to the statute until the measuring script named in that
+slice's acceptance is committed.
+
+**Verified, and reproducible from the flags alone** (re-checked 2026-08-09 against CLI 2.1.220):
+
+- `--json-schema` really does force the shape — the result object carries `stop_reason: "tool_use"` and a parsed
+  `structured_output`. There is no prose to strip and no ask-and-validate loop to build.
+- **Trap:** `--bare` strips more but forces key-based auth and cannot see the subscription — it fails with
+  exactly *"Not logged in · Please run /login"*. Tier one must use `--safe-mode`.
+
+**`--tools ""` is a structural guarantee** — with one caveat worth stating precisely. The mandate's rule is
+never check the branch out *in a shared tree*; `--tools ""` is stronger, since a tool-free juror cannot check out
+anywhere, including the throwaway clone the mandate allows. That is the intended trade, not an accident.
 
 ## Conversion order — chosen to falsify early
 

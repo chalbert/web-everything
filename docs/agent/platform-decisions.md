@@ -3029,7 +3029,8 @@ declaration. Four clauses:
 1. **One declaration, derived callers.** The command-line caller (agents, any clone, no server), the HTTP caller
    (the console), the typed-tool caller, the input validation and the tests all fall out of the declaration. A
    hand-written route or argv parser for an operation that *could* be declared is a defect, not a style choice.
-   This closes the gap the parent statute leaves open: today `plateau:vite.config.mts` and the drain daemon each
+   This closes the gap the parent statute leaves open: today `plateau:tools/dev-panel/vite-plugin.ts` (the
+   console's review routes, mounted from `plateau:vite.config.mts`) and `plateau:tools/drain-daemon/cli.mjs` each
    hand-roll their own argv and route glue over the same single-sourced scripts.
 2. **Four step kinds, closed.** `compute` (pure fn + declared reads, no model), `judge` (needs a model, needs
    **no** tools), `confirm` (needs a person — the engine **suspends**, resumable from any surface), `effect`
@@ -3039,8 +3040,10 @@ declaration. Four clauses:
    no tools granted, identical wherever it was started; work needing a tree is an agent session per
    [#agent-runner-cli-backend](#agent-runner-cli-backend). **The in-session reviewer is retired** — it inherits
    the host session's instructions, memory and cwd, so the same operation behaves differently depending on who
-   started it, which is precisely what one-source exists to prevent. `--tools ""` also turns the review mandate's
-   never-check-out rule from prose the model must recall into something it cannot do.
+   started it, which is precisely what one-source exists to prevent. Granting a judge step **no** tools also turns
+   the review mandate's *never check the branch out in a shared tree* rule from prose the model must recall into
+   something it cannot do — and, deliberately, goes further: it also forecloses the throwaway clone that mandate
+   permits, so a repro that genuinely needs a tree is an agent session, never a judge step.
 4. **Two tiers, one seam, nothing metered in tier one.** The solo tier spawns the subscription-funded
    command-line backend on the operator's own machine; the hosted tier is key-billed behind the same seam. These
    are two permanent products for different people — *not* a migration — so the seam is load-bearing from the
@@ -3058,7 +3061,9 @@ caller — holds the state.
 turf that statute does not reach, and composes with [#agent-runner-cli-backend](#agent-runner-cli-backend) (the
 backend a judge step spawns), [#conveyor-orchestration-mechanics-not-per-lane-agent](#conveyor-orchestration-mechanics-not-per-lane-agent)
 (no model in the mechanical loop) and [#state-lives-where-its-nature-dictates](#state-lives-where-its-nature-dictates)
-(the run record is a session-local sidecar behind a store module until the #2626 product trigger fires). The
+(the run record is a session-local sidecar behind a store module — the store-seam discipline #2626 proposes,
+cited as a direction because #2626 is still an **open** decision; this rule rests on rule-105's animating
+principle, not on #2626 being ruled). The
 rejected branch — agents calling HTTP services — fails on lane clones (N checkouts, N ports, no answer to "which
 server acts on which clone") and on the session-free direction of #2701/#2703.
 

@@ -7,9 +7,11 @@ blockedBy: ["xzbzc7n", "xqpw23c"]
 dateOpened: "2026-08-08"
 scope:
   - we:scripts/operations/
+  - plateau:tools/dev-panel/vite-plugin.ts
+  - plateau:tools/drain-daemon/cli.mjs
   - plateau:src/backlog-view/
   - plateau:vite.config.mts
-scopeRationale: "Adds the adapter generator to the new operations directory and touches the console review surface; cross-locus by nature."
+scopeRationale: "Adds the adapter generator to the new operations directory and touches the console review surface, which today lives in the dev-panel plugin and the drain-daemon CLI, not in src/; cross-locus by nature."
 tags: [plateau-loop, delivery, operations, console, cross-locus]
 ---
 
@@ -32,9 +34,9 @@ couple, implementation first.
 
 ## What it removes
 
-Today the console's review path is `browser → dev-panel route → plateau:tools/drain-daemon/cli.mjs →
-we:scripts/review-detail.mjs` — three process hops for a read, with argv building and repo-arg sanitisation
-hand-written in the middle. The generated adapter collapses that. **Keep the sanitisation**: it exists because of
+Today the console's review path is `browser → plateau:tools/dev-panel/vite-plugin.ts →
+plateau:tools/drain-daemon/cli.mjs → we:scripts/review-detail.mjs` — the dev server plus two spawned processes
+for a single read, with argv building and repo-arg sanitisation hand-written in the middle. The generated adapter collapses that. **Keep the sanitisation**: it exists because of
 a real round-trip bug (#2500), so it moves into the generator rather than being dropped.
 
 ## Acceptance

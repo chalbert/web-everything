@@ -15,8 +15,8 @@ tags: [plateau-loop, delivery, operations, review]
 # Declare review-pr and generate its command-line adapter
 
 The first real operation on the engine, and the proof it works end to end. Declares the five review steps and
-generates the command-line caller. **The existing scripts stay as the implementations behind `read` and
-`effect`** — this slice re-declares, it does not re-implement.
+generates the command-line caller. **The existing scripts stay as the implementations behind the `read` and
+`record` steps** — this slice re-declares, it does not re-implement.
 
 ## The declaration
 
@@ -34,7 +34,7 @@ generated caller cannot clear a gate-self PR any more than the hand-written one 
 
 ## What this replaces
 
-The prose stop in `we:skills-src/review/SKILL.md` — *"This is a stop point. Do not auto-proceed."* — becomes the
+The prose stop in `we:skills-src/review/SKILL.md` — *"This is a stop point … Do not auto-proceed."* — becomes the
 engine suspending at `confirm`. The skill's step 4 note that *"a non-zero exit means re-run the same command"*
 becomes idempotent effect replay. Both stop being rules the model must hold.
 

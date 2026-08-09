@@ -40,6 +40,10 @@ not a task:
   runner, not the session that started it?
 - What survives a restart of the thing that started it? (This is the property the conveyor actually needs.)
 - Does it interact with lane clones and the existing lane lease, or duplicate them?
+- Does it satisfy the `spawn / steer / stop / resume / observe` interface
+  [#agent-runner-cli-backend](../docs/agent/platform-decisions.md#agent-runner-cli-backend) (#2444) already
+  ratified as backend-agnostic? That statute is the prior art here — if `--bg` fills it, answer 1 is the default,
+  and if it does not, the gap should be stated against that named interface rather than in fresh words.
 
 ## Acceptance
 
