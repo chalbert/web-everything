@@ -92,15 +92,13 @@ a **warn** nudge, never a hard gate on an uncomputable predicate.
 
 **Stop enumerating the ways a command re-enters the shell; refuse the ones you cannot read.** The rule: at the
 primary checkout, `guard-bash.mjs` must **deny** a command containing shell re-execution it cannot **fully**
-resolve. **The rule is ratified ahead of the machinery it governs — none of that machinery is on `main`
-today.** Today's guard does the opposite on purpose: `we:scripts/guard-bash.mjs` states *"Fails open on
-unparseable input"*, and `canonicalCommand` / `canonicalGitOp` deliberately do not chase `$(echo git)` or
-`bash -c "…"`. The nested-command scanner that makes the question answerable at all — with its two bounded
-recursion caps (depth 4, 64 expansions) and its explicit refusal to escalate a nested string that does not
-parse — **arrives with #2986 / #2994 (PR #1092, open and unlanded)**. This rule converts all three
-of those fail-opens to fail-closed, and is built as **#3002**. The nearest existing precedent for the posture
-is a *different* guard: `we:scripts/lib/lane-verify.mjs` refuses a corrupt verification marker rather than
-failing open.
+resolve. A bounded scanner has exactly three ways to stop short of an answer — it exhausts its **recursion
+depth bound**, it exhausts its **expansion-count bound**, or it meets **nested text its parser cannot
+represent** — and under this rule all three are *unresolvable*, which is a deny, never a pass. Stopping early
+is not the same as looking and finding nothing. Built as **#3002**; the concrete bound values and the
+per-case tests live there, not here, because a bound is an implementation constant and this rule is not.
+The posture — a component that cannot read its input refuses rather than waving it through — is the one
+`we:scripts/lib/lane-verify.mjs` already takes with a corrupt verification marker.
 
 Ruled 2026-08-08 after **six** review rounds, each of which closed one class of hole and uncovered another;
 the sixth reviewer found the structural reason — the fuzz generator's wrapper list *was* the list of classes
@@ -111,16 +109,25 @@ is unbounded, so the unknown case must fall closed.
 **The ordering is part of the rule, not an implementation detail.** "Refuse what it cannot resolve" says
 nothing about *who decides it cannot be resolved*, and that — not how often real re-execution happens — sets
 the cost. Over the local session corpus a **quote-blind** scan flags substantially more calls for
-re-execution or redirection than a **quote-aware** one does, and the excess is text that was never shell
-(a JavaScript `=>` in a quoted argument, an fd-dup `2>&1`, a heredoc body). *No over-flag percentage is
-carried here:* the ratio moves with the token list used and no committed script reproduces it — see #3002
-for the measured range and its provenance. The **direction** is what this rule rests on, and it is not
-in doubt. So the deny-flip lands **only behind** the quote-aware segment splitter (#2986 / #2994,
-shipping in the still-open, unlanded PR #1092), never in front of it — tightening the default on a
-parser that misreads ordinary text amplifies the false-deny problem instead of fixing the security one.
+re-execution or redirection than a **quote-aware** one does, and the excess is ordinary text misread — a
+JavaScript `=>` or a `>` inside a quoted argument taken for a redirect, an fd-dup `2>&1` taken for a write,
+a heredoc body taken for commands. *No over-flag percentage is carried here:* the ratio moves with the
+token list used and no committed script reproduces it — see #3002 for the measured range and its
+provenance. The **direction** is what this rule rests on, and it is not in doubt. So the deny-flip lands
+**only behind** the quote-aware segment splitter (#2986 / #2994), never in front of it — tightening the
+default on a parser that misreads ordinary text amplifies the false-deny problem instead of fixing the
+security one.
 **A guard may only be made more eager to deny in the same change as, or after, the parser that
 makes its "I can't read this" honest.** After any such flip, **re-run the false-deny sweep** rather than
-inheriting the prior estimate. Lineage: ruled by the operator as **R8**, 2026-08-08 → built as #3002 ·
+inheriting the prior estimate.
+
+**The precondition is a capability, not a schedule — and never a pull request's state.** The flip is
+permitted once a quote-aware splitter is *on `main`*: a condition you check by running the guard against a
+command whose only re-execution token sits inside a quoted string and watching it clear. Whether some pull
+request is open, bounced, re-armed or merged is not this rule's business, and no review label belongs in it —
+those change by the minute and would make the statute wrong without anyone editing it. Same for the guard's
+own internals: this anchor states the rule, and #3002 states what the code does about it.
+Lineage: ruled by the operator as **R8**, 2026-08-08 → built as #3002 ·
 measurement #3001 · #2749 (4th arm) · #2986 · #2994 · #2203.
 
 ### Constellation placement {#constellation-placement}
