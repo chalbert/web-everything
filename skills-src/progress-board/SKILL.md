@@ -228,6 +228,13 @@ blind. A minted duplicate URL cannot be undone.
   (the open list came back, the merged one did not) is treated as stale too: the page says which half it
   could not read, keeps the cached *Landed* rows, and does **not** overwrite the cache with the thinner
   snapshot.
+- **`we:scripts/lib/output-mix.mjs` + `we:scripts/lib/output-mix-paths.json`** — the **Output mix** section
+  (#3012): lines added this week to the **product** versus to the **delivery machinery and backlog
+  bookkeeping**, with the four completed weeks beside it. Derived from `git log --numstat` on every render,
+  so there is **no verb and nothing to type** — it cannot go stale and it cannot be hand-edited. Every path
+  is charged by the first matching rule in the `.json`, and each rule explains itself in one line. To
+  disagree with the number, change one rule there — never patch the script. `--no-git` (or
+  `WE_BOARD_NO_GIT=1`) skips the ~0.8s read; the section then says so rather than showing a zero.
 - **`we:reports/progress-board.json`** — the small hand-maintained half: plan items, decisions awaiting the
   operator, and the artifact URL. Written only through the verbs above.
 - **`we:reports/progress-board.html`** — generated output at a fixed path. Not tracked in git, never read
@@ -260,8 +267,9 @@ moments, so pointing them at one file wrote the page over the plan. It is refuse
 ## The page's own contract
 
 It is **operated, not read**: *Needs you* first (decisions and human-only reviews), then *Ruled, queued*
-(decisions already answered but deferred — shown only when there are some), then *In flight*, then the plan
-table, then *Landed*. State is carried in form — a severity stripe and a chip — so it reads at a glance. It
+(decisions already answered but deferred — shown only when there are some), then *In flight*, then *Output
+mix* (the one standing number about the SHAPE of the work rather than its state), then the plan table, then
+*Landed*. State is carried in form — a severity stripe and a chip — so it reads at a glance. It
 is theme-aware and fully self-contained (no external font, script, or image), which is what the Artifact CSP
 requires.
 

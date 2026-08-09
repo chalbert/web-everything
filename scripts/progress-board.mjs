@@ -11,6 +11,10 @@
  *   • DERIVED (live, free): open + recently-merged pull requests, read through `gh pr list`, each reduced
  *     to ONE status by `classifyPr` — needs-human / bounced / ci-red / conflicted / needs-review / queued /
  *     landed. Nothing about PR state is ever typed by hand, so the board cannot drift from GitHub.
+ *   • DERIVED (live, free): the weekly OUTPUT MIX — lines added to product vs to delivery machinery and
+ *     backlog bookkeeping, read from `git log --numstat` by `we:scripts/lib/output-mix.mjs` (#3012). Like the
+ *     PR half it is never typed: the classification is the committed, first-match-wins rule list in
+ *     `we:scripts/lib/output-mix-paths.json`, so disagreeing with the number means editing one rule there.
  *   • HAND-MAINTAINED (tiny): `reports/progress-board.json` — the plan items and the decisions waiting on
  *     the operator. These are intentions; no API knows them. The model edits them ONLY through the verbs
  *     below, never by hand — a hand-edited state file is how the "mechanical" property gets lost.
@@ -74,14 +78,16 @@
  *   node scripts/progress-board.mjs --decision-evidence=<id> --text="…"              # empty --text clears all
  *   node scripts/progress-board.mjs --decision-remove=<id>                          # retires its R-number with it
  *
- * Flags: --state=<path> --out=<path> --no-gh --json --help.
- * Env:   WE_BOARD_NO_GH=1 (never shell out to gh), WE_BOARD_NOW=<iso> (freeze the stamp, for tests).
+ * Flags: --state=<path> --out=<path> --no-gh --no-git --json --help.
+ * Env:   WE_BOARD_NO_GH=1 (never shell out to gh), WE_BOARD_NO_GIT=1 (skip the weekly output-mix
+ *        derivation), WE_BOARD_NOW=<iso> (freeze the stamp AND the week window, for tests).
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { computeOutputMix, ratioLabel } from './lib/output-mix.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_STATE = join(ROOT, 'reports', 'progress-board.json');
@@ -614,7 +620,7 @@ const ITEM_CHIP = Object.freeze({
  * Join the hand-maintained state to the live PR rows and sort everything by consequence.
  * Pure — takes the already-fetched rows, returns exactly what the renderer prints.
  */
-export function buildModel(state, prs) {
+export function buildModel(state, prs, outputMix = null) {
   const rows = [...prs.rows].sort(
     (a, b) => (PR_STATUS[a.status]?.rank ?? 9) - (PR_STATUS[b.status]?.rank ?? 9) || b.number - a.number,
   );
@@ -659,6 +665,9 @@ export function buildModel(state, prs) {
     stateFatal: Boolean(state[STATE_FATAL]),
     generatedAt: nowIso(),
     prs: { ...prs, rows },
+    // Derived like the PR half and, like it, allowed to be absent: a git read that failed renders an honest
+    // note rather than taking the page down or showing a stale number from some other tree.
+    outputMix,
     counts: {
       needsYou: needsYou.decisions.length + needsYou.prs.length + needsYou.items.length,
       inFlight: inFlight.items.length + inFlight.prs.length,
@@ -851,6 +860,12 @@ td .note { color: var(--ink-2); font-size: .8125rem; }
 .phase-row td { background: var(--surface-2); font-weight: 650; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
 .done .t, .done td.title { color: var(--ink-2); }
 
+/* The output-mix table is all figures, so the columns line up under each other and the eye can read DOWN a
+   column to see a trend — which is the entire point of putting four prior weeks next to this one. */
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.now td { font-weight: 650; }
+tr.now td:first-child { color: var(--ink); }
+
 .empty { color: var(--ink-2); font-size: .875rem; font-style: italic; }
 footer.board { border-top: 1px solid var(--line); padding-top: 1rem; color: var(--ink-2); font-size: .75rem; }
 footer.board a { color: var(--accent); }
@@ -974,6 +989,55 @@ function planTableHtml(plan) {
           <thead><tr><th>Item</th><th>State</th><th>PR</th><th>Note</th></tr></thead>
           <tbody>
 ${body}
+          </tbody>
+        </table>
+      </div>`;
+}
+
+/** "+47,014" — grouped, signed, and never a bare `0` that reads like a missing value. */
+const plusNum = (n) => `+${Number(n ?? 0).toLocaleString('en-US')}`;
+
+/**
+ * THE OUTPUT MIX (#3012) — the one standing number on the page that is about the SHAPE of the work rather
+ * than its state: how much of this week went into the product versus into the machinery that delivers it.
+ *
+ * It is rendered as a section rather than a header tile on purpose. The three header tiles answer "what is
+ * waiting on me right now"; this answers "what have we been building lately", which is a slower question and
+ * would dilute them. Product leads because it is the number the metric exists to protect.
+ *
+ * The `other` column is shown, not hidden: it is how a reader checks that the two headline numbers actually
+ * cover the tree. A remainder that stops being small is a missing rule in `output-mix-paths.json`, and the
+ * page should say so rather than quietly under-reporting one side.
+ */
+function outputMixHtml(mix) {
+  if (!mix || !mix.fresh || !mix.current) {
+    return `      <p class="empty">The weekly output mix could not be computed — ${esc(mix?.reason ?? 'the derivation did not run')}.</p>`;
+  }
+  const cur = mix.current;
+  const ratio = ratioLabel(cur);
+  const rows = mix.weeks
+    .map((w) => {
+      const now = w.start === cur.start;
+      return `          <tr${now ? ' class="now"' : ''}>
+            <td class="mono">${esc(w.start)}${now ? ' <span class="lbl">this week, still running</span>' : ''}</td>
+            <td class="num">${esc(plusNum(w.product))}</td>
+            <td class="num">${esc(plusNum(w.machinery))}</td>
+            <td class="num">${esc(plusNum(w.other))}</td>
+            <td class="num">${esc(ratioLabel(w).text)}</td>
+          </tr>`;
+    })
+    .join('\n');
+
+  return `      <div class="tiles">
+        <div class="tile ${cur.product ? 'ok' : 'crit'}"><div class="n">${esc(plusNum(cur.product))}</div><div class="k">Product lines this week</div></div>
+        <div class="tile info"><div class="n">${esc(plusNum(cur.machinery))}</div><div class="k">Machinery + bookkeeping</div></div>
+      </div>
+      <div class="row ${esc(ratio.sev)}"><div class="body"><div class="t">${esc(ratio.text)}</div><div class="d">Week of ${esc(cur.start)} so far. Product = the spec data, the site that renders it, the blocks and the demos. Machinery = the scripts, skills, agent config and the backlog cards. Every path is charged by the first matching rule in <span class="mono">we:scripts/lib/output-mix-paths.json</span>, and each rule says why in one line.</div></div></div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Week from</th><th class="num">Product</th><th class="num">Machinery</th><th class="num">Other</th><th class="num">Mix</th></tr></thead>
+          <tbody>
+${rows}
           </tbody>
         </table>
       </div>`;
@@ -1116,6 +1180,12 @@ ${sectionHtml(
   'In flight',
   'Work under way. Ordered by how hard it is stuck — bounced and red first, quietly-queued last.',
   inFlight || '      <p class="empty">Nothing in flight.</p>',
+)}
+
+${sectionHtml(
+  'Output mix',
+  'Lines ADDED this week to the product versus to the delivery machinery and backlog bookkeeping, with the four completed weeks beside it. Additions only — the question is output, not churn. Derived from git on every render; nothing here is typed by hand.',
+  outputMixHtml(m.outputMix),
 )}
 
 ${sectionHtml('The plan', 'Every item, by phase, joined to its pull request where one exists.', planTableHtml(m.plan))}
@@ -1546,7 +1616,7 @@ const USAGE = `progress-board — the operator's published status page (one Bash
         A TRIPWIRE, NOT AN AUTHORISATION. The digest is unkeyed and its algorithm is in this file, so exit 0
         rules out an accidental edit or a copied marker — it cannot rule out a deliberately forged page.
 
-  --state=<path>  --out=<path>  --no-gh  --json  --help`;
+  --state=<path>  --out=<path>  --no-gh  --no-git  --json  --help`;
 
 /**
  * Which state key each verb WRITES — the lookup behind the scoped refusal in `main`. `board-title`, `repo`
@@ -1730,7 +1800,17 @@ export function main(argv = process.argv.slice(2)) {
 
   const useGh = !args['no-gh'] && process.env.WE_BOARD_NO_GH !== '1';
   const prs = fetchPrs({ repo: state.repo, statePath, useGh });
-  const model = buildModel(state, prs);
+  // Local git only — no network, no cache, and it never throws (a failure comes back as `fresh: false`).
+  // `WE_BOARD_NOW` already freezes the page stamp; reuse it so the week window freezes with it.
+  //
+  // `--no-git` exists for the same reason `--no-gh` does: the read costs ~0.8s over this history, which is
+  // nothing on a real render next to two `gh` calls, but is the whole runtime of a test suite that spawns
+  // the CLI sixty times. Skipping it degrades exactly like a failed read — an honest note, never a zero.
+  const useGit = !args['no-git'] && process.env.WE_BOARD_NO_GIT !== '1';
+  const mix = useGit
+    ? computeOutputMix({ today: nowIso().slice(0, 10) })
+    : { fresh: false, reason: 'the weekly git derivation was disabled for this run', weeks: [], current: null, trend: [] };
+  const model = buildModel(state, prs, mix);
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, renderPage(model));
 
