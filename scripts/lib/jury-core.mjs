@@ -13,7 +13,11 @@
  *   • the DIVERSITY-SELECTION reduction — `derivePanelVerdict` + `buildPanelFindings` +
  *     `AGGREGATION.DIVERSITY_SELECTION`, over the lens vocabulary (`MANDATE_LENSES` / `MANDATORY_LENSES` /
  *     `ADVISORY_LENSES` / `PANEL_LENSES`).
- *   • the CARE→RIGOR dial — `panelRigorForCareLevel` over the advisory `CARE_LEVELS` enum.
+ *   • the CARE→RIGOR dial — `panelRigorForCareLevel` over the advisory `CARE_LEVELS` enum. SHARED by `/jury`,
+ *     `/review` and `/converge`, which is why the #2908 editor gate below is a SEPARATE knob and not a re-dial
+ *     of this one.
+ *   • the EDITOR knob (#2908) — `editorPolicyForCareLevel` + `EDITOR_ENABLED_CARE_LEVELS` / `EDITOR_MIN_ROUNDS`:
+ *     may the convergence loop's editor PUSH at this band, and what round budget does that buy. Fails closed.
  *   • the JURY-LEDGER EVENT VOCABULARY (#2654, S2 of epic #2649) — `JURY_EVENT_TYPES` + `JUROR_STATUSES` and
  *     the pure `validateJuryEvent` / `normalizeJuryEvent` schema-validator. The append-only shape #2641's durable
  *     on-disk log appends and the #2642 console serializes; this slice is the SHAPE ONLY — the on-disk log and
@@ -719,6 +723,80 @@ export function panelRigorForCareLevel(careLevel) {
     lenses: [...r.lenses],
     jurorsPerLens: r.jurorsPerLens,
     aggregation: AGGREGATION.DIVERSITY_SELECTION,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// THE EDITOR KNOB (#2908) — a SEPARATE dial from `panelRigorForCareLevel`, deliberately.
+//
+// `panelRigorForCareLevel` is SHARED: `/jury` (via `resolveRoster`), `/review` and `/converge` all read its
+// `rounds`. The #2908 rider is explicit that the editor's round minimum must NOT be bought by raising that
+// entry — doing so would double the negotiation budget of every consumer to pay for something only the
+// parked-PR convergence loop needs. So the editor's enablement AND its round floor live here, on their own
+// knob, and `panelRigorForCareLevel` above is left byte-stable.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The care bands at which the convergence loop's EDITOR may push a fix to the author's branch (#2908, codified
+ * `#converge-editor-enabled-at-low-only`). **`low` ONLY.**
+ *
+ * Ratified 2026-08-08: mechanical fixes at the lowest observed risk get repaired and re-judged; anything
+ * carrying a blast-radius or trust-chain signal gets a REPORT and the operator. `elevated` is excluded on
+ * evidence, not on caution — it is the exact band where the loop's one observed editor failure happened (PR
+ * #1018: the editor pushed a 15-file "fix" and the next round faulted that repair three ways, including a
+ * fail-open in the very gate the fix had just written). Re-admitting `elevated` would re-enable the editor
+ * precisely where it is known to misfire.
+ *
+ * An ALLOW-LIST, never a deny-list: a care band nobody has ruled on is review-only by construction.
+ */
+export const EDITOR_ENABLED_CARE_LEVELS = Object.freeze([CARE_LEVELS.LOW]);
+
+/**
+ * The minimum negotiation rounds an EDITOR-ENABLED band must carry (#2908 rider). Two is the floor that makes
+ * the editor mean anything: one round to push the fix, one for a FRESH panel to judge the push. At one round
+ * the loop forces `escalate` at the cap before the editor step is ever reached
+ * (`we:scripts/workflows/review-parked-prs.mjs`), so an editor-enabled 1-round band is a contradiction — and a
+ * push no panel re-read would break the loop's own invariant that a `land` means a non-author panel signed off
+ * the FINAL diff.
+ */
+export const EDITOR_MIN_ROUNDS = 2;
+
+/**
+ * The EDITOR POLICY for a care band (#2908) — may the editor push, and what round budget does that buy?
+ *
+ * FAILS CLOSED, BY CONTRACT. Unlike `panelRigorForCareLevel` (which THROWS on an unknown band), this never
+ * throws: it is consulted on a path where the band arrives from an agent echo or a possibly-degraded escalation
+ * fetch, and a thrown error at a gate is a coin-flip on whatever the caller's `catch` does. An absent, null,
+ * malformed or unrecognized care level therefore resolves to `{ resolved: false, editorEnabled: false }` —
+ * review-only. Mutating someone else's branch is not reversible from their side, so "we could not work out how
+ * risky this is" must mean "report it", never "edit it".
+ *
+ * `rounds` is the loop's round cap for the band: the shared panel dial's `rounds` for a review-only band
+ * (unchanged), floored at `EDITOR_MIN_ROUNDS` for an editor-enabled one, and hard-capped at
+ * `NEGOTIATION_ROUND_CAP`. Reading the SAME band the panel resolved — never re-deriving it — is the point: a
+ * second derivation is a second thing to drift.
+ *
+ * @param {'none'|'low'|'elevated'|'high'|null|undefined} careLevel - the RESOLVED band, as the panel dialed it.
+ * @returns {{careLevel: string|null, resolved: boolean, editorEnabled: boolean, rounds: number, reason: string}}
+ */
+export function editorPolicyForCareLevel(careLevel) {
+  const known = typeof careLevel === 'string' && Object.values(CARE_LEVELS).includes(careLevel);
+  if (!known) {
+    // FAIL CLOSED — an unresolvable band is review-only, and carries the smallest budget (a budget's safe
+    // default is its smallest value, same reasoning as `initConvergeState`'s round-cap clamp).
+    return { careLevel: null, resolved: false, editorEnabled: false, rounds: 1, reason: 'unresolved-care-level' };
+  }
+  const editorEnabled = EDITOR_ENABLED_CARE_LEVELS.includes(careLevel);
+  const panelRounds = panelRigorForCareLevel(careLevel).rounds;
+  const rounds = editorEnabled
+    ? Math.min(Math.max(panelRounds, EDITOR_MIN_ROUNDS), NEGOTIATION_ROUND_CAP)
+    : panelRounds;
+  return {
+    careLevel,
+    resolved: true,
+    editorEnabled,
+    rounds,
+    reason: editorEnabled ? 'editor-enabled-band' : 'review-only-band',
   };
 }
 

@@ -33,6 +33,10 @@ import {
   deriveNegotiationOutcome,
   NEGOTIATION_OUTCOMES,
   NEGOTIATION_ROUND_CAP,
+  panelRigorForCareLevel,
+  editorPolicyForCareLevel,
+  EDITOR_ENABLED_CARE_LEVELS,
+  EDITOR_MIN_ROUNDS,
   VERDICTS,
   redTeamRequired,
   foldRedTeamVerdict,
@@ -1059,5 +1063,114 @@ describe('frozenLookup + the shared rank accessor', () => {
     // and each names the members it DOES know, which the old hand-written messages did not
     expect(() => verdictStrictness('nope')).toThrow(/known: /);
     expect(() => impactStrictness('nope')).toThrow(/known: /);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// #2908 — THE EDITOR KNOB. Ratified 2026-08-08: the convergence loop's editor may PUSH at `low` and nowhere
+// else; every other band (and any band that cannot be resolved) is REVIEW-ONLY. The rider is the load-bearing
+// half: the 2-round budget `low` needs rides a DEDICATED knob, because `panelRigorForCareLevel` is shared with
+// `/jury`, `/review` and `/converge` and raising its `low` entry would double everyone's negotiation budget to
+// buy something only this loop needs.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('editorPolicyForCareLevel — the editor is gated on the care band (#2908)', () => {
+  it('EDITOR ON at low — the one band where a machine may push a fix', () => {
+    const p = editorPolicyForCareLevel('low');
+    expect(p.editorEnabled).toBe(true);
+    expect(p.resolved).toBe(true);
+    expect(p.careLevel).toBe('low');
+  });
+
+  it('REVIEW-ONLY at elevated — the band where the editor was OBSERVED to fail (PR #1018)', () => {
+    const p = editorPolicyForCareLevel('elevated');
+    expect(p.editorEnabled).toBe(false);
+    expect(p.resolved).toBe(true);
+    expect(p.reason).toBe('review-only-band');
+  });
+
+  it('REVIEW-ONLY at high', () => {
+    const p = editorPolicyForCareLevel('high');
+    expect(p.editorEnabled).toBe(false);
+    expect(p.resolved).toBe(true);
+  });
+
+  it('REVIEW-ONLY at none (no panel, so certainly no editor)', () => {
+    expect(editorPolicyForCareLevel('none').editorEnabled).toBe(false);
+  });
+
+  it('the enabled set is EXACTLY {low} — an allow-list, so an unruled band is review-only by construction', () => {
+    expect([...EDITOR_ENABLED_CARE_LEVELS]).toEqual(['low']);
+    expect(Object.isFrozen(EDITOR_ENABLED_CARE_LEVELS)).toBe(true);
+    // Totality: every care band the enum knows resolves, and exactly one of them enables the editor.
+    const bands = ['none', 'low', 'elevated', 'high'];
+    const enabled = bands.filter((b) => editorPolicyForCareLevel(b).editorEnabled);
+    expect(enabled).toEqual(['low']);
+    expect(bands.every((b) => editorPolicyForCareLevel(b).resolved)).toBe(true);
+  });
+
+  // THE FAIL-CLOSED CLAUSE. Before #2908 an unresolvable band fell back to `low`, which was harmless only
+  // because `low` carried a 1-round cap that made the editor unreachable. Giving `low` its 2-round floor
+  // removes that accidental protection, so "we could not resolve the band" must now mean review-only outright.
+  describe('an ABSENT or UNRESOLVABLE care level is review-only, never editor-on (fail closed)', () => {
+    for (const bad of [undefined, null, '', '  ', 'LOW', 'Low', 'critical', 'medium', 0, 1, true, {}, [], ['low'], NaN]) {
+      it(`${JSON.stringify(bad) ?? String(bad)} → review-only, resolved:false, and does NOT throw`, () => {
+        let p;
+        expect(() => { p = editorPolicyForCareLevel(bad); }).not.toThrow();
+        expect(p.editorEnabled).toBe(false);
+        expect(p.resolved).toBe(false);
+        expect(p.careLevel).toBe(null);
+        expect(p.reason).toBe('unresolved-care-level');
+        expect(p.rounds).toBe(1); // a budget's safe default is its SMALLEST value
+      });
+    }
+
+    it('does NOT inherit panelRigorForCareLevel\'s throw — a gate that throws is a coin-flip on the catch', () => {
+      expect(() => panelRigorForCareLevel('critical')).toThrow(/unknown care-level/);
+      expect(() => editorPolicyForCareLevel('critical')).not.toThrow();
+    });
+  });
+});
+
+describe('the 2-round editor budget rides a DEDICATED knob — the shared dial is untouched (#2908 rider)', () => {
+  it('low gets TWO rounds through the editor knob, so the editor is actually REACHABLE there', () => {
+    // One round to push the fix, one for a fresh panel to judge the push. At 1 round the loop forces `escalate`
+    // at the cap BEFORE the editor step, so an editor-enabled 1-round band is a contradiction.
+    expect(EDITOR_MIN_ROUNDS).toBe(2);
+    const p = editorPolicyForCareLevel('low');
+    expect(p.editorEnabled).toBe(true);
+    expect(p.rounds).toBe(2);
+    expect(p.rounds).toBeGreaterThanOrEqual(EDITOR_MIN_ROUNDS);
+  });
+
+  // THE RIDER, PINNED. `/jury` (via resolveRoster) and `/review` read panelRigorForCareLevel.rounds. If someone
+  // "simplifies" #2908 by bumping the low entry there instead, this fails — which is the entire point.
+  it('panelRigorForCareLevel.low is STILL 1 round — /jury and /review budgets do not move', () => {
+    expect(panelRigorForCareLevel('low').rounds).toBe(1);
+  });
+
+  it('the whole shared dial is byte-stable across every band', () => {
+    expect(panelRigorForCareLevel('none').rounds).toBe(0);
+    expect(panelRigorForCareLevel('low').rounds).toBe(1);
+    expect(panelRigorForCareLevel('elevated').rounds).toBe(2);
+    expect(panelRigorForCareLevel('high').rounds).toBe(3);
+    expect(panelRigorForCareLevel('low').jurorsPerLens).toBe(1);
+    expect(panelRigorForCareLevel('high').jurorsPerLens).toBe(2);
+  });
+
+  it('/jury\'s roster resolution still reads the SHARED dial — low is 1 round there too', () => {
+    expect(resolveRoster({ careLevel: 'low' }).rounds).toBe(1);
+    expect(resolveRoster({ careLevel: 'elevated' }).rounds).toBe(2);
+  });
+
+  it('a REVIEW-ONLY band keeps the shared dial\'s round count exactly — the knob only floors the editor band', () => {
+    for (const band of ['none', 'elevated', 'high']) {
+      expect(editorPolicyForCareLevel(band).rounds).toBe(panelRigorForCareLevel(band).rounds);
+    }
+  });
+
+  it('never exceeds the loop\'s hard budget', () => {
+    for (const band of ['none', 'low', 'elevated', 'high']) {
+      expect(editorPolicyForCareLevel(band).rounds).toBeLessThanOrEqual(NEGOTIATION_ROUND_CAP);
+    }
   });
 });

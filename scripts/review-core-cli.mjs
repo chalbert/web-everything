@@ -71,6 +71,7 @@ import {
   buildValidatorMandate,
   careLevelFromReasons,
   panelRigorFromReasons,
+  editorPolicyFromReasons,
   deriveJurorInvite,
 } from './lib/review-core.mjs';
 import { renderPanelComment } from './lib/review-render.mjs';
@@ -399,6 +400,12 @@ function runComment(flags, asJson) {
  * scheduled runner) call this BEFORE fanning out the panel — they hold the parked PR's reasons but no findings
  * yet, so they cannot use `reduce`. Reasons come from `--reasons` (comma-separated) or `--reason`, or a JSON
  * `{reasons}` / `{reason}` on --file/stdin. Never throws on an unknown reason (the dial is lenient/advisory).
+ *
+ * #2908 — ALSO prints `editor: { careLevel, resolved, editorEnabled, rounds, reason }`, the convergence loop's
+ * EDITOR gate on its own knob (`editorPolicyFromReasons`). Two separate `rounds` on purpose: `rigor.rounds` is
+ * the SHARED panel dial every consumer reads and is untouched by #2908; `editor.rounds` is only the parked-PR
+ * loop's round cap, floored at `EDITOR_MIN_ROUNDS` when — and only when — the editor may push at that band. An
+ * EMPTY reason list resolves the editor gate to `resolved: false, editorEnabled: false` (fail closed).
  */
 function runRigor(flags, asJson) {
   let reasons = [];
@@ -414,14 +421,21 @@ function runRigor(flags, asJson) {
 
   const careLevel = careLevelFromReasons(reasons);
   const rigor = panelRigorFromReasons(reasons);
+  // #2908 — the EDITOR gate, on its own knob. `rigor.rounds` is the SHARED panel dial (`/jury`, `/review`,
+  // `/converge` all read it) and stays exactly as it was; `editor.rounds` is the convergence loop's own cap,
+  // which is the shared value floored at `EDITOR_MIN_ROUNDS` only for a band where the editor may push. Printed
+  // from the SAME resolved band as `careLevel` above, never re-derived by the caller.
+  const editor = editorPolicyFromReasons(reasons);
 
   if (asJson) {
-    process.stdout.write(`${JSON.stringify({ careLevel, rigor })}\n`);
+    process.stdout.write(`${JSON.stringify({ careLevel, rigor, editor })}\n`);
     return process.exit(0);
   }
   process.stdout.write(
     `care-level: ${careLevel}   rounds: ${rigor.rounds}   jurorsPerLens: ${rigor.jurorsPerLens}   `
-    + `lenses: ${rigor.lenses.join(', ') || '(none)'}   aggregation: ${rigor.aggregation}\n`,
+    + `lenses: ${rigor.lenses.join(', ') || '(none)'}   aggregation: ${rigor.aggregation}\n`
+    + `editor: ${editor.editorEnabled ? 'ENABLED' : 'review-only'} (${editor.reason})   `
+    + `editor-rounds: ${editor.rounds}\n`,
   );
   return process.exit(0);
 }
