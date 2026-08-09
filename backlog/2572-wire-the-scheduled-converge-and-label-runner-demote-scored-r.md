@@ -156,7 +156,7 @@ would record a wall of "keep parked" that looks healthy and means nothing. The p
 `CONVEYOR_JURY_DIR` ([`we:scripts/lib/jury-ledger.mjs:70`](../scripts/lib/jury-ledger.mjs)) to the **primary**
 checkout's ledger and reads it read-only. That env var is the whole reason the daemon is host-bound on the state
 axis, so **promoting the ledger to a shared store is the one change that would let any host run the shadow half** —
-including a scheduled CI job, since shadow spends no model context at all. **Filed as #xmhw1m5**; not done here.
+including a scheduled CI job, since shadow spends no model context at all. **Filed as #3038**; not done here.
 
 **Safety rails that ride the ruling.** A pass refreshes its clone with `reset --hard`, so both the pass and the
 installer **refuse to run against the operator's primary checkout** (the forced invariant that closed #2501 Fork
