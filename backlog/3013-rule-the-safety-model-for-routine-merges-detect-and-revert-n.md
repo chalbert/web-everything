@@ -12,6 +12,38 @@ tags: [governance, review-integrity, drain, throughput, statute-candidate]
 
 # Rule the safety model for routine merges: detect-and-revert, not prevent-everything
 
+> **RULED 2026-08-09 (operator, in session), Fork 2 → (c): the irreversibility criterion becomes DATA in the
+> review-policy contract, computed from the DIFF, fail-closed.** Ruled in the words *"3013 Fork 2 ratified"*,
+> on the prepared default. #2563 point 3's always-review blacklist is ratified and **unpopulated**; this
+> populates it. It is data, not a new rubric term — **no new anchor, no new hold tier, and no path gating in
+> `we:scripts/lib/review-escalation.mjs`**, which #2840 cleaned of exactly that on 2026-08-02.
+>
+> **What is ratified is the four classes plus the fail-closed default — never the regexes.** The regexes are
+> illustrative and must be replaceable without a re-ruling. The four classes, each grounded in a verified case:
+> 1. **Unattended execution** — PR #1113: the converge daemon self-updates by `reset --hard origin/main` every
+>    15 minutes, so anything landing on `main` that touches it executes unattended within 15 minutes.
+> 2. **Writes outside version control** — PR #1101 (board state), PR #1068 (pool + agent memory): a revert
+>    restores the code and none of the data.
+> 3. **Publishes or pushes externally** — undoing needs a history rewrite.
+> 4. **Adds a destructive git operation** (`reset --hard`, `clean -fd`, `push --force`, branch delete) — PR
+>    #1120 records a real 2026-08-08 incident of exactly this at the primary checkout.
+>
+> **FAIL CLOSED is part of the ruling, not an implementation note.** `diffHunks` is genuinely `null` when the
+> drain has no local clone (documented fallback in `we:scripts/merge-ai-prs.mjs`). **Absent diff ⇒ not
+> routine.** Prep's own first draft returned "routine" for anything unmatched — the identical fail-open this
+> fork rejects branch (b) for — and the polarity was corrected before ruling.
+>
+> **This predicate is a fail-closed FLOOR, never a complete taxonomy.** The skeptic named a real fifth class
+> it misses — **weakening a schema validator** (the PR #1096 shape: an ordinary logic defect silently
+> corrupting version-controlled content, where everything corrupted while the guard was weak stays corrupt
+> after the revert). That class is already governed by
+> [#agent-convergence-independent-validation](docs/agent/platform-decisions.md#agent-convergence-independent-validation)'s
+> coverage-drop and test-tampering clauses, so any statute text must **cite and compose with #2398 rather than
+> silently narrow it**.
+>
+> **Both forks are now ruled.** The item remains `open` for one reason only: `codifiedIn` is blocked on the
+> four statute collisions below. It is not awaiting further judgment.
+>
 > **RULED 2026-08-09 (operator, in session), Fork 1 → (a): prevention stands. No routine tier.**
 > No PR merges with its review hold unsatisfied. The operator ruled on the presented preparation, in the
 > words *"3013 keep prevention"*, after being shown that prep's own recommendation had **reversed** during
