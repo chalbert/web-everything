@@ -26,10 +26,14 @@
  * AND the standard's own declarations: the four `@webeverything/*` contract packages (`contracts/`,
  * `capability-manifest/`, `webcases/`, `validation-generation/`), the capability + conformance substrate
  * (`capabilities/`, `conformance-vectors/`, `conformance-evidence/`, `wrapper-conformance/`), and the 36
- * per-domain declaration trees whose `contract.ts` says in as many words that it becomes the
- * `@webeverything/contracts/<x>` entry FUI depends on. Three DECLARATION-SHAPE rules (`**\/contract.ts`,
- * `**\/*-contract.ts`, `**\/*.vectors.ts`) close the same gap for a domain nobody has written a directory
- * rule for yet. See `conventions.productScope` in the rule list.
+ * per-domain declaration trees. Of those 36, 31 hold a `contract.ts`/`*-contract.ts` and 18 say in as many
+ * words that the module becomes the `@webeverything/contracts/<x>` entry FUI depends on; the rest — notably
+ * `error-summary/`, `interaction-state/`, `module-resolution/`, `source-resolution/`, `webtraits/`, which
+ * hold no contract file — are ruled on the seam test itself, not on a self-description. Three
+ * DECLARATION-SHAPE rules (`**\/contract.ts`, `**\/*-contract.ts`, `**\/*.vectors.ts`) close the same gap
+ * for a domain nobody has written a directory rule for yet; they are ordered BELOW every machinery rule and
+ * below `reports/**`, which protects the trees that HAVE a rule and not the eight that do not. See
+ * `conventions.productScope` in the rule list.
  *
  * A GAP REMAINS, and it is still one-directional. Read `conventions.knownGap` before quoting the `product`
  * figure: machinery is matched in all nine of its homes; product is matched in 44 — but EIGHT tracked
@@ -39,6 +43,12 @@
  * "WE-owned data". So `product` is still a LOWER bound and the machinery:product ratio still an UPPER one —
  * by 5,245 tracked lines now instead of 26,670, and by at most tens of added lines a week. The coverage
  * ratchet in `__tests__/output-mix.test.mjs` pins exactly which directories those are.
+ *
+ * IT IS NOT ONLY A LOWER BOUND ANY MORE. `src/_includes/research-descriptions/**` — write-ups about the
+ * delivery loop, published as /research/ pages — is `product` via `src/**` while the same genre in
+ * `reports/**` is `other`. It is 39% of all `product` lines in the measured window (42% of the 2026-07-13
+ * week), more than this whole revision added. That is an open operator call pushing the other way, and it is
+ * stated in `conventions.knownGap` so nobody quotes the figure without it.
  *
  * ── Weeks are ISO weeks in UTC, and that is what makes it reproducible ───────────────────────────────────
  *

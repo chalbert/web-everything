@@ -100,15 +100,24 @@ did not. They do now. The test the rule list encodes (`conventions.productScope`
 seam?* — is it part of what WE ships to Frontier UI and to any other implementor.
 
 Ruled `product` in that follow-up, **44 directories**: the four real `@webeverything/*` packages
-(`we:contracts/` with its 36 subpath exports and publish workflow, `we:capability-manifest/`, `we:webcases/`,
-`we:validation-generation/`); the capability + conformance substrate (`we:capabilities/`,
+(`we:contracts/` with its **35** subpath exports and publish workflow, `we:capability-manifest/`,
+`we:webcases/`, `we:validation-generation/`); the capability + conformance substrate (`we:capabilities/`,
 `we:conformance-vectors/`, `we:conformance-evidence/`, `we:wrapper-conformance/`); and the **36 per-domain
-declaration trees** whose contract module says in as many words that it becomes the
-`@webeverything/contracts/<x>` entry FUI depends on (`we:intl/`, `we:guard/`, `we:webtheme/`,
-`we:permissions/`, `we:positioning/`, `we:realtime/`, …). Plus three **declaration-shape** rules —
-`we:**/contract.ts`, `we:**/*-contract.ts`, `we:**/*.vectors.ts` — so a NEW domain's contract counts from the
-day it is written, not the day someone remembers to add a directory rule. That is 21,425 tracked lines moved
-from `other` to `product`, and +404 / +26 / +193 / +0 / +0 added lines across the five measured weeks.
+declaration trees** (`we:intl/`, `we:guard/`, `we:webtheme/`, `we:permissions/`, `we:positioning/`,
+`we:realtime/`, …). Plus three **declaration-shape** rules — `we:**/contract.ts`, `we:**/*-contract.ts`,
+`we:**/*.vectors.ts` — so a NEW domain's contract counts from the day it is written, not the day someone
+remembers to add a directory rule. That is 21,425 tracked lines moved from `other` to `product`, and
++404 / +26 / +193 / +0 / +0 added lines across the five measured weeks.
+
+**Be exact about the evidence for those 36**, because it is the load-bearing claim and an earlier draft
+overstated it. 31 of the 36 hold a file of the `we:**/contract.ts` or `we:**/*-contract.ts` shape; **18**
+carry the sentence "can become the `@webeverything/contracts/<x>` entry that FUI depends on (the FUI→WE
+arrow), superseding byte-replication" verbatim. The other 18 do not say it, and five —
+`we:error-summary/`, `we:interaction-state/`, `we:module-resolution/`, `we:source-resolution/`,
+`we:webtraits/` — hold no contract file at all. They are dependency-free models and resolvers ruled on the
+seam test itself, and #1294 (open) argues WE-resident logic of exactly that kind should relocate to FUI.
+Reasonable to call `product`; not evidenced by a self-description, so an operator reversing any of those
+five is disagreeing with a judgement, not a fact.
 
 **The earlier projection was close but high.** It gave +1,591 → +1,909 → +427 → +627 → +0 for a *fully*
 widened definition; the measured result is **+1,510 → +1,909 → +399 → +627 → +0**, the difference being
@@ -122,8 +131,17 @@ product**.
 `we:design-refs/`, `we:design-systems/`, `we:eleventy/`, `we:functions/`, `we:site/`, `we:test-pages/` —
 5,245 tracked text lines, and 81 / 0 / 28 / 0 / 0 added lines over the five weeks. So `product` is still a
 lower bound and the ratio still an upper bound, by tens of lines a week rather than hundreds. (The 38,852
-figure quoted for the old gap counted newline bytes in binary screenshot assets under `we:design-refs/`; the
-comparable text-line figure was 26,670.)
+figure quoted for the old gap counted newline bytes in binary screenshot assets under `we:design-refs/` —
+8,644 such bytes. The comparable text-line figure is 26,670, which reproduces exactly; the crude
+newline-byte count over that same old scope comes to 38,953, so 38,852 does not reproduce precisely either
+way and should not be re-quoted.)
+
+**The shape rules do not protect what has no rule.** Ordering them below the machinery block and
+`we:reports/**` defends every tree that HAS a rule — but not the eight below. `we:eleventy/x/contract.ts`
+would score `product` today even though the rule list's own `productScope` calls 11ty build config
+machinery. The exposure is currently **empty** — zero tracked files and zero paths in the five measured
+weeks are classified by a shape rule — and it is now pinned by two tests (`pins where the shape rules still
+reach` and `keeps that exposure empty`), so it cannot start counting without a visible diff.
 
 **Two of the eight are live questions, not settled `other`,** and both would be `product` under the stated
 test — left unruled deliberately for the operator:
@@ -138,6 +156,27 @@ The other six read delivery-side or stale: `we:audits/` (write-ups, like `we:rep
 (brand reference screenshots for the mark loop), `we:eleventy/` (11ty build config), `we:functions/` (the
 Cloudflare deploy gate, #1137), `we:site/` (a README), `we:test-pages/` (E2E pages importing the deleted
 vendored `we:plugs/`).
+
+## The bias is no longer purely one-way — the biggest open call is inside `we:src/`
+
+Recorded in review of the widening. Everything above makes `product` a **lower** bound. There is now a
+counter-bias of larger size running the other way, and it predates this revision:
+`we:src/_includes/research-descriptions/` is `product` via the `we:src/**` rule, but it holds write-ups
+**about the delivery loop** — per-lane ownership signals, delivery-coordinator placement, the headless agent
+runner contract, review gating — published as `/research/` pages. That is the same genre as `we:reports/`,
+which is explicitly `other`.
+
+| | 07-06 | 07-13 | 07-20 | 07-27 | 08-03 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `we:src/_includes/research-descriptions/` | +506 | +808 | +72 | +369 | +0 |
+| everything this revision added | +404 | +26 | +193 | +0 | +0 |
+| total `product` | +1,510 | +1,909 | +399 | +627 | +0 |
+
+39% of every `product` line in the window, and **42% of the 2026-07-13 week that reads 7.2×** — the one week
+the headline nearly clears the bar. Classing it `other` (as `we:reports/` is) would take that week to roughly
+12.4×, i.e. the "above 20× in three of four" story becomes "above 10× in four of four". **Operator call, not
+taken here:** is a write-up about the loop still `product` because the product site renders it? Whichever
+way it goes, the figure should not be quoted for #3010 without this paragraph.
 
 `rule-list coverage over the real tree` in `we:scripts/lib/__tests__/output-mix.test.mjs` pins that
 eight-directory list **and** requires `conventions.knownGap` to name every entry, so a new uncovered

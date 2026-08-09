@@ -205,12 +205,47 @@ describe('classifyPath — real repository paths', () => {
     expect(classOf('brand-new-domain/provider.ts')).toBe('other');
   });
 
-  it('keeps the delivery-side trees above the shape rules, so a write-up never scores as a contract', () => {
+  it('keeps the RULED delivery-side trees above the shape rules, so a write-up never scores as a contract', () => {
     // `reports/**` and every machinery rule sit ABOVE the product block on purpose. If the shape rules were
     // hoisted over them, a design note or a script fixture named contract.ts would be credited as product.
+    for (const d of ['scripts', 'tools', 'backlog', '.claude', 'skills-src', 'agent-memory-src', '.github', '.githooks']) {
+      expect(classOf(`${d}/fixtures/contract.ts`), `${d}/ no longer beats the shape rules`).toBe('machinery');
+      expect(classOf(`${d}/fixtures/x.vectors.ts`), `${d}/ no longer beats the shape rules`).toBe('machinery');
+    }
     expect(classOf('reports/2026-01-01-whatever/contract.ts')).toBe('other');
-    expect(classOf('scripts/__tests__/fixtures/contract.ts')).toBe('machinery');
+    expect(classOf('reports/2026-01-01-whatever/x.vectors.ts')).toBe('other');
     expect(classOf('docs/agent/examples/contract.ts')).toBe('machinery');
+  });
+
+  /**
+   * …AND WHERE THAT PROTECTION STOPS. Ordering only defends a tree that HAS a rule. The eight directories
+   * `conventions.knownGap` pins as uncovered have none, so a declaration-shaped file inside any of them is
+   * credited as `product` today — `eleventy/x/contract.ts` is build config scoring as the standard's own
+   * declaration. The exposure is currently EMPTY (no tracked file and no path in the five measured weeks is
+   * classified by a shape rule, asserted below), so this is a latent hole rather than a live over-count. It
+   * is pinned rather than quietly fixed because closing it means RULING those directories, which moves the
+   * headline number and is the operator's call — but it must not be able to change without a visible diff.
+   */
+  it('pins where the shape rules still reach — an uncovered directory is NOT protected', () => {
+    for (const d of ['audits', 'config', 'design-refs', 'design-systems', 'eleventy', 'functions', 'site', 'test-pages']) {
+      expect(classOf(`${d}/probe.ts`), `${d}/ is no longer uncovered`).toBe('other');
+      expect(classOf(`${d}/nested/contract.ts`), `${d}/ shape exposure changed`).toBe('product');
+      expect(classOf(`${d}/nested/x.vectors.ts`), `${d}/ shape exposure changed`).toBe('product');
+    }
+  });
+
+  it('keeps that exposure empty — nothing tracked today is classified by a shape rule', () => {
+    const shapes = new Set(['**/contract.ts', '**/*-contract.ts', '**/*.vectors.ts']);
+    const tracked = execFileSync('git', ['-C', ROOT, 'ls-tree', '-r', '--name-only', 'HEAD'], {
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024 * 256,
+    })
+      .split('\n')
+      .filter(Boolean);
+    const viaShape = tracked.filter((f) => shapes.has(classifyPath(f, RULES).match));
+    // A hit is not automatically wrong — it may be a genuine new domain's contract. But it must be SEEN:
+    // every such file is product without any directory rule vouching for it.
+    expect(viaShape, `these files score product only by SHAPE — rule their directory or accept them here`).toEqual([]);
   });
 
   it('answers "why is this file machinery?" in one line, from the file', () => {
