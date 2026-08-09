@@ -170,3 +170,24 @@ hood while `wouldClear` keeps saying `true`.
 - Blocker: #2844 (PR #1100) — the self-clear-refusal rail this item threads ids into.
 - `we:docs/agent/backlog-workflow.md` — the #2838 enforce-flip precondition this indirectly protects
   (a soak that spans the #1100 merge boundary must not silently invert its own meaning).
+
+## Note added 2026-08-09 — re-derived independently, and what it costs #2675
+
+This gap was re-found from scratch during a residual-filing pass and was about to be filed as a new card
+before this one was located. Recording the second derivation here so it is not filed a third time, plus the
+one framing it adds:
+
+- The observation period this silently empties belongs to
+  [#2675](/backlog/2675-auto-land-seam-for-clean-auto-dispositions-defaulting-to-sha/) (resolved), which
+  ratified SHADOW as the auto-land seam's default precisely so the judge could log what it *would* dispose
+  "for a confidence-building period". Once PR #1100 lands, every shadow line reads `self-clear-refused:
+  unknown-clearer`, so that period accumulates no evidence about the rail it exists to observe. Fail-closed
+  and therefore safe; useless as a soak.
+- The module header's wording — "the common case today" (verified present at line 1874 of
+  `gh pr diff 1100`) — reads as temporary. Nothing in the code makes it temporary: the runner reads only
+  `--json number,labels` (verified at `we:scripts/review-runner.mjs` lines 102 and 123), so `authorId` is
+  structurally unobtainable there until the `body` field is added, exactly as this item's acceptance
+  criteria already require.
+- Also re-confirmed on `main` at `a68b4902`: `clearerId`, `authorId`, `currentActorId` and
+  `decideClearerIndependence` appear nowhere under `we:scripts/` — so nothing is refused today, and this
+  item is correctly described above as latent rather than live.
