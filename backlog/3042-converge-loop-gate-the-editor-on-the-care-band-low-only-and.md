@@ -1,4 +1,5 @@
 ---
+bornAs: xlambgc
 kind: story
 size: 3
 status: resolved
