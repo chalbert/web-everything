@@ -47,7 +47,7 @@ import { join } from 'node:path';
 // #x9xqexm's base-independent third marker. Independent concerns.
 import {
   REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker,
-  buildReviewedContributionMarker, READY_TO_MERGE_LABEL,
+  buildReviewedContributionMarker, buildClearedHumanMarker, READY_TO_MERGE_LABEL,
 } from './lib/review-escalation.mjs';
 // #2979 — the NET diff vs current main, NOT `gh pr diff`'s three-dot output (see the fingerprint block in
 // `runReviewLabelCli` for why that distinction is the whole point). Imported from the CLI that owns it, the same
@@ -602,11 +602,17 @@ export function buildVerdictComment({ to, actor, headSha = '', body = '', reason
   // pass causes within minutes of every accept — measured on PR #1100, where the clearance was revoked 3m07s
   // after it was granted over three lines of pure base movement.
   const stampsAcceptance = to === 'accepted' || to === 'clear-human';
+  // #xmnl36p — `clear-human` ALSO stamps a machine-readable clearance marker, so an automated re-score can read
+  // the clearance back and announce that it is overriding one (`parseOperatorClearance`). Until this, the only
+  // record was the prose attribution below — which the reader still parses as a fallback, so clearances written
+  // before this item (WE PR #1106 among them) are covered too. The marker adds NO authority: nothing merges on
+  // it; it exists so a re-hold can be loud instead of silent.
   const marker = stampsAcceptance
     ? [
       buildReviewedShaMarker(headSha),
       buildReviewedDiffMarker(reviewedDiff),
       buildReviewedContributionMarker(reviewedDiff),
+      to === 'clear-human' ? buildClearedHumanMarker(actor) : '',
     ].filter(Boolean).join('\n')
     : '';
   const text = stripReviewedShaMarkers(typeof body === 'string' ? body : '');

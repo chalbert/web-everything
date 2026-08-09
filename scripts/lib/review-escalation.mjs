@@ -971,6 +971,64 @@ export function normalizeContributionFingerprint(diffText) {
   return createHash('sha256').update(normalized, 'utf8').digest('hex');
 }
 
+/**
+ * #xmnl36p — THE OPERATOR CLEARANCE RECORD, read back. `review-set-label.mjs --to=clear-human` (#2895) is the
+ * ONE sanctioned way a `review:human` hold is lifted, and it already writes a durable, attributed comment. Until
+ * now NOTHING read that comment back, so every automated re-score re-derived "this PR is gate-self → apply
+ * `review:human`" from the diff alone and re-imposed the exact hold the operator had just lifted — with no
+ * record that it was overriding a clearance, because the drain's human-park path posts no comment at all (see
+ * `shouldPostParkReasonComment`) and its PR-body block is a ONE-SHOT append (`bodyHasEscalationReason`).
+ * Observed on WE PR #1106: cleared 00:34:00Z, re-held 00:41:28Z, no comment.
+ *
+ * TWO SHAPES, both parsed, because the record predates the marker. Going forward `buildVerdictComment` stamps an
+ * explicit `<!-- cleared-human: <actor> -->` marker. Every clearance written before this item carries only the
+ * prose attribution line, which is produced by that same single pure function and is therefore just as much a
+ * contract — matching it is what makes the fix cover the PRs already stuck in this state (#1106 among them).
+ * LATEST wins, mirroring `parseReviewedSha`, so a re-clear after a bounce supersedes an older record.
+ *
+ * SAME FORGE RESIDUAL as its siblings, stated rather than implied: anyone who can comment on a PR can write
+ * these bytes. That is not a new exposure — #2895 already ruled the unforgeable actor signal deferred (#2946),
+ * and this record is used ONLY to make an automated re-hold LOUD and ATTRIBUTED, never to permit a merge. A
+ * forged clearance comment cannot land anything: `decideReviewGate` still parks, and `applyLabel` is unchanged.
+ */
+export const CLEARED_HUMAN_MARKER = 'cleared-human';
+const CLEARED_HUMAN_RE = new RegExp(`<!--\\s*${CLEARED_HUMAN_MARKER}:\\s*([^>]*?)\\s*-->`, 'g');
+const CLEARED_HUMAN_PROSE_RE = /^Cleared by (.+?) via `review-set-label\.mjs --to=clear-human`/gm;
+
+/** Build the operator-clearance marker for a `--to=clear-human` verdict comment. Pure. Empty actor → '' (no
+ *  marker; the prose attribution line remains the record, exactly as it was before #xmnl36p). */
+export function buildClearedHumanMarker(actor) {
+  const name = String(actor || '').replace(/[\r\n>]+/g, ' ').trim();
+  return name ? `<!-- ${CLEARED_HUMAN_MARKER}: ${name} -->` : '';
+}
+
+/**
+ * Extract the operator clearance a PR carries, from its raw `gh pr view --json comments` array. Pure.
+ *
+ * AN EMPTY ACTOR IS NOT A CLEARANCE. `buildClearedHumanMarker('')` renders '' (no marker), so the producer
+ * never emits one — but a hand-written or forged `<!-- cleared-human: -->` would otherwise parse to
+ * `{actor:''}`, and that value is rendered in TWO places that then disagree: `decideReviewGate`'s reason says
+ * "recorded by  — a re-clear is required" (a blank where a name belongs) while
+ * `buildClearanceRevocationComment` falls back to "the operator". A record with no attribution is not the
+ * durable, attributed record this whole item is about, so it is refused here rather than rendered twice
+ * differently downstream. Review of PR #1124 (finding 3).
+ * @returns {{actor:string}|null} the LATEST clearance record, or `null` when the PR was never `clear-human`-ed.
+ */
+export function parseOperatorClearance(comments) {
+  let latest = null;
+  const take = (raw) => { const actor = String(raw || '').trim(); if (actor) latest = { actor }; };
+  for (const c of Array.isArray(comments) ? comments : []) {
+    const body = c && typeof c.body === 'string' ? c.body : '';
+    if (!body) continue;
+    let m;
+    CLEARED_HUMAN_RE.lastIndex = 0;
+    while ((m = CLEARED_HUMAN_RE.exec(body)) !== null) take(m[1]);
+    CLEARED_HUMAN_PROSE_RE.lastIndex = 0;
+    while ((m = CLEARED_HUMAN_PROSE_RE.exec(body)) !== null) take(m[1]);
+  }
+  return latest;
+}
+
 /** The marker carrying the #x9xqexm CONTRIBUTION fingerprint, stamped beside `reviewed-sha` / `reviewed-diff`. */
 export const REVIEWED_CONTRIBUTION_MARKER = 'reviewed-contribution';
 const REVIEWED_CONTRIBUTION_RE = new RegExp(`<!--\\s*${REVIEWED_CONTRIBUTION_MARKER}:\\s*([0-9a-f]{64})\\s*-->`, 'g');
@@ -1252,6 +1310,37 @@ export function buildEscalationReasonBlock(reasons) {
   return `\n\n${ESCALATION_REASON_MARKER}\n\n${list.map((r) => `- ${r}`).join('\n')}\n`;
 }
 
+/**
+ * #xmnl36p — the durable CLEARANCE-REVOCATION notice. Pure. Rendered whenever an automated re-score re-imposes
+ * `review:human` on a PR an operator had cleared, and posted UNCONDITIONALLY by the caller — it is deliberately
+ * NOT routed through `shouldPostParkReasonComment` (which suppresses every human-park comment) nor through the
+ * #2324 PR-body block (a one-shot append that writes nothing on the second and every later re-hold). Those two
+ * together are why WE PR #1106's re-hold left no trace: the operator saw a cleared PR silently become held again.
+ *
+ * It names the head SHA, so `hasDrainReasonComment`'s exact-text dedup posts ONE notice per distinct head — a
+ * `--watch` loop re-reaching this state on the same head stays quiet, and a genuinely new revocation is loud.
+ * @param {{clearance:{actor:string}, reason:string, pr:(number|string), repo:string}} o
+ */
+export function buildClearanceRevocationComment({ clearance, reason, pr, repo } = {}) {
+  const who = (clearance && clearance.actor) || 'the operator';
+  return [
+    `**Your \`review:human\` clearance was revoked by an automated re-score.** This PR was cleared by ${who} `
+      + 'via the sanctioned `--to=clear-human` path; the drain has just put `review:human` back on. Nothing '
+      + 'merged, and no agent can clear it — but the clearance no longer stands and a re-clear is required.',
+    '',
+    `**Why:** ${reason}`,
+    '',
+    '**To re-clear** (after checking the new head is what you cleared):',
+    '',
+    '```',
+    `node scripts/review-set-label.mjs ${pr} --repo=${repo} --to=clear-human --actor="<you>" --reason="<your instruction>"`,
+    '```',
+    '',
+    'If this keeps happening on a head you never pushed, the cause is the drain\'s own rebase moving the tree '
+      + 'under an accepted lane, not new content — see `acceptanceCoversHead` (#2409/#x169fqe/#x9xqexm).',
+  ].join('\n');
+}
+
 /** Does this PR body already carry the escalation-reason marker (#2324)? Pure — the cheap presence check the
  *  gate verifies without re-deriving the reasons itself. */
 export function bodyHasEscalationReason(body) {
@@ -1278,6 +1367,7 @@ export function bodyHasEscalationReason(body) {
 export function decideReviewGate({
   escalate, humanRequired = false, labels = [], acceptedSha = null, headSha = null,
   acceptedDiff = null, headDiff = null, acceptedContribution = null, headContribution = null,
+  operatorClearance = null,
 } = {}) {
   // A reviewer verdict (whoever applied it — for a human-gated PR only a human can) always wins, and is checked
   // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
@@ -1300,12 +1390,34 @@ export function decideReviewGate({
       // re-clear it. The drain drops the now-stale review:accepted alongside applying this label (see
       // merge-ai-prs.mjs). staleAcceptance flags this as the #2409 outcome for the drain's comment + label swap.
       const toHuman = humanRequired || hasReviewLabel(labels, REVIEW_LABELS.human);
+      // #xmnl36p — IS THIS RE-PARK REVOKING AN OPERATOR CLEARANCE? It is, exactly when it re-imposes
+      // `review:human` on a PR whose `review:human` was lifted by the sanctioned `--to=clear-human` ceremony
+      // (`operatorClearance`) — i.e. the label is being ADDED BACK, not merely kept. Note the second conjunct:
+      // when the PR still carries `review:human` the hold was never lifted this cycle and re-applying it is a
+      // no-op reconcile, not a revocation.
+      //
+      // WHAT THIS FLAG DOES AND DOES NOT DO, so nobody reads it as a loosening. It does NOT change `action`
+      // (still `park` — the merge stays refused), it does NOT change `applyLabel` (still `review:human` — an
+      // agent still cannot clear a gate-self edit, #2285/INVARIANT 2), and it does NOT change `humanRequired`.
+      // The verdict is byte-identical to before. What it adds is an OBLIGATION on the caller: a re-hold that
+      // overrides a recorded human clearance must SAY SO, durably, every time it happens. Downgrading the label
+      // instead (to `review:pending`) was considered and REJECTED — `review:pending` is agent-clearable
+      // (`decideSetLabel` refuses `--to=accepted` only on a `review:human` PR, and `auto-land-seam.mjs` writes
+      // `review:accepted` unattended in `enforce` mode), so it would hand an agent the gate-self clearance the
+      // whole tier exists to withhold. Making the re-hold impossible needs a hold label that is neither
+      // operator-only nor agent-clearable, which is a new tier across ~10 consumers, not a change here.
+      const revokesClearance = !!(toHuman && operatorClearance && !hasReviewLabel(labels, REVIEW_LABELS.human));
       return {
         action: 'park',
-        reason: `review:accepted is STALE — ${fresh.reason}; re-parking for a fresh review`,
+        reason: revokesClearance
+          ? `review:accepted is STALE — ${fresh.reason}; re-parking for a fresh review. This REVOKES the `
+            + `review:human clearance recorded by ${operatorClearance.actor} — a re-clear is required`
+          : `review:accepted is STALE — ${fresh.reason}; re-parking for a fresh review`,
         applyLabel: toHuman ? REVIEW_LABELS.human : REVIEW_LABELS.pending,
         staleAcceptance: true,
         humanRequired: !!toHuman,
+        revokesClearance,
+        clearance: revokesClearance ? operatorClearance : null,
       };
     }
     return { action: 'merge', reason: 'review:accepted — reviewer accepted, merge' };

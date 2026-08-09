@@ -34,6 +34,9 @@ import {
   parseReviewedContribution,
   isDeclarativeLeashPath,
   isPolicyDerivationPath,
+  parseOperatorClearance,
+  buildClearedHumanMarker,
+  buildClearanceRevocationComment,
 } from '../review-escalation.mjs';
 import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
 
@@ -1288,5 +1291,166 @@ describe('the #2771/#2785 tier table — real repo paths, pinned route', () => {
       // …and on the cumulative human basis (#2390), where the own-delta hides it.
       expect(scoreEscalation({ changedFiles: ['demos/spa.html'], humanBasisFiles: ['demos/spa.html', s] }).humanRequired).toBe(true);
     }
+  });
+});
+
+describe('#xmnl36p — an automated re-score never revokes an operator clearance SILENTLY (WE PR #1106)', () => {
+  // THE REPRODUCED SEQUENCE, from the verified timeline of WE PR #1106:
+  //   00:33:59Z  the operator ran `review-set-label.mjs --to=clear-human`; the durable comment stamped
+  //              `reviewed-sha: 53b37954`, `reviewed-diff: 3265beec…`, `reviewed-contribution: b5d1eafe…`.
+  //   00:34:00Z  review:pending + review:human OFF, review:accepted ON.   00:34:14Z  ready-to-merge ON.
+  //   00:35:46Z / 00:41:19Z  the DRAIN's own rebase-drop commits moved the head to e97d6c3b — no content of the
+  //              PR's own changed; `main` merely grew 15 lines above one hunk and 4 above another.
+  //   00:41:26Z  ready-to-merge OFF.   00:41:28Z  review:human back ON. NO comment. The clearance was gone.
+  //
+  // The two gap values below are the ONLY difference measured between the two 137 KB net diffs (verified by
+  // recomputing both from the real commits): `~424 → ~439` and `~324 → ~328`. Not one `+`/`-` line differs.
+  const contribution = (gapA, gapB) => [
+    'diff --git a/scripts/lib/review-core.mjs b/scripts/lib/review-core.mjs',
+    'index 1fb268d1..191cf371 100644',
+    '--- a/scripts/lib/review-core.mjs',
+    '+++ b/scripts/lib/review-core.mjs',
+    '@@ -100,6 +100,7 @@ import {',
+    '+  editorPolicyForCareLevel,',
+    ' context line',
+    `@@ -${100 + gapA},6 +${100 + gapA},115 @@ export function panelRigorFromReasons(reasons) {`,
+    '+/**',
+    '+ * #2908 — the EDITOR POLICY for a set of escalation reasons.',
+    '+ */',
+    ' context line',
+    `@@ -${1000 + gapB},6 +${1000 + gapB},12 @@ function runComment(flags, asJson) {`,
+    '+ * #2908 — ALSO prints `editor: { careLevel, resolved, editorEnabled, rounds, reason }`.',
+    ' context line',
+  ].join('\n');
+  const CLEARED = contribution(424, 324);
+  const REBASED = contribution(439, 328); // `main` grew BETWEEN the lane's own hunks — pure base movement
+
+  // The verbatim attribution line PR #1106's clearance comment carries (pre-#xmnl36p, marker-less).
+  const LEGACY_CLEARANCE = {
+    body: '✅ review — `review:human` cleared via the sanctioned path\n\n'
+      + 'Cleared by Nicolas Gilbert via `review-set-label.mjs --to=clear-human` (#2895).\n\n'
+      + '> Operator approved in session 2026-08-08: \'approved\'\n\n'
+      + '<!-- reviewed-sha: 53b379543095120ecc20e926dafa68df195d677d -->',
+  };
+  const LABELS_AT_0041 = ['review:accepted', 'ready-to-merge']; // review:human is GONE — the operator cleared it
+  const staleArgs = {
+    escalate: true,
+    humanRequired: true, // the real fresh score: statute + gate-derivation + blast-radius + size
+    acceptedSha: '53b379543095120ecc20e926dafa68df195d677d',
+    headSha: 'e97d6c3b26524d793a892a2a3c312c2491e62752',
+    acceptedContribution: CLEARED,
+    headContribution: REBASED,
+  };
+
+  it('THE TRIGGER — a base move BETWEEN the lane\'s own hunks defeats the #x9xqexm contribution escape', () => {
+    // Not one added/removed line differs, yet the inter-hunk GAP signal (added by #x9xqexm to catch a
+    // relocation) is variant under this base movement — pinned here as the mechanism that fires the re-park,
+    // NOT as desired behaviour. It is the INVERSE of #x413mbt and was mis-cited as it in the first cut of this
+    // item (PR #1124 review, finding 2): #x413mbt is the digest COLLIDING on two different contributions (a
+    // false HONOUR, and it turns on the gap being PRESERVED under a uniform shift); this is the digest
+    // DIVERGING on an unchanged contribution (a false STALE, under a NON-uniform base move). That direction is
+    // filed nowhere yet.
+    expect(normalizeContributionFingerprint(CLEARED)).not.toBe(normalizeContributionFingerprint(REBASED));
+    expect(acceptanceCoversHead({
+      acceptedSha: staleArgs.acceptedSha, headSha: staleArgs.headSha,
+      acceptedContribution: CLEARED, headContribution: REBASED,
+    }).covers).toBe(false);
+  });
+
+  it('the clearance record is READ BACK from the pre-#xmnl36p prose comment PR #1106 actually carries', () => {
+    expect(parseOperatorClearance([LEGACY_CLEARANCE])).toEqual({ actor: 'Nicolas Gilbert' });
+  });
+
+  it('the clearance record is READ BACK from the new machine marker, and the LATEST wins', () => {
+    expect(parseOperatorClearance([{ body: `x ${buildClearedHumanMarker('Ada')} y` }])).toEqual({ actor: 'Ada' });
+    expect(parseOperatorClearance([LEGACY_CLEARANCE, { body: buildClearedHumanMarker('Grace') }]))
+      .toEqual({ actor: 'Grace' });
+    expect(parseOperatorClearance([{ body: 'an ordinary review comment' }])).toBe(null);
+    expect(parseOperatorClearance(null)).toBe(null);
+  });
+
+  it('an UNATTRIBUTED marker is not a clearance — it would render two different names downstream', () => {
+    // PR #1124 review, finding 3. `buildClearedHumanMarker('')` emits nothing, so the producer never writes
+    // this — but a hand-written or forged empty marker used to parse as `{actor:''}`, and the two renderings
+    // then disagreed: `decideReviewGate`'s reason said "recorded by  " (a blank) while the notice said "the
+    // operator". A record with no attribution is not the attributed record this item exists to read back.
+    for (const body of ['<!-- cleared-human: -->', '<!-- cleared-human:  -->', '<!-- cleared-human:\t -->']) {
+      expect(parseOperatorClearance([{ body }])).toBe(null);
+    }
+    // …and an empty marker does not erase a real clearance that precedes it.
+    expect(parseOperatorClearance([{ body: buildClearedHumanMarker('Ada') }, { body: '<!-- cleared-human: -->' }]))
+      .toEqual({ actor: 'Ada' });
+    const gate = decideReviewGate({
+      ...staleArgs, labels: LABELS_AT_0041, operatorClearance: parseOperatorClearance([{ body: '<!-- cleared-human: -->' }]),
+    });
+    expect(gate.revokesClearance).toBe(false);
+    expect(gate.reason).not.toContain('recorded by  ');
+  });
+
+  it('THE REGRESSION — the re-hold is FLAGGED as revoking the clearance, and names who cleared it', () => {
+    const gate = decideReviewGate({
+      ...staleArgs, labels: LABELS_AT_0041, operatorClearance: parseOperatorClearance([LEGACY_CLEARANCE]),
+    });
+    expect(gate.action).toBe('park');
+    expect(gate.applyLabel).toBe(REVIEW_LABELS.human);
+    expect(gate.revokesClearance).toBe(true);
+    expect(gate.clearance).toEqual({ actor: 'Nicolas Gilbert' });
+    expect(gate.reason).toContain('REVOKES the review:human clearance recorded by Nicolas Gilbert');
+  });
+
+  it('THE VERDICT IS UNCHANGED — nothing about the merge decision loosens', () => {
+    const withClearance = decideReviewGate({
+      ...staleArgs, labels: LABELS_AT_0041, operatorClearance: { actor: 'Nicolas Gilbert' },
+    });
+    const without = decideReviewGate({ ...staleArgs, labels: LABELS_AT_0041 });
+    // Same action, same label, same humanRequired, same staleAcceptance — an agent still cannot clear it.
+    for (const k of ['action', 'applyLabel', 'humanRequired', 'staleAcceptance']) {
+      expect(withClearance[k]).toBe(without[k]);
+    }
+    expect(without.revokesClearance).toBe(false);
+    expect(without.clearance).toBe(null);
+  });
+
+  it('KEEPING a live review:human is not a revocation — only ADDING it back over a clearance is', () => {
+    const stillHeld = decideReviewGate({
+      ...staleArgs, labels: ['review:accepted', 'review:human'], operatorClearance: { actor: 'Nicolas Gilbert' },
+    });
+    expect(stillHeld.applyLabel).toBe(REVIEW_LABELS.human);
+    expect(stillHeld.revokesClearance).toBe(false);
+  });
+
+  it('an agent-reviewable stale re-park (review:pending) is never a clearance revocation', () => {
+    const pending = decideReviewGate({
+      ...staleArgs, humanRequired: false, labels: ['review:accepted'], operatorClearance: { actor: 'Ada' },
+    });
+    expect(pending.applyLabel).toBe(REVIEW_LABELS.pending);
+    expect(pending.revokesClearance).toBe(false);
+  });
+
+  it('a COVERED head still merges — the clearance record adds no new park', () => {
+    const covered = decideReviewGate({
+      ...staleArgs, headSha: staleArgs.acceptedSha, headContribution: CLEARED,
+      labels: LABELS_AT_0041, operatorClearance: { actor: 'Nicolas Gilbert' },
+    });
+    expect(covered.action).toBe('merge');
+  });
+
+  it('the revocation NOTICE states the revocation, the reason and the exact re-clear command', () => {
+    const gate = decideReviewGate({
+      ...staleArgs, labels: LABELS_AT_0041, operatorClearance: { actor: 'Nicolas Gilbert' },
+    });
+    const body = buildClearanceRevocationComment({
+      clearance: gate.clearance, reason: gate.reason, pr: 1106, repo: 'chalbert/web-everything',
+    });
+    expect(body).toContain('clearance was revoked by an automated re-score');
+    expect(body).toContain('Nicolas Gilbert');
+    expect(body).toContain('head advanced to e97d6c3b2652');
+    expect(body).toContain('node scripts/review-set-label.mjs 1106 --repo=chalbert/web-everything --to=clear-human');
+    // The head SHA rides in the text, so the drain's exact-text dedup posts ONE notice per distinct head.
+    const nextHead = buildClearanceRevocationComment({
+      clearance: gate.clearance,
+      reason: gate.reason.replace('e97d6c3b2652', 'ffffffffffff'), pr: 1106, repo: 'chalbert/web-everything',
+    });
+    expect(nextHead).not.toBe(body);
   });
 });

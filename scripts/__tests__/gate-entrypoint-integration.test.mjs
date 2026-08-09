@@ -40,7 +40,8 @@ function out(o) { process.stdout.write(JSON.stringify(o)); process.exit(0); }
 // get a durable skip/park comment.
 if (a[0] === 'pr' && a[1] === 'comment' && process.env.GATE_COMMENT_LOG) {
   const bi = a.indexOf('--body');
-  fs.appendFileSync(process.env.GATE_COMMENT_LOG, JSON.stringify({ num: a[2], head: String((bi >= 0 && a[bi + 1]) || '').split('\\n')[0] }) + '\\n');
+  const full = String((bi >= 0 && a[bi + 1]) || '');
+  fs.appendFileSync(process.env.GATE_COMMENT_LOG, JSON.stringify({ num: a[2], head: full.split('\\n')[0], body: full }) + '\\n');
   process.exit(0);
 }
 // A flagged PR's '--body' edit FAILS (non-zero) — models a gh write that does not land (#2820 round-4 attest-by-
@@ -57,7 +58,14 @@ if (a[0] === 'pr' && a[1] === 'view') {
   if (fields.includes('body')) out({ body: pr.body || '' });
   // #2409 reviewed-SHA staleness read: return the live head plus a reviewed-sha marker comment. When the fixture's
   // _reviewedSha differs from _headRefOid the accept is STALE (re-park); no marker → gate fails open.
-  if (fields.includes('headRefOid')) out({ headRefOid: pr._headRefOid || '', comments: pr._reviewedSha ? [{ body: '<!-- reviewed-sha: ' + pr._reviewedSha + ' -->' }] : [] });
+  // #xmnl36p — _clearedBy adds the durable --to=clear-human attribution comment the operator ceremony writes,
+  // so the entrypoint test can prove the drain READS it back and announces a re-hold that overrides it.
+  if (fields.includes('headRefOid')) {
+    const cs = [];
+    if (pr._reviewedSha) cs.push({ body: '<!-- reviewed-sha: ' + pr._reviewedSha + ' -->' });
+    if (pr._clearedBy) cs.push({ body: 'Cleared by ' + pr._clearedBy + ' via \`review-set-label.mjs --to=clear-human\` (#2895).' });
+    out({ headRefOid: pr._headRefOid || '', comments: cs });
+  }
   if (fields.includes('comments')) out({ comments: [] });
   out({});
 }
@@ -374,5 +382,49 @@ describe('the real drain entrypoint consults the gate before merging', () => {
     // EXACTLY ONE durable record of why it was not landed (before the fix it carried zero).
     expect(comments.filter((c) => c.num === '801').length).toBe(1);
     expect(comments.find((c) => c.num === '801').head).toContain('drain-skip-reason');
+  });
+
+  // #xmnl36p — THE WIRING, not the decider. `decideReviewGate` returning `revokesClearance` is worth nothing to
+  // the operator unless the REAL entrypoint reads the clearance record, threads it into the gate, and posts the
+  // notice. That delivery path had no coverage: reverting `scripts/merge-ai-prs.mjs` wholesale to main (deleting
+  // the `parseOperatorClearance` read, the `operatorClearance` argument and the whole notice block) left every
+  // suite GREEN — 540/540 — because the pure tests only exercise the library. This is the test that goes red for
+  // that revert. It runs LIVE (lease bypassed) because the notice only exists on the non-dry-run comment path;
+  // both fixtures are held, so `toMerge` is empty and nothing is merged.
+  it('#xmnl36p: a stale re-park over an OPERATOR CLEARANCE posts the revocation notice — and posts none without one', () => {
+    const stale = {
+      mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN, body: 'a real summary',
+      _commits: AI_COMMIT,
+      // the declarative leash → the fresh score is humanRequired, exactly as WE PR #1106's was
+      _files: [{ path: 'scripts/lib/gate-config.mjs', additions: 3, deletions: 1 }],
+      _headRefOid: 'deadbeef',   // the drain's own rebase moved the head …
+      _reviewedSha: 'cafef00d',  // … past the reviewed commit → review:accepted is STALE → re-park review:human
+    };
+    const fixture = {
+      _id: 'clearance-revocation',
+      prs: [
+        // review:human is ABSENT — the operator's `--to=clear-human` removed it. Re-adding it REVOKES the clearance.
+        { number: 901, title: 'cleared by the operator, then re-held by a rebase', _clearedBy: 'Nicolas Gilbert',
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:accepted' }], ...stale },
+        // byte-identical except that it was never `clear-human`-ed → no clearance to revoke → no notice
+        { number: 902, title: 'never cleared by an operator',
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:accepted' }], ...stale },
+      ],
+    };
+    const { result, comments } = runDrainLive(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    // Both are held and re-parked HUMAN — the notice changes no merge decision (#2285 INVARIANT 2 intact).
+    expect(nums(result.toMerge)).toEqual([]);
+    expect(result.parked.find((p) => Number(p.num) === 901)?.humanRequired).toBe(true);
+    expect(result.parked.find((p) => Number(p.num) === 902)?.humanRequired).toBe(true);
+
+    // #901 — EXACTLY ONE revocation notice, naming who cleared it and the re-clear command.
+    const notices901 = comments.filter((c) => c.num === '901' && c.body.includes('clearance was revoked by an automated re-score'));
+    expect(notices901.length).toBe(1);
+    expect(notices901[0].body).toContain('Nicolas Gilbert');
+    expect(notices901[0].body).toContain('--to=clear-human');
+
+    // #902 — no clearance record, so no notice. The notice fires on a REVOKED clearance, never on every re-park.
+    expect(comments.filter((c) => c.num === '902' && c.body.includes('clearance was revoked'))).toEqual([]);
   });
 });
