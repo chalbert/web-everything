@@ -3284,7 +3284,14 @@ async function runCli() {
               clearance: gate.clearance, reason: gate.reason, pr: v.num, repo: v.repo || localSlug,
             }), auditLineFor(v));
             if (posted && !AS_JSON) process.stderr.write(`  🔔 ${repoTag(v.repo)}${v.num} clearance-revocation notice posted (cleared by ${gate.clearance?.actor || 'operator'}, re-held review:human)\n`);
-            durableRecorded = true;
+            // ATTEST BY EFFECT, never by having tried (#2820 round 4 / #2857; PR #1124 review, finding 4). The
+            // first cut set this unconditionally — which asserts a durable record even when the post FAILED.
+            // `postDrainReasonComment` returns false BOTH when it deduped (the record exists) and when `gh`
+            // threw (it does not), so an unconditional set is wrong in exactly the direction that costs the
+            // operator the only trace. Only a confirmed post attests here; on this path `revokesClearance`
+            // implies `humanRequired`, so the #2324 body-block write below re-derives the flag from ITS own
+            // verified effect anyway — this is belt-and-braces, never the sole attestation.
+            if (posted) durableRecorded = true;
           }
           // #2313 — stamp the WHY + what-to-look-for onto the PR itself, not only this log line below.
           // #2333 — but ONLY for a NON-human (agent-reviewable) park: a review:human park already carries the

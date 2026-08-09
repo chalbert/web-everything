@@ -1004,18 +1004,27 @@ export function buildClearedHumanMarker(actor) {
 
 /**
  * Extract the operator clearance a PR carries, from its raw `gh pr view --json comments` array. Pure.
+ *
+ * AN EMPTY ACTOR IS NOT A CLEARANCE. `buildClearedHumanMarker('')` renders '' (no marker), so the producer
+ * never emits one — but a hand-written or forged `<!-- cleared-human: -->` would otherwise parse to
+ * `{actor:''}`, and that value is rendered in TWO places that then disagree: `decideReviewGate`'s reason says
+ * "recorded by  — a re-clear is required" (a blank where a name belongs) while
+ * `buildClearanceRevocationComment` falls back to "the operator". A record with no attribution is not the
+ * durable, attributed record this whole item is about, so it is refused here rather than rendered twice
+ * differently downstream. Review of PR #1124 (finding 3).
  * @returns {{actor:string}|null} the LATEST clearance record, or `null` when the PR was never `clear-human`-ed.
  */
 export function parseOperatorClearance(comments) {
   let latest = null;
+  const take = (raw) => { const actor = String(raw || '').trim(); if (actor) latest = { actor }; };
   for (const c of Array.isArray(comments) ? comments : []) {
     const body = c && typeof c.body === 'string' ? c.body : '';
     if (!body) continue;
     let m;
     CLEARED_HUMAN_RE.lastIndex = 0;
-    while ((m = CLEARED_HUMAN_RE.exec(body)) !== null) latest = { actor: m[1].trim() };
+    while ((m = CLEARED_HUMAN_RE.exec(body)) !== null) take(m[1]);
     CLEARED_HUMAN_PROSE_RE.lastIndex = 0;
-    while ((m = CLEARED_HUMAN_PROSE_RE.exec(body)) !== null) latest = { actor: m[1].trim() };
+    while ((m = CLEARED_HUMAN_PROSE_RE.exec(body)) !== null) take(m[1]);
   }
   return latest;
 }

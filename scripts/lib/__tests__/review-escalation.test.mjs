@@ -1344,8 +1344,12 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
 
   it('THE TRIGGER — a base move BETWEEN the lane\'s own hunks defeats the #x9xqexm contribution escape', () => {
     // Not one added/removed line differs, yet the inter-hunk GAP signal (added by #x9xqexm to catch a
-    // relocation) is variant under this base movement. This is the documented, digest-unclosable residual
-    // (#x413mbt) — pinned here as the mechanism that fires the re-park, NOT as desired behaviour.
+    // relocation) is variant under this base movement — pinned here as the mechanism that fires the re-park,
+    // NOT as desired behaviour. It is the INVERSE of #x413mbt and was mis-cited as it in the first cut of this
+    // item (PR #1124 review, finding 2): #x413mbt is the digest COLLIDING on two different contributions (a
+    // false HONOUR, and it turns on the gap being PRESERVED under a uniform shift); this is the digest
+    // DIVERGING on an unchanged contribution (a false STALE, under a NON-uniform base move). That direction is
+    // filed nowhere yet.
     expect(normalizeContributionFingerprint(CLEARED)).not.toBe(normalizeContributionFingerprint(REBASED));
     expect(acceptanceCoversHead({
       acceptedSha: staleArgs.acceptedSha, headSha: staleArgs.headSha,
@@ -1363,6 +1367,24 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
       .toEqual({ actor: 'Grace' });
     expect(parseOperatorClearance([{ body: 'an ordinary review comment' }])).toBe(null);
     expect(parseOperatorClearance(null)).toBe(null);
+  });
+
+  it('an UNATTRIBUTED marker is not a clearance — it would render two different names downstream', () => {
+    // PR #1124 review, finding 3. `buildClearedHumanMarker('')` emits nothing, so the producer never writes
+    // this — but a hand-written or forged empty marker used to parse as `{actor:''}`, and the two renderings
+    // then disagreed: `decideReviewGate`'s reason said "recorded by  " (a blank) while the notice said "the
+    // operator". A record with no attribution is not the attributed record this item exists to read back.
+    for (const body of ['<!-- cleared-human: -->', '<!-- cleared-human:  -->', '<!-- cleared-human:\t -->']) {
+      expect(parseOperatorClearance([{ body }])).toBe(null);
+    }
+    // …and an empty marker does not erase a real clearance that precedes it.
+    expect(parseOperatorClearance([{ body: buildClearedHumanMarker('Ada') }, { body: '<!-- cleared-human: -->' }]))
+      .toEqual({ actor: 'Ada' });
+    const gate = decideReviewGate({
+      ...staleArgs, labels: LABELS_AT_0041, operatorClearance: parseOperatorClearance([{ body: '<!-- cleared-human: -->' }]),
+    });
+    expect(gate.revokesClearance).toBe(false);
+    expect(gate.reason).not.toContain('recorded by  ');
   });
 
   it('THE REGRESSION — the re-hold is FLAGGED as revoking the clearance, and names who cleared it', () => {

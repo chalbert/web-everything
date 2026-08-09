@@ -40,8 +40,21 @@ the *re-imposition* of the hold on top of it.
    acceptance stale. The `#x9xqexm` contribution escape did not save it: the ONLY difference between
    the accept-time and post-rebase 137 KB net diffs is two inter-hunk GAP values
    (`~424 → ~439`, `~324 → ~328`) — `main` grew *between* the lane's own hunks. Not one `+`/`-`
-   line, hunk length, section heading or file differs. That is the digest residual already filed as
-   `#x413mbt`; the gap signal is variant under non-uniform base movement.
+   line, hunk length, section heading or file differs. (Re-verified in the PR #1124 review by
+   recomputing both net diffs from the real commits: 137,799 bytes each, the recomputed accept-time
+   contribution reproduces the stamped `b5d1eafe…` marker exactly, and precisely two projection
+   lines differ — the two above.)
+
+   **This is NOT the residual filed as `#x413mbt`, and the first cut of this item mis-cited it.**
+   [#3021](/backlog/3021-the-contribution-fingerprint-still-collides-on-an-intra-sect/) (`x413mbt`)
+   tracks the digest COLLIDING — two genuinely different contributions hashing alike, a false
+   *honour*, which is why it notes the gap signal is *preserved* under a uniform shift. The inverse
+   fired here:
+   the digest DIVERGING on a contribution that did not change, a false *stale*, because the gap
+   signal is variant under a NON-uniform base move. That direction is filed nowhere; this item does
+   not close it, and naming it as already-owned would be exactly the "deferral that disappears" the
+   [#3024](/backlog/3024-a-stale-acceptance-re-park-re-asserts-review-human-from-the-/)
+   write-up warns about.
 3. `decideReviewGate`'s stale branch computed `toHuman = humanRequired || <sticky human label>`;
    the fresh score was `humanRequired` (statute + gate-derivation + blast-radius + size), so it
    re-applied `review:human` — the exact hold the operator had lifted seven minutes earlier.
