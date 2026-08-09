@@ -12,6 +12,44 @@ tags: [governance, review-integrity, drain, throughput, statute-candidate]
 
 # Rule the safety model for routine merges: detect-and-revert, not prevent-everything
 
+> **RULED 2026-08-09 (operator, in session), Fork 1 → (a): prevention stands. No routine tier.**
+> No PR merges with its review hold unsatisfied. The operator ruled on the presented preparation, in the
+> words *"3013 keep prevention"*, after being shown that prep's own recommendation had **reversed** during
+> preparation and why.
+>
+> **The warrant for this ruling is the collapse of the cost premise, not a claim that reverts fail.**
+> Reverts mostly work — 73% of recent merges revert cleanly on code, and the "23 of 30 fail" figure prep
+> first produced was a 3× artifact of #2288 rename collisions in `backlog/*.md`, corrected before ruling.
+> What went away is the *reason to accept the risk*: all-time p90 open→merged is **4.0 hours**, not the 77
+> hours the filed premise asserted, and there was **one open PR** when measured. The 77-hour figure was the
+> open→merged time of a single PR (#1034) occupying the p90 rank slot of a trailing-100 window that lands on
+> the 2026-08-08 backlog flush; it appears nowhere in the repo except the premise asserting it. A routine
+> tier buys throughput. There is no throughput problem to buy. Taking on a new failure mode to unblock a
+> queue that is not backed up is a bad trade at any revert cost.
+>
+> **The second leg: tests do not make these catches.** PR #1113 shipped a daemon that, with
+> `CONVERGE_DAEMON_CLONE` pointed at a pooled lane clone, would have run `git reset --hard` + `git clean -fdq`
+> over a live session's working tree every 15 minutes — and whose documented uninstall reported success
+> without checking `launchctl bootout`'s exit status, so the kill switch lied. Suite **30/30 green**,
+> `check:standards` exit 0, on the defective head. No revert restores destroyed uncommitted work. PR #1124
+> was **540/540 green with its delivery path gutted**. PR #1096 landed a 0-byte blob on `main` at exit 0 and
+> took ~30 days to root-cause. The pattern the audit branch cannot answer: **detect-and-revert has no
+> detector for a non-event.**
+>
+> **What this ruling does NOT say.** It does not endorse the current gate's defects, which are real and are
+> separately filed: the merge-path fail-open (`#xi1r9hz`), the false-stale re-park on an unchanged
+> contribution (`#xalaqel`), and the #2288 rename artifact that makes reverts look worse than they are.
+> It does not rule Fork 2 — see below. It is **revisitable on a measurable trigger**, not on a vibe: if the
+> queue backs up the way it did 2026-08-04→08, re-run the measurement appendix and reopen this.
+>
+> **Honest cost, accepted knowingly:** the operator stays first reader on every hold until #3007 lands.
+> The ratified throughput path is #3007 → #2838's triple gate — **build it rather than routing around it.**
+>
+> **No `codifiedIn` yet.** Prep found four statute collisions that must be resolved before any statute text
+> is written — see *Statute collisions* below, in particular #2840, which ratified path gating **out of**
+> `we:scripts/lib/review-escalation.mjs` on 2026-08-02, and `enforceFlipReady`, which the statute names but
+> which **does not exist in the tree**. Fork 2 is also still open and the statute text depends on both.
+
 Rule what `main` is allowed to cost. The filed premise was that a bad routine merge costs one revert while a
 stalled queue costs the week. Prep re-derived both halves. The **cost** half collapsed: all-time p90 open→merged
 is 4.0 hours, not 77, with one open PR when measured. The **revert** half held up better than prep's own first
