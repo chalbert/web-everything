@@ -166,8 +166,10 @@ the everyday-idiom friction is real but small.
   must still **clear**, and the paired unquoted control (`bash -c 'npm run build'`) must still **DENY** —
   before and after the flip, so the check has a negative half and cannot pass on a guard that denies nothing.
   Confirmed both against `main` on 2026-08-08.
-- The false-deny sweep is re-run over the 145-command corpus and the newly-denied set is reported, not
-  merely counted.
+- The false-deny sweep is re-run over the everyday-command corpus and the newly-denied set is reported, not
+  merely counted. No size is asserted here: `145` was carried across from PR #1092's labelled-corpus score
+  (`base 145/184`), which is a classification result and not a corpus count. The corpus the sweep runs over
+  is whatever the committed script names — see the criterion below.
 - **The measuring script is committed with its token list**, so every sizing figure this item or the statute
   quotes can be recomputed from the repo. **No unreproducible number returns to the statute**, and none is
   cited as authoritative here — the 30–59% bracket above is recorded as unreplicated context only. That is
