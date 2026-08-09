@@ -4,7 +4,7 @@ kind: decision
 size: 3
 status: open
 dateOpened: "2026-08-08"
-relatedTo: ["2907", "2606", "3012", "3013", "x96ezuu"]
+relatedTo: ["2907", "2606", "3012", "3013", "3049"]
 tags: [governance, throughput, backlog, statute-candidate]
 ---
 
@@ -51,7 +51,7 @@ Should a floor share of new lanes be product items, and at what level?
 > operator considers most valuable** — and the metric is WE-only, so the conveyor board UI itself
 > (`plateau-app:src/backlog-view/`, per #2586/#2660) is not counted at all. The framing, the measurements, and
 > the open "does the metric need a third class — product / product-in-disguise / plumbing?" question are
-> filed as [#x96ezuu](/backlog/x96ezuu-the-conveyor-as-a-shippable-product-not-machinery-and-what-t/). Nothing
+> filed as [#3049](/backlog/3049-the-conveyor-as-a-shippable-product-not-machinery-and-what-t/). Nothing
 > there rules this item; read it before ruling Fork B.
 
 ## What resolving this produces

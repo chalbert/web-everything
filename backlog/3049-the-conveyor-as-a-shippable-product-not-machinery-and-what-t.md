@@ -1,4 +1,5 @@
 ---
+bornAs: x96ezuu
 kind: decision
 size: 3
 status: open
@@ -29,7 +30,7 @@ And, on the state of the conformity claim, same session:
 
 ## Why this is filed rather than left in a transcript — it changes how #3010 should be ruled
 
-**#3010** (`bornAs: xh1d1el`, `kind: decision`, **open**) proposes a repo-wide process-work freeze plus a
+**#3010** (`bornAs: 3010`, `kind: decision`, **open**) proposes a repo-wide process-work freeze plus a
 **product quota** — its Fork B1 is "at least half of newly-opened lanes serve product items each week". Its
 stated enforcement instrument is the output-mix metric from **#3012** (**resolved** 2026-08-09,
 `graduatedTo: we:scripts/lib/output-mix.mjs`), built by PR **#1126** and refined by PR **#1128** (both merged

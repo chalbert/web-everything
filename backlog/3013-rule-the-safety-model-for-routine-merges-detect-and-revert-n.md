@@ -69,8 +69,8 @@ tags: [governance, review-integrity, drain, throughput, statute-candidate]
 > detector for a non-event.**
 >
 > **What this ruling does NOT say.** It does not endorse the current gate's defects, which are real and are
-> separately filed: the merge-path fail-open (`#xi1r9hz`), the false-stale re-park on an unchanged
-> contribution (`#xalaqel`), and the #2288 rename artifact that makes reverts look worse than they are.
+> separately filed: the merge-path fail-open (`#3047`), the false-stale re-park on an unchanged
+> contribution (`#3046`), and the #2288 rename artifact that makes reverts look worse than they are.
 > It does not rule Fork 2 — see below. It is **revisitable on a measurable trigger**, not on a vibe: if the
 > queue backs up the way it did 2026-08-04→08, re-run the measurement appendix and reopen this.
 >
@@ -146,10 +146,10 @@ Every figure was re-derived. Where a claim did not survive, the correction stand
 | #1100 cleared `12:20:05Z`, re-parked `12:20:57Z` (52 s), same cause | **VERIFIED (2026-08-09)** | same method; drain merge commit `e6511618`; 1,485 `+`/`-` lines byte-identical despite two auto-resolved files |
 | …and it was silent | **REFUTED for #1100** | explicit revocation notice at `12:20:59Z` |
 | Digest embeds inter-hunk gaps, invariant only under uniform displacement | **VERIFIED in code** | [we:scripts/lib/review-escalation.mjs](scripts/lib/review-escalation.mjs) `normalizeContributionFingerprint`, docblock lines 891–893 |
-| Merge-path fail-open in the same module | **REPRODUCED** | driving the real module, an *empty* comment list and an unreadable head **both** yield `{action:'merge'}` on a `review:accepted` PR. Note it is a **documented #2409 design choice**, not a hidden bug — the docblock says "fails OPEN"; filed as `#xi1r9hz` |
+| Merge-path fail-open in the same module | **REPRODUCED** | driving the real module, an *empty* comment list and an unreadable head **both** yield `{action:'merge'}` on a `review:accepted` PR. Note it is a **documented #2409 design choice**, not a hidden bug — the docblock says "fails OPEN"; filed as `#3047` |
 | Eight code paths change a review label with no comment | **PARTIALLY — "eight" not reproduced; five raw sites confirmed** | raw `gh pr edit --add-label <review:*>` sites bypassing the commenting ceremony: [we:scripts/merge-ai-prs.mjs](scripts/merge-ai-prs.mjs) 3118, 3149, 3272 and [we:scripts/pr-land.mjs](scripts/pr-land.mjs) 873, 933, plus a `--remove-label review:accepted` at ~3314. The two land seams route through `decideSetLabel`, which *does* comment. **Cite "at least five raw sites", not "eight".** |
 | `enforceFlipReady` (the #2838 predicate) exists | **REFUTED — it does not exist** | grep of the tree: only `computeAgreementMetric` / `resolveLandMode` in [we:scripts/lib/decision-routing.mjs](scripts/lib/decision-routing.mjs). The composed predicate and its two CI probes are unbuilt, as #2838's own "separate impl follow-on" clause says |
-| 137,799-byte / two-line #1106 measurement | **unreplicated, carried as such** | recorded on `#xalaqel` (PR #1125) as review-sourced, not script-produced. Prep's independent diff agrees in *shape* only |
+| 137,799-byte / two-line #1106 measurement | **unreplicated, carried as such** | recorded on `#3046` (PR #1125) as review-sourced, not script-produced. Prep's independent diff agrees in *shape* only |
 
 ## Statute collisions prep found — resolve these before any `codifiedIn`
 
@@ -196,7 +196,7 @@ break a branch outright. This section is the most important thing prep produced.
   `careJury.disposition.landMode`. And correction 10 shows a *commit-count* bound is the wrong shape anyway —
   the only sound predicate is **attempt the revert; if it does not apply cleanly, escalate point-level** per
   #2563 point 3's delivery form (never a blanket whole-PR escalation).
-- **The merge-path fail-open is a build, not a fork.** Reproduced, filed as `#xi1r9hz`; its option set is
+- **The merge-path fail-open is a build, not a fork.** Reproduced, filed as `#3047`; its option set is
   already written there. Fixing it is orthogonal to which branch is ruled.
 
 ## Why this is (partly) one ruling — the card's claim, corrected
@@ -210,9 +210,9 @@ The card says #2830, #2948 and #2979 are each stuck on this question. **Two are 
   this epic changes how hard the jury looks, never who clears the merge."* Its slices (#2947, #2950, #2949,
   #2951) stay buildable either way.
 - **#2979** (`active`) has a genuine connection and is not stuck — largely **landed** (PR #1086; PR #1119 merged
-  `2026-08-08T23:09:39Z`). Live residuals: #3021, #3024, `#xalaqel`.
+  `2026-08-08T23:09:39Z`). Live residuals: #3021, #3024, `#3046`.
 
-The honest leverage claim: **this ruling settles the shared premise that #3024, `#xalaqel` and `#xi1r9hz` will
+The honest leverage claim: **this ruling settles the shared premise that #3024, `#3046` and `#3047` will
 each otherwise re-argue** — how much staleness-detection error is tolerable and in which direction it should
 fail. Real leverage; not the leverage the card advertised.
 
@@ -431,7 +431,7 @@ and there is no throughput problem — four hours at p90 all-time, one open PR, 
 to be one PR during a one-time flush. Taking on a new failure mode to fix a queue that is not backed up is a bad
 trade at any revert cost. Meanwhile #2563 will not let the audit stand in for the operator's oversight until
 throughput actually outgrows manual watch, which the same measurements disprove. So: keep prevention, fix the
-cheap real defects it has (`#xi1r9hz`'s fail-open, `#xalaqel`'s false stale, the #2288 rename artifact that
+cheap real defects it has (`#3047`'s fail-open, `#3046`'s false stale, the #2288 rename artifact that
 makes reverts look worse than they are), populate #2563's blacklist from the diff, and **build the ratified
 throughput path (#3007 → #2838's triple gate) rather than routing around it**. If the queue backs up again the
 way it did 2026-08-04→08, re-run the appendix and this recommendation should be revisited — that is a measurable
@@ -476,7 +476,7 @@ node -e "import('./scripts/lib/review-escalation.mjs').then(({decideReviewGate})
 ```
 
 Carried as **unverified**: the "eight label paths" count (five raw sites confirmed instead), and the
-137,799-byte #1106 byte measurement (review-sourced, recorded unreplicated on `#xalaqel`).
+137,799-byte #1106 byte measurement (review-sourced, recorded unreplicated on `#3046`).
 
 ### Review jury (provisional — pre-registered #2638)
 
