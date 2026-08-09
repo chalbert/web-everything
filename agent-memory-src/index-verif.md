@@ -1,6 +1,6 @@
 ---
 name: index-verif
-description: Proving claims before asserting them: run the real probe (browser for UI) before naming a cause, prove-before-claiming-fixed, verify grounding claims before ratifying, a resolved blocker may be a false edge, cross-locus preflight, verify a mechanism has a consumer, verify a closed set member-by-member, distrust bulk LLM classification. Recall when about to assert a cause, a fix, or a closure, or to verify an assumption.
+description: Proving claims before asserting them: run the real probe (browser for UI) before naming a cause, prove-before-claiming-fixed, verify grounding claims before ratifying, a resolved blocker may be a false edge, cross-locus preflight, verify a mechanism has a consumer, verify a closed set member-by-member, distrust bulk LLM classification, grep every symbol/file/id/count you name in prose before pushing it. Recall when about to assert a cause, a fix, or a closure, to cite a symbol or an item, or to verify an assumption.
 metadata:
   type: reference
 ---
@@ -19,4 +19,5 @@ Verification & Proof cluster — open a leaf with `node scripts/memory-resolve.m
 - [Review a parked PR against CURRENT main, not `gh pr diff`](review-parked-pr-diff-against-current-main.md) — `gh pr diff` renders the stale merge-base; siblings may have already landed most of it, so diff the head against current main to get the true review surface (a gate-self touch can be illusory); WE #798
 - [Record the changes-request before launching fix/converge](record-verdict-before-launching-converge.md) — post the `changes` verdict on the PR FIRST, then launch the loop: it moves the head out from under the review and races the `review:pending` filter; PR #1049
 - [Stop hardening an unachievable guarantee](stop-hardening-an-unachievable-guarantee.md) — same finding-CLASS one layer down each converge round = the claim is unachievable by this mechanism; narrow the claim, don't harden; #2895/PR #1056
+- [Grep every name you cite in prose](grep-every-name-you-cite-in-prose.md) — every symbol/file/id/count named in prose gets grepped before push, or dropped; provenance written from memory reads plausible and nothing checks it; worst in `leash: spec` files + backlog bodies; PR #1112, 7 misses / 4 rounds; gate #x8918rc
 - 146. Prompt Sink Resists Sanitising — author data in a prompt that JUDGES that author can't be sanitised (LLM sink ≠ shell) or corroborated (existence ≠ identity); delete the channel, carry a boolean; #2457
