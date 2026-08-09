@@ -6,7 +6,8 @@ dateOpened: "2026-08-09"
 scope:
   - we:scripts/merge-ai-prs.mjs
   - we:scripts/lib/review-escalation.mjs
-  - we:scripts/__tests__/review-set-label.test.mjs
+  - we:scripts/lib/__tests__/review-escalation.test.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
 tags: [gate, review, drain, review-escalation, fail-open, merge-safety]
 ---
 
@@ -75,6 +76,20 @@ Note the third line: an *empty* comment list (the call succeeds but returns noth
 read, or a comments page the API truncated) produces the identical verdict, so this is not only about a
 thrown exception.
 
+**Re-run independently on `main` at `cf6730a3`**, driving the real `parseReviewedSha` / `parseReviewedDiff` /
+`parseReviewedContribution` / `parseOperatorClearance` over an empty comment array rather than hand-passing
+nulls — same result:
+
+```
+parse* on EMPTY comments: {"accSha":null,"accDiff":null,"accContrib":null,"clearance":null}
+decideReviewGate w/ EMPTY comment list (fetch ok, head read ok):
+  {"action":"merge","reason":"review:accepted — reviewer accepted, merge"}
+```
+
+And the verdict does reach the merge: `gate.action === 'merge'` skips the park branch at
+[we:scripts/merge-ai-prs.mjs](scripts/merge-ai-prs.mjs) line 3243, so `v.decision` stays `merge` and the PR
+falls through to the land cascade.
+
 ## The asymmetry, which is the real argument
 
 The same module and its siblings fail **closed** everywhere else this question comes up:
@@ -83,10 +98,11 @@ The same module and its siblings fail **closed** everywhere else this question c
   normalized to `{ corrupt: true }` and refused unconditionally (`verify-corrupt`), with the docblock naming
   the alternative it rejected: "the gate refuses it, never treats it as `absent` and fails OPEN (#2833
   finding 2/5)".
-- The clearer-identity refusal being added by PR #1100 (open, backlog
-  [#2844](/backlog/2844-land-seam-refuses-a-self-cleared-verdict-and-an-invariant-an/))
-  requires `independent === true` on the autonomous path and refuses **both** unknown statuses: "A machine
-  that cannot PROVE the clearer is not the author does not land."
+- The clearer-identity refusal landed by PR #1100 (merged 2026-08-09T12:40:01Z, backlog
+  [#2844](/backlog/2844-land-seam-refuses-a-self-cleared-verdict-and-an-invariant-an/), resolved) —
+  [we:scripts/lib/review-independence.mjs](scripts/lib/review-independence.mjs) — requires
+  `independent === true` on the autonomous path and refuses **both** unknown statuses: "A machine that cannot
+  PROVE the clearer is not the author does not land."
 - Within `acceptanceCoversHead` itself, the two content escapes are explicitly fail-closed — both
   fingerprints must be present and equal; a missing one falls through to the stale verdict.
 
@@ -103,6 +119,24 @@ inverts it, and it is the branch a `gh` failure reaches.
    reversible by re-clearing, and the drain is non-blocking by construction (an escalated PR is parked alive
    and re-evaluated next pass). The cost of failing closed here is a re-clear; the cost of failing open is a
    merge.
+
+## This is a new instance of a class the board already owns
+
+Two open cards own the "a degraded read is presented as a clean result, on the merge path" class in this same
+file. Neither covers this call site, and whoever takes this item should land it *with* them rather than
+alongside them:
+
+- **[#2885](/backlog/2885-gate-the-drain-s-ordering-context-on-a-degraded-open-pr-read/)** (open) — the same
+  shape at the open-PR listing: a failed `gh pr list` yields an empty set that is classified HEALTHY, so the
+  cross-item merge ORDER is derived from a subset and a dependent merges early. Different reader, identical
+  posture bug.
+- **[#2993](/backlog/2993-check-standards-rule-a-catch-feeding-a-merge-decision-must-s/)** (open) — the
+  DETERMINISTIC guard for the class: a `check:standards` rule that a `catch` returning a bare empty
+  collection must set a degradation marker in the same `catch`. Its rule is deliberately scoped to a named
+  ALLOW-LIST of context-collection functions (`collectOpenPrContext`, `reduceOpenPrContext`,
+  `readPrManifest`, `readRemoteManifestViaApi`, `readManifestFromPrBody`, `fetchPrCommits`) — and the marker
+  fetch at [we:scripts/merge-ai-prs.mjs](scripts/merge-ai-prs.mjs) line 3190 is **not on that list**, so
+  #2993 as written would not fire on it. Extending the list by one name is the cheap half of this item.
 
 ## Directions worth costing (none picked)
 
@@ -127,4 +161,9 @@ Related: [#2409](/backlog/2409-gate-check-a-pr-s-reviewed-commit-set-must-match-
 (the gate, resolved — this is its stated fail-open),
 [#2883](/backlog/2883-a-stale-acceptance-must-stay-non-waivable-after-the-accepted/) (open, the other
 non-waivability hole in the same gate),
-[#2884](/backlog/2884-acceptance-coverage-keys-on-head-sha-identity-so-a-no-op-reb/) (open).
+[#2884](/backlog/2884-acceptance-coverage-keys-on-head-sha-identity-so-a-no-op-reb/) (open),
+[#2885](/backlog/2885-gate-the-drain-s-ordering-context-on-a-degraded-open-pr-read/) and
+[#2993](/backlog/2993-check-standards-rule-a-catch-feeding-a-merge-decision-must-s/) (both open — the class
+above),
+[#2913](/backlog/2913-one-shared-sha-identity-primitive-samecommit-and-acceptancec/) (open — the duplicated
+SHA-identity primitive this branch is the front half of).

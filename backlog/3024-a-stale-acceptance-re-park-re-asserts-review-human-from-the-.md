@@ -56,7 +56,13 @@ Until (2) lands, the current whole-PR behaviour is the fail-closed one and stays
 
 PR #1124's write-up proposes a **fourth review hold tier** — `review:stale`, meaning "an operator clearance
 exists, the tree moved past it, held pending re-confirmation, and no agent may clear it" — spanning roughly
-ten label consumers plus an edit to the policy contract. It attacks the same incident this item does
+ten label consumers plus an edit to the policy contract. **That proposal has no card.**
+[#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/) says of it "Filed
+separately rather than smuggled in here", but a grep of all 3017 files in `we:backlog/` for `review:stale`
+and "hold tier" returns only #3039 itself — so the deferral currently lives only in that sentence, which is
+the same "a deferral under a resolved parent is a deferral that disappears" failure this item exists to
+prevent. File it, or fold it into step 1's fork as the third option. It attacks the same incident this item
+does
 (WE PR #1106, the 00:34:00Z clearance revoked at 00:41:28Z), from the other end: this item keeps three hold
 tiers and narrows **which** one a stale re-park applies; the `review:stale` proposal adds a **fourth** tier so
 the re-park stops landing on an operator-only label at all.
@@ -76,5 +82,6 @@ this hole survives once the false stale stops firing.
 
 Related: [#3023](/backlog/3023-a-drain-re-score-revokes-a-human-clearance-a-content-preserv/) (parent),
 [#2840](/backlog/2840/), [#2409](/backlog/2409/), [#2771](/backlog/2771/),
-[#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/) (the landed
-notice-on-revocation fix from PR #1124), `#xalaqel` (the false-stale root cause).
+[#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/) (the
+notice-on-revocation fix; its code landed in PR #1124, merged 2026-08-09T11:50:32Z, though the card itself is
+still `status: open`), `#xalaqel` (the false-stale root cause).

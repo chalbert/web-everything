@@ -2,11 +2,11 @@
 kind: story
 size: 1
 status: open
-blockedBy: ["2844"]
 dateOpened: "2026-08-09"
 scope:
   - we:scripts/lib/gate-config.mjs
   - we:scripts/lib/__tests__/gate-config.test.mjs
+  - we:scripts/lib/review-independence.mjs
 tags: [gate, review, trust-chain, policy-tier, review-independence]
 ---
 
@@ -20,34 +20,33 @@ an owed follow-up and names the reason it was deferred: a concurrent change, PR 
 longer exists. This item does the one-entry roster edit — deliberately left to an operator, because the
 roster file is itself policy tier.
 
-## Correcting the framing this was filed under
+## The gap is LIVE on `main`, and measured
 
-Two things must be said plainly or this item will be picked up and found unbuildable:
+PR #1100 merged 2026-08-09T12:40:01Z, so the module is on `main` (first landed in `057a98cb`) and #2844 is
+`status: resolved`. There is no blocker left: the file exists, the roster is free, and the misclassification
+is observable today rather than prospective. Measured by calling the real predicates on a lane clone of
+`main` at `cf6730a3`:
 
-1. **The module does not exist on `main` today.** It arrives with PR #1100 (OPEN, branch
-   `lane/2844-refuse-self-cleared-verdict`, backlog
-   [#2844](/backlog/2844-land-seam-refuses-a-self-cleared-verdict-and-an-invariant-an/), `status: open`).
-   Everything below was read from that branch via the GitHub contents API, not from a local checkout.
-   Hence `blockedBy: ["2844"]` — the roster entry cannot be written before the file it names lands.
-2. **`isPolicyCorePath` returning `false` for it today is therefore trivially true** — the path is not in the
-   roster because nothing at that path exists yet. Verified by calling the real function in a lane clone of
-   `main`:
+```
+isPolicyCorePath  isPolicySpecPath  path
+false             false             scripts/lib/review-independence.mjs
+true              false             scripts/lib/auto-land-seam.mjs
+true              true              scripts/lib/review-runner-core.mjs
+true              false             scripts/lib/review-escalation.mjs
+true              true              scripts/lib/gate-config.mjs
 
-   ```
-   false  scripts/lib/review-independence.mjs
-   true   scripts/lib/auto-land-seam.mjs
-   true   scripts/lib/review-runner-core.mjs
-   true   scripts/lib/review-escalation.mjs
-   true   scripts/lib/gate-config.mjs
-   ```
+scoreEscalation({ changedFiles: ['scripts/lib/review-independence.mjs'], diffLines: 40 })
+  → { escalate: true, humanRequired: false,
+      reasons: ['blast-radius (scripts/lib/review-independence.mjs)'] }
+```
 
-   The gap is real and the header's own reasoning stands; it is just **not yet observable** as a live
-   misclassification. It becomes one the moment PR #1100 merges, which is why this is filed now rather than
-   rediscovered later.
+So the header's own description of today's behaviour is exactly right: an edit here **escalates** (the
+`^scripts/` blast-radius rule) and is then **agent-clearable**, because `humanRequired` is false.
 
 ## What the module's header says
 
-Read verbatim from PR #1100's branch, the last paragraph of the file header:
+Read verbatim from [we:scripts/lib/review-independence.mjs](scripts/lib/review-independence.mjs) lines
+54–60 on `main`:
 
 ```text
 NOT YET TRUST-CHAIN REGISTERED, AND THAT IS AN OWED FOLLOW-UP, NOT A CHOICE. This module DECIDES what may
@@ -59,9 +58,8 @@ edit here still ESCALATES (the `^scripts/` blast-radius rule) but does not force
 `{ role: 'clearer-identity', file: 'review-independence.mjs', tier: 'policy' }` in the next roster edit.
 ```
 
-Note the header also says "#2844 landed", which is not true either — #2844 is `status: open` and PR #1100 is
-unmerged. The sentence was written in anticipation. Whoever takes this item should fix that clause in the
-same change, or the file will keep asserting a landing that did not happen.
+Every clause of that paragraph is now true, including "#2844 landed". Delete it as part of the registration,
+because it will then be describing a state that no longer holds.
 
 ## The edit
 
@@ -74,28 +72,53 @@ header names, so the header's snippet is abbreviated, not the full record:
   role: 'clearer-identity',
   file: 'review-independence.mjs',
   tier: 'policy',
-  leash: …,          // 'spec' or 'code' — see below; this is the actual judgment call
+  leash: 'spec',     // see below — this field, not `tier`, is what forces review:human
   desc: '…decides WHO may clear the gate; an agent may not clear an edit to its own independence check…',
   homes: ['scripts/lib/review-independence.mjs'],
 },
 ```
 
-**`leash` is the one open question, not `tier`.** The tier is settled by the header's own argument. But the
-sibling entries `review-runner-core` and `review-runner-cli` both carry `leash: 'spec'` under a comment
-saying reclassifying them is "a separate, human-ratified call", and the same reasoning plausibly applies
-here. Pick `spec` unless there is a reason not to — it is the fail-closed direction and a strict no-op on
-today's behaviour.
+**`leash`, not `tier`, is the field that delivers this item.** After #2771/#2785 the policy tier is SPLIT and
+`tier: 'policy'` on its own no longer forces a human: `scoreEscalation` derives
+`humanRequired = leashFiles.length > 0 || statuteFiles.length > 0`, where `leashFiles` comes from
+`isDeclarativeLeashPath` / `isPolicySpecPath` — i.e. from `POLICY_SPEC_BASENAMES`, which
+[we:scripts/lib/gate-config.mjs](scripts/lib/gate-config.mjs) derives as "every policy member whose `leash`
+is not exactly `'code'`". Registering this module as `tier: 'policy', leash: 'code'` would put it in the
+roster, flip `isPolicyCorePath` to `true`, and leave `humanRequired` at `false` — i.e. satisfy a naive
+"it's in the roster now" check while changing nothing about the hole this item names.
 
-## Why an operator, not an agent
+The sibling entries `review-runner-core` and `review-runner-cli` both carry `leash: 'spec'` under a comment
+saying reclassifying them is "a separate, human-ratified call", and the roster's own guidance is explicit:
+"If you cannot answer with confidence, leave it `'spec'` and file the classification as its own decision —
+the fail-closed direction is human, never committee." Take `'spec'`. It is not a no-op: it is precisely the
+behaviour change this item exists to make.
 
-The roster file is itself `policy` tier (`isPolicyCorePath` returns `true` for it, per the run above), so an
-edit to it forces `review:human` by construction — an agent cannot clear its own change to the leash roster.
-That is the design working, not an obstacle. This card exists so the edit lives on the board rather than only
-in a comment inside an unmerged file.
+## Sibling card — read it first
+
+[#2960](/backlog/2960-register-the-review-label-cli-on-the-trust-chain-s-policy-ti/) (open) is the same shape
+one file over: register [we:scripts/review-set-label.mjs](scripts/review-set-label.mjs) — the other file that
+decides what may clear the gate — at policy tier. It already works through the #2771 spec-vs-code question in
+detail and states the option set (place the file in `POLICY_SPEC` with the leash-statement reason, or
+register `tier: 'policy'` for the escalation signal only and cover the preconditions in the conformance
+suite). Answer this item's `leash` with the same argument, or say why the two files land on different sides.
+The two roster edits are also natural to do in one PR, since the roster is itself `leash: 'spec'` and each
+edit costs a human clearance.
+
+## An agent may BUILD this; only a human may CLEAR it
+
+The roster file is itself policy tier AND declarative leash (`isPolicyCorePath` and `isPolicySpecPath` both
+return `true` for its basename, per the run above), so this PR will carry `review:human` by construction and
+only an operator clearance lands it. That is the design working, not a blocker: authoring the entry, its
+`desc`, and its test is ordinary agent work, exactly as it is for the sibling #2960. Budget for the human
+clearance at the end, not for a human to write the diff.
 
 ## Acceptance
 
-- `isPolicyCorePath` returns `true` for the clearer-identity module's path.
-- The "NOT YET TRUST-CHAIN REGISTERED" paragraph is removed from the module header (and its inaccurate
-  "#2844 landed" clause goes with it), so the file and the roster stop disagreeing.
-- The roster's own conformance/enum test covers the new entry, the same as every other role.
+- `isPolicySpecPath` returns `true` for the clearer-identity module's path, and `scoreEscalation` over a
+  changed-file set containing it returns `humanRequired: true`. The assertion must be on the human-forcing
+  predicate, not only on `isPolicyCorePath` — a `leash: 'code'` entry satisfies the latter without changing
+  the gate.
+- The "NOT YET TRUST-CHAIN REGISTERED" paragraph is removed from the module header, so the file and the
+  roster stop disagreeing.
+- The roster's own conformance/enum test covers the new entry, the same as every other role, including the
+  invariant that every `policy` member declares a valid `leash`.

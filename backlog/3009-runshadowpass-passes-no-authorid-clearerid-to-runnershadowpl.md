@@ -180,14 +180,32 @@ one framing it adds:
 - The observation period this silently empties belongs to
   [#2675](/backlog/2675-auto-land-seam-for-clean-auto-dispositions-defaulting-to-sha/) (resolved), which
   ratified SHADOW as the auto-land seam's default precisely so the judge could log what it *would* dispose
-  "for a confidence-building period". Once PR #1100 lands, every shadow line reads `self-clear-refused:
-  unknown-clearer`, so that period accumulates no evidence about the rail it exists to observe. Fail-closed
-  and therefore safe; useless as a soak.
-- The module header's wording — "the common case today" (verified present at line 1874 of
-  `gh pr diff 1100`) — reads as temporary. Nothing in the code makes it temporary: the runner reads only
-  `--json number,labels` (verified at `we:scripts/review-runner.mjs` lines 102 and 123), so `authorId` is
+  "for a confidence-building period". Every shadow line now reads `self-clear-refused: unknown-clearer`, so
+  that period accumulates no evidence about the rail it exists to observe. Fail-closed and therefore safe;
+  useless as a soak.
+- The wording in [we:scripts/lib/review-runner-core.mjs](scripts/lib/review-runner-core.mjs)'s
+  `runnerShadowPlan` docblock — "the common case today", line 95 on `main` — reads as temporary. Nothing in
+  the code makes it temporary: the runner reads only `--json number,labels` (verified at
+  [we:scripts/review-runner.mjs](scripts/review-runner.mjs) lines 102 and 123), so `authorId` is
   structurally unobtainable there until the `body` field is added, exactly as this item's acceptance
   criteria already require.
-- Also re-confirmed on `main` at `a68b4902`: `clearerId`, `authorId`, `currentActorId` and
-  `decideClearerIndependence` appear nowhere under `we:scripts/` — so nothing is refused today, and this
-  item is correctly described above as latent rather than live.
+
+**Correction, same day — this is LIVE now, not latent.** The first cut of this note said the gap was latent
+because `clearerId` / `authorId` / `decideClearerIndependence` appeared nowhere under `we:scripts/`. That was
+true at `a68b4902` and stopped being true hours later: **PR #1100 merged 2026-08-09T12:40:01Z** and #2844 is
+`status: resolved`. Re-verified on `main` at `cf6730a3`:
+
+- `runShadowPass` still calls `runnerShadowPlan({ ledger, config, currentLabels: item.labels })` with neither
+  id ([we:scripts/review-runner.mjs](scripts/review-runner.mjs) line 181).
+- `decideAutoLand` evaluates `decideClearerIndependence({ authorId, clearerId })` before the shadow branch and,
+  when it is not `independent`, returns `reason: 'self-clear-refused: <status>'`
+  ([we:scripts/lib/auto-land-seam.mjs](scripts/lib/auto-land-seam.mjs) lines 153–160).
+- `decideClearerIndependence` reads no environment of its own — it tests the two arguments, `clearerId` first
+  ([we:scripts/lib/review-independence.mjs](scripts/lib/review-independence.mjs) lines 193–205). With neither
+  passed, the status is `unknown-clearer`, exactly as this item says above and NOT `unknown-author`.
+
+So the shadow ledger misreports today. Two consequences for whoever picks this up: the "What this is NOT"
+section's "**This is latent, not live**" no longer holds and should be restated when the item is next edited,
+and `blockedBy: ["2844"]` is now a stale edge on a resolved blocker — sweep it under
+[#1231](/backlog/1231-sweep-the-stale-blockedby-edges-items-marked-blocked-whose-b/). Neither is changed here:
+this pass is capture-only and does not move item state.

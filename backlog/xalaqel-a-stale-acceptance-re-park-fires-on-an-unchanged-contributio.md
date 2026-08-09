@@ -36,10 +36,13 @@ not distinguish *who* moved it. The design intends it to catch **the contributio
 just as readily when **the base** grows by a different amount above two of the contribution's hunks — a
 non-uniform base move — which the contributor did not cause and cannot prevent.
 
-## Proven on WE PR #1106, twice, independently
+## Observed on WE PR #1106 — the timeline is replicated, the byte measurement is not
 
-Verified from the live timeline (`gh api repos/chalbert/web-everything/issues/1106/timeline`), re-read for
-this filing:
+Two claims, two different evidence grades; do not read the second as carrying the first's weight.
+
+The **label + commit timeline** is replicated. Read independently three times from
+`gh api repos/chalbert/web-everything/issues/1106/timeline` — in the PR #1124 review, for this filing, and
+again in the independent review of the PR that filed this card — matching line for line each time:
 
 ```
 2026-08-09T00:34:00Z  unlabeled review:pending, unlabeled review:human, labeled review:accepted
@@ -52,7 +55,8 @@ this filing:
 
 The head moved because of the **drain's own** rebase-drop commit `e97d6c3b`, not because the author pushed.
 
-**The measurement, and its provenance.** Both net diffs are 137,799 bytes and the two normalized 1,534-line
+**The byte measurement is SINGLE-SOURCED and unreplicated — treat every number below as a lead, not a
+fact.** Both net diffs are reported as 137,799 bytes and the two normalized 1,534-line
 projections differ in **exactly two lines** — the two inter-hunk gap values:
 
 ```
@@ -62,13 +66,15 @@ projections differ in **exactly two lines** — the two inter-hunk gap values:
 +@@ ~328 -,6 +,12 @@ function runComment(flags, asJson) {
 ```
 
-Not one `+`/`-` line, hunk length, section heading or file differs. `main` grew 15 lines above one hunk and
-4 above another — a non-uniform move. **This figure came from the PR #1124 review, recomputed by hand from
-the real commits; it is not produced by any committed script and has not been replicated by an independent
-run.** The same numbers are recorded on
-[#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/) from that same review,
-so the two cites share one source rather than corroborating each other. Reproducing it from a script is part
-of this item's work.
+On that reading no `+`/`-` line, hunk length, section heading or file differs, and `main` grew 15 lines above
+one hunk and 4 above another (439−424 and 328−324) — a non-uniform move. **All of it came from the PR #1124
+review, recomputed by hand from the real commits. No committed script produces it, and no independent run has
+replicated it — including the review of the PR that filed this card, which checked the provenance and
+deliberately did not re-derive the bytes.** The same numbers on
+[#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/) come from that same
+review, so the two cites share one source rather than corroborating each other. Re-deriving it from a script
+is part of this item's work, and the mechanism above does not depend on it: the docblock at lines 891–893
+already states the gap is invariant only under a *uniform* displacement, which is the whole argument.
 
 ## Why this is unowned
 
@@ -78,10 +84,10 @@ Confirmed by reading each card, not inferred:
   files the **inverse**: the digest *colliding* — two different contributions hashing alike, a false
   *honour*. Its argument turns on the gap being *preserved* under a uniform shift ("a set of hunks that
   relocates uniformly preserves every gap and collides the same way"). It does not file the diverging case.
-- **[#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/)** (landed via
-  PR #1124) makes the re-hold **loud** — it posts a durable notice naming the clearer. It states in as many
-  words that the diverging direction "is filed nowhere; this item does not close it". It fixes the silence,
-  not the false stale.
+- **[#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/)** (its code landed
+  in PR #1124, merged 2026-08-09T11:50:32Z; the card is still `status: open`) makes the re-hold **loud** — it
+  posts a durable notice naming the clearer. It states in as many words that the diverging direction "is
+  filed nowhere; this item does not close it". It fixes the silence, not the false stale.
 - **[#2884](/backlog/2884-acceptance-coverage-keys-on-head-sha-identity-so-a-no-op-reb/)** (open) is the
   pre-escape framing — SHA identity re-parking a no-op rebase — written before the diff/contribution escapes
   existed. Its option 3 ("auto-re-stamp on a provably-identical rebase") overlaps a possible fix here, so the
@@ -101,6 +107,14 @@ other is worth; see the note on #3024.
 PR #1119 (merged 2026-08-08T23:09:39Z) landed the contribution-only fingerprint that fixed the **uniform**
 case — the escape works, and #1106's own `review:accepted` survived because of it. What did not survive is
 the `review:human` re-imposition on top.
+
+**Five cards now sit on one incident, and that is the real risk here.** This one (does the re-park fire?),
+#3021 (the inverse digest direction), #3024 (which label a genuine re-park applies), #3039 (say so out loud
+— landed), #2884 (the pre-escape SHA-identity framing), plus the unfiled `review:stale` fourth-tier proposal.
+They are distinct defects, not re-filings — each was checked against the others before this one was written,
+and #3039 says of this direction "filed nowhere; this item does not close it". But no two of them can be
+costed independently, so the first move on any of them should be to run them through `/consolidate` and
+decide whether they want an umbrella epic. Do that before claiming this card, not after.
 
 ## Directions worth costing (none picked)
 
