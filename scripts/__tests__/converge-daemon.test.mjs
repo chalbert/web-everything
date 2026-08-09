@@ -4,8 +4,11 @@
  * schedule). Both files are IO shells over pure resolvers, and it is the pure half that carries the risk, so
  * that is what this pins:
  *   • the PRIMARY-checkout refusal — a pass runs `git reset --hard`, so pointing the daemon at the operator's
- *     tree would clobber real uncommitted work (#2501 clause 1's forced invariant). Refused in BOTH the pass
+ *     tree would clobber real uncommitted work (#2501 Fork A(a)'s forced invariant). Refused in BOTH the pass
  *     (`assertNotPrimary`) and the installer (`installBlockers`), because either one alone leaves a hole.
+ *   • the IN-USE clone refusal — `assertNotPrimary` only knows about ONE tree, but `reset --hard` + `clean -fdq`
+ *     destroys uncommitted work in ANY tree, and a pooled lane clone is exactly as destroyable as primary. A live
+ *     lane lease, a dirty tree, or unpushed commits must all fail CLOSED, in the pass AND at install.
  *   • the LEDGER wire — the daemon's own clone has an empty gitignored `.conveyor/jury`, so a pass that did not
  *     repoint `CONVEYOR_JURY_DIR` would fold every PR fail-closed to keep-parked and record a soak that looks
  *     healthy and means nothing. The default must land on the PRIMARY tree's ledger, and the plist must carry it.
@@ -18,6 +21,7 @@ import { join } from 'node:path';
 
 import {
   resolvePassConfig, buildRefreshSteps, buildRunnerArgv, buildPassRecord, assertNotPrimary,
+  assertCloneNotInUse, PROVISION_CMD,
 } from '../converge-daemon-pass.mjs';
 import {
   LABEL, DEFAULT_INTERVAL_SEC, plistPath, resolveInstallConfig, renderPlist, installBlockers,
@@ -75,6 +79,60 @@ describe('assertNotPrimary', () => {
 
   it('passes a genuinely separate clone', () => {
     expect(assertNotPrimary({ clone: '/clones/lane-1', primary: '/work/webeverything' })).toBeNull();
+  });
+
+  it('refuses through a SYMLINK, not just a lexical match — a link to primary is still primary', () => {
+    // `~/we -> ~/work/webeverything`: lexically these are two different paths, and `resolve` alone would let the
+    // daemon `reset --hard` the operator's tree through the link.
+    const realpathOf = (p) => (p === '/home/op/we' ? '/work/webeverything' : p);
+    const msg = assertNotPrimary({ clone: '/home/op/we', primary: '/work/webeverything' }, realpathOf);
+    expect(msg).toMatch(/refusing to run from the PRIMARY checkout/);
+  });
+
+  it('names the provisioning command that actually works — `--name=`, not the read-only `--pool=` selector', () => {
+    // lane-pool.mjs documents `--pool` as an EXISTING-pool selector for read/release ops and its own `cloneLane`
+    // refuses a clone path with it. Pointing the operator at `--pool` for provisioning is an unusable instruction.
+    expect(PROVISION_CMD).toContain('--name=we-converge-daemon');
+    expect(PROVISION_CMD).not.toContain('--pool=');
+    const msg = assertNotPrimary({ clone: '/work/webeverything', primary: '/work/webeverything' });
+    expect(msg).toContain(PROVISION_CMD);
+  });
+});
+
+describe('assertCloneNotInUse', () => {
+  const CLEAN = { dirty: false, ahead: false, lease: null };
+  const now = Date.parse('2026-08-08T12:00:00Z');
+  const lease = (mins) => ({
+    session: 'Mac:1234', purpose: 'review-1113', ttlMinutes: 240,
+    acquiredAt: new Date(now - mins * 60_000).toISOString(),
+  });
+
+  it('passes a clean, unleased, up-to-date clone — the daemon\'s own clone at rest', () => {
+    expect(assertCloneNotInUse('/clones/lane-1', CLEAN, now)).toBeNull();
+  });
+
+  it('refuses a clone holding a LIVE lane lease — the collision assertNotPrimary cannot see', () => {
+    const msg = assertCloneNotInUse('/lanes/web-everything/lane-3', { ...CLEAN, lease: lease(5) }, now);
+    expect(msg).toMatch(/LIVE lane lease/);
+    expect(msg).toContain('review-1113'); // says WHO, so the operator can find the session
+    expect(msg).toMatch(/clean -fdq/);    // and says what would have been destroyed
+  });
+
+  it('ignores a STALE lease — a crashed session must not wedge the daemon forever', () => {
+    // 240-minute TTL; a lease acquired 10 hours ago is long dead.
+    expect(assertCloneNotInUse('/clones/lane-1', { ...CLEAN, lease: lease(600) }, now)).toBeNull();
+  });
+
+  it('refuses a DIRTY tree — uncommitted or untracked work `clean -fdq` would eat', () => {
+    expect(assertCloneNotInUse('/clones/lane-1', { ...CLEAN, dirty: true }, now)).toMatch(/uncommitted or untracked/);
+  });
+
+  it('refuses a clone AHEAD of its upstream — unpushed commits live nowhere else (#2267)', () => {
+    expect(assertCloneNotInUse('/clones/lane-1', { ...CLEAN, ahead: true }, now)).toMatch(/not pushed/);
+  });
+
+  it('treats a missing state object as safe-to-refuse-nothing rather than throwing', () => {
+    expect(assertCloneNotInUse('/clones/lane-1', null, now)).toBeNull();
   });
 });
 
@@ -199,30 +257,46 @@ describe('renderPlist', () => {
 
 describe('installBlockers', () => {
   const all = () => true;
+  /** The in-use probe, injected so the blocker set is decided with no git and no fs. */
+  const idle = () => ({ dirty: false, ahead: false, lease: null });
   const cfg = resolveInstallConfig(ENV, HOME, '/usr/bin/node');
 
   it('is empty when the clone, the script and the ledger all exist', () => {
-    expect(installBlockers(cfg, all)).toEqual([]);
+    expect(installBlockers(cfg, all, idle)).toEqual([]);
   });
 
   it('blocks an install pointed at the primary checkout', () => {
-    const blockers = installBlockers({ ...cfg, clone: cfg.primary, script: `${cfg.primary}/scripts/converge-daemon-pass.mjs` }, all);
+    const blockers = installBlockers({ ...cfg, clone: cfg.primary, script: `${cfg.primary}/scripts/converge-daemon-pass.mjs` }, all, idle);
     expect(blockers.join('\n')).toMatch(/PRIMARY checkout/);
   });
 
   it('blocks a missing clone and names the provision command', () => {
-    const blockers = installBlockers(cfg, (p) => p !== cfg.clone);
-    expect(blockers.join('\n')).toMatch(/lane-pool\.mjs provision --pool=we-converge-daemon/);
+    const blockers = installBlockers(cfg, (p) => p !== cfg.clone, idle);
+    expect(blockers.join('\n')).toContain(PROVISION_CMD);
+    expect(blockers.join('\n')).toMatch(/lane-pool\.mjs provision .*--name=we-converge-daemon/);
   });
 
   it('blocks a clone that predates this change rather than scheduling a job that cannot run', () => {
-    const blockers = installBlockers(cfg, (p) => p !== cfg.script);
+    const blockers = installBlockers(cfg, (p) => p !== cfg.script, idle);
     expect(blockers.join('\n')).toMatch(/no scripts\/converge-daemon-pass\.mjs/);
   });
 
   it('blocks a missing ledger dir — an absent ledger looks like a working daemon and is not', () => {
-    const blockers = installBlockers(cfg, (p) => p !== cfg.juryDir);
+    const blockers = installBlockers(cfg, (p) => p !== cfg.juryDir, idle);
     expect(blockers.join('\n')).toMatch(/jury ledger dir/);
+  });
+
+  it('blocks an install pointed at a LEASED lane clone — refuse while a human is here to read it', () => {
+    const leased = () => ({ dirty: false, ahead: false, lease: { session: 'Mac:99', purpose: 'batch', ttlMinutes: 240, acquiredAt: new Date().toISOString() } });
+    const blockers = installBlockers(cfg, all, leased);
+    expect(blockers.join('\n')).toMatch(/LIVE lane lease/);
+    // Reworded for the installer's "refusing to install —" preamble, not left as a pass-time sentence.
+    expect(blockers.join('\n')).not.toMatch(/refusing to run from/);
+  });
+
+  it('blocks an install pointed at a DIRTY clone', () => {
+    const dirty = () => ({ dirty: true, ahead: false, lease: null });
+    expect(installBlockers(cfg, all, dirty).join('\n')).toMatch(/uncommitted or untracked/);
   });
 });
 

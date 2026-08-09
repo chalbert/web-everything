@@ -32,7 +32,9 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { resolvePassConfig } from './converge-daemon-pass.mjs';
+import {
+  resolvePassConfig, assertCloneNotInUse, probeCloneState, PROVISION_CMD,
+} from './converge-daemon-pass.mjs';
 
 /** Labelled by the repo that OWNS the source (WE), not by the drain daemon's plateau-app prefix. */
 export const LABEL = 'com.webeverything.converge-daemon';
@@ -71,7 +73,7 @@ export function resolveInstallConfig(env = process.env, home = homedir(), nodePa
     node: nodePath,
     // The daemon runs the script FROM ITS OWN CLONE — so a self-update (the pass's `reset --hard origin/main`)
     // takes effect on the next fire with no reinstall. Pointing this at the primary checkout would make the
-    // operator's working tree the daemon's source, which is exactly what #2501 clause 1 forbids.
+    // operator's working tree the daemon's source, which is exactly what #2501 Fork A(a) forbids.
     script: join(pass.clone, 'scripts', 'converge-daemon-pass.mjs'),
     intervalSec: Number.isFinite(rawInterval) && rawInterval > 0 ? Math.floor(rawInterval) : DEFAULT_INTERVAL_SEC,
     stdoutPath: join(pass.stateRoot, 'daemon.log'),
@@ -130,17 +132,24 @@ ${envXml}
  * checks) so the whole refusal set is testable.
  * @param {object} cfg
  * @param {(p:string)=>boolean} exists
+ * @param {(c:string)=>{dirty:boolean,ahead:boolean,lease:object|null}} [probe] - injectable in-use probe
  * @returns {string[]}
  */
-export function installBlockers(cfg, exists) {
+export function installBlockers(cfg, exists, probe = probeCloneState) {
   const out = [];
   if (resolve(cfg.clone) === resolve(cfg.primary)) {
     out.push(`the daemon clone resolves to the PRIMARY checkout (${cfg.primary}) — a pass runs git reset --hard there. Set CONVERGE_DAEMON_CLONE.`);
   }
   if (!exists(cfg.clone)) {
-    out.push(`no clone at ${cfg.clone} — provision it: node scripts/lane-pool.mjs provision --pool=we-converge-daemon --count=1`);
-  } else if (!exists(cfg.script)) {
-    out.push(`the clone at ${cfg.clone} has no scripts/converge-daemon-pass.mjs — refresh it to a main that contains this change.`);
+    out.push(`no clone at ${cfg.clone} — provision it: ${PROVISION_CMD}`);
+  } else {
+    if (!exists(cfg.script)) {
+      out.push(`the clone at ${cfg.clone} has no scripts/converge-daemon-pass.mjs — refresh it to a main that contains this change.`);
+    }
+    // Catch the in-use clone HERE too, not only at pass time: scheduling a job that resets a lane someone is
+    // working in is a mistake worth refusing at install, when a human is present to read the refusal.
+    const inUse = assertCloneNotInUse(cfg.clone, probe(cfg.clone));
+    if (inUse) out.push(inUse.replace(/^converge-daemon: refusing to run from /, 'the daemon clone '));
   }
   if (!exists(cfg.juryDir)) {
     // NOT fatal on its own, but silence here is how a soak ends up recording nothing: an absent ledger dir
@@ -186,8 +195,20 @@ function main(argv) {
   }
 
   if (cmd === 'uninstall') {
-    launchctl('bootout', `${target}/${cfg.label}`);
+    const out = launchctl('bootout', `${target}/${cfg.label}`);
+    // Remove the plist FIRST-class, whatever bootout did — without it the job comes back at the next login.
     try { rmSync(path, { force: true }); } catch { /* already gone */ }
+    // launchctl exits non-zero when the job simply was not loaded; that is the benign case. Anything else means
+    // the job may STILL be running, and reporting "booted out" there would tell the operator it is off when it is
+    // not — the one lie an uninstall command must never tell.
+    const stderr = `${out.stderr || ''}`;
+    const wasNotLoaded = out.status === 0 || /no such process|could not find|not (loaded|find)/i.test(stderr);
+    if (!wasNotLoaded) {
+      process.stderr.write(`converge-daemon: removed ${path} (so it will NOT return at login), but \`launchctl bootout\` `
+        + `failed — the job may still be loaded right now. Run: launchctl bootout ${target}/${cfg.label}\n`
+        + `  ${stderr.trim() || `exit ${out.status}`}\n`);
+      return 1;
+    }
     process.stdout.write(`converge-daemon: booted out and removed ${path}\n`);
     return 0;
   }

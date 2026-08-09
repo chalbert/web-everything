@@ -125,7 +125,7 @@ substrate is the only thing under this epic that is buildable now.
 
 **The call.** The converge daemon is scheduled as a **launchd job on the operator's Mac**, sibling to the resident
 drain daemon (`com.plateau.drain-daemon`), running from its **own dedicated single-lane clone** — the #2501
-clause-1 pattern applied to this daemon. Shipped here as `we:scripts/converge-daemon-pass.mjs` (one pass) plus
+Fork A(a) pattern applied to this daemon. Shipped here as `we:scripts/converge-daemon-pass.mjs` (one pass) plus
 `we:scripts/converge-daemon-install.mjs` (the schedule), both registered `engine` tier in the trust chain.
 
 **Why local, and what the reason is NOT.** The binding constraint is **auth**, not the ledger: the enforce-era pass
@@ -166,7 +166,8 @@ the soak record; and a pass that could not run (lease held, `gh` down) is *recor
 gap the enforce-flip readiness predicate cannot see is a gap it cannot account for.
 
 **Not done under this ruling:** installing the job (an operator step — `npm run converge:daemon install`, after
-`node we:scripts/lane-pool.mjs provision --pool=we-converge-daemon --count=1`), and the "shadow runner" → converge
+`node we:scripts/lane-pool.mjs provision --repo=<WE checkout> --name=we-converge-daemon --count=1`), and the
+"shadow runner" → converge
 daemon **rename**, which is the epic's remaining piece.
 
 ## The enforce flip is BLOCKED by #2864 — now in the DAG, not just in prose
