@@ -76,7 +76,7 @@ as part of preparing the fork, not after.
 Note also that this item and the `review:stale` proposal both assume the re-park itself was *correct* on
 #1106. It was not: the contribution digest diverged on a byte-identical contribution because `main` grew a
 different number of lines above two of the lane's hunks. That root cause is filed separately as **the
-non-uniform-base false stale** (`#xalaqel`), which is the layer above both of these. A fix there would have
+non-uniform-base false stale** (`#3046`), which is the layer above both of these. A fix there would have
 prevented #1106 entirely — so the reconciliation is really three-way, and its first question is how much of
 this hole survives once the false stale stops firing.
 
@@ -84,4 +84,4 @@ Related: [#3023](/backlog/3023-a-drain-re-score-revokes-a-human-clearance-a-cont
 [#2840](/backlog/2840/), [#2409](/backlog/2409/), [#2771](/backlog/2771/),
 [#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/) (the
 notice-on-revocation fix; its code landed in PR #1124, merged 2026-08-09T11:50:32Z, though the card itself is
-still `status: open`), `#xalaqel` (the false-stale root cause).
+still `status: open`), `#3046` (the false-stale root cause).

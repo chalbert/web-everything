@@ -1,4 +1,5 @@
 ---
+bornAs: xalaqel
 kind: story
 size: 3
 status: open
@@ -80,7 +81,7 @@ already states the gap is invariant only under a *uniform* displacement, which i
 
 Confirmed by reading each card, not inferred:
 
-- **[#3021](/backlog/3021-the-contribution-fingerprint-still-collides-on-an-intra-sect/)** (`x413mbt`, open)
+- **[#3021](/backlog/3021-the-contribution-fingerprint-still-collides-on-an-intra-sect/)** (`3021`, open)
   files the **inverse**: the digest *colliding* — two different contributions hashing alike, a false
   *honour*. Its argument turns on the gap being *preserved* under a uniform shift ("a set of hunks that
   relocates uniformly preserves every gap and collides the same way"). It does not file the diverging case.
@@ -98,7 +99,7 @@ Confirmed by reading each card, not inferred:
 
 ## Relate, do not duplicate
 
-[#3024](/backlog/3024-a-stale-acceptance-re-park-re-asserts-review-human-from-the-/) (`xfdgdln`, open) is a
+[#3024](/backlog/3024-a-stale-acceptance-re-park-re-asserts-review-human-from-the-/) (`3024`, open) is a
 **narrower** fix for the same incident: it narrows *which label* a genuine stale re-park applies, by scoring
 the uncovered delta instead of the whole PR. This item attacks the layer above — whether the re-park should
 fire at all. They are not the same fix and neither subsumes the other, but a fix to either changes what the
