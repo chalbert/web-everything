@@ -70,7 +70,9 @@ describe('the committed rule list', () => {
   it('is valid JSON with a self-describing header, so a reader can open it cold', () => {
     const raw = JSON.parse(readFileSync(RULES_PATH, 'utf8'));
     expect(raw.description).toMatch(/#3012/);
-    expect(Object.keys(raw.conventions)).toEqual(expect.arrayContaining(['matching', 'counting', 'tests', 'generated', 'default', 'knownGap']));
+    expect(Object.keys(raw.conventions)).toEqual(
+      expect.arrayContaining(['matching', 'counting', 'tests', 'generated', 'productScope', 'default', 'knownGap']),
+    );
   });
 
   /**
@@ -106,6 +108,29 @@ describe('classifyPath — real repository paths', () => {
     ['demos/declarative-spa.html', 'product'],
     ['tests/a11y/routes.spec.ts', 'product'],
 
+    // product — the standard's own DECLARATIONS, the half WE ships across the seam to FUI.
+    // The four real `@webeverything/*` packages (each has a package.json with an `exports` map):
+    ['contracts/intl.ts', 'product'],
+    ['contracts/package.json', 'product'],
+    ['capability-manifest/index.ts', 'product'],
+    ['webcases/requirementValidator.ts', 'product'],
+    ['validation-generation/adapters/zod.ts', 'product'],
+    // the capability + conformance substrate:
+    ['capabilities/resolver.ts', 'product'],
+    ['conformance-vectors/schema.ts', 'product'],
+    ['conformance-vectors/intl.vectors.ts', 'product'],
+    ['conformance-evidence/provider.ts', 'product'],
+    ['wrapper-conformance/runner.ts', 'product'],
+    // the per-domain declaration trees — the contract half AND the dependency-free model beside it:
+    ['intl/contract.ts', 'product'],
+    ['notifications/push-contract.ts', 'product'],
+    ['positioning/contract.ts', 'product'],
+    ['guard/provider.ts', 'product'],
+    ['guard/__tests__/registry.test.ts', 'product'],
+    ['manifests/changelog-contract.ts', 'product'],
+    ['repro-bundle/repro-bundle.vectors.ts', 'product'],
+    ['webtraits/intentProfileResolver.ts', 'product'],
+
     // machinery + bookkeeping
     ['backlog/3012-put-the-weekly-product-vs-machinery-output-ratio-on-the-prog.md', 'machinery'],
     ['scripts/progress-board.mjs', 'machinery'],
@@ -134,6 +159,14 @@ describe('classifyPath — real repository paths', () => {
     ['reports/2026-08-08-agent-command-surface-sizing.md', 'other'],
     ['AGENTS.md', 'other'],
     ['package.json', 'other'],
+    // …and the eight directories still deliberately left unruled (see `conventions.knownGap`). These rows
+    // are the OPEN QUESTIONS, pinned so that ruling one of them is a visible edit here, not a silent drift.
+    ['config/resolverContract.ts', 'other'],
+    ['design-systems/shadcn.tokens.json', 'other'],
+    ['audits/backlog-health-audit.md', 'other'],
+    ['test-pages/webcontexts.html', 'other'],
+    ['eleventy/filters.cjs', 'other'],
+    ['functions/__tests__/gate.test.ts', 'other'],
   ];
 
   it.each(cases)('%s → %s', (path, expected) => {
@@ -149,6 +182,70 @@ describe('classifyPath — real repository paths', () => {
   it('lets a generated file inside a product tree beat the product rule — order is load-bearing', () => {
     expect(classOf('src/_data/referenceIndex.json')).toBe('other');
     expect(classOf('src/_data/blocks.json')).toBe('product');
+    // conformance-vectors/ became a product tree in the same revision that made this ordering matter: the
+    // GENERATED vectors file must still lose to its exclusion, or a generator's output starts scoring as
+    // the standard's own declarations.
+    expect(classOf('conformance-vectors/webdirectives-ssr.vectors.json')).toBe('other');
+    expect(classOf('conformance-vectors/webdocs.vectors.ts')).toBe('product');
+  });
+
+  /**
+   * THE DECLARATION-SHAPE RULES. `contracts/`, `guard/`, `intl/` … are named directories, which means a
+   * NEW domain landing tomorrow would fall to `other` until someone edited the rule list. The three shape
+   * rules (`**\/contract.ts`, `**\/*-contract.ts`, `**\/*.vectors.ts`) close that: this repo's convention is
+   * that a file with one of those names IS the pure-contract half, wherever it sits. They are the reason
+   * the classifier encodes the PRINCIPLE and not a snapshot of today's folder names.
+   */
+  it('classifies a declaration by SHAPE, so a brand-new domain is product on day one', () => {
+    expect(classOf('brand-new-domain/contract.ts')).toBe('product');
+    expect(classOf('brand-new-domain/some-thing-contract.ts')).toBe('product');
+    expect(classOf('brand-new-domain/brand-new-domain.vectors.ts')).toBe('product');
+    // …but only the declaration itself. The rest of an unruled tree still falls to the remainder, which is
+    // what keeps the coverage ratchet below honest about the directory.
+    expect(classOf('brand-new-domain/provider.ts')).toBe('other');
+  });
+
+  it('keeps the RULED delivery-side trees above the shape rules, so a write-up never scores as a contract', () => {
+    // `reports/**` and every machinery rule sit ABOVE the product block on purpose. If the shape rules were
+    // hoisted over them, a design note or a script fixture named contract.ts would be credited as product.
+    for (const d of ['scripts', 'tools', 'backlog', '.claude', 'skills-src', 'agent-memory-src', '.github', '.githooks']) {
+      expect(classOf(`${d}/fixtures/contract.ts`), `${d}/ no longer beats the shape rules`).toBe('machinery');
+      expect(classOf(`${d}/fixtures/x.vectors.ts`), `${d}/ no longer beats the shape rules`).toBe('machinery');
+    }
+    expect(classOf('reports/2026-01-01-whatever/contract.ts')).toBe('other');
+    expect(classOf('reports/2026-01-01-whatever/x.vectors.ts')).toBe('other');
+    expect(classOf('docs/agent/examples/contract.ts')).toBe('machinery');
+  });
+
+  /**
+   * …AND WHERE THAT PROTECTION STOPS. Ordering only defends a tree that HAS a rule. The eight directories
+   * `conventions.knownGap` pins as uncovered have none, so a declaration-shaped file inside any of them is
+   * credited as `product` today — `eleventy/x/contract.ts` is build config scoring as the standard's own
+   * declaration. The exposure is currently EMPTY (no tracked file and no path in the five measured weeks is
+   * classified by a shape rule, asserted below), so this is a latent hole rather than a live over-count. It
+   * is pinned rather than quietly fixed because closing it means RULING those directories, which moves the
+   * headline number and is the operator's call — but it must not be able to change without a visible diff.
+   */
+  it('pins where the shape rules still reach — an uncovered directory is NOT protected', () => {
+    for (const d of ['audits', 'config', 'design-refs', 'design-systems', 'eleventy', 'functions', 'site', 'test-pages']) {
+      expect(classOf(`${d}/probe.ts`), `${d}/ is no longer uncovered`).toBe('other');
+      expect(classOf(`${d}/nested/contract.ts`), `${d}/ shape exposure changed`).toBe('product');
+      expect(classOf(`${d}/nested/x.vectors.ts`), `${d}/ shape exposure changed`).toBe('product');
+    }
+  });
+
+  it('keeps that exposure empty — nothing tracked today is classified by a shape rule', () => {
+    const shapes = new Set(['**/contract.ts', '**/*-contract.ts', '**/*.vectors.ts']);
+    const tracked = execFileSync('git', ['-C', ROOT, 'ls-tree', '-r', '--name-only', 'HEAD'], {
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024 * 256,
+    })
+      .split('\n')
+      .filter(Boolean);
+    const viaShape = tracked.filter((f) => shapes.has(classifyPath(f, RULES).match));
+    // A hit is not automatically wrong — it may be a genuine new domain's contract. But it must be SEEN:
+    // every such file is product without any directory rule vouching for it.
+    expect(viaShape, `these files score product only by SHAPE — rule their directory or accept them here`).toEqual([]);
   });
 
   it('answers "why is this file machinery?" in one line, from the file', () => {
@@ -168,33 +265,46 @@ describe('classifyPath — real repository paths', () => {
 /**
  * THE COVERAGE RATCHET — the test the first cut of this file did not have.
  *
- * The rule list is an ALLOWLIST over a default of `other`, and the two headline classes are not covered
- * equally. Machinery lives in nine stable directories, all of them matched. Product is matched in four,
- * while the standard's own declarations — `contracts/`, `capabilities/`, `conformance-vectors/`,
- * `webcases/`, and the per-domain `<domain>/contract.ts` trees — live in ~45 more that no rule names. Those
- * fall to `other`, so the published `product` figure is a lower bound and the machinery:product ratio is an
- * upper bound. See `conventions.knownGap` in the rule list.
+ * The rule list is an ALLOWLIST over a default of `other`, and the two headline classes were not covered
+ * equally. Machinery lives in nine stable directories, all of them matched. Product started matched in
+ * four (`src/`, `blocks/`, `demos/`, `tests/`) while the standard's own declarations — the
+ * `@webeverything/*` contract packages, the capability/conformance substrate, and the per-domain
+ * `<domain>/contract.ts` trees — lived in 44 more that no rule named, so 26,670 tracked lines of the thing
+ * this repo exists to SHIP fell to `other`. Those 44 are ruled `product` now, on the operator's direction
+ * that "for WE contracts and similar are the main product". EIGHT directories remain unmatched, two of
+ * them live questions rather than settled `other` (`config/` holds a resolver contract; `design-systems/`
+ * calls itself WE-owned data). So `product` is still a lower bound, by much less. See
+ * `conventions.knownGap`.
  *
  * The path table above cannot see this: it asserts what the rules DO classify, and a directory nobody wrote
- * a rule for has no row. So the gap is pinned directly. Two things fail here, both deliberately:
+ * a rule for has no row. So the gap is pinned directly. Three things fail here, all deliberately:
  *   • a NEW top-level directory that no rule covers — it must be classified on the way in, not discovered
  *     later as a number that quietly moved;
  *   • one of these directories finally being ruled `product` or `machinery` — the list must shrink WITH the
- *     ruling, in the same diff, so the gap statement and the rules never drift apart.
- * Whether these are product is an operator call that has not been made. This test does not make it; it
- * refuses to let it stay invisible.
+ *     ruling, in the same diff, so the gap statement and the rules never drift apart. That is not a
+ *     nuisance to route around: this test went red when the 44 declaration directories were ruled, and the
+ *     correct response was to shrink the list here and rewrite `knownGap`, never to weaken the assertion;
+ *   • the rule list's prose and this list disagreeing — `knownGap` must NAME every directory pinned here,
+ *     so the paragraph a reader trusts and the list a test enforces can never drift.
  */
 describe('rule-list coverage over the real tree', () => {
-  const KNOWN_UNCOVERED = [
-    'analytics', 'audits', 'capabilities', 'capability-manifest', 'charts', 'commitment-policy', 'config',
-    'conformance-evidence', 'conformance-vectors', 'contracts', 'design-refs', 'design-systems', 'eleventy',
-    'error-summary', 'experiment', 'explorer', 'functions', 'graphs', 'guard', 'identity',
-    'interaction-state', 'intl', 'manifests', 'module-resolution', 'notifications', 'permissions',
+  const KNOWN_UNCOVERED = ['audits', 'config', 'design-refs', 'design-systems', 'eleventy', 'functions', 'site', 'test-pages'];
+
+  /** The declaration homes ruled `product` by this revision — the machinery-coverage test's counterpart. */
+  const PRODUCT_HOMES = [
+    // the site half, unchanged
+    'src', 'blocks', 'demos', 'tests',
+    // the four real `@webeverything/*` packages
+    'contracts', 'capability-manifest', 'webcases', 'validation-generation',
+    // the capability + conformance substrate
+    'capabilities', 'conformance-vectors', 'conformance-evidence', 'wrapper-conformance',
+    // the per-domain declaration trees
+    'analytics', 'charts', 'commitment-policy', 'error-summary', 'experiment', 'explorer', 'graphs', 'guard',
+    'identity', 'interaction-state', 'intl', 'manifests', 'module-resolution', 'notifications', 'permissions',
     'plug-parity', 'positioning', 'process', 'range-anchor', 'realtime', 'reliability', 'repro-bundle',
-    'reproduction-parity', 'resources', 'site', 'source-resolution', 'suggested-edit', 'test-pages',
-    'trainable-judge', 'validation-generation', 'validator-resolution', 'validity-merge', 'webcases',
-    'webcompliance', 'webcontexts', 'webdocs', 'webinjectors', 'webpolicy', 'webtheme', 'webtraits',
-    'wrapper-conformance',
+    'reproduction-parity', 'resources', 'source-resolution', 'suggested-edit', 'trainable-judge',
+    'validator-resolution', 'validity-merge', 'webcompliance', 'webcontexts', 'webdocs', 'webinjectors',
+    'webpolicy', 'webtheme', 'webtraits',
   ];
 
   const trackedTopLevelDirs = () =>
@@ -214,10 +324,21 @@ describe('rule-list coverage over the real tree', () => {
     }
   });
 
+  it('keeps product coverage over every declaration home — the seam WE ships across', () => {
+    for (const d of PRODUCT_HOMES) {
+      expect(trackedTopLevelDirs(), `${d}/ is in PRODUCT_HOMES but is not a tracked directory`).toContain(d);
+      expect(classOf(`${d}/probe.ts`), `${d}/ is no longer product`).toBe('product');
+    }
+  });
+
   it('states the product-coverage gap in the rule list itself, not only in a test', () => {
     const raw = JSON.parse(readFileSync(RULES_PATH, 'utf8'));
     expect(raw.conventions.knownGap).toMatch(/LOWER BOUND/);
-    expect(raw.conventions.knownGap).toMatch(/contracts\//);
+    // The prose must name every directory the ratchet pins, or the paragraph a reader trusts drifts from
+    // the list a test enforces.
+    for (const d of KNOWN_UNCOVERED) expect(raw.conventions.knownGap, `knownGap does not name ${d}/`).toContain(`${d}/`);
+    // The membership test the rules encode has to be written down too, not inferrable from 47 `why` lines.
+    expect(raw.conventions.productScope).toMatch(/cross the seam/);
   });
 });
 
