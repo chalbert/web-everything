@@ -88,7 +88,7 @@ beforeEach(() => {
 function cli(...args) {
   const r = spawnSync(process.execPath, [CLI, `--state=${statePath}`, `--out=${outPath}`, '--no-gh', ...args], {
     encoding: 'utf8',
-    env: { ...process.env, WE_BOARD_NOW: NOW, WE_BOARD_NO_GH: '1' },
+    env: { ...process.env, WE_BOARD_NOW: NOW, WE_BOARD_NO_GH: '1', WE_BOARD_NO_GIT: '1' },
   });
   return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim() };
 }
@@ -257,6 +257,76 @@ describe('renderPage', () => {
     const h = renderPage(buildModel(SEED, { fresh: false, fetchedAt: NOW, reason: 'GitHub was unreachable', rows: [] }));
     expect(h).toContain('class="banner"');
     expect(h).toContain('GitHub was unreachable');
+  });
+});
+
+// ── The weekly output mix (#3012) ─────────────────────────────────────────────
+
+/**
+ * The board's THIRD derived half: product vs machinery lines added this week, with the four completed weeks
+ * beside it. The derivation itself is proved in `scripts/lib/__tests__/output-mix.test.mjs`; what matters
+ * here is that the page carries both numbers and the trend, and that a failed derivation degrades to an
+ * honest note rather than an empty section that reads as "no work happened".
+ */
+describe('the output-mix section', () => {
+  const PRS = { fresh: true, fetchedAt: NOW, reason: null, rows: [] };
+  const MIX = {
+    fresh: true,
+    reason: null,
+    weeks: [
+      { start: '2026-07-06', end: '2026-07-12', product: 1106, machinery: 28757, other: 4041, total: 33904 },
+      { start: '2026-07-13', end: '2026-07-19', product: 1883, machinery: 12638, other: 2024, total: 16545 },
+      { start: '2026-07-20', end: '2026-07-26', product: 206, machinery: 26553, other: 989, total: 27748 },
+      { start: '2026-07-27', end: '2026-08-02', product: 627, machinery: 36347, other: 757, total: 37731 },
+      { start: '2026-08-03', end: '2026-08-09', product: 0, machinery: 47014, other: 1014, total: 48028 },
+    ],
+    get current() {
+      return this.weeks[4];
+    },
+    get trend() {
+      return this.weeks.slice(0, 4);
+    },
+  };
+
+  it('renders the current week as two numbers, grouped and signed', () => {
+    const h = renderPage(buildModel(SEED, PRS, MIX));
+    expect(h).toContain('Output mix');
+    expect(h).toContain('Product lines this week');
+    expect(h).toContain('+47,014');
+    expect(h).toContain('no product output at all');
+  });
+
+  it('puts the four completed weeks beside it, oldest first, with the current week marked', () => {
+    const h = renderPage(buildModel(SEED, PRS, MIX));
+    // Scoped to the trend table's BODY: week stamps also appear in the summary line above it and in item
+    // dates elsewhere on the page, so an index comparison over anything wider proves nothing about row order.
+    const from = h.indexOf('>Output mix<');
+    const body = h.slice(h.indexOf('<tbody>', from), h.indexOf('</tbody>', from));
+    for (const w of ['2026-07-06', '2026-07-13', '2026-07-20', '2026-07-27', '2026-08-03']) expect(body).toContain(w);
+    expect(body).toContain('this week, still running');
+    expect(body.indexOf('2026-07-06')).toBeLessThan(body.indexOf('2026-08-03'));
+  });
+
+  it('shows the unclassified remainder, so a reader can see how much the two numbers cover', () => {
+    const h = renderPage(buildModel(SEED, PRS, MIX));
+    expect(h).toContain('+4,041');
+    expect(h).toContain('Other');
+  });
+
+  it('names the committed rule list on the page, so the classification is inspectable from it', () => {
+    const h = renderPage(buildModel(SEED, PRS, MIX));
+    expect(h).toContain('we:scripts/lib/output-mix-paths.json');
+  });
+
+  it('degrades to an honest note — never a silent empty section — when the derivation failed', () => {
+    const h = renderPage(buildModel(SEED, PRS, { fresh: false, reason: 'the git history could not be read — boom', weeks: [], current: null, trend: [] }));
+    expect(h).toContain('could not be computed');
+    expect(h).toContain('the git history could not be read');
+  });
+
+  it('degrades the same way when no mix was supplied at all', () => {
+    const h = renderPage(buildModel(SEED, PRS));
+    expect(h).toContain('could not be computed');
   });
 });
 
@@ -608,7 +678,7 @@ describe('CLI verbs', () => {
     const first = state().items.find((i) => i.id === 'alpha').doneAt;
     const r = spawnSync(process.execPath, [CLI, `--state=${statePath}`, `--out=${outPath}`, '--no-gh', '--done=alpha'], {
       encoding: 'utf8',
-      env: { ...process.env, WE_BOARD_NOW: '2027-01-01T00:00:00.000Z', WE_BOARD_NO_GH: '1' },
+      env: { ...process.env, WE_BOARD_NOW: '2027-01-01T00:00:00.000Z', WE_BOARD_NO_GH: '1', WE_BOARD_NO_GIT: '1' },
     });
     expect(r.status).toBe(0);
     expect(state().items.find((i) => i.id === 'alpha').doneAt).toBe(first);
@@ -1632,7 +1702,7 @@ describe('--out and --state may not be the same file', () => {
     const before = readFileSync(statePath, 'utf8');
     const r = spawnSync(process.execPath, [CLI, `--state=${statePath}`, `--out=${statePath}`, '--no-gh'], {
       encoding: 'utf8',
-      env: { ...process.env, WE_BOARD_NOW: NOW, WE_BOARD_NO_GH: '1' },
+      env: { ...process.env, WE_BOARD_NOW: NOW, WE_BOARD_NO_GH: '1', WE_BOARD_NO_GIT: '1' },
     });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('point at');
@@ -1643,7 +1713,7 @@ describe('--out and --state may not be the same file', () => {
     writeFileSync(statePath, '{ not json');
     const r = spawnSync(process.execPath, [CLI, `--state=${statePath}`, `--out=${statePath}`, '--no-gh'], {
       encoding: 'utf8',
-      env: { ...process.env, WE_BOARD_NOW: NOW, WE_BOARD_NO_GH: '1' },
+      env: { ...process.env, WE_BOARD_NOW: NOW, WE_BOARD_NO_GH: '1', WE_BOARD_NO_GIT: '1' },
     });
     expect(r.status).toBe(1);
     expect(readFileSync(statePath, 'utf8')).toBe('{ not json'); // byte-for-byte
