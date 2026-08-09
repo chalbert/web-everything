@@ -21,6 +21,13 @@
  * vendored code is `other` (it is another repo's output), and anything unmatched falls to `other`. `other`
  * is REPORTED, not hidden — a large remainder means the rule list has a gap, and the reader can see it.
  *
+ * THE GAP IS REAL TODAY, and it is not symmetric. Read `conventions.knownGap` in the rule list before
+ * quoting the `product` figure: machinery is matched in all nine of its homes, product in four, and the
+ * standard's own declarations (`contracts/`, `capabilities/`, `conformance-vectors/`, `webcases/`, the
+ * per-domain contract trees) sit in ~50 directories no rule names, so they land in `other`. `product` is a
+ * LOWER bound and the machinery:product ratio an UPPER one until those directories are ruled. The coverage
+ * ratchet in `__tests__/output-mix.test.mjs` pins exactly which directories those are.
+ *
  * ── Weeks are ISO weeks in UTC, and that is what makes it reproducible ───────────────────────────────────
  *
  * Buckets are Monday-00:00-UTC ISO weeks, and commit dates are read in UTC (`TZ=UTC` + `--date=format-local`)

@@ -6,7 +6,8 @@
     "counting": "Only ADDED lines are counted — the metric is output, not churn, so a deletion is not negative output. Binary files (`-` in numstat) contribute 0.",
     "tests": "Test lines are charged to the thing they test, never to a class of their own. `scripts/**` therefore absorbs `scripts/__tests__/**` and `scripts/lib/__tests__/**` as machinery, while `tests/**` and any `*.test.ts` under `blocks/`/`demos/` count as product. Change this by adding a rule ABOVE the group you want to carve out of.",
     "generated": "Generated and vendored files are `other`, not `product` or `machinery` — nobody authored those lines, so crediting them to either side inflates that week's output. Each generated-file rule names the command that writes it, so the list can be re-checked when a generator moves.",
-    "default": "A path matching no rule falls to `other`. `other` is reported alongside the two headline numbers precisely so the reader can see how much of the tree the classification does NOT cover — a large `other` is a signal that this file needs a new rule, not that the metric is wrong."
+    "default": "A path matching no rule falls to `other`. `other` is reported alongside the two headline numbers precisely so the reader can see how much of the tree the classification does NOT cover — a large `other` is a signal that this file needs a new rule, not that the metric is wrong.",
+    "knownGap": "READ THIS BEFORE CITING THE PRODUCT NUMBER. The default is NOT symmetric between the two headline classes, and the asymmetry runs in one direction. Machinery lives in a small, stable, fully-covered set of directories (scripts/, backlog/, .claude/, skills-src/, agent-memory-src/, docs/, .github/, .githooks/, tools/), so machinery coverage is effectively complete. Product does not: the `product` rules cover FOUR directories (src/, blocks/, demos/, tests/), while the standard's own declarations live in ~45 further top-level domain directories — `contracts/`, `capabilities/`, `conformance-vectors/`, `webcases/`, `validation-generation/`, `capability-manifest/`, and the per-domain `<domain>/contract.ts` trees (intl/, webtheme/, permissions/, positioning/, realtime/, …). Those are unmatched today and fall to `other`: 38,852 tracked lines at the 2026-08-09 HEAD, and roughly 730 of the added lines in the five measured weeks. So the published `product` figure is a LOWER BOUND and the machinery:product ratio is an UPPER bound. Whether those directories are `product` is an operator call that has not been made; `uncoveredTopLevel` in the test suite pins the gap so a NEW uncovered directory fails loudly instead of silently joining the remainder."
   },
   "defaultClass": "other",
   "rules": [
@@ -72,9 +73,19 @@
       "why": "agent memory source, deployed into the harness — instructions to the loop, not product"
     },
     {
+      "match": ".lane-manifest.json",
+      "class": "machinery",
+      "why": "the lane transport's own bookkeeping — written by scripts/lane-pool.mjs and dropped again at land (#2288); it was the single largest unclassified contributor before this rule (+1,170 lines over 2026-07-06..2026-08-09)"
+    },
+    {
       "match": "docs/agent/**",
       "class": "machinery",
-      "why": "agent operating instructions (the whole of docs/ is docs/agent/ today)"
+      "why": "agent operating instructions"
+    },
+    {
+      "match": "docs/**",
+      "class": "machinery",
+      "why": "the rest of docs/ is delivery-side too — design notes and mocks for the agent surfaces (docs/design/**). An earlier revision asserted 'the whole of docs/ is docs/agent/ today', which is true of the HEAD tree but was NOT true of the measured window: +1,033 lines of docs/design/ landed in the week of 2026-07-13 and fell to `other` against that stated intent"
     },
     {
       "match": ".github/**",

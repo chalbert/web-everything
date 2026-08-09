@@ -328,6 +328,27 @@ describe('the output-mix section', () => {
     const h = renderPage(buildModel(SEED, PRS));
     expect(h).toContain('could not be computed');
   });
+
+  /**
+   * The one case that runs the REAL derivation through the CLI. Every other `cli()` call in this file forces
+   * `WE_BOARD_NO_GIT=1` for runtime, which means `main()`'s own call into `computeOutputMix` — the ROOT it
+   * resolves, the `today` it passes, the wiring into `buildModel` — is otherwise never executed under test:
+   * the module could throw at that seam and 216 green tests would say nothing. Asserts SHAPE only, never a
+   * number, because the number moves every week.
+   */
+  it('runs the real git derivation end to end when it is NOT disabled', () => {
+    const r = spawnSync(process.execPath, [CLI, `--state=${statePath}`, `--out=${outPath}`, '--no-gh'], {
+      encoding: 'utf8',
+      env: { ...process.env, WE_BOARD_NOW: NOW, WE_BOARD_NO_GH: '1', WE_BOARD_NO_GIT: '' },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const h = readFileSync(outPath, 'utf8');
+    expect(h).toContain('Output mix');
+    expect(h).not.toContain('could not be computed');
+    // A real read produces grouped, signed figures in the machinery column — not the honest-note fallback.
+    expect(h).toMatch(/Machinery \+ bookkeeping/);
+    expect(h).toMatch(/>\+[\d,]+<\/div>/);
+  }, 30_000);
 });
 
 // ── Decisions: the page's only ask ────────────────────────────────────────────

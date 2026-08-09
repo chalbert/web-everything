@@ -15,10 +15,12 @@
  * the live repository — never a specific number, which would re-break every week.
  */
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import {
   CLASSES,
   WEEK_COUNT,
+  ROOT,
   RULES_PATH,
   patternToRegExp,
   loadRules,
@@ -68,7 +70,24 @@ describe('the committed rule list', () => {
   it('is valid JSON with a self-describing header, so a reader can open it cold', () => {
     const raw = JSON.parse(readFileSync(RULES_PATH, 'utf8'));
     expect(raw.description).toMatch(/#3012/);
-    expect(Object.keys(raw.conventions)).toEqual(expect.arrayContaining(['matching', 'counting', 'tests', 'generated', 'default']));
+    expect(Object.keys(raw.conventions)).toEqual(expect.arrayContaining(['matching', 'counting', 'tests', 'generated', 'default', 'knownGap']));
+  });
+
+  /**
+   * THE INERT RULES. `reports/**` and `plugs/**` both resolve to `other`, which is ALSO the default class,
+   * so deleting either one moves no number and every path-table assertion above stays green. Their entire
+   * stated value is being explicit rather than left to omission — "the choice is visible and arguable". A
+   * classification that only a comment defends is one silent edit away from being unmade, so the presence
+   * and class of these two are asserted directly against the rule list rather than through a classified path.
+   */
+  it.each([
+    ['reports/**', 'other'],
+    ['plugs/**', 'other'],
+  ])('keeps %s as an EXPLICIT rule, not left to the default', (match, cls) => {
+    const rule = RULES.rules.find((r) => r.match === match);
+    expect(rule, `${match} was removed — it classifies the same as the default, so nothing else fails`).toBeDefined();
+    expect(rule.class).toBe(cls);
+    expect(rule.why.trim().length).toBeGreaterThan(0);
   });
 });
 
@@ -97,6 +116,10 @@ describe('classifyPath — real repository paths', () => {
     ['agent-memory-src/9-memory_management_policy.md', 'machinery'],
     ['.claude/settings.json', 'machinery'],
     ['docs/agent/testing.md', 'machinery'],
+    // Not under docs/agent/ — it fell to `other` before the docs/** rule, against the stated intent.
+    ['docs/design/mocks/console-ruling-surface.html', 'machinery'],
+    // The lane transport's own bookkeeping: +1,170 lines in the measured window, previously unclassified.
+    ['.lane-manifest.json', 'machinery'],
     ['.github/workflows/ci.yml', 'machinery'],
     ['.githooks/post-merge', 'machinery'],
     ['tools/whatever.mjs', 'machinery'],
@@ -139,6 +162,62 @@ describe('classifyPath — real repository paths', () => {
     expect(r.class).toBe('other');
     expect(r.match).toBeNull();
     expect(r.why).toMatch(/no rule/);
+  });
+});
+
+/**
+ * THE COVERAGE RATCHET — the test the first cut of this file did not have.
+ *
+ * The rule list is an ALLOWLIST over a default of `other`, and the two headline classes are not covered
+ * equally. Machinery lives in nine stable directories, all of them matched. Product is matched in four,
+ * while the standard's own declarations — `contracts/`, `capabilities/`, `conformance-vectors/`,
+ * `webcases/`, and the per-domain `<domain>/contract.ts` trees — live in ~45 more that no rule names. Those
+ * fall to `other`, so the published `product` figure is a lower bound and the machinery:product ratio is an
+ * upper bound. See `conventions.knownGap` in the rule list.
+ *
+ * The path table above cannot see this: it asserts what the rules DO classify, and a directory nobody wrote
+ * a rule for has no row. So the gap is pinned directly. Two things fail here, both deliberately:
+ *   • a NEW top-level directory that no rule covers — it must be classified on the way in, not discovered
+ *     later as a number that quietly moved;
+ *   • one of these directories finally being ruled `product` or `machinery` — the list must shrink WITH the
+ *     ruling, in the same diff, so the gap statement and the rules never drift apart.
+ * Whether these are product is an operator call that has not been made. This test does not make it; it
+ * refuses to let it stay invisible.
+ */
+describe('rule-list coverage over the real tree', () => {
+  const KNOWN_UNCOVERED = [
+    'analytics', 'audits', 'capabilities', 'capability-manifest', 'charts', 'commitment-policy', 'config',
+    'conformance-evidence', 'conformance-vectors', 'contracts', 'design-refs', 'design-systems', 'eleventy',
+    'error-summary', 'experiment', 'explorer', 'functions', 'graphs', 'guard', 'identity',
+    'interaction-state', 'intl', 'manifests', 'module-resolution', 'notifications', 'permissions',
+    'plug-parity', 'positioning', 'process', 'range-anchor', 'realtime', 'reliability', 'repro-bundle',
+    'reproduction-parity', 'resources', 'site', 'source-resolution', 'suggested-edit', 'test-pages',
+    'trainable-judge', 'validation-generation', 'validator-resolution', 'validity-merge', 'webcases',
+    'webcompliance', 'webcontexts', 'webdocs', 'webinjectors', 'webpolicy', 'webtheme', 'webtraits',
+    'wrapper-conformance',
+  ];
+
+  const trackedTopLevelDirs = () =>
+    execFileSync('git', ['-C', ROOT, 'ls-tree', '--name-only', '-d', 'HEAD'], { encoding: 'utf8' })
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  it('pins exactly which top-level directories no rule covers', () => {
+    const uncovered = trackedTopLevelDirs().filter((d) => classifyPath(`${d}/probe.ts`, RULES).match === null);
+    expect(uncovered.sort()).toEqual([...KNOWN_UNCOVERED].sort());
+  });
+
+  it('keeps machinery coverage complete — every machinery home is matched by a rule', () => {
+    for (const d of ['scripts', 'backlog', '.claude', 'skills-src', 'agent-memory-src', 'docs', '.github', '.githooks', 'tools']) {
+      expect(classOf(`${d}/probe.ts`), `${d}/ is no longer machinery`).toBe('machinery');
+    }
+  });
+
+  it('states the product-coverage gap in the rule list itself, not only in a test', () => {
+    const raw = JSON.parse(readFileSync(RULES_PATH, 'utf8'));
+    expect(raw.conventions.knownGap).toMatch(/LOWER BOUND/);
+    expect(raw.conventions.knownGap).toMatch(/contracts\//);
   });
 });
 

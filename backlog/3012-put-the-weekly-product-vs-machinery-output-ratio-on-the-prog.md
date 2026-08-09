@@ -47,7 +47,9 @@ or machinery, since nobody authored those lines; `we:reports/` is `other` by an 
 omission. The `other` remainder is **rendered**, so a reader can see how much of the tree the two headline
 numbers do not cover.
 
-**Measured 2026-08-09** (product → machinery, added lines/week):
+**Measured 2026-08-09 at `cf6730a3`** (product → machinery, added lines/week), by the rule list AS FIRST
+COMMITTED — before the `we:docs/**` and `we:.lane-manifest.json` rules added in review, so the machinery
+column below understates by +1,144 (2026-07-06), +1,033 (2026-07-13) and +26 (2026-07-27):
 
 | Week from | Product | Machinery | Other |
 | --- | --- | --- | --- |
@@ -55,7 +57,12 @@ numbers do not cover.
 | 2026-07-13 | +1,883 | +12,638 | +2,024 |
 | 2026-07-20 | +206 | +26,553 | +989 |
 | 2026-07-27 | +627 | +36,347 | +757 |
-| 2026-08-03 (partial) | **+0** | **+47,014** | +1,014 |
+| 2026-08-03 (partial) | **+0** | **+47,023** | +1,014 |
+
+The four completed rows re-derive exactly under an independent pipeline (human-readable `--numstat`, own
+rename parse, own transcription of the rules). The partial row is the one that moves: it was published as
+`+47,014`, 9 lines short of what the committed script yields at the stated SHA, and it grows with every
+commit — at `72b93534` the same script reads `+47,902`. Read the completed weeks, not the partial one.
 
 **The quoted `+1,699 → +705 → +480 → +147` did NOT reproduce, and is recorded here as unreplicated.** No
 `2026-08-08 delivery review` exists under `we:reports/`; the figure appears only in this card and in #3010,
@@ -69,6 +76,30 @@ Product in this repo is **real but small**, not empty: `we:src/` (the spec data 
 renders it), `we:blocks/`, `we:demos/`, `we:tests/`. Per constellation rule 1 WE holds zero standard
 *implementation*, so the product surface here is definitions and the site over them — which is why it can
 credibly sit at +0 for a week while the machinery does not.
+
+## The product number is a LOWER BOUND — an operator call is open
+
+Review finding, recorded rather than silently fixed. The rule list is an allowlist over a default of
+`other`, and the two headline classes are **not covered equally**. Machinery lives in nine stable
+directories, every one of them matched, so machinery coverage is effectively complete. Product is matched in
+**four** — while the standard's own declarations live in **52 further top-level directories** that no rule
+names: `we:contracts/`, `we:capabilities/`, `we:conformance-vectors/`, `we:webcases/`,
+`we:validation-generation/`, `we:capability-manifest/`, and the per-domain contract trees (`we:intl/`,
+`we:webtheme/`, `we:permissions/`, `we:positioning/`, `we:realtime/`, …). Those fall to `other`:
+**38,852 tracked lines** at the 2026-08-09 HEAD, and ~730 of the added lines across the five measured weeks.
+
+So the published `product` figure is a **lower bound** and the machinery:product ratio an **upper bound**,
+and the bias runs in the same direction as the conclusion the number is being used to support. Counting the
+plausibly-product remainder as product gives **+1,591 → +1,909 → +427 → +627 → +0** against the published
++1,106 → +1,883 → +206 → +627 → +0. The headline finding survives either way — the ratio stays above 20×
+every week and the current week stays at zero — but the exact product figure should not be quoted as final
+until the directories above are ruled.
+
+Deliberately NOT decided here, because it moves the headline number: whether those 52 directories are
+`product`. `rule-list coverage over the real tree` in `we:scripts/lib/__tests__/output-mix.test.mjs` pins
+the list, so a new uncovered directory fails loudly and the ruling must shrink the list in the same diff.
+Also left to the operator: whether `we:reports/` is `other` (as committed) or machinery — reports are
+written by the delivery loop about the delivery loop, and moving them adds ~+1,000/week to machinery.
 
 ## Why on the board and not a report
 
