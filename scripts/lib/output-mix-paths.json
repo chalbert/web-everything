@@ -1,13 +1,14 @@
 {
   "$schema": "output-mix-paths/v1",
-  "description": "Backlog #3012 — the committed, inspectable classifier behind the progress board's weekly product-vs-machinery output ratio. Every line added to this repository is charged to exactly ONE of three classes by the FIRST rule below whose `match` accepts its path: `product` (the thing the repo exists to ship), `machinery` (the delivery loop and its backlog bookkeeping), or `other` (deliberately counted in neither). Order is load-bearing — the exclusions come first so a generated file inside `src/` is never credited as product. Nothing is classified by a regex buried in a function: to disagree with the number, open this file, change one rule's `class`, and re-run `node scripts/progress-board.mjs`. Each rule carries a `why` that is the whole explanation for that path, so `classifyPath()` can answer 'why is this file machinery?' in one line.",
+  "description": "Backlog #3012 — the committed, inspectable classifier behind the progress board's weekly product-vs-machinery output ratio. Every line added to this repository is charged to exactly ONE of three classes by the FIRST rule below whose `match` accepts its path: `product` (the thing the repo exists to ship), `machinery` (the delivery loop and its backlog bookkeeping), or `other` (deliberately counted in neither). Order is load-bearing — the exclusions come first so a generated file inside `src/` or `conformance-vectors/` is never credited as product. Nothing is classified by a regex buried in a function: to disagree with the number, open this file, change one rule's `class`, and re-run `node scripts/progress-board.mjs`. Each rule carries a `why` that is the whole explanation for that path, so `classifyPath()` can answer 'why is this file machinery?' in one line.",
   "conventions": {
     "matching": "First match wins, top to bottom. `**` matches any characters including `/`; `*` matches any characters except `/`; everything else is literal. Paths are repo-relative, forward-slashed, exactly as `git log --numstat` reports them (the NEW path, for a rename).",
     "counting": "Only ADDED lines are counted — the metric is output, not churn, so a deletion is not negative output. Binary files (`-` in numstat) contribute 0.",
-    "tests": "Test lines are charged to the thing they test, never to a class of their own. `scripts/**` therefore absorbs `scripts/__tests__/**` and `scripts/lib/__tests__/**` as machinery, while `tests/**` and any `*.test.ts` under `blocks/`/`demos/` count as product. Change this by adding a rule ABOVE the group you want to carve out of.",
+    "tests": "Test lines are charged to the thing they test, never to a class of their own. `scripts/**` therefore absorbs `scripts/__tests__/**` and `scripts/lib/__tests__/**` as machinery, while `tests/**`, a declaration tree's own `__tests__/**`, and any `*.test.ts` under `blocks/`/`demos/` count as product. Change this by adding a rule ABOVE the group you want to carve out of.",
     "generated": "Generated and vendored files are `other`, not `product` or `machinery` — nobody authored those lines, so crediting them to either side inflates that week's output. Each generated-file rule names the command that writes it, so the list can be re-checked when a generator moves.",
+    "productScope": "WHAT MAKES A PATH `product`. The test is *does this cross the seam?* — is it part of what Web Everything ships to Frontier UI and to any other implementor. Three families qualify and all three are ruled below: (1) the SITE and its spec data (`src/`), the blocks and demos that render it, and their tests; (2) the standard's own DECLARATIONS — the published contract distributions (`contracts/`, `capability-manifest/`, `webcases/`, `validation-generation/`, each a real `@webeverything/*` package with an `exports` map), the capability and conformance substrate (`capabilities/`, `conformance-vectors/`, `conformance-evidence/`, `wrapper-conformance/`), and the per-domain declaration trees whose `contract.ts` says in as many words that it 'can become the `@webeverything/contracts/<x>` entry that FUI depends on (the FUI→WE arrow)'; (3) any file with a declaration SHAPE — `contract.ts`, `*-contract.ts`, `*.vectors.ts` — wherever it lands, so a NEW domain's contract is product from the day it is written rather than the day someone remembers to add a directory rule. What does NOT qualify: anything that only helps us build or ship the above (`scripts/`, `tools/`, `docs/`, `eleventy/`, `.github/`) — that is machinery — and write-ups about the work (`reports/`, and today `audits/`), which are neither.",
     "default": "A path matching no rule falls to `other`. `other` is reported alongside the two headline numbers precisely so the reader can see how much of the tree the classification does NOT cover — a large `other` is a signal that this file needs a new rule, not that the metric is wrong.",
-    "knownGap": "READ THIS BEFORE CITING THE PRODUCT NUMBER. The default is NOT symmetric between the two headline classes, and the asymmetry runs in one direction. Machinery lives in a small, stable, fully-covered set of directories (scripts/, backlog/, .claude/, skills-src/, agent-memory-src/, docs/, .github/, .githooks/, tools/), so machinery coverage is effectively complete. Product does not: the `product` rules cover FOUR directories (src/, blocks/, demos/, tests/), while the standard's own declarations live in ~45 further top-level domain directories — `contracts/`, `capabilities/`, `conformance-vectors/`, `webcases/`, `validation-generation/`, `capability-manifest/`, and the per-domain `<domain>/contract.ts` trees (intl/, webtheme/, permissions/, positioning/, realtime/, …). Those are unmatched today and fall to `other`: 38,852 tracked lines at the 2026-08-09 HEAD, and roughly 730 of the added lines in the five measured weeks. So the published `product` figure is a LOWER BOUND and the machinery:product ratio is an UPPER bound. Whether those directories are `product` is an operator call that has not been made; `uncoveredTopLevel` in the test suite pins the gap so a NEW uncovered directory fails loudly instead of silently joining the remainder."
+    "knownGap": "READ THIS BEFORE CITING THE PRODUCT NUMBER. The default is NOT symmetric between the two headline classes, and the asymmetry still runs one way, though it is now small. Machinery lives in a stable, fully-covered set of directories (scripts/, backlog/, .claude/, skills-src/, agent-memory-src/, docs/, .github/, .githooks/, tools/), so machinery coverage is effectively complete. Product is covered in the four original homes (src/, blocks/, demos/, tests/) PLUS, since this revision, the standard's own declarations: the four `@webeverything/*` contract packages, the capability/conformance substrate, and the 36 per-domain declaration trees — 44 directories, plus the three declaration-shape rules that catch a new domain's `contract.ts` before anyone writes it a directory rule. EIGHT tracked top-level directories remain unmatched and still fall to `other`: `audits/`, `config/`, `design-refs/`, `design-systems/`, `eleventy/`, `functions/`, `site/`, `test-pages/` — 5,245 tracked TEXT lines at the 2026-08-09 HEAD, down from 26,670 before this revision, and 81 / 0 / 28 / 0 / 0 added lines across the five weeks measured on 2026-08-09 (so closing the rest would move the weekly product figure by at most tens of lines). Unmatched ROOT files (AGENTS.md, package.json, the migration write-ups) add a further 3,522 tracked lines and are deliberately left unruled. The previous revision quoted 38,852 for the old gap; that figure counted newline BYTES in binary assets too (the .webp screenshots under design-refs/) and does not reproduce as a text-line count — measured that same crude way the residual here is 17,410, but the text-line figures above are the honest ones. Two of those eight are live questions rather than settled `other`: `config/` is not build config at all — `config/resolverContract.ts` says 'WE keeps the interface + vectors; FUI keeps the runtime' — and `design-systems/` describes itself as 'WE-owned data, not scorer code'. Both would be `product` under the test in `productScope`; both are left unruled deliberately, pending an operator call. So the published `product` figure is STILL a LOWER BOUND and the machinery:product ratio still an UPPER bound — just by 5,245 tracked lines rather than 26,670. `KNOWN_UNCOVERED` in the test suite pins that eight-directory list, so a NEW uncovered directory fails loudly instead of silently joining the remainder, and closing any part of the gap forces this paragraph to be rewritten in the same diff."
   },
   "defaultClass": "other",
   "rules": [
@@ -34,7 +35,7 @@
     {
       "match": "conformance-vectors/webdirectives-ssr.vectors.json",
       "class": "other",
-      "why": "generated by `npm run gen:webdirectives-ssr-vectors` (scripts/gen-webdirectives-ssr-vectors.mjs)"
+      "why": "generated by `npm run gen:webdirectives-ssr-vectors` (scripts/gen-webdirectives-ssr-vectors.mjs) — inside conformance-vectors/, so it must stay above the conformance-vectors/ product rule"
     },
     {
       "match": "plugs/**",
@@ -99,6 +100,12 @@
     },
 
     {
+      "match": "reports/**",
+      "class": "other",
+      "why": "analysis and review write-ups — neither product code nor delivery machinery; stated explicitly rather than left to the default so the choice is visible and arguable. It sits ABOVE the product block on purpose: the declaration-SHAPE rules below match a filename anywhere in the tree, and a write-up that happens to contain a `contract.ts` example must not be credited as product"
+    },
+
+    {
       "match": "src/**",
       "class": "product",
       "why": "the standard's spec data (src/_data/*.json, src/_includes/*-descriptions) plus the 11ty site that renders it — WE's actual shipped surface"
@@ -120,9 +127,241 @@
     },
 
     {
-      "match": "reports/**",
-      "class": "other",
-      "why": "analysis and review write-ups — neither product code nor delivery machinery; stated explicitly rather than left to the default so the choice is visible and arguable"
+      "match": "contracts/**",
+      "class": "product",
+      "why": "`@webeverything/contracts` — the real, publishable package (its own package.json declares 36 subpath exports and a publish workflow) that is the type-only single source of truth FUI depends on, superseding byte-replication (#872/#874). This is the deliverable the repo exists to ship, not tooling for shipping it"
+    },
+    {
+      "match": "capability-manifest/**",
+      "class": "product",
+      "why": "`@webeverything/capability-manifest` (#266) — the dependency-free CapabilityManifest schema, feature vocabulary, conformance fixtures, runtime guard and adherence report; a package with an `exports` map, consumed by siblings on the scoped specifier"
+    },
+    {
+      "match": "webcases/**",
+      "class": "product",
+      "why": "`@webeverything/webcases` — requirement→case compilation, case→vector projection and the drift check: the standard's own conformance-authoring surface, exported on subpaths for sibling repos"
+    },
+    {
+      "match": "validation-generation/**",
+      "class": "product",
+      "why": "`@webeverything/validation-generation` (#085/#309) — the validation-generation standard contract; its curated subpath exports enforce the #730 standard/impl split mechanically, so the whole tree is the shipped declaration"
+    },
+    {
+      "match": "capabilities/**",
+      "class": "product",
+      "why": "the capability declarations and the resolver over them — the same `src/_data/*.json` the /capabilities/ catalog page renders, so this tree and that product page can never disagree"
+    },
+    {
+      "match": "conformance-vectors/**",
+      "class": "product",
+      "why": "behavioural conformance vectors (#1016) — the WE-owned substrate for the #899 conformance KIT: the vector schema, the dependency-free structural validator, and the per-standard suites. WE owns the vectors and the shape; the driver that executes them lives in FUI/plateau. The one GENERATED vectors file is excluded by a rule above this one"
+    },
+    {
+      "match": "conformance-evidence/**",
+      "class": "product",
+      "why": "the conformance-evidence plane (#599) — the standalone `ConformanceEvidenceManifest` shape, builder and validator that the Plateau dev-browser consumes across the #475/#091 split"
+    },
+    {
+      "match": "wrapper-conformance/**",
+      "class": "product",
+      "why": "behavioural wrapper conformance (#891, ratified #855 B2) — WE owns the wrapper CONTRACT (a generator-agnostic vector corpus plus a headless-DOM runner) so FUI's wrapper generator stays swappable"
+    },
+
+    {
+      "match": "analytics/**",
+      "class": "product",
+      "why": "the Analytics protocol's declaration tree (#1003/#1012) — the `@webeverything/contracts/analytics` pure-contract half plus the dev-metrics contract beside it"
+    },
+    {
+      "match": "charts/**",
+      "class": "product",
+      "why": "the Web Charts protocol's declaration tree (#1004/#1334) — the `@webeverything/contracts/charts` pure-contract half"
+    },
+    {
+      "match": "commitment-policy/**",
+      "class": "product",
+      "why": "the commitment-policy plane (#1112, webvalidation completion #1090) — contract, registry and provider for when an invalid value enters form state"
+    },
+    {
+      "match": "error-summary/**",
+      "class": "product",
+      "why": "the error-summary model (#1114) — the pure, DOM-free GOV.UK dual-model aggregation the runtime `<validation-error-summary>` element consumes verbatim, so the ordering rules have one home"
+    },
+    {
+      "match": "experiment/**",
+      "class": "product",
+      "why": "the Experiment (variant-assignment) protocol's declaration tree (#1479, ratified #1414 Fork 2) — the `@webeverything/contracts/experiment` pure-contract half"
+    },
+    {
+      "match": "explorer/**",
+      "class": "product",
+      "why": "the explorer result/output interchange contract (#1769) — a SARIF-2.1.0-compatible shape plus its structural schema, so a reader never depends on the closed Plateau explorer product (#1467: WE keeps the CONTRACT, not the engine)"
+    },
+    {
+      "match": "graphs/**",
+      "class": "product",
+      "why": "the Web Graph protocol's declaration tree (#1289/#1443) — the `@webeverything/contracts/graph` pure-contract half"
+    },
+    {
+      "match": "guard/**",
+      "class": "product",
+      "why": "the Guard protocol's declaration tree (#288/#289) — the `@webeverything/contracts/guard` pure-contract half, the standalone dependency-free registry/provider model of it, the access-control member, and their tests"
+    },
+    {
+      "match": "identity/**",
+      "class": "product",
+      "why": "the Credential-Management protocol's declaration tree (#1022/#1060) — the `@webeverything/contracts/credential-management` pure-contract half"
+    },
+    {
+      "match": "interaction-state/**",
+      "class": "product",
+      "why": "the interaction-state model (#1110, webvalidation completion #1090) — the pure, framework-free L1 model of a control's touched/dirty state, specified in `src/_includes/project-webvalidation.njk`"
+    },
+    {
+      "match": "intl/**",
+      "class": "product",
+      "why": "the Intl-formatting protocol's declaration tree (#1020/#1054) — the compile-erased contract that 'can become the `@webeverything/contracts/intl` entry that FUI depends on (the FUI→WE arrow), superseding byte-replication'. The runtime half is impl and lives in FUI; only the contract crosses the seam"
+    },
+    {
+      "match": "manifests/**",
+      "class": "product",
+      "why": "the Changelog-Manifest protocol's declaration tree (#1021/#1057-8) — the `@webeverything/contracts/changelog-manifest` pure-contract half and the reader that fulfils it"
+    },
+    {
+      "match": "module-resolution/**",
+      "class": "product",
+      "why": "the module-resolution axis (#274, materializing #271) — the standalone, dependency-free model of how a project resolves a bare specifier through the native manifest it already maintains"
+    },
+    {
+      "match": "notifications/**",
+      "class": "product",
+      "why": "the Push-Delivery protocol's declaration tree (#1024/#1064) — the `@webeverything/contracts/push-delivery` pure-contract half"
+    },
+    {
+      "match": "permissions/**",
+      "class": "product",
+      "why": "the webpermissions role/permission-scope authorization model (#1699, ruled by #178 + #379) — the `@webeverything/contracts/permissions` pure-contract half"
+    },
+    {
+      "match": "plug-parity/**",
+      "class": "product",
+      "why": "the per-plug unplugged-parity manifest schema (#1888, epic #1836) — the `@webeverything/contracts/plug-parity` entry FUI depends on"
+    },
+    {
+      "match": "positioning/**",
+      "class": "product",
+      "why": "the Positioning protocol's declaration tree (#1018/#1048) — the `@webeverything/contracts/positioning` pure-contract half"
+    },
+    {
+      "match": "process/**",
+      "class": "product",
+      "why": "the Self-Driven Project Artefact protocol's declaration tree (#1026/#1070) — the pure-contract half of the artefact schema"
+    },
+    {
+      "match": "range-anchor/**",
+      "class": "product",
+      "why": "the Durable Range Anchor protocol's declaration tree (#1471, ratified #1408 Fork 2) — the foundational `@webeverything/contracts/range-anchor` entry"
+    },
+    {
+      "match": "realtime/**",
+      "class": "product",
+      "why": "the Transport-Negotiation protocol's declaration tree (#1025/#1067) — the `@webeverything/contracts/transport-negotiation` pure-contract half"
+    },
+    {
+      "match": "reliability/**",
+      "class": "product",
+      "why": "the Reliability protocol's declaration tree (#1019/#1051) — the `@webeverything/contracts/reliability` pure-contract half"
+    },
+    {
+      "match": "repro-bundle/**",
+      "class": "product",
+      "why": "the repro-bundle contract (#1664, epic #1663) — the serializable shape every layer agrees a captured page-state reproduces from, plus its schema and vectors"
+    },
+    {
+      "match": "reproduction-parity/**",
+      "class": "product",
+      "why": "the reproduction-parity contract (#1227, from the #1225 charter) — the thin shape the Plateau vision-judgment service emits and WE ingests, plus the shadcn reference reproduction it is measured against"
+    },
+    {
+      "match": "resources/**",
+      "class": "product",
+      "why": "the Resources protocol's declaration tree (#1027/#1074) — the `@webeverything/contracts/resources` pure-contract half"
+    },
+    {
+      "match": "source-resolution/**",
+      "class": "product",
+      "why": "the source-resolution plane (#575, graduating #562) — the source-anchor self-description contract and its registry, WE-standard-owned across the #475/#091 split with the Plateau dev-browser as consumer"
+    },
+    {
+      "match": "suggested-edit/**",
+      "class": "product",
+      "why": "the Suggested-Edit contract (#2145, ratified #2029 Fork 1) — the propose→accept/reject shape, a `@webeverything/contracts` entry"
+    },
+    {
+      "match": "trainable-judge/**",
+      "class": "product",
+      "why": "the trainable-judge feedback-corpus contract (#1580, epic #1552, ruled by #1553) — the `@webeverything/contracts/trainable-judge` entry the impl side depends on"
+    },
+    {
+      "match": "validator-resolution/**",
+      "class": "product",
+      "why": "the async validator-resolution strategy plane (#214) — the `@webeverything/contracts/validator-resolution` pure-contract half plus the standalone registry/provider model of it"
+    },
+    {
+      "match": "validity-merge/**",
+      "class": "product",
+      "why": "the validity-merge strategy plane (#212) — the pure-contract half plus the two shipped reduction strategies and the registry that swaps them"
+    },
+    {
+      "match": "webcompliance/**",
+      "class": "product",
+      "why": "the Web Compliance contract (#436 policy/rule model, #437/#438/#439 gate/waiver/audit result types) — slice C1 of the #1294 relocation cascade"
+    },
+    {
+      "match": "webcontexts/**",
+      "class": "product",
+      "why": "the webcontexts per-seam value-contract (#1700, adjacent to #237) — the `@webeverything/contracts/webcontexts` pure-contract half"
+    },
+    {
+      "match": "webdocs/**",
+      "class": "product",
+      "why": "the Web Docs Doc-Spec contract (ratified #1163) — the envelopes a docs site is generated from and the declarative strategy vocabulary"
+    },
+    {
+      "match": "webinjectors/**",
+      "class": "product",
+      "why": "the webinjectors consume()/provide() handle (#1829, ruling #1798) — the `@webeverything/contracts/webinjectors` pure-contract half"
+    },
+    {
+      "match": "webpolicy/**",
+      "class": "product",
+      "why": "the Web Policy contract (#1028/#1077) — the #406 DMN-aligned rule meta-schema, a `@webeverything/contracts` entry"
+    },
+    {
+      "match": "webtheme/**",
+      "class": "product",
+      "why": "the Web Theme contract (#404 token model, #405 scheme/accent results, #1252/#1274 palette-source ingest) — slice T1 of the #1294 relocation cascade"
+    },
+    {
+      "match": "webtraits/**",
+      "class": "product",
+      "why": "the intent-profile→trait build-time resolver (#776, mechanic from #747 Fork 4) — WE-resident standard logic, a pure dependency-free resolver over the WE registries that the FUI build and the Plateau configurator merely consume"
+    },
+
+    {
+      "match": "**/contract.ts",
+      "class": "product",
+      "why": "DECLARATION SHAPE, not a directory: a `contract.ts` is by convention this repo's compile-erased pure-contract half — the module that becomes a `@webeverything/contracts/<x>` entry FUI depends on. Stated as a shape so a NEW domain's contract counts as product the day it is written, before anyone adds its directory rule; the machinery and `reports/` rules above it keep it out of the delivery-side trees"
+    },
+    {
+      "match": "**/*-contract.ts",
+      "class": "product",
+      "why": "the same declaration shape when a domain declares more than one contract in a tree (notifications/push-contract.ts, manifests/changelog-contract.ts, config/resolverContract.ts's camelCase cousin excepted — see knownGap)"
+    },
+    {
+      "match": "**/*.vectors.ts",
+      "class": "product",
+      "why": "a conformance vector suite is a declaration wherever it sits: `<standard>.vectors.ts` exports a `ConformanceVectorSuite` that any implementor's driver runs against its own candidate. The generated `*.vectors.json` is excluded by a rule at the top of this file"
     }
   ]
 }
