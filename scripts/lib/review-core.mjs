@@ -108,6 +108,9 @@ import {
   PANEL_LENSES,
   AGGREGATION,
   panelRigorForCareLevel,
+  EDITOR_ENABLED_CARE_LEVELS,
+  EDITOR_MIN_ROUNDS,
+  editorPolicyForCareLevel,
   buildPanelFindings,
   derivePanelVerdict,
 } from './jury-core.mjs';
@@ -150,6 +153,9 @@ export {
   PANEL_LENSES,
   AGGREGATION,
   panelRigorForCareLevel,
+  EDITOR_ENABLED_CARE_LEVELS,
+  EDITOR_MIN_ROUNDS,
+  editorPolicyForCareLevel,
   buildPanelFindings,
   derivePanelVerdict,
 };
@@ -572,6 +578,115 @@ export function careLevelFromReasons(reasons) {
  */
 export function panelRigorFromReasons(reasons) {
   return panelRigorForCareLevel(careLevelFromReasons(reasons));
+}
+
+/**
+ * #2908 — the EDITOR POLICY for a set of escalation reasons: `careLevelFromReasons` → `editorPolicyForCareLevel`,
+ * in one call for the reasons-holding consumer (the parked-PR convergence loop, via `review-core-cli rigor`).
+ * Pure. The band is resolved ONCE, here, and both the panel dial and the editor gate read that same value — a
+ * second derivation would be a second thing to drift.
+ *
+ * AN EMPTY REASON LIST IS `unresolved`, NOT `none`. This is the fail-closed clause, and it is the whole point of
+ * having a bridge rather than calling `editorPolicyForCareLevel(careLevelFromReasons(r))` inline.
+ *
+ * WHY `[]` CANNOT BE READ AS "no signals fired". `[]` has TWO producers and they are indistinguishable from here:
+ *   1. a DEGRADED read — the reason list reaches the loop through a fetch agent, and a bad read yields `[]`; and
+ *   2. a genuinely REASON-LESS parked PR — `pr-land.mjs --park=review:pending` (#2622) applies the review label
+ *      AT OPEN and writes no `## Escalation reason` block at all (the block is appended only on the separate
+ *      `scoreEscalation` verdict path, and `buildEscalationReasonBlock([])` returns `''`).
+ * So "a parked PR always has a reason" is FALSE, and no version of this function can tell the two apart. Reading
+ * `[]` as `none` (score 0) would look tidy and would be exactly the fail-open: a statute PR whose reason read
+ * flaked would present as the weakest band. Before #2908 that was harmless by accident, because the weakest
+ * band's 1-round cap made the editor unreachable anyway; giving an editor-enabled band its 2-round floor removes
+ * that accidental protection, so the clause has to be explicit.
+ *
+ * THE CONSEQUENCE, STATED PLAINLY: a `--park=review:pending` PR opened with no reason block is now permanently
+ * REVIEW-ONLY. Its panel still runs and its findings still reach the operator — it simply escalates to
+ * `review:human` instead of ever being machine-edited. That cost is accepted deliberately: the alternative reads
+ * a broken fetch as a safe diff.
+ *
+ * @param {string[]} reasons - the drain's escalation reasons for this PR.
+ * @returns {{careLevel: string|null, resolved: boolean, editorEnabled: boolean, rounds: number, reason: string}}
+ */
+export function editorPolicyFromReasons(reasons) {
+  const raw = (Array.isArray(reasons) ? reasons : reasons ? [reasons] : []).filter(Boolean);
+  if (!raw.length) return editorPolicyForCareLevel(null); // fail closed — see above
+  return editorPolicyForCareLevel(careLevelFromReasons(raw));
+}
+
+/**
+ * ============================================================================
+ * THE EDITOR-GATE LOOP GUARDS (#2908, PR #1106 review) — the SPEC the sandbox loop enforces from its OWN state.
+ * ============================================================================
+ *
+ * Same shape, and same reason, as the juror-invite guards further down: the parked-PR loop
+ * (`we:scripts/workflows/review-parked-prs.mjs`) runs every derivation inside an AGENT and cannot `import` this
+ * module, so what it holds is an ECHO. `editorPolicyFromReasons` above is the derivation; these two are the
+ * guards that make the echo incapable of GRANTING. They live here (tested) and are MIRRORED inline in the loop.
+ *
+ * The rule both encode: the editor gate is an AND of things the loop can check itself. An agent may always turn
+ * the editor OFF; nothing an agent says can turn it ON.
+ */
+
+/**
+ * The canonical escalation-reason tokens that can reach an editor-enabled band — and they only reach it ALONE
+ * (#2908, PR #1106 review F1). Exhaustive, and verified against `careLevelFromReasons`: `size` → `low` and
+ * `cross-repo` → `low`; every other token bands at `elevated` or above on its own, and `size` + `cross-repo`
+ * together score 2 + 2 = 4, which is `elevated`. So "the editor may push" is expressible as a property of the
+ * reason list alone, with no care band in it.
+ */
+export const EDITOR_ENABLED_REASON_TOKENS = Object.freeze([REVIEW_REASONS.SIZE, REVIEW_REASONS.CROSS_REPO]);
+
+/**
+ * #2908 (PR #1106 review, F1) — may the editor push, judged from the ESCALATION REASONS ALONE? Pure.
+ *
+ * WHY THIS EXISTS ON TOP OF `editorPolicyFromReasons`. In the loop the care BAND arrives as an agent echo: the
+ * rigor agent shells `review-core-cli rigor` and reports back a `careLevel` string. The loop re-derives
+ * `editorEnabled` from the allow-list, but it re-derives it against THAT echoed band — so a rigor agent that
+ * reports `{careLevel:'low'}` on a PR parked for `blast-radius` opens the editor at what is really `elevated`.
+ * "An agent's `editorEnabled` can only veto" was true; "an agent echo can never enable" was not. The loop DOES
+ * hold the reason list locally, so this is the half of the derivation it can check for itself.
+ *
+ * STRICTER THAN THE SHARED DIAL, DELIBERATELY. `careLevelFromReasons` is LENIENT with an unrecognized reason (it
+ * contributes nothing) because it is advisory — it sizes a panel. This authorizes a WRITE to someone else's
+ * branch, so a reason token we cannot weigh is a signal we cannot rule out: it returns `false`. The gate can
+ * therefore only ever be narrower than the band, never wider.
+ *
+ * @param {string[]} reasons - the drain's escalation reasons for this PR, as parsed from the PR body.
+ * @returns {boolean} true iff EVERY reason canonicalizes, they name exactly ONE distinct token, and that token
+ *   is in `EDITOR_ENABLED_REASON_TOKENS`.
+ */
+export function editorAllowedByReasons(reasons) {
+  const raw = (Array.isArray(reasons) ? reasons : reasons ? [reasons] : []).filter(Boolean);
+  if (!raw.length) return false; // fail closed — see `editorPolicyFromReasons` on why `[]` is not `none`
+  const tokens = new Set();
+  for (const r of raw) {
+    const token = canonicalizeReason(r);
+    if (!token) return false; // an unweighable reason is a signal we cannot rule out
+    tokens.add(token);
+  }
+  return tokens.size === 1 && EDITOR_ENABLED_REASON_TOKENS.includes([...tokens][0]);
+}
+
+/**
+ * #2908 (PR #1106 review, F3 — the blocker) — may the editor push on THIS round? Pure.
+ *
+ * The loop pins `editorEnabled` as a `const` at loop start, and `careLevel` is MUTABLE: an accepted juror invite
+ * (#2640) reassigns it. Pinning alone gives one property — no later mutation can turn the editor ON — and the
+ * loop's header comment argued that recomputing would only ever turn it OFF, so pinning was the safe half of a
+ * choice. That was a false dichotomy. Both properties are available at once, and this is them: the PINNED value
+ * still means nothing can turn the editor on, and the CURRENT band is honoured, so a mid-run raise turns it off.
+ *
+ * Without the second conjunct the loop pushes to the author's branch while its own state reads
+ * `care=elevated` — the band the ruling excludes on evidence — and the "EDITOR OFF" log line never fires, so it
+ * is not even visible.
+ *
+ * @param {boolean} pinnedEditorEnabled - the gate as resolved ONCE at loop start (an agent may only veto it).
+ * @param {string|null} careLevel - the band as it stands on THIS round (an invite may have raised it).
+ * @returns {boolean}
+ */
+export function editorMayPush(pinnedEditorEnabled, careLevel) {
+  return pinnedEditorEnabled === true && EDITOR_ENABLED_CARE_LEVELS.includes(careLevel);
 }
 
 /**
@@ -1485,6 +1600,31 @@ export function growOnlyRoster(currentLenses = [], invitedLens = '', addedLenses
   const added = Array.isArray(addedLenses) ? addedLenses.filter((l) => typeof l === 'string' && l) : [];
   const inv = typeof invitedLens === 'string' && invitedLens ? [invitedLens] : [];
   return [...new Set([...cur, ...inv, ...added])];
+}
+
+/**
+ * Grow-only CARE BAND after an accepted invite (#2640, hardened by the PR #1106 review). Pure.
+ *
+ * The loop takes the raised band from the invite agent's `toCareLevel` — an UNVALIDATED agent string that no
+ * `CARE_LEVEL_ORDER` filter ever saw. Since #2908 that band is write-authorizing (it feeds the editor gate), so
+ * the loop must not depend on the echo being honest about it. It does not have to: an accepted invite raises
+ * care by EXACTLY ONE BAND, capped at `INVITE_CARE_CEILING` (`raiseCareForDiscovery`), so the loop can compute
+ * the raise ITSELF and use the echo only where it is safe — to raise FURTHER.
+ *
+ *   • `current` is not a known band → `null` (UNRESOLVED). An echo may never RESOLVE an unresolved band; that
+ *     direction is the fail-open (`null` can satisfy no gate, a resolved band might).
+ *   • otherwise the result is at least `raiseCareForDiscovery(current)`, and the echoed band only if it is a
+ *     known band ABOVE that. So the echo can raise care, never lower it, and never hold it flat.
+ *
+ * @param {string|null} current - the band the loop currently holds.
+ * @param {string|null} echoed - the invite agent's `toCareLevel` (untrusted).
+ * @returns {string|null} the band the loop adopts, or `null` when it cannot be resolved.
+ */
+export function growOnlyCareLevel(current, echoed) {
+  if (!CARE_LEVEL_ORDER.includes(current)) return null;
+  const raised = raiseCareForDiscovery(current);
+  const rank = (l) => CARE_LEVEL_ORDER.indexOf(l);
+  return (CARE_LEVEL_ORDER.includes(echoed) && rank(echoed) > rank(raised)) ? echoed : raised;
 }
 
 /**

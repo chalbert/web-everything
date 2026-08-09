@@ -10,6 +10,7 @@ import {
   scopeFilesToNet, resolveNetDiff, sameCommit,
 } from '../fetch-parked.mjs';
 import { classifyChecks } from '../pr-land.mjs';
+import { parseEscalationReason } from '../review-detail.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -305,6 +306,45 @@ describe('#2864 — headSha: the bundle must say WHICH TREE its diff was read at
 
   it('is present on every bundle, so a consumer can always ask', () => {
     expect(assembleParked({ view })).toHaveProperty('headSha');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #2908 / PR #1106 review F2 — escalationReason is PARSED here, not read by eye downstream.
+// The convergence loop's fetch agent used to LLM-parse the `## Escalation reason` bullets out of `body`. Since
+// #2908 that list decides whether a machine may push to the author's branch, and one dropped bullet flips it:
+// ['size'] → low → editor ON, ['size','blast-radius'] → elevated → editor OFF. PR #1018 — the PR the ruling is
+// built on — was parked with exactly those two. The exact parser already existed in review-detail.mjs; the
+// bundle now carries its output so the agent copies rather than reads.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('escalationReason — the drain\'s reason block, parsed exactly (#2908 / PR #1106 F2)', () => {
+  const base = { number: 9, title: 't', files: [], state: 'OPEN', labels: [], headRefName: 'lane/x' };
+  const bodyWith = (block) => `Some PR body.\n\n## Escalation reason\n\n${block}\n\n## Something else\n\n- not a reason\n`;
+
+  it('reads BOTH bullets of the PR #1018 park — the pair that bands to elevated', () => {
+    const body = bodyWith('- blast-radius (scripts/lib/review-core.mjs)\n- size (602 ≥ 400 changed lines)');
+    expect(assembleParked({ view: { ...base, body } }).escalationReason)
+      .toEqual(['blast-radius (scripts/lib/review-core.mjs)', 'size (602 ≥ 400 changed lines)']);
+  });
+
+  it('is the SAME output as the shared parser — one definition, not a second one here', () => {
+    const body = bodyWith('- size (500 lines)\n- cross-repo (frontierui)');
+    expect(assembleParked({ view: { ...base, body } }).escalationReason).toEqual(parseEscalationReason(body));
+  });
+
+  it('stops at the next heading and strips the bullet marker', () => {
+    const body = bodyWith('- size (500 lines)');
+    expect(assembleParked({ view: { ...base, body } }).escalationReason).toEqual(['size (500 lines)']);
+  });
+
+  it('[] when the PR carries no reason block — a REAL state (--park=review:pending, #2622), not only a bad read', () => {
+    expect(assembleParked({ view: { ...base, body: 'Opened parked for review. No reason block.' } }).escalationReason).toEqual([]);
+    expect(assembleParked({ view: base }).escalationReason).toEqual([]);
+    expect(assembleParked({}).escalationReason).toEqual([]);
+  });
+
+  it('is present on every bundle, so a consumer can always ask', () => {
+    expect(assembleParked({ view: base })).toHaveProperty('escalationReason');
   });
 });
 
