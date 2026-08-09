@@ -4,7 +4,7 @@ kind: decision
 size: 3
 status: open
 dateOpened: "2026-08-08"
-relatedTo: ["2907", "2606", "3012", "3013"]
+relatedTo: ["2907", "2606", "3012", "3013", "x96ezuu"]
 tags: [governance, throughput, backlog, statute-candidate]
 ---
 
@@ -41,6 +41,18 @@ Should a floor share of new lanes be product items, and at what level?
   shows drift survives being measurable-in-principle; it only stops when something pulls the other way.
 - **B3 — quota above half**: fastest reversal, but risks starving the load-bearing process fixes the
   freeze exempts.
+
+> **READ BEFORE RULING FORK B — added 2026-08-09 as capture, not as a ruling.** The operator's in-session
+> framing of 2026-08-09 is that the **conveyor is itself a product**, and provably-conformant automated
+> delivery is the enterprise differentiator over single-agent code generation. Under the #3012 classifier that
+> work is **machinery**: measured at `origin/main` 73a3925b, `we:scripts/conveyor/status-board.mjs`,
+> `we:scripts/lib/jury-core.mjs`, `we:scripts/lib/review-core.mjs` and `we:skills-src/conveyor/SKILL.md` all
+> classify `machinery`. So **a numeric quota (B1/B3) would mechanically penalise building the thing the
+> operator considers most valuable** — and the metric is WE-only, so the conveyor board UI itself
+> (`plateau-app:src/backlog-view/`, per #2586/#2660) is not counted at all. The framing, the measurements, and
+> the open "does the metric need a third class — product / product-in-disguise / plumbing?" question are
+> filed as [#x96ezuu](/backlog/x96ezuu-the-conveyor-as-a-shippable-product-not-machinery-and-what-t/). Nothing
+> there rules this item; read it before ruling Fork B.
 
 ## What resolving this produces
 
