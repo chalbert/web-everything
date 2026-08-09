@@ -16,7 +16,7 @@ import {
 } from '../review-set-label.mjs';
 import {
   parseReviewedSha, decideReviewGate, parseReviewedDiff, parseReviewedContribution,
-  normalizeDiffFingerprint, normalizeContributionFingerprint,
+  normalizeDiffFingerprint, normalizeContributionFingerprint, parseOperatorClearance,
 } from '../lib/review-escalation.mjs';
 import { REVIEW_LABELS, READY_TO_MERGE_LABEL } from '../lib/review-escalation.mjs';
 
@@ -1122,5 +1122,36 @@ exit 0
     expect(r.status).toBe(0);
     expect(verbs()).toEqual(['pr view', 'pr comment', 'pr edit', 'pr view']);
     expect(parseReviewedSha(posted())).toBe(null); // a bounce stamps nothing
+  });
+});
+
+// #xmnl36p — the clearance a `--to=clear-human` ceremony writes must be READABLE BACK, or an automated re-score
+// cannot know it is overriding one. The pin is a ROUND TRIP through the real reader (never a substring assert):
+// producer and consumer verified independently is exactly how the #2882 marker inversion hid.
+describe('#xmnl36p — clear-human stamps a clearance the re-score reader can find', () => {
+  it('round-trips the actor through parseOperatorClearance', () => {
+    const body = buildVerdictComment({
+      to: 'clear-human', actor: 'Nicolas Gilbert', headSha: 'a'.repeat(40),
+      reason: 'operator approved in session', reviewedDiff: 'f'.repeat(64),
+    });
+    expect(parseOperatorClearance([{ body }])).toEqual({ actor: 'Nicolas Gilbert' });
+  });
+
+  it('an ORDINARY accept records no clearance — only clear-human does', () => {
+    const body = buildVerdictComment({ to: 'accepted', actor: 'Nicolas Gilbert', headSha: 'a'.repeat(40) });
+    expect(parseOperatorClearance([{ body }])).toBe(null);
+    const bounce = buildVerdictComment({ to: 'changes', actor: 'Nicolas Gilbert', headSha: 'a'.repeat(40) });
+    expect(parseOperatorClearance([{ body: bounce }])).toBe(null);
+  });
+
+  it('the size pre-flight counts the new marker (the #1056-M2 under-count class)', () => {
+    // `projectVerdictCommentLength` maxes over REVIEW_LABEL_TARGETS, so the longest-rendering target must be
+    // >= what clear-human actually posts, marker included.
+    const actual = buildVerdictComment({
+      to: 'clear-human', actor: 'Nicolas Gilbert', headSha: 'f'.repeat(40),
+      reason: 'r', reviewedDiff: 'f'.repeat(64),
+    }).length;
+    expect(projectVerdictCommentLength({ body: '', actor: 'Nicolas Gilbert', reason: 'r' }))
+      .toBeGreaterThanOrEqual(actual);
   });
 });

@@ -110,7 +110,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // fingerprint reader (`parseReviewedDiff`), #2832/#984's hold-invariant helpers (`READY_TO_MERGE_LABEL`,
 // `isReviewHoldLabel`, `decideParkReadyStrip`), #2890's null-contract diff mapper (`diffHunksFrom`), and
 // #x9xqexm's contribution fingerprint reader (`parseReviewedContribution`). None supersedes another.
-import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
+import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
@@ -3174,6 +3174,10 @@ async function runCli() {
       // from the same live net-diff text as their `*Diff` siblings (no extra gh or git hop).
       let acceptedContribution = null;
       let liveHeadContribution = null;
+      // #xmnl36p — the OPERATOR CLEARANCE record, read from the SAME comment scan (no extra gh hop). It never
+      // permits a merge; it only lets the gate know that a re-imposed `review:human` is overriding a human's
+      // recorded clearance, so the re-hold can be announced instead of landing silently.
+      let operatorClearance = null;
       if (hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
         try {
           const d = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'headRefOid,headRefName,comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
@@ -3182,6 +3186,7 @@ async function runCli() {
           acceptedSha = parseReviewedSha(d.comments || []);
           acceptedDiff = parseReviewedDiff(d.comments || []);
           acceptedContribution = parseReviewedContribution(d.comments || []);
+          operatorClearance = parseOperatorClearance(d.comments || []);
         } catch { /* fetch miss → SHAs null → gate fails open */ }
         // #x169fqe — the LIVE diff, read only when the accept actually recorded a fingerprint to compare it
         // against AND the head has moved. Both conditions keep this off the common path: a pre-#x169fqe accept
@@ -3218,7 +3223,7 @@ async function runCli() {
           } catch { /* miss → null → SHA-identity verdict (the stricter path) */ }
         }
       }
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution });
+      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance });
       v.escalated = score.escalate ? 'yes' : 'no';
       // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
       // makes an already-applied review:human label win even when a rebase narrows the diff back to
@@ -3265,6 +3270,21 @@ async function runCli() {
         if (gate.applyLabel && !DRY_RUN) {
           if (shouldApplyReviewLabel(gate.applyLabel, v.prLabels)) {
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          }
+          // #xmnl36p — A CLEARANCE REVOCATION IS NEVER SILENT, and this is the ONE path that guarantees it.
+          // It sits AHEAD of `shouldPostParkReasonComment` (which returns false for every human park, routing
+          // the reason into the PR body instead) and outside the #2324 body-block write (which is a ONE-SHOT
+          // append gated on `bodyHasEscalationReason`, so the second and every later re-hold writes nothing at
+          // all). Together those two are exactly why WE PR #1106 was cleared at 00:34:00Z and silently re-held
+          // at 00:41:28Z. `postDrainReasonComment` dedupes on the rendered text, which names the head SHA, so a
+          // `--watch` loop re-reaching this state on the SAME head posts once — a new head posts again, which
+          // is correct: that is a new revocation.
+          if (gate.revokesClearance) {
+            const posted = postDrainReasonComment(v.repo, v.num, 'park', buildClearanceRevocationComment({
+              clearance: gate.clearance, reason: gate.reason, pr: v.num, repo: v.repo || localSlug,
+            }), auditLineFor(v));
+            if (posted && !AS_JSON) process.stderr.write(`  🔔 ${repoTag(v.repo)}${v.num} clearance-revocation notice posted (cleared by ${gate.clearance?.actor || 'operator'}, re-held review:human)\n`);
+            durableRecorded = true;
           }
           // #2313 — stamp the WHY + what-to-look-for onto the PR itself, not only this log line below.
           // #2333 — but ONLY for a NON-human (agent-reviewable) park: a review:human park already carries the
