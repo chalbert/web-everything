@@ -134,9 +134,33 @@ export function readPr({ pr, repo, exec = null, cwd = REPO_ROOT } = {}) {
     detail,
     headRefName,
     body: typeof view.body === 'string' ? view.body : '',
-    net: netPaths,
+    // PIN THE REV. `computeNetDiffPaths` reports `rev` as the candidate it resolved — `origin/<headRefName>`,
+    // a MUTABLE ref — so the recorded basis stopped describing the judged diff as soon as the lane pushed
+    // again. Resolve it here, in the io shell, where the git call belongs; `shapeReadFinding` keeps both the
+    // commit and the ref. It is the SAME candidate the diff was taken from and not the PR's `headRefOid`:
+    // `headRefOid` is GitHub's view of the head, which can differ from the ref this clone actually diffed, and
+    // recording it would pin the basis to a tree that was never read.
+    net: { ...netPaths, revSha: revParseCommit(gitExec, netPaths.rev) },
     diff: netText,
   };
+}
+
+/**
+ * Resolve a rev to its full commit SHA, or `null`. Never throws: an unresolvable rev is recorded as unpinned
+ * (and rendered with a warning) rather than failing a review that has otherwise succeeded.
+ */
+export function revParseCommit(exec, rev) {
+  if (typeof exec !== 'function' || typeof rev !== 'string' || !rev) return null;
+  try {
+    // `--end-of-options` for the same reason `resolveNetDiffBasis` uses it: `rev` derives from a branch name
+    // off the `gh` API, and a dash-leading refname is legal.
+    const out = String(exec('git', ['rev-parse', '--verify', '--end-of-options', `${rev}^{commit}`], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }) || '').trim();
+    return /^[0-9a-f]{40}$/i.test(out) ? out.toLowerCase() : null;
+  } catch {
+    return null;
+  }
 }
 
 /** `readPr` bound to one repo/exec, which is the shape the declaration wants. */
@@ -212,6 +236,10 @@ export function createReviewPrSinks({
         `--repo=${payload.repo}`,
         `--to=${payload.to}`,
         `--actor=${payload.actor}`,
+        // #2898 — state the surface the verdict actually came through. Conditional because the payload shape
+        // predates the flag: a run record written before it (a `--resume` across the upgrade) has no `channel`,
+        // and the single home's own default for an absent one is the NEUTRAL sentence, never a wrong channel.
+        ...(payload.channel ? [`--channel=${payload.channel}`] : []),
         `--body-file=${bodyPath}`,
       ];
       let stdout = '';

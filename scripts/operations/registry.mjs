@@ -51,11 +51,24 @@ function isPlainObject(v) {
 /**
  * Normalize an input schema — `{ pr: 'number' }` and `{ pr: { type: 'number', required: true } }` are the
  * same thing. Shorthand fields are REQUIRED; optionality is opt-in, so a caller cannot omit a field by
- * accident. Returns a frozen map of `{ type, required, default }`.
+ * accident. Returns a frozen map of `{ type, required, default, enum }`.
+ *
+ * `enum` — A CLOSED SET, DECLARED ONCE. Under the statute's "declared once, callers generated", the set of
+ * values a field accepts is part of what the operation IS, so declaring it buys three things from one line:
+ * `validateInput` refuses anything outside it, the command line PRINTS it in `--help` instead of `<string>`,
+ * and #3036's HTTP adapter gets the same for free. Before this, `review-pr` knew its four lenses (it re-exports
+ * `PANEL_LENSES` from `we:scripts/lib/jury-core.mjs` expressly "so an adapter can list it in --help"), and the
+ * adapter still printed `[--lens=<string>]` — the intent was there and the wiring was not, because the adapter
+ * derives every flag from THIS schema and the schema had nowhere to put it. It generalises: any field with a
+ * fixed vocabulary (a verdict target, a mode, a repo class) declares one here rather than validating by hand
+ * inside its first step, where the refusal arrives after the run record already exists.
+ *
+ * Only `string` and `number` may carry one — a closed set of objects/arrays is a schema, not an enum, and
+ * pretending otherwise would invite deep-equality membership tests the CLI's `--flag=value` parse cannot serve.
  *
  * @param {object|undefined} schema
  * @param {string} name - operation name, for error text.
- * @returns {Readonly<Record<string, {type: string, required: boolean, default: *}>>}
+ * @returns {Readonly<Record<string, {type: string, required: boolean, default: *, enum: (readonly *[]|null)}>>}
  */
 export function normalizeInputSchema(schema, name = '<anonymous>') {
   if (schema == null) return Object.freeze({});
@@ -77,9 +90,46 @@ export function normalizeInputSchema(schema, name = '<anonymous>') {
     if (required && s.default !== undefined) {
       throw new TypeError(`operations: \`${name}\` — input field \`${field}\` is required and cannot also carry a \`default\``);
     }
-    out[field] = Object.freeze({ type: s.type, required, default: s.default });
+    const members = normalizeEnum(s.enum, name, field, s.type);
+    if (members && s.default !== undefined && !members.includes(s.default)) {
+      throw new TypeError(
+        `operations: \`${name}\` — input field \`${field}\` defaults to ${JSON.stringify(s.default)}, which is not `
+        + `one of its own declared values (${members.join('|')}). A default the field would refuse is a run that `
+        + 'dies on its own schema.',
+      );
+    }
+    out[field] = Object.freeze({ type: s.type, required, default: s.default, enum: members });
   }
   return Object.freeze(out);
+}
+
+/** Types a declared `enum` is allowed on. See the note in {@link normalizeInputSchema}. */
+const ENUMERABLE_TYPES = Object.freeze(['string', 'number']);
+
+/** Validate + freeze one field's declared value set. Returns `null` when the field declares none. */
+function normalizeEnum(members, name, field, type) {
+  if (members === undefined || members === null) return null;
+  if (!Array.isArray(members) || members.length === 0) {
+    throw new TypeError(`operations: \`${name}\` — input field \`${field}\`'s \`enum\` must be a non-empty array`);
+  }
+  if (!ENUMERABLE_TYPES.includes(type)) {
+    throw new TypeError(
+      `operations: \`${name}\` — input field \`${field}\` is a ${type} and cannot declare an \`enum\` `
+      + `(only ${ENUMERABLE_TYPES.join('/')} may)`,
+    );
+  }
+  for (const m of members) {
+    if (typeOf(m) !== type) {
+      throw new TypeError(
+        `operations: \`${name}\` — input field \`${field}\` declares enum member ${JSON.stringify(m)}, `
+        + `which is not a ${type}`,
+      );
+    }
+  }
+  if (new Set(members).size !== members.length) {
+    throw new TypeError(`operations: \`${name}\` — input field \`${field}\`'s \`enum\` repeats a value`);
+  }
+  return Object.freeze([...members]);
 }
 
 /** Runtime type test matching {@link INPUT_TYPES}. */
@@ -113,6 +163,14 @@ export function validateInput(schema, input) {
     const actual = typeOf(given);
     if (actual !== spec.type) {
       errors.push(`input field \`${field}\` must be a ${spec.type}, got ${actual}`);
+      continue;
+    }
+    // A declared value set is refused HERE, before a run record exists — not inside the first step that
+    // happens to look at it, where the refusal costs a run id and a written record to reject one flag.
+    if (spec.enum && !spec.enum.includes(given)) {
+      errors.push(
+        `input field \`${field}\` must be one of ${spec.enum.map((m) => String(m)).join('|')}, got ${JSON.stringify(given)}`,
+      );
       continue;
     }
     value[field] = given;

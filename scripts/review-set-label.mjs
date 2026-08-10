@@ -660,14 +660,26 @@ export function runReviewLabelCli({
  * attribution. A clearance record that names only a self-declared actor is the "asserted but unenforced" state
  * this item exists to end; naming the id makes a later self-clear audit a machine read, not an archaeology.
  *
+ * #2898 — THE CHANNEL IS AN INPUT, NOT A CONSTANT. This sentence used to end "via the Plateau Loop review
+ * console" unconditionally, written when the module had exactly one caller. It now has four (the console, the
+ * conveyor re-arm, `/review`, and since #3035 the declared `review-pr` operation), so the constant asserted a
+ * provenance three of them did not come through. It was observed live on PR #1146: the operation's own footer
+ * said *"Recorded through the declared `review-pr` operation (#3035)"* while this line, higher in the SAME
+ * comment, credited the console. A durable record that states two provenances is worse than one that states
+ * none — so a caller that supplies no `channel` now gets the NEUTRAL sentence (`Recorded by <actor>.`), never
+ * another caller's identity. The caller knows the surface; it is told, and this renders what it is given.
+ *
  * @param {{to:string, actor:string, headSha?:string, body?:string, reason?:string, reviewedDiff?:string,
- *   clearerId?:string, independence?:{independent:boolean,status:string,reason:string}|null}} o -
+ *   clearerId?:string, independence?:{independent:boolean,status:string,reason:string}|null,
+ *   channel?:string}} o -
  *   #x169fqe: `reviewedDiff` is the raw diff (or a precomputed fingerprint) the verdict was formed against.
  *   Omitted → no diff marker → the gate falls back to SHA identity, i.e. pre-#x169fqe behaviour.
+ *   #2898: `channel` is the SURFACE the verdict came through, free text like `actor` (see `normalizeChannel`).
  * @returns {string}
  */
 export function buildVerdictComment({
   to, actor, headSha = '', body = '', reason = '', reviewedDiff = '', clearerId = '', independence = null,
+  channel = '',
 } = {}) {
   // #2895 — `clear-human` stamps the marker for the same reason `accepted` does: it IS an acceptance (it adds
   // review:accepted), so the drain must be able to refuse it later if the head advances past the cleared tree.
@@ -718,7 +730,7 @@ export function buildVerdictComment({
         + 'it", NOT as "an independent reviewer cleared it".'
       : `\n\n⚠️ Independence NOT established for this clearance (#2844): ${independence.reason}. `
         + 'This record does not show that a party other than the author cleared it.';
-  const text = stripReviewedShaMarkers(typeof body === 'string' ? body : '');
+  const text = String(typeof body === 'string' ? body : '').trim();
   const heading = to === 'clear-human'
     ? '✅ review — `review:human` cleared via the sanctioned path'
     : to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested';
@@ -735,23 +747,67 @@ export function buildVerdictComment({
       + 'it. The actor name and the reason above are free text and nothing verifies who supplied them — #2895 '
       + 'deferred the unforgeable actor signal (no local construct survives an agent with shell access on the '
       + 'same machine), and #2946 is the durable fix.'
-    : `Recorded by ${actor} via the Plateau Loop review console.`;
-  return [
+    : `Recorded by ${actor}${normalizeChannel(channel) ? ` via ${normalizeChannel(channel)}` : ''}.`;
+  // ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  // THE RENDER BOUNDARY (PR #1147 review — the structural close of the marker-forgery class).
+  //
+  // Everything ABOVE this line is PROSE and may carry caller free text — `actor`, `body`, `reason`, `channel`,
+  // and whatever field the next caller needs. Everything BELOW it is the TRUSTED marker block, built only by
+  // the validating `build*Marker` helpers. One sanitizer sits on the seam, so the guarantee is a property of
+  // the SHAPE of this function rather than of a list of field names that has to be kept in sync.
+  //
+  // WHY NOT PER-FIELD. #2898 sanitized `--channel` and left `--actor` — its sibling, rendered by the very next
+  // interpolation on the same line — reachable, and PR #1147's reviewer proved it: `--actor` alone forged a
+  // `reviewed-sha` that `parseReviewedSha` read as gospel on a `changes` verdict (which appends no marker of
+  // its own, so the forgery is the ONLY one in the body and last-match-wins hands it the win). Patching the
+  // second field would have left the third. The per-input pattern re-opens on every new input by construction;
+  // this does not.
+  //
+  // WHY SHAPE, NOT NAMES. The sanitizer neutralizes the HTML-comment SYNTAX, not a list of marker names. Every
+  // marker this repo reads — `reviewed-sha`, `reviewed-diff`, `reviewed-contribution` (all three in
+  // `we:scripts/lib/review-escalation.mjs`), `cleared-human` (ditto), `cleared-by-actor` / `authored-by-actor`
+  // (`we:scripts/lib/review-independence.mjs`), `drain-{park,skip,land}-reason`
+  // (`we:scripts/merge-ai-prs.mjs`) — needs a literal `<!--` to open. Those parsers each hard-code their own
+  // regex, so there is NO single list to derive a strip-set from; matching on the syntax is the only close that
+  // covers a marker defined in a module this one does not import, or one invented after today.
+  //
+  // WHY ESCAPE RATHER THAN DELETE. `&lt;!--` renders as a visible `<!--` on GitHub, so a `/review` write-up
+  // that legitimately QUOTES a prior round's marker still reads correctly (#983's re-accept comment did exactly
+  // that) — it is simply inert to every parser, all of which scan the RAW body `gh pr view --json comments`
+  // returns. Over-neutralizing is the safe direction: an escaped marker is text, an un-escaped one outranks the
+  // real stamp.
+  const prose = neutralizeCommentMarkers([
     heading,
     '',
     attribution + independenceNote,
     ...(text ? ['', text] : []),
-    ...(marker ? ['', marker] : []),
-  ].join('\n');
+  ].join('\n'));
+  return marker ? `${prose}\n\n${marker}` : prose;
 }
 
 /**
- * we:scripts/review-set-label.mjs#stripReviewedShaMarkers — remove every `reviewed-sha` marker from a
- * caller-supplied body, replacing each with a visible placeholder so the write-up still reads correctly where
- * it was quoting one. PURE. Mirrors `REVIEWED_SHA_RE` in `we:scripts/lib/review-escalation.mjs` — the marker
- * SHAPE is defined there; this only has to recognise the same thing, and over-matching is the safe direction
- * (a stripped marker is inert text, an un-stripped one can outrank the real stamp).
+ * we:scripts/review-set-label.mjs#normalizeChannel — the `--channel` value as ONE clause of ONE sentence. PURE.
+ *
+ * It is argv free text that lands mid-sentence in a durable public comment, so two things are done to it and
+ * each has a reason:
+ *   1. WHITESPACE COLLAPSED to single spaces. A newline would break the attribution paragraph in two and let
+ *      the second half read as the comment's own prose.
+ *   2. TRAILING PUNCTUATION TRIMMED, so `--channel="the console."` does not render "console..".
+ * The empty string means "no channel stated", which renders the neutral sentence.
+ *
+ * IT NO LONGER STRIPS MARKERS, and that is the point (PR #1147 review). #2898 put a `reviewed-sha` strip here,
+ * which made this function a SECOND home for a guarantee — and the first home never covered `--actor`, so the
+ * hole stayed open in the field rendered by the same sentence. Marker neutralization now happens once, at
+ * `buildVerdictComment`'s render boundary, where it covers every prose field including the ones added next.
+ * Presentation lives here; safety lives there.
  */
+export function normalizeChannel(channel) {
+  return String(channel ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.\s]+$/, '');
+}
+
 /** GitHub's hard cap on an issue/PR comment body. Checked BEFORE the label swap, on the rendered bytes in
  *  `runReviewLabelCli` (unskippable) and again from argv in the CLI block below (names the flag to trim). */
 export const GH_COMMENT_MAX = 65536;
@@ -759,9 +815,35 @@ export const GH_COMMENT_MAX = 65536;
 /** Who the durable comment is attributed to when `--actor` is absent. `clear-human` REFUSES this default. */
 export const DEFAULT_ACTOR = 'loop-console operator';
 
-export function stripReviewedShaMarkers(body) {
-  return String(body || '')
-    .replace(/<!--\s*reviewed-sha:\s*([0-9a-fA-F]{7,40})\s*-->/g, '`reviewed-sha: $1` (quoted, not this verdict\'s)')
+/**
+ * we:scripts/review-set-label.mjs#neutralizeCommentMarkers — make every HTML comment in a stretch of text INERT
+ * to every marker parser in the constellation, while keeping it readable. PURE. The sanitizer that sits on
+ * `buildVerdictComment`'s render boundary; see the long note there for why the boundary, and not the inputs, is
+ * where this belongs.
+ *
+ * WHAT IT DOES: escapes the DELIMITERS — `<!--` → `&lt;!--`, `-->` → `--&gt;`. Nothing else is touched.
+ *
+ * WHY THAT IS SUFFICIENT, and how to falsify it. Every marker read anywhere in this repo is matched by a regex
+ * that opens on a literal `<!--` (`REVIEWED_SHA_RE`, `REVIEWED_DIFF_RE`, `REVIEWED_CONTRIBUTION_RE`,
+ * `CLEARED_HUMAN_RE` in `we:scripts/lib/review-escalation.mjs`; `actorMarkerRe` in
+ * `we:scripts/lib/review-independence.mjs`; `drainReasonMarker` in `we:scripts/merge-ai-prs.mjs`). Remove every
+ * literal `<!--` from a string and NONE of them can match it, whatever the marker is named, however the payload
+ * is cased or spaced, and whether or not the marker was invented after this line was written. That is a
+ * property of the marker SYNTAX, so it holds for markers this module cannot even see — which matters, because
+ * those parsers each hard-code their own pattern and there is no shared registry to derive a strip-list from.
+ *
+ * WHY IT IS NOT A DELETE. `&lt;!--` renders as a literal `<!--` in GitHub-flavoured markdown, so a quoted
+ * marker still SAYS what the write-up meant it to say; the parsers read the raw body, where it is inert. The
+ * predecessor (`stripReviewedShaMarkers`) replaced one named marker with a backticked placeholder; this keeps
+ * that readability property while covering every marker instead of one.
+ *
+ * ORDERING NOTE: `<!--` is escaped first, so the `--` it leaves behind cannot be re-consumed by the `-->` pass
+ * (`&lt;!--` ends in `--`, and the closer pass needs `-->`).
+ */
+export function neutralizeCommentMarkers(text) {
+  return String(text ?? '')
+    .replace(/<!--/g, '&lt;!--')
+    .replace(/-->/g, '--&gt;')
     .trim();
 }
 
@@ -786,11 +868,13 @@ export function stripReviewedShaMarkers(body) {
  * and under-counting it is precisely the 65,405–65,536 band failure M2 documents. Both unproven statuses render
  * a FIXED-length message (the proven `self-clear` never renders — the CLI refuses it before any write), so the
  * worst case is computed here from the real decider rather than guessed at with a placeholder width.
- * @param {{body?:string, actor?:string, reason?:string, clearerId?:string}} o - the caller-supplied
- *   variable-length inputs
+ * #2898 — `channel` joins them for the SAME reason: it is argv free text that lands in the rendered comment, so
+ * leaving it out of the projection re-opens the exact gap `--reason` had (PR #1057).
+ * @param {{body?:string, actor?:string, reason?:string, clearerId?:string, channel?:string}} o - the
+ *   caller-supplied variable-length inputs
  * @returns {number} the largest length any target renders to
  */
-export function projectVerdictCommentLength({ body = '', actor = '', reason = '', clearerId = '' } = {}) {
+export function projectVerdictCommentLength({ body = '', actor = '', reason = '', clearerId = '', channel = '' } = {}) {
   // #x9xqexm — project the DIFF + CONTRIBUTION markers at full width too. A 64-hex string is the idempotence
   // shortcut in both `normalize*Fingerprint`s, so this renders exactly the bytes a real accept stamps; before,
   // the projection passed no diff, both markers rendered as '', and the estimate was ~180 chars short of what
@@ -807,7 +891,7 @@ export function projectVerdictCommentLength({ body = '', actor = '', reason = ''
     decideClearerIndependence({ authorId: clearerId || 'x', clearerId: clearerId || 'x' }),
   ];
   return Math.max(...REVIEW_LABEL_TARGETS.flatMap((to) => outcomes.map((independence) => buildVerdictComment({
-    to, actor, headSha: 'f'.repeat(40), body, reason, reviewedDiff: 'f'.repeat(64), clearerId, independence,
+    to, actor, headSha: 'f'.repeat(40), body, reason, reviewedDiff: 'f'.repeat(64), clearerId, independence, channel,
   }).length)));
 }
 
@@ -833,6 +917,11 @@ if (IS_CLI) {
   // below can be a real upper bound (#1056 M2) — `runReviewLabelCli` re-parses them and owns their validation.
   const projActor = (argvRest.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length) || DEFAULT_ACTOR;
   const projReason = (argvRest.find((a) => a.startsWith('--reason=')) || '').slice('--reason='.length);
+  // #2898 — the SURFACE this verdict came through. Free text and therefore unbounded, exactly like `--actor`
+  // and `--reason`, so it is read here for the same reason they are: the size pre-flight below must be a real
+  // upper bound over EVERY variable-length input, which is the PR #1057 lesson (`--reason` was added later and
+  // went unprojected). Absent → the neutral attribution; never another caller's channel.
+  const verdictChannel = (argvRest.find((a) => a.startsWith('--channel=')) || '').slice('--channel='.length);
   let verdictBody = '';
   if (bodyFileArg) {
     // Constrain the path: this file's contents are published to a PUBLIC PR and cannot be unpublished. A stale
@@ -853,18 +942,18 @@ if (IS_CLI) {
   // no `--body-file` was passed. Projected over the WHOLE target set AND every free-text argv input; see
   // `projectVerdictCommentLength`.
   const projected = projectVerdictCommentLength({
-    body: verdictBody, actor: projActor, reason: projReason, clearerId: currentActorId(),
+    body: verdictBody, actor: projActor, reason: projReason, clearerId: currentActorId(), channel: verdictChannel,
   });
   if (projected > GH_COMMENT_MAX) {
     const flag = [[verdictBody.length, `--body-file=${bodyFileArg}`], [projReason.length, '--reason'],
-      [projActor.length, '--actor']].sort((a, b) => b[0] - a[0])[0][1];
+      [projActor.length, '--actor'], [verdictChannel.length, '--channel']].sort((a, b) => b[0] - a[0])[0][1];
     fail(`${flag} renders a ${projected}-char comment, over GitHub's ${GH_COMMENT_MAX} limit — trim it (nothing was changed: no comment, no label)`);
   }
   runReviewLabelCli({
     defaultActor: DEFAULT_ACTOR,
-    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--body-file=<path>]  (pr must be a positive integer; clear-human additionally requires --actor and --reason=<stated reason>)',
+    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--channel=<surface>] [--body-file=<path>]  (pr must be a positive integer; clear-human additionally requires --actor and --reason=<stated reason>)',
     buildComment: ({ to, actor, headSha, reason, reviewedDiff, clearerId, independence }) => buildVerdictComment({
-      to, actor, headSha, reason, reviewedDiff, clearerId, independence, body: verdictBody,
+      to, actor, headSha, reason, reviewedDiff, clearerId, independence, body: verdictBody, channel: verdictChannel,
     }),
     successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
     refusalResult: ({ decision }) => ({ error: decision.reason }),

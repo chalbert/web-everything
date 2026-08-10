@@ -142,7 +142,7 @@ describe('verdictFrom', () => {
 describe('the input schema', () => {
   it('treats a shorthand type as REQUIRED — optionality is opt-in', () => {
     const schema = normalizeInputSchema({ pr: 'number' }, 'x');
-    expect(schema.pr).toEqual({ type: 'number', required: true, default: undefined });
+    expect(schema.pr).toEqual({ type: 'number', required: true, default: undefined, enum: null });
     expect(validateInput(schema, {}).errors).toEqual(['missing required input field `pr` (number)']);
   });
 
@@ -171,6 +171,49 @@ describe('the input schema', () => {
   it('fills a declared default for an omitted optional field', () => {
     const schema = normalizeInputSchema({ note: { type: 'string', required: false, default: 'none' } }, 'x');
     expect(validateInput(schema, {}).value).toEqual({ note: 'none' });
+  });
+});
+
+// A CLOSED VALUE SET, DECLARED ONCE. It buys the refusal AND the `--help` text AND #3036's HTTP validation
+// from one line — the alternative being each adapter re-listing the same vocabulary, which is the
+// two-readers-of-one-contract defect the whole statute is about.
+describe('the input schema — a declared enum', () => {
+  const lens = (extra = {}) => normalizeInputSchema(
+    { lens: { type: 'string', required: false, default: 'a', enum: ['a', 'b'], ...extra } }, 'x',
+  );
+
+  it('normalizes to a frozen member list a caller cannot mutate', () => {
+    const schema = lens();
+    expect(schema.lens.enum).toEqual(['a', 'b']);
+    expect(Object.isFrozen(schema.lens.enum)).toBe(true);
+  });
+
+  it('refuses a value outside the set, BEFORE a run record exists, and names the set', () => {
+    const result = validateInput(lens(), { lens: 'c' });
+    expect(result.ok).toBe(false);
+    expect(result.errors).toEqual(['input field `lens` must be one of a|b, got "c"']);
+  });
+
+  it('accepts a member, and still fills the default when omitted', () => {
+    expect(validateInput(lens(), { lens: 'b' }).value).toEqual({ lens: 'b' });
+    expect(validateInput(lens(), {}).value).toEqual({ lens: 'a' });
+  });
+
+  it('refuses a declaration whose own default is not a member — that is a run that dies on its schema', () => {
+    expect(() => lens({ default: 'z' })).toThrow(/defaults to "z", which is not one of its own declared values/);
+  });
+
+  it('refuses a malformed or mistyped set at DECLARATION time, not at run time', () => {
+    expect(() => normalizeInputSchema({ f: { type: 'string', enum: [] } }, 'x')).toThrow(/non-empty array/);
+    expect(() => normalizeInputSchema({ f: { type: 'string', enum: ['a', 'a'] } }, 'x')).toThrow(/repeats a value/);
+    expect(() => normalizeInputSchema({ f: { type: 'string', enum: [1] } }, 'x')).toThrow(/is not a string/);
+    expect(() => normalizeInputSchema({ f: { type: 'object', enum: [{}] } }, 'x')).toThrow(/cannot declare an `enum`/);
+  });
+
+  it('works on numbers too, and a number field with no enum is unconstrained as before', () => {
+    const schema = normalizeInputSchema({ n: { type: 'number', enum: [1, 2] }, m: 'number' }, 'x');
+    expect(validateInput(schema, { n: 3, m: 99 }).errors).toEqual(['input field `n` must be one of 1|2, got 3']);
+    expect(validateInput(schema, { n: 2, m: 99 }).ok).toBe(true);
   });
 });
 

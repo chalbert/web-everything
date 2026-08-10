@@ -192,6 +192,49 @@ describe('advance over the four kinds', () => {
   });
 });
 
+// A `judge` step declares the juror call and the CALLER makes it, so the cost of the spawn exists only out
+// there — the resume is the one seam it can travel back through. See `withTelemetry` in the engine.
+describe('a judge resume carries what the spawn cost', () => {
+  const registry = fixtureRegistry();
+  const atJudge = () => advanceWhileRunning(
+    startRun({ op: FIXTURE_OP, id: 'run-tel', input: { pr: 7 }, registry }), { registry },
+  );
+  const SPEND = { costUsd: 0.02, wallMs: 1500, sessionId: 'abc', junk: 'dropped', usage: { input_tokens: 10 } };
+
+  it('records a row on the run, whitelisted, stamped with the step and the declared request', () => {
+    const run = advance(atJudge(), { registry, resume: { value: FIXTURE_JUDGE_ANSWER, telemetry: SPEND } });
+    expect(run.telemetry).toHaveLength(1);
+    expect(run.telemetry[0]).toEqual({
+      step: 'panel', stepIndex: 1, costUsd: 0.02, wallMs: 1500, sessionId: 'abc',
+      // From the SUSPENDED REQUEST, not from the caller's report — the row is attributable either way.
+      lens: 'panel', model: 'sonnet', effort: 'medium',
+      usage: { input_tokens: 10 },
+    });
+    // The answer itself is untouched: a declaration must not be able to compute over what it cost.
+    expect(run.findings.panel).toEqual(FIXTURE_JUDGE_ANSWER);
+  });
+
+  it('is optional — a resume without it records nothing and changes nothing', () => {
+    const run = advance(atJudge(), { registry, resume: { value: FIXTURE_JUDGE_ANSWER } });
+    expect(run.telemetry).toEqual([]);
+  });
+
+  it('REFUSES telemetry on a confirm resume — a person answering a question spawns no juror', () => {
+    let run = advance(atJudge(), { registry, resume: { value: FIXTURE_JUDGE_ANSWER } });
+    run = advanceWhileRunning(run, { registry });
+    expect(runStatus(run, { registry })).toBe('awaiting-confirm');
+    expect(() => advance(run, { registry, resume: { value: 'accept', telemetry: SPEND } }))
+      .toThrow(/a `confirm` resume carries no juror telemetry/);
+  });
+
+  it('a record that predates the field still advances — absent is not corrupt', () => {
+    const { telemetry, ...legacy } = atJudge();
+    expect(telemetry).toEqual([]);
+    const run = advance(legacy, { registry, resume: { value: FIXTURE_JUDGE_ANSWER, telemetry: SPEND } });
+    expect(run.telemetry).toHaveLength(1);
+  });
+});
+
 describe('advance is idempotent and never mutates', () => {
   const registry = fixtureRegistry();
 

@@ -17,6 +17,7 @@
  *   |-----------|--------------------------------------------------|--------------------------------------------|
  *   | `compute` | calls the pure fn, stores the finding, moves on   | nothing — no suspend                       |
  *   | `judge`   | suspends with `{ mandate, input, shape, … }`      | runs `judgeSpawn` (#3028), resumes with it |
+ *   |           | …and records `resume.telemetry` as what it cost   | (the spawn's cost exists only out there)   |
  *   | `confirm` | suspends recording WHAT is asked and OF WHOM      | asks a person, resumes with the decision   |
  *   | `effect`  | suspends with the declared effects, keyed         | runs the executor, then calls `advance`    |
  *
@@ -39,7 +40,7 @@
  */
 
 import { defaultRegistry, validateInput } from './registry.mjs';
-import { assertRunRecord, effectKey, newRunRecord } from './run-record.mjs';
+import { assertRunRecord, effectKey, newRunRecord, normalizeJudgeTelemetry } from './run-record.mjs';
 
 /** Every state a run can be in. Derived from the record; never stored, so it cannot go stale. */
 export const RUN_STATUSES = Object.freeze(['running', 'awaiting-judge', 'awaiting-confirm', 'awaiting-effect', 'complete']);
@@ -235,7 +236,43 @@ function resolvePending(run, declaration, resume) {
   }
 
   const next = withFinding(run, declaration, stepName, resume.value);
-  return { ...next, pending: null, cursor: stepIndex + 1 };
+  return { ...withTelemetry(next, kind, stepName, stepIndex, resume), pending: null, cursor: stepIndex + 1 };
+}
+
+/**
+ * RECORD WHAT THE SPAWN COST, on the resume that carries the answer.
+ *
+ * A `judge` step DECLARES the juror call and never makes it — the spawn happens in the caller, between two
+ * `advance` calls (see the `judge` case above). So the cost, the wall time and the session id exist ONLY in the
+ * adapter, and the resume is the one seam they can travel back through. Everything about them is data: the
+ * engine stays pure, and {@link ./run-record.mjs#normalizeJudgeTelemetry} whitelists what may land.
+ *
+ * REFUSED on a `confirm` resume: a person answering a question spends no jurors, so `telemetry` there is a
+ * caller confusion, and silently dropping it would make a lost cost figure look like a free run.
+ *
+ * The `lens` / `model` / `effort` on the row come from the REQUEST the engine itself suspended with, never from
+ * the adapter's copy — the row is then attributable to the declared call even if the caller reports nonsense.
+ */
+function withTelemetry(run, kind, stepName, stepIndex, resume) {
+  if (resume.telemetry === undefined || resume.telemetry === null) return run;
+  if (kind !== 'judge') {
+    throw new Error(
+      `operations: run ${run.id} — a \`${kind}\` resume carries no juror telemetry (only a \`judge\` step spawns one). `
+      + `Refusing the resume for \`${stepName}\` rather than recording a cost nothing incurred.`,
+    );
+  }
+  const request = run.pending?.request ?? {};
+  const row = normalizeJudgeTelemetry({
+    step: stepName,
+    stepIndex,
+    telemetry: {
+      ...(isPlainObject(resume.telemetry) ? resume.telemetry : {}),
+      lens: request.lens,
+      model: request.model,
+      effort: request.effort,
+    },
+  });
+  return { ...run, telemetry: [...(run.telemetry ?? []), row] };
 }
 
 /**

@@ -286,6 +286,16 @@ describe('buildSetLabelArgs — the accept-write argv uses the =-joined flag for
     expect(argv).not.toContain('--repo');
     expect(argv).not.toContain('--to');
   });
+
+  // #2898 — the durable comment used to claim the Plateau Loop review console for EVERY caller, including
+  // this one, which is the unattended path where no console and no person was involved at all.
+  it('states its own surface, so the durable comment does not claim a human recorded the verdict', () => {
+    const argv = buildSetLabelArgs({ pr: 42, repo: 'owner/name' });
+    const channel = argv.find((a) => a.startsWith('--channel='));
+    expect(channel).toBeTruthy();
+    expect(channel).toMatch(/auto-land seam/);
+    expect(channel).not.toMatch(/review console/);
+  });
 });
 
 describe('runAutoLandSeam — end-to-end (ledger → resolved config → intent → action)', () => {

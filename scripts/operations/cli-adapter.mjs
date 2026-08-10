@@ -19,7 +19,7 @@
  *   | status             | this adapter                                                                        |
  *   |--------------------|-------------------------------------------------------------------------------------|
  *   | `running`          | `advance` again — no io                                                             |
- *   | `awaiting-judge`   | spawns ONE tool-free juror (`judgeSpawn`, #3028) and resumes with its answer         |
+ *   | `awaiting-judge`   | spawns ONE tool-free juror (`judgeSpawn`, #3028), resumes with its answer + its cost |
  *   | `awaiting-confirm` | **STOPS AND EXITS.** The question is printed; the run id is printed. Nothing else.   |
  *   | `awaiting-effect`  | applies the declared effects through the executor, then `advance` again              |
  *
@@ -40,6 +40,7 @@
 
 import { advance, runStatus, startRun } from './engine.mjs';
 import { applyPendingEffects } from './effect-executor.mjs';
+import { totalJudgeSpend } from './run-record.mjs';
 import { validateInput } from './registry.mjs';
 import { assertNoForbiddenArgv, EFFORT_LEVELS, judgeSpawn } from '../lib/judge-spawn.mjs';
 
@@ -53,7 +54,7 @@ export const CONTROL_FLAGS = Object.freeze(['help', 'json', 'resume', 'answer', 
  */
 export function buildCliSpec(declaration) {
   const fields = Object.entries(declaration.input).map(([name, spec]) => ({
-    name, type: spec.type, required: spec.required, default: spec.default,
+    name, type: spec.type, required: spec.required, default: spec.default, enum: spec.enum ?? null,
   }));
   const collision = fields.find((f) => CONTROL_FLAGS.includes(f.name));
   if (collision) {
@@ -62,8 +63,14 @@ export function buildCliSpec(declaration) {
       + `adapter's own control flag — rename it (control flags: ${CONTROL_FLAGS.join(', ')}).`,
     );
   }
+  // A field with a declared value set PRINTS THE SET, not its type: `--lens=<string>` tells the operator
+  // nothing they can act on, and the four valid lenses were already declared — the help just never read them.
+  // The default is shown alongside, so "what happens if I omit it" is answered in the same line.
+  const placeholder = (f) => (f.enum ? f.enum.map(String).join('|') : `<${f.type}>`);
   const flagText = fields
-    .map((f) => (f.required ? `--${f.name}=<${f.type}>` : `[--${f.name}=<${f.type}>]`))
+    .map((f) => (f.required
+      ? `--${f.name}=${placeholder(f)}`
+      : `[--${f.name}=${placeholder(f)}${f.default !== undefined ? `, default ${f.default}` : ''}]`))
     .join(' ');
   const steps = declaration.steps.map((s) => `${s.name}(${s.step.kind})`).join(' → ');
   return {
@@ -174,7 +181,43 @@ export function assertSafeJudgeRequest(request) {
   assertNoForbiddenArgv([request?.model, request?.effort].filter((t) => typeof t === 'string'));
 }
 
-/** The default judge: ONE tool-free juror per `judge` step, guarded by {@link assertSafeJudgeRequest}. */
+/**
+ * THE BRAND on a judge return that carries telemetry alongside the answer.
+ *
+ * A judge is injected (`driveRun({ judge })`) and the ordinary implementation returns the juror's answer
+ * directly — every test in the suite does. So the adapter has to tell "this IS the answer" from "this WRAPS
+ * the answer", and sniffing for a `value` key would misread any future juror shape that happens to have one.
+ * A registered symbol cannot appear in JSON a juror produced, so the test is exact rather than probable.
+ * `Symbol.for` (not a bare `Symbol`) so two copies of this module in one process still agree.
+ */
+const JUDGE_OUTCOME = Symbol.for('we.operations.judgeOutcome');
+
+/**
+ * Wrap a juror answer with the SPAWN's telemetry, for a judge that has it. `driveRun` unwraps.
+ * @param {*} value - the juror's answer, exactly as it would be returned bare.
+ * @param {object|null} [telemetry] - `judgeSpawn`'s metered fields (see `normalizeJudgeTelemetry`).
+ */
+export function judgeOutcome(value, telemetry = null) {
+  return { [JUDGE_OUTCOME]: true, value, telemetry };
+}
+
+/** Split a judge's return into `{ value, telemetry }`. A bare answer is the answer, with no telemetry. */
+export function unwrapJudgeOutcome(returned) {
+  return (returned && typeof returned === 'object' && returned[JUDGE_OUTCOME] === true)
+    ? { value: returned.value, telemetry: returned.telemetry ?? null }
+    : { value: returned, telemetry: null };
+}
+
+/**
+ * The default judge: ONE tool-free juror per `judge` step, guarded by {@link assertSafeJudgeRequest}.
+ *
+ * IT RETURNS WHAT THE SPAWN COST, not only what the juror said. `judgeSpawn` reports `costUsd`, `sessionId`,
+ * `usage`, `durationMs` and `wallMs`; the first cut returned `outcome.value` alone, so after #3035's first live
+ * run against PR #1146 "what did that juror cost?" had no answer anywhere — the numbers existed for the length
+ * of one expression and were dropped. The juror also runs `--no-session-persistence` (a #3028 isolation
+ * property, deliberately unchanged here), so there is no transcript to reconstruct them from either. They ride
+ * back through {@link judgeOutcome} onto the run record, which is where a completed run and `--json` read them.
+ */
 export function createDefaultJudge({ spawn = judgeSpawn, cwd } = {}) {
   return async (request) => {
     assertSafeJudgeRequest(request);
@@ -189,7 +232,18 @@ export function createDefaultJudge({ spawn = judgeSpawn, cwd } = {}) {
       lens: request.lens,
       ...(cwd ? { cwd } : {}),
     });
-    return outcome.value;
+    // NOT a spread of `outcome`: it also carries `argv` (which embeds the whole mandate) and the answer itself.
+    // The record keeps the meter, never the material. `normalizeJudgeTelemetry` whitelists again on arrival.
+    return judgeOutcome(outcome.value, {
+      costUsd: outcome.costUsd,
+      durationMs: outcome.durationMs,
+      wallMs: outcome.wallMs,
+      numTurns: outcome.numTurns,
+      stopReason: outcome.stopReason,
+      sessionId: outcome.sessionId,
+      loadedContextTokens: outcome.loadedContextTokens,
+      usage: outcome.usage,
+    });
   };
 }
 
@@ -226,8 +280,13 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
     }
 
     if (status === 'awaiting-judge') {
-      const answer = await judge(current.pending.request);
-      current = advance(current, { registry, resume: { step: current.pending.step, value: answer } });
+      // THE SPAWN, in the caller, between two `advance` calls — the declaration declared it and did not act.
+      // Its cost rides back on the resume; `advance` stamps the row with the request's own lens/model/effort.
+      const { value, telemetry } = unwrapJudgeOutcome(await judge(current.pending.request));
+      current = advance(current, {
+        registry,
+        resume: { step: current.pending.step, value, ...(telemetry ? { telemetry } : {}) },
+      });
       store.write(current);
       continue;
     }
@@ -308,6 +367,34 @@ export async function runOperationCli({ declaration, argv, registry, store, sink
   return { ...renderOutcome({ outcome, json: parsed.control.json }), run: outcome.run, stopped: outcome.stopped };
 }
 
+/**
+ * WHAT THE RUN'S JURORS COST, as operator-facing lines. PURE; `[]` when the run spawned none (so a stub-judged
+ * run and a pre-telemetry record both render exactly as they did before).
+ *
+ * PRINTED AT EVERY STOP, INCLUDING THE CONFIRM. The confirm suspend is where it matters most: the juror has
+ * already run and been paid for, and the operator is about to decide whether to spend more. A cost figure that
+ * only appeared on `complete` would arrive after the decision it informs.
+ */
+export function renderSpendLines(run) {
+  const rows = Array.isArray(run?.telemetry) ? run.telemetry : [];
+  if (!rows.length) return [];
+  const total = totalJudgeSpend(run);
+  const per = rows.map((r) => {
+    const bits = [
+      `$${(r.costUsd ?? 0).toFixed(4)}`,
+      `${((r.wallMs ?? r.durationMs ?? 0) / 1000).toFixed(1)}s`,
+      r.model ? `model ${r.model}` : '',
+      typeof r.loadedContextTokens === 'number' ? `${r.loadedContextTokens} ctx tokens` : '',
+      r.sessionId ? `session ${r.sessionId}` : '',
+    ].filter(Boolean);
+    return `  ${r.step}${r.lens ? ` (${r.lens})` : ''}: ${bits.join(' · ')}`;
+  });
+  return [
+    `judge spend: $${total.costUsd.toFixed(4)} over ${total.jurors} juror(s), ${(total.wallMs / 1000).toFixed(1)}s wall`,
+    ...per,
+  ];
+}
+
 /** Turn a `driveRun` outcome into exit code + lines. PURE. */
 export function renderOutcome({ outcome, json = false }) {
   const { run, stopped, error, applied } = outcome;
@@ -315,10 +402,14 @@ export function renderOutcome({ outcome, json = false }) {
     const payload = {
       runId: run.id, op: run.op, stopped, applied,
       pending: run.pending, verdict: run.verdict, findings: run.findings,
+      // The meter, and its total pre-summed — a consumer must not have to re-derive "what did this cost".
+      telemetry: run.telemetry ?? [], spend: totalJudgeSpend(run),
       ...(error ? { error: String(error.message ?? error) } : {}),
     };
     return { code: stopped === 'complete' || stopped === 'confirm' ? 0 : 1, lines: [JSON.stringify(payload, null, 2)] };
   }
+
+  const spend = renderSpendLines(run);
 
   if (stopped === 'confirm') {
     const p = run.pending;
@@ -330,6 +421,7 @@ export function renderOutcome({ outcome, json = false }) {
         // The material the decision is made ON, not just the question — otherwise the caller has to go and
         // fetch it, which is the restating-the-flow the skill is being freed from.
         ...(run.verdict != null ? ['verdict:', JSON.stringify(run.verdict, null, 2), ''] : []),
+        ...(spend.length ? [...spend, ''] : []),
         p.asks,
         '',
         ...(p.options ? [`options: ${p.options.join(' | ')}`, ''] : []),
@@ -338,7 +430,7 @@ export function renderOutcome({ outcome, json = false }) {
     };
   }
   if (stopped === 'complete') {
-    return { code: 0, lines: [`run ${run.id} — complete. ${applied.length} effect(s) applied.`] };
+    return { code: 0, lines: [`run ${run.id} — complete. ${applied.length} effect(s) applied.`, ...spend] };
   }
   if (stopped === 'effect-halted') {
     return {
@@ -347,8 +439,9 @@ export function renderOutcome({ outcome, json = false }) {
         `run ${run.id} — HALTED applying \`${run.pending?.step}\`: ${String(error?.message ?? error)}`,
         `${applied.length} effect(s) landed and are recorded as applied; a --resume=${run.id} continues from there `
         + 'and never re-applies them.',
+        ...spend,
       ],
     };
   }
-  return { code: 1, lines: [`run ${run.id} — ${stopped}.`] };
+  return { code: 1, lines: [`run ${run.id} — ${stopped}.`, ...spend] };
 }
