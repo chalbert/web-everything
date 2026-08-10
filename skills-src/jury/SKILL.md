@@ -23,6 +23,10 @@ the round cap — is a pure derivation in the engine:
   — the subject-agnostic generalization of `we:scripts/workflows/review-parked-prs.mjs`.
 - **The engine-invoker shim** the harness shells (it does the `resolveAdapterRoster` call the sandboxed harness
   can't `import`): [resolve-roster.mjs](resolve-roster.mjs). Pure glue — zero jury logic.
+- **The panel shim** the harness shells to fan the jurors out (#3057): [panel-fanout.mjs](panel-fanout.mjs). It
+  calls `judgePanel` ([scripts/lib/judge-panel.mjs](../../../scripts/lib/judge-panel.mjs), #3050), which spawns one
+  **tool-free headless `claude -p` juror per seat**. Same reason as above — the sandbox can't `import` a Node
+  function. Pure glue: it returns each seat's answer and **derives no verdict**.
 
 ## What this skill does
 
@@ -33,6 +37,13 @@ Given a **subject** (`pr-diff` | `design-pixels` | `decision-prose`), a **care-l
    lenses + the subject's touch-set lenses, materialized into `jurorsPerLens` independent jurors each, with each
    lens's mandate framed by the adapter.
 2. **Fans out one juror per rostered seat** over the one shared subject snapshot, each judging under its mandate.
+   Since #3057 each juror is a **headless, tool-free `claude -p` process with its own `--session-id`**, derived
+   from the run id plus the seat's `lens#slot`, not a subagent. That matters because a subagent **inherits its
+   parent's `CLAUDE_CODE_SESSION_ID`** — the identity
+   [review-independence.mjs](../../../scripts/lib/review-independence.mjs) keys reviewer independence on — so the
+   old fan-out was one actor wearing N hats by this repo's own test. `panelSeats` refuses to seat a panel whose
+   derived ids are not pairwise distinct, before anything spawns. Read the limit honestly (#2895): a distinct
+   session id is not an *unforgeable* actor signal; it removes the failure a subagent juror has by construction.
 3. **Reduces the panel** to per-lens verdicts + one panel verdict via the shared review core
    (`review-core-cli reduce` — diversity-selection). A mandatory lens whose whole jury fails degrades the panel to
    `needs-human` (a jury that did not run never reads as accept).
