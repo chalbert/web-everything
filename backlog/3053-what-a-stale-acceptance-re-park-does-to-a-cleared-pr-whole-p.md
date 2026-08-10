@@ -11,6 +11,55 @@ tags: [gate, review, drain, review-escalation, declarative-leash, ratification]
 
 # What a stale-acceptance re-park does to a cleared PR — whole-PR score, uncovered-delta score, or a fourth `review:stale` hold tier
 
+> **RULED 2026-08-10 (operator, in session): (a) stands · (c) REJECTED and closed · (b) direction only.**
+> Ruled on the presented preparation, in the words *"I accept your recommendation"*, after the recommendation and
+> its reasoning were restated in full and the operator confirmed the scope (the preparation PR lands normally; what
+> is rejected is option (c), not the PR).
+>
+> **(a) — the whole-PR score stands.** A stale-acceptance re-park continues to re-assert the hold from the whole-PR
+> score. It is fail-closed, and its error costs one re-clear where (b)'s would cost an agent-clearable merge.
+>
+> **(c) — the fourth `review:stale` hold tier is REJECTED and closed.** Its premise is false in the tree today: a
+> re-park does **not** destroy the clearance record. `review:accepted` survives it
+> ([we:scripts/lib/review-escalation.mjs](scripts/lib/review-escalation.mjs) lines 1178-1186 — *"the drain DELETED
+> the accept whenever it re-parked. It no longer does"*), and #3039's landed notice posts a durable comment naming
+> the clearer. The premise traces to a **stale docblock at lines 1404-1405 of the same file**, contradicted by line
+> 1180 — almost certainly the origin of the option. Once #3054 repairs the digest, (c)'s only distinct behaviour
+> fires solely in the case the repair removes, so **(c) ≡ (a) plus a label name**. Closed by ruling rather than by
+> silence because an unruled option returns — this one already did, promised as a separate card by #3039, never
+> filed, then resurfaced folded into this one.
+>
+> **(b) — the uncovered-delta score is kept as a DIRECTION, not a commitment.** It is the only branch touching the
+> half #3054 never reaches, and its grain is ratifiable. It is **not** authorised to build. Three preconditions,
+> all unmet: a sound delta construction (a path-set delta misses a relocation inside indented `POLICY_SPEC` JSON —
+> #3021's empty-heading collision); `revokesClearance` re-based off the accept-drop, since (b) otherwise suppresses
+> the notice in its own motivating case; and a ratified #2840 trigger-3 amendment reconciled with
+> `#2390-review-fix`.
+>
+> **What the measurements decided, and what they did not.** Repo-wide label census: 4,476 events, 479
+> review-labelled PRs, **35** accept→park transitions. Post-#1119: exactly **2** stale re-parks, **both provably
+> false** against the stamped markers; **genuinely stale: 0**. #1106 diverged on the gap alone; **#1100 needed gap
+> *and* heading**, so #3046 alone would not have saved it. Classified by cause of the head move — 24 drain or
+> other-lane rebase traffic, 5 own content replayed unchanged, 5 no head move, and **1 author-caused event ever**
+> (PR #984), which touched no leash path and under today's post-#1102 roster would route to `review:pending`
+> regardless. Volume is **not** the warrant for this ruling — the false premise is. The counts explain why (b) is
+> not urgent; they do not decide it.
+>
+> **Corrections carried by this ruling.** A claim both this card and #3024 cited as #2840 statute — *"the leash
+> split is fail-closed and cannot shrink"* — is a **test `describe` title** in
+> [we:scripts/lib/__tests__/gate-invariants.test.mjs](scripts/lib/__tests__/gate-invariants.test.mjs), not ratified
+> text. The blast radius of a fourth label is ~30 production files and ~113 behavioural sites, not the "~10
+> consumers" carried since #3039. #3007 Phase 1 does **not** deliver a durable clearance record: it is
+> home-anchored outside the repo, never lands on `main`, is fail-soft on write and is **unread** — see
+> [we:scripts/lib/verdict-ledger.mjs](scripts/lib/verdict-ledger.mjs). What survives from it is precedent only —
+> do not build gate behaviour on a digest until the digest is sound.
+>
+> **Revisitable on evidence, not on taste.** (c) re-opens only if #3054 proves unfixable without a tolerance
+> threshold. (b) advances only when a sound delta construction exists. If the stale docblock turns out to describe
+> current behaviour after all, this ruling is void — check before relying on it.
+>
+> **Owed next, and not part of this ruling:** delete the stale docblock, and fix the digest (#3054).
+
 Three approaches to one hole compete with no ruling: keep the whole-PR score (status quo, fail-closed), narrow the
 re-park score to the **uncovered delta**
 ([#3024](/backlog/3024-a-stale-acceptance-re-park-re-asserts-review-human-from-the-/) is its build side), or add a
