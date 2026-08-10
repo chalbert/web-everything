@@ -19,8 +19,10 @@ import {
   effectKey,
   isValidRunId,
   newRunRecord,
+  normalizeJudgeTelemetry,
   parseRunRecord,
   serializeRunRecord,
+  totalJudgeSpend,
   validateRunRecord,
 } from '../run-record.mjs';
 import {
@@ -47,7 +49,7 @@ describe('the pure core', () => {
   it('newRunRecord produces exactly the documented shape', () => {
     expect(sample()).toEqual({
       v: RUN_RECORD_VERSION, id: 'run-sample', op: 'fixture-review',
-      input: { pr: 1 }, cursor: 0, findings: {}, verdict: null, effects: [], pending: null,
+      input: { pr: 1 }, cursor: 0, findings: {}, verdict: null, effects: [], telemetry: [], pending: null,
     });
   });
 
@@ -85,6 +87,44 @@ describe('the pure core', () => {
 
   it('assertRunRecord throws carrying the errors', () => {
     expect(() => assertRunRecord({}, 'thing')).toThrow(/operations: thing is invalid — /);
+  });
+
+  // The juror-spend meter. It is written by the ADAPTER (the engine never spawns), so what may land on the
+  // record is whitelisted — the record is serialized to disk and printed verbatim by `--json`.
+  it('normalizeJudgeTelemetry keeps the meter and drops everything else, including the material', () => {
+    const row = normalizeJudgeTelemetry({
+      step: 'judge',
+      stepIndex: 1,
+      telemetry: {
+        costUsd: 0.5, durationMs: 100, wallMs: 120, numTurns: 2, loadedContextTokens: 9,
+        sessionId: 's', stopReason: 'end_turn', lens: 'correctness', model: 'sonnet', effort: 'high',
+        // The three that must NEVER land: the argv (which embeds the mandate), the answer, a NaN.
+        argv: ['--append-system-prompt', 'THE MANDATE'], value: { findings: [] }, bogus: NaN,
+        usage: { input_tokens: 5, note: 'not a number' },
+      },
+    });
+    expect(row).toEqual({
+      step: 'judge', stepIndex: 1, costUsd: 0.5, durationMs: 100, wallMs: 120, numTurns: 2,
+      loadedContextTokens: 9, sessionId: 's', stopReason: 'end_turn', lens: 'correctness',
+      model: 'sonnet', effort: 'high', usage: { input_tokens: 5 },
+    });
+    expect(Object.isFrozen(row)).toBe(true);
+    expect(JSON.stringify(row)).not.toContain('THE MANDATE');
+  });
+
+  it('totalJudgeSpend sums the meter, and reports zero for a run that spawned nothing', () => {
+    const run = { ...sample(), telemetry: [{ costUsd: 0.02, wallMs: 100 }, { costUsd: 0.03, wallMs: 250, durationMs: 200 }] };
+    expect(totalJudgeSpend(run)).toEqual({ jurors: 2, costUsd: 0.05, wallMs: 350, durationMs: 200 });
+    expect(totalJudgeSpend(sample())).toEqual({ jurors: 0, costUsd: 0, wallMs: 0, durationMs: 0 });
+    expect(totalJudgeSpend(undefined)).toEqual({ jurors: 0, costUsd: 0, wallMs: 0, durationMs: 0 });
+  });
+
+  it('validates `telemetry` when present and TOLERATES it absent — a pre-upgrade record is not corrupt', () => {
+    const { telemetry, ...legacy } = sample();
+    expect(telemetry).toEqual([]);
+    expect(validateRunRecord(legacy).ok).toBe(true);
+    expect(validateRunRecord({ ...sample(), telemetry: 'no' }).errors).toContain('`telemetry` must be an array when present');
+    expect(validateRunRecord({ ...sample(), telemetry: [1] }).errors).toContain('telemetry[0] must be an object');
   });
 });
 

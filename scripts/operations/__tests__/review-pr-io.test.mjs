@@ -17,8 +17,10 @@ import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createReviewPrSinks, isPreWriteRefusal, reviewBodyPath, reviewSidecarDir } from '../review-pr-io.mjs';
-import { REVIEW_EFFECTS } from '../review-pr.mjs';
+import {
+  createReviewPrSinks, isPreWriteRefusal, revParseCommit, reviewBodyPath, reviewSidecarDir,
+} from '../review-pr-io.mjs';
+import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL } from '../review-pr.mjs';
 
 let root;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'review-pr-io-')); });
@@ -84,6 +86,25 @@ describe('the label sink', () => {
     expect(argv.join(' ')).not.toContain('gh ');
   });
 
+  // #2898 — the single home renders the attribution it is GIVEN. Before this the CLI hardcoded "via the
+  // Plateau Loop review console" for every caller, so the live run on PR #1146 posted a comment claiming a
+  // surface it never touched, three lines above its own footer naming this operation.
+  it('passes the CHANNEL through, so the durable comment names the surface it came through', async () => {
+    const seen = [];
+    const sinks = createReviewPrSinks({ root, runNode: (argv) => { seen.push(argv); return '{"ok":true}'; } });
+    await sinks[REVIEW_EFFECTS.LABEL]({ ...payload, channel: REVIEW_PR_CHANNEL }, CTX);
+    expect(seen[0]).toContain(`--channel=${REVIEW_PR_CHANNEL}`);
+  });
+
+  it('omits --channel entirely for a payload written before the field existed', async () => {
+    const seen = [];
+    const sinks = createReviewPrSinks({ root, runNode: (argv) => { seen.push(argv); return '{"ok":true}'; } });
+    await sinks[REVIEW_EFFECTS.LABEL](payload, CTX);
+    // The single home's own default for an absent channel is the NEUTRAL sentence, never a wrong one — so a
+    // `--resume` across the upgrade degrades to "no surface stated", not to another caller's identity.
+    expect(seen[0].some((a) => a.startsWith('--channel='))).toBe(false);
+  });
+
   it('maps a PROVEN pre-write refusal to `notApplied`, so it is retried rather than refused', async () => {
     const sinks = createReviewPrSinks({
       root,
@@ -120,6 +141,27 @@ describe('the label sink', () => {
     for (const text of ['fatal: unable to access', 'HTTP 502', 'connection reset by peer']) {
       expect(isPreWriteRefusal(text)).toBe(false);
     }
+  });
+});
+
+// The recorded basis used to name `origin/<branch>` — a ref that moves. The `reviewed-sha` marker covers the
+// merge gate; it does not make the "Net basis" line reproducible, which is what this pins.
+describe('the rev is pinned to a commit', () => {
+  const SHA = 'd7ad4774849fe32af2a317510a43b7ca1375e6b3';
+
+  it('resolves the candidate ref to its full commit SHA, guarding a dash-leading refname', () => {
+    const calls = [];
+    const exec = (cmd, args) => { calls.push([cmd, ...args]); return `${SHA}\n`; };
+    expect(revParseCommit(exec, 'origin/lane/3058-seed-encoding')).toBe(SHA);
+    expect(calls[0]).toEqual(['git', 'rev-parse', '--verify', '--end-of-options', 'origin/lane/3058-seed-encoding^{commit}']);
+  });
+
+  it('returns null — never a half-pin — when the rev will not resolve, and never throws', () => {
+    expect(revParseCommit(() => { throw new Error('fatal: Needed a single revision'); }, 'origin/gone')).toBe(null);
+    expect(revParseCommit(() => 'd7ad477\n', 'origin/x')).toBe(null); // an abbreviation is not a pin
+    expect(revParseCommit(() => '', 'origin/x')).toBe(null);
+    expect(revParseCommit(null, 'origin/x')).toBe(null);
+    expect(revParseCommit(() => SHA, '')).toBe(null);
   });
 });
 

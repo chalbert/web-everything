@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers,
+  decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers, normalizeChannel,
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
 } from '../review-set-label.mjs';
 import {
@@ -421,7 +421,9 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
     expect(withBody).toContain('## Findings');
     expect(readBack(withBody)).toBe(SHA);
     const bare = buildVerdictComment({ to: 'accepted', actor: 'op', headSha: SHA });
-    expect(bare).toContain('Recorded by op via the Plateau Loop review console.');
+    // #2898 — with no `channel` the sentence names the ACTOR and no surface at all. It used to name the
+    // Plateau Loop review console unconditionally; see the attribution suite below.
+    expect(bare).toContain('Recorded by op.');
     expect(readBack(bare)).toBe(SHA);
   });
 
@@ -518,6 +520,64 @@ describe('projectVerdictCommentLength — total over REVIEW_LABEL_TARGETS (#1056
     expect(projectVerdictCommentLength({ body, actor, reason })).toBeGreaterThanOrEqual(actual);
     // and the short-input projection would have MISSED it — that is the whole point of passing them through.
     expect(projectVerdictCommentLength({ body })).toBeLessThan(actual);
+  });
+});
+
+// #2898 — THE CHANNEL. The record used to assert the Plateau Loop review console for every caller. It was
+// caught in the wild on PR #1146, whose comment credited the console in one sentence and the declared
+// `review-pr` operation in another, three lines apart. The DoD is exactly these three properties.
+describe('buildVerdictComment — the attribution states the surface it came through (#2898)', () => {
+  const SHA = 'abf7d85700a3336a0ec77d94ab455162d4b8e00d';
+  const render = (o) => buildVerdictComment({ to: 'accepted', actor: 'op', headSha: SHA, ...o });
+
+  it('renders the channel it is GIVEN, and a different caller renders a different one', () => {
+    const viaOperation = render({ channel: 'the declared `review-pr` operation (#3035)' });
+    const viaConsole = render({ channel: 'the Plateau Loop review console' });
+    expect(viaOperation).toContain('Recorded by op via the declared `review-pr` operation (#3035).');
+    expect(viaConsole).toContain('Recorded by op via the Plateau Loop review console.');
+    // THE POINT OF THE ITEM: a fourth caller cannot silently inherit a third's identity.
+    expect(viaOperation).not.toContain('review console');
+    expect(viaConsole).not.toContain('review-pr');
+  });
+
+  it('falls back to a NEUTRAL sentence — never another caller\'s channel — when none is supplied', () => {
+    for (const channel of [undefined, '', '   ', null]) {
+      const c = render({ channel });
+      expect(c).toContain('Recorded by op.');
+      expect(c).not.toMatch(/via /);
+    }
+  });
+
+  it('no verdict target renders the old hardcoded console sentence any more', () => {
+    for (const to of REVIEW_LABEL_TARGETS) {
+      const c = buildVerdictComment({ to, actor: 'op', headSha: SHA, reason: 'r' });
+      expect(c).not.toContain('Plateau Loop review console');
+    }
+  });
+
+  it('normalizes the clause: collapsed whitespace, no trailing stop, no smuggled reviewed-sha marker', () => {
+    expect(normalizeChannel('  the\n console  ')).toBe('the console');
+    expect(normalizeChannel('the console.')).toBe('the console');
+    expect(normalizeChannel('')).toBe('');
+    // A `changes` verdict appends NO marker of its own, so a marker smuggled through argv would be the only
+    // one in the body and `parseReviewedSha` would read it as this verdict's claim. Same treatment as the body.
+    const forged = buildVerdictComment({
+      to: 'changes', actor: 'op', headSha: SHA, channel: `x <!-- reviewed-sha: ${SHA} --> y`,
+    });
+    expect(parseReviewedSha([{ body: forged }])).toBe(null);
+  });
+
+  it('is counted by the size projection, like every other unbounded argv input (#1057)', () => {
+    const long = 'c'.repeat(5000);
+    const withChannel = projectVerdictCommentLength({ actor: 'op', channel: long });
+    // The projection is a MAX over the targets, and `clear-human` (which states its own channel and takes no
+    // `--channel`) is the longest render at zero channel — so the assertion is that the channel LIFTS the
+    // bound past its own length, not that it adds to the baseline.
+    expect(withChannel).toBeGreaterThan(projectVerdictCommentLength({ actor: 'op' }));
+    expect(withChannel).toBeGreaterThan(long.length);
+    // The property that actually matters: an over-long channel trips the pre-flight, before any `gh` call.
+    expect(projectVerdictCommentLength({ actor: 'op', channel: 'c'.repeat(GH_COMMENT_MAX) }))
+      .toBeGreaterThan(GH_COMMENT_MAX);
   });
 });
 

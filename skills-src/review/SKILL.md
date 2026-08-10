@@ -23,8 +23,13 @@ node scripts/operations/run.mjs review-pr --pr=<PR> --repo=<owner/name> --json
 
 It reads the PR, judges the diff, reduces to a verdict, and then **suspends**. It writes nothing on this
 invocation. Present its `verdict` (the findings and the reduced verdict), its `findings.read` (the escalation
-reason, the disposition, the net changed-file list, any advisory comment) and its `pending.asks` to the
-operator, then stop.
+reason, the disposition, the net changed-file list, any advisory comment), its `spend` (what the juror cost —
+the operator is on a constrained model budget, so report the dollar figure, never omit it) and its
+`pending.asks` to the operator, then stop.
+
+`--lens=` picks which single lens judges; `--help` lists the valid ones. **One `judge` step spawns ONE juror,
+so a run is single-lens** — the verdict write-up says so in words and its panel table lists only the lens that
+judged. Do not describe the result as a panel verdict.
 
 On the operator's explicit decision:
 

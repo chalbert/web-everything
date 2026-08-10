@@ -187,7 +187,12 @@ export function decideAutoLand({ intent, mode, authorId, clearerId } = {}) {
  *  leave the value unparsed and fail the CLI's input validation. Extracted + exported so the exact flag form is
  *  unit-tested without shelling. The PR is a positional (the CLI matches the first bare integer arg). */
 export function buildSetLabelArgs({ pr, repo }) {
-  return [String(pr), `--repo=${repo}`, '--to=accepted', '--actor=auto-land seam (enforce)'];
+  // `--channel` (#2898) states the SURFACE, which for this writer is not a surface a person used at all: this
+  // is the unattended auto-land path. Saying so in the durable comment is the same honesty the `--actor` here
+  // already carries — and it is why the flag exists, since the CLI used to assert the review console for every
+  // caller including this one.
+  return [String(pr), `--repo=${repo}`, '--to=accepted', '--actor=auto-land seam (enforce)',
+    '--channel=the unattended auto-land seam (#2675) — no human recorded this verdict'];
 }
 
 /** The default impure label writer — shell the existing INVARIANT-2-guarded `review-set-label.mjs` CLI to swap the

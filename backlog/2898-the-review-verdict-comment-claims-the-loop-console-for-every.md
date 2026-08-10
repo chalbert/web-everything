@@ -2,13 +2,15 @@
 bornAs: xexz7q7
 kind: story
 size: 1
-status: open
+status: resolved
 blockedBy: ["2882"]
 relatedTo: ["2644", "2439"]
 scope:
   - we:scripts/review-set-label.mjs
   - we:scripts/__tests__/review-set-label.test.mjs
 dateOpened: "2026-08-03"
+dateResolved: "2026-08-10"
+graduatedTo: scripts/review-set-label.mjs
 tags: [review, cli, attribution, single-home]
 ---
 
@@ -44,3 +46,32 @@ channel makes that after-the-fact reconstruction harder for no reason.
 - A caller that supplies nothing gets a neutral sentence, never another caller's channel name.
 - A test asserts the rendered attribution differs per caller, so a fourth caller cannot silently inherit a third's
   identity the way `/review` inherited the console's.
+
+## Resolved
+
+The fourth caller arrived before the fix did, and made the defect self-evident rather than merely arguable: the
+first live run of the declared `review-pr` operation (#3035) posted a comment on PR #1146 whose attribution
+credited the Plateau Loop review console **three lines above its own footer** saying *"Recorded through the
+declared `review-pr` operation (#3035)"*. One durable record, two provenances.
+
+What landed:
+
+- `--channel=<surface>` on [we:scripts/review-set-label.mjs](../scripts/review-set-label.mjs), rendered by
+  `buildVerdictComment`. Absent → `Recorded by <actor>.`, the neutral sentence, never another caller's channel.
+- `normalizeChannel` treats it as one clause of one sentence: whitespace collapsed, trailing stop trimmed, and
+  `reviewed-sha` markers STRIPPED — a `changes` verdict appends no marker of its own, so a marker smuggled
+  through argv would otherwise be the only one in the body and would read as this verdict's SHA claim.
+- It joins `--actor` / `--reason` in `projectVerdictCommentLength`, so an over-long channel trips the size
+  pre-flight before any `gh` call (the PR #1057 lesson about unprojected free text).
+- The two in-repo callers state their own surface: the `review-pr` operation
+  ([we:scripts/operations/review-pr.mjs#REVIEW_PR_CHANNEL](../scripts/operations/review-pr.mjs), passed through
+  the label sink) and the unattended auto-land seam
+  ([we:scripts/lib/auto-land-seam.mjs#buildSetLabelArgs](../scripts/lib/auto-land-seam.mjs), which says in the
+  comment that no human recorded the verdict). `clear-human` is untouched: its attribution already names its own
+  channel (the ceremony and the tool), so a second channel clause would restate it.
+
+Not done here, and deliberately: the **loop console itself** lives in `plateau:tools/dev-panel/vite-plugin.ts`
+and is not this repo's to edit. It supplies no `--channel`, so it now renders the neutral sentence — truthful,
+just less specific than it could be. Passing `--channel=the Plateau Loop review console` from the panel is a
+one-line plateau-side change; until it lands the console's record understates rather than misstates, which is
+the direction this item exists to move in.

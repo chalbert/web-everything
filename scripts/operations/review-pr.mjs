@@ -85,6 +85,16 @@ import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
 /** The operation's stable id. Adapters resolve it by this name. */
 export const REVIEW_PR_OP = 'review-pr';
 
+/**
+ * THE SURFACE this operation's verdicts come through, as `review-set-label.mjs --channel` renders it (#2898).
+ *
+ * Declared HERE, beside the footer that says the same thing, because the two sentences appear in ONE comment
+ * and drifting apart is the defect: the first live run (PR #1146) posted a comment whose attribution credited
+ * the Plateau Loop review console — the CLI's old hardcoded constant — three lines above its own footer saying
+ * it came through this operation. Same comment, two provenances.
+ */
+export const REVIEW_PR_CHANNEL = `the declared \`${REVIEW_PR_OP}\` operation (#3035)`;
+
 /** The default lens a single juror judges under. `correctness` is `MANDATORY_LENSES[0]` — the floor, not a pick. */
 export const DEFAULT_LENS = MANDATORY_LENSES[0];
 
@@ -154,6 +164,11 @@ export const REVIEW_JUDGE_SHAPE = Object.freeze({
   },
 });
 
+/** A full 40-hex object name, or `null`. Nothing shorter counts: an abbreviation is not a pin. */
+function pinnedSha(value) {
+  return typeof value === 'string' && /^[0-9a-f]{40}$/i.test(value) ? value.toLowerCase() : null;
+}
+
 /**
  * SHAPE-CHECK one `readPr` result and turn it into the `read` finding. PURE — separated from the injected read
  * so the refusal below is testable without touching `gh` or `git`.
@@ -206,7 +221,18 @@ export function shapeReadFinding(raw, { pr, repo } = {}) {
     humanComment: detail.humanComment ?? null,
     // ── GROUND TRUTH ──────────────────────────────────────────────────────────────────────────────────────
     netChangedFiles,
-    netBasis: { base: net.base ?? null, rev: net.rev ?? null, scored: net.scored === true },
+    // THE BASIS IS PINNED TO COMMITS, NOT REFS. `base` is already a merge-base SHA. `rev` used to be
+    // `computeNetDiffPaths`'s `candidate`, i.e. `origin/<headRefName>` — a ref that moves the moment the lane
+    // pushes again, so the recorded basis stopped describing the diff that was actually judged. The io shell
+    // resolves that candidate to a commit (`revSha`) and the REF is kept separately for the reader.
+    // `pinnedSha` refuses anything that is not a full 40-hex object name rather than pinning a shorter thing
+    // that only looks like one — `rev: null` is a legible "unpinned", a half-pinned ref is not.
+    netBasis: {
+      base: net.base ?? null,
+      rev: pinnedSha(net.revSha) ?? pinnedSha(net.rev),
+      revRef: net.rev ? String(net.rev) : null,
+      scored: net.scored === true,
+    },
     diffText: String(diff.text || ''),
     diffScored: diff.scored === true,
     // ── NOT GROUND TRUTH: `gh`'s own file list, three-dot and inflated. Carried for DISPLAY only; nothing
@@ -250,12 +276,20 @@ export function renderVerdictWriteUp({ read, verdict, answer, actor, lens }) {
     verdict: verdict.verdict,
     disposition: read.disposition,
     lensVerdicts: { [lens]: verdict.verdict },
+    // THE TABLE LISTS WHAT RAN, NOT WHAT EXISTS. `renderPanelComment` defaults `lenses` to the whole
+    // `PANEL_LENSES` set, so the first live run (PR #1146) rendered `security | mandatory | (no verdict)`
+    // directly under "✅ pass — no blocking findings": three mandatory lenses shown as unjudged beside a pass,
+    // which reads as a hole in the review. It was not a hole — this operation declares ONE `judge` step and
+    // therefore runs ONE juror. The honest render is a one-row table plus the note below saying so; the four
+    // rows come back when the multi-lens panel (`we:scripts/lib/judge-panel.mjs`, #3050 — BUILT, and not yet
+    // wired into this operation) substitutes behind the same step.
+    lenses: [lens],
     heading: `Human review verdict — ${read.repo}#${read.pr}`,
   });
   const basis = read.degraded
     ? `⚠️ DEGRADED BASIS (\`${read.degradedReason}\`) — the net diff vs current main could not be resolved, so the `
       + 'file list below may be inflated by sibling-lane content this PR does not touch (#2450).'
-    : `Net basis: \`${read.netBasis.base ?? '?'}..${read.netBasis.rev ?? '?'}\` — `
+    : `Net basis: \`${read.netBasis.base ?? '?'}..${read.netBasis.rev ?? '?'}\`${renderRevProvenance(read.netBasis)} — `
       + `${read.netChangedFiles.length} net changed file(s) vs current main (#2450), not \`gh pr diff\`'s three-dot list.`;
   return [
     body,
@@ -263,11 +297,29 @@ export function renderVerdictWriteUp({ read, verdict, answer, actor, lens }) {
     '---',
     '',
     `**Decision:** \`${answer}\` — recorded by ${actor}.`,
-    `**Lens:** \`${lens}\`.`,
+    `**Lens:** \`${lens}\` — a SINGLE-LENS run. One \`judge\` step, one juror, one lens; the table above lists `
+      + `only the lens that judged. The other ${Math.max(PANEL_LENSES.length - 1, 0)} panel lenses `
+      + `(${PANEL_LENSES.filter((l) => l !== lens).join(', ')}) did NOT run and are not reported as unjudged.`,
     basis,
     '',
     `_Recorded through the declared \`${REVIEW_PR_OP}\` operation (#3035)._`,
   ].join('\n');
+}
+
+/**
+ * The parenthetical after the net basis: which ref that pinned SHA came from, or a warning that nothing was
+ * pinned. PURE.
+ *
+ * WHY IT EXISTS. The first live run recorded `netBasis.rev` as `origin/lane/3058-seed-encoding` — a MUTABLE
+ * ref. The `reviewed-sha` marker compensates for the merge gate, but the "Net basis" line is the durable
+ * statement of what the juror was shown, and a branch name does not state it: the branch moves, and the line
+ * then describes a diff nobody can reproduce. The reader now gets the commit, plus the ref it resolved from.
+ */
+function renderRevProvenance(netBasis) {
+  if (netBasis?.rev) return netBasis.revRef ? ` (rev \`${netBasis.revRef}\` at review time)` : '';
+  return netBasis?.revRef
+    ? ` (⚠️ UNPINNED — \`${netBasis.revRef}\` is a mutable ref that could not be resolved to a commit)`
+    : '';
 }
 
 /**
@@ -289,12 +341,18 @@ export function reviewPrOperation({ readPr } = {}) {
     input: {
       pr: 'number',
       repo: 'string',
-      // Which single lens judges. `buildPanelMandate` refuses anything outside `PANEL_LENSES`, so an invalid
-      // value dies in the `judge` step's request rather than reaching a juror.
-      // THE MULTI-LENS PANEL IS #3050, NOT THIS SLICE. A `judge` step declares ONE request; fanning it out to N
-      // jurors under one budget is #3050 (filed under epic #3029, blocked on nothing, NOT built). When it lands
-      // it substitutes behind this same step — the request already carries `lens` — and no other step changes.
-      lens: { type: 'string', required: false, default: DEFAULT_LENS },
+      // Which single lens judges. The value set is DECLARED (`enum`), so `validateInput` refuses an unknown
+      // lens before a run record exists and the derived `--help` lists the four by name instead of `<string>`.
+      // `buildPanelMandate` still refuses anything outside `PANEL_LENSES` in the `judge` step — belt and
+      // braces, and it is the one that binds a caller who builds a run record by hand.
+      // THE MULTI-LENS PANEL IS NOT THIS SLICE. A `judge` step declares ONE request; fanning it out to N
+      // jurors under one budget is #3050, which is now RESOLVED and SHIPPED as `we:scripts/lib/judge-panel.mjs`
+      // — but it is NOT wired into this operation, which still declares and spawns exactly one juror. (This
+      // comment said "NOT built" until #3050 landed; the correction matters, because the verdict write-up
+      // renders a ONE-ROW panel table on that basis and would be lying if the panel were actually running.)
+      // Wiring it substitutes behind this same step — the request already carries `lens` — and no other step
+      // changes.
+      lens: { type: 'string', required: false, default: DEFAULT_LENS, enum: [...PANEL_LENSES] },
       // Who the durable comment is attributed to. Free text, exactly like `review-set-label.mjs --actor`.
       actor: { type: 'string', required: false, default: 'operator' },
     },
@@ -452,6 +510,9 @@ export function reviewPrOperation({ readPr } = {}) {
               repo,
               to,
               actor,
+              // #2898 — the single home renders WHAT IT IS GIVEN. Told, not guessed: this operation is the
+              // only thing that knows a run came through it, and the comment's own footer already says so.
+              channel: REVIEW_PR_CHANNEL,
               bodyFile,
               addLabel: decision.addLabel,
               removeLabels: presentRemoveLabels(decision.removeLabels, read.labels),

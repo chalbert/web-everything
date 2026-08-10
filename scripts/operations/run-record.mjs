@@ -69,8 +69,65 @@ export function newRunRecord({ id, op, input = {} } = {}) {
     findings: {},
     verdict: null,
     effects: [],
+    telemetry: [],
     pending: null,
   };
+}
+
+/**
+ * THE METERED FIELDS of one juror spawn, and NOTHING ELSE. See {@link normalizeJudgeTelemetry}.
+ * `usage` is handled separately (it is an object of counters, not a scalar).
+ */
+const TELEMETRY_NUMBERS = Object.freeze(['costUsd', 'durationMs', 'wallMs', 'numTurns', 'loadedContextTokens']);
+const TELEMETRY_STRINGS = Object.freeze(['sessionId', 'stopReason', 'lens', 'model', 'effort']);
+
+/**
+ * NORMALIZE one juror spawn's telemetry into a run-record row. PURE.
+ *
+ * WHY A WHITELIST AND NOT A SPREAD. The row is supplied by the ADAPTER (the engine declares the juror call and
+ * never makes it — see {@link ./engine.mjs}), so its contents come from outside the pure core, and the record
+ * is JSON-serialized to disk AND printed verbatim by `--json`. A spread would let a caller put the juror's
+ * whole argv (which carries the mandate) or an unbounded transcript into a record that is written on every
+ * `advance`. This takes the five numbers, the five names and the counter block that answer "what did that
+ * juror cost", and drops everything else silently — a caller adding a field gets no error and no leak.
+ *
+ * `usage` is copied ONE level deep and only its numeric entries, for the same reason.
+ *
+ * @param {{step?: string, stepIndex?: number, telemetry?: object}} o
+ * @returns {object} a frozen row: `{ step, stepIndex, …scalars, usage }`.
+ */
+export function normalizeJudgeTelemetry({ step = '', stepIndex = null, telemetry = {} } = {}) {
+  const src = isPlainObject(telemetry) ? telemetry : {};
+  const row = { step: String(step), stepIndex: Number.isInteger(stepIndex) ? stepIndex : null };
+  for (const k of TELEMETRY_NUMBERS) {
+    if (typeof src[k] === 'number' && Number.isFinite(src[k])) row[k] = src[k];
+  }
+  for (const k of TELEMETRY_STRINGS) {
+    if (typeof src[k] === 'string' && src[k]) row[k] = src[k];
+  }
+  const usage = {};
+  if (isPlainObject(src.usage)) {
+    for (const [k, v] of Object.entries(src.usage)) {
+      if (typeof v === 'number' && Number.isFinite(v)) usage[k] = v;
+    }
+  }
+  row.usage = Object.freeze(usage);
+  return Object.freeze(row);
+}
+
+/**
+ * WHAT THIS RUN SPENT, summed over every juror it spawned. PURE.
+ *
+ * The answer to "what did that juror cost?" after a live run — unanswerable after #3035's FIRST live run
+ * (PR #1146), because the adapter discarded everything `judgeSpawn` returned except the answer.
+ *
+ * @param {object} run
+ * @returns {{jurors: number, costUsd: number, wallMs: number, durationMs: number}}
+ */
+export function totalJudgeSpend(run) {
+  const rows = Array.isArray(run?.telemetry) ? run.telemetry : [];
+  const sum = (k) => rows.reduce((n, r) => n + (typeof r?.[k] === 'number' ? r[k] : 0), 0);
+  return { jurors: rows.length, costUsd: sum('costUsd'), wallMs: sum('wallMs'), durationMs: sum('durationMs') };
 }
 
 /**
@@ -111,6 +168,14 @@ export function validateRunRecord(record) {
         keys.add(e.key);
       }
     }
+  }
+  // TOLERATED WHEN ABSENT, and deliberately not a version bump: `telemetry` was added after v1 shipped, and a
+  // record written by the previous build simply has no key. Refusing those would wedge a run mid-flight (the
+  // records are session-local, but a `--resume` across the upgrade is exactly the case the store exists for)
+  // for a field nothing decides on. Present-but-wrong-shape IS refused — that is a live caller's bug.
+  if (record.telemetry !== undefined) {
+    if (!Array.isArray(record.telemetry)) errors.push('`telemetry` must be an array when present');
+    else record.telemetry.forEach((t, i) => { if (!isPlainObject(t)) errors.push(`telemetry[${i}] must be an object`); });
   }
   if (record.pending !== null && !isPlainObject(record.pending)) {
     errors.push('`pending` must be null or an object');

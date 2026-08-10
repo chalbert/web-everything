@@ -24,12 +24,17 @@ import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs
 import { applyPendingEffects } from '../effect-executor.mjs';
 import { createRegistry } from '../registry.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
-import { driveRun, parseOperationArgv, buildCliSpec, assertSafeJudgeRequest, runOperationCli } from '../cli-adapter.mjs';
+import {
+  driveRun, parseOperationArgv, buildCliSpec, assertSafeJudgeRequest, runOperationCli, judgeOutcome,
+} from '../cli-adapter.mjs';
 import {
   CONFIRM_ACTORS,
+  PANEL_LENSES,
   REVIEW_EFFECTS,
+  REVIEW_PR_CHANNEL,
   REVIEW_PR_OP,
   renderJudgeInput,
+  renderVerdictWriteUp,
   reviewPrOperation,
   shapeReadFinding,
 } from '../review-pr.mjs';
@@ -270,7 +275,11 @@ describe('the derived command line', () => {
     const spec = buildCliSpec(declaration);
     expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'lens', 'pr', 'repo']);
     expect(spec.usage).toContain('--pr=<number>');
-    expect(spec.usage).toContain('[--lens=<string>]');
+    // THE LENSES ARE NAMED, NOT TYPED. `[--lens=<string>]` told the operator nothing they could act on while
+    // the four valid values sat in the declaration unread — asserted against `PANEL_LENSES` itself so a fifth
+    // lens shows up in `--help` the moment it is declared, with no second list to remember.
+    expect(spec.usage).toContain(`[--lens=${PANEL_LENSES.join('|')}, default correctness]`);
+    expect(spec.usage).not.toContain('--lens=<string>');
     expect(spec.usage).toContain('read(compute) → judge(judge) → reduce(compute) → confirm(confirm) → record(effect)');
   });
 
@@ -324,6 +333,160 @@ describe('the derived command line', () => {
   });
 });
 
+// ── WHAT THE FIRST LIVE RUN (PR #1146) EXPOSED ────────────────────────────────────────────────────────────
+// Four defects, none of which a stub-driven suite could have caught by inspection, all four now pinned.
+
+describe('the juror\'s cost survives the run (the adapter used to drop it)', () => {
+  /** A judge that reports what a real `judgeSpawn` reports, through the adapter's own envelope. */
+  const meteredJudge = async () => judgeOutcome(CLEAN_ANSWER, {
+    costUsd: 0.0421, durationMs: 8123, wallMs: 8400, numTurns: 1, stopReason: 'end_turn',
+    sessionId: '11111111-2222-3333-4444-555555555555', loadedContextTokens: 51234,
+    usage: { input_tokens: 900, output_tokens: 120, cache_read_input_tokens: 50214, junk: 'dropped' },
+    argv: ['-p', '--append-system-prompt', 'THE WHOLE MANDATE'],
+  });
+
+  const driveToConfirm = async (judge, store = createMemoryRunStore()) => {
+    const { declaration, registry } = registryFor({});
+    const sinks = Object.fromEntries(Object.values(REVIEW_EFFECTS).map((t) => [t, async () => ({ ok: true })]));
+    const out = await runOperationCli({
+      declaration, registry, store, sinks, judge,
+      argv: ['--pr=1234', '--repo=chalbert/web-everything'], newRunId: () => 'run-tel',
+    });
+    return { out, store, declaration, registry, sinks };
+  };
+
+  it('lands the metered fields on the run record, attributed to the step that spawned it', async () => {
+    const { out } = await driveToConfirm(meteredJudge);
+    expect(out.run.telemetry).toHaveLength(1);
+    const row = out.run.telemetry[0];
+    expect(row).toMatchObject({
+      step: 'judge', stepIndex: 1, costUsd: 0.0421, wallMs: 8400, durationMs: 8123,
+      sessionId: '11111111-2222-3333-4444-555555555555', loadedContextTokens: 51234,
+    });
+    // The lens/model/effort come from the REQUEST the engine suspended with, not from the caller's report.
+    expect(row.lens).toBe('correctness');
+    expect(row.model).toBe('sonnet');
+    expect(row.effort).toBe('high');
+    // The counters are carried; the non-numeric noise in `usage` is not.
+    expect(row.usage).toEqual({ input_tokens: 900, output_tokens: 120, cache_read_input_tokens: 50214 });
+    // AND NOT THE MATERIAL: `argv` embeds the whole mandate and must never reach a record that is printed.
+    expect(JSON.stringify(out.run)).not.toContain('THE WHOLE MANDATE');
+  });
+
+  it('reports the cost AT THE CONFIRM STOP — before the operator decides whether to spend more', async () => {
+    const { out } = await driveToConfirm(meteredJudge);
+    const text = out.lines.join('\n');
+    expect(text).toContain('judge spend: $0.0421 over 1 juror(s)');
+    expect(text).toContain('judge (correctness): $0.0421 · 8.4s');
+    expect(text).toContain('session 11111111-2222-3333-4444-555555555555');
+  });
+
+  it('survives the resume into the completed run, and into --json with a pre-summed total', async () => {
+    const { store, declaration, registry, sinks } = await driveToConfirm(meteredJudge);
+    const second = await runOperationCli({
+      declaration, registry, store, sinks, judge: meteredJudge,
+      argv: ['--resume=run-tel', '--answer=accept', '--json'], newRunId: () => 'x',
+    });
+    expect(second.stopped).toBe('complete');
+    const payload = JSON.parse(second.lines.join('\n'));
+    expect(payload.spend).toEqual({ jurors: 1, costUsd: 0.0421, wallMs: 8400, durationMs: 8123 });
+    expect(payload.telemetry[0].costUsd).toBe(0.0421);
+  });
+
+  it('a judge that returns a bare answer still works, and simply records no spend', async () => {
+    const { out } = await driveToConfirm(async () => CLEAN_ANSWER);
+    expect(out.run.telemetry).toEqual([]);
+    expect(out.lines.join('\n')).not.toContain('judge spend');
+  });
+
+  it('keeps the cost OUT of the juror\'s finding — a declaration must not compute over what it cost', async () => {
+    const { out } = await driveToConfirm(meteredJudge);
+    expect(out.run.findings.judge).toEqual(CLEAN_ANSWER);
+    expect(out.run.verdict.findings).toEqual([]);
+  });
+});
+
+describe('the durable comment states ONE provenance (#2898)', () => {
+  it('tells the single home the surface, so its attribution matches the operation\'s own footer', () => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-chan' });
+    const declared = advance(advance(run, { registry, resume: { value: 'accept' } }), { registry });
+    const label = declared.effects.find((e) => e.type === REVIEW_EFFECTS.LABEL);
+    expect(label.payload.channel).toBe(REVIEW_PR_CHANNEL);
+    expect(REVIEW_PR_CHANNEL).toContain('review-pr');
+    // The write-up's footer and the channel must name the same thing — they sit in ONE comment.
+    const writeUp = declared.effects.find((e) => e.type === REVIEW_EFFECTS.WRITE_UP);
+    expect(writeUp.payload.body).toContain(`Recorded through the declared \`${REVIEW_PR_OP}\` operation (#3035)`);
+    expect(writeUp.payload.body).not.toContain('review console');
+  });
+});
+
+describe('the write-up does not over-promise on a single-lens run', () => {
+  const writeUp = (lens = 'correctness') => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: { ...BASE_INPUT, lens }, id: `run-wu-${lens}` });
+    return renderVerdictWriteUp({
+      read: run.findings.read, verdict: run.verdict, answer: 'accept', actor: 'op', lens,
+    });
+  };
+
+  it('lists ONLY the lens that judged — never a mandatory lens as `(no verdict)` beside a pass', () => {
+    const body = writeUp('correctness');
+    expect(body).toContain('| correctness | mandatory | accept |');
+    for (const other of PANEL_LENSES.filter((l) => l !== 'correctness')) {
+      expect(body).not.toContain(`| ${other} |`);
+    }
+    expect(body).not.toContain('(no verdict)');
+  });
+
+  it('says in words that it was a single-lens run, and which lenses did not run', () => {
+    const body = writeUp('security');
+    expect(body).toContain('a SINGLE-LENS run');
+    expect(body).toContain('did NOT run and are not reported as unjudged');
+    expect(body).toContain('correctness');
+  });
+});
+
+describe('the net basis is pinned to a commit, not a moving ref', () => {
+  const SHA = 'd7ad4774849fe32af2a317510a43b7ca1375e6b3';
+
+  it('records the resolved SHA and keeps the ref it came from', () => {
+    const finding = shapeReadFinding({
+      detail: { pr: 1, repo: 'o/n', labels: [] },
+      net: { paths: ['a.mjs'], base: 'abc', rev: 'origin/lane/3058-seed-encoding', revSha: SHA, scored: true },
+      diff: { text: 'x', scored: true },
+    }, { pr: 1, repo: 'o/n' });
+    expect(finding.netBasis.rev).toBe(SHA);
+    expect(finding.netBasis.revRef).toBe('origin/lane/3058-seed-encoding');
+  });
+
+  it('renders the commit in the comment — the ref appears only as provenance', () => {
+    const read = shapeReadFinding({
+      detail: { pr: 1, repo: 'o/n', labels: [] },
+      net: { paths: ['a.mjs'], base: 'abc', rev: 'origin/lane/3058-seed-encoding', revSha: SHA, scored: true },
+      diff: { text: 'x', scored: true },
+    }, { pr: 1, repo: 'o/n' });
+    const body = renderVerdictWriteUp({
+      read, verdict: { verdict: 'accept', findings: [], lens: 'correctness' }, answer: 'accept', actor: 'op', lens: 'correctness',
+    });
+    expect(body).toContain(`Net basis: \`abc..${SHA}\` (rev \`origin/lane/3058-seed-encoding\` at review time)`);
+  });
+
+  it('says UNPINNED rather than quietly recording the mutable ref when it will not resolve', () => {
+    const read = shapeReadFinding({
+      detail: { pr: 1, repo: 'o/n', labels: [] },
+      net: { paths: ['a.mjs'], base: 'abc', rev: 'origin/lane/gone', revSha: null, scored: true },
+      diff: { text: 'x', scored: true },
+    }, { pr: 1, repo: 'o/n' });
+    expect(read.netBasis.rev).toBe(null);
+    const body = renderVerdictWriteUp({
+      read, verdict: { verdict: 'accept', findings: [], lens: 'correctness' }, answer: 'accept', actor: 'op', lens: 'correctness',
+    });
+    expect(body).toContain('⚠️ UNPINNED');
+    expect(body).toContain('origin/lane/gone');
+  });
+});
+
 // ── THE #3028 ARGV FOOTGUN ────────────────────────────────────────────────────────────────────────────────
 describe('the judge request is never built from unvalidated input', () => {
   it('pins model/effort/budget as declaration literals — no input field reaches a juror flag', () => {
@@ -336,9 +499,20 @@ describe('the judge request is never built from unvalidated input', () => {
     expect(request.lens).toBe('correctness');
   });
 
-  it('an unknown lens dies in `buildPanelMandate` before it can become argv', () => {
+  // TWO REFUSALS, AND THE OUTER ONE IS NEW. The declared `enum` (see the `--help` test above) now refuses an
+  // unknown lens in `validateInput`, so a bad `--lens` never produces a run record at all. The inner refusal —
+  // `buildPanelMandate` throwing when the `judge` step builds its request — is still the one that binds a
+  // caller who assembles a record by hand, so BOTH are pinned: dropping either would leave one path open.
+  it('an unknown lens dies at the schema, before a run record exists', () => {
     const { registry } = registryFor({});
-    const started = startRun({ op: REVIEW_PR_OP, id: 'run-lens', input: { ...BASE_INPUT, lens: '--bare' }, registry });
+    expect(() => startRun({ op: REVIEW_PR_OP, id: 'run-lens', input: { ...BASE_INPUT, lens: '--bare' }, registry }))
+      .toThrow(/must be one of correctness\|security\|simplicity\|standards-conformance/);
+  });
+
+  it('…and an unknown lens smuggled past the schema still dies in `buildPanelMandate`, before argv', () => {
+    const { registry } = registryFor({});
+    // A record built by hand, bypassing `startRun`'s validation exactly as a rogue caller would.
+    const started = { ...startRun({ op: REVIEW_PR_OP, id: 'run-lens2', input: BASE_INPUT, registry }), input: { ...BASE_INPUT, lens: '--bare' } };
     expect(() => advanceWhileRunning(started, { registry })).toThrow(/unknown lens/);
   });
 
