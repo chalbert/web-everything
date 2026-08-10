@@ -89,3 +89,10 @@ skills-src/drain/review-park-state.json
 # false "recovering from interrupted pass" reset; ignoring it also lets the tamper baseline persist cross-pass.
 .claude/skills/drain/review-baseline-state.json
 skills-src/drain/review-baseline-state.json
+# Operation-engine RUN RECORDS (#3032, epic #3029) — one JSON file per in-flight run of a declared
+# operation. A half-finished run is transient operator/session intent, not durable repo readiness, so it
+# rides a gitignored sidecar the card-mutation guard does not police (clause 1 of
+# docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates), exactly like .conveyor/queue.json.
+# NOT the verdict ledger (#3007) — that is the durable merge authority and a different object entirely; see
+# scripts/operations/run-record.mjs. Never committed.
+.operations/
