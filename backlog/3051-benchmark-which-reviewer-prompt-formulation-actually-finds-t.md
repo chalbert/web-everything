@@ -1,4 +1,5 @@
 ---
+bornAs: xwin4xf
 kind: story
 size: 8
 status: parked
@@ -73,7 +74,7 @@ Measure **cost per real defect found**, not defect count alone — every arm's s
 | already exists | what it gives this |
 | --- | --- |
 | #3028 (resolved) → `we:scripts/lib/judge-spawn.mjs` | a juror is one parameterised call; model, effort and budget are flags, so N variants are cheap and controlled |
-| #3050 (open, born `xnc8wyd`, filed by PR #1133) | the panel fan-out — the single-vs-panel arm needs it |
+| #3050 (open, born `3050`, filed by PR #1133) | the panel fan-out — the single-vs-panel arm needs it |
 | `we:scripts/lib/jury-core.mjs` | `PANEL_LENSES`, `panelRigorForCareLevel`, and diversity-selection aggregation — a set of existing lens formulations to score, and its own invitation to tune from data |
 | #2638 (resolved) → `LENS_EXPECTATIONS`, `buildJuryCharter` in `we:scripts/lib/review-core.mjs` | pre-registration already exists **per item** — write the bar down before looking. Lifting the same discipline to the experiment level (pre-register the metric before running the arms) is the standard guard against fitting the measure to the answer |
 | #1582 / #1584 (resolved, plateau-app) | the same harness shape, proven on a different subject: a variant-rich held-out set with deliberate false-positive traps, recall / precision / fpRate reported, and an A/B that requires the treatment arm to beat a frozen control |
