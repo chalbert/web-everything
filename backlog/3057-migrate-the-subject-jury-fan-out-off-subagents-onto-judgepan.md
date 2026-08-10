@@ -191,7 +191,7 @@ declared shape beats the prose; the pre-migration subagents supplied the triple 
 competing shape. It failed *closed* (an unanswered finding stays blocking), so no verdict was ever at risk — but
 without it the migrated jury could never route anything to a carve-out, i.e. it was strictly stricter than the
 jury it replaced. The three booleans are now declared in the shape, and a test pins that they are. **This is
-#xdompzx's failure mode with the volume turned up, and it is exactly what the "actual billed run" clause was
+#2942's failure mode with the volume turned up, and it is exactly what the "actual billed run" clause was
 for.**
 
 **The bill.** Three live panels at 4 headless `haiku`/low jurors each: **$0.108771 + $0.102118 + $0.109653 =
