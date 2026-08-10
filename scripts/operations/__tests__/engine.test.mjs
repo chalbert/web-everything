@@ -6,13 +6,18 @@
  * write", "the engine is unit-testable without a process or the network" — rests on the engine having no
  * way to do those things. A behavioural test can only show it did not act THIS time; the static graph check
  * shows it CANNOT, and it fails the moment someone adds `import { spawn } from 'node:child_process'`.
+ *
+ * The scanner itself now lives in {@link ./import-graph.mjs}, shared with `http-adapter.test.mjs`'s read-only
+ * check (#3036) and fixed to skip comments — the copy that used to sit here scanned raw source, so a JSDoc
+ * sentence containing `from 'x'` was reported as an import. That over-reports and can only cause a false
+ * FAILURE, never a false pass, but it made the scanner unusable on any documented module.
  */
 
-import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 
+import { importGraph } from './import-graph.mjs';
 import { advance, advanceWhileRunning, isComplete, projectReads, runStatus, startRun } from '../engine.mjs';
 import { createRegistry, op } from '../registry.mjs';
 import { compute, confirm, effect, judge } from '../step-kinds.mjs';
@@ -20,27 +25,6 @@ import { newRunRecord } from '../run-record.mjs';
 import { FIXTURE_JUDGE_ANSWER, FIXTURE_OP, fixtureRegistry } from '../__fixtures__/fixture-operation.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SPECIFIER_RE = /\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)|^\s*import\s+['"]([^'"]+)['"]/gm;
-
-/** Every module reachable from `entry` by static or dynamic import, plus every non-relative specifier. */
-function importGraph(entry) {
-  const files = new Set();
-  const external = new Set();
-  const queue = [entry];
-  while (queue.length) {
-    const file = queue.pop();
-    if (files.has(file)) continue;
-    files.add(file);
-    const src = readFileSync(file, 'utf8');
-    for (const match of src.matchAll(SPECIFIER_RE)) {
-      const spec = match[1] ?? match[2] ?? match[3];
-      if (!spec) continue;
-      if (spec.startsWith('.')) queue.push(resolve(dirname(file), spec));
-      else external.add(spec);
-    }
-  }
-  return { files: [...files].sort(), external: [...external].sort() };
-}
 
 describe('the engine performs no io — structurally, not by habit', () => {
   it('the engine\'s import graph reaches nothing that can act', () => {
