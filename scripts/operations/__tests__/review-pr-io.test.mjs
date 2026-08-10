@@ -217,6 +217,85 @@ describe('the ledger and notice sinks', () => {
     expect(rows[0]).toMatchObject({ pr: 9, verdict: 'accepted', source: 'operation-reconcile', clears: true });
   });
 
+  // ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  // THE MULTI-ROUND CASE (PR #1149 review). "Already reconciled" is about THIS ROUND'S VERDICT, never about
+  // the PR having any row at all. A PR that got `changes` and later `accepted` is the ordinary shape of a
+  // review, so the first cut's `if (folded && folded.current)` mis-fired on most PRs: it found round 1's
+  // `changes` row, called itself reconciled, and dropped the acceptance on the floor while the label said
+  // accepted. Both directions are pinned — the miss must be recovered, and the hit must NOT double-write.
+  // ───────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  it('round 2 accepted after a round-1 `changes` row WRITES the fresh verdict — a stale row is not reconciliation', async () => {
+    // Round 1: the reviewer bounced it, and the single home recorded that.
+    appendVerdict(buildVerdictRecord({
+      repo: 'o/n', pr: 42, verdict: VERDICTS.CHANGES, at: '2026-08-01T10:00:00.000Z', source: 'review-set-label',
+    }));
+    // Round 2: the reviewer accepts, the label swaps, and the single home's fail-soft append misses.
+    const sinks = createReviewPrSinks({ root });
+    const result = await sinks[REVIEW_EFFECTS.LEDGER]({
+      pr: 42, repo: 'o/n', to: 'accepted', actor: 'operator', lens: 'correctness', findings: [],
+    }, CTX);
+    expect(result).toMatchObject({ reconciled: false, verdict: 'accepted', source: 'operation-reconcile' });
+    const rows = readVerdictLedger('o/n');
+    expect(rows.map((r) => r.verdict)).toEqual(['changes', 'accepted']);
+    // The FOLD is what a Phase-2 gate would read, and it now holds the verdict the label mirrors.
+    expect(rows[rows.length - 1].clears).toBe(true);
+  });
+
+  it('round 2 accepted whose single-home row DID land reconciles — the multi-round case never double-writes', async () => {
+    appendVerdict(buildVerdictRecord({
+      repo: 'o/n', pr: 43, verdict: VERDICTS.CHANGES, at: '2026-08-01T10:00:00.000Z', source: 'review-set-label',
+    }));
+    appendVerdict(buildVerdictRecord({
+      repo: 'o/n', pr: 43, verdict: VERDICTS.ACCEPTED, at: '2026-08-02T10:00:00.000Z', source: 'review-set-label',
+    }));
+    const sinks = createReviewPrSinks({ root });
+    const result = await sinks[REVIEW_EFFECTS.LEDGER]({ pr: 43, repo: 'o/n', to: 'accepted' }, CTX);
+    expect(result).toMatchObject({ reconciled: true, verdict: 'accepted', source: 'review-set-label' });
+    expect(readVerdictLedger('o/n')).toHaveLength(2);
+  });
+
+  it('a RECOVERY row is written once and only once — the replay after it finds its own row and stops', async () => {
+    // The dangerous replay: the recovery path appended, then the effect is applied again. If the comparison
+    // looked at anything but the LIVE verdict this would put two `accepted` rows in an append-only authority.
+    appendVerdict(buildVerdictRecord({
+      repo: 'o/n', pr: 44, verdict: VERDICTS.CHANGES, at: '2026-08-01T10:00:00.000Z', source: 'review-set-label',
+    }));
+    const sinks = createReviewPrSinks({ root });
+    const first = await sinks[REVIEW_EFFECTS.LEDGER]({ pr: 44, repo: 'o/n', to: 'accepted' }, CTX);
+    const replay = await sinks[REVIEW_EFFECTS.LEDGER]({ pr: 44, repo: 'o/n', to: 'accepted' }, CTX);
+    expect(first.reconciled).toBe(false);
+    expect(replay).toMatchObject({ reconciled: true, verdict: 'accepted', source: 'operation-reconcile' });
+    expect(readVerdictLedger('o/n').map((r) => r.verdict)).toEqual(['changes', 'accepted']);
+  });
+
+  it('another PR\'s rows are not this PR\'s reconciliation', async () => {
+    appendVerdict(buildVerdictRecord({
+      repo: 'o/n', pr: 45, verdict: VERDICTS.ACCEPTED, at: '2026-08-01T10:00:00.000Z', source: 'review-set-label',
+    }));
+    const sinks = createReviewPrSinks({ root });
+    const result = await sinks[REVIEW_EFFECTS.LEDGER]({ pr: 46, repo: 'o/n', to: 'accepted' }, CTX);
+    expect(result.reconciled).toBe(false);
+    expect(readVerdictLedger('o/n').map((r) => r.pr)).toEqual([45, 46]);
+  });
+
+  it('a recovery row records the verdict the target actually implies — `clear-human` is not `changes`', async () => {
+    // The first cut's `payload.to === 'accepted' ? ACCEPTED : CHANGES` recorded a `clear-human` clearance as a
+    // HOLD. Both sides now derive through the writer's own `verdictForLabelTarget`, so they cannot diverge.
+    const sinks = createReviewPrSinks({ root });
+    await sinks[REVIEW_EFFECTS.LEDGER]({ pr: 47, repo: 'o/n', to: 'clear-human' }, CTX);
+    await sinks[REVIEW_EFFECTS.LEDGER]({ pr: 48, repo: 'o/n', to: 'rearm' }, CTX);
+    const rows = readVerdictLedger('o/n');
+    expect(rows.map((r) => [r.pr, r.verdict, r.clears])).toEqual([[47, 'clear-human', true], [48, 'pending', false]]);
+  });
+
+  it('refuses through `notApplied` on a label target it does not know — a guessed disposition is worse than none', async () => {
+    const sinks = createReviewPrSinks({ root });
+    await expect(sinks[REVIEW_EFFECTS.LEDGER]({ pr: 49, repo: 'o/n', to: 'merge-it' }, CTX))
+      .rejects.toThrow(/unknown label target/);
+    expect(readVerdictLedger('o/n')).toEqual([]);
+  });
+
   it('refuses through `notApplied` when the record is unbuildable — nothing landed, so it is retriable', async () => {
     const sinks = createReviewPrSinks({ root });
     await expect(sinks[REVIEW_EFFECTS.LEDGER]({ pr: 'not-a-pr', repo: 'o/n', to: 'accepted' }, CTX))

@@ -30,7 +30,7 @@ import { assembleReviewDetail } from '../review-detail.mjs';
 import { computeNetDiffPaths, computeNetDiffText, resolveNetDiffBasis } from '../merge-ai-prs.mjs';
 import { currentActorId } from '../lib/review-independence.mjs';
 // #3007 — the real verdict ledger, behind the reserved `verdict-ledger.append` seam. See the LEDGER sink.
-import { VERDICTS, appendVerdict, buildVerdictRecord, foldRepo, verdictLedgerPath } from '../lib/verdict-ledger.mjs';
+import { appendVerdict, buildVerdictRecord, foldRepo, verdictForLabelTarget, verdictLedgerPath } from '../lib/verdict-ledger.mjs';
 import { notApplied } from './effect-executor.mjs';
 import { REVIEW_EFFECTS } from './review-pr.mjs';
 import { isValidRunId } from './run-record.mjs';
@@ -282,17 +282,48 @@ export function createReviewPrSinks({
     // swap and is now also the single home of a ledger row — effect 1 above shells it, so by the time this sink
     // runs the row already exists. Appending again here would put TWO rows in an append-only merge authority
     // for one verdict, which no dedupe can undo later. So this sink READS the ledger and reports the row effect
-    // 1 wrote; it appends only when there is nothing there, which means the single home's fail-soft write
-    // missed, and stamps that recovery row `source: 'operation-reconcile'` so the ledger says which path
-    // produced it.
+    // 1 wrote; it appends only when the ledger's LIVE verdict for the PR is not the one this round decided —
+    // which means the single home's fail-soft write missed — and stamps that recovery row
+    // `source: 'operation-reconcile'` so the ledger says which path produced it.
+    //
+    // WHAT COUNTS AS "ALREADY THERE" — THIS ROUND'S VERDICT, NOT ANY ROW AT ALL (PR #1149 review).
+    // The first cut asked only whether the PR had a folded entry, and that is wrong in the ORDINARY
+    // multi-round case, which is most PRs: a PR that got `changes` and later `accepted` has a `changes` row
+    // from round 1, so when round 2's single-home append fail-softs the sink finds that stale row, reports
+    // `{reconciled: true, verdict: 'changes'}`, and NEVER writes the acceptance. The ledger is then left
+    // holding the superseded verdict while the label says accepted — the exact ledger/label disagreement this
+    // whole item exists to detect, manufactured by the thing meant to prevent it. Reproduced by appending an
+    // older `changes` row and calling this sink with `to: 'accepted'`.
+    //
+    // So the test is `folded.current.verdict === the verdict this payload implies`. The fold is latest-wins,
+    // so `current` IS the ledger's live verdict for the PR; the question "did effect 1's write land?" is
+    // exactly "does the live verdict already say what this round decided?". Both sides derive the verdict
+    // through the ONE `verdictForLabelTarget` the writer uses, so they cannot disagree about what `to` means —
+    // which is what makes the comparison sound rather than merely plausible.
+    //
+    // WHY NOT A CORRELATION ID FROM EFFECT 1, the exact alternative. It would distinguish rounds perfectly,
+    // and its FAILURE MODE is the one thing that must never happen. The id has to survive being frozen into
+    // the run record at suspend, cross a process boundary as a `review-set-label.mjs` argv flag, and land in a
+    // new schema field; the moment any of those drops it, no row carries the id, the sink concludes the write
+    // missed, and it APPENDS — a second row for one verdict in an append-only authority, which nothing can
+    // undo. Verdict comparison fails the other way: its one ambiguity is a verdict that legitimately REPEATS
+    // (a second `accepted` after a re-review), where the sink treats the earlier identical row as this
+    // round's and writes nothing. That costs a duplicate history row saying what the ledger already says —
+    // `current`, `clears` and `outstandingHolds` are all unchanged by its absence, so no consumer, present or
+    // Phase-2, computes a different answer. An under-write of a redundant row against an unrecoverable
+    // double-write of a real one is not a close call.
     //
     // The DECLARATION is unchanged (`we:scripts/operations/review-pr.mjs` still declares
     // `verdict-ledger.append` at ordinal 2, still `idempotent: false`), which was the point of the reserved
     // seam: #3007 registers a writer behind the same effect type without the operation moving.
     [REVIEW_EFFECTS.LEDGER]: async (payload) => {
       const pr = Number(payload.pr);
+      // FAIL CLOSED on a target this repo does not know: `null` here would become a `verdict` the record
+      // builder refuses, so say so as a refusal rather than recording a guessed disposition.
+      const verdict = verdictForLabelTarget(payload.to);
+      if (!verdict) throw notApplied(`verdict-ledger: unknown label target ${JSON.stringify(payload.to)}`);
       const folded = foldRepo(payload.repo).get(pr);
-      if (folded && folded.current) {
+      if (folded && folded.current && folded.current.verdict === verdict) {
         return {
           reconciled: true,
           path: verdictLedgerPath(payload.repo),
@@ -304,7 +335,7 @@ export function createReviewPrSinks({
       const appended = appendVerdict(buildVerdictRecord({
         repo: payload.repo,
         pr,
-        verdict: payload.to === 'accepted' ? VERDICTS.ACCEPTED : VERDICTS.CHANGES,
+        verdict,
         at: new Date().toISOString(),
         reason: payload.reason || `recorded by the review-pr operation (${payload.lens} lens)`,
         declaredActor: payload.actor,

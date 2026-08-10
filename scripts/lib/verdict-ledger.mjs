@@ -131,6 +131,37 @@ export function verdictClears(verdict) {
 }
 
 /**
+ * THE VERDICT A LABEL-SWAP TARGET IMPLIES. Pure, total over `REVIEW_LABEL_TARGETS`
+ * (`we:scripts/review-set-label.mjs`), and the INVERSE direction of {@link verdictLabel}.
+ *
+ * ONE HOME, TWO CALLERS, AND THAT IS THE WHOLE POINT. The single home of a label swap (`runReviewLabelCli`)
+ * derives the row's verdict from `--to`; the declared operation's reconciling sink
+ * (`we:scripts/operations/review-pr-io.mjs`) must derive the SAME verdict from the SAME `to` in order to ask
+ * "is the row that exists this round's row?". Two copies of this ternary is what makes that comparison
+ * unsound: if the reconciler and the writer disagree about what `to` means, the reconciler either appends a
+ * second row for a verdict already recorded, or silently accepts a row for a different one. It lives here,
+ * beside {@link VERDICTS}, rather than in `review-set-label.mjs`, because that module already imports this
+ * one and the reverse edge would be a cycle.
+ *
+ * `rearm` is `pending`: the conveyor's re-arm swaps `review:changes` → `review:pending`, which is a HOLD
+ * awaiting an independent review, not a verdict on the contribution. An unrecognized target is `null` —
+ * fail closed, never a guessed disposition, because the recorded verdict is the thing a Phase-2 gate will
+ * merge on and a wrong one is worse than an absent one.
+ *
+ * @param {string} to - a member of `REVIEW_LABEL_TARGETS`.
+ * @returns {string|null} the {@link VERDICTS} member, or `null` when `to` is not a known target.
+ */
+export function verdictForLabelTarget(to) {
+  switch (String(to ?? '')) {
+    case 'accepted': return VERDICTS.ACCEPTED;
+    case 'changes': return VERDICTS.CHANGES;
+    case 'clear-human': return VERDICTS.CLEAR_HUMAN;
+    case 'rearm': return VERDICTS.PENDING;
+    default: return null;
+  }
+}
+
+/**
  * The label a verdict MIRRORS. Pure, total over {@link VERDICTS}. This is the projection the Phase-1 checker
  * compares against the PR's live labels — and it is the ONLY place the ledger↔label mapping is written down,
  * so the writer and the checker cannot disagree about what "mirroring" means.

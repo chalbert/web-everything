@@ -78,7 +78,7 @@ import {
 // sink, the loop console, the conveyor's rearm) reaches the ledger by reaching THIS, and none of them needs
 // its own writer. NOTHING MERGES ON IT YET — the drain still reads labels; `we:scripts/review-ledger-check.mjs`
 // reports any ledger/label disagreement, and that evidence is what decides whether Phase 2 is safe.
-import { VERDICTS, buildVerdictRecord, appendVerdict } from './lib/verdict-ledger.mjs';
+import { buildVerdictRecord, appendVerdict, verdictForLabelTarget } from './lib/verdict-ledger.mjs';
 // #2979 — the NET diff vs current main, NOT `gh pr diff`'s three-dot output (see the fingerprint block in
 // `runReviewLabelCli` for why that distinction is the whole point). Imported from the CLI that owns it, the same
 // way `we:scripts/fetch-parked.mjs` already does — it is the single home of the #2450 net-diff basis.
@@ -571,10 +571,13 @@ export function runReviewLabelCli({
   // not be written would trade a real capability for an imaginary one. The miss goes to stderr (so it is
   // visible in a run log) and the checker reports the PR as `unledgered`. This posture MUST be revisited at
   // Phase 2, where a missing row means an un-mergeable PR rather than a missing observation.
-  const ledgerVerdict = to === 'accepted' ? VERDICTS.ACCEPTED
-    : to === 'clear-human' ? VERDICTS.CLEAR_HUMAN
-      : to === 'changes' ? VERDICTS.CHANGES
-        : VERDICTS.PENDING; // `rearm` swaps review:changes → review:pending
+  //
+  // THE `to` → VERDICT MAPPING IS NOT WRITTEN HERE. It lives in `verdictForLabelTarget`
+  // (`we:scripts/lib/verdict-ledger.mjs`) because the declared operation's reconciling sink has to derive the
+  // SAME verdict from the SAME `to` to decide whether the row it finds is this round's row. A private copy of
+  // the ternary here is what made that comparison unsound (PR #1149 review): the two sides must agree by
+  // construction, not by both happening to be maintained.
+  const ledgerVerdict = verdictForLabelTarget(to);
   try {
     const appended = appendVerdict(buildVerdictRecord({
       repo,

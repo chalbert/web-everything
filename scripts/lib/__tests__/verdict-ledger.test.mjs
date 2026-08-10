@@ -17,7 +17,7 @@ import {
   VERDICTS, VERDICT_VALUES, VERDICT_LEDGER_VERSION, VERDICT_LEDGER_KIND, ACTOR_PROVES,
   AGREEMENT, DISAGREE_DIRECTION,
   buildVerdictRecord, validateVerdictRecord, serializeVerdictRecord, parseVerdictLog,
-  verdictClears, verdictLabel, labelVerdictOf, foldVerdictLedger, ledgerCoversHead,
+  verdictClears, verdictLabel, verdictForLabelTarget, labelVerdictOf, foldVerdictLedger, ledgerCoversHead,
   compareLedgerToLabels, summarizeAgreement,
   appendVerdict, readVerdictLedger, foldRepo, verdictLedgerPath, verdictLedgerDir, defaultVerdictLedgerDir,
   listLedgerRepos,
@@ -56,18 +56,34 @@ describe('#3007 schema — versioned, closed, and total over the label targets',
 
   it('the verdict set covers every REVIEW_LABEL_TARGETS member the single home can write', () => {
     // A label target with no ledger verdict is a ledger that is silently narrower than the labels it replaces.
-    const mapped = {
-      accepted: VERDICTS.ACCEPTED,
-      changes: VERDICTS.CHANGES,
-      'clear-human': VERDICTS.CLEAR_HUMAN,
-      rearm: VERDICTS.PENDING,
-    };
+    // Taken through the ONE mapping both the writer and the reconciling sink use — a local table here would be
+    // a third copy, and copies of this mapping are what made the reconciler unsound (PR #1149 review).
     for (const target of REVIEW_LABEL_TARGETS) {
-      expect(VERDICT_VALUES, `no ledger verdict for --to=${target}`).toContain(mapped[target]);
+      expect(VERDICT_VALUES, `no ledger verdict for --to=${target}`).toContain(verdictForLabelTarget(target));
     }
     // …and the two hold labels the DRAIN parks under are expressible too, which Phase 2 requires.
     expect(VERDICT_VALUES).toContain(VERDICTS.PENDING);
     expect(VERDICT_VALUES).toContain(VERDICTS.HUMAN);
+  });
+
+  it('verdictForLabelTarget is total over the targets, fails closed, and inverts verdictLabel', () => {
+    expect(verdictForLabelTarget('accepted')).toBe(VERDICTS.ACCEPTED);
+    expect(verdictForLabelTarget('changes')).toBe(VERDICTS.CHANGES);
+    expect(verdictForLabelTarget('clear-human')).toBe(VERDICTS.CLEAR_HUMAN);
+    // `rearm` swaps review:changes → review:pending: a HOLD awaiting review, not a verdict on the diff.
+    expect(verdictForLabelTarget('rearm')).toBe(VERDICTS.PENDING);
+    // FAIL CLOSED. The old private copy of this ternary defaulted an unrecognised target to a verdict, which
+    // is how a `clear-human` clearance would have been recorded as a `changes` hold.
+    for (const bad of ['', 'merge-it', 'ACCEPTED', null, undefined, 0]) {
+      expect(verdictForLabelTarget(bad), `\`${String(bad)}\` must not map to a verdict`).toBeNull();
+    }
+    // Round-trip: the verdict a target implies mirrors to the label that target's swap actually applies.
+    for (const target of REVIEW_LABEL_TARGETS) {
+      expect(verdictLabel(verdictForLabelTarget(target))).toBe(
+        target === 'clear-human' ? REVIEW_LABELS.accepted
+          : target === 'rearm' ? REVIEW_LABELS.pending : REVIEW_LABELS[target],
+      );
+    }
   });
 
   it('verdictLabel is total over the closed set and matches decideSetLabel\'s applied labels', () => {
