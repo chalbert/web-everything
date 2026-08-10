@@ -521,11 +521,16 @@ export function reviewPrOperation({ readPr } = {}) {
             idempotent: false,
           },
           // 2 — THE LEDGER ROW (#3007's reserved seam, `verdict-ledger.append`).
-          //     IDEMPOTENT: FALSE. #3007 is still OPEN — there is no writer behind this type yet — so declaring
-          //     it idempotent would assert a dedupe property of a sink nobody has written, on the store
-          //     `we:scripts/operations/run-record.mjs` calls the durable MERGE AUTHORITY. A duplicate verdict row
-          //     there is worse than a stalled run: a stalled run asks a person, a duplicate row silently vouches
-          //     twice. Fail closed until #3007 ships a writer that can honestly claim the property.
+          //     #3007 PHASE 1 has now registered a writer behind this type, and the declaration did not have to
+          //     move — which is what the reserved seam was for. The sink is a RECONCILER, not a second writer:
+          //     effect 1 shells `we:scripts/review-set-label.mjs`, the single home, which appends the row, so
+          //     the sink reads it back and only writes when that fail-soft append missed
+          //     (`we:scripts/operations/review-pr-io.mjs`).
+          //     IDEMPOTENT: STILL FALSE, deliberately. Reconciliation makes a replay harmless in practice, but
+          //     the flag asserts a property of the SINK CONTRACT, and the honest answer while #3007 is still
+          //     shadow-only (Phase 2 — the drain reading the ledger — is unbuilt) is to keep the executor's
+          //     fail-closed refusal: a stalled run asks a person, a duplicate row in a merge authority silently
+          //     vouches twice. Flip this when Phase 2 lands and the dedupe is load-bearing rather than incidental.
           {
             type: REVIEW_EFFECTS.LEDGER,
             payload: {

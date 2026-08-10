@@ -195,7 +195,7 @@ describe('the record step', () => {
     expect(declared.effects.map((e) => [e.index, e.type, e.idempotent])).toEqual([
       [0, REVIEW_EFFECTS.WRITE_UP, true],   // local, deterministic bytes → safe to redo
       [1, REVIEW_EFFECTS.LABEL, false],     // posts a durable comment → never replayed on a guess
-      [2, REVIEW_EFFECTS.LEDGER, false],    // #3007 has no writer yet → cannot claim dedupe
+      [2, REVIEW_EFFECTS.LEDGER, false],    // #3007 Phase 1 writes in SHADOW; the flag stays fail-closed
       [3, REVIEW_EFFECTS.NOTICE, true],     // reports only → a duplicate line is the whole cost
     ]);
     // The remote write is never first, and the ledger row never precedes the label it vouches for.

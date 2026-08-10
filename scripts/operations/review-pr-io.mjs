@@ -22,12 +22,15 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { assembleReviewDetail } from '../review-detail.mjs';
 import { computeNetDiffPaths, computeNetDiffText, resolveNetDiffBasis } from '../merge-ai-prs.mjs';
+import { currentActorId } from '../lib/review-independence.mjs';
+// #3007 — the real verdict ledger, behind the reserved `verdict-ledger.append` seam. See the LEDGER sink.
+import { appendVerdict, buildVerdictRecord, foldRepo, verdictForLabelTarget, verdictLedgerPath } from '../lib/verdict-ledger.mjs';
 import { notApplied } from './effect-executor.mjs';
 import { REVIEW_EFFECTS } from './review-pr.mjs';
 import { isValidRunId } from './run-record.mjs';
@@ -210,8 +213,6 @@ export function createReviewPrSinks({
   out = (line) => process.stdout.write(`${line}\n`),
   runNode = (argv, opts) => execFileSync(process.execPath, argv, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, ...opts }),
 } = {}) {
-  const dir = reviewSidecarDir(root);
-
   return {
     // ── 0. THE COMMENT BODY, staged locally. Deterministic path, deterministic bytes → safe to redo. ────────
     // The path is RUN-SCOPED (`reviewBodyPath`) so two runs on the same PR in one checkout cannot cross-stage.
@@ -265,21 +266,86 @@ export function createReviewPrSinks({
       return parsed ?? { raw: stdout.trim() };
     },
 
-    // ── 2. THE LEDGER ROW. ──────────────────────────────────────────────────────────────────────────────────
-    // THIS IS NOT THE #3007 VERDICT LEDGER, and must not be mistaken for it. #3007 — append-only JSONL keyed by
-    // PR + diff content-hash, single-writer via the drain lease, the durable MERGE AUTHORITY — is still OPEN and
-    // ships no writer. What this default sink does is append the row to the operation's own gitignored,
-    // session-local sidecar: nothing merges on it, nothing reads it back, and no gate consults it. It exists so
-    // the declared effect has somewhere honest to land before #3007 registers the real writer behind the SAME
-    // effect type, at which point this default is deleted rather than migrated. Under
-    // `docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates` clause 1 that is session scratch;
-    // clause 2's durable authority is #3007's to build.
-    [REVIEW_EFFECTS.LEDGER]: async (payload, ctx) => {
-      mkdirSync(dir, { recursive: true });
-      const path = join(dir, 'verdicts.pending.jsonl');
-      const row = JSON.stringify({ effectKey: ctx.key, runId: ctx.runId, ...payload });
-      appendFileSync(path, `${row}\n`, 'utf8');
-      return { path, note: 'session-local sidecar — NOT the #3007 verdict ledger' };
+    // ── 2. THE LEDGER ROW — NOW THE REAL #3007 LEDGER, VIA RECONCILIATION RATHER THAN A SECOND WRITE. ───────
+    //
+    // WHAT THIS REPLACED. Until #3007 shipped a writer, this sink appended to a gitignored, session-local
+    // sidecar at `.operations/review/verdicts.pending.jsonl` whose own result string said "NOT the #3007
+    // verdict ledger". Its doc said the default would be "deleted rather than migrated" when the real writer
+    // arrived. It is deleted here, and NOT migrated: those rows carry no write timestamp, no session id and no
+    // head sha — the three fields that make a row a verdict RECORD rather than a payload echo — so importing
+    // them would mean inventing the values the schema exists to attest. One row existed in the primary
+    // checkout (PR #1146, 2026-08-09, accepted), and the label + comment it mirrors are still on that PR, which
+    // is the durable record of it. The sidecar is session-local and gitignored, so there was never a complete
+    // set to import in the first place.
+    //
+    // WHY THIS RECONCILES INSTEAD OF APPENDING. `we:scripts/review-set-label.mjs` is the SINGLE HOME of a label
+    // swap and is now also the single home of a ledger row — effect 1 above shells it, so by the time this sink
+    // runs the row already exists. Appending again here would put TWO rows in an append-only merge authority
+    // for one verdict, which no dedupe can undo later. So this sink READS the ledger and reports the row effect
+    // 1 wrote; it appends only when the ledger's LIVE verdict for the PR is not the one this round decided —
+    // which means the single home's fail-soft write missed — and stamps that recovery row
+    // `source: 'operation-reconcile'` so the ledger says which path produced it.
+    //
+    // WHAT COUNTS AS "ALREADY THERE" — THIS ROUND'S VERDICT, NOT ANY ROW AT ALL (PR #1149 review).
+    // The first cut asked only whether the PR had a folded entry, and that is wrong in the ORDINARY
+    // multi-round case, which is most PRs: a PR that got `changes` and later `accepted` has a `changes` row
+    // from round 1, so when round 2's single-home append fail-softs the sink finds that stale row, reports
+    // `{reconciled: true, verdict: 'changes'}`, and NEVER writes the acceptance. The ledger is then left
+    // holding the superseded verdict while the label says accepted — the exact ledger/label disagreement this
+    // whole item exists to detect, manufactured by the thing meant to prevent it. Reproduced by appending an
+    // older `changes` row and calling this sink with `to: 'accepted'`.
+    //
+    // So the test is `folded.current.verdict === the verdict this payload implies`. The fold is latest-wins,
+    // so `current` IS the ledger's live verdict for the PR; the question "did effect 1's write land?" is
+    // exactly "does the live verdict already say what this round decided?". Both sides derive the verdict
+    // through the ONE `verdictForLabelTarget` the writer uses, so they cannot disagree about what `to` means —
+    // which is what makes the comparison sound rather than merely plausible.
+    //
+    // WHY NOT A CORRELATION ID FROM EFFECT 1, the exact alternative. It would distinguish rounds perfectly,
+    // and its FAILURE MODE is the one thing that must never happen. The id has to survive being frozen into
+    // the run record at suspend, cross a process boundary as a `review-set-label.mjs` argv flag, and land in a
+    // new schema field; the moment any of those drops it, no row carries the id, the sink concludes the write
+    // missed, and it APPENDS — a second row for one verdict in an append-only authority, which nothing can
+    // undo. Verdict comparison fails the other way: its one ambiguity is a verdict that legitimately REPEATS
+    // (a second `accepted` after a re-review), where the sink treats the earlier identical row as this
+    // round's and writes nothing. That costs a duplicate history row saying what the ledger already says —
+    // `current`, `clears` and `outstandingHolds` are all unchanged by its absence, so no consumer, present or
+    // Phase-2, computes a different answer. An under-write of a redundant row against an unrecoverable
+    // double-write of a real one is not a close call.
+    //
+    // The DECLARATION is unchanged (`we:scripts/operations/review-pr.mjs` still declares
+    // `verdict-ledger.append` at ordinal 2, still `idempotent: false`), which was the point of the reserved
+    // seam: #3007 registers a writer behind the same effect type without the operation moving.
+    [REVIEW_EFFECTS.LEDGER]: async (payload) => {
+      const pr = Number(payload.pr);
+      // FAIL CLOSED on a target this repo does not know: `null` here would become a `verdict` the record
+      // builder refuses, so say so as a refusal rather than recording a guessed disposition.
+      const verdict = verdictForLabelTarget(payload.to);
+      if (!verdict) throw notApplied(`verdict-ledger: unknown label target ${JSON.stringify(payload.to)}`);
+      const folded = foldRepo(payload.repo).get(pr);
+      if (folded && folded.current && folded.current.verdict === verdict) {
+        return {
+          reconciled: true,
+          path: verdictLedgerPath(payload.repo),
+          verdict: folded.current.verdict,
+          at: folded.current.at,
+          source: folded.current.source,
+        };
+      }
+      const appended = appendVerdict(buildVerdictRecord({
+        repo: payload.repo,
+        pr,
+        verdict,
+        at: new Date().toISOString(),
+        reason: payload.reason || `recorded by the review-pr operation (${payload.lens} lens)`,
+        declaredActor: payload.actor,
+        session: currentActorId(),
+        channel: payload.channel || '',
+        source: 'operation-reconcile',
+        findingCount: Array.isArray(payload.findings) ? payload.findings.length : null,
+      }));
+      if (!appended.ok) throw notApplied(`verdict-ledger append refused: ${appended.errors.join('; ')}`);
+      return { reconciled: false, path: appended.path, verdict: appended.record.verdict, source: 'operation-reconcile' };
     },
 
     // ── 3. THE EVENT: the operator notice, rendered by `renderReviewNotice` in the declaration. ──────────────
