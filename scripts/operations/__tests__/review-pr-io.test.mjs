@@ -21,6 +21,7 @@ import {
   createReviewPrSinks, isPreWriteRefusal, revParseCommit, reviewBodyPath, reviewSidecarDir,
 } from '../review-pr-io.mjs';
 import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL } from '../review-pr.mjs';
+import { VERDICTS, appendVerdict, buildVerdictRecord, readVerdictLedger } from '../../lib/verdict-ledger.mjs';
 
 let root;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'review-pr-io-')); });
@@ -166,14 +167,61 @@ describe('the rev is pinned to a commit', () => {
 });
 
 describe('the ledger and notice sinks', () => {
-  it('appends a ledger row to the SIDECAR, and says in the result that it is not the #3007 ledger', async () => {
+  // #3007 — the sink now reaches the REAL verdict ledger, so every test here redirects its home. Without
+  // this, running the suite would append to the operator's live ledger, which is a merge authority in
+  // waiting. The redirect is set/torn down per test alongside the temp root.
+  let ledgerDir;
+  const prevLedgerDir = process.env.WE_VERDICT_LEDGER_DIR;
+  beforeEach(() => {
+    ledgerDir = mkdtempSync(join(tmpdir(), 'review-pr-io-ledger-'));
+    process.env.WE_VERDICT_LEDGER_DIR = ledgerDir;
+  });
+  afterEach(() => {
+    if (prevLedgerDir === undefined) delete process.env.WE_VERDICT_LEDGER_DIR;
+    else process.env.WE_VERDICT_LEDGER_DIR = prevLedgerDir;
+    rmSync(ledgerDir, { recursive: true, force: true });
+    rmSync(`${ledgerDir}-locks`, { recursive: true, force: true });
+  });
+
+  it('RECONCILES against the row the single home already wrote — it does not append a second one', async () => {
+    // Effect 1 shells `we:scripts/review-set-label.mjs`, which is the single home of BOTH the label swap and
+    // the ledger row. By the time this sink runs the row exists, and appending again would put two rows in an
+    // append-only merge authority for one verdict.
+    appendVerdict(buildVerdictRecord({
+      repo: 'o/n', pr: 7, verdict: VERDICTS.ACCEPTED, at: '2026-08-10T12:00:00.000Z', source: 'review-set-label',
+    }));
     const sinks = createReviewPrSinks({ root });
     const result = await sinks[REVIEW_EFFECTS.LEDGER]({ pr: 7, repo: 'o/n', to: 'accepted' }, CTX);
-    expect(result.note).toMatch(/NOT the #3007 verdict ledger/);
-    const row = JSON.parse(readFileSync(result.path, 'utf8').trim());
-    expect(row).toMatchObject({ effectKey: CTX.key, runId: CTX.runId, pr: 7, to: 'accepted' });
-    // It is a sidecar under `.operations/`, which is gitignored — never a committed store.
-    expect(result.path.includes(join('.operations', 'review'))).toBe(true);
+    expect(result).toMatchObject({ reconciled: true, verdict: 'accepted', source: 'review-set-label' });
+    expect(readVerdictLedger('o/n')).toHaveLength(1);
+    // The gitignored session-local sidecar the seam used before a writer existed is GONE, not migrated.
+    expect(existsSync(join(reviewSidecarDir(root), 'verdicts.pending.jsonl'))).toBe(false);
+  });
+
+  it('is a no-op on replay — a second apply finds the same row and still writes nothing new', async () => {
+    const sinks = createReviewPrSinks({ root });
+    await sinks[REVIEW_EFFECTS.LEDGER]({ pr: 8, repo: 'o/n', to: 'changes', actor: 'a', lens: 'correctness' }, CTX);
+    const again = await sinks[REVIEW_EFFECTS.LEDGER]({ pr: 8, repo: 'o/n', to: 'changes', actor: 'a', lens: 'correctness' }, CTX);
+    expect(again.reconciled).toBe(true);
+    expect(readVerdictLedger('o/n')).toHaveLength(1);
+  });
+
+  it('writes a recovery row when the single home\'s fail-soft append missed, and says which path made it', async () => {
+    const sinks = createReviewPrSinks({ root });
+    const result = await sinks[REVIEW_EFFECTS.LEDGER]({
+      pr: 9, repo: 'o/n', to: 'accepted', actor: 'operator', lens: 'correctness', findings: [],
+    }, CTX);
+    expect(result).toMatchObject({ reconciled: false, source: 'operation-reconcile' });
+    const rows = readVerdictLedger('o/n');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ pr: 9, verdict: 'accepted', source: 'operation-reconcile', clears: true });
+  });
+
+  it('refuses through `notApplied` when the record is unbuildable — nothing landed, so it is retriable', async () => {
+    const sinks = createReviewPrSinks({ root });
+    await expect(sinks[REVIEW_EFFECTS.LEDGER]({ pr: 'not-a-pr', repo: 'o/n', to: 'accepted' }, CTX))
+      .rejects.toThrow(/positive integer/);
+    expect(readVerdictLedger('o/n')).toEqual([]);
   });
 
   it('emits the notice through the injected channel and writes nothing', async () => {
@@ -182,5 +230,6 @@ describe('the ledger and notice sinks', () => {
     await sinks[REVIEW_EFFECTS.NOTICE]({ notice: 'PR o/n#7 — human review accepted by operator.' }, CTX);
     expect(lines).toEqual(['PR o/n#7 — human review accepted by operator.']);
     expect(existsSync(join(reviewSidecarDir(root), 'verdicts.pending.jsonl'))).toBe(false);
+    expect(readVerdictLedger('o/n')).toEqual([]);
   });
 });

@@ -64,12 +64,21 @@ import { join } from 'node:path';
 import {
   REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker,
   buildReviewedContributionMarker, buildClearedHumanMarker, READY_TO_MERGE_LABEL,
+  // #3007 — the SAME two digests the markers carry, taken raw so the ledger row records the witnesses
+  // themselves rather than re-deriving them from the rendered comment. One computation, two consumers.
+  normalizeDiffFingerprint, normalizeContributionFingerprint,
 } from './lib/review-escalation.mjs';
 // #2844 — WHO cleared this verdict, and the refusal when that is the PR's own author. See that module's header
 // for what the id rests on (the harness session identity, NOT the free-text `--actor`) and for the residual.
 import {
   currentActorId, parseAuthorActorId, buildClearerActorMarker, decideClearerIndependence, INDEPENDENCE,
 } from './lib/review-independence.mjs';
+// #3007 PHASE 1 (SHADOW) — the append-only verdict ledger. This CLI is the SINGLE HOME of a label swap, so it
+// is also the single home of a ledger row: every caller (the `/review` ceremony, the #3035 operation's label
+// sink, the loop console, the conveyor's rearm) reaches the ledger by reaching THIS, and none of them needs
+// its own writer. NOTHING MERGES ON IT YET — the drain still reads labels; `we:scripts/review-ledger-check.mjs`
+// reports any ledger/label disagreement, and that evidence is what decides whether Phase 2 is safe.
+import { VERDICTS, buildVerdictRecord, appendVerdict } from './lib/verdict-ledger.mjs';
 // #2979 — the NET diff vs current main, NOT `gh pr diff`'s three-dot output (see the fingerprint block in
 // `runReviewLabelCli` for why that distinction is the whole point). Imported from the CLI that owns it, the same
 // way `we:scripts/fetch-parked.mjs` already does — it is the single home of the #2450 net-diff basis.
@@ -302,6 +311,10 @@ export function runReviewLabelCli({
   const actorArg = (argv.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length);
   const actor = actorArg || defaultActor;
   const clearReason = (argv.find((a) => a.startsWith('--reason=')) || '').slice('--reason='.length).trim();
+  // #3007 — the SURFACE, read here so the ledger row can record it. The rendered COMMENT gets its channel
+  // from the caller's `buildComment` closure (#2898); this read is only for the durable row, and it is the
+  // same argv flag, so the two can never name different surfaces.
+  const channelArg = (argv.find((a) => a.startsWith('--channel=')) || '').slice('--channel='.length);
   const pr = argv.find((a) => /^\d+$/.test(a));
   const to = fixedTo || (argv.find((a) => a.startsWith('--to=')) || '').slice('--to='.length);
 
@@ -531,6 +544,63 @@ export function runReviewLabelCli({
   // argv projection stays as belt-and-braces only because it can name the offending flag before any gh call.
   if (commentBody.length > GH_COMMENT_MAX) {
     fail(`the rendered comment is ${commentBody.length} chars, over GitHub's ${GH_COMMENT_MAX} limit — trim the body/--reason/--actor (nothing was changed)`);
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  // #3007 PHASE 1 — THE LEDGER ROW, WRITTEN FIRST, THEN MIRRORED TO THE LABEL.
+  //
+  // WHY HERE AND NOT AFTER THE gh CALLS. #3007 says the ledger is written first, and this is the one point
+  // where that is both possible and safe: EVERY refusal is already behind us — the argv validation, the
+  // #2953 OPEN-state gate, the #2844 self-clear refusal, the pure `decideSetLabel` decision and the size
+  // guard have all run and none of them can fire again. The only thing that can still fail below is `gh`
+  // TRANSPORT, and a transport failure does not un-form the verdict: the reviewer decided, and the row says
+  // so. What it costs is an orphan row with no label, which `we:scripts/review-ledger-check.mjs` reports as
+  // `unlabeled` — a visible Phase-1 observation, which is exactly what this phase is for.
+  //
+  // THIS IS NOT IN CONFLICT WITH #3035's OPPOSITE ORDER, and the difference matters. The declared `review-pr`
+  // operation (`we:scripts/operations/review-pr.mjs`) puts its ledger effect at ordinal 2, AFTER the label
+  // effect, on the stated grounds that "an orphan row in the merge authority is NOT inert, so it must never
+  // precede the label it vouches for". That is right THERE, because from outside this process the operation
+  // cannot see the five refusals above — its effect 1 shells this CLI, which may still refuse. It is right
+  // HERE too, one layer down, because at this line those refusals have already happened. The two orderings
+  // are the same rule ("never write the row while a refusal is still reachable") applied at two seams; the
+  // operation's own sink is therefore a RECONCILER, not a second writer (see review-pr-io.mjs).
+  //
+  // FAIL-SOFT ON THE LEDGER, DELIBERATELY: a ledger write failure does NOT abort the verdict. In Phase 1 the
+  // ledger is shadow — nothing merges on it — so refusing an operator's verdict because a shadow file could
+  // not be written would trade a real capability for an imaginary one. The miss goes to stderr (so it is
+  // visible in a run log) and the checker reports the PR as `unledgered`. This posture MUST be revisited at
+  // Phase 2, where a missing row means an un-mergeable PR rather than a missing observation.
+  const ledgerVerdict = to === 'accepted' ? VERDICTS.ACCEPTED
+    : to === 'clear-human' ? VERDICTS.CLEAR_HUMAN
+      : to === 'changes' ? VERDICTS.CHANGES
+        : VERDICTS.PENDING; // `rearm` swaps review:changes → review:pending
+  try {
+    const appended = appendVerdict(buildVerdictRecord({
+      repo,
+      pr: Number(pr),
+      verdict: ledgerVerdict,
+      at: new Date().toISOString(),
+      // The operator's quoted `--reason` when there is one (the `clear-human` honesty tax), else the pure
+      // decider's own reason — so a row always says WHY, from whichever source actually had a reason.
+      reason: clearReason || decision.reason,
+      // THE CONTENT WITNESSES — recorded, never used as the key. See the header of `lib/verdict-ledger.mjs`
+      // for the two proven defects (#3046 gap divergence, `#3052` heading divergence, both open under
+      // `#3054`) that make this digest unfit to FIND a record by, and fine to STORE beside one.
+      headSha,
+      reviewedDiff: normalizeDiffFingerprint(reviewedDiff),
+      reviewedContribution: normalizeContributionFingerprint(reviewedDiff),
+      declaredActor: actor,
+      session: clearerId,
+      channel: normalizeChannel(channelArg),
+      independence: independence ? independence.status : null,
+      source: 'review-set-label',
+    }));
+    if (!appended.ok) {
+      process.stderr.write(`review-set-label: verdict-ledger append REFUSED (#3007 shadow) — ${appended.errors.join('; ')}\n`);
+    }
+  } catch (e) {
+    process.stderr.write(`review-set-label: verdict-ledger append failed (#3007 shadow, non-fatal) — ${String((e && e.message) || e).split('\n')[0]}\n`);
   }
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — THE SWAP: add the verdict label, remove the stale ones
