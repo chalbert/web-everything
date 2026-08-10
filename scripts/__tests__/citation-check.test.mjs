@@ -23,6 +23,12 @@ import {
   findOutOfScopeHashSlugs,
   countSourceLines,
   CROSS_REPO_LOCI,
+  findUnresolvedIdentifiers,
+  buildIdentifierIndex,
+  stripSourceComments,
+  parseIdentifierSpan,
+  codeSpans,
+  PROVENANCE_ESCAPE_MARKERS,
 } from '../lib/citation-check.mjs';
 
 describe('buildAnchorOwners', () => {
@@ -244,5 +250,217 @@ describe('findOutOfScopeHashSlugs — gate 3 (hash-slug outside the at-land rewr
   it('does NOT fire on a word that merely starts with x + letters but is not a hash-slug form', () => {
     // `xoverflow` has 8 chars after x; a real slug is exactly `x`+6 and cited as `#x...` or `x...-slug.md`.
     expect(findOutOfScopeHashSlugs('the xoverflow example and extended prose', 'reports/r.md')).toHaveLength(0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// The PROVENANCE gate (#3026) — a backticked identifier in prose must resolve, or be marked
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** A tree that knows only these names. `validateTodoMarker` is real; `validateTodoMarkerBlock` never was —
+ *  that pair IS the round-3 regression this gate exists to catch. */
+const REAL = new Set(['validateTodoMarker', 'validateContract', 'countSourceLines', 'computeAgreementMetric',
+  'resolveLandMode', 'ciStatus', 'POLICY_SPEC_BASENAMES']);
+const resolves = (t) => REAL.has(t);
+/** Report the whole body (the wired gate always passes a real added-line set; `null` means "all lines"). */
+const scan = (text, opts = {}) => findUnresolvedIdentifiers(text, { resolves, addedLines: null, ...opts });
+const tokens = (text, opts) => scan(text, opts).filter((f) => f.kind === 'unresolved').map((f) => f.token);
+
+describe('parseIdentifierSpan — what shape reads as an existence claim', () => {
+  it('accepts camelCase and SCREAMING_SNAKE, bare', () => {
+    expect(parseIdentifierSpan('validateTodoMarker')).toEqual({ token: 'validateTodoMarker', form: 'bare' });
+    expect(parseIdentifierSpan('POLICY_SPEC_BASENAMES')).toEqual({ token: 'POLICY_SPEC_BASENAMES', form: 'bare' });
+  });
+
+  it('accepts a call WITH ARGUMENTS — the strongest existence claim, and the one #3026 as filed missed', () => {
+    // The statute asserts `enforceFlipReady({ ciStatus, reviewShadowLedger })`. #3026's design said only
+    // "a trailing `()` tolerated", which does not match that span at all — so the single most-cited false
+    // symbol in the briefing would have walked straight through the gate built to its literal spec.
+    expect(parseIdentifierSpan('enforceFlipReady({ ciStatus, reviewShadowLedger })'))
+      .toEqual({ token: 'enforceFlipReady', form: 'call' });
+    expect(parseIdentifierSpan('judgeSpawn()')).toEqual({ token: 'judgeSpawn', form: 'call' });
+    expect(parseIdentifierSpan('ns.deep.someHelper(a, b)')).toEqual({ token: 'someHelper', form: 'call' });
+  });
+
+  it('rejects the shapes that are ENGLISH, not citations — the false-positive floor', () => {
+    for (const notACitation of ['status', 'the walk', 'TODO', 'WE', 'CustomStore', 'kebab-case', 'a.b']) {
+      expect(parseIdentifierSpan(notACitation)).toBeNull();
+    }
+  });
+});
+
+describe('findUnresolvedIdentifiers — the regression the gate was built for', () => {
+  it('THE REAL ONE: `validateTodoMarkerBlock` fires, `validateTodoMarker` does not', () => {
+    // Round 3 of PR #1112, verbatim in shape: a name that ought to have existed, shipped in the past tense.
+    const body = 'Where it is today: `validateTodoMarkerBlock` / the reasons walk in `validateContract`.';
+    const found = scan(body);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ kind: 'unresolved', token: 'validateTodoMarkerBlock', form: 'bare', line: 1 });
+    expect(scan('the real helper is `validateTodoMarker`')).toHaveLength(0);
+  });
+
+  it('catches the statute call-form cite `enforceFlipReady({ … })` that resolves to nothing', () => {
+    expect(tokens('gated by a readiness predicate, `enforceFlipReady({ ciStatus, reviewShadowLedger })`, that arms it'))
+      .toEqual(['enforceFlipReady']);
+  });
+
+  it('stays silent on names that DO resolve, including inside a call', () => {
+    expect(scan('the proven `computeAgreementMetric` bar and `resolveLandMode()` path')).toHaveLength(0);
+  });
+
+  it('never reads a fenced code block as prose', () => {
+    const body = ['prose is checked: `realOne`', '```js', 'const totallyFakeSymbol = 1; // `alsoFake`', '```',
+      'and `anotherFake` after the fence'].join('\n');
+    expect(tokens(body)).toEqual(['realOne', 'anotherFake']);
+  });
+});
+
+describe('findUnresolvedIdentifiers — the escapes, and their limits', () => {
+  it('the inline marker suppresses, and all three spellings work', () => {
+    expect(scan('a new `mountLaneBoard` (proposed) helper')).toHaveLength(0);
+    expect(scan('`enforceFlipReady` (does not exist) in the tree')).toHaveLength(0);
+    expect(scan('names like `detectAnomalies` (example) illustrate the class')).toHaveLength(0);
+    // Emphasis inside the parens is the form actually written in #3013 prep.
+    expect(scan('`enforceFlipReady` (**does not exist**) — refuted')).toHaveLength(0);
+  });
+
+  it('the escape vocabulary is CLOSED — a near-miss word does not suppress', () => {
+    // Greppability is the whole value; an open synonym list would make `grep '(proposed)'` incomplete.
+    expect(tokens('a new `mountLaneBoard` (planned) helper')).toEqual(['mountLaneBoard']);
+    expect(tokens('a new `mountLaneBoard` (future) helper')).toEqual(['mountLaneBoard']);
+    expect(PROVENANCE_ESCAPE_MARKERS).toEqual(['proposed', 'does not exist', 'example']);
+  });
+
+  it('the marker binds to the token it FOLLOWS, not to the whole line', () => {
+    expect(tokens('`firstFake` and `secondFake` (proposed)')).toEqual(['firstFake']);
+  });
+
+  it('a reasoned `provenance-lint: off` region suppresses; `on` re-arms', () => {
+    const body = ['<!-- provenance-lint: off — historical citations, these never existed -->',
+      '| `collectOpenItemIds` | `validateTodoMarkerBlock` |',
+      '<!-- provenance-lint: on -->', 'but `escapedNothing` here fires'].join('\n');
+    expect(tokens(body)).toEqual(['escapedNothing']);
+  });
+
+  it('a REASONLESS `provenance-lint: off` suppresses NOTHING and is reported itself (fail-closed)', () => {
+    const body = ['<!-- provenance-lint: off -->', '`stillFires` must still fire'].join('\n');
+    const found = scan(body);
+    expect(found.map((f) => f.kind)).toEqual(['escape-no-reason', 'unresolved']);
+    expect(found[1].token).toBe('stillFires');
+  });
+
+  it('`## Done when` / `## Design` are escape zones, and a SUBSECTION inherits the zone', () => {
+    const body = ['# Item', 'lede cites `ledeFake`', '## Done when', '- `doneWhenFake` exists',
+      '### sub of done-when', '- `subFake` too', '## Provenance', 'cites `provenanceFake`'].join('\n');
+    expect(tokens(body)).toEqual(['ledeFake', 'provenanceFake']);
+  });
+
+  it('only ADDED lines are reported, but escape state is read from the WHOLE file', () => {
+    // The heading and the fence are untouched context; the added line must still inherit them.
+    const body = ['## Done when', '- `underUntouchedHeading`', '## Elsewhere', '- `reportedHere`',
+      '- `notAddedSoSilent`'].join('\n');
+    const found = findUnresolvedIdentifiers(body, { resolves, addedLines: new Set([2, 4]) });
+    expect(found.map((f) => f.token)).toEqual(['reportedHere']);
+  });
+});
+
+describe('codeSpans — both markdown inline-code forms', () => {
+  it('reads the DOUBLE-backtick form, which docs/agent/conventions.md uses throughout', () => {
+    // Found by observation, not by design: the first wiring reported CLEAN on a docs page deliberately
+    // seeded with two bad names, because every example on it was written `` `x` `` (the wrapper you need
+    // when the displayed code contains a backtick). A gate that reads a file and sees nothing is worse
+    // than no gate, so both forms are extracted.
+    const line = 'bare (`` `countSourceLines` ``) or as a call (`` `enforceFlipReady({ ciStatus })` ``)';
+    expect(codeSpans(line).map((s) => s.inner)).toEqual(['countSourceLines', 'enforceFlipReady({ ciStatus })']);
+    expect(tokens(line)).toEqual(['enforceFlipReady']);
+  });
+
+  it('still reads the plain single-backtick form, and does not double-count a doubled span', () => {
+    expect(codeSpans('a `single` span').map((s) => s.inner)).toEqual(['single']);
+    expect(codeSpans('`` `wrapped` ``').map((s) => s.inner)).toEqual(['wrapped']);
+  });
+
+  it('an escape marker after a DOUBLED span still binds', () => {
+    expect(scan('`` `mountLaneBoard` `` (proposed) is unbuilt')).toHaveLength(0);
+  });
+});
+
+describe('findUnresolvedIdentifiers — comment syntax, for the `leash: spec` surface', () => {
+  it('reads JSDoc as prose and IGNORES the code around it', () => {
+    // The round-1 miss of PR #1112 lived in exactly this shape: a false symbol asserted in a conformance
+    // suite's JSDoc header, where no compiler and no gate could reach it.
+    const body = ['/**', ' * `collectOpenItemIds` in we:scripts/lib/validate-rules-anchors.cjs', ' */',
+      'const someLocalThing = 1;', 'export function anotherCodeSymbol() {}'].join('\n');
+    expect(tokens(body, { syntax: 'comment' })).toEqual(['collectOpenItemIds']);
+  });
+
+  it('reads a `//` line comment as prose too', () => {
+    expect(tokens('// the helper `lineCommentFake` does the walk', { syntax: 'comment' })).toEqual(['lineCommentFake']);
+  });
+
+  it('a comment resolves against its OWN file\'s code — the local index that stops the over-correction', () => {
+    // Test files are excluded from the tree-wide index (their fixtures name things that must not exist).
+    // Excluding them wholesale over-corrected: a conformance suite's JSDoc legitimately names helpers
+    // defined right below it, and 6 such names went red on PR #1112's diff. The wiring therefore resolves
+    // a comment against the tree PLUS this file's own CODE — reproduced here with the same composition.
+    const body = ['/**', ' * `definedRightBelow` walks it; `neverDefinedAnywhere` does not exist.', ' */',
+      'export function definedRightBelow() { return 1; }'].join('\n');
+    const local = buildIdentifierIndex([body]);
+    const composed = (t) => REAL.has(t) || local.has(t);
+    const found = findUnresolvedIdentifiers(body, { resolves: composed, addedLines: null, syntax: 'comment' });
+    expect(found.map((f) => f.token)).toEqual(['neverDefinedAnywhere']);
+  });
+});
+
+describe('buildIdentifierIndex / stripSourceComments — what "resolves" means', () => {
+  it('indexes identifier-shaped tokens from code', () => {
+    const idx = buildIdentifierIndex(['export function realHelper() { const MY_CONST = 1; return MY_CONST; }']);
+    expect(idx.has('realHelper')).toBe(true);
+    expect(idx.has('MY_CONST')).toBe(true);
+    expect(idx.has('export')).toBe(false); // not identifier-SHAPED (no interior capital)
+  });
+
+  it('EXCLUDES comment text — the miss that a naive index caused on replay', () => {
+    // Replaying PR #1112 round 1 with comments indexed, `collectOpenItemIds` did NOT fire: the token
+    // resolved against the very JSDoc line that invented it. A citation asserts something about the CODE.
+    const src = ['/** the helper `inventedInJsdoc` walks the tree */', 'export function realCode() {}'].join('\n');
+    const idx = buildIdentifierIndex([src]);
+    expect(idx.has('realCode')).toBe(true);
+    expect(idx.has('inventedInJsdoc')).toBe(false);
+  });
+
+  it('does NOT strip a trailing `//` — it would eat every https:// URL and delete real code tokens', () => {
+    const kept = stripSourceComments('const u = "https://example.com/someRealPath";');
+    expect(kept).toContain('someRealPath');
+    expect(buildIdentifierIndex(['const homeUrl = "https://x.dev/api";']).has('homeUrl')).toBe(true);
+  });
+
+  it('handles a NUL-sentinel file without choking — plain grep silently reports nothing on these', () => {
+    // guard-bash.mjs, renumber-collisions.mjs and component-render-build-hook.cjs carry deliberate NUL
+    // bytes. readFileSync+regex treat \0 as an ordinary character, so they must index normally.
+    // Written as an ESCAPE, never a literal NUL byte in this file — a committed raw NUL is the very
+    // footgun under test (plain `grep` reports nothing on such a file; `grep -a` is needed to see it).
+    const NUL = '\0';
+    const nulSrc = `const before = 1;${NUL}${NUL} export function afterTheNul() {}`;
+    const idx = buildIdentifierIndex([nulSrc]);
+    expect(idx.has('afterTheNul')).toBe(true);
+    // and the prose scanner must not throw or mis-scan on one either
+    const nulProse = `prose with ${NUL} a NUL and \`someFakeName\` after`;
+    expect(() => scan(nulProse)).not.toThrow();
+    expect(tokens(nulProse)).toEqual(['someFakeName']);
+  });
+});
+
+describe('findUnresolvedIdentifiers — degenerate input never throws', () => {
+  it('tolerates empty / non-string / missing resolver', () => {
+    expect(findUnresolvedIdentifiers('', { resolves })).toEqual([]);
+    expect(findUnresolvedIdentifiers(null, { resolves })).toEqual([]);
+    expect(findUnresolvedIdentifiers('`someFake`', {})).toEqual([]);
+  });
+
+  it('tolerates an unterminated fence and an unterminated escape region', () => {
+    expect(() => scan('```\nunclosed fence with `fakeOne`')).not.toThrow();
+    expect(scan('```\nunclosed fence with `fakeOne`')).toHaveLength(0);
+    expect(scan('<!-- provenance-lint: off — never closed -->\n`fakeTwo`')).toHaveLength(0);
   });
 });

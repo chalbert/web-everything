@@ -118,6 +118,68 @@ silently widened past what was actually measured:
   one.
 - The gate is silent on a clean `main` (no new warnings introduced for untouched prose).
 
+## Built 2026-08-09 — what shipped, and the two claims above that did NOT survive re-measurement
+
+The gate is built and wired, at WARN, in `we:scripts/lib/citation-check.mjs`
+(`findUnresolvedIdentifiers` (example), `buildIdentifierIndex` (example)) + `we:scripts/check-standards.mjs`
+section 6f-iii, with 51 fixtures and the escape documented in `we:docs/agent/conventions.md`. The item stays
+**open**: the `backlog/*.md` half of its Scope is measurably not shippable, and that is a real result, not a
+deferral.
+
+**Re-derived corpus-wide (reproduces).** 11,779 identifier tokens over the 3,040 md files in `backlog/` +
+`docs/`, **1,068 distinct unresolved (1,808 occurrences)** — against this card's 11,381 / 1,074 / 1,814. The
+corpus grew from 2,998 to 3,040 files in between. Corpus-wide remains non-viable, as filed.
+
+**Diff-scoped "zero false positives" does NOT reproduce at the filed scope.** This card measured ONE
+hand-picked diff (19 tokens, 1 unresolved). Over the **40 most recent merges into `main`**:
+
+| scope | findings | merges non-clean |
+|---|---|---|
+| `backlog/` + `docs/` + `leash: spec` (as filed) | **503** | 22 / 40 |
+| the same, plus a "token is in the item's own filename" escape | 339 | 20 / 40 |
+| `docs/` + `leash: spec` (**shipped**) | **0** | 0 / 40 |
+
+The 503 are overwhelmingly correct prose — `clearerId` (example) ×108 and `authorId` (example) ×99 are
+parameters an open item accurately describes as not yet existing. The dividing line is what a surface is
+FOR: `backlog/` is a **proposal register**, so an unresolved name there is the norm; `we:docs/agent/` and the
+`leash: spec` contracts are **assertion surfaces**. The shipped zero is not vacuous — a positive control
+(same 40 merges, resolver forced false) shows **271 tokens actually went through resolution across 12 of the
+40 merges** and none was flagged.
+
+**Three defects in this card's design, each found by observation:**
+
+1. **The extractor as specified misses the most important real cite.** "A trailing `()` tolerated" does not
+   match the statute's `` `enforceFlipReady({ ciStatus, reviewShadowLedger })` `` (example) — a call written
+   with its arguments, which is the *strongest* existence claim. Now matched with or without arguments.
+2. **A single-backtick regex reads `we:docs/agent/conventions.md` as empty.** That file uses the doubled
+   `` `x` `` form throughout. First wiring reported CLEAN on a page seeded with two bad names. Both forms
+   are now extracted.
+3. **A naive index lets a false cite resolve against itself.** Replaying PR #1112 round 1,
+   `collectOpenItemIds` (example) did not fire: the index included the very JSDoc block that invented it.
+   Comments are now stripped, test files excluded, and a comment resolves against the tree plus *its own
+   file's code* (excluding test files outright over-corrected — 6 legitimate test-local helpers went red).
+
+**Both "Known gaps" above are now resolved.** The `leash: spec` JSDoc surface is measured, not asserted — it
+is where historical miss 3 is caught. The missing third escape exists: the marker vocabulary is exactly
+`(proposed)`, `(does not exist)`, `(example)`, plus a reason-requiring `provenance-lint: off`/`on` region for
+blocks of such names.
+
+**Historical replay — the proof it works on real defects, not just fixtures:**
+
+| miss | diff | shipped scope |
+|---|---|---|
+| `collectOpenItemIds` (example) in a conformance suite's JSDoc | `2423f255` (PR #1112 round 1) | **CAUGHT** (1 finding) |
+| `enforceFlipReady` (example) call-form in the statute | `dd9f7db2` (#2838/#2839/#2840 ratification) | **CAUGHT** |
+| `validateTodoMarkerBlock` (example) | `ccec4a17` (PR #1112 round 3) | caught by the detector, but the file is `backlog/` — **out of shipped scope** |
+
+**Done-when status:** 1 met · 2 met · 3 met · 4 **not met as written** (PR #1112's *merge* is the corrected
+state, so it yields 0; the round-1 commit that carried the defect yields exactly 1, the right one) ·
+5 met (`check:standards` exit 0, 1278 warnings before and after).
+
+**What is still owed (why this stays open):** a proposal-vs-assertion discriminator for `backlog/*.md`. The
+filename-based escape was measured and only takes 503 → 339; it is not enough. Until something better
+exists, backlog prose stays author-and-review discipline.
+
 ## Provenance
 
 Filed out of round 4 of the independent review of PR #1112 (`#3027`), which asked for a durable fix rather
