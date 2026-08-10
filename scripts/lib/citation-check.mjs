@@ -290,9 +290,60 @@ export const PROVENANCE_ESCAPE_HEADINGS = Object.freeze(['done when', 'design'])
 /** The region escape, for a block that quotes MANY non-resolving names (a table of historical defects, a
  *  list of illustrative proposals) where a per-token marker would be pure noise. Two lines instead of N
  *  markers. A REASON is REQUIRED — a bare `off` does not escape and is reported in its own right, so the
- *  escape can never be a silent blanket. Greppable as `provenance-lint:`; visible in the rendered diff. */
+ *  escape can never be a silent blanket. Greppable as `provenance-lint:`; visible in the rendered diff.
+ *
+ *  These two patterns are matched against a line's COMMENT PAYLOAD ONLY, never the raw line — see
+ *  `regionMarkerPayload`. Matching the raw line is the SELF-DISARM defect: the paragraph in
+ *  `docs/agent/conventions.md` that documents this very escape contains the sentence "a bare
+ *  `` `provenance-lint: off` `` suppresses nothing", which the raw-line form matched, captured " suppresses
+ *  nothing and is reported in its own" as a ≥3-char "reason", and silently switched the gate off for the
+ *  whole remainder of the page — so every section appended to that file afterwards was exempt, and any docs
+ *  page that merely MENTIONS the marker in prose disarmed itself the same way. Silent-clean is the worst
+ *  failure mode a gate can have, so the marker is now recognised only where a real directive can live. */
 export const PROVENANCE_REGION_OFF_RE = /provenance-lint:\s*off\b(.*)$/i;
 export const PROVENANCE_REGION_ON_RE = /provenance-lint:\s*on\b/i;
+
+/** Blank out every inline code span on a line, preserving offsets. A marker QUOTED as code is a marker being
+ *  DISCUSSED, not one being issued — both the single- and double-backtick forms, because docs prose uses
+ *  both (`` `provenance-lint: off` `` and `` `<!-- provenance-lint: off — why -->` `` are equally "quoted"). */
+function maskCodeSpans(line) {
+  if (typeof line !== 'string' || line === '') return '';
+  const blank = (m) => ' '.repeat(m.length);
+  return line.replace(/``.+?``/g, blank).replace(/`[^`\n]{1,120}`/g, blank);
+}
+
+/**
+ * The part of a line where a `provenance-lint:` directive may legitimately live — a COMMENT, per syntax mode
+ * — with inline code spans masked out first. Returns null when the line offers no such place.
+ *
+ * Two independent gates, and both are needed; either alone still self-disarms.
+ *   • ANCHOR TO A COMMENT. In markdown the documented form is an HTML comment (`<!-- provenance-lint: off — …
+ *     -->`); in `comment` syntax mode the caller has already established the line is a `//` or `/* … *\/`
+ *     comment. Prose that merely says the words "provenance-lint: off" mid-sentence — the exact shape that
+ *     disarmed `conventions.md` — carries no comment opener and is therefore inert. Masking alone would not
+ *     have caught it: the sentence writes the marker in code spans AND in bare prose in the same paragraph.
+ *   • MASK CODE SPANS. A docs page teaching the syntax naturally writes the whole HTML comment inside an
+ *     inline span, which WOULD satisfy the anchor. Fenced blocks are already skipped upstream, but an inline
+ *     span is not, so it is masked here.
+ *
+ * Net effect: the marker works as a real HTML comment, is inert inside a fenced block (upstream), inert
+ * inside an inline code span, and inert in running prose — all three of which occur on the same docs page.
+ *
+ * @param line   the raw line.
+ * @param syntax 'markdown' | 'comment'.
+ * @returns the directive-eligible text, or null if this line has none.
+ */
+export function regionMarkerPayload(line, syntax = 'markdown') {
+  const masked = maskCodeSpans(line);
+  if (masked === '') return null;
+  if (syntax === 'comment') {
+    // The caller only offers lines it has already classified as comment prose, so the whole line qualifies;
+    // strip the punctuation so a reason does not start with `*` or end with `*/`.
+    return masked.replace(/^\s*(?:\/\*+|\/\/+|\*+)/, '').replace(/\*+\/\s*$/, '');
+  }
+  const html = masked.match(/<!--([\s\S]*?)(?:-->|$)/);
+  return html ? html[1] : null;
+}
 
 // Identifier SHAPES that read as a code symbol in prose. camelCase must carry an interior capital (so a
 // plain English word like `status` is never a citation) and SCREAMING_SNAKE must carry an underscore (so a
@@ -425,9 +476,10 @@ function hasInlineEscape(rest) {
  *        (used only by the corpus-wide measurement, never by the wired gate).
  * @param opts.syntax 'markdown' (default) or 'comment' — in 'comment' mode only `//` and `/* *\/` comment
  *        lines are prose, so the gate reads a `leash: spec` source file's JSDoc without reading its code.
- * @returns array of `{ kind, token, line, form, context }`. `kind` is 'unresolved' for a failing citation,
- *          or 'escape-no-reason' for a `provenance-lint: off` marker that states no reason (which therefore
- *          does NOT escape — the fail-closed direction: an unexplained blanket is refused, not honoured).
+ * @returns array of `{ kind, token, line, form, context }`. `kind` is 'unresolved' for a failing citation;
+ *          'escape-no-reason' for a `provenance-lint: off` marker that states no reason (which therefore
+ *          does NOT escape — the fail-closed direction: an unexplained blanket is refused, not honoured);
+ *          or 'escape-unclosed' for a reasoned region left open at EOF (which DOES escape, but says so).
  */
 export function findUnresolvedIdentifiers(text, {
   resolves,
@@ -443,6 +495,8 @@ export function findUnresolvedIdentifiers(text, {
   let fenceChar = '';
   let escapeLevel = null;   // heading depth that opened the current escape zone, or null
   let regionOff = false;
+  let regionOffLine = null;      // where the currently-open region was opened (for the unclosed report)
+  let regionOffContext = '';
   let inBlockComment = false;
   const seen = new Set();
 
@@ -458,16 +512,6 @@ export function findUnresolvedIdentifiers(text, {
       continue;
     }
     if (inFence) continue;
-
-    // ── the region escape. Checked before anything else so it works in both syntaxes and inside any zone.
-    const off = line.match(PROVENANCE_REGION_OFF_RE);
-    if (off) {
-      const reason = off[1].replace(/(-->|\*\/)\s*$/, '').replace(/^[\s—–:,.*_-]+/, '').trim();
-      if (reason.length >= 3) regionOff = true;
-      else findings.push({ kind: 'escape-no-reason', token: null, line: lineNo, form: null, context: line.trim().slice(0, 120) });
-      continue;
-    }
-    if (PROVENANCE_REGION_ON_RE.test(line)) { regionOff = false; continue; }
 
     // ── prose selection + heading zones.
     let prose;
@@ -492,6 +536,22 @@ export function findUnresolvedIdentifiers(text, {
       }
     }
     if (!prose) continue;
+
+    // ── the region escape, read from this line's COMMENT PAYLOAD only (never the raw line — see
+    //    PROVENANCE_REGION_OFF_RE's header for the self-disarm defect that requires this). Checked before the
+    //    regionOff/zone skip so that `on` can always re-arm from inside an open region.
+    const payload = regionMarkerPayload(line, syntax);
+    if (payload !== null) {
+      const off = payload.match(PROVENANCE_REGION_OFF_RE);
+      if (off) {
+        const reason = off[1].replace(/(-->|\*\/)\s*$/, '').replace(/^[\s—–:,.*_-]+/, '').trim();
+        if (reason.length >= 3) { regionOff = true; regionOffLine = lineNo; regionOffContext = line.trim().slice(0, 120); }
+        else findings.push({ kind: 'escape-no-reason', token: null, line: lineNo, form: null, context: line.trim().slice(0, 120) });
+        continue;
+      }
+      if (PROVENANCE_REGION_ON_RE.test(payload)) { regionOff = false; regionOffLine = null; continue; }
+    }
+
     if (regionOff || escapeLevel !== null) continue;
     if (addedLines && !addedLines.has(lineNo)) continue;
 
@@ -505,6 +565,15 @@ export function findUnresolvedIdentifiers(text, {
       seen.add(key);
       findings.push({ kind: 'unresolved', token: parsed.token, line: lineNo, form: parsed.form, context: line.trim().slice(0, 160) });
     }
+  }
+
+  // An `off` that is never closed suppresses everything to EOF. That is design-ACCEPTED (a file whose tail is
+  // all illustrative names is legitimate) but it must not be silent: an author who forgets the `on` gets a
+  // blanket escape they never asked for, and every future section appended to that file inherits it. Reported
+  // only when the OPENING line is itself in the diff, so the gate stays diff-scoped and never re-litigates a
+  // region that was already there.
+  if (regionOff && regionOffLine !== null && (!addedLines || addedLines.has(regionOffLine))) {
+    findings.push({ kind: 'escape-unclosed', token: null, line: regionOffLine, form: null, context: regionOffContext });
   }
   return findings;
 }
@@ -527,6 +596,37 @@ export function stripSourceComments(body) {
   // Block comments first; keep newlines so nothing merges across lines.
   const noBlocks = body.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
   return noBlocks.split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l)).join('\n');
+}
+
+/** A source extension worth indexing. Anything else (images, lockfiles, binaries) carries no vocabulary. */
+const PROVENANCE_SRC_EXT_RE = /\.(mjs|cjs|js|jsx|ts|tsx|json|njk|html|css|sh|bash|yml|yaml|py)$/;
+/** PROSE dirs — if the index covered them, every false citation would resolve against the sentence that
+ *  invented it. This is the same self-resolution failure `stripSourceComments` fixes, one level up. */
+const PROVENANCE_PROSE_DIR_RE = /^(backlog|docs|reports|plans|research)\//;
+/** TEST files. */
+const PROVENANCE_TEST_FILE_RE = /(^|\/)(__tests__|__mocks__|__fixtures__)\/|\.(test|spec)\.[A-Za-z]+$/;
+
+/**
+ * Is this tracked path part of the tree's VOCABULARY — i.e. should its body feed the resolution index?
+ *
+ * Lives here rather than inline in `check-standards.mjs` so it is unit-coverable. That is not tidiness: the
+ * test-file exclusion below is the single most mutation-fragile line in the gate, and deleting it was caught
+ * only by an end-to-end probe, never by a test. A gate whose load-bearing predicate has no unit is a gate
+ * that can be silently reverted.
+ *
+ * TEST FILES ARE NOT THE TREE'S VOCABULARY, and excluding them is load-bearing. A test's whole job is to name
+ * things that must NOT exist: this gate's own fixtures carry the string literals 'enforceFlipReady',
+ * 'collectOpenItemIds' and 'validateTodoMarkerBlock' precisely because they are the historical false
+ * citations. Index them and all three regressions start "resolving" — the gate is neutered by the very suite
+ * that proves it works. (Observed on first wiring: a docs page seeded with `enforceFlipReady({ ciStatus })`
+ * reported clean because this file had just been written.) A comment's own file is re-indexed locally by the
+ * caller, which is what keeps a conformance suite's JSDoc able to cite the helpers defined right below it.
+ *
+ * @param p a repo-relative tracked path.
+ */
+export function isIndexableSourcePath(p) {
+  return typeof p === 'string' && p !== '' &&
+    PROVENANCE_SRC_EXT_RE.test(p) && !PROVENANCE_PROSE_DIR_RE.test(p) && !PROVENANCE_TEST_FILE_RE.test(p);
 }
 
 /**

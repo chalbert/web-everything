@@ -67,7 +67,7 @@ import {
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
   countSourceLines, CITATION_GATES_ENFORCED,
-  findUnresolvedIdentifiers, buildIdentifierIndex, PROVENANCE_ESCAPE_MARKERS,
+  findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
 } from './lib/citation-check.mjs';
 import { TRUST_CHAIN } from './lib/gate-config.mjs';
 
@@ -1186,19 +1186,14 @@ try {
     if (addedByFile.size > 0) {
       // Build the resolution index ONLY when something in scope actually changed — it reads the whole source
       // tree, so an untouched run must not pay for it.
-      const srcExt = /\.(mjs|cjs|js|jsx|ts|tsx|json|njk|html|css|sh|bash|yml|yaml|py)$/;
-      const proseDir = /^(backlog|docs|reports|plans|research)\//;
-      // TEST FILES ARE NOT THE TREE'S VOCABULARY — excluding them is load-bearing, not tidiness. A test's
-      // whole job is to name things that must NOT exist: this gate's own fixtures carry the string literals
-      // 'enforceFlipReady', 'collectOpenItemIds' and 'validateTodoMarkerBlock' precisely because they are the
-      // historical false citations. Index them and all three regressions start "resolving" — the gate would
-      // be neutered by the very suite that proves it works. (Observed on first wiring: a docs page seeded
-      // with `enforceFlipReady({ ciStatus })` reported clean because this file had just been written.)
-      const testFile = /(^|\/)(__tests__|__mocks__|__fixtures__)\/|\.(test|spec)\.[A-Za-z]+$/;
+      // Source ext + prose-dir + TEST-FILE exclusion all live in `isIndexableSourcePath` (citation-check.mjs)
+      // so they are unit-coverable — the test-file exclusion is the gate's most mutation-fragile line (delete
+      // it and this suite's own 'enforceFlipReady'/'collectOpenItemIds' literals make every historical
+      // regression "resolve"), and it previously had no unit at all.
       let index = null;
       try {
         const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-          .split('\0').filter((f) => f && srcExt.test(f) && !proseDir.test(f) && !testFile.test(f));
+          .split('\0').filter((f) => isIndexableSourcePath(f));
         // readFileSync + a JS regex treat a NUL byte as an ordinary character, so the three deliberate
         // NUL-sentinel scripts (guard-bash.mjs, renumber-collisions.mjs, component-render-build-hook.cjs)
         // index normally here — unlike plain `grep`, which silently reports nothing on them.
@@ -1230,6 +1225,14 @@ try {
                 `(#3026) — an unexplained blanket escape is refused by design. Write ` +
                 `\`provenance-lint: off — <why these names do not resolve>\`, and close it with \`provenance-lint: on\`.`,
                 { kind: 'provenance-escape-no-reason', file: rel });
+              continue;
+            }
+            if (f.kind === 'escape-unclosed') {
+              warn(`${rel}:${f.line}: this \`provenance-lint: off\` region is never closed, so it suppresses ` +
+                `every identifier citation to the END OF THE FILE (#3026) — including every section appended ` +
+                `later. Close it with \`<!-- provenance-lint: on -->\` right after the block it is meant to ` +
+                `cover. Opened at: "${f.context}"`,
+                { kind: 'provenance-escape-unclosed', file: rel });
               continue;
             }
             warn(`${rel}:${f.line}: \`${f.token}\` is cited as ${f.form === 'call' ? 'a call' : 'an identifier'} ` +

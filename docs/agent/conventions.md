@@ -125,7 +125,12 @@ looks deliberate in review, rather than being silently skipped:
    <!-- provenance-lint: on -->
    ```
    **A reason is required.** A bare `provenance-lint: off` suppresses nothing and is reported in its own
-   right — an unexplained blanket escape is refused by design.
+   right — an unexplained blanket escape is refused by design. **It must be a real comment** — an HTML
+   comment in markdown, a `//` or `/* … */` comment in a spec source. The marker written in running prose or
+   inside a code span (as it is throughout this section) is being *discussed*, not issued, and does nothing;
+   otherwise a page documenting the escape would switch the gate off for its own remainder. **Close it.** An
+   `off` left open runs to end of file — that still works, but it is reported, because every section appended
+   to the page afterwards would silently inherit the escape.
 3. **Write it under `## Done when` or `## Design`** — already the conventional homes for names that do not
    exist yet, so those sections (and their subsections) are skipped without any marker.
 
