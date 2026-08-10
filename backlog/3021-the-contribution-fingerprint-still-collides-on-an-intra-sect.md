@@ -4,7 +4,7 @@ kind: story
 size: 2
 status: open
 dateOpened: "2026-08-08"
-parent: "x5p1xz8"
+parent: "3054"
 tags: [gate, review, drain, review-escalation, fingerprint]
 scope:
   - we:scripts/lib/review-escalation.mjs

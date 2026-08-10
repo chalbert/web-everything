@@ -4,7 +4,7 @@ kind: story
 size: 3
 status: open
 dateOpened: "2026-08-09"
-parent: "x5p1xz8"
+parent: "3054"
 scope:
   - we:scripts/lib/review-escalation.mjs
   - we:scripts/lib/__tests__/review-escalation.test.mjs
@@ -90,7 +90,7 @@ which is the whole argument.
 ## Why this was unowned when it was filed
 
 Confirmed by reading each card, not inferred (and still true — the 2026-08-09 consolidation grouped these cards
-under `#x5p1xz8` without merging any of their scopes):
+under `#3054` without merging any of their scopes):
 
 - **[#3021](/backlog/3021-the-contribution-fingerprint-still-collides-on-an-intra-sect/)** (`3021`, open)
   files the **inverse**: the digest *colliding* — two different contributions hashing alike, a false
@@ -125,18 +125,18 @@ the `review:human` re-imposition on top.
 "five cards now sit on one incident … the first move on any of them should be to run them through
 `/consolidate` … do that before claiming this card, not after." That was done, and the outcome is:
 
-- **`#x5p1xz8`** — a `kind: epic` umbrella over the digest-correctness work: this card, #3021, #2884, and a
-  fourth slice `#x0pfbqp` (a **second** false-stale mechanism the sweep found and no card owned — the section
+- **`#3054`** — a `kind: epic` umbrella over the digest-correctness work: this card, #3021, #2884, and a
+  fourth slice `#3052` (a **second** false-stale mechanism the sweep found and no card owned — the section
   **heading** is variant when `main` inserts a new column-0 declaration above an unmoved hunk; observed on WE
   PR #1100 at 12:20:57Z). This card keeps its `NNN`, its `size: 3`, its scope and its body, and stays
   independently claimable — the umbrella exists so the joint cost is visible, not to merge the scopes.
-- **`#xxdslno`** — a `kind: decision` carving the live fork out of #3024 (whole-PR score vs uncovered-delta
+- **`#3053`** — a `kind: decision` carving the live fork out of #3024 (whole-PR score vs uncovered-delta
   score vs a fourth `review:stale` hold tier), which also **files #3039's dangling deferral** instead of
-  leaving it in a sentence. `#x5p1xz8` is `blockedBy` it.
+  leaving it in a sentence. `#3054` is `blockedBy` it.
 - **#3039** — resolved; its code landed in PR #1124 and its notice was observed firing in production.
-- **#3024** — stays a story, fork trimmed to a pointer, `blockedBy: xxdslno`.
+- **#3024** — stays a story, fork trimmed to a pointer, `blockedBy: 3053`.
 
-**This card is now claimable**, jointly costed with its siblings under `#x5p1xz8`.
+**This card is now claimable**, jointly costed with its siblings under `#3054`.
 
 ## Directions worth costing (none picked)
 
@@ -160,5 +160,5 @@ the `review:human` re-imposition on top.
   the 1,534-line projection count both replicate. A committed script for it is no longer owed by this card;
   what remains owed is the *unit test* in the bullet above.
 - Whichever direction is taken, #3021's pinned "known residual" test is updated in the same change — the two
-  residuals must never be allowed to disagree about what the digest promises. Under `#x5p1xz8` this now extends
-  to `#x0pfbqp`'s heading direction: **three** residuals, one promise.
+  residuals must never be allowed to disagree about what the digest promises. Under `#3054` this now extends
+  to `#3052`'s heading direction: **three** residuals, one promise.

@@ -4,7 +4,7 @@ kind: story
 size: 3
 status: open
 dateOpened: "2026-08-08"
-blockedBy: ["xxdslno"]
+blockedBy: ["3053"]
 tags: [gate, review, drain, review-escalation, declarative-leash, ratification]
 scope:
   - we:scripts/lib/review-escalation.mjs
@@ -50,13 +50,13 @@ live here.** Per the fork-flip-or-carve rule
 ([we:docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md)) a fork never lives inline in a story body,
 so the 2026-08-09 consolidation carved it to its own item:
 
-> **`#xxdslno`** — *What a stale-acceptance re-park does to a cleared PR — whole-PR score, uncovered-delta score,
+> **`#3053`** — *What a stale-acceptance re-park does to a cleared PR — whole-PR score, uncovered-delta score,
 > or a fourth `review:stale` hold tier.* It is now a **three-way** fork: it also absorbed the `review:stale`
 > fourth-tier proposal that PR #1124's write-up made and #3039 said was "filed separately rather than smuggled in
 > here" but never was. That decision item carries the full option set, the hard cases, and the prep still owed.
 
-What remains here is **step 3 only**: once `#xxdslno` rules for the delta-only score, implement the narrowing,
-with the leash-cannot-shrink invariants extended to cover it. This item is `blockedBy: xxdslno` and may not be
+What remains here is **step 3 only**: once `#3053` rules for the delta-only score, implement the narrowing,
+with the leash-cannot-shrink invariants extended to cover it. This item is `blockedBy: 3053` and may not be
 built before it resolves. **Until then the current whole-PR behaviour is the fail-closed one and stays.**
 
 Two facts the carved decision turns on, kept here because they are this item's own findings:
@@ -66,8 +66,8 @@ Two facts the carved decision turns on, kept here because they are this item's o
   on #1106 was *correct*. It was not — the contribution digest diverged on a byte-identical contribution because
   `main` grew a different number of lines above two of the lane's hunks (re-derived by script 2026-08-09:
   1,534 projection lines each side, exactly two differing, both gap values). That root cause is the umbrella
-  `#x5p1xz8` ([#3046](/backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio/) plus
-  `#x0pfbqp`), the layer above both options — a fix there would have prevented #1106 entirely.
+  `#3054` ([#3046](/backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio/) plus
+  `#3052`), the layer above both options — a fix there would have prevented #1106 entirely.
 - The hard case any delta-only score must still catch: a head advance that **MOVES** a leash-path edit rather
   than adding one.
 
@@ -75,6 +75,6 @@ Related: [#3023](/backlog/3023-a-drain-re-score-revokes-a-human-clearance-a-cont
 [#2840](/backlog/2840/), [#2409](/backlog/2409/), [#2771](/backlog/2771/),
 [#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/) (the
 notice-on-revocation fix; its code landed in PR #1124, merged 2026-08-09T11:50:32Z, and the card was resolved
-2026-08-09 once its notice was observed firing in production on PR #1100 at 12:20:59Z), `#xxdslno` (the carved
-fork this item is blocked on), `#x5p1xz8` (the false-stale umbrella, the layer above), `#3046` and `#x0pfbqp`
+2026-08-09 once its notice was observed firing in production on PR #1100 at 12:20:59Z), `#3053` (the carved
+fork this item is blocked on), `#3054` (the false-stale umbrella, the layer above), `#3046` and `#3052`
 (its two slices — the false-stale root causes).

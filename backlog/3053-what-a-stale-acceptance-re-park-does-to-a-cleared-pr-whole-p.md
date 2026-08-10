@@ -1,4 +1,5 @@
 ---
+bornAs: xxdslno
 kind: decision
 status: open
 dateOpened: "2026-08-09"
@@ -36,13 +37,13 @@ delta-scored re-park removes much of the reason for a new tier. They are **not**
 Both options above assume the re-park on WE PR #1106 was *correct*. **It was not.** The contribution digest
 diverged on a byte-identical contribution because `main` grew a different number of lines above two of the lane's
 hunks — re-derived by script for this filing: 1,534 projection lines on each side, exactly two differing, both
-inter-hunk gap values (`~424 → ~439`, `~324 → ~328`). That root cause is the umbrella `#x5p1xz8`
-([#3046](/backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio/) plus `#x0pfbqp`), which is
+inter-hunk gap values (`~424 → ~439`, `~324 → ~328`). That root cause is the umbrella `#3054`
+([#3046](/backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio/) plus `#3052`), which is
 the layer *above* both options here — a fix there would have prevented #1106 entirely.
 
 So this is a **three-way** reconciliation, and its first question is: **how much of this hole survives once the
 false stale stops firing?** If the answer is "very little", the status quo may be the correct ruling and both
-proposals become dead weight. The umbrella `#x5p1xz8` is `blockedBy` this item so the ruling lands before the
+proposals become dead weight. The umbrella `#3054` is `blockedBy` this item so the ruling lands before the
 digest work commits to a shape.
 
 ## Option A — keep the whole-PR score (status quo)
@@ -99,7 +100,7 @@ of PR #1124 rather than built there.
 
 Per *Never Take An Unprepared Decision*, prep must:
 
-1. **Answer the precondition first** — quantify how much of the hole survives once `#x5p1xz8` lands. This is the
+1. **Answer the precondition first** — quantify how much of the hole survives once `#3054` lands. This is the
    gating question, not a footnote.
 2. **Enumerate the `review:stale` blast radius for real** — the "~10 consumers" figure is from PR #1124's
    write-up and is **unreplicated**. Grep the actual `REVIEW_LABELS` / `hasUnclearedReviewLabel` call sites and

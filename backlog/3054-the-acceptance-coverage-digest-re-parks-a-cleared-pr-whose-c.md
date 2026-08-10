@@ -1,9 +1,10 @@
 ---
+bornAs: x5p1xz8
 kind: epic
 status: open
 dateOpened: "2026-08-09"
 tags: [gate, review, drain, review-escalation, fingerprint]
-blockedBy: ["xxdslno"]
+blockedBy: ["3053"]
 relatedReport: reports/2026-08-09-backlog-consolidation-analysis.md
 ---
 
@@ -17,7 +18,7 @@ operator's clearance — and, read the other way, mis-reads a real contribution 
 
 Sliced into [#3021](/backlog/3021-the-contribution-fingerprint-still-collides-on-an-intra-sect/) (false honour),
 [#3046](/backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio/) (false stale, gap signal),
-`#x0pfbqp` (false stale, heading signal — filed by this consolidation, previously unowned), and
+`#3052` (false stale, heading signal — filed by this consolidation, previously unowned), and
 [#2884](/backlog/2884-acceptance-coverage-keys-on-head-sha-identity-so-a-no-op-reb/) (the coverage key, and the
 convergence requirement the digest work must satisfy).
 
@@ -41,7 +42,7 @@ Two revocations on 2026-08-09, both with the head moved **only** by the drain's 
 | PR | cleared | re-parked | mechanism |
 | --- | --- | --- | --- |
 | [#1106](https://github.com/chalbert/web-everything/pull/1106) | `2026-08-09T00:34:00Z` | `2026-08-09T00:41:28Z`, **silently** | inter-hunk **gap** divergence (`#3046`) |
-| [#1100](https://github.com/chalbert/web-everything/pull/1100) | `2026-08-09T12:20:05Z` | `2026-08-09T12:20:57Z`, with a notice | **gap** divergence **and** section-**heading** drift (`#x0pfbqp`) |
+| [#1100](https://github.com/chalbert/web-everything/pull/1100) | `2026-08-09T12:20:05Z` | `2026-08-09T12:20:57Z`, with a notice | **gap** divergence **and** section-**heading** drift (`#3052`) |
 
 Both timelines read from `gh api repos/chalbert/web-everything/issues/<n>/timeline`. #1100 got a notice because
 [#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/)'s code had landed
@@ -75,7 +76,7 @@ and 4 above another, a non-uniform move. No `+`/`-` line, hunk length, section h
 | --- | --- | --- |
 | [#3021](/backlog/3021-the-contribution-fingerprint-still-collides-on-an-intra-sect/) | digest **converges** | false **honour** — two different contributions hash alike when a relocation preserves heading + gap |
 | [#3046](/backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio/) | digest **diverges** | false **stale** — the inter-hunk **gap** is variant under a non-uniform base move |
-| `#x0pfbqp` | digest **diverges** | false **stale** — the section **heading** is variant when the base inserts a new column-0 declaration |
+| `#3052` | digest **diverges** | false **stale** — the section **heading** is variant when the base inserts a new column-0 declaration |
 | [#2884](/backlog/2884-acceptance-coverage-keys-on-head-sha-identity-so-a-no-op-reb/) | the caller | `acceptanceCoversHead` keys on head-SHA identity; the "self-corrects on a fresh accept" clause fails when the drain is what moves the head |
 
 ## The joint constraint no slice may break
@@ -89,7 +90,7 @@ is the acceptance bar for the umbrella as a whole, not just for that slice.
 
 ## What is deliberately NOT in scope here
 
-**Which label a stale re-park applies** is a different layer and a live design fork — it is carved to `#xxdslno`
+**Which label a stale re-park applies** is a different layer and a live design fork — it is carved to `#3053`
 (this epic `blockedBy` it), with the build side kept at
 [#3024](/backlog/3024-a-stale-acceptance-re-park-re-asserts-review-human-from-the-/). That fork's first question is
 how much of its hole survives once the false stale stops firing, which is why it gates this epic rather than

@@ -58,8 +58,8 @@ the *re-imposition* of the hold on top of it.
    signal is variant under a NON-uniform base move. ~~That direction is filed nowhere~~ — it was filed
    the same day as
    [#3046](/backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio/), and on
-   2026-08-09 both were grouped under the umbrella `#x5p1xz8` alongside a **second** false-stale
-   mechanism nobody had owned (`#x0pfbqp` — the section HEADING is also variant, when `main` inserts a
+   2026-08-09 both were grouped under the umbrella `#3054` alongside a **second** false-stale
+   mechanism nobody had owned (`#3052` — the section HEADING is also variant, when `main` inserts a
    new column-0 declaration above an unmoved hunk). This item still does not close either direction.
 3. `decideReviewGate`'s stale branch computed `toHuman = humanRequired || <sticky human label>`;
    the fresh score was `humanRequired` (statute + gate-derivation + blast-radius + size), so it
@@ -117,10 +117,10 @@ deliverable observed working on a real revocation it did not anticipate.
 **The deferral in the section above is no longer dangling.** "Filed separately rather than smuggled in
 here" was never actually filed — a grep of every item in `we:backlog/` for `review:stale` and "hold tier"
 returned only this sentence. The 2026-08-09 consolidation folded the fourth-tier proposal into the carved
-decision **`#xxdslno`** as its option C, rather than opening a sixth card on one hole, per the operator's
+decision **`#3053`** as its option C, rather than opening a sixth card on one hole, per the operator's
 direction. The cost figure quoted above (~10 consumers) is carried across as **unreplicated** — counting it
-for real is prep owed on `#xxdslno`.
+for real is prep owed on `#3053`.
 
-Nothing further is owed here. The false-stale root causes live under the umbrella `#x5p1xz8`
-([#3046](/backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio/) and `#x0pfbqp`);
-making the re-hold *impossible* is `#xxdslno`'s ruling to make.
+Nothing further is owed here. The false-stale root causes live under the umbrella `#3054`
+([#3046](/backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio/) and `#3052`);
+making the re-hold *impossible* is `#3053`'s ruling to make.

@@ -1,9 +1,10 @@
 ---
+bornAs: x0pfbqp
 kind: story
 size: 2
 status: open
 dateOpened: "2026-08-09"
-parent: "x5p1xz8"
+parent: "3054"
 tags: [gate, review, drain, review-escalation, fingerprint]
 scope:
   - we:scripts/lib/review-escalation.mjs
@@ -64,7 +65,7 @@ contribution is byte-identical. In `we:scripts/__tests__/review-set-label.test.m
 
 ```
 - @@ -1124,3 +1131,186 @@ exit 0
-+ @@ -1155,3 +1162,186 @@ describe('#xmnl36p — clear-human stamps a clearance the re-score reader can fi
++ @@ -1155,3 +1162,186 @@ describe('#3039 — clear-human stamps a clearance the re-score reader can fi
 ```
 
 Same hunk, same `3`/`186` lengths, same content — but the heading moved from `exit 0` to a `describe(…)` block
@@ -89,7 +90,7 @@ diff would wrongly conclude the contribution changed; the projection is the thin
 
 - **Drop the heading from the digest** and re-detect relocation another way. Widens #3021's false-honour residual
   in exactly the way dropping the gap does — the same joint-cost problem, which is why this is a slice of
-  `#x5p1xz8` and not a standalone fix.
+  `#3054` and not a standalone fix.
 - **Attribute the move to its actor.** The drain knows it produced the rebase and could re-stamp the markers.
   Listed on #3021, #3046 and #2884 as well; it narrows all three false-stale directions at once and still does
   not cover a producer-lane force-push.
