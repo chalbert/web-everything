@@ -18,6 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { ESCALATION_REASON_MARKER, REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
 import { deriveReviewDisposition } from './lib/review-core.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 /** The drain's advisory AI-review comment marker (the body the drain posts on an agent-review park). */
 const ADVISORY_MARKER = '🤖 advisory AI review';
@@ -132,7 +133,7 @@ function runCli() {
   const pr = args.find((a) => /^\d+$/.test(a));
 
   if (!pr || !repo) {
-    process.stdout.write(`${JSON.stringify({ error: 'usage: review-detail.mjs <pr> --repo=<owner/name> [--json]' })}\n`);
+    writeAllSync(1, `${JSON.stringify({ error: 'usage: review-detail.mjs <pr> --repo=<owner/name> [--json]' })}\n`);
     process.exit(2);
   }
 
@@ -144,7 +145,7 @@ function runCli() {
     view = JSON.parse(out);
   } catch (e) {
     const msg = String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean).pop() || 'gh pr view failed';
-    process.stdout.write(`${JSON.stringify({ error: msg })}\n`);
+    writeAllSync(1, `${JSON.stringify({ error: msg })}\n`);
     process.exit(1);
   }
 
@@ -153,7 +154,7 @@ function runCli() {
   const detail = assembleReviewDetail({ view });
 
   if (asJson) {
-    process.stdout.write(`${JSON.stringify(detail, null, 2)}\n`);
+    writeAllSync(1, `${JSON.stringify(detail, null, 2)}\n`);
     process.exit(0);
   }
 
@@ -166,6 +167,6 @@ function runCli() {
     `  files changed: ${detail.filesChanged}`,
     `  advisory comment: ${detail.advisoryComment ? 'yes' : 'no'}   human comment: ${detail.humanComment ? 'yes' : 'no'}`,
   ];
-  process.stdout.write(`${lines.join('\n')}\n`);
+  writeAllSync(1, `${lines.join('\n')}\n`);
   process.exit(0);
 }

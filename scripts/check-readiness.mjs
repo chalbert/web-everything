@@ -28,6 +28,7 @@ import { LOCI } from './check-standards-rules.mjs';
 import { checkMainStaleness } from './lib/main-staleness.mjs';
 import { openPrItemNums } from './lib/open-pr-items.mjs';
 import { slugFromName } from './backlog/id.mjs';
+import { writeLineSync } from './lib/write-all-sync.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -198,7 +199,7 @@ if (JSON_MODE) {
     mySession: MY_SESSION ?? null,
     foreign: [...foreign.entries()].map(([num, session]) => ({ num, session })),
   };
-  console.log(JSON.stringify({ ...report, selection, batch: { capacity, budget, ...batchPack }, report: buildReadinessReport(selection, batchPack, budget), unshaped: unshaped.map((it) => ({ num: it.num, id: it.id })), reservations: reservationsOut, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
+  writeLineSync(1, JSON.stringify({ ...report, selection, batch: { capacity, budget, ...batchPack }, report: buildReadinessReport(selection, batchPack, budget), unshaped: unshaped.map((it) => ({ num: it.num, id: it.id })), reservations: reservationsOut, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
   process.exit(0);
 }
 

@@ -267,7 +267,9 @@ describe('runReviewLabelCli — the clear-human preconditions (#2895)', () => {
     process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
     let exitCode = null;
     let threw = null;
-    try { runReviewLabelCli({ ...CFG, ...cfg }); }
+    // #3061 — collect through the injected emitter; the CLI drains through `fs.writeSync(1, …)`, which a
+    // `process.stdout.write` patch cannot observe.
+    try { runReviewLabelCli({ ...CFG, emit: (line) => { chunks.push(String(line)); }, ...cfg }); }
     catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else threw = e; }
     finally { process.stdout.write = realWrite; process.exit = realExit; }
     if (threw) throw threw;
@@ -917,6 +919,7 @@ process.exit(0);
         buildComment: () => 'z'.repeat(GH_COMMENT_MAX + 1),
         successResult: (o) => ({ ok: true, ...o }),
         refusalResult: ({ decision }) => ({ error: decision.reason }),
+        emit: (line) => { chunks.push(String(line)); }, // #3061 — see runHarness
       });
     } catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
     finally {
@@ -1264,6 +1267,11 @@ exit 0
         }),
         successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
         refusalResult: ({ decision }) => ({ error: decision.reason }),
+        // #3061 — collect through the INJECTED emitter, not the `process.stdout.write` patch above. The CLI's
+        // default emitter drains synchronously (`fs.writeSync(1, …)`) so its payload survives a capturing
+        // parent, and a patch on the stream object cannot observe that. The patch stays for anything else in
+        // the call that still reaches the stream.
+        emit: (line) => { chunks.push(String(line)); },
       });
     } catch (e) {
       if (typeof e.exitCode === 'number') status = e.exitCode; else throw e;

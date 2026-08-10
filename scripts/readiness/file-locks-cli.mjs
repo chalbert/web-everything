@@ -23,6 +23,7 @@
 import {
   reserve, releaseLockDir, heartbeat, readLockEntry, wasReclaimed, DEFAULT_LEASE_MINUTES,
 } from './file-locks.mjs';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 function parseArgs(argv) {
   const opts = { paths: [], pid: null };
@@ -49,7 +50,7 @@ function probePidLiveness(pid, selfPid) {
   catch (e) { return e && e.code === 'ESRCH' ? 'dead' : 'unknown'; }
 }
 
-function emit(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
+function emit(obj) { writeAllSync(1, JSON.stringify(obj) + '\n'); }
 
 const [, , cmd, ...rest] = process.argv;
 const o = parseArgs(rest);

@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { localToday } from './lib/local-date.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -24,7 +25,7 @@ const today = localToday();
 const { errors, warnings } = validateWorkflowInvariants(items, { today });
 
 if (AS_JSON) {
-  process.stdout.write(JSON.stringify({ errors, warnings }, null, 2) + '\n');
+  writeAllSync(1, JSON.stringify({ errors, warnings }, null, 2) + '\n');
 } else {
   for (const w of warnings) console.warn(`\x1b[33m  warn\x1b[0m ${w.message}`);
   for (const e of errors) console.error(`\x1b[31m error\x1b[0m ${e.message}`);

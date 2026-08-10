@@ -91,6 +91,7 @@ import { homedir, hostname, tmpdir } from 'node:os';
 
 import { REVIEW_LABELS, hasReviewLabel, acceptanceCoversHead } from './review-escalation.mjs';
 import { reserve, releaseLockDir } from '../readiness/file-locks.mjs';
+import { writeAllSync } from './write-all-sync.mjs';
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 // SCHEMA
@@ -775,11 +776,11 @@ function main(argv) {
   const repo = typeof flags.repo === 'string' ? flags.repo : '';
 
   if (sub === 'path') {
-    process.stdout.write(`${repo ? verdictLedgerPath(repo) : verdictLedgerDir()}\n`);
+    writeAllSync(1, `${repo ? verdictLedgerPath(repo) : verdictLedgerDir()}\n`);
     process.exit(0);
   }
   if (sub === 'repos') {
-    process.stdout.write(`${listLedgerRepos().join('\n')}\n`);
+    writeAllSync(1, `${listLedgerRepos().join('\n')}\n`);
     process.exit(0);
   }
   if (sub === 'show') {
@@ -792,7 +793,7 @@ function main(argv) {
       actor: e.current.actor, source: e.current.source, coverage: e.current.coverage,
       records: e.history.length, outstandingHolds: e.outstandingHolds.length,
     }));
-    process.stdout.write(`${JSON.stringify(folded, null, flags.json ? 0 : 2)}\n`);
+    writeAllSync(1, `${JSON.stringify(folded, null, flags.json ? 0 : 2)}\n`);
     process.exit(0);
   }
   process.stderr.write('usage: verdict-ledger <show --repo=<owner/name> [--json] | path [--repo=…] | repos>\n');

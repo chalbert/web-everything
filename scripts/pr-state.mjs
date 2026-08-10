@@ -31,6 +31,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { classifyChecks } from './pr-land.mjs';
 import { rollupToCheckRows, filterToRequired, resolveRequiredNames } from './fetch-parked.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 /**
  * The PURE structured state record for one PR (#2434). Distills a parsed `gh pr view … --json` object into the
@@ -83,7 +84,7 @@ function runCli() {
   const nums = args.filter((a) => /^\d+$/.test(a));
 
   if (nums.length === 0) {
-    process.stdout.write(`${JSON.stringify({ error: 'usage: pr-state <num…> [--repo=<path>] [--json]' })}\n`);
+    writeAllSync(1, `${JSON.stringify({ error: 'usage: pr-state <num…> [--repo=<path>] [--json]' })}\n`);
     process.exit(2);
   }
 
@@ -108,7 +109,7 @@ function runCli() {
     }
   }
 
-  if (asJson) process.stdout.write(`${JSON.stringify(records, null, 2)}\n`);
-  else process.stdout.write(`${lines.join('\n')}\n`);
+  if (asJson) writeAllSync(1, `${JSON.stringify(records, null, 2)}\n`);
+  else writeAllSync(1, `${lines.join('\n')}\n`);
   process.exit(0);
 }

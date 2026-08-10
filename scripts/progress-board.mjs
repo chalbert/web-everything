@@ -1831,4 +1831,4 @@ export function main(argv = process.argv.slice(2)) {
   return 0;
 }
 
-if (process.argv[1] && process.argv[1].endsWith('progress-board.mjs')) process.exit(main());
+if (process.argv[1] && process.argv[1].endsWith('progress-board.mjs')) process.exitCode = main();

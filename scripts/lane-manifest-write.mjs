@@ -40,6 +40,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { buildManifest, validateManifest, serializeManifest, asItemId, isItemId } from './readiness/lane-manifest.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 const argv = process.argv.slice(2);
 const flags = {};
@@ -61,7 +62,7 @@ const expandHome = (p) => (p && p.startsWith('~') ? p.replace(/^~/, homedir()) :
 const AS_JSON = !!flags.json;
 
 function emit(result, code) {
-  if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
+  if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
   else process.stderr.write(`lane-manifest-write ${result.ok ? '✓' : '✗'} ${result.detail}\n`);
   process.exit(code);
 }

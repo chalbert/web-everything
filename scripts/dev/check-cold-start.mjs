@@ -17,18 +17,19 @@
 //
 // Exit 0 = config loads + a dev server can be created. Exit 1 = cold start broken.
 import { createServer } from 'vite';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 const asJson = process.argv.includes('--json');
 
 function report(ok, detail, code) {
   if (asJson) {
-    process.stdout.write(JSON.stringify({ ok, ...detail }) + '\n');
+    writeAllSync(1, JSON.stringify({ ok, ...detail }) + '\n');
   } else {
     const GRN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', RST = '\x1b[0m';
-    process.stdout.write(
+    writeAllSync(1,
       `${ok ? GRN + '✓ COLD-START OK' : RED + '✗ COLD-START BROKEN'}${RST} — ${detail.message}\n`,
     );
-    if (!ok && detail.stack) process.stdout.write(`${DIM}${detail.stack}${RST}\n`);
+    if (!ok && detail.stack) writeAllSync(1, `${DIM}${detail.stack}${RST}\n`);
   }
   process.exit(code);
 }

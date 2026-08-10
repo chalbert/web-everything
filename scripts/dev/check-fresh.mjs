@@ -9,6 +9,7 @@
 // Exit 1 = stale (server up but serving an older build — a rebuild is pending/failed).
 // Exit 2 = down  (server unreachable / no parseable build-id.json).
 import { execSync } from "node:child_process";
+import { writeAllSync } from "../lib/write-all-sync.mjs";
 
 const args = process.argv.slice(2);
 const urlArg = args.find((a) => a.startsWith("--url="));
@@ -27,10 +28,10 @@ function headSha() {
 
 function report(state, detail, code) {
   if (asJson) {
-    process.stdout.write(JSON.stringify({ state, ...detail }) + "\n");
+    writeAllSync(1, JSON.stringify({ state, ...detail }) + "\n");
   } else {
     const label = { fresh: "✓ FRESH", stale: "⚠ STALE", down: "✗ DOWN" }[state];
-    process.stdout.write(`${label} — ${detail.message}\n`);
+    writeAllSync(1, `${label} — ${detail.message}\n`);
   }
   process.exit(code);
 }

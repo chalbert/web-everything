@@ -72,6 +72,7 @@ import { normScope, breachOf } from './scope-lease.mjs';
 import { porcelainFiles } from './claimScope.mjs';
 import { repoKeyFromSlug } from './lane-manifest.mjs';
 import { liveScopePicture } from './scope-lease-live.mjs';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 // ── PURE CORE (no fs / git / Date / child_process — every dependency is injected) ────────────────────────────
 
@@ -533,7 +534,7 @@ function main(argv) {
   const picture = liveScopePicture({ leases, policy });
 
   if (flags.json) {
-    process.stdout.write(JSON.stringify(picture, null, 2) + '\n');
+    writeAllSync(1, JSON.stringify(picture, null, 2) + '\n');
   } else {
     const overlaps = picture.overlaps.length;
     log(

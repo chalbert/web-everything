@@ -17,6 +17,7 @@
  *   node scripts/dev/regression.mjs --no-e2e   # skip the Playwright lanes (fast: unit + standards only)
  */
 import { spawnSync } from 'node:child_process';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 const noE2e = process.argv.includes('--no-e2e');
 
@@ -31,20 +32,20 @@ const LANES = [
 
 const results = [];
 for (const lane of LANES) {
-  process.stdout.write(`\n\x1b[36m▶ ${lane.label}\x1b[0m\n`);
+  writeAllSync(1, `\n\x1b[36m▶ ${lane.label}\x1b[0m\n`);
   const started = Date.now();
   const r = spawnSync(lane.cmd[0], lane.cmd[1], { stdio: 'inherit', encoding: 'utf8' });
   results.push({ label: lane.label, ok: r.status === 0, ms: Date.now() - started });
 }
 
 const pad = (s, n) => (s + ' '.repeat(n)).slice(0, n);
-process.stdout.write(`\n\x1b[1m═══ regression summary ═══\x1b[0m\n`);
+writeAllSync(1, `\n\x1b[1m═══ regression summary ═══\x1b[0m\n`);
 for (const r of results) {
   const mark = r.ok ? '\x1b[32m✓ pass\x1b[0m' : '\x1b[31m✗ FAIL\x1b[0m';
-  process.stdout.write(`  ${mark}  ${pad(r.label, 38)} ${(r.ms / 1000).toFixed(1)}s\n`);
+  writeAllSync(1, `  ${mark}  ${pad(r.label, 38)} ${(r.ms / 1000).toFixed(1)}s\n`);
 }
 const failed = results.filter((r) => !r.ok);
-process.stdout.write(
+writeAllSync(1,
   failed.length
     ? `\n\x1b[31m${failed.length} lane(s) red: ${failed.map((r) => r.label).join(', ')}\x1b[0m\n`
     : `\n\x1b[32mall ${results.length} lanes green\x1b[0m\n`,

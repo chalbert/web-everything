@@ -14,6 +14,7 @@
  * Usage: `npm run check:memory-freshness` [--json]. Always exits 0 (advisory-only).
  */
 import { createRequire } from 'node:module';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 const require = createRequire(import.meta.url);
 const { runMemoryFreshnessCheck } = require('./lib/memory-freshness.cjs');
 
@@ -21,7 +22,7 @@ const AS_JSON = process.argv.includes('--json');
 const { warnings } = runMemoryFreshnessCheck();
 
 if (AS_JSON) {
-  process.stdout.write(JSON.stringify({ warnings }, null, 2) + '\n');
+  writeAllSync(1, JSON.stringify({ warnings }, null, 2) + '\n');
 } else {
   for (const w of warnings) console.warn(`\x1b[33m  stale\x1b[0m ${w.message}`);
   console.log(`${warnings.length ? '\x1b[33m' : '\x1b[32m'}${warnings.length} freshness warning(s)\x1b[0m — agent-memory cites vs live status (#2087)`);

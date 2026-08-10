@@ -29,6 +29,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolveDropboxPath, validateEntry } from './learnings-drop.mjs';
 import { dedup, parseJsonl, DEFAULT_THRESHOLD } from './learnings-dedup.mjs';
+import { writeLineSync } from '../lib/write-all-sync.mjs';
 
 /**
  * sweep(rawEntries, { threshold }) → { candidates, stats }. Pure.
@@ -100,7 +101,7 @@ function main(argv) {
     process.exit(2);
   }
   if (f.json) {
-    console.log(JSON.stringify(result, null, 2));
+    writeLineSync(1, JSON.stringify(result, null, 2));
   } else if (result.stats.received === 0) {
     console.log(`no learnings drop-box to sweep (${path}) — nothing to do.`);
   } else {

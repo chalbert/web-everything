@@ -55,6 +55,7 @@ import {
   RULING_ACTIONS,
 } from '../lib/decision-routing.mjs';
 import { resolveDispositionConfig } from '../lib/review-policy.mjs';
+import { writeLineSync } from '../lib/write-all-sync.mjs';
 
 /** Parse `--flag` / `--flag=value` argv into a flat map (value `true` for a bare flag). Pure. */
 export function parseArgs(argv) {
@@ -125,7 +126,7 @@ function main(argv) {
       shadowAction: f.shadow === true ? undefined : f.shadow,
       humanAction: f.human === true ? undefined : f.human,
     });
-    console.log(JSON.stringify(rec));
+    writeLineSync(1, JSON.stringify(rec));
     process.exit(0);
   }
 
@@ -169,7 +170,7 @@ function main(argv) {
   if (Array.isArray(agreement) && !Array.isArray(ledger)) {
     const metric = computeAgreementMetric(agreement, {});
     if (f.json) {
-      console.log(JSON.stringify({ metric }));
+      writeLineSync(1, JSON.stringify({ metric }));
     } else {
       console.log([`flip-metric: ${metric.answer}`, `  trigger: N=${metric.N} consecutive matches, 0 divergences over the last M=${metric.M}`].join('\n'));
     }

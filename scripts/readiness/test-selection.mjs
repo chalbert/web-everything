@@ -57,6 +57,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { isBlastRadiusPath, isStatutePath, isGateSelfPath } from '../lib/review-escalation.mjs';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 // ── the flag (NOT defaulted — DoD) ───────────────────────────────────────────────────────────────────────────
 
@@ -456,7 +457,7 @@ function runCli(argv) {
       approx, // true ⇒ selectedTestFiles is the changed-file approximation, not the real `vitest related` set
     };
     recordFalseGreen(sample);
-    process.stdout.write(JSON.stringify({ decision, falseGreen: fg, recorded: sample }, null, 2) + '\n');
+    writeAllSync(1, JSON.stringify({ decision, falseGreen: fg, recorded: sample }, null, 2) + '\n');
     process.exit(0);
   }
 

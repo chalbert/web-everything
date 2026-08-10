@@ -101,6 +101,7 @@ import { parseManifest, embedManifestInBody, repoKeyFromSlug, manifestBaseForRep
 import { currentActorId, buildAuthorActorMarker, readAuthorActorStamps } from './lib/review-independence.mjs'; // #2844 — the author stamp the self-clear refusal compares against
 import { classifyPrOpenFailure, recordInfraBlockIO, infraStorePath, primaryRootFromClone, originSlugOf } from './conveyor/infra-blocked.mjs'; // #2659 — a post-push PR-open failure on an outside dependency → the infra-blocked state (recorded for auto-retry/resume), not a hard fail
 import { join } from 'node:path';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 import { verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs'; // #2833 — the lane-verification finish-guard: refuse to land a HEAD whose synchronous suite run never finished (or, under --require-verified, was never recorded green). readVerifyMarker/resolveVerifyOptions are the SHARED marker reader + option resolver (findings 2/5) both this gate and verify-lane use, so the two can never drift (readVerifyMarker owns the VERIFY_FILENAME path — no bare JSON.parse of the marker here).
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
@@ -593,7 +594,7 @@ function runCli() {
   };
 
   function emit(result, exitCode) {
-    if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
+    if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
     else {
       const tag = result.merged ? '✓ merged' : result.reason === 'dry-run' ? '· dry-run' : result.reason === 'opened' ? '· opened (no-wait)'
         : result.reason === 'parked' ? '· parked (review — held, not landed)'

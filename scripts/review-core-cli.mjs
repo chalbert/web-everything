@@ -75,6 +75,7 @@ import {
   deriveJurorInvite,
 } from './lib/review-core.mjs';
 import { renderPanelComment } from './lib/review-render.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 // ── tiny flags parser (matches push-if-green.mjs) ─────────────────────────────────────────────────────
 /**
@@ -302,7 +303,7 @@ function readJsonInput(flags) {
 }
 
 function fail(msg, code) {
-  process.stdout.write(`${JSON.stringify({ error: msg })}\n`);
+  writeAllSync(1, `${JSON.stringify({ error: msg })}\n`);
   process.exit(code);
 }
 
@@ -350,7 +351,7 @@ function runReduce(flags, asJson) {
   }
 
   if (asJson) {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
+    writeAllSync(1, `${JSON.stringify(result)}\n`);
     return process.exit(0);
   }
 
@@ -360,7 +361,7 @@ function runReduce(flags, asJson) {
   summary.push(`findings: ${result.findingsCount}`);
   const lines = [summary.join('   ')];
   if (result.verdictTable) lines.push('', result.verdictTable);
-  process.stdout.write(`${lines.join('\n')}\n`);
+  writeAllSync(1, `${lines.join('\n')}\n`);
   return process.exit(0);
 }
 
@@ -387,10 +388,10 @@ function runComment(flags, asJson) {
   }
 
   if (asJson) {
-    process.stdout.write(`${JSON.stringify({ markdown })}\n`);
+    writeAllSync(1, `${JSON.stringify({ markdown })}\n`);
     return process.exit(0);
   }
-  process.stdout.write(`${markdown}\n`);
+  writeAllSync(1, `${markdown}\n`);
   return process.exit(0);
 }
 
@@ -428,10 +429,10 @@ function runRigor(flags, asJson) {
   const editor = editorPolicyFromReasons(reasons);
 
   if (asJson) {
-    process.stdout.write(`${JSON.stringify({ careLevel, rigor, editor })}\n`);
+    writeAllSync(1, `${JSON.stringify({ careLevel, rigor, editor })}\n`);
     return process.exit(0);
   }
-  process.stdout.write(
+  writeAllSync(1,
     `care-level: ${careLevel}   rounds: ${rigor.rounds}   jurorsPerLens: ${rigor.jurorsPerLens}   `
     + `lenses: ${rigor.lenses.join(', ') || '(none)'}   aggregation: ${rigor.aggregation}\n`
     + `editor: ${editor.editorEnabled ? 'ENABLED' : 'review-only'} (${editor.reason})   `
@@ -466,11 +467,11 @@ function runInvite(flags, asJson) {
   }
 
   if (asJson) {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
+    writeAllSync(1, `${JSON.stringify(result)}\n`);
     return process.exit(0);
   }
   const added = result.addedLenses.map((a) => `${a.lens}+${a.addedJurors}(${a.kind})`).join(', ') || '(none)';
-  process.stdout.write(
+  writeAllSync(1,
     `invite: ${result.accepted ? 'ACCEPTED' : `rejected (${result.reason})`}   `
     + `care: ${result.fromCareLevel} → ${result.toCareLevel}   jurorsPerLens: ${result.jurorsPerLens}   `
     + `delta: ${added}\n`,
@@ -510,9 +511,9 @@ function runMandate(flags, asJson) {
   }
 
   if (asJson) {
-    process.stdout.write(`${JSON.stringify({ kind, lens: typeof flags.lens === 'string' ? flags.lens : null, mandate: text })}\n`);
+    writeAllSync(1, `${JSON.stringify({ kind, lens: typeof flags.lens === 'string' ? flags.lens : null, mandate: text })}\n`);
     return process.exit(0);
   }
-  process.stdout.write(`${text}\n`);
+  writeAllSync(1, `${text}\n`);
   return process.exit(0);
 }

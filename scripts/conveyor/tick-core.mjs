@@ -987,12 +987,13 @@ async function main(argv) {
   }
 
   const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, config, now: Date.now(), lastOperatorTurn });
-  process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+  writeAllSync(1, JSON.stringify(out, null, 2) + '\n');
   process.exit(0);
 }
 
 // Run the IO shell only when invoked directly — never on import (keeps the pure core side-effect-free).
 import { pathToFileURL } from 'node:url';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   main(process.argv.slice(2));
 }

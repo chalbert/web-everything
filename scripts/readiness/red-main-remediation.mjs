@@ -38,6 +38,7 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..'); // scripts/readiness → repo root
@@ -179,12 +180,12 @@ function runCli(argv) {
     process.stdout.write(JSON.stringify(m, null, 2) + '\n');
   } else if (cmd === 'unfreeze') {
     unfreezeDispatch();
-    process.stdout.write(JSON.stringify({ frozen: false }, null, 2) + '\n');
+    writeAllSync(1, JSON.stringify({ frozen: false }, null, 2) + '\n');
   } else if (cmd === 'status') {
-    process.stdout.write(JSON.stringify({ frozen: isDispatchFrozen(), marker: readFreeze() }, null, 2) + '\n');
+    writeAllSync(1, JSON.stringify({ frozen: isDispatchFrozen(), marker: readFreeze() }, null, 2) + '\n');
   } else if (cmd === 'decide') {
     const d = decidePostLand({ trigger: flags.trigger, ref: flags.ref, result: flags.result, mergeSha: flags['merge-sha'] });
-    process.stdout.write(JSON.stringify(d, null, 2) + '\n');
+    writeAllSync(1, JSON.stringify(d, null, 2) + '\n');
     if (d.action === 'stop-the-line' && flags.apply) freezeDispatch({ reason: 'decide --apply', redRef: flags.ref, mergeSha: flags['merge-sha'] });
   } else {
     process.stderr.write('usage: red-main-remediation.mjs <freeze|unfreeze|status|decide> [--flags]\n');

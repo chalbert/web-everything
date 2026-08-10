@@ -41,6 +41,7 @@ import { REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
 // the same body by eye. Imported, never re-implemented: `review-detail.mjs` guards its CLI behind `IS_CLI`, so
 // importing the pure parser does not run it (the same reason this file may import `merge-ai-prs.mjs`).
 import { parseEscalationReason } from './review-detail.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 /** Map a raw `gh` labels array (objects `{name}` or strings) to a plain name array. Pure, tolerant of absent. */
 export function labelNames(labels) {
@@ -361,7 +362,7 @@ function runCli() {
   const nums = args.filter((a) => /^\d+$/.test(a));
 
   if (nums.length === 0) {
-    process.stdout.write(`${JSON.stringify({ error: 'usage: fetch-parked <num…> [--repo=<path>] [--json]' })}\n`);
+    writeAllSync(1, `${JSON.stringify({ error: 'usage: fetch-parked <num…> [--repo=<path>] [--json]' })}\n`);
     process.exit(2);
   }
 
@@ -406,6 +407,6 @@ function runCli() {
     }
   });
 
-  process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
+  writeAllSync(1, `${JSON.stringify(out, null, 2)}\n`);
   process.exit(0);
 }

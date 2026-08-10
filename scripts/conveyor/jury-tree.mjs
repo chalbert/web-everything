@@ -30,6 +30,7 @@
 import { pathToFileURL } from 'node:url';
 import { foldAllSubjects, foldSubject } from '../lib/jury-ledger.mjs';
 import { VERDICTS, frozenLookup } from '../lib/jury-core.mjs';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 // ── PURE CORE (no fs / Date / child_process — the folded ledger is passed IN) ────────────────────────────────
 
@@ -138,7 +139,7 @@ function main(argv) {
     const out = subject && subject.trim()
       ? renderAllJuryTrees([foldSubject(subject)])
       : renderAllJuryTrees(foldAllSubjects());
-    process.stdout.write(out);
+    writeAllSync(1, out);
     process.exit(0);
   } catch (e) {
     process.stderr.write(`jury-tree: could not render the live jury — ${String(e.message || e).split('\n')[0]}\n`);
