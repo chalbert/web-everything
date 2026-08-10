@@ -37,6 +37,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 // ── flag parsing (mirrors pr-land.mjs / push-if-green.mjs) ─────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -135,7 +136,14 @@ function runCli() {
     let out;
     try { out = gitC(diffArgs({ base: flags.base, stat: !!flags.stat })); }
     catch (e) { process.stderr.write(`lane-review diff failed: ${String(e.message || e).split('\n')[0]}\n`); process.exit(3); }
-    process.stdout.write(out);
+    // `writeAllSync`, NEVER a bare `process.stdout.write` before an exit — remedy (b) in
+    // we:scripts/lib/write-all-sync.mjs (#3061). `runCli` is a chain of GUARD branches that must halt in place
+    // (the `body` branch and the usage exit follow), so the exit stays and the WRITE is what changes. This is the
+    // single most damaging instance in the repo: skills-src/batch-backlog-items/parallel-execute.workflow.js
+    // step 7 hands exactly this stdout to the #2170 pre-PR independent reviewer, and a captured 1.36 MB lane
+    // diff arrived as 8 192 bytes (0.6 %) — the reviewer read the first few hunks and reported clean, with
+    // nothing anywhere signalling the loss. Byte-transparent: `out` is emitted verbatim, as before.
+    writeAllSync(1, out);
     process.exit(0);
   }
 
@@ -149,7 +157,10 @@ function runCli() {
       writeFileSync(expandHome(flags.out), body.endsWith('\n') ? body : body + '\n');
       process.stderr.write(`lane-review: wrote PR body (${dismissals.length} dismissal(s)) → ${flags.out}\n`);
     } else {
-      process.stdout.write(body.endsWith('\n') ? body : body + '\n');
+      // Same drain, same reason (#3061): `body` is composed from CALLER-SUPPLIED dismissed findings, so it is
+      // unbounded by construction, and it feeds pr-land's `--body-file` on the stdout path. Fixed alongside
+      // `diff` because it is the identical shape fourteen lines away in the same function.
+      writeAllSync(1, body.endsWith('\n') ? body : body + '\n');
     }
     process.exit(0);
   }

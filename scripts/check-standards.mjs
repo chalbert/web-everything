@@ -2054,4 +2054,11 @@ if (JSON_MODE) {
     `${DIM}(checked ${blocks.length} blocks, ${plugs.length} plugs, ${protocols.length} protocols, ${intents.length} intents, ${capabilities.length} capabilities, ${semantics.length} terms, ${research.length} research topics, ${backlog.length} backlog items)${RST}`,
   );
 }
-process.exit(errors.length ? 1 : 0);
+// `process.exitCode`, NEVER `process.exit()` — remedy (a) in we:scripts/lib/write-all-sync.mjs (#3061). This is
+// the LAST statement of the script, so setting the status and falling off the end exits with the same code
+// once stdout has DRAINED. `process.exit()` here truncated both modes for any parent that captures stdout:
+// `--json` is one ~1.1 MB `console.log` and came back as exactly 8 192 bytes of unparseable JSON through
+// `execFileSync` (measured 2026-08-10) — the health gate's own machine feed, unreadable; the human mode is a
+// `console.log` loop whose many small async writes truncate RACILY (337 131 bytes to a file, 302 018 through a
+// slow pipe in the same measurement), which is why the drain remedy alone would not have been enough here.
+process.exitCode = errors.length ? 1 : 0;

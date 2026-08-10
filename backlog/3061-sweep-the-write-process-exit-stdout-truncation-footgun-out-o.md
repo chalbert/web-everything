@@ -235,3 +235,40 @@ already names that exact instance. Do not fold it in here; just don't be surpris
   [we:scripts/check-standards.mjs](../scripts/check-standards.mjs),
   [we:scripts/lane-review.mjs](../scripts/lane-review.mjs) and
   [we:scripts/review-core-cli.mjs](../scripts/review-core-cli.mjs).
+
+## Progress
+
+**2026-08-10 — the two DECISION-CORRUPTING instances are fixed ahead of the sweep; six remain.** Instances #2
+and #3 were carved out and landed on their own because they corrupt a verdict rather than merely losing data:
+[we:scripts/lane-review.mjs](../scripts/lane-review.mjs) `diff` feeds the #2170 pre-PR independent reviewer, and
+[we:scripts/check-standards.mjs](../scripts/check-standards.mjs) `--json` is the health gate's machine feed.
+Both were reproduced first, on this checkout, at the measured numbers (1 143 763 → 8 192 unparseable;
+1 355 035 → 8 192).
+
+- **[we:scripts/check-standards.mjs](../scripts/check-standards.mjs) → remedy (a)**, `process.exitCode`. Its
+  exit was the LAST statement of the script, and (a) is the only remedy that also repairs the HUMAN mode: that
+  mode is a `console.log` loop whose many small async writes truncate RACILY rather than deterministically —
+  measured here at 337 131 bytes to a file versus 302 018 through a slow pipe, losing every error line and the
+  summary. Remedy (b) would have fixed `--json` alone. Both modes re-measured byte-identical to baseline.
+- **[we:scripts/lane-review.mjs](../scripts/lane-review.mjs) → remedy (b)**, `writeAllSync` keeping
+  `process.exit`. `runCli` is a chain of guard branches that must halt in place. Its `body` subcommand got the
+  same treatment: identical shape, fourteen lines away, and unbounded by construction (caller-supplied
+  dismissed findings).
+- **`writeAllSync` now has its single home** at [we:scripts/lib/write-all-sync.mjs](../scripts/lib/write-all-sync.mjs),
+  and the three copies ([we:scripts/backlog.mjs](../scripts/backlog.mjs),
+  [we:scripts/readiness/conveyor-state.mjs](../scripts/readiness/conveyor-state.mjs),
+  [we:scripts/readiness/conveyor-instrument.mjs](../scripts/readiness/conveyor-instrument.mjs)) import it. The
+  module splits into a byte-transparent `writeAllSync(fd, chunk)` — required so the lane diff gains no trailing
+  newline — plus `writeLineSync(fd, line)`, which is exactly what the three copies did. That module header is
+  now the canonical write-up of the footgun, so the sixth local comment is unnecessary.
+- **Regression tests** in [we:scripts/__tests__/stdout-flush.test.mjs](../scripts/__tests__/stdout-flush.test.mjs)
+  — all four properties, plus a repo-wide guard that fails if any file outside the shared home re-implements the
+  EAGAIN drain loop. Verified failing on a revert of both fixes.
+
+**The `check:standards` rule in Acceptance is still owed, and belongs WITH the sweep, not before it.** A
+detector requiring a `process.stdout.write` of an UNBOUNDED payload (a `JSON.stringify`, a bare identifier, or
+an interpolation — never a plain literal) within three lines of a `process.exit` flags **65 sites** on this
+tree. Almost none are false positives on the SHAPE, but most carry provably-bounded payloads, and six are the
+instances this item defers on purpose — so shipping the rule now means either a red gate or 65 new warnings.
+Land it in the same change as the last fix. The alternative, a 65-entry baseline allowlist, rots before the
+sweep ends.

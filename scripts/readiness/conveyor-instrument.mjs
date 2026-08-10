@@ -49,13 +49,14 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, writeSync, mkdirSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 // Compose, never reinvent (#96): the PR→item-num map and the CI-rollup distiller are already the tested contract
 // in conveyor-state.mjs — the IO shell reuses them so the two conveyor reads can never disagree on what a lane ref
 // means or when a PR's CI is green. Both are PURE (no side effects at import); importing does NOT run its IO shell.
 import { itemNumFromRef, ciRollup } from './conveyor-state.mjs';
+import { writeLineSync } from '../lib/write-all-sync.mjs';
 
 /** Normalize an item id to the dispatch-log key form: a numeric run via `String(Number())` (drops leading zeros);
  *  a JIT `x…` slug LOWER-CASED. Used by BOTH the sidecar writer/reader and the record lookup so a mixed-case ref
@@ -384,20 +385,6 @@ const DISPATCH_LOG_PATH = process.env.CONVEYOR_DISPATCH_LOG || join(ROOT, '.conv
 // stdout = machine payload ONLY; ALL logs / human text → stderr.
 const log = (m) => process.stderr.write(m + '\n');
 
-/**
- * Write a line to a fd SYNCHRONOUSLY and completely, then return — `process.stdout.write` is ASYNC to a pipe and
- * `process.exit()` drops the unflushed tail, silently TRUNCATING a large `--json` payload for an `execFileSync`
- * consumer. A synchronous `writeSync` fully drains BEFORE `process.exit`. Mirrors conveyor-state.mjs's writeAllSync.
- */
-function writeAllSync(fd, line) {
-  const buf = Buffer.from(String(line) + '\n', 'utf8');
-  let off = 0;
-  while (off < buf.length) {
-    try { off += writeSync(fd, buf, off, buf.length - off); }
-    catch (e) { if (e.code === 'EAGAIN') continue; if (e.code === 'EPIPE') break; throw e; }
-  }
-}
-
 /** Hand-rolled `--k=v` flag parsing. */
 function parseFlags(argv) {
   const flags = {};
@@ -576,7 +563,10 @@ function main(argv) {
   // Always emit the JSON payload (the `--json` view both the conveyor skill and the future console read). `--json`
   // is accepted for call-site symmetry with the sibling collectors but is not required.
   void flags.json;
-  writeAllSync(1, JSON.stringify(report, null, 2));
+  // `writeLineSync` — remedy (b) from we:scripts/lib/write-all-sync.mjs: a synchronous drain that completes
+  // before the `process.exit(0)` below, which would otherwise truncate this payload for a capturing parent.
+  // The loop lived here as a local copy until #3061 moved it to the shared home; behaviour is unchanged.
+  writeLineSync(1, JSON.stringify(report, null, 2));
   process.exit(0);
 }
 
