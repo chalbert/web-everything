@@ -6,8 +6,10 @@
  * called directly on the same fixture — so if this declaration ever grew a prioritisation heuristic of its
  * own, the two would diverge and these tests would fail. Nothing here asserts a hand-written expected order.
  *
- * Plus the two properties that make it the right first HTTP operation: it is `compute`-only (structurally
- * incapable of writing), and declaring it cost the command line four lines in `run.mjs` and nothing else.
+ * Plus the two properties that make it the right first HTTP operation: it is `compute`-only — so it cannot
+ * suspend and declares no effects, which is what buys it a GET-only surface — and declaring it cost the
+ * command line four lines in `run.mjs` and nothing else. `compute`-only is NOT the same as "cannot write";
+ * see `http-adapter.test.mjs`, which asserts both the narrower guarantee and the hole it leaves.
  *
  * NOTHING HERE TOUCHES THE LOADER, A LEASE OR `gh`: the board is a fixture array and the exclusions are stubs.
  */
@@ -201,7 +203,7 @@ describe('suggest-next — refusals', () => {
 });
 
 describe('suggest-next — what makes it the right first HTTP operation', () => {
-  it('is `compute`-only, so it is structurally incapable of writing', () => {
+  it('is `compute`-only, so it cannot suspend and declares no effects', () => {
     const declaration = suggestNextOperation({ loadBoard: stubBoard() });
     expect(declaration.steps.map((s) => s.step.kind)).toEqual(['compute', 'compute']);
     expect(isReadOnlyDeclaration(declaration)).toBe(true);

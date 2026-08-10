@@ -275,19 +275,27 @@ export function op(name, body) {
 }
 
 /**
- * IS THIS DECLARATION READ-ONLY? True when every step is a `compute`.
+ * IS EVERY STEP OF THIS DECLARATION A `compute`? That is the whole test, and the name is the strongest thing
+ * that can honestly be said about the answer.
  *
- * DERIVED FROM THE CLOSED VOCABULARY, which is the only reason it can be trusted: `compute` is the one kind
- * that cannot reach the world — a pure fn over a frozen projection of its declared reads, no suspend, no juror,
- * no person, no effect descriptor. So a declaration made only of them has no write path anywhere in it, and
- * that is a structural fact about the four kinds rather than a property anyone has to maintain per operation.
+ * WHAT IS DERIVED FROM THE CLOSED VOCABULARY, and is therefore structural: a `compute`-only declaration cannot
+ * SUSPEND (no `judge`, no `confirm`, so no stop point exists), and it cannot produce an EFFECT DESCRIPTOR for
+ * {@link ./effect-executor.mjs} to apply (no `effect` step). Both follow from the four kinds and neither is a
+ * per-operation promise. That is why #3035's command line drops the `--resume` line for such an operation and
+ * why #3036's HTTP adapter derives a GET-only, run-record-free route table from it.
  *
- * It lives HERE, beside `op()`, because both adapters need it and neither should own it: #3035's command line
- * uses it to stop printing a `--resume` line for an operation that can never suspend, and #3036's HTTP adapter
- * derives an entire GET-only, run-record-free route table from it.
+ * WHAT IS **NOT** DERIVED, AND MUST NOT BE READ INTO THE NAME: this says nothing about what a `compute` step's
+ * fn does. Nothing here — not `op()`, not this predicate — inspects a step fn's body or its closure. A
+ * `compute` fn that closes over `writeFileSync` passes every check in this file, and the HTTP adapter will then
+ * serve it on a `GET`. The `compute` contract in {@link ./step-kinds.mjs} ("a pure function plus its declared
+ * reads") is a contract the DECLARATION AUTHOR keeps; the engine enforces only the reads.
+ *
+ * The repo narrows that gap for its own declarations with a static import-graph assertion — a module that
+ * declares a read-only operation must reach nothing that can act, so its step fns hold no writer in lexical
+ * scope. See `__tests__/http-adapter.test.mjs`, which also states exactly what that check does not cover.
  *
  * @param {object} declaration - a frozen declaration from {@link op}.
- * @returns {boolean}
+ * @returns {boolean} true when every declared step's kind is `compute`.
  */
 export function isReadOnlyOperation(declaration) {
   if (!declaration || !Array.isArray(declaration.steps) || declaration.steps.length === 0) {

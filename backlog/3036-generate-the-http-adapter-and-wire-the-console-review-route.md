@@ -65,10 +65,36 @@ byte-identical outcomes for the same PR, and a run suspended in one can be resum
 ## Landed — the WE half (impl PR of the couple)
 
 `we:scripts/operations/http-adapter.mjs` — generic over ANY declaration, with no `review-pr` and no
-`suggest-next` knowledge in it. `planRoutes(declaration)` derives the route table from the **step kinds**, so
-read-only is structural rather than conventional: a `compute`-only declaration gets `GET …/<op>` and
-`GET …/<op>/run` and **no other route exists**, and the fn behind that route (`runReadOnly`) takes no store, no
-sinks and no judge in its signature. Conversely nothing that can suspend or write is reachable by a safe method.
+`suggest-next` knowledge in it. `planRoutes(declaration)` derives the route table from the **step kinds**: a
+`compute`-only declaration gets `GET …/<op>` and `GET …/<op>/run` and **no other route exists**, and the fn
+behind that route (`runReadOnly`) takes no store, no sinks and no judge in its signature. Conversely nothing
+that can suspend is reachable by a safe method.
+
+**Correction (2026-08-10, review of the impl PR). "Read-only is structural" was an overclaim and is withdrawn.**
+This section, the PR description and three module headers said a `compute`-only declaration is *structurally*
+incapable of writing — that `compute` "cannot reach the world". It is false, and there is a working exploit: a
+`compute`-only declaration whose step fn closes over `writeFileSync` passes `isReadOnlyOperation`, passes
+`assertReadOnlyDeclaration`, is planned a `GET …/run` route, and returns **200 with the file written**. Nothing
+in `op()` or either predicate inspects a step fn's body or closure; they read the declared **kind**. Nothing
+exploitable ships — `suggest-next`'s two `compute` fns only read — but the guarantee as written was wrong.
+
+What is now claimed, and checked:
+
+- **From the closed vocabulary, for any declaration:** a `compute`-only declaration cannot *suspend* and
+  declares no *effects*, so it truly has no run-record, resume or non-GET route, and `runReadOnly` truly gets
+  no store, sinks or judge.
+- **From a static check, for this repo's own declarations:** the module that *declares* a read-only operation
+  reaches nothing that can act — its whole import graph has zero non-relative specifiers. Its step fns hold no
+  writer in lexical scope. Same technique as #3032's engine import-graph test, applied to a narrower claim;
+  the shared scanner is `we:scripts/operations/__tests__/import-graph.mjs`.
+- **The hole, asserted rather than implied:** injected `deps` are not covered. `suggest-next`'s own readers
+  (`we:scripts/operations/suggest-next-io.mjs`) reach `node:fs` and, via `we:scripts/lib/open-pr-items.mjs`,
+  `node:child_process`. They only read — a promise this repo keeps, not a property anything verifies. The check
+  also covers only the operations in `we:scripts/operations/run.mjs`'s table; an ad-hoc declaration is served
+  and never seen by it.
+
+The describe route now ships `readOnlyCaveat` alongside `readOnly`, so a consumer mounting this on a public
+surface is told in the payload that `readOnly` is derived from declared kinds and is not a write guarantee.
 
 **"One route per operation" was not achievable and is corrected here.** A declaration that suspends needs four
 (describe · start · read record · resume), because a `confirm` stop is by construction two requests. Only a

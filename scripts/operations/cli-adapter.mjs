@@ -85,7 +85,7 @@ export function buildCliSpec(declaration) {
       ...(resumable ? [`       run.mjs ${declaration.name} --resume=<run-id> [--answer=<option>] [--json]`] : []),
       '',
       `steps: ${steps}`,
-      ...(resumable ? [] : ['', 'read-only: every step is `compute` — this operation completes in one call, suspends at nothing and writes nothing.']),
+      ...(resumable ? [] : ['', 'read-only: every step is `compute` — this operation completes in one call, suspends at nothing and records no run.']),
     ].join('\n'),
   };
 }

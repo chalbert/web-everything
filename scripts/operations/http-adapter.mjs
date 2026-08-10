@@ -16,10 +16,8 @@
  *
  * ── THE ROUTE TABLE IS A FUNCTION OF THE STEP KINDS ─────────────────────────────────────────────────────────
  *
- * This is the load-bearing property, and it is what makes read-only **structural rather than conventional**.
  * The engine's vocabulary is closed at `compute | judge | confirm | effect` ({@link ./step-kinds.mjs}), and
- * `compute` is the only kind that cannot reach the world: it is a pure fn over its declared reads, it never
- * suspends, and it declares no effects. So:
+ * the route table is derived from which kinds a declaration uses — never from a per-operation allowlist:
  *
  *   | declaration                       | routes planned                                                     |
  *   |-----------------------------------|--------------------------------------------------------------------|
@@ -27,18 +25,35 @@
  *   | any `judge`/`confirm`/`effect`    | `GET /<base>/<op>` · `POST …/runs` · `GET …/runs/<id>` ·            |
  *   |                                   | `POST …/runs/<id>/advance`                                          |
  *
- * A read-only operation therefore has **no non-GET route in existence**, no run-record route, and no resume
- * route — not because someone remembered to leave them out, but because `planRoutes` derives them from kinds
- * and there is no kind present that could justify one. Two further teeth back that up:
+ * ── WHAT "READ-ONLY" HERE DOES AND DOES NOT GUARANTEE ───────────────────────────────────────────────────────
  *
- *   1. {@link runReadOnly} — the fn behind the only executing read-only route — takes **no store, no sinks and
- *      no judge in its signature**. There is no write handle in its scope to misuse. It drives the run with
- *      `startRun` + `advanceWhileRunning`, both from the engine, which imports nothing from `node:` at all.
- *   2. {@link assertReadOnlyDeclaration} refuses at the door, so an effectful declaration cannot be handed to
- *      the read-only path even by a direct call that bypasses the router.
+ * READ THIS BEFORE QUOTING THE TABLE ABOVE AS A SECURITY PROPERTY. It is not one.
  *
- * The converse holds and matters just as much: an operation that CAN write is never reachable by `GET`, so no
- * crawler, prefetch, or `<img src>` can start one. HTTP's own safe-method contract falls out of the step kinds.
+ * **Guaranteed by the closed vocabulary, for any declaration whatever.** A `compute`-only declaration cannot
+ * suspend (no `judge`/`confirm` means no stop point exists) and cannot produce an effect descriptor for
+ * {@link ./effect-executor.mjs} to apply (no `effect` step). So it genuinely has no run-record route, no
+ * resume route and no non-GET route, and {@link runReadOnly} genuinely receives no store, no sinks and no
+ * judge — the read-only branch has none of those handles in scope, so the engine and this adapter write
+ * nothing on that path. {@link assertReadOnlyDeclaration} re-checks at the door for a caller that bypassed the
+ * router. The converse holds too: a declaration that CAN suspend is never reachable by a safe method, so no
+ * crawler, prefetch or `<img src>` can start one.
+ *
+ * **NOT guaranteed: that the operation writes nothing.** Nothing in `op()`, {@link isReadOnlyDeclaration} or
+ * {@link assertReadOnlyDeclaration} inspects what a `compute` fn's body or closure touches — they read the
+ * declared KIND. A `compute` fn that closes over `writeFileSync` passes all three, and `GET …/<op>/run`
+ * returns `200` with the file written. `compute` means "the engine gives this fn only its declared reads and
+ * takes only a finding back"; it does not and cannot mean "this fn is pure". Purity of a step fn is a contract
+ * the DECLARATION AUTHOR keeps, exactly like every other convention in this tree.
+ *
+ * **How far the repo narrows that gap for its OWN declarations.** `__tests__/http-adapter.test.mjs` asserts
+ * statically, over the whole import graph, that the module DECLARING a read-only operation reaches nothing
+ * that can act — no `node:fs`, no `node:child_process`, no package at all. So its step fns hold no writer in
+ * lexical scope, and the only way one can arrive is through the `deps` its builder is handed. That narrows the
+ * surface to one call site (`we:scripts/operations/run.mjs`'s `OPERATIONS` table); it does not close it. The
+ * injected readers are NOT covered, and for the read-only operation that ships today they do reach `node:fs`
+ * and `node:child_process` — they only read, which is a convention, not a structure. That test names it. The
+ * check also covers only declarations in that table; an ad-hoc declaration built at a call site is served by
+ * this adapter and never seen by it. (This file stays generic: which operation is which is not its business.)
  *
  * ── THE RUN RECORD, AND WHEN THERE ISN'T ONE ────────────────────────────────────────────────────────────────
  *
@@ -48,7 +63,8 @@
  * Consistency is kept where it is worth something: the response body is {@link ./cli-adapter.mjs}'s
  * `outcomePayload` — the SAME envelope `--json` prints — plus `persisted: false` so a consumer is told, not
  * left to infer. And this is not a policy the handler observes: the read-only branch has no store in scope at
- * all (see teeth 1 above), so "did not persist" is the same structural fact as "could not write".
+ * all, so "no run record was written" is structural. (It is a statement about the RUN STORE and about nothing
+ * else — see the section above for what a step fn can still do on its own account.)
  *
  * A stateful run IS persisted, on the same store the command line writes, because that is the whole point of
  * the record: a review begun in the terminal can be finished in the browser and the reverse.
@@ -92,7 +108,8 @@ const URL_BASE = 'http://operations.invalid';
 export const ROUTE_KINDS = Object.freeze(['index', 'describe', 'read-run-once', 'start', 'read-run', 'advance']);
 
 /**
- * Is every step of this declaration a `compute`?
+ * Is every step of this declaration a `compute`? That is exactly what it tests — see the header's
+ * *"what read-only does and does not guarantee"*: it reads declared KINDS, never a step fn's body or closure.
  *
  * THE PREDICATE LIVES IN {@link ./registry.mjs}, beside `op()`, because BOTH adapters derive from it — the
  * command line drops its `--resume` line for an operation that can never suspend, and this derives an entire
@@ -105,8 +122,11 @@ export const ROUTE_KINDS = Object.freeze(['index', 'describe', 'read-run-once', 
 export const isReadOnlyDeclaration = isReadOnlyOperation;
 
 /**
- * Refuse anything that is not read-only. The door on {@link runReadOnly}, so the write-free path cannot be
- * handed a declaration that writes even by a caller that bypassed the router entirely.
+ * Refuse a declaration that has a step this path cannot drive. The door on {@link runReadOnly}, so a
+ * declaration that can suspend or declare effects cannot reach the store-free, sink-free, judge-free path even
+ * by a caller that bypassed the router entirely.
+ *
+ * IT CHECKS KINDS, NOT BEHAVIOUR. A `compute`-only declaration whose fn writes passes here. See the header.
  *
  * @param {object} declaration
  * @returns {object} the same declaration, for chaining.
@@ -115,9 +135,9 @@ export function assertReadOnlyDeclaration(declaration) {
   if (!isReadOnlyDeclaration(declaration)) {
     const impure = declaration.steps.filter((s) => s.step.kind !== 'compute').map((s) => `${s.name}(${s.step.kind})`);
     throw new Error(
-      `operations: \`${declaration.name}\` is not read-only — ${impure.join(', ')} can suspend or declare effects. `
+      `operations: \`${declaration.name}\` is not \`compute\`-only — ${impure.join(', ')} can suspend or declare effects. `
       + 'The read-only HTTP path takes no store, no sinks and no judge, so it has nothing to drive those with; '
-      + 'refusing rather than half-running an operation that writes.',
+      + 'refusing rather than half-running an operation that suspends.',
     );
   }
   return declaration;
@@ -158,7 +178,7 @@ export function planRoutes(declaration, { basePath = DEFAULT_BASE_PATH } = {}) {
       path: joinPath(basePath, name, 'run'),
       kind: 'read-run-once',
       safe: true,
-      summary: `Run \`${name}\` and return its verdict. Every step is \`compute\`, so it completes in one sweep, writes nothing and leaves no run record.`,
+      summary: `Run \`${name}\` and return its verdict. Every step is \`compute\`, so it cannot suspend: it completes in one sweep and leaves no run record. It is served on GET on the strength of its step fns being pure, which the engine does not enforce.`,
     });
     return Object.freeze(routes.map((r) => Object.freeze(r)));
   }
@@ -202,9 +222,16 @@ export function describeOperation(declaration, { basePath = DEFAULT_BASE_PATH } 
   return {
     op: declaration.name,
     readOnly,
-    // Said out loud rather than left to be inferred from the absent routes: WHY there is no write surface.
+    // Said out loud rather than left to be inferred from the absent routes: WHY the table has this shape.
     readOnlyBecause: readOnly
-      ? 'every declared step is `compute` — a pure fn over its declared reads. No judge, no confirm, no effect, so nothing can suspend and nothing can be written.'
+      ? 'every declared step is `compute`. No judge, no confirm, no effect — so this operation cannot suspend, '
+        + 'declares no effects, and is given no run store, no sinks and no judge when it runs.'
+      : null,
+    // The limit of the flag above, in the payload rather than only in a comment, because a consumer deciding
+    // whether a GET is safe must not read `readOnly: true` as "this cannot write".
+    readOnlyCaveat: readOnly
+      ? 'This is derived from declared step KINDS. Nothing inspects what a `compute` fn does, so `readOnly` is '
+        + 'not a guarantee that running the operation writes nothing — that rests on its step fns being pure.'
       : null,
     input: Object.fromEntries(Object.entries(declaration.input).map(([field, spec]) => ([field, {
       type: spec.type,
@@ -258,9 +285,12 @@ export function parseQueryInput(declaration, params) {
 }
 
 /**
- * RUN A READ-ONLY OPERATION TO COMPLETION. **Takes no store, no sinks and no judge** — that absence is the
+ * RUN A `compute`-ONLY OPERATION TO COMPLETION. **Takes no store, no sinks and no judge** — that absence is the
  * point, and it is why this function is the whole read-only execution path rather than a flag on the general
  * one. `startRun` and `advanceWhileRunning` are the engine's, which imports nothing from `node:`.
+ *
+ * THE ABSENCE IS ABOUT THIS FUNCTION'S SCOPE, NOT THE STEP FNS'. Nothing here can write; a `compute` fn the
+ * declaration supplies still can, because it is called with whatever its own closure holds. See the header.
  *
  * @param {object} declaration
  * @param {object} o
@@ -420,7 +450,7 @@ export async function handleOperationRequest(
       // Told, not inferred. See the header: the read-only branch has no store in scope, so this is a
       // structural fact about the code path, not a policy it chose to follow.
       persisted: false,
-      persistedWhy: 'every step is `compute`, so the run completes in one request and never needs to cross a surface; the read-only path is given no run store at all.',
+      persistedWhy: 'every step is `compute`, so the run cannot suspend, completes in one request and never needs to cross a surface; the read-only path is given no run store at all. This says no RUN RECORD was written — not that the operation wrote nothing.',
     });
   }
 
@@ -502,7 +532,7 @@ export async function handleOperationRequest(
 /** The 404 body for a path the declaration's own route table never planned. */
 function notPlanned(declaration, basePath, attempted, readOnly) {
   const why = readOnly
-    ? `\`${declaration.name}\` is READ-ONLY — every declared step is \`compute\`, so it has no run records, no suspends and no write routes. Its route table is derived from those step kinds, not from a policy.`
+    ? `\`${declaration.name}\` is READ-ONLY — every declared step is \`compute\`, so it cannot suspend and has no run records and no non-GET routes. Its route table is derived from those step kinds, not from a policy.`
     : `\`${declaration.name}\` suspends, so it is served through run records rather than a single call.`;
   return `${attempted} is not a route \`${declaration.name}\` declares. ${why} Routes: ${shapesFor(declaration, basePath).join(' · ')}`;
 }

@@ -3,29 +3,41 @@
  *
  * THE THREE PROPERTIES THIS FILE EXISTS FOR:
  *
- *   1. **READ-ONLY IS STRUCTURAL.** A `compute`-only declaration gets a route table with no non-GET route in
- *      it, because {@link ../http-adapter.mjs}'s `planRoutes` derives the table from step kinds. Proven twice
- *      over: the plan is asserted, and then a whole `suggest-next` request is served through a store whose
- *      every method THROWS — which passes only because the read-only path has no store in scope to call.
+ *   1. **THE ROUTE TABLE IS DERIVED FROM STEP KINDS.** A `compute`-only declaration gets a route table with no
+ *      non-GET route in it, because {@link ../http-adapter.mjs}'s `planRoutes` derives the table from step
+ *      kinds. Proven twice over: the plan is asserted, and then a whole `suggest-next` request is served
+ *      through a store whose every method THROWS — which passes only because the read-only path has no store
+ *      in scope to call. **The limit of that is asserted too, in `the limits of "read-only"` below: a
+ *      `compute`-only declaration whose fn closes over a writer is served on `GET` and writes. Do not read
+ *      property 1 as a security guarantee; the guarantee is `#3036 read-only is a property of the DECLARING
+ *      MODULE` further down, and it is narrower.**
  *   2. **GENERICITY.** The same adapter, with no `review-pr` knowledge anywhere in it, drives `review-pr`
  *      through start → judge → reduce → its `confirm` suspend, and resumes it — executing nothing. A run
- *      started on the command line is then finished over HTTP against the same store, which is the card's
- *      "a review begun in the terminal can be finished in the browser".
+ *      crosses surfaces in BOTH directions: started on the command line and finished over HTTP, and started
+ *      over HTTP and finished on the command line, both against the same store.
  *   3. **THE ERRORS ARE THE COMMAND LINE'S.** The enum, missing-field and unknown-field refusals are asserted
  *      BYTE-IDENTICAL against `parseOperationArgv`/`validateInput`, not against a copied string.
  *
  * NOTHING HERE SPAWNS A PROCESS, TOUCHES `gh`, OR LEAVES A SERVER RUNNING. The one real `node:http` server is
- * created, bound to port 0, requested against, and closed inside a single test.
+ * created, bound to port 0, requested against, and closed inside a single test. The exploit test writes one
+ * file into `node:os`'s tmpdir and removes it in the same test.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { createServer } from 'node:http';
 import { get as httpGet, request as httpRequest } from 'node:http';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { createRegistry } from '../registry.mjs';
+import { importGraph } from './import-graph.mjs';
+import { createRegistry, isReadOnlyOperation, op } from '../registry.mjs';
+import { compute } from '../step-kinds.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { validateInput } from '../registry.mjs';
 import { buildCliSpec, judgeOutcome, parseOperationArgv, runOperationCli } from '../cli-adapter.mjs';
+import { OPERATIONS, resolveOperation } from '../run.mjs';
 import { reviewPrOperation, REVIEW_PR_OP } from '../review-pr.mjs';
 import { suggestNextOperation, SUGGEST_NEXT_OP } from '../suggest-next.mjs';
 import {
@@ -114,7 +126,10 @@ const stubJudge = async () => judgeOutcome({ summary: 'nothing blocking', findin
 const REVIEW_PR_DECL = () => reviewPrOperation({ readPr: stubReader() });
 const SUGGEST_DECL = () => suggestNextOperation({ loadBoard: () => ({ items: BOARD }) });
 
-// ── 1. read-only is structural ──────────────────────────────────────────────────────────────────────────────
+const HERE = dirname(fileURLToPath(import.meta.url));
+const OPS_DIR = resolvePath(HERE, '..');
+
+// ── 1. the route table is derived from step kinds — and what that is worth ──────────────────────────────────
 
 describe('the route table is a function of the step kinds', () => {
   it('a compute-only declaration plans GET routes and NOTHING else', () => {
@@ -145,7 +160,7 @@ describe('the route table is a function of the step kinds', () => {
   });
 });
 
-describe('read-only is impossible-to-write, not merely absent', () => {
+describe('the read-only path is given nothing to write WITH', () => {
   it('serves a whole suggest-next request through a store whose every method throws', async () => {
     const res = await handleOperationRequest(
       { method: 'GET', url: '/operations/suggest-next/run?limit=2' },
@@ -157,10 +172,10 @@ describe('read-only is impossible-to-write, not merely absent', () => {
     expect(res.body.persisted).toBe(false);
   });
 
-  it('`runReadOnly` takes no store, no sinks and no judge — and refuses a declaration that writes', () => {
+  it('`runReadOnly` takes no store, no sinks and no judge — and refuses a declaration that can suspend', () => {
     expect(() => runReadOnly(REVIEW_PR_DECL(), { input: { pr: 1, repo: 'a/b' }, id: 'r-1', registry: createRegistry() }))
-      .toThrow(/is not read-only — judge\(judge\), confirm\(confirm\), record\(effect\)/);
-    expect(() => assertReadOnlyDeclaration(REVIEW_PR_DECL())).toThrow(/is not read-only/);
+      .toThrow(/is not `compute`-only — judge\(judge\), confirm\(confirm\), record\(effect\)/);
+    expect(() => assertReadOnlyDeclaration(REVIEW_PR_DECL())).toThrow(/is not `compute`-only/);
     expect(assertReadOnlyDeclaration(SUGGEST_DECL()).name).toBe(SUGGEST_NEXT_OP);
   });
 
@@ -181,6 +196,115 @@ describe('read-only is impossible-to-write, not merely absent', () => {
       expect(res.body.error).toContain('is READ-ONLY');
       expect(res.body.error).toContain('every declared step is `compute`');
     }
+  });
+});
+
+describe('the limits of "read-only" — asserted, so the claim above cannot grow back', () => {
+  /**
+   * THE EXPLOIT, AS A TEST. A `compute`-only declaration whose step fn closes over `writeFileSync` passes
+   * `isReadOnlyOperation`, passes `assertReadOnlyDeclaration`, is planned a `GET …/run` route, and returns
+   * `200` with the file on disk. Nothing in `op()` or in either predicate inspects a step fn's closure — they
+   * read the declared KIND. This test exists so that any future header claiming a `compute` step "cannot reach
+   * the world" is contradicted by a green test sitting next to it.
+   */
+  it('a compute-only declaration whose fn closes over a writer IS served on GET, and writes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-op-readonly-'));
+    const victim = join(dir, 'written-by-a-compute-step.txt');
+    try {
+      const declaration = op('closure-writer', {
+        input: { who: { type: 'string', required: false, default: 'world' } },
+        verdictFrom: 'lookup',
+        lookup: compute({
+          reads: ['input.who'],
+          fn: (view) => { writeFileSync(victim, `${view.input.who}\n`); return { greeting: view.input.who }; },
+        }),
+      });
+
+      // Every declaration-level check says "read-only".
+      expect(isReadOnlyOperation(declaration)).toBe(true);
+      expect(() => assertReadOnlyDeclaration(declaration)).not.toThrow();
+      expect(planRoutes(declaration).map((r) => `${r.method} ${r.path}`))
+        .toEqual(['GET /operations/closure-writer', 'GET /operations/closure-writer/run']);
+
+      const registry = createRegistry();
+      registry.register(declaration);
+      const res = await handleOperationRequest(
+        { method: 'GET', url: '/operations/closure-writer/run?who=reviewer' },
+        {
+          resolve: () => ({ declaration, registry, sinks: {} }),
+          names: () => [declaration.name],
+          store: refusingStore(),
+          newRunId: idMinter(),
+        },
+      );
+
+      // …and the "write-free" GET wrote a file.
+      expect(res.status).toBe(200);
+      expect(res.body.persisted).toBe(false); // no RUN RECORD — which is all `persisted` ever meant
+      expect(existsSync(victim)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the describe route ships the caveat, so a consumer is not told `readOnly` means "writes nothing"', () => {
+    const described = describeOperation(SUGGEST_DECL());
+    expect(described.readOnly).toBe(true);
+    expect(described.readOnlyCaveat).toContain('declared step KINDS');
+    expect(described.readOnlyCaveat).toContain('not a guarantee');
+    // …and an operation that is not read-only carries neither field's prose.
+    expect(describeOperation(REVIEW_PR_DECL()).readOnlyCaveat).toBeNull();
+  });
+});
+
+describe('#3036 read-only is a property of the DECLARING MODULE — the part that IS checkable', () => {
+  /**
+   * THE PROPERTY, STATED EXACTLY: for every operation this repo registers as read-only, the module that
+   * DECLARES it reaches nothing that can act — its whole static import graph has zero non-relative
+   * specifiers, so no `node:` builtin and no package. Its `compute` fns therefore hold no writer in lexical
+   * scope, and the only way one can arrive is through the `deps` its builder is handed at the single call
+   * site in `../run.mjs`.
+   *
+   * THE HOLE, EQUALLY EXACTLY: `deps` is not covered, and for the one read-only operation that ships it is
+   * where all the io lives — the test below asserts that too, rather than leaving it implied. This is the
+   * same technique #3032's engine test uses (`engine.test.mjs`, "the engine's import graph reaches nothing
+   * that can act"); it is applied here to a strictly narrower claim.
+   */
+  const DECLARING_MODULE = Object.freeze({
+    [REVIEW_PR_OP]: 'review-pr.mjs',
+    [SUGGEST_NEXT_OP]: 'suggest-next.mjs',
+  });
+
+  it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
+    expect(Object.keys(DECLARING_MODULE).sort()).toEqual(Object.keys(OPERATIONS).sort());
+  });
+
+  it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
+    const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
+    // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
+    expect(readOnly).toEqual([SUGGEST_NEXT_OP]);
+    for (const name of readOnly) {
+      const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
+      expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)
+        .toEqual([]);
+    }
+  });
+
+  it('and the check stops at the injected deps — suggest-next\'s own readers DO reach fs and child_process', () => {
+    // Not a defect being tolerated quietly: this is the boundary of the guarantee, written down as an
+    // assertion so the header's "that narrows the surface; it does not close it" cannot rot into a stronger
+    // claim. Both readers only read; that is a promise this repo keeps, not a property anything verifies.
+    const { external } = importGraph(resolvePath(OPS_DIR, 'suggest-next-io.mjs'));
+    expect(external).toContain('node:fs');
+    expect(external).toContain('node:child_process');
+  });
+
+  it('a declaration module that imports a writer FAILS the check — the scanner is not vacuous', () => {
+    // `review-pr` is the negative control: it is not read-only, and its module graph is full of writers. If
+    // the scanner ever returned `[]` for everything, this would fail and the assertion above would be empty.
+    const { external } = importGraph(resolvePath(OPS_DIR, 'review-pr.mjs'));
+    expect(external).toContain('node:fs');
+    expect(external).toContain('node:child_process');
   });
 });
 
@@ -351,6 +475,36 @@ describe('genericity — the adapter knows nothing about either operation', () =
     );
     expect(done.body.stopped).toBe('complete');
     expect(store.read('review-pr-crossing').findings.confirm).toBe('abstain');
+  });
+
+  it('and the OTHER direction: a run STARTED over HTTP is finished on the command line', async () => {
+    // The card claims the crossing works "in the terminal … and the reverse". Only one direction was pinned;
+    // this is the reverse, and it is a separate risk — the HTTP start writes the record and the CLI's
+    // `--resume` has to find, validate and advance a record it did not create.
+    const store = createMemoryRunStore();
+    const { resolve, names } = wiring();
+    const deps = { resolve, names, store, judge: stubJudge, newRunId: () => 'review-pr-reverse' };
+
+    const started = await handleOperationRequest(
+      { method: 'POST', url: '/operations/review-pr/runs', body: { pr: 1146, repo: 'chalbert/web-everything' } },
+      deps,
+    );
+    expect(started.status).toBe(201);
+    expect(started.body.stopped).toBe('confirm');
+    expect(store.read('review-pr-reverse').pending.kind).toBe('confirm');
+
+    // …and the terminal finishes it, against the record the browser wrote. No second implementation.
+    const { declaration, registry, sinks } = resolve(REVIEW_PR_OP);
+    const cli = await runOperationCli({
+      declaration, argv: ['--resume=review-pr-reverse', '--answer=abstain', '--json'],
+      registry, store, sinks, judge: stubJudge, newRunId: () => 'unused',
+    });
+    expect(cli.stopped).toBe('complete');
+    expect(cli.code).toBe(0);
+    expect(cli.run.id).toBe('review-pr-reverse');
+    expect(store.read('review-pr-reverse').findings.confirm).toBe('abstain');
+    // `abstain` declares no effects, so nothing was applied on either surface.
+    expect(store.read('review-pr-reverse').effects).toEqual([]);
   });
 
   it('keeps the repo sanitisation — in the operation\'s io shell, not in the generic adapter', async () => {

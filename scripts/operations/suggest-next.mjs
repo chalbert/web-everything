@@ -7,12 +7,25 @@
  *
  * ── WHY THIS OPERATION SHIPS WITH THE HTTP ADAPTER ──────────────────────────────────────────────────────────
  *
- * It is **pure `compute`, both steps**. The engine's vocabulary is closed at `compute | judge | confirm |
- * effect` ({@link ./step-kinds.mjs}); `compute` is the only kind that cannot reach the world. So this
- * declaration has no juror to spawn, no person to ask, no effect to apply and nothing to write — which is
- * exactly what {@link ./http-adapter.mjs} reads off the step kinds to give it a `GET`-only surface with no run
- * records and no resume route. It exercises the whole HTTP path end to end while being **structurally**
- * incapable of changing anything.
+ * It is **`compute`, both steps**. The engine's vocabulary is closed at `compute | judge | confirm | effect`
+ * ({@link ./step-kinds.mjs}), so this declaration has no juror to spawn, no person to ask and no effect to
+ * apply — which is exactly what {@link ./http-adapter.mjs} reads off the step kinds to give it a `GET`-only
+ * surface with no run records and no resume route. It exercises the whole HTTP path end to end.
+ *
+ * AND IT ACTUALLY ONLY READS — which is a separate fact, kept by this file rather than enforced by the engine.
+ * `compute` constrains what the engine HANDS a step (its declared reads) and what it takes BACK (a finding);
+ * it does not constrain what the fn itself does, and a `compute` fn closing over a writer would be served on
+ * `GET` just the same (see {@link ./http-adapter.mjs}'s header). Two things keep it honest here, both narrow
+ * and both worth stating precisely:
+ *
+ *   - THIS MODULE reaches nothing that can act — its entire import graph is `registry`, `step-kinds` and
+ *     `readiness/engine`, with zero `node:` or package specifiers. `__tests__/http-adapter.test.mjs` asserts
+ *     that statically, so a future edit that imports `node:fs` here fails the suite. That means the step fns
+ *     below hold no writer in lexical scope.
+ *   - THE INJECTED READERS are the remaining surface, and they are NOT covered by that check.
+ *     {@link ./suggest-next-io.mjs} reaches `node:fs` and, via `we:scripts/lib/open-pr-items.mjs`,
+ *     `node:child_process` (it shells out to `gh`). Both only read. That is a promise this repo keeps, not a
+ *     property the engine or the adapter can verify.
  *
  * It also needs none of the vocabulary the engine is still missing. A *build* is not expressible in any of the
  * four kinds — that is #3030's open spike (`does the background-agent lifecycle cover a dispatch effect?`), and
