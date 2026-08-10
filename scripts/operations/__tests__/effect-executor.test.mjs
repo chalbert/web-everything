@@ -147,6 +147,23 @@ describe('a GENUINE partial failure — the #2964 shape', () => {
 });
 
 describe('the indeterminate case — an attempt whose outcome is unknown', () => {
+  it('the PERSISTED record already says `pending` at the moment the sink runs — so a crash mid-sink reads as indeterminate', async () => {
+    // The mark-before-attempt is the whole three-state model: a process killed inside the sink leaves no
+    // catch handler to record anything, so the only thing standing between a mid-sink SIGKILL and a silent
+    // re-apply on replay is that the `pending` mark was DURABLE before the sink was called. Observe the
+    // store from inside the sink — the exact state a crash at that instant would leave behind.
+    const store = createMemoryRunStore();
+    const seenByStore = [];
+    const observe = async (_payload, ctx) => {
+      seenByStore.push(store.read(ctx.runId).effects.find((e) => e.key === ctx.key).status);
+      return { ok: true };
+    };
+    const run = atEffectStep('run-presink');
+    store.write(run);
+    await applyPendingEffects(run, { sinks: { 'comment.post': observe, 'label.swap': observe }, store });
+    expect(seenByStore).toEqual(['pending', 'pending']);
+  });
+
   it('marks the entry `pending`, not `failed`, when the sink throws without saying nothing landed', async () => {
     const store = createMemoryRunStore();
     const { sinks } = recordingSinks({ fail: 'comment.post', certain: false });
