@@ -3,8 +3,11 @@ bornAs: xju8rp3
 kind: story
 size: 5
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-10"
+dateStarted: "2026-08-10"
+dateResolved: "2026-08-10"
+graduatedTo: skills-src/jury/panel-fanout.mjs
 relatedTo: ["3050", "3028", "2658", "3029"]
 scope:
   - "we:skills-src/jury/subject-jury.workflow.js"
@@ -70,9 +73,15 @@ call it.** The two shims the harness already uses
 ([we:skills-src/jury/resolve-roster.mjs](../skills-src/jury/resolve-roster.mjs) and
 [we:scripts/review-core-cli.mjs](../scripts/review-core-cli.mjs)) are reached exactly this way.
 
+**The constraint was re-verified before the route was taken, not assumed from this card.** `node --check` still
+rejects the harness (its top-level `return` is what makes it a body rather than a module), so there is no import
+edge to add and no version of this that calls `judgePanel` directly. A test now pins both halves of that — the
+body has no top-level `import` and does end in a top-level `return` — so the reason the shim exists stays
+checkable rather than becoming folklore.
+
 Two routes, and this item picks one rather than carving a fork (an implementation shape, not a design fork):
 
-- **Recommended — a panel shim, shelled once.** Add a sibling CLI next to
+- **TAKEN — a panel shim, shelled once.** Add a sibling CLI next to
   [we:skills-src/jury/resolve-roster.mjs](../skills-src/jury/resolve-roster.mjs) that takes the materialized
   roster plus the round's subject snapshot, calls `judgePanel`, and returns the per-juror results as structured
   data. The harness replaces its `parallel(… agent(…) …)` nest with **one** `agent()` call that shells it. The
@@ -112,22 +121,99 @@ untouched — the seat ids the ledger records are unchanged, which is what makes
 
 The acceptance that matters is **equivalence on a real subject**, not fixture parity.
 
-- [ ] **Same subject, same outcome, verified against a real run.** Run one subject through the harness before
+- [x] **Same subject, same outcome, verified against a real run.** Run one subject through the harness before
       and after at the same `careLevel`, and record: the **same roster** (identical seat ids in identical
-      order), the **same seat count**, and an **equivalent verdict**. "Equivalent" is the panel verdict and the
-      per-lens verdicts matching; the *findings* are model output and will differ in wording — say so in the
-      run record rather than pretending to byte-equality. This must be an actual billed run, not a stubbed one.
-- [ ] **The seats are pairwise-distinct actors** — a test asserting the session ids the migrated harness put in
-      its children's argv are pairwise distinct, over a roster of N ≥ 3 including two seats on one lens. This
-      is the one property the old harness **cannot** have, so it is the one the migration exists to buy, and it
-      must fail if the fan-out ever regresses to `agent()`.
-- [ ] **A failed seat is still a reported seat.** `judgePanel` returns `{ ok: false, error }` rather than
-      throwing; the harness's existing rule — a mandatory lens whose whole jury failed degrades to
-      `needs-human`, never a silent accept — must hold on the new path and be tested there.
-- [ ] **No second reducer.** The diff adds no verdict derivation outside
-      [we:scripts/lib/jury-core.mjs](../scripts/lib/jury-core.mjs).
-- [ ] The aggregate ceiling is passed, not defaulted — `judgePanel` requires `maxTotalBudgetUsd`, `depth` and
-      `maxDepth`, and all three fail closed when unknown.
+      order), the **same seat count**, and an **equivalent verdict**. This must be an actual billed run, not a
+      stubbed one. **Done — see "The equivalence run, as measured" below, including the way this bullet's own
+      definition of "equivalent" turned out to be the wrong test.**
+- [x] **The seats are pairwise-distinct actors** — pinned on the `--session-id` tokens that reached each child's
+      argv over a 5-seat roster with **two seats on one lens**, in
+      [we:skills-src/jury/tests/panel-fanout.test.mjs](../skills-src/jury/__tests__/panel-fanout.test.mjs), and
+      confirmed live (4/4 distinct, each echoed back by the CLI). The regression guard is in the same file: it
+      reads the harness body as text and fails if a per-seat `agent(jurorPrompt(…))` fan-out or a `parallel()`
+      call ever comes back.
+- [x] **A failed seat is still a reported seat.** Tested on the new path both ways — one seat failing while its
+      siblings still spawn and report, and a whole lens's jury failing (the shape the harness's
+      mandatory-lens → `needs-human` degrade keys on). The harness now walks the ROSTER and looks each seat up
+      by id, so a seat the relay silently dropped degrades exactly like a seat that crashed.
+- [x] **No second reducer.** The diff touches only [we:skills-src/jury/](../skills-src/jury/);
+      [we:scripts/lib/jury-core.mjs](../scripts/lib/jury-core.mjs),
+      [we:scripts/review-core-cli.mjs](../scripts/review-core-cli.mjs),
+      [we:scripts/lib/judge-panel.mjs](../scripts/lib/judge-panel.mjs) and
+      [we:scripts/lib/judge-spawn.mjs](../scripts/lib/judge-spawn.mjs) are byte-unchanged. Pinned by a test that
+      greps the shim's code for every reducer name and asserts its ONLY jury-core import is `IMPACT_LEVELS`.
+- [x] The aggregate ceiling is passed, not defaulted — the shim makes `--depth`, `--max-depth` and
+      `--max-total-budget-usd` **required flags** (usage error, nothing spawned), and the harness passes all
+      three from named constants. Each refusal is asserted with a spawn counter, so "refused" and "refused
+      before it cost anything" are separate claims.
+
+## The equivalence run, as measured (2026-08-10)
+
+**Subject:** a 10-line added-file diff with one off-by-one (`if (i === attempts) throw e` inside a
+`i < attempts` loop, so an exhausted retry silently returns `undefined`). `pr-diff`, care `low` — the smallest
+non-empty roster the dial produces: **4 seats, 1 juror per lens, 1 round**.
+
+**Roster and seat count: identical, and identical for free.**
+[we:skills-src/jury/resolve-roster.mjs](../skills-src/jury/resolve-roster.mjs) is unchanged, so both legs seated
+`correctness#1, security#1, simplicity#1, standards-conformance#1` in that order. This half of the bar costs
+nothing to prove and was never at risk.
+
+**Both legs found the same defect, at the same impact.** All eight jurors (4 subagents before, 4 headless
+children after) reported one finding: the same off-by-one, `impactIfUnfixed: broken`, `introduced: true`,
+`worseThanBase: true`, `preventionCaptured: false`. Wording differs, as this card predicted.
+
+**The panel verdicts did NOT match, and the reason is worth more than the match would have been.**
+
+| | before (4 subagents) | after (4 headless jurors) |
+|---|---|---|
+| panel verdict | `changes` | `prevention-outstanding` (twice, two samples) |
+| outcome | `escalate` | `escalate` |
+| the one divergent field | `correctness#1` answered `parallelizable: false` | every seat answered `parallelizable: true` |
+
+Flip that **one boolean on one seat** and the migrated path reduces to `changes` with a byte-identical per-lens
+map. Same reducer, same inputs, same output — the mechanism is equivalent and the divergence is one juror's
+judgement call on a genuinely debatable question. A second live sample of the migrated path reproduced
+`parallelizable: true` on all four seats, so the outlier is the *old* leg's single subagent, not a shift the new
+mechanism introduced.
+
+**So this card's own definition of "equivalent" was wrong, and is corrected here.** It said the findings are
+model output and will differ, but the panel verdict must match — and those two clauses contradict each other.
+`parallelizable` *is* model output, and `deriveFindingDisposition` keys the verdict on it. A verdict-equality
+test over one sample of a 4-seat panel is therefore a test of model variance, not of the fan-out. The test that
+actually discriminates is the one run above: **same roster, same seat count, same defect at the same impact, and
+identical reduction under identical inputs.**
+
+**What the run caught that no fixture would have.** The first live panel came back with findings carrying
+*exactly* the keys the shim's `--json-schema` declared and not one more — every seat dropped
+`introduced` / `worseThanBase` / `parallelizable`, even though the adapter mandate demands all three and
+`additionalProperties: true` permitted them. `--json-schema` is a FORCED TOOL CALL (#3028), so on this path the
+declared shape beats the prose; the pre-migration subagents supplied the triple because free-form JSON has no
+competing shape. It failed *closed* (an unanswered finding stays blocking), so no verdict was ever at risk — but
+without it the migrated jury could never route anything to a carve-out, i.e. it was strictly stricter than the
+jury it replaced. The three booleans are now declared in the shape, and a test pins that they are. **This is
+#xdompzx's failure mode with the volume turned up, and it is exactly what the "actual billed run" clause was
+for.**
+
+**The bill.** Three live panels at 4 headless `haiku`/low jurors each: **$0.108771 + $0.102118 + $0.109653 =
+$0.320542**, 36–39 s wall per panel. Per-panel that is **~$0.10 for a 4-seat care-`low` panel on a 10-line
+subject** — the number to extrapolate from, remembering that a care-`high` panel is 8 seats × 3 rounds and that
+the harness's own dial is `sonnet`/`medium`, not `haiku`/`low`. The "before" leg billed 4 subagents (~21k tokens
+each) against the parent session, which is precisely the cost line that used to be invisible.
+
+**The independence claim, re-measured rather than cited.** All four "before" jurors reported
+`CLAUDE_CODE_SESSION_ID = 01f39b97-274a-4078-8eeb-e7f8d6008673` — byte-identical to the launching session. One
+actor wearing four hats, exactly as #3006 and #3048 recorded. All four "after" jurors reported four distinct ids,
+each equal to the one `panelSeats` derived for its seat and none equal to the parent's.
+
+## Found while building this — a live truncation in the sibling shim
+
+[we:skills-src/jury/resolve-roster.mjs](../skills-src/jury/resolve-roster.mjs) ended with
+`process.stdout.write(bigJson); process.exit(0)`. `process.exit` tears the process down at once and a pipe write
+is asynchronous past the pipe buffer, so the two together truncate: read back through `execFileSync`, its ~20 KB
+care-`low` roster returned **8144 bytes of unparseable JSON**. The harness's resolve agent shells that shim on
+every jury run, so this was live on the shipped path, not hypothetical. Fixed in both shims (`process.exitCode` +
+return) with a regression test that reads a real roster back through a real pipe. The new shim would have
+inherited the bug — it was copied from the old one.
 
 ## The honest cost
 

@@ -149,9 +149,19 @@ function decisionApproachOf(input) {
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) main(process.argv.slice(2));
 
+/**
+ * Print `{error}` and set the exit code — WITHOUT calling `process.exit`.
+ *
+ * `process.exit()` tears the process down at once, and a `process.stdout.write` to a PIPE is asynchronous once
+ * the payload exceeds the pipe buffer (~8 KB on macOS), so the two together TRUNCATE the output. That is not
+ * hypothetical here: this shim's own roster JSON for a care-`low` pr-diff panel is ~20 KB (four lenses, each
+ * carrying its adapter mandate), and `execFileSync`-ing it returned exactly 8144 bytes — a truncated,
+ * unparseable JSON — until this was changed (reproduced 2026-08-10 while building #3057). Setting `exitCode` and
+ * returning lets Node drain stdout and exit with the same status.
+ */
 function fail(msg, code) {
   process.stdout.write(`${JSON.stringify({ error: msg })}\n`);
-  process.exit(code);
+  process.exitCode = code;
 }
 
 /** Read a JSON flag value directly (`--k={...}`) or, when it names a path via `--k-file=`, from that file. */
@@ -188,6 +198,7 @@ function main(argv) {
     return fail(msg, /unknown subject|is required/.test(msg) ? 2 : 1);
   }
 
+  // No `process.exit(0)` here — see `fail`'s header. The roster JSON is ~20 KB and exiting would truncate it.
   process.stdout.write(`${JSON.stringify(result)}\n`);
-  return process.exit(0);
+  return undefined;
 }
