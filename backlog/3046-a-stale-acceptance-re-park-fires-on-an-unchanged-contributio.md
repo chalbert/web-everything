@@ -4,6 +4,7 @@ kind: story
 size: 3
 status: open
 dateOpened: "2026-08-09"
+parent: "x5p1xz8"
 scope:
   - we:scripts/lib/review-escalation.mjs
   - we:scripts/lib/__tests__/review-escalation.test.mjs
@@ -37,9 +38,7 @@ not distinguish *who* moved it. The design intends it to catch **the contributio
 just as readily when **the base** grows by a different amount above two of the contribution's hunks — a
 non-uniform base move — which the contributor did not cause and cannot prevent.
 
-## Observed on WE PR #1106 — the timeline is replicated, the byte measurement is not
-
-Two claims, two different evidence grades; do not read the second as carrying the first's weight.
+## Observed on WE PR #1106 — timeline and measurement both replicated
 
 The **label + commit timeline** is replicated. Read independently three times from
 `gh api repos/chalbert/web-everything/issues/1106/timeline` — in the PR #1124 review, for this filing, and
@@ -56,9 +55,25 @@ again in the independent review of the PR that filed this card — matching line
 
 The head moved because of the **drain's own** rebase-drop commit `e97d6c3b`, not because the author pushed.
 
-**The byte measurement is SINGLE-SOURCED and unreplicated — treat every number below as a lead, not a
-fact.** Both net diffs are reported as 137,799 bytes and the two normalized 1,534-line
-projections differ in **exactly two lines** — the two inter-hunk gap values:
+**Update 2026-08-09 — the measurement has now been re-derived, and one figure in it was WRONG.** The first cut
+of this card recorded the measurement as single-sourced and unreplicated ("both net diffs reported as
+~~137,799 bytes~~"), sourced only from the PR #1124 review's by-hand recomputation, with re-derivation listed as
+part of this item's work. That re-derivation has been run for the 2026-08-09 consolidation, using the same basis
+`computeNetDiffText` ([we:scripts/merge-ai-prs.mjs](scripts/merge-ai-prs.mjs)) uses —
+`git diff <merge-base(main-tip, head)> <head>` — and it is **self-certifying**: the accept-time net diff
+reproduces both markers stamped in the `00:33:59Z` clearance comment exactly, `reviewed-diff 3265beec…` and
+`reviewed-contribution b5d1eafe…`, which proves the base reconstruction is the right one.
+
+| | main tip | head | merge-base | net-diff bytes | contribution digest |
+| --- | --- | --- | --- | --- | --- |
+| accept-time | `926c3471` | `53b37954` | `543b9962` | **141,836** | `b5d1eafe…` (matches the stamp) |
+| post-rebase | `7a58229f` | `e97d6c3b` | `7a58229f` | **141,836** | `e7b1d883…` (**diverged**) |
+
+**The byte figure is 141,836, not ~~137,799~~.** The 137,799 figure was wrong and is retired; it appears with
+the same single source on
+[#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/), which is retired with it.
+Everything else replicates exactly: **1,534 normalized projection lines on each side, differing in exactly two**
+— the two inter-hunk gap values:
 
 ```
 -@@ ~424 -,6 +,115 @@ export function panelRigorFromReasons(reasons) {
@@ -67,26 +82,23 @@ projections differ in **exactly two lines** — the two inter-hunk gap values:
 +@@ ~328 -,6 +,12 @@ function runComment(flags, asJson) {
 ```
 
-On that reading no `+`/`-` line, hunk length, section heading or file differs, and `main` grew 15 lines above
-one hunk and 4 above another (439−424 and 328−324) — a non-uniform move. **All of it came from the PR #1124
-review, recomputed by hand from the real commits. No committed script produces it, and no independent run has
-replicated it — including the review of the PR that filed this card, which checked the provenance and
-deliberately did not re-derive the bytes.** The same numbers on
-[#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/) come from that same
-review, so the two cites share one source rather than corroborating each other. Re-deriving it from a script
-is part of this item's work, and the mechanism above does not depend on it: the docblock at lines 891–893
-already states the gap is invariant only under a *uniform* displacement, which is the whole argument.
+No `+`/`-` line, hunk length, section heading or file differs, and `main` grew 15 lines above one hunk and 4
+above another (439−424 and 328−324) — a non-uniform move. The mechanism never depended on the byte figure
+anyway: the docblock at lines 891–893 already states the gap is invariant only under a *uniform* displacement,
+which is the whole argument.
 
-## Why this is unowned
+## Why this was unowned when it was filed
 
-Confirmed by reading each card, not inferred:
+Confirmed by reading each card, not inferred (and still true — the 2026-08-09 consolidation grouped these cards
+under `#x5p1xz8` without merging any of their scopes):
 
 - **[#3021](/backlog/3021-the-contribution-fingerprint-still-collides-on-an-intra-sect/)** (`3021`, open)
   files the **inverse**: the digest *colliding* — two different contributions hashing alike, a false
   *honour*. Its argument turns on the gap being *preserved* under a uniform shift ("a set of hunks that
   relocates uniformly preserves every gap and collides the same way"). It does not file the diverging case.
 - **[#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/)** (its code landed
-  in PR #1124, merged 2026-08-09T11:50:32Z; the card is still `status: open`) makes the re-hold **loud** — it
+  in PR #1124, merged 2026-08-09T11:50:32Z; **resolved 2026-08-09** by the consolidation, after its notice was
+  observed firing in production on PR #1100 at 12:20:59Z) makes the re-hold **loud** — it
   posts a durable notice naming the clearer. It states in as many words that the diverging direction "is
   filed nowhere; this item does not close it". It fixes the silence, not the false stale.
 - **[#2884](/backlog/2884-acceptance-coverage-keys-on-head-sha-identity-so-a-no-op-reb/)** (open) is the
@@ -109,13 +121,22 @@ PR #1119 (merged 2026-08-08T23:09:39Z) landed the contribution-only fingerprint 
 case — the escape works, and #1106's own `review:accepted` survived because of it. What did not survive is
 the `review:human` re-imposition on top.
 
-**Five cards now sit on one incident, and that is the real risk here.** This one (does the re-park fire?),
-#3021 (the inverse digest direction), #3024 (which label a genuine re-park applies), #3039 (say so out loud
-— landed), #2884 (the pre-escape SHA-identity framing), plus the unfiled `review:stale` fourth-tier proposal.
-They are distinct defects, not re-filings — each was checked against the others before this one was written,
-and #3039 says of this direction "filed nowhere; this item does not close it". But no two of them can be
-costed independently, so the first move on any of them should be to run them through `/consolidate` and
-decide whether they want an umbrella epic. Do that before claiming this card, not after.
+**DONE — the consolidation ran on 2026-08-09; this instruction is discharged.** This card previously read
+"five cards now sit on one incident … the first move on any of them should be to run them through
+`/consolidate` … do that before claiming this card, not after." That was done, and the outcome is:
+
+- **`#x5p1xz8`** — a `kind: epic` umbrella over the digest-correctness work: this card, #3021, #2884, and a
+  fourth slice `#x0pfbqp` (a **second** false-stale mechanism the sweep found and no card owned — the section
+  **heading** is variant when `main` inserts a new column-0 declaration above an unmoved hunk; observed on WE
+  PR #1100 at 12:20:57Z). This card keeps its `NNN`, its `size: 3`, its scope and its body, and stays
+  independently claimable — the umbrella exists so the joint cost is visible, not to merge the scopes.
+- **`#xxdslno`** — a `kind: decision` carving the live fork out of #3024 (whole-PR score vs uncovered-delta
+  score vs a fourth `review:stale` hold tier), which also **files #3039's dangling deferral** instead of
+  leaving it in a sentence. `#x5p1xz8` is `blockedBy` it.
+- **#3039** — resolved; its code landed in PR #1124 and its notice was observed firing in production.
+- **#3024** — stays a story, fork trimmed to a pointer, `blockedBy: xxdslno`.
+
+**This card is now claimable**, jointly costed with its siblings under `#x5p1xz8`.
 
 ## Directions worth costing (none picked)
 
@@ -133,7 +154,11 @@ decide whether they want an umbrella epic. Do that before claiming this card, no
 - A test reproduces the false stale from real `git diff` text: one contribution, two bases that grow by
   *different* amounts above two of its hunks, byte-identical `+`/`-` lines, and today's
   `normalizeContributionFingerprint` returning two different digests.
-- The 137,799-byte / two-line PR #1106 measurement is re-derived by a script from the two real commits, so
-  the figure stops being review-sourced.
+- ~~The 137,799-byte / two-line PR #1106 measurement is re-derived by a script from the two real commits, so
+  the figure stops being review-sourced.~~ **Done 2026-08-09** — re-derived (see the table above); the figure
+  is **141,836** bytes on both sides, the 137,799 figure was wrong, and the two-differing-gap-lines result and
+  the 1,534-line projection count both replicate. A committed script for it is no longer owed by this card;
+  what remains owed is the *unit test* in the bullet above.
 - Whichever direction is taken, #3021's pinned "known residual" test is updated in the same change — the two
-  residuals must never be allowed to disagree about what the digest promises.
+  residuals must never be allowed to disagree about what the digest promises. Under `#x5p1xz8` this now extends
+  to `#x0pfbqp`'s heading direction: **three** residuals, one promise.

@@ -4,6 +4,7 @@ kind: story
 size: 3
 status: open
 dateOpened: "2026-08-08"
+blockedBy: ["xxdslno"]
 tags: [gate, review, drain, review-escalation, declarative-leash, ratification]
 scope:
   - we:scripts/lib/review-escalation.mjs
@@ -42,46 +43,38 @@ fail-closed and cannot shrink" put the boundary itself under ratification
 ([we:docs/agent/platform-decisions.md](docs/agent/platform-decisions.md), `#principle-and-impl-two-pr`). An
 impl PR may not author it.
 
-## What this item is
+## What this item is — the BUILD side only; the fork was carved out on 2026-08-09
 
-1. **Prepare the fork** — state the option set and the bold default for "does a stale-acceptance re-park score
-   the whole PR or the uncovered delta?", with the fail-closed argument on both sides. The hard case is a head
-   advance that MOVES a leash-path edit rather than adding one; a delta-only score must still catch that.
-2. **Ratify it** as a principle change (statute edit + `codifiedIn`), separately from any code.
-3. **Only then** implement the narrowing, with the leash-cannot-shrink invariants extended to cover it.
+This item originally carried three steps: prepare the fork, ratify it, then implement. **Steps 1 and 2 no longer
+live here.** Per the fork-flip-or-carve rule
+([we:docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md)) a fork never lives inline in a story body,
+so the 2026-08-09 consolidation carved it to its own item:
 
-Until (2) lands, the current whole-PR behaviour is the fail-closed one and stays.
+> **`#xxdslno`** — *What a stale-acceptance re-park does to a cleared PR — whole-PR score, uncovered-delta score,
+> or a fourth `review:stale` hold tier.* It is now a **three-way** fork: it also absorbed the `review:stale`
+> fourth-tier proposal that PR #1124's write-up made and #3039 said was "filed separately rather than smuggled in
+> here" but never was. That decision item carries the full option set, the hard cases, and the prep still owed.
 
-## Note added 2026-08-09 — a competing approach to the same hole, reconcile before building either
+What remains here is **step 3 only**: once `#xxdslno` rules for the delta-only score, implement the narrowing,
+with the leash-cannot-shrink invariants extended to cover it. This item is `blockedBy: xxdslno` and may not be
+built before it resolves. **Until then the current whole-PR behaviour is the fail-closed one and stays.**
 
-PR #1124's write-up proposes a **fourth review hold tier** — `review:stale`, meaning "an operator clearance
-exists, the tree moved past it, held pending re-confirmation, and no agent may clear it" — spanning roughly
-ten label consumers plus an edit to the policy contract. **That proposal has no card.**
-[#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/) says of it "Filed
-separately rather than smuggled in here", but a grep of all 3017 files in `we:backlog/` for `review:stale`
-and "hold tier" returns only #3039 itself — so the deferral currently lives only in that sentence, which is
-the same "a deferral under a resolved parent is a deferral that disappears" failure this item exists to
-prevent. File it, or fold it into step 1's fork as the third option. It attacks the same incident this item
-does
-(WE PR #1106, the 00:34:00Z clearance revoked at 00:41:28Z), from the other end: this item keeps three hold
-tiers and narrows **which** one a stale re-park applies; the `review:stale` proposal adds a **fourth** tier so
-the re-park stops landing on an operator-only label at all.
+Two facts the carved decision turns on, kept here because they are this item's own findings:
 
-They are not complementary refinements. Both change what a stale re-park does to a cleared PR, and each makes
-the other's argument weaker: a new tier that is neither operator-only nor agent-clearable removes much of the
-reason to re-score the delta, and a delta-scored re-park removes much of the reason for a new tier. **Do not
-build either without first ruling which one is the approach** — that reconciliation belongs in step 1 above,
-as part of preparing the fork, not after.
-
-Note also that this item and the `review:stale` proposal both assume the re-park itself was *correct* on
-#1106. It was not: the contribution digest diverged on a byte-identical contribution because `main` grew a
-different number of lines above two of the lane's hunks. That root cause is filed separately as **the
-non-uniform-base false stale** (`#3046`), which is the layer above both of these. A fix there would have
-prevented #1106 entirely — so the reconciliation is really three-way, and its first question is how much of
-this hole survives once the false stale stops firing.
+- The reconciliation is really **three-way**, not two-way, and its first question is *how much of this hole
+  survives once the false stale stops firing.* This item and the `review:stale` proposal both assume the re-park
+  on #1106 was *correct*. It was not — the contribution digest diverged on a byte-identical contribution because
+  `main` grew a different number of lines above two of the lane's hunks (re-derived by script 2026-08-09:
+  1,534 projection lines each side, exactly two differing, both gap values). That root cause is the umbrella
+  `#x5p1xz8` ([#3046](/backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio/) plus
+  `#x0pfbqp`), the layer above both options — a fix there would have prevented #1106 entirely.
+- The hard case any delta-only score must still catch: a head advance that **MOVES** a leash-path edit rather
+  than adding one.
 
 Related: [#3023](/backlog/3023-a-drain-re-score-revokes-a-human-clearance-a-content-preserv/) (parent),
 [#2840](/backlog/2840/), [#2409](/backlog/2409/), [#2771](/backlog/2771/),
 [#3039](/backlog/3039-drain-re-hold-must-never-silently-revoke-an-operator-review-/) (the
-notice-on-revocation fix; its code landed in PR #1124, merged 2026-08-09T11:50:32Z, though the card itself is
-still `status: open`), `#3046` (the false-stale root cause).
+notice-on-revocation fix; its code landed in PR #1124, merged 2026-08-09T11:50:32Z, and the card was resolved
+2026-08-09 once its notice was observed firing in production on PR #1100 at 12:20:59Z), `#xxdslno` (the carved
+fork this item is blocked on), `#x5p1xz8` (the false-stale umbrella, the layer above), `#3046` and `#x0pfbqp`
+(its two slices — the false-stale root causes).
