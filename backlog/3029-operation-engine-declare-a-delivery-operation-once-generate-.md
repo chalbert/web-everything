@@ -76,7 +76,7 @@ Ordered to **falsify early**, since every operation converts eventually and the 
 **Run the spike first in practice**, whatever its slice number: two points, and it is the only item that can
 invalidate the vocabulary the other seven are built on.
 
-9. #xnc8wyd — the **judge panel**: fan #3028's single spawn out to N distinct jurors, awaited, under one
+9. #3050 — the **judge panel**: fan #3028's single spawn out to N distinct jurors, awaited, under one
    aggregate budget and a fail-closed depth cap. Not ordered with the eight above and **blocked on nothing** —
    it is the fan-out layer a `judge` step calls, not an operation declared onto the engine.
 
@@ -106,7 +106,7 @@ Three consequences for this epic, none of them a re-ruling:
 - **The named sequence is: the review operation first (#3035), then the jury, then the remaining operations.**
   Not a re-ordering of the falsify-early list above — #3035 is already slice 4 and the spike still runs first in
   practice. It is the operator's statement of what comes after `review-pr` proves the engine end to end.
-- **The jury is the named next candidate.** Its fan-out primitive is #xnc8wyd, filed under this epic.
+- **The jury is the named next candidate.** Its fan-out primitive is #3050, filed under this epic.
 - **"All other current and future operations we will need"** is the standing scope. Every operation converts
   eventually, which is exactly why the slice ordering above is free.
 
