@@ -42,6 +42,7 @@
     "gen:maas-openapi": "node scripts/gen-maas-openapi.mjs",
     "gen:webdirectives-ssr-vectors": "node scripts/gen-webdirectives-ssr-vectors.mjs",
     "review:clear": "node scripts/review-set-label.mjs --to=clear-human",
+    "review:ledger-check": "node scripts/review-ledger-check.mjs",
     "converge:pass": "node scripts/converge-daemon-pass.mjs",
     "converge:daemon": "node scripts/converge-daemon-install.mjs",
     "check:standards": "node scripts/check-standards.mjs",

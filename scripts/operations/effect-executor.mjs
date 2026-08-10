@@ -33,8 +33,12 @@
  * marked `failed` and is retried on the next pass.
  *
  * THE LEDGER SEAM — deliberately empty here. {@link LEDGER_EFFECT_TYPE} is the reserved effect type the
- * **verdict ledger** (#3007, still **open**) lands behind: an append-only JSONL keyed by PR + diff
- * content-hash, single-writer via the drain lease, and the durable merge authority. This executor SHIPS NO
+ * **verdict ledger** (#3007) lands behind: an append-only JSONL of review verdicts, keyed by repo + PR +
+ * append order, which #3007 PHASE 1 now writes in SHADOW (labels are still what the drain merges on; Phase 2
+ * flips the authority and is unbuilt). Two details this comment used to state are corrected in
+ * `we:scripts/lib/verdict-ledger.mjs`'s header and were wrong: the records are NOT keyed on the diff
+ * content-hash (that digest has two proven divergence defects, #3046 and `#3052`, open under `#3054`), and
+ * the drain lease does NOT make the writers single — the ledger takes its own lock. This executor SHIPS NO
  * SINK FOR IT and owns no durable outcome store of its own — it only routes to a sink the caller registers.
  * That is the producer→store relationship: the run record is the transient working state, the ledger is the
  * durable authority, and #3032 must not invent a competitor to it (see the `run-record.mjs` header).
