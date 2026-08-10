@@ -3,6 +3,7 @@ bornAs: xyl3dc9
 kind: story
 size: 3
 status: open
+parent: "x5p1xz8"
 relatedTo: ["2409", "2198"]
 scope: ["we:scripts/lib/review-escalation.mjs"]
 dateOpened: "2026-08-02"
