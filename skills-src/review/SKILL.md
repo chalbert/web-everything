@@ -6,241 +6,101 @@ description: Review a parked pull request and record the human verdict — pull 
 # Review a parked PR — the human verdict (#2326)
 
 The drain (`/drain`) **parks** a blast-radius or gate-self PR with a `review:*` label and waits for an
-independent verdict before it may land (#2171/#2262/#2285). Two classes reach a human:
-- **`review:pending`** — agent-reviewable but not yet cleared (or the drain's auto-review bounced it here);
-- **`review:human`** — a **gate-self** edit (the diff touches the auto-review trust chain,
-  `we:scripts/lib/review-escalation.mjs` / `we:scripts/merge-ai-prs.mjs`), which an agent may **never**
-  self-clear (conflict of interest). Two shapes reach you here, and `deriveReviewDisposition` (#2285) tells them
-  apart — read the drain's comment to see which:
-  - a **sensitivity** park (`gate-self`, `{ mode: converge, autoLand: false }`) — the drain **ran the panel↔editor
-    convergence and may have pushed an advisory FIX** to the PR branch, then posted an `🤖 advisory AI review /
-    fix (non-clearing)` comment. The diff you review may already carry agent-authored trust-chain edits — scrutinize
-    them, don't rubber-stamp.
-  - a **deadlock** park (`non-convergence` / `mandate-conflict`, `{ mode: human }`) — the loop ran and could not
-    agree, so no fix was pushed; the comment is the round history + verdict table. You break the tie.
-  Either way only a **human** clears it.
+independent verdict before it may land (#2171/#2262/#2285). `/review <PR>` is that verdict.
 
-`/review <PR>` is the one review flow with no skill until now (before, a human did it by hand — e.g. PR #206).
-It renders through the **same engine** as the drain's auto-review and `/code-review`: the judge-only core in
-**[scripts/lib/review-core.mjs](../../../scripts/lib/review-core.mjs)** (#2325). The core **judges**; you
-**decide what the verdict does** (the `decideReviewGate` policy stays in the drain — *review-core.mjs* never
-applies a label). The same module also renders the operator-facing notice for your clearance (`renderReviewNotice`,
-#2433) — see step 6 below.
+**The flow is a declared operation, not a procedure you follow.** `review-pr`
+(`we:scripts/operations/review-pr.mjs`, #3035) declares five steps — `read` → `judge` → `reduce` → `confirm` →
+`record` — and the command line is derived from that declaration (#3031's statute
+[`#operations-declared-once-callers-generated`](../../docs/agent/platform-decisions.md#operations-declared-once-callers-generated)).
+Your job is to **invoke it and present its output**. Do not re-derive the diff, the mandate, the verdict or the
+label swap by hand: each is a step, and a hand-rolled one drifts from the console's copy (#3036) by construction.
 
-## Flow
+## Run it
 
-1. **Pull the PR — on the NET basis vs CURRENT main, never `gh pr diff` alone (#2901).** Metadata first, so you
-   have the head ref:
-   ```
-   gh pr view <PR> --repo <repo> --json headRefName,title,body,files,labels,comments
-   ```
-   Then take the diff from **`computeNetDiffText({ exec, rev: <headRefName>, fetchExtraRefs: [<headRefName>] })`**
-   ([we:scripts/merge-ai-prs.mjs](../../../scripts/merge-ai-prs.mjs), #2450) — the two-tree
-   `git diff <forkpoint> <head>` resolved off the SAME #2373/#2404 basis the drain's escalation SCORE uses, so
-   what you review and what was scored cannot drift. Take the net changed-file list from
-   **`computeNetDiffPaths(...)`** (same module, same basis) and carry it into step 2 — **not**
-   `computeNetDiffChangedFiles`, which is the SCORING path and returns git's DISPLAY encoding (a rename renders
-   as `a.txt => b.txt`, a non-ASCII path is C-quoted). Intersecting that with `gh`'s plain paths silently drops
-   those entries, so a rename-only PR yields a ZERO-file list that reads as authoritative — and the list feeds
-   `buildPanelMandate({ netChangedFiles })` as GROUND TRUTH, so a juror is told a real file is outside the net
-   set.
+```
+node scripts/operations/run.mjs review-pr --pr=<PR> --repo=<owner/name> --json
+```
 
-   **`exec` is not a shell-exec — spell its shape exactly, or the call throws inside a swallowed `try` and looks
-   like a degrade (#2952):**
-   ```js
-   const { execFileSync } = require('node:child_process'); // or `import` in an .mjs
-   const exec = (cmd, args, opts) => execFileSync(cmd, args, opts);
-   ```
-   `resolveNetDiffBasis` (inside `computeNetDiffText` / `computeNetDiffPaths` / `computeNetDiffChangedFiles`)
-   calls it as **`exec('git', ['diff', ...], { encoding: 'utf8', ... })`** — three positional args, `execFileSync`
-   shaped. The natural-looking but WRONG shape is a shell-exec, `(cmd, opts) => execSync(cmd, opts)`: called
-   3-arg, it receives the **args array** in its `opts` position and throws. Reproduced live in the review of WE PR
-   #1063 (2026-08-06): the wrong shape byte-for-byte matched a foreign clone with no head ref —
-   `{"paths": [], "base": null, "rev": null, "scored": false}` either way — until the `reason` field below made
-   them distinguishable.
+It reads the PR, judges the diff, reduces to a verdict, and then **suspends**. It writes nothing on this
+invocation. Present its `verdict` (the findings and the reduced verdict), its `findings.read` (the escalation
+reason, the disposition, the net changed-file list, any advisory comment) and its `pending.asks` to the
+operator, then stop.
 
-   This is **not** `gh pr diff <PR>`'s three-dot merge-base diff. That one still lists a sibling-lane file that
-   has since landed on `main` as if this PR added it, and the phantom scope-creep is not harmless framing — it
-   hides the findings that matter. Observed on PR #1009: `gh pr diff` presented 4 files / 42 lines where the net
-   diff was 2 files / 2 lines, and the one real conflict only became visible on the net basis. Observed again on
-   PR #1012, where `gh pr diff` reported three files the PR does not touch.
+On the operator's explicit decision:
 
-   The #2336 no-checkout constraint is intact: `computeNetDiffText` fetches tracking refs and diffs two trees in
-   place — it never moves HEAD in this shared checkout. If it returns **`scored:false`**, check `reason` (#2952)
-   before falling back:
-   - **`reason: 'exec-contract'`** — the `exec` you passed in is not `(cmd, args, opts) =>
-     execFileSync(cmd, args, opts)`-shaped. This is **a bug in YOUR wrapper to fix**, not license to fall back —
-     fix the shape above and re-run step 1. Falling back here silently ships `gh pr diff`'s inflated three-dot
-     list, the exact false positive #2450/#2901 exist to prevent.
-   - **`reason: 'ref-unresolved'`** — neither `<remote>/<headRefName>` nor the bare ref resolved (a genuinely
-     foreign/sibling clone). Unfixable from here — fall back to `gh pr diff <PR> --repo <repo>`, and **say so in
-     your write-up**: the basis is degraded and the reader must know the file list may be inflated.
-   - **`reason: 'diff-failed'`** — the basis resolved but the diff call itself then failed (rare; treat like
-     `ref-unresolved` and fall back, but worth a note in your write-up since it is less expected).
+```
+node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=accept    # → review:accepted
+node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=changes   # → review:changes, back to the author lane
+node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=abstain   # → records nothing at all
+```
 
-   The escalation reasons ride the PR body's escalation block (and the `parked` entry in the drain's `--json`).
-   Read the `🤖 advisory AI review (non-clearing)` comment if the drain already posted one.
+Four things you no longer have to remember, because the machinery holds them:
 
-2. **Run the shared core.** Seed a **fresh-context** review subagent (the `Agent` tool, e.g. `general-purpose`)
-   with `buildMandate()` from `review-core.mjs` — it sees **ONLY the diff + PR description**, and per the mandate
-   **never checks out the PR branch** in a shared tree (#2336; any test/repro runs in a throwaway clone). Running
-   a multi-lens panel instead of one reviewer? Seed each with `buildPanelMandate({ lens, netChangedFiles })` and
-   pass step 1's net changed-file list — it rides as GROUND TRUTH so a reviewer will not flag a diff-side file
-   outside that set as scope creep (#2450). Shape each answer with `normalizeFindings()` and reduce it to a
-   verdict with `deriveVerdict({ findings, humanRequired })`
-   (`humanRequired: true` for a `review:human` PR → the verdict is always `needs-human`, never agent-clearable).
+- **The stop is a suspend.** `--answer` without `--resume` is refused — you cannot answer a question that has
+  not been asked, so there is no auto-proceed to resist.
+- **The diff is on the net basis** vs current `main` (#2450/#2901), and the juror is told that file set as
+  ground truth. `gh pr diff`'s inflated three-dot list never reaches it. A mis-shaped `exec` (#2952) is a hard
+  refusal, not a quiet fallback.
+- **Re-running is safe, and now provably so.** A `--resume` re-enters the effects, skips every one already
+  applied, and refuses to guess at one whose outcome is unknown. No duplicate comment.
+- **The label swap goes through `we:scripts/review-set-label.mjs`** — the single home (#2644), with the
+  `reviewed-sha` / `reviewed-diff` / `reviewed-contribution` markers and the #2964 write ordering. `accepted` on
+  a `review:human` PR is refused in `decideSetLabel`'s pure core, so the operation cannot clear a gate-self PR
+  either.
 
-3. **Present** the findings + the escalation reason + the core's verdict to the operator. This is a **stop
-   point** — the human reads and decides. Do not auto-proceed.
+## What still needs you
 
-4. **Record the verdict** on the operator's OK (never inferred, always an explicit label — #2281) — **always
-   through `we:scripts/review-set-label.mjs`, never a hand-rolled `gh pr edit`.** That module is the SINGLE HOME
-   of the review-label swap (#2644): it posts the durable comment, stamps the `reviewed-sha` marker, and applies
-   the label. The two writes are not atomic, so #2964 orders them so the half that can survive a blip alone is
-   the harmless one — on an unaccepted PR the comment goes first (an orphan marker is never read), on an
-   already-accepted one the swap does. **A non-zero exit means re-run the same command**; it is safe.
-   Write your findings write-up to a file first, then:
+**The two shapes of a `review:human` park.** Read the drain's comment to tell them apart (`deriveReviewDisposition`,
+#2285) — the operation reports which in `findings.read.disposition`:
+- a **sensitivity** park (`gate-self`, `{ mode: converge, autoLand: false }`) — the drain may already have pushed
+  an advisory FIX to the branch. The diff you are reading can carry agent-authored trust-chain edits. Scrutinize
+  them; do not rubber-stamp.
+- a **deadlock** park (`non-convergence` / `mandate-conflict`, `{ mode: human }`) — the loop could not agree and
+  pushed nothing. You break the tie.
 
-   ```
-   node scripts/review-set-label.mjs <PR> --repo=<owner/name> --to=accepted --actor="<operator>" --body-file=<findings.md>
-   node scripts/review-set-label.mjs <PR> --repo=<owner/name> --to=changes  --actor="<operator>" --body-file=<findings.md>
-   ```
+**Clearing a gate-self PR — the human ceremony (#2895).** `--answer=accept` is REFUSED on a `review:human` PR,
+and that is the invariant working. The only thing that removes `review:human` is:
 
-   - **accept** — adds `review:accepted`, drops `review:pending`. Then `/drain` (a bare pass) lands it.
-   - **changes** — adds `review:changes`, drops `review:pending` and any stale `review:accepted`, and routes the
-     fix back to the **author lane** (the drain does no editing here — that convergence loop is v2, epic #2285).
-   - The CLI **refuses** an `accepted` verdict on a `review:human` PR and changes nothing (INVARIANT 2). That
-     refusal is the gate-self protection, and it only binds callers that come through this module — which is
-     exactly why the swap must not be hand-rolled.
+```
+node scripts/review-set-label.mjs <PR> --repo=<owner/name> --to=clear-human --actor="<operator>" --reason="<quoted instruction>" --body-file=<findings.md>
+```
 
-   **The second refusal on `accepted`: a self-cleared verdict (#2844).** The CLI also refuses `--to=accepted`
-   when the clearing actor is provably the PR's own **author**. The actor id is `CLAUDE_CODE_SESSION_ID`, and a
-   **subagent inherits its parent's**, so this is a *session-level* comparison: if the PR was opened from the
-   session you are running in — including by a subagent you spawned — `--to=accepted` will refuse, and nothing
-   is written. That is the guard working, not a bug. **Two routes clear such a PR, and there is no `--force`:**
+It is deliberately **not** a step of the operation: it demands an operator instruction quoted verbatim, which is
+judgment, not a declared input. **You may run it ONLY on an explicit in-conversation instruction from the
+operator naming that PR, and you must pass that instruction verbatim as `--reason`.** No instruction, or an
+instruction about a different PR: hand the operator the command line and stop. Nothing in the tool checks who
+ran it — #2895 ruled the unforgeable actor signal DEFERRED, so what stands in the way of a clearance nobody
+asked for is that misuse takes a written lie. Do not go looking for a third route; there is none, and there is
+no `--force`. Its durable comment says the clearance was a HUMAN CEREMONY, not an established-independent
+review — never describe it as the latter.
 
-   1. **The human ceremony** — `--to=clear-human` (below) is **exempt** from this refusal. It is the operator's
-      normal path and it stays open. It is refused when the PR does **not** carry `review:human`.
-   2. **A different session** — run the review, and the CLI, from a session that did not open the PR. Its own
-      session id then becomes the clearing actor and the independence bar is genuinely met.
+**A self-cleared verdict (#2844).** `--answer=accept` also refuses when the clearing actor is provably the PR's
+author. The id is `CLAUDE_CODE_SESSION_ID` and a subagent inherits its parent's, so a PR your session opened is
+a self-clear by that measure. Two routes, both above the board: the human ceremony, or running the review from a
+session that did not open the PR. Clearing `CLAUDE_CODE_SESSION_ID` out of the environment buys nothing — it
+only downgrades the record to *"Independence NOT established"*.
 
-   Do **not** go looking for a third way. Clearing `CLAUDE_CODE_SESSION_ID` out of the environment does not buy
-   independence — it only downgrades the record to *"Independence NOT established"*, which every reader of that
-   PR then has to discount. It is not a sanctioned path and must not be used or recommended.
-
-   **Clearing a `review:human` PR — `--to=clear-human` (#2895).** There IS a tool now; it is the fourth target,
-   and the ONLY thing that removes `review:human`. Same invocation shape as the two lines above — one form for
-   this tool everywhere, so `JSON.parse(stdout)` always works:
-
-   ```
-   node scripts/review-set-label.mjs <PR> --repo=<owner/name> --to=clear-human --actor="<operator>" --reason="<quoted instruction>" --body-file=<findings.md>
-   ```
-
-   (`npm run --silent review:clear -- <PR> --repo=<owner/name> …` is an equivalent alias: it supplies only
-   `--to=clear-human`, so the target cannot be typo'd, and it deliberately bakes in NO repo — the first `--repo=`
-   on the line wins, so a hardcoded one would silently override yours and clear a PR in the wrong repo. The
-   `--silent` is **not** optional: without it `npm run` prints its two banner lines to *stdout* ahead of the
-   payload, and `JSON.parse(stdout)` then throws on a clearance that in fact landed. Prefer the direct `node`
-   line above — it is what every other caller in this repo uses.)
-
-   **Nothing in the tool checks who ran it.** #2895 ruled the unforgeable actor signal DEFERRED — no local
-   construct survives an agent with shell access on this machine, so a flag, a token, or a terminal check are
-   all things you could satisfy. Do not go looking; there is nothing there. What binds you is this rule:
-
-   > **You may run `clear-human` ONLY on an explicit in-conversation instruction from the operator naming that
-   > PR, and you must pass that instruction verbatim as `--reason`.** No instruction, or an instruction about a
-   > different PR: prepare the findings file, hand the operator the command line above, and stop. Clearing your
-   > own review unbidden is the thing the whole gate exists to prevent, and doing it now takes a fabricated
-   > quote — which is a lie, not an oversight.
-
-   `--actor` and `--reason` are both mandatory; the tool refuses without either. Both land verbatim in the
-   durable comment, which states in as many words what the record proves — that the sanctioned path was
-   followed — and what it does NOT prove: that a human followed it. Do not describe it as proof of a human
-   anywhere.
-
-   **When this target clears a PR your own session opened** (the ordinary case — a subagent inherits its
-   parent's session id), the durable comment says so: *"Cleared by the HUMAN CEREMONY, not by an
-   established-independent agent (#2844)"*. That line is the honest record of what happened, and it is exactly
-   why `clear-human` is allowed to be exempt where `--to=accepted` is not — the ceremony demands the named
-   actor, the quoted reason, and a PR that already carries `review:human`. Do not describe such a clearance as
-   an independent review. Do not route around the tool with a raw `gh pr edit` either (`check:standards` errors when this
-   file spells that): the tool carries the `review:accepted` label, the `reviewed-sha` stamp, and the attributed
-   comment that the raw command loses. The durable fix for the missing signal is #2946 (a hardware
-   human-presence gesture), filed `someday`; #2945 is the out-of-session console.
-
-   **Why not a raw label edit.** Two things ride on the CLI that adding the label by hand silently drops.
-   (a) The `reviewed-sha` marker: it is the ONLY record of which tree the acceptance covered, and at land the
-   drain reads it with `parseReviewedSha` while `acceptanceCoversHead` (#2409) refuses an accept whose head has
-   since advanced. Without it `parseReviewedSha` takes the LAST marker in ANY comment — typically the drain's own
-   older advisory stamp — so your accept reads as stale and the PR is re-parked (observed on #983: five
-   re-parks). Note the direction: the CLI puts its stamp **last** and neutralises any marker your body quotes,
-   precisely because the reader is last-match-wins. (b) INVARIANT 2, above. `check:standards` errors when this
-   file spells a hand-rolled review-label edit (#2882), so the raw path cannot come back.
-
-   **What the clearance is durable against (#x9xqexm).** The CLI stamps three markers, not one: `reviewed-sha`
-   (which commit), `reviewed-diff` (the exact net diff), and `reviewed-contribution` (only the lines the PR
-   itself adds and removes). The third one is what makes a clearance survive the drain's own rebase-drop pass:
-   that pass replays the lane onto a newer `main` within minutes of an accept, which moves context lines and
-   hunk offsets and therefore changes `reviewed-diff` even though the author changed nothing. Before this the
-   clearance was revoked on essentially every accepted PR (PR #1100, 3m07s after `--to=clear-human`; PR #984,
-   the same pass). What still re-parks the PR — correctly — is a real change to the contribution: a commit that
-   rides in after the clearance is not covered by it, and no marker makes it so. And a re-score **never removes
-   `review:accepted`**: only your `--to=changes` retracts a verdict, so the record of a clearance outlives any
-   automated pass that declines to land on it.
-
-5. **The findings file you pass as `--body-file`** is the durable, readable record of the verdict on the PR —
-   marked clearly as the human decision so it is never mistaken for the drain's `🤖 advisory AI review
-   (non-clearing)` take. The CLI supplies the header line and the marker; your file supplies:
-   - the core's findings + verdict that you presented, and
-   - one line naming who accepted / requested changes (the operator).
-
-   On the **changes** path this **is** the "summarize the required changes" record — one comment, not two.
-
-   **Re-accepting after a rebase.** `acceptanceCoversHead` keys on head-SHA IDENTITY, so a benign
-   rebase-onto-`main` invalidates an accept even when it adds no review-worthy content. Do not re-run the whole
-   panel for that: prove the content is unchanged by diffing the two NET patches
-   (`git diff <merge-base>..<head>` at the accepted sha vs now — an empty diff means the reviewed tree is
-   byte-identical), then re-run the CLI (it re-reads the live head, so the fresh marker is automatic) with a body
-   that states the net patch is identical and why the head moved.
-
-6. **Report the clearance to the operator via `renderReviewNotice({ event: 'cleared', pr, repo, outcome, actor })`**
-   (`we:scripts/lib/review-core.mjs`, #2433) — the in-chat notice, distinct from the PR comment step 5 just
-   posted. Same renderer the drain uses for its `escalated` event, so both directions of a PR's review outcome
-   are reported in the same words, never hand-typed per call.
+**Re-accepting after a rebase.** `acceptanceCoversHead` keys on head-SHA identity, so a benign rebase invalidates
+an accept. Do not re-run the panel: prove the net patch is byte-identical, then re-run the operation with a body
+that says so. `reviewed-contribution` (#x9xqexm) already covers pure base movement.
 
 ## Invariant
 
-A **`review:human` PR is never agent-cleared** — the core may render an *advisory* take (findings + verdict as a
-non-clearing comment), but the `review:accepted` label on such a PR is applied **only** by a human via this
-skill. That invariant is unchanged; this skill is the sanctioned place the human acts on it.
-
-What DID change is which PRs get there. Since #2771/#2785 (statute
+A **`review:human` PR is never agent-cleared.** The core may render an advisory take; the `review:accepted` label
+on such a PR is applied only by a human, via the ceremony above. Since #2771/#2785 (statute
 [`#review-human-declarative-leash-only`](../../docs/agent/platform-decisions.md#review-human-declarative-leash-only))
-`humanRequired` fires on `isDeclarativeLeashPath` — the **declarative leash** (the policy contract, the
-`we:gate-config.mjs` roster, the invariant / conformance suites) — plus any **statute** edit, exactly as before.
-The gate's **derivation code** parks `review:pending` for the independent committee instead. Read the label and
-the escalation reason; never infer "this needs me" from the fact that a PR touches gate machinery.
+`humanRequired` fires on the **declarative leash** plus any statute edit; the gate's derivation code parks
+`review:pending` for the independent committee instead. Read the label, never infer "this needs me" from the
+fact that a PR touches gate machinery.
 
-## Non-author-accepts (#2439) — independence is about the ACTOR, not the git login
+## Independence is about the ACTOR, not the git login (#2439)
 
-The independence #2439 wants is between the **actor that produced the diff** and the actor that clears it — **not**
-between GitHub identities. In a solo constellation every PR's git author / login is the same person's PAT (a human
-commit and an AI-lane commit both show up as the same account), so login identity is a **useless** independence
-signal — do NOT gate on it, and do NOT warn the operator that "this is your own PR" merely because the author login
-matches. It always will.
+In a solo constellation every PR's git login is the same PAT, so login identity is a **useless** independence
+signal — do not gate on it and do not warn the operator that "this is your own PR". What matters:
 
-What actually matters:
-- **An agent must not clear a diff it produced.** If *you* (the agent running this skill) wrote the diff, or ran the
-  lane that wrote it, then reviewing it with your own subagents and flipping `review:accepted` yourself is the
-  author-self-accept seam #2439's `redteam:accepted` (an INDEPENDENT hardened validator) exists to close. Spawning
-  your own review subagents does not make you independent. So: review your own working diff before you open the PR
-  (that is `/code-review`), but never relabel a `review:*` PR **you** authored to `review:accepted` yourself.
-- **A human clearing an AI-lane PR is exactly the independence — clear it without hesitation.** A parked PR produced
-  by a `lane/*` clone (an AI actor) and cleared by the human via this skill has a diff-producer distinct from its
-  clearer. That holds *regardless* of the shared git login. This is the sanctioned path — present the verdict and,
-  on the operator's OK, swap the label. Raise no author-self-accept caveat.
-- **…but the machine check is coarser than that judgement, and you will meet it.** #2844 compares
-  `CLAUDE_CODE_SESSION_ID`, which a subagent inherits from its parent, so a PR your session opened is a
-  *session-level* self-clear even when the human is the one clearing it. `--to=accepted` therefore refuses;
-  `--to=clear-human` does not (step 4 spells out both routes). Take the refusal at face value and use a route,
-  never a workaround.
+- **An agent must not clear a diff it produced.** Spawning your own review subagents does not make you
+  independent. Review your own working diff before the PR (`/code-review`); never relabel a PR **you** authored.
+- **A human clearing an AI-lane PR is exactly the independence — clear it without hesitation.** Raise no
+  author-self-accept caveat.
+- **…but the machine check is coarser than that judgement**, per #2844 above. Take the refusal at face value and
+  use a route, never a workaround.

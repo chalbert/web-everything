@@ -1,0 +1,351 @@
+/**
+ * @file review-pr.test.mjs — the `review-pr` declaration and its derived command line (#3035).
+ *
+ * THE TWO TESTS THE ITEM EXISTS FOR are the two invariants, and neither is asserted by inspection:
+ *
+ *   1. **THE NET BASIS.** The `read` step's finding hands `buildPanelMandate` the NET changed-file list and
+ *      never `gh`'s three-dot stat — proven by driving a run whose stub reader returns DELIBERATELY DIFFERENT
+ *      lists for the two, and asserting which one reaches the juror's mandate. An `exec-contract` miss REFUSES
+ *      rather than falling back, which is the skill rule (#2952) as machinery.
+ *   2. **THE GATE-SELF REFUSAL.** A `review:human` PR driven all the way to a `confirm` answer of `accept` is
+ *      REFUSED by `decideSetLabel` in the pure core, declares NO effects, and therefore cannot reach
+ *      `review:accepted` through this caller any more than through the hand-written one.
+ *
+ * Plus the replay property the card names: a `record` step whose second effect fails does not re-post the
+ * comment on replay.
+ *
+ * NOTHING HERE SPAWNS A PROCESS OR TOUCHES `gh`: the reader is a stub, the judge is a canned answer, the sinks
+ * are recorders, and the store is in memory.
+ */
+
+import { describe, it, expect } from 'vitest';
+
+import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs';
+import { applyPendingEffects } from '../effect-executor.mjs';
+import { createRegistry } from '../registry.mjs';
+import { createMemoryRunStore } from '../run-store.mjs';
+import { driveRun, parseOperationArgv, buildCliSpec, assertSafeJudgeRequest, runOperationCli } from '../cli-adapter.mjs';
+import {
+  CONFIRM_ACTORS,
+  REVIEW_EFFECTS,
+  REVIEW_PR_OP,
+  renderJudgeInput,
+  reviewPrOperation,
+  shapeReadFinding,
+} from '../review-pr.mjs';
+
+/** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
+const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.md'];
+const GH_ONLY_PATH = 'a-sibling-lane-file-that-already-landed.md';
+
+/** A stub `readPr`. `labels` decides gate-self; `netReason` forces an unscored basis. */
+function stubReader({ labels = ['review:pending'], netScored = true, netReason = undefined } = {}) {
+  return ({ pr, repo }) => ({
+    detail: {
+      pr, repo, title: 'a parked PR', url: `https://example.invalid/${pr}`,
+      labels,
+      humanRequired: labels.includes('review:human'),
+      reviewClass: labels.includes('review:human') ? 'human' : 'pending',
+      disposition: { mode: 'converge', autoLand: false },
+      escalationReason: ['gate-self'],
+      advisoryComment: null,
+      humanComment: null,
+      // `gh`'s own list — deliberately DISJOINT from the net list.
+      diffStat: [...NET_PATHS, GH_ONLY_PATH].map((p) => ({ path: p, additions: 1, deletions: 0 })),
+    },
+    headRefName: 'lane/thing',
+    body: 'the PR description',
+    net: netScored
+      ? { paths: NET_PATHS, base: 'abc123', rev: 'def456', scored: true }
+      : { paths: [], base: null, rev: null, scored: false, reason: netReason },
+    diff: netScored ? { text: '--- a/x\n+++ b/x\n+one line\n', scored: true } : { text: '', scored: false, reason: netReason },
+  });
+}
+
+/** A registry holding one freshly-built declaration over a stub reader. */
+function registryFor(readerOptions) {
+  const declaration = reviewPrOperation({ readPr: stubReader(readerOptions) });
+  const registry = createRegistry();
+  registry.register(declaration);
+  return { declaration, registry };
+}
+
+/** A canned juror answer — one blocking finding, or none. */
+const CLEAN_ANSWER = { summary: 'nothing blocking', findings: [] };
+const BLOCKING_ANSWER = {
+  summary: 'one blocker',
+  findings: [{ summary: 'the guard is inverted', file: NET_PATHS[0], disposition: 'blocker' }],
+};
+
+/** Drive a run to its `confirm` suspend with a canned juror answer. */
+function atConfirm({ registry, input, answer = CLEAN_ANSWER, id = 'run-rp' }) {
+  let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id, input, registry }), { registry });
+  expect(runStatus(run, { registry })).toBe('awaiting-judge');
+  const request = run.pending.request;
+  run = advanceWhileRunning(run, { registry, resume: { value: answer } });
+  expect(runStatus(run, { registry })).toBe('awaiting-confirm');
+  return { run, request };
+}
+
+const BASE_INPUT = { pr: 1234, repo: 'chalbert/web-everything' };
+
+// ── PROPERTY 1: THE DIFF ARRIVES ON THE NET BASIS ─────────────────────────────────────────────────────────
+describe('the net basis', () => {
+  it('yields NET paths as ground truth and keeps `gh`\'s stat separate and unused by the juror', () => {
+    const { registry } = registryFor({});
+    const { run, request } = atConfirm({ registry, input: BASE_INPUT });
+
+    const read = run.findings.read;
+    expect(read.netChangedFiles).toEqual(NET_PATHS);
+    // `gh`'s list is carried, is DIFFERENT, and is named apart.
+    expect(read.ghDiffStat.map((f) => f.path)).toContain(GH_ONLY_PATH);
+    expect(read.netChangedFiles).not.toContain(GH_ONLY_PATH);
+
+    // THE ASSERTION THAT MATTERS: the mandate states the NET set as GROUND TRUTH and never names the gh-only file.
+    expect(request.mandate).toContain(`the NET changed-file set of this PR vs CURRENT main is exactly: ${NET_PATHS.join(', ')}`);
+    expect(request.mandate).not.toContain(GH_ONLY_PATH);
+    // …and neither does the material the juror is handed.
+    expect(request.input).toContain(NET_PATHS[0]);
+    expect(request.input).not.toContain(GH_ONLY_PATH);
+  });
+
+  it('REFUSES an `exec-contract` miss instead of falling back to the three-dot diff', () => {
+    const { registry } = registryFor({ netScored: false, netReason: 'exec-contract' });
+    expect(() => advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: 'run-exec', input: BASE_INPUT, registry }), { registry }))
+      .toThrow(/exec-contract/);
+  });
+
+  it('DEGRADES (and says so) on a `ref-unresolved` miss, which is genuinely unfixable from here', () => {
+    const { registry } = registryFor({ netScored: false, netReason: 'ref-unresolved' });
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-ref' });
+    expect(run.findings.read.degraded).toBe(true);
+    expect(run.findings.read.degradedReason).toBe('ref-unresolved');
+  });
+
+  it('`shapeReadFinding` never lets `gh`\'s stat masquerade as the net list', () => {
+    const shaped = shapeReadFinding(stubReader({})({ pr: 1, repo: 'o/n' }), { pr: 1, repo: 'o/n' });
+    expect(shaped.netChangedFiles).toEqual(NET_PATHS);
+    expect(renderJudgeInput(shaped)).not.toContain(GH_ONLY_PATH);
+  });
+});
+
+// ── PROPERTY 2: THE GATE-SELF REFUSAL LIVES IN THE PURE CORE ──────────────────────────────────────────────
+describe('the gate-self invariant', () => {
+  it('reduces a `review:human` PR to `needs-human` however clean the findings are', () => {
+    const { registry } = registryFor({ labels: ['review:human'] });
+    const { run } = atConfirm({ registry, input: BASE_INPUT, answer: CLEAN_ANSWER, id: 'run-gs1' });
+    expect(run.verdict.humanRequired).toBe(true);
+    expect(run.verdict.verdict).toBe('needs-human');
+    expect(run.verdict.findings).toEqual([]);
+  });
+
+  it('records the decision as owed by a HUMAN on a gate-self PR and by an AGENT otherwise', () => {
+    const gateSelf = registryFor({ labels: ['review:human'] });
+    expect(atConfirm({ registry: gateSelf.registry, input: BASE_INPUT, id: 'run-gs2' }).run.pending.of)
+      .toBe(CONFIRM_ACTORS.HUMAN);
+
+    const ordinary = registryFor({ labels: ['review:pending'] });
+    expect(atConfirm({ registry: ordinary.registry, input: BASE_INPUT, id: 'run-gs3' }).run.pending.of)
+      .toBe(CONFIRM_ACTORS.AGENT);
+  });
+
+  it('REFUSES to declare any effect when the operator answers `accept` on a gate-self PR', () => {
+    const { registry } = registryFor({ labels: ['review:human'] });
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-gs4' });
+
+    // The operator tries to accept it anyway — the exact thing INVARIANT 2 exists to stop.
+    const answered = advance(run, { registry, resume: { value: 'accept' } });
+    expect(answered.findings.confirm).toBe('accept');
+
+    let thrown = null;
+    try { advance(answered, { registry }); } catch (e) { thrown = e; }
+    expect(thrown).toBeTruthy();
+    expect(String(thrown.message)).toMatch(/gate-self: review:human is human-ceremony-only/);
+    expect(String(thrown.message)).toMatch(/decideSetLabel/);
+    // NOTHING was declared, so there is nothing to apply and nothing half-done.
+    expect(answered.effects).toEqual([]);
+  });
+
+  it('still allows a `changes` bounce on a gate-self PR — a bounce lands nothing', () => {
+    const { registry } = registryFor({ labels: ['review:human'] });
+    const { run } = atConfirm({ registry, input: BASE_INPUT, answer: BLOCKING_ANSWER, id: 'run-gs5' });
+    const answered = advance(run, { registry, resume: { value: 'changes' } });
+    const declared = advance(answered, { registry });
+    const types = declared.effects.map((e) => e.type);
+    expect(types).toEqual([REVIEW_EFFECTS.WRITE_UP, REVIEW_EFFECTS.LABEL, REVIEW_EFFECTS.LEDGER, REVIEW_EFFECTS.NOTICE]);
+    const label = declared.effects.find((e) => e.type === REVIEW_EFFECTS.LABEL);
+    expect(label.payload.to).toBe('changes');
+    // A bounce never removes the human gate.
+    expect(label.payload.removeLabels).not.toContain('review:human');
+  });
+});
+
+// ── THE DECLARED EFFECTS: ORDER, IDEMPOTENCY, AND REPLAY ──────────────────────────────────────────────────
+describe('the record step', () => {
+  it('declares the four effects in the safe order, with the classification each was given', () => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-eff' });
+    const declared = advance(advance(run, { registry, resume: { value: 'accept' } }), { registry });
+
+    expect(declared.effects.map((e) => [e.index, e.type, e.idempotent])).toEqual([
+      [0, REVIEW_EFFECTS.WRITE_UP, true],   // local, deterministic bytes → safe to redo
+      [1, REVIEW_EFFECTS.LABEL, false],     // posts a durable comment → never replayed on a guess
+      [2, REVIEW_EFFECTS.LEDGER, false],    // #3007 has no writer yet → cannot claim dedupe
+      [3, REVIEW_EFFECTS.NOTICE, true],     // reports only → a duplicate line is the whole cost
+    ]);
+    // The remote write is never first, and the ledger row never precedes the label it vouches for.
+    expect(declared.effects[1].payload.addLabel).toBe('review:accepted');
+  });
+
+  it('`abstain` declares ZERO effects and completes the run without writing anything', () => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-abs' });
+    const done = advanceWhileRunning(run, { registry, resume: { value: 'abstain' } });
+    expect(done.effects).toEqual([]);
+    expect(runStatus(done, { registry })).toBe('complete');
+  });
+
+  it('a replayed `record` step posts NO duplicate comment', async () => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-replay' });
+    const declared = advance(advance(run, { registry, resume: { value: 'accept' } }), { registry });
+
+    const store = createMemoryRunStore();
+    store.write(declared);
+    const calls = [];
+    const sinkFor = (type, behaviour = () => ({ ok: true })) => async (payload, ctx) => {
+      calls.push({ type, key: ctx.key });
+      return behaviour(payload, ctx);
+    };
+    // The LEDGER row fails the first time — AFTER the comment+label effect landed. That is #2964's half-done
+    // state, and the replay must finish the act rather than restart it.
+    let ledgerAttempts = 0;
+    const sinks = {
+      [REVIEW_EFFECTS.WRITE_UP]: sinkFor(REVIEW_EFFECTS.WRITE_UP),
+      [REVIEW_EFFECTS.LABEL]: sinkFor(REVIEW_EFFECTS.LABEL),
+      [REVIEW_EFFECTS.LEDGER]: sinkFor(REVIEW_EFFECTS.LEDGER, () => {
+        ledgerAttempts += 1;
+        if (ledgerAttempts === 1) throw Object.assign(new Error('ledger unavailable'), { notApplied: true });
+        return { ok: true };
+      }),
+      [REVIEW_EFFECTS.NOTICE]: sinkFor(REVIEW_EFFECTS.NOTICE),
+    };
+
+    const first = await applyPendingEffects(declared, { sinks, store });
+    expect(first.error).toBeTruthy();
+    expect(first.applied).toEqual(['run-replay#4#0', 'run-replay#4#1']);
+
+    const second = await applyPendingEffects(first.run, { sinks, store });
+    expect(second.error).toBeNull();
+    // THE ASSERTION: the label/comment sink ran exactly ONCE across both passes.
+    expect(calls.filter((c) => c.type === REVIEW_EFFECTS.LABEL)).toHaveLength(1);
+    expect(calls.filter((c) => c.type === REVIEW_EFFECTS.WRITE_UP)).toHaveLength(1);
+    expect(second.skipped).toEqual(['run-replay#4#0', 'run-replay#4#1']);
+  });
+
+  it('REFUSES to replay the label effect when its outcome is unknown', async () => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-indet' });
+    const declared = advance(advance(run, { registry, resume: { value: 'accept' } }), { registry });
+    const store = createMemoryRunStore();
+    store.write(declared);
+    const sinks = {
+      [REVIEW_EFFECTS.WRITE_UP]: async () => ({ ok: true }),
+      // A plain throw = INDETERMINATE: the single home may already have posted the comment.
+      [REVIEW_EFFECTS.LABEL]: async () => { throw new Error('gh timed out'); },
+      [REVIEW_EFFECTS.LEDGER]: async () => ({ ok: true }),
+      [REVIEW_EFFECTS.NOTICE]: async () => ({ ok: true }),
+    };
+    const first = await applyPendingEffects(declared, { sinks, store });
+    expect(first.error).toBeTruthy();
+    await expect(applyPendingEffects(first.run, { sinks, store })).rejects.toThrow(/outcome is UNKNOWN/);
+  });
+});
+
+// ── THE DERIVED COMMAND LINE ──────────────────────────────────────────────────────────────────────────────
+describe('the derived command line', () => {
+  const { declaration, registry } = registryFor({});
+
+  it('derives its flags and usage from the declaration, not from a hand-written parser', () => {
+    const spec = buildCliSpec(declaration);
+    expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'lens', 'pr', 'repo']);
+    expect(spec.usage).toContain('--pr=<number>');
+    expect(spec.usage).toContain('[--lens=<string>]');
+    expect(spec.usage).toContain('read(compute) → judge(judge) → reduce(compute) → confirm(confirm) → record(effect)');
+  });
+
+  it('refuses an unknown flag and a missing required one', () => {
+    expect(parseOperationArgv(declaration, ['--pr=1', '--repo=o/n', '--force']).errors.join(' ')).toMatch(/unknown flag --force/);
+    expect(parseOperationArgv(declaration, ['--pr=1']).errors.join(' ')).toMatch(/missing required input field `repo`/);
+  });
+
+  it('REFUSES an --answer that is not attached to a suspended run — the stop point, as arithmetic', () => {
+    expect(parseOperationArgv(declaration, ['--pr=1', '--repo=o/n', '--answer=accept']).errors.join(' '))
+      .toMatch(/--answer requires --resume/);
+  });
+
+  it('stops at the confirm suspend on the first invocation and records on the second', async () => {
+    const store = createMemoryRunStore();
+    const applied = [];
+    const sinks = Object.fromEntries(Object.values(REVIEW_EFFECTS).map((t) => [t, async () => { applied.push(t); return { ok: true }; }]));
+    const judge = async () => CLEAN_ANSWER;
+
+    const first = await runOperationCli({
+      declaration, registry, store, sinks, judge,
+      argv: ['--pr=1234', '--repo=chalbert/web-everything'],
+      newRunId: () => 'run-cli',
+    });
+    expect(first.stopped).toBe('confirm');
+    expect(first.code).toBe(0);
+    expect(applied).toEqual([]);            // NOTHING was written at the stop point.
+    expect(first.lines.join('\n')).toContain('awaiting a decision from: agent');
+
+    const second = await runOperationCli({
+      declaration, registry, store, sinks, judge,
+      argv: ['--resume=run-cli', '--answer=accept'],
+      newRunId: () => 'unused',
+    });
+    expect(second.stopped).toBe('complete');
+    expect(applied).toEqual(Object.values(REVIEW_EFFECTS));
+  });
+
+  it('refuses an --answer outside the declared option set', async () => {
+    const store = createMemoryRunStore();
+    const judge = async () => CLEAN_ANSWER;
+    const sinks = Object.fromEntries(Object.values(REVIEW_EFFECTS).map((t) => [t, async () => ({ ok: true })]));
+    await runOperationCli({
+      declaration, registry, store, sinks, judge,
+      argv: ['--pr=1234', '--repo=chalbert/web-everything'], newRunId: () => 'run-opt',
+    });
+    await expect(runOperationCli({
+      declaration, registry, store, sinks, judge,
+      argv: ['--resume=run-opt', '--answer=merge-it'], newRunId: () => 'x',
+    })).rejects.toThrow(/accepts only/);
+  });
+});
+
+// ── THE #3028 ARGV FOOTGUN ────────────────────────────────────────────────────────────────────────────────
+describe('the judge request is never built from unvalidated input', () => {
+  it('pins model/effort/budget as declaration literals — no input field reaches a juror flag', () => {
+    const { registry } = registryFor({});
+    const { request } = atConfirm({ registry, input: { ...BASE_INPUT, actor: '--bare' }, id: 'run-fg' });
+    expect(request.model).toBe('sonnet');
+    expect(request.effort).toBe('high');
+    expect(String(request.model).startsWith('-')).toBe(false);
+    // The one input field that DOES reach the request lands in prose, never in a flag position.
+    expect(request.lens).toBe('correctness');
+  });
+
+  it('an unknown lens dies in `buildPanelMandate` before it can become argv', () => {
+    const { registry } = registryFor({});
+    const started = startRun({ op: REVIEW_PR_OP, id: 'run-lens', input: { ...BASE_INPUT, lens: '--bare' }, registry });
+    expect(() => advanceWhileRunning(started, { registry })).toThrow(/unknown lens/);
+  });
+
+  it('the adapter refuses a flag-shaped option value outright', () => {
+    expect(() => assertSafeJudgeRequest({ mandate: 'x', input: 'y', shape: {}, model: '--bare' }))
+      .toThrow(/shaped like a flag/);
+    expect(() => assertSafeJudgeRequest({ mandate: 'x', input: 'y', shape: {}, effort: 'ludicrous' }))
+      .toThrow(/effort/);
+  });
+});
