@@ -598,8 +598,12 @@ export function stripSourceComments(body) {
   return noBlocks.split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l)).join('\n');
 }
 
-/** A source extension worth indexing. Anything else (images, lockfiles, binaries) carries no vocabulary. */
-const PROVENANCE_SRC_EXT_RE = /\.(mjs|cjs|js|jsx|ts|tsx|json|njk|html|css|sh|bash|yml|yaml|py)$/;
+/** A source extension worth indexing. Anything else (images, lockfiles, binaries) carries no vocabulary.
+ *  `.mts`/`.cts` are here for the same reason `.mjs`/`.cjs` are: they are ORDINARY SOURCE, and a missing
+ *  extension is a silent false-positive generator — every name defined only in such a file contributes no
+ *  vocabulary, so citing it reads as "resolves to NO source file". They were omitted on first wiring; the one
+ *  tracked file affected was `vite.config.mts` (1 `.mts`, 0 `.cts` at the time of the fix). */
+const PROVENANCE_SRC_EXT_RE = /\.(mjs|cjs|mts|cts|js|jsx|ts|tsx|json|njk|html|css|sh|bash|yml|yaml|py)$/;
 /** PROSE dirs — if the index covered them, every false citation would resolve against the sentence that
  *  invented it. This is the same self-resolution failure `stripSourceComments` fixes, one level up. */
 const PROVENANCE_PROSE_DIR_RE = /^(backlog|docs|reports|plans|research)\//;

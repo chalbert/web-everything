@@ -17,7 +17,7 @@ import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createReviewPrSinks, isPreWriteRefusal, reviewSidecarDir } from '../review-pr-io.mjs';
+import { createReviewPrSinks, isPreWriteRefusal, reviewBodyPath, reviewSidecarDir } from '../review-pr-io.mjs';
 import { REVIEW_EFFECTS } from '../review-pr.mjs';
 
 let root;
@@ -31,11 +31,34 @@ describe('the write-up sink', () => {
     const sinks = createReviewPrSinks({ root });
     const result = await sinks[REVIEW_EFFECTS.WRITE_UP]({ bodyFile: 'o-n-7-verdict.md', body: '# hello' }, CTX);
     expect(readFileSync(result.path, 'utf8')).toBe('# hello');
-    expect(result.path).toBe(join(reviewSidecarDir(root), 'o-n-7-verdict.md'));
-    // Re-applying writes the SAME bytes to the SAME path — which is why it is declared idempotent.
+    expect(result.path).toBe(join(reviewSidecarDir(root), 'run-1', 'o-n-7-verdict.md'));
+    // Re-applying writes the SAME bytes to the SAME path — which is why it is declared idempotent. A REPLAY
+    // is the same run resuming, so it arrives with the same `ctx.runId` and the run-scoping is invisible to it.
     const again = await sinks[REVIEW_EFFECTS.WRITE_UP]({ bodyFile: 'o-n-7-verdict.md', body: '# hello' }, CTX);
     expect(again.path).toBe(result.path);
     expect(readFileSync(result.path, 'utf8')).toBe('# hello');
+  });
+
+  it('SCOPES the staged write-up by run — two runs on the same PR do not cross-stage', async () => {
+    // The payload name is keyed by PR only, so before this the second run's bytes replaced the first's and
+    // the label sink shelled the single home with `--body-file=` pointing at the wrong verdict.
+    const sinks = createReviewPrSinks({ root });
+    const payload = (body) => ({ bodyFile: 'o-n-7-verdict.md', body });
+    const a = await sinks[REVIEW_EFFECTS.WRITE_UP](payload('# run A'), { ...CTX, runId: 'run-a' });
+    const b = await sinks[REVIEW_EFFECTS.WRITE_UP](payload('# run B'), { ...CTX, runId: 'run-b' });
+    expect(a.path).not.toBe(b.path);
+    expect(readFileSync(a.path, 'utf8')).toBe('# run A');
+    expect(readFileSync(b.path, 'utf8')).toBe('# run B');
+  });
+
+  it('REFUSES a missing or unsafe run id rather than falling back to the shared path', async () => {
+    const sinks = createReviewPrSinks({ root });
+    for (const runId of [undefined, '', '..', '../../etc', 'a/b']) {
+      await expect(sinks[REVIEW_EFFECTS.WRITE_UP]({ bodyFile: 'o-n-7-verdict.md', body: 'x' }, { ...CTX, runId }))
+        .rejects.toThrow(/valid run id/);
+    }
+    // …and the file name stays a bare name, so the payload cannot escape the run's directory either.
+    expect(() => reviewBodyPath({ root, runId: 'run-1', bodyFile: '../x.md' })).toThrow(/bare file name/);
   });
 });
 
@@ -55,7 +78,8 @@ describe('the label sink', () => {
     expect(argv).toContain('--repo=o/n');
     expect(argv).toContain('--to=accepted');
     expect(argv).toContain('--actor=operator');
-    expect(argv).toContain(`--body-file=${join(reviewSidecarDir(root), 'o-n-7-verdict.md')}`);
+    // The SAME run-scoped path effect 0 staged — derived from `ctx.runId`, not re-derived from the payload.
+    expect(argv).toContain(`--body-file=${join(reviewSidecarDir(root), 'run-1', 'o-n-7-verdict.md')}`);
     // It never builds a `gh` call of its own — the single home owns the write arc, the markers and the ordering.
     expect(argv.join(' ')).not.toContain('gh ');
   });

@@ -30,6 +30,7 @@ import { assembleReviewDetail } from '../review-detail.mjs';
 import { computeNetDiffPaths, computeNetDiffText, resolveNetDiffBasis } from '../merge-ai-prs.mjs';
 import { notApplied } from './effect-executor.mjs';
 import { REVIEW_EFFECTS } from './review-pr.mjs';
+import { isValidRunId } from './run-record.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
@@ -38,6 +39,43 @@ export const REPO_ROOT = resolve(HERE, '..', '..');
 /** Where the operation's own scratch lives — the gitignored `.operations/` sidecar, beside `runs/`. */
 export function reviewSidecarDir(root = REPO_ROOT) {
   return join(root, '.operations', 'review');
+}
+
+/**
+ * The staged write-up's path — RUN-SCOPED, and that is the whole point.
+ *
+ * The name in the payload (`<repo>-<pr>-verdict.md`) is keyed by PR only, so two runs reviewing the SAME PR in
+ * the same checkout resolved to the SAME file: run B's write-up overwrote run A's staged bytes, and effect 1
+ * then shelled the single home with `--body-file=` pointing at the wrong verdict. Interleaving the two runs'
+ * effect 0 / effect 1 makes that a posted comment, not just a clobbered scratch file. A run id is the only
+ * thing here that distinguishes them, so it is the directory.
+ *
+ * ORDINAL 0'S `idempotent: true` SURVIVES THIS, and the reason is that a replay is the SAME RUN. The effect
+ * entry is created once and its payload frozen into the run record (`we:scripts/operations/engine.mjs`), and
+ * `applyPendingEffects` re-applies the STORED entry with `ctx.runId = run.id` — the id of the record it is
+ * resuming. So attempt N and attempt N+1 of one entry compute an identical path from an identical payload and
+ * write identical bytes, which is exactly the property the declaration claims. Had the id been minted per
+ * ATTEMPT rather than per run, this change would have broken it and would not be worth making.
+ *
+ * The id is validated with the SAME predicate the run store uses before putting it in a path, so a
+ * `--run-id=` from the CLI cannot become a traversal. A missing or malformed id is refused rather than
+ * silently falling back to the shared path — a fallback would restore the collision it exists to remove.
+ *
+ * @param {{root?: string, runId: string, bodyFile: string}} o
+ * @returns {string} absolute path under `.operations/review/<runId>/`.
+ */
+export function reviewBodyPath({ root = REPO_ROOT, runId, bodyFile } = {}) {
+  if (!isValidRunId(runId)) {
+    throw new TypeError(
+      `operations: the review write-up is staged per RUN, so it needs a valid run id — got ${JSON.stringify(runId)}. ` +
+      'The sink reads it from the executor context (`ctx.runId`); a caller invoking the sink directly must supply one.',
+    );
+  }
+  const name = String(bodyFile ?? '');
+  if (!name || name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
+    throw new TypeError(`operations: invalid review write-up file name ${JSON.stringify(bodyFile)} — expected a bare file name`);
+  }
+  return join(reviewSidecarDir(root), runId, name);
 }
 
 /**
@@ -152,9 +190,11 @@ export function createReviewPrSinks({
 
   return {
     // ── 0. THE COMMENT BODY, staged locally. Deterministic path, deterministic bytes → safe to redo. ────────
-    [REVIEW_EFFECTS.WRITE_UP]: async (payload) => {
-      mkdirSync(dir, { recursive: true });
-      const path = join(dir, String(payload.bodyFile));
+    // The path is RUN-SCOPED (`reviewBodyPath`) so two runs on the same PR in one checkout cannot cross-stage.
+    // Deterministic PER RUN is still deterministic for a replay, which is what `idempotent: true` asserts.
+    [REVIEW_EFFECTS.WRITE_UP]: async (payload, ctx) => {
+      const path = reviewBodyPath({ root, runId: ctx?.runId, bodyFile: payload.bodyFile });
+      mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, String(payload.body), 'utf8');
       return { path, bytes: String(payload.body).length };
     },
@@ -162,8 +202,10 @@ export function createReviewPrSinks({
     // ── 1. THE LABEL SWAP — the SINGLE HOME, as a subprocess. ───────────────────────────────────────────────
     // It posts the staged write-up (with the markers) AND applies the label, in the #2964 order it owns. This
     // sink adds no policy of its own: it builds argv, runs it, and reports.
-    [REVIEW_EFFECTS.LABEL]: async (payload) => {
-      const bodyPath = join(dir, String(payload.bodyFile));
+    [REVIEW_EFFECTS.LABEL]: async (payload, ctx) => {
+      // The SAME run-scoped path effect 0 wrote — both sinks derive it from `ctx.runId`, which is one run's id
+      // for every effect in that run, so 1 always posts the write-up 0 staged and never a sibling run's.
+      const bodyPath = reviewBodyPath({ root, runId: ctx?.runId, bodyFile: payload.bodyFile });
       const argv = [
         join(root, 'scripts', 'review-set-label.mjs'),
         String(payload.pr),
