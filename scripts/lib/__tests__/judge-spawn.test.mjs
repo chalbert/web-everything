@@ -7,8 +7,16 @@
  *
  * THE LOAD-BEARING TEST IN HERE is the `--bare` refusal. #3028 records the trap: `--bare` strips more
  * context than `--safe-mode` but forces key-based auth, so on a subscription the spawn dies "Not logged in".
- * Reproduced while writing this: exit 1, `is_error: true`, zero tokens billed. A comment would rot; two
- * tests (argv never emits it, `judgeSpawn` refuses it even if argv were later edited) will not.
+ * Reproduced while writing this: exit 1, `is_error: true`, zero tokens billed. A comment would rot; three
+ * tests will not, and they pin three DIFFERENT things — say which, because an earlier version of this header
+ * claimed more than was actually held:
+ *   1. `buildJudgeArgv` never EMITS `--bare`, across the whole care→rigor dial.
+ *   2. `assertNoForbiddenArgv` REFUSES any argv carrying it, whatever produced that argv (called directly).
+ *   3. `judgeSpawn`'s own CALL to that guard is pinned — the route is a flag-shaped `model`, which
+ *      `buildJudgeArgv` accepts as a plain non-empty string and drops into argv as `--model --bare`. Deleting
+ *      the guard call therefore turns that test red. What is still NOT pinned by any test is the guard's
+ *      stated belt-and-braces case (a future edit making `buildJudgeArgv` emit `--bare` literally); that is
+ *      unreachable from the public API by construction, and no test here pretends otherwise.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -73,6 +81,18 @@ describe('the recorded `--bare` trap is a gate, not a comment', () => {
   it('the guard is total over an empty or absent argv', () => {
     expect(() => assertNoForbiddenArgv()).not.toThrow();
     expect(() => assertNoForbiddenArgv([])).not.toThrow();
+  });
+
+  it('judgeSpawn CALLS that guard before spawning — a flag-shaped `model` smuggles `--bare` into argv', async () => {
+    // `buildJudgeArgv` only checks `model` is a non-empty string, so `--model --bare` is a well-formed argv
+    // it will happily produce. This is the one route by which a forbidden flag reaches the guard through the
+    // public API, and it is what pins the call site: delete `assertNoForbiddenArgv(argv)` from `judgeSpawn`
+    // and this test goes red because the spawn starts.
+    let started = false;
+    const spawnFn = () => { started = true; };
+    await expect(judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, model: '--bare', sessionId: SID, spawnFn }))
+      .rejects.toThrow(/refusing to spawn with --bare/);
+    expect(started).toBe(false);
   });
 });
 
@@ -385,6 +405,37 @@ describe('judgeSpawn — the one function a `judge` step calls, exercised over a
     await expect(judgeSpawn({ mandate: '', input: 'i', shape: SHAPE, sessionId: SID, spawnFn }))
       .rejects.toThrow(/mandate/);
     expect(started).toBe(false);
+  });
+
+  it('SIGKILLs a juror that outlives `timeoutMs` and rejects naming the budget it blew', async () => {
+    // A juror that never closes: no `close` event ever fires, so the ONLY thing that can settle the promise
+    // is the timeout path. No real `claude` is spawned — the seam is the injected `spawnFn`.
+    let killedWith;
+    let stdinClosed = false;
+    const spawnFn = () => ({
+      stdout: { on: () => {} },
+      stderr: { on: () => {} },
+      stdin: { on: () => {}, end: () => { stdinClosed = true; } },
+      on: () => {},
+      kill: (signal) => { killedWith = signal; },
+    });
+    await expect(judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, timeoutMs: 5, spawnFn }))
+      .rejects.toThrow('judge-spawn: the juror exceeded 5ms and was killed');
+    // Killed, not merely abandoned — an orphaned `claude -p` would keep billing against the budget.
+    expect(killedWith).toBe('SIGKILL');
+    expect(stdinClosed).toBe(true);
+  });
+
+  it('survives a child whose `kill` throws — the juror is already gone, the timeout still rejects', async () => {
+    const spawnFn = () => ({
+      stdout: { on: () => {} },
+      stderr: { on: () => {} },
+      stdin: { on: () => {}, end: () => {} },
+      on: () => {},
+      kill: () => { throw new Error('ESRCH'); },
+    });
+    await expect(judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, timeoutMs: 5, spawnFn }))
+      .rejects.toThrow(/exceeded 5ms and was killed/);
   });
 
   it('reports a missing binary as a start failure naming the CLI', async () => {

@@ -82,9 +82,16 @@ export const JUDGE_CLI = 'claude';
 export const FORBIDDEN_ARGV = Object.freeze(['--bare']);
 
 /**
- * The runtime half of the `--bare` refusal. `buildJudgeArgv` never emits a forbidden flag, but this is the
- * check that actually stands between an argv and a process — separately exported so it is provable on its
- * own rather than only reachable through a call that cannot express the failure.
+ * The runtime half of the `--bare` refusal. `buildJudgeArgv` never emits a forbidden flag from its OWN
+ * recipe, but this is the check that actually stands between an argv and a process. Separately exported so
+ * it is provable on its own.
+ *
+ * IT IS ALSO REACHABLE THROUGH `judgeSpawn`, which an earlier version of this header denied. `model` is
+ * validated only as a non-empty string, so `model: '--bare'` becomes the argv pair `--model --bare` and this
+ * guard fires — a real footgun (a flag-shaped option VALUE smuggling a banned flag past the recipe), and the
+ * route the unit test uses to pin `judgeSpawn`'s call to this function. The belt-and-braces case the call
+ * site is commented for — a future edit making `buildJudgeArgv` emit `--bare` literally — remains
+ * unreachable from the public API and is therefore untested; say so rather than imply otherwise.
  *
  * @param {string[]} argv
  * @throws when argv carries any `FORBIDDEN_ARGV` entry.
