@@ -3,8 +3,10 @@ bornAs: xzbzc7n
 kind: story
 size: 5
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-08"
+dateStarted: "2026-08-09"
+dateResolved: "2026-08-09"
 scope:
   - we:scripts/operations/
 scopeRationale: "The engine is a new directory authored whole by this slice; there are no pre-existing files to enumerate and no sibling item writes there."
