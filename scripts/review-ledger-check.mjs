@@ -39,6 +39,7 @@ import {
   AGREEMENT, DISAGREE_DIRECTION, compareLedgerToLabels, foldRepo, labelVerdictOf, summarizeAgreement,
   verdictLedgerPath,
 } from './lib/verdict-ledger.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 const DEFAULT_REPO = 'chalbert/web-everything';
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
@@ -174,9 +175,9 @@ function main(argv) {
   const path = verdictLedgerPath(repo);
 
   if (flags.json) {
-    process.stdout.write(`${JSON.stringify({ repo, path, rows, summary }, null, 2)}\n`);
+    writeAllSync(1, `${JSON.stringify({ repo, path, rows, summary }, null, 2)}\n`);
   } else {
-    process.stdout.write(`${renderReport({ repo, rows, summary, path, showAll: flags.all === true })}\n`);
+    writeAllSync(1, `${renderReport({ repo, rows, summary, path, showAll: flags.all === true })}\n`);
   }
   process.exit(summary.dangerous.length ? 1 : 0);
 }

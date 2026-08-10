@@ -2,8 +2,9 @@
 bornAs: xbqzlo9
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-10"
+dateResolved: "2026-08-10"
 relatedTo: ["3057", "2961"]
 scope:
   - "we:scripts/check-standards.mjs"
@@ -15,6 +16,7 @@ scope:
   - "we:scripts/progress-board.mjs"
   - "we:scripts/conveyor/learnings-harvest.mjs"
   - "we:scripts/lib/write-all-sync.mjs"
+  - "we:scripts/lib/stdout-flush-scan.mjs"
 tags: [cli, stdout, truncation, footgun, hygiene, capture]
 ---
 
@@ -272,3 +274,136 @@ tree. Almost none are false positives on the SHAPE, but most carry provably-boun
 instances this item defers on purpose — so shipping the rule now means either a red gate or 65 new warnings.
 Land it in the same change as the last fix. The alternative, a 65-entry baseline allowlist, rots before the
 sweep ends.
+
+**2026-08-10 — SWEEP COMPLETE, and the gate shipped with it. 109 sites fixed; the rule's baseline is ZERO.**
+
+Every remaining instance is drained, every statically-flagged candidate is measured, and
+[we:scripts/lib/stdout-flush-scan.mjs](../scripts/lib/stdout-flush-scan.mjs) is wired into `check:standards`
+with **no allowlist**, because the sweep left nothing to allow.
+
+### The remaining measured instances — before → after, through `execFileSync`
+
+| command | to a file | pipe BEFORE | pipe AFTER | remedy |
+|---|---|---|---|---|
+| [propose-readiness](../scripts/propose-readiness.mjs) `--json` | 1 741 141 | 8 192 (99.5 % lost) | **1 741 141** | b |
+| [check-readiness](../scripts/check-readiness.mjs) `--json` | 979 573 | 8 192 (99.2 %) | **979 573** | b |
+| [velocity-metrics](../scripts/readiness/velocity-metrics.mjs) `--json` | 644 635 | 8 192 (98.7 %) | **644 635** | a |
+| [learnings-harvest](../scripts/conveyor/learnings-harvest.mjs) `--json` | 39 743 | 8 192 (79.4 %) | **39 743** | b |
+| [progress-board](../scripts/progress-board.mjs) `--json` | 25 142 | 8 192 (67.4 %) | **25 142** | a |
+| [review-core-cli](../scripts/review-core-cli.mjs) `reduce --json` (60 findings) | 50 008 | 8 192 (83.6 %) | **50 008** | b |
+| [review-core-cli](../scripts/review-core-cli.mjs) `comment --json` | 39 454 | 8 192 (79.2 %) | **39 454** | b |
+| [review-core-cli](../scripts/review-core-cli.mjs) `comment` (human) | 39 304 | 8 192 (79.2 %) | **39 304** | b |
+| [jury-tree](../scripts/conveyor/jury-tree.mjs) | 7 865 | 7 865 (**96 % of the floor**) | 7 865 | a |
+
+[we:scripts/review-core-cli.mjs](../scripts/review-core-cli.mjs) took **b** throughout: `main()` dispatches and
+every branch is a guard that must halt in place, `fail()` most of all.
+[we:scripts/readiness/velocity-metrics.mjs](../scripts/readiness/velocity-metrics.mjs) and
+[we:scripts/progress-board.mjs](../scripts/progress-board.mjs) took **a**, because their exit was
+`process.exit(main(argv))` — the third shape below. `jury-tree` measured 7 865 of 8 192 (it was 7 437 when this
+card was filed): it had not truncated yet and would have started with no code change at all.
+
+### The twelve statically-flagged candidates — all measured
+
+**Over the floor, fixed** — [we:scripts/lib/jury-ledger.mjs](../scripts/lib/jury-ledger.mjs) `show`
+**62 177 → 8 192 (86.8 % lost)**, the largest unmeasured one and a true positive ·
+[we:scripts/fetch-parked.mjs](../scripts/fetch-parked.mjs) `--json` (3 PRs) **1 233 421 → 8 192 (99.3 %)** ·
+[we:scripts/review-detail.mjs](../scripts/review-detail.mjs) `--json` (PR #984, 26 comments)
+**11 072 → 8 192 (26 %)**.
+
+**Under the floor today but UNBOUNDED BY CONSTRUCTION, fixed anyway** —
+[we:scripts/pr-state.mjs](../scripts/pr-state.mjs) `--json` 3 215 B for 12 PRs (268 B/PR, variadic `<num…>` ⇒
+crosses at 31 PRs) · [we:scripts/review-runner.mjs](../scripts/review-runner.mjs) (one `records` entry per
+pending PR; its exits run through a local `exit()` helper, which is why the first detector missed all three of
+its sites) · [we:scripts/merge-ai-prs.mjs](../scripts/merge-ai-prs.mjs) `--dry-run --json` 363 B on an empty
+queue, but `result` carries `merged`/`failed`/`deferred`/`skipped`/`parked` over every open PR ·
+[we:scripts/lane-drain.mjs](../scripts/lane-drain.mjs) (its `emit` embeds a whole `pr-land` result) ·
+[we:scripts/lib/verdict-ledger.mjs](../scripts/lib/verdict-ledger.mjs) `show` 2 010 B, one row per reviewed PR ·
+[we:scripts/review-ledger-check.mjs](../scripts/review-ledger-check.mjs) `--json` 504 B, same growth ·
+[we:scripts/lib/micro-decision-surface.mjs](../scripts/lib/micro-decision-surface.mjs) `surface` 146 B, grows
+with open decisions and carries untrusted text ·
+[we:scripts/check-statute.mjs](../scripts/check-statute.mjs) 37 B (`--json`) / 80 B (human) — a gate, so it
+took **a** for one line.
+
+**Provably bounded, and fixed only for the rule's sake** —
+[we:scripts/review-set-label.mjs](../scripts/review-set-label.mjs) emits `{ok, pr, to, labels}` or
+`{error: <one line>}`, a fixed small object with nothing in it that grows. It is included because a syntactic
+rule cannot tell "bounded" from "unbounded", and the alternative was an allowlist entry. Its in-process test
+harness captured by monkey-patching `process.stdout.write`, which a synchronous `fs.writeSync(1, …)` correctly
+bypasses — so `runReviewLabelCli` now takes an injected `emit` and the harness collects through it. That patch
+was never testing the flush anyway: it never touched a pipe.
+
+Also fixed while sweeping, same shape, previously unlisted:
+[we:scripts/conveyor/tick-core.mjs](../scripts/conveyor/tick-core.mjs) (789 B idle, but
+[we:skills-src/conveyor/runner.mjs](../skills-src/conveyor/runner.mjs) `JSON.parse`s it in the resident loop)
+and [we:scripts/conveyor/status-board.mjs](../scripts/conveyor/status-board.mjs) — which worked *around* this
+bug in its child and then committed it on its own output — plus `pr-land`, `push-if-green`, `lane-resume`,
+`lane-stack`, `verify-lane`, `guard-bash`, `infra-blocked`, `scope-lease-collect`, `red-main-remediation`,
+`couple-plan`, `test-selection`, `file-locks-cli`, `operations/run`, `wait-green`, `pr-watch`,
+`decision-route`, `learnings-drop`, `learnings-dedup`, `close-session-sweep`, `check-memory`,
+`check-memory-freshness`, `check-backlog-workflow`, `drain-push-at-close`, `lane-manifest-write`,
+`backlog-renumber-collisions`, `converge-daemon-pass`, `converge-daemon-install`, `dev/check-fresh`,
+`dev/check-cold-start` and `dev/regression`.
+
+### Output is byte-identical — the property that mattered most
+
+65 commands were captured to a FILE (never a pipe) before and after, hashed, and compared: **62 byte-identical
+outright**. The three exceptions are live-state reads, not formatting, and each was proven separately:
+
+- [we:scripts/progress-board.mjs](../scripts/progress-board.mjs) `--json` differs only in `generatedAt` —
+  identical once the timestamp is normalised. (Established by running the BASELINE twice: it was the only one
+  of the 65 that was not byte-stable against itself.)
+- [we:scripts/conveyor/status-board.mjs](../scripts/conveyor/status-board.mjs) and
+  [we:scripts/readiness/scope-lease-collect.mjs](../scripts/readiness/scope-lease-collect.mjs) report on the
+  working tree's own lane lease and dirty-file set — which this change alters, so a before/after run compares
+  two different worlds (the same caveat [we:scripts/backlog.mjs](../scripts/backlog.mjs) `build-queue --json`
+  carries). Proven by materialising each file's pre-change version *alongside* the new one and running both
+  against one identical tree: **byte-identical, 159 B and 7 616 B**.
+
+`writeAllSync` is byte-transparent by construction, and `writeLineSync(1, x)` appends exactly the newline
+`console.log(x)` did — so a single-argument `console.log(JSON.stringify(…))` converts with no diff, and every
+converted `console.log` in this sweep took a single argument.
+
+### The gate — shipped, zero baseline, no allowlist
+
+[we:scripts/lib/stdout-flush-scan.mjs](../scripts/lib/stdout-flush-scan.mjs). **109 hits on the pre-sweep tree,
+0 after** — which is the whole reason it was shippable. `check:standards` reports the same **1 284 warnings**
+as the pre-change baseline, so the rule adds no noise at all.
+
+The naive detector this card proposed — a stdout write within three lines of a `process.exit` — would have
+been a false-green gate. It missed three of the eight measured instances, and building it honestly turned up
+three shapes and three scanner defects:
+
+1. `emit-then-exit`, the textbook one.
+2. `emit-then-exit-fn` — the exit reached through a LOCAL helper (`review-runner`'s `exit()`,
+   `review-core-cli`'s `fail()`). Helper names are resolved per file, never hardcoded.
+3. `exit-wraps-call` — `process.exit(main(argv))`, invisible at any window size, and the shape that broke both
+   `velocity-metrics` and `progress-board`.
+
+The defects, each of which produced a false GREEN and each now pinned by a test: a doc comment that NAMES
+`process.exit(` counted as a call (this rule and
+[we:scripts/lib/write-all-sync.mjs](../scripts/lib/write-all-sync.mjs) both have to name it); popping a
+template hole on the first `}` left `` `${JSON.stringify({ error: msg })}` `` permanently unbalanced, so every
+function extent after it collapsed and `review-runner`'s `main` vanished from the scan entirely; and a regex
+literal carrying unpaired quotes (`/[&<>"']/g` in
+[we:scripts/progress-board.mjs](../scripts/progress-board.mjs)) desynchronised the scanner for 1 100 lines,
+blanking that file's real `process.exit(main())` and reporting it clean.
+
+`console.log` is in scope only in its `JSON.stringify` form. That boundary is deliberate and it is the line
+between a useful rule and a dead one: a single big serialized write truncates deterministically (three of the
+eight instances were exactly that), while a `console.log` LOOP of human lines drains between writes and
+truncates racily — real, but not decidable from one line, and flagging every human summary before an exit
+would bury the rule. Remedy **a** is the loop's fix.
+
+### Tests
+
+[we:scripts/__tests__/stdout-flush.test.mjs](../scripts/__tests__/stdout-flush.test.mjs) grows from 14 to 34
+cases: real-child `execFileSync` round-trips for `review-core-cli` (`comment --json`, `comment` human,
+`reduce --json`) and `velocity-metrics --json`, all four original properties intact; the rule's own table
+(bounded literal → clean, stderr → clean, already-drained → clean, remedy (a) → clean, a `console.log` loop →
+clean, each of the three shapes → flagged); one regression test per scanner defect above; and
+`THE BASELINE IS ZERO`, which is what keeps the gate honest. Verified failing on a revert of the fixes: 6 red,
+including the zero-baseline assertion.
+
+`npm run test:unit` — 318 files, 7 148 passed, 3 skipped, 0 failed. `npm run check:standards` — 0 errors,
+1 284 warnings (baseline: 3 errors, all pre-existing untracked report files in the operator's checkout, and
+the same 1 284 warnings).

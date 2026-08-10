@@ -210,7 +210,7 @@ export function probeCloneState(clone) {
 
 // ── the CLI (gated on direct invocation) ──────────────────────────────────────────────────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
-if (IS_CLI) process.exit(main(process.argv.slice(2)));
+if (IS_CLI) process.exitCode = main(process.argv.slice(2));
 
 function main(argv) {
   const cfg = resolvePassConfig();

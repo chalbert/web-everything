@@ -79,6 +79,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname, join } from 'node:path';
 import { LEASE_FILENAME, isLeaseStale, isForeignLease, laneMarkedSlug, assertedLaneSlug } from './lib/lane-lease.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 const BACKLOG_MD = /(?:^|[\s'"=(])(?:\.\/)?backlog\/(\d+)-[^\s'")]*\.md/;
 const CORPUS_MD = /(?:^|[\s'"=(])(?:\.\/)?(?:backlog|reports)\/[^\s'")]*\.md/;
@@ -1590,7 +1591,7 @@ if (IS_CLI) {
       // two concatenated JSON documents on one stream, which a strict reader cannot parse — and the deny is
       // the message that matters, so corrupting it to append a nudge is a strictly bad trade. When the
       // command is already denied, the nudge goes to stderr only.
-      if (!r) process.stdout.write(JSON.stringify({ systemMessage: 'guard-bash: ' + nudge }) + '\n');
+      if (!r) writeAllSync(1, JSON.stringify({ systemMessage: 'guard-bash: ' + nudge }) + '\n');
       process.stderr.write('guard-bash: ' + nudge + '\n');
     }
   } catch { /* never wedge on a nudge-computation fault */ }

@@ -40,6 +40,7 @@ import { loadDataRegistry } from './lib/registry-loader.cjs';
 import { loadAdapters } from './lib/adapters-loader.cjs';
 import { localToday } from './lib/local-date.mjs';
 import { findUtcDaySlices, utcDaySliceMessage } from './lib/utc-day-slice-scan.mjs';
+import { scanStdoutFlush, stdoutFlushMessage } from './lib/stdout-flush-scan.mjs';
 import {
   BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, validatePolyglotWideningGate, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance, computeDesignKnowledgeConformance,
@@ -867,6 +868,19 @@ try {
     err(utcDaySliceMessage(hit), { kind: 'utc-day-slice', fix: 'model', file: hit.file, line: hit.line });
 } catch (e) {
   err(`UTC day-slice scan failed: ${e.message}`);
+}
+
+// stdout flushed before a process.exit (#3061). `write(big); process.exit()` TRUNCATES to the pipe buffer
+// (~8 KB) whenever a parent CAPTURES stdout — silently, with a zero status. Eight live CLIs carried it, four
+// losing over 99 % of their payload, including this gate. Prose did not stop it: five files had each
+// rediscovered the mechanism in a local comment. Deterministic and script-decidable ⇒ a scan (memory rule #51).
+try {
+  // Attributed per hit (#952/#1389/#1144) — an unattributed finding reds a concurrent session on a file it
+  // never touched, and `--local --files=<lane set>` would demote a real one to a note.
+  for (const hit of scanStdoutFlush(ROOT))
+    err(stdoutFlushMessage(hit), { kind: 'stdout-flush', fix: 'model', file: hit.file, line: hit.line });
+} catch (e) {
+  err(`stdout-flush scan failed: ${e.message}`);
 }
 
 // Epic ↔ child status coherence (docs/agent/backlog-workflow.md → "Closing out" step 4):

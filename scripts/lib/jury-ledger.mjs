@@ -51,6 +51,7 @@ import {
   // With no local copy, this fold cannot drift from disposition-judge's reduction again.
   verdictStrictness,
 } from './jury-core.mjs';
+import { writeAllSync } from './write-all-sync.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root (this file lives at `<root>/scripts/lib/`). The default log dir hangs off it (never CWD). */
@@ -529,7 +530,7 @@ function main(argv) {
     }
     const raw = Array.isArray(input) ? input : (input && Array.isArray(input.events) ? input.events : (input ? [input] : []));
     const { appended, rejected } = appendJuryEvents(flags.subject, raw);
-    process.stdout.write(`${JSON.stringify({ subject: flags.subject, appended, rejected })}\n`);
+    writeAllSync(1, `${JSON.stringify({ subject: flags.subject, appended, rejected })}\n`);
     // A rejected event is a caller bug (a malformed event), surfaced non-zero so a CI/agent notices — but the
     // good events in the batch were still persisted (append-only never loses a valid event to a bad neighbor).
     process.exit(rejected.length ? 1 : 0);
@@ -551,7 +552,7 @@ function main(argv) {
     }
     const events = buildReviewLedgerEvents(state || {});
     const { appended, rejected } = appendJuryEvents(flags.subject, events);
-    process.stdout.write(`${JSON.stringify({ subject: flags.subject, appended, rejected })}\n`);
+    writeAllSync(1, `${JSON.stringify({ subject: flags.subject, appended, rejected })}\n`);
     process.exit(rejected.length ? 1 : 0);
   }
 
@@ -559,7 +560,7 @@ function main(argv) {
     const out = typeof flags.subject === 'string' && flags.subject.trim()
       ? foldSubject(flags.subject)
       : foldAllSubjects();
-    process.stdout.write(`${JSON.stringify(out, null, flags.json ? 0 : 2)}\n`);
+    writeAllSync(1, `${JSON.stringify(out, null, flags.json ? 0 : 2)}\n`);
     process.exit(0);
   }
 

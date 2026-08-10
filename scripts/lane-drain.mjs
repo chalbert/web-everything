@@ -77,6 +77,7 @@ import { isHash, isNum, idFromName, applyLedger, swapHashes } from './backlog/id
 // #2603 — the drain's resolve-reachable check reads `status:` FRONTMATTER-strict (see `resolveReachableFromBody`),
 // never loose over the whole body. `readField` parses only the first `---`…`---` block.
 import { readField } from './backlog/frontmatter.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 dual-lock: numbering mutex + whole-process drain lease
 
 // ── flag parsing (mirrors pr-land.mjs / lane-review.mjs) ──────────────────────────────────────────────
@@ -304,7 +305,7 @@ function runCli() {
   if (sub === 'watch' || sub === 'drain') return runWatch({ follow: sub === 'watch' });
   if (sub !== 'drain-one') {
     const detail = 'usage: `drain-one <NNN> --manifest=<path>` (land one queued couple) · `drain` (one cascade pass over the queue) · `watch` (poll + drain, --follow to keep waiting for producers)';
-    if (flags.json) process.stdout.write(JSON.stringify({ landed: false, reason: 'usage', detail }) + '\n');
+    if (flags.json) writeAllSync(1, JSON.stringify({ landed: false, reason: 'usage', detail }) + '\n');
     else process.stderr.write(`lane-drain ✗ usage: ${detail}\n`);
     process.exit(3);
   }
@@ -335,7 +336,7 @@ function runDrainOne() {
   const CWD = resolveWeRoot();
 
   function emit(result, code) {
-    if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
+    if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
     else process.stderr.write(`lane-drain ${result.landed ? '✓ landed' : result.reason === 'not-ready' ? '· not ready' : result.reason === 'dry-run' ? '· dry-run' : '✗ ' + (result.reason || 'failed')}: ${result.detail}\n`);
     process.exit(code);
   }
@@ -911,7 +912,7 @@ function runWatch({ follow }) {
   const log = (msg) => { if (!AS_JSON) process.stderr.write(`lane-drain · ${msg}\n`); };
 
   function fail(reason, detail, code) {
-    if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
+    if (AS_JSON) writeAllSync(1, JSON.stringify({ ok: false, reason, detail }) + '\n');
     else process.stderr.write(`lane-drain ✗ ${reason}: ${detail}\n`);
     process.exit(code);
   }
@@ -931,7 +932,7 @@ function runWatch({ follow }) {
     const lease = acquireDrainLease(DRAIN_LOCK_ROOT, leaseOwner);
     if (!lease.ok) {
       const st = drainLeaseStatus(DRAIN_LOCK_ROOT);
-      if (AS_JSON) process.stdout.write(JSON.stringify({ ok: true, mode: follow ? 'watch' : 'drain', skipped: 'drain-in-progress', heldBy: st.owner, detail: `another drain already holds the lease (${st.owner}) — no-op (#2391)` }) + '\n');
+      if (AS_JSON) writeAllSync(1, JSON.stringify({ ok: true, mode: follow ? 'watch' : 'drain', skipped: 'drain-in-progress', heldBy: st.owner, detail: `another drain already holds the lease (${st.owner}) — no-op (#2391)` }) + '\n');
       else process.stderr.write(`lane-drain · another drain already running (lease held by ${st.owner || '?'}) — no-op (#2391)\n`);
       process.exit(0);
     }
@@ -1036,7 +1037,7 @@ function runWatch({ follow }) {
     detail: `${DRY_RUN ? 'dry-run: ' : ''}landed ${landed.length} couple(s)${landed.length ? ` (${landed.map((n) => '#' + n).join(', ')})` : ''}${failedCouples.length ? `, ${failedCouples.length} failed (left queued)` : ''}${landedButQueued.length ? `, ${landedButQueued.length} landed-but-not-cleared` : ''}${lastPlan.deferred.length ? `, ${lastPlan.deferred.length} deferred` : ''}${!DRY_RUN && !fullyDrained ? `, ${remainingQueue.length} still queued` : ''}`,
   };
   if (!DRY_RUN) releaseDrainLease(DRAIN_LOCK_ROOT, leaseOwner); // #2391 — free the whole-process lease for the next drain launch
-  if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
+  if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
   else process.stderr.write(`lane-drain ${follow ? 'watch' : 'drain'} ${fullyDrained ? '✓' : '⚠'} ${result.detail}\n`);
   // Exit 0 ONLY when the queue fully drained (nothing left needing attention); else 2. A dry-run reports 0
   // (it plans, never drains) — its plan is in the JSON.

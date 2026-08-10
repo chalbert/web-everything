@@ -35,6 +35,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { classifyChecks } from './pr-land.mjs';
 import { recoverCheckRows } from './fetch-parked.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 /**
  * Parse a positive-numeric CLI flag, falling back to a default when the parse is NOT a finite number > 0 (#2482
@@ -91,7 +92,7 @@ function runCli() {
   const pr = args.find((a) => /^\d+$/.test(a));
 
   if (!pr) {
-    process.stdout.write(`${JSON.stringify({ error: 'usage: wait-green <pr> [--repo=<path>] [--timeout=600] [--interval=15] [--json]' })}\n`);
+    writeAllSync(1, `${JSON.stringify({ error: 'usage: wait-green <pr> [--repo=<path>] [--timeout=600] [--interval=15] [--json]' })}\n`);
     process.exit(2);
   }
 
@@ -122,8 +123,8 @@ function runCli() {
   function emitFinal(verdict, exit, checkStatus) {
     const elapsed = Math.round((Date.now() - start) / 1000);
     const result = { pr: Number(pr), verdict, checkStatus, elapsed, timeout };
-    if (asJson) process.stdout.write(`${JSON.stringify(result)}\n`);
-    else process.stdout.write(`#${pr} ${verdict} (checks=${checkStatus}) after ${elapsed}s\n`);
+    if (asJson) writeAllSync(1, `${JSON.stringify(result)}\n`);
+    else writeAllSync(1, `#${pr} ${verdict} (checks=${checkStatus}) after ${elapsed}s\n`);
     process.exit(exit);
   }
 

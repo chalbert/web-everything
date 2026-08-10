@@ -42,6 +42,7 @@
  */
 
 import { pathToFileURL } from 'node:url';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /** A git object hash: 7–64 hex chars (matches `lane-manifest.mjs`'s `base` validation). */
 const SHA_RE = /^[0-9a-f]{7,64}$/;
@@ -163,7 +164,7 @@ function main(argv) {
       mainTipSha: typeof flags['main-tip'] === 'string' ? flags['main-tip'] : undefined,
     });
   }
-  process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+  writeAllSync(1, JSON.stringify(out, null, 2) + '\n');
   process.exit(0);
 }
 

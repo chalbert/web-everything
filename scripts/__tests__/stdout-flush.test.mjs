@@ -34,6 +34,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+import { findStdoutFlushViolations, scanStdoutFlush } from '../lib/stdout-flush-scan.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
@@ -158,6 +159,172 @@ describe('lane-review.mjs diff survives a capturing parent — the #2170 reviewe
     // stays and the WRITE is what changed. Nothing may write to stdout raw here.
     expect(src).not.toMatch(/process\.stdout\.write\(/);
     expect(src).toMatch(/import \{ writeAllSync \} from '\.\/lib\/write-all-sync\.mjs'/);
+  });
+});
+
+// ── THE SWEEP (#3061) ────────────────────────────────────────────────────────────────────────────────────────
+// The six remaining MEASURED instances plus the newly-measured ones, each re-read through the strictest
+// consumer. Only the sites whose payload can be produced from a clean checkout are spawned here; the rest are
+// covered by the source-level rule below (a gh-backed CLI cannot be exercised offline, but its SHAPE can).
+describe('the swept CLIs deliver their full payload through a capturing parent (#3061)', () => {
+  const REVIEW_CORE = join(ROOT, 'scripts', 'review-core-cli.mjs');
+  const VELOCITY = join(ROOT, 'scripts', 'readiness', 'velocity-metrics.mjs');
+
+  /** 60 findings with realistic prose — `reduce`/`comment` take CALLER-supplied findings, so both are
+   *  unbounded by construction; this fixture puts them at ~40 KB, five times the pipe floor. */
+  let fixture;
+  let dir;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'review-core-flush-'));
+    fixture = join(dir, 'findings.json');
+    const findings = Array.from({ length: 60 }, (_, i) => ({
+      summary: `finding ${i} — ${'the reviewer sentence that names the defect '.repeat(4)}`,
+      file: `scripts/some/path/file-${i}.mjs`,
+      line: i + 10,
+      category: 'correctness',
+      failure_scenario: 'when the payload exceeds the pipe buffer the tail is dropped '.repeat(4),
+      rootCause: 'the author copied a nearby shim '.repeat(3),
+      prevention: 'a check:standards rule that flags the shape '.repeat(3),
+      preventionCaptured: false,
+    }));
+    writeFileSync(fixture, JSON.stringify({ findings, verdict: 'changes' }));
+  });
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+
+  // Measured on this checkout, 2026-08-10, BEFORE the fix: 39 454 / 39 304 / 50 008 bytes to a file, all three
+  // 8 192 through `execFileSync`. `comment --json` failed `JSON.parse` with "Unterminated string at 8092".
+  it('review-core-cli comment --json — 39 454 B, and it PARSES', () => {
+    const out = captureViaExecFileSync(REVIEW_CORE, ['comment', `--file=${fixture}`, '--json']);
+    expect(Buffer.byteLength(out, 'utf8')).toBeGreaterThan(PIPE_FLOOR * 4);
+    expect(typeof JSON.parse(out).markdown).toBe('string');
+  });
+
+  it('review-core-cli comment (human) — the markdown body is structurally complete', () => {
+    const out = captureViaExecFileSync(REVIEW_CORE, ['comment', `--file=${fixture}`]);
+    expect(Buffer.byteLength(out, 'utf8')).toBeGreaterThan(PIPE_FLOOR * 4);
+    // Truncation removes the TAIL, so the last finding arriving is the exact detector.
+    expect(out).toContain('finding 59');
+  });
+
+  it('review-core-cli reduce --json — 50 008 B, and it PARSES', () => {
+    const out = captureViaExecFileSync(REVIEW_CORE, ['reduce', `--file=${fixture}`, '--json']);
+    expect(Buffer.byteLength(out, 'utf8')).toBeGreaterThan(PIPE_FLOOR * 4);
+    expect(JSON.parse(out).findingsCount).toBe(60);
+  });
+
+  // 644 635 B to a file vs 8 192 through the pipe before the fix. This one took remedy (a) — its exit was
+  // `process.exit(main(argv))`, the shape no window rule can see, so the WRITE was never the thing to change.
+  it('velocity-metrics --json — 644 635 B, and it PARSES', () => {
+    const out = captureViaExecFileSync(VELOCITY, ['--json']);
+    expect(Buffer.byteLength(out, 'utf8')).toBeGreaterThan(PIPE_FLOOR * 10);
+    const parsed = JSON.parse(out);
+    expect(parsed.throughput).toBeTruthy();
+    expect(parsed.counts.total).toBeGreaterThan(0);
+  }, 60_000);
+
+  it('velocity-metrics never calls process.exit — remedy (a), so BOTH modes drain', () => {
+    const code = readFileSync(VELOCITY, 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    expect(code).not.toMatch(/process\.exit\(/);
+    expect(code).toMatch(/process\.exitCode\s*=\s*main\(/);
+  });
+});
+
+// ── THE GATE (#3061) ─────────────────────────────────────────────────────────────────────────────────────────
+describe('the check:standards stdout-flush rule (#3061)', () => {
+  const cases = [
+    ['emit-then-exit', "process.stdout.write(JSON.stringify(x));\nprocess.exit(0);", 1],
+    ['a plain literal banner is BOUNDED and never flagged', "process.stdout.write('done\\n');\nprocess.exit(0);", 0],
+    ['console.log of a big serialized payload IS flagged', 'console.log(JSON.stringify(x, null, 2));\nprocess.exit(0);', 1],
+    ['a console.log LOOP of human lines is not (racy, not deterministic — remedy (a) territory)',
+      'for (const e of errors) console.log(`  ${e}`);\nprocess.exit(1);', 0],
+    ['stderr is already synchronous', "process.stderr.write(JSON.stringify(x));\nprocess.exit(1);", 0],
+    ['already drained through the shared helper', 'writeAllSync(1, JSON.stringify(x));\nprocess.exit(0);', 0],
+    ['remedy (a) — no process.exit at all', 'process.stdout.write(JSON.stringify(x));\nprocess.exitCode = 1;', 0],
+    ['exit-wraps-call', 'process.exit(main(process.argv.slice(2)));', 1],
+    ['process.exit with a plain code is not the wrapper shape', 'process.exit(2);', 0],
+  ];
+  for (const [name, src, expected] of cases) {
+    it(`${name} → ${expected} finding(s)`, () => {
+      expect(findStdoutFlushViolations(src)).toHaveLength(expected);
+    });
+  }
+
+  it('resolves a LOCAL exit helper, so `return fail(msg)` counts as an exit', () => {
+    // review-core-cli's `fail()` and review-runner's `exit()` are this shape; a hardcoded name list would rot.
+    const src = [
+      'function main() {',
+      '  process.stdout.write(JSON.stringify(result));',
+      '  return bail(2);',
+      '}',
+      'function bail(code) { process.exit(code); }',
+    ].join('\n');
+    expect(findStdoutFlushViolations(src).map((v) => v.kind)).toEqual(['emit-then-exit-fn']);
+  });
+
+  it('does NOT treat an expression-bodied arrow as an exit helper', () => {
+    // `const log = (m) => process.stderr.write(m);` has no brace body. The first cut scanned forward for ANY
+    // `{`, found the NEXT function's, and so inherited its `process.exit` — every `log(` then read as an exit.
+    const src = [
+      "const log = (m) => process.stderr.write(m + '\\n');",
+      'function other() { process.exit(1); }',
+      'function show() {',
+      '  process.stdout.write(JSON.stringify(rows));',
+      '  log("done");',
+      '}',
+    ].join('\n');
+    expect(findStdoutFlushViolations(src)).toEqual([]);
+  });
+
+  it('stops at the end of the enclosing function — a neighbour\'s guard is not this write\'s exit', () => {
+    const src = [
+      'function a() {',
+      '  process.stdout.write(JSON.stringify(rows));',
+      '}',
+      'function b() {',
+      '  if (bad) process.exit(1);',
+      '}',
+    ].join('\n');
+    expect(findStdoutFlushViolations(src)).toEqual([]);
+  });
+
+  it('ignores a comment that NAMES process.exit — this rule documents its own footgun', () => {
+    const src = [
+      'function f() {',
+      '  process.stdout.write(JSON.stringify(x));',
+      '  // never follow this with process.exit(0) — it truncates',
+      '}',
+    ].join('\n');
+    expect(findStdoutFlushViolations(src)).toEqual([]);
+  });
+
+  it('survives a regex literal carrying unpaired quotes', () => {
+    // `.replace(/[&<>"']/g, …)` in progress-board.mjs desynchronised the first scanner for 1 100 lines, which
+    // BLANKED its real `process.exit(main())` and reported the file clean. A false GREEN, the worst kind.
+    const src = [
+      'const esc = (s) => String(s).replace(/[&<>"\']/g, (c) => c);',
+      'process.exit(main());',
+    ].join('\n');
+    expect(findStdoutFlushViolations(src).map((v) => v.kind)).toEqual(['exit-wraps-call']);
+  });
+
+  it('survives a template hole whose expression contains braces', () => {
+    // `` `${JSON.stringify({ error: msg })}` `` — popping the hole on the FIRST `}` left a brace open and every
+    // function extent after it collapsed, so review-runner.mjs's `main` disappeared from the scan entirely.
+    const src = [
+      'function main() {',
+      '  process.stdout.write(`${JSON.stringify({ error: msg })}\\n`);',
+      '  return bail(2);',
+      '}',
+      'function bail(c) { process.exit(c); }',
+    ].join('\n');
+    expect(findStdoutFlushViolations(src).map((v) => v.kind)).toEqual(['emit-then-exit-fn']);
+  });
+
+  it('THE BASELINE IS ZERO — the sweep is complete, so the rule needs no allowlist', () => {
+    // The whole reason this rule could ship at all (#3061): 109 sites matched on the pre-sweep tree, every one
+    // was fixed in the same change, so there is no 109-entry allowlist to rot. If this goes red, a NEW site was
+    // introduced — drain it (writeAllSync/writeLineSync) or drop the exit for `process.exitCode`.
+    expect(scanStdoutFlush(ROOT)).toEqual([]);
   });
 });
 

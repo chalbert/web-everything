@@ -83,6 +83,7 @@ import { buildVerdictRecord, appendVerdict, verdictForLabelTarget } from './lib/
 // `runReviewLabelCli` for why that distinction is the whole point). Imported from the CLI that owns it, the same
 // way `we:scripts/fetch-parked.mjs` already does — it is the single home of the #2450 net-diff basis.
 import { computeNetDiffText } from './merge-ai-prs.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 /**
  * we:scripts/review-set-label.mjs#REVIEW_LABEL_TARGETS — the CLOSED set of label-swap targets `decideSetLabel`
@@ -294,7 +295,15 @@ export function presentRemoveLabels(removeLabels, currentLabels) {
  *   allowClearHuman?:boolean,
  *   buildComment:(o:{to:string,actor:string,decision:object,headSha:string,reason:string})=>string,
  *   successResult:(o:{pr:number,to:string,decision:object,labels:string[]})=>object,
- *   refusalResult:(o:{pr:number,decision:object})=>object}} cfg
+ *   refusalResult:(o:{pr:number,decision:object})=>object,
+ *   emit?:(line:string)=>void}} cfg
+ *
+ * `emit` is the stdout writer, and it is INJECTED for one reason (#3061): the production default drains
+ * SYNCHRONOUSLY (`writeAllSync`), because `write(payload); process.exit()` truncates to the pipe buffer when a
+ * parent captures stdout. A synchronous `fs.writeSync(1, …)` is invisible to a test that captures by
+ * monkey-patching `process.stdout.write` — and it should be: that patch never touched a pipe, so it could
+ * never have caught the truncation it looks like it is testing. An in-process caller passes its own collector
+ * instead of pretending to own fd 1.
  */
 export function runReviewLabelCli({
   argv = process.argv.slice(2),
@@ -306,7 +315,12 @@ export function runReviewLabelCli({
   successResult,
   refusalResult,
   allowClearHuman = false,
+  emit = (line) => writeAllSync(1, line),
 } = {}) {
+  // Shadows the module-level `fail` so EVERY refusal inside this function — there are seventeen — goes to the
+  // injected emitter too. Without this the guards print past an in-process caller's collector (#3061); the
+  // module-level one stays for the CLI bootstrap below, which owns fd 1 for real.
+  const fail = (message, code = 2) => { emit(`${JSON.stringify({ error: message })}\n`); process.exit(code); };
   let repo = (argv.find((a) => a.startsWith('--repo=')) || '').slice('--repo='.length);
   const actorArg = (argv.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length);
   const actor = actorArg || defaultActor;
@@ -478,7 +492,7 @@ export function runReviewLabelCli({
   // re-arm) changes NOTHING and exits non-zero.
   const decision = decideSetLabel({ to, currentLabels });
   if (!decision.allowed) {
-    process.stdout.write(`${JSON.stringify(refusalResult({ pr: Number(pr), decision }))}\n`);
+    emit(`${JSON.stringify(refusalResult({ pr: Number(pr), decision }))}\n`);
     process.exit(1);
   }
 
@@ -697,7 +711,7 @@ export function runReviewLabelCli({
     newLabels = [...new Set([...names, decision.addLabel])];
   }
 
-  process.stdout.write(`${JSON.stringify(successResult({ pr: Number(pr), to, decision, labels: newLabels }))}\n`);
+  emit(`${JSON.stringify(successResult({ pr: Number(pr), to, decision, labels: newLabels }))}\n`);
   process.exit(0);
 }
 
@@ -1040,7 +1054,7 @@ if (IS_CLI) {
 
 /** we:scripts/review-set-label.mjs#fail — print a machine-readable error and exit non-zero. */
 function fail(message, code = 2) {
-  process.stdout.write(`${JSON.stringify({ error: message })}\n`);
+  writeAllSync(1, `${JSON.stringify({ error: message })}\n`);
   process.exit(code);
 }
 

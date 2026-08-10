@@ -62,6 +62,7 @@ import { repoKeyForSlug } from './lib/constellation-repos.mjs';
 import {
   partitionRunnerPRs, runnerShadowPlan, buildShadowRecord,
 } from './lib/review-runner-core.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 // ── singleton lease (daemon parity — its OWN lock root/key so it never aliases the drain lease) ───────────────
 /** Machine-global lock home for the review runner — shared across checkouts on the host so two scheduled runs
@@ -195,7 +196,7 @@ function main(argv) {
 
   // `--enforce` is REFUSED — this mechanical slice is shadow-only; the act flip is a separate ratified step.
   if (flags.enforce) {
-    process.stdout.write(`${JSON.stringify({ error: 'review-runner is SHADOW-only — enforcing (auto-clearing) is a separate ratified step (#2572 part 2), not a flag here' })}\n`);
+    writeAllSync(1, `${JSON.stringify({ error: 'review-runner is SHADOW-only — enforcing (auto-clearing) is a separate ratified step (#2572 part 2), not a flag here' })}\n`);
     return process.exit(2);
   }
 
@@ -204,7 +205,7 @@ function main(argv) {
   // #2830 M3 defect: `--repo=…frontierui` reading a FrontierUI PR but folding the WE ledger).
   const repoKey = repoKeyForSlug(repoSlug);
   if (!repoKey) {
-    process.stdout.write(`${JSON.stringify({ error: `review-runner: --repo=${repoSlug} is not a known constellation repo (slug or key) — refusing to guess its ledger key` })}\n`);
+    writeAllSync(1, `${JSON.stringify({ error: `review-runner: --repo=${repoSlug} is not a known constellation repo (slug or key) — refusing to guess its ledger key` })}\n`);
     return process.exit(2);
   }
 
@@ -216,7 +217,7 @@ function main(argv) {
     if (!acq.ok) {
       // A live runner already holds the lease → benign no-op (idempotent, singleton). Exit 0.
       const msg = `review-runner: another runner holds the singleton lease (${acq.reason}${acq.heldBy ? `, heldBy ${acq.heldBy}` : ''}) — no-op.`;
-      if (asJson) process.stdout.write(`${JSON.stringify({ ranPass: false, reason: 'lease-held', heldBy: acq.heldBy || null, records: [] })}\n`);
+      if (asJson) writeAllSync(1, `${JSON.stringify({ ranPass: false, reason: 'lease-held', heldBy: acq.heldBy || null, records: [] })}\n`);
       else process.stderr.write(`${msg}\n`);
       return process.exit(0);
     }
@@ -233,7 +234,7 @@ function main(argv) {
       discovered = discoverPending(repoSlug, repoKey);
     }
     if (discovered == null) {
-      process.stdout.write(`${JSON.stringify({ error: `review-runner: could not discover review:pending PRs from ${repoSlug} (gh failed)` })}\n`);
+      writeAllSync(1, `${JSON.stringify({ error: `review-runner: could not discover review:pending PRs from ${repoSlug} (gh failed)` })}\n`);
       return exit(holding, owner, 2);
     }
 
@@ -259,13 +260,13 @@ function main(argv) {
     };
 
     if (asJson) {
-      process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+      writeAllSync(1, `${JSON.stringify(summary, null, 2)}\n`);
     } else {
-      process.stdout.write(renderHuman(summary));
+      writeAllSync(1, renderHuman(summary));
     }
     return exit(holding, owner, 0);
   } catch (e) {
-    process.stdout.write(`${JSON.stringify({ error: `review-runner: ${String((e && e.message) || e)}` })}\n`);
+    writeAllSync(1, `${JSON.stringify({ error: `review-runner: ${String((e && e.message) || e)}` })}\n`);
     return exit(holding, owner, 2);
   }
 }

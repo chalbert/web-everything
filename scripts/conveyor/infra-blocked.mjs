@@ -45,6 +45,7 @@ import { join, dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { normNum } from './queue-store.mjs';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 // ── TUNING (exported so a caller/test can override; the conveyor tick uses the defaults) ──────────────────────
 
@@ -618,7 +619,7 @@ async function main(argv) {
       if (r.ok) { mutateInfraStore((s) => removeInfraBlock(s, entry.num), { path }); resumed.push({ num: entry.num, pr: r.prNumber ?? null }); }
       else { mutateInfraStore((s) => markRetryAttempt(s, entry.num, Date.now(), { cause: refined }), { path }); log(`  ⊘ #${entry.num} resume still failing (${r.detail}) — backing off`); }
     }
-    process.stdout.write(JSON.stringify({ retried, resumed, surfaced, waiting }) + '\n');
+    writeAllSync(1, JSON.stringify({ retried, resumed, surfaced, waiting }) + '\n');
     return 0;
   }
 

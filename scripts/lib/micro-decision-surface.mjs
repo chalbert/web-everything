@@ -41,6 +41,7 @@ import { disposeVerdict, DISPOSITIONS } from './disposition-judge.mjs';
 import { resolveDispositionConfig } from './review-policy.mjs';
 import { MANDATORY_LENSES } from './jury-core.mjs';
 import { subjectSlug, readJuryLog } from './jury-ledger.mjs';
+import { writeAllSync } from './write-all-sync.mjs';
 
 /**
  * @typedef {Object} ForkInput
@@ -409,11 +410,11 @@ function main(argv) {
   if (sub === 'surface') {
     let payload;
     try { payload = readInput(flags); } catch (e) {
-      process.stdout.write(`${JSON.stringify({ ok: false, error: `could not read payload — ${String(e.message || e).split('\n')[0]}` })}\n`);
+      writeAllSync(1, `${JSON.stringify({ ok: false, error: `could not read payload — ${String(e.message || e).split('\n')[0]}` })}\n`);
       process.exit(2);
     }
     const dto = buildSurfaceFromDisk({ root: flags.root, ...(payload || {}) });
-    process.stdout.write(`${JSON.stringify(dto)}\n`);
+    writeAllSync(1, `${JSON.stringify(dto)}\n`);
     process.exit(0);
   }
 
@@ -423,13 +424,13 @@ function main(argv) {
     // arrives via --file/stdin, never argv.
     let body;
     try { body = readInput(flags); } catch (e) {
-      process.stdout.write(`${JSON.stringify({ ok: false, error: `could not read record — ${String(e.message || e).split('\n')[0]}` })}\n`);
+      writeAllSync(1, `${JSON.stringify({ ok: false, error: `could not read record — ${String(e.message || e).split('\n')[0]}` })}\n`);
       process.exit(2);
     }
     const forkN = Number.parseInt(String(flags.fork ?? body?.forkN), 10);
     const subject = microDecisionSubjectKey(flags.repo ?? body?.repo, flags.decision ?? body?.decision ?? body?.decisionKey, forkN);
     const { ok, record, errors } = appendMicroDecisionRecord(subject, { kind: flags.kind ?? body?.kind, forkN, text: body?.text }, { root: flags.root });
-    process.stdout.write(`${JSON.stringify(ok ? { ok: true, subject, record } : { ok: false, error: errors.join('; ') })}\n`);
+    writeAllSync(1, `${JSON.stringify(ok ? { ok: true, subject, record } : { ok: false, error: errors.join('; ') })}\n`);
     process.exit(ok ? 0 : 1);
   }
 

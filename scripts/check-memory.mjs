@@ -20,6 +20,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeLineSync } from './lib/write-all-sync.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -182,7 +183,7 @@ const metrics = {
 // `--json` (#1880): emit the front-A metrics as one object for the watch to consume, instead of a
 // sequence of greps. Still exits non-zero on a violation so it stays a usable gate.
 if (process.argv.includes('--json')) {
-  console.log(JSON.stringify(metrics, null, 2));
+  writeLineSync(1, JSON.stringify(metrics, null, 2));
   process.exit(v.length ? 2 : 0);
 }
 

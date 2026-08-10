@@ -443,13 +443,14 @@ async function main(argv) {
       : code === EXIT_PARKED ? 'parked'
       : code === EXIT_CLOSED ? 'closed'
       : 'timeout';
-    process.stdout.write(JSON.stringify({ pr: Number(prNumber), outcome, exit: code }, null, 2) + '\n');
+    writeAllSync(1, JSON.stringify({ pr: Number(prNumber), outcome, exit: code }, null, 2) + '\n');
   }
   process.exit(code);
 }
 
 // Run the IO shell only when invoked directly — never on import (keeps the pure core side-effect-free).
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   main(process.argv.slice(2));
 }

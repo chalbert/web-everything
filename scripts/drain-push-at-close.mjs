@@ -52,6 +52,7 @@ import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { drainLeaseStatus, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 // ── pure decision + arg building (unit-tested; no side effects) ───────────────────────────────────────
 
@@ -151,12 +152,12 @@ if (IS_CLI) {
     result = runPushAtClose({ repo, drainScript, intervalSec, maxRuntimeMin, batchFeed, dryRun: DRY_RUN });
   } catch (e) {
     result = { fired: false, reason: 'spawn-failed', detail: String((e && e.message) || e).split('\n')[0] };
-    if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
+    if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
     else process.stderr.write(`drain-push-at-close ✗ could not fire a drain: ${result.detail}\n`);
     process.exit(3);
   }
 
-  if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
+  if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
   else if (result.fired) process.stderr.write(`drain-push-at-close ✓ fired a detached drain (pid ${result.pid}, log ${result.log}) — lands the chain, self-terminates.\n`);
   else if (result.wouldFire) process.stderr.write(`drain-push-at-close · dry-run: WOULD fire a detached drain (${result.argv.join(' ')}).\n`);
   else process.stderr.write(`drain-push-at-close · no-op (${result.reason}${result.heldBy ? `, held by ${result.heldBy}` : ''}) — item is enqueued; the running drain will collect it.\n`);

@@ -24,6 +24,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { writeLineSync } from '../lib/write-all-sync.mjs';
 
 export const DEFAULT_THRESHOLD = 0.6;
 
@@ -153,7 +154,7 @@ function main(argv) {
   }
   const result = dedup(entries, { threshold });
   if (flags.json) {
-    console.log(JSON.stringify(result, null, 2));
+    writeLineSync(1, JSON.stringify(result, null, 2));
   } else {
     console.log(`${result.stats.entries} entries → ${result.stats.clusters} clusters (${result.stats.collapsed} collapsed)`);
     for (const c of result.clusters) {

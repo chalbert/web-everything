@@ -32,6 +32,7 @@ import {
 } from './queue-store.mjs';
 import { readField } from '../backlog/frontmatter.mjs';
 import { idFromName, normalizeId } from '../backlog/id.mjs';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 const GRN = '\x1b[32m';
 const DIM = '\x1b[2m';
@@ -113,11 +114,11 @@ function main(argv) {
   const num = rawNum == null ? rawNum : String(rawNum).trim().replace(/^#+/, '').trim();
 
   const emit = (payload, human) => {
-    process.stdout.write(json ? JSON.stringify(payload) + '\n' : human + '\n');
+    writeAllSync(1, json ? JSON.stringify(payload) + '\n' : human + '\n');
     process.exit(0);
   };
   const fail = (msg) => {
-    if (json) process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+    if (json) writeAllSync(1, JSON.stringify({ ok: false, error: msg }) + '\n');
     else process.stderr.write(`${RED}✗${RST} ${msg}\n`);
     process.exit(1);
   };

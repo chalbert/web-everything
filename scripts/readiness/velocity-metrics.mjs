@@ -342,5 +342,5 @@ function main(argv) {
 // Run the IO shell only when invoked directly — importing the module (e.g. from the test or a consumer shell)
 // runs zero side effects, keeping the pure core clean-room testable.
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  process.exit(main(process.argv.slice(2)));
+  process.exitCode = main(process.argv.slice(2));
 }

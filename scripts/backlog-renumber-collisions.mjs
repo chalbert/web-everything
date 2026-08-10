@@ -185,7 +185,7 @@ function planSummary(plan) {
 }
 
 try {
-  process.exit(main());
+  process.exitCode = main();
 } catch (e) {
   process.stderr.write(`${RED}✗ renumber-collisions failed:${RST} ${e && e.message ? e.message : e}\n`);
   process.exit(2);

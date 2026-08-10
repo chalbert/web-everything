@@ -122,6 +122,7 @@ import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.m
 // #2399 — the ONE remote-manifest `gh api` argv, shared with `/finish` (lane-resume) so the two readers never
 // drift. Re-exported to keep this file's public surface (and its tests' import site) stable.
 import { remoteManifestApiArgs } from './lib/remote-manifest.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
@@ -2401,7 +2402,7 @@ async function runCli() {
   };
 
   const fail = (reason, detail, code) => {
-    if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
+    if (AS_JSON) writeAllSync(1, JSON.stringify({ ok: false, reason, detail }) + '\n');
     else process.stderr.write(`merge-ai-prs ✗ ${reason}: ${detail}\n`);
     process.exit(code);
   };
@@ -3809,7 +3810,7 @@ async function runCli() {
       : leaseGate.reason === 'lease-held-uncovered'
       ? `another drain holds the whole-process lease (${heldBy || '?'}) but its scope does NOT cover ${uncovered.join(', ')} — those repos are NOT swept by the holder; wait for it to exit, or force an immediate scoped run with --no-drain-lease (#2458)`
       : `another drain already holds the whole-process lease (${heldBy || '?'}) — no-op; its next pass covers this work (#2449/#2391)`;
-    if (AS_JSON) process.stdout.write(JSON.stringify({ ok: true, ...(WATCH ? { watch: true } : {}), skipped: 'drain-in-progress', heldBy, detail, ...(uncovered.length ? { uncovered } : {}) }) + '\n');
+    if (AS_JSON) writeAllSync(1, JSON.stringify({ ok: true, ...(WATCH ? { watch: true } : {}), skipped: 'drain-in-progress', heldBy, detail, ...(uncovered.length ? { uncovered } : {}) }) + '\n');
     else process.stderr.write(`merge-ai-prs · ${detail}\n`);
     process.exit(0);
   }
@@ -3840,7 +3841,7 @@ async function runCli() {
     };
   };
   const emitRedMainStop = (stop) => {
-    if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, ...(WATCH ? { watch: true } : {}), stopped: 'red-main-freeze', detail: stop.detail, marker: stop.marker }) + '\n');
+    if (AS_JSON) writeAllSync(1, JSON.stringify({ ok: false, ...(WATCH ? { watch: true } : {}), stopped: 'red-main-freeze', detail: stop.detail, marker: stop.marker }) + '\n');
     else process.stderr.write(`merge-ai-prs · STOP-THE-LINE — ${stop.detail}\n`);
   };
   {
@@ -3859,7 +3860,7 @@ async function runCli() {
       sleepSync(REPOLL_SEC * 1000);
       ({ result, failedMerges, duplicateIdsOnMain } = await sweepOnce());
     }
-    if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
+    if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
     // #2318 — a duplicate id surviving on main is a LOUD failure (exit 3), distinct from a merge failure (exit 2):
     // main is in a globally-red state until it is resolved by hand, so the drain must never exit 0 over it.
     process.exit((duplicateIdsOnMain && duplicateIdsOnMain.length) ? 3 : (failedMerges.length ? 2 : 0));
@@ -3964,6 +3965,6 @@ async function runCli() {
   if (!AS_JSON) process.stderr.write(`watch: stopped after ${passes.length} pass(es); merged ${allMerged.length} PR(s) total.\n`);
   // A red-main freeze already emitted its own stop payload (above) — don't double-emit; just exit 5.
   if (redMainStopped) process.exit(5);
-  if (AS_JSON) process.stdout.write(JSON.stringify({ ok: lastDup.length === 0, watch: true, label, interval: INTERVAL, maxIdle: MAX_IDLE, passes: passes.length, merged: allMerged, lastFailed, ...(lastDup.length ? { duplicateIdsOnMain: lastDup } : {}) }) + '\n');
+  if (AS_JSON) writeAllSync(1, JSON.stringify({ ok: lastDup.length === 0, watch: true, label, interval: INTERVAL, maxIdle: MAX_IDLE, passes: passes.length, merged: allMerged, lastFailed, ...(lastDup.length ? { duplicateIdsOnMain: lastDup } : {}) }) + '\n');
   process.exit(lastDup.length ? 3 : (lastFailed.length ? 2 : 0));
 }

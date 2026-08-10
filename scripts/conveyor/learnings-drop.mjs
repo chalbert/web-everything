@@ -346,11 +346,11 @@ function main(argv) {
   }
   try {
     const { record, path } = appendEntry(entry, { file: f.file, session: f.session });
-    if (f.json) console.log(JSON.stringify({ ok: true, path, record }));
+    if (f.json) writeLineSync(1, JSON.stringify({ ok: true, path, record }));
     else console.log(`✓ dropped ${record.kind} learning → ${path}`);
     process.exit(0);
   } catch (e) {
-    if (f.json) console.log(JSON.stringify({ ok: false, errors: e.reasons || [e.message] }));
+    if (f.json) writeLineSync(1, JSON.stringify({ ok: false, errors: e.reasons || [e.message] }));
     else console.error(`✗ ${e.message}`);
     process.exit(1);
   }
@@ -358,6 +358,7 @@ function main(argv) {
 
 // Run only as a CLI (not when imported by tests / the sweep).
 import { fileURLToPath } from 'node:url';
+import { writeLineSync } from '../lib/write-all-sync.mjs';
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main(process.argv.slice(2));
 }

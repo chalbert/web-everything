@@ -34,6 +34,7 @@ import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { VERIFY_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
 const flags = {};
@@ -80,7 +81,7 @@ function writeMarker(record) {
 }
 
 function emit(result, exitCode) {
-  if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
+  if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
   else process.stderr.write(`verify-lane [lane @ ${result.sha ? result.sha.slice(0, 8) : '?'}] ${result.status}: ${result.detail}\n`);
   process.exit(exitCode);
 }

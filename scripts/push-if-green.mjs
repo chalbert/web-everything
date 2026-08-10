@@ -49,6 +49,7 @@
 import { execFileSync, execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 // ── tiny arg parsing (matches lane-pool.mjs) ────────────────────────────────────────────────────────
 const flags = {};
@@ -74,7 +75,7 @@ const git = (args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8', s
 const tryGit = (args) => { try { return git(args); } catch { return null; } };
 
 function emit(result, exitCode) {
-  if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
+  if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
   else {
     const tag = result.pushed ? '✓ pushed' : (result.reason === 'up-to-date' || result.reason === 'nothing-to-push' ? '· nothing to push' : (DRY_RUN && result.gate === 'green' ? '· dry-run (would push)' : '✗ not pushed'));
     process.stderr.write(`push-if-green [${result.repo}] ${tag}: ${result.detail}\n`);

@@ -26,6 +26,7 @@ import { createFileRunStore, newRunId } from './run-store.mjs';
 import { createDefaultJudge, runOperationCli, buildCliSpec } from './cli-adapter.mjs';
 import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
 import { createReviewPrReader, createReviewPrSinks } from './review-pr-io.mjs';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
  * THE OPERATION TABLE — the only per-operation code in the command line. Each entry builds its declaration and
@@ -71,19 +72,19 @@ const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLTo
 if (IS_CLI) {
   const [name, ...rest] = process.argv.slice(2);
   if (!name || name === '--help' || name === '-h') {
-    process.stdout.write(`${rootUsage()}\n`);
+    writeAllSync(1, `${rootUsage()}\n`);
     process.exit(name ? 0 : 2);
   }
   let resolved;
   try {
     resolved = resolveOperation(name);
   } catch (e) {
-    process.stdout.write(`error: ${String(e.message ?? e)}\n\n${rootUsage()}\n`);
+    writeAllSync(1, `error: ${String(e.message ?? e)}\n\n${rootUsage()}\n`);
     process.exit(2);
   }
   const { declaration, registry, sinks } = resolved;
   if (rest.includes('--help')) {
-    process.stdout.write(`${buildCliSpec(declaration).usage}\n`);
+    writeAllSync(1, `${buildCliSpec(declaration).usage}\n`);
     process.exit(0);
   }
   runOperationCli({
@@ -96,13 +97,13 @@ if (IS_CLI) {
     newRunId: () => newRunId(declaration.name),
   })
     .then(({ code, lines }) => {
-      process.stdout.write(`${lines.join('\n')}\n`);
+      writeAllSync(1, `${lines.join('\n')}\n`);
       process.exit(code);
     })
     .catch((e) => {
       // The engine and the declaration both REFUSE rather than improvise; a refusal must reach the operator
       // with its own words, never a paraphrase.
-      process.stdout.write(`error: ${String(e?.message ?? e)}\n`);
+      writeAllSync(1, `error: ${String(e?.message ?? e)}\n`);
       process.exit(1);
     });
 }

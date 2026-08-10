@@ -43,6 +43,7 @@ import { fileURLToPath } from 'node:url';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { validateEntry, poolDir as machinePoolDir } from './learnings-drop.mjs';
 import { dedup, DEFAULT_THRESHOLD } from './learnings-dedup.mjs';
+import { writeLineSync } from '../lib/write-all-sync.mjs';
 
 export const ARCHIVE_DIR = 'harvested';
 
@@ -273,7 +274,7 @@ function main(argv) {
       console.error(`learnings-harvest: ${e.message}`);
       process.exit(2);
     }
-    if (f.json) console.log(JSON.stringify(result, null, 2));
+    if (f.json) writeLineSync(1, JSON.stringify(result, null, 2));
     else {
       console.log(result.moved.length ? `archived ${result.moved.length} pool file(s) → ${result.to}` : 'nothing to archive.');
       if (result.missing.length) console.log(`  (${result.missing.length} requested file(s) no longer in the pool — skipped)`);
@@ -283,7 +284,7 @@ function main(argv) {
 
   if (f.status) {
     const s = poolStatus({ dir });
-    if (f.json) console.log(JSON.stringify(s, null, 2));
+    if (f.json) writeLineSync(1, JSON.stringify(s, null, 2));
     else if (!s.entries) console.log('learnings pool: empty.');
     else console.log(`learnings pool: ${s.entries} entr${s.entries === 1 ? 'y' : 'ies'} across ${s.sessions} session file(s)${s.ageDays != null ? `, oldest ${s.ageDays}d` : ''}.`);
     process.exit(0);
@@ -299,7 +300,7 @@ function main(argv) {
     process.exit(2);
   }
   if (f.json) {
-    console.log(JSON.stringify(result, null, 2));
+    writeLineSync(1, JSON.stringify(result, null, 2));
   } else if (!result.stats.received) {
     console.log(`learnings pool empty (${result.dir}) — nothing to harvest.`);
   } else {

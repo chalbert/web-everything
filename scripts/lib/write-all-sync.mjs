@@ -31,6 +31,15 @@
  *       `we:scripts/backlog.mjs`'s `die()` are that shape.
  *
  * `process.stderr.write` is already synchronous in Node, so an exit after one needs neither remedy.
+ *
+ * A THIRD SHAPE, which neither remedy reads as a call site: `process.exit(main(argv))`. The exit is nowhere
+ * near a write, yet it discards the drain for every byte the callee wrote — `we:scripts/readiness/
+ * velocity-metrics.mjs` (644 635 B → 8 192) and `we:scripts/progress-board.mjs` (25 142 → 8 192) both died
+ * this way. It always takes (a): `process.exitCode = main(argv)`.
+ *
+ * YOU DO NOT HAVE TO REMEMBER ANY OF THIS. `we:scripts/lib/stdout-flush-scan.mjs` is the `check:standards` rule
+ * that flags all three shapes, and its baseline is ZERO — the #3061 sweep fixed all 109 sites on the tree, so a
+ * new one is a red gate rather than a comment nobody reads.
  */
 
 import { writeSync } from 'node:fs';

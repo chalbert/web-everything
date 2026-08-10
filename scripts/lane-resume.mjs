@@ -70,6 +70,7 @@ export { remoteManifestApiArgs };
 // a body can carry a column-0 `status: resolved` (e.g. a fenced frontmatter example). `readField` parses
 // only the first `---`…`---` block — the same splice-scoped reader the backlog status verbs use.
 import { readField } from './backlog/frontmatter.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 /**
  * The ONE frontmatter-strict "is this backlog doc `status: resolved` on main?" predicate (#2455). BOTH
@@ -636,7 +637,7 @@ if (IS_CLI) {
     const self = localSlug();
     const repo = repos ? null : (flagVal('repo') || null); // a bare non-self slug → route through --repo
     const verdict = land({ prNum, dryRun: argv.includes('--dry-run'), drainScript, repo: repo && repo !== self ? repo : null });
-    if (asJson) process.stdout.write(JSON.stringify(verdict, null, 2) + '\n');
+    if (asJson) writeAllSync(1, JSON.stringify(verdict, null, 2) + '\n');
     else process.stderr.write(`lane-resume land #${verdict.pr}${repo ? ` (${repo})` : ''}: ${verdict.merged ? '✓ merged' : verdict.action} — ${verdict.reason}\n`);
     // 0 = enqueued / dry-run / clean / not-green (soft — the drain lands later); red/skip/error = 2.
     const soft = ['enqueued', 'rebuilt-enqueued', 'clean', 'rebuild', 'rebuilt-awaiting-ci', 'not-green'];
@@ -662,14 +663,14 @@ if (IS_CLI) {
     try { execFileSync('git', ['fetch', 'origin', '--quiet'], { stdio: 'ignore' }); } catch { /* bornAs proof degrades to the local origin/main */ }
     const landed = Array.isArray(spec.landed) ? new Set(spec.landed) : deriveLandedFromMain(spec.descendants || []);
     const plan = planStackRebuild({ repaired: spec.repaired, descendants: spec.descendants || [], fixTouched: spec.fixTouched || [], landed });
-    process.stdout.write(JSON.stringify({ ok: true, repaired: spec.repaired ?? null, landed: [...landed], ...plan }, null, 2) + '\n');
+    writeAllSync(1, JSON.stringify({ ok: true, repaired: spec.repaired ?? null, landed: [...landed], ...plan }, null, 2) + '\n');
   }
   else if (cmd === 'rebuild') {
     const laneRef = positional[1];
     const ontoSha = flagVal('onto');
     if (!laneRef || !ontoSha) { process.stderr.write('usage: lane-resume.mjs rebuild <laneRef> --onto=<repaired-tip-sha> [--json]\n'); process.exit(2); }
     const verdict = rebuildDescendant({ laneRef, ontoSha });
-    if (asJson) process.stdout.write(JSON.stringify(verdict, null, 2) + '\n');
+    if (asJson) writeAllSync(1, JSON.stringify(verdict, null, 2) + '\n');
     else process.stderr.write(`lane-resume rebuild ${laneRef} onto ${ontoSha}: ${verdict.action}${verdict.reason ? ` — ${verdict.reason}` : ''}\n`);
     // `current` (idempotency short-circuit) is SUCCESS, not a guided-conflict/error: a re-run of `rebuild` on an
     // already-rebuilt-but-unlanded descendant (tip already on ontoSha, manifest-free) returns `current` with

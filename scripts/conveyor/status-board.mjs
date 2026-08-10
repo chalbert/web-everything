@@ -39,6 +39,7 @@ import { openSync, closeSync, readFileSync, unlinkSync, mkdtempSync } from 'node
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 // ── PURE CORE (no fs / gh / Date / child_process — the whole state is passed IN) ─────────────────────────────
 
@@ -301,7 +302,7 @@ function main() {
   } finally {
     try { unlinkSync(tmp); } catch { /* best-effort cleanup */ }
   }
-  process.stdout.write(renderBoard(state));
+  writeAllSync(1, renderBoard(state));
   process.exit(0);
 }
 

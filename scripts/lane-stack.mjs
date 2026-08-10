@@ -56,6 +56,7 @@ import {
 } from './readiness/overlap-chain.mjs';
 import { planCoupleOpen } from './readiness/couple-plan.mjs'; // #2684 — the cross-locus couple's overlap-open order + WE stack-base (pure)
 import { CAPABILITY_MARKER_PATH, readCapabilityFromMain } from './readiness/drain-capability.mjs';
+import { writeAllSync } from './lib/write-all-sync.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const flags = {};
@@ -90,7 +91,7 @@ function assertKnownFlags() {
 }
 
 function emit(result, code) {
-  if (AS_JSON) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  if (AS_JSON) writeAllSync(1, JSON.stringify(result, null, 2) + '\n');
   else process.stderr.write(`lane-stack ${result.ok === false ? '✗' : '✓'} ${result.detail}\n`);
   process.exit(code);
 }

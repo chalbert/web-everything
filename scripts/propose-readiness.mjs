@@ -27,6 +27,7 @@ import {
   CustomProposerRegistry, registerReferenceProposers, propose, renderProposalDiff,
 } from './readiness/proposer.mjs';
 import { createModelProposer, MODEL } from './readiness/model-proposer.mjs';
+import { writeLineSync } from './lib/write-all-sync.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -65,7 +66,7 @@ const readBody = (file) => {
 const results = await propose(items, { readBody, registry });
 
 if (JSON_MODE) {
-  console.log(JSON.stringify({ provider: providerKind, providerIds: registry.ids(), results }, null, 2));
+  writeLineSync(1, JSON.stringify({ provider: providerKind, providerIds: registry.ids(), results }, null, 2));
   process.exit(0);
 }
 
