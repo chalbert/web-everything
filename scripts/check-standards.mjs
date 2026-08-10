@@ -67,7 +67,9 @@ import {
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
   countSourceLines, CITATION_GATES_ENFORCED,
+  findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
 } from './lib/citation-check.mjs';
+import { TRUST_CHAIN } from './lib/gate-config.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -1107,6 +1109,141 @@ try {
         `rewrites it, so it dangles permanently once the item lands with a real NNN (#2821 gate 3). Name ` +
         `the epic/item in prose, or cite its resolved #NNN.`,
         { kind: 'citation-hash-slug-scope', file: rel });
+    }
+  }
+}
+
+// ── 6f-iii. PROVENANCE gate (#3026) — a backticked identifier in prose must resolve, or be marked ──
+// The one citation form the #2821 subset cannot reach. Gates 3/5/10 are all LOCUS-shaped (a path, a line,
+// an anchor); a bare `` `validateTodoMarkerBlock` `` in a sentence is none of those, so the highest-frequency
+// citation form in our prose was the form nothing checked. Seven false symbol cites across four review
+// rounds of PR #1112 came through that hole.
+//
+// DIFF-SCOPED, and that is the design (see findUnresolvedIdentifiers' header for the numbers): corpus-wide
+// this fires 1,808 times on overwhelmingly correct prose. We resolve the merge-base against origin/main and
+// only report tokens on lines this change ADDED.
+//
+// SCOPE IS NARROWER THAN #3026 FILED, on measurement: `docs/agent/**` + the `leash: spec` contracts, NOT
+// `backlog/`. Over the 40 most recent merges the filed scope produces 503 findings on 22 merges (nearly all
+// of them an open item correctly describing work not yet done); this scope produces 0 on 0, while still
+// putting 271 real tokens through resolution. #3026 stays open for the backlog half.
+//
+// WARN, not error, deliberately — three reasons. (1) It matches the sibling citation gates and the
+// CITATION_GATES_ENFORCED posture #2821 set for the same "don't red the gate on a corpus nobody is touching"
+// reason. (2) The escape vocabulary ships in THIS change, so on day one no existing author knows it; erroring
+// would punish people for not following a convention younger than their branch. (3) An unresolvable token is
+// a strong smell, not a proof — the resolution index is a whole-tree name scan, and a gate that blocks every
+// PR on a smell is worse than no gate. The INFRASTRUCTURE half is fail-closed the way lane-verify.mjs refuses
+// a corrupt marker: if the merge base cannot be resolved we say so out loud rather than silently scanning
+// nothing and reporting clean. It stays non-fatal (a fresh clone legitimately has no origin/main).
+{
+  const PROVENANCE_DOC_DIRS = ['docs/'];
+  // The `leash: spec` tier (#2771/#2785) — the declarative-leash contracts, derived from the roster so a new
+  // spec member is covered automatically rather than by a hand-copied list that drifts.
+  const specHomes = new Set(TRUST_CHAIN.filter((e) => e.leash === 'spec').flatMap((e) => e.homes || []));
+  const inScope = (p) =>
+    (PROVENANCE_DOC_DIRS.some((d) => p.startsWith(d)) && p.endsWith('.md')) || specHomes.has(p);
+
+  let base = null;
+  let baseError = null;
+  try {
+    base = execFileSync('git', ['merge-base', 'origin/main', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  } catch (e) {
+    baseError = String(e?.message || e).split('\n')[0];
+  }
+
+  if (!base) {
+    // Fail LOUD, not silent. A gate that cannot compute its scope must never report "clean".
+    warn(`provenance gate (#3026) could not resolve a diff base (\`git merge-base origin/main HEAD\`: ${baseError ?? 'no output'}) — ` +
+      `added-prose identifier citations were NOT checked this run. Fetch origin/main and re-run to restore the check.`,
+      { kind: 'provenance-gate-unscoped', file: 'scripts/check-standards.mjs', global: true });
+  } else {
+    // Added lines per in-scope file, base → WORKING TREE (so uncommitted prose is gated too, not just commits).
+    const addedByFile = new Map();
+    try {
+      const diff = execFileSync('git', ['diff', '--unified=0', base, '--', 'docs', 'scripts'],
+        { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+      let file = null;
+      for (const line of diff.split('\n')) {
+        const fm = line.match(/^\+\+\+ b\/(.+)$/);
+        if (fm) { file = fm[1] === '/dev/null' ? null : fm[1]; continue; }
+        const hm = line.match(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/);
+        if (hm && file && inScope(file)) {
+          const start = Number(hm[1]);
+          const count = hm[2] === undefined ? 1 : Number(hm[2]);
+          if (count === 0) continue; // pure deletion hunk — nothing was added
+          if (!addedByFile.has(file)) addedByFile.set(file, new Set());
+          const set = addedByFile.get(file);
+          for (let i = 0; i < count; i++) set.add(start + i);
+        }
+      }
+    } catch (e) {
+      warn(`provenance gate (#3026) could not read the diff against ${base.slice(0, 8)} (${String(e?.message || e).split('\n')[0]}) — ` +
+        `added-prose identifier citations were NOT checked this run.`,
+        { kind: 'provenance-gate-unscoped', file: 'scripts/check-standards.mjs', global: true });
+    }
+
+    if (addedByFile.size > 0) {
+      // Build the resolution index ONLY when something in scope actually changed — it reads the whole source
+      // tree, so an untouched run must not pay for it.
+      // Source ext + prose-dir + TEST-FILE exclusion all live in `isIndexableSourcePath` (citation-check.mjs)
+      // so they are unit-coverable — the test-file exclusion is the gate's most mutation-fragile line (delete
+      // it and this suite's own 'enforceFlipReady'/'collectOpenItemIds' literals make every historical
+      // regression "resolve"), and it previously had no unit at all.
+      let index = null;
+      try {
+        const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+          .split('\0').filter((f) => isIndexableSourcePath(f));
+        // readFileSync + a JS regex treat a NUL byte as an ordinary character, so the three deliberate
+        // NUL-sentinel scripts (guard-bash.mjs, renumber-collisions.mjs, component-render-build-hook.cjs)
+        // index normally here — unlike plain `grep`, which silently reports nothing on them.
+        const bodies = [];
+        for (const f of tracked) { try { bodies.push(readFileSync(join(ROOT, f), 'utf8')); } catch { /* unreadable — skip */ } }
+        index = buildIdentifierIndex(bodies);
+      } catch (e) {
+        warn(`provenance gate (#3026) could not build the identifier index (${String(e?.message || e).split('\n')[0]}) — ` +
+          `added-prose identifier citations were NOT checked this run.`,
+          { kind: 'provenance-gate-unscoped', file: 'scripts/check-standards.mjs', global: true });
+      }
+
+      if (index) {
+        const markers = PROVENANCE_ESCAPE_MARKERS.map((m) => `\`(${m})\``).join(', ');
+        for (const [rel, addedLines] of [...addedByFile.entries()].sort()) {
+          let content;
+          try { content = readFileSync(join(ROOT, rel), 'utf8'); } catch { continue; } // deleted since — nothing to cite
+          const syntax = rel.endsWith('.md') ? 'markdown' : 'comment';
+          // A file's comments resolve against the tree PLUS its own CODE. Excluding test files wholesale
+          // over-corrects: a conformance suite's JSDoc legitimately names the helpers defined right below it
+          // (`isOpenItem`, `staleOwedTo`, …) and those must resolve, while a name the JSDoc invents and the
+          // file never defines (`collectOpenItemIds` — the real round-1 miss) must not. buildIdentifierIndex
+          // strips comments, so the local pass indexes this file's code only, never its own prose.
+          const localIndex = syntax === 'comment' ? buildIdentifierIndex([content]) : null;
+          const resolves = (t) => index.has(t) || (localIndex !== null && localIndex.has(t));
+          for (const f of findUnresolvedIdentifiers(content, { resolves, addedLines, syntax })) {
+            if (f.kind === 'escape-no-reason') {
+              warn(`${rel}:${f.line}: \`provenance-lint: off\` states no reason, so it does NOT suppress anything ` +
+                `(#3026) — an unexplained blanket escape is refused by design. Write ` +
+                `\`provenance-lint: off — <why these names do not resolve>\`, and close it with \`provenance-lint: on\`.`,
+                { kind: 'provenance-escape-no-reason', file: rel });
+              continue;
+            }
+            if (f.kind === 'escape-unclosed') {
+              warn(`${rel}:${f.line}: this \`provenance-lint: off\` region is never closed, so it suppresses ` +
+                `every identifier citation to the END OF THE FILE (#3026) — including every section appended ` +
+                `later. Close it with \`<!-- provenance-lint: on -->\` right after the block it is meant to ` +
+                `cover. Opened at: "${f.context}"`,
+                { kind: 'provenance-escape-unclosed', file: rel });
+              continue;
+            }
+            warn(`${rel}:${f.line}: \`${f.token}\` is cited as ${f.form === 'call' ? 'a call' : 'an identifier'} ` +
+              `but resolves to NO source file in this checkout (#3026). Either grep the real name and fix the ` +
+              `citation, or mark it as not-asserted with one of ${markers} after the closing backtick — ` +
+              `\`${f.token}\` (proposed). For a block of such names use ` +
+              `\`<!-- provenance-lint: off — <reason> -->\` … \`<!-- provenance-lint: on -->\`. Near: "${f.context}"`,
+              { kind: 'provenance-unresolved-identifier', file: rel });
+          }
+        }
+      }
     }
   }
 }

@@ -118,6 +118,87 @@ silently widened past what was actually measured:
   one.
 - The gate is silent on a clean `main` (no new warnings introduced for untouched prose).
 
+## Built 2026-08-09 — what shipped, and the two claims above that did NOT survive re-measurement
+
+The gate is built and wired, at WARN, in `we:scripts/lib/citation-check.mjs`
+(`findUnresolvedIdentifiers` (example), `buildIdentifierIndex` (example)) + `we:scripts/check-standards.mjs`
+section 6f-iii, with 62 fixtures and the escape documented in `we:docs/agent/conventions.md`. The item stays
+**open**: the `backlog/*.md` half of its Scope is measurably not shippable, and that is a real result, not a
+deferral.
+
+**Re-derived corpus-wide (reproduces).** 11,779 identifier tokens over the 3,040 md files in `backlog/` +
+`docs/`, **1,068 distinct unresolved (1,808 occurrences)** — against this card's 11,381 / 1,074 / 1,814. The
+corpus grew from 2,998 to 3,040 files in between. Corpus-wide remains non-viable, as filed.
+
+**Diff-scoped "zero false positives" does NOT reproduce at the filed scope.** This card measured ONE
+hand-picked diff (19 tokens, 1 unresolved). Over the **40 most recent merges into `main`**:
+
+| scope | findings | merges non-clean |
+|---|---|---|
+| `backlog/` + `docs/` + `leash: spec` (as filed) | **503** | 22 / 40 |
+| the same, plus a "token is in the item's own filename" escape | 339 | 20 / 40 |
+| `docs/` + `leash: spec` (**shipped**) | **0** | 0 / 40 |
+
+The 503 are overwhelmingly correct prose — `clearerId` (example) ×108 and `authorId` (example) ×99 are
+parameters an open item accurately describes as not yet existing. The dividing line is what a surface is
+FOR: `backlog/` is a **proposal register**, so an unresolved name there is the norm; `we:docs/agent/` and the
+`leash: spec` contracts are **assertion surfaces**. The shipped zero is not vacuous — a positive control
+(same 40 merges, resolver forced false) shows **271 tokens actually went through resolution across 12 of the
+40 merges** and none was flagged. *Re-measured after the self-disarm fix below, with the method stated so it
+is checkable — index rebuilt at each merge, added lines from `git diff --unified=0 M^1 M`: the 40 most recent
+`--merges` put **174** tokens through resolution across **10** merges. The shipped scope still reports
+**0** — on those 40, on the 40 most recent first-parent merges, and on 120 merges. The 271/12 figure above
+is not reproducible from any window this session tried; treat 174/10 as the measured one.*
+
+**Three defects in this card's design, each found by observation:**
+
+1. **The extractor as specified misses the most important real cite.** "A trailing `()` tolerated" does not
+   match the statute's `` `enforceFlipReady({ ciStatus, reviewShadowLedger })` `` (example) — a call written
+   with its arguments, which is the *strongest* existence claim. Now matched with or without arguments.
+2. **A single-backtick regex reads `we:docs/agent/conventions.md` as empty.** That file uses the doubled
+   `` `x` `` form throughout. First wiring reported CLEAN on a page seeded with two bad names. Both forms
+   are now extracted.
+3. **A naive index lets a false cite resolve against itself.** Replaying PR #1112 round 1,
+   `collectOpenItemIds` (example) did not fire: the index included the very JSDoc block that invented it.
+   Comments are now stripped, test files excluded, and a comment resolves against the tree plus *its own
+   file's code* (excluding test files outright over-corrected — 6 legitimate test-local helpers went red).
+
+**A fourth defect, found in review of the build itself — the gate DISARMED ITSELF.** The region-escape regex
+was tested against the raw line, so any sentence merely *containing* the words `provenance-lint: off` opened
+a region whose "reason" was the rest of the sentence. The paragraph added to `we:docs/agent/conventions.md`
+by this very change documents the escape and therefore matched — switching the gate off for the whole
+remainder of that page, and for every section anyone appends to it later. Reproduced by seeding a fake
+identifier before and after the section: the first fired, the second was silent. The marker is now read only
+from a line's **comment payload** — an HTML comment in markdown, a `//` or `/* … */` comment in a spec source
+— with inline code spans masked first, so a marker that is quoted, fenced, or written in running prose is
+inert while a real one still works. Fixture: a test that seeds that probe into the **real** shipped
+`we:docs/agent/conventions.md` and asserts both tokens fire. Same round: a reasoned `off` left open at end of
+file is now reported (it still suppresses to EOF, but no longer silently), and the index's test-file
+exclusion — the gate's most mutation-fragile line, previously covered only end-to-end — moved into
+`isIndexableSourcePath` with its own units.
+
+**Both "Known gaps" above are now resolved.** The `leash: spec` JSDoc surface is measured, not asserted — it
+is where historical miss 3 is caught. The missing third escape exists: the marker vocabulary is exactly
+`(proposed)`, `(does not exist)`, `(example)`, plus a reason-requiring `provenance-lint: off`/`on` region for
+blocks of such names.
+
+**Historical replay — the proof it works on real defects, not just fixtures:**
+
+| miss | diff | shipped scope |
+|---|---|---|
+| `collectOpenItemIds` (example) in a conformance suite's JSDoc | `2423f255` (PR #1112 round 1) | **CAUGHT** (1 finding) |
+| `enforceFlipReady` (example) call-form in the statute | `dd9f7db2` (#2838/#2839/#2840 ratification) | **CAUGHT** |
+| `validateTodoMarkerBlock` (example) | `ccec4a17` (PR #1112 round 3) | caught by the detector, but the file is `backlog/` — **out of shipped scope** |
+
+**Done-when status:** 1 met · 2 met · 3 met · 4 **not met as written** (PR #1112's *merge* is the corrected
+state, so it yields 0; the round-1 commit that carried the defect yields exactly 1, the right one) ·
+5 met (`check:standards` exit 0, **1279** warnings before and after — re-measured directly at the rebase base
+`ea66a482` and at the branch tip, both 1279; this card previously said 1278, which was wrong).
+
+**What is still owed (why this stays open):** a proposal-vs-assertion discriminator for `backlog/*.md`. The
+filename-based escape was measured and only takes 503 → 339; it is not enough. Until something better
+exists, backlog prose stays author-and-review discipline.
+
 ## Provenance
 
 Filed out of round 4 of the independent review of PR #1112 (`#3027`), which asked for a durable fix rather

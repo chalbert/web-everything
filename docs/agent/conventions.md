@@ -92,6 +92,55 @@ after the one-pass corpus migration in #885).
 >    `*.ts|*.json|*.njk|*.html|*.mjs` outside a fenced block needs a `we:`/`fui:`/`plateau:` prefix — no
 >    exceptions for short names.
 
+## Provenance: a backticked identifier must resolve, or say it doesn't (#3026)
+
+The repo-locus rule above covers a **path**. This one covers a **name**. If you write a symbol in backticks
+in `docs/agent/**` or in a `leash: spec` contract's comments, you are asserting that name exists — so
+`check:standards` greps for it, and warns when it resolves to no source file in the checkout.
+
+It is **diff-scoped**: only lines your change ADDS are checked, so the existing corpus is never re-litigated.
+It is **warn-level**, not an error. `backlog/*.md` is deliberately **out of scope** — the backlog is a
+proposal register, where naming a function you have not written yet is normal (measured: the filed scope
+produced 503 findings over 40 merges, almost all correct prose; this scope produced 0 while still resolving
+271 real tokens).
+
+What counts as a citation: a backticked **camelCase** or **SCREAMING_SNAKE** token, either bare
+(`` `countSourceLines` ``) or as a call (`` `enforceFlipReady({ ciStatus })` `` (example) — the call form is
+the strongest existence claim, so it is checked with or without arguments). Fenced code blocks are exempt.
+(That `(example)` is not decoration: without it this very sentence trips the gate, which is how the rule
+below was verified.)
+
+**Three escapes, all greppable, all visible to a reader.** The point is that a deliberate forward reference
+looks deliberate in review, rather than being silently skipped:
+
+1. **Mark the token** — a parenthetical right after the closing backtick. Exactly three, one per legitimate
+   case: `` `newThing` (proposed) `` for something not built yet; `` `enforceFlipReady` (does not exist) ``
+   for a name you are citing *as* absent (an audit finding, a refuted claim); `` `mountLaneBoard` (example) ``
+   for an illustrative or historical mention. Emphasis inside the parens is fine — `(**does not exist**)`.
+2. **Mark a region** — for a block quoting many unreal names (a table of past defects, a list of proposals),
+   where per-token markers would be noise:
+   ```
+   <!-- provenance-lint: off — historical citations; these names never existed -->
+   …prose…
+   <!-- provenance-lint: on -->
+   ```
+   **A reason is required.** A bare `provenance-lint: off` suppresses nothing and is reported in its own
+   right — an unexplained blanket escape is refused by design. **It must be a real comment** — an HTML
+   comment in markdown, a `//` or `/* … */` comment in a spec source. The marker written in running prose or
+   inside a code span (as it is throughout this section) is being *discussed*, not issued, and does nothing;
+   otherwise a page documenting the escape would switch the gate off for its own remainder. **Close it.** An
+   `off` left open runs to end of file — that still works, but it is reported, because every section appended
+   to the page afterwards would silently inherit the escape.
+3. **Write it under `## Done when` or `## Design`** — already the conventional homes for names that do not
+   exist yet, so those sections (and their subsections) are skipped without any marker.
+
+Find every deliberate escape in one pass:
+`grep -rn '(proposed)\|(does not exist)\|(example)\|provenance-lint:' docs/ scripts/`
+
+> **The residue this does NOT cover.** Grepping proves a name is *real*, never that the sentence about it is
+> *true*. A resolvable symbol can still be cited in the wrong file, with the wrong behaviour, or beside a
+> miscounted total. That half stays author-and-review discipline — grep every name you cite in prose.
+
 ## Glossary Philosophy (`src/_data/semantics.json`)
 - **Term first**: identify the abstract concept (`Action`, `Layout`), not the project artifact (`Action Intent`).
 - Each entry: **Term** (general web/UI concept), **Definition** (universal explanation), **Usage** (the Web Everything implementation, e.g. "standardized by Web Intents").
