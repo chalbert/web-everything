@@ -35,7 +35,7 @@ import {
   assertPanelDepth,
   assertPanelBudget,
 } from '../judge-panel.mjs';
-import { deriveSessionId, buildJudgeArgv, DEFAULT_BUDGET_USD } from '../judge-spawn.mjs';
+import { deriveSessionId, sessionSeed, buildJudgeArgv, DEFAULT_BUDGET_USD } from '../judge-spawn.mjs';
 import { PANEL_LENSES, panelRigorForCareLevel } from '../jury-core.mjs';
 import { CARE_LEVELS } from '../review-escalation.mjs';
 
@@ -187,7 +187,7 @@ describe('judgePanel — one spawn per seat, all awaited, results returned toget
       model: 'opus',
       effort: 'high',
       budget: 0.75,
-      sessionId: deriveSessionId('run-3050 correctness#1'),
+      sessionId: deriveSessionId(sessionSeed(['run-3050', 'correctness#1'])),
     }));
   });
 
@@ -267,17 +267,17 @@ describe('PAIRWISE-DISTINCT SIBLINGS — the one property a subagent panel canno
 describe('PAIRWISE-DISTINCT over the PURE seam — no spawning at all (#3050 acceptance 2, second half)', () => {
   it('deriveSessionId separates N distinct runId+lens seeds', () => {
     const seeds = [
-      'run-3050 correctness#1',
-      'run-3050 security#1',
-      'run-3050 simplicity#1',
-      'run-3050 standards-conformance#1',
-      'run-3051 correctness#1',
-    ];
+      ['run-3050', 'correctness#1'],
+      ['run-3050', 'security#1'],
+      ['run-3050', 'simplicity#1'],
+      ['run-3050', 'standards-conformance#1'],
+      ['run-3051', 'correctness#1'],
+    ].map((f) => sessionSeed(f));
     expect(new Set(seeds.map(deriveSessionId)).size).toBe(seeds.length);
   });
 
   it('deriveSessionId separates TWO SEATS ON THE SAME LENS, because the slot is in the seed', () => {
-    expect(deriveSessionId('run-3050 correctness#1')).not.toBe(deriveSessionId('run-3050 correctness#2'));
+    expect(deriveSessionId(sessionSeed(['run-3050', 'correctness#1']))).not.toBe(deriveSessionId(sessionSeed(['run-3050', 'correctness#2'])));
   });
 
   it('panelSeats mints the same lens#slot ids jury-core\'s materializeRoster already uses', () => {
@@ -294,13 +294,53 @@ describe('PAIRWISE-DISTINCT over the PURE seam — no spawning at all (#3050 acc
     const a = panelSeats({ runId: 'run-3050', jurors: [{ lens: 'correctness' }] });
     const b = panelSeats({ runId: 'run-3050', jurors: [{ lens: 'correctness' }] });
     expect(a[0].sessionId).toBe(b[0].sessionId);
-    expect(a[0].sessionId).toBe(deriveSessionId('run-3050 correctness#1'));
+    expect(a[0].sessionId).toBe(deriveSessionId(sessionSeed(['run-3050', 'correctness#1'])));
   });
 
   it('a different run yields a different actor for the same seat', () => {
     const [x] = panelSeats({ runId: 'run-A', jurors: [{ lens: 'correctness' }] });
     const [y] = panelSeats({ runId: 'run-B', jurors: [{ lens: 'correctness' }] });
     expect(x.sessionId).not.toBe(y.sessionId);
+  });
+
+  it('CROSS-RUN: two structurally different seats in two runs are never the same actor (#3058)', () => {
+    // Reproduced on `main` before the fix: `(runId "a", id "b c#1")` and `(runId "a b", id "c#1")` both
+    // derived 8f57af23-ca27-80e7-b1f3-c2510e0aa618 THROUGH `panelSeats`, not merely through the hash helper.
+    const [x] = panelSeats({ runId: 'a', jurors: [{ lens: 'correctness', id: 'b c#1' }] });
+    const [y] = panelSeats({ runId: 'a b', jurors: [{ lens: 'correctness', id: 'c#1' }] });
+    expect(x.id).not.toBe(y.id);
+    expect(x.sessionId).not.toBe(y.sessionId);
+    expect(x.sessionId).toBe(deriveSessionId(sessionSeed(['a', 'b c#1'])));
+    expect(y.sessionId).toBe(deriveSessionId(sessionSeed(['a b', 'c#1'])));
+  });
+
+  it('CROSS-RUN, as a table over run ids and seat ids that a space join would have merged (#3058)', () => {
+    const runIds = ['a', 'a b', 'a b c', '', ' ', 'run#1'];
+    const seatIds = ['b c#1', 'c#1', 'b#1 c', 'correctness#1', 'correctness#2', '#1'];
+    const seen = new Map();
+    for (const runId of runIds) {
+      for (const seatId of seatIds) {
+        // `panelSeats` refuses a blank runId, so the pure encoder carries the blank rows.
+        const sid = runId.trim()
+          ? panelSeats({ runId, jurors: [{ lens: 'correctness', id: seatId }] })[0].sessionId
+          : deriveSessionId(sessionSeed([runId, seatId]));
+        const key = `${JSON.stringify(runId)}|${JSON.stringify(seatId)}`;
+        expect(seen.has(sid)).toBe(false);
+        seen.set(sid, key);
+      }
+    }
+    expect(seen.size).toBe(runIds.length * seatIds.length);
+  });
+
+  it('there is ONE seed encoding: panelSeats derives exactly what the shared encoder does (#3058)', () => {
+    // If this module ever grows its own join, this fails — which is the whole point of the shared helper.
+    const seats = panelSeats({
+      runId: 'run 3050',
+      jurors: [{ lens: 'correctness' }, { lens: 'correctness' }, { lens: 'security#odd name' }],
+    });
+    expect(seats.map((s) => s.sessionId)).toEqual(
+      seats.map((s) => deriveSessionId(sessionSeed(['run 3050', s.id]))),
+    );
   });
 
   it('refuses a roster it cannot name — no runId, no jurors, a lensless or malformed seat, a bad slot', () => {
@@ -504,7 +544,7 @@ describe('PARTIAL FAILURE — a rejecting juror is a reported seat, never an orp
     expect(failed.value).toBeNull();
     expect(failed.error).toContain('Not logged in · Please run /login');
     // Still a NAMED seat: which juror failed is recorded, not merely that one did.
-    expect(failed.sessionId).toBe(deriveSessionId('run-3050 security#1'));
+    expect(failed.sessionId).toBe(deriveSessionId(sessionSeed(['run-3050', 'security#1'])));
 
     for (const ok of [panel.jurors[0], panel.jurors[2], panel.jurors[3]]) {
       expect(ok.ok).toBe(true);

@@ -113,6 +113,52 @@ export const DEFAULT_EFFORT = 'medium';
 export const DEFAULT_BUDGET_USD = 0.5;
 
 /**
+ * THE ONE SEED ENCODING — the single place a multi-field identity becomes a `deriveSessionId` seed (#3058).
+ *
+ * WHY IT EXISTS: a space join is not injective. `` `${runId} ${id}` `` maps `("a", "b c#1")` and
+ * `("a b", "c#1")` onto the SAME seed, so two structurally different seats in two different runs are recorded
+ * as one actor. And `[runId, lens].filter(Boolean).join(' ')` was worse than ambiguous — dropping an absent
+ * field before the join collapsed a `runId`-only spawn onto a `lens`-only spawn carrying the same string, with
+ * no space anywhere in the input. Both were reproduced before this encoder replaced them.
+ *
+ * WHY LENGTH-PREFIXED AND NOT NUL-DELIMITED. A NUL delimiter is injective only while you can promise NUL never
+ * appears in a field, and that promise is about CALLER INPUT this module does not control — `runId` and `lens`
+ * arrive from an operations declaration (`we:scripts/operations/cli-adapter.mjs`). Length-prefixing reserves no
+ * byte at all, so it needs no promise and no escaping: it stays injective over arbitrary field content. This
+ * repo also already uses NUL as a deliberate in-file sentinel in committed scripts, so it is not a free byte
+ * here by convention either.
+ *
+ * THE ENCODING. `v1|<count>|` then, per field, either `~` for an ABSENT field (`undefined`/`null`) or
+ * `<length>:<value>` for a present one. Absent, empty and missing are therefore three different things:
+ * `['a']` → `v1|1|1:a`, `['a', undefined]` → `v1|2|1:a~`, `['a', '']` → `v1|2|1:a0:`. Decoding is
+ * unambiguous — read the count, then read each field's declared length — which is what injectivity means.
+ * `<length>` is in UTF-16 code units, i.e. JS `String.length`, because that is the unit a decoder would slice
+ * a JS string by; byte length would be the wrong ruler for this data type, not a stricter one.
+ *
+ * FIELD SEMANTICS ARE POSITIONAL AND SHARED: field 0 is the run identity, field 1 is the actor's name within
+ * that run (a bare `lens` for a direct spawn, a `lens#slot` seat id for a panel seat). Both call sites mean the
+ * same thing by the same position, which is why they share this encoder rather than each owning one.
+ *
+ * @param {Array<string|undefined|null>} fields - the identity fields, in a fixed positional order.
+ * @returns {string} an injective encoding of exactly that field list.
+ */
+export function sessionSeed(fields) {
+  if (!Array.isArray(fields) || fields.length === 0) {
+    throw new TypeError('judge-spawn: sessionSeed needs a non-empty array of fields');
+  }
+  const parts = fields.map((f, i) => {
+    if (f === undefined || f === null) return '~';
+    if (typeof f !== 'string') {
+      throw new TypeError(
+        `judge-spawn: sessionSeed field ${i} must be a string, null or undefined, got ${JSON.stringify(f)}`,
+      );
+    }
+    return `${f.length}:${f}`;
+  });
+  return `v1|${fields.length}|${parts.join('')}`;
+}
+
+/**
  * A deterministic RFC 9562 UUIDv8 derived from a seed — the juror's `--session-id`.
  *
  * DETERMINISTIC ON PURPOSE: the same run id and lens always name the same session, so the transcript is
@@ -121,7 +167,12 @@ export const DEFAULT_BUDGET_USD = 0.5;
  * namespaced SHA-1 (v5). Verified accepted by `claude --session-id` at 2.1.220: the CLI echoed the exact
  * id back in its result.
  *
- * @param {string} seed - any stable string; callers pass `${runId} ${lens}`.
+ * SEEDS OF MORE THAN ONE FIELD GO THROUGH `sessionSeed`, NEVER THROUGH A HAND-ROLLED JOIN. This function
+ * hashes whatever string it is given and cannot tell an ambiguous seed from an unambiguous one, so the
+ * injectivity has to be established before the call — see `sessionSeed`'s header and #3058 for the
+ * space-join defect that convention replaced.
+ *
+ * @param {string} seed - any stable string; multi-field callers pass `sessionSeed([...])`.
  * @returns {string} a lowercase canonical UUID.
  */
 export function deriveSessionId(seed) {
@@ -285,8 +336,8 @@ export async function judgeSpawn({
   model = DEFAULT_MODEL,
   effort = DEFAULT_EFFORT,
   budget = DEFAULT_BUDGET_USD,
-  runId = '',
-  lens = '',
+  runId,
+  lens,
   sessionId,
   cwd = process.cwd(),
   env = process.env,
@@ -300,7 +351,16 @@ export async function judgeSpawn({
   // A run id + lens names the juror DETERMINISTICALLY, so its transcript is findable from the run record
   // and the actor that judged is recorded. With neither supplied there is nothing stable to derive from,
   // so fall back to a one-off seed — still a distinct actor, just not a reproducible name.
-  const seed = [runId, lens].filter(Boolean).join(' ') || `judge:${Date.now()}:${Math.random()}`;
+  //
+  // BOTH FIELDS ARE ALWAYS ENCODED, PRESENT OR NOT (#3058). The predecessor here was
+  // `[runId, lens].filter(Boolean).join(' ')`, and the `filter` is what made it wrong: dropping an absent
+  // field before the join made a `runId`-only spawn and a `lens`-only spawn carrying the same string derive
+  // ONE id. `sessionSeed` encodes an absent field as an absent field, so position is preserved and the two
+  // shapes stay distinct. The `filter` survives only as the "is anything nameable at all" test below, where
+  // it decides between a stable name and a one-off — it no longer touches the seed's contents.
+  const seed = (runId || lens)
+    ? sessionSeed([runId, lens])
+    : `judge:${Date.now()}:${Math.random()}`;
   const sid = sessionId ?? deriveSessionId(seed);
   const argv = buildJudgeArgv({ mandate, shape, model, effort, budget, sessionId: sid });
 
