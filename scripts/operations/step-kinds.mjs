@@ -14,7 +14,11 @@
  *
  *  - `compute` — a **pure function** plus its **declared reads**. The engine hands the fn a projection
  *    containing ONLY the paths the step declared, so an undeclared read is structurally impossible rather
- *    than merely discouraged.
+ *    than merely discouraged. **The PURITY half is a contract, not a gate**, and it is the one place in this
+ *    vocabulary where the two come apart: the engine constrains what a `compute` fn is given and what it
+ *    returns, and inspects nothing about what the fn's own closure touches. A `compute` fn that writes a file
+ *    is a declaration bug that no check in this tree catches — see the *"what read-only does and does not
+ *    guarantee"* section of {@link ./http-adapter.mjs}, which is where that gap gets exposed on a surface.
  *  - `judge` — **declares a judgement; never performs one.** Its `request` fn returns `{ mandate, input,
  *    shape, … }` shaped for {@link ../lib/judge-spawn.mjs} (`judgeSpawn`, #3028) to run. The engine
  *    SUSPENDS and the caller does the spawn between two `advance` calls. This module imports nothing that

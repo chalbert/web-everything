@@ -41,7 +41,7 @@
 import { advance, runStatus, startRun } from './engine.mjs';
 import { applyPendingEffects } from './effect-executor.mjs';
 import { totalJudgeSpend } from './run-record.mjs';
-import { validateInput } from './registry.mjs';
+import { isReadOnlyOperation, validateInput } from './registry.mjs';
 import { assertNoForbiddenArgv, EFFORT_LEVELS, judgeSpawn } from '../lib/judge-spawn.mjs';
 
 /** Flags the adapter owns. A declaration may not name an input field that collides with one. */
@@ -73,20 +73,32 @@ export function buildCliSpec(declaration) {
       : `[--${f.name}=${placeholder(f)}${f.default !== undefined ? `, default ${f.default}` : ''}]`))
     .join(' ');
   const steps = declaration.steps.map((s) => `${s.name}(${s.step.kind})`).join(' → ');
+  // THE RESUME LINE IS DERIVED TOO. A declaration whose every step is `compute` can never suspend, so there is
+  // no run to resume and no question to answer — printing the line anyway documents a flag combination the
+  // adapter would refuse. `isReadOnlyOperation` reads the step kinds; nothing here knows which operation it is.
+  const resumable = !isReadOnlyOperation(declaration);
   return {
     name: declaration.name,
     fields,
     usage: [
       `usage: run.mjs ${declaration.name} ${flagText} [--json]`,
-      `       run.mjs ${declaration.name} --resume=<run-id> [--answer=<option>] [--json]`,
+      ...(resumable ? [`       run.mjs ${declaration.name} --resume=<run-id> [--answer=<option>] [--json]`] : []),
       '',
       `steps: ${steps}`,
+      ...(resumable ? [] : ['', 'read-only: every step is `compute` — this operation completes in one call, suspends at nothing and records no run.']),
     ].join('\n'),
   };
 }
 
-/** Coerce one `--flag=value` token to a declared input type. Returns `undefined` when it does not fit. */
-function coerce(type, raw) {
+/**
+ * Coerce one string token to a declared input type. Returns `undefined` when it does not fit.
+ *
+ * EXPORTED because a query parameter and a `--flag=value` are the same problem — a string that has to become
+ * a declared type — and #3036's HTTP adapter must not grow a second answer to it. The `undefined` sentinel
+ * (rather than a thrown error) is what lets each caller name the offending token in its own transport's
+ * spelling while the coercion itself stays one implementation.
+ */
+export function coerceInputValue(type, raw) {
   if (type === 'string') return raw;
   if (type === 'number') { const n = Number(raw); return Number.isFinite(n) ? n : undefined; }
   if (type === 'boolean') {
@@ -126,7 +138,7 @@ export function parseOperationArgv(declaration, argv = []) {
     if (name === 'run-id') { control.runId = value; continue; }
     if (!known.has(name)) { errors.push(`unknown flag --${name} — \`${declaration.name}\` accepts ${[...known].map((k) => `--${k}`).join(', ')}`); continue; }
     const field = spec.fields.find((f) => f.name === name);
-    const coerced = coerce(field.type, value);
+    const coerced = coerceInputValue(field.type, value);
     if (coerced === undefined) { errors.push(`--${name} must be a ${field.type}, got ${JSON.stringify(value)}`); continue; }
     raw[name] = coerced;
   }
@@ -395,18 +407,35 @@ export function renderSpendLines(run) {
   ];
 }
 
+/**
+ * THE MACHINE-READABLE OUTCOME of a run, as one object. PURE.
+ *
+ * EXPORTED because it is the envelope, not the command line's private rendering: `--json` prints exactly this,
+ * and #3036's HTTP adapter returns exactly this (plus its own `persisted` flag). One declaration describing an
+ * operation and then two callers describing its OUTCOME two different ways would be the same defect one layer
+ * down — a console reading the HTTP route and a terminal reading `--json` must not have to parse two shapes.
+ *
+ * @param {{run: object, stopped: string, error?: (Error|null), applied?: string[]}} outcome
+ * @returns {object}
+ */
+export function outcomePayload({ run, stopped, error = null, applied = [] }) {
+  return {
+    runId: run.id, op: run.op, stopped, applied,
+    pending: run.pending, verdict: run.verdict, findings: run.findings,
+    // The meter, and its total pre-summed — a consumer must not have to re-derive "what did this cost".
+    telemetry: run.telemetry ?? [], spend: totalJudgeSpend(run),
+    ...(error ? { error: String(error.message ?? error) } : {}),
+  };
+}
+
 /** Turn a `driveRun` outcome into exit code + lines. PURE. */
 export function renderOutcome({ outcome, json = false }) {
   const { run, stopped, error, applied } = outcome;
   if (json) {
-    const payload = {
-      runId: run.id, op: run.op, stopped, applied,
-      pending: run.pending, verdict: run.verdict, findings: run.findings,
-      // The meter, and its total pre-summed — a consumer must not have to re-derive "what did this cost".
-      telemetry: run.telemetry ?? [], spend: totalJudgeSpend(run),
-      ...(error ? { error: String(error.message ?? error) } : {}),
+    return {
+      code: stopped === 'complete' || stopped === 'confirm' ? 0 : 1,
+      lines: [JSON.stringify(outcomePayload(outcome), null, 2)],
     };
-    return { code: stopped === 'complete' || stopped === 'confirm' ? 0 : 1, lines: [JSON.stringify(payload, null, 2)] };
   }
 
   const spend = renderSpendLines(run);

@@ -4,7 +4,6 @@ kind: story
 size: 3
 parent: "3029"
 status: open
-blockedBy: ["3032", "3035"]
 dateOpened: "2026-08-08"
 scope:
   - we:scripts/operations/
@@ -37,8 +36,24 @@ couple, implementation first.
 
 Today the console's review path is `browser → plateau:tools/dev-panel/vite-plugin.ts →
 plateau:tools/drain-daemon/cli.mjs → we:scripts/review-detail.mjs` — the dev server plus two spawned processes
-for a single read, with argv building and repo-arg sanitisation hand-written in the middle. The generated adapter collapses that. **Keep the sanitisation**: it exists because of
-a real round-trip bug (#2500), so it moves into the generator rather than being dropped.
+for a single read, with argv building and repo-arg sanitisation hand-written in the middle. The generated adapter collapses that.
+
+**Correction (2026-08-10, while building the WE half).** This paragraph said *"Keep the sanitisation: it exists
+because of a real round-trip bug (#2500)"*. That citation is wrong and the instruction is already satisfied:
+
+- **#2500 is not that bug.** It is *"Persist the #2437 review-pipeline ledger…"* (task under #2445, resolved
+  2026-07-26) — persisting an in-memory ledger to a panel-reachable artifact. It records no repo-arg
+  round-trip defect.
+- **The sanitisation is a plain input guard, and it already moved.** `daemonReviewDetailJson`
+  (`plateau:tools/dev-panel/vite-plugin.ts`) refuses a repo that does not match `/^[\w.-]+\/[\w.-]+$/` before
+  building argv. `we:scripts/operations/review-pr-io.mjs#readPr` carries the **byte-identical regex**, applied
+  before its own `gh` call — #3035 moved it when it wrote the io shell. There is nothing for #3036's generator
+  to add, and adding it there would be wrong: a repo-format rule is `review-pr`'s knowledge, and the adapter is
+  generic over every declaration.
+- **One guard did NOT move, and should not.** `daemonReviewLedgerJson` uses a *looser* rule
+  (`/^[\w.-]+(?:\/[\w.-]+)?$/` plus a `.`/`..` segment refusal) because the ledger's repo vocabulary admits a
+  bare constellation id (`we`, `frontierui`, `plateau-app`). That route reads the `#2437` artifact and is not
+  an operation; it is unaffected by this slice.
 
 ## Acceptance
 
@@ -46,6 +61,69 @@ An operator can review a parked PR from the console — see the context and net 
 findings, and record a verdict — with no route or argv code written per operation. Terminal and console produce
 byte-identical outcomes for the same PR, and a run suspended in one can be resumed in the other. `plateau-app`'s
 `npm test` and WE's `check:standards` both green.
+
+## Landed — the WE half (impl PR of the couple)
+
+`we:scripts/operations/http-adapter.mjs` — generic over ANY declaration, with no `review-pr` and no
+`suggest-next` knowledge in it. `planRoutes(declaration)` derives the route table from the **step kinds**: a
+`compute`-only declaration gets `GET …/<op>` and `GET …/<op>/run` and **no other route exists**, and the fn
+behind that route (`runReadOnly`) takes no store, no sinks and no judge in its signature. Conversely nothing
+that can suspend is reachable by a safe method.
+
+**Correction (2026-08-10, review of the impl PR). "Read-only is structural" was an overclaim and is withdrawn.**
+This section, the PR description and three module headers said a `compute`-only declaration is *structurally*
+incapable of writing — that `compute` "cannot reach the world". It is false, and there is a working exploit: a
+`compute`-only declaration whose step fn closes over `writeFileSync` passes `isReadOnlyOperation`, passes
+`assertReadOnlyDeclaration`, is planned a `GET …/run` route, and returns **200 with the file written**. Nothing
+in `op()` or either predicate inspects a step fn's body or closure; they read the declared **kind**. Nothing
+exploitable ships — `suggest-next`'s two `compute` fns only read — but the guarantee as written was wrong.
+
+What is now claimed, and checked:
+
+- **From the closed vocabulary, for any declaration:** a `compute`-only declaration cannot *suspend* and
+  declares no *effects*, so it truly has no run-record, resume or non-GET route, and `runReadOnly` truly gets
+  no store, sinks or judge.
+- **From a static check, for this repo's own declarations:** the module that *declares* a read-only operation
+  reaches nothing that can act — its whole import graph has zero non-relative specifiers. Its step fns hold no
+  writer in lexical scope. Same technique as #3032's engine import-graph test, applied to a narrower claim;
+  the shared scanner is `we:scripts/operations/__tests__/import-graph.mjs`.
+- **The hole, asserted rather than implied:** injected `deps` are not covered. `suggest-next`'s own readers
+  (`we:scripts/operations/suggest-next-io.mjs`) reach `node:fs` and, via `we:scripts/lib/open-pr-items.mjs`,
+  `node:child_process`. They only read — a promise this repo keeps, not a property anything verifies. The check
+  also covers only the operations in `we:scripts/operations/run.mjs`'s table; an ad-hoc declaration is served
+  and never seen by it.
+
+The describe route now ships `readOnlyCaveat` alongside `readOnly`, so a consumer mounting this on a public
+surface is told in the payload that `readOnly` is derived from declared kinds and is not a write guarantee.
+
+**"One route per operation" was not achievable and is corrected here.** A declaration that suspends needs four
+(describe · start · read record · resume), because a `confirm` stop is by construction two requests. Only a
+read-only declaration collapses to one executing route. The card predates the engine's suspend model.
+
+First declared operation: `we:scripts/operations/suggest-next.mjs` (+ its io shell), which wraps
+`computeSelection` (`we:scripts/readiness/engine.mjs`) and the two boundary exclusions
+`we:scripts/check-readiness.mjs` applies. It re-declares the ranking; it does not re-implement it.
+
+## Still needed — the plateau half (the second PR of the couple)
+
+Nothing in this repo can do it, so it is written down rather than guessed at:
+
+1. **Mount the listener.** `createNodeRequestListener({ resolve, names, store, judge, newRunId, basePath })`
+   from `we:scripts/operations/http-adapter.mjs` takes duck-typed `req`/`res` — exactly what
+   `plateau:tools/dev-panel/vite-plugin.ts` already receives from Vite's `configureServer` middleware. `resolve`
+   and `names` come straight from `we:scripts/operations/run.mjs` (`resolveOperation` / `Object.keys(OPERATIONS)`),
+   so the console and the terminal serve the identical operation table.
+2. **Share the run store, or the "finish it in the browser" claim is false.** `createFileRunStore()`
+   (`we:scripts/operations/run-store.mjs`) resolves `we:.operations/runs/` by SCRIPT location, so a plateau
+   process importing it lands on the same sidecar the terminal writes — provided it imports WE's module rather
+   than re-deriving the path. If the console runs from a different checkout, set `OPERATION_RUNS_DIR`.
+3. **Supply a judge.** `createDefaultJudge()` spawns a real juror. The console must decide whether a browser
+   click may spend one, and surface `spend` from the response (the envelope already carries it).
+4. **Delete, do not wrap.** `daemonReviewDetailJson` and the `review-detail` hop through
+   `plateau:tools/drain-daemon/cli.mjs` are what the mounted route replaces; leaving both is two implementations
+   of one read, which is the defect this epic exists to remove.
+5. **Point the review surface at `POST …/review-pr/runs`** and render the `confirm` suspend from `pending`
+   (`asks`, `of`, `options`), answering with `POST …/runs/<id>/advance` `{ "value": … }`.
 
 ## Not in scope
 
