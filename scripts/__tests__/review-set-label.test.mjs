@@ -11,13 +11,15 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  decideSetLabel, presentRemoveLabels, buildVerdictComment, stripReviewedShaMarkers, normalizeChannel,
+  decideSetLabel, presentRemoveLabels, buildVerdictComment, neutralizeCommentMarkers, normalizeChannel,
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
 } from '../review-set-label.mjs';
 import {
   parseReviewedSha, decideReviewGate, parseReviewedDiff, parseReviewedContribution,
   normalizeDiffFingerprint, normalizeContributionFingerprint, parseOperatorClearance,
+  buildClearedHumanMarker,
 } from '../lib/review-escalation.mjs';
+import { parseClearerActorId, parseAuthorActorId, readAuthorActorStamps } from '../lib/review-independence.mjs';
 import { REVIEW_LABELS, READY_TO_MERGE_LABEL } from '../lib/review-escalation.mjs';
 
 const human = [{ name: REVIEW_LABELS.human }, { name: 'ready-to-merge' }];
@@ -398,8 +400,9 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
   });
 
   it('neutralises quoted markers but keeps them READABLE — the write-up still says what it meant', () => {
-    const out = stripReviewedShaMarkers(`prior round: <!-- reviewed-sha: ${OLDER} -->`);
+    const out = neutralizeCommentMarkers(`prior round: <!-- reviewed-sha: ${OLDER} -->`);
     expect(out).toContain(OLDER);
+    expect(out).toContain('reviewed-sha');
     expect(out).not.toContain('<!--');
   });
 
@@ -560,7 +563,9 @@ describe('buildVerdictComment — the attribution states the surface it came thr
     expect(normalizeChannel('the console.')).toBe('the console');
     expect(normalizeChannel('')).toBe('');
     // A `changes` verdict appends NO marker of its own, so a marker smuggled through argv would be the only
-    // one in the body and `parseReviewedSha` would read it as this verdict's claim. Same treatment as the body.
+    // one in the body and `parseReviewedSha` would read it as this verdict's claim. The guarantee no longer
+    // lives in `normalizeChannel` (PR #1147 review — a per-field strip left `--actor` open); it lives on
+    // `buildVerdictComment`'s render boundary, so this asserts it end-to-end, through the builder.
     const forged = buildVerdictComment({
       to: 'changes', actor: 'op', headSha: SHA, channel: `x <!-- reviewed-sha: ${SHA} --> y`,
     });
@@ -578,6 +583,228 @@ describe('buildVerdictComment — the attribution states the surface it came thr
     // The property that actually matters: an over-long channel trips the pre-flight, before any `gh` call.
     expect(projectVerdictCommentLength({ actor: 'op', channel: 'c'.repeat(GH_COMMENT_MAX) }))
       .toBeGreaterThan(GH_COMMENT_MAX);
+  });
+});
+
+/**
+ * PR #1147 review — THE MARKER-FORGERY CLASS, closed by construction rather than field by field.
+ *
+ * #2898 sanitized `--channel` and reasoned correctly about WHY (a `changes` verdict appends no marker, so a
+ * smuggled one is the only one in the body and `parseReviewedSha` is last-match-wins) — then left `--actor`,
+ * rendered by the very next interpolation on the same line, wide open. Two further holes came with it:
+ * `stripReviewedShaMarkers` knew only ONE of the six marker names this repo parses, and `buildClearedHumanMarker`
+ * let an UNCLOSED `<!--` in `--actor` cross into the trusted marker block, where the builder's own `-->` closed
+ * it and last-match-wins put the forgery AHEAD of the real stamp on a clear-human acceptance.
+ *
+ * SO THIS SUITE DOES NOT LIST FIELDS. It reads the option names off `buildVerdictComment` ITSELF and drives the
+ * payload through every one, so a field added tomorrow is covered the day it is added — with no edit here, and
+ * with a failure if it is interpolated raw. A suite that enumerated today's fields would be the same trap one
+ * level up.
+ */
+describe('buildVerdictComment — NO free text reaches the comment unsanitized (PR #1147)', () => {
+  const FORGED_SHA = 'deadbeef'.repeat(5);
+  const FORGED_DIGEST = 'ba'.repeat(32);
+  const FORGED_ID = 'forged-clearer-session-id';
+  const FORGED_NAME = 'ghost-operator';
+  const REAL_SHA = 'abf7d85700a3336a0ec77d94ab455162d4b8e00d';
+
+  /**
+   * The option names `buildVerdictComment` destructures, read from the function source. A hand-written list
+   * would go stale silently — which is the whole defect this suite exists for — so it is derived, and the
+   * derivation THROWS rather than degrading to `[]` if the signature shape ever changes. Splitting is done at
+   * bracket depth 0 so a default value containing a comma cannot fool it.
+   */
+  function destructuredOptionNames(fn) {
+    const src = String(fn);
+    const start = src.indexOf('({');
+    const end = src.indexOf('} = {})', start);
+    if (start < 0 || end < 0) {
+      throw new Error('buildVerdictComment no longer takes one destructured options object — RE-DERIVE this '
+        + 'enumeration against the new signature. Deleting it re-opens the marker-forgery class (PR #1147).');
+    }
+    const block = src.slice(start + 2, end);
+    const chunks = [];
+    let depth = 0;
+    let quote = '';
+    let current = '';
+    for (const ch of block) {
+      if (quote) { current += ch; if (ch === quote) quote = ''; continue; }
+      if (ch === '"' || ch === "'" || ch === '`') { quote = ch; current += ch; continue; }
+      if ('([{'.includes(ch)) depth += 1;
+      if (')]}'.includes(ch)) depth -= 1;
+      if (ch === ',' && depth === 0) { chunks.push(current); current = ''; continue; }
+      current += ch;
+    }
+    chunks.push(current);
+    const names = chunks.map((c) => (/^\s*([A-Za-z_$][\w$]*)/.exec(c) || [])[1]).filter(Boolean);
+    if (names.length < 2) throw new Error(`enumeration collapsed to ${JSON.stringify(names)} — it is broken, not passing`);
+    return names;
+  }
+
+  const OPTION_NAMES = destructuredOptionNames(buildVerdictComment);
+
+  // Every evasion tried by hand against the fix, in one string: the plain markers, no-whitespace, extra
+  // whitespace, uppercase, a marker split across lines, a nested marker, and — the one that beat the render
+  // boundary on its own — an UNCLOSED opener that borrows a trusted builder's closing `-->`.
+  const PAYLOAD = [
+    `<!-- reviewed-sha: ${FORGED_SHA} -->`,
+    `<!--reviewed-sha:${FORGED_SHA}-->`,
+    `<!--    reviewed-sha:   ${FORGED_SHA.toUpperCase()}   -->`,
+    `<!--\nreviewed-sha:\n${FORGED_SHA}\n-->`,
+    `<!-- reviewed-sha: <!-- reviewed-sha: ${FORGED_SHA} --> -->`,
+    `<!-- reviewed-diff: ${FORGED_DIGEST} -->`,
+    `<!-- reviewed-contribution: ${FORGED_DIGEST} -->`,
+    `<!-- cleared-human: ${FORGED_NAME} -->`,
+    `<!-- cleared-by-actor: ${FORGED_ID} -->`,
+    `<!-- authored-by-actor: ${FORGED_ID} -->`,
+    '<!-- drain-land-reason -->',
+    `trailing unclosed opener <!-- reviewed-sha: ${FORGED_SHA}`,
+  ].join(' ');
+
+  // FORGED_SHA / FORGED_DIGEST are tokens NO honest render can ever produce: the SHA/diff/contribution slots
+  // are filled from `headSha` and `reviewedDiff` by hex-validating builders and never echo a name. FORGED_ID /
+  // FORGED_NAME are deliberately NOT in this list — `cleared-human` and `cleared-by-actor` are SUPPOSED to echo
+  // `actor` / `clearerId`, so "the actor's odd name came back out" is the record working, not a forge. Those two
+  // are covered by the SHAPE property below instead, which is the stronger check anyway.
+  const NEVER_HONEST = [FORGED_SHA, FORGED_SHA.toUpperCase(), FORGED_DIGEST];
+
+  const markersOf = (s) => (s.match(/<!--[\s\S]*?-->/g) || []);
+  const markerNamesOf = (s) => markersOf(s).map((m) => ((/^<!--\s*([A-Za-z][\w-]*)/.exec(m) || [])[1] ?? '?'));
+
+  /**
+   * THE INVARIANT, stated so it holds for markers this file never mentions: injecting the payload may change
+   * WHAT a legitimate marker says (an actor named oddly is recorded oddly — that is the record doing its job),
+   * but it may never change WHICH markers exist, and it may never leave a marker the caller's own bytes can
+   * open or close. Nothing about it enumerates marker names, so a marker type added tomorrow is covered.
+   */
+  const assertNoForgeryLands = (comment, benign, where) => {
+    // 1 — NO MARKER GAINED. The names present must be a SUBSEQUENCE of the benign render's: injecting into a
+    //     field may only ever LOSE a marker (`headSha`/`clearerId` are validated, so garbage → no stamp → the
+    //     gate fails closed, which is the safe direction and already pinned elsewhere). Gaining one, or
+    //     re-ordering, is a forge. This is what catches a new unsanitized field with no edit here: raw
+    //     interpolation of the payload puts markers in the output that the benign render has no counterpart for.
+    const got = markerNamesOf(comment);
+    const want = markerNamesOf(benign);
+    let cursor = 0;
+    for (const name of got) {
+      cursor = want.indexOf(name, cursor);
+      expect(cursor, `${where} · marker "${name}" is not one the benign render stamps (got [${got}] vs [${want}])`)
+        .toBeGreaterThanOrEqual(0);
+      cursor += 1;
+    }
+    // 2 — WELL FORMED, NOT NESTED. No `<` or `>` may survive INSIDE a marker: a nested `<!--` re-opens, and a
+    //     stray `>` closes early. This is the property `buildClearedHumanMarker` broke.
+    for (const raw of markersOf(comment)) expect(raw, `${where} · marker shape`).toMatch(/^<!--[^<>]*-->$/);
+    // 3 — NO DANGLING OPENER. An unclosed `<!--` in free text borrows the NEXT marker's `-->`; that is exactly
+    //     how `--actor` reached past the render boundary before the fix.
+    expect((comment.match(/<!--/g) || []).length, `${where} · openers`).toBe(markersOf(comment).length);
+    // 4 — THE ESCALATION ITSELF. The three CONTENT-fingerprint parsers gate the drain, and none of them ever
+    //     echoes a caller-supplied name, so a forged token surfacing there is unambiguously a forge. The
+    //     IDENTITY parsers (`cleared-human` / `cleared-by-actor` / `authored-by-actor`) are excluded on purpose:
+    //     they are SUPPOSED to return the actor the caller named, so "the odd name came back out" is the record
+    //     working. Their integrity is what checks 1–3 assert, which is the stronger statement anyway — the
+    //     bytes can be odd, but they can never BE or OPEN a marker.
+    const read = {
+      reviewedSha: parseReviewedSha([{ body: comment }]),
+      reviewedDiff: parseReviewedDiff([{ body: comment }]),
+      reviewedContribution: parseReviewedContribution([{ body: comment }]),
+    };
+    for (const [parser, value] of Object.entries(read)) {
+      for (const forged of NEVER_HONEST) {
+        expect(`${where} · ${parser} · ${String(value ?? '')}`).not.toContain(forged);
+      }
+    }
+    // 5 — the identity parsers are still READ, so a crash or a runaway scan would surface here rather than
+    //     going unexercised; their VALUES are judged by the clearance test below.
+    parseClearerActorId([{ body: comment }]);
+    parseAuthorActorId(comment);
+    readAuthorActorStamps(comment);
+    return read;
+  };
+
+  it('enumerates the builder\'s own option names rather than a hand-written list', () => {
+    // A sanity floor only: the ASSERTION is that the derivation works, not that these are all there are. A new
+    // field lands in `OPTION_NAMES` automatically and is driven by the suite below with no edit here.
+    expect(OPTION_NAMES).toEqual(expect.arrayContaining(['to', 'actor', 'headSha', 'body', 'reason', 'channel']));
+    expect(destructuredOptionNames(buildVerdictComment).length).toBe(OPTION_NAMES.length);
+  });
+
+  // A realistic baseline, so every verdict renders its FULL shape (all trusted markers present) and the payload
+  // has real markers to try to outrank rather than an empty field to be the only marker in.
+  const baseArgs = (to) => ({
+    to, actor: 'op', headSha: REAL_SHA, reason: 'a reason', reviewedDiff: 'diff --git a/x b/x\n+one\n',
+    clearerId: 'real-clearer', channel: 'the console',
+  });
+
+  it.each(REVIEW_LABEL_TARGETS)('no single option forges a marker on a `%s` verdict', (to) => {
+    const benign = buildVerdictComment(baseArgs(to));
+    for (const name of OPTION_NAMES) {
+      if (name === 'to') continue; // the verdict target is a closed vocabulary, iterated by the `each` above
+      const args = { ...baseArgs(to), [name]: PAYLOAD };
+      assertNoForgeryLands(buildVerdictComment(args), benign, `to=${to} field=${name}`);
+    }
+  });
+
+  it.each(REVIEW_LABEL_TARGETS)('no COMBINATION of options forges a marker on a `%s` verdict', (to) => {
+    const args = { ...baseArgs(to) };
+    for (const name of OPTION_NAMES) if (name !== 'to') args[name] = PAYLOAD;
+    args.headSha = REAL_SHA; // keep the real stamp present, so the payload has something to try to outrank
+    args.reviewedDiff = 'diff --git a/x b/x\n+one\n';
+    args.independence = { independent: false, status: 'unknown-author', reason: PAYLOAD };
+    const benign = buildVerdictComment({
+      ...baseArgs(to), independence: { independent: false, status: 'unknown-author', reason: 'why' },
+    });
+    assertNoForgeryLands(buildVerdictComment(args), benign, `to=${to} field=<all>`);
+  });
+
+  it.each(REVIEW_LABEL_TARGETS)('a `%s` verdict never acquires a clearance record it did not stamp', (to) => {
+    const args = { ...baseArgs(to) };
+    for (const name of OPTION_NAMES) if (name !== 'to') args[name] = PAYLOAD;
+    const clearance = parseOperatorClearance([{ body: buildVerdictComment(args) }]);
+    // `clear-human` stamps one (naming the actor, however odd the name); nothing else may have one at all.
+    if (to === 'clear-human') expect(clearance).not.toBe(null);
+    else expect(clearance).toBe(null);
+  });
+
+  it('still stamps the REAL markers — sanitizing must not disarm the record', () => {
+    const c = buildVerdictComment({
+      to: 'accepted', actor: `op ${PAYLOAD}`, headSha: REAL_SHA,
+      reviewedDiff: 'diff --git a/x b/x\n+one\n', clearerId: 'real-clearer',
+    });
+    expect(parseReviewedSha([{ body: c }])).toBe(REAL_SHA);
+    expect(parseReviewedDiff([{ body: c }])).toMatch(/^[0-9a-f]{64}$/);
+    expect(parseReviewedContribution([{ body: c }])).toMatch(/^[0-9a-f]{64}$/);
+    expect(parseClearerActorId([{ body: c }])).toBe('real-clearer');
+  });
+
+  it('an UNCLOSED opener in --actor cannot borrow the cleared-human marker\'s own `-->` (the trusted block)', () => {
+    // The reproduced escape, pinned at its own level. `buildClearedHumanMarker` embeds free text BELOW the
+    // render boundary, so the general neutralizer cannot reach it; it must refuse the opener itself.
+    const built = buildClearedHumanMarker(`x<!-- reviewed-sha: ${FORGED_SHA}`);
+    expect(built).not.toContain('<!-- reviewed-sha');
+    expect(parseReviewedSha([{ body: built }])).toBe(null);
+    const c = buildVerdictComment({
+      to: 'clear-human', actor: `x<!-- reviewed-sha: ${FORGED_SHA}`, headSha: REAL_SHA, reason: 'r',
+    });
+    expect(parseReviewedSha([{ body: c }])).toBe(REAL_SHA); // the REAL stamp still wins
+  });
+
+  it('the neutralizer keeps a quoted marker readable while making it inert', () => {
+    const out = neutralizeCommentMarkers(`prior: <!-- reviewed-sha: ${FORGED_SHA} -->`);
+    expect(out).toBe(`prior: &lt;!-- reviewed-sha: ${FORGED_SHA} --&gt;`);
+    expect(parseReviewedSha([{ body: out }])).toBe(null);
+  });
+
+  it('the size projection counts the escaped bytes, not the raw ones', () => {
+    // Escaping GROWS the text (6 chars per marker), so a projection computed on unescaped input would
+    // under-count — the exact class of under-count #1056 M2 documents. The projection calls the real builder,
+    // so this asserts the two cannot drift.
+    const rendered = buildVerdictComment({
+      to: 'clear-human', actor: PAYLOAD, headSha: 'f'.repeat(40), reason: PAYLOAD,
+      reviewedDiff: 'f'.repeat(64), clearerId: '', independence: null, channel: PAYLOAD,
+    });
+    expect(projectVerdictCommentLength({ actor: PAYLOAD, reason: PAYLOAD, channel: PAYLOAD }))
+      .toBeGreaterThanOrEqual(rendered.length);
   });
 });
 

@@ -58,9 +58,37 @@ What landed:
 
 - `--channel=<surface>` on [we:scripts/review-set-label.mjs](../scripts/review-set-label.mjs), rendered by
   `buildVerdictComment`. Absent → `Recorded by <actor>.`, the neutral sentence, never another caller's channel.
-- `normalizeChannel` treats it as one clause of one sentence: whitespace collapsed, trailing stop trimmed, and
-  `reviewed-sha` markers STRIPPED — a `changes` verdict appends no marker of its own, so a marker smuggled
-  through argv would otherwise be the only one in the body and would read as this verdict's SHA claim.
+- `normalizeChannel` treats it as one clause of one sentence: whitespace collapsed, trailing stop trimmed.
+
+### Correction — the marker-safety claim this card first made was FALSE
+
+The original text of this section said `--channel`'s `reviewed-sha` markers were "STRIPPED", and left it there
+as though the marker-forgery hole were closed. **It was not**, and the claim was wrong in two directions at
+once. Independent review of [PR #1147](https://github.com/chalbert/web-everything/pull/1147) proved both against
+the real code, and both are now fixed on that PR:
+
+- **`--actor` was never sanitized, on any verdict.** It is rendered by the very next interpolation of the same
+  sentence `--channel` sits in. `buildVerdictComment({to:'changes', actor:'evil<!-- reviewed-sha: … -->'})` made
+  `parseReviewedSha` return the forged SHA — a `changes` verdict appends no marker of its own, so the smuggled
+  one was the only one in the body and last-match-wins read it as this verdict's claim. Pre-existing, and this
+  card's "closure" walked straight past it.
+- **The strip knew only ONE marker name.** `reviewed-diff`, `reviewed-contribution`, `cleared-human`,
+  `cleared-by-actor` and `authored-by-actor` all passed through untouched, from `--actor`, `--body`, `--reason`
+  and `--channel` alike. `reviewed-diff` / `reviewed-contribution` mattered most: they are fail-soft, so an
+  accept that cannot compute the diff stamps no marker and a forged one in an earlier comment survives as
+  "latest".
+- A **third** hole, found while fixing those two: `buildClearedHumanMarker` stripped `>` but not `<`, so an
+  unclosed `<!--` in `--actor` borrowed the builder's own trailing `-->` and forged a `reviewed-sha` **inside
+  the trusted marker block** — outranking the real stamp on a `clear-human` acceptance.
+
+**What is true now.** Sanitization is a property of `buildVerdictComment`'s SHAPE, not of a list of field names.
+One `neutralizeCommentMarkers` call sits on the render boundary between the prose region (which may carry any
+caller free text, present or future) and the trusted marker block (built only by validating `build*Marker`
+helpers). It escapes the HTML-comment DELIMITERS — `<!--` → `&lt;!--`, `-->` → `--&gt;` — so no marker parser
+in the constellation can match caller bytes, whatever the marker is named and whether or not it existed when
+the line was written. `buildClearedHumanMarker`, the one builder that embeds free text below that boundary, now
+strips `<` alongside `>`. The pin is a suite that reads the builder's option names off the function itself and
+drives a forgery payload through every one, so a field added later is covered with no test edit.
 - It joins `--actor` / `--reason` in `projectVerdictCommentLength`, so an over-long channel trips the size
   pre-flight before any `gh` call (the PR #1057 lesson about unprojected free text).
 - The two in-repo callers state their own surface: the `review-pr` operation

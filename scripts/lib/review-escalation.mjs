@@ -995,10 +995,24 @@ export const CLEARED_HUMAN_MARKER = 'cleared-human';
 const CLEARED_HUMAN_RE = new RegExp(`<!--\\s*${CLEARED_HUMAN_MARKER}:\\s*([^>]*?)\\s*-->`, 'g');
 const CLEARED_HUMAN_PROSE_RE = /^Cleared by (.+?) via `review-set-label\.mjs --to=clear-human`/gm;
 
-/** Build the operator-clearance marker for a `--to=clear-human` verdict comment. Pure. Empty actor → '' (no
- *  marker; the prose attribution line remains the record, exactly as it was before #xmnl36p). */
+/**
+ * Build the operator-clearance marker for a `--to=clear-human` verdict comment. Pure. Empty actor → '' (no
+ * marker; the prose attribution line remains the record, exactly as it was before #xmnl36p).
+ *
+ * `<` IS STRIPPED ALONGSIDE `>` AND THE NEWLINES, and the omission was a live forge (PR #1147 review). This is
+ * the ONE marker builder that embeds caller free text, so it is the one place free text crosses INTO the
+ * trusted marker block — below `buildVerdictComment`'s render boundary, where the general neutralizer no longer
+ * runs. Stripping only `>` stopped an actor from closing a comment, but not from OPENING one, and the builder's
+ * own trailing `-->` then closed it for free:
+ *   `--actor='x<!-- reviewed-sha: <40 hex>'`  →  `<!-- cleared-human: x<!-- reviewed-sha: <40 hex> -->`
+ * `REVIEWED_SHA_RE` matches the inner opener against the outer closer, and because this marker is emitted
+ * AFTER `buildReviewedShaMarker` in the block, last-match-wins gave the forgery the win over the REAL stamp —
+ * on a `clear-human` verdict, which is an acceptance. Reproduced against the real code before the fix.
+ * Sanitize rather than refuse (unlike `buildActorMarker`, whose input is an opaque machine id): a human name is
+ * the record here, so a stray angle bracket must not silently cost the clearance its machine-readable form.
+ */
 export function buildClearedHumanMarker(actor) {
-  const name = String(actor || '').replace(/[\r\n>]+/g, ' ').trim();
+  const name = String(actor || '').replace(/[\r\n<>]+/g, ' ').trim();
   return name ? `<!-- ${CLEARED_HUMAN_MARKER}: ${name} -->` : '';
 }
 

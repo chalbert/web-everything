@@ -730,7 +730,7 @@ export function buildVerdictComment({
         + 'it", NOT as "an independent reviewer cleared it".'
       : `\n\n⚠️ Independence NOT established for this clearance (#2844): ${independence.reason}. `
         + 'This record does not show that a party other than the author cleared it.';
-  const text = stripReviewedShaMarkers(typeof body === 'string' ? body : '');
+  const text = String(typeof body === 'string' ? body : '').trim();
   const heading = to === 'clear-human'
     ? '✅ review — `review:human` cleared via the sanctioned path'
     : to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested';
@@ -748,44 +748,66 @@ export function buildVerdictComment({
       + 'deferred the unforgeable actor signal (no local construct survives an agent with shell access on the '
       + 'same machine), and #2946 is the durable fix.'
     : `Recorded by ${actor}${normalizeChannel(channel) ? ` via ${normalizeChannel(channel)}` : ''}.`;
-  return [
+  // ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  // THE RENDER BOUNDARY (PR #1147 review — the structural close of the marker-forgery class).
+  //
+  // Everything ABOVE this line is PROSE and may carry caller free text — `actor`, `body`, `reason`, `channel`,
+  // and whatever field the next caller needs. Everything BELOW it is the TRUSTED marker block, built only by
+  // the validating `build*Marker` helpers. One sanitizer sits on the seam, so the guarantee is a property of
+  // the SHAPE of this function rather than of a list of field names that has to be kept in sync.
+  //
+  // WHY NOT PER-FIELD. #2898 sanitized `--channel` and left `--actor` — its sibling, rendered by the very next
+  // interpolation on the same line — reachable, and PR #1147's reviewer proved it: `--actor` alone forged a
+  // `reviewed-sha` that `parseReviewedSha` read as gospel on a `changes` verdict (which appends no marker of
+  // its own, so the forgery is the ONLY one in the body and last-match-wins hands it the win). Patching the
+  // second field would have left the third. The per-input pattern re-opens on every new input by construction;
+  // this does not.
+  //
+  // WHY SHAPE, NOT NAMES. The sanitizer neutralizes the HTML-comment SYNTAX, not a list of marker names. Every
+  // marker this repo reads — `reviewed-sha`, `reviewed-diff`, `reviewed-contribution` (all three in
+  // `we:scripts/lib/review-escalation.mjs`), `cleared-human` (ditto), `cleared-by-actor` / `authored-by-actor`
+  // (`we:scripts/lib/review-independence.mjs`), `drain-{park,skip,land}-reason`
+  // (`we:scripts/merge-ai-prs.mjs`) — needs a literal `<!--` to open. Those parsers each hard-code their own
+  // regex, so there is NO single list to derive a strip-set from; matching on the syntax is the only close that
+  // covers a marker defined in a module this one does not import, or one invented after today.
+  //
+  // WHY ESCAPE RATHER THAN DELETE. `&lt;!--` renders as a visible `<!--` on GitHub, so a `/review` write-up
+  // that legitimately QUOTES a prior round's marker still reads correctly (#983's re-accept comment did exactly
+  // that) — it is simply inert to every parser, all of which scan the RAW body `gh pr view --json comments`
+  // returns. Over-neutralizing is the safe direction: an escaped marker is text, an un-escaped one outranks the
+  // real stamp.
+  const prose = neutralizeCommentMarkers([
     heading,
     '',
     attribution + independenceNote,
     ...(text ? ['', text] : []),
-    ...(marker ? ['', marker] : []),
-  ].join('\n');
+  ].join('\n'));
+  return marker ? `${prose}\n\n${marker}` : prose;
 }
 
 /**
  * we:scripts/review-set-label.mjs#normalizeChannel — the `--channel` value as ONE clause of ONE sentence. PURE.
  *
- * It is argv free text that lands mid-sentence in a durable public comment, so three things are done to it and
+ * It is argv free text that lands mid-sentence in a durable public comment, so two things are done to it and
  * each has a reason:
  *   1. WHITESPACE COLLAPSED to single spaces. A newline would break the attribution paragraph in two and let
  *      the second half read as the comment's own prose.
- *   2. `reviewed-sha` MARKERS STRIPPED, exactly as the caller-supplied body is. `parseReviewedSha` is
- *      last-match-wins and the builder appends its own marker LAST — but only on an ACCEPT. On a `changes`
- *      verdict no marker is appended at all, so a marker smuggled in here would be the only one in the body
- *      and would read as this verdict's own claim about a SHA. The body already gets this treatment; a second
- *      free-text field reaching the same comment must not be the hole.
- *   3. TRAILING PUNCTUATION TRIMMED, so `--channel="the console."` does not render "console..".
+ *   2. TRAILING PUNCTUATION TRIMMED, so `--channel="the console."` does not render "console..".
  * The empty string means "no channel stated", which renders the neutral sentence.
+ *
+ * IT NO LONGER STRIPS MARKERS, and that is the point (PR #1147 review). #2898 put a `reviewed-sha` strip here,
+ * which made this function a SECOND home for a guarantee — and the first home never covered `--actor`, so the
+ * hole stayed open in the field rendered by the same sentence. Marker neutralization now happens once, at
+ * `buildVerdictComment`'s render boundary, where it covers every prose field including the ones added next.
+ * Presentation lives here; safety lives there.
  */
 export function normalizeChannel(channel) {
-  return stripReviewedShaMarkers(String(channel ?? ''))
+  return String(channel ?? '')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/[.\s]+$/, '');
 }
 
-/**
- * we:scripts/review-set-label.mjs#stripReviewedShaMarkers — remove every `reviewed-sha` marker from a
- * caller-supplied body, replacing each with a visible placeholder so the write-up still reads correctly where
- * it was quoting one. PURE. Mirrors `REVIEWED_SHA_RE` in `we:scripts/lib/review-escalation.mjs` — the marker
- * SHAPE is defined there; this only has to recognise the same thing, and over-matching is the safe direction
- * (a stripped marker is inert text, an un-stripped one can outrank the real stamp).
- */
 /** GitHub's hard cap on an issue/PR comment body. Checked BEFORE the label swap, on the rendered bytes in
  *  `runReviewLabelCli` (unskippable) and again from argv in the CLI block below (names the flag to trim). */
 export const GH_COMMENT_MAX = 65536;
@@ -793,9 +815,35 @@ export const GH_COMMENT_MAX = 65536;
 /** Who the durable comment is attributed to when `--actor` is absent. `clear-human` REFUSES this default. */
 export const DEFAULT_ACTOR = 'loop-console operator';
 
-export function stripReviewedShaMarkers(body) {
-  return String(body || '')
-    .replace(/<!--\s*reviewed-sha:\s*([0-9a-fA-F]{7,40})\s*-->/g, '`reviewed-sha: $1` (quoted, not this verdict\'s)')
+/**
+ * we:scripts/review-set-label.mjs#neutralizeCommentMarkers — make every HTML comment in a stretch of text INERT
+ * to every marker parser in the constellation, while keeping it readable. PURE. The sanitizer that sits on
+ * `buildVerdictComment`'s render boundary; see the long note there for why the boundary, and not the inputs, is
+ * where this belongs.
+ *
+ * WHAT IT DOES: escapes the DELIMITERS — `<!--` → `&lt;!--`, `-->` → `--&gt;`. Nothing else is touched.
+ *
+ * WHY THAT IS SUFFICIENT, and how to falsify it. Every marker read anywhere in this repo is matched by a regex
+ * that opens on a literal `<!--` (`REVIEWED_SHA_RE`, `REVIEWED_DIFF_RE`, `REVIEWED_CONTRIBUTION_RE`,
+ * `CLEARED_HUMAN_RE` in `we:scripts/lib/review-escalation.mjs`; `actorMarkerRe` in
+ * `we:scripts/lib/review-independence.mjs`; `drainReasonMarker` in `we:scripts/merge-ai-prs.mjs`). Remove every
+ * literal `<!--` from a string and NONE of them can match it, whatever the marker is named, however the payload
+ * is cased or spaced, and whether or not the marker was invented after this line was written. That is a
+ * property of the marker SYNTAX, so it holds for markers this module cannot even see — which matters, because
+ * those parsers each hard-code their own pattern and there is no shared registry to derive a strip-list from.
+ *
+ * WHY IT IS NOT A DELETE. `&lt;!--` renders as a literal `<!--` in GitHub-flavoured markdown, so a quoted
+ * marker still SAYS what the write-up meant it to say; the parsers read the raw body, where it is inert. The
+ * predecessor (`stripReviewedShaMarkers`) replaced one named marker with a backticked placeholder; this keeps
+ * that readability property while covering every marker instead of one.
+ *
+ * ORDERING NOTE: `<!--` is escaped first, so the `--` it leaves behind cannot be re-consumed by the `-->` pass
+ * (`&lt;!--` ends in `--`, and the closer pass needs `-->`).
+ */
+export function neutralizeCommentMarkers(text) {
+  return String(text ?? '')
+    .replace(/<!--/g, '&lt;!--')
+    .replace(/-->/g, '--&gt;')
     .trim();
 }
 
