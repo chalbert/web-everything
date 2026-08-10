@@ -426,6 +426,10 @@ export function reviewPrOperation({ readPr } = {}) {
           //     byte-identical file, there is no remote side and nothing accumulates, so an attempt whose
           //     outcome is unknown is safe to simply redo. Flagging it false would wedge the run on a crash
           //     that cost nothing.
+          //     The name below is keyed by PR, NOT by run — the io shell stages it under `<runId>/`
+          //     (`reviewBodyPath` in `we:scripts/operations/review-pr-io.mjs`) so two runs on the same PR in
+          //     one checkout cannot cross-stage. That scoping does not weaken the property above: the run id
+          //     belongs to the RECORD, not to the attempt, so a replay of this entry resolves the same path.
           {
             type: REVIEW_EFFECTS.WRITE_UP,
             payload: { pr, repo, bodyFile, body },

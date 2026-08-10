@@ -531,6 +531,18 @@ describe('isIndexableSourcePath — the resolution index\'s vocabulary, and what
     }
   });
 
+  it('indexes `.mts` / `.cts` — omitting an ordinary source extension silently manufactures false positives', () => {
+    // Omitted on first wiring. A name defined ONLY in such a file contributed no vocabulary, so citing it
+    // reported "resolves to NO source file in this checkout" — a false positive with no way for an author to
+    // tell it apart from a real miss. One tracked file was affected when this was fixed: `vite.config.mts`.
+    for (const p of ['vite.config.mts', 'scripts/tool.cts', 'src/lib/thing.mts']) {
+      expect(isIndexableSourcePath(p)).toBe(true);
+    }
+    // The two exclusions still apply ON TOP of the new extensions — adding an extension must not open a hole.
+    expect(isIndexableSourcePath('src/thing.test.mts')).toBe(false);
+    expect(isIndexableSourcePath('docs/agent/thing.cts')).toBe(false);
+  });
+
   it('EXCLUDES test files — the mutation-fragile line the gate depends on', () => {
     // Delete this exclusion and this very file's string literals ('enforceFlipReady', 'collectOpenItemIds',
     // 'validateTodoMarkerBlock') enter the index, so all three historical regressions start "resolving" and

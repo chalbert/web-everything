@@ -190,6 +190,14 @@ blocks of such names.
 | `enforceFlipReady` (example) call-form in the statute | `dd9f7db2` (#2838/#2839/#2840 ratification) | **CAUGHT** |
 | `validateTodoMarkerBlock` (example) | `ccec4a17` (PR #1112 round 3) | caught by the detector, but the file is `backlog/` — **out of shipped scope** |
 
+**Method, because the first row's verdict depends on it:** each replay builds the resolution index at the
+commit's PARENT (period-correct), takes added lines from `git diff --unified=0 M^ M`, and reads file content
+at `M`. Row 1's **CAUGHT** holds *only* under a period-correct index — `collectOpenItemIds` (example) was
+genuinely implemented later, in `we:scripts/lib/validate-rules-anchors.cjs` (added by `057a98cb`, #2844), so
+an index built from today's tree resolves it and the same replay yields **0 findings**. Row 2 does not depend
+on the vintage: `enforceFlipReady` (example) fires under both. So row 1 is evidence the detector catches the
+real defect *as it was shipped*, not a claim that today's gate would catch it today.
+
 **Done-when status:** 1 met · 2 met · 3 met · 4 **not met as written** (PR #1112's *merge* is the corrected
 state, so it yields 0; the round-1 commit that carried the defect yields exactly 1, the right one) ·
 5 met (`check:standards` exit 0, **1279** warnings before and after — re-measured directly at the rebase base
