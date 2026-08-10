@@ -7,6 +7,7 @@ status: resolved
 dateOpened: "2026-08-08"
 dateStarted: "2026-08-09"
 dateResolved: "2026-08-09"
+graduatedTo: "scripts/operations/ (registry.mjs + engine.mjs + step-kinds.mjs + run-record.mjs + run-store.mjs + effect-executor.mjs)"
 scope:
   - we:scripts/operations/
 scopeRationale: "The engine is a new directory authored whole by this slice; there are no pre-existing files to enumerate and no sibling item writes there."
