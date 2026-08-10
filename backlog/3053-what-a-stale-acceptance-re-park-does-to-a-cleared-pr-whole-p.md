@@ -1,8 +1,11 @@
 ---
 bornAs: xxdslno
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-08-09"
+dateStarted: "2026-08-10"
+dateResolved: "2026-08-10"
+codifiedIn: one-off
 preparedDate: "2026-08-10"
 relatedTo: ["3024", "3039", "3046", "3052", "3021", "2884", "3054", "3007", "2990", "3013", "3023", "2840", "2771", "2409", "2390"]
 relatedReport: reports/2026-08-09-backlog-consolidation-analysis.md
@@ -11,9 +14,28 @@ tags: [gate, review, drain, review-escalation, declarative-leash, ratification]
 
 # What a stale-acceptance re-park does to a cleared PR — whole-PR score, uncovered-delta score, or a fourth `review:stale` hold tier
 
+> **RATIFIED 2026-08-10 (operator, in session) — the word given was *"Ratified"*.** This closes the item:
+> `status: resolved`, `codifiedIn: one-off`. **One-off, not a statute anchor, deliberately** — the ruling keeps
+> the behaviour that already stands and rejects a proposed addition, so there is no new rule to codify. Writing
+> one would assert a change that did not happen.
+>
+> **Why this second word was needed, recorded because it is the point of the ruling.** The ruling below was
+> already stated and accepted, but *"I accept your recommendation"* is not among the canonical ratification
+> utterances `we:docs/agent/backlog-workflow.md` enumerates, so the item stayed `open`. An independent review of
+> PR #1155 caught that and correctly left it open rather than inferring closure. **That mattered here more than
+> usual:** the entire warrant for rejecting option (c) is that *an unruled option returns* — and (c) had already
+> returned once, promised as a separate card by #3039 and never filed. A ruling recorded but not ratified would
+> have reproduced the exact condition it exists to end.
+>
+> **Also corrected on ratification:** the block below originally said *"the operator confirmed the scope"*. That
+> is a shade more active than what happened — the operator asked a clarifying question, it was answered, and they
+> accepted. Nothing was confirmed; they proceeded. Softened, because a ruling record that quietly upgrades an
+> operator's act is the same defect this repo has caught twice before.
+>
 > **RULED 2026-08-10 (operator, in session): (a) stands · (c) REJECTED and closed · (b) direction only.**
 > Ruled on the presented preparation, in the words *"I accept your recommendation"*, after the recommendation and
-> its reasoning were restated in full and the operator confirmed the scope (the preparation PR lands normally; what
+> its reasoning were restated in full and the operator asked a clarifying question about scope, which was answered
+> before they accepted (the preparation PR lands normally; what
 > is rejected is option (c), not the PR).
 >
 > **(a) — the whole-PR score stands.** A stale-acceptance re-park continues to re-assert the hold from the whole-PR
