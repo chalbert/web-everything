@@ -275,6 +275,28 @@ export function op(name, body) {
 }
 
 /**
+ * IS THIS DECLARATION READ-ONLY? True when every step is a `compute`.
+ *
+ * DERIVED FROM THE CLOSED VOCABULARY, which is the only reason it can be trusted: `compute` is the one kind
+ * that cannot reach the world — a pure fn over a frozen projection of its declared reads, no suspend, no juror,
+ * no person, no effect descriptor. So a declaration made only of them has no write path anywhere in it, and
+ * that is a structural fact about the four kinds rather than a property anyone has to maintain per operation.
+ *
+ * It lives HERE, beside `op()`, because both adapters need it and neither should own it: #3035's command line
+ * uses it to stop printing a `--resume` line for an operation that can never suspend, and #3036's HTTP adapter
+ * derives an entire GET-only, run-record-free route table from it.
+ *
+ * @param {object} declaration - a frozen declaration from {@link op}.
+ * @returns {boolean}
+ */
+export function isReadOnlyOperation(declaration) {
+  if (!declaration || !Array.isArray(declaration.steps) || declaration.steps.length === 0) {
+    throw new TypeError('operations: isReadOnlyOperation expects a declaration built by `op(name, …)`');
+  }
+  return declaration.steps.every((s) => s.step.kind === 'compute');
+}
+
+/**
  * A registry of declared operations. `createRegistry()` returns an isolated one (what tests and adapters
  * should use); {@link defaultRegistry} is the process-wide one that {@link defineOperation} writes to.
  *

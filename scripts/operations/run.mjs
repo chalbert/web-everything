@@ -26,16 +26,33 @@ import { createFileRunStore, newRunId } from './run-store.mjs';
 import { createDefaultJudge, runOperationCli, buildCliSpec } from './cli-adapter.mjs';
 import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
 import { createReviewPrReader, createReviewPrSinks } from './review-pr-io.mjs';
+import { suggestNextOperation, SUGGEST_NEXT_OP } from './suggest-next.mjs';
+import { createBoardReader, createExclusionReader } from './suggest-next-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
  * THE OPERATION TABLE — the only per-operation code in the command line. Each entry builds its declaration and
  * its io bindings; everything else is derived.
+ *
+ * `suggest-next` (#3036) is the proof that "declaring a second operation buys its command line" is literally
+ * true: the four lines below are the ENTIRE command-line cost of it. No argv parser, no usage text, no
+ * validation — `--help` prints `[--tier=A|B, default A] …` because the declaration says so. The same
+ * declaration is what {@link ./http-adapter.mjs} derives a route table from, with no third entry anywhere.
  */
 export const OPERATIONS = Object.freeze({
   [REVIEW_PR_OP]: () => ({
     declaration: reviewPrOperation({ readPr: createReviewPrReader() }),
     sinks: createReviewPrSinks(),
+  }),
+  [SUGGEST_NEXT_OP]: () => ({
+    declaration: suggestNextOperation({
+      loadBoard: createBoardReader(),
+      loadExclusions: createExclusionReader(),
+    }),
+    // NO SINKS, AND NOT AN OVERSIGHT: every step is `compute`, so the declaration cannot produce an effect
+    // for a sink to apply. `applyPendingEffects` is never reached, and the HTTP adapter reads the same step
+    // kinds to give this operation a GET-only, record-free surface.
+    sinks: {},
   }),
 });
 
