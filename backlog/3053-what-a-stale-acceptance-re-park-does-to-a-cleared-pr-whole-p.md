@@ -57,9 +57,37 @@ The two answerable cases, re-derived by script and **self-certifying** — for a
 **Tally: gap-only 1 · heading-only 0 · both 1 · genuinely stale 0 · undeterminable 0.**
 
 **Read this honestly. N = 2 is the whole denominator, not a rate.** The mechanism is two days old, and the
-accept→re-park window on #1106 was **seven minutes** — roughly one drain tick — so "zero genuine advances" measures
-the drain's rebase cadence at least as much as it measures the author-push rate. It is a real observation and a weak
-one. Its weakness is why the ruling below does **not** rest on it.
+accept→re-park window on #1106 was **seven minutes** — roughly one drain tick — so "zero genuine advances" over that
+window measures the drain's rebase cadence as much as the author-push rate.
+
+**So prep ran the mechanism-independent measurement too, and it is the stronger one.** Cause of the head move is a
+property of the *commits*, not of the digest, so all **35** transitions can be classified on one method regardless
+of which staleness mechanism was live. Every window was reconstructed from `issues/<n>/timeline`; for the 24
+carrying a `drain-park-reason` comment the exact `reviewed → head` sha pair was read from that comment and every
+non-drain commit resolved to its owning PR via `commits/<sha>/pulls`:
+
+| cause of the head move | events | note |
+| --- | --- | --- |
+| Drain commits and/or other-lane traffic pulled in by a rebase onto a moving `main` | 24 | in all 24, no commit belonging to the re-parked PR appears on the new head without a match on the reviewed head |
+| Own content **replayed** by a rebase, content unchanged | 5 | #984 (2nd), #1012, #1017, #1110, #1119 — author dates all pre-date the clearance; stats and file lists unchanged |
+| **No head movement at all** | 5 | #374, #620, #870, #983 (2nd), #1100 (1st) |
+| **AUTHOR — the PR's own author pushed genuinely new content after a clearance** | **1** | **PR #984**, cleared `2026-08-08T11:32:40Z`, own commit `87e97cf9` authored `11:34:51`, re-parked `11:41:12Z` |
+
+**One event in the entire recorded history is the shape option (b) exists to fix — and it touched no leash path.**
+`87e97cf9` touches [we:scripts/lib/review-escalation.mjs](scripts/lib/review-escalation.mjs), which is policy tier
+but `leash: 'code'`; the second commit `6d84f7c6` touches one backlog `.md`. Neither is a `POLICY_SPEC` basename nor
+the statute file.
+
+**And it would not fire today.** On 2026-08-08 the whole gate-self surface still forced `review:human`. The
+`leash: 'code'` split landed **that same afternoon** in PR #1102 (`93f9fe7c`, *"narrow review:human to the
+declarative leash — Fork A only"*), and #984's own later park comment already classifies that same file as
+*gate-derivation* routed to *"independent committee review"*. Under today's roster the single AUTHOR event routes to
+`review:pending` — which is what (b) would have produced anyway. **#2771/#2785's narrowing already took the one
+observed case off the human's desk.**
+
+**Blind spot, stated:** GitHub drops force-pushed-away commits from the timeline, and `git commit --amend` preserves
+the author date, so an amend that changed content immediately after a clearance would read as "authored before". No
+replayed commit's stats or file list moved in any of the five replay cases — evidence against, not proof.
 
 ### 2 — The *question* survives, because the fork's motivating scenario is not a false stale
 
@@ -372,8 +400,9 @@ That is a real tax, it is unbounded in principle, and #3039 made it *loud*, not 
 
 - **It is the only option that addresses the half of the hole `#3054` does not reach.** (a) tolerates the
   genuine-advance case; (c) renames its label; only (b) changes its verdict.
-- **The complaint is real and will recur.** Every genuine advance on a cleared gate-self PR spends an operator turn
-  re-reading a diff they signed. Nothing else on the board reduces that.
+- **The complaint is real, even if rare.** Every genuine advance on a cleared gate-self PR spends an operator turn
+  re-reading a diff they signed, and nothing else on the board reduces that. (Honest counter-weight, stated inside
+  (b)'s own case: measured at **1 event in 35**, and that one would route to `review:pending` under today's roster.)
 - **The grain is arguably already ratified.** Two of #2840's three principle-surface triggers are computed
   base-vs-head; (b) only changes which base.
 - **It composes forward.** #3007 records `coverage.reviewedContribution` as an attribute on the clearance row, so a
@@ -525,11 +554,13 @@ am not recommending one be improvised.
 
 **What would falsify this** — each concrete and checkable:
 
-1. **The genuine case turns out to be common.** Appendix probe 4b classifies the 24 pre-#1119 re-parks and the 7
-   undetermined ones by *cause* (drain rebase vs author push) — a property of the commits, not of the digest, so the
-   method works across mechanisms. If author-caused re-parks are routine, (b)'s preconditions become urgent work
-   rather than a gate. Prep ran the post-#1119 classification and reports the pre-#1119 classification as an **open
-   measurement**, not as a settled zero.
+1. ~~**The genuine case turns out to be common.**~~ **CLOSED by measurement — this falsifier did not fire.** Prep
+   ran the mechanism-independent cause classification over all 35 transitions (gating question, part 1): **1**
+   AUTHOR-caused event in the recorded history, touching **no** leash path, and under today's post-#1102 roster it
+   would route to `review:pending` anyway. The falsifier stays listed because the probe is re-runnable (appendix 4b)
+   and the population grows: **if author-caused re-parks reach a handful, (b)'s preconditions become urgent work
+   rather than a gate.** Note also its blind spot — a `--amend` right after a clearance preserves the author date
+   and would read as mechanical.
 2. **A sound delta construction is found.** Correction 6 is an absence-of-proof, not a proof-of-absence. A
    construction that handles indented `POLICY_SPEC` files retires (b)'s largest cost, and then (a) is holding only
    on precondition 3.
@@ -564,7 +595,9 @@ gh api repos/chalbert/web-everything/issues/events --paginate > events.json   # 
 #   a STALE re-park additionally carries a drain-park-reason comment reading "review:accepted is STALE"
 #   2026-08-10 result: 35 transitions · 2 post-#1119 (both FALSE) · 24 pre-#1119 · 2 not stale · 7 undetermined
 
-# 4b. FALSIFIER 1 — classify every event by CAUSE, which is mechanism-independent (NOT yet run for pre-#1119)
+# 4b. classify every event by CAUSE — mechanism-independent, so it spans all 35 (RUN 2026-08-10)
+#   2026-08-10 result: 24 drain/other-lane rebase · 5 own content replayed unchanged · 5 no head move ·
+#                      1 AUTHOR (PR #984, 2026-08-08T11:32:40Z→11:41:12Z, no leash path)
 #   for each transition, read the `committed` events between the two labels and classify the messages:
 #   `drain: …` => DRAIN (mechanical);  anything else => AUTHOR (the case option (b) exists to fix)
 #   for each AUTHOR event, `gh api repos/chalbert/web-everything/commits/<sha>` and check the file list
