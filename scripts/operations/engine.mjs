@@ -301,9 +301,16 @@ export function advance(run, { registry = defaultRegistry, resume = null } = {})
       if (typeof asks !== 'string' || !asks.trim()) {
         throw new Error(`operations: \`${declaration.name}\`.\`${stepName}\` produced an empty question`);
       }
+      // WHO is asked can depend on the run, not only on the declaration (#3035: `human` on a gate-self PR,
+      // `agent` otherwise). Evaluated over the SAME projected view as `asks`, and refused when empty — a record
+      // that says the decision is owed by "" is worse than a refusal.
+      const of = typeof step.of === 'function' ? step.of(view) : step.of;
+      if (typeof of !== 'string' || !of.trim()) {
+        throw new Error(`operations: \`${declaration.name}\`.\`${stepName}\` produced an empty \`of\` — WHO is being asked`);
+      }
       return {
         ...run,
-        pending: { kind: 'confirm', step: stepName, stepIndex, asks, of: step.of, options: step.options ? [...step.options] : null },
+        pending: { kind: 'confirm', step: stepName, stepIndex, asks, of, options: step.options ? [...step.options] : null },
       };
     }
 

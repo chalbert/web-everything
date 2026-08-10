@@ -133,7 +133,12 @@ export function judge({ reads, request } = {}) {
  * @param {object} spec
  * @param {string[]} [spec.reads]
  * @param {string|((view: object) => string)} spec.asks - the question put to the person.
- * @param {string} spec.of - who is asked (`operator`, a role, a handle) — recorded on the run record.
+ * @param {string|((view: object) => string)} spec.of - who is asked (`operator`, a role, a handle) — recorded on
+ *   the run record. A FUNCTION, exactly like `asks`, when WHO is owed the decision depends on the run: #3035's
+ *   `review-pr` needs `human` on a gate-self PR (`review:human`) and `agent` otherwise, and that is a property of
+ *   the PR the `read` step observed, not of the declaration. The engine evaluates it over the same projected
+ *   view as `asks` and refuses an empty result, so a fn that returns nothing fails at the suspend rather than
+ *   writing a record that says the decision is owed by "".
  * @param {string[]} [spec.options] - a closed answer set; a resume outside it is REFUSED.
  * @returns {object} a frozen `confirm` step.
  */
@@ -144,7 +149,10 @@ export function confirm({ reads, asks, of, options } = {}) {
   if (typeof asks === 'string' && !asks.trim()) {
     throw new TypeError('operations: `confirm` step `asks` must be non-empty');
   }
-  if (typeof of !== 'string' || !of.trim()) {
+  if (typeof of !== 'string' && typeof of !== 'function') {
+    throw new TypeError('operations: `confirm` step needs `of` — WHO is being asked (e.g. "operator"), a string or a fn returning one');
+  }
+  if (typeof of === 'string' && !of.trim()) {
     throw new TypeError('operations: `confirm` step needs `of` — WHO is being asked (e.g. "operator")');
   }
   if (options != null) {
@@ -156,7 +164,7 @@ export function confirm({ reads, asks, of, options } = {}) {
     kind: 'confirm',
     reads: normalizeReads(reads, 'confirm'),
     asks,
-    of: of.trim(),
+    of: typeof of === 'function' ? of : of.trim(),
     options: options ? Object.freeze([...options]) : null,
   });
 }

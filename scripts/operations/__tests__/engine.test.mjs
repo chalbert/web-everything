@@ -307,6 +307,27 @@ describe('the engine fails closed', () => {
       .toThrow(/produced an empty question/);
   });
 
+  // #3035 — WHO is asked can depend on the run. `review-pr` needs `human` on a gate-self PR and `agent`
+  // otherwise, which is a property of the PR the `read` step observed, not of the declaration.
+  it('evaluates a FUNCTION `of` over the same projected view as `asks`', () => {
+    const r = createRegistry();
+    r.register(op('whoasks', {
+      input: { gateSelf: 'boolean' },
+      a: confirm({ reads: ['input.gateSelf'], asks: 'clear it?', of: (v) => (v.input.gateSelf ? 'human' : 'agent') }),
+    }));
+    const human = advance(startRun({ op: 'whoasks', id: 'run-wh', input: { gateSelf: true }, registry: r }), { registry: r });
+    expect(human.pending.of).toBe('human');
+    const agent = advance(startRun({ op: 'whoasks', id: 'run-wa', input: { gateSelf: false }, registry: r }), { registry: r });
+    expect(agent.pending.of).toBe('agent');
+  });
+
+  it('refuses a confirm step whose `of` came out empty — never records a decision owed by ""', () => {
+    const r = createRegistry();
+    r.register(op('noof', { a: confirm({ asks: 'clear it?', of: () => '  ' }) }));
+    expect(() => advance(startRun({ op: 'noof', id: 'run-no', registry: r }), { registry: r }))
+      .toThrow(/produced an empty `of`/);
+  });
+
   it('refuses to loop forever', () => {
     const r = createRegistry();
     const body = { input: {} };
