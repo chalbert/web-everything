@@ -198,3 +198,14 @@ has to settle:
 
 Whoever rules #3010 must not be able to miss this card — hence the `crossRef` above and the reciprocal note on
 #3010 itself.
+
+## The mechanical link to the operation engine (#3029)
+
+Recorded 2026-08-09 alongside the operator note on #3029: *"the only way the UI will be able to use it"* is what
+connects this thesis to the operation engine. The conveyor is a product only insofar as its UI surface can
+actually invoke the delivery operations, and under the statute
+[#operations-declared-once-callers-generated](../docs/agent/platform-decisions.md#operations-declared-once-callers-generated)
+a caller for the console is **generated from a declaration** — so an operation that is not declared onto #3029's
+engine cannot appear in the console at all. That makes the operation registry the supply of features this
+product ships, and an undeclared operation a feature it cannot sell. The rationale in full is on #3029; noted
+here so the dependency reads in both directions.
