@@ -30,7 +30,7 @@
  *   node scripts/backlog.mjs build-queue add|remove <NNN>            # MANUAL CLEAR-FOR-BUILD gate (#2530): `add` sets buildQueued:true (the supervised builder may pull it); `remove` clears it. Frontmatter-only, lane-gated; never touches blockedBy/readiness. The builder pulls ONLY cleared items, so re-prioritizing never arms a build
  *   add --json to any verb for machine-readable output.
  */
-import { readdirSync, readFileSync, writeFileSync, writeSync, unlinkSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +50,7 @@ import { numberPendingHashes, landedNumberFor } from './lane-drain.mjs';
 import { laneGuardDecision, resolveReal } from './guard-lane.mjs';
 import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig, orderQueueDetailed } from './lib/build-queue.mjs';
 import { localToday } from './lib/local-date.mjs';
+import { writeLineSync } from './lib/write-all-sync.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
@@ -71,32 +72,18 @@ const positional = argv.slice(1).filter((a) => !a.startsWith('--'));
 const today = () => localToday();
 const files = () => readdirSync(DIR).filter((f) => f.endsWith('.md'));
 
-/**
- * Write a line to a fd SYNCHRONOUSLY and completely, then return. `console.log` writes ASYNC to a pipe, and
- * `process.exit()` drops the unflushed tail — so a large payload (e.g. `build-queue --json`, ~37KB) is
- * silently truncated when a parent captures our stdout via a pipe (execFile), while a TTY/redirect-to-file
- * happens to win the race. A synchronous `writeSync` fully drains BEFORE `process.exit` runs, and crucially
- * keeps `die()`/`ok()` SYNCHRONOUS — every `die()` is a guard that must halt the caller in place (an async
- * write callback would let the code after the guard keep running). The EAGAIN loop handles a full
- * non-blocking pipe. The console `/api/backlog/queue` seam and the future builder both shell us over a pipe.
- */
-function writeAllSync(fd, line) {
-  // Coerce defensively: every caller passes a string today, but `String(...)` locks that in so a future
-  // non-string payload degrades predictably rather than throwing inside the write loop.
-  const buf = Buffer.from(String(line) + '\n', 'utf8');
-  let off = 0;
-  while (off < buf.length) {
-    try { off += writeSync(fd, buf, off, buf.length - off); }
-    catch (e) { if (e.code === 'EAGAIN') continue; if (e.code === 'EPIPE') break; throw e; }
-  }
-}
+// `writeLineSync` is remedy (b) from we:scripts/lib/write-all-sync.mjs — a synchronous drain that keeps the
+// `process.exit()` below. Required here rather than `process.exitCode`: every `die()` is a GUARD that must halt
+// the caller in place, and an async write callback would let the code after the guard keep running. This file
+// used to carry its own copy of the loop (one of three); #3061 moved it to the shared home. Behaviour is
+// unchanged — `writeLineSync` appends exactly the one trailing newline the local copy did.
 function die(msg) {
-  if (JSON_MODE) writeAllSync(1, JSON.stringify({ ok: false, error: msg }));
-  else writeAllSync(2, `${RED}✗${RST} ${msg}`);
+  if (JSON_MODE) writeLineSync(1, JSON.stringify({ ok: false, error: msg }));
+  else writeLineSync(2, `${RED}✗${RST} ${msg}`);
   process.exit(1);
 }
 function ok(payload, human) {
-  writeAllSync(1, JSON_MODE ? JSON.stringify({ ok: true, ...payload }) : human);
+  writeLineSync(1, JSON_MODE ? JSON.stringify({ ok: true, ...payload }) : human);
   process.exit(0);
 }
 
