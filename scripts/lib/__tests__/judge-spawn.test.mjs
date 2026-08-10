@@ -29,6 +29,7 @@ import {
   DEFAULT_EFFORT,
   DEFAULT_BUDGET_USD,
   deriveSessionId,
+  sessionSeed,
   buildJudgeArgv,
   parseJudgeOutcome,
   loadedContextTokens,
@@ -41,7 +42,7 @@ const SHAPE = {
   required: ['verdict', 'findings'],
   additionalProperties: false,
 };
-const SID = deriveSessionId('run-7 rigor');
+const SID = deriveSessionId(sessionSeed(['run-7', 'rigor']));
 
 /** The flag/value pair a caller asked for, so assertions read as the recipe rather than as indices. */
 function flagValue(argv, flag) {
@@ -212,17 +213,84 @@ describe('deriveSessionId — the juror is a NAMED actor, not merely a fresh one
   });
 
   it('separates the lenses of one panel, so jurors are distinct actors from each other', () => {
-    const seen = new Set(['rigor', 'care', 'security', 'a11y', 'perf'].map((l) => deriveSessionId(`run-7 ${l}`)));
+    const seen = new Set(['rigor', 'care', 'security', 'a11y', 'perf'].map((l) => deriveSessionId(sessionSeed(['run-7', l]))));
     expect(seen.size).toBe(5);
   });
 
   it('separates runs, so yesterday\'s juror is not today\'s', () => {
-    expect(deriveSessionId('run-7 rigor')).not.toBe(deriveSessionId('run-8 rigor'));
+    expect(deriveSessionId(sessionSeed(['run-7', 'rigor']))).not.toBe(deriveSessionId(sessionSeed(['run-8', 'rigor'])));
   });
 
   it('refuses an empty seed rather than inventing an identity', () => {
     expect(() => deriveSessionId('')).toThrow(/seed/);
     expect(() => deriveSessionId(undefined)).toThrow(/seed/);
+  });
+});
+
+describe('sessionSeed — the ONE injective seed encoding, replacing the ambiguous space join (#3058)', () => {
+  const id = (fields) => deriveSessionId(sessionSeed(fields));
+
+  it('THE ORIGINAL DEFECT: a space join maps two different (runId, id) pairs onto one actor', () => {
+    // The join itself is the defect — these two DIFFERENT field pairs are ONE string, which on `main` both
+    // derived 8f57af23-ca27-80e7-b1f3-c2510e0aa618 through `panelSeats`.
+    const spaceJoin = (runId, seatId) => `${runId} ${seatId}`;
+    expect(spaceJoin('a', 'b c#1')).toBe(spaceJoin('a b', 'c#1'));
+    expect(deriveSessionId(spaceJoin('a', 'b c#1'))).toBe(deriveSessionId(spaceJoin('a b', 'c#1')));
+    // The encoder separates exactly that pair — same fields, no longer the same seed and no longer one actor.
+    expect(sessionSeed(['a', 'b c#1'])).not.toBe(sessionSeed(['a b', 'c#1']));
+    expect(id(['a', 'b c#1'])).not.toBe(id(['a b', 'c#1']));
+  });
+
+  it('THE SECOND DEFECT: an absent field no longer collapses onto a present one of the same value', () => {
+    // `[runId, lens].filter(Boolean).join(' ')` made these one seed with NO SPACE anywhere in the input.
+    expect(id(['same-string', undefined])).not.toBe(id([undefined, 'same-string']));
+    expect(id(['same-string', ''])).not.toBe(id(['', 'same-string']));
+  });
+
+  it('absent, empty and missing are three different fields, not one', () => {
+    const shapes = [
+      ['a'],
+      ['a', undefined],
+      ['a', null],
+      ['a', ''],
+      ['a', 'b'],
+      ['', 'a'],
+      [undefined, 'a'],
+      ['a', 'b', undefined],
+      ['a', 'b', ''],
+    ];
+    // `undefined` and `null` are BOTH "absent" and deliberately encode the same — the distinction the item
+    // asks for is absent-vs-empty-vs-missing, and nothing in this repo means different things by the two
+    // nullish values. Everything else must be pairwise distinct.
+    expect(sessionSeed(['a', null])).toBe(sessionSeed(['a', undefined]));
+    const distinct = shapes.filter((s) => !(s.length === 2 && s[1] === null));
+    expect(new Set(distinct.map(id)).size).toBe(distinct.length);
+  });
+
+  it('is injective over field values carrying the separators a naive join would reuse', () => {
+    const alphabet = ['', ' ', 'a', 'a b', 'b', '#1', 'a#1', 'a b#1', ':', '2:x', '|', 'v1|2|', '~', undefined];
+    const pairs = [];
+    for (const x of alphabet) for (const y of alphabet) pairs.push([x, y]);
+    // Every distinct (x, y) is a distinct seed, and therefore a distinct id.
+    expect(new Set(pairs.map((p) => sessionSeed(p))).size).toBe(pairs.length);
+    expect(new Set(pairs.map(id)).size).toBe(pairs.length);
+  });
+
+  it('is deterministic and declares its own field count, so a decoder cannot mis-split it', () => {
+    expect(sessionSeed(['a', 'b c#1'])).toBe(sessionSeed(['a', 'b c#1']));
+    expect(sessionSeed(['a', 'b c#1'])).toBe('v1|2|1:a5:b c#1');
+    expect(sessionSeed(['a b', 'c#1'])).toBe('v1|2|3:a b3:c#1');
+    expect(sessionSeed(['a'])).toBe('v1|1|1:a');
+    expect(sessionSeed(['a', undefined])).toBe('v1|2|1:a~');
+    expect(sessionSeed(['a', ''])).toBe('v1|2|1:a0:');
+  });
+
+  it('refuses a field list it cannot encode rather than stringifying its way past it', () => {
+    expect(() => sessionSeed([])).toThrow(/non-empty array/);
+    expect(() => sessionSeed('a b')).toThrow(/non-empty array/);
+    expect(() => sessionSeed(undefined)).toThrow(/non-empty array/);
+    expect(() => sessionSeed(['a', 7])).toThrow(/field 1 must be a string/);
+    expect(() => sessionSeed([{ runId: 'a' }])).toThrow(/field 0 must be a string/);
   });
 });
 
@@ -337,7 +405,7 @@ describe('judgeSpawn — the one function a `judge` step calls, exercised over a
     expect(seen.cli).toBe('claude');
     expect(seen.argv).toEqual(buildJudgeArgv({
       mandate: 'You are the rigor juror.', shape: SHAPE, model: 'opus', effort: 'high', budget: 0.75,
-      sessionId: deriveSessionId('run-7 rigor'),
+      sessionId: deriveSessionId(sessionSeed(['run-7', 'rigor'])),
     }));
     expect(seen.stdin).toBe('THE-DIFF-SENTINEL');
     expect(seen.argv.join('')).not.toContain('THE-DIFF-SENTINEL');
@@ -360,13 +428,44 @@ describe('judgeSpawn — the one function a `judge` step calls, exercised over a
     await judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, runId: 'run-7', lens: 'care', spawnFn: b.fn });
     const sidOf = (seen) => seen.argv[seen.argv.indexOf('--session-id') + 1];
     expect(sidOf(a.seen)).not.toBe(sidOf(b.seen));
-    expect(sidOf(a.seen)).toBe(deriveSessionId('run-7 rigor'));
+    expect(sidOf(a.seen)).toBe(deriveSessionId(sessionSeed(['run-7', 'rigor'])));
   });
 
   it('honours an explicit sessionId over the derivation', async () => {
     const { fn, seen } = fakeSpawn(okJson);
     await judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, spawnFn: fn });
     expect(seen.argv[seen.argv.indexOf('--session-id') + 1]).toBe(SID);
+  });
+
+  it('a runId-only spawn and a lens-only spawn carrying the same string are DIFFERENT actors (#3058)', async () => {
+    // The `filter(Boolean)` this replaced dropped the absent field before joining, so both of these derived
+    // one id with no space anywhere in the input. Driven through the real `judgeSpawn`, not the encoder.
+    const a = fakeSpawn(okJson);
+    const b = fakeSpawn(okJson);
+    await judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, runId: 'same-string', spawnFn: a.fn });
+    await judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, lens: 'same-string', spawnFn: b.fn });
+    const sidOf = (seen) => seen.argv[seen.argv.indexOf('--session-id') + 1];
+    expect(sidOf(a.seen)).not.toBe(sidOf(b.seen));
+    expect(sidOf(a.seen)).toBe(deriveSessionId(sessionSeed(['same-string', undefined])));
+    expect(sidOf(b.seen)).toBe(deriveSessionId(sessionSeed([undefined, 'same-string'])));
+  });
+
+  it('a runId/lens pair that a space join would have merged stays two actors (#3058)', async () => {
+    const a = fakeSpawn(okJson);
+    const b = fakeSpawn(okJson);
+    await judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, runId: 'r 1', lens: 'lens', spawnFn: a.fn });
+    await judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, runId: 'r', lens: '1 lens', spawnFn: b.fn });
+    const sidOf = (seen) => seen.argv[seen.argv.indexOf('--session-id') + 1];
+    expect(sidOf(a.seen)).not.toBe(sidOf(b.seen));
+  });
+
+  it('an EMPTY lens and an ABSENT lens are different actors, so neither collapses onto the other', async () => {
+    const a = fakeSpawn(okJson);
+    const b = fakeSpawn(okJson);
+    await judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, runId: 'run-7', spawnFn: a.fn });
+    await judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, runId: 'run-7', lens: '', spawnFn: b.fn });
+    const sidOf = (seen) => seen.argv[seen.argv.indexOf('--session-id') + 1];
+    expect(sidOf(a.seen)).not.toBe(sidOf(b.seen));
   });
 
   it('still names a distinct actor when no runId or lens is supplied', async () => {

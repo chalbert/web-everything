@@ -3,8 +3,11 @@ bornAs: xo0qe85
 kind: story
 size: 1
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-10"
+dateStarted: "2026-08-10"
+dateResolved: "2026-08-10"
+graduatedTo: scripts/lib/judge-spawn.mjs#sessionSeed
 relatedTo: ["3028", "3050", "3029"]
 scope:
   - "we:scripts/lib/judge-spawn.mjs"
@@ -19,7 +22,12 @@ tags: [plateau-loop, delivery, operations, jury, judge, panel, capture]
 `deriveSessionId` is seeded on `` `${runId} ${id}` `` — a space join, which is not injective, so two different
 (runId, id) pairs can derive the **same** session id. Within one panel the distinctness guarantee is intact;
 it only bites if cross-run actor identity becomes load-bearing. The fix is a delimiter that cannot be forged.
-**Capture only:** nothing is built here.
+
+**Resolved 2026-08-10.** Both forms were re-reproduced against `main` at `51278cce` before any edit, then fixed by
+one shared, injective, length-prefixed encoder —
+[we:scripts/lib/judge-spawn.mjs#sessionSeed](../scripts/lib/judge-spawn.mjs) — which BOTH call sites now seed
+through. It was captured as "capture only"; it was built here instead because it is a size-1 clean break and the
+window for taking it without a migration is exactly now (see *When it actually matters*).
 
 ## The defect, reproduced
 
@@ -67,10 +75,17 @@ stop collapsing absent fields, not only stop splitting on spaces.
 - `panelSeats` refuses structurally, before anything spawns, on either a duplicate seat `id` or a duplicate
   derived `sessionId` — the self-check #3050 deliberately kept in the module rather than only in its tests.
 - `judgePanel` always passes an explicit `sessionId` down to `judgeSpawn`, so the `filter(Boolean)` fallback
-  above is never on the panel path. It reaches only a *direct* `judgeSpawn` caller, of which there are none in
-  production today (`judgeSpawn` still has no production callers; only its tests and
-  [we:scripts/measure-judge-spawn.mjs](../scripts/measure-judge-spawn.mjs) import it, and that one passes an
-  explicit `sessionId`).
+  above is never on the panel path. It reaches only a *direct* `judgeSpawn` caller.
+
+  **CORRECTION, found while building this (2026-08-10).** The bullet above originally said *"`judgeSpawn` still
+  has no production callers; only its tests and
+  [we:scripts/measure-judge-spawn.mjs](../scripts/measure-judge-spawn.mjs) import it."* **That was already false
+  when this card was filed.**
+  [we:scripts/operations/cli-adapter.mjs#createDefaultJudge](../scripts/operations/cli-adapter.mjs) — the default
+  judge behind every `awaiting-judge` step of the operations engine (#3032, resolved) — calls `judgeSpawn` with
+  `runId` and `lens` and **no** explicit `sessionId`, which is the `filter(Boolean)` fallback exactly. So form 2
+  was on a live path, not a hypothetical one. It still persisted nothing (see below), so the clean break stayed
+  safe — but the bound was wrong and is corrected rather than left standing.
 
 So the sibling-distinctness property that is #3050's whole product is **not** affected. This is a *cross-run*
 naming defect.
@@ -114,14 +129,52 @@ field rather than a field that disappears.
 Cost: a few lines and a table test. The only real consideration is that **it changes every derived id**, so it
 is a clean break to take while `judgeSpawn` still has no production callers and no ledger has recorded an id.
 
+## Nothing persists a derived id, so the clean break is free — checked, not assumed
+
+The change alters **every** derived id, so the question is whether anything durable would disagree. Swept
+2026-08-10 at `51278cce`:
+
+- **The operations run record does not carry one.** `createDefaultJudge` returns `outcome.value` and **discards**
+  the spawn's session id — it never reaches the run record at all. `sessionId`/`session_id` does not appear
+  anywhere in `we:scripts/operations/` outside tests.
+- **The run store is session-local and gitignored anyway.**
+  [we:scripts/operations/run-store.mjs](../scripts/operations/run-store.mjs) writes `.operations/runs/<id>.json`;
+  `.operations/` is in `.gitignore` and does not exist in a fresh checkout.
+- **The ledger sink records `runId`, never a session id.**
+  [we:scripts/operations/review-pr-io.mjs](../scripts/operations/review-pr-io.mjs) appends
+  `{ effectKey, runId, ...payload }` to a session-local `verdicts.pending.jsonl` sidecar that its own comment
+  states nothing reads back.
+- **#3007's real verdict ledger is still open and ships no writer**, so no durable record of reviewer identity
+  exists to invalidate — which is exactly the window this card said to take the break in.
+- **Nothing looks an id up after the fact.** No transcript path, PR comment, or gate consumes a derived id.
+- Only two test fixtures hard-code a literal UUID (`aaaaaaaa-bbbb-8ccc-9ddd-eeeeeeeeeeee`) and both are the
+  CLI's *echoed* `session_id`, not a derived one — unaffected.
+
 ## Acceptance
 
-- [ ] One shared seed encoder, used by both `deriveSessionId` call sites — no second derivation.
-- [ ] A test asserting non-collision over the pairs above: `("a", "b c#1")` vs `("a b", "c#1")`, and the
-      `filter(Boolean)` pair (`runId` only vs `lens` only with the same string).
-- [ ] A property-style table over field values containing spaces, `#`, and the empty string, asserting distinct
-      inputs derive distinct ids.
-- [ ] `deriveSessionId`'s docstring stops specifying the space-join convention, so a future caller does not
-      re-introduce it.
-- [ ] Every existing `judgeSpawn` / `judgePanel` test still passes with the new ids (no test hard-codes a
-      literal UUID that the change would falsify — check before assuming).
+- [x] One shared seed encoder, used by both `deriveSessionId` call sites — no second derivation.
+      `sessionSeed` is exported from [we:scripts/lib/judge-spawn.mjs](../scripts/lib/judge-spawn.mjs) and
+      IMPORTED by [we:scripts/lib/judge-panel.mjs](../scripts/lib/judge-panel.mjs); neither module joins by hand.
+- [x] A test asserting non-collision over the pairs above: `("a", "b c#1")` vs `("a b", "c#1")`, and the
+      `filter(Boolean)` pair (`runId` only vs `lens` only with the same string). Both are driven through the
+      real callers — `panelSeats` and `judgeSpawn` — not only through the encoder.
+- [x] A property-style table over field values containing spaces, `#`, and the empty string, asserting distinct
+      inputs derive distinct ids. Two of them: a 14×14 pair table over the encoder (including `:`, `|`, `~` and
+      `v1|2|`, the encoding's own metacharacters) and a 6×6 run-id × seat-id table through `panelSeats`.
+- [x] `deriveSessionId`'s docstring stops specifying the space-join convention, so a future caller does not
+      re-introduce it — it now points at `sessionSeed` and says it cannot itself tell an ambiguous seed from an
+      unambiguous one.
+- [x] Every existing `judgeSpawn` / `judgePanel` test still passes with the new ids. No test hard-coded a literal
+      derived UUID; six re-derivations of the old convention were rewritten through `sessionSeed`. Full unit
+      suite: 314 files, 6961 passed / 3 skipped, 0 failed. `check:standards`: exit 0, 0 errors,
+      1284 warnings — unchanged from the pre-change baseline.
+
+### The encoding, and why length-prefixed over NUL
+
+`v1|<count>|` then, per field, `~` for an absent field or `<length>:<value>` for a present one. NUL-delimiting is
+injective only while you can promise NUL never appears in a field, and that promise is about caller input these
+modules do not control — `runId` and `lens` arrive from an operations declaration. Length-prefixing reserves no
+byte, so it needs no promise and no escaping. This repo also already uses NUL as a deliberate in-file sentinel in
+committed scripts, so it is not a free byte here by convention either. Encoding the field count keeps absent,
+empty and missing three different things: `['a']` → `v1|1|1:a`, `['a', undefined]` → `v1|2|1:a~`, `['a', '']` →
+`v1|2|1:a0:`.

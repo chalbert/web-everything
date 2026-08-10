@@ -8,8 +8,8 @@
  * concurrently, awaits every one, and hands back the per-juror results together.
  *
  * IT REIMPLEMENTS NOTHING AND RULES NOTHING. No second argv recipe (`buildJudgeArgv`), no second denylist
- * (`assertNoForbiddenArgv`), no second session-id derivation (`deriveSessionId`) — all four are IMPORTED from
- * `judge-spawn.mjs`. And no reduction: `derivePanelVerdict` / `buildPanelFindings` / diversity-selection stay
+ * (`assertNoForbiddenArgv`), no second session-id derivation (`deriveSessionId`) and no second seed encoding
+ * (`sessionSeed`, #3058) — every one of them is IMPORTED from `judge-spawn.mjs`. And no reduction: `derivePanelVerdict` / `buildPanelFindings` / diversity-selection stay
  * in `jury-core.mjs`, because a second reducer here is precisely the defect that module's `AGGREGATION`
  * constant exists to prevent (#3050 "Not in scope").
  *
@@ -96,8 +96,9 @@
  * VALUE reaches argv. It is captured there and NOT fixed here — but it is not widened either. Every option this
  * module forwards (`mandate`, `shape`, `model`, `effort`, `budget`) was already a `judgeSpawn` argv input, and
  * this module's OWN new inputs reach argv through exactly one funnel or not at all: `runId`, `lens`, `slot` and
- * `id` go only into `deriveSessionId`, which SHA-256s them into a canonical UUID, and `depth` / `maxDepth` /
- * `maxTotalBudgetUsd` never touch argv in any form. A test pins that with flag-shaped lens and run ids.
+ * `id` go only into `sessionSeed` → `deriveSessionId`, which SHA-256s them into a canonical UUID, and `depth` /
+ * `maxDepth` / `maxTotalBudgetUsd` never touch argv in any form. A test pins that with flag-shaped lens and run
+ * ids.
  *
  * PURE except `judgePanel`, which spawns subprocesses through the injectable `spawnFn` it forwards to
  * `judgeSpawn` — the same seam the unit tests use, so the whole suite spawns nothing. A LEAF module above
@@ -109,6 +110,7 @@ import {
   buildJudgeArgv,
   assertNoForbiddenArgv,
   deriveSessionId,
+  sessionSeed,
   DEFAULT_MODEL,
   DEFAULT_EFFORT,
   DEFAULT_BUDGET_USD,
@@ -202,8 +204,12 @@ export function assertPanelBudget({ budgets = [], maxTotalBudgetUsd } = {}) {
  *   • `id` — `lens#slot`, the SAME identity string `materializeRoster` mints in `we:scripts/lib/jury-core.mjs`,
  *     so a panel's seats line up with a `roster-picked` ledger event's jurors without a translation table. A
  *     caller may supply `id` outright.
- *   • `sessionId` — `deriveSessionId(`${runId} ${id}`)`. Deterministic (the run record can point at the
- *     transcript), and distinct per seat because `id` is distinct per seat.
+ *   • `sessionId` — `deriveSessionId(sessionSeed([runId, id]))`. Deterministic (the run record can point at
+ *     the transcript), and distinct per seat because `id` is distinct per seat. The seed goes through the
+ *     IMPORTED `sessionSeed` encoder rather than a join written here: a space join is not injective, so
+ *     `("a", "b c#1")` and `("a b", "c#1")` used to name the same actor across two runs (#3058). There is
+ *     exactly one seed encoding in the constellation and it lives in `judge-spawn.mjs` — a second one here
+ *     would be the same defect wearing a different hat.
  *
  * `runId` IS REQUIRED. `judgeSpawn` alone may fall back to a one-off random seed — still a distinct actor, just
  * not a reproducible name — but recordability is the entire reason a panel is worth owning (#3050), so a panel
@@ -249,7 +255,7 @@ export function panelSeats({ jurors, runId } = {}) {
       }
       id = juror.id.trim();
     }
-    seats.push({ id, lens, slot, sessionId: deriveSessionId(`${runId} ${id}`), juror });
+    seats.push({ id, lens, slot, sessionId: deriveSessionId(sessionSeed([runId, id])), juror });
   }
 
   const ids = new Set(seats.map((s) => s.id));
