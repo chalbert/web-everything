@@ -1,4 +1,5 @@
 ---
+bornAs: xo0qe85
 kind: story
 size: 1
 parent: "3029"
@@ -95,7 +96,7 @@ can mint the same actor name" from a curiosity into a wrong answer. It is worth 
 consumer exists rather than after — changing the derivation later invalidates every id already recorded.
 
 Note the ordering is one-way: this item is safe to do at any time, and
-[#xju8rp3](/backlog/xju8rp3-migrate-the-subject-jury-fan-out-off-subagents-onto-judgepan/)
+[#3057](/backlog/3057-migrate-the-subject-jury-fan-out-off-subagents-onto-judgepan/)
 (migrate the jury fan-out onto `judgePanel`) does not wait on it, because the intra-panel guarantee it relies
 on is already intact.
 

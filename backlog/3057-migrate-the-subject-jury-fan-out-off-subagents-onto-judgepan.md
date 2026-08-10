@@ -1,4 +1,5 @@
 ---
+bornAs: xju8rp3
 kind: story
 size: 5
 parent: "3029"
@@ -156,7 +157,7 @@ Two open items are **adjacent and non-blocking**, worth reading before starting:
 - #3056 (open decision) — the argv denylist is a one-token list, so a flag-shaped option *value* reaches argv.
   This migration adds a caller to that surface; it must not widen it (every value it forwards is already a
   `judgeSpawn` argv input), and it does not wait on the ruling.
-- [#xo0qe85](/backlog/xo0qe85-the-juror-session-id-seed-is-a-space-join-so-it-is-ambiguous/)
+- [#3058](/backlog/3058-the-juror-session-id-seed-is-a-space-join-so-it-is-ambiguous/)
   — the session-id seed is a space join and is not injective across runs. Within one panel the distinctness
   guarantee is intact, so this migration is safe to do first; the two are independent.
 
