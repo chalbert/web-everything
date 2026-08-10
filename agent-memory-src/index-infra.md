@@ -1,6 +1,6 @@
 ---
 name: index-infra
-description: This repo’s gates, build, and tooling quirks: check:standards skips the 11ty build, blocks/ has no typecheck gate, build:plugs pollutes the tree, FrontierUI happy-dom test quirks, vite config plugin≠alias, dev ports, write-time enforcement hooks + hookable-vs-judgment, intents.json escaping footgun, bootstrap-patches inject footgun, blocks per-file virtual anchor, dev-panel duplication, explorer report inflation. Recall when running gates/tests/builds or touching repo tooling.
+description: This repo’s gates, build, and tooling quirks: check:standards skips the 11ty build, blocks/ has no typecheck gate, build:plugs pollutes the tree, FrontierUI happy-dom test quirks, vite config plugin≠alias, dev ports, write-time enforcement hooks + hookable-vs-judgment, intents.json escaping footgun, bootstrap-patches inject footgun, blocks per-file virtual anchor, dev-panel duplication, explorer report inflation, deliberate NUL sentinels in three committed scripts (plain grep reports nothing). Recall when running gates/tests/builds, grepping the scripts tree, or touching repo tooling.
 metadata:
   type: reference
 ---
@@ -26,4 +26,5 @@ Testing · Gates · Build Infra cluster — open a leaf with `node scripts/memor
 - [jsdom query cache stale after move](jsdom-query-cache-stale-after-move.md) — querySelectorAll/children lie after in-place insertBefore; assert via childNodes; minimum-move reorders; #2002
 - [Dogfood & parity keystones missing](dogfood-and-parity-keystones-missing.md) — both "resolved" themes actually blocked; do #2016 + #2017 first; #1243 shadcn is a stub
 - [UI loader ↔ CLI engine field parity](ui-loader-cli-engine-field-parity.md) — backlog.js & engine.mjs derive batchable/tier/filler independently; a rule live in one isn't live in the other; #2014
+- [Committed scripts carry deliberate NUL sentinels](committed-scripts-carry-nul-sentinels.md) — `scripts/guard-bash.mjs`, `scripts/backlog/renumber-collisions.mjs`, `scripts/lib/component-render-build-hook.cjs` hold intentional NUL delimiters, so plain `grep` calls them binary and prints NOTHING (exit 1) — use `grep -a`; and `grep $'\x00'` matches EVERY line, so use `grep -P '\x00'`. NOT Write-tool corruption; don't "repair" them
 - [Cloudflare deploy state](cloudflare-deploy-state.md) — WE site LIVE+gated on Cloudflare Workers (pivoted off #1135 Pages); auto-deploy unwired; domain held for #2127
