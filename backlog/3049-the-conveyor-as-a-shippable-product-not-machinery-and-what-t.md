@@ -76,7 +76,9 @@ never gets confronted. The operator's point is narrower. The test to record is:
 
 So the metric arguably needs **three classes, not two** — product, **product-in-disguise** (shippable delivery
 machinery), and plumbing. Nobody is tracking the middle one, and it may be the interesting number: it is
-plausibly where most of the +26,000-to-+48,000 machinery lines a week actually sit.
+plausibly where most of the machinery lines sit — #3012's completed weeks measure +13,671 to +36,373 machinery
+lines a week (its partial current-week row reads higher still, but #3012's own guidance is to read the
+completed weeks).
 
 Note that the classifier **already splits the "plausibly yes" list down the middle** without anyone deciding
 that it should: the conformance substrate (`we:conformance-vectors/`, `we:wrapper-conformance/`) was ruled
@@ -158,7 +160,11 @@ should be made only from what re-checks. Verified with `gh pr view`:
   with no recording route at all. Its wider finding matters more than the deadlock: a subagent inherits its
   parent's `CLAUDE_CODE_SESSION_ID`, so a subagent "independent adversarial review" is **the same actor as the
   author** by this repo's own #2439/#2398 bar, and `we:scripts/lib/review-core.mjs` and
-  `we:scripts/lib/jury-core.mjs` import nothing from `we:scripts/lib/review-independence.mjs`.
+  `we:scripts/lib/jury-core.mjs` import nothing from `we:scripts/lib/review-independence.mjs`. The finding is
+  **subagent-scoped, not universal**: a headless `claude -p` spawn does *not* adopt the inherited id — it mints
+  its own `session_id` — so headless spawns are structurally distinct actors and independent review stays
+  possible via that route (#3028 / PR #1131, merged 2026-08-09, which verified both halves and builds the
+  juror spawn on exactly that distinction; re-verified independently by the 2026-08-09 review of this card).
 - **Numbers corrected by later review** — #3012's own body records `+1,699 → +705 → +480 → +147` as
   **unreplicated** (no `2026-08-08 delivery review` exists under `we:reports/`), records the `38,852` gap
   figure as not reproducing either way, and records the earlier projection as high (`+1,591 → +1,909 → +427`
@@ -168,8 +174,10 @@ should be made only from what re-checks. Verified with `gh pr view`:
 PRs landed" does not reproduce — 61 PRs carry a merge timestamp in the 2026-08-08..2026-08-09 UTC window, 12 of
 them on 2026-08-09. "Deleting the fix left 540/540 green" does not appear in PR #1124, whose recorded
 verification is `npm run test:unit`, 300 files / 6,383 tests. And the corrections above should **not** be
-attributed to "a genuinely separate reviewer" — PR #1129 is the reason that phrase cannot be used, since it
-establishes the reviewer was not independent by this repo's own definition.
+attributed to "a genuinely separate reviewer" — those passes ran as same-session subagents, which PR #1129
+establishes are the same actor as the author by this repo's own definition. That disqualifies *those
+reviews*, not independent review as such: a headless `claude -p` spawn mints its own `session_id` and is a
+distinct actor (#3028 / PR #1131).
 
 ## Not ruled — what this item is for
 
