@@ -245,11 +245,11 @@ describe('#3007 log parsing — tolerant, never throws', () => {
 });
 
 describe('#3007 THE KEY — a rebase that breaks the fingerprint must NOT break the record', () => {
-  // The card asked for records "keyed by PR + the diff content-hash the verdict covered". #3046 and `#3052`
-  // (open, under `#3054`) prove that digest DIVERGES on a byte-identical contribution. These two tests are the
-  // reason the key is `repo` + `pr` + append order instead.
+  // The card asked for records "keyed by PR + the diff content-hash the verdict covered". #3046 and #3052
+  // proved that digest DIVERGED on a byte-identical contribution; #3054 has since repaired it, and the key is
+  // STILL `repo` + `pr` + append order — see the first test for the reason that outlived the repair.
 
-  it('the contribution digest really does diverge on an unchanged contribution (#3046, reproduced)', () => {
+  it('#3046 is FIXED — that same base move no longer diverges the digest, and the key still is not it', () => {
     // One contribution, two bases: `main` grew a DIFFERENT number of lines above each of the two hunks
     // (a non-uniform base move). Every `+`/`-` line, hunk length and section heading is identical.
     const diffAt = (startA, startB) => [
@@ -279,7 +279,13 @@ describe('#3007 THE KEY — a rebase that breaks the fingerprint must NOT break 
     const after = normalizeContributionFingerprint(diffAt(115, 219));
     expect(before).toBeTruthy();
     expect(after).toBeTruthy();
-    expect(after).not.toBe(before); // ← the live #3046 defect, pinned here as the premise of the key decision
+    // #3054 (via #3046/#3052) dropped both base-derived position signals, so this now HOLDS. The key decision
+    // below is unchanged by that, and this test is kept rather than deleted to say why: the digest is a
+    // COVERAGE witness, not an identity. It is still not usable as a lookup key, for a reason the repair did
+    // not remove and deliberately widened — two DIFFERENT contributions collide whenever one is a relocation of
+    // the other (#3021, open, pinned in `we:scripts/lib/__tests__/review-escalation.test.mjs`). A key that two
+    // different verdicts can share is worse than one that a rebase breaks.
+    expect(after).toBe(before);
   });
 
   it('the ledger record for that PR is still found after the digest diverges', () => {

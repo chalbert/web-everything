@@ -2,8 +2,10 @@
 bornAs: xalaqel
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-09"
+dateResolved: "2026-08-10"
+graduatedTo: none
 parent: "3054"
 scope:
   - we:scripts/lib/review-escalation.mjs
@@ -12,6 +14,28 @@ tags: [gate, review, drain, review-escalation, fingerprint]
 ---
 
 # A stale-acceptance re-park fires on an unchanged contribution when the base moves non-uniformly (a false stale)
+
+> **RESOLVED 2026-08-10.** The inter-hunk gap is gone from `normalizeContributionFingerprint`, together with
+> the section heading (`#3052`), because the two could not be separated — see the *Impossibility* note below.
+> Verified three ways: the WE PR #1106 accept-time and post-rebase net diffs, rebuilt from the real commits and
+> self-certified by reproducing the stamped `reviewed-diff 3265beec…` / `reviewed-contribution b5d1eafe…`
+> markers, now hash **alike** (`eae879d2…` both sides) where they hashed `b5d1eafe…` vs `e7b1d883…` before; a
+> unit test reproduces the mechanism from real `git diff` output (`#xalaqel — a NON-UNIFORM base move no longer
+> diverges the digest`); and a corpus replay — 16 stamp-certified accept→head pairs plus 201 machine-replayed
+> content-preserving rebases onto four different bases — drops from 5 false stales to 0 with 181/181 genuine
+> contribution changes still detected. **One correction to this card's own record:** the retired *137,799 bytes*
+> figure was never wrong. 137,799 is the net diff's length in JavaScript characters; 141,836 is the same text in
+> UTF-8 bytes. Both were measured from the same commits; only the unit differed.
+>
+> **Impossibility, and the price.** Everything this digest can see about a hunk's position is its old-side
+> start. A base that grows *k* lines above the contribution and a contribution that relocates *k* lines down an
+> unchanged base produce byte-identical projections, headings included — so any signal invariant under every
+> base move is also blind to every relocation. Dropping the gap therefore widened
+> [#3021](/backlog/3021-the-contribution-fingerprint-still-collides-on-an-intra-sect/), which stays **open**:
+> its pin was updated in the same change to the new, wider width. What partially replaces the gap is a
+> base-invariant context-**run shape** (the length of each run of context lines, never its text), which costs no
+> invariance — a base edit that changes a run length already changed `oldLen`/`newLen` — and still refuses a
+> move that re-clusters the contributed lines.
 
 The contribution digest `acceptanceCoversHead` reads is meant to be invariant under the base moving, so
 an operator's clearance survives the drain's own rebase. It is not: it embeds each hunk's **gap** to the

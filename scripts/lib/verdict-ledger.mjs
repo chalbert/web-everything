@@ -15,27 +15,39 @@
  * #2979, so a mechanical rebase does not void it)". **That premise is false, and it was proven false twice
  * on 2026-08-09**, after the card was written:
  *
- *   • [#3046] — `normalizeContributionFingerprint` (`we:scripts/lib/review-escalation.mjs`) embeds each
+ *   • [#3046] — `normalizeContributionFingerprint` (`we:scripts/lib/review-escalation.mjs`) EMBEDDED each
  *     hunk's INTER-HUNK GAP, which is invariant only under a *uniform* whole-file displacement. A base that
- *     grows by different amounts above two hunks diverges the digest on a byte-identical contribution.
+ *     grew by different amounts above two hunks diverged the digest on a byte-identical contribution.
  *     Measured on WE PR #1106: 1,534 projection lines each side, differing in exactly two, both gap values.
  *   • `#3052` — git's `xfuncname` picks the nearest preceding column-0 declaration as the `@@` heading, so a
- *     base INSERTION of a new declaration changes the heading with zero content lines differing. Observed on
+ *     base INSERTION of a new declaration changed the heading with zero content lines differing. Observed on
  *     WE PR #1100, whose clearance was revoked 52 seconds after it was granted.
  *
- * Both are open slices of epic `#3054` (with [#3021], the converging direction, and [#2884], the caller).
- * A ledger whose records were *found* by that digest would inherit the live defect in the worst place: a
- * legitimate clearance would fail to match its own PR after an unrelated rebase, and the record would be
- * unreachable rather than merely mis-scored. Today the defect costs a false re-park that a re-clear repairs;
- * keying the authority on it would cost the record itself.
+ * Both were slices of epic `#3054`, and **both are now FIXED** — `#3054` dropped every base-derived position
+ * signal from the digest, so neither a non-uniform base move nor a base declaration-insertion diverges it any
+ * more. THE KEY DOES NOT CHANGE, and the reason it does not is worth stating rather than leaving as inertia:
+ *   • A ledger whose records were *found* by that digest would have inherited the divergence in the worst
+ *     place — a legitimate clearance failing to match its own PR after an unrelated rebase leaves the record
+ *     UNREACHABLE rather than merely mis-scored. That hazard is gone.
+ *   • What is NOT gone, and is the reason this key stays where it is, is the OPPOSITE direction: [#3021],
+ *     still open and deliberately WIDENED by `#3054`'s repair. Two different contributions collide whenever
+ *     one is a relocation of the other — same files, same hunk lengths, same context-run shape, same `+`/`-`
+ *     lines. A lookup key that two DIFFERENT verdicts can share is worse than one a rebase can break: the
+ *     first silently returns the wrong record, the second merely fails to find one.
+ * So the digest is a coverage WITNESS and never an identity, exactly as below.
  *
  * SO THE IDENTITY IS `repo` + `pr` + APPEND ORDER, and nothing else. Those three are defect-free by
  * construction. The three content witnesses (`coverage.headSha`, `coverage.reviewedDiff`,
  * `coverage.reviewedContribution`) are recorded VERBATIM as **attributes** of the record, never as the thing
  * a lookup joins on. Two properties fall out and both are the reason:
  *
- *   1. When `#3054` fixes the digest, the stored witnesses are RE-INTERPRETABLE with no schema change and no
- *      migration — the ledger stored the diff text's digests, not a conclusion drawn from them.
+ *   1. When `#3054` fixed the digest, the stored witnesses stayed RE-INTERPRETABLE with no schema change and
+ *      no migration — the ledger stored the diff text's digests, not a conclusion drawn from them. Note what
+ *      "re-interpretable" does and does not mean, now that the repair has actually happened: a witness is a
+ *      HASH, so one written under the old projection cannot be recomputed under the new one and will never
+ *      match again. It re-interprets by falling through — {@link ledgerCoversHead} says "not covered", the PR
+ *      re-parks, and the next clearance re-stamps it. Fail-closed and self-healing; no record is lost, no
+ *      migration is owed, and no stale witness is ever read as a match.
  *   2. "Which verdict is current?" (append order) and "does that verdict still cover this head?" (the
  *      witnesses) stay SEPARATE questions. The second one already has exactly one owner,
  *      `acceptanceCoversHead`; {@link ledgerCoversHead} delegates to it rather than growing a second,
