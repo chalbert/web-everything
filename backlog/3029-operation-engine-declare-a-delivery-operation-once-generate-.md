@@ -76,6 +76,43 @@ Ordered to **falsify early**, since every operation converts eventually and the 
 **Run the spike first in practice**, whatever its slice number: two points, and it is the only item that can
 invalidate the vocabulary the other seven are built on.
 
+9. #xnc8wyd — the **judge panel**: fan #3028's single spawn out to N distinct jurors, awaited, under one
+   aggregate budget and a fail-closed depth cap. Not ordered with the eight above and **blocked on nothing** —
+   it is the fan-out layer a `judge` step calls, not an operation declared onto the engine.
+
 The risk being managed: engines over-abstract, and the failure is silent — each operation fits badly in a slightly
 different way and four kinds quietly becomes seven. If slice 6 or slice 8 fights the model, that is the signal to
 change the model, not to add a kind.
+
+## Rationale — the operator's framing, 2026-08-09
+
+Recorded as an in-session note. The operator's own words:
+
+> *"The idea is to mechanise in similar way absolutely all operations, as it's the only way the UI will be able
+> to use it, in addition to other advantages of mechanisation. So let's finish the review, but the jury is
+> certainly another candidate, as well as all other current and future operations we will need."*
+
+This **strengthens** the statute
+[#operations-declared-once-callers-generated](../docs/agent/platform-decisions.md#operations-declared-once-callers-generated)
+without amending it. Clause 1 already lists the HTTP caller — the console — among the callers that fall out of a
+declaration, and frames a hand-written route as *"a defect, not a style choice"*. The operator's framing raises
+that from an efficiency argument to a **precondition**: a generated caller is not a convenience, it is the only
+way a UI surface can invoke an operation at all. **An operation that is not declared simply cannot appear in the
+console.** Nothing here edits the statute text — a statute edit is a separate act with its own review, and
+#1122's rule about not encoding transient state applies.
+
+Three consequences for this epic, none of them a re-ruling:
+
+- **The named sequence is: the review operation first (#3035), then the jury, then the remaining operations.**
+  Not a re-ordering of the falsify-early list above — #3035 is already slice 4 and the spike still runs first in
+  practice. It is the operator's statement of what comes after `review-pr` proves the engine end to end.
+- **The jury is the named next candidate.** Its fan-out primitive is #xnc8wyd, filed under this epic.
+- **"All other current and future operations we will need"** is the standing scope. Every operation converts
+  eventually, which is exactly why the slice ordering above is free.
+
+**Cross-reference — #3049, the conveyor as a shippable product.** "The only way the UI can use it" is the
+mechanical link between this epic and that thesis. #3049 argues the conveyor is a sellable product because it is
+a UI surface managing standards-conformant automated development, with provable conformity as the differentiator.
+This epic is what makes that surface *possible*: every operation the console needs to expose has to be declared
+here first, so the operation registry is the conveyor product's supply of features, and an undeclared operation
+is a feature the product cannot ship.
