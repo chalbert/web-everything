@@ -89,5 +89,39 @@ The contribution escape is checked **last**, after the SHA test and the strict `
 so it can only ever honour an accept those already rejected — and only for a head advance in which every
 added/removed line, every hunk length, every section heading and every inter-hunk gap is unchanged.
 
+## What "bounded" does and does not buy — added 2026-08-10 from the independent review of PR #1158
+
+The *Bound on the exposure* section above, and #1158's restatement of it, are both correct and both easy to
+over-read. Stated sharply, so nobody reads the widening as smaller than it is:
+
+> **`bounded` is an ordering guarantee, not a size guarantee.**
+
+Checking this tier **last** bounds **which** transitions can reach it — only those the SHA test and the strict
+`normalizeDiffFingerprint` test already refused. It says nothing about how large the false-honour class is once
+a transition gets here, and #3054's repair made that class **strictly larger**. Ordering was unchanged by the
+repair; width was the whole cost. Two different properties, one word.
+
+**The case that makes the cost legible.** After #3054's repair, **any pure offset-only relocation is silently
+honoured** — same files, same hunk order, same hunk lengths, same run shape, same content, only the old-side
+start differs. That includes **a same-text move across a semantic boundary**: a guard moved past the thing it
+guards. The suite pins three such shapes ("THE KNOWN RESIDUAL, pinned at its WIDENED width"), and **two of the
+three were refused before** the repair — a move across a top-level declaration, and one hunk moving relative to
+its sibling. This is the concrete thing an operator's clearance now carries forward.
+
+**A frame-limit on the impossibility proof, worth knowing before anyone re-litigates it.** THE
+INDISTINGUISHABILITY is sound, but it is proved *for a digest built from git's default 3-line-context unified
+diff*. Under that frame the two events genuinely produce byte-identical projections. Widen the frame and they
+need not:
+
+- **A wider diff context.** More surrounding lines is more base text, so it costs invariance in the direction
+  #1100 exercised — but the trade is a dial, not a wall, and it was never costed.
+- **An AST-based scope anchor.** Record the enclosing *syntactic* scope rather than git's nearest column-0
+  line. A guard moved past the call it guards changes its scope; a base insertion above it does not.
+
+Neither is a counter-signal to the proof — both are **different mechanisms**, outside the frame the proof
+assumes, and that is exactly why they are where a real closure could come from. Add them to *Directions worth
+costing* alongside "attribute the move to its actor", "bound the escape by a recorded merge base", and
+"recompute the reviewed side against the new base".
+
 Related: [#3023](/backlog/3023-a-drain-re-score-revokes-a-human-clearance-a-content-preserv/) (parent),
 [#2409](/backlog/2409/).
