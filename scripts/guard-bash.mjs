@@ -1343,14 +1343,34 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
     return "Don't append/in-place-edit backlog|reports/*.md from the shell (>>, tee -a, sed -i, perl -pi) — it bypasses the locus-prefix write hook so bare code-paths leak to the gate. Use the Edit/Write tools.";
 
   // A raw PR-BODY rewrite DISARMS the self-clear guard. `pr-land` stamps `authored-by-actor` into the body at
-  // open; `review-independence.mjs` reads it to refuse an author clearing its own PR. `gh pr edit --body*`
-  // replaces the whole body, so the stamp is silently dropped and the guard then reads `unknown-author` — a
-  // state the invoked CLI deliberately permits (it would otherwise strand every PR opened before the stamp
-  // existed, `review-independence.mjs` header). Permitting it is right for an OLD PR and wrong for a stripped
-  // one, and nothing can tell the two apart after the fact. So keep the stamp instead of weakening the guard.
-  // No repo script edits a body — every `gh pr edit` in scripts/ is `--add-label`/`--remove-label`.
-  if (atCommand(/^gh\s+pr\s+edit\b/) && /\s--body(?:-file)?[\s=]/.test(s) && !/\bPR_BODY_STAMP_OK=1\b/.test(s))
-    return 'a raw `gh pr edit --body` drops the `authored-by-actor` stamp pr-land wrote at open, which disarms the self-clear refusal in review-independence.mjs (this is how #1162 landed on its own author\'s clearance). Use `node scripts/pr-body-edit.mjs --pr=<n> --body-file=<f>`, which carries the stamp across. Sanctioned override: prefix `PR_BODY_STAMP_OK=1`.';
+  // open; `review-independence.mjs` reads it to refuse an author clearing its own PR. Replacing the body drops
+  // the stamp, and the guard then reads `unknown-author` — a state the invoked CLI deliberately permits (it
+  // would otherwise strand every PR opened before the stamp existed). That tolerance is right for an OLD PR
+  // and wrong for a STRIPPED one, and after the fact nothing tells them apart. So keep the stamp rather than
+  // weaken the rule that depends on it.
+  //
+  // MATCHED ON TOKENS, NOT THE RAW STRING. The first cut regexed `\s--body(-file)?[\s=]` and was bypassable
+  // three ways, all found by review: `gh` documents `-b`/`-F` as exact equivalents of `--body`/`--body-file`
+  // and neither matched; a quoted `"--body-file"` has a quote before the dashes, not whitespace; and `gh api
+  // -X PATCH …/pulls/<n> -f body=…` is not `gh pr edit` at all. `shellTokens` unquotes, so the first two
+  // collapse into one token test. `-B` is `--base` and must NOT match — the check is case-sensitive.
+  if (!/\bPR_BODY_STAMP_OK=1\b/.test(s)) {
+    const BODY_FLAG = /^(?:--body(?:-file)?(?:=|$)|-[bF]$)/;
+    // `shellTokens` yields `{text, quoted, op}` records, not strings — test `.text`, or every token
+    // stringifies to `[object Object]` and the rule denies nothing at all.
+    const bodyish = (seg) => shellTokens(seg).some((t) => BODY_FLAG.test(t.text));
+    if (atCommand(/^gh\s+pr\s+edit\b/) && bodyish(s))
+      return 'a raw `gh pr edit --body`/`-b`/`-F` drops the `authored-by-actor` stamp pr-land wrote at open, which disarms the self-clear refusal in review-independence.mjs (this is how #1162 landed on its own author\'s clearance). Use `node scripts/pr-body-edit.mjs --pr=<n> --body-file=<f>`, which carries the stamp across. Sanctioned override: prefix `PR_BODY_STAMP_OK=1`.';
+    // The REST route to the same field. `gh api` writes it with `-f body=…`/`--field`/`--raw-field`, and the
+    // graphql form names the mutation instead of a path.
+    if (atCommand(/^gh\s+api\b/)
+      && (/\bpulls\/\d+/.test(s) || /\bupdatePullRequest\b/.test(s))
+      // `[^\w-]` and not `[\s'"]`: in the graphql form the field is nested — `input:{body:"x"}` — so the
+      // character before `body` is `{`, and a whitespace-or-quote boundary missed it entirely. Excluding `-`
+      // keeps `--body` out of this arm; that spelling belongs to the `gh pr edit` arm above.
+      && /(?:^|[^\w-])body\s*[=:]/.test(s))
+      return 'a `gh api` write to a PR body drops the `authored-by-actor` stamp, disarming the self-clear refusal (same hole as `gh pr edit --body`, one API layer down). Use `node scripts/pr-body-edit.mjs --pr=<n> --body-file=<f>`. Sanctioned override: prefix `PR_BODY_STAMP_OK=1`.';
+  }
 
   // Direct push to a constellation `main` — blocked (strict lane-only, #2203). Everything reaches main via a
   // `lane/*` ref → PR → CI gate; a direct `git push … main` (or a bare `git push` from a checkout on main)

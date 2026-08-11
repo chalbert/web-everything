@@ -58,6 +58,18 @@ Body rewriting was only ever an ad-hoc operator action.
 (agreement-or-nothing), so dropping one would turn an unresolvable body into a confident single-author one —
 a refusal silently becoming a permit, the same defect class this closes. Pinned by test.
 
+## The deny is PARTIAL, and the boundary is worth stating
+
+It covers the shell routes only, and the first cut covered fewer than it claimed. Review found three bypasses:
+`gh` documents `-b`/`-F` as exact equivalents of `--body`/`--body-file` and neither matched; a quoted
+`"--body-file"` has a quote before the dashes rather than whitespace; and `gh api -X PATCH …/pulls/<n> -f
+body=…` is not `gh pr edit` at all. Matching on `shellTokens` rather than the raw string collapses the first
+two, and a second arm covers `gh api`.
+
+**What no shell guard can reach:** the GitHub web UI. A body edited in a browser strips the stamp with nothing
+to intercept it. That route stays open, and the mitigation is the same one that caught this — the stamp's
+absence is visible to any reviewer who looks.
+
 ## What this does not fix
 
 The cause of #1162's bad clearance was not only the stripped stamp — it was that the reviewer was spawned with

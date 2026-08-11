@@ -44,23 +44,50 @@ describe('withCarriedStamps', () => {
 });
 
 describe('guard-bash denies a raw PR-body rewrite', () => {
+  // Every spelling that replaces the body. The short flags and the quoted form were BYPASSES in the first
+  // cut — `gh` documents `-b`/`-F` as exact equivalents, and a quoted `"--body-file"` has a quote before the
+  // dashes rather than whitespace, so a raw-string regex missed both.
   for (const cmd of [
     'gh pr edit 1162 --body-file /tmp/body.md',
     'gh pr edit 1162 --repo chalbert/web-everything --body-file /tmp/b.md',
     'gh pr edit 1162 --body "text"',
     'gh pr edit 1162 --body="text"',
+    'gh pr edit 1162 -F /tmp/body.md',
+    'gh pr edit 1162 -b "text"',
+    'gh pr edit 1162 "--body-file" /tmp/b.md',
+    "gh pr edit 1162 '--body' 'text'",
+    'gh api -X PATCH repos/o/r/pulls/1162 -f body=text',
+    'gh api graphql -f query=mutation{updatePullRequest(input:{body:"x"})}',
   ]) {
     it(`denies: ${cmd}`, () => {
       expect(reason(cmd)).toMatch(/authored-by-actor|pr-body-edit/);
     });
   }
 
+  // `-B` is `--base`, a different flag entirely. Case matters, and denying it would block a legitimate retarget.
+  it('does not deny the base flag, which only differs by case', () => {
+    expect(reason('gh pr edit 1162 -B main')).toBeFalsy();
+    expect(reason('gh pr edit 1162 --base main')).toBeFalsy();
+  });
+
   it('allows a label edit — every `gh pr edit` in scripts/ is labels only', () => {
     expect(reason('gh pr edit 1162 --add-label ready-to-merge')).toBeFalsy();
     expect(reason('gh pr edit 1162 --remove-label review:pending')).toBeFalsy();
   });
 
+  // `pr-land` opens PRs with `gh pr create --body`, which is where the stamp is WRITTEN. Denying create would
+  // block the only path that stamps anything.
+  it('does not touch `gh pr create --body`, which is what writes the stamp', () => {
+    expect(reason('gh pr create --title x --body-file /tmp/b.md')).toBeFalsy();
+  });
+
+  it('does not deny a read of a PR body', () => {
+    expect(reason('gh pr view 1162 --json body')).toBeFalsy();
+    expect(reason('gh api repos/o/r/pulls/1162')).toBeFalsy();
+  });
+
   it('honours the sanctioned override, which is how pr-body-edit itself writes', () => {
     expect(reason('PR_BODY_STAMP_OK=1 gh pr edit 1162 --body-file /tmp/b.md')).toBeFalsy();
+    expect(reason('PR_BODY_STAMP_OK=1 gh pr edit 1162 -F /tmp/b.md')).toBeFalsy();
   });
 });
