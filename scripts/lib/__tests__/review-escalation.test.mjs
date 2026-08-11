@@ -42,7 +42,7 @@ import {
 import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
 // The SECOND consumer of `isBlastRadiusPath` (#1162 review N2). Imported so the superset relation between the
 // drain's rubric and test selection is asserted here rather than restated as a hand-counted number.
-import { isSensitivePath } from '../../readiness/test-selection.mjs';
+import { isSensitivePath, EXTRA_DENY } from '../../readiness/test-selection.mjs';
 
 describe('isBlastRadiusPath', () => {
   // The agent-behaviour trees (skills + agent memory) are NOT re-asserted here: every spelling of both has one
@@ -160,20 +160,35 @@ describe('isBlastRadiusPath', () => {
       }
     });
 
-    // THE SUPERSET RELATION, pinned so the two counts in the docblock cannot legally diverge again. An earlier
-    // revision said 31 paths newly escalate and, sixteen lines later, that 27 flip in test selection — the
-    // second measured before `wrapper-conformance/` was added and never redone. `isSensitivePath` folds
-    // `isBlastRadiusPath` into its deny set, so the counts are necessarily equal and a stale one is now RED.
-    it('every conformance-grading path is also SENSITIVE to test selection — the counts cannot diverge', () => {
+    // THE SUPERSET LAW: `isSensitivePath` folds `isBlastRadiusPath` into its deny set, so anything this set
+    // escalates is also sensitive to test selection. ONE SAMPLE PER PATTERN — all five, because the docblock
+    // claims the relation holds for the whole set and a four-of-five sample quietly excludes one.
+    it('every conformance-grading path is also SENSITIVE to test selection', () => {
       for (const p of [
-        'conformance-vectors/intl.vectors.ts',
-        'wrapper-conformance/runner.ts',
-        'packages/core/src/conformance-engine/conformanceVectors.ts',
-        'intl/intlConformance.ts',
+        'conformance-vectors/intl.vectors.ts',                          // pattern 1
+        'wrapper-conformance/runner.ts',                                // pattern 2
+        'packages/core/src/conformance-engine/conformanceVectors.ts',   // pattern 3
+        'plugs/webportals/conformance/ssrVectors.ts',                   // pattern 4
+        'intl/intlConformance.ts',                                      // pattern 5
       ]) {
         expect(matchedByNewSet(p), p).toBe(true);
-        expect(isSensitivePath(p), `${p} escalates but is not sensitive — the superset relation broke`).toBe(true);
+        expect(isSensitivePath(p), `${p} escalates but is not sensitive — the superset law broke`).toBe(true);
       }
+    });
+
+    // THE DIVERGENCE CONDITION, pinned because the obvious reading of the law above is WRONG and shipped once.
+    // The law gives `escalating ⇒ sensitive`. It does NOT give `newly escalating ⇒ NEWLY sensitive` — flipping
+    // also needs the path to have been un-sensitive before, and `isSensitivePath` has a second source in
+    // `EXTRA_DENY`. So the guarantee is `flip-count ≤ newly-escalating-count`, and today's equality is a
+    // measured fact (zero of the 65 overlap `EXTRA_DENY`), not a theorem.
+    //
+    // This is the file class that breaks it. Note the last assertion: the superset test above stays GREEN on
+    // it, which is precisely why the contingency needs its own test rather than a sentence in a comment.
+    it('a config-shaped file inside a grading directory would make the two counts diverge', () => {
+      const p = 'conformance-vectors/vitest.config.ts';
+      expect(matchedByNewSet(p), 'newly escalates via the directory anchor').toBe(true);
+      expect(EXTRA_DENY.some((re) => re.test(p)), 'but was ALREADY sensitive via the *.config.ts rule').toBe(true);
+      expect(isSensitivePath(p), 'so the superset assertion above cannot detect the divergence').toBe(true);
     });
 
     // The rename footgun the PR #1162 review found. Without `.` in the basename character class, renaming a

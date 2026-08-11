@@ -88,11 +88,18 @@ previously shrinkable. No live impact — that selection sits behind a CI job th
 `continue-on-error` and gates nothing — and the direction is safe. Recorded because "clearance is unchanged" is
 true of the drain and not of every caller.
 
-**"The same 31" is a property, not a second count** — and it is written that way because a second count is what
-went wrong. The first revision of this item said 27 here, measured before the `wrapper-conformance/` anchor was
-added and never redone, while the paragraph above already said 31. The two cannot legally differ:
-`isSensitivePath` is a strict superset of `isBlastRadiusPath`. The second review caught the contradiction
-without leaving the file. The relation is now pinned by test, so a divergent count is red rather than stale.
+**"The same 31" replaces a second count, because a second count is what went wrong.** The first revision said
+27 here, measured before the `wrapper-conformance/` anchor was added and never redone, while the paragraph
+above already said 31.
+
+**And the obvious justification for "the same" is itself wrong** — a second review caught that too. The law is
+`isSensitivePath ⊇ isBlastRadiusPath`, giving *escalating ⇒ sensitive*. It does **not** give *newly escalating
+⇒ newly sensitive*: flipping also requires the path to have been un-sensitive before, and `isSensitivePath` has
+a second source in `EXTRA_DENY` (lockfiles, build/test config, the `.claude/` surface, `check-*` scripts). The
+guarantee is an inequality — `flip-count ≤ newly-escalating-count` — and today's equality is a **measured
+fact** (zero of the 65 overlap `EXTRA_DENY`), not a theorem. A single vitest config file added inside a grading
+directory breaks it: 32 escalating, 31 flipping. Both the law and that divergence condition are now pinned by
+test, the second because the first assertion stays green on exactly the file that would diverge.
 
 ## Known gaps inside this set's own scope
 
@@ -119,7 +126,9 @@ stays in WE, where changing it is itself gated.
 - [x] A consumer INSIDE one does score, asserted explicitly, so the comment and the tests cannot disagree.
 - [x] The basename pattern has a control that turns red if it is deleted.
 - [x] A dotted judge name scores; a dotted consumer name does not.
-- [x] The superset relation with `isSensitivePath` is pinned by test, so the two counts cannot diverge again.
+- [x] The superset law with `isSensitivePath` is pinned by test, one sample per pattern.
+- [x] The condition under which the two counts CAN still diverge is pinned by its own test, because the
+      superset assertion stays green on exactly the file that would diverge.
 - [x] `plateau-app#137`'s exact two files and its real 99-line size escalate, with a negative control proving
       the non-conformance file still scores nothing on its own.
 - [x] Every fixture is a real tracked path from `git ls-files`, not an invented shape.

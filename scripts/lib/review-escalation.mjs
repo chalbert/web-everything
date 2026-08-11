@@ -197,12 +197,28 @@ export function isStatutePath(path) {
  * `continue-on-error`, and gates nothing — and the direction is the safe one. It is recorded because "clearance
  * is unchanged" is true of the drain rubric and NOT of every consumer of this predicate.
  *
- * "THE SAME 31" IS A PROPERTY, NOT A SECOND MEASUREMENT — and it is written that way because a second
- * measurement is exactly what went wrong. This paragraph previously said 27, measured before the
- * `wrapper-conformance/` anchor was added and never redone, while the paragraph above already said 31. The two
- * cannot legally differ: `isSensitivePath` is a strict superset of `isBlastRadiusPath`, so every path this set
- * newly escalates necessarily flips there too. `review-escalation.test.mjs` pins that superset relation
- * directly, so a future divergent count is a RED TEST rather than a number nobody re-checks.
+ * WHY "THE SAME 31" AND NOT A SECOND MEASUREMENT. This paragraph previously said 27, measured before the
+ * `wrapper-conformance/` anchor was added and never redone, while the paragraph above already said 31 — the
+ * third hand-written figure in this change to rot.
+ *
+ * BE PRECISE ABOUT WHAT IS GUARANTEED, because the obvious statement is WRONG and a reviewer caught it. The law
+ * is `isSensitivePath ⊇ isBlastRadiusPath`, which gives *escalating ⇒ sensitive*. It does NOT give
+ * *newly escalating ⇒ newly sensitive*: flipping also requires the path to have been NOT sensitive before, and
+ * `isSensitivePath` has a second source — `EXTRA_DENY` (lockfiles, `*.config.ts`, `.claude/`, `check-*`). So
+ * the guaranteed relation is an INEQUALITY:
+ *
+ *     flip-count  ≤  newly-escalating-count
+ *
+ * Equality holds today as a MEASURED FACT, not a theorem: zero of the 65 newly-escalating paths also match
+ * `EXTRA_DENY`. One file added inside a registered directory breaks it — `conformance-vectors/vitest.config.ts`
+ * would newly escalate while already being sensitive via the `*.config.ts` rule, giving 32 escalating and 31
+ * flipping. That file does not exist; nothing stops it being created.
+ *
+ * WHAT THE TESTS PIN, and what they deliberately do not. `review-escalation.test.mjs` pins the superset law
+ * (one sample per pattern) and pins the divergence CONDITION explicitly, so the contingency is visible in a
+ * test rather than only in this comment. It does NOT pin the equality itself: that would mean enumerating
+ * three working copies from a unit test, coupling it to checkouts it has no business reading. If the two
+ * numbers above ever disagree, the cause is a config-shaped file inside a grading directory — look there first.
  */
 export const CONFORMANCE_GRADING_PATHS = [
   /(^|\/)conformance-vectors(\/|$)/,          // WE: the vectors a standard is judged by (+ their own tests)
