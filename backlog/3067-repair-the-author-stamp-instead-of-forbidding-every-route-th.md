@@ -1,4 +1,5 @@
 ---
+bornAs: xqz1mat
 kind: story
 size: 3
 status: open
@@ -11,10 +12,10 @@ scope:
 
 # Repair the author stamp instead of forbidding every route that strips it
 
-`#x28zf4i` blocks the shell commands that wipe a PR's `authored-by-actor` stamp, and took **six review rounds
+`#3066` blocks the shell commands that wipe a PR's `authored-by-actor` stamp, and took **six review rounds
 and six spellings** to get most of them. That is the wrong shape of fix: a deny-list over a CLI's argument
 grammar can only ever enumerate. Notice a stamp is missing and put it back, and every route is covered at once
-— including the ones no shell guard can reach. The reviewer's acceptance of `#x28zf4i` was explicitly
+— including the ones no shell guard can reach. The reviewer's acceptance of `#3066` was explicitly
 conditioned on this item existing.
 
 ## Why the deny-list cannot finish
@@ -45,7 +46,7 @@ So the next reader does not have to rediscover them:
 
 The accident that actually happened, and every habitual spelling of it, IS covered. That is what the deny-list
 is worth: it raises an accidental strip from free to "deliberately route around a named guard". It is not
-coverage, and `#x28zf4i` should not be read as claiming otherwise.
+coverage, and `#3066` should not be read as claiming otherwise.
 
 ## What repair looks like
 
