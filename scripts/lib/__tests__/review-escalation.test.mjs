@@ -110,11 +110,10 @@ describe('isBlastRadiusPath', () => {
       }
     });
 
-    // The other half of the rule, and the one that keeps the gate readable. A CONSUMER of the judge goes RED
-    // when it breaks, so it carries none of the silent-green property that earns a review. If these ever start
-    // scoring, the set has widened into "anything with 'conformance' in the name" and a large share of
-    // frontierui's PRs park for nothing.
-    it('does NOT flag the consumers, the UI, or fixture data', () => {
+    // A consumer OUTSIDE a registered directory does not score. The qualifier is not decoration — an earlier
+    // version of this test omitted it and was VACUOUS: every fixture failed every pattern structurally, so
+    // deleting the basename pattern entirely left the test green. It proved nothing about the exclusion.
+    it('does NOT flag a consumer, the UI, or fixture data that sits outside a registered directory', () => {
       for (const p of [
         'intl/__tests__/intlConformance.test.ts',                        // a consumer — it goes red on its own
         'blocks/__tests__/unit/a11y-composition-conformance.test.ts',    // a consumer
@@ -124,6 +123,56 @@ describe('isBlastRadiusPath', () => {
         'plugs/webdirectives/ssr/net/WebDirectivesSsr.Conformance.csproj', // a project file, not a harness
       ]) {
         expect(matchedByNewSet(p), p).toBe(false);
+      }
+    });
+
+    // The honest other half, and the reason the test above carries its qualifier. A DIRECTORY anchor sweeps
+    // everything inside it. These four consumers and this golden fixture DO escalate, and the comment on
+    // `CONFORMANCE_GRADING_PATHS` must keep saying so — the earlier draft claimed consumers were excluded "by
+    // construction", which is true of the basename pattern and false of the directory anchors.
+    it('DOES flag a consumer that lives inside a registered grading directory', () => {
+      for (const p of [
+        'packages/core/src/conformance-engine/intl.conformance.test.ts',
+        'packages/core/src/conformance-engine/webpolicy.conformance.test.ts',
+        'packages/core/src/conformance-engine/conformanceVectors.test.ts',
+        'packages/core/src/conformance-engine/renderer-audit/goldens/pagination-goldens.json',
+        'conformance-vectors/__tests__/webdocs.vectors.test.ts',
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(true);
+      }
+    });
+
+    // THE CONTROL for the basename pattern. Each of these matches through that pattern and NO other, so
+    // deleting it turns this test red — which is exactly what the previous negative test failed to do.
+    it('the basename pattern is load-bearing — nothing else matches these', () => {
+      const dirPatterns = CONFORMANCE_GRADING_PATHS.slice(0, 4);
+      for (const p of [
+        'intl/intlConformance.ts',
+        'blocks/deck/deckConformance.ts',
+        'plugs/webtheme/conformanceHarness.ts',
+        'plugs/webdirectives/ssr/net/src/ConformanceHarness.cs',
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(true);
+        expect(dirPatterns.some((re) => re.test(p)), `${p} must NOT match a directory anchor`).toBe(false);
+      }
+    });
+
+    // The rename footgun the PR #1162 review found. Without `.` in the basename character class, renaming a
+    // judge `intlConformance.ts` → `intl.conformance.ts` silently drops it from the gate — and the comment's
+    // own "a consumer is dotted" framing invites exactly that rename. Both spellings must score, and the
+    // `.test.ts` consumer must still not.
+    it('a dotted judge name still scores, while a dotted CONSUMER name still does not', () => {
+      expect(matchedByNewSet('intl/intl.conformance.ts')).toBe(true);
+      expect(matchedByNewSet('intl/intlConformance.ts')).toBe(true);
+      expect(matchedByNewSet('intl/intl.conformance.test.ts')).toBe(false);
+      expect(matchedByNewSet('intl/intlConformance.test.ts')).toBe(false);
+    });
+
+    // WE's second vector home, missed by the first draft. Its runner header says WE owns the runner AND the
+    // vectors, which is the same silent-green surface as `conformance-vectors/`.
+    it('flags WE\'s other vector home', () => {
+      for (const p of ['wrapper-conformance/runner.ts', 'wrapper-conformance/vectors.ts', 'wrapper-conformance/index.ts']) {
+        expect(matchedByNewSet(p), p).toBe(true);
       }
     });
 

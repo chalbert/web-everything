@@ -114,11 +114,22 @@ export function isStatutePath(path) {
  * WHY THIS SET EXISTS, and it is a measured hole rather than a precaution. plateau-app#137 added the missing
  * intl grader and the drain merged it UNREVIEWED, in one pass, with no review label ever applied. That was not a
  * daemon bug: the daemon scored it exactly as written and nothing fired. 2 files, 99 added lines — under the
- * 400-line size trip — and NOT on any risk list, because every path pattern above this comment is spelled for
- * WEB-EVERYTHING's file layout (`^scripts/`, `docs/agent/…`, `src/_data/*.json`). The drain sweeps all three
- * constellation repos (#2257/#2287) under ONE policy, but in frontierui and plateau-app that policy's risk
- * roster matches NOTHING, so those two repos could only ever escalate on size or a cross-repo couple. The
- * rules already travelled; the list of what counts as risky did not.
+ * 400-line size trip — and on no risk list.
+ *
+ * THE HOLE IS NARROWER THAN "the roster does not travel", and the narrower statement is the one that locates it.
+ * An earlier draft of this comment said the roster matches NOTHING outside WE and called the gate decorative in
+ * the other two repos. Both are measurably false, and PR #1162's own review caught them:
+ *   - `^scripts\/` matches 5 tracked frontierui files (including `frontierui/scripts/check-standards.mjs`) and 7
+ *     in plateau-app. It is not WE-only in practice, whatever its anchor suggests.
+ *   - `^src\/_data\/(blocks|plugs|…)\.json` matches 2 frontierui files, despite the comment beside it below
+ *     calling that pattern "WE-permanent, never relocates". It fires in production: frontierui PRs #37/#38/#39
+ *     each escalated on `blast-radius (src/_data/blocks.json)`, and #30 on `.github/workflows/ci.yml`. Those are
+ *     FRONTIERUI-LOCAL escalations, so they also refute the follow-up guess that the impl repos only ever
+ *     escalate by inheriting a cross-repo couple's verdict.
+ * What no pattern reaches is the impl repos' APPLICATION SOURCE TREES — `packages/core/src/**` in plateau-app,
+ * `plugs/**` and the per-standard dirs in frontierui. That is the uncovered surface, and it is exactly where
+ * #137 landed. The rules travelled; what did not travel is any pattern aimed at the code those repos exist to
+ * hold.
  *
  * WHY THESE FILES AND NOT MERELY "IMPORTANT" ONES. A conformance judge that grades nothing is INVISIBLE —
  * it is green, and green is what everyone reads. plateau-app#137 proved that concretely: three of the five intl
@@ -127,39 +138,71 @@ export function isStatutePath(path) {
  * TEST goes red and stops the line; a broken JUDGE goes green and certifies whatever it is handed. That is the
  * property that earns a review, and it is why the consumers are deliberately EXCLUDED below.
  *
- * WHAT IS IN, across all three repos' real spellings — the judge, the vectors, and the bindings:
- *  - `conformance-vectors/`  — WE's vector home (the assertions a standard is judged BY)
- *  - `conformance-engine/`   — plateau-app's neutral runner + judge (`conformanceVectors.ts`, `embedSuites.ts`)
- *  - `…/conformance/*.ts`    — frontierui's per-plug vector home (`plugs/webportals/conformance/ssrVectors.ts`)
- *  - `*Conformance.ts` / `*conformanceHarness.ts` (+ `.java`/`.cs` reference harnesses) — the BINDINGS that
- *    expose an implementation to the judge. Matched by basename SUFFIX rather than enumerated, for the same
- *    reason `BLAST_RADIUS_ENGINE` matches by basename: the surface must travel when the file relocates.
+ * WHAT IS IN. TWO DIFFERENT MECHANISMS, and conflating them is what made the first draft of this comment lie:
  *
- * WHAT IS DELIBERATELY OUT, and why the suffix form is shaped the way it is. Every `*.conformance.test.ts` is a
- * CONSUMER — it invokes the judge and goes red when it fails, so it carries none of the silent-green property
- * above. `ConformancePanel.ts` is UI. A demo's `conformance.json` is fixture data. Sweeping all three would park
- * a large share of frontierui's PRs for nothing, and a gate that escalates everything is one nobody reads. The
- * `\.(ts|java|cs)$` anchor excludes them by construction (a consumer ends `.test.ts`; the panel ends
- * `Panel.ts`; the csproj ends `.csproj`) rather than by an exclusion list that could drift.
+ *  A. THREE DIRECTORY anchors. Everything inside them scores, whatever its extension — source, tests, JSON
+ *     goldens, a README:
+ *       - `conformance-vectors/` — WE's vector home (the assertions a standard is judged BY)
+ *       - `wrapper-conformance/` — WE's OTHER vector home + its runner (#891/#967)
+ *       - `conformance-engine/`  — plateau-app's neutral runner and judge
+ *     plus `…/conformance/*.ts`, frontierui's per-plug vector home, which IS extension-scoped.
  *
- * MEASURED, so the cost is on the record rather than asserted: across the three repos this set newly escalates
- * 60 tracked files — 27 in WE, 12 in frontierui, 21 in plateau-app — and leaves the blast-radius share at 13.0%
- * / 1.4% / 4.5% of tracked files respectively. ONE of the 60 is a known, accepted over-escalation:
- * `demos/reveal-nav-conformance.ts` is a demo that happens to end in the binding suffix. It escalates, which is
- * the declared safe direction, and it is left un-special-cased on purpose — a demo carve-out would be a second
- * rule to keep true, for one file, against a cost of one agent review.
+ *  B. ONE BASENAME suffix, `<name>Conformance` / `conformanceHarness` in `.ts`/`.java`/`.cs` — the BINDINGS that
+ *     expose an implementation to the judge. By basename rather than enumerated, for the same reason
+ *     `BLAST_RADIUS_ENGINE` matches by basename: the surface must travel when the file relocates.
+ *
+ * WHAT IS OUT — and this is a WEAKER claim than the one it replaces. An earlier draft said consumers, UI and
+ * fixture data are excluded "BY CONSTRUCTION". That is true of mechanism B only. Mechanism A sweeps a whole
+ * directory, so the four `*.conformance.test.ts` files inside plateau-app's `conformance-engine/` DO escalate,
+ * as do the `renderer-audit/goldens/*.json`. Of the files this set adds, roughly a quarter are consumers or
+ * fixture data caught by a directory anchor. The accurate rule is: **a consumer OUTSIDE a registered directory
+ * does not score** — `intl/__tests__/intlConformance.test.ts`, `packages/webdocs-ui/src/ConformancePanel.ts`,
+ * a demo's `conformance.json`, `WebDirectivesSsr.Conformance.csproj`. Inside one, everything scores, because a
+ * directory whose entire job is grading is worth reviewing as a unit.
+ *
+ * THE DOT IN THE BASENAME PATTERN IS LOAD-BEARING. `[A-Za-z0-9.-]*` includes `.` deliberately. Without it,
+ * renaming a judge `intlConformance.ts` → `intl.conformance.ts` silently drops it from the gate, and a
+ * maintainer reading the paragraph above would make exactly that rename believing dotted means consumer. The
+ * `.test.ts` exclusion still holds — a consumer's name ends `.test.ts`, which cannot match `…Conformance.ts$`.
+ *
+ * KNOWN GAPS inside the set's own scope, named rather than left for the next reader to rediscover:
+ *  - `frontierui/plugs/webdirectives/ssr/python/harness.py` — the THIRD of three cross-language SSR reference
+ *    harnesses. Its siblings are `ConformanceHarness.java`/`.cs` and travel by basename; this one is named
+ *    `harness.py`, carries no conformance token, and `harness` is far too generic to register. It is uncovered.
+ *  - `plateau-app/tools/explorer/oracles/` — `intentConformance.ts` scores by name; its five sibling judges
+ *    (`advisoryJudge`, `genericInvariants`, `layoutOverflow`, `layoutShift`, `tier2VlmJudgeModel`) do not, and
+ *    they carry the same silent-green property. Registering `oracles/` is a real widening and belongs to its
+ *    own decision, not to this one.
+ *
+ * MEASURED, so the cost is on the record rather than asserted. Across the three repos this set newly escalates
+ * 65 tracked files — 31 in WE, 12 in frontierui, 22 in plateau-app — leaving the blast-radius share at 13.0% /
+ * 1.4% / 4.6%. Of those 65, THIRTEEN are consumer tests and FOUR are data/doc files, all of them swept by a
+ * mechanism-A directory anchor: that is the quarter the paragraph above declines to call excluded. The impl
+ * repos are read from `origin/main`, AFTER plateau-app#137 merged — an earlier plateau figure of 21/4.5% came
+ * from a checkout one merge behind, which is the merge this whole item is about.
+ *
+ * ONE of the 65 is a known, accepted over-escalation: `demos/reveal-nav-conformance.ts` is a demo that ends in
+ * the binding suffix. It is left un-special-cased on purpose — a carve-out would be a second rule to keep true,
+ * for one file, against a cost of one agent review.
  *
  * CLEARANCE, stated so the next tightening is deliberate: these carry the existing `blast-radius` token, whose
  * ratified clearance is AGENT (#2445 two-tier flip) — an independent panel may clear them and they land. They
- * are NOT added to the declarative leash, so no `review:human`. That is the loose-to-start posture this whole
- * rubric is built on; if a graded-nothing judge ever survives an agent panel, THAT is the evidence for
- * promoting this set to the leash, and it should be promoted on that evidence rather than on this argument.
+ * are NOT added to the declarative leash, so no `review:human` from the DRAIN's rubric.
+ *
+ * BUT `isBlastRadiusPath` HAS A SECOND CONSUMER, and there the effect is not the same. `isSensitivePath` in
+ * `we:scripts/readiness/test-selection.mjs` folds this predicate into its deny set, and `decideSelection` maps
+ * sensitive → `humanRequired: true`. So widening this list also widens THAT gate: 27 WE paths flip there, 5 of
+ * them previously shrinkable. No live impact today — that selection is flag-gated behind a CI job that is
+ * off-by-default and `continue-on-error`, and gates nothing — and the direction is the safe one. It is recorded
+ * because "clearance is unchanged" is true of the drain rubric and NOT of every consumer of this predicate.
  */
 export const CONFORMANCE_GRADING_PATHS = [
   /(^|\/)conformance-vectors(\/|$)/,          // WE: the vectors a standard is judged by (+ their own tests)
+  /(^|\/)wrapper-conformance(\/|$)/,          // WE: the OTHER vector home — runner + vectors (#891/#967)
   /(^|\/)conformance-engine(\/|$)/,           // plateau-app: the neutral runner + the judge itself
   /(^|\/)conformance\/[^/]+\.ts$/,            // frontierui: the per-plug vector home
-  /(^|\/)[A-Za-z0-9-]*[Cc]onformance(Harness)?\.(ts|java|cs)$/, // any repo: the binding/harness, by relocatable basename
+  // `.` inside the character class is deliberate — see "THE DOT IN THE BASENAME PATTERN IS LOAD-BEARING" above.
+  /(^|\/)[A-Za-z0-9.-]*[Cc]onformance(Harness)?\.(ts|java|cs)$/, // any repo: the binding/harness, by relocatable basename
 ];
 
 const BLAST_RADIUS = [
