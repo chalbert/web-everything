@@ -40,6 +40,9 @@ import {
   CONFORMANCE_GRADING_PATHS,
 } from '../review-escalation.mjs';
 import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
+// The SECOND consumer of `isBlastRadiusPath` (#1162 review N2). Imported so the superset relation between the
+// drain's rubric and test selection is asserted here rather than restated as a hand-counted number.
+import { isSensitivePath } from '../../readiness/test-selection.mjs';
 
 describe('isBlastRadiusPath', () => {
   // The agent-behaviour trees (skills + agent memory) are NOT re-asserted here: every spelling of both has one
@@ -142,18 +145,34 @@ describe('isBlastRadiusPath', () => {
       }
     });
 
-    // THE CONTROL for the basename pattern. Each of these matches through that pattern and NO other, so
-    // deleting it turns this test red — which is exactly what the previous negative test failed to do.
-    it('the basename pattern is load-bearing — nothing else matches these', () => {
-      const dirPatterns = CONFORMANCE_GRADING_PATHS.slice(0, 4);
+    // THE CONTROL for the basename pattern. Each of these matches through EXACTLY ONE pattern, so deleting
+    // that pattern turns this test red — which is exactly what the previous negative test failed to do.
+    // Counted rather than sliced positionally: `slice(0, 4)` would silently stop testing anything the day a
+    // fifth directory anchor is appended after the basename pattern.
+    it('the basename pattern is load-bearing — exactly one pattern matches each of these', () => {
       for (const p of [
         'intl/intlConformance.ts',
         'blocks/deck/deckConformance.ts',
         'plugs/webtheme/conformanceHarness.ts',
         'plugs/webdirectives/ssr/net/src/ConformanceHarness.cs',
       ]) {
+        expect(CONFORMANCE_GRADING_PATHS.filter((re) => re.test(p)).length, p).toBe(1);
+      }
+    });
+
+    // THE SUPERSET RELATION, pinned so the two counts in the docblock cannot legally diverge again. An earlier
+    // revision said 31 paths newly escalate and, sixteen lines later, that 27 flip in test selection — the
+    // second measured before `wrapper-conformance/` was added and never redone. `isSensitivePath` folds
+    // `isBlastRadiusPath` into its deny set, so the counts are necessarily equal and a stale one is now RED.
+    it('every conformance-grading path is also SENSITIVE to test selection — the counts cannot diverge', () => {
+      for (const p of [
+        'conformance-vectors/intl.vectors.ts',
+        'wrapper-conformance/runner.ts',
+        'packages/core/src/conformance-engine/conformanceVectors.ts',
+        'intl/intlConformance.ts',
+      ]) {
         expect(matchedByNewSet(p), p).toBe(true);
-        expect(dirPatterns.some((re) => re.test(p)), `${p} must NOT match a directory anchor`).toBe(false);
+        expect(isSensitivePath(p), `${p} escalates but is not sensitive — the superset relation broke`).toBe(true);
       }
     });
 

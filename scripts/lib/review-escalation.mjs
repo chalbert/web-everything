@@ -119,7 +119,7 @@ export function isStatutePath(path) {
  * THE HOLE IS NARROWER THAN "the roster does not travel", and the narrower statement is the one that locates it.
  * An earlier draft of this comment said the roster matches NOTHING outside WE and called the gate decorative in
  * the other two repos. Both are measurably false, and PR #1162's own review caught them:
- *   - `^scripts\/` matches 5 tracked frontierui files (including `frontierui/scripts/check-standards.mjs`) and 7
+ *   - `^scripts\/` matches 4 tracked frontierui files (including `frontierui/scripts/check-standards.mjs`) and 8
  *     in plateau-app. It is not WE-only in practice, whatever its anchor suggests.
  *   - `^src\/_data\/(blocks|plugs|…)\.json` matches 2 frontierui files, despite the comment beside it below
  *     calling that pattern "WE-permanent, never relocates". It fires in production: frontierui PRs #37/#38/#39
@@ -191,10 +191,18 @@ export function isStatutePath(path) {
  *
  * BUT `isBlastRadiusPath` HAS A SECOND CONSUMER, and there the effect is not the same. `isSensitivePath` in
  * `we:scripts/readiness/test-selection.mjs` folds this predicate into its deny set, and `decideSelection` maps
- * sensitive → `humanRequired: true`. So widening this list also widens THAT gate: 27 WE paths flip there, 5 of
- * them previously shrinkable. No live impact today — that selection is flag-gated behind a CI job that is
- * off-by-default and `continue-on-error`, and gates nothing — and the direction is the safe one. It is recorded
- * because "clearance is unchanged" is true of the drain rubric and NOT of every consumer of this predicate.
+ * sensitive → `humanRequired: true`. So widening this list also widens THAT gate: **the same 31 WE paths** flip
+ * there, 6 of them previously shrinkable (5 in `conformance-vectors/__tests__/`, 1 in `wrapper-conformance/`).
+ * No live impact today — that selection is flag-gated behind a CI job that is off-by-default and
+ * `continue-on-error`, and gates nothing — and the direction is the safe one. It is recorded because "clearance
+ * is unchanged" is true of the drain rubric and NOT of every consumer of this predicate.
+ *
+ * "THE SAME 31" IS A PROPERTY, NOT A SECOND MEASUREMENT — and it is written that way because a second
+ * measurement is exactly what went wrong. This paragraph previously said 27, measured before the
+ * `wrapper-conformance/` anchor was added and never redone, while the paragraph above already said 31. The two
+ * cannot legally differ: `isSensitivePath` is a strict superset of `isBlastRadiusPath`, so every path this set
+ * newly escalates necessarily flips there too. `review-escalation.test.mjs` pins that superset relation
+ * directly, so a future divergent count is a RED TEST rather than a number nobody re-checks.
  */
 export const CONFORMANCE_GRADING_PATHS = [
   /(^|\/)conformance-vectors(\/|$)/,          // WE: the vectors a standard is judged by (+ their own tests)

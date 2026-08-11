@@ -27,8 +27,8 @@ size trip, no dismissed findings, not a cross-repo couple. And on no risk list.
 earlier draft of this item said the roster matches nothing outside WE and called the gate decorative in the
 other two repos. The independent review of PR #1162 measured both claims and both are false:
 
-- The `we:scripts/` pattern matches **5** tracked frontierui files (including `fui:scripts/check-standards.mjs`)
-  and **7** in plateau-app.
+- The `we:scripts/` pattern matches **4** tracked frontierui files (including `fui:scripts/check-standards.mjs`)
+  and **8** in plateau-app.
 - The standards-definition pattern for `we:src/_data/blocks.json` and its siblings matches **2** frontierui
   files, despite the comment beside it calling that pattern "WE-permanent, never relocates". It fires in
   production: frontierui PRs #37/#38/#39 each escalated on the blocks definition, and #30 on that repo's own
@@ -83,10 +83,16 @@ the binding suffix; it is left un-special-cased on purpose.
 
 **But `isBlastRadiusPath` has a second consumer**, and there the effect differs.
 [we:scripts/readiness/test-selection.mjs](../scripts/readiness/test-selection.mjs) folds it into
-`isSensitivePath`, and sensitive maps to `humanRequired: true`. 27 WE paths flip there, 5 previously
-shrinkable. No live impact — that selection sits behind a CI job that is off-by-default and `continue-on-error`
-and gates nothing — and the direction is safe. Recorded because "clearance is unchanged" is true of the drain
-and not of every caller.
+`isSensitivePath`, and sensitive maps to `humanRequired: true`. **The same 31** WE paths flip there, 6 of them
+previously shrinkable. No live impact — that selection sits behind a CI job that is off-by-default and
+`continue-on-error` and gates nothing — and the direction is safe. Recorded because "clearance is unchanged" is
+true of the drain and not of every caller.
+
+**"The same 31" is a property, not a second count** — and it is written that way because a second count is what
+went wrong. The first revision of this item said 27 here, measured before the `wrapper-conformance/` anchor was
+added and never redone, while the paragraph above already said 31. The two cannot legally differ:
+`isSensitivePath` is a strict superset of `isBlastRadiusPath`. The second review caught the contradiction
+without leaving the file. The relation is now pinned by test, so a divergent count is red rather than stale.
 
 ## Known gaps inside this set's own scope
 
@@ -113,6 +119,7 @@ stays in WE, where changing it is itself gated.
 - [x] A consumer INSIDE one does score, asserted explicitly, so the comment and the tests cannot disagree.
 - [x] The basename pattern has a control that turns red if it is deleted.
 - [x] A dotted judge name scores; a dotted consumer name does not.
+- [x] The superset relation with `isSensitivePath` is pinned by test, so the two counts cannot diverge again.
 - [x] `plateau-app#137`'s exact two files and its real 99-line size escalate, with a negative control proving
       the non-conformance file still scores nothing on its own.
 - [x] Every fixture is a real tracked path from `git ls-files`, not an invented shape.
