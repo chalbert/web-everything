@@ -1576,8 +1576,18 @@ export function decideReviewGate({
     if (!fresh.covers) {
       // Re-park for a fresh review: review:pending re-arms an agent panel; a gate-self/human-gated PR (fresh
       // humanRequired score, or a sticky review:human still present) re-parks review:human — only a human may
-      // re-clear it. The drain drops the now-stale review:accepted alongside applying this label (see
-      // merge-ai-prs.mjs). staleAcceptance flags this as the #2409 outcome for the drain's comment + label swap.
+      // re-clear it. staleAcceptance flags this as the #2409 outcome for the drain's comment + label swap.
+      //
+      // #3053 — THE DRAIN DOES NOT DROP `review:accepted` HERE, AND HAS NOT SINCE #x9xqexm. This comment used
+      // to say it did, citing merge-ai-prs.mjs — which says the opposite in as many words: "A RE-SCORE NEVER
+      // REMOVES `review:accepted`". A re-park ADDS a hold; the recorded clearance survives beside it, and
+      // `hasUnclearedReviewLabel` is what refuses the co-present pair (see its own #x9xqexm note above).
+      //
+      // Corrected because the stale text was load-bearing in the wrong direction. #3053 traced a proposed
+      // fourth `review:stale` hold tier to precisely this sentence: the tier existed to stop a revocation that
+      // had already been stopped. The operator ruled that option REJECTED and closed on 2026-08-10, and named
+      // deleting this comment as owed. Do not restore it without first re-reading merge-ai-prs.mjs — a claim
+      // about what the drain deletes belongs where the drain does the deleting, not here.
       const toHuman = humanRequired || hasReviewLabel(labels, REVIEW_LABELS.human);
       // #xmnl36p — IS THIS RE-PARK REVOKING AN OPERATOR CLEARANCE? It is, exactly when it re-imposes
       // `review:human` on a PR whose `review:human` was lifted by the sanctioned `--to=clear-human` ceremony
