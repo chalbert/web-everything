@@ -1342,6 +1342,53 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   if (/>>\s*(?:\.\/)?(?:backlog|reports)\//.test(s) || (atCommand(/^(?:sed|tee|perl)\b/) && CORPUS_MD.test(s)))
     return "Don't append/in-place-edit backlog|reports/*.md from the shell (>>, tee -a, sed -i, perl -pi) — it bypasses the locus-prefix write hook so bare code-paths leak to the gate. Use the Edit/Write tools.";
 
+  // A raw PR-BODY rewrite DISARMS the self-clear guard. `pr-land` stamps `authored-by-actor` into the body at
+  // open; `review-independence.mjs` reads it to refuse an author clearing its own PR. Replacing the body drops
+  // the stamp, and the guard then reads `unknown-author` — a state the invoked CLI deliberately permits (it
+  // would otherwise strand every PR opened before the stamp existed). That tolerance is right for an OLD PR
+  // and wrong for a STRIPPED one, and after the fact nothing tells them apart. So keep the stamp rather than
+  // weaken the rule that depends on it.
+  //
+  // MATCHED ON TOKENS, NOT THE RAW STRING. The first cut regexed `\s--body(-file)?[\s=]` and was bypassable
+  // three ways, all found by review: `gh` documents `-b`/`-F` as exact equivalents of `--body`/`--body-file`
+  // and neither matched; a quoted `"--body-file"` has a quote before the dashes, not whitespace; and `gh api
+  // -X PATCH …/pulls/<n> -f body=…` is not `gh pr edit` at all. `shellTokens` unquotes, so the first two
+  // collapse into one token test. `-B` is `--base` and must NOT match — the check is case-sensitive.
+  if (!/\bPR_BODY_STAMP_OK=1\b/.test(s)) {
+    // NO `$` AFTER `-[bF]`. pflag lets `gh` glue the value onto the shorthand, so `-F/tmp/b.md`, `-F=/tmp/b.md`,
+    // `-bhello` and `-b=hello` are all real body writes in one token. Anchoring to an exact `-b`/`-F` matched
+    // none of them — the fourth bypass found in review, each verified against `gh` itself. Case-sensitive, so
+    // `-B` (`--base`) still does not match, and no other `gh pr edit` shorthand starts with `b` or `F`.
+    const BODY_FLAG = /^(?:--body(?:-file)?(?:=|$)|-[bF])/;
+    // `shellTokens` yields `{text, quoted, op}` records, not strings — test `.text`, or every token
+    // stringifies to `[object Object]` and the rule denies nothing at all.
+    const bodyish = (seg) => shellTokens(seg).some((t) => BODY_FLAG.test(t.text));
+    if (atCommand(/^gh\s+pr\s+edit\b/) && bodyish(s))
+      return 'a raw `gh pr edit --body`/`-b`/`-F` drops the `authored-by-actor` stamp pr-land wrote at open, which disarms the self-clear refusal in review-independence.mjs (this is how #1162 landed on its own author\'s clearance). Use `node scripts/pr-body-edit.mjs --pr=<n> --body-file=<f>`, which carries the stamp across. Sanctioned override: prefix `PR_BODY_STAMP_OK=1`.';
+    // The REST route to the same field. `gh api` writes it with `-f body=…`/`--field`/`--raw-field`, and the
+    // graphql form names the mutation instead of a path.
+    if (atCommand(/^gh\s+api\b/)
+      && (/\bpulls\/\d+/.test(s) || /\bupdatePullRequest\b/.test(s))
+      // `[^\w-]` and not `[\s'"]`: in the graphql form the field is nested — `input:{body:"x"}` — so the
+      // character before `body` is `{`, and a whitespace-or-quote boundary missed it entirely. Excluding `-`
+      // keeps `--body` out of this arm; that spelling belongs to the `gh pr edit` arm above.
+      && /(?:^|[^\w-])body\s*[=:]/.test(s))
+      return 'a `gh api` write to a PR body drops the `authored-by-actor` stamp, disarming the self-clear refusal (same hole as `gh pr edit --body`, one API layer down). Use `node scripts/pr-body-edit.mjs --pr=<n> --body-file=<f>`. Sanctioned override: prefix `PR_BODY_STAMP_OK=1`.';
+    // `--input <file>` carries the JSON payload in a FILE, so no `body=` ever appears in argv and the arm
+    // above cannot see what is being written. Refused on the shape rather than the content: a PATCH to a
+    // pulls endpoint whose payload is unreadable from here MIGHT set the body. That over-denies a title- or
+    // base-only patch, which is what the escape is for — the alternative is a route the guard provably
+    // cannot inspect.
+    // `graphql` is included because it has NO `pulls/<n>` path to key on: with the mutation in a file, neither
+    // the endpoint nor `updatePullRequest` appears in argv, so both other arms miss it. Verified against real
+    // `gh` — the command reaches GitHub's `updatePullRequest` resolver. `-F key=@file` reads a field value from
+    // a file and is the same hole by another spelling.
+    if (atCommand(/^gh\s+api\b/)
+      && (/\bpulls\/\d+/.test(s) || /(?:^|\s)graphql\b/.test(s))
+      && /(?:^|\s)(?:--input\b|-{1,2}[a-zA-Z-]*\s*[\w.]+=@)/.test(s))
+      return 'a `gh api` call whose payload comes from a FILE (`--input`, or a `field=@file` value) cannot be inspected by this guard, and it may rewrite a PR body — which drops the `authored-by-actor` stamp. Refused on shape. Use `node scripts/pr-body-edit.mjs`, or prefix `PR_BODY_STAMP_OK=1` if the payload genuinely does not touch a body.';
+  }
+
   // Direct push to a constellation `main` — blocked (strict lane-only, #2203). Everything reaches main via a
   // `lane/*` ref → PR → CI gate; a direct `git push … main` (or a bare `git push` from a checkout on main)
   // skips CI entirely. Only an explicit `lane/*` destination is allowed. Sanctioned override: prefix
