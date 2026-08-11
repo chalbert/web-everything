@@ -1455,7 +1455,12 @@ export function readyMergeConflictsWithHold(labels) {
  * `decideReviewGate` returns `action:'merge'` for it. Two independent reasons it cannot be un-queued.
  * @param {Array} observedLabels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
  * @param {{applyLabel?:(string|null), staleAcceptance?:boolean}} [o] - the park's own writes this operation:
- *   the hold label it is applying (if any), and whether it is a #2409 re-park that drops `review:accepted`.
+ *   the hold label it is applying (if any), and whether this is a #2409 STALE-ACCEPTANCE re-park — one whose
+ *   `review:accepted` is known-stale because the head advanced past the reviewed tree. It does NOT drop that
+ *   accept; nothing does (#x9xqexm — see the `staleAcceptance` paragraph above). This line said "drops
+ *   `review:accepted`" until #3053, contradicting its own docblock body six lines up; it is spelled out here
+ *   rather than shortened because `staleAcceptance` is the flag a reader meets FIRST, in an IDE hover that
+ *   shows the signature and not the prose.
  * @returns {boolean} true iff `ready-to-merge` must be removed
  */
 export function decideParkReadyStrip(observedLabels, { applyLabel = null, staleAcceptance = false } = {}) {
