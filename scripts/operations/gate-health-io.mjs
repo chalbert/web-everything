@@ -156,8 +156,18 @@ export function createHistoryReader({ repo = 'chalbert/web-everything', root = R
   if (typeof classify !== 'function') {
     throw new TypeError('gate-health-io: `classify` is required — pass `classifyFollowUp` from we:scripts/lib/gate-health.mjs');
   }
-  return ({ limit = 300, windowDays = FOLLOW_WINDOW_DAYS } = {}) => {
-    const prs = readMergedPrs({ repo, limit });
+  // `repo` comes from the CALL, not from binding time. Bound at construction it silently ignored
+  // `--repo=chalbert/frontierui` and answered with web-everything's history — a wrong answer wearing the
+  // right label, which is worse than a refusal. `root` still binds, so a cross-repo request is refused below
+  // rather than joined against the wrong commit stream.
+  return ({ repo: asked = repo, limit = 300, windowDays = FOLLOW_WINDOW_DAYS } = {}) => {
+    if (asked !== repo) {
+      throw new Error(
+        `gate-health: this reader is bound to ${repo} but was asked for ${asked}. The commit stream comes from a `
+        + 'local checkout, so answering would join one repo\'s PRs against another\'s history. Run it from that repo.',
+      );
+    }
+    const prs = readMergedPrs({ repo: asked, limit });
     const commits = readCommitStream({ root });
     // The clock is read HERE and passed through, never called inside the analysis — so a given history plus a
     // given `nowSec` always produces the same assessment.

@@ -104,8 +104,11 @@ export function clusterEffectiveN(records) {
     distinctSources: sizes.length,
     effectiveN,
     largestClusterShare: n ? largest / n : 0,
-    // Below this the interval arithmetic is reporting a confidence the data does not have.
-    clustered: n > 0 && effectiveN < n * 0.5,
+    // ANY clustering inflates confidence, so the threshold is "are these independent at all", not a tolerance
+    // band. A 0.5 cut let MEDIUM clumping through: 20 observations from 11 commits passed as independent while
+    // the interval was built on 20 trials it did not have. Review caught that. The interval arithmetic assumes
+    // independent trials, so the honest test is whether they are — one repeated source is already too many.
+    clustered: n > 0 && effectiveN < n,
   };
 }
 

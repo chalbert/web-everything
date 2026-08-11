@@ -87,7 +87,10 @@ export function gateHealthOperation({ loadHistory } = {}) {
 
     history: compute({
       reads: ['input.repo', 'input.limit', 'input.windowDays'],
+      // `repo` MUST reach the reader. Validating it in `input` and then not passing it meant a request for
+      // another repo was accepted and answered with this one's history.
       fn: (view) => shapeHistoryFinding(loadHistory({
+        repo: view.input.repo,
         limit: clampLimit(view.input.limit),
         windowDays: Math.max(1, Math.floor(Number(view.input.windowDays) || 14)),
       })),

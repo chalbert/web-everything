@@ -15,7 +15,7 @@ import {
   bandOf, classifyFollowUp, stratifyBySize, compareProportions, compareGroups,
   assessCriteria, censor, clusterEffectiveN, requiredNPerGroup, zForAlpha, SIZE_BANDS,
 } from '../../lib/gate-health.mjs';
-import { joinHistory, hotFileCut, HOT_FILE_MIN } from '../gate-health-io.mjs';
+import { joinHistory, hotFileCut, HOT_FILE_MIN, createHistoryReader } from '../gate-health-io.mjs';
 import { gateHealthOperation, GATE_HEALTH_OP, clampLimit, shapeHistoryFinding } from '../gate-health.mjs';
 import { OPERATIONS } from '../run.mjs';
 
@@ -100,6 +100,39 @@ describe('precondition 3 — clustered observations', () => {
     const records = Array.from({ length: 10 }, (_, i) => pr(300 + i, 100, true, 'independent-fix', 60, `sha-${i}`));
     expect(clusterEffectiveN(records).clustered).toBe(false);
   });
+
+  // MEDIUM clumping used to pass. A 0.5 threshold let 20 observations from 11 commits read as independent
+  // while the interval was built on 20 trials that do not exist. The test is "are these independent at all".
+  it('flags medium clumping, not only the extreme case', () => {
+    const records = [
+      ...Array.from({ length: 10 }, (_, i) => pr(400 + i, 100, true, 'independent-fix', 60, 'shared-sha')),
+      ...Array.from({ length: 10 }, (_, i) => pr(420 + i, 100, true, 'independent-fix', 60, `own-${i}`)),
+    ];
+    const out = clusterEffectiveN(records);
+    expect(out.observations).toBe(20);
+    expect(out.distinctSources).toBe(11);
+    expect(out.clustered).toBe(true);
+  });
+});
+
+describe('the repo input reaches the reader', () => {
+  // It was validated against the enum and then never passed, so `--repo=chalbert/frontierui` was accepted and
+  // answered with web-everything's history — a wrong answer wearing the right label.
+  it('a request for another repo is refused, not silently answered with this one', () => {
+    const reader = createHistoryReader({ repo: 'chalbert/web-everything', classify: classifyFollowUp });
+    expect(() => reader({ repo: 'chalbert/frontierui' })).toThrow(/bound to chalbert\/web-everything/);
+  });
+
+  it('the declaration passes `repo` through', () => {
+    let seen = null;
+    const declaration = gateHealthOperation({
+      loadHistory: (o) => { seen = o.repo; return { repo: o.repo, nowSec: NOW, records: [], unmeasurable: 0, hotFiles: [] }; },
+    });
+    const registry = createRegistry();
+    registry.register(declaration);
+    advanceWhileRunning(startRun({ op: GATE_HEALTH_OP, id: 'r-repo', input: { repo: 'chalbert/frontierui' }, registry }), { registry });
+    expect(seen).toBe('chalbert/frontierui');
+  });
 });
 
 describe('precondition 4 — multiplicity, and the interval', () => {
@@ -137,6 +170,43 @@ describe('the verdict names blockers rather than producing a number it cannot su
     const out = assessCriteria({ records: Array.from({ length: 40 }, (_, i) => pr(i, 100, i % 2 === 0, i < 2 ? 'independent-fix' : null, 60, `s${i}`)), nowSec: NOW });
     expect(out.power.requiredNPerGroup).toBe(requiredNPerGroup(out.power.baseRate, 0.05));
     expect(out.verdict.blockers.join(' ')).toMatch(/insufficient observations/);
+  });
+
+  // PINNED AGAINST A REFERENCE, not against itself. The previous test compared the function to its own output,
+  // so dropping the 80%-power term (404 → 232) left it green and the headline "~404" number unpinned.
+  // Reference: n = (z_{α/2} + z_β)² · 2p̄(1−p̄) / d² with p̄ = p + d/2, z = 1.96 / 0.84. Computed
+  // independently of this module, then rounded up: p=0.044,d=0.05 → 403; p=0.5,d=0.1 → 389.
+  // Dropping the 0.84 power term changes both, which is what the previous self-comparison missed.
+  it('required-n matches the textbook two-proportion formula, not just itself', () => {
+    expect(requiredNPerGroup(0.044, 0.05)).toBe(403);
+    expect(requiredNPerGroup(0.5, 0.1)).toBe(389);
+    // A RARER event needs more, up to p̄=0.5 — pinned as values, not as an inequality, so a monotonicity bug
+    // in either direction is caught.
+    expect(requiredNPerGroup(0.02, 0.05)).toBe(270);
+    expect(requiredNPerGroup(0.2, 0.05)).toBe(1094);
+    // A bigger detectable difference needs far fewer.
+    expect(requiredNPerGroup(0.044, 0.2)).toBe(49);
+  });
+
+  // The multiplicity correction had no test at all — making it a no-op stayed green.
+  it('alpha is divided by the number of TESTABLE bands', () => {
+    const twoBands = [
+      ...Array.from({ length: 60 }, (_, i) => pr(800 + i, 200, i % 2 === 0, i < 30 ? 'independent-fix' : null, 60, `m${i}`)),
+      ...Array.from({ length: 60 }, (_, i) => pr(900 + i, 600, i % 2 === 0, i < 30 ? 'independent-fix' : null, 60, `l${i}`)),
+    ];
+    const out = assessCriteria({ records: twoBands, nowSec: NOW });
+    expect(out.multiplicity.bandsTested).toBe(2);
+    expect(out.multiplicity.alphaPerBand).toBeCloseTo(0.025, 10);
+    expect(out.bands.m.comparison.alpha).toBeCloseTo(0.025, 10);
+  });
+
+  // An off-by-one in the censor cutoff stayed green: nothing pinned the boundary itself.
+  it('the censor boundary is exact — a PR at exactly the window edge is observable', () => {
+    const atEdge = pr(1, 100, true, null, 14);
+    const justInside = pr(2, 100, true, null, 13.9);
+    const out = censor([atEdge, justInside], { nowSec: NOW, windowDays: 14 });
+    expect(out.observed.map((r) => r.number)).toEqual([1]);
+    expect(out.censored).toBe(1);
   });
 
   it('concludes only when a band separates AND nothing is blocking', () => {
