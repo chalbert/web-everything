@@ -2,8 +2,10 @@
 bornAs: x0pfbqp
 kind: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-08-09"
+dateResolved: "2026-08-10"
+graduatedTo: none
 parent: "3054"
 tags: [gate, review, drain, review-escalation, fingerprint]
 scope:
@@ -12,6 +14,24 @@ scope:
 ---
 
 # A base insertion of a new column-0 declaration changes the section heading and false-stales an unmoved contribution
+
+> **RESOLVED 2026-08-10, jointly with [#3046](/backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio/).**
+> The `@@` section heading is gone from `normalizeContributionFingerprint`, and the `POSITION` docblock this
+> card demanded be corrected is rewritten around the impossibility rather than patched. WE PR #1100's two net
+> diffs — rebuilt from the real commits and self-certified against the stamped `6a4f7c53…` / `b8dd7351…`
+> markers — now hash **alike** (`2ba8be98…` both sides). A unit test reproduces the mechanism from real
+> `git diff` output (`#x0pfbqp — a base INSERTION of a column-0 declaration no longer diverges it`), and a
+> second one pins the empty/absent-heading case this card and `#3021` both flagged.
+>
+> **Two corrections to this card's own record, both re-derived by script.** (1) The two differing projection
+> lines on #1100 are `@@ ~269 … exit 0` → `@@ ~300 … describe('#xmnl36p — …` and `@@ ~23 … buildVerdictComment`
+> → `@@ ~29 …`. The first line carries **both** mechanisms at once — its gap moved `269→300` *and* its heading
+> changed — which this card recorded as a heading change alone. The conclusion is unaffected and in fact
+> strengthened: neither slice alone would have saved #1100. (2) The inserted heading reads `describe('#xmnl36p
+> — clear-human stamps …`, the bornAs id, not `describe('#3039 — …`. (3) The raw byte counts are 132,109 and
+> 132,196 in UTF-8 bytes but 130,831 and 130,916 in JavaScript characters — the 87-vs-85 delta between those
+> two rulers is why a `wc -c` check and a `.length` check disagree, and the card's wider point stands: compare
+> the projection, not the raw bytes.
 
 The contribution digest keeps git's `@@` **section heading** as a position signal, on the stated grounds that it
 "travels WITH the code rather than with the base". That holds only when the base inserts **no new column-0

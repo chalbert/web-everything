@@ -878,40 +878,9 @@ describe('#x9xqexm — a clearance covers a CONTRIBUTION, not the base it sits o
   const AT_LINE_10 = relocated(7, 'line6', ['line7', 'line8', 'line9', 'line10', 'line11', 'line12']);
   const AT_LINE_30 = relocated(27, 'line26', ['line27', 'line28', 'line29', 'line30', 'line31', 'line32']);
 
-  it('BLOCKER 1 — the SAME added line at a DIFFERENT place in the file is NOT the same contribution', () => {
-    // The reviewer's measured repro: one guard line moved from line 10 to line 30 of a 40-line file. Every
-    // `+`/`-` line and both hunk lengths are identical, so a digest built from those alone collides — and
-    // "right line, wrong place" (a guard below the call it guards, a `return` out of its branch) is the class
-    // that hides there. A 3-way rebase misapplying a hunk to a clean-but-wrong offset has the same shape.
-    expect(normalizeContributionFingerprint(AT_LINE_10)).not.toBe(normalizeContributionFingerprint(AT_LINE_30));
-    expect(acceptanceCoversHead({
-      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb',
-      acceptedContribution: AT_LINE_10, headContribution: AT_LINE_30,
-    }).covers).toBe(false);
-  });
-
-  it('BLOCKER 1 — relocating into a DIFFERENT FUNCTION is refused (the section heading is hashed)', () => {
-    const inAlpha = relocated(7, 'function alpha() {', ['a1();', 'a2();', 'a3();', 'a4();', 'a5();', 'a6();']);
-    const inBeta = relocated(7, 'function beta() {', ['a1();', 'a2();', 'a3();', 'a4();', 'a5();', 'a6();']);
-    expect(normalizeContributionFingerprint(inAlpha)).not.toBe(normalizeContributionFingerprint(inBeta));
-  });
-
-  it('BLOCKER 1 — a hunk moving relative to its SIBLINGS is refused (the inter-hunk gap is hashed)', () => {
-    const twoHunks = (secondStart) => [
-      'diff --git a/f.js b/f.js',
-      '--- a/f.js',
-      '+++ b/f.js',
-      '@@ -10,6 +10,7 @@ function only() {',
-      ' c1();', ' c2();', ' c3();', GUARD, ' c4();', ' c5();', ' c6();',
-      `@@ -${secondStart},6 +${secondStart + 1},7 @@ function only() {`,
-      ' d1();', ' d2();', ' d3();', '+  emit();', ' d4();', ' d5();', ' d6();',
-    ].join('\n');
-    expect(normalizeContributionFingerprint(twoHunks(50))).not.toBe(normalizeContributionFingerprint(twoHunks(70)));
-  });
-
-  it('…while a UNIFORM whole-file shift of BOTH hunks still reads as unchanged (the #1100 property)', () => {
+  it('…a UNIFORM whole-file shift of BOTH hunks reads as unchanged (the #1100 property #x9xqexm shipped for)', () => {
     // This is the case the escape exists for, kept alive at more than one hunk: `main` grew ABOVE the lane's
-    // hunks, so every offset moves by the same amount and every inter-hunk gap is untouched.
+    // hunks, so every offset moves by the same amount.
     const shifted = (by) => [
       'diff --git a/f.js b/f.js',
       '--- a/f.js',
@@ -925,20 +894,180 @@ describe('#x9xqexm — a clearance covers a CONTRIBUTION, not the base it sits o
     expect(normalizeContributionFingerprint(shifted(0))).toBe(normalizeContributionFingerprint(shifted(6)));
   });
 
-  it('THE KNOWN RESIDUAL, pinned: an intra-section move in a SINGLE-hunk file still collides (#x413mbt)', () => {
-    // Not a passing grade — a deliberately recorded limit, so nobody reads the two tests above as "relocation
-    // is solved". With the context lines dropped, the only witness to a move INSIDE one section heading is the
-    // context itself — and the #1100 case this escape exists for is one where `main` changed the context line
-    // immediately adjacent to the contribution. Tolerating that and detecting this are the same measurement
-    // read in opposite directions. Filed as #x413mbt; if that item lands, this expectation flips to `not.toBe`.
+  // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  // #x5p1xz8 — THE TWO FALSE STALES, reproduced from REAL `git diff` output, and fixed.
+  // Every fixture in this block was captured verbatim from `git diff` in a scratch repo (only the fixture file
+  // is named `f.js`); nothing here is hand-written from memory.
+  // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  const realDiff = (...lines) => lines.join('\n');
+
+  // #xalaqel — ONE contribution, TWO bases: `main` grew 15 lines above the first hunk and 4 MORE between the
+  // two, so the inter-hunk gap moves 11 → 15 while not one `+`/`-` line changes. The WE PR #1106 shape.
+  const GAP_BASE_A = realDiff(
+    'diff --git a/f.js b/f.js',
+    'index c1d483e..10e7961 100644',
+    '--- a/f.js',
+    '+++ b/f.js',
+    '@@ -3,6 +3,7 @@ function alpha() {',
+    '   a2();', '   a3();', '   a4();', '+  guard();', '   a5();', '   a6();', '   a7();',
+    '@@ -14,6 +15,7 @@ function beta() {',
+    '   b2();', '   b3();', '   b4();', '+  guard();', '   b5();', '   b6();', '   b7();',
+  );
+  const GAP_BASE_B = realDiff(
+    'diff --git a/f.js b/f.js',
+    'index a78dd18..dcf128c 100644',
+    '--- a/f.js',
+    '+++ b/f.js',
+    '@@ -18,6 +18,7 @@ function alpha() {',
+    '   a2();', '   a3();', '   a4();', '+  guard();', '   a5();', '   a6();', '   a7();',
+    '@@ -33,6 +34,7 @@ function beta() {',
+    '   b2();', '   b3();', '   b4();', '+  guard();', '   b5();', '   b6();', '   b7();',
+  );
+
+  it('#xalaqel — a NON-UNIFORM base move no longer diverges the digest (WE PR #1106, false stale)', () => {
+    expect(14 - 3).not.toBe(33 - 18); // the gaps really are different: 11 vs 15
+    expect(normalizeDiffFingerprint(GAP_BASE_A)).not.toBe(normalizeDiffFingerprint(GAP_BASE_B));
+    expect(normalizeContributionFingerprint(GAP_BASE_A)).toBe(normalizeContributionFingerprint(GAP_BASE_B));
+    expect(acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb',
+      acceptedContribution: GAP_BASE_A, headContribution: GAP_BASE_B,
+    }).covers).toBe(true);
+  });
+
+  // #x0pfbqp — ONE contribution, TWO bases differing only by a NEW COLUMN-0 DECLARATION inserted above the
+  // (unmoved) hunk. Git's `xfuncname` re-points the `@@` heading at it. The WE PR #1100 shape, where the
+  // inserted declaration was PR #1124's own `describe(…)` block.
+  const HEAD_BASE_A = realDiff(
+    'diff --git a/f.js b/f.js',
+    'index d48c02d..845e075 100644',
+    '--- a/f.js',
+    '+++ b/f.js',
+    '@@ -2,6 +2,7 @@ exit 0',
+    '   s1();', '   s2();', '   s3();', '+  s3b();', '   s4();', '   s5();', '   s6();',
+  );
+  const HEAD_BASE_B = realDiff(
+    'diff --git a/f.js b/f.js',
+    'index 5408b0b..f15f0f6 100644',
+    '--- a/f.js',
+    '+++ b/f.js',
+    "@@ -5,6 +5,7 @@ describe('#3039 — clear-human stamps a clearance', () => {",
+    '   s1();', '   s2();', '   s3();', '+  s3b();', '   s4();', '   s5();', '   s6();',
+  );
+
+  it('#x0pfbqp — a base INSERTION of a column-0 declaration no longer diverges it (WE PR #1100, false stale)', () => {
+    expect(HEAD_BASE_A).toContain('@@ exit 0');
+    expect(HEAD_BASE_B).toContain("@@ describe('#3039");
+    expect(normalizeDiffFingerprint(HEAD_BASE_A)).not.toBe(normalizeDiffFingerprint(HEAD_BASE_B));
+    expect(normalizeContributionFingerprint(HEAD_BASE_A)).toBe(normalizeContributionFingerprint(HEAD_BASE_B));
+  });
+
+  it('#x0pfbqp — a hunk whose heading is EMPTY or absent is handled, not special-cased', () => {
+    // The #x413mbt trap: a relocation inside indented `POLICY_SPEC` JSON. No line in the file starts at column 0
+    // with a letter, so git emits a bare `@@ -2,6 +2,7 @@` — real output, captured. The projection must neither
+    // throw nor treat the empty heading differently from a present one.
+    const jsonHunk = (start) => realDiff(
+      'diff --git a/p.json b/p.json',
+      'index 8617c2b..a46798f 100644',
+      '--- a/p.json',
+      '+++ b/p.json',
+      `@@ -${start},6 +${start},7 @@`,
+      '   "k1": 1,', '   "k2": 2,', '   "k3": 3,', '+  "added": 1,', '   "k4": 4,', '   "k5": 5,', '   "k6": 6,',
+    );
+    expect(normalizeContributionFingerprint(jsonHunk(2))).toMatch(/^[0-9a-f]{64}$/);
+    // Absent `,<len>` on both sides, an empty heading, and a one-line hunk: still a digest, still stable.
+    const bare = realDiff('diff --git a/p.json b/p.json', '@@ -1 +1 @@', '-a', '+b');
+    expect(normalizeContributionFingerprint(bare)).toBe(
+      normalizeContributionFingerprint(realDiff('diff --git a/p.json b/p.json', '@@ -9,1 +9,1 @@', '-a', '+b')),
+    );
+  });
+
+  it('#x5p1xz8 — THE INDISTINGUISHABILITY, from real git output: why no position signal can do both', () => {
+    // Two REAL diffs, both captured from `git diff`. LEFT: the contribution relocated from one block to the
+    // next on an UNCHANGED base. RIGHT: the SAME contribution, unmoved, after the base inserted a `beta()`
+    // declaration above it. Different events, opposite verdicts wanted — and byte-identical hunk headers apart
+    // from the absolute offset, which no base-independent digest may keep. The first cut's gap+heading pair
+    // gives these two the SAME answer as well; keeping the signals never separated this shape, it only made the
+    // base move look like a change in OTHER shapes. This is the proof that the trade below is forced.
+    const RELOCATED_ON_SAME_BASE = realDiff(
+      'diff --git a/f.js b/f.js', 'index f537c83..6e5d259 100644', '--- a/f.js', '+++ b/f.js',
+      '@@ -9,6 +9,7 @@ beta()',
+      '   s1();', '   s2();', '   s3();', '+  s3b();', '   s4();', '   s5();', '   s6();',
+    );
+    const UNMOVED_AFTER_BASE_INSERT = realDiff(
+      'diff --git a/f.js b/f.js', 'index f40be9c..4ab34ad 100644', '--- a/f.js', '+++ b/f.js',
+      '@@ -3,6 +3,7 @@ beta()',
+      '   s1();', '   s2();', '   s3();', '+  s3b();', '   s4();', '   s5();', '   s6();',
+    );
+    expect(normalizeContributionFingerprint(RELOCATED_ON_SAME_BASE))
+      .toBe(normalizeContributionFingerprint(UNMOVED_AFTER_BASE_INSERT));
+  });
+
+  it('#x5p1xz8 — THE RUN SHAPE still refuses a move that re-clusters the contributed lines', () => {
+    // What survives of relocation detection. Both diffs are real `git diff` output over the SAME base with the
+    // SAME three added lines and the SAME `@@ -1,13 +1,16 @@` header — the middle `guard()` simply sits one
+    // line lower. Identical lengths, identical (empty) heading, one hunk so no gap: the first cut collided
+    // here too. The context-RUN lengths differ, so this is refused.
+    const runs = (moved) => realDiff(
+      'diff --git a/r.js b/r.js', '--- a/r.js', '+++ b/r.js',
+      '@@ -1,13 +1,16 @@',
+      '   e1();', '   e2();', '+  guard();', '   e3();', '   e4();', '   e5();', '   e6();',
+      ...(moved ? ['   e7();', '+  guard();', '   e8();'] : ['+  guard();', '   e7();', '   e8();']),
+      '   e9();', '   e10();', '+  guard();', '   e11();', '   e12();', '   e13();',
+    );
+    expect(normalizeContributionFingerprint(runs(false))).not.toBe(normalizeContributionFingerprint(runs(true)));
+  });
+
+  it('THE KNOWN RESIDUAL, pinned at its WIDENED width: any offset-only relocation collides (#x413mbt)', () => {
+    // Not a passing grade — a deliberately recorded limit, WIDER than the one #x9xqexm pinned. Then, a
+    // relocation had to preserve the section heading and the inter-hunk gap to collide; those two signals are
+    // gone (see `normalizeContributionFingerprint`, POSITION), so now ANY relocation that preserves content,
+    // hunk lengths and run shape collides. All three fixtures below are real `git diff` output and all three
+    // were REFUSED before #x5p1xz8. They are kept, flipped, rather than deleted, because the price of the fix
+    // must stay visible in the suite that measures it. #x413mbt stays OPEN and owns closing them; when it
+    // lands, these expectations flip back.
+    //
+    // Why the price is paid rather than avoided: the two signals are variant under the BASE moving as readily
+    // as under the contribution moving (proved directly by the indistinguishability test above), and in
+    // production they fired on the base 2 times out of 2 while catching a real relocation 0 times out of 0.
     const sameHeading = (start) => [
-      'diff --git a/f.js b/f.js',
-      '--- a/f.js',
-      '+++ b/f.js',
+      'diff --git a/f.js b/f.js', '--- a/f.js', '+++ b/f.js',
       `@@ -${start},6 +${start},7 @@ function only() {`,
       ' x1();', ' x2();', ' x3();', GUARD, ' x4();', ' x5();', ' x6();',
     ].join('\n');
+    // (a) #x9xqexm's original residual — an intra-section move in a single-hunk file. Unchanged.
     expect(normalizeContributionFingerprint(sameHeading(4))).toBe(normalizeContributionFingerprint(sameHeading(13)));
+    // (b) NEWLY collides — a move across a top-level declaration (the heading used to catch this).
+    const inAlpha = relocated(7, 'function alpha() {', ['a1();', 'a2();', 'a3();', 'a4();', 'a5();', 'a6();']);
+    const inBeta = relocated(7, 'function beta() {', ['a1();', 'a2();', 'a3();', 'a4();', 'a5();', 'a6();']);
+    expect(normalizeContributionFingerprint(inAlpha)).toBe(normalizeContributionFingerprint(inBeta));
+    expect(normalizeContributionFingerprint(AT_LINE_10)).toBe(normalizeContributionFingerprint(AT_LINE_30));
+    // (c) NEWLY collides — one hunk moving relative to its sibling (the gap used to catch this).
+    const twoHunks = (secondStart) => [
+      'diff --git a/f.js b/f.js', '--- a/f.js', '+++ b/f.js',
+      '@@ -10,6 +10,7 @@ function only() {',
+      ' c1();', ' c2();', ' c3();', GUARD, ' c4();', ' c5();', ' c6();',
+      `@@ -${secondStart},6 +${secondStart + 1},7 @@ function only() {`,
+      ' d1();', ' d2();', ' d3();', '+  emit();', ' d4();', ' d5();', ' d6();',
+    ].join('\n');
+    expect(normalizeContributionFingerprint(twoHunks(50))).toBe(normalizeContributionFingerprint(twoHunks(70)));
+    // The BOUND that makes this payable: the escape is checked LAST. Both stricter tests still refuse all of
+    // these, so nothing that used to be refused by the SHA test or the strict diff digest is newly honoured.
+    for (const [a, b] of [[sameHeading(4), sameHeading(13)], [inAlpha, inBeta], [twoHunks(50), twoHunks(70)]]) {
+      expect(normalizeDiffFingerprint(a)).not.toBe(normalizeDiffFingerprint(b));
+    }
+  });
+
+  it('#x3q28ce — a witness digest stamped by the OLD projection fails CLOSED, so the ledger needs no migration', () => {
+    // The ledger records `reviewed-contribution` as an attribute, never as a lookup key, precisely so a
+    // repaired digest re-interprets in place. Re-interpreting is not the same as MATCHING: an old digest is a
+    // hash, not the diff text, so it cannot be recomputed under the new projection. It simply never matches,
+    // the escape falls through, and the PR re-parks for a re-clear that re-stamps it. Fail-closed, self-healing.
+    const OLD_PROJECTION_DIGEST = 'b5d1eafec934379329ac3280c56bf46db8ace69f204de74e5dd2c45f70fd7f85'; // WE PR #1106
+    expect(normalizeContributionFingerprint(OLD_PROJECTION_DIGEST)).toBe(OLD_PROJECTION_DIGEST); // still parsed
+    expect(acceptanceCoversHead({
+      acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb',
+      acceptedContribution: OLD_PROJECTION_DIGEST, headContribution: GAP_BASE_A,
+    }).covers).toBe(false);
   });
 
   // ── ROUND-2 MAJOR 3: binary content is invisible to a digest that drops the blob pair. ───────────────────
@@ -1303,8 +1432,11 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
   //              PR's own changed; `main` merely grew 15 lines above one hunk and 4 above another.
   //   00:41:26Z  ready-to-merge OFF.   00:41:28Z  review:human back ON. NO comment. The clearance was gone.
   //
-  // The two gap values below are the ONLY difference measured between the two 137 KB net diffs (verified by
+  // The two gap values below are the ONLY difference measured between the two net diffs (verified by
   // recomputing both from the real commits): `~424 → ~439` and `~324 → ~328`. Not one `+`/`-` line differs.
+  // Size, for the record and in BOTH units, because two "corrections" of it have now circulated: each net diff
+  // is 137,799 JavaScript characters and 141,836 UTF-8 bytes. Neither figure was ever wrong; they measure the
+  // same text with different rulers, and the two sides are byte-for-byte the same size as each other.
   const contribution = (gapA, gapB) => [
     'diff --git a/scripts/lib/review-core.mjs b/scripts/lib/review-core.mjs',
     'index 1fb268d1..191cf371 100644',
@@ -1324,6 +1456,10 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
   ].join('\n');
   const CLEARED = contribution(424, 324);
   const REBASED = contribution(439, 328); // `main` grew BETWEEN the lane's own hunks — pure base movement
+  // #x5p1xz8 — the base move above is no longer stale at all, so the notice tests below need a head that
+  // genuinely IS stale. One ride-in line on top of the same rebase: the contribution changed, and every digest
+  // in the chain says so.
+  const RIDE_IN = `${REBASED}\n+  rmRf();`;
 
   // The verbatim attribution line PR #1106's clearance comment carries (pre-#xmnl36p, marker-less).
   const LEGACY_CLEARANCE = {
@@ -1339,21 +1475,25 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
     acceptedSha: '53b379543095120ecc20e926dafa68df195d677d',
     headSha: 'e97d6c3b26524d793a892a2a3c312c2491e62752',
     acceptedContribution: CLEARED,
-    headContribution: REBASED,
+    headContribution: RIDE_IN,
   };
 
-  it('THE TRIGGER — a base move BETWEEN the lane\'s own hunks defeats the #x9xqexm contribution escape', () => {
-    // Not one added/removed line differs, yet the inter-hunk GAP signal (added by #x9xqexm to catch a
-    // relocation) is variant under this base movement — pinned here as the mechanism that fires the re-park,
-    // NOT as desired behaviour. It is the INVERSE of #x413mbt and was mis-cited as it in the first cut of this
-    // item (PR #1124 review, finding 2): #x413mbt is the digest COLLIDING on two different contributions (a
-    // false HONOUR, and it turns on the gap being PRESERVED under a uniform shift); this is the digest
-    // DIVERGING on an unchanged contribution (a false STALE, under a NON-uniform base move). That direction is
-    // filed nowhere yet.
-    expect(normalizeContributionFingerprint(CLEARED)).not.toBe(normalizeContributionFingerprint(REBASED));
+  it('THE TRIGGER, NOW FIXED — a base move BETWEEN the lane\'s own hunks no longer defeats the escape', () => {
+    // This test used to pin the DEFECT: the inter-hunk GAP signal was variant under this base movement, so the
+    // escape failed and the clearance was revoked over a contribution nobody touched. #x5p1xz8 removed the
+    // signal, so the same two fixtures now agree. The gap values still differ — that is the point; what changed
+    // is that the digest no longer reads a base move as a contribution change.
+    expect(REBASED).toContain('@@ -539,6'); // `main` grew 15 lines above this hunk …
+    expect(REBASED).toContain('@@ -1328,6'); // … and only 4 more above this one: a NON-uniform move
+    expect(normalizeContributionFingerprint(CLEARED)).toBe(normalizeContributionFingerprint(REBASED));
     expect(acceptanceCoversHead({
       acceptedSha: staleArgs.acceptedSha, headSha: staleArgs.headSha,
       acceptedContribution: CLEARED, headContribution: REBASED,
+    }).covers).toBe(true);
+    // …while a real ride-in on top of that same rebase is still refused, which is what the tests below drive.
+    expect(acceptanceCoversHead({
+      acceptedSha: staleArgs.acceptedSha, headSha: staleArgs.headSha,
+      acceptedContribution: CLEARED, headContribution: RIDE_IN,
     }).covers).toBe(false);
   });
 
