@@ -37,8 +37,12 @@ import {
   parseOperatorClearance,
   buildClearedHumanMarker,
   buildClearanceRevocationComment,
+  CONFORMANCE_GRADING_PATHS,
 } from '../review-escalation.mjs';
 import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
+// The SECOND consumer of `isBlastRadiusPath` (#1162 review N2). Imported so the superset relation between the
+// drain's rubric and test selection is asserted here rather than restated as a hand-counted number.
+import { isSensitivePath, EXTRA_DENY } from '../../readiness/test-selection.mjs';
 
 describe('isBlastRadiusPath', () => {
   // The agent-behaviour trees (skills + agent memory) are NOT re-asserted here: every spelling of both has one
@@ -57,6 +61,180 @@ describe('isBlastRadiusPath', () => {
     for (const p of ['backlog/2171-x.md', 'demos/declarative-spa.html', 'src/_data/other.json']) {
       expect(isBlastRadiusPath(p)).toBe(false);
     }
+  });
+
+  // The conformance-grading surfaces. Regression fixtures for the plateau-app#137 hole: the drain merged the
+  // intl grader unreviewed because every pattern above was spelled for WE's layout, so the OTHER TWO repos in
+  // the constellation the same drain sweeps had an effectively empty risk roster. Every path below is a REAL
+  // tracked path from `git ls-files` in its repo, not an invented shape — an invented fixture would prove the
+  // regex matches itself and nothing about the repos the gate actually runs against.
+  describe('conformance-grading surfaces score in all three constellation repos', () => {
+    // Deliberately NOT `isBlastRadiusPath` here: this asserts the NEW patterns are what do the work. A path
+    // that also matched a pre-existing pattern would pass an `isBlastRadiusPath` assertion while the new set
+    // sat dead, which is exactly the vacuous-green failure the set exists to prevent.
+    const matchedByNewSet = (p) => CONFORMANCE_GRADING_PATHS.some((re) => re.test(p));
+
+    it('flags the WE vector home — the assertions a standard is judged BY', () => {
+      for (const p of [
+        'conformance-vectors/intl.vectors.ts',
+        'conformance-vectors/webpolicy.vectors.ts',
+        'conformance-vectors/binding.ts',
+        'conformance-vectors/__tests__/schema.test.ts',
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(true);
+        expect(isBlastRadiusPath(p), p).toBe(true);
+      }
+    });
+
+    it('flags the plateau-app judge + runner — the code that decides pass/fail', () => {
+      for (const p of [
+        'packages/core/src/conformance-engine/conformanceVectors.ts',
+        'packages/core/src/conformance-engine/embedSuites.ts',
+        'packages/core/src/conformance-engine/renderer-audit/goldens.ts',
+        'tests/fidelity/real-route-conformance.ts',
+        'tools/explorer/oracles/intentConformance.ts',
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(true);
+        expect(isBlastRadiusPath(p), p).toBe(true);
+      }
+    });
+
+    it('flags the frontierui bindings + harnesses, in every language they are written in', () => {
+      for (const p of [
+        'intl/intlConformance.ts',
+        'blocks/deck/deckConformance.ts',
+        'plugs/webtheme/conformanceHarness.ts',
+        'plugs/webportals/conformance/ssrVectors.ts',
+        'plugs/webdirectives/ssr/net/src/ConformanceHarness.cs',
+        'plugs/webdirectives/ssr/jvm/src/test/java/com/frontierui/webdirectives/ssr/ConformanceHarness.java',
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(true);
+        expect(isBlastRadiusPath(p), p).toBe(true);
+      }
+    });
+
+    // A consumer OUTSIDE a registered directory does not score. The qualifier is not decoration — an earlier
+    // version of this test omitted it and was VACUOUS: every fixture failed every pattern structurally, so
+    // deleting the basename pattern entirely left the test green. It proved nothing about the exclusion.
+    it('does NOT flag a consumer, the UI, or fixture data that sits outside a registered directory', () => {
+      for (const p of [
+        'intl/__tests__/intlConformance.test.ts',                        // a consumer — it goes red on its own
+        'blocks/__tests__/unit/a11y-composition-conformance.test.ts',    // a consumer
+        'plugs/__tests__/unit/subpath-exports.conformance.test.ts',      // a consumer
+        'packages/webdocs-ui/src/ConformancePanel.ts',                   // UI that renders results
+        'demos/auto-insurance/conformance.json',                         // fixture data
+        'plugs/webdirectives/ssr/net/WebDirectivesSsr.Conformance.csproj', // a project file, not a harness
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(false);
+      }
+    });
+
+    // The honest other half, and the reason the test above carries its qualifier. A DIRECTORY anchor sweeps
+    // everything inside it. These four consumers and this golden fixture DO escalate, and the comment on
+    // `CONFORMANCE_GRADING_PATHS` must keep saying so — the earlier draft claimed consumers were excluded "by
+    // construction", which is true of the basename pattern and false of the directory anchors.
+    it('DOES flag a consumer that lives inside a registered grading directory', () => {
+      for (const p of [
+        'packages/core/src/conformance-engine/intl.conformance.test.ts',
+        'packages/core/src/conformance-engine/webpolicy.conformance.test.ts',
+        'packages/core/src/conformance-engine/conformanceVectors.test.ts',
+        'packages/core/src/conformance-engine/renderer-audit/goldens/pagination-goldens.json',
+        'conformance-vectors/__tests__/webdocs.vectors.test.ts',
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(true);
+      }
+    });
+
+    // THE CONTROL for the basename pattern. Each of these matches through EXACTLY ONE pattern, so deleting
+    // that pattern turns this test red — which is exactly what the previous negative test failed to do.
+    // Counted rather than sliced positionally: `slice(0, 4)` would silently stop testing anything the day a
+    // fifth directory anchor is appended after the basename pattern.
+    it('the basename pattern is load-bearing — exactly one pattern matches each of these', () => {
+      for (const p of [
+        'intl/intlConformance.ts',
+        'blocks/deck/deckConformance.ts',
+        'plugs/webtheme/conformanceHarness.ts',
+        'plugs/webdirectives/ssr/net/src/ConformanceHarness.cs',
+      ]) {
+        expect(CONFORMANCE_GRADING_PATHS.filter((re) => re.test(p)).length, p).toBe(1);
+      }
+    });
+
+    // THE SUPERSET LAW: `isSensitivePath` folds `isBlastRadiusPath` into its deny set, so anything this set
+    // escalates is also sensitive to test selection. ONE SAMPLE PER PATTERN — all five, because the docblock
+    // claims the relation holds for the whole set and a four-of-five sample quietly excludes one.
+    it('every conformance-grading path is also SENSITIVE to test selection', () => {
+      for (const p of [
+        'conformance-vectors/intl.vectors.ts',                          // pattern 1
+        'wrapper-conformance/runner.ts',                                // pattern 2
+        'packages/core/src/conformance-engine/conformanceVectors.ts',   // pattern 3
+        'plugs/webportals/conformance/ssrVectors.ts',                   // pattern 4
+        'intl/intlConformance.ts',                                      // pattern 5
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(true);
+        expect(isSensitivePath(p), `${p} escalates but is not sensitive — the superset law broke`).toBe(true);
+      }
+    });
+
+    // THE DIVERGENCE CONDITION, pinned because the obvious reading of the law above is WRONG and shipped once.
+    // The law gives `escalating ⇒ sensitive`. It does NOT give `newly escalating ⇒ NEWLY sensitive` — flipping
+    // also needs the path to have been un-sensitive before, and `isSensitivePath` has a second source in
+    // `EXTRA_DENY`. So the guarantee is `flip-count ≤ newly-escalating-count`, and today's equality is a
+    // measured fact (zero of the 65 overlap `EXTRA_DENY`), not a theorem.
+    //
+    // This is the file class that breaks it. Note the last assertion: the superset test above stays GREEN on
+    // it, which is precisely why the contingency needs its own test rather than a sentence in a comment.
+    it('a config-shaped file inside a grading directory would make the two counts diverge', () => {
+      const p = 'conformance-vectors/vitest.config.ts';
+      expect(matchedByNewSet(p), 'newly escalates via the directory anchor').toBe(true);
+      expect(EXTRA_DENY.some((re) => re.test(p)), 'but was ALREADY sensitive via the *.config.ts rule').toBe(true);
+      expect(isSensitivePath(p), 'so the superset assertion above cannot detect the divergence').toBe(true);
+    });
+
+    // The rename footgun the PR #1162 review found. Without `.` in the basename character class, renaming a
+    // judge `intlConformance.ts` → `intl.conformance.ts` silently drops it from the gate — and the comment's
+    // own "a consumer is dotted" framing invites exactly that rename. Both spellings must score, and the
+    // `.test.ts` consumer must still not.
+    it('a dotted judge name still scores, while a dotted CONSUMER name still does not', () => {
+      expect(matchedByNewSet('intl/intl.conformance.ts')).toBe(true);
+      expect(matchedByNewSet('intl/intlConformance.ts')).toBe(true);
+      expect(matchedByNewSet('intl/intl.conformance.test.ts')).toBe(false);
+      expect(matchedByNewSet('intl/intlConformance.test.ts')).toBe(false);
+    });
+
+    // WE's second vector home, missed by the first draft. Its runner header says WE owns the runner AND the
+    // vectors, which is the same silent-green surface as `conformance-vectors/`.
+    it('flags WE\'s other vector home', () => {
+      for (const p of ['wrapper-conformance/runner.ts', 'wrapper-conformance/vectors.ts', 'wrapper-conformance/index.ts']) {
+        expect(matchedByNewSet(p), p).toBe(true);
+      }
+    });
+
+    // The regression itself, scored end-to-end rather than as a path predicate. These are plateau-app#137's
+    // two real files and its real size (99 added, 0 deleted) — under the 400-line trip, which is precisely why
+    // nothing fired and the drain landed it in one pass with no review label ever applied.
+    it('plateau-app#137 — the PR that merged unreviewed now escalates, and stays agent-clearable', () => {
+      const changedFiles = [
+        'packages/core/src/conformance-engine/intl.conformance.test.ts',
+        'vitest.config.ts',
+      ];
+      const score = scoreEscalation({ changedFiles, diffLines: 99 });
+      expect(score.escalate).toBe(true);
+      expect(score.signals.blastRadius).toContain('packages/core/src/conformance-engine/intl.conformance.test.ts');
+      // Size did NOT save it and must not be credited with doing so — 99 is far under the 400-line threshold.
+      expect(score.signals.size).toBeUndefined();
+      expect(Number(DEFAULT_THRESHOLDS.diffLines)).toBeGreaterThan(99);
+      // Agent-clearable, not `review:human`: this set carries the existing `blast-radius` token and is
+      // deliberately NOT on the declarative leash. Promoting it is a separate, evidence-led decision.
+      expect(score.humanRequired).toBe(false);
+    });
+
+    // The negative control. `vitest.config.ts` is the OTHER file in #137 and it must still score nothing on its
+    // own — otherwise the test above would pass for the wrong reason and the whole fixture proves nothing.
+    it('the same PR\'s non-conformance file scores nothing on its own', () => {
+      expect(isBlastRadiusPath('vitest.config.ts')).toBe(false);
+      expect(scoreEscalation({ changedFiles: ['vitest.config.ts'], diffLines: 99 }).escalate).toBe(false);
+    });
   });
 
   // #2909 — #2266 relocated both agent-behaviour trees out of `.claude/` and left a symlink behind. Git tracks a
