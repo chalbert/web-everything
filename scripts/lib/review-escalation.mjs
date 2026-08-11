@@ -863,53 +863,88 @@ export function parseReviewedDiff(comments) {
  *   • the per-file headers — `diff --git`, `---`/`+++`, mode / new-file / deleted-file / rename / similarity /
  *     `Binary files` lines. A file entering or leaving the diff, or changing mode, is content. A binary
  *     section's `index` blob pair is kept too (`binaryIndexLines`) — there it IS the content.
- *   • each hunk header rewritten as `@@ ~<gap> -,<oldLen> +,<newLen> @@<section heading>`. THREE parts, and the
- *     split between them is the whole design (see POSITION, below): the ABSOLUTE offsets are dropped, the
- *     LENGTHS are kept, the GAP to the previous hunk IN THE SAME FILE is kept (`*` for a file's first hunk), and
- *     git's trailing SECTION HEADING is kept verbatim.
+ *   • each hunk header rewritten as `@@ -,<oldLen> +,<newLen> @@`. The ABSOLUTE offsets are dropped, the
+ *     LENGTHS are kept, and — since #x5p1xz8 — NOTHING position-derived survives (see POSITION, below).
  *   • every `+` and `-` line inside a hunk, verbatim — including whitespace-only ones. This is the contribution.
  *   • `\ No newline at end of file`, which is content.
- * DROPPED: `index` blob-pair lines of TEXT sections (restated hashes), every CONTEXT line (base text the author
- * did not write), and the hunks' absolute file offsets.
+ *   • one `~<n>` marker per maximal RUN of consecutive context lines inside a hunk — the run's LENGTH, never
+ *     its text (see THE RUN SHAPE, below).
+ * DROPPED: `index` blob-pair lines of TEXT sections (restated hashes), every CONTEXT line's TEXT (base text the
+ * author did not write), the hunks' absolute file offsets, the inter-hunk gap and git's `@@` section heading.
  *
- * POSITION — why the offsets are not simply thrown away (round-2 review, blocker 2). The first cut stripped the
- * whole `@@` line down to its lengths, and that collides on a RELOCATION: for any hunk more than three lines
- * from either file edge the length pair is position-invariant, so ONE ADDED GUARD LINE MOVED FROM LINE 10 TO
- * LINE 30 produced a byte-identical digest and `covers: true` (reproduced with real `git diff` output). That is
- * the "right line, wrong place" class — a guard moved below the call it guards, a `return` moved out of a
- * branch — and it is not only adversarial: a 3-way rebase that misapplies a hunk to a clean-but-wrong offset
- * produces exactly this shape with nobody attacking. Two position signals are kept, chosen because each is
- * invariant under the base moving but variant under the contribution moving:
- *   • THE SECTION HEADING (`@@ … @@ <heading>`). Git's default `xfuncname` heuristic (no `.gitattributes` in this
- *     repo) picks the NEAREST PRECEDING LINE STARTING AT COLUMN 0 WITH A LETTER — a top-level declaration, not
- *     "the enclosing function". It travels WITH the code rather than with the base, so `main` inserting lines
- *     above does not change it — but it does NOT separate a relocation between two methods of the same class,
- *     between two blocks of one long top-level function, or between any two hunks of an indented JSON/YAML file
- *     (no line there starts at column 0, so the heading is EMPTY and identical across the whole file). Those
- *     shapes collide; see THE RESIDUAL, below. If `main` RENAMES the top-level declaration the heading changes
- *     and the escape simply fails closed — the PR re-parks and the human re-clears, the safe direction.
- *   • THE INTER-HUNK GAP (this hunk's old-side start minus the previous hunk's, within the same file). A
- *     uniform whole-file displacement — the #1100 shape, `@@ -197,3` → `@@ -203,3` because the file grew above
- *     the hunk — leaves every gap unchanged. Any hunk that moves relative to its siblings changes one.
+ * ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+ * POSITION — WHY BOTH POSITION SIGNALS ARE GONE (#x5p1xz8, over #xalaqel and #x0pfbqp)
+ * ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+ * The first cut of this digest kept two of them, on the claim that each was "invariant under the base moving
+ * but variant under the contribution moving". BOTH HALVES OF THAT CLAIM WERE FALSE FOR THE FIRST CONJUNCT, and
+ * both were proven false in production on 2026-08-09, on two PRs, within twelve hours of shipping:
  *
- * THE RESIDUAL, stated at its true width because dropping context is a real loosening. Two diffs collide iff
- * they touch the same files in the same order, with the same hunk count, the same hunk lengths, the same
- * section headings, the same inter-hunk gaps, and byte-identical `+`/`-` lines. After the two signals above,
- * what is left is a relocation that keeps a hunk's SECTION HEADING and its GAP to the previous hunk unchanged.
- * That is wider than "one function, one hunk": it also covers a move between two methods of the same class, a
- * move between two blocks of one long top-level function, ANY relocation inside an indented JSON/YAML file
- * (the heading is empty and identical for the whole file, so no hunk in it is ever distinguished by heading),
- * and a set of hunks that relocates UNIFORMLY — a two-hunk file shifted as a block collides the same way a
- * single-hunk file does, because every gap is preserved by construction. That residual is NOT closable inside a
- * fixed-size digest, and the reason is worth writing down rather than hand-waving: the only remaining witness to
- * a within-heading move is the hunk's CONTEXT lines — and the #1100 case this whole escape exists for is one
- * where `main` changed the context line IMMEDIATELY ADJACENT to the contribution. Tolerating that and detecting
- * a within-heading move are the same measurement read in opposite directions; no digest can do both. Tracked as
- * #x413mbt (with the directions worth costing) rather than left implicit, and pinned by a deliberately-passing
- * test. What bounds it: this is checked LAST, after the SHA test and after the strict
+ *   • THE INTER-HUNK GAP (`~<gap>`, this hunk's old-side start minus the previous hunk's) is invariant only
+ *     under a UNIFORM whole-file displacement. WE PR #1106: `main` grew 15 lines above one hunk and 4 above
+ *     another, the two gaps moved `424→439` and `324→328`, and the operator's clearance — granted 00:34:00Z —
+ *     was revoked at 00:41:28Z over a contribution whose 1,435 `+`/`-` lines were byte-identical. 1,534
+ *     projection lines each side; exactly two differed, both of them gap values. Filed as #xalaqel.
+ *   • THE SECTION HEADING (`@@ … @@ <heading>`) is derived by git's `xfuncname` from the NEAREST PRECEDING
+ *     COLUMN-0 LINE, which lives in the BASE. The old docblock reasoned that it therefore "travels WITH the
+ *     code", and anticipated exactly one base-driven change — a RENAME — which it ruled safe. It missed the
+ *     common one: the base INSERTING A NEW COLUMN-0 DECLARATION between the old heading source and the hunk.
+ *     WE PR #1100: PR #1124 landed a new `describe(…)` block in the same test file at 11:50:32Z, and at
+ *     12:20:57Z — 52 seconds after the clearance — the heading read `exit 0` on one side and the new
+ *     `describe(…)` on the other, with ZERO `+`/`-` lines differing. Filed as #x0pfbqp.
+ *
+ * WHY NOT A BETTER POSITION SIGNAL — the impossibility, because "try harder" is the obvious objection and it
+ * does not survive contact. Everything this function can see about a hunk's position is its old-side start
+ * (the heading is a function of the base text above that start). Consider one contribution C and one file:
+ *   (i)  the BASE grows by k lines above C — old start becomes s+k, `+`/`-` lines and lengths unchanged;
+ *   (ii) C RELOCATES down by k lines on an unchanged base — old start becomes s+k, `+`/`-` lines and lengths
+ *        unchanged.
+ * With context dropped, (i) and (ii) produce BYTE-IDENTICAL projections — including their headings, when the
+ * base's insertion in (i) is a declaration and the relocation in (ii) crosses one. Two identical inputs cannot
+ * be given two different answers, so ANY function of this projection that is invariant under every base move is
+ * also blind to every relocation. Reproduced from real `git diff` output in the unit suite
+ * ("the indistinguishability, from real git output"). The symmetry breaks only on the hunk's CONTEXT LINES —
+ * which are exactly what this digest must drop, because the WE PR #1100 case the escape exists for is one where
+ * `main` changed the context line immediately adjacent to the contribution (re-derived: 5 context lines changed
+ * across that head move). So position-sensitivity and base-invariance are not a tuning problem; they are
+ * mutually exclusive given a base-independent digest, and the choice below is a CHOICE, not an oversight.
+ *
+ * THE RUN SHAPE — what relocation detection survives, and it is not nothing. Context TEXT is dropped, but the
+ * LENGTH of each run of context lines between contributed lines is kept. It costs no base-invariance at all: a
+ * base edit that changes a run length also changes the hunk's `oldLen`/`newLen`, which were already hashed, so
+ * the run markers add no new way for the base to diverge the digest. A base MODIFICATION of a context line —
+ * the #1100 shape — changes neither. What it buys is every relocation that changes the hunk's shape rather than
+ * only its offset: a hunk moved to within three lines of either file edge (its leading or trailing run is
+ * truncated), and any move that re-clusters two contributed lines into one hunk or splits them across two.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+ * THE RESIDUAL, AND THE DIRECTION IT ERRS IN — stated at its true, WIDENED width
+ * ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+ * Two diffs now collide iff they touch the same files in the same order, with the same hunk count, the same
+ * hunk lengths, the same context-run shape, and byte-identical `+`/`-` lines. Against the first cut this is a
+ * REAL WIDENING of the false-HONOUR direction (#x413mbt), and it is paid deliberately:
+ *   • what was closed: the false STALE. Measured over every stamped clearance in recent history (16 pairs,
+ *     each self-certified by reproducing its own `reviewed-contribution` marker) plus 201 machine-replayed
+ *     content-preserving rebases onto four different bases — the first cut diverged on 5, this digest on 0.
+ *   • what was widened: a RELOCATION whose content, hunk lengths and run shape are all unchanged is now
+ *     honoured. The first cut also required the heading and the gap to match, so it additionally caught a move
+ *     across a top-level declaration and a move relative to a sibling hunk. Those two are gone. #x413mbt stays
+ *     OPEN and its pinned test is widened in the same change, so the digest's residuals never disagree about
+ *     what it promises.
+ *   • the INVARIANCE residual — the part that is still not invariant under the base moving — errs the SAFE
+ *     way: a base edit INSIDE a hunk's own context window changes `oldLen`/`newLen` (and may split or coalesce
+ *     hunks), the digest diverges, the accept goes stale and a human re-clears. False stale, never false
+ *     honour.
+ * What bounds the widened direction: this is checked LAST, after the SHA test and after the strict
  * `normalizeDiffFingerprint` test, so nothing that already passed behaves differently; it can only ever honour
- * an accept the strict test rejected, and only for a head advance whose every added/removed line, hunk length,
- * section heading and inter-hunk gap is unchanged.
+ * an accept the strict test rejected. Closing #x413mbt needs information this function does not have, and both
+ * viable routes are outside it: ATTRIBUTE THE MOVE TO ITS ACTOR (the drain knows it produced the rebase, so it
+ * could re-stamp rather than re-derive) or RECOMPUTE THE REVIEWED SIDE AGAINST THE NEW BASE (compare one
+ * projection against a re-derived one instead of two taken against different bases). Neither is a digest change.
+ *
+ * MIGRATION — none, and none is possible. A `reviewed-contribution` marker stamped by the first cut is a
+ * digest, not the diff text, so it cannot be recomputed under this projection: it will simply never match, the
+ * escape falls through, and the PR re-parks for a re-clear that re-stamps it. FAIL-CLOSED and self-healing,
+ * which is also why #x3q28ce's ledger stores these digests as WITNESSES rather than as a lookup key.
  *
  * @param {string|null|undefined} diffText - raw unified diff, or a 64-hex fingerprint this function produced.
  *   Same idempotence caveat as `normalizeDiffFingerprint`: do not pass untrusted free-form text, and never pass
@@ -926,32 +961,39 @@ export function normalizeContributionFingerprint(diffText) {
   const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
   const kept = [];
   const lines = diffText.split('\n');
+  // A trailing NEWLINE is not a context line. `git diff` ends its output with one, so splitting leaves a final
+  // `''` — and now that context RUNS are counted (rather than every context line silently dropped) that phantom
+  // would emit a `~1` and make the digest depend on whether the caller's text ends in a newline. Only genuinely
+  // EMPTY entries are dropped, never a line carrying whitespace: git spells a blank context line `' '`, and the
+  // sibling `normalizeDiffFingerprint` draws the same line for the same reason (#1086 blocker 2).
+  while (lines.length && lines[lines.length - 1] === '') lines.pop();
   const keepIndexAt = binaryIndexLines(lines); // #x9xqexm major 3 — a binary section's blob pair IS its content
   let inManifestSection = false;
   let inHunk = false;
-  let prevOldStart = null; // per FILE section — the anchor for the inter-hunk gap
+  let contextRun = 0; // length of the context run currently open inside a hunk (THE RUN SHAPE, above)
+  // Close the open context run by emitting only its LENGTH. `~<n>` can never collide with anything else the
+  // projection emits inside a hunk: those lines all start with `+`, `-` or `\`.
+  const closeRun = () => { if (contextRun > 0) kept.push(`~${contextRun}`); contextRun = 0; };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.startsWith('diff --git ')) {
-      // A new file section always ends any skip AND any hunk in progress, and restarts the gap chain.
+      // A new file section always ends any skip AND any hunk in progress.
+      closeRun();
       inManifestSection = line === MANIFEST_HEADER;
       inHunk = false;
-      prevOldStart = null;
       if (!inManifestSection) kept.push(line);
       continue;
     }
     if (inManifestSection) continue;
     const hunk = HUNK_RE.exec(line);
     if (hunk) {
+      closeRun();
       inHunk = true;
-      // Absolute offsets out; lengths, the inter-hunk GAP and the SECTION HEADING in (see POSITION above).
-      // An omitted length means 1 (git's own shorthand) — spell it so `@@ -1 +1 @@` and `@@ -1,1 +1,1 @@`
-      // cannot hash differently for the same shape. The gap is measured on the OLD side (the base pre-image);
-      // the new-side gap is derivable from it and the preceding lengths, so hashing it too would add no signal.
-      const oldStart = Number(hunk[1]);
-      const gap = prevOldStart === null ? '*' : String(oldStart - prevOldStart);
-      prevOldStart = oldStart;
-      kept.push(`@@ ~${gap} -,${hunk[2] ?? '1'} +,${hunk[4] ?? '1'} @@${hunk[5]}`);
+      // Absolute offsets, the inter-hunk gap and git's section heading are ALL out — every one of them is a
+      // function of the base, and #xalaqel / #x0pfbqp are the two production proofs (see POSITION above).
+      // Lengths stay. An omitted length means 1 (git's own shorthand) — spell it so `@@ -1 +1 @@` and
+      // `@@ -1,1 +1,1 @@` cannot hash differently for the same shape.
+      kept.push(`@@ -,${hunk[2] ?? '1'} +,${hunk[4] ?? '1'} @@`);
       continue;
     }
     if (!inHunk) {
@@ -963,9 +1005,17 @@ export function normalizeContributionFingerprint(diffText) {
       continue;
     }
     // Inside a hunk: the contribution is the `+`/`-` lines plus the no-newline marker. A leading space (or an
-    // empty line, which is how some producers spell an empty context line) is BASE text and is dropped.
-    if (line.startsWith('+') || line.startsWith('-') || line.startsWith('\\')) kept.push(line);
+    // empty line, which is how some producers spell an empty context line) is BASE text — its TEXT is dropped,
+    // and only the length of the run it belongs to is kept.
+    if (line.startsWith('+') || line.startsWith('-') || line.startsWith('\\')) { closeRun(); kept.push(line); continue; }
+    // A wholly EMPTY line inside a hunk counts for nothing. Git spells a blank context line `' '`, so `''` is
+    // either a producer that trimmed that space or a blank separator between sections — neither is a signal, and
+    // letting one increment a run would make the digest depend on whether the caller's producer trims. Same
+    // outcome as before this projection existed, where every context line was dropped outright.
+    if (line === '') continue;
+    contextRun++;
   }
+  closeRun();
   const normalized = kept.join('\n');
   if (!normalized.trim()) return null;
   return createHash('sha256').update(normalized, 'utf8').digest('hex');
@@ -1119,9 +1169,12 @@ export function acceptanceCoversHead({
   // contribution, so it changes whenever `main` moves a context line or shifts a hunk offset under the lane —
   // which the drain's own rebase-drop pass causes within minutes of every accept (measured on PR #1100: three
   // differing lines across 130 KB, none of them the PR's own). This digest hashes only what the PR ADDS and
-  // REMOVES, so a base-only move is recognised as covered while any change to the contribution is not. Same
-  // FAIL-CLOSED shape as its sibling: both fingerprints must be present and equal, so an accept stamped before
-  // #x9xqexm (no contribution marker) behaves exactly as it did.
+  // REMOVES, so a base-only move is recognised as covered. It does NOT catch every change to the contribution:
+  // since #x5p1xz8 dropped the two base-derived position signals (they revoked live clearances on PR #1106 and
+  // PR #1100 — see `normalizeContributionFingerprint`), a pure RELOCATION that preserves content, hunk lengths
+  // and context-run shape is honoured here. That is #x413mbt, still open, and it is bounded by this tier being
+  // LAST. Same FAIL-CLOSED shape as its sibling: both fingerprints must be present and equal, so an accept
+  // stamped before #x9xqexm — or by #x9xqexm's own first cut, whose digests can no longer match — falls through.
   const ac = normalizeContributionFingerprint(acceptedContribution);
   const hc = normalizeContributionFingerprint(headContribution);
   if (ac && hc && ac === hc) {

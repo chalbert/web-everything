@@ -10,6 +10,29 @@ relatedReport: reports/2026-08-09-backlog-consolidation-analysis.md
 
 # The acceptance-coverage digest re-parks a cleared PR whose contribution never changed
 
+> **DIGEST REPAIRED 2026-08-10 — the two false-stale slices are closed; the epic stays OPEN on the other two.**
+> `#3046` and `#3052` are **resolved together**: both base-derived position signals (the inter-hunk gap and
+> git's `@@` section heading) are out of `normalizeContributionFingerprint`, and both 2026-08-09 incidents now
+> re-hash alike from their real commits — WE PR #1106 `b5d1eafe…`/`e7b1d883…` → `eae879d2…` both sides, WE
+> PR #1100 `6a4f7c53…`/`b8dd7351…` → `2ba8be98…` both sides — with the accept-side reconstruction self-certified
+> by reproducing all four stamped markers exactly.
+>
+> **Why the epic does not close with them.** `#3021` and `#2884` are untouched, and `#3021` is **deliberately
+> widened**: relocation detection cannot survive base-invariance. Everything the digest can see about position
+> is a hunk's old-side start, and a base growing *k* lines above the contribution is byte-identical, in the
+> projection, to the contribution relocating *k* lines down an unchanged base — headings included. So a signal
+> invariant under every base move is blind to every relocation; the two properties are mutually exclusive, not
+> a tuning problem. Proved from real `git diff` output in the unit suite. `#3021`'s pin was widened in the same
+> change, as this card's *joint constraint* requires: three residuals, one promise.
+>
+> **Measured, not asserted.** 16 stamp-certified accept→head pairs from recent history plus 201 machine-replayed
+> content-preserving rebases onto four different bases: 5 false stales before, **0** after; 181/181 genuine
+> contribution changes still detected. The residual that remains on the invariance side errs the safe way — a
+> base edit *inside* a hunk's own context window changes the hunk lengths, the digest diverges, and a human
+> re-clears. **What is still owed here:** `#3021` (now wider) and `#2884` (the caller). Both viable closures for
+> `#3021` are outside the digest — attribute the move to its actor, or recompute the reviewed side against the
+> new base.
+
 Umbrella for the 2026-08-09 clearance-revocation incident on WE PR #1106 and WE PR #1100.
 `normalizeContributionFingerprint` ([we:scripts/lib/review-escalation.mjs](scripts/lib/review-escalation.mjs))
 mis-reads a base move the **drain itself** produced as a contribution change — a false *stale* that revokes an

@@ -13,6 +13,37 @@ scope:
 
 # The contribution fingerprint still collides when a relocation keeps its `@@` heading and hunk gaps unchanged
 
+> **WIDENED 2026-08-10 by `#3054`'s repair — read this before the body, which describes the narrower original.**
+> `#3046` and `#3052` proved that BOTH position signals this card's title names are variant under the base
+> moving, and they revoked two live operator clearances on 2026-08-09. They are now gone from
+> `normalizeContributionFingerprint`, so the collision no longer needs the heading and the gap to be preserved:
+> **any relocation collides** that keeps the same files, the same hunk order, the same hunk lengths, the same
+> context-run shape and byte-identical `+`/`-` lines. The pinned test in
+> [we:scripts/lib/__tests__/review-escalation.test.mjs](scripts/lib/__tests__/review-escalation.test.mjs) was
+> widened in the same change and now pins three shapes, two of which were REFUSED before: a move across a
+> top-level declaration, and a hunk moving relative to its sibling.
+>
+> **Why this was not avoidable, so nobody re-litigates it here.** Everything the digest can see about a hunk's
+> position is its old-side start. A base growing *k* lines above the contribution and the contribution
+> relocating *k* lines down an unchanged base produce byte-identical projections — headings included, when the
+> base's insertion is a declaration and the relocation crosses one. Two identical inputs cannot get two
+> different answers, so a digest invariant under every base move is blind to every relocation. Reproduced from
+> real `git diff` output ("THE INDISTINGUISHABILITY"). Note what that proof also says about the old design: the
+> gap and the heading never separated that shape either — they only made a base move look like a change in
+> *other* shapes.
+>
+> **What partially replaced them, and it is not nothing.** A base-invariant context-**RUN SHAPE** — the length
+> of each run of context lines between contributed lines, never its text. It costs no invariance (a base edit
+> that changes a run length already changed `oldLen`/`newLen`) and it refuses any relocation that re-clusters
+> the contributed lines or truncates a run at a file edge.
+>
+> **So the two directions that close this card are both OUTSIDE the digest**, and the *Directions worth costing*
+> below should be read with the first one struck: per-hunk context anchors are refuted by #1100 itself, where
+> `main` changed 5 context lines under the lane across the head move (re-derived 2026-08-10). What remains is
+> **attribute the move to its actor** and **bound the escape by a recorded merge base** — plus a third the
+> siblings surfaced: **recompute the reviewed side against the new base** instead of comparing two projections
+> taken against different bases.
+
 `normalizeContributionFingerprint` drops context lines so a clearance survives the drain rebasing a lane, and
 that leaves one collision open: a contribution that MOVES while keeping the same `@@` section heading and the
 same gap to its sibling hunks. This is WIDER than "one function, one hunk" — git's `@@` heading is the nearest
