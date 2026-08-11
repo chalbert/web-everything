@@ -57,6 +57,20 @@ red. Rather than accept a red window, the sequence widens, switches, then narrow
 The tolerance cannot rot into a blanket pass: anything outside the two named strings still fails, and both
 vacuity controls run unconditionally.
 
+**THE SAFETY IS ORDER-DEPENDENT, and an earlier draft overstated it as "no red window in either direction".**
+The reviewer ran the orders rather than reasoning about them:
+
+| order | result |
+| --- | --- |
+| plateau first (what the manifest enforces: impl-first, WE-last) | green at every point |
+| **WE first** | **plateau `main` goes RED** — 2 failures, the canary inverts and the frozen-findings assertion breaks |
+| plateau lands, WE abandoned | green indefinitely; the suite still grades, wrong sign still caught |
+| **WE lands, plateau abandoned** | **plateau `main` red — WE must not land alone** |
+
+So the couple is safe *because* the drain enforces impl-first, not because the change is order-independent. The
+manifest listing `plateau-app` before `we` is load-bearing, and this item should not be read as saying
+otherwise.
+
 ## The controls are the point
 
 A suite that passes everything is indistinguishable from a suite that grades nothing — which is precisely what
