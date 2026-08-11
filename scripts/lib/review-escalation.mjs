@@ -1455,7 +1455,13 @@ export function readyMergeConflictsWithHold(labels) {
  * `decideReviewGate` returns `action:'merge'` for it. Two independent reasons it cannot be un-queued.
  * @param {Array} observedLabels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
  * @param {{applyLabel?:(string|null), staleAcceptance?:boolean}} [o] - the park's own writes this operation:
- *   the hold label it is applying (if any), and whether it is a #2409 re-park that drops `review:accepted`.
+ *   the hold label it is applying (if any), and whether this is a #2409 STALE-ACCEPTANCE re-park — one whose
+ *   `review:accepted` is known-stale because the head advanced past the reviewed tree. It does NOT drop that
+ *   accept, and NO DRAIN PATH does (#x9xqexm — see the `staleAcceptance` paragraph above). Retracting an
+ *   acceptance is a REVIEWER action and stays one: `review-set-label.mjs --to=changes` strips it deliberately.
+ *   This line said "drops `review:accepted`" until #3053, contradicting its own docblock body six lines up; it
+ *   is spelled out here rather than shortened because `staleAcceptance` is the flag a reader meets FIRST, in an
+ *   IDE hover that shows the signature and not the prose.
  * @returns {boolean} true iff `ready-to-merge` must be removed
  */
 export function decideParkReadyStrip(observedLabels, { applyLabel = null, staleAcceptance = false } = {}) {
@@ -1576,8 +1582,18 @@ export function decideReviewGate({
     if (!fresh.covers) {
       // Re-park for a fresh review: review:pending re-arms an agent panel; a gate-self/human-gated PR (fresh
       // humanRequired score, or a sticky review:human still present) re-parks review:human — only a human may
-      // re-clear it. The drain drops the now-stale review:accepted alongside applying this label (see
-      // merge-ai-prs.mjs). staleAcceptance flags this as the #2409 outcome for the drain's comment + label swap.
+      // re-clear it. staleAcceptance flags this as the #2409 outcome for the drain's comment + label swap.
+      //
+      // #3053 — THE DRAIN DOES NOT DROP `review:accepted` HERE, AND HAS NOT SINCE #x9xqexm. This comment used
+      // to say it did, citing merge-ai-prs.mjs — which says the opposite in as many words: "A RE-SCORE NEVER
+      // REMOVES `review:accepted`". A re-park ADDS a hold; the recorded clearance survives beside it, and
+      // `hasUnclearedReviewLabel` is what refuses the co-present pair (see its own #x9xqexm note above).
+      //
+      // Corrected because the stale text was load-bearing in the wrong direction. #3053 traced a proposed
+      // fourth `review:stale` hold tier to precisely this sentence: the tier existed to stop a revocation that
+      // had already been stopped. The operator ruled that option REJECTED and closed on 2026-08-10, and named
+      // deleting this comment as owed. Do not restore it without first re-reading merge-ai-prs.mjs — a claim
+      // about what the drain deletes belongs where the drain does the deleting, not here.
       const toHuman = humanRequired || hasReviewLabel(labels, REVIEW_LABELS.human);
       // #xmnl36p — IS THIS RE-PARK REVOKING AN OPERATOR CLEARANCE? It is, exactly when it re-imposes
       // `review:human` on a PR whose `review:human` was lifted by the sanctioned `--to=clear-human` ceremony
