@@ -3,8 +3,12 @@ bornAs: xm881ll
 kind: story
 size: 2
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-08"
+dateStarted: "2026-08-11"
+dateResolved: "2026-08-11"
+graduatedTo: reports/2026-08-11-dispatch-lifecycle-spike.md
+relatedReport: reports/2026-08-11-dispatch-lifecycle-spike.md
 scope:
   - we:reports/
 scopeRationale: "A spike whose only output is one new report; its filename is not known until the spike runs."
