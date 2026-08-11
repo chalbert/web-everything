@@ -20,7 +20,7 @@ tags: [gate, review, drain, review-escalation, fingerprint]
 > Verified three ways: the WE PR #1106 accept-time and post-rebase net diffs, rebuilt from the real commits and
 > self-certified by reproducing the stamped `reviewed-diff 3265beec…` / `reviewed-contribution b5d1eafe…`
 > markers, now hash **alike** (`eae879d2…` both sides) where they hashed `b5d1eafe…` vs `e7b1d883…` before; a
-> unit test reproduces the mechanism from real `git diff` output (`#xalaqel — a NON-UNIFORM base move no longer
+> unit test reproduces the mechanism from real `git diff` output (`#3046 — a NON-UNIFORM base move no longer
 > diverges the digest`); and a corpus replay — 16 stamp-certified accept→head pairs plus 201 machine-replayed
 > content-preserving rebases onto four different bases — drops from 5 false stales to 0 with 181/181 genuine
 > contribution changes still detected. **One correction to this card's own record:** the retired *137,799 bytes*

@@ -179,7 +179,7 @@ operator's clearance record.** Two landed mechanisms preserve it, both verified 
   [we:scripts/lib/review-escalation.mjs](scripts/lib/review-escalation.mjs) `:1178`–`:1186`: *"`review:accepted`
   used to short-circuit to `false` unconditionally, which was safe only because the drain DELETED the accept
   whenever it re-parked. **It no longer does** … so a contradictory `accepted + hold` pair can now survive a
-  re-park."* `hasUnclearedReviewLabel` was tightened (`#x9xqexm`) to fail closed on that pair. So after a re-park
+  re-park."* `hasUnclearedReviewLabel` was tightened (`#3023`) to fail closed on that pair. So after a re-park
   the PR visibly carries **both** the clearance and the hold.
 - **#3039's revocation notice posts a durable comment on the PR** naming the clearer — `gate.revokesClearance` →
   `buildClearanceRevocationComment` at [we:scripts/merge-ai-prs.mjs](scripts/merge-ai-prs.mjs) `:3283`. Landed in
