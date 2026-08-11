@@ -1355,7 +1355,11 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // -X PATCH …/pulls/<n> -f body=…` is not `gh pr edit` at all. `shellTokens` unquotes, so the first two
   // collapse into one token test. `-B` is `--base` and must NOT match — the check is case-sensitive.
   if (!/\bPR_BODY_STAMP_OK=1\b/.test(s)) {
-    const BODY_FLAG = /^(?:--body(?:-file)?(?:=|$)|-[bF]$)/;
+    // NO `$` AFTER `-[bF]`. pflag lets `gh` glue the value onto the shorthand, so `-F/tmp/b.md`, `-F=/tmp/b.md`,
+    // `-bhello` and `-b=hello` are all real body writes in one token. Anchoring to an exact `-b`/`-F` matched
+    // none of them — the fourth bypass found in review, each verified against `gh` itself. Case-sensitive, so
+    // `-B` (`--base`) still does not match, and no other `gh pr edit` shorthand starts with `b` or `F`.
+    const BODY_FLAG = /^(?:--body(?:-file)?(?:=|$)|-[bF])/;
     // `shellTokens` yields `{text, quoted, op}` records, not strings — test `.text`, or every token
     // stringifies to `[object Object]` and the rule denies nothing at all.
     const bodyish = (seg) => shellTokens(seg).some((t) => BODY_FLAG.test(t.text));
@@ -1370,6 +1374,16 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
       // keeps `--body` out of this arm; that spelling belongs to the `gh pr edit` arm above.
       && /(?:^|[^\w-])body\s*[=:]/.test(s))
       return 'a `gh api` write to a PR body drops the `authored-by-actor` stamp, disarming the self-clear refusal (same hole as `gh pr edit --body`, one API layer down). Use `node scripts/pr-body-edit.mjs --pr=<n> --body-file=<f>`. Sanctioned override: prefix `PR_BODY_STAMP_OK=1`.';
+    // `--input <file>` carries the JSON payload in a FILE, so no `body=` ever appears in argv and the arm
+    // above cannot see what is being written. Refused on the shape rather than the content: a PATCH to a
+    // pulls endpoint whose payload is unreadable from here MIGHT set the body. That over-denies a title- or
+    // base-only patch, which is what the escape is for — the alternative is a route the guard provably
+    // cannot inspect.
+    if (atCommand(/^gh\s+api\b/)
+      && /\bpulls\/\d+/.test(s)
+      && /(?:^|\s)(?:--input\b|-X\s*PATCH\b|--method\s*PATCH\b)/.test(s)
+      && /(?:^|\s)--input\b/.test(s))
+      return 'a `gh api --input` PATCH to a PR carries its payload in a file, so this guard cannot see whether it rewrites the body — and a body rewrite would drop the `authored-by-actor` stamp. Refused on shape. Use `node scripts/pr-body-edit.mjs`, or prefix `PR_BODY_STAMP_OK=1` if the patch genuinely does not touch the body.';
   }
 
   // Direct push to a constellation `main` — blocked (strict lane-only, #2203). Everything reaches main via a

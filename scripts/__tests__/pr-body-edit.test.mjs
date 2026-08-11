@@ -58,16 +58,34 @@ describe('guard-bash denies a raw PR-body rewrite', () => {
     "gh pr edit 1162 '--body' 'text'",
     'gh api -X PATCH repos/o/r/pulls/1162 -f body=text',
     'gh api graphql -f query=mutation{updatePullRequest(input:{body:"x"})}',
+    // pflag glues a value onto the shorthand, so these are ONE token each. Anchoring `-[bF]$` matched none
+    // of them — the fourth bypass, each verified against the real `gh`.
+    'gh pr edit 1162 -F/tmp/body.md',
+    'gh pr edit 1162 -F=/tmp/body.md',
+    'gh pr edit 1162 -bhello',
+    'gh pr edit 1162 -b=hello',
+    // The payload is in a file, so no `body=` appears anywhere in argv — refused on shape, not content.
+    'gh api repos/o/r/pulls/1162 -X PATCH --input /tmp/patch.json',
   ]) {
     it(`denies: ${cmd}`, () => {
       expect(reason(cmd)).toMatch(/authored-by-actor|pr-body-edit/);
     });
   }
 
-  // `-B` is `--base`, a different flag entirely. Case matters, and denying it would block a legitimate retarget.
+  // `-B` is `--base`, a different flag entirely. Case matters, and denying it would block a legitimate
+  // retarget. Dropping the `$` anchor made this test load-bearing: `-[bF]` without it is one case-fold away
+  // from swallowing `-Bmain`.
   it('does not deny the base flag, which only differs by case', () => {
     expect(reason('gh pr edit 1162 -B main')).toBeFalsy();
+    expect(reason('gh pr edit 1162 -Bmain')).toBeFalsy();
     expect(reason('gh pr edit 1162 --base main')).toBeFalsy();
+  });
+
+  // A read of the same endpoint carries no payload and must stay allowed, or every `gh api` inspection of a
+  // PR needs the escape.
+  it('does not deny a GET of a pulls endpoint', () => {
+    expect(reason('gh api repos/o/r/pulls/1162')).toBeFalsy();
+    expect(reason('gh api repos/o/r/pulls/1162 --jq .body')).toBeFalsy();
   });
 
   it('allows a label edit — every `gh pr edit` in scripts/ is labels only', () => {

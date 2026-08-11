@@ -60,15 +60,29 @@ a refusal silently becoming a permit, the same defect class this closes. Pinned 
 
 ## The deny is PARTIAL, and the boundary is worth stating
 
-It covers the shell routes only, and the first cut covered fewer than it claimed. Review found three bypasses:
-`gh` documents `-b`/`-F` as exact equivalents of `--body`/`--body-file` and neither matched; a quoted
-`"--body-file"` has a quote before the dashes rather than whitespace; and `gh api -X PATCH …/pulls/<n> -f
-body=…` is not `gh pr edit` at all. Matching on `shellTokens` rather than the raw string collapses the first
-two, and a second arm covers `gh api`.
+It covers shell routes only, and it took **two review rounds and four bypasses** to get there. Each was
+verified against the real `gh`, not reasoned about:
+
+| bypass | why it slipped |
+| --- | --- |
+| the short flags | documented equivalents of `--body`/`--body-file`; the regex matched only long flags |
+| the quoted long flag | quoted, so the character before the dashes is a quote, not whitespace |
+| the REST field write | not `gh pr edit` at all |
+| a shorthand with its value glued on | pflag makes it ONE token, and the pattern required an exact match |
+
+Matching on `shellTokens` handles quoting; dropping the end-anchor handles gluing; two API arms handle the
+layer below. The `--input` form is refused **on shape** rather than content — its payload sits in a file, so
+the guard cannot see whether the body is touched. That over-denies a title-only patch, which is what the
+`PR_BODY_STAMP_OK=1` escape is for.
 
 **What no shell guard can reach:** the GitHub web UI. A body edited in a browser strips the stamp with nothing
 to intercept it. That route stays open, and the mitigation is the same one that caught this — the stamp's
 absence is visible to any reviewer who looks.
+
+**Worth recording about the shape of this defect.** Four rounds, four spellings of one command, and the code
+was never conceptually wrong — only incompletely enumerated. A deny-list guard is exactly as good as its
+author's knowledge of the tool's argument grammar, which is a poor thing to bet a gate on. The durable lesson
+is that a missing stamp is what a reviewer should check for, not that this guard is complete.
 
 ## What this does not fix
 
