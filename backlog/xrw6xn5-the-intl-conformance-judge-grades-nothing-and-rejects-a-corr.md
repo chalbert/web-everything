@@ -94,10 +94,13 @@ implementations through this same runner. The grading agent said so this morning
 claim was repeated anyway.
 
 What is actually new is narrower and more interesting: **this is the first suite shown to have been VACUOUS and
-then made real.** The other three were written and passed. This one passed for a year without grading anything,
-and the only reason anyone found out is that someone finally ran it and read the findings rather than the exit
-code. The transferable lesson is not about intl — it is that a green conformance suite is not evidence until
-something has proven it can go red.
+then made real.** The other three were graded for real from their first commit. This one was **never graded at
+all** until `plateau-app#137` built the runner for it — the suite was authored 2026-06-28 under #1917 and
+nothing executed it for six weeks. When it finally ran, it passed without grading anything.
+
+So the transferable lesson is not about intl, and it is not "a suite can rot": it is that **a conformance suite
+which has never been run is not evidence, and once run, a green one is not evidence either until something has
+proven it can go red.** The wrong-binding controls are the only reason this suite now counts as either.
 
 ## Done when
 
