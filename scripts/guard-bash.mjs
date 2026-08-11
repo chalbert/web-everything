@@ -1342,6 +1342,16 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   if (/>>\s*(?:\.\/)?(?:backlog|reports)\//.test(s) || (atCommand(/^(?:sed|tee|perl)\b/) && CORPUS_MD.test(s)))
     return "Don't append/in-place-edit backlog|reports/*.md from the shell (>>, tee -a, sed -i, perl -pi) — it bypasses the locus-prefix write hook so bare code-paths leak to the gate. Use the Edit/Write tools.";
 
+  // A raw PR-BODY rewrite DISARMS the self-clear guard. `pr-land` stamps `authored-by-actor` into the body at
+  // open; `review-independence.mjs` reads it to refuse an author clearing its own PR. `gh pr edit --body*`
+  // replaces the whole body, so the stamp is silently dropped and the guard then reads `unknown-author` — a
+  // state the invoked CLI deliberately permits (it would otherwise strand every PR opened before the stamp
+  // existed, `review-independence.mjs` header). Permitting it is right for an OLD PR and wrong for a stripped
+  // one, and nothing can tell the two apart after the fact. So keep the stamp instead of weakening the guard.
+  // No repo script edits a body — every `gh pr edit` in scripts/ is `--add-label`/`--remove-label`.
+  if (atCommand(/^gh\s+pr\s+edit\b/) && /\s--body(?:-file)?[\s=]/.test(s) && !/\bPR_BODY_STAMP_OK=1\b/.test(s))
+    return 'a raw `gh pr edit --body` drops the `authored-by-actor` stamp pr-land wrote at open, which disarms the self-clear refusal in review-independence.mjs (this is how #1162 landed on its own author\'s clearance). Use `node scripts/pr-body-edit.mjs --pr=<n> --body-file=<f>`, which carries the stamp across. Sanctioned override: prefix `PR_BODY_STAMP_OK=1`.';
+
   // Direct push to a constellation `main` — blocked (strict lane-only, #2203). Everything reaches main via a
   // `lane/*` ref → PR → CI gate; a direct `git push … main` (or a bare `git push` from a checkout on main)
   // skips CI entirely. Only an explicit `lane/*` destination is allowed. Sanctioned override: prefix
