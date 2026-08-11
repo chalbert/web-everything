@@ -28,6 +28,8 @@ import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
 import { createReviewPrReader, createReviewPrSinks } from './review-pr-io.mjs';
 import { suggestNextOperation, SUGGEST_NEXT_OP } from './suggest-next.mjs';
 import { createBoardReader, createExclusionReader } from './suggest-next-io.mjs';
+import { gateHealthOperation, GATE_HEALTH_OP, classifyFollowUp } from './gate-health.mjs';
+import { createHistoryReader } from './gate-health-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -52,6 +54,13 @@ export const OPERATIONS = Object.freeze({
     // NO SINKS, AND NOT AN OVERSIGHT: every step is `compute`, so the declaration cannot produce an effect
     // for a sink to apply. `applyPendingEffects` is never reached, and the HTTP adapter reads the same step
     // kinds to give this operation a GET-only, record-free surface.
+    sinks: {},
+  }),
+  // Registering here is what makes `gate-health` callable at all. It shipped unregistered in PR #1163, so
+  // `resolveOperation` threw and its "callable from the command line and over HTTP" claim was false — the
+  // reviewer could only run it by hand-writing the wiring. Same no-sinks reasoning as `suggest-next`.
+  [GATE_HEALTH_OP]: () => ({
+    declaration: gateHealthOperation({ loadHistory: createHistoryReader({ classify: classifyFollowUp }) }),
     sinks: {},
   }),
 });

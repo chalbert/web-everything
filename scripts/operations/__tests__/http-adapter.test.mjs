@@ -40,6 +40,7 @@ import { buildCliSpec, judgeOutcome, parseOperationArgv, runOperationCli } from 
 import { OPERATIONS, resolveOperation } from '../run.mjs';
 import { reviewPrOperation, REVIEW_PR_OP } from '../review-pr.mjs';
 import { suggestNextOperation, SUGGEST_NEXT_OP } from '../suggest-next.mjs';
+import { GATE_HEALTH_OP } from '../gate-health.mjs';
 import {
   DEFAULT_BASE_PATH,
   assertReadOnlyDeclaration,
@@ -273,6 +274,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   const DECLARING_MODULE = Object.freeze({
     [REVIEW_PR_OP]: 'review-pr.mjs',
     [SUGGEST_NEXT_OP]: 'suggest-next.mjs',
+    [GATE_HEALTH_OP]: 'gate-health.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
@@ -282,7 +284,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
     const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
     // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
-    expect(readOnly).toEqual([SUGGEST_NEXT_OP]);
+    expect(readOnly.sort()).toEqual([GATE_HEALTH_OP, SUGGEST_NEXT_OP].sort());
     for (const name of readOnly) {
       const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
       expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)
