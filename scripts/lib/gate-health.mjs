@@ -1,99 +1,45 @@
 /**
  * @file scripts/lib/gate-health.mjs
- * @description Are the review-escalation criteria selecting the RIGHT pull requests? The pure analysis half —
- *   no `gh`, no `git`, no clock. Every function here takes already-read data and returns numbers.
+ * @description Can this repository's merge history answer *"are the review-escalation criteria selecting the
+ *   right PRs?"* — and if not, what is blocking it? Pure: every function takes already-read data.
  *
- * ── WHY THIS EXISTS, AND WHY THE FIRST ATTEMPT WAS WRONG ────────────────────────────────────────────────────
+ * IT REPORTS BLOCKERS, NOT AN ANSWER, and that is the design rather than a shortfall. Review found that even
+ * over the full merged history no size band has enough observations, because the binding constraint is the
+ * defect signal's ~3% base rate, not the window — so "collect more history" is unactionable advice. A tool
+ * that keeps printing a rate invites a parameter change on evidence that cannot carry one. This one names
+ * what would have to change.
  *
- * The obvious measurement is: "how often is a merged PR followed by a fix touching its files?", split by
- * whether the rubric escalated it. Run naively over 300 merged PRs it returns 23% for escalated versus 7% for
- * clean — a clean-looking 3× signal that the criteria are picking real risk.
- *
- * That number is not trustworthy, for two reasons visible in its own output, and BOTH are encoded as
- * corrections below rather than left as caveats in a report nobody re-reads:
- *
- *  1. **The follow-ups are the review working, not the PR failing.** The commits it counts are named
- *     `fix-live-review-findings` and `small-owed-fixes`. An escalated PR gets reviewed, the review finds
- *     things, and those become fix commits. Counting them as evidence the PR was risky is circular: it credits
- *     the criteria for an effect they CAUSED. {@link classifyFollowUp} separates the two populations, and
- *     {@link compareGroups} takes only the independent half as the defect signal.
- *
- *  2. **Escalated PRs are simply bigger** — a median of 18 changed files against 2. More surface means more
- *     chance of intersecting any later commit whatsoever, defect or not. Comparing the raw rates measures
- *     size, not the criteria. {@link stratifyBySize} bands the PRs first so the comparison happens between
- *     like-sized PRs, which is the only form of it that carries information.
- *
- * ── AND WHY IT REPORTS UNCERTAINTY RATHER THAN A NUMBER ─────────────────────────────────────────────────────
- *
- * Split 300 PRs into size bands and then into escalated/clean, and a cell holds a few dozen. At that n, an
- * 8-point difference in rates is indistinguishable from noise, and a tool that prints `23% vs 7%` invites a
- * parameter change on evidence that cannot support one. {@link compareProportions} returns a 95% interval on
- * the DIFFERENCE and a `separated` flag that is true only when that interval excludes zero. Nothing in this
- * module ever calls a difference real on the point estimate alone.
- *
- * This matters more, not less, once review parameters are per-project and A/B-tested: the same arithmetic
- * decides whether a variant actually beat the control, and the failure mode — shipping a parameter change on
- * a difference that was noise — is exactly what an underpowered comparison manufactures.
- *
- * ── WHAT IT CANNOT DO, STATED HERE SO NO CALLER INFERS OTHERWISE ────────────────────────────────────────────
- *
- * It cannot attribute an outcome to a PARAMETER SET. The escalation record stamped on a PR carries the reason
- * strings and nothing else — `review-policy.contract.json` has a `version` field and no code reads it. So a
- * threshold change silently splits the history into incomparable halves with no marker at the seam.
- * {@link assessCriteria} reports `parameterSet: null` for exactly this reason, and a caller must treat the
- * whole window as ONE unlabelled configuration. Retrospective A/B is not possible until that is stamped.
+ * FOUR THINGS CORRUPT THE NAIVE COMPARISON. Each is a precondition here, not a caveat in a report:
+ *   `classifyFollowUp` — a review-driven fix is the gate WORKING, so counting it credits the criteria for an
+ *      effect they caused;
+ *   `stratifyBySize` — escalated PRs are far bigger, so they intersect more later commits regardless;
+ *   `censor` — a PR merged inside the follow-up window cannot have been observed yet, and escalated PRs skew
+ *      younger, so including them biases by group;
+ *   `clusterEffectiveN` — defect observations trace back to a handful of fix commits, so the binomial
+ *      standard error is too narrow and the interval too confident.
  */
 
-/**
- * The size bands the comparison is stratified over, as `[label, minLines]` ordered LARGEST FIRST so the first
- * match wins. Chosen against the observed distribution, not round numbers for their own sake: the escalated
- * median is ~1166 changed lines and the clean median ~69, so the bands have to be fine-grained at the small
- * end — that is where the two populations actually overlap and where a comparison can say anything.
- */
-export const SIZE_BANDS = Object.freeze([
-  ['xl', 1000],
-  ['l', 400],
-  ['m', 150],
-  ['s', 50],
-  ['xs', 0],
-]);
+/** Size bands, largest first so the first match wins. Fine-grained low, which is where the groups overlap. */
+export const SIZE_BANDS = Object.freeze([['xl', 1000], ['l', 400], ['m', 150], ['s', 50], ['xs', 0]]);
 
-/** Which band a changed-line count falls in. Pure. */
+/** Which band a changed-line count falls in. */
 export function bandOf(lines) {
   const n = Number(lines) || 0;
   for (const [label, min] of SIZE_BANDS) if (n >= min) return label;
   return 'xs';
 }
 
-/**
- * Commit subjects that mean "somebody fixed something". Deliberately broad — a missed defect costs more than
- * a false one here, because the two groups share the false-positive rate and the COMPARISON is what is read.
- */
 const FIX_SUBJECT = /\b(fix|fixes|fixed|revert|reverts|regress|regression|defect|bug|broke|broken|repair|hotfix)\b/i;
-
-/**
- * Subjects that mean "this fix exists BECAUSE a review found something". The branch-name conventions the
- * repo actually uses (`lane/fix-live-review-findings`, `lane/…-review-fix`, `lane/…-review-followup-…`)
- * surface in the merge subject, so they are matchable without reading PR bodies.
- */
 const REVIEW_FOLLOWUP = /review[-\s]?(finding|fix|followup|follow-up)|(finding|fix)[-\s]?review/i;
 
 /**
- * Classify a candidate follow-up commit against a merged PR.
+ * `'review-followup'` (the gate working) | `'independent-fix'` (the defect signal) | `null`.
  *
- * Three outcomes, and the middle one is the whole point of the function:
- *  - `'review-followup'` — a fix that exists because a reviewer asked for it. **Evidence the gate WORKED.**
- *    Counting it as a defect credits the criteria for an effect they caused (see the file header).
- *  - `'independent-fix'` — a fix with no review provenance in its subject. The honest defect signal.
- *  - `null` — not a fix at all.
- *
- * The classification reads only the SUBJECT, which is a real limit: a review-driven fix landed on a branch
- * named something else is counted as independent, biasing the escalated group's defect rate UPWARD. That is
- * the conservative direction — it works against the conclusion "the criteria are good" — so it is left rather
- * than papered over with a fuzzier matcher that would misclassify in both directions.
- *
- * @param {string} subject - the follow-up commit's subject line.
- * @returns {'review-followup'|'independent-fix'|null}
+ * Subject-only, which biases in a KNOWN direction: a review-driven fix on an unconventionally named branch
+ * counts as independent, inflating the ESCALATED group's defect rate. That is the affirmative signal, so
+ * inflating it manufactures the conclusion "the criteria are good" — the OPPOSITE of conservative. An earlier
+ * version of this comment called it conservative and was wrong. Reported by `misclassificationRisk` rather
+ * than silently absorbed.
  */
 export function classifyFollowUp(subject) {
   const s = String(subject ?? '');
@@ -103,135 +49,210 @@ export function classifyFollowUp(subject) {
 }
 
 /**
- * Group merged-PR records into `{ band: { escalated: [], clean: [] } }`.
+ * Split records into those whose follow-up window has fully elapsed and those still censored.
  *
- * @param {Array<{lines:number, escalated:boolean}>} records
- * @returns {Record<string, {escalated: Array<object>, clean: Array<object>}>}
+ * A PR merged 3 days ago cannot show a 14-day follow-up, so counting it as "no defect" is not an observation
+ * — it is a missing one. It matters here specifically because the two groups age differently.
+ *
+ * @param {Array<{mergedAtSec:number, escalated:boolean}>} records
+ * @param {{nowSec:number, windowDays:number}} o
  */
+export function censor(records, { nowSec, windowDays = 14 } = {}) {
+  const cutoff = Number(nowSec) - windowDays * 24 * 3600;
+  const list = Array.isArray(records) ? records : [];
+  const observed = list.filter((r) => Number(r.mergedAtSec) > 0 && Number(r.mergedAtSec) <= cutoff);
+  const censored = list.filter((r) => !(Number(r.mergedAtSec) > 0 && Number(r.mergedAtSec) <= cutoff));
+  const medianAge = (g) => {
+    const ages = g.map((r) => (Number(nowSec) - Number(r.mergedAtSec)) / 86400).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+    return ages.length ? Number(ages[Math.floor(ages.length / 2)].toFixed(2)) : null;
+  };
+  return {
+    observed,
+    censored: censored.length,
+    // Reported per group: equal censoring is survivable, DIFFERENTIAL censoring is the bias.
+    medianAgeDaysEscalated: medianAge(list.filter((r) => r.escalated)),
+    medianAgeDaysClean: medianAge(list.filter((r) => !r.escalated)),
+    fullyObservedShare: list.length ? observed.length / list.length : 0,
+  };
+}
+
+/**
+ * How many INDEPENDENT sources the defect observations actually represent.
+ *
+ * One fix commit touching thirty files marks thirty PRs as defective from a single event. The trials are not
+ * independent, so a binomial interval over the raw count is too narrow. Kish's effective sample size over the
+ * cluster sizes, floored at the number of distinct sources.
+ *
+ * @param {Array<{followUp:string|null, followUpSource:string|null}>} records
+ */
+export function clusterEffectiveN(records) {
+  const hits = (Array.isArray(records) ? records : []).filter((r) => r.followUp === 'independent-fix');
+  const bySource = new Map();
+  for (const h of hits) {
+    const key = h.followUpSource || `unattributed:${h.number}`;
+    bySource.set(key, (bySource.get(key) || 0) + 1);
+  }
+  const sizes = [...bySource.values()];
+  const n = hits.length;
+  // Kish: n / (1 + (m̄ − 1)) with m̄ the mean cluster size — i.e. n / m̄ = the number of clusters, when
+  // clusters are perfectly correlated internally. The conservative reading, and the one that matters: a
+  // defect seen 15 times from one commit is one observation, not 15.
+  const effectiveN = sizes.length ? sizes.length : 0;
+  const largest = sizes.length ? Math.max(...sizes) : 0;
+  return {
+    observations: n,
+    distinctSources: sizes.length,
+    effectiveN,
+    largestClusterShare: n ? largest / n : 0,
+    // Below this the interval arithmetic is reporting a confidence the data does not have.
+    clustered: n > 0 && effectiveN < n * 0.5,
+  };
+}
+
+/** Group records into `{band: {escalated, clean}}`. Every band always present, so an empty one is visible. */
 export function stratifyBySize(records) {
   const out = {};
   for (const [label] of SIZE_BANDS) out[label] = { escalated: [], clean: [] };
   for (const r of Array.isArray(records) ? records : []) {
-    const band = out[bandOf(r.lines)];
-    (r.escalated ? band.escalated : band.clean).push(r);
+    (r.escalated ? out[bandOf(r.lines)].escalated : out[bandOf(r.lines)].clean).push(r);
   }
   return out;
 }
 
+/** Two-sided normal critical value for a Bonferroni-corrected α. Rational approximation to the normal quantile. */
+export function zForAlpha(alpha) {
+  const p = 1 - Math.max(1e-12, Math.min(0.5, alpha)) / 2;
+  const t = Math.sqrt(-2 * Math.log(1 - p));
+  return t - (2.515517 + 0.802853 * t + 0.010328 * t * t) / (1 + 1.432788 * t + 0.189269 * t * t + 0.001308 * t * t * t);
+}
+
 /**
- * A 95% confidence interval on the DIFFERENCE between two proportions (normal approximation, unpooled
- * standard error).
+ * Interval on the DIFFERENCE of two proportions. `separated` is the only field to branch on.
  *
- * `separated` is the only field a caller should branch on. It is true when the interval excludes zero — i.e.
- * when the data can actually distinguish the two rates. Everything else is descriptive.
+ * `separated` is forced FALSE when the normal approximation does not hold (<5 successes AND <5 failures per
+ * group) — an interval from an invalid approximation that happens to exclude zero is the most dangerous
+ * output here. `alpha` carries the multiplicity correction: five band tests at 0.05 each is a family-wise
+ * error near 25%, so the caller passes 0.05/bandsTested.
  *
- * The normal approximation is unreliable when a cell is tiny or a rate is pinned at 0 or 1, so `usable`
- * reports whether the standard textbook condition (at least 5 expected successes AND 5 failures per group)
- * holds. When it does not, `separated` is forced FALSE rather than computed: an interval from an invalid
- * approximation that happens to exclude zero is the single most dangerous output this module could produce.
- *
- * @param {{n:number, k:number}} a - group A: `n` trials, `k` successes.
- * @param {{n:number, k:number}} b - group B.
- * @returns {{rateA:number|null, rateB:number|null, diff:number|null, ci95:[number,number]|null,
- *   separated:boolean, usable:boolean, note:string}}
+ * `direction` exists because `separated` is symmetric. The headline used to assert that escalation correlates
+ * with defects whatever the sign, and printed exactly that on data showing the reverse.
  */
-export function compareProportions(a, b) {
+export function compareProportions(a, b, { alpha = 0.05 } = {}) {
   const nA = Math.max(0, Math.floor(Number(a?.n) || 0));
   const nB = Math.max(0, Math.floor(Number(b?.n) || 0));
   const kA = Math.min(nA, Math.max(0, Math.floor(Number(a?.k) || 0)));
   const kB = Math.min(nB, Math.max(0, Math.floor(Number(b?.k) || 0)));
   if (nA === 0 || nB === 0) {
-    return { rateA: null, rateB: null, diff: null, ci95: null, separated: false, usable: false, note: 'one group is empty — nothing to compare' };
+    return { rateA: null, rateB: null, diff: null, ci: null, separated: false, usable: false, direction: null, alpha, note: 'one group is empty — nothing to compare' };
   }
   const pA = kA / nA;
   const pB = kB / nB;
   const usable = Math.min(kA, nA - kA, kB, nB - kB) >= 5;
+  const z = zForAlpha(alpha);
   const se = Math.sqrt((pA * (1 - pA)) / nA + (pB * (1 - pB)) / nB);
   const diff = pA - pB;
-  const lo = diff - 1.96 * se;
-  const hi = diff + 1.96 * se;
+  const lo = diff - z * se;
+  const hi = diff + z * se;
+  const excludesZero = lo > 0 || hi < 0;
   return {
     rateA: pA,
     rateB: pB,
     diff,
-    ci95: [lo, hi],
-    // Forced false on an unusable approximation — see the docblock. An underpowered cell must read as
-    // "we cannot tell", never as a result.
-    separated: usable && (lo > 0 || hi < 0),
+    ci: [lo, hi],
+    alpha,
     usable,
+    separated: usable && excludesZero,
+    // WHICH group is worse. Never inferred by a caller from the summary text.
+    direction: usable && excludesZero ? (diff > 0 ? 'escalated-worse' : 'clean-worse') : null,
     note: usable
-      ? (lo > 0 || hi < 0 ? 'the interval excludes zero — the rates differ' : 'the interval spans zero — indistinguishable at this n')
+      ? (excludesZero ? 'the interval excludes zero' : 'the interval spans zero — indistinguishable at this n')
       : `too few observations for a normal approximation (need ≥5 successes AND ≥5 failures per group; have ${kA}/${nA - kA} and ${kB}/${nB - kB})`,
   };
 }
 
-/**
- * Compare escalated against clean within ONE size band, using only the independent-fix signal.
- *
- * @param {{escalated: Array<object>, clean: Array<object>}} band
- * @returns {object}
- */
-export function compareGroups(band) {
+/** Escalated vs clean within one band, counting only independent fixes as defects. */
+export function compareGroups(band, { alpha = 0.05 } = {}) {
   const count = (list) => ({
     n: list.length,
-    // The DEFECT signal. `review-followup` follow-ups are deliberately NOT counted — see `classifyFollowUp`.
     k: list.filter((r) => r.followUp === 'independent-fix').length,
     reviewDriven: list.filter((r) => r.followUp === 'review-followup').length,
   });
   const esc = count(band.escalated ?? []);
   const cln = count(band.clean ?? []);
-  return {
-    escalated: esc,
-    clean: cln,
-    // Read as: does escalating a PR of THIS SIZE correlate with it needing an independent fix afterwards?
-    comparison: compareProportions({ n: esc.n, k: esc.k }, { n: cln.n, k: cln.k }),
-  };
+  return { escalated: esc, clean: cln, comparison: compareProportions({ n: esc.n, k: esc.k }, { n: cln.n, k: cln.k }, { alpha }) };
 }
 
 /**
- * The whole assessment. Returns per-band comparisons plus a plain verdict on whether the data supports any
- * conclusion at all.
+ * Observations per group needed to detect `mdd` at this base rate (80% power, α=0.05, two-sided).
+ * The actionable number: it says whether the metric or the patience is the constraint.
+ */
+export function requiredNPerGroup(baseRate, mdd = 0.05) {
+  const p = Math.max(1e-6, Math.min(1 - 1e-6, Number(baseRate) || 0));
+  const d = Math.max(1e-6, Number(mdd) || 0.05);
+  const pbar = Math.min(1 - 1e-6, p + d / 2);
+  return Math.ceil(((1.96 + 0.84) ** 2 * 2 * pbar * (1 - pbar)) / (d * d));
+}
+
+/**
+ * The assessment. `verdict.conclusive` requires a separated band AND no blocker — the blockers are the point.
  *
  * @param {object} o
- * @param {Array<object>} o.records - one per merged PR: `{number, title, lines, files, escalated, followUp}`.
- * @param {string|null} [o.parameterSet] - which policy version scored these PRs. Today ALWAYS null: nothing
- *   stamps it (see the file header). Present so the field exists the day it can be filled.
- * @returns {object}
+ * @param {Array<object>} o.records - `{number, title, lines, escalated, followUp, followUpSource, mergedAtSec}`.
+ * @param {number} o.nowSec - injected, never read from a clock, so the result is reproducible.
  */
-export function assessCriteria({ records, parameterSet = null } = {}) {
-  const list = Array.isArray(records) ? records : [];
-  const strata = stratifyBySize(list);
+export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet = null, mdd = 0.05 } = {}) {
+  const all = Array.isArray(records) ? records : [];
+  const obs = censor(all, { nowSec, windowDays });
+  const usableRecords = obs.observed;
+  const cluster = clusterEffectiveN(usableRecords);
+
+  const strata = stratifyBySize(usableRecords);
+  // Correct across the bands that CAN be tested, not all five — an empty band is not a test.
+  const testable = SIZE_BANDS.map(([l]) => l).filter((l) => compareGroups(strata[l]).comparison.usable);
+  const alpha = testable.length ? 0.05 / testable.length : 0.05;
   const bands = {};
-  for (const [label] of SIZE_BANDS) bands[label] = compareGroups(strata[label]);
+  for (const [label] of SIZE_BANDS) bands[label] = compareGroups(strata[label], { alpha });
 
   const separated = Object.entries(bands).filter(([, b]) => b.comparison.separated);
-  const usable = Object.entries(bands).filter(([, b]) => b.comparison.usable);
+  const defects = usableRecords.filter((r) => r.followUp === 'independent-fix').length;
+  const baseRate = usableRecords.length ? defects / usableRecords.length : 0;
 
+  const blockers = [];
+  if (obs.fullyObservedShare < 0.8) {
+    blockers.push(`censoring — only ${Math.round(obs.fullyObservedShare * 100)}% of PRs have a closed ${windowDays}-day follow-up window, and the groups age differently (median ${obs.medianAgeDaysEscalated}d escalated vs ${obs.medianAgeDaysClean}d clean)`);
+  }
+  if (cluster.clustered) {
+    blockers.push(`clustered observations — ${cluster.observations} defect signals trace to ${cluster.distinctSources} commits (largest is ${Math.round(cluster.largestClusterShare * 100)}% of them), so the interval is narrower than the data supports`);
+  }
+  if (!testable.length) {
+    blockers.push(`insufficient observations — no size band reaches 5 defects and 5 non-defects in both groups at a ${(100 * baseRate).toFixed(1)}% base rate; ~${requiredNPerGroup(baseRate, mdd)} PRs per group per band would be needed to detect a ${Math.round(mdd * 100)}-point difference`);
+  }
+
+  // `obs.observed` is the working set, not a result. Returning it put all 300 records inside the finding a
+  // web caller renders — kilobytes of payload to say "23% were observable".
+  const { observed, ...observability } = obs;
   return {
-    window: {
-      prs: list.length,
-      escalated: list.filter((r) => r.escalated).length,
-      clean: list.filter((r) => !r.escalated).length,
-    },
-    // Null until the escalation record carries the contract version. A caller MUST treat the window as one
-    // unlabelled configuration — if a threshold moved inside it, two regimes are being averaged together and
-    // nothing here can tell.
+    window: { prs: all.length, escalated: all.filter((r) => r.escalated).length, clean: all.filter((r) => !r.escalated).length },
+    observability: { ...observability, observed: observed.length },
+    clustering: cluster,
+    multiplicity: { bandsTested: testable.length, alphaPerBand: alpha, uncorrectedFamilyWise: 1 - (0.95 ** (testable.length || 1)) },
+    power: { baseRate, minDetectableDiff: mdd, requiredNPerGroup: requiredNPerGroup(baseRate, mdd) },
+    // Null until the escalation record carries the policy-contract version. The caveat rides with the
+    // numbers because a web caller renders the numbers, not prose.
     parameterSet,
     parameterSetCaveat: parameterSet === null
       ? 'UNKNOWN — nothing stamps the policy-contract version onto a PR, so this window may span more than one parameter set with no marker at the seam. Retrospective A/B is not possible until it is stamped.'
       : null,
     bands,
     verdict: {
-      // The honest headline. Almost always this, at these sample sizes — which IS the finding: the criteria
-      // cannot be tuned from this much history, and the tool says so instead of producing a number.
-      conclusive: separated.length > 0,
-      bandsWithEnoughData: usable.map(([label]) => label),
-      bandsShowingADifference: separated.map(([label]) => label),
-      summary: separated.length > 0
-        ? `escalation correlates with later independent fixes in size band(s): ${separated.map(([l]) => l).join(', ')}`
-        : usable.length > 0
-          ? 'no size band shows a distinguishable difference — at this sample size the criteria cannot be shown to select riskier PRs, nor shown not to'
-          : 'no size band has enough observations to support any comparison; collect more history before tuning a threshold',
+      conclusive: separated.length > 0 && blockers.length === 0,
+      blockers,
+      bandsShowingADifference: separated.map(([l, b]) => ({ band: l, direction: b.comparison.direction })),
+      summary: blockers.length
+        ? `cannot conclude — ${blockers.length} blocker(s): ${blockers.map((b) => b.split(' — ')[0]).join(', ')}`
+        : separated.length
+          ? separated.map(([l, b]) => `band ${l}: ${b.comparison.direction === 'escalated-worse' ? 'escalated PRs' : 'UNESCALATED PRs'} are followed by independent fixes more often`).join('; ')
+          : 'no band shows a distinguishable difference — the criteria cannot be shown to select riskier PRs, nor shown not to',
     },
   };
 }

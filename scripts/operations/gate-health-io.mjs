@@ -118,6 +118,7 @@ export function joinHistory({ prs, commits, classify, windowDays = FOLLOW_WINDOW
     const own = mc ? mc.files.filter((f) => !hot.has(f)) : [];
     if (!mc || own.length === 0) { unmeasurable += 1; continue; }
     let followUp = null;
+    let followUpSource = null;
     for (const c of commits) {
       if (c.t <= mc.t || c.t > mc.t + windowSec || c.sha === mc.sha) continue;
       const kind = classify(c.subject);
@@ -125,8 +126,8 @@ export function joinHistory({ prs, commits, classify, windowDays = FOLLOW_WINDOW
       if (!own.some((f) => c.files.includes(f))) continue;
       // First match wins, but a review-followup does NOT get to mask a later independent fix — the
       // independent one is the signal being measured, so it takes precedence when both exist.
-      if (kind === 'independent-fix') { followUp = kind; break; }
-      followUp = followUp ?? kind;
+      if (kind === 'independent-fix') { followUp = kind; followUpSource = c.sha; break; }
+      if (followUp === null) { followUp = kind; followUpSource = c.sha; }
     }
     records.push({
       number: pr.number,
@@ -135,6 +136,11 @@ export function joinHistory({ prs, commits, classify, windowDays = FOLLOW_WINDOW
       files: Number(pr.changedFiles) || 0,
       escalated: (pr.labels ?? []).some((l) => String(l.name).startsWith('review:')),
       followUp,
+      // WHICH commit produced the signal. One fix touching thirty files marks thirty PRs from a single event,
+      // so without this the analysis counts thirty independent trials where there is one.
+      followUpSource,
+      // Merge time, so a PR whose follow-up window has not closed can be excluded rather than scored clean.
+      mergedAtSec: mc.t,
     });
   }
   return { records, unmeasurable, hotFiles: [...hot].sort() };
@@ -153,6 +159,8 @@ export function createHistoryReader({ repo = 'chalbert/web-everything', root = R
   return ({ limit = 300, windowDays = FOLLOW_WINDOW_DAYS } = {}) => {
     const prs = readMergedPrs({ repo, limit });
     const commits = readCommitStream({ root });
-    return { repo, ...joinHistory({ prs, commits, classify, windowDays }) };
+    // The clock is read HERE and passed through, never called inside the analysis — so a given history plus a
+    // given `nowSec` always produces the same assessment.
+    return { repo, nowSec: Math.floor(Date.now() / 1000), ...joinHistory({ prs, commits, classify, windowDays }) };
   };
 }
