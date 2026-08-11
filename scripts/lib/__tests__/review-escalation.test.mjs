@@ -37,6 +37,7 @@ import {
   parseOperatorClearance,
   buildClearedHumanMarker,
   buildClearanceRevocationComment,
+  CONFORMANCE_GRADING_PATHS,
 } from '../review-escalation.mjs';
 import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
 
@@ -57,6 +58,100 @@ describe('isBlastRadiusPath', () => {
     for (const p of ['backlog/2171-x.md', 'demos/declarative-spa.html', 'src/_data/other.json']) {
       expect(isBlastRadiusPath(p)).toBe(false);
     }
+  });
+
+  // The conformance-grading surfaces. Regression fixtures for the plateau-app#137 hole: the drain merged the
+  // intl grader unreviewed because every pattern above was spelled for WE's layout, so the OTHER TWO repos in
+  // the constellation the same drain sweeps had an effectively empty risk roster. Every path below is a REAL
+  // tracked path from `git ls-files` in its repo, not an invented shape — an invented fixture would prove the
+  // regex matches itself and nothing about the repos the gate actually runs against.
+  describe('conformance-grading surfaces score in all three constellation repos', () => {
+    // Deliberately NOT `isBlastRadiusPath` here: this asserts the NEW patterns are what do the work. A path
+    // that also matched a pre-existing pattern would pass an `isBlastRadiusPath` assertion while the new set
+    // sat dead, which is exactly the vacuous-green failure the set exists to prevent.
+    const matchedByNewSet = (p) => CONFORMANCE_GRADING_PATHS.some((re) => re.test(p));
+
+    it('flags the WE vector home — the assertions a standard is judged BY', () => {
+      for (const p of [
+        'conformance-vectors/intl.vectors.ts',
+        'conformance-vectors/webpolicy.vectors.ts',
+        'conformance-vectors/binding.ts',
+        'conformance-vectors/__tests__/schema.test.ts',
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(true);
+        expect(isBlastRadiusPath(p), p).toBe(true);
+      }
+    });
+
+    it('flags the plateau-app judge + runner — the code that decides pass/fail', () => {
+      for (const p of [
+        'packages/core/src/conformance-engine/conformanceVectors.ts',
+        'packages/core/src/conformance-engine/embedSuites.ts',
+        'packages/core/src/conformance-engine/renderer-audit/goldens.ts',
+        'tests/fidelity/real-route-conformance.ts',
+        'tools/explorer/oracles/intentConformance.ts',
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(true);
+        expect(isBlastRadiusPath(p), p).toBe(true);
+      }
+    });
+
+    it('flags the frontierui bindings + harnesses, in every language they are written in', () => {
+      for (const p of [
+        'intl/intlConformance.ts',
+        'blocks/deck/deckConformance.ts',
+        'plugs/webtheme/conformanceHarness.ts',
+        'plugs/webportals/conformance/ssrVectors.ts',
+        'plugs/webdirectives/ssr/net/src/ConformanceHarness.cs',
+        'plugs/webdirectives/ssr/jvm/src/test/java/com/frontierui/webdirectives/ssr/ConformanceHarness.java',
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(true);
+        expect(isBlastRadiusPath(p), p).toBe(true);
+      }
+    });
+
+    // The other half of the rule, and the one that keeps the gate readable. A CONSUMER of the judge goes RED
+    // when it breaks, so it carries none of the silent-green property that earns a review. If these ever start
+    // scoring, the set has widened into "anything with 'conformance' in the name" and a large share of
+    // frontierui's PRs park for nothing.
+    it('does NOT flag the consumers, the UI, or fixture data', () => {
+      for (const p of [
+        'intl/__tests__/intlConformance.test.ts',                        // a consumer — it goes red on its own
+        'blocks/__tests__/unit/a11y-composition-conformance.test.ts',    // a consumer
+        'plugs/__tests__/unit/subpath-exports.conformance.test.ts',      // a consumer
+        'packages/webdocs-ui/src/ConformancePanel.ts',                   // UI that renders results
+        'demos/auto-insurance/conformance.json',                         // fixture data
+        'plugs/webdirectives/ssr/net/WebDirectivesSsr.Conformance.csproj', // a project file, not a harness
+      ]) {
+        expect(matchedByNewSet(p), p).toBe(false);
+      }
+    });
+
+    // The regression itself, scored end-to-end rather than as a path predicate. These are plateau-app#137's
+    // two real files and its real size (99 added, 0 deleted) — under the 400-line trip, which is precisely why
+    // nothing fired and the drain landed it in one pass with no review label ever applied.
+    it('plateau-app#137 — the PR that merged unreviewed now escalates, and stays agent-clearable', () => {
+      const changedFiles = [
+        'packages/core/src/conformance-engine/intl.conformance.test.ts',
+        'vitest.config.ts',
+      ];
+      const score = scoreEscalation({ changedFiles, diffLines: 99 });
+      expect(score.escalate).toBe(true);
+      expect(score.signals.blastRadius).toContain('packages/core/src/conformance-engine/intl.conformance.test.ts');
+      // Size did NOT save it and must not be credited with doing so — 99 is far under the 400-line threshold.
+      expect(score.signals.size).toBeUndefined();
+      expect(Number(DEFAULT_THRESHOLDS.diffLines)).toBeGreaterThan(99);
+      // Agent-clearable, not `review:human`: this set carries the existing `blast-radius` token and is
+      // deliberately NOT on the declarative leash. Promoting it is a separate, evidence-led decision.
+      expect(score.humanRequired).toBe(false);
+    });
+
+    // The negative control. `vitest.config.ts` is the OTHER file in #137 and it must still score nothing on its
+    // own — otherwise the test above would pass for the wrong reason and the whole fixture proves nothing.
+    it('the same PR\'s non-conformance file scores nothing on its own', () => {
+      expect(isBlastRadiusPath('vitest.config.ts')).toBe(false);
+      expect(scoreEscalation({ changedFiles: ['vitest.config.ts'], diffLines: 99 }).escalate).toBe(false);
+    });
   });
 
   // #2909 — #2266 relocated both agent-behaviour trees out of `.claude/` and left a symlink behind. Git tracks a
