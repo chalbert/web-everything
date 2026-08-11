@@ -66,6 +66,11 @@ describe('guard-bash denies a raw PR-body rewrite', () => {
     'gh pr edit 1162 -b=hello',
     // The payload is in a file, so no `body=` appears anywhere in argv — refused on shape, not content.
     'gh api repos/o/r/pulls/1162 -X PATCH --input /tmp/patch.json',
+    // …and the graphql endpoint has no `pulls/<n>` path to key on, so with the mutation in a file NEITHER the
+    // endpoint nor `updatePullRequest` appears in argv. Verified against real `gh`: it reaches the resolver.
+    'gh api graphql --input /tmp/gql.json',
+    'gh api graphql --input -',
+    'gh api graphql -F query=@/tmp/mutation.graphql',
   ]) {
     it(`denies: ${cmd}`, () => {
       expect(reason(cmd)).toMatch(/authored-by-actor|pr-body-edit/);

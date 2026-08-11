@@ -1379,11 +1379,14 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
     // pulls endpoint whose payload is unreadable from here MIGHT set the body. That over-denies a title- or
     // base-only patch, which is what the escape is for — the alternative is a route the guard provably
     // cannot inspect.
+    // `graphql` is included because it has NO `pulls/<n>` path to key on: with the mutation in a file, neither
+    // the endpoint nor `updatePullRequest` appears in argv, so both other arms miss it. Verified against real
+    // `gh` — the command reaches GitHub's `updatePullRequest` resolver. `-F key=@file` reads a field value from
+    // a file and is the same hole by another spelling.
     if (atCommand(/^gh\s+api\b/)
-      && /\bpulls\/\d+/.test(s)
-      && /(?:^|\s)(?:--input\b|-X\s*PATCH\b|--method\s*PATCH\b)/.test(s)
-      && /(?:^|\s)--input\b/.test(s))
-      return 'a `gh api --input` PATCH to a PR carries its payload in a file, so this guard cannot see whether it rewrites the body — and a body rewrite would drop the `authored-by-actor` stamp. Refused on shape. Use `node scripts/pr-body-edit.mjs`, or prefix `PR_BODY_STAMP_OK=1` if the patch genuinely does not touch the body.';
+      && (/\bpulls\/\d+/.test(s) || /(?:^|\s)graphql\b/.test(s))
+      && /(?:^|\s)(?:--input\b|-{1,2}[a-zA-Z-]*\s*[\w.]+=@)/.test(s))
+      return 'a `gh api` call whose payload comes from a FILE (`--input`, or a `field=@file` value) cannot be inspected by this guard, and it may rewrite a PR body — which drops the `authored-by-actor` stamp. Refused on shape. Use `node scripts/pr-body-edit.mjs`, or prefix `PR_BODY_STAMP_OK=1` if the payload genuinely does not touch a body.';
   }
 
   // Direct push to a constellation `main` — blocked (strict lane-only, #2203). Everything reaches main via a

@@ -79,10 +79,24 @@ the guard cannot see whether the body is touched. That over-denies a title-only 
 to intercept it. That route stays open, and the mitigation is the same one that caught this — the stamp's
 absence is visible to any reviewer who looks.
 
-**Worth recording about the shape of this defect.** Four rounds, four spellings of one command, and the code
-was never conceptually wrong — only incompletely enumerated. A deny-list guard is exactly as good as its
-author's knowledge of the tool's argument grammar, which is a poor thing to bet a gate on. The durable lesson
-is that a missing stamp is what a reviewer should check for, not that this guard is complete.
+A fifth round found a fifth: the GraphQL endpoint has no `pulls/<n>` path to key on, so with the mutation in a
+file neither the endpoint nor the mutation name appears in argv and every arm missed it. Verified against real
+`gh` — it reached GitHub's resolver. Closed by keying the file-payload arm on `graphql` too.
+
+## THE DENY-LIST IS THE WRONG SHAPE, and five rounds is enough evidence to say so
+
+Five rounds, five spellings, and the code was never conceptually wrong — only incompletely enumerated. That is
+not bad luck. A deny-list over a rich CLI grammar is exactly as good as its author's knowledge of that grammar,
+and `gh` has long flags, short flags, glued values, quoted flags, two API layers, and file-fed payloads on
+both. Each round closed a real hole and each round I believed it was the last.
+
+**The guard is worth keeping** — it stops the accident that actually happened, cheaply, at the moment it
+happens. But it should not be mistaken for coverage, and this item should not accumulate a sixth round.
+
+**The route-agnostic fix is REPAIR, not refusal:** notice that a PR body has lost its stamp and put it back.
+That covers every route at once — including the GitHub web UI, which no shell guard can ever reach — and it
+does not depend on anyone enumerating a CLI's argument grammar correctly. Filed as the follow-up; deliberately
+not bundled here, because it replaces this approach rather than extending it.
 
 ## What this does not fix
 
