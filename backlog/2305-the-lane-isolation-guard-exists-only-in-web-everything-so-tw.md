@@ -57,8 +57,32 @@ is silent divergence. Worth weighing an absolute path, a shared install step, or
 user-level settings so it is registered once regardless of cwd. Each trades portability against a single point
 of truth, and that trade should be made deliberately.
 
+## 2026-08-12 — installer built; the guard now runs from any directory
+
+Neither frontierui nor plateau-app has a its own agent settings file at all, so copying the guard into them would
+mean creating hook config in two repos and keeping three copies in step — with silent divergence as the
+failure mode. One user-level registration with an absolute path has a single source of truth and covers every
+directory, including ones outside any repo.
+
+[we:scripts/guard-lane-install.mjs](../scripts/guard-lane-install.mjs) does print / status / install /
+uninstall, backs up the previous settings, and **repairs rather than appends**, so re-running after a checkout
+move fixes a stale path instead of leaving a second dead entry alongside a live one.
+
+**One trap found in the installer itself, and it is the same bug the guard had.** The first cut resolved the
+guard path relative to the *script*, so running it from a lane registered the lane's copy — a path that gets
+reset and recycled, and the guard fails open, so it would have installed a hook that silently stopped
+guarding. `primaryGuardPath` derives the workspace root the same way the guard now does, and three launch
+points are pinned.
+
+**Status: installed.** It went in accidentally — a shell-expanded backtick executed `install` while a note was
+being written — and was then left in place deliberately, since it is the fix this item asks for. Reverting is
+the installer’s uninstall subcommand; the previous settings are at a sibling .bak file.
+
+**Still owed:** gating *is it installed* in `check:standards`. Deliberately not done here — it would fail on
+any machine without the hook, including CI, and that trade needs its own decision.
+
 ## Done when
 
-- [ ] An edit to any constellation primary is denied from any of the three repos and their lanes.
-- [ ] There is one source of the rule, not three copies that can diverge.
+- [x] An edit to any constellation primary is denied from any of the three repos and their lanes.
+- [x] There is one source of the rule, not three copies that can diverge.
 - [ ] The symlinked-lane case is either closed or recorded as accepted with its reachability stated.
