@@ -10,12 +10,46 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { laneGuardDecision, resolveReal } from '../guard-lane.mjs';
+import { laneGuardDecision, resolveReal, workspaceRootOf } from '../guard-lane.mjs';
 
 // A fake constellation: <workspace>/{webeverything,frontierui} primaries + a <workspace>/.lanes/ clone.
 const WORKSPACE = '/ws';
 const WE_ROOT = path.join(WORKSPACE, 'webeverything');
 const p = (...seg) => path.join(WORKSPACE, ...seg);
+
+// THE LAUNCH-LOCATION HOLE (2026-08-11), demonstrated before it was fixed. The hook is configured as
+// `node scripts/guard-lane.mjs`, resolved against the CURRENT DIRECTORY — so a session whose cwd is a lane runs
+// the LANE'S copy, and `weRoot` is that lane. The guard then protected only the tree it was launched from,
+// which when launched from a lane is the one tree that never needed protecting. A Write to the real shared
+// checkout went through with no deny.
+describe('the guard protects the primaries wherever it is launched from', () => {
+  const TARGET = p('webeverything', 'conformance-vectors', 'intl.vectors.ts');
+  for (const [label, root] of [
+    ['the primary itself', WE_ROOT],
+    ['a WE lane', p('.lanes', 'web-everything', 'lane-21')],
+    ['a plateau lane', p('.lanes', 'plateau-app', 'lane-3')],
+    ['a deeply nested lane path', p('.lanes', 'web-everything', 'lane-4', 'nested')],
+  ]) {
+    it(`DENIES a primary edit when launched from ${label}`, () => {
+      expect(laneGuardDecision(TARGET, root), label).toMatch(/BLOCKED/);
+    });
+  }
+
+  it('and still ALLOWS an edit inside a lane, from either launch point', () => {
+    const laneFile = p('.lanes', 'web-everything', 'lane-1', 'scripts', 'x.mjs');
+    expect(laneGuardDecision(laneFile, p('.lanes', 'web-everything', 'lane-1'))).toBeNull();
+    expect(laneGuardDecision(laneFile, WE_ROOT)).toBeNull();
+  });
+
+  it('workspaceRootOf recovers the true root from a lane path', () => {
+    expect(workspaceRootOf(p('.lanes', 'web-everything', 'lane-21'))).toBe(WORKSPACE);
+    expect(workspaceRootOf(p('.lanes', 'plateau-app', 'lane-3'))).toBe(WORKSPACE);
+    // A non-lane root keeps the old meaning: the workspace is its parent.
+    expect(workspaceRootOf(WE_ROOT)).toBe(WORKSPACE);
+    // A directory merely NAMED `.lanes` at the end is not a lane path — the segment must be interior.
+    expect(workspaceRootOf(p('webeverything', '.lanes'))).toBe(p('webeverything'));
+  });
+});
 
 describe('laneGuardDecision (pure)', () => {
   it('DENIES a plain primary-tree edit', () => {
