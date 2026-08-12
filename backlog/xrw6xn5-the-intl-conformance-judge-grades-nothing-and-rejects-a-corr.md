@@ -82,25 +82,8 @@ these three vectors did. So the grader now carries two deliberately-wrong bindin
 Both were run against the fixed harness and both catch. Without the second, tagging the vectors `exact` could
 have been wrong in the other direction with nothing to notice.
 
-## What this establishes — and it is NOT what the first draft claimed
-
 With both halves applied the suite returns **zero findings** against FUI's real provider, and both controls
 still bite.
-
-An earlier draft called that *"the first end-to-end proof that a real implementation satisfies a WE contract
-through the neutral runner"*. **That is false**, and it is the second time today the same overclaim was made
-after being corrected: `deck`, `webpolicy` and `webcompliance` already assert zero findings against real FUI
-implementations through this same runner. The grading agent said so this morning, in as many words, and the
-claim was repeated anyway.
-
-What is actually new is narrower and more interesting: **this is the first suite shown to have been VACUOUS and
-then made real.** The other three were graded for real from their first commit. This one was **never graded at
-all** until `plateau-app#137` built the runner for it — the suite was authored 2026-06-28 under #1917 and
-nothing executed it for six weeks. When it finally ran, it passed without grading anything.
-
-So the transferable lesson is not about intl, and it is not "a suite can rot": it is that **a conformance suite
-which has never been run is not evidence, and once run, a green one is not evidence either until something has
-proven it can go red.** The wrong-binding controls are the only reason this suite now counts as either.
 
 ## Done when
 
