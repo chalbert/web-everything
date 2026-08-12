@@ -119,7 +119,12 @@ if (IS_CLI) {
     registry,
     store: createFileRunStore(),
     sinks,
-    judge: createDefaultJudge(),
+    // A TOOL-BEARING juror needs a lane cwd, and `assertLaneCwd` refuses the spawn without one. The lane is
+    // taken from the environment rather than acquired here: this entry point must not lease a resource whose
+    // release it cannot guarantee, and a caller that has not leased one should get the refusal, not a lane it
+    // will forget to release. A tool-free juror ignores `cwd` entirely, so every existing operation is
+    // unaffected.
+    judge: createDefaultJudge(process.env.JUDGE_LANE_CWD ? { cwd: process.env.JUDGE_LANE_CWD } : {}),
     newRunId: () => newRunId(declaration.name),
   })
     .then(({ code, lines }) => {

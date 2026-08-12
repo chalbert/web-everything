@@ -34,6 +34,7 @@ import {
   parseJudgeOutcome,
   loadedContextTokens,
   judgeSpawn,
+  assertLaneCwd
 } from '../judge-spawn.mjs';
 
 const SHAPE = {
@@ -541,5 +542,61 @@ describe('judgeSpawn — the one function a `judge` step calls, exercised over a
     const spawnFn = () => { throw new Error('ENOENT'); };
     await expect(judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, cli: 'nope', spawnFn }))
       .rejects.toThrow(/could not start `nope`/);
+  });
+});
+
+// A TOOL-BEARING JUROR MUST RUN IN A LANE — the guarantee that replaces `--tools ""`, enforced rather than
+// asserted. The first version of this feature CLAIMED the cwd was a lane and claimed `guard-lane` would deny a
+// shared-tree write. Nothing set the cwd, and `--safe-mode` disables hooks, so both were false. Review caught
+// it as a behavioural regression of a structural guarantee.
+describe('assertLaneCwd', () => {
+  it('refuses a tool-bearing spawn outside a lane', () => {
+    expect(() => assertLaneCwd('/ws/webeverything', ['Bash'])).toThrow(/outside a lane/);
+    expect(() => assertLaneCwd(undefined, ['Bash'])).toThrow(/outside a lane/);
+    expect(() => assertLaneCwd('', ['Read'])).toThrow(/outside a lane/);
+  });
+
+  it('allows a tool-bearing spawn inside a lane', () => {
+    expect(() => assertLaneCwd('/ws/.lanes/web-everything/lane-3', ['Bash'])).not.toThrow();
+    expect(() => assertLaneCwd('/ws/.lanes/plateau-app/lane-1/sub', ['Bash', 'Read'])).not.toThrow();
+  });
+
+  it('ignores cwd entirely for a tool-free juror, so every existing caller is unaffected', () => {
+    expect(() => assertLaneCwd('/ws/webeverything', null)).not.toThrow();
+    expect(() => assertLaneCwd('/anywhere', undefined)).not.toThrow();
+  });
+
+  it('judgeSpawn refuses before spawning — the check is on the path to the process, not beside it', async () => {
+    let spawned = false;
+    await expect(judgeSpawn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, runId: 'r', lens: 'correctness',
+      allowedTools: ['Bash'], cwd: '/ws/webeverything',
+      spawnFn: () => { spawned = true; throw new Error('should not reach'); },
+    })).rejects.toThrow(/outside a lane/);
+    expect(spawned).toBe(false);
+  });
+});
+
+// The argv boundary had no test at all — review noted the coverage claim covered only the adapter side.
+describe('buildJudgeArgv with allowedTools', () => {
+  const base = () => ({ mandate: 'm', shape: { type: 'object' }, sessionId: deriveSessionId('seed') });
+
+  it('emits the allow-list and follows it with an option token', () => {
+    const argv = buildJudgeArgv({ ...base(), allowedTools: ['Bash', 'Read'] });
+    const i = argv.indexOf('--allowedTools');
+    expect(argv.slice(i, i + 3)).toEqual(['--allowedTools', 'Bash', 'Read']);
+    // `--allowedTools` is variadic, so the next token MUST be an option or it is swallowed as a tool name.
+    expect(argv[i + 3].startsWith('--')).toBe(true);
+  });
+
+  it('omits `--tools ""` when tools are granted, and keeps it when they are not', () => {
+    expect(buildJudgeArgv({ ...base(), allowedTools: ['Bash'] })).not.toContain('--tools');
+    expect(buildJudgeArgv(base())).toContain('--tools');
+  });
+
+  it('refuses a flag-shaped or non-identifier tool name at this boundary too', () => {
+    for (const bad of [['--bare'], ['-x'], [''], ['Bash(git *)'], 'Bash', []]) {
+      expect(() => buildJudgeArgv({ ...base(), allowedTools: bad }), JSON.stringify(bad)).toThrow();
+    }
   });
 });

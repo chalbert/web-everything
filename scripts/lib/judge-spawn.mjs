@@ -2,7 +2,8 @@
  * judge-spawn.mjs — the tool-free juror spawn behind one function (#3028, under #3029).
  *
  * ONE HELPER EVERY `judge` STEP CALLS. A juror is a `claude -p` subprocess with the findings shape
- * ENFORCED, the repo context STRIPPED, and NO TOOLS GRANTED. The flag recipe was measured in session
+ * ENFORCED, the repo context STRIPPED, and NO TOOLS GRANTED BY DEFAULT — a caller may pass an explicit
+ * `allowedTools` allow-list, and `assertLaneCwd` then REFUSES the spawn unless its cwd is a lane clone. The flag recipe was measured in session
  * rather than invented, and this module is where it stops being folklore: no caller re-derives it, and
  * every caller gets the same three guarantees below. `judgeSpawn` returns a validated object or throws
  * carrying THE SPAWN'S OWN error text — never a paraphrase this module made up.
@@ -103,6 +104,32 @@ export function assertNoForbiddenArgv(argv = []) {
     }
   }
 }
+
+/**
+ * A tool-bearing juror MUST run in a lane. Refuses the spawn otherwise. Pure over the path string.
+ *
+ * THIS IS THE GUARANTEE, not a reminder — and it exists because the first version of this feature ASSERTED an
+ * isolation property it did not have. It claimed the spawn's cwd was a lane; nothing set it, so the default
+ * `process.cwd()` meant a review launched from the primary checkout handed a juror unscoped `Bash` pointed at
+ * the shared tree. It also claimed `guard-lane` would deny writes there, but `--safe-mode` disables hooks, so
+ * that guard never ran inside the juror at all.
+ *
+ * Enforcing it here needs neither hooks nor cooperation: no lane, no tools. A lane is disposable and never
+ * shared, so the worst an unguarded write inside one costs is a `lane-pool` refresh.
+ */
+export function assertLaneCwd(cwd, allowedTools) {
+  if (allowedTools === null || allowedTools === undefined) return;
+  const path = String(cwd || '');
+  if (!path.includes('/.lanes/')) {
+    throw new Error(
+      'judge-spawn: refusing to spawn a TOOL-BEARING juror outside a lane clone — `cwd` is '
+      + `${JSON.stringify(path)}. A juror with tools can write, and \`--safe-mode\` disables the hooks that `
+      + 'would otherwise stop it, so the lane IS the isolation. Acquire one (`lane-pool.mjs acquire`) and pass '
+      + 'its path as `cwd`, or omit `allowedTools` for a tool-free juror.',
+    );
+  }
+}
+
 
 /** The CLI's own `--effort` enum, per `claude --help` at 2.1.220. */
 export const EFFORT_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -251,10 +278,19 @@ export function buildJudgeArgv({
   // reproduced on the parent commit, four decorative tests found by mutating source and watching what stayed
   // green. A juror that can only read a diff finds none of those. The tools ARE the finding mechanism.
   //
-  // WHAT REPLACES THE GUARANTEE `--tools ''` GAVE. Two structural properties, both enforced by hooks rather
-  // than by instruction: the spawn runs with `cwd` in the caller's own LANE, so `guard-lane` denies any write
-  // to a shared checkout; and its `sessionId` is derived, so it differs from the author's and the self-clear
-  // refusal in `review-independence.mjs` holds. Neither depends on the juror cooperating.
+  // WHAT REPLACES THE GUARANTEE `--tools ''` GAVE — and the first version of this comment claimed two
+  // replacements, one of which did not exist and one of which was switched off. Review caught both:
+  //   • it said the spawn's `cwd` is a lane. NOTHING SET IT. The default was `process.cwd()`, so a review run
+  //     from the primary checkout spawned a juror with unscoped Bash pointed at the shared tree.
+  //   • it said `guard-lane` would deny a shared-tree write. `--safe-mode` DISABLES HOOKS, so the guard the
+  //     claim leaned on never ran inside the juror at all.
+  // A false claim about a safety property is exactly the kind that must bounce, and it did.
+  //
+  // THE REAL GUARANTEE, enforced below rather than asserted: a tool-bearing juror MUST be given a lane cwd,
+  // and `assertLaneCwd` refuses the spawn otherwise. That does not depend on hooks, on the juror cooperating,
+  // or on anyone remembering — if there is no lane, there are no tools. A lane is disposable and never shared,
+  // so an unguarded write inside one costs a `lane-pool` refresh. The derived `sessionId` still holds
+  // independently, and is a separate property from this one.
   const toolArgs = allowedTools === null
     ? ['--tools', '']                 // variadic — the next token below MUST be an option, and is.
     : ['--allowedTools', ...allowedTools];
@@ -393,7 +429,8 @@ export async function judgeSpawn({
     ? sessionSeed([runId, lens])
     : `judge:${Date.now()}:${Math.random()}`;
   const sid = sessionId ?? deriveSessionId(seed);
-  const argv = buildJudgeArgv({ mandate, shape, model, effort, budget, sessionId: sid , allowedTools });
+  assertLaneCwd(cwd, allowedTools);
+  const argv = buildJudgeArgv({ mandate, shape, model, effort, budget, sessionId: sid, allowedTools });
 
   // Belt-and-braces: the trap can never reach a real process, even if `buildJudgeArgv` is later edited.
   assertNoForbiddenArgv(argv);

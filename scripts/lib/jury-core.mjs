@@ -1574,7 +1574,11 @@ export function resolveAdapterRoster({ adapter, careLevel, input, overrides = []
  */
 export function deriveLoopOutcome({ verdict, round = 1, cap = DEFAULT_ROUND_CAP } = {}) {
   const r = Math.max(1, Math.floor(Number(round) || 1));
-  const c = Math.max(1, Math.floor(Number(cap) || DEFAULT_ROUND_CAP));
+  // A NON-POSITIVE cap takes the DEFAULT, not 1. `Math.max(1, …)` turned a negative into instant exhaustion —
+  // the direction the test comment already called wrong, caught by review. `0` and `NaN` already fell back via
+  // `||`; a negative slipped past it.
+  const capN = Math.floor(Number(cap));
+  const c = Number.isFinite(capN) && capN > 0 ? capN : DEFAULT_ROUND_CAP;
   if (verdict === VERDICTS.NEEDS_HUMAN) {
     return { outcome: 'escalated', round: r, cap: c, why: 'a human gate applies — the loop does not decide this' };
   }
