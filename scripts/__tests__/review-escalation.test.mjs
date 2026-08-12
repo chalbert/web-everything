@@ -69,6 +69,67 @@ describe('review-escalation — #2324 escalation-reason-in-body', () => {
     });
   });
 
+  // THE RENDER BOUNDARY AT THE READ SEAM. PR #1167 shipped both markers and its own description documented
+  // them in a fenced example — so `bodyHasEscalationReason` returned true and `parsePolicyStamp` returned a
+  // stamp the drain never wrote. The digest in that example was the true current value, so the forged reading
+  // was CORRECT, which is worse: nothing about the output looked wrong.
+  describe('a quoted marker is documentation, not a stamp', () => {
+    const real = buildEscalationReasonBlock(['size (500 ≥ 400 changed lines)']);
+
+    it('still detects the block the drain actually writes', () => {
+      expect(bodyHasEscalationReason(real)).toBe(true);
+      expect(parsePolicyStamp(real)).not.toBeNull();
+    });
+
+    it('ignores the exact PR #1167 shape — the real block inside a fence', () => {
+      const documented = `Here is what it looks like:\n\n\`\`\`\n${real}\n\`\`\`\n\nEnd.`;
+      expect(bodyHasEscalationReason(documented)).toBe(false);
+      expect(parsePolicyStamp(documented)).toBeNull();
+    });
+
+    it('ignores an inline span and a tilde fence', () => {
+      expect(bodyHasEscalationReason('see `## Escalation reason` above')).toBe(false);
+      expect(bodyHasEscalationReason('~~~\n## Escalation reason\n~~~')).toBe(false);
+    });
+
+    // An unclosed fence blanks to end-of-body. The cost is a MISSING block, which is visible; the alternative
+    // is trusting whatever follows an opener, which is not.
+    it('blanks to the end of the body on an unclosed fence', () => {
+      expect(bodyHasEscalationReason('```\n## Escalation reason\n')).toBe(false);
+    });
+
+    // A ``` inside a ~~~~ block is content, not a terminator.
+    it('closes a fence only on the same character, at least as long', () => {
+      expect(bodyHasEscalationReason('~~~~\n```\n## Escalation reason\n~~~~')).toBe(false);
+    });
+  });
+
+  // AGREEMENT-OR-NOTHING, not first-match. First-match is POSITIONAL, not temporal — a body has no clock in
+  // it, so a forger who PREPENDS a stamp wins outright. Same reasoning as the author-actor marker.
+  describe('two disagreeing stamps resolve to unknown', () => {
+    it('a prepended stamp cannot shadow the drain\'s real one', () => {
+      const real = buildEscalationReasonBlock(['size (500 ≥ 400 changed lines)']);
+      expect(parsePolicyStamp(`<!-- policy-set: v9 ffffffffffff -->\n${real}`)).toBeNull();
+    });
+
+    it('two different stamps read as unstamped', () => {
+      expect(parsePolicyStamp('<!-- policy-set: v1 aaaaaaaaaaaa -->\n<!-- policy-set: v2 bbbbbbbbbbbb -->')).toBeNull();
+    });
+
+    it('the SAME stamp repeated still resolves — repetition is not disagreement', () => {
+      const twice = '<!-- policy-set: v1 aaaaaaaaaaaa -->\n<!-- policy-set: v1 aaaaaaaaaaaa -->';
+      expect(parsePolicyStamp(twice)).toEqual({ version: '1', digest: 'aaaaaaaaaaaa' });
+    });
+
+    // The combination that matters: a real stamp plus a fenced decoy. The fence is blanked first, so the
+    // decoy never reaches the agreement test and the real stamp still resolves.
+    it('a fenced decoy alongside a real stamp does not poison it', () => {
+      const real = buildEscalationReasonBlock(['size (500 ≥ 400 changed lines)']);
+      const withDecoy = `${real}\n\n\`\`\`\n<!-- policy-set: v9 ffffffffffff -->\n\`\`\``;
+      expect(parsePolicyStamp(withDecoy)).not.toBeNull();
+    });
+  });
+
   it('bodyHasEscalationReason detects the marker (present/absent/non-string)', () => {
     expect(bodyHasEscalationReason('some body\n\n## Escalation reason\n\n- x')).toBe(true);
     expect(bodyHasEscalationReason('plain body, no marker')).toBe(false);

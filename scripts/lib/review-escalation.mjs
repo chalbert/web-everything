@@ -1515,9 +1515,31 @@ export function buildPolicyStampMarker(version = POLICY_VERSION, digest = POLICY
 
 /** Read the parameter set back off a PR body. `null` when unstamped — which is every PR before this shipped,
  *  and must stay distinguishable from a stamped one rather than defaulting to "current". Pure. */
+/**
+ * WHAT A STAMP MEANS, for anything that groups by it. The reason block is a ONE-SHOT APPEND: it is written at
+ * the first park and never rewritten, so the stamp records **the parameter set in force when the PR was first
+ * escalated** — not the current one, and not the one in force at merge. A re-score after a contract change
+ * keeps the original.
+ *
+ * That is the right semantics (the escalation decision was made under those rules) and it is stated here
+ * because a reader that assumes "current" would silently mis-attribute every PR that outlived a threshold
+ * change — the exact failure the stamp exists to prevent, reintroduced one layer up.
+ */
 export function parsePolicyStamp(body) {
-  const m = new RegExp(`<!--\\s*${POLICY_STAMP_MARKER}:\\s*v(\\S+)\\s+([0-9a-f]{6,64})\\s*-->`).exec(String(body || ''));
-  return m ? { version: m[1], digest: m[2] } : null;
+  // Quoted regions are blanked first — a fenced example is documentation, not a stamp (see
+  // `blankQuotedRegions`). PR #1167's own description forged both markers this way.
+  const scanned = blankQuotedRegions(String(body || ''));
+  const re = new RegExp(`<!--\\s*${POLICY_STAMP_MARKER}:\\s*v(\\S+)\\s+([0-9a-f]{6,64})\\s*-->`, 'g');
+  // AGREEMENT-OR-NOTHING, not first-match. First-match is POSITIONAL, not temporal: a body has no clock in it,
+  // so "first in the text" says nothing about "written first", and a forger who PREPENDS a stamp wins outright
+  // — the cheapest possible forge. Two DIFFERENT stamps resolve to null (unknown), which the reader must treat
+  // as unstamped rather than picking whichever was positioned better. Same reasoning, and the same conclusion,
+  // as `parseAuthorActorId` in `we:scripts/lib/review-independence.mjs`.
+  const seen = new Map();
+  for (let m = re.exec(scanned); m !== null; m = re.exec(scanned)) {
+    seen.set(`${m[1]} ${m[2]}`, { version: m[1], digest: m[2] });
+  }
+  return seen.size === 1 ? [...seen.values()][0] : null;
 }
 
 /** Build the body block embedding the escalation reason(s) — APPENDED to the existing PR body at park time,
@@ -1563,8 +1585,55 @@ export function buildClearanceRevocationComment({ clearance, reason, pr, repo } 
 
 /** Does this PR body already carry the escalation-reason marker (#2324)? Pure — the cheap presence check the
  *  gate verifies without re-deriving the reasons itself. */
+/**
+ * Blank out every QUOTED region of a markdown body — fenced blocks and inline code spans — replacing each with
+ * same-length whitespace so offsets are preserved. PURE.
+ *
+ * THE READ SEAM IS WHERE THIS BELONGS, and PR #1167 is the proof. That PR shipped both markers and its own
+ * description documented them in a fenced example — so `bodyHasEscalationReason` returned true and
+ * `parsePolicyStamp` returned a stamp the drain never wrote. The digest in the example happened to be the true
+ * current value, so the forged reading was CORRECT, which is worse: nothing about the output looked wrong.
+ *
+ * A drain-side escape would not fix it. The drain writes the real block as plain markdown; the forgery came
+ * from a HUMAN-authored body the drain never touched. Only the reader can tell "documented" from "stamped",
+ * and it tells them apart by where the text sits.
+ *
+ * Deliberately NOT a markdown parser. It recognises the two quoting forms a PR body actually uses, and errs
+ * toward blanking: an unclosed fence blanks to end-of-body, so a body that opens a fence and never closes it
+ * yields no markers at all rather than trusting whatever follows. That is the safe direction — the cost is a
+ * missing escalation block, which is visible; the alternative is a forged one, which is not.
+ */
+export function blankQuotedRegions(body) {
+  // A LINE SCANNER, not one regex. The regex form of this was wrong in a way worth recording: with the `m`
+  // flag, `$` matches at EVERY line end, so a `(?:<closing fence>|$)` alternation ended the block at the first
+  // newline and blanked only the opening line — the fenced example still forged both markers. Fence state is
+  // inherently line-oriented; tracking it as state is both correct and legible.
+  const blankLine = (l) => ' '.repeat(l.length);
+  let fence = null;
+  const scanned = String(body ?? '').split('\n').map((line) => {
+    const open = /^[ \t]*(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      // A fence closes only on the SAME character, at least as long as the opener — a ``` inside a ~~~~ block
+      // is content, not a terminator.
+      if (open && open[1][0] === fence[0] && open[1].length >= fence.length) fence = null;
+      return blankLine(line);
+    }
+    if (open) { fence = open[1]; return blankLine(line); }
+    return line;
+  }).join('\n');
+  // An unclosed fence leaves `fence` set, so everything after it stays blanked — a body that opens a fence and
+  // never closes it yields NO markers rather than trusting whatever follows. Safe direction: the cost is a
+  // missing escalation block, which is visible; the alternative is a forged one, which is not.
+  // Inline spans last, on what survived. A span never crosses a newline.
+  return scanned.replace(/(`+)(?:(?!\1)[^\n])*\1/g, (s) => ' '.repeat(s.length));
+}
+
+/**
+ * Does the body carry the drain's escalation-reason block? Quoted regions are ignored — see
+ * {@link blankQuotedRegions} for why the boundary sits here rather than at the write.
+ */
 export function bodyHasEscalationReason(body) {
-  return typeof body === 'string' && body.includes(ESCALATION_REASON_MARKER);
+  return typeof body === 'string' && blankQuotedRegions(body).includes(ESCALATION_REASON_MARKER);
 }
 
 /**
