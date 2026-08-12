@@ -19,6 +19,30 @@ refusal, `review-pr` is declared. What does not exist is them being **one operat
 hand-writing a prompt, spawning a session, reading the report and deciding. On 2026-08-11 that loop was run by
 hand **nine times**.
 
+## 2026-08-12 — THIS IS NOT PLUMBING. The declared juror is tool-free, and that is insufficient here
+
+`review-pr` already exists and is declared (`read` → `judge` → `reduce`), with a declared mandate
+(`buildPanelMandate`) and a **tool-free** juror — `--tools ""`, which is what makes "never check the branch out
+in a shared tree" something the juror *cannot* do rather than is asked not to.
+
+Nine reviews were run by hand on 2026-08-11/12 and **none of them used it**. They were headless sessions with
+full tools, and that is why they found what they found:
+
+- the short-flag PR-body bypass — found by **firing the command at real GitHub**, not by reading a regex;
+- the guard-lane hole — **reproduced on the parent commit** before the fix was trusted;
+- four decorative tests — found by **mutating the source** and watching what stayed green.
+
+A tool-free juror reading a diff finds none of those. **The tools are the finding mechanism**, so this slice
+cannot be satisfied by wiring `review-pr` to the existing juror shape; it needs a tool-bearing variant, and the
+isolation property `--tools ""` currently guarantees has to be re-established some other way (its own lane, a
+read-only credential, or an explicit allow-list).
+
+What the hand-run reviews lacked is exactly what the engine provides: a run record, telemetry, cost accounting,
+reuse — and durability. **Three of them died mid-gate** having completed the analysis and set no label.
+
+So the slice is: a tool-bearing review operation whose isolation is structural rather than instructed, and
+whose state survives the session. Not a rewiring.
+
 ## Why it is the highest-value slice
 
 It is the most repeated action in the delivery loop, and the only one still entirely manual. It is also the one
