@@ -190,7 +190,18 @@ export function assertSafeJudgeRequest(request) {
   if (request?.budget !== undefined && (typeof request.budget !== 'number' || !Number.isFinite(request.budget) || request.budget <= 0)) {
     throw new Error(`operations: \`budget\` must be a positive finite number of USD, got ${JSON.stringify(request.budget)}`);
   }
-  assertNoForbiddenArgv([request?.model, request?.effort].filter((t) => typeof t === 'string'));
+  // A tool name reaches argv as a bare token, so the same flag-shaped-value hazard applies one field over.
+  if (request?.allowedTools !== undefined) {
+    if (!Array.isArray(request.allowedTools) || request.allowedTools.length === 0) {
+      throw new Error('operations: `allowedTools` must be a non-empty array when present — omit it for a tool-free juror');
+    }
+    for (const t of request.allowedTools) {
+      if (typeof t !== 'string' || !/^[A-Za-z][A-Za-z0-9_]*$/.test(t)) {
+        throw new Error(`operations: refusing a juror tool name ${JSON.stringify(t)} — a non-identifier reaches argv as a flag`);
+      }
+    }
+  }
+  assertNoForbiddenArgv([request?.model, request?.effort, ...(request?.allowedTools ?? [])].filter((t) => typeof t === 'string'));
 }
 
 /**
@@ -242,6 +253,7 @@ export function createDefaultJudge({ spawn = judgeSpawn, cwd } = {}) {
       budget: request.budget,
       runId: request.runId,
       lens: request.lens,
+      ...(request.allowedTools ? { allowedTools: request.allowedTools } : {}),
       ...(cwd ? { cwd } : {}),
     });
     // NOT a spread of `outcome`: it also carries `argv` (which embeds the whole mandate) and the answer itself.
