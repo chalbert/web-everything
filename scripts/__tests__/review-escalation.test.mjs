@@ -153,6 +153,27 @@ describe('review-escalation — #2324 escalation-reason-in-body', () => {
     it('an indented lazy continuation of a paragraph is not code', () => {
       expect(bodyHasEscalationReason(`a paragraph\n    continued lazily\n${real}`)).toBe(true);
     });
+
+    // ROUND 4 — five more, and the point at which hand-modelling CommonMark was abandoned for markdown-it's
+    // own block tokenizer. Sixteen shapes across three rounds, each fix correct and the set never closed:
+    // a hand-rolled subset is only as good as its author's knowledge of the grammar.
+    for (const [label, body] of [
+      ['a marker indented after a setext h1', 'Title\n=====\n    ' + M],
+      ['a marker indented after a setext h2', 'x\n---\n    ' + M],
+      ['a marker indented after a thematic break', 'p\n\n***\n    ' + M],
+      ['a fence inside a bullet list item', '- ```\n  ' + M + '\n  ```'],
+      ['a fence inside an ordered list item', '1. ```\n   ' + M + '\n   ```'],
+    ]) {
+      it(`ignores ${label}`, () => {
+        expect(bodyHasEscalationReason(body), label).toBe(false);
+      });
+    }
+
+    // markdown-it classifies a standalone HTML COMMENT as an `html_block`, and the policy stamp IS a comment —
+    // blanking that token type wholesale ate the drain's own stamp. Only code-bearing HTML is blanked.
+    it('an HTML comment is not a quoted region, because the stamp is one', () => {
+      expect(parsePolicyStamp(real)).not.toBeNull();
+    });
   });
 
   // THE WRITE GUARD IS A DIFFERENT QUESTION, and conflating the two created an append loop.

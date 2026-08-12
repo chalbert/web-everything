@@ -14,7 +14,20 @@
  */
 import { createHash } from 'node:crypto';
 import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivationPath, basenameOf } from './gate-config.mjs';
+import MarkdownIt from 'markdown-it';
 import { POLICY_THRESHOLDS, POLICY_VERSION, POLICY_DIGEST } from './review-policy.mjs';
+
+/** Block tokens whose lines a reader sees as QUOTED. `blockquote_open` covers the container: the drain writes
+ *  at top level, so nothing legitimate ever sits behind a `>`.
+ *
+ *  `html_block` is NOT in this set, and that is load-bearing rather than an omission: markdown-it classifies a
+ *  standalone HTML COMMENT as an `html_block`, and the policy stamp IS an HTML comment — blanking the type
+ *  wholesale ate the drain's own stamp. Only the code-bearing HTML shapes are blanked, by
+ *  {@link isQuotedHtmlBlock}. Comment-shaped markers inside a fence are already covered by `fence`. */
+const QUOTED_BLOCK_TOKENS = new Set(['fence', 'code_block', 'blockquote_open']);
+/** An `html_block` a reader sees as CODE. A bare comment is invisible to a reader and carries the stamp. */
+const isQuotedHtmlBlock = (t) => t.type === 'html_block' && /<(?:pre|code)[\s>]/i.test(t.content || '');
+const md = new MarkdownIt({ html: true });
 // #x169fqe — the transient lane bookkeeping the reviewed-diff fingerprint excludes, imported rather than
 // re-spelled so the fingerprint and the rebase-drop pass that removes the file can never disagree on its name.
 import { LANE_MANIFEST } from './rebase-drop-manifest.mjs';
@@ -1611,44 +1624,31 @@ export function blankQuotedRegions(body) {
   // FIVE QUOTING FORMS, all four beyond the first found by review as live forgeries against the first cut.
   // Each was verified twice: the scanner accepted it AND a markdown renderer showed it as a code block, so a
   // reader would see documentation while the gate saw a record.
-  const blankLine = (l) => ' '.repeat(l.length);
-  let fence = null;        // the open fence's run, e.g. '```'
-  let html = false;        // inside <pre>/<code>
-  let inParagraph = false; // an indented block is CODE only when it does not continue a paragraph
-  const scanned = String(body ?? '').split('\n').map((line) => {
-    // A BLOCKQUOTE IS QUOTED BY DEFINITION — blank the whole line and never look inside. The first cut
-    // STRIPPED the `>` and re-scanned, which was worse than doing nothing: quoted fence content became a bare
-    // closer, so `` ```\n> ```\nMARKER\n``` `` reopened the hole. The drain writes at top level, so nothing
-    // legitimate ever lives behind a `>`.
-    if (/^ {0,3}>/.test(line)) { inParagraph = false; return blankLine(line); }
-    const isBlank = line.trim() === '';
-
-    if (html) {
-      if (/<\/(?:pre|code)\s*>/i.test(line)) html = false;
-      return blankLine(line);
-    }
-    if (fence) {
-      // A CLOSER IS BARE AND BARELY INDENTED. CommonMark forbids an info string on a closer and caps its
-      // indent at three spaces, so ` ```js `, `    ``` ` and a tab-indented run are all CONTENT. Treating any
-      // of them as a close ended the block early and made everything after it scannable.
-      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
-      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) { fence = null; inParagraph = false; }
-      return blankLine(line);
-    }
-    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (open) { fence = open[1]; inParagraph = false; return blankLine(line); }
-    if (/<(?:pre|code)[\s>]/i.test(line)) {
-      if (!/<\/(?:pre|code)\s*>/i.test(line)) html = true;
-      inParagraph = false; return blankLine(line);
-    }
-    // INDENTED CODE BLOCK. The rule is NOT "after a blank line" — that model missed a marker indented right
-    // after a closed fence or a heading, both of which start code immediately. Four spaces is code unless it
-    // is a lazy continuation of an open PARAGRAPH, so paragraph state is what has to be tracked.
-    if (!inParagraph && !isBlank && /^(?: {4}|\t)/.test(line)) return blankLine(line);
-    if (isBlank || /^ {0,3}#{1,6}\s/.test(line)) { inParagraph = false; return line; }
-    inParagraph = true;
-    return line;
-  }).join('\n');
+  // ASK A REAL PARSER. Three rounds of hand-modelling CommonMark produced sixteen forgery shapes and the
+  // reviewer kept finding more: info-string closers, indented closers, tab closers, blockquoted closers,
+  // indented code after a fence, after an ATX heading, after a SETEXT heading, after a thematic break, fences
+  // inside list items… Each fix was correct and the set was never closed, because a hand-rolled subset is only
+  // as good as its author's knowledge of the grammar. That is the same lesson the `gh` deny-list taught in
+  // `#3067` — enumeration loses to a real grammar — and markdown-it is already a dependency here via 11ty.
+  //
+  // `md.parse` yields block tokens with a `[startLine, endLine)` map. Blanking the lines of every code-ish
+  // token blanks exactly what a reader sees as quoted, by construction rather than by enumeration.
+  const src = String(body ?? '');
+  const lines = src.split('\n');
+  const blanked = new Set();
+  let tokens;
+  try { tokens = md.parse(src, {}); } catch { tokens = null; }
+  if (tokens === null) {
+    // A parser fault must not silently open the gate. With no token stream nothing can be trusted, so treat
+    // the WHOLE body as quoted — the safe direction, and the same one an unclosed fence takes.
+    return lines.map((l) => ' '.repeat(l.length)).join('\n');
+  }
+  for (const t of tokens) {
+    if (!Array.isArray(t.map)) continue;
+    if (!QUOTED_BLOCK_TOKENS.has(t.type) && !isQuotedHtmlBlock(t)) continue;
+    for (let i = t.map[0]; i < t.map[1]; i += 1) blanked.add(i);
+  }
+  const scanned = lines.map((l, i) => (blanked.has(i) ? ' '.repeat(l.length) : l)).join('\n');
   // NOT A MARKDOWN PARSER, and it does not need to be. It errs toward blanking: anything it mistakes for a
   // quote yields a MISSING record, which the caller can see, rather than a forged one, which it cannot.
   // Inline spans last, on what survived. A span never crosses a newline.
