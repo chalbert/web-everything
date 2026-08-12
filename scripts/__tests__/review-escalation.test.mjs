@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate, parsePolicyStamp } from '../lib/review-escalation.mjs';
+import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate, parsePolicyStamp, bodyAlreadyCarriesReasonBlock } from '../lib/review-escalation.mjs';
 import { POLICY_VERSION, POLICY_DIGEST } from '../lib/review-policy.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +66,161 @@ describe('review-escalation — #2324 escalation-reason-in-body', () => {
 
     it('an empty reason list still produces no block, so an unescalated PR is not stamped', () => {
       expect(buildEscalationReasonBlock([])).toBe('');
+    });
+  });
+
+  // THE RENDER BOUNDARY AT THE READ SEAM. PR #1167 shipped both markers and its own description documented
+  // them in a fenced example — so `bodyHasEscalationReason` returned true and `parsePolicyStamp` returned a
+  // stamp the drain never wrote. The digest in that example was the true current value, so the forged reading
+  // was CORRECT, which is worse: nothing about the output looked wrong.
+  describe('a quoted marker is documentation, not a stamp', () => {
+    const real = buildEscalationReasonBlock(['size (500 ≥ 400 changed lines)']);
+
+    it('still detects the block the drain actually writes', () => {
+      expect(bodyHasEscalationReason(real)).toBe(true);
+      expect(parsePolicyStamp(real)).not.toBeNull();
+    });
+
+    it('ignores the exact PR #1167 shape — the real block inside a fence', () => {
+      const documented = `Here is what it looks like:\n\n\`\`\`\n${real}\n\`\`\`\n\nEnd.`;
+      expect(bodyHasEscalationReason(documented)).toBe(false);
+      expect(parsePolicyStamp(documented)).toBeNull();
+    });
+
+    it('ignores an inline span and a tilde fence', () => {
+      expect(bodyHasEscalationReason('see `## Escalation reason` above')).toBe(false);
+      expect(bodyHasEscalationReason('~~~\n## Escalation reason\n~~~')).toBe(false);
+    });
+
+    // An unclosed fence blanks to end-of-body. The cost is a MISSING block, which is visible; the alternative
+    // is trusting whatever follows an opener, which is not.
+    it('blanks to the end of the body on an unclosed fence', () => {
+      expect(bodyHasEscalationReason('```\n## Escalation reason\n')).toBe(false);
+    });
+
+    // A ``` inside a ~~~~ block is content, not a terminator.
+    it('closes a fence only on the same character, at least as long', () => {
+      expect(bodyHasEscalationReason('~~~~\n```\n## Escalation reason\n~~~~')).toBe(false);
+    });
+
+    // FOUR MORE FORGERIES, each found by review against the first cut of this boundary and each verified
+    // twice: the scanner accepted it AND a markdown renderer showed it as a code block. A reader would have
+    // seen documentation while the gate saw a record.
+    const M = '## Escalation reason';
+    for (const [label, body] of [
+      // CommonMark forbids an info string on a CLOSING fence, so ```js is content. The first cut read it as a
+      // close, and everything after became scannable.
+      ['an info-string "closer" does not close the fence', '```\ntext\n```js\n' + M + '\n```'],
+      // `> ``` ` never matched a `^[ \t]*` anchor, so a quoted fence inside a blockquote was invisible.
+      ['a fence inside a blockquote', '> ```\n> ' + M + '\n> ```'],
+      // The likeliest accidental repeat of the original defect: pasting the block with an indent.
+      ['a four-space indented code block', 'para\n\n    ' + M + '\n\npara'],
+      ['an HTML <pre> block', '<pre>\n' + M + '\n</pre>'],
+      ['an HTML <code> block', '<code>\n' + M + '\n</code>'],
+    ]) {
+      it(`ignores ${label}`, () => {
+        expect(bodyHasEscalationReason(body), label).toBe(false);
+      });
+    }
+
+    // Stripping blockquote prefixes must not eat an ordinary `>` in prose.
+    it('a bare > in prose is not a blockquote prefix', () => {
+      expect(bodyHasEscalationReason(`a > b in prose, and ${M} here`)).toBe(true);
+    });
+
+    // ROUND 3 — five more, each found by review against the round-2 boundary. Two themes: the CLOSE rule was
+    // too permissive, and "indented code starts after a blank line" was the wrong model.
+    for (const [label, body] of [
+      // CommonMark caps a closing fence's indent at three spaces. Four is content, so the block never closed.
+      ['a four-space-indented "closer"', '```\n    ```\n' + M + '\n```'],
+      ['a tab-indented "closer"', '```\n\t```\n' + M + '\n```'],
+      // The round-2 code STRIPPED `>` and re-scanned, which turned quoted fence content into a bare closer.
+      // A blockquote is quoted by definition; the line is now blanked whole and never looked inside.
+      ['a blockquoted line used as a closer', '```\n> ```\n' + M + '\n```'],
+      // Indented code needs a blank line only to interrupt a PARAGRAPH. After a closed fence or a heading it
+      // starts immediately — which the `prevBlank` model missed.
+      ['an indented marker straight after a closed fence', '```\nx\n```\n    ' + M],
+      ['an indented marker straight after a heading', '# Title\n    ' + M],
+      // The drain writes at top level, so nothing legitimate lives behind a `>`.
+      ['a plainly blockquoted marker', '> ' + M],
+    ]) {
+      it(`ignores ${label}`, () => {
+        expect(bodyHasEscalationReason(body), label).toBe(false);
+      });
+    }
+
+    // The paragraph model must not swallow a legitimate indented continuation line.
+    it('an indented lazy continuation of a paragraph is not code', () => {
+      expect(bodyHasEscalationReason(`a paragraph\n    continued lazily\n${real}`)).toBe(true);
+    });
+
+    // ROUND 4 — five more, and the point at which hand-modelling CommonMark was abandoned for markdown-it's
+    // own block tokenizer. Sixteen shapes across three rounds, each fix correct and the set never closed:
+    // a hand-rolled subset is only as good as its author's knowledge of the grammar.
+    for (const [label, body] of [
+      ['a marker indented after a setext h1', 'Title\n=====\n    ' + M],
+      ['a marker indented after a setext h2', 'x\n---\n    ' + M],
+      ['a marker indented after a thematic break', 'p\n\n***\n    ' + M],
+      ['a fence inside a bullet list item', '- ```\n  ' + M + '\n  ```'],
+      ['a fence inside an ordered list item', '1. ```\n   ' + M + '\n   ```'],
+    ]) {
+      it(`ignores ${label}`, () => {
+        expect(bodyHasEscalationReason(body), label).toBe(false);
+      });
+    }
+
+    // markdown-it classifies a standalone HTML COMMENT as an `html_block`, and the policy stamp IS a comment —
+    // blanking that token type wholesale ate the drain's own stamp. Only code-bearing HTML is blanked.
+    it('an HTML comment is not a quoted region, because the stamp is one', () => {
+      expect(parsePolicyStamp(real)).not.toBeNull();
+    });
+  });
+
+  // THE WRITE GUARD IS A DIFFERENT QUESTION, and conflating the two created an append loop.
+  // `bodyHasEscalationReason` asks "does a trustworthy record exist" and must ignore quoted text.
+  // `bodyAlreadyCarriesReasonBlock` asks "would appending duplicate what is already here" — for which quoted
+  // or not is irrelevant, because the bytes are there either way.
+  describe('the raw write-guard, so the drain can see its own write', () => {
+    const real = buildEscalationReasonBlock(['size (500 ≥ 400 changed lines)']);
+
+    it('sees a block that the trusted reader blanks', () => {
+      // A body whose earlier content blanks the appended block: the drain could never see its own write, so
+      // it re-appended on EVERY park pass until the body hit its size cap.
+      const selfBlanking = '```\n' + real;
+      expect(bodyHasEscalationReason(selfBlanking)).toBe(false);
+      expect(bodyAlreadyCarriesReasonBlock(selfBlanking)).toBe(true);
+    });
+
+    it('is false on a body with no block at all, so a first write still happens', () => {
+      expect(bodyAlreadyCarriesReasonBlock('a plain description')).toBe(false);
+      expect(bodyAlreadyCarriesReasonBlock('')).toBe(false);
+      expect(bodyAlreadyCarriesReasonBlock(undefined)).toBe(false);
+    });
+  });
+
+  // AGREEMENT-OR-NOTHING, not first-match. First-match is POSITIONAL, not temporal — a body has no clock in
+  // it, so a forger who PREPENDS a stamp wins outright. Same reasoning as the author-actor marker.
+  describe('two disagreeing stamps resolve to unknown', () => {
+    it('a prepended stamp cannot shadow the drain\'s real one', () => {
+      const real = buildEscalationReasonBlock(['size (500 ≥ 400 changed lines)']);
+      expect(parsePolicyStamp(`<!-- policy-set: v9 ffffffffffff -->\n${real}`)).toBeNull();
+    });
+
+    it('two different stamps read as unstamped', () => {
+      expect(parsePolicyStamp('<!-- policy-set: v1 aaaaaaaaaaaa -->\n<!-- policy-set: v2 bbbbbbbbbbbb -->')).toBeNull();
+    });
+
+    it('the SAME stamp repeated still resolves — repetition is not disagreement', () => {
+      const twice = '<!-- policy-set: v1 aaaaaaaaaaaa -->\n<!-- policy-set: v1 aaaaaaaaaaaa -->';
+      expect(parsePolicyStamp(twice)).toEqual({ version: '1', digest: 'aaaaaaaaaaaa' });
+    });
+
+    // The combination that matters: a real stamp plus a fenced decoy. The fence is blanked first, so the
+    // decoy never reaches the agreement test and the real stamp still resolves.
+    it('a fenced decoy alongside a real stamp does not poison it', () => {
+      const real = buildEscalationReasonBlock(['size (500 ≥ 400 changed lines)']);
+      const withDecoy = `${real}\n\n\`\`\`\n<!-- policy-set: v9 ffffffffffff -->\n\`\`\``;
+      expect(parsePolicyStamp(withDecoy)).not.toBeNull();
     });
   });
 

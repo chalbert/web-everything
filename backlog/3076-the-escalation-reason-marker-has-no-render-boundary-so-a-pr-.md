@@ -2,7 +2,9 @@
 bornAs: xy0ff9u
 kind: story
 size: 2
-status: open
+status: resolved
+dateStarted: "2026-08-12"
+dateResolved: "2026-08-12"
 dateOpened: "2026-08-12"
 relatedTo: ["2324"]
 tags: [gate, review, drain, marker-forgery]
@@ -62,6 +64,8 @@ so a correct example costs nothing.
 
 ## Done when
 
-- [ ] A quoted or fenced marker in a PR body cannot satisfy `bodyHasEscalationReason`.
-- [ ] A quoted stamp cannot shadow or substitute for one the drain wrote.
-- [ ] The one-shot-append semantics are stated wherever the stamp is read.
+- [x] A quoted or fenced marker in a PR body cannot satisfy `bodyHasEscalationReason`.
+- [x] A quoted stamp cannot shadow or substitute for one the drain wrote.
+- [x] The one-shot-append semantics are stated wherever the stamp is read — today that is `parsePolicyStamp`
+      itself, since nothing else reads it yet; the note travels with the parser rather than with a consumer
+      that does not exist.
