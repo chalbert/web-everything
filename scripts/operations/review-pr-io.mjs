@@ -133,7 +133,14 @@ export function readPr({ pr, repo, exec = null, cwd = REPO_ROOT } = {}) {
   // the head ref in this clone, so the second resolution is a local probe, not a second network round trip.
   const netPaths = computeNetDiffPaths({ exec: gitExec, rev: headRefName, fetchExtraRefs: [] });
 
+  // PRIOR ROUNDS, from the durable ledger — the loop's round number is derivable, so it needs no new state.
+  // Fail-soft: an unreadable ledger yields 0 prior rounds, which reads as 'first round' rather than blocking a
+  // review on bookkeeping.
+  let priorRounds = 0;
+  try { priorRounds = (foldRepo(repo).get(pr)?.history ?? []).length; } catch { priorRounds = 0; }
+
   return {
+    priorRounds,
     detail,
     headRefName,
     body: typeof view.body === 'string' ? view.body : '',

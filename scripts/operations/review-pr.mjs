@@ -74,6 +74,7 @@ import {
   PANEL_LENSES,
   buildPanelMandate,
   deriveVerdict,
+  deriveLoopOutcome,
   normalizeFindings,
   renderReviewNotice,
 } from '../lib/review-core.mjs';
@@ -208,6 +209,7 @@ export function shapeReadFinding(raw, { pr, repo } = {}) {
   const degradedReason = net.scored === true ? '' : String(net.reason || 'unscored');
 
   return {
+    priorRounds: Number(raw?.priorRounds) || 0,
     pr: Number(detail.pr) || Number(pr) || 0,
     repo: String(detail.repo || repo || ''),
     title: String(detail.title || ''),
@@ -411,8 +413,13 @@ export function reviewPrOperation({ readPr } = {}) {
         const answer = view.findings.judge && typeof view.findings.judge === 'object' ? view.findings.judge : {};
         const findings = normalizeFindings(answer.findings);
         const humanRequired = read.humanRequired === true;
+        const verdict = deriveVerdict({ findings, humanRequired });
         return {
-          verdict: deriveVerdict({ findings, humanRequired }),
+          verdict,
+          // WHERE THE LOOP STANDS, distinct from what this round decided. "converged" and "exhausted" both end
+          // the loop and mean opposite things, so a caller must never have to infer one from the other. The
+          // round comes from the durable ledger, so it needs no new state and survives a dead session.
+          loop: deriveLoopOutcome({ verdict, round: read.priorRounds + 1 }),
           humanRequired,
           lens: view.input.lens,
           findings,
