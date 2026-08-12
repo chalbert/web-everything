@@ -1,4 +1,5 @@
 ---
+bornAs: xirbbbl
 kind: story
 size: 2
 status: open
@@ -11,7 +12,7 @@ scope:
 
 # The lane-isolation guard exists only in web-everything, so two primaries are wholly unguarded
 
-`#x1l67ou` fixed the guard's workspace-root derivation, and its card claimed a primary edit is now denied
+`#3074` fixed the guard's workspace-root derivation, and its card claimed a primary edit is now denied
 "whatever directory the hook is launched from". That is true of the pure function and **false in production**:
 the hook is registered only in web-everything, and the script exists only there. Started anywhere else — a
 plateau lane, the frontierui checkout, `/tmp` — nothing runs at all.
@@ -30,14 +31,14 @@ The hook is a **relative** invocation registered in
 a directory carrying both the setting and the script produces a guard at all. From frontierui, plateau-app, or
 any of their lanes, an edit to any primary checkout proceeds unchecked.
 
-This is larger than the bug `#x1l67ou` fixed. That one left the primaries open **from a WE lane**; this leaves
+This is larger than the bug `#3074` fixed. That one left the primaries open **from a WE lane**; this leaves
 them open from two whole repos, and it was never closed rather than having regressed.
 
 ## Why the earlier card overstated it
 
 The fix was verified against `laneGuardDecision` — the pure decider — from three simulated launch roots
 including a plateau lane. That proves the *decision* is right wherever it is asked. It does not prove anyone
-asks. The reviewer of `#x1l67ou` drew that distinction and it is the correct one: **a pure function's coverage
+asks. The reviewer of `#3074` drew that distinction and it is the correct one: **a pure function's coverage
 is not a hook's coverage.**
 
 ## Two smaller gaps found alongside, recorded so they are not rediscovered
