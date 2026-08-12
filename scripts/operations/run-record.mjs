@@ -30,8 +30,16 @@
 /** Schema version stamped on every record. A reader refuses a version it does not know. */
 export const RUN_RECORD_VERSION = 1;
 
-/** The lifecycle of one declared effect inside a run record. See {@link ./effect-executor.mjs}. */
-export const EFFECT_STATUSES = Object.freeze(['declared', 'pending', 'applied', 'failed']);
+/**
+ * The lifecycle of one declared effect inside a run record. See {@link ./effect-executor.mjs}.
+ *
+ * `in-flight` (#3073) is NOT a synonym for `pending`, and conflating them is the defect it was added to fix.
+ * `pending` means *attempted, outcome UNKNOWN* — the process died mid-sink — and a replay REFUSES it rather
+ * than risk a double-apply. `in-flight` means *started ON PURPOSE, outcome arrives later* — a dispatched build,
+ * a spawned session — and a replay must RESUME it. One status cannot carry both without the replay guard being
+ * wrong half the time.
+ */
+export const EFFECT_STATUSES = Object.freeze(['declared', 'pending', 'in-flight', 'applied', 'failed']);
 
 /** Ids are used as filenames, so the character set is closed — no separators, no traversal, no surprises. */
 const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;

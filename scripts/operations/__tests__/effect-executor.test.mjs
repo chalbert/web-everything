@@ -18,7 +18,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs';
-import { LEDGER_EFFECT_TYPE, applyPendingEffects, createEffectExecutor, notApplied } from '../effect-executor.mjs';
+import { LEDGER_EFFECT_TYPE, applyPendingEffects, createEffectExecutor, inFlight, inFlightEntries, notApplied, resolveInFlight } from '../effect-executor.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { createRegistry, op } from '../registry.mjs';
 import { effect } from '../step-kinds.mjs';
@@ -253,5 +253,295 @@ describe('the executor fails closed', () => {
     expect(seen).toEqual(['comment.post', 'label.swap']);
     expect(outcome.run.effects.every((e) => e.status === 'applied')).toBe(true);
     expect(outcome.run.effects[0].result).toBeNull(); // a sink returning undefined records null, not undefined
+  });
+});
+
+
+/**
+ * THE FOURTH STATE (#3073). `applied` means the sink RAN, not that the work it started FINISHED. For every
+ * effect above, those were the same event; a DISPATCH — start a build, spawn a session — breaks that.
+ *
+ * Its own operation rather than the fixture, because the distinction is DECLARED: an effect says
+ * `dispatch: true` and the executor writes `in-flight` BEFORE calling the sink. That ordering is the point —
+ * learning it from the return value would leave a crash mid-dispatch recording running work as an unknown
+ * outcome, which is the window the whole item exists to close.
+ */
+const DISPATCH_OP = 'fx-dispatch';
+
+/** `start.build` dispatches and is NOT idempotent; `note.write` is an ordinary effect after it. */
+function dispatchRegistry() {
+  const r = createRegistry();
+  r.register(op(DISPATCH_OP, {
+    input: { pr: 'number' },
+    go: effect({
+      reads: ['input.pr'],
+      effects: (view) => [
+        { type: 'start.build', payload: { pr: view.input.pr }, dispatch: true },
+        { type: 'note.write', payload: { pr: view.input.pr } },
+      ],
+    }),
+  }));
+  return r;
+}
+
+const dRegistry = dispatchRegistry();
+const KEY = 'run-d#0#0';
+const NOTE = 'run-d#0#1';
+
+function atDispatchStep(id = 'run-d') {
+  const run = advanceWhileRunning(startRun({ op: DISPATCH_OP, id, input: { pr: 7 }, registry: dRegistry }), { registry: dRegistry });
+  expect(runStatus(run, { registry: dRegistry })).toBe('awaiting-effect');
+  return run;
+}
+
+describe('in-flight: started on purpose, outcome arrives later', () => {
+  /** @param {(payload, ctx) => any} build - what `start.build` does. */
+  function sinks(build, calls = []) {
+    return {
+      calls,
+      sinks: {
+        'start.build': async (p, ctx) => { calls.push(ctx.key); return build(p, ctx); },
+        'note.write': async (p, ctx) => { calls.push(ctx.key); return { ok: true }; },
+      },
+    };
+  }
+
+  it('records the dispatch as `in-flight`, not `applied`, with its handle, start time and deadline', async () => {
+    const store = createMemoryRunStore();
+    const s = sinks(() => inFlight({ handle: 'sess-abc', expectedBy: '2099-01-01T00:00:00.000Z' }));
+    const run = atDispatchStep();
+    store.write(run);
+
+    const outcome = await applyPendingEffects(run, { sinks: s.sinks, store });
+    expect(outcome.run.effects.find((e) => e.key === KEY)).toMatchObject({
+      status: 'in-flight', handle: 'sess-abc', expectedBy: '2099-01-01T00:00:00.000Z',
+    });
+    expect(Number.isNaN(Date.parse(outcome.run.effects[0].startedAt))).toBe(false);
+    expect(outcome.inFlight).toEqual([KEY]);
+    expect(outcome.error).toBeNull();
+  });
+
+  // THE ORDERING WINDOW, and the reason `dispatch` is declared rather than inferred. What the store holds at
+  // the instant the sink is running is what a crash leaves behind — and for a dispatch it must already say
+  // `in-flight`, never `pending`.
+  it('the PERSISTED record says `in-flight` at the moment the sink runs, before it has returned anything', async () => {
+    const store = createMemoryRunStore();
+    let seenMidSink = null;
+    const s = sinks(() => { seenMidSink = store.read('run-d').effects.find((e) => e.key === KEY); return inFlight({ handle: 'sess-abc' }); });
+    const run = atDispatchStep();
+    store.write(run);
+    await applyPendingEffects(run, { sinks: s.sinks, store });
+    expect(seenMidSink.status).toBe('in-flight');
+    expect(seenMidSink.handle).toBeNull(); // nothing can know the handle yet
+  });
+
+  // The ordering guarantee is about the WORK, not about the sink call returning.
+  it('HALTS the batch — a later effect is not attempted while an earlier one is still going', async () => {
+    const store = createMemoryRunStore();
+    const s = sinks(() => inFlight({ handle: 'sess-abc' }));
+    const run = atDispatchStep();
+    store.write(run);
+    await applyPendingEffects(run, { sinks: s.sinks, store });
+    expect(s.calls).toEqual([KEY]);
+  });
+
+  it('keeps the run suspended on the effect step — dispatch is not completion', async () => {
+    const store = createMemoryRunStore();
+    const s = sinks(() => inFlight({ handle: 'sess-abc' }));
+    let run = atDispatchStep();
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: s.sinks, store })).run;
+    expect(runStatus(run, { registry: dRegistry })).toBe('awaiting-effect');
+    expect(advance(run, { registry: dRegistry })).toEqual(run);
+  });
+
+  // THE LOAD-BEARING ONE. An indeterminate `pending` entry is REFUSED on replay because re-running it might
+  // double-apply; the effect here is likewise NOT idempotent. In-flight must not inherit that refusal —
+  // doing so would strand every dispatch forever.
+  it('a replay RESUMES an observable in-flight entry rather than refusing it, and never re-calls the sink', async () => {
+    const store = createMemoryRunStore();
+    const s = sinks(() => inFlight({ handle: 'sess-abc' }));
+    let run = atDispatchStep();
+    expect(run.effects.find((e) => e.key === KEY).idempotent).toBe(false);
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: s.sinks, store })).run;
+
+    const replay = await applyPendingEffects(run, { sinks: s.sinks, store });
+    expect(replay.error).toBeNull();
+    expect(replay.inFlight).toEqual([KEY]);
+    expect(s.calls).toEqual([KEY]); // called once, not twice
+  });
+
+  // Reporting "still going" needs no sink — the sink's job was to START the work, and it did.
+  it('reports an in-flight entry even when its sink is no longer registered', async () => {
+    const store = createMemoryRunStore();
+    const s = sinks(() => inFlight({ handle: 'sess-abc' }));
+    let run = atDispatchStep();
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: s.sinks, store })).run;
+    const outcome = await applyPendingEffects(run, { sinks: { 'note.write': s.sinks['note.write'] }, store });
+    expect(outcome.inFlight).toEqual([KEY]);
+  });
+
+  it('refuses an in-flight marker from an effect that was not declared `dispatch`', async () => {
+    const store = createMemoryRunStore();
+    const s = sinks(() => ({ ok: true }));
+    s.sinks['note.write'] = async () => inFlight({ handle: 'sess-x' });
+    const run = atDispatchStep();
+    store.write(run);
+    const outcome = await applyPendingEffects(run, { sinks: s.sinks, store });
+    expect(outcome.error.message).toMatch(/not declared `dispatch: true`/);
+  });
+
+  // A dispatch that turns out to finish synchronously is honestly `applied` — there is nothing left to observe.
+  it('a dispatch sink that returns an ordinary value supersedes the pre-sink in-flight with `applied`', async () => {
+    const store = createMemoryRunStore();
+    const s = sinks(() => ({ exit: 0 }));
+    const run = atDispatchStep();
+    store.write(run);
+    const outcome = await applyPendingEffects(run, { sinks: s.sinks, store });
+    expect(outcome.applied).toEqual([KEY, NOTE]);
+    expect(outcome.run.effects[0]).toMatchObject({ status: 'applied', result: { exit: 0 } });
+  });
+
+  it('refuses a handle that is missing or a number — a pid is not durable, the OS reuses it', () => {
+    expect(() => inFlight({})).toThrow(/durable `handle`/);
+    expect(() => inFlight({ handle: '  ' })).toThrow(/durable `handle`/);
+    expect(() => inFlight({ handle: 12345 })).toThrow(/durable `handle`/);
+    expect(() => inFlight({ handle: 'ok', expectedBy: 'soon' })).toThrow(/ISO timestamp/);
+  });
+
+  // The brand is a Symbol so an ordinary sink result cannot be mistaken for a dispatch.
+  it('a plain object that merely looks like a marker is applied, not treated as in-flight', async () => {
+    const store = createMemoryRunStore();
+    const s = sinks(() => ({ handle: 'sess-x', expectedBy: null, inFlight: true }));
+    const run = atDispatchStep();
+    store.write(run);
+    expect((await applyPendingEffects(run, { sinks: s.sinks, store })).applied).toEqual([KEY, NOTE]);
+  });
+});
+
+/**
+ * A LOST HANDLE IS NOT "STILL RUNNING". In-flight is resumable because it can be OBSERVED; with no handle it
+ * cannot be, so it has degraded into the same "might have started, cannot check" that `pending` means, and
+ * gets the same refusal. Without this, a dispatch whose process died before reporting its handle reads as
+ * healthy work forever.
+ */
+describe('a dispatch that loses its handle degrades to unknown', () => {
+  async function handleless(idempotent = false) {
+    const r = createRegistry();
+    r.register(op('fx-lost', {
+      input: { pr: 'number' },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'start.build', payload: {}, dispatch: true, idempotent }] }),
+    }));
+    const store = createMemoryRunStore();
+    const calls = [];
+    // Throws WITHOUT `notApplied` — the sink cannot say whether it started anything.
+    const sinks = { 'start.build': async () => { calls.push('start.build'); throw new Error('lost the child before it reported back'); } };
+    let run = advanceWhileRunning(startRun({ op: 'fx-lost', id: 'run-l', input: { pr: 7 }, registry: r }), { registry: r });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks, store })).run;
+    return { run, store, sinks, calls, r };
+  }
+
+  it('stays in-flight with a null handle and the error, rather than reading as failed', async () => {
+    const { run } = await handleless();
+    expect(run.effects[0]).toMatchObject({ status: 'in-flight', handle: null });
+    expect(run.effects[0].error).toMatch(/lost the child/);
+  });
+
+  it('is reported as UNKNOWN, never as running', async () => {
+    const { run } = await handleless();
+    const split = inFlightEntries(run, '2026-01-01T00:00:00.000Z');
+    expect(split.unknown.map((e) => e.key)).toEqual(['run-l#0#0']);
+    expect(split.running).toEqual([]);
+    expect(split.overdue).toEqual([]);
+  });
+
+  it('REFUSES on replay, exactly as an indeterminate `pending` does', async () => {
+    const { run, store, sinks } = await handleless();
+    await expect(applyPendingEffects(run, { sinks, store })).rejects.toThrow(/dispatched but has NO handle/);
+  });
+
+  it('is re-dispatched instead when the effect declared itself idempotent', async () => {
+    const { run, store, sinks, calls } = await handleless(true);
+    await applyPendingEffects(run, { sinks, store });
+    expect(calls).toEqual(['start.build', 'start.build']);
+  });
+
+  // A sink that KNOWS nothing started still says so the ordinary way, and gets `failed` — retryable.
+  it('a dispatch sink that says nothing started is `failed`, not in-flight', async () => {
+    const r = createRegistry();
+    r.register(op('fx-refused', {
+      input: { pr: 'number' },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'start.build', payload: {}, dispatch: true }] }),
+    }));
+    const store = createMemoryRunStore();
+    const sinks = { 'start.build': async () => { throw notApplied('no worker available'); } };
+    let run = advanceWhileRunning(startRun({ op: 'fx-refused', id: 'run-r', input: { pr: 7 }, registry: r }), { registry: r });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks, store })).run;
+    expect(run.effects[0].status).toBe('failed');
+    expect(inFlightEntries(run).unknown).toEqual([]);
+  });
+});
+
+describe('resolving in-flight work when it reports back', () => {
+  async function dispatched(expectedBy = '2020-01-01T00:00:00.000Z') {
+    const store = createMemoryRunStore();
+    const sinks = {
+      'start.build': async () => inFlight({ handle: 'sess-abc', expectedBy }),
+      'note.write': async () => ({ ok: true }),
+    };
+    let run = atDispatchStep();
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks, store })).run;
+    return { run, store, sinks };
+  }
+
+  it('resolving to `applied` lets the rest of the step run and the run complete', async () => {
+    const { run, store, sinks } = await dispatched();
+    const resolved = resolveInFlight(run, KEY, { status: 'applied', result: { exit: 0 } });
+    expect(resolved.effects[0]).toMatchObject({ status: 'applied', result: { exit: 0 } });
+    store.write(resolved);
+    const outcome = await applyPendingEffects(resolved, { sinks, store });
+    expect(outcome.applied).toEqual([NOTE]);
+    expect(runStatus(advanceWhileRunning(outcome.run, { registry: dRegistry }), { registry: dRegistry })).toBe('complete');
+  });
+
+  it('resolving to `failed` leaves it retryable, which is what `failed` already means', async () => {
+    const { run } = await dispatched();
+    expect(resolveInFlight(run, KEY, { status: 'failed', error: 'the build died' }).effects[0])
+      .toMatchObject({ status: 'failed', error: 'the build died' });
+  });
+
+  // Guessing at an unknown outcome is what the `pending` refusal exists to prevent; this is the same refusal
+  // reached from the other side.
+  it('REFUSES to resolve anything that is not in-flight, and refuses a non-terminal status', async () => {
+    const { run, store, sinks } = await dispatched();
+    const done = (await applyPendingEffects(resolveInFlight(run, KEY, { status: 'applied' }), { sinks, store })).run;
+    expect(() => resolveInFlight(done, NOTE, { status: 'applied' })).toThrow(/is `applied`, not `in-flight`/);
+    expect(() => resolveInFlight(run, 'nope', { status: 'applied' })).toThrow(/has no effect/);
+    expect(() => resolveInFlight(run, KEY, { status: 'in-flight' })).toThrow(/terminal status/);
+  });
+
+  // RUNNING vs OVERDUE is the distinction a waker needs, and the reason `expectedBy` is recorded at all.
+  it('splits observable in-flight work into running and overdue by its own deadline', async () => {
+    const { run } = await dispatched();
+    expect(inFlightEntries(run, '2019-01-01T00:00:00.000Z').running.map((e) => e.key)).toEqual([KEY]);
+    expect(inFlightEntries(run, '2019-01-01T00:00:00.000Z').overdue).toEqual([]);
+    expect(inFlightEntries(run, '2021-01-01T00:00:00.000Z').overdue.map((e) => e.key)).toEqual([KEY]);
+  });
+
+  // Unbounded work is honestly unbounded. Inventing a deadline would turn every long job into a false alarm.
+  it('counts work with no expectedBy as running however old it is', async () => {
+    const { run } = await dispatched(null);
+    expect(inFlightEntries(run, '2999-01-01T00:00:00.000Z').overdue).toEqual([]);
+    expect(inFlightEntries(run, '2999-01-01T00:00:00.000Z').running).toHaveLength(1);
+  });
+
+  it('needs a valid instant rather than silently comparing against NaN', async () => {
+    const { run } = await dispatched();
+    expect(() => inFlightEntries(run, 'whenever')).toThrow(/valid instant/);
   });
 });

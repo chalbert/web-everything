@@ -70,6 +70,56 @@ export function notApplied(message, extra = {}) {
   return Object.assign(new Error(message), { ...extra, notApplied: true });
 }
 
+/**
+ * The marker a sink returns to say **"I started something that outlives this run"** (#3073).
+ *
+ * WHY A FOURTH STATE, AND WHY `applied` IS NOT IT. `applied` means the sink RAN, not that the work it started
+ * FINISHED — and for every effect until now those were the same event. A dispatch breaks that: the sink starts
+ * a build and returns in a second, so marking it `applied` records a completion that has not happened, and the
+ * run advances past a step whose work is still going.
+ *
+ * WHY IT IS NOT `pending` EITHER, which is the confusion the #3030 spike named. `pending` means *attempted,
+ * outcome UNKNOWN* — the process died mid-sink — and the replay guard rightly REFUSES a non-idempotent one
+ * rather than risk a double-apply. In-flight means *started ON PURPOSE, outcome arrives later*, and refusing
+ * it would be exactly wrong: it is the one state a replay is supposed to resume from. One status cannot mean
+ * both without the guard being wrong half the time.
+ *
+ * THE DECLARATION SAYS SO FIRST. An effect opts in with `dispatch: true`, and the executor writes `in-flight`
+ * BEFORE calling the sink — a crash between starting the work and hearing back therefore records started work
+ * as started, not as an unknown outcome. Inferring it from the return value would leave that window open,
+ * which is the same before-not-after rule `pending` already follows.
+ *
+ * The sink then supplies what only it can know, by returning `inFlight({ handle, expectedBy })`:
+ *   - `handle` is what a later observer polls. The spike established `sessionId` is durable and `pid` is NOT
+ *     (the OS reuses it), so a handle must never be a pid.
+ *   - `expectedBy` is an ISO timestamp — the earliest point at which "still running" becomes "probably dead".
+ *     Without it a waker can tell finished from not-finished but not RUNNING from STALLED, which are the two
+ *     that need opposite responses. Optional, because some work genuinely has no estimate; an entry without
+ *     one is honestly unbounded rather than falsely bounded.
+ *
+ * AND A LOST HANDLE IS NOT "STILL RUNNING". Resumability rests entirely on being observable, so an in-flight
+ * entry with no handle — the sink died before reporting one — has degraded back into "might have started,
+ * cannot check", and {@link applyPendingEffects} refuses it exactly as it refuses an indeterminate `pending`.
+ * {@link inFlightEntries} reports it under `unknown`, never `running`.
+ */
+export function inFlight({ handle, expectedBy = null } = {}) {
+  if (typeof handle !== 'string' || !handle.trim()) {
+    throw new TypeError('operations: `inFlight` needs a durable `handle` — a pid is not one (the OS reuses it)');
+  }
+  if (expectedBy !== null && !(typeof expectedBy === 'string' && !Number.isNaN(Date.parse(expectedBy)))) {
+    throw new TypeError('operations: `inFlight.expectedBy` must be an ISO timestamp or null');
+  }
+  return { [IN_FLIGHT]: true, handle: handle.trim(), expectedBy };
+}
+
+/** The brand `inFlight` stamps and the executor reads. A Symbol so no sink payload can forge it by accident. */
+const IN_FLIGHT = Symbol.for('operations.effect.inFlight');
+
+/** Is this sink return value an in-flight marker? Pure. */
+export function isInFlightResult(value) {
+  return !!value && typeof value === 'object' && value[IN_FLIGHT] === true;
+}
+
 /** Normalize a sinks map (plain object or `Map`) into a lookup fn. */
 function sinkLookup(sinks) {
   if (sinks instanceof Map) return (type) => sinks.get(type);
@@ -127,6 +177,22 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null 
   // prevent, so the checks run over the entire list first.
   for (const entry of entries) {
     if (entry.status === 'applied') continue;
+    // IN-FLIGHT IS RESUMABLE, NOT REFUSED — the one status a replay exists to continue from. Skipped BEFORE
+    // the sink check on purpose: reporting "still going" needs no sink, because the sink's job was to START
+    // the work and it did. Requiring one would strand genuinely-running work behind an unregistered type.
+    //
+    // UNLESS THE HANDLE IS LOST, which is the case the whole distinction rests on: in-flight is resumable
+    // because it can be OBSERVED. A handle-less entry cannot be, so it has degraded back into "might have
+    // started, cannot check" — the definition of `pending` — and falls under the same refusal.
+    if (entry.status === 'in-flight' && entry.handle) continue;
+    if (entry.status === 'in-flight' && !entry.idempotent) {
+      throw new Error(
+        `operations: effect ${entry.key} (${entry.type}) was dispatched but has NO handle, so whether it is still running ` +
+        'cannot be observed — it is indistinguishable from an unknown outcome. It is not declared idempotent, so ' +
+        'restarting it could double-apply. Refusing. Resolve it by hand (mark the entry `applied` or `failed` on the ' +
+        'run record) and re-run.',
+      );
+    }
     if (typeof lookup(entry.type) !== 'function') {
       throw new Error(
         `operations: no sink registered for effect type ${JSON.stringify(entry.type)} (run ${run.id}, step ${index}, ordinal ${entry.index}) — refusing to apply any of this step's effects.` +
@@ -146,36 +212,135 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null 
 
   const applied = [];
   const skipped = [];
+  const inFlightKeys = [];
   let current = run;
 
   for (const entry of entries) {
     const live = current.effects.find((e) => e.key === entry.key);
     if (live.status === 'applied') { skipped.push(live.key); continue; }
+    // Only an OBSERVABLE in-flight entry is reported and left alone. A handle-less one reached here because it
+    // is idempotent, and falls through to be dispatched again — which is what `idempotent` licenses.
+    if (live.status === 'in-flight' && live.handle) {
+      // Still going. Report and HALT — the same ordering rule a failure gets. Re-calling the sink would start
+      // the work a SECOND time, which is the double-apply the `pending` refusal exists to prevent; here we can
+      // avoid it outright because the entry says the first attempt is still alive. Something outside this
+      // executor resolves the entry to `applied` or `failed` once the work reports back.
+      inFlightKeys.push(live.key);
+      return { run: current, applied, skipped, inFlight: inFlightKeys, halted: live, error: null };
+    }
 
-    // Mark the attempt BEFORE making it, and persist — an entry left here is the indeterminate case above.
-    current = withEntry(current, live.key, { status: 'pending', error: null });
+    // MARK THE ATTEMPT BEFORE MAKING IT, and persist. Which mark depends on what the declaration says the
+    // effect IS, because the pre-sink write is the only one a crash cannot skip:
+    //   - an ordinary effect gets `pending` — attempted, outcome unknown, refused on replay;
+    //   - a DISPATCH gets `in-flight` with no handle yet, so work that was started and then lost its process
+    //     is recorded as started rather than as an unknown outcome. Writing `in-flight` only AFTER the sink
+    //     returned would leave that exact window open, which is the defect #3073 names.
+    current = live.dispatch
+      ? withEntry(current, live.key, { status: 'in-flight', handle: null, startedAt: new Date().toISOString(), expectedBy: null, error: null })
+      : withEntry(current, live.key, { status: 'pending', error: null });
     store.write(current);
 
     try {
       const result = await lookup(live.type)(live.payload, {
         key: live.key, runId: current.id, type: live.type, stepIndex: live.stepIndex, step: live.step, index: live.index,
       });
+      if (isInFlightResult(result)) {
+        if (!live.dispatch) {
+          throw new Error(
+            `operations: sink for ${live.key} (${live.type}) returned an in-flight marker, but the effect was not declared ` +
+            '`dispatch: true`. The declaration has to say so BEFORE the sink runs — otherwise a crash mid-dispatch records ' +
+            'running work as an unknown outcome. Refusing.',
+          );
+        }
+        // The handle arrives now, which is the earliest anything can know it. The status was already written.
+        current = withEntry(current, live.key, { handle: result.handle, expectedBy: result.expectedBy, error: null });
+        store.write(current);
+        inFlightKeys.push(live.key);
+        // HALT, exactly as a failure does. Effect N+1 must not run while N is still going — the ordering
+        // guarantee is about the WORK, not about the sink call returning.
+        return { run: current, applied, skipped, inFlight: inFlightKeys, halted: current.effects.find((x) => x.key === live.key), error: null };
+      }
+      // A dispatch sink that returns an ordinary value finished synchronously after all. Recording `applied`
+      // supersedes the pre-sink `in-flight` and is honest: the work is done, so there is nothing to observe.
       current = withEntry(current, live.key, { status: 'applied', result: result === undefined ? null : result, error: null });
       store.write(current);
       applied.push(live.key);
     } catch (e) {
       const certainlyNotApplied = e && e.notApplied === true;
+      // A dispatch that threw WITHOUT saying "nothing started" stays `in-flight` with a null handle — started,
+      // unobservable. `inFlightEntries` reports that as `unknown` and the replay guard refuses it, so it is
+      // never mistaken for healthy running work.
+      const indeterminate = live.dispatch ? 'in-flight' : 'pending';
       current = withEntry(current, live.key, {
-        status: certainlyNotApplied ? 'failed' : 'pending',
+        status: certainlyNotApplied ? 'failed' : indeterminate,
         error: String(e?.message ?? e),
       });
       store.write(current);
       // HALT. Effect N+1 is never attempted while N has not landed — guarantee 1 in the header.
-      return { run: current, applied, skipped, halted: current.effects.find((x) => x.key === live.key), error: e };
+      return { run: current, applied, skipped, inFlight: inFlightKeys, halted: current.effects.find((x) => x.key === live.key), error: e };
     }
   }
 
-  return { run: current, applied, skipped, halted: null, error: null };
+  return { run: current, applied, skipped, inFlight: inFlightKeys, halted: null, error: null };
+}
+
+/**
+ * Resolve an `in-flight` entry once the work it started reports back (#3073) — the ONLY supported way out of
+ * that status, so nothing has to hand-edit a run record.
+ *
+ * REFUSES on any other status. Resolving an entry that is `pending` would be a guess about an unknown outcome,
+ * which is exactly what the replay guard refuses; resolving one that is `applied` would rewrite a settled fact.
+ *
+ * @param {object} run
+ * @param {string} key - the effect key.
+ * @param {{status: 'applied'|'failed', result?: any, error?: string}} outcome
+ * @returns {object} the new run record — the caller persists it.
+ */
+export function resolveInFlight(run, key, { status, result = null, error = null } = {}) {
+  assertRunRecord(run, 'run record passed to resolveInFlight');
+  if (status !== 'applied' && status !== 'failed') {
+    throw new TypeError(`operations: resolveInFlight needs a terminal status (\`applied\` or \`failed\`), got ${JSON.stringify(status)}`);
+  }
+  const entry = (run.effects || []).find((e) => e.key === key);
+  if (!entry) throw new Error(`operations: run ${run.id} has no effect ${JSON.stringify(key)}`);
+  if (entry.status !== 'in-flight') {
+    throw new Error(
+      `operations: effect ${key} is \`${entry.status}\`, not \`in-flight\` — refusing to resolve it. ` +
+      'Only work that was started deliberately and reported back can be resolved this way.',
+    );
+  }
+  return withEntry(run, key, { status, result, error: error == null ? null : String(error) });
+}
+
+/**
+ * Every `in-flight` entry on a run, split into the three things an observer has to tell apart (#3073).
+ *
+ *   - `running` — observable and inside its deadline. Leave it alone.
+ *   - `overdue` — observable, but `expectedBy` has passed. Go look at it. An entry with NO `expectedBy` is
+ *     never overdue however old it is: unbounded work is honestly unbounded, and inventing a deadline for it
+ *     would turn every long job into a false alarm.
+ *   - `unknown` — no handle, so whether it is running cannot be checked at all. This is the degradation the
+ *     item calls out: a dispatch that loses its handle must NOT keep reading as "still running" forever. It is
+ *     back to being an unknown outcome, and the replay guard refuses it for the same reason it refuses
+ *     `pending`.
+ *
+ * @param {object} run
+ * @param {string|Date} [now] - the instant to compare against; injected so this stays pure.
+ * @returns {{running: object[], overdue: object[], unknown: object[]}}
+ */
+export function inFlightEntries(run, now = new Date()) {
+  const at = now instanceof Date ? now.getTime() : Date.parse(String(now));
+  if (Number.isNaN(at)) throw new TypeError('operations: inFlightEntries needs a valid instant');
+  const running = [];
+  const overdue = [];
+  const unknown = [];
+  for (const e of (run && run.effects) || []) {
+    if (e.status !== 'in-flight') continue;
+    if (!e.handle) { unknown.push(e); continue; }
+    const due = e.expectedBy ? Date.parse(e.expectedBy) : NaN;
+    (!Number.isNaN(due) && due < at ? overdue : running).push(e);
+  }
+  return { running, overdue, unknown };
 }
 
 /**
