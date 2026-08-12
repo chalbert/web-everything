@@ -14,7 +14,20 @@
  */
 import { createHash } from 'node:crypto';
 import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivationPath, basenameOf } from './gate-config.mjs';
+import MarkdownIt from 'markdown-it';
 import { POLICY_THRESHOLDS, POLICY_VERSION, POLICY_DIGEST } from './review-policy.mjs';
+
+/** Block tokens whose lines a reader sees as QUOTED. `blockquote_open` covers the container: the drain writes
+ *  at top level, so nothing legitimate ever sits behind a `>`.
+ *
+ *  `html_block` is NOT in this set, and that is load-bearing rather than an omission: markdown-it classifies a
+ *  standalone HTML COMMENT as an `html_block`, and the policy stamp IS an HTML comment — blanking the type
+ *  wholesale ate the drain's own stamp. Only the code-bearing HTML shapes are blanked, by
+ *  {@link isQuotedHtmlBlock}. Comment-shaped markers inside a fence are already covered by `fence`. */
+const QUOTED_BLOCK_TOKENS = new Set(['fence', 'code_block', 'blockquote_open']);
+/** An `html_block` a reader sees as CODE. A bare comment is invisible to a reader and carries the stamp. */
+const isQuotedHtmlBlock = (t) => t.type === 'html_block' && /<(?:pre|code)[\s>]/i.test(t.content || '');
+const md = new MarkdownIt({ html: true });
 // #x169fqe — the transient lane bookkeeping the reviewed-diff fingerprint excludes, imported rather than
 // re-spelled so the fingerprint and the rebase-drop pass that removes the file can never disagree on its name.
 import { LANE_MANIFEST } from './rebase-drop-manifest.mjs';
@@ -1515,9 +1528,31 @@ export function buildPolicyStampMarker(version = POLICY_VERSION, digest = POLICY
 
 /** Read the parameter set back off a PR body. `null` when unstamped — which is every PR before this shipped,
  *  and must stay distinguishable from a stamped one rather than defaulting to "current". Pure. */
+/**
+ * WHAT A STAMP MEANS, for anything that groups by it. The reason block is a ONE-SHOT APPEND: it is written at
+ * the first park and never rewritten, so the stamp records **the parameter set in force when the PR was first
+ * escalated** — not the current one, and not the one in force at merge. A re-score after a contract change
+ * keeps the original.
+ *
+ * That is the right semantics (the escalation decision was made under those rules) and it is stated here
+ * because a reader that assumes "current" would silently mis-attribute every PR that outlived a threshold
+ * change — the exact failure the stamp exists to prevent, reintroduced one layer up.
+ */
 export function parsePolicyStamp(body) {
-  const m = new RegExp(`<!--\\s*${POLICY_STAMP_MARKER}:\\s*v(\\S+)\\s+([0-9a-f]{6,64})\\s*-->`).exec(String(body || ''));
-  return m ? { version: m[1], digest: m[2] } : null;
+  // Quoted regions are blanked first — a fenced example is documentation, not a stamp (see
+  // `blankQuotedRegions`). PR #1167's own description forged both markers this way.
+  const scanned = blankQuotedRegions(String(body || ''));
+  const re = new RegExp(`<!--\\s*${POLICY_STAMP_MARKER}:\\s*v(\\S+)\\s+([0-9a-f]{6,64})\\s*-->`, 'g');
+  // AGREEMENT-OR-NOTHING, not first-match. First-match is POSITIONAL, not temporal: a body has no clock in it,
+  // so "first in the text" says nothing about "written first", and a forger who PREPENDS a stamp wins outright
+  // — the cheapest possible forge. Two DIFFERENT stamps resolve to null (unknown), which the reader must treat
+  // as unstamped rather than picking whichever was positioned better. Same reasoning, and the same conclusion,
+  // as `parseAuthorActorId` in `we:scripts/lib/review-independence.mjs`.
+  const seen = new Map();
+  for (let m = re.exec(scanned); m !== null; m = re.exec(scanned)) {
+    seen.set(`${m[1]} ${m[2]}`, { version: m[1], digest: m[2] });
+  }
+  return seen.size === 1 ? [...seen.values()][0] : null;
 }
 
 /** Build the body block embedding the escalation reason(s) — APPENDED to the existing PR body at park time,
@@ -1563,8 +1598,86 @@ export function buildClearanceRevocationComment({ clearance, reason, pr, repo } 
 
 /** Does this PR body already carry the escalation-reason marker (#2324)? Pure — the cheap presence check the
  *  gate verifies without re-deriving the reasons itself. */
-export function bodyHasEscalationReason(body) {
+/**
+ * Blank out every QUOTED region of a markdown body — fenced blocks and inline code spans — replacing each with
+ * same-length whitespace so offsets are preserved. PURE.
+ *
+ * THE READ SEAM IS WHERE THIS BELONGS, and PR #1167 is the proof. That PR shipped both markers and its own
+ * description documented them in a fenced example — so `bodyHasEscalationReason` returned true and
+ * `parsePolicyStamp` returned a stamp the drain never wrote. The digest in the example happened to be the true
+ * current value, so the forged reading was CORRECT, which is worse: nothing about the output looked wrong.
+ *
+ * A drain-side escape would not fix it. The drain writes the real block as plain markdown; the forgery came
+ * from a HUMAN-authored body the drain never touched. Only the reader can tell "documented" from "stamped",
+ * and it tells them apart by where the text sits.
+ *
+ * Deliberately NOT a markdown parser. It recognises the two quoting forms a PR body actually uses, and errs
+ * toward blanking: an unclosed fence blanks to end-of-body, so a body that opens a fence and never closes it
+ * yields no markers at all rather than trusting whatever follows. That is the safe direction — the cost is a
+ * missing escalation block, which is visible; the alternative is a forged one, which is not.
+ */
+export function blankQuotedRegions(body) {
+  // A LINE SCANNER, not one regex. The regex form was wrong in a way worth recording: with the `m` flag `$`
+  // matches at EVERY line end, so a `(?:<closing fence>|$)` alternation ended the block at the first newline
+  // and blanked only the opening line. Fence state is inherently line-oriented.
+  //
+  // FIVE QUOTING FORMS, all four beyond the first found by review as live forgeries against the first cut.
+  // Each was verified twice: the scanner accepted it AND a markdown renderer showed it as a code block, so a
+  // reader would see documentation while the gate saw a record.
+  // ASK A REAL PARSER. Three rounds of hand-modelling CommonMark produced sixteen forgery shapes and the
+  // reviewer kept finding more: info-string closers, indented closers, tab closers, blockquoted closers,
+  // indented code after a fence, after an ATX heading, after a SETEXT heading, after a thematic break, fences
+  // inside list items… Each fix was correct and the set was never closed, because a hand-rolled subset is only
+  // as good as its author's knowledge of the grammar. That is the same lesson the `gh` deny-list taught in
+  // `#3067` — enumeration loses to a real grammar — and markdown-it is already a dependency here via 11ty.
+  //
+  // `md.parse` yields block tokens with a `[startLine, endLine)` map. Blanking the lines of every code-ish
+  // token blanks exactly what a reader sees as quoted, by construction rather than by enumeration.
+  const src = String(body ?? '');
+  const lines = src.split('\n');
+  const blanked = new Set();
+  let tokens;
+  try { tokens = md.parse(src, {}); } catch { tokens = null; }
+  if (tokens === null) {
+    // A parser fault must not silently open the gate. With no token stream nothing can be trusted, so treat
+    // the WHOLE body as quoted — the safe direction, and the same one an unclosed fence takes.
+    return lines.map((l) => ' '.repeat(l.length)).join('\n');
+  }
+  for (const t of tokens) {
+    if (!Array.isArray(t.map)) continue;
+    if (!QUOTED_BLOCK_TOKENS.has(t.type) && !isQuotedHtmlBlock(t)) continue;
+    for (let i = t.map[0]; i < t.map[1]; i += 1) blanked.add(i);
+  }
+  const scanned = lines.map((l, i) => (blanked.has(i) ? ' '.repeat(l.length) : l)).join('\n');
+  // NOT A MARKDOWN PARSER, and it does not need to be. It errs toward blanking: anything it mistakes for a
+  // quote yields a MISSING record, which the caller can see, rather than a forged one, which it cannot.
+  // Inline spans last, on what survived. A span never crosses a newline.
+  return scanned.replace(/(`+)(?:(?!\1)[^\n])*\1/g, (s) => ' '.repeat(s.length));
+}
+
+/**
+ * Has the drain ALREADY appended a reason block to this body? Scans the RAW text, deliberately.
+ *
+ * WHY THIS IS A DIFFERENT QUESTION from {@link bodyHasEscalationReason}, and why conflating them created a
+ * bug. That one asks *"does a trustworthy record exist"* and must ignore quoted text. This one asks *"would
+ * appending again duplicate what is already here"* — and for that, quoted or not is irrelevant: the bytes are
+ * there either way.
+ *
+ * Using the trusted reader for the write guard meant a body whose earlier content blanked the appended block
+ * (an unclosed fence, or an innocently indented one) could never see its own write, so the drain re-appended
+ * the block on EVERY park pass until the body hit its size cap. Review traced it: not the feared silent
+ * attestation — `durableRecorded` correctly stayed false and the warn fired — but an unbounded append loop.
+ */
+export function bodyAlreadyCarriesReasonBlock(body) {
   return typeof body === 'string' && body.includes(ESCALATION_REASON_MARKER);
+}
+
+/**
+ * Does the body carry the drain's escalation-reason block? Quoted regions are ignored — see
+ * {@link blankQuotedRegions} for why the boundary sits here rather than at the write.
+ */
+export function bodyHasEscalationReason(body) {
+  return typeof body === 'string' && blankQuotedRegions(body).includes(ESCALATION_REASON_MARKER);
 }
 
 /**

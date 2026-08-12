@@ -110,7 +110,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // fingerprint reader (`parseReviewedDiff`), #2832/#984's hold-invariant helpers (`READY_TO_MERGE_LABEL`,
 // `isReviewHoldLabel`, `decideParkReadyStrip`), #2890's null-contract diff mapper (`diffHunksFrom`), and
 // #x9xqexm's contribution fingerprint reader (`parseReviewedContribution`). None supersedes another.
-import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
+import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, bodyAlreadyCarriesReasonBlock, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
@@ -3346,7 +3346,7 @@ async function runCli() {
           const reasonBlock = buildEscalationReasonBlock(parkReasons);
           let liveBody = '';
           try { liveBody = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').body || ''; } catch { /* fetch miss — augment from empty, still best-effort */ }
-          if (!bodyHasEscalationReason(liveBody)) {
+          if (!bodyAlreadyCarriesReasonBlock(liveBody)) {
             const newBody = liveBody + reasonBlock;
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--body', newBody], { stdio: ['ignore', 'ignore', 'pipe'] }); }
             catch { if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} could not write the review:human escalation reason into the PR body (#2324) — add it by hand: ${parkReasons.join('; ')}\n`); }
@@ -3361,9 +3361,13 @@ async function runCli() {
             // pass with NO record at all (a regression vs main). #2857 sweeps this attest-by-effect class.
             if (reasonBlock) durableRecorded = verified;
           } else if (reasonBlock) {
-            // The #2324 block is already durably in the body from a prior pass — the record exists; setting the
-            // flag here keeps the skip loop from re-stamping a duplicate (round-3 dedup preserved).
-            durableRecorded = true;
+            // GUARD ON RAW, ATTEST ON TRUSTED — two different questions, and answering both from the raw
+            // reader was a regression this round's review caught. Raw correctly prevents a duplicate append
+            // (the bytes are there whether quoted or not), but a body that merely MENTIONS the marker as
+            // documentation would then also attest `durableRecorded`, suppress the skip-stamp fallback via
+            // `reviewParked`, and leave the PR with no drain-written record and no warning. Attesting from the
+            // trusted reader makes raw-true/trusted-false fall through to the loud fallback instead.
+            durableRecorded = bodyHasEscalationReason(liveBody);
           }
         }
         // #2820-review-fix (finding-1, round 3) — suppress the final skip-stamp ONLY when this branch actually
