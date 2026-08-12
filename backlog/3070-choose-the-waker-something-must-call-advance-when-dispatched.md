@@ -12,6 +12,26 @@ scope:
 
 # Choose the waker: something must call `advance` when dispatched work finishes
 
+> **RULED 2026-08-12 (operator, in session): a dedicated `StartInterval` job that calls `advance` and nothing
+> else — the converge daemon's SHAPE, not the converge daemon.** Awake-only accepted, in the words *"For now
+> ok if only run on awake Mac"*.
+>
+> All three filed candidates rejected for the same reason — coupling. The **drain** inverts the layering this
+> epic is built on (the engine is meant to be what the drain is eventually expressed in). An **operator
+> invocation** is not automatic, which is the whole requirement. The **converge daemon** has the right shape
+> but a different job; giving it a second one is how a thin waker becomes a resident supervisor.
+>
+> **The blocker recorded against the daemon is discharged, verified not assumed.** It stayed uninstalled until
+> the silent re-hold in [we:scripts/merge-ai-prs.mjs](../scripts/merge-ai-prs.mjs) was understood — now both
+> ruled (#3053) and loud (`buildClearanceRevocationComment` posts unconditionally). It is simply not the right
+> host.
+>
+> **Accepted cost:** a build finishing overnight waits for the lid to open. A pure `advance` tick spends no
+> model context, so CI is the later home once state leaves local disk.
+>
+> **Blocked on `#3073`** — nothing is worth waking until an effect can say *in flight by design*. The build is
+> a separate story.
+
 A suspended run resumes only when someone calls `advance`, and it cannot be the session that dispatched the
 work — that session is gone. The [#3030] spike named three candidates and costed none, and filed nothing. Until
 one is chosen, every stage above it in the epic produces runs that suspend correctly and never wake.
