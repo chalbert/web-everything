@@ -37,6 +37,29 @@ const PRIMARY_REPOS = ['webeverything', 'web-everything', 'frontierui', 'plateau
 const SEP = path.sep;
 
 /**
+ * The WORKSPACE root — the shared parent every primary checkout and the `.lanes/` pool sit under. Pure.
+ *
+ * WHY IT IS NOT JUST `dirname(weRoot)`, and this was a live hole rather than a hypothetical. The hook is
+ * configured as `node scripts/guard-lane.mjs`, resolved against the CURRENT DIRECTORY — so when a session's cwd
+ * is a lane, the LANE'S copy of this script runs. `dirname` then made `workspace` the lane pool
+ * (`<workspace>/.lanes/web-everything`), the primary list became paths that do not exist
+ * (`…/.lanes/web-everything/webeverything/`), nothing matched, and an edit to the real shared checkout was
+ * ALLOWED. The guard protected only the checkout it happened to be launched from — which, when launched from a
+ * lane, is the one tree that never needed protecting.
+ *
+ * Demonstrated on 2026-08-11: with cwd in a lane, a Write to `webeverything/conformance-vectors/intl.vectors.ts`
+ * went through with no deny.
+ *
+ * A lane always lives at `<workspace>/.lanes/<pool>/lane-N`, so splitting on the `.lanes` segment recovers the
+ * true root wherever the script is running from.
+ */
+export function workspaceRootOf(weRoot) {
+  const s = String(weRoot || '');
+  const i = s.indexOf(`${SEP}.lanes${SEP}`);
+  return i >= 0 ? s.slice(0, i) : path.dirname(s);
+}
+
+/**
  * PURE decision — no I/O. Given an already-resolved REAL path and the guard's own repo root, return a deny
  * message when the edit targets a constellation PRIMARY checkout outside any lane clone, else null (allow).
  * Kept separate from the stdin/exit-code wrapper so it is unit-testable (mirrors guard-git-push.mjs).
@@ -46,7 +69,7 @@ const SEP = path.sep;
  */
 export function laneGuardDecision(real, weRoot) {
   if (!real) return null; // no path to judge (never block)
-  const workspace = path.dirname(weRoot);
+  const workspace = workspaceRootOf(weRoot);
   const primaries = PRIMARY_REPOS.map((r) => path.join(workspace, r) + SEP);
 
   // A lane clone lives under `<workspace>/.lanes/…` — never under a primary root — so a primary-root prefix
