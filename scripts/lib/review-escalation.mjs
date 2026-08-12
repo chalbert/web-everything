@@ -1612,36 +1612,41 @@ export function blankQuotedRegions(body) {
   // Each was verified twice: the scanner accepted it AND a markdown renderer showed it as a code block, so a
   // reader would see documentation while the gate saw a record.
   const blankLine = (l) => ' '.repeat(l.length);
-  let fence = null;      // the open fence's run, e.g. '```'
-  let html = false;      // inside <pre>/<code>
-  let prevBlank = true;  // an indented code block may only START after a blank line
-  const scanned = String(body ?? '').split('\n').map((raw) => {
-    // BLOCKQUOTE PREFIXES ARE STRIPPED BEFORE ANYTHING ELSE. `> ```` never matched a `^[ \t]*` anchor, so a
-    // quoted fence inside a blockquote was invisible to the scanner and rendered as code to a human.
-    const line = raw.replace(/^[ \t]*(?:>[ \t]?)+/, '');
+  let fence = null;        // the open fence's run, e.g. '```'
+  let html = false;        // inside <pre>/<code>
+  let inParagraph = false; // an indented block is CODE only when it does not continue a paragraph
+  const scanned = String(body ?? '').split('\n').map((line) => {
+    // A BLOCKQUOTE IS QUOTED BY DEFINITION — blank the whole line and never look inside. The first cut
+    // STRIPPED the `>` and re-scanned, which was worse than doing nothing: quoted fence content became a bare
+    // closer, so `` ```\n> ```\nMARKER\n``` `` reopened the hole. The drain writes at top level, so nothing
+    // legitimate ever lives behind a `>`.
+    if (/^ {0,3}>/.test(line)) { inParagraph = false; return blankLine(line); }
     const isBlank = line.trim() === '';
 
     if (html) {
       if (/<\/(?:pre|code)\s*>/i.test(line)) html = false;
-      prevBlank = isBlank; return blankLine(raw);
+      return blankLine(line);
     }
     if (fence) {
-      // A CLOSER IS BARE. CommonMark forbids an info string on a closing fence, so ` ```js ` is CONTENT — the
-      // first cut treated it as a close and everything after it became scannable.
-      const close = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(line);
-      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
-      prevBlank = isBlank; return blankLine(raw);
+      // A CLOSER IS BARE AND BARELY INDENTED. CommonMark forbids an info string on a closer and caps its
+      // indent at three spaces, so ` ```js `, `    ``` ` and a tab-indented run are all CONTENT. Treating any
+      // of them as a close ended the block early and made everything after it scannable.
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) { fence = null; inParagraph = false; }
+      return blankLine(line);
     }
-    const open = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(line);
-    if (open) { fence = open[1]; prevBlank = false; return blankLine(raw); }
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (open) { fence = open[1]; inParagraph = false; return blankLine(line); }
     if (/<(?:pre|code)[\s>]/i.test(line)) {
       if (!/<\/(?:pre|code)\s*>/i.test(line)) html = true;
-      prevBlank = isBlank; return blankLine(raw);
+      inParagraph = false; return blankLine(line);
     }
-    // INDENTED CODE BLOCK — four spaces after a blank line. The likeliest accidental repeat of the original
-    // defect: pasting the block into a description with an indent.
-    if (prevBlank && /^(?: {4}|\t)/.test(line) && !isBlank) { return blankLine(raw); }
-    prevBlank = isBlank;
+    // INDENTED CODE BLOCK. The rule is NOT "after a blank line" — that model missed a marker indented right
+    // after a closed fence or a heading, both of which start code immediately. Four spaces is code unless it
+    // is a lazy continuation of an open PARAGRAPH, so paragraph state is what has to be tracked.
+    if (!inParagraph && !isBlank && /^(?: {4}|\t)/.test(line)) return blankLine(line);
+    if (isBlank || /^ {0,3}#{1,6}\s/.test(line)) { inParagraph = false; return line; }
+    inParagraph = true;
     return line;
   }).join('\n');
   // NOT A MARKDOWN PARSER, and it does not need to be. It errs toward blanking: anything it mistakes for a

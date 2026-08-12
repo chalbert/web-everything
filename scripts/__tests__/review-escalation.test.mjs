@@ -127,6 +127,32 @@ describe('review-escalation — #2324 escalation-reason-in-body', () => {
     it('a bare > in prose is not a blockquote prefix', () => {
       expect(bodyHasEscalationReason(`a > b in prose, and ${M} here`)).toBe(true);
     });
+
+    // ROUND 3 — five more, each found by review against the round-2 boundary. Two themes: the CLOSE rule was
+    // too permissive, and "indented code starts after a blank line" was the wrong model.
+    for (const [label, body] of [
+      // CommonMark caps a closing fence's indent at three spaces. Four is content, so the block never closed.
+      ['a four-space-indented "closer"', '```\n    ```\n' + M + '\n```'],
+      ['a tab-indented "closer"', '```\n\t```\n' + M + '\n```'],
+      // The round-2 code STRIPPED `>` and re-scanned, which turned quoted fence content into a bare closer.
+      // A blockquote is quoted by definition; the line is now blanked whole and never looked inside.
+      ['a blockquoted line used as a closer', '```\n> ```\n' + M + '\n```'],
+      // Indented code needs a blank line only to interrupt a PARAGRAPH. After a closed fence or a heading it
+      // starts immediately — which the `prevBlank` model missed.
+      ['an indented marker straight after a closed fence', '```\nx\n```\n    ' + M],
+      ['an indented marker straight after a heading', '# Title\n    ' + M],
+      // The drain writes at top level, so nothing legitimate lives behind a `>`.
+      ['a plainly blockquoted marker', '> ' + M],
+    ]) {
+      it(`ignores ${label}`, () => {
+        expect(bodyHasEscalationReason(body), label).toBe(false);
+      });
+    }
+
+    // The paragraph model must not swallow a legitimate indented continuation line.
+    it('an indented lazy continuation of a paragraph is not code', () => {
+      expect(bodyHasEscalationReason(`a paragraph\n    continued lazily\n${real}`)).toBe(true);
+    });
   });
 
   // THE WRITE GUARD IS A DIFFERENT QUESTION, and conflating the two created an append loop.
