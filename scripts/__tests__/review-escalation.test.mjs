@@ -5,7 +5,14 @@
  *   and a cheap marker check lets the gate verify the write actually landed.
  */
 import { describe, it, expect } from 'vitest';
-import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate } from '../lib/review-escalation.mjs';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate, parsePolicyStamp } from '../lib/review-escalation.mjs';
+import { POLICY_VERSION, POLICY_DIGEST } from '../lib/review-policy.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 describe('review-escalation — #2324 escalation-reason-in-body', () => {
   it('builds a marked block listing every reason', () => {
@@ -24,6 +31,44 @@ describe('review-escalation — #2324 escalation-reason-in-body', () => {
     expect(combined.startsWith(existing)).toBe(true);
     expect(combined).toContain('reason one');
   });
+  // The escalation record said WHAT fired and never WHICH RULES were in force. A threshold change therefore
+  // split the history into two incomparable halves with no marker at the seam — which is why `gate-health`
+  // reports `parameterSet: null` and why retrospective A/B is impossible today.
+  describe('the policy stamp — which parameter set scored this PR', () => {
+    it('rides the reason block and round-trips', () => {
+      const block = buildEscalationReasonBlock(['size (500 ≥ 400 changed lines)']);
+      const stamp = parsePolicyStamp(block);
+      expect(stamp).not.toBeNull();
+      expect(stamp.version).toBe(String(POLICY_VERSION));
+      expect(stamp.digest).toBe(POLICY_DIGEST);
+    });
+
+    // An unstamped body is every PR opened before this shipped. It must stay DISTINGUISHABLE from a stamped
+    // one — defaulting it to "the current set" would silently claim old PRs were scored under today's rules,
+    // which is the exact false-attribution this stamp exists to prevent.
+    it('reads null for an unstamped body rather than assuming the current set', () => {
+      expect(parsePolicyStamp('a PR body with no stamp')).toBeNull();
+      expect(parsePolicyStamp('')).toBeNull();
+      expect(parsePolicyStamp(undefined)).toBeNull();
+    });
+
+    // THE LOAD-BEARING PROPERTY. `version` is hand-declared and nothing forces a bump, so it can read `1`
+    // across edits that moved the thresholds. The digest is derived from the contract's bytes, so it cannot.
+    // If this ever fails, the stamp has stopped tracking the thing it exists to track.
+    it('the digest is derived from the contract text, so it moves when the contract does', () => {
+      const contract = readFileSync(resolve(HERE, '..', 'lib', 'review-policy.contract.json'), 'utf8');
+      const expected = createHash('sha256').update(contract).digest('hex').slice(0, 12);
+      expect(POLICY_DIGEST).toBe(expected);
+      // …and a one-character edit changes it, which `version` alone would not reflect.
+      const nudged = createHash('sha256').update(`${contract} `).digest('hex').slice(0, 12);
+      expect(nudged).not.toBe(POLICY_DIGEST);
+    });
+
+    it('an empty reason list still produces no block, so an unescalated PR is not stamped', () => {
+      expect(buildEscalationReasonBlock([])).toBe('');
+    });
+  });
+
   it('bodyHasEscalationReason detects the marker (present/absent/non-string)', () => {
     expect(bodyHasEscalationReason('some body\n\n## Escalation reason\n\n- x')).toBe(true);
     expect(bodyHasEscalationReason('plain body, no marker')).toBe(false);
