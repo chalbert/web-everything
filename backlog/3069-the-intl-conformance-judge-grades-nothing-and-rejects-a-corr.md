@@ -1,4 +1,5 @@
 ---
+bornAs: xrw6xn5
 kind: story
 size: 2
 status: resolved
