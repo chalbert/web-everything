@@ -178,6 +178,23 @@ export const DEFAULT_MANDATE = 'correctness';
  *   the anti-spiral clause. Both additive — omitted, the text is what it was before #2950.
  * @returns {string}
  */
+/**
+ * WHAT IS WORTH A BOUNCE AND WHAT IS ONLY WORTH A NOTE. Declared once, here, rather than typed at each call —
+ * an instruction that has to be remembered per-invocation is one that gets forgotten, and this rule was
+ * originally written into `buildPanelMandate` alone, so the #2439 FINAL VALIDATOR (an equally adversarial
+ * reader of the same diff, and the one whose accept the panel's accept is gated on) never received it.
+ *
+ * Exported so a test can prove it reaches EVERY mandate built from `buildMandate`, and so a caller building a
+ * different transport can assert its presence rather than re-typing a paraphrase that drifts.
+ */
+export const PROSE_IMPRECISION_RULE = [
+  'PROSE IMPRECISION IS NON-BLOCKING. Wording, framing, and claims about history or significance are worth a',
+  'NOTE, never a change-request, unless the imprecision would cause a wrong ACTION — a maintainer editing the',
+  'wrong thing, trusting a guarantee that does not hold, or building against a premise that is false. Bounce',
+  'on behaviour. Measured cost of the alternative: PRs in this repo have taken three and four review rounds on',
+  'significance framing while the code was correct throughout.',
+].join(' ');
+
 export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE, goal = '', round = 1 } = {}) {
   const isolationLine = contextIsolation === 'diff-only'
     ? 'You see ONLY the diff (and, if supplied, the PR description) — no author framing, no prior session context.'
@@ -202,6 +219,7 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
       'Work from the diff text alone — do NOT `git checkout`, `git switch`, `git fetch`+checkout, or otherwise',
       'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain. If',
       'you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.',
+      PROSE_IMPRECISION_RULE,
     ],
   });
 }
@@ -979,14 +997,9 @@ export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netCha
     'verdict to accommodate what you guess another lens\'s reviewer might want. A genuine tradeoff BETWEEN',
     'mandates (e.g. security wants X, simplicity wants not-X) is human judgment by definition — surface your',
     'honest verdict for your own lens and let the panel reduction detect the conflict; do not resolve it yourself.',
-    // Declared here rather than typed per-invocation. An instruction that has to be remembered at each
-    // call is one that gets forgotten: this session demonstrated that with the juror session-id rule, which was
-    // known and violated four times running.
-    'PROSE IMPRECISION IS NON-BLOCKING. Wording, framing, and claims about history or significance are worth a',
-    'NOTE, never a change-request, unless the imprecision would cause a wrong ACTION — a maintainer editing the',
-    'wrong thing, trusting a guarantee that does not hold, or building against a premise that is false. Bounce',
-    'on behaviour. Measured cost of the alternative: PRs in this repo have taken three and four review rounds on',
-    'significance framing while the code was correct throughout.',
+    // The PROSE IMPRECISION clause used to be typed out here, which meant only the PANEL got it — the #2439
+    // FINAL VALIDATOR, an equally adversarial reader of the same diff, did not. It now lives in `buildMandate`
+    // so both do; see PROSE_IMPRECISION_RULE.
   ];
   const netFiles = (Array.isArray(netChangedFiles) ? netChangedFiles : []).filter(Boolean).map(String);
   if (netFiles.length) {
