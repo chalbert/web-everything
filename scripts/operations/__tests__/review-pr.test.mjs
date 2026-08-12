@@ -555,6 +555,11 @@ describe('#3072 the review juror is tool-bearing', () => {
 
 // #3072 third slice — an UNATTENDED confirm, and only where the declaration said an agent may give one.
 describe('#3072 autoConfirm answers an agent confirm and never a human one', () => {
+  /** Stub sinks for every declared effect, recording what was applied. No gh, no ledger, no disk. */
+  const recordingSinks = (seen) => Object.fromEntries(
+    Object.values(REVIEW_EFFECTS).map((t) => [t, async (payload) => { seen.push(t); return { ok: true, t, payload }; }]),
+  );
+
   /** The policy a loop supplies: answer an AGENT confirm with the derived verdict, decline a HUMAN one. */
   const agentOnly = (pending, run) => (pending?.of === CONFIRM_ACTORS.AGENT
     ? { value: run.verdict?.verdict === 'accept' ? 'accept' : 'changes' }
@@ -592,5 +597,45 @@ describe('#3072 autoConfirm answers an agent confirm and never a human one', () 
       autoConfirm: () => null,
     });
     expect(out.stopped).toBe('confirm');
+  });
+
+  // THE POSITIVE CASE, which had no test at all (PR #1178 review, finding 4): all three above assert a STOP,
+  // so deleting the answer branch — the entire feature — left the whole suite green. This is the one that
+  // reddens when it goes.
+  it('ANSWERS an agent-addressed confirm and drives past it, unattended', async () => {
+    const { registry } = registryFor();
+    const store = createMemoryRunStore();
+    const seen = [];
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-auto', input: BASE_INPUT, registry }),
+      registry,
+      store,
+      sinks: recordingSinks(seen),
+      judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+      autoConfirm: agentOnly,
+    });
+    expect(out.stopped).not.toBe('confirm');
+    // The answer the policy gave is the one the run recorded — not merely "it did not stop".
+    expect(out.run.findings.confirm).toBe('accept');
+    // And it went ON to the effects, which is the whole point of not needing a person.
+    expect(seen.length).toBeGreaterThan(0);
+  });
+
+  // The policy is CONSULTED with what it needs to decide: which actor is being asked, and the run so far.
+  it('hands the policy the pending confirm and the run, so its decision can depend on both', async () => {
+    const { registry } = registryFor();
+    const store = createMemoryRunStore();
+    const calls = [];
+    await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-args', input: BASE_INPUT, registry }),
+      registry,
+      store,
+      sinks: recordingSinks([]),
+      judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+      autoConfirm: (pending, run) => { calls.push({ of: pending?.of, id: run?.id, verdict: run?.verdict?.verdict }); return null; },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ of: CONFIRM_ACTORS.AGENT, id: 'r-args' });
+    expect(calls[0].verdict).toBeDefined();
   });
 });

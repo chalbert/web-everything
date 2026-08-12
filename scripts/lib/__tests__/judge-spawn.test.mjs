@@ -34,7 +34,8 @@ import {
   parseJudgeOutcome,
   loadedContextTokens,
   judgeSpawn,
-  assertLaneCwd
+  assertLaneCwd,
+  laneRootOf,
 } from '../judge-spawn.mjs';
 
 const SHAPE = {
@@ -550,20 +551,59 @@ describe('judgeSpawn — the one function a `judge` step calls, exercised over a
 // shared-tree write. Nothing set the cwd, and `--safe-mode` disables hooks, so both were false. Review caught
 // it as a behavioural regression of a structural guarantee.
 describe('assertLaneCwd', () => {
+  const LANE = '/ws/.lanes/web-everything/lane-3';
+  const DRIVER = '/ws/.lanes/web-everything/lane-9';
+
   it('refuses a tool-bearing spawn outside a lane', () => {
-    expect(() => assertLaneCwd('/ws/webeverything', ['Bash'])).toThrow(/outside a lane/);
-    expect(() => assertLaneCwd(undefined, ['Bash'])).toThrow(/outside a lane/);
-    expect(() => assertLaneCwd('', ['Read'])).toThrow(/outside a lane/);
+    expect(() => assertLaneCwd('/ws/webeverything', ['Bash'], DRIVER)).toThrow(/not a lane clone/);
   });
 
-  it('allows a tool-bearing spawn inside a lane', () => {
-    expect(() => assertLaneCwd('/ws/.lanes/web-everything/lane-3', ['Bash'])).not.toThrow();
-    expect(() => assertLaneCwd('/ws/.lanes/plateau-app/lane-1/sub', ['Bash', 'Read'])).not.toThrow();
+  // THE HOLE THE FIRST FIX LEFT (PR #1178 review, blocking 1). `judgeSpawn` defaulted `cwd` to
+  // `process.cwd()`, and a review normally runs inside a lane — so an omitted cwd passed the old check by
+  // donating the DRIVER'S OWN lane. There is no safe default; an absent one is refused outright.
+  it('refuses when no cwd was supplied at all — there is no safe default to inherit', () => {
+    for (const nothing of [undefined, null, '', '   ']) {
+      expect(() => assertLaneCwd(nothing, ['Bash'], DRIVER)).toThrow(/no `cwd` was supplied/);
+    }
+  });
+
+  // Same tree, same hazard — and the shape an omitted cwd used to produce. The juror's mandate is to MUTATE
+  // that tree (check out the parent commit, edit source, re-run the suite), which is the driver's diff.
+  it("refuses the DRIVER'S own directory, even though it is a perfectly good lane", () => {
+    expect(() => assertLaneCwd(DRIVER, ['Bash'], DRIVER)).toThrow(/DRIVER'S OWN directory/);
+    expect(() => assertLaneCwd(`${DRIVER}/`, ['Bash'], DRIVER)).toThrow(/DRIVER'S OWN directory/);
+  });
+
+  // A RAW SUBSTRING TEST WALKS THROUGH `..` (review finding 2). The old check was
+  // `path.includes('/.lanes/')`, so this string matched while the child's real working directory was the
+  // shared primary checkout.
+  it('resolves the path before judging it, so `..` cannot escape', () => {
+    expect(() => assertLaneCwd('/ws/.lanes/../webeverything', ['Bash'], DRIVER)).toThrow(/not a lane clone/);
+    expect(() => assertLaneCwd('/ws/.lanes/web-everything/lane-3/../../../webeverything', ['Bash'], DRIVER))
+      .toThrow(/not a lane clone/);
+  });
+
+  // …and it matches a real pool member, not any directory that happens to be called `.lanes`.
+  it('requires the <workspace>/.lanes/<pool>/lane-N shape, not merely a `.lanes` segment', () => {
+    expect(() => assertLaneCwd('/tmp/.lanes/anything', ['Bash'], DRIVER)).toThrow(/not a lane clone/);
+    expect(() => assertLaneCwd('/tmp/.lanes/pool/notalane', ['Bash'], DRIVER)).toThrow(/not a lane clone/);
+  });
+
+  it('allows a tool-bearing spawn in a lane that is not the driver\'s', () => {
+    expect(() => assertLaneCwd(LANE, ['Bash'], DRIVER)).not.toThrow();
+    expect(() => assertLaneCwd('/ws/.lanes/plateau-app/lane-1/sub', ['Bash', 'Read'], DRIVER)).not.toThrow();
   });
 
   it('ignores cwd entirely for a tool-free juror, so every existing caller is unaffected', () => {
-    expect(() => assertLaneCwd('/ws/webeverything', null)).not.toThrow();
-    expect(() => assertLaneCwd('/anywhere', undefined)).not.toThrow();
+    expect(() => assertLaneCwd('/ws/webeverything', null, DRIVER)).not.toThrow();
+    expect(() => assertLaneCwd(undefined, undefined, DRIVER)).not.toThrow();
+  });
+
+  it('laneRootOf names the lane, and nothing else', () => {
+    expect(laneRootOf('/ws/.lanes/web-everything/lane-3/scripts/x.mjs')).toBe('/ws/.lanes/web-everything/lane-3');
+    expect(laneRootOf('/ws/.lanes/web-everything/lane-12')).toBe('/ws/.lanes/web-everything/lane-12');
+    expect(laneRootOf('/ws/webeverything')).toBeNull();
+    expect(laneRootOf('/tmp/.lanes/pool/notalane')).toBeNull();
   });
 
   it('judgeSpawn refuses before spawning — the check is on the path to the process, not beside it', async () => {
@@ -572,8 +612,29 @@ describe('assertLaneCwd', () => {
       mandate: 'm', input: 'i', shape: { type: 'object' }, runId: 'r', lens: 'correctness',
       allowedTools: ['Bash'], cwd: '/ws/webeverything',
       spawnFn: () => { spawned = true; throw new Error('should not reach'); },
-    })).rejects.toThrow(/outside a lane/);
+    })).rejects.toThrow(/not a lane clone/);
     expect(spawned).toBe(false);
+  });
+
+  // THE DEFAULT ITSELF, pinned at the spawn boundary: an omitted cwd must not become `process.cwd()`.
+  it('judgeSpawn refuses a tool-bearing spawn with NO cwd, rather than inheriting its own', async () => {
+    let spawned = false;
+    await expect(judgeSpawn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, runId: 'r', lens: 'correctness',
+      allowedTools: ['Bash'],
+      spawnFn: () => { spawned = true; throw new Error('should not reach'); },
+    })).rejects.toThrow(/no `cwd` was supplied/);
+    expect(spawned).toBe(false);
+  });
+
+  // A tool-free juror still spawns with no cwd — the directory is immaterial when nothing can write.
+  it('a tool-free juror with no cwd still spawns, in the process directory', async () => {
+    let seen = null;
+    await expect(judgeSpawn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, runId: 'r', lens: 'correctness',
+      spawnFn: (cli, argv, opts) => { seen = opts.cwd; throw new Error('stop here'); },
+    })).rejects.toThrow(/stop here/);
+    expect(seen).toBe(process.cwd());
   });
 });
 

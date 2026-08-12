@@ -119,12 +119,16 @@ if (IS_CLI) {
     registry,
     store: createFileRunStore(),
     sinks,
-    // A TOOL-BEARING juror needs a lane cwd, and `assertLaneCwd` refuses the spawn without one. The lane is
-    // taken from the environment rather than acquired here: this entry point must not lease a resource whose
-    // release it cannot guarantee, and a caller that has not leased one should get the refusal, not a lane it
-    // will forget to release. A tool-free juror ignores `cwd` entirely, so every existing operation is
-    // unaffected.
-    judge: createDefaultJudge(process.env.JUDGE_LANE_CWD ? { cwd: process.env.JUDGE_LANE_CWD } : {}),
+    // A TOOL-BEARING juror needs a lane of its OWN, and `assertLaneCwd` refuses the spawn without one. The
+    // lane comes from the environment rather than being acquired here: this entry point must not lease a
+    // resource whose release it cannot guarantee, and a caller that has not leased one should get the refusal.
+    //
+    // `?? null`, NEVER a fallback to this process's directory (PR #1178 review, blocking 1). An omitted cwd
+    // used to reach `judgeSpawn`'s `process.cwd()` default, and since a review normally runs INSIDE a lane
+    // that silently handed the juror the driver's own working tree — the very tree the parent was mid-review
+    // of, and one the juror's mandate tells it to mutate. Passing `null` makes the refusal fire, which is what
+    // the caller wanted all along. A tool-free juror ignores `cwd`, so every existing operation is unaffected.
+    judge: createDefaultJudge({ cwd: process.env.JUDGE_LANE_CWD || null }),
     newRunId: () => newRunId(declaration.name),
   })
     .then(({ code, lines }) => {

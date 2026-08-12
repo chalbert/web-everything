@@ -133,11 +133,7 @@ export function readPr({ pr, repo, exec = null, cwd = REPO_ROOT } = {}) {
   // the head ref in this clone, so the second resolution is a local probe, not a second network round trip.
   const netPaths = computeNetDiffPaths({ exec: gitExec, rev: headRefName, fetchExtraRefs: [] });
 
-  // PRIOR ROUNDS, from the durable ledger — the loop's round number is derivable, so it needs no new state.
-  // Fail-soft: an unreadable ledger yields 0 prior rounds, which reads as 'first round' rather than blocking a
-  // review on bookkeeping.
-  let priorRounds = 0;
-  try { priorRounds = (foldRepo(repo).get(pr)?.history ?? []).length; } catch { priorRounds = 0; }
+  const priorRounds = priorRoundsFor(repo, pr);
 
   return {
     priorRounds,
@@ -174,6 +170,34 @@ export function revParseCommit(exec, rev) {
 }
 
 /** `readPr` bound to one repo/exec, which is the shape the declaration wants. */
+/**
+ * HOW MANY ROUNDS THIS LOOP HAS ALREADY RUN, from the durable ledger — so the round number needs no new state.
+ *
+ * ROUNDS SINCE THE LAST CLEAR, not rows ever written (PR #1178 review, finding 3). `history` is every verdict
+ * this PR has ever carried, including rows from an already-CONVERGED loop, so counting its length made a
+ * brand-new review of a previously-accepted PR report itself as round N of a cap of 5. Measured on real repo
+ * data before the fix: PRs 1162 and 1164 each ran three `changes` rounds then an `accepted` that cleared them,
+ * and the old expression reported `exhausted` on the FIRST round of the next loop. #1164's four-round run is
+ * the very reason the cap is 5 (`we:scripts/lib/jury-core.mjs`), so the miscount strangled exactly the case
+ * the cap exists to allow.
+ *
+ * `outstandingHolds` is the LEDGER'S OWN answer to "what is still standing" — it slices from the last
+ * `clears: true` row. Reusing it keeps one definition of a loop rather than two that can disagree.
+ *
+ * EXPORTED so the count is testable on its own. Inline in the reader it was only reachable through a `gh` call
+ * and a git fetch, which is why the wrong expression shipped with no test to redden.
+ *
+ * Fail-soft: an unreadable ledger yields 0, which reads as "first round" rather than blocking a review on
+ * bookkeeping.
+ *
+ * @param {string} repo - `owner/name`.
+ * @param {number} pr
+ * @returns {number}
+ */
+export function priorRoundsFor(repo, pr) {
+  try { return (foldRepo(repo).get(pr)?.outstandingHolds ?? []).length; } catch { return 0; }
+}
+
 export function createReviewPrReader({ exec = null, cwd = REPO_ROOT } = {}) {
   return ({ pr, repo }) => readPr({ pr, repo, exec, cwd });
 }
