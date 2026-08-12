@@ -37,7 +37,9 @@ import {
   renderVerdictWriteUp,
   reviewPrOperation,
   shapeReadFinding,
+  REVIEW_JUROR_TOOLS,
 } from '../review-pr.mjs';
+import { buildJudgeArgv, deriveSessionId } from '../../lib/judge-spawn.mjs';
 
 /** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
 const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.md'];
@@ -521,5 +523,32 @@ describe('the judge request is never built from unvalidated input', () => {
       .toThrow(/shaped like a flag/);
     expect(() => assertSafeJudgeRequest({ mandate: 'x', input: 'y', shape: {}, effort: 'ludicrous' }))
       .toThrow(/effort/);
+  });
+});
+
+// #3072 — THE JUROR CAN ACT. A tool-free juror reading a diff found none of the defects the hand-run reviews
+// found this week: a `gh` flag bypass proven by firing the command, a guard hole reproduced on the parent
+// commit, four decorative tests found by mutating source. The tools ARE the finding mechanism, so the review
+// operation grants them — and the isolation `--tools ""` used to provide is replaced structurally, by the
+// spawn's lane cwd and its derived session id, neither of which depends on the juror cooperating.
+describe('#3072 the review juror is tool-bearing', () => {
+  it('the judge request carries an explicit tool allow-list', () => {
+    const { request: req } = atConfirm({ ...registryFor(), input: BASE_INPUT });
+    expect(req.allowedTools).toEqual([...REVIEW_JUROR_TOOLS]);
+    expect(REVIEW_JUROR_TOOLS).toContain('Bash');
+  });
+
+  it('a flag-shaped tool name is refused at the adapter boundary', () => {
+    // Same hazard as a flag-shaped `model`, one field over: the name reaches argv as a bare token.
+    for (const bad of [['--bare'], ['-x'], [''], 'Bash', []]) {
+      expect(() => assertSafeJudgeRequest({ allowedTools: bad }), JSON.stringify(bad)).toThrow();
+    }
+  });
+
+  it('omitting the list still yields a tool-free juror, so every other caller is unchanged', () => {
+    expect(() => assertSafeJudgeRequest({})).not.toThrow();
+    const argv = buildJudgeArgv({ mandate: 'm', shape: { type: 'object' }, sessionId: deriveSessionId('t') });
+    expect(argv).toContain('--tools');
+    expect(argv).not.toContain('--allowedTools');
   });
 });

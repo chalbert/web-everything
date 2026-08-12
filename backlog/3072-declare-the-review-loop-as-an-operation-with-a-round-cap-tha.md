@@ -19,6 +19,34 @@ refusal, `review-pr` is declared. What does not exist is them being **one operat
 hand-writing a prompt, spawning a session, reading the report and deciding. On 2026-08-11 that loop was run by
 hand **nine times**.
 
+## 2026-08-12 — FIRST SLICE LANDED: the juror can act
+
+I was wrong about how much was missing. `review-pr` already declares the full pipeline — `read` → `judge` →
+`reduce` → `confirm` → `record`, with four ordered effects including the label swap. It was never a stub.
+
+**Exactly one thing made every review get hand-crafted instead: the juror was tool-free.** `buildJudgeArgv`
+hardcoded `--tools ''`, so a juror could read a diff and nothing else. Every significant find this week came
+from *acting* — firing a `gh` command at the real API, reproducing a bug on the parent commit, mutating source
+to see which tests stayed green. None of those are reachable by reading.
+
+`allowedTools` now threads through `buildJudgeArgv` → `judgeSpawn` → the CLI adapter, and `review-pr` requests
+`Bash`, `Read`, `Grep`, `Glob`. **Tool-free stays the default**, so every other caller is unchanged.
+
+**What replaces the guarantee `--tools ''` gave**, since that was its whole justification — two properties,
+both enforced by hooks rather than instruction:
+
+- the spawn's `cwd` is a lane, so `guard-lane` denies any write to a shared checkout;
+- its `sessionId` is derived, so it differs from the author's and the self-clear refusal holds.
+
+Neither depends on the juror cooperating, which is the same bar `--tools ''` met.
+
+A flag-shaped tool name is refused at both boundaries — the same hazard as a flag-shaped `model`, one field
+over, and pinned by test at each.
+
+**Still owed on this card:** the round cap with distinguishable *converged / exhausted / stuck*, and answering
+the `confirm` step unattended for `AGENT` actors. Those are what remain between this and a loop that runs
+without a person.
+
 ## Why it is the highest-value slice
 
 It is the most repeated action in the delivery loop, and the only one still entirely manual. It is also the one

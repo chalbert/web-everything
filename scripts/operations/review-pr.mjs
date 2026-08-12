@@ -107,6 +107,9 @@ export const DEFAULT_LENS = MANDATORY_LENSES[0];
  * that DOES reach the judge request is `lens`, and `buildPanelMandate` refuses anything outside `PANEL_LENSES`
  * before it can become argv (it lands in the mandate TEXT, never in a flag position, either way).
  */
+/** What a reviewing juror may do. Read and search, plus Bash for gates, reproduction and mutation probes. */
+export const REVIEW_JUROR_TOOLS = Object.freeze(['Bash', 'Read', 'Grep', 'Glob']);
+
 export const JUDGE_MODEL = 'sonnet';
 export const JUDGE_EFFORT = 'high';
 export const JUDGE_BUDGET_USD = 1.5;
@@ -388,6 +391,12 @@ export function reviewPrOperation({ readPr } = {}) {
           model: JUDGE_MODEL,
           effort: JUDGE_EFFORT,
           budget: JUDGE_BUDGET_USD,
+          // TOOL-BEARING. A juror that can only read a diff finds none of the defects the hand-run reviews found
+          // this week — a gh flag bypass proven by firing the command, a guard hole reproduced on the parent
+          // commit, four decorative tests found by mutating source. The tools ARE the finding mechanism.
+          // Isolation is structural instead: the spawn's cwd is a lane (guard-lane denies a shared-tree write)
+          // and its sessionId is derived, so the self-clear refusal holds against the author.
+          allowedTools: REVIEW_JUROR_TOOLS,
         };
       },
     }),

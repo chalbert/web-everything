@@ -208,7 +208,21 @@ export function buildJudgeArgv({
   effort = DEFAULT_EFFORT,
   budget = DEFAULT_BUDGET_USD,
   sessionId,
+  allowedTools = null,
 } = {}) {
+  if (allowedTools !== null) {
+    // A tool name reaches argv as a bare token, so a flag-shaped one becomes a FLAG — the same hazard
+    // `FORBIDDEN_ARGV` exists for, one field over. Refuse anything that is not a plain tool identifier.
+    if (!Array.isArray(allowedTools) || allowedTools.length === 0) {
+      throw new TypeError('judge-spawn: `allowedTools` must be a non-empty array, or null for a tool-free juror');
+    }
+    for (const t of allowedTools) {
+      if (typeof t !== 'string' || !/^[A-Za-z][A-Za-z0-9_]*$/.test(t)) {
+        throw new TypeError(`judge-spawn: refusing tool name ${JSON.stringify(t)} — a non-identifier reaches argv as a flag`);
+      }
+    }
+    assertNoForbiddenArgv(allowedTools);
+  }
   if (typeof mandate !== 'string' || !mandate.trim()) {
     throw new TypeError('judge-spawn: `mandate` must be a non-empty string');
   }
@@ -228,11 +242,27 @@ export function buildJudgeArgv({
     throw new TypeError('judge-spawn: `sessionId` must be a canonical lowercase UUID — use deriveSessionId()');
   }
 
+  // TOOL-FREE BY DEFAULT, TOOL-BEARING ONLY ON REQUEST. `--tools ''` is what makes a juror's "never check the
+  // branch out in a shared tree" a thing it CANNOT do rather than is asked not to — so it stays the default and
+  // every existing caller is unchanged.
+  //
+  // WHY A TOOL-BEARING VARIANT EXISTS AT ALL. Nine PR reviews run by hand on 2026-08-11/12 found what they
+  // found BECAUSE they could act: a `gh` flag bypass found by firing the command at real GitHub, a guard hole
+  // reproduced on the parent commit, four decorative tests found by mutating source and watching what stayed
+  // green. A juror that can only read a diff finds none of those. The tools ARE the finding mechanism.
+  //
+  // WHAT REPLACES THE GUARANTEE `--tools ''` GAVE. Two structural properties, both enforced by hooks rather
+  // than by instruction: the spawn runs with `cwd` in the caller's own LANE, so `guard-lane` denies any write
+  // to a shared checkout; and its `sessionId` is derived, so it differs from the author's and the self-clear
+  // refusal in `review-independence.mjs` holds. Neither depends on the juror cooperating.
+  const toolArgs = allowedTools === null
+    ? ['--tools', '']                 // variadic — the next token below MUST be an option, and is.
+    : ['--allowedTools', ...allowedTools];
   return [
     '-p',
     '--output-format', 'json',
     '--safe-mode',                    // NOT --bare: see FORBIDDEN_ARGV and the header's trap section.
-    '--tools', '',                    // variadic — the next token below MUST be an option, and is.
+    ...toolArgs,
     '--model', model,
     '--effort', effort,
     '--max-budget-usd', String(budget),
@@ -343,6 +373,7 @@ export async function judgeSpawn({
   env = process.env,
   cli = JUDGE_CLI,
   timeoutMs = 10 * 60 * 1000,
+  allowedTools = null,
   spawnFn = nodeSpawn,
 } = {}) {
   if (typeof input !== 'string' || !input.trim()) {
@@ -362,7 +393,7 @@ export async function judgeSpawn({
     ? sessionSeed([runId, lens])
     : `judge:${Date.now()}:${Math.random()}`;
   const sid = sessionId ?? deriveSessionId(seed);
-  const argv = buildJudgeArgv({ mandate, shape, model, effort, budget, sessionId: sid });
+  const argv = buildJudgeArgv({ mandate, shape, model, effort, budget, sessionId: sid , allowedTools });
 
   // Belt-and-braces: the trap can never reach a real process, even if `buildJudgeArgv` is later edited.
   assertNoForbiddenArgv(argv);
