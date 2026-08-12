@@ -2162,10 +2162,29 @@ describe('PROSE_IMPRECISION_RULE reaches every mandate built on buildMandate', (
     expect(buildMandate({})).toContain(PROSE_IMPRECISION_RULE);
   });
 
+  // #1182 review, finding C: the item named two builders and there are THREE — the `/jury` roster shim calls
+  // the PR-diff adapter's own `buildMandate` member, not `buildPanelMandate`.
+  it('reaches the PR-diff adapter member the /jury roster calls', () => {
+    expect(PR_DIFF_ADAPTER.buildMandate({ lens: 'correctness', mandate: 'correctness' }))
+      .toContain(PROSE_IMPRECISION_RULE);
+  });
+
   // Declared once and inherited, not typed twice. A second copy is how the two drift apart.
-  it('appears exactly ONCE in a panel mandate, not once per builder', () => {
-    const text = buildPanelMandate({ lens: 'correctness' });
-    expect(text.split(PROSE_IMPRECISION_RULE).length - 1).toBe(1);
+  //
+  // FOLDED OVER EVERY BUILDER (#1182 review, finding A). This guard read `buildPanelMandate` alone, so a
+  // second copy re-typed into `buildValidatorMandate` — the builder the whole change was about — rendered two
+  // copies and left all 270 tests green. `toContain` cannot tell one copy from two, so the count has to be
+  // taken everywhere the rule is supposed to appear exactly once.
+  it('appears exactly ONCE in EVERY mandate that carries it, not once per builder', () => {
+    const built = {
+      base: buildMandate({}),
+      panel: buildPanelMandate({ lens: 'correctness' }),
+      validator: buildValidatorMandate({ lens: 'correctness' }),
+      adapter: PR_DIFF_ADAPTER.buildMandate({ lens: 'correctness', mandate: 'correctness' }),
+    };
+    for (const [name, text] of Object.entries(built)) {
+      expect(`${name}: ${text.split(PROSE_IMPRECISION_RULE).length - 1}`).toBe(`${name}: 1`);
+    }
   });
 
   it('says what it has to say — bounce on behaviour, note on wording', () => {

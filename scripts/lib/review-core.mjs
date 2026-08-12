@@ -168,21 +168,19 @@ export {
 export const DEFAULT_MANDATE = 'correctness';
 
 /**
- * Build the canonical judge-only mandate text handed to a review subagent (the "read a diff, judge it"
- * instructions) — single-sourced so `/code-review`-shaped callers and the drain auto-review (`#2326`) stop
- * hand-rolling their own prose copy of the same mandate. Pure — returns the instruction string; SPAWNING the
- * subagent and reading its answer remains the caller's action (this module never calls a model, same split
- * `we:scripts/lane-review.mjs` documents for the pre-PR review seam).
- * @param {{contextIsolation?: string, mandate?: string|string[], goal?: string, round?: number}} [o] - #2950:
- *   `goal` is what the diff is trying to do (judged against that and the base, never an ideal); `round` ≥ 2 fires
- *   the anti-spiral clause. Both additive — omitted, the text is what it was before #2950.
- * @returns {string}
- */
-/**
  * WHAT IS WORTH A BOUNCE AND WHAT IS ONLY WORTH A NOTE. Declared once, here, rather than typed at each call —
  * an instruction that has to be remembered per-invocation is one that gets forgotten, and this rule was
  * originally written into `buildPanelMandate` alone, so the #2439 FINAL VALIDATOR (an equally adversarial
  * reader of the same diff, and the one whose accept the panel's accept is gated on) never received it.
+ *
+ * IT REACHES THREE TRANSPORTS, not two (PR #1182 review, finding C). `buildPanelMandate` and
+ * `buildValidatorMandate` are the two the item named, and `PR_DIFF_ADAPTER.buildMandate` is the third — the
+ * `/jury` roster shim (`we:skills-src/jury/resolve-roster.mjs`) calls the adapter member directly, so `/jury`
+ * jurors judging a PR diff now receive it too. Same subject, same adversarial role, so this is a wanted gain;
+ * it is written down because a gate-derivation file should not surprise its next reader.
+ *
+ * DELIBERATELY ABSENT from `buildEditorMandate` (it hand-rolls its own array and does not wrap this) and from
+ * `DECISION_PROSE_ADAPTER`, where the rule would be actively wrong: for a decision, framing IS the substance.
  *
  * Exported so a test can prove it reaches EVERY mandate built from `buildMandate`, and so a caller building a
  * different transport can assert its presence rather than re-typing a paraphrase that drifts.
@@ -195,6 +193,17 @@ export const PROSE_IMPRECISION_RULE = [
   'significance framing while the code was correct throughout.',
 ].join(' ');
 
+/**
+ * Build the canonical judge-only mandate text handed to a review subagent (the "read a diff, judge it"
+ * instructions) — single-sourced so `/code-review`-shaped callers and the drain auto-review (`#2326`) stop
+ * hand-rolling their own prose copy of the same mandate. Pure — returns the instruction string; SPAWNING the
+ * subagent and reading its answer remains the caller's action (this module never calls a model, same split
+ * `we:scripts/lane-review.mjs` documents for the pre-PR review seam).
+ * @param {{contextIsolation?: string, mandate?: string|string[], goal?: string, round?: number}} [o] - #2950:
+ *   `goal` is what the diff is trying to do (judged against that and the base, never an ideal); `round` ≥ 2 fires
+ *   the anti-spiral clause. Both additive — omitted, the text is what it was before #2950.
+ * @returns {string}
+ */
 export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE, goal = '', round = 1 } = {}) {
   const isolationLine = contextIsolation === 'diff-only'
     ? 'You see ONLY the diff (and, if supplied, the PR description) — no author framing, no prior session context.'
