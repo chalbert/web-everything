@@ -1,4 +1,5 @@
 ---
+bornAs: xuy3mlv
 kind: story
 size: 3
 parent: "3029"
