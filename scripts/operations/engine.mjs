@@ -158,7 +158,13 @@ export function effectsForStep(run, stepIndex) {
   return (run.effects ?? []).filter((e) => e.stepIndex === stepIndex).sort((a, b) => a.index - b.index);
 }
 
-/** Effect entries that are declared/pending/failed — i.e. everything still standing between here and done. */
+/**
+ * Effect entries that are declared/pending/in-flight/failed — everything still standing between here and done.
+ *
+ * `in-flight` counts as unapplied ON PURPOSE (#3073): the sink returned, but the work it STARTED has not
+ * finished, so the run must stay suspended on this step. Treating a dispatch as applied would advance the run
+ * past work still in progress, which is the whole reason the status exists.
+ */
 export function unappliedEffects(run, stepIndex = null) {
   return (run.effects ?? [])
     .filter((e) => (stepIndex === null || e.stepIndex === stepIndex) && e.status !== 'applied')
@@ -188,6 +194,11 @@ function toEffectEntry(run, declaration, stepIndex, stepName, descriptor, index)
     type: descriptor.type.trim(),
     payload: frozenCopy(descriptor.payload) ?? null,
     idempotent: descriptor.idempotent === true,
+    // DECLARED, not inferred (#3073). A dispatch effect STARTS work rather than completing it, and the
+    // executor has to know that BEFORE it calls the sink: it writes `in-flight` first, so a crash between
+    // the dispatch and the write cannot leave running work recorded as an unknown outcome. Learning it from
+    // the sink's return value would reintroduce exactly that window.
+    dispatch: descriptor.dispatch === true,
     status: 'declared',
     result: null,
     error: null,

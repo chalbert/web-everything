@@ -80,6 +80,48 @@ describe('the pure core', () => {
     expect(validateRunRecord(record).errors).toContain('duplicate effect key "run-sample#0#0" — the idempotency key must be unique within a run');
   });
 
+  /**
+   * THE FIELDS `in-flight` DECIDES ON (#3073; PR #1180 review, finding 4). Adding a status to the enum without
+   * checking its payload lets a hand-built or truncated record claim a state the executor's rules are keyed on:
+   * `handle` decides refuse-vs-resume on replay, `expectedBy` decides running-vs-overdue. A malformed one is a
+   * wrong answer to both questions, not a cosmetic defect.
+   */
+  describe('an in-flight entry carries the fields its own rules read', () => {
+    const withEffect = (over) => ({
+      ...sample(),
+      effects: [{ key: 'run-sample#0#0', stepIndex: 0, index: 0, type: 't', status: 'in-flight', ...over }],
+    });
+
+    it('accepts a handle, and accepts null — a dispatch that lost it before reporting', () => {
+      expect(validateRunRecord(withEffect({ handle: 'sess-abc' })).ok).toBe(true);
+      expect(validateRunRecord(withEffect({ handle: null })).ok).toBe(true);
+      expect(validateRunRecord(withEffect({})).ok).toBe(true); // absent is the same as null
+    });
+
+    // `''` is falsy, so it would read as "no handle" while looking like one — refused rather than coerced.
+    it('refuses a non-string or empty handle', () => {
+      for (const bad of [12345, {}, '']) {
+        expect(validateRunRecord(withEffect({ handle: bad })).errors.join(' ')).toMatch(/in-flight with an invalid handle/);
+      }
+    });
+
+    // An unparseable date makes every entry read as never-overdue, which is exactly what hides a stalled job.
+    it('refuses an unparseable expectedBy or startedAt, and accepts an absent one', () => {
+      expect(validateRunRecord(withEffect({ handle: 'h', expectedBy: 'soon' })).errors.join(' ')).toMatch(/unparseable expectedBy/);
+      expect(validateRunRecord(withEffect({ handle: 'h', startedAt: 'yesterday' })).errors.join(' ')).toMatch(/unparseable startedAt/);
+      expect(validateRunRecord(withEffect({ handle: 'h', expectedBy: null })).ok).toBe(true);
+      expect(validateRunRecord(withEffect({ handle: 'h', expectedBy: '2099-01-01T00:00:00.000Z' })).ok).toBe(true);
+    });
+
+    // The checks are scoped to the status that reads them — a `pending` entry is not asked for a handle.
+    it('does not impose the in-flight fields on any other status', () => {
+      expect(validateRunRecord({
+        ...sample(),
+        effects: [{ key: 'k', stepIndex: 0, index: 0, type: 't', status: 'pending', handle: 12345 }],
+      }).ok).toBe(true);
+    });
+  });
+
   it('effectKey is (run, step, ordinal) — the ordinal is what makes a PARTIAL replay exact (#2964)', () => {
     expect(effectKey('run-1', 3, 0)).toBe('run-1#3#0');
     expect(effectKey('run-1', 3, 1)).toBe('run-1#3#1');
