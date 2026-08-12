@@ -71,6 +71,9 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
     skipped: observed.skipped,
     errors: [...observed.errors],
     advanced: false,
+    // Keys whose work RAN AND FAILED, which stops this pass. `[]` on every other outcome, so the shape is
+    // stable and a consumer never has to distinguish absent from empty.
+    haltedOnFailure: [],
     status: null,
   };
 
@@ -84,6 +87,29 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
   // engine would return unchanged anyway.
   if (!observed.resolved.length) {
     report.status = runStatus(current, { registry });
+    return report;
+  }
+
+  // A `failed` OBSERVATION STOPS THE PASS. This is not the same word twice, and reading it as one re-ran real
+  // work on a timer (PR #1186 review, blocking):
+  //
+  //   - the EXECUTOR's `failed` means "the sink threw `notApplied` — I am CERTAIN nothing landed", so the
+  //     pre-flight lets it straight through to the sink again. Safe to retry, by construction.
+  //   - an OBSERVER's `failed` means "the work I started RAN, and it failed". The opposite: retrying re-does
+  //     side-effecting work that already happened once.
+  //
+  // Writing the second through `resolveInFlight` produces a status whose contract is the first, and the very
+  // next `applyPendingEffects` re-dispatched it — unbounded, at `StartInterval` frequency, with `advanced:
+  // false`, no errors and exit 0, so a supervisor saw a healthy job. Measured: one dispatch became five over
+  // four passes.
+  //
+  // The waker's job is to call `advance` and nothing else (#3070). Re-dispatching is not advancing, and
+  // deciding whether failed work should be retried is a RETRY POLICY — which nothing owns yet, so nothing here
+  // may improvise one. The resolution is persisted (above) and reported; a person or a future policy decides.
+  const failed = observed.resolved.filter((r) => r.status === 'failed');
+  if (failed.length) {
+    report.status = runStatus(current, { registry });
+    report.haltedOnFailure = failed.map((r) => r.key);
     return report;
   }
 
@@ -133,10 +159,15 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
  * @returns {Promise<{scanned: number, parked: number, runs: object[], errors: object[]}>}
  */
 export async function wakePass({ store, observers, resolveFor, now = new Date() } = {}) {
-  const ids = store.list();
+  // FAIL-SOFT AT THE FRONT DOOR TOO (PR #1186 review, NB-4). The header promises per-run fail-soft and the
+  // scan sat outside every `try`, so a store whose `list` throws took the whole pass down. It is still a real
+  // fault — the caller sees it in `errors` and the CLI exits non-zero — but it is reported in the same shape
+  // as everything else rather than as an exception the caller has to know to catch.
   const runs = [];
   const errors = [];
   let parked = 0;
+  let ids;
+  try { ids = store.list(); } catch (e) { return { scanned: 0, parked: 0, runs, errors: [{ error: String(e?.message ?? e) }] }; }
 
   for (const id of ids) {
     let run;
@@ -164,6 +195,7 @@ export function renderPass(pass) {
     const bits = [
       r.resolved.length ? `resolved ${r.resolved.map((x) => `${x.key}→${x.status}`).join(', ')}` : '',
       r.stillRunning.length ? `still running ${r.stillRunning.join(', ')}` : '',
+      r.haltedOnFailure?.length ? `HALTED — work ran and FAILED: ${r.haltedOnFailure.join(', ')} (no retry policy owns this; a person decides)` : '',
       r.skipped.length ? `SKIPPED ${r.skipped.map((x) => `${x.key} (${x.reason})`).join(', ')}` : '',
       r.errors.length ? `ERRORS ${r.errors.map((x) => x.error).join(' | ')}` : '',
       r.advanced ? 'advanced' : '',

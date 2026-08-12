@@ -17,7 +17,7 @@ import { createEffectObserver, observeRun, planObservations, OBSERVATIONS, SKIPS
 import { isParkedOnDispatch, renderPass, wakePass, wakeRun } from '../wake.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { createRegistry, op } from '../registry.mjs';
-import { effect } from '../step-kinds.mjs';
+import { confirm as confirmStep, effect } from '../step-kinds.mjs';
 
 const OP = 'fx-wake';
 const KEY = 'run-w#0#0';
@@ -284,5 +284,149 @@ describe('wakePass — one pass over the whole store', () => {
     const { store } = await parked();
     const pass = await wakePass({ store, observers: {}, resolveFor });
     expect(renderPass(pass).join('\n')).toMatch(/SKIPPED run-w#0#0 \(no-observer\)/);
+  });
+});
+
+/**
+ * A `failed` OBSERVATION MUST NOT RE-DISPATCH (PR #1186 review, blocking). The word means two opposite things:
+ * the executor's `failed` is "the sink threw `notApplied`, nothing landed, safe to retry", and an observer's
+ * `failed` is "the work RAN and it failed". Reading the second as the first re-ran real work on a timer —
+ * one dispatch became five over four passes, with `advanced: false`, no errors, and exit 0.
+ */
+describe('a failed observation halts the pass instead of restarting the work', () => {
+  /** Counts how many times the dispatch sink is actually called. */
+  function countingSinks(calls) {
+    return {
+      'start.build': async () => { calls.push('dispatch'); return inFlight({ handle: 'sess-abc' }); },
+      'note.write': async () => ({ ok: true }),
+    };
+  }
+
+  it('does NOT re-dispatch, however many passes run', async () => {
+    const calls = [];
+    const sinks = countingSinks(calls);
+    const store = createMemoryRunStore();
+    let run = advanceWhileRunning(startRun({ op: OP, id: 'run-w', input: { pr: 7 }, registry }), { registry });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks, store })).run;
+    expect(calls).toEqual(['dispatch']);
+
+    const observers = { 'start.build': async () => ({ status: 'failed', error: 'the build died' }) };
+    const first = await wakeRun(store.read('run-w'), { observers, store, registry, sinks });
+    expect(first.haltedOnFailure).toEqual([KEY]);
+    expect(first.advanced).toBe(false);
+
+    // Every later pass finds nothing to do: the entry is `failed`, so it is not in-flight, so it is not even
+    // observed. The run also stops being picked up by a pass at all — see the `wakePass` case below.
+    for (let i = 0; i < 3; i += 1) {
+      const again = await wakeRun(store.read('run-w'), { observers, store, registry, sinks });
+      expect(again.resolved).toEqual([]);
+      expect(again.advanced).toBe(false);
+    }
+    // One dispatch, still. Before the fix this was five over four passes.
+    expect(calls).toEqual(['dispatch']);
+    expect(isParkedOnDispatch(store.read('run-w'))).toBe(false);
+  });
+
+  // Invisible was half the defect: the line read as "still parked" on every tick and the exit code stayed 0.
+  it('SAYS it halted, rather than looking identical to still-parked', async () => {
+    const store = createMemoryRunStore();
+    const sinks = countingSinks([]);
+    let run = advanceWhileRunning(startRun({ op: OP, id: 'run-w', input: { pr: 7 }, registry }), { registry });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks, store })).run;
+
+    const pass = await wakePass({
+      store, observers: { 'start.build': async () => ({ status: 'failed' }) }, resolveFor,
+    });
+    expect(renderPass(pass).join('\n')).toMatch(/HALTED — work ran and FAILED/);
+  });
+
+  it('the resolution is still persisted — halting is not forgetting', async () => {
+    const store = createMemoryRunStore();
+    const sinks = countingSinks([]);
+    let run = advanceWhileRunning(startRun({ op: OP, id: 'run-w', input: { pr: 7 }, registry }), { registry });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks, store })).run;
+    await wakeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'failed', error: 'the build died' }) },
+      store, registry, sinks,
+    });
+    expect(store.read('run-w').effects[0]).toMatchObject({ status: 'failed', error: 'the build died' });
+  });
+
+  // An `applied` resolution still advances — the halt is scoped to failure, not to resolutions generally.
+  it('an applied resolution in the same pass still advances', async () => {
+    const { run, store } = await parked();
+    const report = await wakeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'applied' }) },
+      store, registry, sinks: SINKS,
+    });
+    expect(report.haltedOnFailure).toEqual([]);
+    expect(report.advanced).toBe(true);
+  });
+});
+
+/**
+ * THE SAFETY PROPERTY THAT MATTERS MOST, and it was defended by a comment only (PR #1186 review, NB-1).
+ * #3070 ruled the waker calls `advance` and nothing else. A confirm owed to a HUMAN must therefore survive a
+ * pass untouched — the reviewer mutated the else-branch to auto-answer one and the whole suite stayed green,
+ * because no `confirm` step appeared anywhere in this file.
+ */
+describe('the waker hands back every suspend that is not an effect', () => {
+  /** A dispatch, then a confirm addressed to a human. */
+  function humanRegistry() {
+    const r = createRegistry();
+    r.register(op('fx-human', {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'start.build', payload: {}, dispatch: true }] }),
+      ok: confirmStep({ reads: ['input.pr'], asks: () => 'Land it?', of: () => 'human', options: ['accept', 'changes'] }),
+    }));
+    return r;
+  }
+
+  it('leaves a HUMAN-addressed confirm suspended, and answers nothing', async () => {
+    const r = humanRegistry();
+    const store = createMemoryRunStore();
+    let run = advanceWhileRunning(startRun({ op: 'fx-human', id: 'run-h', input: { pr: 7 }, registry: r }), { registry: r });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: SINKS, store })).run;
+
+    const report = await wakeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'applied' }) },
+      store, registry: r, sinks: SINKS,
+    });
+    expect(report.status).toBe('awaiting-confirm');
+    const after = store.read('run-h');
+    expect(after.pending).toMatchObject({ kind: 'confirm', of: 'human' });
+    expect(after.findings.ok).toBeUndefined(); // nothing answered it
+  });
+
+  // The no-progress break: without it the loop burns all 64 turns and writes the record on each one.
+  it('stops as soon as advancing makes no progress, rather than spending the whole turn cap', async () => {
+    const r = humanRegistry();
+    const store = createMemoryRunStore();
+    let run = advanceWhileRunning(startRun({ op: 'fx-human', id: 'run-h', input: { pr: 7 }, registry: r }), { registry: r });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: SINKS, store })).run;
+
+    let writes = 0;
+    const spy = { read: store.read, write: (x) => { writes += 1; return store.write(x); }, list: store.list };
+    await wakeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'applied' }) },
+      store: spy, registry: r, sinks: SINKS,
+    });
+    // The resolution, then the one advance that reaches the confirm. Not 64.
+    expect(writes).toBeLessThanOrEqual(3);
+  });
+});
+
+describe('wakePass is fail-soft at its own front door', () => {
+  it('a store whose list() throws is reported, not thrown', async () => {
+    const store = { list: () => { throw new Error('store offline'); }, read: () => null, write: () => {} };
+    const pass = await wakePass({ store, observers: {}, resolveFor });
+    expect(pass.errors).toEqual([{ error: 'store offline' }]);
+    expect(pass.scanned).toBe(0);
+    expect(pass.runs).toEqual([]);
   });
 });
