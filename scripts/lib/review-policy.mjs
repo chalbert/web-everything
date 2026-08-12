@@ -27,6 +27,7 @@
  * we:scripts). Registered on the trust-chain policy tier (gate-config.mjs) — editing this file or the contract
  * is a spec change that forces review:human.
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -300,8 +301,29 @@ export function validateContract(c) {
   return c;
 }
 
+const CONTRACT_TEXT = readFileSync(CONTRACT_PATH, 'utf8');
+
 /** The parsed, validated, deep-frozen contract. */
-export const REVIEW_POLICY = deepFreeze(validateContract(JSON.parse(readFileSync(CONTRACT_PATH, 'utf8'))));
+export const REVIEW_POLICY = deepFreeze(validateContract(JSON.parse(CONTRACT_TEXT)));
+
+/**
+ * WHICH PARAMETER SET SCORED A PR — the two fields that make an escalation record attributable.
+ *
+ * The contract has carried a `version` since it was written and NOTHING read it, so every escalation record
+ * ever stamped is unattributable: change a threshold and the history silently splits into two incomparable
+ * halves with no marker at the seam. That makes retrospective analysis guesswork and A/B impossible.
+ *
+ * TWO FIELDS, BECAUSE THE VERSION ALONE IS NOT ENOUGH. `version` is declared by hand and nothing forces a bump
+ * when the contract changes — a stamp that says `1` forever would read as "same parameters" across edits that
+ * moved them, which is worse than no stamp. `digest` is derived from the file's bytes, so it changes whenever
+ * the contract does, with no discipline required. The version stays because it is what a human reads and cites;
+ * the digest is the one an analysis should group by.
+ *
+ * Hashing the raw TEXT rather than a canonicalized parse is deliberate: the contract's own stated test is
+ * "did this file change?", and the trust chain gates it on exactly that.
+ */
+export const POLICY_VERSION = REVIEW_POLICY.version;
+export const POLICY_DIGEST = createHash('sha256').update(CONTRACT_TEXT).digest('hex').slice(0, 12);
 
 /** The rubric threshold VALUES (bare numbers) — the single source `review-escalation.mjs` imports. Frozen. */
 export const POLICY_THRESHOLDS = Object.freeze({
