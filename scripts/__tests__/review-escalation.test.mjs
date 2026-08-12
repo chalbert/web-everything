@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate, parsePolicyStamp } from '../lib/review-escalation.mjs';
+import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate, parsePolicyStamp, bodyAlreadyCarriesReasonBlock } from '../lib/review-escalation.mjs';
 import { POLICY_VERSION, POLICY_DIGEST } from '../lib/review-policy.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -101,6 +101,53 @@ describe('review-escalation — #2324 escalation-reason-in-body', () => {
     // A ``` inside a ~~~~ block is content, not a terminator.
     it('closes a fence only on the same character, at least as long', () => {
       expect(bodyHasEscalationReason('~~~~\n```\n## Escalation reason\n~~~~')).toBe(false);
+    });
+
+    // FOUR MORE FORGERIES, each found by review against the first cut of this boundary and each verified
+    // twice: the scanner accepted it AND a markdown renderer showed it as a code block. A reader would have
+    // seen documentation while the gate saw a record.
+    const M = '## Escalation reason';
+    for (const [label, body] of [
+      // CommonMark forbids an info string on a CLOSING fence, so ```js is content. The first cut read it as a
+      // close, and everything after became scannable.
+      ['an info-string "closer" does not close the fence', '```\ntext\n```js\n' + M + '\n```'],
+      // `> ``` ` never matched a `^[ \t]*` anchor, so a quoted fence inside a blockquote was invisible.
+      ['a fence inside a blockquote', '> ```\n> ' + M + '\n> ```'],
+      // The likeliest accidental repeat of the original defect: pasting the block with an indent.
+      ['a four-space indented code block', 'para\n\n    ' + M + '\n\npara'],
+      ['an HTML <pre> block', '<pre>\n' + M + '\n</pre>'],
+      ['an HTML <code> block', '<code>\n' + M + '\n</code>'],
+    ]) {
+      it(`ignores ${label}`, () => {
+        expect(bodyHasEscalationReason(body), label).toBe(false);
+      });
+    }
+
+    // Stripping blockquote prefixes must not eat an ordinary `>` in prose.
+    it('a bare > in prose is not a blockquote prefix', () => {
+      expect(bodyHasEscalationReason(`a > b in prose, and ${M} here`)).toBe(true);
+    });
+  });
+
+  // THE WRITE GUARD IS A DIFFERENT QUESTION, and conflating the two created an append loop.
+  // `bodyHasEscalationReason` asks "does a trustworthy record exist" and must ignore quoted text.
+  // `bodyAlreadyCarriesReasonBlock` asks "would appending duplicate what is already here" — for which quoted
+  // or not is irrelevant, because the bytes are there either way.
+  describe('the raw write-guard, so the drain can see its own write', () => {
+    const real = buildEscalationReasonBlock(['size (500 ≥ 400 changed lines)']);
+
+    it('sees a block that the trusted reader blanks', () => {
+      // A body whose earlier content blanks the appended block: the drain could never see its own write, so
+      // it re-appended on EVERY park pass until the body hit its size cap.
+      const selfBlanking = '```\n' + real;
+      expect(bodyHasEscalationReason(selfBlanking)).toBe(false);
+      expect(bodyAlreadyCarriesReasonBlock(selfBlanking)).toBe(true);
+    });
+
+    it('is false on a body with no block at all, so a first write still happens', () => {
+      expect(bodyAlreadyCarriesReasonBlock('a plain description')).toBe(false);
+      expect(bodyAlreadyCarriesReasonBlock('')).toBe(false);
+      expect(bodyAlreadyCarriesReasonBlock(undefined)).toBe(false);
     });
   });
 

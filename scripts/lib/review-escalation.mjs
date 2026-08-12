@@ -1604,28 +1604,67 @@ export function buildClearanceRevocationComment({ clearance, reason, pr, repo } 
  * missing escalation block, which is visible; the alternative is a forged one, which is not.
  */
 export function blankQuotedRegions(body) {
-  // A LINE SCANNER, not one regex. The regex form of this was wrong in a way worth recording: with the `m`
-  // flag, `$` matches at EVERY line end, so a `(?:<closing fence>|$)` alternation ended the block at the first
-  // newline and blanked only the opening line — the fenced example still forged both markers. Fence state is
-  // inherently line-oriented; tracking it as state is both correct and legible.
+  // A LINE SCANNER, not one regex. The regex form was wrong in a way worth recording: with the `m` flag `$`
+  // matches at EVERY line end, so a `(?:<closing fence>|$)` alternation ended the block at the first newline
+  // and blanked only the opening line. Fence state is inherently line-oriented.
+  //
+  // FIVE QUOTING FORMS, all four beyond the first found by review as live forgeries against the first cut.
+  // Each was verified twice: the scanner accepted it AND a markdown renderer showed it as a code block, so a
+  // reader would see documentation while the gate saw a record.
   const blankLine = (l) => ' '.repeat(l.length);
-  let fence = null;
-  const scanned = String(body ?? '').split('\n').map((line) => {
-    const open = /^[ \t]*(`{3,}|~{3,})/.exec(line);
-    if (fence) {
-      // A fence closes only on the SAME character, at least as long as the opener — a ``` inside a ~~~~ block
-      // is content, not a terminator.
-      if (open && open[1][0] === fence[0] && open[1].length >= fence.length) fence = null;
-      return blankLine(line);
+  let fence = null;      // the open fence's run, e.g. '```'
+  let html = false;      // inside <pre>/<code>
+  let prevBlank = true;  // an indented code block may only START after a blank line
+  const scanned = String(body ?? '').split('\n').map((raw) => {
+    // BLOCKQUOTE PREFIXES ARE STRIPPED BEFORE ANYTHING ELSE. `> ```` never matched a `^[ \t]*` anchor, so a
+    // quoted fence inside a blockquote was invisible to the scanner and rendered as code to a human.
+    const line = raw.replace(/^[ \t]*(?:>[ \t]?)+/, '');
+    const isBlank = line.trim() === '';
+
+    if (html) {
+      if (/<\/(?:pre|code)\s*>/i.test(line)) html = false;
+      prevBlank = isBlank; return blankLine(raw);
     }
-    if (open) { fence = open[1]; return blankLine(line); }
+    if (fence) {
+      // A CLOSER IS BARE. CommonMark forbids an info string on a closing fence, so ` ```js ` is CONTENT — the
+      // first cut treated it as a close and everything after it became scannable.
+      const close = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
+      prevBlank = isBlank; return blankLine(raw);
+    }
+    const open = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(line);
+    if (open) { fence = open[1]; prevBlank = false; return blankLine(raw); }
+    if (/<(?:pre|code)[\s>]/i.test(line)) {
+      if (!/<\/(?:pre|code)\s*>/i.test(line)) html = true;
+      prevBlank = isBlank; return blankLine(raw);
+    }
+    // INDENTED CODE BLOCK — four spaces after a blank line. The likeliest accidental repeat of the original
+    // defect: pasting the block into a description with an indent.
+    if (prevBlank && /^(?: {4}|\t)/.test(line) && !isBlank) { return blankLine(raw); }
+    prevBlank = isBlank;
     return line;
   }).join('\n');
-  // An unclosed fence leaves `fence` set, so everything after it stays blanked — a body that opens a fence and
-  // never closes it yields NO markers rather than trusting whatever follows. Safe direction: the cost is a
-  // missing escalation block, which is visible; the alternative is a forged one, which is not.
+  // NOT A MARKDOWN PARSER, and it does not need to be. It errs toward blanking: anything it mistakes for a
+  // quote yields a MISSING record, which the caller can see, rather than a forged one, which it cannot.
   // Inline spans last, on what survived. A span never crosses a newline.
   return scanned.replace(/(`+)(?:(?!\1)[^\n])*\1/g, (s) => ' '.repeat(s.length));
+}
+
+/**
+ * Has the drain ALREADY appended a reason block to this body? Scans the RAW text, deliberately.
+ *
+ * WHY THIS IS A DIFFERENT QUESTION from {@link bodyHasEscalationReason}, and why conflating them created a
+ * bug. That one asks *"does a trustworthy record exist"* and must ignore quoted text. This one asks *"would
+ * appending again duplicate what is already here"* — and for that, quoted or not is irrelevant: the bytes are
+ * there either way.
+ *
+ * Using the trusted reader for the write guard meant a body whose earlier content blanked the appended block
+ * (an unclosed fence, or an innocently indented one) could never see its own write, so the drain re-appended
+ * the block on EVERY park pass until the body hit its size cap. Review traced it: not the feared silent
+ * attestation — `durableRecorded` correctly stayed false and the warn fired — but an unbounded append loop.
+ */
+export function bodyAlreadyCarriesReasonBlock(body) {
+  return typeof body === 'string' && body.includes(ESCALATION_REASON_MARKER);
 }
 
 /**
