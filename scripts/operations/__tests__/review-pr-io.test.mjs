@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  createReviewPrSinks, isPreWriteRefusal, revParseCommit, reviewBodyPath, reviewSidecarDir,
+  createReviewPrSinks, isPreWriteRefusal, priorRoundsFor, revParseCommit, reviewBodyPath, reviewSidecarDir,
 } from '../review-pr-io.mjs';
 import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL } from '../review-pr.mjs';
 import { VERDICTS, appendVerdict, buildVerdictRecord, readVerdictLedger } from '../../lib/verdict-ledger.mjs';
@@ -310,5 +310,61 @@ describe('the ledger and notice sinks', () => {
     expect(lines).toEqual(['PR o/n#7 — human review accepted by operator.']);
     expect(existsSync(join(reviewSidecarDir(root), 'verdicts.pending.jsonl'))).toBe(false);
     expect(readVerdictLedger('o/n')).toEqual([]);
+  });
+});
+
+/**
+ * THE ROUND NUMBER IS ROUNDS SINCE THE LAST CLEAR, not rows ever written (#3072; PR #1178 review, finding 3).
+ *
+ * `history` holds every verdict a PR has ever carried, including rows from an already-CONVERGED loop, so
+ * counting its length made a brand-new review of a previously-accepted PR report itself as round N of a cap of
+ * 5. Measured on real repo data before the fix: PRs 1162 and 1164 each ran three `changes` rounds then an
+ * `accepted` that cleared them, and the old expression reported `exhausted` on the FIRST round of the next
+ * loop. #1164's four-round run is why the cap is 5, so the miscount strangled the exact case the cap allows.
+ */
+describe('priorRounds counts the CURRENT loop', () => {
+  let ledgerDir;
+  const prevLedgerDir = process.env.WE_VERDICT_LEDGER_DIR;
+  beforeEach(() => {
+    ledgerDir = mkdtempSync(join(tmpdir(), 'review-pr-io-rounds-'));
+    process.env.WE_VERDICT_LEDGER_DIR = ledgerDir;
+  });
+  afterEach(() => {
+    if (prevLedgerDir === undefined) delete process.env.WE_VERDICT_LEDGER_DIR;
+    else process.env.WE_VERDICT_LEDGER_DIR = prevLedgerDir;
+    rmSync(ledgerDir, { recursive: true, force: true });
+    rmSync(`${ledgerDir}-locks`, { recursive: true, force: true });
+  });
+
+  const row = (verdict, at) => appendVerdict(buildVerdictRecord({
+    repo: 'o/n', pr: 7, verdict, at, source: 'review-set-label',
+  }));
+  /** The REAL helper the reader calls, over the ledger as it now stands. */
+  const priorRounds = () => priorRoundsFor('o/n', 7);
+
+  it('is 0 on a PR with no history at all', () => {
+    expect(priorRounds()).toBe(0);
+  });
+
+  it('counts the bounces of an open loop', () => {
+    row(VERDICTS.CHANGES, '2026-08-10T12:00:00.000Z');
+    row(VERDICTS.CHANGES, '2026-08-10T13:00:00.000Z');
+    expect(priorRounds()).toBe(2);
+  });
+
+  // THE ONE THAT WAS WRONG. Three bounces then an accept is a CONVERGED loop; the next review starts over.
+  it('RESETS after a clearing verdict — a converged loop does not count against the next one', () => {
+    row(VERDICTS.CHANGES, '2026-08-10T12:00:00.000Z');
+    row(VERDICTS.CHANGES, '2026-08-10T13:00:00.000Z');
+    row(VERDICTS.CHANGES, '2026-08-10T14:00:00.000Z');
+    row(VERDICTS.ACCEPTED, '2026-08-10T15:00:00.000Z');
+    expect(priorRounds()).toBe(0); // history.length would be 4 — round 5 of 5, i.e. `exhausted` on a fresh loop
+  });
+
+  it('counts only the bounces since that clear', () => {
+    row(VERDICTS.CHANGES, '2026-08-10T12:00:00.000Z');
+    row(VERDICTS.ACCEPTED, '2026-08-10T13:00:00.000Z');
+    row(VERDICTS.CHANGES, '2026-08-10T14:00:00.000Z');
+    expect(priorRounds()).toBe(1);
   });
 });

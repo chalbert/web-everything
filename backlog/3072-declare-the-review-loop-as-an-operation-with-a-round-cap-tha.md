@@ -43,6 +43,41 @@ reuse — and durability. **Three of them died mid-gate** having completed the a
 So the slice is: a tool-bearing review operation whose isolation is structural rather than instructed, and
 whose state survives the session. Not a rewiring.
 
+## 2026-08-12 — FIRST SLICE LANDED: the juror can act
+
+I was wrong about how much was missing. `review-pr` already declares the full pipeline — `read` → `judge` →
+`reduce` → `confirm` → `record`, with four ordered effects including the label swap. It was never a stub.
+
+**Exactly one thing made every review get hand-crafted instead: the juror was tool-free.** `buildJudgeArgv`
+hardcoded `--tools ''`, so a juror could read a diff and nothing else. Every significant find this week came
+from *acting* — firing a `gh` command at the real API, reproducing a bug on the parent commit, mutating source
+to see which tests stayed green. None of those are reachable by reading.
+
+`allowedTools` now threads through `buildJudgeArgv` → `judgeSpawn` → the CLI adapter, and `review-pr` requests
+`Bash`, `Read`, `Grep`, `Glob`. **Tool-free stays the default**, so every other caller is unchanged.
+
+**What replaces the guarantee `--tools ''` gave**, since that was its whole justification. The first two
+answers here were both WRONG and both caught by review, which is worth recording because the second looked
+like a fix:
+
+1. *"the spawn's `cwd` is a lane, so `guard-lane` denies any write to a shared checkout"* — false twice over.
+   Nothing set the cwd, and `--safe-mode` disables hooks, so `guard-lane` never ran inside the juror at all.
+2. `assertLaneCwd` then refused a non-lane cwd — and still did not fire, because `judgeSpawn` DEFAULTED the
+   cwd to `process.cwd()` and a review normally runs inside a lane. An omitted cwd passed the check by
+   donating the driver's own tree.
+
+What holds now: a tool-bearing spawn is refused unless it is handed a lane of its OWN — not the primary
+checkout, not the driver's lane, checked on the resolved path. And its `sessionId` is derived, so it differs
+from the author's and the self-clear refusal holds. Neither depends on the juror cooperating, which is the
+bar `--tools ''` met.
+
+A flag-shaped tool name is refused at both boundaries — the same hazard as a flag-shaped `model`, one field
+over, and pinned by test at each.
+
+**Still owed on this card:** the round cap with distinguishable *converged / exhausted / stuck*, and answering
+the `confirm` step unattended for `AGENT` actors. Those are what remain between this and a loop that runs
+without a person.
+
 ## Why it is the highest-value slice
 
 It is the most repeated action in the delivery loop, and the only one still entirely manual. It is also the one

@@ -57,6 +57,7 @@ import {
   DISPOSITIONS,
   earnsRound,
   deriveFindingDisposition,
+  deriveLoopOutcome
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
@@ -1172,5 +1173,51 @@ describe('the 2-round editor budget rides a DEDICATED knob — the shared dial i
     for (const band of ['none', 'low', 'elevated', 'high']) {
       expect(editorPolicyForCareLevel(band).rounds).toBeLessThanOrEqual(NEGOTIATION_ROUND_CAP);
     }
+  });
+});
+
+// #3072 — the loop outcome, distinct from the round's verdict. `converged` and `exhausted` both END the loop
+// and mean opposite things, so nothing downstream may have to infer one from the other.
+describe('deriveLoopOutcome', () => {
+  it('an accept converges, whatever the round', () => {
+    expect(deriveLoopOutcome({ verdict: VERDICTS.ACCEPT, round: 1 }).outcome).toBe('converged');
+    expect(deriveLoopOutcome({ verdict: VERDICTS.ACCEPT, round: 9 }).outcome).toBe('converged');
+  });
+
+  it('changes below the cap is in-progress, at or above it is exhausted', () => {
+    expect(deriveLoopOutcome({ verdict: VERDICTS.CHANGES, round: 4 }).outcome).toBe('in-progress');
+    expect(deriveLoopOutcome({ verdict: VERDICTS.CHANGES, round: 5 }).outcome).toBe('exhausted');
+    expect(deriveLoopOutcome({ verdict: VERDICTS.CHANGES, round: 99 }).outcome).toBe('exhausted');
+  });
+
+  it('an outstanding prevention owes another pass, so it caps like changes', () => {
+    expect(deriveLoopOutcome({ verdict: VERDICTS.PREVENTION_OUTSTANDING, round: 5 }).outcome).toBe('exhausted');
+  });
+
+  it('a human gate escalates rather than looping', () => {
+    expect(deriveLoopOutcome({ verdict: VERDICTS.NEEDS_HUMAN, round: 1 }).outcome).toBe('escalated');
+  });
+
+  it('exhausted says UNRESOLVED, so it can never read as a success', () => {
+    const out = deriveLoopOutcome({ verdict: VERDICTS.CHANGES, round: 5 });
+    expect(out.why).toMatch(/UNRESOLVED/);
+    expect(out.why).toMatch(/human/);
+  });
+
+  // THE CAP IS SET FROM EVIDENCE, not taste. PR #1164's four rounds were all productive, so a cap at or below
+  // four would have truncated real work. The cap exists to catch a loop that is not progressing.
+  it('the default cap does not truncate the longest productive run observed (4 rounds)', () => {
+    for (const round of [1, 2, 3, 4]) {
+      expect(deriveLoopOutcome({ verdict: VERDICTS.CHANGES, round }).outcome, `round ${round}`).toBe('in-progress');
+    }
+  });
+
+  it('a nonsense round or cap falls back rather than throwing', () => {
+    expect(deriveLoopOutcome({ verdict: VERDICTS.CHANGES, round: 0 }).round).toBe(1);
+    expect(deriveLoopOutcome({ verdict: VERDICTS.CHANGES, round: NaN }).round).toBe(1);
+    // A nonsense cap takes the DEFAULT, not 1. Treating `0` as "cap of one" would end every loop at its first
+    // round on a typo — louder than looping forever, but wrong in the direction that destroys work.
+    expect(deriveLoopOutcome({ verdict: VERDICTS.CHANGES, round: 3, cap: 0 }).cap).toBe(5);
+    expect(deriveLoopOutcome({ verdict: VERDICTS.CHANGES, round: 3, cap: NaN }).outcome).toBe('in-progress');
   });
 });

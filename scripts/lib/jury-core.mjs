@@ -1544,3 +1544,62 @@ export function resolveAdapterRoster({ adapter, careLevel, input, overrides = []
   const ovs = Array.isArray(overrides) ? overrides : [];
   return ovs.length ? applyRosterOverrides(plan, ovs, { resolveMethods }) : plan;
 }
+
+/**
+ * THE LOOP OUTCOME (#3072) — where the editor↔reviewer loop stands after this round, as distinct from what
+ * this round's verdict was. A verdict judges one review; an outcome says whether the loop should continue.
+ *
+ * WHY THEY MUST BE DISTINGUISHABLE. A loop that reports success on exhaustion is worse than one that never
+ * terminates, because the second is at least visible. `converged` and `exhausted` both end the loop and mean
+ * opposite things.
+ *
+ * THREE OUTCOMES, NOT FOUR — and the missing one is the interesting part. A `stuck` detector was designed and
+ * then REFUSED on evidence: the obvious rule (finding count stops shrinking) was tested against the only real
+ * multi-round case in the repo, PR #1164, whose four rounds ran 3 → 1 → 1 → 1 findings. A count rule flags
+ * that as stuck at round three, and every one of those rounds found a NEW, real bypass that was then fixed.
+ * The detector would have killed the most productive review of the week.
+ *
+ * Telling *thrashing* from *converging slowly* needs finding IDENTITY — is this the SAME finding recurring? —
+ * and the ledger records only counts. That is a genuine input to the observability spike (#3077), not
+ * something to approximate here. Approximating it would have been worse than the gap.
+ *
+ * @verdicts-partial `changes` and `prevention-outstanding` deliberately share one branch: both mean another
+ *   pass is owed, and the loop treats them identically. Naming them separately would imply a distinction this
+ *   function does not make. `accept` and `needs-human` are the two that genuinely differ, so those are the two
+ *   it references — and the fall-through covers the rest, so it is total in BEHAVIOUR while partial in
+ *   reference. A new verdict added to the enum lands in the fall-through as "another pass owed", which is the
+ *   safe default for a loop.
+ * @param {{verdict: string, round: number, cap: number}} o
+ * @returns {{outcome: 'converged'|'in-progress'|'exhausted'|'escalated', round: number, cap: number, why: string}}
+ */
+export function deriveLoopOutcome({ verdict, round = 1, cap = DEFAULT_ROUND_CAP } = {}) {
+  const r = Math.max(1, Math.floor(Number(round) || 1));
+  // A NON-POSITIVE cap takes the DEFAULT, not 1. `Math.max(1, …)` turned a negative into instant exhaustion —
+  // the direction the test comment already called wrong, caught by review. `0` and `NaN` already fell back via
+  // `||`; a negative slipped past it.
+  const capN = Math.floor(Number(cap));
+  const c = Number.isFinite(capN) && capN > 0 ? capN : DEFAULT_ROUND_CAP;
+  if (verdict === VERDICTS.NEEDS_HUMAN) {
+    return { outcome: 'escalated', round: r, cap: c, why: 'a human gate applies — the loop does not decide this' };
+  }
+  if (verdict === VERDICTS.ACCEPT) {
+    return { outcome: 'converged', round: r, cap: c, why: `accepted at round ${r}` };
+  }
+  // `changes` and `prevention-outstanding` both mean another pass is owed.
+  if (r >= c) {
+    return {
+      outcome: 'exhausted',
+      round: r,
+      cap: c,
+      why: `round ${r} of ${c} still returned \`${verdict}\` — the cap is reached, so this ends UNRESOLVED and a human owes it a look`,
+    };
+  }
+  return { outcome: 'in-progress', round: r, cap: c, why: `round ${r} of ${c} returned \`${verdict}\`` };
+}
+
+/**
+ * How many editor↔reviewer rounds before the loop stops and asks a person. Five, because the longest genuinely
+ * productive run observed in this repo (PR #1164) was four — a cap at or below that would have truncated real
+ * work, and the point of the cap is to catch a loop that is not progressing, not to ration one that is.
+ */
+export const DEFAULT_ROUND_CAP = 5;
