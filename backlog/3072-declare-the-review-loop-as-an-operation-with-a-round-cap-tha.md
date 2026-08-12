@@ -1,4 +1,5 @@
 ---
+bornAs: xf3gv78
 kind: story
 size: 5
 parent: "3029"
@@ -30,7 +31,7 @@ whose manual execution keeps producing the same two defects:
 - **A headless reviewer that starts slow work and exits produces nothing.** Verified repeatedly: the session
   ends mid-gate, having done the analysis and set no label. State in a process is state that evaporates; state
   in a run record does not. Routing the loop through the engine is what fixes this, and is why this slice comes
-  after `#xu03x3d` and `#xbu7adg` rather than before.
+  after `#3073` and `#3070` rather than before.
 
 ## The round cap is not a nicety
 
