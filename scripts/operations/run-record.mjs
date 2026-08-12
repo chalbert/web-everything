@@ -168,6 +168,26 @@ export function validateRunRecord(record) {
       if (!EFFECT_STATUSES.includes(e.status)) {
         errors.push(`effects[${i}] has status ${JSON.stringify(e.status)}; expected one of ${EFFECT_STATUSES.join('|')}`);
       }
+      // THE FIELDS `in-flight` DEPENDS ON (#3073; PR #1180 review, finding 4). Adding the status to the enum
+      // without checking its payload lets a hand-built or truncated record claim a state the executor's rules
+      // are keyed on. `handle` decides refuse-vs-resume on replay and `expectedBy` decides running-vs-overdue,
+      // so a malformed one is not a cosmetic defect — it is a wrong answer to both questions.
+      //
+      // `handle` may be null (a dispatch that lost it before reporting) but never a non-string, and never
+      // empty — `''` is falsy, so it would silently read as "no handle" while looking like one. `expectedBy`
+      // is optional and, when present, must actually parse; an unparseable date makes every entry read as
+      // never-overdue, which is the failure that hides a stalled job.
+      if (e.status === 'in-flight') {
+        if (!(e.handle === null || e.handle === undefined || (typeof e.handle === 'string' && e.handle !== ''))) {
+          errors.push(`effects[${i}] is in-flight with an invalid handle ${JSON.stringify(e.handle)} — a string or null`);
+        }
+        if (e.expectedBy != null && !(typeof e.expectedBy === 'string' && !Number.isNaN(Date.parse(e.expectedBy)))) {
+          errors.push(`effects[${i}] is in-flight with an unparseable expectedBy ${JSON.stringify(e.expectedBy)}`);
+        }
+        if (e.startedAt != null && !(typeof e.startedAt === 'string' && !Number.isNaN(Date.parse(e.startedAt)))) {
+          errors.push(`effects[${i}] is in-flight with an unparseable startedAt ${JSON.stringify(e.startedAt)}`);
+        }
+      }
     });
     const keys = new Set();
     for (const e of record.effects) {

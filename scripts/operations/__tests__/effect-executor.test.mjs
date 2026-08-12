@@ -21,6 +21,7 @@ import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs
 import { LEDGER_EFFECT_TYPE, applyPendingEffects, createEffectExecutor, inFlight, inFlightEntries, notApplied, resolveInFlight } from '../effect-executor.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { createRegistry, op } from '../registry.mjs';
+import { driveRun, outcomePayload, renderOutcome } from '../cli-adapter.mjs';
 import { effect } from '../step-kinds.mjs';
 import { FIXTURE_JUDGE_ANSWER, FIXTURE_OP, fixtureRegistry } from '../__fixtures__/fixture-operation.mjs';
 
@@ -543,5 +544,92 @@ describe('resolving in-flight work when it reports back', () => {
   it('needs a valid instant rather than silently comparing against NaN', async () => {
     const { run } = await dispatched();
     expect(() => inFlightEntries(run, 'whenever')).toThrow(/valid instant/);
+  });
+});
+
+/**
+ * THE DRIVER HAS TO BE ABLE TO STOP (PR #1180 review, blocking 1). The executor recorded a dispatch perfectly
+ * and `driveRun` could not express it: an in-flight halt returns `error: null`, so the `awaiting-effect` branch
+ * fell through to `advance`, which returns the run UNCHANGED (in-flight counts as unapplied, by design). The
+ * loop then spun to `maxTurns` and threw a runaway-loop error — the CLI exited 1 and the HTTP adapter 500'd on
+ * the one operation this whole epic exists to reach.
+ *
+ * These drive the REAL adapter, so a regression shows up here rather than in production.
+ */
+describe('driveRun parks on a dispatch instead of spinning', () => {
+  const dispatchSinks = (calls = []) => ({
+    calls,
+    sinks: {
+      'start.build': async (p, ctx) => { calls.push(ctx.key); return inFlight({ handle: 'sess-abc', expectedBy: '2099-01-01T00:00:00.000Z' }); },
+      'note.write': async (p, ctx) => { calls.push(ctx.key); return { ok: true }; },
+    },
+  });
+
+  it('returns `effect-in-flight` rather than throwing a runaway-loop error', async () => {
+    const store = createMemoryRunStore();
+    const { sinks, calls } = dispatchSinks();
+    const run = startRun({ op: DISPATCH_OP, id: 'run-d', input: { pr: 7 }, registry: dRegistry });
+    store.write(run);
+
+    const outcome = await driveRun({ run, registry: dRegistry, store, sinks, judge: async () => { throw new Error('no juror'); } });
+    expect(outcome.stopped).toBe('effect-in-flight');
+    expect(outcome.error).toBeNull();
+    expect(outcome.inFlight).toEqual([KEY]);
+    expect(calls).toEqual([KEY]); // the later effect was NOT attempted
+  });
+
+  // A dispatch is a SUCCESSFUL stop. Exiting 1 would tell every caller that starting long work is an error.
+  it('renders as exit 0, naming the handle and the deadline an observer needs', async () => {
+    const store = createMemoryRunStore();
+    const { sinks } = dispatchSinks();
+    const run = startRun({ op: DISPATCH_OP, id: 'run-d', input: { pr: 7 }, registry: dRegistry });
+    store.write(run);
+    const outcome = await driveRun({ run, registry: dRegistry, store, sinks, judge: async () => { throw new Error('no juror'); } });
+
+    const { code, lines } = renderOutcome({ outcome });
+    expect(code).toBe(0);
+    const text = lines.join('\n');
+    expect(text).toMatch(/PARKED/);
+    expect(text).toMatch(/sess-abc/);
+    expect(text).toMatch(/2099-01-01/);
+    expect(renderOutcome({ outcome, json: true }).code).toBe(0);
+  });
+
+  it('puts the in-flight keys in the machine-readable payload, so nothing re-scans the record', async () => {
+    const store = createMemoryRunStore();
+    const { sinks } = dispatchSinks();
+    const run = startRun({ op: DISPATCH_OP, id: 'run-d', input: { pr: 7 }, registry: dRegistry });
+    store.write(run);
+    const outcome = await driveRun({ run, registry: dRegistry, store, sinks, judge: async () => { throw new Error('no juror'); } });
+    expect(outcomePayload(outcome).inFlight).toEqual([KEY]);
+    // Stable shape: the field is present even when nothing is in flight.
+    expect(outcomePayload({ run, stopped: 'complete' }).inFlight).toEqual([]);
+  });
+
+  // Re-driving reports the same park and does not start the work a second time.
+  it('a re-drive parks again without re-dispatching', async () => {
+    const store = createMemoryRunStore();
+    const { sinks, calls } = dispatchSinks();
+    let run = startRun({ op: DISPATCH_OP, id: 'run-d', input: { pr: 7 }, registry: dRegistry });
+    store.write(run);
+    run = (await driveRun({ run, registry: dRegistry, store, sinks, judge: async () => { throw new Error('no juror'); } })).run;
+    const again = await driveRun({ run, registry: dRegistry, store, sinks, judge: async () => { throw new Error('no juror'); } });
+    expect(again.stopped).toBe('effect-in-flight');
+    expect(calls).toEqual([KEY]);
+  });
+
+  // Once the work reports back, the SAME driver finishes the run — the park was a pause, not a dead end.
+  it('resolving the entry lets the next drive complete the run', async () => {
+    const store = createMemoryRunStore();
+    const { sinks } = dispatchSinks();
+    let run = startRun({ op: DISPATCH_OP, id: 'run-d', input: { pr: 7 }, registry: dRegistry });
+    store.write(run);
+    run = (await driveRun({ run, registry: dRegistry, store, sinks, judge: async () => { throw new Error('no juror'); } })).run;
+
+    const resolved = resolveInFlight(run, KEY, { status: 'applied', result: { exit: 0 } });
+    store.write(resolved);
+    const done = await driveRun({ run: resolved, registry: dRegistry, store, sinks, judge: async () => { throw new Error('no juror'); } });
+    expect(done.stopped).toBe('complete');
+    expect(done.applied).toEqual([NOTE]);
   });
 });

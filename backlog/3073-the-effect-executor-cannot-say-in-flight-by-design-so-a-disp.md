@@ -62,9 +62,16 @@ The second is not a weaker `pending`. It carries a handle — the spike establis
 `in-flight` joins `EFFECT_STATUSES`, and an effect opts into it by DECLARING `dispatch: true`.
 
 The declaration, not the sink's return value, is what makes the pre-sink write correct. The executor writes
-`in-flight` with a null handle *before* calling a dispatch sink, so the "state is written before the sink runs"
-rule in [Watch for](#watch-for) holds for the new state too. The sink then returns `inFlight({ handle,
-expectedBy })` and only the handle and the deadline are patched in afterwards — the status was already durable.
+`in-flight` with a null handle *before* calling a dispatch sink; the sink then returns `inFlight({ handle,
+expectedBy })` and only the handle and the deadline are patched in afterwards.
+
+**The [Watch for](#watch-for) rule above is right about the ordering and wrong about why**, and PR #1180's
+reviewer caught the first draft repeating the error. The pre-sink write does NOT make a crash mid-dispatch
+resumable: a crash between starting the work and hearing back is exactly the no-handle case, and that is
+refused on replay, same as `pending`. What the ordering buys is VISIBILITY — the crash lands in
+`inFlightEntries().unknown` ("something may be running and cannot be observed") and is closable through
+`resolveInFlight`, where a `pending` entry is invisible to both and can only be hand-edited. Keep the
+ordering; keep the reason straight.
 
 The lost-handle degradation falls out of one rule: **in-flight is resumable because it is observable.** No
 handle, no observation, so the entry is back to "might have started, cannot check" and gets the same refusal an
@@ -74,8 +81,17 @@ has passed), `unknown` (no handle) — which is what a waker needs to tell healt
 `resolveInFlight` is the only supported exit, so nothing has to hand-edit a run record; it refuses any entry
 that is not in-flight and any non-terminal status.
 
-Six mutations were run against the claims above — including marking the dispatch `pending` before the sink,
-treating a handle-less entry as observable, and dropping the `dispatch` flag in the engine — and each reddened
-named tests.
+**The driver had to learn to stop, too.** An in-flight halt returns `error: null`, so `driveRun`'s
+`awaiting-effect` branch fell straight through to `advance` — which returns the run unchanged, because
+in-flight counts as unapplied — and the loop spun to its turn cap and threw. The CLI exited 1 and the HTTP
+adapter 500'd on the one operation this epic exists to reach. `driveRun` now returns a distinct
+`effect-in-flight` stop, `renderOutcome` prints the handle and the deadline at exit 0, and the HTTP adapter
+treats it as settled. Both are covered by adapter tests, which is what was missing: a green gate could not see
+the gap because no adapter test declared a dispatch.
+
+Nine mutations were run against the claims above — including marking the dispatch `pending` before the sink,
+moving the in-flight write to AFTER the sink while preserving the end state, treating a handle-less entry as
+observable, dropping the `dispatch` flag in the engine, removing the driver's park branch, and 500-ing on a
+park — and each reddened named tests.
 
 No waker is built here; [#3070] is what polls these entries.

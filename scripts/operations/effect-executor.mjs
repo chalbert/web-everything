@@ -85,9 +85,18 @@ export function notApplied(message, extra = {}) {
  * both without the guard being wrong half the time.
  *
  * THE DECLARATION SAYS SO FIRST. An effect opts in with `dispatch: true`, and the executor writes `in-flight`
- * BEFORE calling the sink — a crash between starting the work and hearing back therefore records started work
- * as started, not as an unknown outcome. Inferring it from the return value would leave that window open,
- * which is the same before-not-after rule `pending` already follows.
+ * BEFORE calling the sink.
+ *
+ * WHAT THAT ORDERING ACTUALLY BUYS, stated precisely because an earlier version of this comment overclaimed it
+ * (PR #1180 review, blocking 2). It does NOT make a crash mid-dispatch resumable: a crash between starting the
+ * work and hearing back is exactly the no-handle case below, and that is REFUSED on replay, same as `pending`.
+ * What it buys is that the crash lands in a state a person can see and act on:
+ *   - `inFlightEntries` reports it under `unknown` — "something may be running and cannot be observed" — where
+ *     a `pending` entry says only "an attempt was made", losing the fact that work may still be out there.
+ *   - `resolveInFlight` accepts it, so there is a supported way to close it out. `pending` has none, and the
+ *     operator's only option is to hand-edit the run record.
+ * Writing `in-flight` after the sink returned would put a crashed dispatch back in `pending`, invisible to
+ * both. The ordering is worth keeping; it is a visibility guarantee, not a resumability one.
  *
  * The sink then supplies what only it can know, by returning `inFlight({ handle, expectedBy })`:
  *   - `handle` is what a later observer polls. The spike established `sessionId` is durable and `pid` is NOT
@@ -112,8 +121,16 @@ export function inFlight({ handle, expectedBy = null } = {}) {
   return { [IN_FLIGHT]: true, handle: handle.trim(), expectedBy };
 }
 
-/** The brand `inFlight` stamps and the executor reads. A Symbol so no sink payload can forge it by accident. */
-const IN_FLIGHT = Symbol.for('operations.effect.inFlight');
+/**
+ * The brand `inFlight` stamps and the executor reads.
+ *
+ * A MODULE-LOCAL `Symbol()`, not `Symbol.for()` (PR #1180 review, finding 5). The global registry version was
+ * unforgeable by ACCIDENT — a JSON payload carries no symbols — but any object could carry it deliberately
+ * without importing this module, and a forged handle-less marker is reported to the caller as running while
+ * the very next replay refuses it as unknown. A local symbol costs nothing and closes that outright: the only
+ * way to make one is to call `inFlight`, which validates the handle.
+ */
+const IN_FLIGHT = Symbol('operations.effect.inFlight');
 
 /** Is this sink return value an in-flight marker? Pure. */
 export function isInFlightResult(value) {
@@ -189,8 +206,9 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null 
       throw new Error(
         `operations: effect ${entry.key} (${entry.type}) was dispatched but has NO handle, so whether it is still running ` +
         'cannot be observed — it is indistinguishable from an unknown outcome. It is not declared idempotent, so ' +
-        'restarting it could double-apply. Refusing. Resolve it by hand (mark the entry `applied` or `failed` on the ' +
-        'run record) and re-run.',
+        'restarting it could double-apply. Refusing. Find out what happened to it, then close it out with ' +
+        '`resolveInFlight(run, key, { status: \'applied\' | \'failed\' })` and re-run — no hand-editing of the run ' +
+        'record needed.',
       );
     }
     if (typeof lookup(entry.type) !== 'function') {
@@ -232,9 +250,10 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null 
     // MARK THE ATTEMPT BEFORE MAKING IT, and persist. Which mark depends on what the declaration says the
     // effect IS, because the pre-sink write is the only one a crash cannot skip:
     //   - an ordinary effect gets `pending` — attempted, outcome unknown, refused on replay;
-    //   - a DISPATCH gets `in-flight` with no handle yet, so work that was started and then lost its process
-    //     is recorded as started rather than as an unknown outcome. Writing `in-flight` only AFTER the sink
-    //     returned would leave that exact window open, which is the defect #3073 names.
+    //   - a DISPATCH gets `in-flight` with no handle yet. That does NOT make a crash here resumable — a
+    //     handle-less entry is refused on replay exactly as `pending` is. What it buys is VISIBILITY: the
+    //     crash lands in `inFlightEntries().unknown` and is closable through `resolveInFlight`, where a
+    //     `pending` entry is invisible to both and can only be hand-edited. See the `inFlight` docblock.
     current = live.dispatch
       ? withEntry(current, live.key, { status: 'in-flight', handle: null, startedAt: new Date().toISOString(), expectedBy: null, error: null })
       : withEntry(current, live.key, { status: 'pending', error: null });
