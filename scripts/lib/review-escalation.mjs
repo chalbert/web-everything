@@ -14,7 +14,7 @@
  */
 import { createHash } from 'node:crypto';
 import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivationPath, basenameOf } from './gate-config.mjs';
-import { POLICY_THRESHOLDS } from './review-policy.mjs';
+import { POLICY_THRESHOLDS, POLICY_VERSION, POLICY_DIGEST } from './review-policy.mjs';
 // #x169fqe — the transient lane bookkeeping the reviewed-diff fingerprint excludes, imported rather than
 // re-spelled so the fingerprint and the rebase-drop pass that removes the file can never disagree on its name.
 import { LANE_MANIFEST } from './rebase-drop-manifest.mjs';
@@ -1497,12 +1497,37 @@ export function shouldApplyReviewLabel(label, currentLabels) {
  */
 export const ESCALATION_REASON_MARKER = '## Escalation reason';
 
+/**
+ * The greppable stamp naming WHICH PARAMETER SET produced an escalation. Pure.
+ *
+ * Without it an escalation record says what fired but not what the rules WERE, so a threshold change splits
+ * the history into two incomparable halves with no marker at the seam — and nothing downstream can tell which
+ * PRs were scored under which. That makes retrospective analysis guesswork and A/B impossible; `gate-health`
+ * reports `parameterSet: null` for exactly this reason.
+ *
+ * The DIGEST is the field to group by. `version` is hand-declared and nothing forces a bump, so it can say `1`
+ * across edits that moved the thresholds; the digest is derived from the contract's bytes and cannot.
+ */
+export const POLICY_STAMP_MARKER = 'policy-set';
+export function buildPolicyStampMarker(version = POLICY_VERSION, digest = POLICY_DIGEST) {
+  return `<!-- ${POLICY_STAMP_MARKER}: v${version} ${digest} -->`;
+}
+
+/** Read the parameter set back off a PR body. `null` when unstamped — which is every PR before this shipped,
+ *  and must stay distinguishable from a stamped one rather than defaulting to "current". Pure. */
+export function parsePolicyStamp(body) {
+  const m = new RegExp(`<!--\\s*${POLICY_STAMP_MARKER}:\\s*v(\\S+)\\s+([0-9a-f]{6,64})\\s*-->`).exec(String(body || ''));
+  return m ? { version: m[1], digest: m[2] } : null;
+}
+
 /** Build the body block embedding the escalation reason(s) — APPENDED to the existing PR body at park time,
- *  never replacing it. Pure. Empty/absent `reasons` → `''` (nothing to append). */
+ *  never replacing it. Pure. Empty/absent `reasons` → `''` (nothing to append).
+ *
+ *  Carries the policy stamp, because the reason and the rules that produced it are only useful together. */
 export function buildEscalationReasonBlock(reasons) {
   const list = (Array.isArray(reasons) ? reasons : []).filter(Boolean);
   if (!list.length) return '';
-  return `\n\n${ESCALATION_REASON_MARKER}\n\n${list.map((r) => `- ${r}`).join('\n')}\n`;
+  return `\n\n${ESCALATION_REASON_MARKER}\n\n${list.map((r) => `- ${r}`).join('\n')}\n\n${buildPolicyStampMarker()}\n`;
 }
 
 /**
