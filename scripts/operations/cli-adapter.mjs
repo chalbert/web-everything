@@ -426,12 +426,18 @@ export function renderSpendLines(run) {
  * @param {{run: object, stopped: string, error?: (Error|null), applied?: string[], inFlight?: string[]}} outcome
  * @returns {object}
  */
-export function outcomePayload({ run, stopped, error = null, applied = [], inFlight = [] }) {
+export function outcomePayload({ run, stopped, error = null, applied = [] }) {
   return {
     runId: run.id, op: run.op, stopped, applied,
     // #3073 — WHICH effects are still going, so a consumer does not have to re-scan `run.effects` to find out
-    // why a parked run is parked. Always present (`[]` when nothing is in flight) so the shape is stable.
-    inFlight,
+    // why a parked run is parked.
+    //
+    // DERIVED FROM THE RECORD, never passed in (PR #1180 review, finding 1). The first cut took it as a
+    // parameter, so `GET …/runs/<id>` — which builds this payload with no drive behind it — reported `[]` for
+    // a parked run. On that route `[]` stopped meaning "nothing is in flight", and since the payload carries
+    // no `effects` either, there was no way to recover a parked run's handle over HTTP at all. Reading the
+    // record answers the same on every route.
+    inFlight: (run.effects ?? []).filter((e) => e.status === 'in-flight').map((e) => e.key),
     pending: run.pending, verdict: run.verdict, findings: run.findings,
     // The meter, and its total pre-summed — a consumer must not have to re-derive "what did this cost".
     telemetry: run.telemetry ?? [], spend: totalJudgeSpend(run),
@@ -488,7 +494,10 @@ export function renderOutcome({ outcome, json = false }) {
         ...(running.length ? ['in flight:', ...running.map(describe)] : []),
         ...(overdue.length ? ['OVERDUE — past its own expectedBy:', ...overdue.map(describe)] : []),
         ...(unknown.length ? ['UNKNOWN — dispatched but no handle, so it cannot be observed:', ...unknown.map(describe)] : []),
-        `${applied.length} effect(s) landed before the dispatch and are recorded as applied.`,
+        // FROM THE RECORD, not from this drive (PR #1180 review, finding 4). `applied` counts what THIS
+        // drive applied, and the re-drive is the path the next line steers the operator onto — so on the
+        // drive they actually run, a drive-local count says "0 effect(s) landed" about a record holding one.
+        `${run.effects.filter((e) => e.status === 'applied').length} effect(s) have landed and are recorded as applied.`,
         `resume with: node scripts/operations/run.mjs ${run.op} --resume=${run.id} — it reports the same park `
         + 'until the work reports back, and never re-dispatches.',
         ...spend,

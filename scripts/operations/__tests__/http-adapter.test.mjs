@@ -624,3 +624,54 @@ describe('an in-flight dispatch is a successful park over HTTP, not a 500', () =
     expect(res.body.error).toBeUndefined();
   });
 });
+
+/**
+ * READING A PARKED RUN MUST REPORT THE PARK (PR #1180 review, finding 1). `GET …/runs/<id>` builds its payload
+ * with no drive behind it, so a passed-in `inFlight` defaulted to `[]` — and since the payload carries no
+ * `effects` either, there was no way to recover a parked run's handle over HTTP at all. "The work outlives
+ * this process" is the case the status exists for, so the read route is the one that matters most.
+ */
+describe('GET on a parked run reports what is in flight', () => {
+  const DISPATCH_OP = 'http-parked-fx';
+
+  function wiringFor() {
+    const build = () => ({
+      declaration: op(DISPATCH_OP, {
+        input: { pr: { type: 'number', required: true } },
+        go: effect({ reads: ['input.pr'], effects: () => [{ type: 'start.build', payload: {}, dispatch: true }] }),
+      }),
+      sinks: { 'start.build': async () => inFlight({ handle: 'sess-http' }) },
+    });
+    return {
+      resolve: (name) => {
+        if (name !== DISPATCH_OP) throw new Error(`operations: no operation named ${JSON.stringify(name)}`);
+        const { declaration, sinks } = build();
+        const registry = createRegistry();
+        registry.register(declaration);
+        return { declaration, registry, sinks };
+      },
+      names: () => [DISPATCH_OP],
+    };
+  }
+
+  it('the POST parks it and the GET still names the in-flight effect', async () => {
+    const wiring = wiringFor();
+    const store = createMemoryRunStore();
+    const newRunId = idMinter();
+    const judge = async () => { throw new Error('no juror'); };
+
+    const posted = await handleOperationRequest(
+      { method: 'POST', url: `${DEFAULT_BASE_PATH}/${DISPATCH_OP}/runs`, body: { pr: 7 } },
+      { ...wiring, newRunId, store, judge },
+    );
+    expect(posted.status).toBe(201);
+    expect(posted.body.inFlight).toHaveLength(1);
+
+    const got = await handleOperationRequest(
+      { method: 'GET', url: `${DEFAULT_BASE_PATH}/${DISPATCH_OP}/runs/${posted.body.runId}` },
+      { ...wiring, newRunId, store, judge },
+    );
+    expect(got.status).toBe(200);
+    expect(got.body.inFlight).toEqual(posted.body.inFlight);
+  });
+});

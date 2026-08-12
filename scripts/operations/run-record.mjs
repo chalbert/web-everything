@@ -174,11 +174,14 @@ export function validateRunRecord(record) {
       // so a malformed one is not a cosmetic defect — it is a wrong answer to both questions.
       //
       // `handle` may be null (a dispatch that lost it before reporting) but never a non-string, and never
-      // empty — `''` is falsy, so it would silently read as "no handle" while looking like one. `expectedBy`
+      // blank. `''` is falsy, so it would read as "no handle" while looking like one — but the WORSE case is
+      // whitespace, which is TRUTHY: it passed the first cut of this check, was bucketed `running`, and the
+      // driver parked forever telling the operator to poll a blank handle (PR #1180 review, finding 3).
+      // `inFlight()` trims, so the validator was looser than the constructor it backstops. `expectedBy`
       // is optional and, when present, must actually parse; an unparseable date makes every entry read as
       // never-overdue, which is the failure that hides a stalled job.
       if (e.status === 'in-flight') {
-        if (!(e.handle === null || e.handle === undefined || (typeof e.handle === 'string' && e.handle !== ''))) {
+        if (!(e.handle === null || e.handle === undefined || (typeof e.handle === 'string' && e.handle.trim() !== ''))) {
           errors.push(`effects[${i}] is in-flight with an invalid handle ${JSON.stringify(e.handle)} — a string or null`);
         }
         if (e.expectedBy != null && !(typeof e.expectedBy === 'string' && !Number.isNaN(Date.parse(e.expectedBy)))) {
