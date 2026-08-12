@@ -30,8 +30,16 @@
 /** Schema version stamped on every record. A reader refuses a version it does not know. */
 export const RUN_RECORD_VERSION = 1;
 
-/** The lifecycle of one declared effect inside a run record. See {@link ./effect-executor.mjs}. */
-export const EFFECT_STATUSES = Object.freeze(['declared', 'pending', 'applied', 'failed']);
+/**
+ * The lifecycle of one declared effect inside a run record. See {@link ./effect-executor.mjs}.
+ *
+ * `in-flight` (#3073) is NOT a synonym for `pending`, and conflating them is the defect it was added to fix.
+ * `pending` means *attempted, outcome UNKNOWN* — the process died mid-sink — and a replay REFUSES it rather
+ * than risk a double-apply. `in-flight` means *started ON PURPOSE, outcome arrives later* — a dispatched build,
+ * a spawned session — and a replay must RESUME it. One status cannot carry both without the replay guard being
+ * wrong half the time.
+ */
+export const EFFECT_STATUSES = Object.freeze(['declared', 'pending', 'in-flight', 'applied', 'failed']);
 
 /** Ids are used as filenames, so the character set is closed — no separators, no traversal, no surprises. */
 const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -159,6 +167,26 @@ export function validateRunRecord(record) {
       if (!Number.isInteger(e.index) || e.index < 0) errors.push(`effects[${i}] has an invalid index`);
       if (!EFFECT_STATUSES.includes(e.status)) {
         errors.push(`effects[${i}] has status ${JSON.stringify(e.status)}; expected one of ${EFFECT_STATUSES.join('|')}`);
+      }
+      // THE FIELDS `in-flight` DEPENDS ON (#3073; PR #1180 review, finding 4). Adding the status to the enum
+      // without checking its payload lets a hand-built or truncated record claim a state the executor's rules
+      // are keyed on. `handle` decides refuse-vs-resume on replay and `expectedBy` decides running-vs-overdue,
+      // so a malformed one is not a cosmetic defect — it is a wrong answer to both questions.
+      //
+      // `handle` may be null (a dispatch that lost it before reporting) but never a non-string, and never
+      // empty — `''` is falsy, so it would silently read as "no handle" while looking like one. `expectedBy`
+      // is optional and, when present, must actually parse; an unparseable date makes every entry read as
+      // never-overdue, which is the failure that hides a stalled job.
+      if (e.status === 'in-flight') {
+        if (!(e.handle === null || e.handle === undefined || (typeof e.handle === 'string' && e.handle !== ''))) {
+          errors.push(`effects[${i}] is in-flight with an invalid handle ${JSON.stringify(e.handle)} — a string or null`);
+        }
+        if (e.expectedBy != null && !(typeof e.expectedBy === 'string' && !Number.isNaN(Date.parse(e.expectedBy)))) {
+          errors.push(`effects[${i}] is in-flight with an unparseable expectedBy ${JSON.stringify(e.expectedBy)}`);
+        }
+        if (e.startedAt != null && !(typeof e.startedAt === 'string' && !Number.isNaN(Date.parse(e.startedAt)))) {
+          errors.push(`effects[${i}] is in-flight with an unparseable startedAt ${JSON.stringify(e.startedAt)}`);
+        }
       }
     });
     const keys = new Set();

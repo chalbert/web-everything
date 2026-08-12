@@ -39,7 +39,7 @@
  */
 
 import { advance, runStatus, startRun } from './engine.mjs';
-import { applyPendingEffects } from './effect-executor.mjs';
+import { applyPendingEffects, inFlightEntries } from './effect-executor.mjs';
 import { totalJudgeSpend } from './run-record.mjs';
 import { isReadOnlyOperation, validateInput } from './registry.mjs';
 import { assertNoForbiddenArgv, EFFORT_LEVELS, judgeSpawn } from '../lib/judge-spawn.mjs';
@@ -308,6 +308,14 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
       current = outcome.run;
       applied.push(...outcome.applied);
       if (outcome.error) return { run: current, stopped: 'effect-halted', error: outcome.error, applied };
+      // PARKED ON A DISPATCH (#3073). An in-flight halt is a SUCCESSFUL stop, not an error: the sink started
+      // work that outlives this process, so `error` is null and the halt reports itself through `inFlight`.
+      // Without this branch the loop falls through to `advance`, which returns the run UNCHANGED (in-flight
+      // counts as unapplied, by design), so the driver spins to `maxTurns` and throws a runaway-loop error —
+      // the CLI exits 1 and the HTTP adapter 500s on the one operation the epic exists to reach.
+      if (outcome.inFlight && outcome.inFlight.length) {
+        return { run: current, stopped: 'effect-in-flight', error: null, applied, inFlight: outcome.inFlight };
+      }
       current = advance(current, { registry });
       store.write(current);
       continue;
@@ -415,12 +423,15 @@ export function renderSpendLines(run) {
  * operation and then two callers describing its OUTCOME two different ways would be the same defect one layer
  * down — a console reading the HTTP route and a terminal reading `--json` must not have to parse two shapes.
  *
- * @param {{run: object, stopped: string, error?: (Error|null), applied?: string[]}} outcome
+ * @param {{run: object, stopped: string, error?: (Error|null), applied?: string[], inFlight?: string[]}} outcome
  * @returns {object}
  */
-export function outcomePayload({ run, stopped, error = null, applied = [] }) {
+export function outcomePayload({ run, stopped, error = null, applied = [], inFlight = [] }) {
   return {
     runId: run.id, op: run.op, stopped, applied,
+    // #3073 — WHICH effects are still going, so a consumer does not have to re-scan `run.effects` to find out
+    // why a parked run is parked. Always present (`[]` when nothing is in flight) so the shape is stable.
+    inFlight,
     pending: run.pending, verdict: run.verdict, findings: run.findings,
     // The meter, and its total pre-summed — a consumer must not have to re-derive "what did this cost".
     telemetry: run.telemetry ?? [], spend: totalJudgeSpend(run),
@@ -433,7 +444,8 @@ export function renderOutcome({ outcome, json = false }) {
   const { run, stopped, error, applied } = outcome;
   if (json) {
     return {
-      code: stopped === 'complete' || stopped === 'confirm' ? 0 : 1,
+      // A dispatch park is a SUCCESSFUL stop, exactly like a confirm suspend — the run did what was asked.
+      code: stopped === 'complete' || stopped === 'confirm' || stopped === 'effect-in-flight' ? 0 : 1,
       lines: [JSON.stringify(outcomePayload(outcome), null, 2)],
     };
   }
@@ -460,6 +472,28 @@ export function renderOutcome({ outcome, json = false }) {
   }
   if (stopped === 'complete') {
     return { code: 0, lines: [`run ${run.id} — complete. ${applied.length} effect(s) applied.`, ...spend] };
+  }
+  // PARKED, NOT FAILED (#3073). Exit 0 — the run did exactly what it was asked to: it started work that
+  // outlives this process, and stopped. Exiting 1 would tell every caller a successful dispatch is an error.
+  // The lines name the handle, because that is what an observer polls, and the deadline, because "still
+  // running" and "probably dead" need opposite responses.
+  if (stopped === 'effect-in-flight') {
+    const { running, overdue, unknown } = inFlightEntries(run);
+    const describe = (e) => `  ${e.key} (${e.type}) — handle ${e.handle ?? '(none)'}`
+      + `${e.expectedBy ? `, expected by ${e.expectedBy}` : ', no deadline'}`;
+    return {
+      code: 0,
+      lines: [
+        `run ${run.id} — PARKED at \`${run.pending?.step}\`: work is in flight and its outcome arrives later.`,
+        ...(running.length ? ['in flight:', ...running.map(describe)] : []),
+        ...(overdue.length ? ['OVERDUE — past its own expectedBy:', ...overdue.map(describe)] : []),
+        ...(unknown.length ? ['UNKNOWN — dispatched but no handle, so it cannot be observed:', ...unknown.map(describe)] : []),
+        `${applied.length} effect(s) landed before the dispatch and are recorded as applied.`,
+        `resume with: node scripts/operations/run.mjs ${run.op} --resume=${run.id} — it reports the same park `
+        + 'until the work reports back, and never re-dispatches.',
+        ...spend,
+      ],
+    };
   }
   if (stopped === 'effect-halted') {
     return {

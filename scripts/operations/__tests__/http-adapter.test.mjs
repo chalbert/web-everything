@@ -33,8 +33,9 @@ import { fileURLToPath } from 'node:url';
 
 import { importGraph } from './import-graph.mjs';
 import { createRegistry, isReadOnlyOperation, op } from '../registry.mjs';
-import { compute } from '../step-kinds.mjs';
+import { compute, effect } from '../step-kinds.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
+import { inFlight } from '../effect-executor.mjs';
 import { validateInput } from '../registry.mjs';
 import { buildCliSpec, judgeOutcome, parseOperationArgv, runOperationCli } from '../cli-adapter.mjs';
 import { OPERATIONS, resolveOperation } from '../run.mjs';
@@ -576,5 +577,50 @@ describe('the node:http shim', () => {
     const refused = await fetchText(port, '/operations/suggest-next/run', { method: 'POST', body: {} });
     expect(refused.status).toBe(405);
     expect(refused.headers.allow).toBe('GET');
+  });
+});
+
+/**
+ * A DISPATCH IS NOT A SERVER FAULT (#3073; PR #1180 review, blocking 1). `driveAndRespond` mapped anything
+ * other than `complete`/`confirm` to 500, so a run that parked on deliberately-started long work — the one
+ * operation the operations epic exists to reach — came back as a server error. The CLI had the same defect
+ * one layer down (it exited 1 after spinning to the turn cap).
+ */
+describe('an in-flight dispatch is a successful park over HTTP, not a 500', () => {
+  const DISPATCH_OP = 'http-dispatch-fx';
+
+  /** The adapter's whole per-repo wiring, over one dispatching declaration. */
+  function dispatchWiring() {
+    const build = () => ({
+      declaration: op(DISPATCH_OP, {
+        input: { pr: { type: 'number', required: true } },
+        go: effect({
+          reads: ['input.pr'],
+          effects: (view) => [{ type: 'start.build', payload: { pr: view.input.pr }, dispatch: true }],
+        }),
+      }),
+      sinks: { 'start.build': async () => inFlight({ handle: 'sess-http', expectedBy: '2099-01-01T00:00:00.000Z' }) },
+    });
+    return {
+      resolve: (name) => {
+        if (name !== DISPATCH_OP) throw new Error(`operations: no operation named ${JSON.stringify(name)}`);
+        const { declaration, sinks } = build();
+        const registry = createRegistry();
+        registry.register(declaration);
+        return { declaration, registry, sinks };
+      },
+      names: () => [DISPATCH_OP],
+    };
+  }
+
+  it('answers 201 with the park recorded, not 500', async () => {
+    const res = await handleOperationRequest(
+      { method: 'POST', url: `${DEFAULT_BASE_PATH}/${DISPATCH_OP}/runs`, body: { pr: 7 } },
+      { ...dispatchWiring(), newRunId: idMinter(), store: createMemoryRunStore(), judge: async () => { throw new Error('no juror'); } },
+    );
+    expect(res.status).toBe(201);
+    expect(res.body.stopped).toBe('effect-in-flight');
+    expect(res.body.inFlight).toHaveLength(1);
+    expect(res.body.error).toBeUndefined();
   });
 });

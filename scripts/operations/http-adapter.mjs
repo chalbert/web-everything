@@ -540,9 +540,13 @@ function notPlanned(declaration, basePath, attempted, readOnly) {
 /**
  * Drive a stateful run and render it, sharing one response shape with the read routes.
  *
- * The status code follows the CLI's exit code exactly: `complete` and `confirm` are the two stops the command
- * line exits 0 on (a suspend is a successful outcome — the run is parked, waiting for a person or a juror),
- * and everything else is the `stopped` states it exits 1 on.
+ * The status code follows the CLI's exit code exactly: `complete`, `confirm` and `effect-in-flight` are the
+ * stops the command line exits 0 on (a suspend is a successful outcome — the run is parked, waiting for a
+ * person, a juror, or work that outlives this process), and everything else is the `stopped` states it exits
+ * 1 on.
+ *
+ * `effect-in-flight` (#3073) joined that list because a DISPATCH is the epic's target operation, and 500-ing
+ * on it would report the one thing the machinery exists to do as a server fault.
  */
 async function driveAndRespond({ run, registry, store, sinks, judge, resume, basePath, status }) {
   let outcome;
@@ -551,7 +555,7 @@ async function driveAndRespond({ run, registry, store, sinks, judge, resume, bas
   } catch (e) {
     return fail(500, String(e?.message ?? e));
   }
-  const settled = outcome.stopped === 'complete' || outcome.stopped === 'confirm';
+  const settled = outcome.stopped === 'complete' || outcome.stopped === 'confirm' || outcome.stopped === 'effect-in-flight';
   return json(settled ? status : 500, {
     ...outcomePayload(outcome),
     status: runStatus(outcome.run, { registry }),
