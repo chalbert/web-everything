@@ -1,4 +1,5 @@
 ---
+bornAs: x1l67ou
 kind: story
 size: 1
 status: resolved
@@ -44,7 +45,7 @@ and a genuine lane edit is still allowed from either.
 ## Worth noting about the failure shape
 
 This is the same family as the other gate holes found this week: a guard that reads as enforced and is not.
-`#x28zf4i`'s deny-list enumerated five spellings and missed a sixth; the self-clear refusal tolerated a missing
+`#3066`'s deny-list enumerated five spellings and missed a sixth; the self-clear refusal tolerated a missing
 stamp it could not distinguish from an old PR. Here the guard was correct in its logic and wrong about **where
 it was standing**.
 
