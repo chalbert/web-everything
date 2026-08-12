@@ -621,6 +621,28 @@ describe('#3072 autoConfirm answers an agent confirm and never a human one', () 
     expect(seen.length).toBeGreaterThan(0);
   });
 
+  // AN EXPLICIT HUMAN ANSWER BEATS THE POLICY, and nothing defended that (PR #1178 round 4, finding 3).
+  // Mutating the `pendingResume == null` guard away — so the policy overrides a typed answer — left the whole
+  // suite green. It is the property that keeps a person's decision authoritative.
+  it('an explicit --answer wins over the policy, rather than the policy overriding it', async () => {
+    const { registry } = registryFor();
+    const store = createMemoryRunStore();
+    let asked = 0;
+    const seen = [];
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-explicit', input: BASE_INPUT, registry }),
+      registry,
+      store,
+      sinks: recordingSinks(seen),
+      judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+      resume: { value: 'changes' },
+      // Would answer `accept`; must never be consulted, because a human already answered.
+      autoConfirm: () => { asked += 1; return { value: 'accept' }; },
+    });
+    expect(out.run.findings.confirm).toBe('changes');
+    expect(asked).toBe(0);
+  });
+
   // The policy is CONSULTED with what it needs to decide: which actor is being asked, and the run so far.
   it('hands the policy the pending confirm and the run, so its decision can depend on both', async () => {
     const { registry } = registryFor();

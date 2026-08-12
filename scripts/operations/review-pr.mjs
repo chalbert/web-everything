@@ -397,8 +397,9 @@ export function reviewPrOperation({ readPr } = {}) {
           // this week — a gh flag bypass proven by firing the command, a guard hole reproduced on the parent
           // commit, four decorative tests found by mutating source. The tools ARE the finding mechanism.
           // Isolation is structural instead: `assertLaneCwd` refuses the spawn unless the cwd is a lane of the
-    // juror's OWN — not the primary checkout, and not the driver's lane. It cannot lean on `guard-lane`,
-    // because `--safe-mode` disables hooks inside the juror; see `we:scripts/lib/judge-spawn.mjs`
+          // juror's OWN — not the primary checkout, and not the driver's lane. It cannot lean on
+          // `guard-lane`, because `--safe-mode` disables hooks inside the juror; see
+          // `we:scripts/lib/judge-spawn.mjs`
           // and its sessionId is derived, so the self-clear refusal holds against the author.
           allowedTools: REVIEW_JUROR_TOOLS,
         };
