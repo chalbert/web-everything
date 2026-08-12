@@ -52,6 +52,7 @@ import {
   derivePanelVerdict,
   renderPanelVerdictTable,
   buildValidatorMandate,
+  PROSE_IMPRECISION_RULE,
   combineValidatedVerdict,
   REVIEW_NOTICE_EVENTS,
   renderDrainRunSummary,
@@ -2138,5 +2139,38 @@ describe('review-parked-prs.mjs — the editor is gated on the care band (source
   it('the "a parked PR always has a reason" premise is gone from the loop\'s justification (F5)', () => {
     expect(src).not.toMatch(/a parked PR always HAS a reason/i);
     expect(src).toMatch(/--park=review:pending/);
+  });
+});
+
+/**
+ * THE PROSE-IMPRECISION RULE REACHES EVERY ADVERSARY (#1175 follow-up). The rule was originally typed into
+ * `buildPanelMandate` alone, so the #2439 FINAL VALIDATOR — an equally adversarial reader of the same diff,
+ * and the one whose accept the panel's accept is GATED on — never received it. A rule the last gate does not
+ * have is a rule the loop does not have.
+ */
+describe('PROSE_IMPRECISION_RULE reaches every mandate built on buildMandate', () => {
+  it('reaches the panel reviewer', () => {
+    expect(buildPanelMandate({ lens: 'correctness' })).toContain(PROSE_IMPRECISION_RULE);
+  });
+
+  // THE ONE THAT WAS MISSING.
+  it('reaches the independent FINAL VALIDATOR', () => {
+    expect(buildValidatorMandate({ lens: 'correctness' })).toContain(PROSE_IMPRECISION_RULE);
+  });
+
+  it('reaches the plain reviewer mandate', () => {
+    expect(buildMandate({})).toContain(PROSE_IMPRECISION_RULE);
+  });
+
+  // Declared once and inherited, not typed twice. A second copy is how the two drift apart.
+  it('appears exactly ONCE in a panel mandate, not once per builder', () => {
+    const text = buildPanelMandate({ lens: 'correctness' });
+    expect(text.split(PROSE_IMPRECISION_RULE).length - 1).toBe(1);
+  });
+
+  it('says what it has to say — bounce on behaviour, note on wording', () => {
+    expect(PROSE_IMPRECISION_RULE).toMatch(/NON-BLOCKING/);
+    expect(PROSE_IMPRECISION_RULE).toMatch(/wrong ACTION/);
+    expect(PROSE_IMPRECISION_RULE).toMatch(/Bounce on behaviour/);
   });
 });
