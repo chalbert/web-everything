@@ -552,3 +552,45 @@ describe('#3072 the review juror is tool-bearing', () => {
     expect(argv).not.toContain('--allowedTools');
   });
 });
+
+// #3072 third slice — an UNATTENDED confirm, and only where the declaration said an agent may give one.
+describe('#3072 autoConfirm answers an agent confirm and never a human one', () => {
+  /** The policy a loop supplies: answer an AGENT confirm with the derived verdict, decline a HUMAN one. */
+  const agentOnly = (pending, run) => (pending?.of === CONFIRM_ACTORS.AGENT
+    ? { value: run.verdict?.verdict === 'accept' ? 'accept' : 'changes' }
+    : null);
+
+  it('stops at a confirm when no policy is supplied — today\'s behaviour is unchanged', async () => {
+    const { registry } = registryFor();
+    const store = createMemoryRunStore();
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-noauto', input: BASE_INPUT, registry }),
+      registry, store, sinks: {}, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    expect(out.stopped).toBe('confirm');
+  });
+
+  it('declines a HUMAN-addressed confirm, so a gate-self PR still stops', async () => {
+    // `of` is HUMAN whenever the PR is humanRequired — the step exists precisely so a person answers.
+    const { registry } = registryFor({ labels: ['review:human'] });
+    const store = createMemoryRunStore();
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-human', input: BASE_INPUT, registry }),
+      registry, store, sinks: {}, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+      autoConfirm: agentOnly,
+    });
+    expect(out.run.pending.of).toBe(CONFIRM_ACTORS.HUMAN);
+    expect(out.stopped).toBe('confirm');
+  });
+
+  it('a policy that always declines is identical to supplying none', async () => {
+    const { registry } = registryFor();
+    const store = createMemoryRunStore();
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-decline', input: BASE_INPUT, registry }),
+      registry, store, sinks: {}, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+      autoConfirm: () => null,
+    });
+    expect(out.stopped).toBe('confirm');
+  });
+});
