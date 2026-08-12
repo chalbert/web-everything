@@ -37,7 +37,9 @@ import {
   renderVerdictWriteUp,
   reviewPrOperation,
   shapeReadFinding,
+  REVIEW_JUROR_TOOLS,
 } from '../review-pr.mjs';
+import { buildJudgeArgv, deriveSessionId } from '../../lib/judge-spawn.mjs';
 
 /** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
 const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.md'];
@@ -521,5 +523,141 @@ describe('the judge request is never built from unvalidated input', () => {
       .toThrow(/shaped like a flag/);
     expect(() => assertSafeJudgeRequest({ mandate: 'x', input: 'y', shape: {}, effort: 'ludicrous' }))
       .toThrow(/effort/);
+  });
+});
+
+// #3072 — THE JUROR CAN ACT. A tool-free juror reading a diff found none of the defects the hand-run reviews
+// found this week: a `gh` flag bypass proven by firing the command, a guard hole reproduced on the parent
+// commit, four decorative tests found by mutating source. The tools ARE the finding mechanism, so the review
+// operation grants them — and the isolation `--tools ""` used to provide is replaced structurally, by the
+// spawn's lane cwd and its derived session id, neither of which depends on the juror cooperating.
+describe('#3072 the review juror is tool-bearing', () => {
+  it('the judge request carries an explicit tool allow-list', () => {
+    const { request: req } = atConfirm({ ...registryFor(), input: BASE_INPUT });
+    expect(req.allowedTools).toEqual([...REVIEW_JUROR_TOOLS]);
+    expect(REVIEW_JUROR_TOOLS).toContain('Bash');
+  });
+
+  it('a flag-shaped tool name is refused at the adapter boundary', () => {
+    // Same hazard as a flag-shaped `model`, one field over: the name reaches argv as a bare token.
+    for (const bad of [['--bare'], ['-x'], [''], 'Bash', []]) {
+      expect(() => assertSafeJudgeRequest({ allowedTools: bad }), JSON.stringify(bad)).toThrow();
+    }
+  });
+
+  it('omitting the list still yields a tool-free juror, so every other caller is unchanged', () => {
+    expect(() => assertSafeJudgeRequest({})).not.toThrow();
+    const argv = buildJudgeArgv({ mandate: 'm', shape: { type: 'object' }, sessionId: deriveSessionId('t') });
+    expect(argv).toContain('--tools');
+    expect(argv).not.toContain('--allowedTools');
+  });
+});
+
+// #3072 third slice — an UNATTENDED confirm, and only where the declaration said an agent may give one.
+describe('#3072 autoConfirm answers an agent confirm and never a human one', () => {
+  /** Stub sinks for every declared effect, recording what was applied. No gh, no ledger, no disk. */
+  const recordingSinks = (seen) => Object.fromEntries(
+    Object.values(REVIEW_EFFECTS).map((t) => [t, async (payload) => { seen.push(t); return { ok: true, t, payload }; }]),
+  );
+
+  /** The policy a loop supplies: answer an AGENT confirm with the derived verdict, decline a HUMAN one. */
+  const agentOnly = (pending, run) => (pending?.of === CONFIRM_ACTORS.AGENT
+    ? { value: run.verdict?.verdict === 'accept' ? 'accept' : 'changes' }
+    : null);
+
+  it('stops at a confirm when no policy is supplied — today\'s behaviour is unchanged', async () => {
+    const { registry } = registryFor();
+    const store = createMemoryRunStore();
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-noauto', input: BASE_INPUT, registry }),
+      registry, store, sinks: {}, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    expect(out.stopped).toBe('confirm');
+  });
+
+  it('declines a HUMAN-addressed confirm, so a gate-self PR still stops', async () => {
+    // `of` is HUMAN whenever the PR is humanRequired — the step exists precisely so a person answers.
+    const { registry } = registryFor({ labels: ['review:human'] });
+    const store = createMemoryRunStore();
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-human', input: BASE_INPUT, registry }),
+      registry, store, sinks: {}, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+      autoConfirm: agentOnly,
+    });
+    expect(out.run.pending.of).toBe(CONFIRM_ACTORS.HUMAN);
+    expect(out.stopped).toBe('confirm');
+  });
+
+  it('a policy that always declines is identical to supplying none', async () => {
+    const { registry } = registryFor();
+    const store = createMemoryRunStore();
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-decline', input: BASE_INPUT, registry }),
+      registry, store, sinks: {}, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+      autoConfirm: () => null,
+    });
+    expect(out.stopped).toBe('confirm');
+  });
+
+  // THE POSITIVE CASE, which had no test at all (PR #1178 review, finding 4): all three above assert a STOP,
+  // so deleting the answer branch — the entire feature — left the whole suite green. This is the one that
+  // reddens when it goes.
+  it('ANSWERS an agent-addressed confirm and drives past it, unattended', async () => {
+    const { registry } = registryFor();
+    const store = createMemoryRunStore();
+    const seen = [];
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-auto', input: BASE_INPUT, registry }),
+      registry,
+      store,
+      sinks: recordingSinks(seen),
+      judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+      autoConfirm: agentOnly,
+    });
+    expect(out.stopped).not.toBe('confirm');
+    // The answer the policy gave is the one the run recorded — not merely "it did not stop".
+    expect(out.run.findings.confirm).toBe('accept');
+    // And it went ON to the effects, which is the whole point of not needing a person.
+    expect(seen.length).toBeGreaterThan(0);
+  });
+
+  // AN EXPLICIT HUMAN ANSWER BEATS THE POLICY, and nothing defended that (PR #1178 round 4, finding 3).
+  // Mutating the `pendingResume == null` guard away — so the policy overrides a typed answer — left the whole
+  // suite green. It is the property that keeps a person's decision authoritative.
+  it('an explicit --answer wins over the policy, rather than the policy overriding it', async () => {
+    const { registry } = registryFor();
+    const store = createMemoryRunStore();
+    let asked = 0;
+    const seen = [];
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-explicit', input: BASE_INPUT, registry }),
+      registry,
+      store,
+      sinks: recordingSinks(seen),
+      judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+      resume: { value: 'changes' },
+      // Would answer `accept`; must never be consulted, because a human already answered.
+      autoConfirm: () => { asked += 1; return { value: 'accept' }; },
+    });
+    expect(out.run.findings.confirm).toBe('changes');
+    expect(asked).toBe(0);
+  });
+
+  // The policy is CONSULTED with what it needs to decide: which actor is being asked, and the run so far.
+  it('hands the policy the pending confirm and the run, so its decision can depend on both', async () => {
+    const { registry } = registryFor();
+    const store = createMemoryRunStore();
+    const calls = [];
+    await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'r-args', input: BASE_INPUT, registry }),
+      registry,
+      store,
+      sinks: recordingSinks([]),
+      judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+      autoConfirm: (pending, run) => { calls.push({ of: pending?.of, id: run?.id, verdict: run?.verdict?.verdict }); return null; },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ of: CONFIRM_ACTORS.AGENT, id: 'r-args' });
+    expect(calls[0].verdict).toBeDefined();
   });
 });

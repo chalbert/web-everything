@@ -2,7 +2,8 @@
  * judge-spawn.mjs — the tool-free juror spawn behind one function (#3028, under #3029).
  *
  * ONE HELPER EVERY `judge` STEP CALLS. A juror is a `claude -p` subprocess with the findings shape
- * ENFORCED, the repo context STRIPPED, and NO TOOLS GRANTED. The flag recipe was measured in session
+ * ENFORCED, the repo context STRIPPED, and NO TOOLS GRANTED BY DEFAULT — a caller may pass an explicit
+ * `allowedTools` allow-list, and `assertLaneCwd` then REFUSES the spawn unless its cwd is a lane clone. The flag recipe was measured in session
  * rather than invented, and this module is where it stops being folklore: no caller re-derives it, and
  * every caller gets the same three guarantees below. `judgeSpawn` returns a validated object or throws
  * carrying THE SPAWN'S OWN error text — never a paraphrase this module made up.
@@ -71,6 +72,8 @@
 
 import { spawn as nodeSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { resolve as resolvePath } from 'node:path';
+import { realpathSync } from 'node:fs';
 
 /** The CLI a juror runs as. Named once so a test can assert it and a caller can override the path. */
 export const JUDGE_CLI = 'claude';
@@ -102,6 +105,92 @@ export function assertNoForbiddenArgv(argv = []) {
       throw new Error(`judge-spawn: refusing to spawn with ${banned} — see FORBIDDEN_ARGV and #3028's recorded trap`);
     }
   }
+}
+
+/**
+ * A tool-bearing juror MUST run in a lane of its OWN. Refuses the spawn otherwise. Pure over the path strings.
+ *
+ * THIS IS THE GUARANTEE, not a reminder — and it exists because the first version of this feature ASSERTED an
+ * isolation property it did not have. It claimed the spawn's cwd was a lane; nothing set it, so the default
+ * `process.cwd()` meant a review launched from the primary checkout handed a juror unscoped `Bash` pointed at
+ * the shared tree. It also claimed `guard-lane` would deny writes there, but `--safe-mode` disables hooks, so
+ * that guard never ran inside the juror at all.
+ *
+ * THE FIRST FIX WAS ALSO NOT ENOUGH (PR #1178 review, blocking 1), and how it failed is the reason this
+ * function now takes three arguments instead of one. It refused a cwd that was not a lane — but `judgeSpawn`
+ * still DEFAULTED `cwd` to `process.cwd()`, and the normal deployment runs the review inside a lane. So an
+ * omitted cwd silently passed the check by donating the DRIVER'S OWN lane: the juror got unscoped `Bash`
+ * pointed at the very working tree the parent was mid-review of, which is a tree the juror's own mandate tells
+ * it to mutate (check out the parent commit, edit source, re-run the suite to expose a decorative test). The
+ * lane may also carry another session's live lease. "A lane is disposable and never shared" is true of a lane
+ * nobody is using; it is false of the one the driver is standing in.
+ *
+ * So three things are refused, and each closes a hole the reviewer reproduced:
+ *   1. NO cwd at all. There is no safe default — inheriting one is exactly the defect above — so a
+ *      tool-bearing spawn must be handed a lane explicitly.
+ *   2. A cwd that is not a lane, checked on the REAL path. The first predecessor was a raw
+ *      `path.includes('/.lanes/')`, which `…/.lanes/../webeverything` walked straight through. The second used
+ *      `resolve`, which normalizes text and never touches the filesystem — so a symlink wearing a lane's shape
+ *      passed while the child landed in the shared primary checkout. `realpathSync` follows the link.
+ *   3. A cwd inside the DRIVER'S own lane. Same tree, same hazard, and it is the shape an omitted cwd used to
+ *      produce. Compared by LANE ROOT rather than by full path: an exact compare let a subdirectory through
+ *      (same working tree, same lease) and, on a case-insensitive filesystem, let a case-variant of the very
+ *      same directory through.
+ *
+ * Enforcing it here needs neither hooks nor cooperation: no lane of its own, no tools.
+ *
+ * @param {string|null} cwd - the lane handed to the juror.
+ * @param {string[]|null} allowedTools - null/undefined means a tool-free juror, which is unaffected.
+ * @param {string} [selfCwd] - the DRIVER's directory, injected so this stays testable.
+ * @param {(p: string) => string} [realpath] - injected for the same reason. The default follows symlinks; a
+ *   test passes identity so it can keep reasoning about path STRINGS instead of building real directories.
+ */
+export function assertLaneCwd(cwd, allowedTools, selfCwd = process.cwd(), realpath = realpathSync) {
+  if (allowedTools === null || allowedTools === undefined) return;
+  const refuse = (why) => {
+    throw new Error(
+      `judge-spawn: refusing to spawn a TOOL-BEARING juror — ${why}. A juror with tools can write, and `
+      + '`--safe-mode` disables the hooks that would otherwise stop it, so a lane of its OWN is the isolation. '
+      + 'Acquire one (`lane-pool.mjs acquire`) and pass its path as `cwd`, or omit `allowedTools` for a '
+      + 'tool-free juror.',
+    );
+  };
+  if (cwd === null || cwd === undefined || String(cwd).trim() === '') {
+    refuse('no `cwd` was supplied, and there is no safe default — inheriting the driver\'s directory is the '
+      + 'defect this exists to prevent');
+  }
+  // REAL PATH, not just a resolved one (PR #1178 round 4, finding 2). `resolve` normalizes `..` and `.`
+  // textually and never touches the filesystem, so a symlink wearing a lane's shape passed `laneRootOf` while
+  // the child landed in the shared primary checkout — reproduced end to end. `realpathSync` follows the link.
+  // It THROWS on a path that does not exist, which is the right answer too: a juror cannot run there.
+  let path;
+  try {
+    path = realpath(resolvePath(String(cwd)));
+  } catch {
+    refuse(`\`cwd\` ${JSON.stringify(String(cwd))} does not exist, so it cannot be a lane`);
+  }
+  const lane = laneRootOf(path);
+  if (!lane) refuse(`\`cwd\` resolves to ${JSON.stringify(path)}, which is not a lane clone`);
+  // LANE ROOTS, not full paths (PR #1178 round 4, finding 1). An exact path compare let a SUBDIRECTORY of the
+  // driver's lane through — same git working tree, same lease — and on a case-insensitive filesystem it let
+  // a case-variant of the very same directory through. Both were reproduced with the child reporting the
+  // driver's own tree. Comparing the lane each path belongs to asks the question the refusal is actually for.
+  let selfLane = null;
+  try { selfLane = laneRootOf(realpath(resolvePath(String(selfCwd || '.')))); } catch { selfLane = null; }
+  if (selfLane && lane === selfLane) {
+    refuse(`\`cwd\` is inside the DRIVER'S OWN lane (${JSON.stringify(lane)}) — the juror would be pointed at the `
+      + 'working tree its caller is mid-run in, and its mandate is to mutate that tree');
+  }
+}
+
+/**
+ * The lane a resolved path belongs to, or `null`. A lane always lives at `<workspace>/.lanes/<pool>/lane-N`,
+ * the same shape `we:scripts/guard-lane.mjs` splits on — so this matches a real pool member and not any
+ * directory that happens to be named `.lanes`.
+ */
+export function laneRootOf(resolvedPath) {
+  const m = /^(.*[/\\]\.lanes[/\\][^/\\]+[/\\]lane-\d+)(?:[/\\]|$)/.exec(String(resolvedPath));
+  return m ? m[1] : null;
 }
 
 /** The CLI's own `--effort` enum, per `claude --help` at 2.1.220. */
@@ -208,7 +297,21 @@ export function buildJudgeArgv({
   effort = DEFAULT_EFFORT,
   budget = DEFAULT_BUDGET_USD,
   sessionId,
+  allowedTools = null,
 } = {}) {
+  if (allowedTools !== null) {
+    // A tool name reaches argv as a bare token, so a flag-shaped one becomes a FLAG — the same hazard
+    // `FORBIDDEN_ARGV` exists for, one field over. Refuse anything that is not a plain tool identifier.
+    if (!Array.isArray(allowedTools) || allowedTools.length === 0) {
+      throw new TypeError('judge-spawn: `allowedTools` must be a non-empty array, or null for a tool-free juror');
+    }
+    for (const t of allowedTools) {
+      if (typeof t !== 'string' || !/^[A-Za-z][A-Za-z0-9_]*$/.test(t)) {
+        throw new TypeError(`judge-spawn: refusing tool name ${JSON.stringify(t)} — a non-identifier reaches argv as a flag`);
+      }
+    }
+    assertNoForbiddenArgv(allowedTools);
+  }
   if (typeof mandate !== 'string' || !mandate.trim()) {
     throw new TypeError('judge-spawn: `mandate` must be a non-empty string');
   }
@@ -228,11 +331,36 @@ export function buildJudgeArgv({
     throw new TypeError('judge-spawn: `sessionId` must be a canonical lowercase UUID — use deriveSessionId()');
   }
 
+  // TOOL-FREE BY DEFAULT, TOOL-BEARING ONLY ON REQUEST. `--tools ''` is what makes a juror's "never check the
+  // branch out in a shared tree" a thing it CANNOT do rather than is asked not to — so it stays the default and
+  // every existing caller is unchanged.
+  //
+  // WHY A TOOL-BEARING VARIANT EXISTS AT ALL. Nine PR reviews run by hand on 2026-08-11/12 found what they
+  // found BECAUSE they could act: a `gh` flag bypass found by firing the command at real GitHub, a guard hole
+  // reproduced on the parent commit, four decorative tests found by mutating source and watching what stayed
+  // green. A juror that can only read a diff finds none of those. The tools ARE the finding mechanism.
+  //
+  // WHAT REPLACES THE GUARANTEE `--tools ''` GAVE — and the first version of this comment claimed two
+  // replacements, one of which did not exist and one of which was switched off. Review caught both:
+  //   • it said the spawn's `cwd` is a lane. NOTHING SET IT. The default was `process.cwd()`, so a review run
+  //     from the primary checkout spawned a juror with unscoped Bash pointed at the shared tree.
+  //   • it said `guard-lane` would deny a shared-tree write. `--safe-mode` DISABLES HOOKS, so the guard the
+  //     claim leaned on never ran inside the juror at all.
+  // A false claim about a safety property is exactly the kind that must bounce, and it did.
+  //
+  // THE REAL GUARANTEE, enforced below rather than asserted: a tool-bearing juror MUST be given a lane cwd,
+  // and `assertLaneCwd` refuses the spawn otherwise. That does not depend on hooks, on the juror cooperating,
+  // or on anyone remembering — if there is no lane, there are no tools. A lane is disposable and never shared,
+  // so an unguarded write inside one costs a `lane-pool` refresh. The derived `sessionId` still holds
+  // independently, and is a separate property from this one.
+  const toolArgs = allowedTools === null
+    ? ['--tools', '']                 // variadic — the next token below MUST be an option, and is.
+    : ['--allowedTools', ...allowedTools];
   return [
     '-p',
     '--output-format', 'json',
     '--safe-mode',                    // NOT --bare: see FORBIDDEN_ARGV and the header's trap section.
-    '--tools', '',                    // variadic — the next token below MUST be an option, and is.
+    ...toolArgs,
     '--model', model,
     '--effort', effort,
     '--max-budget-usd', String(budget),
@@ -320,7 +448,8 @@ export function loadedContextTokens(usage = {}) {
  * @param {string} [opts.runId] - run identity the session id derives from.
  * @param {string} [opts.lens] - lens name, mixed into the session id so a panel's jurors differ.
  * @param {string} [opts.sessionId] - an explicit session id, overriding the derivation.
- * @param {string} [opts.cwd] - working directory for the spawn.
+ * @param {string|null} [opts.cwd] - the juror's lane. REQUIRED when `allowedTools` is set, and deliberately
+ *   defaulted to `null` rather than `process.cwd()` — see {@link assertLaneCwd}.
  * @param {object} [opts.env] - environment for the spawn; defaults to the caller's.
  * @param {string} [opts.cli] - the binary to run.
  * @param {number} [opts.timeoutMs] - kill the juror after this long.
@@ -339,10 +468,14 @@ export async function judgeSpawn({
   runId,
   lens,
   sessionId,
-  cwd = process.cwd(),
+  // NO DEFAULT. A tool-bearing juror that inherits its driver's directory is PR #1178's blocking defect;
+  // `assertLaneCwd` refuses a null cwd outright. A tool-free juror ignores this entirely, so `process.cwd()`
+  // is substituted below only once tools are known to be absent.
+  cwd = null,
   env = process.env,
   cli = JUDGE_CLI,
   timeoutMs = 10 * 60 * 1000,
+  allowedTools = null,
   spawnFn = nodeSpawn,
 } = {}) {
   if (typeof input !== 'string' || !input.trim()) {
@@ -362,7 +495,10 @@ export async function judgeSpawn({
     ? sessionSeed([runId, lens])
     : `judge:${Date.now()}:${Math.random()}`;
   const sid = sessionId ?? deriveSessionId(seed);
-  const argv = buildJudgeArgv({ mandate, shape, model, effort, budget, sessionId: sid });
+  assertLaneCwd(cwd, allowedTools);
+  // Only reached for a tool-free juror, which cannot write and for which the directory is immaterial.
+  const spawnCwd = cwd ?? process.cwd();
+  const argv = buildJudgeArgv({ mandate, shape, model, effort, budget, sessionId: sid, allowedTools });
 
   // Belt-and-braces: the trap can never reach a real process, even if `buildJudgeArgv` is later edited.
   assertNoForbiddenArgv(argv);
@@ -371,7 +507,7 @@ export async function judgeSpawn({
   const { stdout, stderr, code } = await new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawnFn(cli, argv, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawnFn(cli, argv, { cwd: spawnCwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (e) {
       reject(new Error(`judge-spawn: could not start \`${cli}\`: ${e.message}`));
       return;

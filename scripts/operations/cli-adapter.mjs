@@ -190,7 +190,18 @@ export function assertSafeJudgeRequest(request) {
   if (request?.budget !== undefined && (typeof request.budget !== 'number' || !Number.isFinite(request.budget) || request.budget <= 0)) {
     throw new Error(`operations: \`budget\` must be a positive finite number of USD, got ${JSON.stringify(request.budget)}`);
   }
-  assertNoForbiddenArgv([request?.model, request?.effort].filter((t) => typeof t === 'string'));
+  // A tool name reaches argv as a bare token, so the same flag-shaped-value hazard applies one field over.
+  if (request?.allowedTools !== undefined) {
+    if (!Array.isArray(request.allowedTools) || request.allowedTools.length === 0) {
+      throw new Error('operations: `allowedTools` must be a non-empty array when present — omit it for a tool-free juror');
+    }
+    for (const t of request.allowedTools) {
+      if (typeof t !== 'string' || !/^[A-Za-z][A-Za-z0-9_]*$/.test(t)) {
+        throw new Error(`operations: refusing a juror tool name ${JSON.stringify(t)} — a non-identifier reaches argv as a flag`);
+      }
+    }
+  }
+  assertNoForbiddenArgv([request?.model, request?.effort, ...(request?.allowedTools ?? [])].filter((t) => typeof t === 'string'));
 }
 
 /**
@@ -242,6 +253,7 @@ export function createDefaultJudge({ spawn = judgeSpawn, cwd } = {}) {
       budget: request.budget,
       runId: request.runId,
       lens: request.lens,
+      ...(request.allowedTools ? { allowedTools: request.allowedTools } : {}),
       ...(cwd ? { cwd } : {}),
     });
     // NOT a spread of `outcome`: it also carries `argv` (which embeds the whole mandate) and the answer itself.
@@ -272,7 +284,7 @@ export function createDefaultJudge({ spawn = judgeSpawn, cwd } = {}) {
  * @param {number} [o.maxTurns]
  * @returns {Promise<{run: object, stopped: string, error: (Error|null), applied: string[]}>}
  */
-export async function driveRun({ run, registry, store, sinks, judge, resume = null, maxTurns = 64 } = {}) {
+export async function driveRun({ run, registry, store, sinks, judge, resume = null, maxTurns = 64, autoConfirm = null } = {}) {
   let current = run;
   let pendingResume = resume;
   const applied = [];
@@ -283,6 +295,17 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
     if (status === 'complete') return { run: current, stopped: 'complete', error: null, applied };
 
     if (status === 'awaiting-confirm') {
+      // AN UNATTENDED ANSWER, WHEN AND ONLY WHEN THE DECLARATION SAID AN AGENT MAY GIVE ONE. The policy is
+      // INJECTED rather than decided here: this adapter must not know which actor names a declaration uses, and
+      // a confirm addressed to a HUMAN must keep stopping — that is the whole point of the step.
+      //
+      // The seam matters more than the convenience. A caller that wants an unattended loop supplies a policy;
+      // a caller that does not gets today's behaviour unchanged, because `autoConfirm` defaults to null. The
+      // policy returns `null` to decline, which is how it refuses a human-addressed confirm.
+      if (pendingResume == null && typeof autoConfirm === 'function') {
+        const auto = autoConfirm(current.pending, current);
+        if (auto != null) { pendingResume = auto; }
+      }
       // THE STOP. With no answer in hand the adapter returns; the caller prints the question and exits.
       if (pendingResume == null) return { run: current, stopped: 'confirm', error: null, applied };
       current = advance(current, { registry, resume: pendingResume });

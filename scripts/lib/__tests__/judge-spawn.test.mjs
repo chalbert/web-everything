@@ -19,7 +19,10 @@
  *      unreachable from the public API by construction, and no test here pretends otherwise.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   JUDGE_CLI,
   FORBIDDEN_ARGV,
@@ -34,6 +37,8 @@ import {
   parseJudgeOutcome,
   loadedContextTokens,
   judgeSpawn,
+  assertLaneCwd,
+  laneRootOf,
 } from '../judge-spawn.mjs';
 
 const SHAPE = {
@@ -541,5 +546,174 @@ describe('judgeSpawn — the one function a `judge` step calls, exercised over a
     const spawnFn = () => { throw new Error('ENOENT'); };
     await expect(judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, cli: 'nope', spawnFn }))
       .rejects.toThrow(/could not start `nope`/);
+  });
+});
+
+// A TOOL-BEARING JUROR MUST RUN IN A LANE — the guarantee that replaces `--tools ""`, enforced rather than
+// asserted. The first version of this feature CLAIMED the cwd was a lane and claimed `guard-lane` would deny a
+// shared-tree write. Nothing set the cwd, and `--safe-mode` disables hooks, so both were false. Review caught
+// it as a behavioural regression of a structural guarantee.
+describe('assertLaneCwd', () => {
+  const LANE = '/ws/.lanes/web-everything/lane-3';
+  const DRIVER = '/ws/.lanes/web-everything/lane-9';
+  // These reason about path STRINGS, so `realpath` is identity here — the symlink case gets its own suite
+  // below, with a real link on disk, because a stubbed realpath cannot prove a link is followed.
+  const same = (p) => p;
+  const assertLane = (cwd, tools, driver = DRIVER) => assertLaneCwd(cwd, tools, driver, same);
+
+  it('refuses a tool-bearing spawn outside a lane', () => {
+    expect(() => assertLane('/ws/webeverything', ['Bash'])).toThrow(/not a lane clone/);
+  });
+
+  // THE HOLE THE FIRST FIX LEFT (PR #1178 review, blocking 1). `judgeSpawn` defaulted `cwd` to
+  // `process.cwd()`, and a review normally runs inside a lane — so an omitted cwd passed the old check by
+  // donating the DRIVER'S OWN lane. There is no safe default; an absent one is refused outright.
+  it('refuses when no cwd was supplied at all — there is no safe default to inherit', () => {
+    for (const nothing of [undefined, null, '', '   ']) {
+      expect(() => assertLane(nothing, ['Bash'])).toThrow(/no `cwd` was supplied/);
+    }
+  });
+
+  // Same tree, same hazard — and the shape an omitted cwd used to produce. The juror's mandate is to MUTATE
+  // that tree (check out the parent commit, edit source, re-run the suite), which is the driver's diff.
+  it("refuses the DRIVER'S own lane, and everything inside it", () => {
+    expect(() => assertLane(DRIVER, ['Bash'])).toThrow(/DRIVER'S OWN lane/);
+    expect(() => assertLane(`${DRIVER}/`, ['Bash'])).toThrow(/DRIVER'S OWN lane/);
+    // A SUBDIRECTORY is the same git working tree and the same lease — an exact path compare let it through
+    // and the child reported the driver's own toplevel (PR #1178 round 4, finding 1).
+    expect(() => assertLane(`${DRIVER}/scripts`, ['Bash'])).toThrow(/DRIVER'S OWN lane/);
+    expect(() => assertLane(`${DRIVER}/scripts/../scripts/lib`, ['Bash'])).toThrow(/DRIVER'S OWN lane/);
+  });
+
+  // A RAW SUBSTRING TEST WALKS THROUGH `..` (review finding 2). The old check was
+  // `path.includes('/.lanes/')`, so this string matched while the child's real working directory was the
+  // shared primary checkout.
+  it('resolves the path before judging it, so `..` cannot escape', () => {
+    expect(() => assertLane('/ws/.lanes/../webeverything', ['Bash'])).toThrow(/not a lane clone/);
+    expect(() => assertLane('/ws/.lanes/web-everything/lane-3/../../../webeverything', ['Bash']))
+      .toThrow(/not a lane clone/);
+  });
+
+  // …and it matches a real pool member, not any directory that happens to be called `.lanes`.
+  it('requires the <workspace>/.lanes/<pool>/lane-N shape, not merely a `.lanes` segment', () => {
+    expect(() => assertLane('/tmp/.lanes/anything', ['Bash'])).toThrow(/not a lane clone/);
+    expect(() => assertLane('/tmp/.lanes/pool/notalane', ['Bash'])).toThrow(/not a lane clone/);
+  });
+
+  it('allows a tool-bearing spawn in a lane that is not the driver\'s', () => {
+    expect(() => assertLane(LANE, ['Bash'])).not.toThrow();
+    expect(() => assertLane('/ws/.lanes/plateau-app/lane-1/sub', ['Bash', 'Read'])).not.toThrow();
+  });
+
+  it('ignores cwd entirely for a tool-free juror, so every existing caller is unaffected', () => {
+    expect(() => assertLane('/ws/webeverything', null)).not.toThrow();
+    expect(() => assertLane(undefined, undefined)).not.toThrow();
+  });
+
+  it('laneRootOf names the lane, and nothing else', () => {
+    expect(laneRootOf('/ws/.lanes/web-everything/lane-3/scripts/x.mjs')).toBe('/ws/.lanes/web-everything/lane-3');
+    expect(laneRootOf('/ws/.lanes/web-everything/lane-12')).toBe('/ws/.lanes/web-everything/lane-12');
+    expect(laneRootOf('/ws/webeverything')).toBeNull();
+    expect(laneRootOf('/tmp/.lanes/pool/notalane')).toBeNull();
+  });
+
+  it('judgeSpawn refuses before spawning — the check is on the path to the process, not beside it', async () => {
+    let spawned = false;
+    await expect(judgeSpawn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, runId: 'r', lens: 'correctness',
+      allowedTools: ['Bash'], cwd: '/ws/webeverything',
+      spawnFn: () => { spawned = true; throw new Error('should not reach'); },
+    })).rejects.toThrow(/refusing to spawn a TOOL-BEARING juror/);
+    expect(spawned).toBe(false);
+  });
+
+  // THE DEFAULT ITSELF, pinned at the spawn boundary: an omitted cwd must not become `process.cwd()`.
+  it('judgeSpawn refuses a tool-bearing spawn with NO cwd, rather than inheriting its own', async () => {
+    let spawned = false;
+    await expect(judgeSpawn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, runId: 'r', lens: 'correctness',
+      allowedTools: ['Bash'],
+      spawnFn: () => { spawned = true; throw new Error('should not reach'); },
+    })).rejects.toThrow(/no `cwd` was supplied/);
+    expect(spawned).toBe(false);
+  });
+
+  // A tool-free juror still spawns with no cwd — the directory is immaterial when nothing can write.
+  it('a tool-free juror with no cwd still spawns, in the process directory', async () => {
+    let seen = null;
+    await expect(judgeSpawn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, runId: 'r', lens: 'correctness',
+      spawnFn: (cli, argv, opts) => { seen = opts.cwd; throw new Error('stop here'); },
+    })).rejects.toThrow(/stop here/);
+    expect(seen).toBe(process.cwd());
+  });
+});
+
+/**
+ * A STUBBED REALPATH CANNOT PROVE A LINK IS FOLLOWED, so this suite builds a real one on disk. `resolve`
+ * normalizes `..` and `.` textually and never touches the filesystem, so a symlink wearing a lane's shape
+ * passed `laneRootOf` while the child landed in the shared primary checkout — the reviewer reproduced exactly
+ * that end to end (PR #1178 round 4, finding 2).
+ */
+describe('assertLaneCwd follows symlinks', () => {
+  let dir;
+  let realLane;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'judge-lane-'));
+    realLane = join(dir, 'real', '.lanes', 'web-everything', 'lane-4');
+    mkdirSync(realLane, { recursive: true });
+    mkdirSync(join(dir, 'primary'), { recursive: true });
+    mkdirSync(join(dir, 'fake', '.lanes', 'web-everything'), { recursive: true });
+  });
+  afterEach(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+
+  it('REFUSES a lane-shaped symlink that points at something that is not a lane', () => {
+    const link = join(dir, 'fake', '.lanes', 'web-everything', 'lane-7');
+    symlinkSync(join(dir, 'primary'), link, 'dir');
+    // The path LOOKS like a lane and `resolve` agrees; only following the link says otherwise.
+    expect(laneRootOf(link)).toBe(link);
+    expect(() => assertLaneCwd(link, ['Bash'], join(dir, 'other'))).toThrow(/not a lane clone/);
+  });
+
+  it('ALLOWS a symlink that really does point at a lane', () => {
+    const link = join(dir, 'shortcut');
+    symlinkSync(realLane, link, 'dir');
+    expect(() => assertLaneCwd(link, ['Bash'], join(dir, 'primary'))).not.toThrow();
+  });
+
+  // Following the link is also what catches a link INTO the driver's own lane, which the lane-root compare
+  // would otherwise miss because the two paths share no text at all.
+  it("REFUSES a symlink into the DRIVER'S own lane", () => {
+    const link = join(dir, 'shortcut');
+    symlinkSync(realLane, link, 'dir');
+    expect(() => assertLaneCwd(link, ['Bash'], realLane)).toThrow(/DRIVER'S OWN lane/);
+  });
+
+  it('REFUSES a path that does not exist — a juror cannot run there either', () => {
+    expect(() => assertLaneCwd(join(dir, 'nope', '.lanes', 'p', 'lane-1'), ['Bash'], dir)).toThrow(/does not exist/);
+  });
+});
+
+// The argv boundary had no test at all — review noted the coverage claim covered only the adapter side.
+describe('buildJudgeArgv with allowedTools', () => {
+  const base = () => ({ mandate: 'm', shape: { type: 'object' }, sessionId: deriveSessionId('seed') });
+
+  it('emits the allow-list and follows it with an option token', () => {
+    const argv = buildJudgeArgv({ ...base(), allowedTools: ['Bash', 'Read'] });
+    const i = argv.indexOf('--allowedTools');
+    expect(argv.slice(i, i + 3)).toEqual(['--allowedTools', 'Bash', 'Read']);
+    // `--allowedTools` is variadic, so the next token MUST be an option or it is swallowed as a tool name.
+    expect(argv[i + 3].startsWith('--')).toBe(true);
+  });
+
+  it('omits `--tools ""` when tools are granted, and keeps it when they are not', () => {
+    expect(buildJudgeArgv({ ...base(), allowedTools: ['Bash'] })).not.toContain('--tools');
+    expect(buildJudgeArgv(base())).toContain('--tools');
+  });
+
+  it('refuses a flag-shaped or non-identifier tool name at this boundary too', () => {
+    for (const bad of [['--bare'], ['-x'], [''], ['Bash(git *)'], 'Bash', []]) {
+      expect(() => buildJudgeArgv({ ...base(), allowedTools: bad }), JSON.stringify(bad)).toThrow();
+    }
   });
 });

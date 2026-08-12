@@ -74,6 +74,7 @@ import {
   PANEL_LENSES,
   buildPanelMandate,
   deriveVerdict,
+  deriveLoopOutcome,
   normalizeFindings,
   renderReviewNotice,
 } from '../lib/review-core.mjs';
@@ -107,6 +108,9 @@ export const DEFAULT_LENS = MANDATORY_LENSES[0];
  * that DOES reach the judge request is `lens`, and `buildPanelMandate` refuses anything outside `PANEL_LENSES`
  * before it can become argv (it lands in the mandate TEXT, never in a flag position, either way).
  */
+/** What a reviewing juror may do. Read and search, plus Bash for gates, reproduction and mutation probes. */
+export const REVIEW_JUROR_TOOLS = Object.freeze(['Bash', 'Read', 'Grep', 'Glob']);
+
 export const JUDGE_MODEL = 'sonnet';
 export const JUDGE_EFFORT = 'high';
 export const JUDGE_BUDGET_USD = 1.5;
@@ -205,6 +209,7 @@ export function shapeReadFinding(raw, { pr, repo } = {}) {
   const degradedReason = net.scored === true ? '' : String(net.reason || 'unscored');
 
   return {
+    priorRounds: Number(raw?.priorRounds) || 0,
     pr: Number(detail.pr) || Number(pr) || 0,
     repo: String(detail.repo || repo || ''),
     title: String(detail.title || ''),
@@ -388,6 +393,15 @@ export function reviewPrOperation({ readPr } = {}) {
           model: JUDGE_MODEL,
           effort: JUDGE_EFFORT,
           budget: JUDGE_BUDGET_USD,
+          // TOOL-BEARING. A juror that can only read a diff finds none of the defects the hand-run reviews found
+          // this week — a gh flag bypass proven by firing the command, a guard hole reproduced on the parent
+          // commit, four decorative tests found by mutating source. The tools ARE the finding mechanism.
+          // Isolation is structural instead: `assertLaneCwd` refuses the spawn unless the cwd is a lane of the
+          // juror's OWN — not the primary checkout, and not the driver's lane. It cannot lean on
+          // `guard-lane`, because `--safe-mode` disables hooks inside the juror; see
+          // `we:scripts/lib/judge-spawn.mjs`
+          // and its sessionId is derived, so the self-clear refusal holds against the author.
+          allowedTools: REVIEW_JUROR_TOOLS,
         };
       },
     }),
@@ -402,8 +416,13 @@ export function reviewPrOperation({ readPr } = {}) {
         const answer = view.findings.judge && typeof view.findings.judge === 'object' ? view.findings.judge : {};
         const findings = normalizeFindings(answer.findings);
         const humanRequired = read.humanRequired === true;
+        const verdict = deriveVerdict({ findings, humanRequired });
         return {
-          verdict: deriveVerdict({ findings, humanRequired }),
+          verdict,
+          // WHERE THE LOOP STANDS, distinct from what this round decided. "converged" and "exhausted" both end
+          // the loop and mean opposite things, so a caller must never have to infer one from the other. The
+          // round comes from the durable ledger, so it needs no new state and survives a dead session.
+          loop: deriveLoopOutcome({ verdict, round: read.priorRounds + 1 }),
           humanRequired,
           lens: view.input.lens,
           findings,
