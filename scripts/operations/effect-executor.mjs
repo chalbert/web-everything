@@ -87,16 +87,16 @@ export function notApplied(message, extra = {}) {
  * THE DECLARATION SAYS SO FIRST. An effect opts in with `dispatch: true`, and the executor writes `in-flight`
  * BEFORE calling the sink.
  *
- * WHAT THAT ORDERING ACTUALLY BUYS, stated precisely because an earlier version of this comment overclaimed it
- * (PR #1180 review, blocking 2). It does NOT make a crash mid-dispatch resumable: a crash between starting the
- * work and hearing back is exactly the no-handle case below, and that is REFUSED on replay, same as `pending`.
- * What it buys is that the crash lands in a state a person can see and act on:
+ * WHAT THAT ORDERING BUYS, and only for a PROCESS DEATH. It does NOT make a dispatch crash resumable: the
+ * no-handle case below is REFUSED on replay, same as `pending`. What it buys is that a process killed between
+ * starting the work and hearing back lands in a state a person can see and act on:
  *   - `inFlightEntries` reports it under `unknown` — "something may be running and cannot be observed" — where
  *     a `pending` entry says only "an attempt was made", losing the fact that work may still be out there.
  *   - `resolveInFlight` accepts it, so there is a supported way to close it out. `pending` has none, and the
  *     operator's only option is to hand-edit the run record.
- * Writing `in-flight` after the sink returned would put a crashed dispatch back in `pending`, invisible to
- * both. The ordering is worth keeping; it is a visibility guarantee, not a resumability one.
+ * Writing `in-flight` after the sink returned would put a process-killed dispatch back in `pending`, invisible
+ * to both. A sink that THROWS is a different path and does not need the ordering — the catch branch below
+ * records `in-flight` on its own.
  *
  * The sink then supplies what only it can know, by returning `inFlight({ handle, expectedBy })`:
  *   - `handle` is what a later observer polls. The spike established `sessionId` is durable and `pid` is NOT
@@ -124,11 +124,10 @@ export function inFlight({ handle, expectedBy = null } = {}) {
 /**
  * The brand `inFlight` stamps and the executor reads.
  *
- * A MODULE-LOCAL `Symbol()`, not `Symbol.for()` (PR #1180 review, finding 5). The global registry version was
- * unforgeable by ACCIDENT — a JSON payload carries no symbols — but any object could carry it deliberately
- * without importing this module, and a forged handle-less marker is reported to the caller as running while
- * the very next replay refuses it as unknown. A local symbol costs nothing and closes that outright: the only
- * way to make one is to call `inFlight`, which validates the handle.
+ * A MODULE-LOCAL `Symbol()`, not `Symbol.for()`. The global-registry version could be carried by any object
+ * without importing this module; a local one cannot. It is NOT unforgeable — the symbol can still be lifted
+ * off a real marker with `Object.getOwnPropertySymbols` and stamped on a hand-built object, which needs a
+ * sink that bypasses `inFlight()` entirely.
  */
 const IN_FLIGHT = Symbol('operations.effect.inFlight');
 
@@ -207,8 +206,8 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null 
         `operations: effect ${entry.key} (${entry.type}) was dispatched but has NO handle, so whether it is still running ` +
         'cannot be observed — it is indistinguishable from an unknown outcome. It is not declared idempotent, so ' +
         'restarting it could double-apply. Refusing. Find out what happened to it, then close it out with ' +
-        '`resolveInFlight(run, key, { status: \'applied\' | \'failed\' })` and re-run — no hand-editing of the run ' +
-        'record needed.',
+        '`resolveInFlight(run, key, { status: \'applied\' | \'failed\' })` and re-run. No command-line surface ' +
+        'exposes it yet, so that means a short script over the run store.',
       );
     }
     if (typeof lookup(entry.type) !== 'function') {
@@ -304,8 +303,9 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null 
 }
 
 /**
- * Resolve an `in-flight` entry once the work it started reports back (#3073) — the ONLY supported way out of
- * that status, so nothing has to hand-edit a run record.
+ * Resolve an `in-flight` entry once the work it started reports back (#3073) — the only supported way out of
+ * that status. No CLI flag or HTTP route reaches it yet, so an operator calls it from a short script; #3070,
+ * which polls these entries, is the first caller that will.
  *
  * REFUSES on any other status. Resolving an entry that is `pending` would be a guess about an unknown outcome,
  * which is exactly what the replay guard refuses; resolving one that is `applied` would rewrite a settled fact.

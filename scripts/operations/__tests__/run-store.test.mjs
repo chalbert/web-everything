@@ -98,9 +98,12 @@ describe('the pure core', () => {
       expect(validateRunRecord(withEffect({})).ok).toBe(true); // absent is the same as null
     });
 
-    // `''` is falsy, so it would read as "no handle" while looking like one — refused rather than coerced.
-    it('refuses a non-string or empty handle', () => {
-      for (const bad of [12345, {}, '']) {
+    // `''` is falsy, so it would read as "no handle" while looking like one. WHITESPACE is the worse case and
+    // is TRUTHY — it passed the first cut, was bucketed `running`, and the driver parked forever telling the
+    // operator to poll a blank handle (PR #1180 review, finding 3). `inFlight()` trims, so the validator was
+    // looser than the constructor it backstops.
+    it('refuses a non-string, empty, or BLANK handle', () => {
+      for (const bad of [12345, {}, '', '   ', '\t\n']) {
         expect(validateRunRecord(withEffect({ handle: bad })).errors.join(' ')).toMatch(/in-flight with an invalid handle/);
       }
     });

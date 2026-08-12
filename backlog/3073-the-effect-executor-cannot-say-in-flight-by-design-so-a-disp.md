@@ -89,7 +89,7 @@ adapter 500'd on the one operation this epic exists to reach. `driveRun` now ret
 treats it as settled. Both are covered by adapter tests, which is what was missing: a green gate could not see
 the gap because no adapter test declared a dispatch.
 
-Nine mutations were run against the claims above — including marking the dispatch `pending` before the sink,
+Eleven mutations were run against the claims above — including marking the dispatch `pending` before the sink,
 moving the in-flight write to AFTER the sink while preserving the end state, treating a handle-less entry as
 observable, dropping the `dispatch` flag in the engine, removing the driver's park branch, and 500-ing on a
 park — and each reddened named tests.

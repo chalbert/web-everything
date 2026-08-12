@@ -633,3 +633,58 @@ describe('driveRun parks on a dispatch instead of spinning', () => {
     expect(done.applied).toEqual([NOTE]);
   });
 });
+
+/**
+ * TWO PLACES REPORTED A DRIVE-LOCAL NUMBER AS A PROPERTY OF THE RECORD (PR #1180 review, findings 1 and 4).
+ * Both surface on the RE-DRIVE — the path the park message itself steers the operator onto — so the wrong
+ * answer is the one they actually see.
+ */
+describe('a parked run reports the same thing on every route', () => {
+  const dispatchSinks = () => ({
+    'start.build': async () => inFlight({ handle: 'sess-abc' }),
+    'note.write': async () => ({ ok: true }),
+  });
+  const judge = async () => { throw new Error('no juror'); };
+
+  it('outcomePayload derives inFlight from the RECORD, so a read with no drive behind it still reports it', async () => {
+    const store = createMemoryRunStore();
+    const sinks = dispatchSinks();
+    let run = startRun({ op: DISPATCH_OP, id: 'run-d', input: { pr: 7 }, registry: dRegistry });
+    store.write(run);
+    run = (await driveRun({ run, registry: dRegistry, store, sinks, judge })).run;
+
+    // The shape a read route builds: no drive, so nothing to pass in.
+    expect(outcomePayload({ run, stopped: null, error: null, applied: [] }).inFlight).toEqual([KEY]);
+  });
+
+  it('still reports [] when nothing is in flight, so the shape stays stable', () => {
+    const run = startRun({ op: DISPATCH_OP, id: 'run-d', input: { pr: 7 }, registry: dRegistry });
+    expect(outcomePayload({ run, stopped: 'complete' }).inFlight).toEqual([]);
+  });
+
+  // The park line used to count what THIS drive applied, so a re-drive said "0 effect(s) landed" about a
+  // record holding one.
+  it('the park message counts landed effects from the record, on the first drive and on a re-drive', async () => {
+    const r = createRegistry();
+    r.register(op('fx-two', {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({
+        reads: ['input.pr'],
+        effects: () => [
+          { type: 'note.write', payload: {} },
+          { type: 'start.build', payload: {}, dispatch: true },
+        ],
+      }),
+    }));
+    const store = createMemoryRunStore();
+    const sinks = dispatchSinks();
+    let run = startRun({ op: 'fx-two', id: 'run-c', input: { pr: 7 }, registry: r });
+    store.write(run);
+
+    const first = await driveRun({ run, registry: r, store, sinks, judge });
+    expect(renderOutcome({ outcome: first }).lines.join('\n')).toMatch(/1 effect\(s\) have landed/);
+
+    const again = await driveRun({ run: first.run, registry: r, store, sinks, judge });
+    expect(renderOutcome({ outcome: again }).lines.join('\n')).toMatch(/1 effect\(s\) have landed/);
+  });
+});
