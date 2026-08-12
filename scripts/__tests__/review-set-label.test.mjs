@@ -1126,7 +1126,11 @@ process.exit(0);
   for (const state of ['MERGED', 'CLOSED']) {
     it(`refuses a --to=changes verdict on a ${state} PR, naming the state, and reaches no mutating gh call`, () => {
       setUpShim(state);
-      const r = spawnSync('node', [script, '1073', '--repo=o/n', '--to=changes', '--actor=op'], {
+      // A bounce carries findings now (#xd6moh1); what is under test here is the non-OPEN refusal, which
+      // must still fire and must still reach no mutation.
+      const findings = join(shimDir, 'findings.md');
+      writeFileSync(findings, 'the one changed line is wrong');
+      const r = spawnSync('node', [script, '1073', '--repo=o/n', '--to=changes', '--actor=op', `--body-file=${findings}`], {
         encoding: 'utf8',
         env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GH_CALL_LOG: logPath },
       });
@@ -1209,11 +1213,17 @@ exit 0
 
   const script = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'review-set-label.mjs');
   let dir;
+  // A `changes` bounce must carry findings (#xd6moh1). Irrelevant to the ordering rule under test, but the
+  // CLI refuses without it, so every bounce here supplies one.
+  const FINDINGS = 'the change is not right yet';
+  let findingsPath;
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'review-label-order-'));
     writeFileSync(join(dir, 'gh'), FAKE_GH);
     chmodSync(join(dir, 'gh'), 0o755);
+    findingsPath = join(dir, 'findings.md');
+    writeFileSync(findingsPath, FINDINGS);
   });
   afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } });
   const reset = () => {
@@ -1236,7 +1246,8 @@ exit 0
     GH_HEAD_SHA: headSha,
     GH_FAIL_ON: failOn,
   });
-  const argvFor = (opts) => ['1099', '--repo=o/n', `--to=${opts.to || 'accepted'}`, `--actor=${ACTOR}`];
+  const argvFor = (opts) => ['1099', '--repo=o/n', `--to=${opts.to || 'accepted'}`, `--actor=${ACTOR}`,
+    ...(opts.to === 'changes' ? [`--body-file=${findingsPath}`] : [])];
 
   /** Drive the REAL CLI entrypoint in a child process. Reserved for the two headline pins — each spawn re-imports
    *  this CLI's whole module graph (seconds), so the rest run in-process below. */
@@ -1262,6 +1273,9 @@ exit 0
         argv: argvFor(opts),
         defaultActor: 'test',
         usage: 'usage: test',
+        // The harness does not read `--body-file` (only the CLI shell does), so the findings are handed over
+        // directly — same text either way.
+        verdictBody: opts.to === 'changes' ? FINDINGS : '',
         buildComment: ({ to, actor, headSha, reason, reviewedDiff }) => buildVerdictComment({
           to, actor, headSha, reason, reviewedDiff,
         }),
@@ -1567,7 +1581,9 @@ process.exit(0);
 
   it('a `changes` BOUNCE is never blocked by the independence bar — a bounce lands nothing', () => {
     // the author, bouncing its own PR — allowed, it clears nothing
-    const r = runCli(['--to=changes', '--actor=an agent'], { sessionId: AUTHOR });
+    const findings = join(dir, 'findings.md');
+    writeFileSync(findings, 'the isolation claim does not hold');
+    const r = runCli(['--to=changes', '--actor=an agent', `--body-file=${findings}`], { sessionId: AUTHOR });
     expect(r.status).toBe(0);
     expect(ghCalls()).toContain('pr edit');
     // And a bounce carries NO clearer stamp — there is no clearance to attribute.
@@ -1638,5 +1654,80 @@ process.exit(0);
     // …and never advertise an env-var escape as sanctioned: unsetting the session id does not buy independence,
     // it only downgrades the record to "not established", so the message must not offer it as a way through.
     expect(err).not.toMatch(/env -u|unset|CLAUDE_CODE_SESSION_ID=/);
+  });
+});
+
+/**
+ * A BOUNCE WITH NO FINDINGS IS UNACTIONABLE (#xd6moh1). `review:changes` tells the author to fix something and
+ * the findings are the only place that says what; without them the drain parks the PR behind a hold nobody can
+ * clear. Observed live on PR #1178, twice in one afternoon.
+ *
+ * Every refusal here lands through the `{"error":…}` JSON contract BEFORE the first `gh` call, so no network
+ * and no mocking — the same in-process harness the clear-human preconditions use.
+ */
+describe('runReviewLabelCli — a changes verdict must carry its findings (#xd6moh1)', () => {
+  const CFG = {
+    defaultActor: 'test',
+    usage: 'usage: test',
+    buildComment: () => 'unused',
+    successResult: (o) => ({ ok: true, ...o }),
+    refusalResult: ({ decision }) => ({ error: decision.reason }),
+  };
+
+  // PATH points at an EMPTY directory, so `gh` cannot be found and no network is touched. That is enough for
+  // every assertion here: the findings guard runs BEFORE the first gh call, so "the error is not the findings
+  // error" proves the guard did not fire, whatever the run failed on afterwards.
+  let noGhDir;
+  beforeAll(() => { noGhDir = mkdtempSync(join(tmpdir(), 'review-label-nogh-')); });
+  afterAll(() => { try { rmSync(noGhDir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+
+  function run(cfg) {
+    const chunks = [];
+    const realExit = process.exit.bind(process);
+    const savedPath = process.env.PATH;
+    process.env.PATH = noGhDir;
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = null;
+    let threw = null;
+    try { runReviewLabelCli({ ...CFG, emit: (line) => { chunks.push(String(line)); }, ...cfg }); }
+    catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else threw = e; }
+    finally { process.exit = realExit; process.env.PATH = savedPath; }
+    if (threw) throw threw;
+    return { exitCode, payload: JSON.parse(chunks.join('') || '{}') };
+  }
+
+  const bounce = (extra = {}) => run({ argv: ['1178', '--repo=o/n', '--to=changes'], ...extra });
+
+  it('REFUSES a changes verdict with no findings at all', () => {
+    const { exitCode, payload } = bounce();
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toMatch(/--to=changes requires the findings/);
+    expect(payload.error).toMatch(/--body-file/);
+  });
+
+  // Whitespace-only is the same dead end as absent — the author still learns nothing.
+  it('REFUSES a whitespace-only findings body', () => {
+    const { exitCode, payload } = bounce({ verdictBody: '   \n\t\n  ' });
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toMatch(/requires the findings/);
+  });
+
+  it('lets a changes verdict WITH findings past the guard', () => {
+    const { payload } = bounce({ verdictBody: 'the isolation claim is false: nothing sets cwd to a lane' });
+    expect(payload.error ?? '').not.toMatch(/requires the findings/);
+  });
+
+  // THE ASYMMETRY IS THE POINT. An accept with no body is merely TERSE — the label already carries the whole
+  // meaning, "nothing to do". Requiring one there would be a different, unasked-for change.
+  it('does NOT touch --to=accepted — a terse accept still gets past this guard', () => {
+    const { payload } = run({ argv: ['1178', '--repo=o/n', '--to=accepted'] });
+    expect(payload.error ?? '').not.toMatch(/requires the findings/);
+  });
+
+  // `rearm` is the conveyor's hand-back to the fix agent, not a reviewer verdict, and carries no findings by
+  // design — it re-arms a review rather than asking for a repair.
+  it('does NOT touch the rearm target', () => {
+    const { payload } = run({ argv: ['1178', '--repo=o/n'], fixedTo: 'rearm' });
+    expect(payload.error ?? '').not.toMatch(/requires the findings/);
   });
 });

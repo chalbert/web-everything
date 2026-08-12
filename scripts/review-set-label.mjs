@@ -315,6 +315,11 @@ export function runReviewLabelCli({
   successResult,
   refusalResult,
   allowClearHuman = false,
+  // The findings write-up, so this function can REFUSE an empty bounce (see the `--to=changes` guard below).
+  // The rendered comment still gets its body from the caller's `buildComment` closure — this is the same text,
+  // handed over separately so the refusal lives with the other pre-flight validation instead of in one CLI
+  // shell that no in-process caller runs. A caller that omits it is treated as having supplied nothing.
+  verdictBody = '',
   emit = (line) => writeAllSync(1, line),
 } = {}) {
   // Shadows the module-level `fail` so EVERY refusal inside this function — there are seventeen — goes to the
@@ -371,6 +376,21 @@ export function runReviewLabelCli({
         + 'clearance; it is posted verbatim in the durable comment (#2895)',
       );
     }
+  }
+  // A BOUNCE WITH NO FINDINGS IS UNACTIONABLE, so it is refused (#xd6moh1). `review:changes` tells the author
+  // to fix something; the findings are the only place that says WHAT. Without them the PR is parked behind a
+  // hold nobody can clear, because clearing it means addressing what was never written down. Seen live on
+  // PR #1178, twice in one afternoon: two reviewers set the label and neither wrote a body.
+  //
+  // ONLY ON `changes`, and the asymmetry is the point. An accept with no body is merely TERSE — the label
+  // already carries the whole meaning, "nothing to do". A bounce with no body carries NONE of its meaning.
+  // Same shape as the `--reason` requirement above: the useless path has to take an explicit act, not a
+  // silence.
+  if (to === 'changes' && !String(verdictBody || '').trim()) {
+    fail(
+      '--to=changes requires the findings — pass --body-file=<path> with what the author has to fix. A bounce '
+      + 'with no findings parks the PR behind a hold nobody can clear (#xd6moh1); nothing was changed.',
+    );
   }
   const targets = allowClearHuman ? "'accepted', 'changes', or 'clear-human'" : "'accepted' or 'changes'";
   const targetOk = to === 'accepted' || to === 'changes' || to === 'clear-human';
@@ -1038,7 +1058,10 @@ if (IS_CLI) {
   }
   runReviewLabelCli({
     defaultActor: DEFAULT_ACTOR,
-    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--channel=<surface>] [--body-file=<path>]  (pr must be a positive integer; clear-human additionally requires --actor and --reason=<stated reason>)',
+    // Handed over so the harness can refuse an empty `--to=changes` alongside its other pre-flight checks
+    // (#xd6moh1). The rendered body still comes from the `buildComment` closure below — same text, one read.
+    verdictBody,
+    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--channel=<surface>] [--body-file=<path>]  (pr must be a positive integer; changes REQUIRES --body-file=<the findings>; clear-human additionally requires --actor and --reason=<stated reason>)',
     buildComment: ({ to, actor, headSha, reason, reviewedDiff, clearerId, independence }) => buildVerdictComment({
       to, actor, headSha, reason, reviewedDiff, clearerId, independence, body: verdictBody, channel: verdictChannel,
     }),
