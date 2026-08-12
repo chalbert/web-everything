@@ -10,8 +10,11 @@
  *  - **`resolved-options/parts-structure`** for the three formatters (Number / DateTime / RelativeTime):
  *    assert the `formatToParts` part **type sequence** (an equivalence class over the literal glyphs), so a
  *    conformant provider is judged on structure, not on whether the host renders `$` vs `US$` or `,` vs `.`.
- *  - **`predicate`** for `Intl.Collator`, which has no `formatToParts`: assert the **sign** of `compare()`
- *    (sort order), the only stable observable of collation across ICU builds.
+ *  - **`exact`** for `Intl.Collator`, which has no `formatToParts`: assert the **sign** of `compare()` (sort
+ *    order), the only stable observable of collation across ICU builds. The binding normalizes to a scalar
+ *    sign, so `exact` compares exactly that. It said `predicate` until `plateau-app#137` graded this suite for
+ *    the first time and found the mismatch — `predicate` requires a `{ predicate, value }` descriptor, so both
+ *    collator vectors failed closed on a correct provider.
  *
  * The vectors judge only what the binding exposes (`partTypes`, `sign`) — never a provider internal. A
  * provider is conformant if it produces these observations, however it is built (the #506/#899 golden-vectors
@@ -83,7 +86,11 @@ export const intlSuite: ConformanceVectorSuite = {
         { do: 'getCollator', locales: 'en-US', options: {} },
         { do: 'compare', a: 'apple', b: 'banana' },
       ],
-      expect: { sign: -1, matchers: { sign: 'predicate' } },
+      // `exact`, not `predicate`. The binding observes a SCALAR sign; `predicate` requires a
+      // `{ predicate, value }` descriptor and fails closed on anything else, so it rejected a correct answer
+      // with "expected -1, observed -1". The judge's only sign form (`sign-order`) needs an array. `exact` on
+      // an already-normalized sign states exactly what this vector means.
+      expect: { sign: -1, matchers: { sign: 'exact' } },
       observeVia: ['sign'],
     },
     {
@@ -96,7 +103,11 @@ export const intlSuite: ConformanceVectorSuite = {
         { do: 'getCollator', locales: 'en-US', options: { numeric: true } },
         { do: 'compare', a: 'item2', b: 'item10' },
       ],
-      expect: { sign: -1, matchers: { sign: 'predicate' } },
+      // `exact`, not `predicate`. The binding observes a SCALAR sign; `predicate` requires a
+      // `{ predicate, value }` descriptor and fails closed on anything else, so it rejected a correct answer
+      // with "expected -1, observed -1". The judge's only sign form (`sign-order`) needs an array. `exact` on
+      // an already-normalized sign states exactly what this vector means.
+      expect: { sign: -1, matchers: { sign: 'exact' } },
       observeVia: ['sign'],
     },
   ],
