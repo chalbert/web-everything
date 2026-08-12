@@ -979,6 +979,14 @@ export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netCha
     'verdict to accommodate what you guess another lens\'s reviewer might want. A genuine tradeoff BETWEEN',
     'mandates (e.g. security wants X, simplicity wants not-X) is human judgment by definition — surface your',
     'honest verdict for your own lens and let the panel reduction detect the conflict; do not resolve it yourself.',
+    // Declared here rather than typed per-invocation. An instruction that has to be remembered at each
+    // call is one that gets forgotten: this session demonstrated that with the juror session-id rule, which was
+    // known and violated four times running.
+    'PROSE IMPRECISION IS NON-BLOCKING. Wording, framing, and claims about history or significance are worth a',
+    'NOTE, never a change-request, unless the imprecision would cause a wrong ACTION — a maintainer editing the',
+    'wrong thing, trusting a guarantee that does not hold, or building against a premise that is false. Bounce',
+    'on behaviour. Measured cost of the alternative: PRs in this repo have taken three and four review rounds on',
+    'significance framing while the code was correct throughout.',
   ];
   const netFiles = (Array.isArray(netChangedFiles) ? netChangedFiles : []).filter(Boolean).map(String);
   if (netFiles.length) {
