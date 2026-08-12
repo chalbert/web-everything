@@ -39,7 +39,7 @@ Note the tension to resolve rather than paper over: making the marker authoritat
 it as written, and do not close it either.
 
 **What is now false.** The premise above — *"the same pass that raises `staleAcceptance` also drops the
-now-stale `review:accepted` label"* — describes behaviour that ended with `#x9xqexm`. The drain does **not**
+now-stale `review:accepted` label"* — describes behaviour that ended with `#3023`. The drain does **not**
 remove `review:accepted` on a re-park. Established four independent ways during #3053 and re-verified by the
 independent review of PR #1160:
 
