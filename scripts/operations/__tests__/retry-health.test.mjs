@@ -207,3 +207,45 @@ describe('the rendering says what is missing', () => {
     expect(renderRetryHealth(assessRetryBudget(runs)).join('\n')).toMatch(/a budget of 1 would reach 95%/);
   });
 });
+
+/**
+ * THE SIXTH PATH (PR #1195 round 3, blocking). `attemptedBy` defaulted to `human`, justified by "every caller
+ * that existed before the waker was one" — a sentence that was false when written. `driveRun` is also reached
+ * by the HTTP adapter, whose caller is a network client it cannot identify, so every request-driven attempt
+ * was filed into the human population.
+ *
+ * There is no safe guess. `unknown` is counted and read by nobody.
+ */
+describe('an unidentifiable caller pads neither population', () => {
+  const unknownEntry = (over = {}) => runWith([{
+    attempts: 2, autoAttempts: 0, humanAttempts: 0, unknownAttempts: 2, lastAttemptBy: 'unknown',
+    status: 'applied', ...over,
+  }]);
+
+  it('yields no observation at all', () => {
+    expect(attemptObservations([unknownEntry()])).toEqual([]);
+  });
+
+  it('is absent from BOTH distributions, rather than padding either', () => {
+    const o = attemptObservations([unknownEntry()]);
+    expect(distributionFor(o, 'auto').settled).toBe(0);
+    expect(distributionFor(o, 'human').settled).toBe(0);
+  });
+
+  // A mixed entry keeps its identified halves; only the unattributable part drops out.
+  it('keeps the identified attempts on an entry that also has unknown ones', () => {
+    const runs = [runWith([{
+      attempts: 3, autoAttempts: 1, humanAttempts: 0, unknownAttempts: 2,
+      lastAttemptBy: 'auto', status: 'applied',
+    }])];
+    const auto = distributionFor(attemptObservations(runs), 'auto');
+    expect(auto.settled).toBe(1);
+    expect(auto.successAtAttempt).toEqual({ 1: 1 });
+  });
+
+  it('never lets an unknown entry reach a suggested budget', () => {
+    const r = assessRetryBudget(Array.from({ length: 100 }, () => unknownEntry()));
+    expect(r.conclusive).toBe(false);
+    expect(r.suggestedBudget).toBeNull();
+  });
+});

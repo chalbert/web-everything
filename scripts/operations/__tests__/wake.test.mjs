@@ -657,7 +657,7 @@ describe('the waker labels its own attempts as automatic', () => {
     let run = advanceWhileRunning(startRun({ op: OP, id: 'run-w', input: { pr: 7 }, registry }), { registry });
     store.write(run);
     // The dispatch itself is applied by the CLI path, so it is human.
-    run = (await applyPendingEffects(run, { sinks, store })).run;
+    run = (await applyPendingEffects(run, { sinks, store, attemptedBy: 'human' })).run;
     expect(run.effects[0].lastAttemptBy).toBe('human');
 
     // The waker resolves it and applies the REST of the step — those are its attempts, and they are auto.
@@ -673,12 +673,22 @@ describe('the waker labels its own attempts as automatic', () => {
 
   // The same executor, driven by the CLI path, must produce the other label — otherwise the split is
   // decorative and the dataset is one population wearing two names.
-  it('the same effect applied outside the waker is recorded as `human`', async () => {
+  it('the same effect driven from the command line is recorded as `human`', async () => {
     const store = createMemoryRunStore();
     const sinks = { 'start.build': async () => ({ ok: true }), 'note.write': async () => ({ ok: true }) };
     let run = advanceWhileRunning(startRun({ op: OP, id: 'run-h', input: { pr: 7 }, registry }), { registry });
     store.write(run);
-    run = (await applyPendingEffects(run, { sinks, store })).run;
+    run = (await applyPendingEffects(run, { sinks, store, attemptedBy: 'human' })).run;
     expect(run.effects.map((e) => e.lastAttemptBy)).toEqual(['human', 'human']);
+  });
+
+  // And an omitted caller is `unknown`, never `human` — there is no safe guess (round 3, blocking).
+  it('an unstated caller is unknown, not assumed to be a person', async () => {
+    const store = createMemoryRunStore();
+    const sinks = { 'start.build': async () => ({ ok: true }), 'note.write': async () => ({ ok: true }) };
+    let run = advanceWhileRunning(startRun({ op: OP, id: 'run-u', input: { pr: 7 }, registry }), { registry });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks, store })).run;
+    expect(run.effects.map((e) => e.lastAttemptBy)).toEqual(['unknown', 'unknown']);
   });
 });

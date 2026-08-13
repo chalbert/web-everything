@@ -21,6 +21,12 @@
  * whichever population attempted LAST, carrying the other's attempts in its count. Each population now has
  * its own count, and the SUCCESS belongs only to whoever made the final attempt — the other's attempts all
  * failed, which is itself evidence.
+ *
+ * AND A THIRD, WHICH IS COUNTED BUT NEVER READ. `unknown` is what an attempt gets when the caller cannot
+ * identify itself — the HTTP adapter's client could be a person in a console or another machine. It is
+ * excluded from both distributions rather than padding either. A thin dataset is recoverable; a mislabelled
+ * one is not, and the earlier default of `human` was filing every request-driven attempt into a population
+ * it did not belong to.
  * A default derived from the pooled distribution is too high, and too high is the expensive direction: the
  * measured failure mode was eleven dispatches over ten ticks at exit 0.
  *
@@ -55,7 +61,7 @@ export function attemptObservations(runs = []) {
       // Only a SETTLED entry answers the question. One still in flight has not succeeded or failed yet, and
       // counting it as a failure at attempt N would read a slow success as a permanent one.
       const settled = e.status === 'applied' || e.status === 'failed';
-      const lastBy = e.lastAttemptBy === 'auto' ? 'auto' : 'human';
+      const lastBy = ['auto', 'human'].includes(e.lastAttemptBy) ? e.lastAttemptBy : 'unknown';
       // ONE ENTRY, UP TO TWO OBSERVATIONS — one per population that touched it. A mixed entry contributes
       // honestly to both instead of being filed wholly into whichever attempted last.
       //

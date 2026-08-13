@@ -708,7 +708,7 @@ describe('the attempt counter records what cannot be recovered later', () => {
     const store = createMemoryRunStore();
     const run = atEffectStep();
     store.write(run);
-    const out = await applyPendingEffects(run, { sinks: sinks(), store });
+    const out = await applyPendingEffects(run, { sinks: sinks(), store, attemptedBy: 'human' });
     const entry = out.run.effects[0];
     expect(entry.attempts).toBe(1);
     expect(entry.lastAttemptBy).toBe('human');
@@ -724,9 +724,9 @@ describe('the attempt counter records what cannot be recovered later', () => {
     let run = atEffectStep();
     store.write(run);
     const failing = { ...sinks(), 'comment.post': async () => { throw notApplied('refused'); } };
-    run = (await applyPendingEffects(run, { sinks: failing, store })).run;
+    run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'human' })).run;
     expect(run.effects[0].attempts).toBe(1);
-    run = (await applyPendingEffects(run, { sinks: sinks(), store })).run;
+    run = (await applyPendingEffects(run, { sinks: sinks(), store, attemptedBy: 'human' })).run;
     expect(run.effects[0].attempts).toBe(2);
     expect(run.effects[0].status).toBe('applied');
   });
@@ -745,12 +745,34 @@ describe('the attempt counter records what cannot be recovered later', () => {
   // THE POPULATION SPLIT, at the executor boundary. `auto` and `human` mean opposite things and the label is
   // unrecoverable once written.
   it('records the caller that re-entered, not a fixed value', async () => {
-    for (const [passed, expected] of [['auto', 'auto'], ['human', 'human'], [undefined, 'human'], ['nonsense', 'human']]) {
+    // NO SAFE DEFAULT (round 3, blocking). An omitted or unrecognised value is `unknown`, which is counted
+    // and read by nobody — the earlier `human` default filed every HTTP-driven attempt into a population it
+    // did not belong to.
+    for (const [passed, expected] of [['auto', 'auto'], ['human', 'human'], [undefined, 'unknown'], ['nonsense', 'unknown']]) {
       const store = createMemoryRunStore();
       const run = atEffectStep();
       store.write(run);
       const out = await applyPendingEffects(run, { sinks: sinks(), store, ...(passed ? { attemptedBy: passed } : {}) });
       expect(`${passed}: ${out.run.effects[0].lastAttemptBy}`).toBe(`${passed}: ${expected}`);
+    }
+  });
+
+  // THE COUNTERS, not just the label. `unknown` must increment its own tally and leave the other two alone —
+  // folding it into `humanAttempts` would reinstate the exact mislabelling the third value exists to stop.
+  it('an unidentifiable caller increments only the unknown tally', async () => {
+    for (const [passed, expected] of [
+      ['auto', { autoAttempts: 1, humanAttempts: 0, unknownAttempts: 0 }],
+      ['human', { autoAttempts: 0, humanAttempts: 1, unknownAttempts: 0 }],
+      [undefined, { autoAttempts: 0, humanAttempts: 0, unknownAttempts: 1 }],
+      ['nonsense', { autoAttempts: 0, humanAttempts: 0, unknownAttempts: 1 }],
+    ]) {
+      const store = createMemoryRunStore();
+      const run = atEffectStep();
+      store.write(run);
+      const out = await applyPendingEffects(run, { sinks: sinks(), store, ...(passed ? { attemptedBy: passed } : {}) });
+      const e = out.run.effects[0];
+      expect(`${passed}: ${e.autoAttempts}/${e.humanAttempts}/${e.unknownAttempts}`)
+        .toBe(`${passed}: ${expected.autoAttempts}/${expected.humanAttempts}/${expected.unknownAttempts}`);
     }
   });
 });
@@ -768,8 +790,8 @@ describe('an effect retried by both populations counts in both', () => {
     const store = createMemoryRunStore();
     let run = atEffectStep();
     store.write(run);
-    run = (await applyPendingEffects(run, { sinks: failing, store })).run;
-    run = (await applyPendingEffects(run, { sinks: failing, store })).run;
+    run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'human' })).run;
+    run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'human' })).run;
     run = (await applyPendingEffects(run, { sinks: working, store, attemptedBy: 'auto' })).run;
     expect(run.effects[0]).toMatchObject({
       attempts: 3, humanAttempts: 2, autoAttempts: 1, lastAttemptBy: 'auto', status: 'applied',
@@ -782,7 +804,7 @@ describe('an effect retried by both populations counts in both', () => {
     store.write(run);
     run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'auto' })).run;
     run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'auto' })).run;
-    run = (await applyPendingEffects(run, { sinks: working, store })).run;
+    run = (await applyPendingEffects(run, { sinks: working, store, attemptedBy: 'human' })).run;
     expect(run.effects[0]).toMatchObject({
       attempts: 3, autoAttempts: 2, humanAttempts: 1, lastAttemptBy: 'human', status: 'applied',
     });

@@ -177,12 +177,18 @@ function withEntry(run, key, patch) {
  * @param {Record<string, Function>|Map<string, Function>} opts.sinks - effect type → `async (payload, ctx) => result`.
  * @param {{read: Function, write: Function}} opts.store - the run store handle (see `run-store.mjs`).
  * @param {number} [opts.stepIndex] - apply a specific step's effects instead of the pending one.
- * @param {'human'|'auto'} [opts.attemptedBy] - who re-entered. Recorded, never acted on; see the attempt
- *   counter below for why the two populations must not be averaged. Defaults to `human`, because every
- *   caller that existed before the waker was one.
+ * @param {'human'|'auto'|'unknown'} [opts.attemptedBy] - who re-entered. Recorded, never acted on.
+ *
+ *   DEFAULTS TO `unknown`, NOT `human` (PR #1195 review, blocking). The earlier default was justified by
+ *   "every caller that existed before the waker was one", and that sentence was false the moment it was
+ *   written: `driveRun` is also reached by the HTTP adapter, where the caller is a network client the
+ *   adapter cannot identify. Every request-driven attempt was being filed as human.
+ *
+ *   There is no safe guess, so the third value is the honest one: `unknown` is excluded from BOTH
+ *   populations rather than padding either. A thin dataset is recoverable; a mislabelled one is not.
  * @returns {Promise<{run: object, applied: string[], skipped: string[], halted: (object|null), error: (Error|null)}>}
  */
-export async function applyPendingEffects(run, { sinks, store, stepIndex = null, attemptedBy = 'human' } = {}) {
+export async function applyPendingEffects(run, { sinks, store, stepIndex = null, attemptedBy = 'unknown' } = {}) {
   assertRunRecord(run, 'run record passed to applyPendingEffects');
   if (!store || typeof store.write !== 'function') {
     throw new TypeError('operations: applyPendingEffects needs a `store` handle — the record must be durable between effects');
@@ -275,15 +281,16 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
     //   - auto, auto, then a human fixes the cause → filed as human, and TWO genuine automatic failures —
     //     evidence that a budget buys nothing — vanish from the automatic population entirely.
     // Counting each population separately means a mixed entry contributes honestly to both.
-    const isAuto = attemptedBy === 'auto';
+    const by = attemptedBy === 'auto' || attemptedBy === 'human' ? attemptedBy : 'unknown';
     const attempted = {
       attempts: (Number(live.attempts) || 0) + 1,
-      autoAttempts: (Number(live.autoAttempts) || 0) + (isAuto ? 1 : 0),
-      humanAttempts: (Number(live.humanAttempts) || 0) + (isAuto ? 0 : 1),
+      autoAttempts: (Number(live.autoAttempts) || 0) + (by === 'auto' ? 1 : 0),
+      humanAttempts: (Number(live.humanAttempts) || 0) + (by === 'human' ? 1 : 0),
+      unknownAttempts: (Number(live.unknownAttempts) || 0) + (by === 'unknown' ? 1 : 0),
       lastAttemptAt: new Date().toISOString(),
       // NAMED for what it is. `attemptedBy` read as "who attempted this", which is false for a mixed entry;
       // it has only ever meant who attempted it LAST, and the last attempt is the one whose outcome settled.
-      lastAttemptBy: isAuto ? 'auto' : 'human',
+      lastAttemptBy: by,
     };
     current = live.dispatch
       ? withEntry(current, live.key, { ...attempted, status: 'in-flight', handle: null, startedAt: new Date().toISOString(), expectedBy: null, error: null })

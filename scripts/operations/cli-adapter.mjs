@@ -284,7 +284,7 @@ export function createDefaultJudge({ spawn = judgeSpawn, cwd } = {}) {
  * @param {number} [o.maxTurns]
  * @returns {Promise<{run: object, stopped: string, error: (Error|null), applied: string[]}>}
  */
-export async function driveRun({ run, registry, store, sinks, judge, resume = null, maxTurns = 64, autoConfirm = null } = {}) {
+export async function driveRun({ run, registry, store, sinks, judge, resume = null, maxTurns = 64, autoConfirm = null, attemptedBy = 'unknown' } = {}) {
   let current = run;
   let pendingResume = resume;
   const applied = [];
@@ -327,7 +327,9 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
     }
 
     if (status === 'awaiting-effect') {
-      const outcome = await applyPendingEffects(current, { sinks, store });
+      // THREADED FROM THE ENTRY POINT, which is the only thing that knows. `driveRun` itself cannot tell a
+      // person from a network client — it has both callers — so it must be told rather than assume.
+      const outcome = await applyPendingEffects(current, { sinks, store, attemptedBy });
       current = outcome.run;
       applied.push(...outcome.applied);
       if (outcome.error) return { run: current, stopped: 'effect-halted', error: outcome.error, applied };
@@ -406,7 +408,8 @@ export async function runOperationCli({ declaration, argv, registry, store, sink
     resume = { step: run.pending.step, value: parsed.control.answer };
   }
 
-  const outcome = await driveRun({ run, registry, store, sinks, judge, resume });
+  // The command line genuinely is a person at a terminal.
+  const outcome = await driveRun({ run, registry, store, sinks, judge, resume, attemptedBy: 'human' });
   return { ...renderOutcome({ outcome, json: parsed.control.json }), run: outcome.run, stopped: outcome.stopped };
 }
 

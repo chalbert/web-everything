@@ -551,7 +551,9 @@ function notPlanned(declaration, basePath, attempted, readOnly) {
 async function driveAndRespond({ run, registry, store, sinks, judge, resume, basePath, status }) {
   let outcome;
   try {
-    outcome = await driveRun({ run, registry, store, sinks, judge, resume });
+    // A NETWORK CLIENT, which this adapter cannot identify — it could be a person in a console or another
+    // machine. `unknown` is excluded from both retry populations rather than padding either.
+    outcome = await driveRun({ run, registry, store, sinks, judge, resume, attemptedBy: 'unknown' });
   } catch (e) {
     return fail(500, String(e?.message ?? e));
   }
