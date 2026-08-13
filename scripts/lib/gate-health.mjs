@@ -188,11 +188,23 @@ export function compareGroups(band, { alpha = 0.05 } = {}) {
 /**
  * Observations per group needed to detect `mdd` at this base rate (80% power, α=0.05, two-sided).
  * The actionable number: it says whether the metric or the patience is the constraint.
+ *
+ * Returns `null` when no answer exists. The formula sizes the comparison arm at `baseRate + mdd`, so
+ * once that exceeds 1 there is no such arm to detect and any number returned describes an impossible
+ * effect. It used to return one — `pbar` hit its clamp, `pbar * (1 - pbar)` collapsed, and the whole
+ * numerator with it, so a 98% base rate answered `1`. A refusal is visible; a small wrong number is not.
+ *
+ * The low end is NOT covered by this guard and is not claimed to be: `pbar = p + d / 2` places the
+ * comparison arm above the base rate, so the formula is one-directional by construction and a
+ * `baseRate - mdd` below 0 is outside what it models either way.
+ *
+ * @returns {number|null} observations per group, or null when `baseRate + mdd` exceeds 1.
  */
 export function requiredNPerGroup(baseRate, mdd = 0.05) {
   const p = Math.max(1e-6, Math.min(1 - 1e-6, Number(baseRate) || 0));
   const d = Math.max(1e-6, Number(mdd) || 0.05);
-  const pbar = Math.min(1 - 1e-6, p + d / 2);
+  if (p + d > 1) return null;
+  const pbar = p + d / 2;
   return Math.ceil(((1.96 + 0.84) ** 2 * 2 * pbar * (1 - pbar)) / (d * d));
 }
 
@@ -227,8 +239,14 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
   if (cluster.clustered) {
     blockers.push(`clustered observations — ${cluster.observations} defect signals trace to ${cluster.distinctSources} commits (largest is ${Math.round(cluster.largestClusterShare * 100)}% of them), so the interval is narrower than the data supports`);
   }
+  const required = requiredNPerGroup(baseRate, mdd);
   if (!testable.length) {
-    blockers.push(`insufficient observations — no size band reaches 5 defects and 5 non-defects in both groups at a ${(100 * baseRate).toFixed(1)}% base rate; ~${requiredNPerGroup(baseRate, mdd)} PRs per group per band would be needed to detect a ${Math.round(mdd * 100)}-point difference`);
+    // `required` is null when a `mdd`-point rise would take the base rate past 1 — say that, rather than
+    // printing "~null PRs" or a number for an effect that cannot occur.
+    const need = required === null
+      ? `no sample size would detect a ${Math.round(mdd * 100)}-point rise from a ${(100 * baseRate).toFixed(1)}% base rate — it would exceed 100%`
+      : `~${required} PRs per group per band would be needed to detect a ${Math.round(mdd * 100)}-point difference`;
+    blockers.push(`insufficient observations — no size band reaches 5 defects and 5 non-defects in both groups at a ${(100 * baseRate).toFixed(1)}% base rate; ${need}`);
   }
 
   // `obs.observed` is the working set, not a result. Returning it put all 300 records inside the finding a
@@ -239,7 +257,7 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
     observability: { ...observability, observed: observed.length },
     clustering: cluster,
     multiplicity: { bandsTested: testable.length, alphaPerBand: alpha, uncorrectedFamilyWise: 1 - (0.95 ** (testable.length || 1)) },
-    power: { baseRate, minDetectableDiff: mdd, requiredNPerGroup: requiredNPerGroup(baseRate, mdd) },
+    power: { baseRate, minDetectableDiff: mdd, requiredNPerGroup: required },
     // Null until the escalation record carries the policy-contract version. The caveat rides with the
     // numbers because a web caller renders the numbers, not prose.
     parameterSet,

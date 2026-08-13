@@ -56,6 +56,30 @@ fraction to ±5% needs about 153 observations, not 20.
 
 ## Done when
 
-- [ ] The estimator refuses instead of returning a small number it cannot justify.
+- [x] The estimator refuses instead of returning a small number it cannot justify.
 - [ ] Both callers handle the refusal.
+
+## 2026-08-13 — the estimator is fixed; the second caller does not exist on main yet
+
+`requiredNPerGroup` now returns `null` when `baseRate + mdd > 1`, and `assessCriteria` prints *"no sample size
+would detect a 5-point rise from a 97.5% base rate — it would exceed 100%"* instead of a number.
+
+**The condition is not the one this card diagnosed, and the difference matters.** The card blamed the clamp,
+which fires at `p + d / 2 >= 1`. Guarding only that would have left a silent zone: at `p=0.96, d=0.05` the
+clamp never fires and the old code returned a plausible **93** — for a comparison arm at 1.01, which cannot
+exist. A visibly absurd `1` is a better failure than a credible 93. The guard is therefore on whether the
+effect being sized is possible at all, not on whether the arithmetic overflows.
+
+**What is NOT fixed, stated plainly.** The low end is untouched. `pbar = p + d / 2` places the comparison arm
+above the base rate, so the formula is one-directional by construction and `baseRate - mdd < 0` is outside
+what it models. No claim is made about it either way.
+
+**Why the second box stays open.** `we:scripts/operations/retry-health.mjs` is not on `main` — it is still in
+PR #1195, which is in its fifth review round and may yet be stood down. Editing it here would collide. The
+`MIN_SUCCESSES = 20` floor should be re-derived once that lands: pinning a 95% coverage fraction to ±5% needs
+about 153 observations, and the estimator can now be trusted to say so.
+
+Mutation-checked: removing the guard reddens *"refuses instead of answering when a detectable rise would
+exceed 100%"* and *"the blocker says no sample size would do"*; disabling only the blocker's null branch
+reddens the second alone.
 - [ ] A test covers the boundary, not just the comfortable middle.

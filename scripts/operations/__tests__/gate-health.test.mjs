@@ -188,6 +188,35 @@ describe('the verdict names blockers rather than producing a number it cannot su
     expect(requiredNPerGroup(0.044, 0.2)).toBe(49);
   });
 
+  // #3090. Every case above sits in the range the shipped callers use — defect rates well under 0.5 — which
+  // is precisely why the boundary break survived. At a 98% base rate the function answered `1`: `pbar` hit
+  // its `1 - 1e-6` clamp, `pbar * (1 - pbar)` collapsed to ~0, and the numerator went with it. The tool that
+  // tells a reader whether they have enough data was saying one observation is plenty.
+  it('refuses instead of answering when a detectable rise would exceed 100%', () => {
+    // p + d > 1: there is no comparison arm at 1.03, so no sample size detects one.
+    expect(requiredNPerGroup(0.98, 0.05)).toBeNull();
+    expect(requiredNPerGroup(0.99, 0.05)).toBeNull();
+    // The silent half of the bug, and the worse one. 0.96 never reached the clamp — it returned a
+    // plausible 93 for an effect that cannot occur, so nothing looked wrong.
+    expect(requiredNPerGroup(0.96, 0.05)).toBeNull();
+    // Exactly at the boundary an answer still exists: p + d === 1, so the arm is 1.0, not past it.
+    expect(requiredNPerGroup(0.95, 0.05)).toBe(153);
+    // The refusal tracks `mdd`, not a hardcoded rate — the same base rate answers with a smaller step.
+    expect(requiredNPerGroup(0.96, 0.1)).toBeNull();
+    // p̄ = 0.97 → 7.84 · 2 · 0.0291 / 0.0004 = 1140.5, rounded up. Derived by hand, not read off the output.
+    expect(requiredNPerGroup(0.96, 0.02)).toBe(1141);
+  });
+
+  it('the blocker says no sample size would do, rather than printing a null', () => {
+    // 39 of 40 defects → a 97.5% base rate, and no band reaches 5-and-5, so both conditions hold at once.
+    const records = Array.from({ length: 40 }, (_, i) => pr(i, 100, i % 2 === 0, i < 39 ? 'independent-fix' : null, 60, `s${i}`));
+    const out = assessCriteria({ records, nowSec: NOW });
+    expect(out.power.requiredNPerGroup).toBeNull();
+    const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
+    expect(blocker).toMatch(/no sample size would detect a 5-point rise/);
+    expect(blocker).not.toMatch(/null|undefined|NaN/);
+  });
+
   // The multiplicity correction had no test at all — making it a no-op stayed green.
   it('alpha is divided by the number of TESTABLE bands', () => {
     const twoBands = [
