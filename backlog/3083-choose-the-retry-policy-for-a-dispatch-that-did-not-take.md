@@ -17,7 +17,7 @@ pre-flight lets such an entry straight back through to the sink. That is correct
 until now the only thing that re-entered `applyPendingEffects` after a failure was **a person re-running the
 command**. Retry was bounded by someone deciding to retry.
 
-The waker (#x0t9923) breaks that. It re-enters on a timer, so `failed` becomes an unbounded automatic retry
+The waker (#3084) breaks that. It re-enters on a timer, so `failed` becomes an unbounded automatic retry
 with no cap and no backoff. PR #1186's round-3 reviewer measured it on a persistently broken dispatch — bad
 credentials, exhausted quota, a missing binary:
 

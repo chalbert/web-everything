@@ -35,7 +35,7 @@ asked to land it with no indication anything was wrong. With no confirm in the d
 
 `#declare-dispatch` is the effect that STARTS something. The whole point of a dispatch is that the work
 produces an outcome later — and an outcome nothing can read is not an outcome. Until this exists, the waker
-(#x0t9923) cannot resolve a dispatch to anything but "cleanly succeeded", because every other answer needs a
+(#3084) cannot resolve a dispatch to anything but "cleanly succeeded", because every other answer needs a
 later step to react and no later step can.
 
 ## Watch for

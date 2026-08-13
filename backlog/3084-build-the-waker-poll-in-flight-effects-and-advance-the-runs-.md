@@ -1,4 +1,5 @@
 ---
+bornAs: x0t9923
 kind: story
 size: 2
 parent: "3029"
