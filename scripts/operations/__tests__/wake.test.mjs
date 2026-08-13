@@ -17,7 +17,7 @@ import { createEffectObserver, observeRun, planObservations, OBSERVATIONS, SKIPS
 import { isParkedOnDispatch, renderPass, wakePass, wakeRun } from '../wake.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { createRegistry, op } from '../registry.mjs';
-import { confirm as confirmStep, effect } from '../step-kinds.mjs';
+import { confirm as confirmStep, effect, judge as judgeStep } from '../step-kinds.mjs';
 
 const OP = 'fx-wake';
 const KEY = 'run-w#0#0';
@@ -79,7 +79,7 @@ describe('planObservations — what a pass would do, before doing any of it', ()
       'start.build': async () => { throw new Error('lost the child before it reported back'); },
       'note.write': SINKS['note.write'],
     });
-    const plan = planObservations(run, { 'start.build': async () => ({ status: 'applied' }) });
+    const plan = planObservations(run, { 'start.build': async () => ({ status: 'finished' }) });
     expect(plan.observe).toEqual([]);
     expect(plan.skip).toEqual([{ key: KEY, type: 'start.build', reason: SKIPS.NO_HANDLE }]);
   });
@@ -101,21 +101,32 @@ describe('observeRun — folding terminal answers into the record', () => {
     expect(out.run.effects[0].status).toBe('in-flight');
   });
 
-  it('an `applied` answer resolves the entry and carries the result', async () => {
+  // THE TWO TERMINAL ANSWERS LAND IN DIFFERENT SLOTS, and that is the whole fix (PR #1186 rounds 1-2).
+  it('`finished` records `applied` — the effect was "start the work", and it started', async () => {
     const { run } = await parked();
     const out = await observeRun(run, {
-      observers: { 'start.build': async () => ({ status: 'applied', result: { exit: 0 } }) },
+      observers: { 'start.build': async () => ({ status: 'finished', result: { exit: 1 }, error: 'the build died' }) },
     });
-    expect(out.resolved).toEqual([{ key: KEY, type: 'start.build', status: 'applied' }]);
-    expect(out.run.effects[0]).toMatchObject({ status: 'applied', result: { exit: 0 } });
+    // A FAILING build is still a finished dispatch. The outcome rides in `result`; the run advances with it.
+    expect(out.run.effects[0]).toMatchObject({ status: 'applied', result: { exit: 1 }, error: 'the build died' });
+    expect(out.resolved[0]).toMatchObject({ status: 'finished', recordedAs: 'applied' });
   });
 
-  it('a `failed` answer resolves it to failed, which is retryable — the same thing `failed` already means', async () => {
+  it('`never-started` records `failed` — nothing landed, so retrying is correct', async () => {
     const { run } = await parked();
     const out = await observeRun(run, {
-      observers: { 'start.build': async () => ({ status: 'failed', error: 'the build died' }) },
+      observers: { 'start.build': async () => ({ status: 'never-started', error: 'no such session' }) },
     });
-    expect(out.run.effects[0]).toMatchObject({ status: 'failed', error: 'the build died' });
+    expect(out.run.effects[0]).toMatchObject({ status: 'failed', error: 'no such session' });
+    expect(out.resolved[0]).toMatchObject({ status: 'never-started', recordedAs: 'failed' });
+  });
+
+  // The word that collided is gone from the vocabulary, so it cannot be answered by accident.
+  it('REFUSES the word `failed`, which meant opposite things to an observer and to the executor', async () => {
+    const { run } = await parked();
+    const out = await observeRun(run, { observers: { 'start.build': async () => ({ status: 'failed' }) } });
+    expect(out.run.effects[0].status).toBe('in-flight');
+    expect(out.errors[0].error).toMatch(/expected one of/);
   });
 
   // FAIL-SOFT. The entry is still in-flight, which is the truth, and the next pass asks again.
@@ -131,12 +142,12 @@ describe('observeRun — folding terminal answers into the record', () => {
 
   it('an observer answering outside the closed set is reported, not obeyed', async () => {
     const { run } = await parked();
-    for (const bad of ['done', 'applied ', null, undefined, 42]) {
+    for (const bad of ['done', 'finished ', 'failed', null, undefined, 42]) {
       const out = await observeRun(run, { observers: { 'start.build': async () => ({ status: bad }) } });
       expect(out.run.effects[0].status).toBe('in-flight');
       expect(out.errors[0].error).toMatch(/expected one of/);
     }
-    expect(OBSERVATIONS).toEqual(['running', 'applied', 'failed']);
+    expect(OBSERVATIONS).toEqual(['running', 'finished', 'never-started']);
   });
 
   it('createEffectObserver validates its wiring at construction, not at the first pass', () => {
@@ -149,7 +160,7 @@ describe('wakeRun — one pass over one run', () => {
   it('resolving the dispatch lets the run finish the rest of the step and complete', async () => {
     const { run, store } = await parked();
     const report = await wakeRun(run, {
-      observers: { 'start.build': async () => ({ status: 'applied', result: { exit: 0 } }) },
+      observers: { 'start.build': async () => ({ status: 'finished', result: { exit: 0 } }) },
       store, registry, sinks: SINKS,
     });
     expect(report.resolved).toHaveLength(1);
@@ -183,7 +194,7 @@ describe('wakeRun — one pass over one run', () => {
       list: store.list,
     };
     await wakeRun(run, {
-      observers: { 'start.build': async () => ({ status: 'applied' }) },
+      observers: { 'start.build': async () => ({ status: 'finished' }) },
       store: spy,
       registry,
       // A sink that throws mid-advance: the resolution must already be on disk by then.
@@ -196,7 +207,7 @@ describe('wakeRun — one pass over one run', () => {
   it('a sink failing during the advance is reported, not thrown', async () => {
     const { run, store } = await parked();
     const report = await wakeRun(run, {
-      observers: { 'start.build': async () => ({ status: 'applied' }) },
+      observers: { 'start.build': async () => ({ status: 'finished' }) },
       store,
       registry,
       sinks: { ...SINKS, 'note.write': async () => { throw new Error('boom'); } },
@@ -218,7 +229,7 @@ describe('wakeRun — one pass over one run', () => {
     run = (await applyPendingEffects(run, { sinks: SINKS, store })).run;
 
     const report = await wakeRun(run, {
-      observers: { 'start.build': async () => ({ status: 'applied' }) },
+      observers: { 'start.build': async () => ({ status: 'finished' }) },
       store, registry: r, sinks: SINKS,
     });
     expect(report.status).toBe('awaiting-effect');
@@ -254,7 +265,7 @@ describe('wakePass — one pass over the whole store', () => {
     };
 
     const pass = await wakePass({
-      store, observers: { 'start.build': async () => ({ status: 'applied' }) }, resolveFor,
+      store, observers: { 'start.build': async () => ({ status: 'finished' }) }, resolveFor,
     });
     expect(pass.errors).toEqual([{ runId: 'run-bad', error: 'unreadable record' }]);
     expect(pass.runs.map((r) => r.runId).sort()).toEqual(['run-a', 'run-b']);
@@ -265,7 +276,7 @@ describe('wakePass — one pass over the whole store', () => {
     const { store } = await parked();
     const pass = await wakePass({
       store,
-      observers: { 'start.build': async () => ({ status: 'applied' }) },
+      observers: { 'start.build': async () => ({ status: 'finished' }) },
       resolveFor: () => { throw new Error('no operation named "fx-wake"'); },
     });
     expect(pass.parked).toBe(1);
@@ -288,13 +299,13 @@ describe('wakePass — one pass over the whole store', () => {
 });
 
 /**
- * A `failed` OBSERVATION MUST NOT RE-DISPATCH (PR #1186 review, blocking). The word means two opposite things:
- * the executor's `failed` is "the sink threw `notApplied`, nothing landed, safe to retry", and an observer's
- * `failed` is "the work RAN and it failed". Reading the second as the first re-ran real work on a timer —
- * one dispatch became five over four passes, with `advanced: false`, no errors, and exit 0.
+ * FINISHED WORK IS NEVER RE-DISPATCHED, BY ANY CALLER (PR #1186 rounds 1 and 2). The first cut let an
+ * observer's "it failed" become the executor's `failed`, whose contract is "nothing landed, safe to retry",
+ * and the waker re-ran the build on every tick. The second cut halted the WAKER — and the operator's
+ * `--resume`, the only recovery the run's own output offers, re-ran it instead. Halting one caller cannot fix
+ * a record that says the wrong thing, so these tests exercise BOTH callers.
  */
-describe('a failed observation halts the pass instead of restarting the work', () => {
-  /** Counts how many times the dispatch sink is actually called. */
+describe('finished work is never re-dispatched, by the waker or by a resume', () => {
   function countingSinks(calls) {
     return {
       'start.build': async () => { calls.push('dispatch'); return inFlight({ handle: 'sess-abc' }); },
@@ -302,68 +313,73 @@ describe('a failed observation halts the pass instead of restarting the work', (
     };
   }
 
-  it('does NOT re-dispatch, however many passes run', async () => {
-    const calls = [];
+  async function parkedCounting(calls, id = 'run-w') {
     const sinks = countingSinks(calls);
     const store = createMemoryRunStore();
-    let run = advanceWhileRunning(startRun({ op: OP, id: 'run-w', input: { pr: 7 }, registry }), { registry });
+    let run = advanceWhileRunning(startRun({ op: OP, id, input: { pr: 7 }, registry }), { registry });
     store.write(run);
     run = (await applyPendingEffects(run, { sinks, store })).run;
-    expect(calls).toEqual(['dispatch']);
+    return { run, store, sinks };
+  }
 
-    const observers = { 'start.build': async () => ({ status: 'failed', error: 'the build died' }) };
-    const first = await wakeRun(store.read('run-w'), { observers, store, registry, sinks });
-    expect(first.haltedOnFailure).toEqual([KEY]);
-    expect(first.advanced).toBe(false);
-
-    // Every later pass finds nothing to do: the entry is `failed`, so it is not in-flight, so it is not even
-    // observed. The run also stops being picked up by a pass at all — see the `wakePass` case below.
-    for (let i = 0; i < 3; i += 1) {
-      const again = await wakeRun(store.read('run-w'), { observers, store, registry, sinks });
-      expect(again.resolved).toEqual([]);
-      expect(again.advanced).toBe(false);
-    }
-    // One dispatch, still. Before the fix this was five over four passes.
+  it('a build that RAN AND FAILED is not re-dispatched by the waker', async () => {
+    const calls = [];
+    const { store, sinks } = await parkedCounting(calls);
     expect(calls).toEqual(['dispatch']);
-    expect(isParkedOnDispatch(store.read('run-w'))).toBe(false);
+    const observers = { 'start.build': async () => ({ status: 'finished', result: { exit: 1 } }) };
+    for (let i = 0; i < 4; i += 1) await wakeRun(store.read('run-w'), { observers, store, registry, sinks });
+    expect(calls).toEqual(['dispatch']);
   });
 
-  // Invisible was half the defect: the line read as "still parked" on every tick and the exit code stayed 0.
-  it('SAYS it halted, rather than looking identical to still-parked', async () => {
-    const store = createMemoryRunStore();
-    const sinks = countingSinks([]);
-    let run = advanceWhileRunning(startRun({ op: OP, id: 'run-w', input: { pr: 7 }, registry }), { registry });
-    store.write(run);
-    run = (await applyPendingEffects(run, { sinks, store })).run;
-
-    const pass = await wakePass({
-      store, observers: { 'start.build': async () => ({ status: 'failed' }) }, resolveFor,
-    });
-    expect(renderPass(pass).join('\n')).toMatch(/HALTED — work ran and FAILED/);
-  });
-
-  it('the resolution is still persisted — halting is not forgetting', async () => {
-    const store = createMemoryRunStore();
-    const sinks = countingSinks([]);
-    let run = advanceWhileRunning(startRun({ op: OP, id: 'run-w', input: { pr: 7 }, registry }), { registry });
-    store.write(run);
-    run = (await applyPendingEffects(run, { sinks, store })).run;
-    await wakeRun(run, {
-      observers: { 'start.build': async () => ({ status: 'failed', error: 'the build died' }) },
+  // THE ROUND-2 FINDING. Halting the waker was not enough — `--resume` is the recovery the run itself prints,
+  // and it re-dispatched instead. Now there is nothing left to resume: the dispatch is `applied`, so the run
+  // ran to completion and the executor refuses a replay outright.
+  it('nor by the operator resuming, which is the recovery the run itself prints', async () => {
+    const calls = [];
+    const { store, sinks } = await parkedCounting(calls);
+    await wakeRun(store.read('run-w'), {
+      observers: { 'start.build': async () => ({ status: 'finished', result: { exit: 1 } }) },
       store, registry, sinks,
     });
-    expect(store.read('run-w').effects[0]).toMatchObject({ status: 'failed', error: 'the build died' });
+    await expect(applyPendingEffects(store.read('run-w'), { sinks, store }))
+      .rejects.toThrow(/not suspended on an effect step/);
+    expect(calls).toEqual(['dispatch']);
   });
 
-  // An `applied` resolution still advances — the halt is scoped to failure, not to resolutions generally.
-  it('an applied resolution in the same pass still advances', async () => {
-    const { run, store } = await parked();
-    const report = await wakeRun(run, {
-      observers: { 'start.build': async () => ({ status: 'applied' }) },
-      store, registry, sinks: SINKS,
+  it('the outcome is kept, so a declaration can act on a failing build', async () => {
+    const calls = [];
+    const { store, sinks } = await parkedCounting(calls);
+    await wakeRun(store.read('run-w'), {
+      observers: { 'start.build': async () => ({ status: 'finished', result: { exit: 1 }, error: 'tests red' }) },
+      store, registry, sinks,
     });
-    expect(report.haltedOnFailure).toEqual([]);
+    expect(store.read('run-w').effects[0]).toMatchObject({ status: 'applied', result: { exit: 1 }, error: 'tests red' });
+  });
+
+  it('the run still advances past a finished dispatch, failing outcome or not', async () => {
+    const calls = [];
+    const { run, store, sinks } = await parkedCounting(calls);
+    const report = await wakeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'finished', result: { exit: 1 } }) },
+      store, registry, sinks,
+    });
     expect(report.advanced).toBe(true);
+    expect(report.status).toBe('complete');
+  });
+
+  // `never-started` is the one that SHOULD retry — nothing landed, which is exactly what the executor's
+  // `failed` licenses. Pinned so the fix above is not mistaken for "never retry anything".
+  it('but work that NEVER STARTED is re-dispatched, because nothing landed', async () => {
+    const calls = [];
+    const { store, sinks } = await parkedCounting(calls);
+    await wakeRun(store.read('run-w'), {
+      observers: { 'start.build': async () => ({ status: 'never-started', error: 'no such session' }) },
+      store, registry, sinks,
+    });
+    // `failed` is the executor's "safe to retry", so the same pass re-enters the sink — which is correct
+    // here and only here: the observer said nothing ran.
+    expect(calls).toEqual(['dispatch', 'dispatch']);
+    expect(store.read('run-w').effects[0].status).toBe('in-flight');
   });
 });
 
@@ -393,13 +409,63 @@ describe('the waker hands back every suspend that is not an effect', () => {
     run = (await applyPendingEffects(run, { sinks: SINKS, store })).run;
 
     const report = await wakeRun(run, {
-      observers: { 'start.build': async () => ({ status: 'applied' }) },
+      observers: { 'start.build': async () => ({ status: 'finished' }) },
       store, registry: r, sinks: SINKS,
     });
     expect(report.status).toBe('awaiting-confirm');
     const after = store.read('run-h');
     expect(after.pending).toMatchObject({ kind: 'confirm', of: 'human' });
     expect(after.findings.ok).toBeUndefined(); // nothing answered it
+  });
+
+  // NB2-1: the first fix pinned ONE shape, so two other auto-answers still slipped past the whole suite —
+  // an AGENT-addressed confirm, and a judge step, which is the worse of the two because answering it invents
+  // a verdict without ever spawning a juror.
+  it('leaves an AGENT-addressed confirm suspended too — the waker answers no confirm at all', async () => {
+    const r = createRegistry();
+    r.register(op('fx-agent', {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'start.build', payload: {}, dispatch: true }] }),
+      ok: confirmStep({ reads: ['input.pr'], asks: () => 'Land it?', of: () => 'agent', options: ['accept', 'changes'] }),
+    }));
+    const store = createMemoryRunStore();
+    let run = advanceWhileRunning(startRun({ op: 'fx-agent', id: 'run-a', input: { pr: 7 }, registry: r }), { registry: r });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: SINKS, store })).run;
+
+    const report = await wakeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'finished' }) },
+      store, registry: r, sinks: SINKS,
+    });
+    expect(report.status).toBe('awaiting-confirm');
+    expect(store.read('run-a').findings.ok).toBeUndefined();
+  });
+
+  it('leaves a JUDGE step suspended — answering it would invent a verdict with no juror', async () => {
+    const r = createRegistry();
+    r.register(op('fx-judge', {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'start.build', payload: {}, dispatch: true }] }),
+      look: judgeStep({
+        reads: ['input.pr'],
+        request: () => ({
+          mandate: 'judge it',
+          input: 'x',
+          shape: { type: 'object', properties: { verdict: { type: 'string' } }, required: ['verdict'] },
+        }),
+      }),
+    }));
+    const store = createMemoryRunStore();
+    let run = advanceWhileRunning(startRun({ op: 'fx-judge', id: 'run-j', input: { pr: 7 }, registry: r }), { registry: r });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: SINKS, store })).run;
+
+    const report = await wakeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'finished' }) },
+      store, registry: r, sinks: SINKS,
+    });
+    expect(report.status).toBe('awaiting-judge');
+    expect(store.read('run-j').findings.look).toBeUndefined();
   });
 
   // The no-progress break: without it the loop burns all 64 turns and writes the record on each one.
@@ -413,7 +479,7 @@ describe('the waker hands back every suspend that is not an effect', () => {
     let writes = 0;
     const spy = { read: store.read, write: (x) => { writes += 1; return store.write(x); }, list: store.list };
     await wakeRun(run, {
-      observers: { 'start.build': async () => ({ status: 'applied' }) },
+      observers: { 'start.build': async () => ({ status: 'finished' }) },
       store: spy, registry: r, sinks: SINKS,
     });
     // The resolution, then the one advance that reaches the confirm. Not 64.
@@ -428,5 +494,17 @@ describe('wakePass is fail-soft at its own front door', () => {
     expect(pass.errors).toEqual([{ error: 'store offline' }]);
     expect(pass.scanned).toBe(0);
     expect(pass.runs).toEqual([]);
+  });
+});
+
+describe('wakePass survives a store that answers oddly', () => {
+  it('a list() that RETURNS a non-array is reported, not thrown (NB2-2)', async () => {
+    for (const bad of [null, undefined, 'run-a', 42, {}]) {
+      const store = { list: () => bad, read: () => null, write: () => {} };
+      const pass = await wakePass({ store, observers: {}, resolveFor });
+      expect(pass.errors).toHaveLength(1);
+      expect(pass.errors[0].error).toMatch(/not an array/);
+      expect(pass.runs).toEqual([]);
+    }
   });
 });

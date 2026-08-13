@@ -41,16 +41,28 @@ running one; being overdue changes what a human is told, not what the machine as
 
 **A handle-less entry is not polled.** There is nothing to poll. It is reported, never guessed at.
 
-**Failed work is not retried.** `failed` means two opposite things depending on who says it, and reading them
-as one word re-ran real work on a timer. The EXECUTOR's `failed` is *"the sink threw `notApplied`, I am certain
-nothing landed"* — safe to retry, so the pre-flight lets it through to the sink again. An OBSERVER's `failed`
-is *"the work I started RAN, and it failed"* — retrying re-does side-effecting work that already happened.
-Writing the second through `resolveInFlight` produced a status whose contract is the first, and the next
-`applyPendingEffects` re-dispatched it: unbounded, at timer frequency, with `advanced: false`, no errors and
-exit 0, so a supervisor saw a healthy job. One dispatch became five over four passes.
+**There is no word for "it failed".** An observer answers `running`, `finished` or `never-started`, and that
+vocabulary is the fix for a collision that re-ran real work twice before it was named.
 
-Deciding whether failed work should be retried is a RETRY POLICY, and nothing owns one — so the waker halts,
-reports, and leaves it to a person. Re-dispatching is not advancing.
+`failed` means opposite things depending on who says it. The EXECUTOR's `failed` is *"the sink threw
+`notApplied`, I am certain nothing landed"* — safe to retry, so the pre-flight lets it back through to the
+sink. An OBSERVER saying "failed" means *"the work I started RAN and it failed"* — retrying re-does
+side-effecting work that already happened. The first cut wrote the second into the first's slot and the waker
+re-dispatched on every tick. The second cut halted the WAKER, and the operator's `--resume` — the only
+recovery the run's own output offers — re-dispatched instead. Halting one caller cannot fix a record that says
+the wrong thing.
+
+So the words say WHICH thing happened, and each maps onto an existing status with nothing left to interpret:
+
+| observer says | means | recorded as |
+| --- | --- | --- |
+| `running` | still going, ask later | unchanged |
+| `finished` | the work ran and is over; pass or fail is in `result` | `applied` — the effect was "start the work", and it started |
+| `never-started` | the dispatch did not take; nothing ran | `failed` — nothing landed, so retrying is correct |
+
+A caller wanting "it ran and went badly" says `finished` with a failing `result`, and the run advances with
+the outcome in hand, which is what a declaration reads to decide what to do about a bad build. There is no
+answer meaning "re-run it": that is a retry policy, and nothing owns one.
 
 ## Why fail-soft, per run
 
@@ -66,8 +78,9 @@ Each fault is collected into the pass report and the pass continues.
 - Advancing past an applied effect step needs `advance`, not another `applyPendingEffects` — the executor does
   not clear `pending`. Looping back into the effect branch applies nothing and spins to the turn cap.
 - A dispatch whose resolution leads to ANOTHER dispatch is legitimate. Stop the pass; the next one picks it up.
-- `failed` is the executor's word for "safe to retry" and an observer's word for "it ran and it failed". They
-  are opposites. Anything that folds an observation into the record has to keep them apart.
+- `failed` is the executor's word for "safe to retry". Nothing that folds an observation into the record may
+  reuse it for "it ran and failed" — that is the collision, and it survives any amount of caller-side halting
+  because the RECORD is what is wrong.
 
 ## Done when
 
@@ -91,11 +104,13 @@ pass finds today is reported as `no-observer` rather than silently ignored, so t
 Scheduling is not here either. #3070 ruled the host is an interval job; this is that job's body, and the
 `StartInterval` is the operator's.
 
-Eleven mutations reddened named tests. Six on the first cut: persisting after the advance instead of before,
-treating overdue as dead, obeying an answer outside the closed set, polling a handle-less entry, letting one
-unreadable record abort the pass, and letting an observer throw kill the run's pass. Five more after review:
-removing the failed-halt, auto-answering a confirm, removing the no-progress break, moving `store.list()` back
-outside its `try`, and dropping the halt from the rendered line.
+Fifteen mutations reddened named tests across three rounds. Six on the first cut: persisting after the advance
+instead of before, treating overdue as dead, obeying an answer outside the closed set, polling a handle-less
+entry, letting one unreadable record abort the pass, and letting an observer throw kill the run's pass. Then,
+after two review rounds: mapping `finished` onto the executor's `failed`, mapping `never-started` onto
+`applied`, accepting the word `failed` again, auto-answering a HUMAN confirm, auto-answering an AGENT confirm,
+answering a JUDGE step, removing the no-progress break, and dropping the non-array check on `store.list()`.
 
-Two of those five were GREEN before the review — the human-confirm hand-back had no test at all, and the
-no-progress break was undefended. The hand-back is the safety property #3070's ruling rests on.
+FIVE of those were GREEN before review — the human confirm, the agent confirm, the judge step, the no-progress
+break, and the non-array list. The three hand-backs are the safety property #3070's ruling rests on, and none
+of them had a test.

@@ -71,9 +71,6 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
     skipped: observed.skipped,
     errors: [...observed.errors],
     advanced: false,
-    // Keys whose work RAN AND FAILED, which stops this pass. `[]` on every other outcome, so the shape is
-    // stable and a consumer never has to distinguish absent from empty.
-    haltedOnFailure: [],
     status: null,
   };
 
@@ -90,29 +87,16 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
     return report;
   }
 
-  // A `failed` OBSERVATION STOPS THE PASS. This is not the same word twice, and reading it as one re-ran real
-  // work on a timer (PR #1186 review, blocking):
+  // NO SPECIAL CASE FOR A FAILURE HERE, and that is the fix rather than an omission (PR #1186 rounds 1-2).
+  // The first cut let an observer's "it failed" become the executor's `failed`, whose contract is "nothing
+  // landed, safe to retry" — so the next `applyPendingEffects` re-dispatched real work. The second cut halted
+  // the WAKER, which left the record still lying: the operator's `--resume`, the only recovery the run's own
+  // output offers, re-dispatched it instead. Halting one caller cannot fix a record that says the wrong thing.
   //
-  //   - the EXECUTOR's `failed` means "the sink threw `notApplied` — I am CERTAIN nothing landed", so the
-  //     pre-flight lets it straight through to the sink again. Safe to retry, by construction.
-  //   - an OBSERVER's `failed` means "the work I started RAN, and it failed". The opposite: retrying re-does
-  //     side-effecting work that already happened once.
-  //
-  // Writing the second through `resolveInFlight` produces a status whose contract is the first, and the very
-  // next `applyPendingEffects` re-dispatched it — unbounded, at `StartInterval` frequency, with `advanced:
-  // false`, no errors and exit 0, so a supervisor saw a healthy job. Measured: one dispatch became five over
-  // four passes.
-  //
-  // The waker's job is to call `advance` and nothing else (#3070). Re-dispatching is not advancing, and
-  // deciding whether failed work should be retried is a RETRY POLICY — which nothing owns yet, so nothing here
-  // may improvise one. The resolution is persisted (above) and reported; a person or a future policy decides.
-  const failed = observed.resolved.filter((r) => r.status === 'failed');
-  if (failed.length) {
-    report.status = runStatus(current, { registry });
-    report.haltedOnFailure = failed.map((r) => r.key);
-    return report;
-  }
-
+  // The vocabulary fixes it at the source. `we:scripts/operations/effect-observer.mjs` no longer has a word
+  // that means both: `finished` records `applied` (the effect was "start the work", and it started; the
+  // outcome rides in `result`), and `never-started` records `failed` (nothing landed, so retrying is right).
+  // Both then behave correctly under every caller, including this one, with no caller-side rule to remember.
   try {
     for (let turn = 0; turn < 64; turn += 1) {
       const status = runStatus(current, { registry });
@@ -167,7 +151,14 @@ export async function wakePass({ store, observers, resolveFor, now = new Date() 
   const errors = [];
   let parked = 0;
   let ids;
-  try { ids = store.list(); } catch (e) { return { scanned: 0, parked: 0, runs, errors: [{ error: String(e?.message ?? e) }] }; }
+  try {
+    ids = store.list();
+    // A `list()` that RETURNS a non-array takes the pass down exactly as a throwing one used to — the first
+    // fix wrapped the call and left the use outside it (PR #1186 round 2, NB2-2).
+    if (!Array.isArray(ids)) throw new TypeError(`store.list() returned ${typeof ids}, not an array`);
+  } catch (e) {
+    return { scanned: 0, parked: 0, runs, errors: [{ error: String(e?.message ?? e) }] };
+  }
 
   for (const id of ids) {
     let run;
@@ -195,7 +186,6 @@ export function renderPass(pass) {
     const bits = [
       r.resolved.length ? `resolved ${r.resolved.map((x) => `${x.key}→${x.status}`).join(', ')}` : '',
       r.stillRunning.length ? `still running ${r.stillRunning.join(', ')}` : '',
-      r.haltedOnFailure?.length ? `HALTED — work ran and FAILED: ${r.haltedOnFailure.join(', ')} (no retry policy owns this; a person decides)` : '',
       r.skipped.length ? `SKIPPED ${r.skipped.map((x) => `${x.key} (${x.reason})`).join(', ')}` : '',
       r.errors.length ? `ERRORS ${r.errors.map((x) => x.error).join(' | ')}` : '',
       r.advanced ? 'advanced' : '',
