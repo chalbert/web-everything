@@ -640,3 +640,61 @@ describe('the per-run catch in wakePass is load-bearing', () => {
     expect(pass.errors[0].runId).toBe('run-w');
   });
 });
+
+/**
+ * THE ONE ARGUMENT THAT PRODUCES EVERY `auto` OBSERVATION (#xou38cr; PR #1195 review, blocking 1). Deleting
+ * `attemptedBy: 'auto'` from the waker's `applyPendingEffects` call kept 367 tests green: the gate passes,
+ * the waker works, and every automatic retry is filed as human forever. By the time anyone reads the corpus
+ * the mislabelled data is gone — which is the exact unrecoverable corruption the item exists to prevent.
+ */
+describe('the waker labels its own attempts as automatic', () => {
+  it('an effect the waker applies is recorded as `auto`', async () => {
+    const store = createMemoryRunStore();
+    const sinks = {
+      'start.build': async () => inFlight({ handle: 'sess-abc' }),
+      'note.write': async () => ({ ok: true }),
+    };
+    let run = advanceWhileRunning(startRun({ op: OP, id: 'run-w', input: { pr: 7 }, registry }), { registry });
+    store.write(run);
+    // The dispatch itself is applied by the CLI path, so it is human.
+    run = (await applyPendingEffects(run, { sinks, store, attemptedBy: 'human' })).run;
+    expect(run.effects[0].lastAttemptBy).toBe('human');
+
+    // The waker resolves it and applies the REST of the step — those are its attempts, and they are auto.
+    await wakeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'succeeded' }) },
+      store, registry, sinks,
+    });
+    const after = store.read('run-w');
+    expect(after.effects[1].lastAttemptBy).toBe('auto');
+    expect(after.effects[1].autoAttempts).toBe(1);
+    expect(after.effects[1].attempts).toBe(1);
+  });
+
+  // The same executor, TOLD `human`, must produce the other label — otherwise the split is decorative and
+  // the dataset is one population wearing two names.
+  //
+  // NAMED FOR WHAT IT ACTUALLY DRIVES (PR #1195 round 6). This was called "driven from the command line"
+  // and its comment said "driven by the CLI path", but it hand-passes `'human'` to `applyPendingEffects`
+  // and never imports `cli-adapter.mjs` — so it asserted nothing about the CLI, and the CLI's own literal
+  // could be changed to `'auto'` with the whole suite green. The real CLI path is covered by `an effect
+  // applied through the REAL command line is recorded as human` in effect-executor.test.mjs.
+  it('the executor told `human` records it, whatever the caller', async () => {
+    const store = createMemoryRunStore();
+    const sinks = { 'start.build': async () => ({ ok: true }), 'note.write': async () => ({ ok: true }) };
+    let run = advanceWhileRunning(startRun({ op: OP, id: 'run-h', input: { pr: 7 }, registry }), { registry });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks, store, attemptedBy: 'human' })).run;
+    expect(run.effects.map((e) => e.lastAttemptBy)).toEqual(['human', 'human']);
+  });
+
+  // And an omitted caller is `unknown`, never `human` — there is no safe guess (round 3, blocking).
+  it('an unstated caller is unknown, not assumed to be a person', async () => {
+    const store = createMemoryRunStore();
+    const sinks = { 'start.build': async () => ({ ok: true }), 'note.write': async () => ({ ok: true }) };
+    let run = advanceWhileRunning(startRun({ op: OP, id: 'run-u', input: { pr: 7 }, registry }), { registry });
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks, store })).run;
+    expect(run.effects.map((e) => e.lastAttemptBy)).toEqual(['unknown', 'unknown']);
+  });
+});

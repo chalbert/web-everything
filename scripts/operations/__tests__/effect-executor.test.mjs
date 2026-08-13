@@ -21,7 +21,7 @@ import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs
 import { LEDGER_EFFECT_TYPE, applyPendingEffects, createEffectExecutor, inFlight, inFlightEntries, notApplied, resolveInFlight } from '../effect-executor.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { createRegistry, op } from '../registry.mjs';
-import { driveRun, outcomePayload, renderOutcome } from '../cli-adapter.mjs';
+import { driveRun, outcomePayload, renderOutcome, runOperationCli } from '../cli-adapter.mjs';
 import { effect } from '../step-kinds.mjs';
 import { FIXTURE_JUDGE_ANSWER, FIXTURE_OP, fixtureRegistry } from '../__fixtures__/fixture-operation.mjs';
 
@@ -686,5 +686,280 @@ describe('a parked run reports the same thing on every route', () => {
 
     const again = await driveRun({ run: first.run, registry: r, store, sinks, judge });
     expect(renderOutcome({ outcome: again }).lines.join('\n')).toMatch(/1 effect\(s\) have landed/);
+  });
+});
+
+/**
+ * THE UNRECOVERABLE HALF (#xou38cr; PR #1195 review, blocking 1). The first cut tested the READER — which can
+ * be rewritten from scratch whenever #3083 is ruled — and left the COLLECTOR bare. Four separate mutations to
+ * the recording lines each kept 367 tests green, including deleting the single argument that is the only
+ * thing in the repo producing an `auto` observation. Delete it and the gate stays green, the waker keeps
+ * working, and every automatic retry is filed as human forever.
+ *
+ * That inverts the item's own argument for existing. These tests defend the half that cannot be recovered.
+ */
+describe('the attempt counter records what cannot be recovered later', () => {
+  const sinks = (calls = []) => ({
+    'comment.post': async () => { calls.push('comment.post'); return { ok: true }; },
+    'label.swap': async () => { calls.push('label.swap'); return { ok: true }; },
+  });
+
+  it('stamps attempts, who made them, and when — on the first attempt', async () => {
+    const store = createMemoryRunStore();
+    const run = atEffectStep();
+    store.write(run);
+    const out = await applyPendingEffects(run, { sinks: sinks(), store, attemptedBy: 'human' });
+    const entry = out.run.effects[0];
+    expect(entry.attempts).toBe(1);
+    expect(entry.lastAttemptBy).toBe('human');
+    expect(entry.humanAttempts).toBe(1);
+    expect(entry.autoAttempts).toBe(0);
+    expect(Number.isNaN(Date.parse(entry.lastAttemptAt))).toBe(false);
+  });
+
+  // THE COUNTER MUST COUNT. Frozen at 1 it looks right on every single-attempt run, which is why the
+  // mutation survived.
+  it('INCREMENTS across a genuine fail then retry', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    store.write(run);
+    const failing = { ...sinks(), 'comment.post': async () => { throw notApplied('refused'); } };
+    run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'human' })).run;
+    expect(run.effects[0].attempts).toBe(1);
+    run = (await applyPendingEffects(run, { sinks: sinks(), store, attemptedBy: 'human' })).run;
+    expect(run.effects[0].attempts).toBe(2);
+    expect(run.effects[0].status).toBe('applied');
+  });
+
+  // A SKIPPED entry is not an attempt. Counting it would inflate every replay.
+  it('does not count an already-applied effect that a replay skips', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: sinks(), store })).run;
+    const before = run.effects.map((e) => e.attempts);
+    run = (await applyPendingEffects(run, { sinks: sinks(), store })).run;
+    expect(run.effects.map((e) => e.attempts)).toEqual(before);
+  });
+
+  // THE POPULATION SPLIT, at the executor boundary. `auto` and `human` mean opposite things and the label is
+  // unrecoverable once written.
+  it('records the caller that re-entered, not a fixed value', async () => {
+    // NO SAFE DEFAULT (round 3, blocking). An omitted or unrecognised value is `unknown`, which is counted
+    // and read by nobody — the earlier `human` default filed every HTTP-driven attempt into a population it
+    // did not belong to.
+    for (const [passed, expected] of [['auto', 'auto'], ['human', 'human'], [undefined, 'unknown'], ['nonsense', 'unknown']]) {
+      const store = createMemoryRunStore();
+      const run = atEffectStep();
+      store.write(run);
+      const out = await applyPendingEffects(run, { sinks: sinks(), store, ...(passed ? { attemptedBy: passed } : {}) });
+      expect(`${passed}: ${out.run.effects[0].lastAttemptBy}`).toBe(`${passed}: ${expected}`);
+    }
+  });
+
+  // THE COUNTERS, not just the label. `unknown` must increment its own tally and leave the other two alone —
+  // folding it into `humanAttempts` would reinstate the exact mislabelling the third value exists to stop.
+  it('an unidentifiable caller increments only the unknown tally', async () => {
+    for (const [passed, expected] of [
+      ['auto', { autoAttempts: 1, humanAttempts: 0, unknownAttempts: 0 }],
+      ['human', { autoAttempts: 0, humanAttempts: 1, unknownAttempts: 0 }],
+      [undefined, { autoAttempts: 0, humanAttempts: 0, unknownAttempts: 1 }],
+      ['nonsense', { autoAttempts: 0, humanAttempts: 0, unknownAttempts: 1 }],
+    ]) {
+      const store = createMemoryRunStore();
+      const run = atEffectStep();
+      store.write(run);
+      const out = await applyPendingEffects(run, { sinks: sinks(), store, ...(passed ? { attemptedBy: passed } : {}) });
+      const e = out.run.effects[0];
+      expect(`${passed}: ${e.autoAttempts}/${e.humanAttempts}/${e.unknownAttempts}`)
+        .toBe(`${passed}: ${expected.autoAttempts}/${expected.humanAttempts}/${expected.unknownAttempts}`);
+    }
+  });
+
+  // THE BOUND EXECUTOR IS A CALLER TOO (PR #1195, raised r1, restated blocking r3, still live at r5). Its
+  // options destructure omitted `attemptedBy`, so the argument was accepted and discarded —
+  // `ex.apply(run, {attemptedBy: 'auto'})` recorded `unknown`, silently.
+  //
+  // NOT A PRODUCTION PATH, and round 6 was right to say so. Nothing outside this test file constructs a
+  // bound executor; the CLI, the HTTP adapter and the waker all call `applyPendingEffects` directly. This
+  // guards a façade the file header offers to adapters, against the day one uses it — not a live leak.
+  it('createEffectExecutor.apply FORWARDS attemptedBy instead of discarding it', async () => {
+    for (const [passed, expected] of [
+      ['auto', { lastAttemptBy: 'auto', autoAttempts: 1, humanAttempts: 0, unknownAttempts: 0 }],
+      ['human', { lastAttemptBy: 'human', autoAttempts: 0, humanAttempts: 1, unknownAttempts: 0 }],
+      // Unstated stays unstated. The closure must not invent a population the caller declined to name.
+      [undefined, { lastAttemptBy: 'unknown', autoAttempts: 0, humanAttempts: 0, unknownAttempts: 1 }],
+    ]) {
+      const store = createMemoryRunStore();
+      const calls = [];
+      const run = atEffectStep();
+      store.write(run);
+      const ex = createEffectExecutor({ sinks: sinks(calls), store });
+      const out = await ex.apply(run, { ...(passed ? { attemptedBy: passed } : {}) });
+      expect(calls).toEqual(['comment.post', 'label.swap']); // the effects really ran — not a vacuous pass
+      const e = out.run.effects[0];
+      expect(`${passed}: ${e.lastAttemptBy} ${e.autoAttempts}/${e.humanAttempts}/${e.unknownAttempts}`)
+        .toBe(`${passed}: ${expected.lastAttemptBy} ${expected.autoAttempts}/${expected.humanAttempts}/${expected.unknownAttempts}`);
+    }
+  });
+});
+
+/**
+ * THE DRIVER'S DEFAULT WAS UNDEFENDED (PR #1195 round 5). `driveRun`'s `attemptedBy = 'unknown'` is the whole
+ * subject of round 4 — a network client is not a person, so the driver refuses to guess — and flipping it back
+ * to `'human'` left all 387 operations tests green. The HTTP test nearby pins the adapter's EXPLICIT argument,
+ * not the parameter default underneath it, so nothing noticed.
+ *
+ * Driven through the real `driveRun` over an effect-only declaration, so the run reaches the effect rather
+ * than suspending at a confirm with the assertion loop running zero times.
+ */
+describe('the driver labels the population only when it was told one', () => {
+  const ATTRIB_OP = 'fx-attrib';
+  const judge = async () => { throw new Error('no juror'); };
+
+  function effectOnlyRegistry() {
+    const r = createRegistry();
+    r.register(op(ATTRIB_OP, {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'note.write', payload: {} }] }),
+    }));
+    return r;
+  }
+
+  it('an unlabelled drive records `unknown`, NOT `human`', async () => {
+    for (const [passed, expected] of [
+      [undefined, { lastAttemptBy: 'unknown', autoAttempts: 0, humanAttempts: 0, unknownAttempts: 1 }],
+      ['auto', { lastAttemptBy: 'auto', autoAttempts: 1, humanAttempts: 0, unknownAttempts: 0 }],
+      ['human', { lastAttemptBy: 'human', autoAttempts: 0, humanAttempts: 1, unknownAttempts: 0 }],
+    ]) {
+      const r = effectOnlyRegistry();
+      const store = createMemoryRunStore();
+      const calls = [];
+      const sinks = { 'note.write': async () => { calls.push('note.write'); return { ok: true }; } };
+      const run = startRun({ op: ATTRIB_OP, id: 'run-attrib', input: { pr: 7 }, registry: r });
+      store.write(run);
+
+      const out = await driveRun({ run, registry: r, store, sinks, judge, ...(passed ? { attemptedBy: passed } : {}) });
+      expect(out.stopped).toBe('complete');
+      expect(calls).toEqual(['note.write']);           // the effect really applied — not a vacuous pass
+      const e = out.run.effects[0];
+      expect(`${passed}: ${e.lastAttemptBy} ${e.autoAttempts}/${e.humanAttempts}/${e.unknownAttempts}`)
+        .toBe(`${passed}: ${expected.lastAttemptBy} ${expected.autoAttempts}/${expected.humanAttempts}/${expected.unknownAttempts}`);
+    }
+  });
+
+  /**
+   * THE COMMAND LINE IS THE ONLY SOURCE OF `human` DATA, AND IT WAS UNDEFENDED (PR #1195 round 6, blocking 1).
+   * `cli-adapter.mjs` passes `attemptedBy: 'human'` on one line. Changing that literal to `'auto'` left the
+   * FULL suite green — 7478 tests — with every attempt a person makes at a terminal filed into the automatic
+   * population. That is the one direction the corpus must never be poisoned in: a human retry succeeding
+   * usually means someone fixed the cause, so folding those in makes automatic retry look like it works and
+   * drives #3083's eventual budget UP. Unrecoverable — the label is all that survives.
+   *
+   * The waker's identical argument got a test and the HTTP adapter's got a test; the third entry point did
+   * not. The test that LOOKED like it covered this (`the same effect driven from the command line is
+   * recorded as human`, in wake.test.mjs) hand-passed `'human'` to `applyPendingEffects` and never imported
+   * the CLI at all — a statement about one population asserted over a different one, which is this PR's own
+   * recurring defect appearing in a test name.
+   *
+   * So this drives `runOperationCli` — parse, start, drive, render — and never names a population itself.
+   */
+  it('an effect applied through the REAL command line is recorded as `human`', async () => {
+    const CLI_OP = 'fx-cli-attrib';
+    const r = createRegistry();
+    const declaration = op(CLI_OP, {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'note.write', payload: {} }] }),
+    });
+    r.register(declaration);
+    const store = createMemoryRunStore();
+    const calls = [];
+    const out = await runOperationCli({
+      declaration,
+      registry: r,
+      store,
+      sinks: { 'note.write': async () => { calls.push('note.write'); return { ok: true }; } },
+      judge: async () => { throw new Error('no juror'); },
+      argv: ['--pr=7'],
+      newRunId: () => 'run-cli-attrib',
+    });
+    expect(out.stopped).toBe('complete');
+    expect(calls).toEqual(['note.write']);           // the effect really applied — not a vacuous pass
+    const e = store.read('run-cli-attrib').effects[0];
+    expect(`${e.lastAttemptBy} ${e.autoAttempts}/${e.humanAttempts}/${e.unknownAttempts}`)
+      .toBe('human 0/1/0');
+  });
+});
+
+/**
+ * A MIXED-PROVENANCE ENTRY, at the executor boundary (PR #1195 review, blocking 1). One count plus a
+ * last-writer label filed the whole entry under whichever population went last; each population now carries
+ * its own count, so a mixed entry contributes honestly to both.
+ */
+describe('an effect retried by both populations counts in both', () => {
+  const failing = { 'comment.post': async () => { throw notApplied('refused'); }, 'label.swap': async () => ({ ok: true }) };
+  const working = { 'comment.post': async () => ({ ok: true }), 'label.swap': async () => ({ ok: true }) };
+
+  it('human, human, then AUTO succeeds — one automatic attempt, not three', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'human' })).run;
+    run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'human' })).run;
+    run = (await applyPendingEffects(run, { sinks: working, store, attemptedBy: 'auto' })).run;
+    expect(run.effects[0]).toMatchObject({
+      attempts: 3, humanAttempts: 2, autoAttempts: 1, lastAttemptBy: 'auto', status: 'applied',
+    });
+  });
+
+  it('auto, auto, then a HUMAN succeeds — the two automatic failures survive', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'auto' })).run;
+    run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'auto' })).run;
+    run = (await applyPendingEffects(run, { sinks: working, store, attemptedBy: 'human' })).run;
+    expect(run.effects[0]).toMatchObject({
+      attempts: 3, autoAttempts: 2, humanAttempts: 1, lastAttemptBy: 'human', status: 'applied',
+    });
+  });
+
+  // THE INVARIANT #3083's READER WILL NEED (PR #1195 round 6, finding 4). `attempts` and the three
+  // per-population counters each read their own prior value, so nothing in the code said whether the total
+  // and the sum are the same number. They are, for any entry created at or after this change — every
+  // attempt increments exactly one population. Stated here as an executable claim rather than a comment,
+  // because the reader has to pick a denominator and a wrong one is the defect class this item bounced on.
+  it('`attempts` equals the sum of the three populations, across a mixed sequence', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    store.write(run);
+    for (const by of ['auto', 'human', undefined, 'auto', 'nonsense']) {
+      run = (await applyPendingEffects(run, { sinks: failing, store, ...(by ? { attemptedBy: by } : {}) })).run;
+    }
+    const e = run.effects[0];
+    expect(e.attempts).toBe(5);
+    expect(e.autoAttempts + e.humanAttempts + e.unknownAttempts).toBe(e.attempts);
+    expect(`${e.autoAttempts}/${e.humanAttempts}/${e.unknownAttempts}`).toBe('2/1/2');
+  });
+
+  // THE ORPHAN KEY. An intermediate build of this branch wrote a cumulative `attempts` plus a last-writer
+  // `attemptedBy` and no per-population fields, and `.operations/` is gitignored so those records outlive a
+  // rebase locally. Left in place, such an entry answers "who attempted this" twice, with two different
+  // fields and possibly two different values.
+  it('clears the superseded `attemptedBy` field rather than leaving it beside `lastAttemptBy`', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    // The pre-split shape, as that build would have written it.
+    run = { ...run, effects: run.effects.map((e, i) => (i === 0 ? { ...e, attempts: 3, attemptedBy: 'human' } : e)) };
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: working, store, attemptedBy: 'auto' })).run;
+    const e = run.effects[0];
+    expect(e.lastAttemptBy).toBe('auto');
+    expect(e.attemptedBy).toBeUndefined();
+    // The legacy total is CARRIED, not reset — the three attempts happened, they just belong to no
+    // population. This is the one shape where the invariant above does not hold, and it is why the
+    // invariant is scoped to entries created at or after this change.
+    expect(e.attempts).toBe(4);
+    expect(e.autoAttempts + e.humanAttempts + e.unknownAttempts).toBe(1);
   });
 });

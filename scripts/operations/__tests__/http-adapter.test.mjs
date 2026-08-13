@@ -675,3 +675,50 @@ describe('GET on a parked run reports what is in flight', () => {
     expect(got.body.inFlight).toEqual(posted.body.inFlight);
   });
 });
+
+/**
+ * A NETWORK CLIENT IS NOT A PERSON (PR #1195 round 3, blocking). `applyPendingEffects` defaulted
+ * `attemptedBy` to `human` on the grounds that every pre-waker caller was one — but `driveRun` is reached
+ * from here too, and this adapter cannot tell a console user from another machine. Every request-driven
+ * attempt was landing in the human retry population.
+ *
+ * Uses an EFFECT-ONLY declaration on purpose. The first version of this test drove `review-pr`, which
+ * suspends at its confirm before any effect applies — so the loop over attempted effects ran zero times and
+ * the assertion passed vacuously. That is the same decorative shape being fixed elsewhere in this diff.
+ */
+describe('effects applied over HTTP are attributed to an unidentifiable caller', () => {
+  const OP_NAME = 'http-attrib-fx';
+
+  function wiringFor(applied) {
+    return {
+      resolve: (name) => {
+        if (name !== OP_NAME) throw new Error(`operations: no operation named ${JSON.stringify(name)}`);
+        const declaration = op(OP_NAME, {
+          input: { pr: { type: 'number', required: true } },
+          go: effect({ reads: ['input.pr'], effects: () => [{ type: 'note.write', payload: {} }] }),
+        });
+        const registry = createRegistry();
+        registry.register(declaration);
+        return { declaration, registry, sinks: { 'note.write': async () => { applied.push('note.write'); return { ok: true }; } } };
+      },
+      names: () => [OP_NAME],
+    };
+  }
+
+  it('records `unknown`, not `human`', async () => {
+    const store = createMemoryRunStore();
+    const applied = [];
+    const res = await handleOperationRequest(
+      { method: 'POST', url: `${DEFAULT_BASE_PATH}/${OP_NAME}/runs`, body: { pr: 7 } },
+      { ...wiringFor(applied), newRunId: idMinter(), store, judge: async () => { throw new Error('no juror'); } },
+    );
+    expect(res.status).toBe(201);
+    expect(applied).toEqual(['note.write']);          // the effect really ran — not a vacuous pass
+
+    const entry = store.read(res.body.runId).effects[0];
+    expect(entry.attempts).toBe(1);
+    expect(entry.lastAttemptBy).toBe('unknown');
+    expect(entry.humanAttempts).toBe(0);
+    expect(entry.unknownAttempts).toBe(1);
+  });
+});
