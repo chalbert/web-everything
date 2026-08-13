@@ -94,23 +94,50 @@ export function clusterEffectiveN(records) {
   }
   const sizes = [...bySource.values()];
   const n = hits.length;
-  // Kish: n / (1 + (m̄ − 1)) with m̄ the mean cluster size — i.e. n / m̄ = the number of clusters, when
-  // clusters are perfectly correlated internally. The conservative reading, and the one that matters: a
-  // defect seen 15 times from one commit is one observation, not 15.
-  const effectiveN = sizes.length ? sizes.length : 0;
   const largest = sizes.length ? Math.max(...sizes) : 0;
+  // THE DESIGN EFFECT, rather than a cliff (#3071). The previous cut treated ANY repeated source as
+  // disqualifying — 20 observations from 19 commits exactly like 20 from one — which on real history made
+  // `conclusive: true` nearly unreachable, because a fix commit routinely touches files from several prior
+  // PRs. The conservative version was right to ship (a false conclusive is silent and would be used to retune
+  // the review parameters; never concluding is visible and carries its counts), but a cliff is not the same
+  // as a gradient.
+  //
+  // Kish, with equal-sized clusters assumed away by using the ACTUAL size distribution: deff = 1 + (m̄ᵉᶠᶠ − 1),
+  // where m̄ᵉᶠᶠ = Σmᵢ² / Σmᵢ is the size-weighted mean cluster size. That weighting is the point — it is
+  // dominated by the LARGE clusters, which are the ones that actually destroy independence, so 20-from-19
+  // barely widens the interval while 20-from-2 widens it a lot.
+  //
+  // ρ = 1 is assumed (perfect within-cluster correlation), which is the conservative end: a defect seen 15
+  // times from one commit is treated as one observation, exactly as before. Nothing here makes a clustered
+  // dataset look better than it is; it stops making a barely-clustered one look as bad as the worst case.
+  const sumSizes = sizes.reduce((t, m) => t + m, 0);
+  const sumSquares = sizes.reduce((t, m) => t + m * m, 0);
+  const meanEffectiveSize = sumSizes ? sumSquares / sumSizes : 0;
+  const designEffect = sizes.length ? Math.max(1, 1 + (meanEffectiveSize - 1)) : 1;
   return {
     observations: n,
     distinctSources: sizes.length,
-    effectiveN,
+    // The independent-trial count the interval may actually assume. `n / deff`, floored at the number of
+    // distinct sources is WRONG and deliberately not done — with ρ = 1 the two coincide for equal clusters
+    // and `n / deff` is the smaller, honest answer for unequal ones.
+    effectiveN: n ? n / designEffect : 0,
+    designEffect,
     largestClusterShare: n ? largest / n : 0,
-    // ANY clustering inflates confidence, so the threshold is "are these independent at all", not a tolerance
-    // band. A 0.5 cut let MEDIUM clumping through: 20 observations from 11 commits passed as independent while
-    // the interval was built on 20 trials it did not have. Review caught that. The interval arithmetic assumes
-    // independent trials, so the honest test is whether they are — one repeated source is already too many.
-    clustered: n > 0 && effectiveN < n,
+    // STILL A REFUSAL, just no longer at the first repeat. Past this the interval would have to be widened so
+    // far that it is not reporting anything — heavily clustered data genuinely cannot conclude, and saying so
+    // remains better than a confident wrong answer.
+    clustered: designEffect > MAX_DESIGN_EFFECT,
   };
 }
+
+/**
+ * Past this design effect the interval is so wide it reports nothing, so the answer is still a refusal.
+ *
+ * 2 means "the clustering has cost you half your sample". Chosen as the point where widening stops being
+ * informative rather than from data — and named here, as one number in one place, so raising it is a visible
+ * decision rather than a scattered edit.
+ */
+export const MAX_DESIGN_EFFECT = 2;
 
 /** Group records into `{band: {escalated, clean}}`. Every band always present, so an empty one is visible. */
 export function stratifyBySize(records) {
@@ -140,7 +167,7 @@ export function zForAlpha(alpha) {
  * `direction` exists because `separated` is symmetric. The headline used to assert that escalation correlates
  * with defects whatever the sign, and printed exactly that on data showing the reverse.
  */
-export function compareProportions(a, b, { alpha = 0.05 } = {}) {
+export function compareProportions(a, b, { alpha = 0.05, designEffect = 1 } = {}) {
   const nA = Math.max(0, Math.floor(Number(a?.n) || 0));
   const nB = Math.max(0, Math.floor(Number(b?.n) || 0));
   const kA = Math.min(nA, Math.max(0, Math.floor(Number(a?.k) || 0)));
@@ -152,7 +179,11 @@ export function compareProportions(a, b, { alpha = 0.05 } = {}) {
   const pB = kB / nB;
   const usable = Math.min(kA, nA - kA, kB, nB - kB) >= 5;
   const z = zForAlpha(alpha);
-  const se = Math.sqrt((pA * (1 - pA)) / nA + (pB * (1 - pB)) / nB);
+  // WIDENED BY √deff (#3071). The interval arithmetic assumes independent trials; when they are not, the
+  // honest response is a wider interval rather than a suppressed verdict. `deff` of 1 is the independent case
+  // and leaves every existing caller byte-identical.
+  const deff = Math.max(1, Number(designEffect) || 1);
+  const se = Math.sqrt(deff) * Math.sqrt((pA * (1 - pA)) / nA + (pB * (1 - pB)) / nB);
   const diff = pA - pB;
   const lo = diff - z * se;
   const hi = diff + z * se;
@@ -174,7 +205,7 @@ export function compareProportions(a, b, { alpha = 0.05 } = {}) {
 }
 
 /** Escalated vs clean within one band, counting only independent fixes as defects. */
-export function compareGroups(band, { alpha = 0.05 } = {}) {
+export function compareGroups(band, { alpha = 0.05, designEffect = 1 } = {}) {
   const count = (list) => ({
     n: list.length,
     k: list.filter((r) => r.followUp === 'independent-fix').length,
@@ -182,7 +213,11 @@ export function compareGroups(band, { alpha = 0.05 } = {}) {
   });
   const esc = count(band.escalated ?? []);
   const cln = count(band.clean ?? []);
-  return { escalated: esc, clean: cln, comparison: compareProportions({ n: esc.n, k: esc.k }, { n: cln.n, k: cln.k }, { alpha }) };
+  return {
+    escalated: esc,
+    clean: cln,
+    comparison: compareProportions({ n: esc.n, k: esc.k }, { n: cln.n, k: cln.k }, { alpha, designEffect }),
+  };
 }
 
 /**
@@ -211,10 +246,16 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
 
   const strata = stratifyBySize(usableRecords);
   // Correct across the bands that CAN be tested, not all five — an empty band is not a test.
+  // `usable` is the ≥5-successes-and-failures gate, which the design effect does not touch — a valid deff
+  // over an invalid normal approximation is still invalid, so the two guards stay independent.
   const testable = SIZE_BANDS.map(([l]) => l).filter((l) => compareGroups(strata[l]).comparison.usable);
   const alpha = testable.length ? 0.05 / testable.length : 0.05;
   const bands = {};
-  for (const [label] of SIZE_BANDS) bands[label] = compareGroups(strata[label], { alpha });
+  // THE WIDENING, applied where the interval is actually built. Every band gets the corpus-level design
+  // effect: the clustering is a property of how the defect signals were sourced, not of a size band.
+  for (const [label] of SIZE_BANDS) {
+    bands[label] = compareGroups(strata[label], { alpha, designEffect: cluster.designEffect });
+  }
 
   const separated = Object.entries(bands).filter(([, b]) => b.comparison.separated);
   const defects = usableRecords.filter((r) => r.followUp === 'independent-fix').length;
@@ -225,7 +266,15 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
     blockers.push(`censoring — only ${Math.round(obs.fullyObservedShare * 100)}% of PRs have a closed ${windowDays}-day follow-up window, and the groups age differently (median ${obs.medianAgeDaysEscalated}d escalated vs ${obs.medianAgeDaysClean}d clean)`);
   }
   if (cluster.clustered) {
-    blockers.push(`clustered observations — ${cluster.observations} defect signals trace to ${cluster.distinctSources} commits (largest is ${Math.round(cluster.largestClusterShare * 100)}% of them), so the interval is narrower than the data supports`);
+    // NAMES THE CLUSTERING SPECIFICALLY, and is distinguishable from "not enough observations" — which is a
+    // separate blocker with its own counts. Conflating them told a reader to collect more data when more data
+    // from the same commits would not have helped.
+    blockers.push(
+      `too clustered to conclude — ${cluster.observations} defect signals trace to ${cluster.distinctSources} commits `
+      + `(largest is ${Math.round(cluster.largestClusterShare * 100)}% of them, design effect `
+      + `${cluster.designEffect.toFixed(1)}× over the ${MAX_DESIGN_EFFECT}× limit). More observations from the same `
+      + 'commits will not help; more SOURCES will',
+    );
   }
   if (!testable.length) {
     blockers.push(`insufficient observations — no size band reaches 5 defects and 5 non-defects in both groups at a ${(100 * baseRate).toFixed(1)}% base rate; ~${requiredNPerGroup(baseRate, mdd)} PRs per group per band would be needed to detect a ${Math.round(mdd * 100)}-point difference`);

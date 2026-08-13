@@ -308,3 +308,157 @@ describe('the declaration', () => {
     expect(run.findings.assess.parameterSetCaveat).toMatch(/nothing stamps the policy-contract version/);
   });
 });
+
+
+/**
+ * THE DESIGN EFFECT (#3071). The previous cut refused on ANY repeated source — 20 observations from 19
+ * commits treated exactly like 20 from one — which on real history made `conclusive: true` nearly
+ * unreachable, because a fix commit routinely touches files from several prior PRs.
+ *
+ * The conservative version was right to ship: a false conclusive is silent and would be used to retune the
+ * review parameters, while never concluding is visible and carries its counts. But a cliff is not a gradient,
+ * and the fix is to widen the interval in proportion to the clustering rather than suppress the verdict.
+ */
+describe('clustering widens the interval instead of suppressing the answer', () => {
+  const hits = (sources) => sources.map((s, i) => ({ number: i, followUp: 'independent-fix', followUpSource: s }));
+
+  // THE CASE THE CLIFF KILLED.
+  it('20 observations from 19 sources barely widens, and no longer blocks', () => {
+    const c = clusterEffectiveN(hits([...Array(18).keys()].map(String).concat(['dup', 'dup'])));
+    expect(c.observations).toBe(20);
+    expect(c.distinctSources).toBe(19);
+    expect(c.designEffect).toBeLessThan(1.2);
+    expect(c.clustered).toBe(false);
+  });
+
+  // AND THE CASE IT SHOULD STILL KILL.
+  it('20 observations from 2 sources still cannot conclude', () => {
+    const c = clusterEffectiveN(hits([...Array(10).fill('a'), ...Array(10).fill('b')]));
+    expect(c.designEffect).toBeCloseTo(10, 5);
+    expect(c.clustered).toBe(true);
+  });
+
+  // SIZE-WEIGHTED, which is the whole reason 20-from-19 and 20-from-2 differ so much: the mean is dominated
+  // by the LARGE clusters, and those are the ones that actually destroy independence.
+  // THE SHARPEST CASE FOR SIZE-WEIGHTING: identical observation count, identical SOURCE count, and one is
+  // twice as clustered as the other. Counting sources cannot tell them apart at all — only the size
+  // distribution can, and the large cluster is what actually destroys independence.
+  it('separates two corpora that have the same observation and source counts', () => {
+    const manySmall = clusterEffectiveN(hits(['a', 'a', 'b', 'b', 'c', 'c', 'd', 'd', 'e', 'e']));
+    const oneBig = clusterEffectiveN(hits([...Array(6).fill('a'), 'b', 'c', 'd', 'e']));
+    expect(manySmall.observations).toBe(oneBig.observations);
+    expect(manySmall.distinctSources).toBe(oneBig.distinctSources);
+    expect(manySmall.designEffect).toBeCloseTo(2, 5);
+    expect(oneBig.designEffect).toBeCloseTo(4, 5);
+    // And they land on opposite sides of the limit, so the distinction has a consequence.
+    expect(manySmall.clustered).toBe(false);
+    expect(oneBig.clustered).toBe(true);
+  });
+
+  it('perfectly independent data has a design effect of exactly 1', () => {
+    const c = clusterEffectiveN(hits(['a', 'b', 'c', 'd', 'e']));
+    expect(c.designEffect).toBe(1);
+    expect(c.effectiveN).toBe(5);
+    expect(c.clustered).toBe(false);
+  });
+
+  it('an empty corpus does not divide by zero', () => {
+    const c = clusterEffectiveN([]);
+    expect(c.designEffect).toBe(1);
+    expect(c.effectiveN).toBe(0);
+    expect(c.clustered).toBe(false);
+  });
+});
+
+describe('the interval widens by the square root of the design effect', () => {
+  const a = { n: 60, k: 24 };
+  const b = { n: 60, k: 9 };
+
+  it('widens monotonically', () => {
+    const widths = [1, 1.5, 2, 3].map((d) => {
+      const [lo, hi] = compareProportions(a, b, { designEffect: d }).ci;
+      return hi - lo;
+    });
+    for (let i = 1; i < widths.length; i += 1) expect(widths[i]).toBeGreaterThan(widths[i - 1]);
+  });
+
+  // THE POINT: it has teeth. A separation that survives deff 1 does not necessarily survive deff 3.
+  it('can flip a separated verdict, which is what makes it honest rather than cosmetic', () => {
+    expect(compareProportions(a, b, { designEffect: 1 }).separated).toBe(true);
+    expect(compareProportions(a, b, { designEffect: 3 }).separated).toBe(false);
+  });
+
+  // Every existing caller passes nothing and must be byte-identical.
+  it('defaults to 1, so an omitted design effect changes nothing', () => {
+    expect(compareProportions(a, b, {})).toEqual(compareProportions(a, b, { designEffect: 1 }));
+    expect(compareProportions(a, b, { designEffect: 0.5 })).toEqual(compareProportions(a, b, { designEffect: 1 }));
+  });
+
+  // The ≥5 gate is a SEPARATE guard: a valid design effect over an invalid normal approximation is still
+  // invalid, and the item says so explicitly.
+  it('does not rescue an unusable comparison, however small the design effect', () => {
+    expect(compareProportions({ n: 10, k: 2 }, { n: 10, k: 1 }, { designEffect: 1 }).usable).toBe(false);
+  });
+});
+
+/**
+ * THE WIRING, which had no test and so was invisible to mutation: the corpus-level design effect has to
+ * REACH the interval each band builds. Computing it correctly and then not passing it would leave every
+ * measured claim in this change true and the feature absent.
+ */
+describe('the design effect reaches the interval assessCriteria builds', () => {
+  /**
+   * One band, big enough to be usable, with clustered defect sources. Escalated PRs carry defects from two
+   * commits; clean PRs carry none — so the corpus is clustered and the band is still testable.
+   */
+  const clusteredCorpus = () => {
+    const out = [];
+    for (let i = 0; i < 30; i += 1) {
+      const isDefect = i < 12;
+      out.push(pr(i, 100, true, isDefect ? 'independent-fix' : null, 60, isDefect ? `src-${i % 2}` : null));
+    }
+    for (let i = 30; i < 60; i += 1) {
+      const isDefect = i < 35;
+      out.push(pr(i, 100, false, isDefect ? 'independent-fix' : null, 60, isDefect ? `src-${i % 2}` : null));
+    }
+    return out;
+  };
+
+  it('a clustered corpus yields a WIDER band interval than the same counts unclustered', () => {
+    const records = clusteredCorpus();
+    const clustered = assessCriteria({ records, nowSec: NOW });
+    // The same records with every defect attributed to its own commit — identical counts, no clustering.
+    const independent = assessCriteria({
+      records: records.map((r, i) => (r.followUp ? { ...r, followUpSource: `uniq-${i}` } : r)),
+      nowSec: NOW,
+    });
+
+    const band = Object.keys(clustered.bands).find((b) => clustered.bands[b].comparison.usable);
+    expect(band).toBeDefined();
+    const width = (a) => { const [lo, hi] = a.bands[band].comparison.ci; return hi - lo; };
+    expect(width(clustered)).toBeGreaterThan(width(independent));
+  });
+
+  it('an unclustered corpus is unchanged — design effect 1 widens nothing', () => {
+    const records = clusteredCorpus().map((r, i) => (r.followUp ? { ...r, followUpSource: `uniq-${i}` } : r));
+    const out = assessCriteria({ records, nowSec: NOW });
+    expect(out.clustering.designEffect).toBe(1);
+    const band = Object.keys(out.bands).find((b) => out.bands[b].comparison.usable);
+    const direct = compareProportions(
+      { n: out.bands[band].escalated.n, k: out.bands[band].escalated.k },
+      { n: out.bands[band].clean.n, k: out.bands[band].clean.k },
+      { alpha: out.bands[band].comparison.alpha },
+    );
+    expect(out.bands[band].comparison.ci).toEqual(direct.ci);
+  });
+
+  // The blocker must say WHICH problem it is: more data from the same commits does not help clustering.
+  it('names clustering distinctly from "not enough observations"', () => {
+    const heavy = Array.from({ length: 40 }, (_, i) =>
+      pr(i, 100, i % 2 === 0, i < 20 ? 'independent-fix' : null, 60, i < 20 ? 'one-commit' : null));
+    const out = assessCriteria({ records: heavy, nowSec: NOW });
+    const text = out.verdict.blockers.join(' | ');
+    expect(text).toMatch(/too clustered to conclude/);
+    expect(text).toMatch(/More observations from the same commits will not help/);
+  });
+});
