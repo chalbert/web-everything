@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -710,11 +710,15 @@ describe('assertLaneCwd follows symlinks', () => {
     expect(() => assertLaneCwd(flipped, ['Bash'], lane)).toThrow(/DRIVER'S OWN lane/);
   });
 
-  // REFUSED UNDER EITHER REALPATH, and that is a change from when this test was written. The inode compare
-  // added for the firmlink axis SUBSUMES the case axis: two spellings of one directory share an inode
-  // whatever `realpath` returned. `.native` is no longer what carries this refusal — it is the fast path, and
-  // it still matters for `laneRootOf`, which is a string test and needs the on-disk spelling of `.lanes` and
-  // `lane-N` to recognise a lane at all.
+  // REFUSED UNDER EITHER REALPATH here, because the inode compare added for the firmlink axis subsumes the
+  // case axis: two spellings of one directory share an inode whatever `realpath` returned.
+  //
+  // THAT DOES NOT DEMOTE `.native` TO A FAST PATH, which is how an earlier version of this comment framed it
+  // (PR #1188 round 3, finding 2). `laneRootOf` is a string test, so when the case difference falls on the
+  // `.lanes` or `lane-N` SEGMENTS the JS `realpathSync` yields a path that is not recognised as a lane at
+  // all — and an unrecognised path is refused for the wrong reason, or a driver whose own lane goes
+  // unrecognised stops being compared against. `.native` is what makes the recognition correct, and the
+  // recognition is what makes the refusal correct.
   it('refuses the case-variant under either realpath, because identity does not care about spelling', () => {
     const pool = join(dir, 'real', '.lanes', 'MixedCase');
     mkdirSync(join(pool, 'lane-9'), { recursive: true });
@@ -752,6 +756,31 @@ describe('assertLaneCwd follows symlinks', () => {
     if (existsSync(alias)) expect(sameDirectory(here, alias)).toBe(true);
     // Unstattable paths answer false rather than throwing — the refusal above is the louder signal.
     expect(sameDirectory(join(here, 'no-such-dir-xyz'), here)).toBe(false);
+  });
+
+  // `dev` IS LOAD-BEARING and had no test (PR #1188 round 3, finding 1). Inode numbers are unique per
+  // VOLUME, not globally, so two unrelated directories on different volumes routinely share one. Dropping
+  // the `dev` comparison collapsed them into "the same directory" — fail-CLOSED, so it over-refuses rather
+  // than letting a juror in, but it is a sentence claiming a guarantee that nothing defended.
+  //
+  // `/` and a mounted volume are on different devices on any machine that has one; skipped where none does.
+  it('compares dev as well as ino, so a SHARED inode across volumes is not one directory', () => {
+    // A volume root is inode 2 on most filesystems, so mounted volumes routinely collide. On this machine
+    // `/`, `/System/Volumes/Preboot` and `/System/Volumes/VM` are all inode 2 on three different devices —
+    // the exact configuration that makes dropping the `dev` comparison collapse them into one directory.
+    const candidates = ['/', '/System/Volumes/Preboot', '/System/Volumes/VM', '/System/Volumes/Data', '/private/tmp', tmpdir()]
+      .filter((p) => existsSync(p))
+      .map((p) => { const st = statSync(realpathSync.native(p)); return { path: p, dev: st.dev, ino: st.ino }; });
+
+    const byIno = new Map();
+    for (const c of candidates) byIno.set(String(c.ino), [...(byIno.get(String(c.ino)) ?? []), c]);
+    const collision = [...byIno.values()].find((g) => g.length > 1 && new Set(g.map((c) => c.dev)).size > 1);
+    if (!collision) return; // no cross-volume inode collision on this machine — nothing to distinguish
+
+    const [a, b] = collision;
+    expect(a.ino).toBe(b.ino);          // same inode …
+    expect(a.dev).not.toBe(b.dev);      // … different device …
+    expect(sameDirectory(a.path, b.path)).toBe(false); // … and therefore not the same directory
   });
 
   // NO FALLBACK. A `?? realpathSync` silently restored the hole on any platform taking that branch.
