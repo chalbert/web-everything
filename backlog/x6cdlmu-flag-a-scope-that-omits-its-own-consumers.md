@@ -5,10 +5,6 @@ parent: xl2q1zt
 status: open
 dateOpened: "2026-08-13"
 tags: [delivery, backlog, readiness, preparation]
-scope:
-  - we:scripts/readiness/scope-consumers.mjs
-  - we:scripts/readiness/__tests__/scope-consumers.test.mjs
-  - we:scripts/check-readiness.mjs
 ---
 
 # Flag a scope that omits its own consumers
@@ -19,6 +15,13 @@ scope:
 
 The idea: given an item's `scope:`, find every module that imports a file in it and report any importer the
 scope does not cover. Three of four surveyed disasters looked like that shape, and it is mechanical.
+
+## No `scope:`, deliberately
+
+The three files this card used to scope are deleted by this PR, so leaving them would be a dangling scope —
+naming paths that do not exist, which is the defect this repo's citation gate catches elsewhere. Removing it
+also puts the item in the state that is TRUE of it: `unshaped-no-scope`, which is what the dispatcher should
+think, because the next attempt has a modelling question to settle before anything can be scoped at all.
 
 ## Why it was stood down
 
