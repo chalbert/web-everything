@@ -24,7 +24,9 @@ import {
   serializeRunRecord,
   totalJudgeSpend,
   validateRunRecord,
+  isPollableHandle,
 } from '../run-record.mjs';
+import { inFlight, inFlightEntries } from '../effect-executor.mjs';
 import {
   createFileRunStore,
   createMemoryRunStore,
@@ -108,6 +110,50 @@ describe('the pure core', () => {
       }
     });
 
+    // `.trim()` was not enough: a zero-width space is TRUTHY and survives it, so it reached `inFlightEntries`
+    // as an observable handle and the operator was told to poll a blank one (PR #1185 review, finding 5).
+    it('refuses a handle with no VISIBLE character, however truthy it is', () => {
+      for (const invisible of ['\u200b', '\u200b\u200c', '\u00a0', '\ufeff', '\u3000', '\u2028']) {
+        expect(`${JSON.stringify(invisible)}: ${validateRunRecord(withEffect({ handle: invisible })).ok}`)
+          .toBe(`${JSON.stringify(invisible)}: false`);
+      }
+      expect(validateRunRecord(withEffect({ handle: ' sess-a ' })).ok).toBe(true); // padded, but pollable
+    });
+
+    // AN ALLOWLIST, because two denylists in a row were wrong (PR #1191 review, finding 1). The previous fix
+    // was a denylist of the four code points the last reviewer had named, called itself "has a visible
+    // character", and let sixteen more through. Built numerically so no invisible literal sits in the source.
+    it('refuses every unusable handle the reviewer found, and the four before them', () => {
+      const unusable = [
+        [0x00, 'NUL'], [0x07, 'BEL'], [0x1b, 'ESC'], [0x7f, 'DEL'], [0x0301, 'combining acute'],
+        [0xd800, 'lone surrogate'], [0x00ad, 'soft hyphen'], [0x061c, 'Arabic letter mark'],
+        [0x202a, 'LRE'], [0x202e, 'RLO'], [0x2066, 'LRI'], [0x2069, 'PDI'], [0xfe0f, 'VS16'],
+        [0x3164, 'Hangul filler'], [0x115f, 'choseong filler'], [0xe0001, 'tag'],
+        [0x200b, 'ZWSP'], [0x00a0, 'NBSP'], [0xfeff, 'BOM'], [0x3000, 'ideographic space'],
+      ];
+      for (const [cp, name] of unusable) {
+        const handle = String.fromCodePoint(cp);
+        expect(`${name}: ${isPollableHandle(handle)}`).toBe(`${name}: false`);
+        expect(`${name}: ${validateRunRecord(withEffect({ handle })).ok}`).toBe(`${name}: false`);
+      }
+    });
+
+    it('accepts what a handle actually looks like', () => {
+      for (const good of ['sess-abc', '12345', 'a', 'build_7', ' sess-a ', 'ab-CD-99']) {
+        expect(`${good}: ${isPollableHandle(good)}`).toBe(`${good}: true`);
+      }
+    });
+
+    // The validator and the constructor ask the SAME question, so they cannot drift apart on it.
+    it('agrees with `inFlight()` about what counts as a handle', () => {
+      for (const invisible of ['\u200b', '\u00a0', '   ']) {
+        expect(() => inFlight({ handle: invisible })).toThrow(/visible character/);
+        expect(validateRunRecord(withEffect({ handle: invisible })).ok).toBe(false);
+      }
+      expect(() => inFlight({ handle: 'sess-a' })).not.toThrow();
+      expect(validateRunRecord(withEffect({ handle: 'sess-a' })).ok).toBe(true);
+    });
+
     // An unparseable date makes every entry read as never-overdue, which is exactly what hides a stalled job.
     it('refuses an unparseable expectedBy or startedAt, and accepts an absent one', () => {
       expect(validateRunRecord(withEffect({ handle: 'h', expectedBy: 'soon' })).errors.join(' ')).toMatch(/unparseable expectedBy/);
@@ -117,6 +163,21 @@ describe('the pure core', () => {
     });
 
     // The checks are scoped to the status that reads them — a `pending` entry is not asked for a handle.
+    // THE READERS ASK IT TOO (PR #1191 review, finding 2). `inFlightEntries` is the function the item named
+    // as the failure site and was the last place still using bare truthiness, so a handle the validator
+    // refuses still bucketed `running` when a record reached it another way.
+    it('inFlightEntries asks the same question, so a refused handle is never `running`', () => {
+      const rec = (handle) => ({
+        ...sample(),
+        effects: [{ key: 'k', stepIndex: 0, index: 0, type: 't', status: 'in-flight', handle }],
+      });
+      for (const invisible of [String.fromCodePoint(0x200b), String.fromCodePoint(0x00a0), '   ', '']) {
+        expect(inFlightEntries(rec(invisible)).unknown).toHaveLength(1);
+        expect(inFlightEntries(rec(invisible)).running).toHaveLength(0);
+      }
+      expect(inFlightEntries(rec('sess-abc')).running).toHaveLength(1);
+    });
+
     it('does not impose the in-flight fields on any other status', () => {
       expect(validateRunRecord({
         ...sample(),
