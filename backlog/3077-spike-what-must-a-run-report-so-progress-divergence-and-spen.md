@@ -3,9 +3,12 @@ bornAs: xuy3mlv
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-12"
+dateStarted: "2026-08-13"
+dateResolved: "2026-08-13"
 tags: [plateau-loop, delivery, operations, engine, spike, observability]
+relatedReport: reports/2026-08-13-run-observability-spike.md
 scope:
   - we:reports/
 scopeRationale: "A spike whose only output is one report; its filename is not known until the spike runs."
@@ -77,3 +80,38 @@ questions 3 and 5 rather than surveying them, and states what it does not cover.
 **No production code, and no cards beyond this one.** The last spike here ran eleven hours and produced
 nothing because its brief also asked it to design, enumerate, write the card, gate and open a PR. A spike's
 deliverable is an answer.
+
+## The answer
+
+`we:reports/2026-08-13-run-observability-spike.md`. Four fields and one refusal.
+
+| field | signal |
+| --- | --- |
+| `lastWriteAt` | liveness |
+| `advancedAt` | progress — cursor movement only |
+| `budgetUsd` declared | the ceiling |
+| `spentUsd` derived (exists) | consumption |
+
+Two timestamps rather than one is the whole trick: `lastWriteAt` recent with `advancedAt` old is *alive but
+not getting anywhere*, and neither field alone says it.
+
+**Q3, the crux — nobody judges convergence, and nothing should.** Both candidates were refused on measured
+grounds. The mechanical proxy cannot separate #1164 (five rounds, every one a real bypass, and the reason the
+cap is 5) from PR #1186 (four rounds, the same defect relocating) — a `stuck` detector was already refused in
+this repo on that same evidence. An agent judge is a `judge` step with its own spend watching work whose
+problem is spending. So the question is REPLACED: a budget the operator states and the machine enforces
+exactly. It does not catch a builder diverging cheaply, and the report says so rather than proposing a proxy
+already shown wrong.
+
+**Q5 — refuse a declaration with no BUDGET, not one with no progress measure**, and only where the
+declaration contains a `judge` step. Refusing on a progress measure would refuse everything or invite a
+made-up number, which is worse than none because it gets trusted.
+
+**Q2 — spend, not time.** Measured today: an identical gate ran 160s idle and 690s under load. A time budget
+fires on the healthy case. Time keeps liveness only.
+
+**Q4 — suspend and ask**, as a `confirm` addressed to a human. No new machinery, resumable on any surface, and
+it does not strangle a productive five-round run the way an eager stop would.
+
+Four gaps are named as uncovered, including the cheap-divergence case and the ledger's missing finding
+identity.
