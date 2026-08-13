@@ -76,6 +76,18 @@ export const SKIPS = Object.freeze({
   NO_OBSERVER: 'no-observer',
 });
 
+/**
+ * Record WHY an entry is unresolved, without touching its status. `observedError` is deliberately not a
+ * status: nothing reads it to decide whether to retry or advance, so it cannot reopen the collision the
+ * vocabulary closed. See {@link OBSERVATIONS}.
+ */
+function withObservation(run, key, error) {
+  return {
+    ...run,
+    effects: run.effects.map((e) => (e.key === key ? { ...e, observedError: error, observedAt: new Date().toISOString() } : e)),
+  };
+}
+
 /** Normalize an observers map (plain object or `Map`) into a lookup fn. Mirrors the executor's `sinkLookup`. */
 function observerLookup(observers) {
   if (observers instanceof Map) return (type) => observers.get(type);
@@ -158,6 +170,22 @@ export async function observeRun(run, { observers = {}, now = new Date() } = {})
     // that licenses a retry or an advance. The entry stays in-flight and is reported for a person.
     if (status === 'unresolved') {
       unresolved.push({ key: entry.key, type: entry.type, error: answer.error ?? null });
+      // THE REASON IS RECORDED even though the STATUS is not. An `error` string licenses nothing to any
+      // caller — it is not a status, so it cannot be read as "retry me" or "advance past me" — which is why
+      // keeping it does not reopen the collision this vocabulary closed. Without it the reason lives only in
+      // the interval job's stdout, and is gone the moment the observer's next answer differs.
+      current = withObservation(current, entry.key, answer.error ?? null);
+      continue;
+    }
+    // `succeeded` MEANS cleanly, so an `error` alongside it is a contradiction, not extra detail. Refused
+    // rather than passed through: this is the one machine-checkable invariant the contract has, and the whole
+    // point of the vocabulary is that a word means one thing.
+    if (answer.error != null && answer.error !== '') {
+      errors.push({
+        key: entry.key,
+        type: entry.type,
+        error: `observer answered \`succeeded\` with an error (${String(answer.error)}) — say \`unresolved\` if it did not finish cleanly`,
+      });
       continue;
     }
     current = resolveInFlight(current, entry.key, {

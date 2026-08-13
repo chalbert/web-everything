@@ -29,9 +29,9 @@ The executor has a table of SINKS keyed by effect type: they start work. There i
 started work is going. That is the whole shape of this story — an **observer** registry that mirrors the sink
 registry, injected the same way, because only the caller knows what a `start.build` handle means.
 
-An observer answers `running`, `applied` or `failed`. `running` is the only non-terminal one and the only safe
-default: an observer that cannot tell must say `running`, because the alternative is closing out work that is
-still happening.
+An observer answers `running`, `succeeded` or `unresolved` — and the section below is about why none of those
+is the word `failed`. `running` is the only non-terminal one and the only safe default: an observer that
+cannot tell must say it, because the alternative is closing out work that is still happening.
 
 ## What the waker does NOT decide
 
@@ -103,13 +103,16 @@ pass finds today is reported as `no-observer` rather than silently ignored, so t
 Scheduling is not here either. #3070 ruled the host is an interval job; this is that job's body, and the
 `StartInterval` is the operator's.
 
-Eighteen mutations reddened named tests across four rounds. Six on the first cut: persisting after the advance
-instead of before, treating overdue as dead, obeying an answer outside the closed set, polling a handle-less
-entry, letting one unreadable record abort the pass, and letting an observer throw kill the run's pass. Then,
-after two review rounds: mapping `finished` onto the executor's `failed`, mapping `never-started` onto
-`applied`, accepting the word `failed` again, auto-answering a HUMAN confirm, auto-answering an AGENT confirm,
-answering a JUDGE step, removing the no-progress break, and dropping the non-array check on `store.list()`.
+**Nineteen mutations** reddened named tests, counted here rather than asserted — an earlier draft said
+eighteen and enumerated fourteen.
 
-FIVE of those were GREEN before review — the human confirm, the agent confirm, the judge step, the no-progress
-break, and the non-array list. The three hand-backs are the safety property #3070's ruling rests on, and none
-of them had a test.
+| round | mutations |
+| --- | --- |
+| 1 (first cut) | persisting after the advance instead of before · overdue treated as dead · an answer outside the closed set obeyed · a handle-less entry polled · one unreadable record aborting the pass · an observer throw killing the run's pass — **6** |
+| 2-3 (vocabulary) | `finished` → the executor's `failed` · `never-started` → `applied` · the word `failed` accepted again · a HUMAN confirm auto-answered · an AGENT confirm auto-answered · a JUDGE step answered · the no-progress break removed · the non-array `store.list()` check dropped — **8** |
+| 4 (follow-ups) | no escalation past the threshold · the close-out action dropped from the line · the reason not recorded · a `succeeded` carrying an error passed through · the per-run catch re-throwing — **5** |
+
+**Ten of the nineteen were GREEN before a reviewer named them.** Among them all three hand-backs — human
+confirm, agent confirm, judge step — which are the safety property #3070's ruling rests on, and the per-run
+catch, which was called belt-and-braces for four rounds and is in fact the only thing keeping one bad run from
+stopping the pass.

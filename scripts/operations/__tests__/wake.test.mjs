@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { advanceWhileRunning, runStatus, startRun } from '../engine.mjs';
 import { applyPendingEffects, inFlight, inFlightEntries } from '../effect-executor.mjs';
 import { createEffectObserver, observeRun, planObservations, OBSERVATIONS, SKIPS } from '../effect-observer.mjs';
-import { isParkedOnDispatch, renderPass, wakePass, wakeRun } from '../wake.mjs';
+import { hoursStuck, isParkedOnDispatch, renderPass, stuckPast, wakePass, wakeRun, STUCK_ESCALATION_HOURS } from '../wake.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { createRegistry, op } from '../registry.mjs';
 import { confirm as confirmStep, effect, judge as judgeStep } from '../step-kinds.mjs';
@@ -503,5 +503,140 @@ describe('wakePass survives a store that answers oddly', () => {
       expect(pass.errors[0].error).toMatch(/not an array/);
       expect(pass.runs).toEqual([]);
     }
+  });
+});
+
+/**
+ * WHAT `unresolved` COSTS, and what now bounds it (PR #1186 round 4, NB4-2 · NB4-3 · NB4-4 · NB4-5 · NB4-7).
+ *
+ * Nothing writes a status, so nothing ever leaves the scan: 50 parked-forever runs polled every tick, exit 0
+ * throughout, and a supervisor watching exit codes never learns. The bound is on REPORTING, never on retrying
+ * — nothing is re-dispatched at any age, because retry is #3083 and has no owner.
+ */
+describe('an unresolved entry is bounded, explained and recorded', () => {
+  const parkedAt = (iso) => ({
+    v: 1, id: 'run-s', op: OP, input: { pr: 7 }, cursor: 0, findings: {}, verdict: null, telemetry: [],
+    pending: { kind: 'effect', step: 'go', stepIndex: 0, count: 1 },
+    effects: [{
+      key: 'run-s#0#0', stepIndex: 0, step: 'go', index: 0, type: 'start.build', payload: {},
+      idempotent: false, dispatch: true, status: 'in-flight', handle: 'sess-abc', startedAt: iso,
+      expectedBy: null, result: null, error: null,
+    }],
+  });
+
+  // The age comes from `startedAt`, which the dispatch already records — the escalation needed no new state.
+  it('measures how long it has been stuck from the record, not from a counter', () => {
+    const e = parkedAt('2026-08-13T00:00:00.000Z').effects[0];
+    expect(hoursStuck(e, '2026-08-13T06:00:00.000Z')).toBeCloseTo(6, 5);
+    expect(hoursStuck(e, '2026-08-13T00:30:00.000Z')).toBeCloseTo(0.5, 5);
+    expect(hoursStuck({ startedAt: null }, '2026-08-13T06:00:00.000Z')).toBeNull();
+  });
+
+  it('ESCALATES past the threshold — a non-zero signal, and a line that says so', async () => {
+    const store = createMemoryRunStore();
+    store.write(parkedAt('2026-08-13T00:00:00.000Z'));
+    const pass = await wakePass({
+      store,
+      observers: { 'start.build': async () => ({ status: 'unresolved', error: 'tests red' }) },
+      resolveFor: () => ({ registry, sinks: SINKS }),
+      now: '2026-08-13T07:00:00.000Z',
+    });
+    expect(stuckPast(pass)).toHaveLength(1);
+    expect(renderPass(pass).join('\n')).toMatch(/ESCALATED — run-s:run-s#0#0 has been unresolved for 7\.0h/);
+  });
+
+  it('does NOT escalate inside the threshold', async () => {
+    const store = createMemoryRunStore();
+    store.write(parkedAt('2026-08-13T00:00:00.000Z'));
+    const pass = await wakePass({
+      store,
+      observers: { 'start.build': async () => ({ status: 'unresolved', error: 'tests red' }) },
+      resolveFor: () => ({ registry, sinks: SINKS }),
+      now: '2026-08-13T01:00:00.000Z',
+    });
+    expect(stuckPast(pass)).toEqual([]);
+    expect(renderPass(pass).join('\n')).not.toMatch(/ESCALATED/);
+  });
+
+  // NB4-3: the line named no action, and the only recovery the run's own output offers loops forever.
+  it('names the close-out call, so the person is told WITH WHAT', async () => {
+    const store = createMemoryRunStore();
+    store.write(parkedAt('2026-08-13T00:00:00.000Z'));
+    const pass = await wakePass({
+      store,
+      observers: { 'start.build': async () => ({ status: 'unresolved', error: 'tests red' }) },
+      resolveFor: () => ({ registry, sinks: SINKS }),
+      now: '2026-08-13T01:00:00.000Z',
+    });
+    expect(renderPass(pass).join('\n')).toMatch(/resolveInFlight\(run, key/);
+  });
+
+  // NB4-5: "writes nothing" was right about the STATUS and wrong about the reason, which lived only in stdout.
+  it('records WHY it is unresolved on the record, without writing a status', async () => {
+    const store = createMemoryRunStore();
+    store.write(parkedAt('2026-08-13T00:00:00.000Z'));
+    await wakePass({
+      store,
+      observers: { 'start.build': async () => ({ status: 'unresolved', error: 'BUILD FAILED: tests red' }) },
+      resolveFor: () => ({ registry, sinks: SINKS }),
+    });
+    const entry = store.read('run-s').effects[0];
+    expect(entry.status).toBe('in-flight');       // still no status written
+    expect(entry.observedError).toBe('BUILD FAILED: tests red');
+    expect(Number.isNaN(Date.parse(entry.observedAt))).toBe(false);
+  });
+
+  // NB4-4: `succeeded` means CLEANLY, so an error alongside it is a contradiction rather than extra detail.
+  it('REFUSES a `succeeded` that carries an error, instead of advancing on it', async () => {
+    const { run } = await parked();
+    const out = await observeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'succeeded', result: { exit: 1 }, error: 'compile error' }) },
+    });
+    expect(out.run.effects[0].status).toBe('in-flight');
+    expect(out.resolved).toEqual([]);
+    expect(out.errors[0].error).toMatch(/answered `succeeded` with an error/);
+  });
+
+  it('a clean `succeeded` with no error still resolves', async () => {
+    const { run } = await parked();
+    const out = await observeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'succeeded', result: { exit: 0 } }) },
+    });
+    expect(out.run.effects[0].status).toBe('applied');
+  });
+});
+
+/**
+ * NB4-7, asked in three consecutive rounds: `wakePass`'s per-run catch is labelled belt-and-braces and the
+ * suite stayed green with it replaced by a re-throw. It is NOT dead — it is the only thing catching faults
+ * that escape `wakeRun`'s own try.
+ */
+describe('the per-run catch in wakePass is load-bearing', () => {
+  it('a throwing store.write inside one run does not take the pass down', async () => {
+    const base = createMemoryRunStore();
+    const run = advanceWhileRunning(startRun({ op: OP, id: 'run-w', input: { pr: 7 }, registry }), { registry });
+    base.write(run);
+    const parkedRun = (await applyPendingEffects(run, { sinks: SINKS, store: base })).run;
+    base.write(parkedRun);
+
+    const store = {
+      list: () => ['run-w'],
+      read: (id) => base.read(id),
+      write: () => { throw new Error('disk full'); },
+    };
+    const pass = await wakePass({
+      store,
+      observers: { 'start.build': async () => ({ status: 'succeeded' }) },
+      resolveFor: () => ({ registry, sinks: SINKS }),
+    });
+    expect(pass.errors).toEqual([{ runId: 'run-w', error: 'disk full' }]);
+    expect(pass.parked).toBe(1);
+  });
+
+  it('a null observers table is reported against its run rather than thrown', async () => {
+    const { store } = await parked();
+    const pass = await wakePass({ store, observers: null, resolveFor: () => ({ registry, sinks: SINKS }) });
+    expect(pass.errors).toHaveLength(1);
+    expect(pass.errors[0].runId).toBe('run-w');
   });
 });

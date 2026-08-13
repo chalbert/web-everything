@@ -70,7 +70,10 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
     stillRunning: observed.stillRunning,
     // Terminal for the observer, not actionable by this machine — the build failed, the dispatch never took,
     // or the answer was ambiguous. Nothing was written; a person decides. See `effect-observer.mjs`.
-    unresolved: observed.unresolved,
+    unresolved: observed.unresolved.map((u) => ({
+      ...u,
+      hoursStuck: hoursStuck((run.effects || []).find((e) => e.key === u.key), now),
+    })),
     skipped: observed.skipped,
     errors: [...observed.errors],
     advanced: false,
@@ -80,7 +83,10 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
   // PERSIST BEFORE ADVANCING. An observation is the only record that the work finished — the observer may not
   // be able to answer twice (a session's transcript is reaped, a build's log rotates), so losing it to a crash
   // during `advance` would strand the run with no way back to the answer.
-  if (observed.resolved.length) store.write(observed.run);
+  // Persist when anything changed — a resolution, or the recorded reason an entry is unresolved. The reason
+  // is the only durable trace of why a run is stuck; losing it to the next tick's differing answer is the gap
+  // this closes.
+  if (observed.resolved.length || observed.unresolved.length) store.write(observed.run);
   let current = observed.run;
 
   // Nothing resolved → nothing to advance past. Say so and stop, rather than spending an `advance` that the
@@ -90,16 +96,9 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
     return report;
   }
 
-  // NO SPECIAL CASE FOR A FAILURE HERE, and that is the fix rather than an omission (PR #1186 rounds 1-2).
-  // The first cut let an observer's "it failed" become the executor's `failed`, whose contract is "nothing
-  // landed, safe to retry" — so the next `applyPendingEffects` re-dispatched real work. The second cut halted
-  // the WAKER, which left the record still lying: the operator's `--resume`, the only recovery the run's own
-  // output offers, re-dispatched it instead. Halting one caller cannot fix a record that says the wrong thing.
-  //
-  // The vocabulary fixes it at the source. `we:scripts/operations/effect-observer.mjs` no longer has a word
-  // that means both: `finished` records `applied` (the effect was "start the work", and it started; the
-  // outcome rides in `result`), and `never-started` records `failed` (nothing landed, so retrying is right).
-  // Both then behave correctly under every caller, including this one, with no caller-side rule to remember.
+  // No special case for a failure, and that is the fix rather than an omission: `unresolved` writes no status,
+  // so there is nothing here to special-case. Three earlier vocabularies each wrote one and each got acted on
+  // by some caller — the account is on `OBSERVATIONS` in `we:scripts/operations/effect-observer.mjs`.
   try {
     for (let turn = 0; turn < 64; turn += 1) {
       const status = runStatus(current, { registry });
@@ -173,12 +172,39 @@ export async function wakePass({ store, observers, resolveFor, now = new Date() 
     try {
       runs.push(await wakeRun(run, { observers, store, registry: bindings.registry, sinks: bindings.sinks, now }));
     } catch (e) {
-      // Belt-and-braces: `wakeRun` catches its own, so reaching here means something structural. Still per-run.
+      // NOT belt-and-braces, though it was labelled that for four review rounds. It is the ONLY thing
+      // catching what escapes `wakeRun`'s own try — a throwing `store.write`, a null observers table, a
+      // malformed record — each of which would otherwise stop the pass for every other run.
       errors.push({ runId: id, error: String(e?.message ?? e) });
     }
   }
 
   return { scanned: ids.length, parked, runs, errors };
+}
+
+/**
+ * How long an unresolved entry has been going, in hours, from the `startedAt` the dispatch already records.
+ * No new state: the escalation the reviewer asked for needs nothing durable that is not already there.
+ */
+export function hoursStuck(entry, now = new Date()) {
+  const started = entry?.startedAt ? Date.parse(entry.startedAt) : NaN;
+  const at = now instanceof Date ? now.getTime() : Date.parse(String(now));
+  if (Number.isNaN(started) || Number.isNaN(at)) return null;
+  return Math.max(0, (at - started) / 3_600_000);
+}
+
+/**
+ * After this many hours, an unresolved entry stops being reported and starts being ESCALATED — a non-zero
+ * exit, so a supervisor watching exit codes learns something. It is a REPORTING bound, never a retry bound:
+ * nothing is re-dispatched at any age. Retry is #3083 and has no owner yet.
+ */
+export const STUCK_ESCALATION_HOURS = 6;
+
+/** Unresolved entries whose age has passed `hours`. PURE — the age is already on the report. */
+export function stuckPast(pass, hours = STUCK_ESCALATION_HOURS) {
+  return (pass.runs || []).flatMap((r) => (r.unresolved || [])
+    .filter((u) => typeof u.hoursStuck === 'number' && u.hoursStuck >= hours)
+    .map((u) => ({ runId: r.runId, ...u })));
 }
 
 /** One pass as operator-facing lines. PURE. Quiet when there is nothing parked — this runs on a timer. */
@@ -189,7 +215,9 @@ export function renderPass(pass) {
     const bits = [
       r.resolved.length ? `resolved ${r.resolved.map((x) => `${x.key}→${x.status}`).join(', ')}` : '',
       r.stillRunning.length ? `still running ${r.stillRunning.join(', ')}` : '',
-      r.unresolved?.length ? `NEEDS A PERSON — terminal but not actionable: ${r.unresolved.map((x) => `${x.key}${x.error ? ` (${x.error})` : ''}`).join(', ')}` : '',
+      r.unresolved?.length ? `NEEDS A PERSON — terminal but not actionable: ${r.unresolved.map((x) => `${x.key}${x.error ? ` (${x.error})` : ''}`).join(', ')}`
+        + ' · close it out with `resolveInFlight(run, key, { status: \'failed\' })` (nothing landed → the next'
+        + ' run re-dispatches) or `{ status: \'applied\' }` (it did land) — no CLI surface yet, so a short script' : '',
       r.skipped.length ? `SKIPPED ${r.skipped.map((x) => `${x.key} (${x.reason})`).join(', ')}` : '',
       r.errors.length ? `ERRORS ${r.errors.map((x) => x.error).join(' | ')}` : '',
       r.advanced ? 'advanced' : '',
@@ -198,13 +226,19 @@ export function renderPass(pass) {
     lines.push(`  ${r.runId}: ${bits.join(' · ')}`);
   }
   for (const e of pass.errors) lines.push(`  ${e.runId ?? '?'}: ERROR ${e.error}`);
+  const stuck = stuckPast(pass);
+  for (const u of stuck) {
+    lines.push(`  ESCALATED — ${u.runId}:${u.key} has been unresolved for ${u.hoursStuck.toFixed(1)}h `
+      + `(over ${STUCK_ESCALATION_HOURS}h). Nothing is being retried; this needs a person.`);
+  }
   return lines;
 }
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
   // NO OBSERVERS ARE REGISTERED HERE, and that is the honest state: nothing in the repo dispatches yet, so
-  // every in-flight entry a pass finds today is reported as `no-observer` rather than silently ignored. The
+  // every OBSERVABLE in-flight entry a pass finds today is reported as `no-observer` rather than silently
+  // ignored (a handle-less one is `no-handle`). The
   // first real dispatch registers its observer alongside its sink.
   const observers = {};
   wakePass({
@@ -217,10 +251,12 @@ if (IS_CLI) {
   })
     .then((pass) => {
       writeAllSync(1, `${renderPass(pass).join('\n')}\n`);
-      // A pass that could not read a run, or could not resolve its operation, is a real fault worth a non-zero
-      // exit — an interval job's exit code is the only thing a supervisor sees. Per-run observer errors are
-      // NOT: those are the fail-soft case, already reported, and the next pass retries them.
-      process.exitCode = pass.errors.length ? 1 : 0;
+      // AN INTERVAL JOB'S EXIT CODE IS THE ONLY THING A SUPERVISOR SEES, so two things earn a non-zero one:
+      // a pass that could not read a run or resolve its operation, and a run stuck unresolved past
+      // `STUCK_ESCALATION_HOURS`. Before the second, a permanently unresolvable run reported at exit 0 on
+      // every tick forever and nothing watching exit codes ever learned. Per-run OBSERVER errors stay at 0:
+      // those are the fail-soft case, already reported, and the next pass asks again.
+      process.exitCode = (pass.errors.length || stuckPast(pass, STUCK_ESCALATION_HOURS).length) ? 1 : 0;
     })
     .catch((e) => {
       writeAllSync(1, `error: ${String(e?.message ?? e)}\n`);
